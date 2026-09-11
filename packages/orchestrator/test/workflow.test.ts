@@ -2319,11 +2319,42 @@ test("workflow reports preflight and model phase progress", async () => {
   }
 });
 
-for (const artifactLayout of ["legacy", "private"] as const)
-  test(`end-to-end workflow fixes only accepted findings and finishes after re-review (${artifactLayout})`, async () => {
+for (const [artifactLayout, writeChangeReport] of [
+  ["legacy", false],
+  ["legacy", true],
+  ["private", false],
+  ["private", true]
+] as const)
+  test(`end-to-end workflow fixes only accepted findings and finishes after re-review (${artifactLayout}, change report ${writeChangeReport ? "written" : "absent"})`, async () => {
     const repository = await createTestRepository({ artifactLayout });
     try {
-      const adapters = new FakeAdapters();
+      class ReportAdapters extends FakeAdapters {
+        override async runPhase(
+          request: PhaseAdapterRequest
+        ): Promise<AdapterResult<PhaseResult>> {
+          const result = await super.runPhase(request);
+          if (result.result.phase === "fix" && writeChangeReport) {
+            const state = JSON.parse(
+              await readFile(
+                path.join(request.runDirectory, "state.json"),
+                "utf8"
+              )
+            ) as RunState;
+            const report =
+              state.artifactBinding?.binding.artifacts.changeReport;
+            assert.ok(report);
+            await mkdir(path.dirname(path.join(request.repoRoot, report)), {
+              recursive: true
+            });
+            await writeFile(
+              path.join(request.repoRoot, report),
+              "# Change report\n\nResolved R1-F1.\n"
+            );
+          }
+          return result;
+        }
+      }
+      const adapters = new ReportAdapters();
       adapters.reviewResults.push(
         {
           contractVersion: CONTRACT_VERSION,
@@ -2414,7 +2445,41 @@ for (const artifactLayout of ["legacy", "private"] as const)
       assert.ok(implementationPrompt);
       assert.match(implementationPrompt, /"id": "custom"/);
       assert.ok(fixPrompt?.includes("R1-F1"));
-      assert.equal(fixPrompt?.includes("R1-F2"), false);
+      assert.ok(fixPrompt);
+      const roles = done.artifactBinding?.binding.artifacts;
+      assert.ok(roles?.changeReport);
+      const grants = (prompt: string) =>
+        JSON.parse(
+          /Artifact writes allowed in this phase: (\[[^\n]*\])\./u.exec(
+            prompt
+          )?.[1] ?? "null"
+        ) as string[];
+      assert.deepEqual(grants(fixPrompt), [
+        roles.implementationReport,
+        roles.testReport,
+        roles.changeReport
+      ]);
+      assert.deepEqual(grants(implementationPrompt), [
+        roles.implementationReport,
+        roles.testReport
+      ]);
+      assert.deepEqual(done.artifactBinding, planned.artifactBinding);
+      if (writeChangeReport) {
+        assert.match(
+          await readFile(
+            path.join(repository.root, roles.changeReport),
+            "utf8"
+          ),
+          /Resolved R1-F1/u
+        );
+      } else {
+        // A write grant alone does not impose report existence at the runner boundary.
+        await assert.rejects(
+          readFile(path.join(repository.root, roles.changeReport)),
+          { code: "ENOENT" }
+        );
+      }
+      assert.equal(fixPrompt.includes("R1-F2"), false);
       assert.match(fixPrompt, /Approved planning artifacts are immutable/);
       assert.ok(
         fixPrompt.includes(
@@ -8947,43 +9012,90 @@ for (const artifactLayout of ["legacy", "private"] as const) {
 }
 
 for (const artifactLayout of ["legacy", "private"] as const) {
-  test(`artifact storage ${artifactLayout} phase rejects another workflow's report`, async () => {
+  for (const workflow of ["strict", "feature", "quick-fix"] as const)
+    test(`artifact storage ${artifactLayout} ${workflow} implementation rejects another workflow's report`, async () => {
+      const repository = await createTestRepository({ artifactLayout });
+      try {
+        class WrongRoleAdapters extends FakeAdapters {
+          override async runPhase(
+            request: PhaseAdapterRequest
+          ): Promise<AdapterResult<PhaseResult>> {
+            const result = await super.runPhase(request);
+            if (result.result.phase !== "implementation") return result;
+            const state = JSON.parse(
+              await readFile(
+                path.join(request.runDirectory, "state.json"),
+                "utf8"
+              )
+            ) as RunState;
+            const roles = state.artifactBinding?.binding.artifacts;
+            const wrongRole =
+              workflow === "quick-fix"
+                ? roles?.implementationReport
+                : roles?.changeReport;
+            assert.ok(wrongRole);
+            await mkdir(path.dirname(path.join(request.repoRoot, wrongRole)), {
+              recursive: true
+            });
+            await writeFile(
+              path.join(request.repoRoot, wrongRole),
+              "Unauthorized report.\n"
+            );
+            return result;
+          }
+        }
+        const adapters = new WrongRoleAdapters();
+        adapters.selectionResults.push(
+          selectionResult({ recommendedWorkflow: workflow })
+        );
+        const runner = new WorkflowRunner(repository.root, adapters);
+        let state = await runner.start({
+          slug: "example",
+          request: "Implement the fixture."
+        });
+        if (workflow === "strict") state = await runner.approvePlan("human");
+        assert.equal(state.status, "blocked");
+        assert.match(state.blockReason ?? "", /unauthorized artifact/u);
+      } finally {
+        await repository.dispose();
+      }
+    });
+}
+
+for (const artifactLayout of ["legacy", "private"] as const) {
+  test(`artifact storage ${artifactLayout} quick-fix without a report trigger completes without a report`, async () => {
     const repository = await createTestRepository({ artifactLayout });
     try {
-      class WrongRoleAdapters extends FakeAdapters {
+      class NoReportAdapters extends FakeAdapters {
         override async runPhase(
           request: PhaseAdapterRequest
         ): Promise<AdapterResult<PhaseResult>> {
           const result = await super.runPhase(request);
-          const state = JSON.parse(
-            await readFile(
-              path.join(request.runDirectory, "state.json"),
-              "utf8"
-            )
-          ) as RunState;
-          const wrongRole =
-            state.artifactBinding?.binding.artifacts.changeReport;
-          assert.ok(wrongRole);
-          await mkdir(path.dirname(path.join(request.repoRoot, wrongRole)), {
-            recursive: true
-          });
-          await writeFile(
-            path.join(request.repoRoot, wrongRole),
-            "Unauthorized report.\n"
+          const report = result.result.artifacts.implementationReport;
+          assert.ok(report);
+          await rm(path.join(request.repoRoot, report));
+          result.result.artifacts.implementationReport = null;
+          assert.match(
+            request.prompt,
+            /only when the existing report trigger applies; otherwise keep it null/u
           );
           return result;
         }
       }
-      const adapters = new WrongRoleAdapters();
+      const adapters = new NoReportAdapters();
       adapters.selectionResults.push(
-        selectionResult({ recommendedWorkflow: "feature" })
+        selectionResult({ recommendedWorkflow: "quick-fix" })
       );
       const state = await new WorkflowRunner(repository.root, adapters).start({
         slug: "example",
-        request: "Implement the fixture."
+        request: "Make a routine internal cleanup with no report trigger."
       });
-      assert.equal(state.status, "blocked");
-      assert.match(state.blockReason ?? "", /unauthorized artifact/u);
+      assert.equal(state.status, "done", state.blockReason ?? "");
+      const report = state.artifactBinding?.binding.artifacts.changeReport;
+      assert.ok(report);
+      await assert.rejects(readFile(path.join(repository.root, report)), {
+        code: "ENOENT"
+      });
     } finally {
       await repository.dispose();
     }

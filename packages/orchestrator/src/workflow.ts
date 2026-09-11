@@ -5146,7 +5146,11 @@ export class WorkflowRunner {
     const workflow = state.workflowSelection?.workflow ?? "strict";
     return (
       workflow === "strict"
-        ? [roles.implementationReport, roles.testReport]
+        ? [
+            roles.implementationReport,
+            roles.testReport,
+            ...(phase === "fix" ? [roles.changeReport] : [])
+          ]
         : workflow === "feature"
           ? [roles.work]
           : [roles.changeReport]

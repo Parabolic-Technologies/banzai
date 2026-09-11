@@ -551,6 +551,11 @@ Plugin (`plugins/banzai/`):
 
 New runs use state v4 with an immutable artifact binding from creation. Storage
 mode `workflow` supplies capacity; `workflowSelection` retains phase authority.
+For work artifacts, strict implementation grants only the bound `implementationReport` and
+`testReport`; strict fix also grants the existing bound `changeReport` in the
+runner's phase-scope check and the hook's write-role set. This grant does not
+change the quick-fix report trigger. Feature and quick-fix retain their bound
+`work` and `changeReport` grants respectively.
 Workspace v2 includes only the selected ignored work with the binding digest.
 Exact bound reports can satisfy completion evidence; arbitrary runner/control
 paths cannot. Attempt-owned workspace evidence also guards terminal reconciliation.

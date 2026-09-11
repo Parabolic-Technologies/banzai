@@ -25414,7 +25414,11 @@ var WorkflowRunner = class {
       );
     if (phase !== "implementation" && phase !== "fix") return [];
     const workflow = state.workflowSelection?.workflow ?? "strict";
-    return (workflow === "strict" ? [roles.implementationReport, roles.testReport] : workflow === "feature" ? [roles.work] : [roles.changeReport]).filter((item) => item !== void 0);
+    return (workflow === "strict" ? [
+      roles.implementationReport,
+      roles.testReport,
+      ...phase === "fix" ? [roles.changeReport] : []
+    ] : workflow === "feature" ? [roles.work] : [roles.changeReport]).filter((item) => item !== void 0);
   }
   artifactInstructions(state, phase) {
     if (state.artifactBinding === void 0) return "";

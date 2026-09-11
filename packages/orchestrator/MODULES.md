@@ -242,6 +242,13 @@ is a navigational reference and is updated with the module it describes.
   approval-digest validation, base-commit validation, attempt reconciliation,
   compatible builder-session selection, bounded full/delta reviewer policy,
   and direct terminal completion after complete zero-accepted triage.
+  `artifactWritePaths` supplies prompt grants and `checkArtifactPhaseScope`:
+  strict implementation permits the bound `implementationReport` and
+  `testReport`; strict fix additionally permits the existing bound
+  `changeReport`, without requiring a report when its existing trigger does not
+  apply. `hooks/spec-gate.cjs` mirrors these roles in `privateWrites`.
+  Feature and quick-fix retain `work` and `changeReport` respectively;
+  planning, selection and review grants remain separate.
   Cancellation captures pre-transition context before clearing the pending
   human decision; durable decision history and the terminal anchor are retained.
   Recovery source discovery distinguishes interrupted mutable work from one

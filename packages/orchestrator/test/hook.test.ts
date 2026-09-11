@@ -11,11 +11,15 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { digestArtifactBundle } from "../src/git.js";
+import { digestArtifactBundle, workspaceSnapshot } from "../src/git.js";
 import { createWork } from "../src/artifact-storage.js";
+import { createVendorAdapters } from "../src/adapters.js";
 import { randomUUID } from "node:crypto";
-import { CONTRACT_VERSION } from "../src/types.js";
-import { workflowAuthorizationDigest } from "../src/workflow.js";
+import { CONTRACT_VERSION, type RunState } from "../src/types.js";
+import {
+  WorkflowRunner,
+  workflowAuthorizationDigest
+} from "../src/workflow.js";
 import { createTestRepository, evaluationStateFixture } from "./helpers.js";
 
 const hookPath = path.resolve(
@@ -483,7 +487,9 @@ test("R4-F4 v4 hook enforces bound phase roles, read-only selection/review and p
       roles.description &&
         roles.plan &&
         roles.implementationReport &&
-        roles.testReport
+        roles.testReport &&
+        roles.changeReport &&
+        roles.work
     );
     const runId = "hook-v4";
     const runDirectory = path.join(root, ".banzai/runs", runId);
@@ -543,7 +549,11 @@ test("R4-F4 v4 hook enforces bound phase roles, read-only selection/review and p
         BANZAI_RUN_ID: runId,
         BANZAI_APPROVAL_DIGEST: ""
       });
-    for (const target of [...forbidden, roles.implementationReport])
+    for (const target of [
+      ...forbidden,
+      roles.implementationReport,
+      roles.changeReport
+    ])
       expect(target, "deny");
     for (const [phase, status] of [
       ["selection", "selecting"],
@@ -555,6 +565,7 @@ test("R4-F4 v4 hook enforces bound phase roles, read-only selection/review and p
         roles.description,
         roles.plan,
         roles.implementationReport,
+        roles.changeReport,
         "src/example.ts"
       ])
         expect(target, "deny");
@@ -577,6 +588,7 @@ test("R4-F4 v4 hook enforces bound phase roles, read-only selection/review and p
         `documentation/features/hook-bound/implementation-report.md`
       ])
         expect(target, "deny");
+      expect(roles.changeReport, phase === "fix" ? "allow" : "deny");
     }
     await save("plan", "planning", {
       artifactBinding: { ...bound, sha256: "0".repeat(64) }
@@ -589,6 +601,193 @@ test("R4-F4 v4 hook enforces bound phase roles, read-only selection/review and p
     await repository.dispose();
   }
 });
+
+for (const artifactLayout of ["private", "legacy"] as const)
+  test(`bound artifact grants have runner and hook allow/deny parity (${artifactLayout})`, async () => {
+    const repository = await createTestRepository({ artifactLayout });
+    try {
+      const root = await realpath(repository.root);
+      const bound = await createWork({
+        repoRoot: root,
+        slug: "grant-parity",
+        mode: "workflow",
+        creationId: randomUUID()
+      });
+      const roles = bound.binding.artifacts;
+      assert.ok(
+        roles.description &&
+          roles.plan &&
+          roles.implementationReport &&
+          roles.testReport &&
+          roles.changeReport &&
+          roles.work
+      );
+      const targets: string[] = [
+        roles.description,
+        roles.plan,
+        roles.implementationReport,
+        roles.testReport,
+        roles.changeReport,
+        roles.work
+      ];
+      for (const role of [roles.description, roles.plan]) {
+        await mkdir(path.dirname(path.join(root, role)), { recursive: true });
+        await writeFile(path.join(root, role), "approved\n");
+      }
+      const bundle = await digestArtifactBundle(root, [
+        roles.description,
+        roles.plan
+      ]);
+      const runId = "grant-parity";
+      const runDirectory = path.join(root, ".banzai/runs", runId);
+      await mkdir(runDirectory, { recursive: true });
+      await writeFile(
+        path.join(root, ".banzai/active-run.json"),
+        JSON.stringify({ schemaVersion: 1, runId })
+      );
+      const runner = new WorkflowRunner(
+        root,
+        createVendorAdapters(async () => {
+          throw new Error("Grant-boundary tests must not invoke a vendor.");
+        })
+      );
+      const phaseBoundary = runner as unknown as {
+        checkArtifactPhaseScope: WorkflowRunner["checkArtifactPhaseScope"];
+      };
+      for (const workflow of ["strict", "feature", "quick-fix"] as const) {
+        for (const phase of [
+          "selection",
+          "plan",
+          "implementation",
+          "fix",
+          "review"
+        ] as const) {
+          // Legacy hooks defer broader documentation scope to the runner. Compare
+          // their shared strict-fix report/approved-byte boundary without changing it.
+          if (
+            artifactLayout === "legacy" &&
+            (workflow !== "strict" || phase !== "fix")
+          )
+            continue;
+          const state = evaluationStateFixture({
+            workflow,
+            extra: {
+              schemaVersion: 4,
+              runId,
+              repoRoot: root,
+              artifactBinding: bound,
+              status: {
+                selection: "selecting",
+                plan: "planning",
+                implementation: "implementing",
+                fix: "fixing",
+                review: "reviewing"
+              }[phase],
+              activeAttempt: {
+                id: `${phase}-1`,
+                kind: phase,
+                mutable: phase !== "selection" && phase !== "review"
+              },
+              workflowSelection: {
+                contractVersion: CONTRACT_VERSION,
+                recommendedWorkflow: workflow,
+                workflow,
+                confidence: "high",
+                reason: "Fixture selection.",
+                escalationTriggers: [],
+                selectedAt: "2026-09-11T00:00:00.000Z",
+                attemptId: "selection-1"
+              },
+              planApproval: { digest: bundle.digest, paths: bundle.paths }
+            }
+          }) as unknown as RunState;
+          const env = {
+            BANZAI_RUN_ID: runId,
+            BANZAI_APPROVAL_DIGEST: phase === "plan" ? "" : bundle.digest
+          };
+          if (workflow !== "strict" && phase === "implementation") {
+            assert.ok(state.workflowSelection);
+            state.workflowSelection.digest = workflowAuthorizationDigest({
+              runId,
+              request: state.request,
+              ...state.workflowSelection
+            });
+            Object.assign(env, {
+              BANZAI_APPROVAL_DIGEST: "",
+              BANZAI_WORKFLOW_DIGEST: state.workflowSelection.digest
+            });
+          }
+          await writeFile(
+            path.join(runDirectory, "state.json"),
+            JSON.stringify(state)
+          );
+          const expected: string[] =
+            phase === "plan"
+              ? [roles.description, roles.plan]
+              : phase === "implementation" || phase === "fix"
+                ? workflow === "feature"
+                  ? [roles.work]
+                  : workflow === "quick-fix"
+                    ? [roles.changeReport]
+                    : phase === "fix"
+                      ? [
+                          roles.implementationReport,
+                          roles.testReport,
+                          roles.changeReport
+                        ]
+                      : [roles.implementationReport, roles.testReport]
+                : [];
+          for (const target of targets) {
+            if (artifactLayout === "legacy" && target === roles.work) continue;
+            const allowed = expected.includes(target);
+            const label: string = [workflow, phase, target].join(": ");
+            assert.equal(
+              runHook({ cwd: root, target, env }).decision,
+              allowed ? "allow" : "deny",
+              label
+            );
+            const before = await workspaceSnapshot(root, {
+              artifactBinding: bound
+            });
+            const absolute = path.join(root, target);
+            const original = await readFile(absolute).catch(
+              (error: unknown) => {
+                if (
+                  !(error instanceof Error) ||
+                  !("code" in error) ||
+                  error.code !== "ENOENT"
+                )
+                  throw error;
+                return null;
+              }
+            );
+            try {
+              await mkdir(path.dirname(absolute), { recursive: true });
+              await writeFile(absolute, "changed artifact\n");
+              // Exercise the post-model filesystem enforcement, not just its grant list.
+              const check = phaseBoundary.checkArtifactPhaseScope(
+                state,
+                phase,
+                before
+              );
+              if (allowed) await assert.doesNotReject(check, label);
+              else
+                await assert.rejects(
+                  check,
+                  { code: "ARTIFACT_PHASE_SCOPE_INVALID" },
+                  label
+                );
+            } finally {
+              if (original === null) await rm(absolute);
+              else await writeFile(absolute, original);
+            }
+          }
+        }
+      }
+    } finally {
+      await repository.dispose();
+    }
+  });
 
 test("R4-F4 manual hook defers only for validated private role paths", async () => {
   const repository = await createTestRepository({ artifactLayout: "private" });

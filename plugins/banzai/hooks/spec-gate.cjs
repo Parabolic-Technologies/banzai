@@ -296,7 +296,7 @@ if (runnerMode) {
       if (phase === 'selection' || state.status === 'selecting') throw new Error('workflow selection is read-only');
       const workflow = state.workflowSelection?.workflow;
       privateWrites = new Set(phase === 'plan' ? [roles.description, roles.plan] :
-        ['implementation', 'fix'].includes(phase) ? workflow === 'feature' ? [roles.work] : workflow === 'quick-fix' ? [roles.changeReport] : [roles.implementationReport, roles.testReport] : []);
+        ['implementation', 'fix'].includes(phase) ? workflow === 'feature' ? [roles.work] : workflow === 'quick-fix' ? [roles.changeReport] : [roles.implementationReport, roles.testReport, ...(phase === 'fix' ? [roles.changeReport] : [])] : []);
       for (const target of targets) {
         const relative = path.relative(projectRoot, path.resolve(projectRoot, target));
         await storage.safePath(projectRoot, relative, {missing: true});

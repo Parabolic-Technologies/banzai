@@ -48,6 +48,7 @@ plugin and orchestrator source.
 | [0039](./0039-npm-trusted-publishing-on-github-release.md)             | npm trusted publishing on GitHub Release             | Accepted   | 2026-09-09 | none; change report [Private work history](../historical-references.md) |
 | [0040](./0040-project-adoption-preflight-and-interactive-setup.md) | Project adoption preflight and interactive setup | Accepted | 2026-09-10 | [Private work history](../historical-references.md) |
 | [0041](./0041-artifact-retention-and-publication-boundary.md) | Artifact retention and publication boundary | Accepted | 2026-09-11 | [archived work history](../historical-references.md); [migration roadmap](../artifact-policy-migration.md) |
+| [0042](./0042-runner-delivered-phase-instructions.md) | Runner-delivered phase instructions | Proposed | 2026-09-11 | Private work `runner-phase-instructions`; requirements summarized in the ADR |
 
 ## File Names
 
