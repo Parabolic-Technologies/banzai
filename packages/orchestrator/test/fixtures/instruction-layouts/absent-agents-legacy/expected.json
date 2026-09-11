@@ -1,0 +1,5 @@
+{
+  "layout": "legacy",
+  "behavior": "approved_migration",
+  "diagnostic": "legacy Banzai layout: run `project-manifest` to migrate"
+}

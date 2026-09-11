@@ -1,0 +1,8736 @@
+import {
+  hasRunnerWorkOwnership,
+  withRunnerWorkOwnership,
+  createWork,
+  inspectBoundWork,
+  readBytes as readArtifactBytes,
+  ownsArtifact
+} from "./artifact-storage.js";
+import { createHash, randomUUID } from "node:crypto";
+import { constants } from "node:fs";
+import { access, chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import process from "node:process";
+import {
+  classifyModelFailure,
+  resolveClaudeInvocationScope
+} from "./adapters.js";
+import {
+  sealReviewSnapshot,
+  reviewApprovedArtifacts
+} from "./review-snapshot.js";
+import { assertContractParity } from "./contracts.js";
+import {
+  claudePermissionDemand,
+  claudePermissionDemanded,
+  claudePermissionRemediation,
+  inspectClaudePermissions
+} from "./claude-permissions.js";
+import { loadConfig } from "./config.js";
+import {
+  adoptionDiagnostic,
+  inspectProjectAdoption
+} from "./project-adoption.js";
+import {
+  available,
+  emptyContextInventory,
+  emptyContextVendorUsage,
+  evaluateContextBudgets,
+  measureRunnerPayload,
+  unavailable
+} from "./context-accounting.js";
+import {
+  BanzaiError,
+  errorMessage,
+  ProcessExitError,
+  ProjectSetupRequiredError,
+  TerminalRunStateError
+} from "./errors.js";
+import {
+  CANCELLATION_SCHEMA,
+  cancellationId,
+  cancellationResponse,
+  captureCancellationContext,
+  decodeCancellationAnchor,
+  decodeCancellationObservation,
+  emptyCancellationContext,
+  initialCancellationResponse,
+  isCancellationReason,
+  resolveCancellation
+} from "./cancellation.js";
+import type {
+  CancelRunInput,
+  CancellationAnswer,
+  CancellationContext,
+  CancellationObservation,
+  CancellationReceipt,
+  CancellationResponseResult,
+  CancellationResult,
+  StopRequest
+} from "./cancellation.js";
+import {
+  CANCELLATION_LIMITS,
+  decodeCancellationEvents,
+  enrichCancellationContext,
+  readCancellationFile
+} from "./cancellation-evidence.js";
+import type { CancellationContextLinks } from "./cancellation-evidence.js";
+import { reviewVerdictText } from "./vocabulary.js";
+import {
+  parseApprovedPlanTaskIds,
+  parsePlanTaskCompletionProjection,
+  PlanTaskCompletionError,
+  summariesMatch,
+  validatePlanTaskCompletionLedgerShape,
+  validatePlanTaskCompletion,
+  type ValidatedPlanTaskCompletion
+} from "./plan-task-completion.js";
+import {
+  currentCommit,
+  repositoryBaseline,
+  digestArtifactBundle,
+  digestArtifactEntries,
+  hashArtifactBytes,
+  workspaceChanges,
+  workspaceChangeCounts,
+  workspaceDigest,
+  workspaceSnapshot,
+  type WorkspaceSnapshot
+} from "./git.js";
+import {
+  fixPromptEnvelope,
+  implementationPromptEnvelope,
+  liteImplementationPromptEnvelope,
+  planningPromptEnvelope,
+  planningRetryPromptEnvelope,
+  recoveryPromptEnvelope,
+  reviewPromptEnvelope,
+  serenaGuidance,
+  workflowSelectionPromptEnvelope,
+  workflowSkills
+} from "./prompts.js";
+import { appendPromptComponent } from "./prompt-envelope.js";
+import { resolveOutputContract } from "./output-contract.js";
+import {
+  FALLBACK_VENDOR,
+  MODEL_ROLES,
+  vendorFor,
+  vendorUsage,
+  type ModelRole
+} from "./models.js";
+import {
+  redactSensitiveText,
+  runProcess,
+  subscriptionOnlyEnvironment,
+  terminateProcessGroup
+} from "./process.js";
+import {
+  renderReviewArtifact,
+  publishReviewArtifact,
+  reviewArtifactPath,
+  validateHistoricalReviewArtifact,
+  validateReviewArtifact,
+  type ValidatedReviewCandidate
+} from "./review-artifact.js";
+import { blockState, requireState, transitionState } from "./state-machine.js";
+import { RunStore } from "./store.js";
+import type {
+  HumanTimeBoundary,
+  HumanTimeEventType,
+  HumanTimeObserver
+} from "./human-time.js";
+import {
+  CONTRACT_VERSION,
+  MODEL_ATTEMPT_SCHEMA_VERSION,
+  RECOVERY_AUTHORIZATION_SCHEMA,
+  RECOVERY_AUTHORIZATION_SCHEMA_VERSION,
+  TERMINAL_CHECKPOINT_SCHEMA,
+  TERMINAL_CHECKPOINT_SCHEMA_VERSION,
+  sessionBindingMatches,
+  type AdapterTerminalSuccess,
+  type AdapterResult,
+  type AdrDecision,
+  type AttemptRecord,
+  type AttemptReference,
+  type ClaudeInvocationScope,
+  type ContextAuthorityEntry,
+  type ContextMetric,
+  type DecisionConsultationAnswer,
+  type FindingDisposition,
+  type ModelFailureCause,
+  type HumanDecisionRequest,
+  type HumanDecisionRecord,
+  type ModelProgressEvent,
+  type ModelSessionBinding,
+  type ModelSettings,
+  type McpWhitelist,
+  type ModelUsage,
+  type OrchestratorConfig,
+  type OutputContractEnvelope,
+  type OutputContractIdentity,
+  type PhaseDescriptor,
+  type PhaseResult,
+  type PersistedPhaseResult,
+  type PlanTaskCompletionViolation,
+  type ProcessRunner,
+  type ProgressEvent,
+  type ProgressReporter,
+  type PromptEnvelope,
+  type ReviewCandidateEvidence,
+  type ReviewFinding,
+  type ReviewArtifactMode,
+  type ReviewArtifactContext,
+  type ReviewMode,
+  type ReviewRotationReason,
+  type ReviewResult,
+  type RecoveryAuthorization,
+  type ReviewerSessionBinding,
+  type RunState,
+  type SessionInventory,
+  type SessionContext,
+  type SessionMode,
+  type TerminalAttemptCheckpoint,
+  type TerminalCheckpointResult,
+  type TerminalResultContract,
+  type TriageItem,
+  type TriageRecord,
+  type VendorAdapters,
+  type VerificationAttemptFailureCategory,
+  type VerificationAttemptRecord,
+  type VerificationCommandDescriptor,
+  type VerificationResult,
+  type WorkflowRoute,
+  type WorkflowSelectionRecord,
+  type WorkflowSelectionResult
+} from "./types.js";
+import {
+  digestCanonicalJson,
+  parseDecisionConsultationAnswers,
+  parsePersistedPhaseResult,
+  parseReviewResult,
+  parseCurrentReviewResult,
+  validateReviewScope,
+  terminalCheckpointIntegrity
+} from "./validation.js";
+import {
+  describeVerificationCommands,
+  flattenVerificationCommands
+} from "./verification.js";
+
+const TERMINAL_STATUSES = new Set(["done", "cancelled"]);
+const MAX_CONSECUTIVE_DELTA_REVIEWS = 2;
+const PHASE_SKILLS = {
+  Selection: ["none (read-only router)"],
+  Planning: [
+    "banzai:feature-description",
+    "banzai:architecture-decision",
+    "banzai:development-plan"
+  ],
+  Implementation: ["banzai:code-writing", "banzai:test-writing"],
+  Fix: ["banzai:quick-fix"],
+  Review: ["banzai:feature-review"]
+} as const;
+
+interface AttemptPolicy {
+  sessionMode: SessionMode;
+  resumeSessionId: string | null;
+  sessionContext: SessionContext;
+  reviewMode?: ReviewMode;
+  rotationReason?: ReviewRotationReason | null;
+}
+
+interface ReviewExecutionPolicy extends AttemptPolicy {
+  sessionContext: SessionContext & { role: "reviewer" };
+  reviewMode: ReviewMode;
+  rotationReason: ReviewRotationReason | null;
+}
+
+function sessionContext(
+  role: SessionContext["role"],
+  settings: ModelSettings
+): SessionContext {
+  return {
+    role,
+    executable: settings.executable,
+    model: settings.model,
+    effort: settings.effort
+  };
+}
+
+function sessionBinding(
+  id: string | null,
+  context: SessionContext
+): ModelSessionBinding | null {
+  return id === null ? null : { id, ...context };
+}
+
+/**
+ * Identifies the ambient-environment inputs that decide a Claude session's tool
+ * inventory. Comparing it before resuming rotates a stale reviewer without
+ * spending the full-prefix re-cache that a mismatched resume would cost.
+ */
+export function invocationScopeDigest(scope: ClaudeInvocationScope): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        scope.strictMcpConfig,
+        scope.settingSources,
+        scope.pluginDirectory
+      ])
+    )
+    .digest("hex");
+}
+
+/**
+ * Causes that say nothing about review integrity. A transient vendor condition
+ * must not discard a reviewer session and promote its retry to a full
+ * from-scratch audit.
+ */
+const INTEGRITY_NEUTRAL_FAILURE_CAUSES = new Set<ModelFailureCause>([
+  "capacity",
+  "timeout",
+  "process_start",
+  "transport"
+]);
+
+/**
+ * Completion violations whose defect lives in the approved plan bundle rather
+ * than in the attempt's evidence. A fresh implementation attempt can never
+ * repair these — the plan is immutable while approved — so their retry reruns
+ * planning for a corrected bundle and a new approval instead of looping a
+ * completion-evidence repair that must fail identically every time.
+ */
+const PLAN_BUNDLE_COMPLETION_VIOLATIONS = new Set<PlanTaskCompletionViolation>([
+  "approved_plan_invalid",
+  "approval_invalid"
+]);
+
+/**
+ * Failures that can terminate an already-running mutable model after it has
+ * changed the checkout but before a terminal result reaches Banzai. They need
+ * the same explicit, snapshot-bound recovery path as a parent interruption.
+ * Process-start failures are excluded because no mutable child ran, while an
+ * unclassified failure remains fail-closed because its integrity is unknown.
+ */
+const RECOVERABLE_MUTABLE_FAILURE_CAUSES = new Set<ModelFailureCause>([
+  "capacity",
+  "timeout",
+  "transport"
+]);
+
+const PLANNING_REPAIR_FAILURE_CODES = new Set([
+  "INVALID_RESULT",
+  "MODEL_RESULT_INVALID",
+  "CODEX_RESULT_MISSING",
+  "PHASE_RESULT_SCHEMA_MISMATCH",
+  "PLAN_TASK_COMPLETION_INVALID"
+]);
+
+const TERMINAL_INTEGRITY_FAILURE_CODES = new Set([
+  "TERMINAL_RESULT_CONFLICT",
+  "SESSION_ID_CONFLICT"
+]);
+
+export function reviewExecutionPolicy(
+  state: RunState,
+  settings: ModelSettings,
+  currentInvocationDigest: string | null = null
+): ReviewExecutionPolicy {
+  const context = {
+    ...sessionContext("reviewer", settings),
+    role: "reviewer" as const
+  };
+  const fresh = (
+    rotationReason: ReviewRotationReason
+  ): ReviewExecutionPolicy => ({
+    sessionMode: "fresh",
+    reviewMode: "full",
+    rotationReason,
+    resumeSessionId: null,
+    sessionContext: context
+  });
+  if (state.pendingReviewRotationReason !== null) {
+    return fresh(state.pendingReviewRotationReason);
+  }
+  if (state.latestReview === null) {
+    return fresh("primary-review");
+  }
+  const reviewer = state.sessions.reviewer;
+  if (reviewer === null) {
+    return fresh("missing-session");
+  }
+  if (!sessionBindingMatches(reviewer, settings, "reviewer")) {
+    return fresh("settings-changed");
+  }
+  // An absent recorded digest is a binding written before ADR 0021: unknown,
+  // never treated as a mismatch.
+  if (
+    currentInvocationDigest !== null &&
+    reviewer.invocationDigest !== undefined &&
+    reviewer.invocationDigest !== currentInvocationDigest
+  ) {
+    return fresh("session-inventory-changed");
+  }
+  if (reviewer.approvalDigest !== (state.planApproval?.digest ?? "")) {
+    return fresh("approval-changed");
+  }
+  if (
+    reviewer.lastSnapshot.digest !== state.latestReview.workspaceDigest ||
+    state.workspaceDigest !== state.latestReview.workspaceDigest ||
+    reviewer.lastFullIteration > state.latestReview.iteration
+  ) {
+    return fresh("unreliable-review");
+  }
+  if (state.latestReview.verdict === "blocked") {
+    return fresh("previous-review-blocked");
+  }
+  if (reviewer.consecutiveDeltaReviews >= MAX_CONSECUTIVE_DELTA_REVIEWS) {
+    return fresh("delta-limit-reached");
+  }
+  if (
+    reviewer.outputContract !== undefined &&
+    !["review-result/v1", "review-result/v2"].includes(reviewer.outputContract)
+  ) {
+    throw new BanzaiError(
+      "REVIEW_RESULT_SCHEMA_MISMATCH",
+      "Reviewer session has an unsupported output-contract identity."
+    );
+  }
+  if (reviewer.outputContract !== "review-result/v2")
+    return fresh("output-contract-not-reusable");
+  return {
+    sessionMode: "resumed",
+    reviewMode: "delta",
+    rotationReason: null,
+    resumeSessionId: reviewer.id,
+    sessionContext: context
+  };
+}
+
+/**
+ * Accumulates the usage of two turns that belong to one attempt, so a repair
+ * turn's cost is attributed rather than replacing the turn it repaired.
+ */
+
+function effectiveWorkflow(result: WorkflowSelectionResult): WorkflowRoute {
+  if (
+    result.recommendedWorkflow !== "strict" &&
+    result.confidence === "high" &&
+    result.escalationTriggers.length === 0
+  ) {
+    return result.recommendedWorkflow;
+  }
+  return "strict";
+}
+
+function isRetryableInterruptedAttempt(
+  attempt: AttemptReference,
+  record: AttemptRecord
+): boolean {
+  return (
+    !attempt.mutable &&
+    record.status === "started" &&
+    (attempt.kind === "selection" || attempt.kind === "review")
+  );
+}
+
+function verificationFailureCategory(
+  error: unknown
+): VerificationAttemptFailureCategory {
+  if (error instanceof BanzaiError) {
+    if (error.code === "PROCESS_START_FAILED") {
+      return "process_start";
+    }
+    if (error.code === "PROCESS_TIMEOUT") {
+      return "timeout";
+    }
+    if (error.code === "PROCESS_OUTPUT_LIMIT") {
+      return "output_limit";
+    }
+  }
+  return "runner_failure";
+}
+
+function verificationCommandMatches(
+  record: VerificationAttemptRecord,
+  descriptor: VerificationCommandDescriptor
+): boolean {
+  return (
+    record.command.profileId === descriptor.profileId &&
+    record.command.projectType === descriptor.projectType &&
+    record.command.profileOrdinal === descriptor.profileOrdinal &&
+    record.command.commandOrdinal === descriptor.commandOrdinal &&
+    record.command.configurationDigest === descriptor.configurationDigest
+  );
+}
+
+function terminalVerificationRecord(
+  record: VerificationAttemptRecord,
+  input: Pick<
+    VerificationAttemptRecord,
+    | "status"
+    | "completedAt"
+    | "exitCode"
+    | "signal"
+    | "failureCategory"
+    | "stdout"
+    | "stderr"
+  >
+): VerificationAttemptRecord {
+  const candidateCompletedAt = input.completedAt ?? now();
+  const completedAt =
+    Date.parse(candidateCompletedAt) >= Date.parse(record.startedAt)
+      ? candidateCompletedAt
+      : now();
+  return {
+    ...record,
+    ...input,
+    completedAt,
+    durationMs: Math.max(
+      0,
+      Date.parse(completedAt) - Date.parse(record.startedAt)
+    )
+  };
+}
+
+export function workflowAuthorizationDigest(input: {
+  runId: string;
+  request: string;
+  recommendedWorkflow: WorkflowRoute;
+  workflow: WorkflowRoute;
+  confidence: WorkflowSelectionResult["confidence"];
+  reason: string;
+  escalationTriggers: string[];
+  selectedAt: string;
+  attemptId: string;
+}): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        version: 1,
+        runId: input.runId,
+        request: input.request,
+        recommendedWorkflow: input.recommendedWorkflow,
+        workflow: input.workflow,
+        confidence: input.confidence,
+        reason: input.reason,
+        escalationTriggers: input.escalationTriggers,
+        selectedAt: input.selectedAt,
+        attemptId: input.attemptId
+      })
+    )
+    .digest("hex");
+}
+
+export interface StartRunInput {
+  slug: string;
+  request: string;
+}
+
+export interface TriageInput {
+  accepted: string[];
+  rejected: string[];
+  deferred: string[];
+  note: string | null;
+  decidedBy: string;
+}
+
+export interface HumanDecisionInput {
+  answers: string[];
+  decidedBy: string;
+}
+
+export interface DecisionConsultationInput {
+  runId: string;
+  requestId: string;
+  roundId: string;
+  answers: DecisionConsultationAnswer[];
+  decidedBy: string;
+}
+
+export function humanDecisionQuestions(
+  pending: HumanDecisionRequest,
+  liteWorkflow: boolean
+): string[] {
+  if (pending.kind === "decision_consultation") {
+    return pending.request.decisions.map((decision) => decision.question);
+  }
+  if (pending.questions.length > 0) {
+    return [...pending.questions];
+  }
+  return [
+    liteWorkflow
+      ? "What decision should workflow reselection apply?"
+      : "What decision or approval should planning apply?"
+  ];
+}
+
+const UNSAFE_HUMAN_DECISION_CONTROL =
+  /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u;
+
+function decisionText(
+  value: unknown,
+  label: string,
+  maximum: number,
+  allowNewlines = false
+): string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > maximum ||
+    value.trim().length === 0 ||
+    UNSAFE_HUMAN_DECISION_CONTROL.test(value) ||
+    (!allowNewlines && /[\r\n]/u.test(value))
+  ) {
+    throw new BanzaiError(
+      "INVALID_DECISION",
+      `${label} must be a bounded non-empty safe string.`
+    );
+  }
+  return value;
+}
+
+function decisionIdentifier(
+  value: unknown,
+  label: string,
+  maximum = 128
+): string {
+  const identifier = decisionText(value, label, maximum);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(identifier)) {
+    throw new BanzaiError(
+      "INVALID_DECISION",
+      `${label} must be a canonical identifier.`
+    );
+  }
+  return identifier;
+}
+
+export interface WorkflowStatus {
+  state: RunState;
+  planApprovalValid: boolean | null;
+  reviewValid: boolean | null;
+  latestReview: ReviewResult | null;
+  retry: RetryEligibility;
+  recovery: RecoveryEligibility;
+  nextAction: string | null;
+  taskCompletion: WorkflowTaskCompletionStatus;
+}
+
+export interface WorkflowTaskCompletionStatus {
+  state:
+    | "complete"
+    | "incomplete"
+    | "inconsistent"
+    | "legacy"
+    | "unknown"
+    | "not_applicable";
+  source:
+    "structured completion evidence" | "plan checkbox" | "legacy" | "unknown";
+  completed: number | null;
+  total: number | null;
+  diagnostics: {
+    code: string;
+    taskId: string | null;
+    message: string;
+  }[];
+}
+
+export type ReviewCompletion =
+  | {
+      basis: "review_pass";
+      iteration: number;
+    }
+  | {
+      basis: "human_triage";
+      iteration: number;
+      accepted: number;
+      rejected: number;
+      deferred: number;
+    }
+  | null;
+
+export function reviewCompletion(status: WorkflowStatus): ReviewCompletion {
+  const { state, latestReview } = status;
+  if (
+    state.status !== "done" ||
+    (state.workflowSelection?.workflow ?? "strict") !== "strict" ||
+    state.latestReview === null ||
+    latestReview === null
+  ) {
+    return null;
+  }
+  const iteration = state.latestReview.iteration;
+  if (latestReview.verdict === "pass") {
+    return { basis: "review_pass", iteration };
+  }
+  const triage = state.triage;
+  if (
+    latestReview.verdict !== "changes_requested" ||
+    triage?.reviewIteration !== iteration
+  ) {
+    return null;
+  }
+  if (triage.items.length !== latestReview.findings.length) {
+    return null;
+  }
+  const findingIds = new Set(
+    latestReview.findings.map((finding) => finding.id)
+  );
+  if (
+    triage.items.some((item) => !findingIds.has(item.findingId)) ||
+    new Set(triage.items.map((item) => item.findingId)).size !== findingIds.size
+  ) {
+    return null;
+  }
+  const accepted = triage.items.filter(
+    (item) => item.disposition === "accepted"
+  ).length;
+  if (accepted !== 0) {
+    return null;
+  }
+  return {
+    basis: "human_triage",
+    iteration,
+    accepted,
+    rejected: triage.items.filter((item) => item.disposition === "rejected")
+      .length,
+    deferred: triage.items.filter((item) => item.disposition === "deferred")
+      .length
+  };
+}
+
+export function reviewStatusLines(status: WorkflowStatus): string[] {
+  if (status.latestReview === null || status.state.latestReview === null) {
+    return [];
+  }
+  const lines = [
+    `Review: ${status.latestReview.verdict} (iteration ${status.state.latestReview.iteration})`
+  ];
+  const completion = reviewCompletion(status);
+  if (completion?.basis === "human_triage") {
+    lines.push(
+      `Completion: human triage (accepted=${completion.accepted}, rejected=${completion.rejected}, deferred=${completion.deferred})`
+    );
+  }
+  return lines;
+}
+
+/** A phase activity's display string plus its structured banner facts. */
+interface ActivityDetail {
+  detail: string;
+  descriptor: PhaseDescriptor | undefined;
+}
+
+export interface RetryEligibility {
+  eligible: boolean;
+  reason: string;
+  attemptId: string | null;
+}
+
+export interface RecoveryEligibility {
+  eligible: boolean;
+  terminalCheckpointPresent?: boolean;
+  reason: string;
+  warning: string;
+  sourceKind: "interrupted" | "prerequisite_blocked_fix" | null;
+  attemptId: string | null;
+  phase: "implementation" | "fix" | null;
+  resolvedFindingIds: string[];
+  remainingFindingIds: string[];
+  prerequisites: string[];
+  authorization: "plan_approval" | "workflow_selection" | null;
+  recoveryIdentity: string | null;
+  workspace: {
+    digest: string;
+    added: number;
+    modified: number;
+    deleted: number;
+    total: number;
+  } | null;
+  baseCommit: string | null;
+  approvalDigest: string | null;
+  workflowDigest: string | null;
+  scopeDigest: string | null;
+  configurationDigest: string | null;
+}
+
+interface PrerequisiteBlockedFixScope {
+  attempt: AttemptReference & { kind: "fix"; mutable: true };
+  record: AttemptRecord<PersistedPhaseResult>;
+  result: PersistedPhaseResult;
+  reviewDigest: string;
+  acceptedFindingIds: string[];
+  resolvedFindingIds: string[];
+  remainingFindingIds: string[];
+  prerequisites: string[];
+  scopeDigest: string;
+}
+
+export interface RecoverInput {
+  attemptId: string;
+  recoveryIdentity: string;
+  unknownSideEffectsAccepted: true;
+  decidedBy: string;
+}
+
+const RECOVERY_WARNING =
+  "Repository and external side effects may be partial or duplicated. Recovery authorizes new work from this exact checkout; it does not mark the interrupted attempt completed.";
+
+function recoveryIneligible(
+  reason: string,
+  attemptId: string | null = null,
+  phase: RecoveryEligibility["phase"] = null,
+  terminalCheckpointPresent = false
+): RecoveryEligibility {
+  return {
+    eligible: false,
+    terminalCheckpointPresent,
+    reason,
+    warning: RECOVERY_WARNING,
+    sourceKind: null,
+    attemptId,
+    phase,
+    resolvedFindingIds: [],
+    remainingFindingIds: [],
+    prerequisites: [],
+    authorization: null,
+    recoveryIdentity: null,
+    workspace: null,
+    baseCommit: null,
+    approvalDigest: null,
+    workflowDigest: null,
+    scopeDigest: null,
+    configurationDigest: null
+  };
+}
+
+function now(): string {
+  return new Date().toISOString();
+}
+
+function runId(slug: string): string {
+  const timestamp = now()
+    .replace(/[-:.TZ]/g, "")
+    .slice(0, 14);
+  return `${timestamp}-${slug}-${randomUUID().slice(0, 8)}`;
+}
+
+function terminalResultContract(
+  kind: AttemptReference["kind"]
+): TerminalResultContract {
+  return kind === "selection"
+    ? "workflow-selection/v1"
+    : kind === "review"
+      ? "review-result/v2"
+      : "phase-result/v3";
+}
+
+function commandDisplay(command: string, args: string[]): string {
+  return [command, ...args]
+    .map((part) => (/[\s"'\\]/.test(part) ? JSON.stringify(part) : part))
+    .join(" ");
+}
+
+/** `a, b, and c` — an Oxford list, for prose the runner speaks aloud. */
+function listPhrase(items: readonly string[]): string {
+  if (items.length <= 1) {
+    return items[0] ?? "";
+  }
+  if (items.length === 2) {
+    return `${items[0]} and ${items[1]}`;
+  }
+  return `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}`;
+}
+
+function modelActivityDetail(
+  settings: ModelSettings,
+  attempt: AttemptReference,
+  skills: readonly string[]
+): string {
+  const timeoutMinutes = Math.ceil(settings.timeoutMs / 60_000);
+  return `${settings.executable} model=${settings.model} effort=${settings.effort} attempt=${attempt.id} timeout=${timeoutMinutes}m skills=${skills.join(" -> ")}`;
+}
+
+/**
+ * The same facts a phase's detail string already carries, in the structured
+ * form a presenter can render as a banner. The string stays authoritative for
+ * unstyled output, so adding this changes no existing line.
+ */
+function phaseDescriptor(
+  settings: ModelSettings,
+  sessionMode: SessionMode,
+  skills: readonly string[]
+): PhaseDescriptor {
+  return {
+    executable: settings.executable,
+    model: settings.model,
+    effort: settings.effort,
+    sessionMode,
+    timeoutMs: settings.timeoutMs,
+    skills
+  };
+}
+
+function requireSlug(slug: string): void {
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+    throw new BanzaiError(
+      "INVALID_SLUG",
+      "Feature slug must be lowercase kebab-case."
+    );
+  }
+}
+
+function checkFailureReason(error: unknown): string {
+  return error instanceof BanzaiError
+    ? `[${error.code}] ${error.message}`
+    : errorMessage(error);
+}
+
+function artifactPaths(state: RunState): string[] {
+  const artifacts = state.planArtifacts;
+  if (
+    artifacts?.description === null ||
+    artifacts?.plan === null ||
+    artifacts === null
+  ) {
+    throw new BanzaiError(
+      "INCOMPLETE_PLAN",
+      "Planning must produce description and plan artifact paths before approval."
+    );
+  }
+  return [artifacts.description, ...artifacts.adrs, artifacts.plan];
+}
+
+function isDocumentationPath(relativePath: string): boolean {
+  const normalized = relativePath.replaceAll("\\", "/");
+  return (
+    normalized === "documentation" || normalized.startsWith("documentation/")
+  );
+}
+
+function executableCandidates(
+  command: string,
+  cwd: string,
+  env: NodeJS.ProcessEnv
+): string[] {
+  if (command.includes(path.sep)) {
+    return [path.resolve(cwd, command)];
+  }
+  return (env.PATH ?? "")
+    .split(path.delimiter)
+    .filter(Boolean)
+    .map((entry) => path.join(entry, command));
+}
+
+async function assertExecutable(
+  command: string,
+  cwd: string,
+  env: NodeJS.ProcessEnv
+): Promise<void> {
+  for (const candidate of executableCandidates(command, cwd, env)) {
+    try {
+      await access(candidate, constants.X_OK);
+      return;
+    } catch {
+      // Continue through PATH candidates.
+    }
+  }
+  throw new BanzaiError(
+    "COMMAND_NOT_FOUND",
+    `Configured executable is unavailable: ${command}`
+  );
+}
+
+function validateNodeVersion(): void {
+  const [major = 0, minor = 0] = process.versions.node.split(".").map(Number);
+  if (major < 22 || (major === 22 && minor < 18)) {
+    throw new BanzaiError(
+      "NODE_TOO_OLD",
+      `Node.js 22.18 or newer is required; found ${process.versions.node}.`
+    );
+  }
+  if (process.platform !== "darwin" && process.platform !== "linux") {
+    throw new BanzaiError(
+      "UNSUPPORTED_PLATFORM",
+      `Increment 1 supports macOS and Linux; found ${process.platform}.`
+    );
+  }
+}
+
+export class WorkflowRunner {
+  private readonly cancellationReceipts = new WeakMap<
+    CancellationReceipt,
+    CancellationObservation
+  >();
+  readonly store: RunStore;
+  private progressSequence = 0;
+  private resolvedScope: {
+    key: string;
+    scope: ClaudeInvocationScope;
+    degradedReason: string | null;
+    mcp: McpWhitelist | null;
+  } | null = null;
+  private reportedScopeDegradation = false;
+  private reportedMcpWhitelist = false;
+
+  constructor(
+    readonly repoRoot: string,
+    readonly adapters: VendorAdapters,
+    readonly processRunner: ProcessRunner = runProcess,
+    readonly progressReporter: ProgressReporter = () => {},
+    private readonly humanTimeObserver?: HumanTimeObserver
+  ) {
+    this.store = new RunStore(repoRoot);
+  }
+
+  private async observeHumanTime(
+    state: RunState,
+    kind: HumanTimeBoundary["kind"],
+    eventType: HumanTimeEventType | null = null,
+    eventAt: string | null = null,
+    attemptId: string | null = state.activeAttempt?.id ?? null
+  ): Promise<void> {
+    if (this.humanTimeObserver === undefined) return;
+    const pending = state.pendingHumanDecision;
+    try {
+      await this.humanTimeObserver({
+        kind,
+        runId: state.runId,
+        attemptId,
+        reviewIteration:
+          state.reviewIteration > 0 ? state.reviewIteration : null,
+        requestId:
+          pending?.kind === "decision_consultation"
+            ? pending.request.requestId
+            : null,
+        roundId:
+          pending?.kind === "decision_consultation"
+            ? pending.request.roundId
+            : null,
+        eventType,
+        eventAt
+      });
+    } catch {
+      // Optional observation cannot change a durable decision or continuation.
+    }
+  }
+
+  private report(event: ProgressEvent): void {
+    try {
+      this.progressReporter(event);
+    } catch {
+      // Terminal presentation must never change workflow behavior.
+    }
+  }
+
+  /**
+   * Resolves how much ambient Claude Code environment spawned processes may see.
+   * Filesystem verification is memoized per configuration, and a degraded
+   * resolution is reported once per run so the weaker isolation is never silent.
+   */
+  private async invocationScope(
+    runId: string,
+    config: OrchestratorConfig,
+    report = true
+  ): Promise<ClaudeInvocationScope> {
+    const key = JSON.stringify(config.claudeEnvironment);
+    if (this.resolvedScope?.key !== key) {
+      const resolved = await resolveClaudeInvocationScope(
+        config.claudeEnvironment
+      );
+      this.resolvedScope = {
+        key,
+        ...resolved,
+        mcp: await this.resolveMcpWhitelist(config)
+      };
+      this.reportedScopeDegradation = false;
+      this.reportedMcpWhitelist = false;
+    }
+    const current = this.resolvedScope;
+    if (
+      report &&
+      current.degradedReason !== null &&
+      !this.reportedScopeDegradation
+    ) {
+      this.reportedScopeDegradation = true;
+      this.info(
+        `Claude environment isolation degraded: ${current.degradedReason}`
+      );
+      await this.store.appendEvent(runId, "claude_environment.degraded", {
+        reason: current.degradedReason,
+        strictMcpConfig: current.scope.strictMcpConfig
+      });
+    }
+    if (report && current.mcp !== null && !this.reportedMcpWhitelist) {
+      this.reportedMcpWhitelist = true;
+      const vendors = [
+        current.mcp.claude === null ? null : "claude",
+        current.mcp.codex === null ? null : "codex"
+      ].filter((vendor) => vendor !== null);
+      const notes =
+        current.mcp.notes.length > 0
+          ? ` (${current.mcp.notes.join("; ")})`
+          : "";
+      this.info(
+        vendors.length > 0
+          ? `MCP whitelist: serena -> ${vendors.join(", ")}${notes}`
+          : `MCP whitelist: none${notes}`
+      );
+      await this.store.appendEvent(runId, "mcp_whitelist.resolved", {
+        claude: current.mcp.claude !== null,
+        codex: current.mcp.codex !== null,
+        notes: current.mcp.notes
+      });
+    }
+    return current.mcp === null
+      ? current.scope
+      : { ...current.scope, mcp: current.mcp };
+  }
+
+  /**
+   * The whitelist is availability-gated, never load-bearing: an absent
+   * resolver (test doubles), a failed probe, or a missing Serena all resolve
+   * to "no whitelist" and the run proceeds exactly as before.
+   */
+  /**
+   * The Serena guidance line for one phase, gated on the phase vendor's
+   * resolved whitelist entry so runs without Serena keep byte-identical
+   * prompts.
+   */
+  private serenaGuidanceFor(
+    environment: ClaudeInvocationScope,
+    executable: string
+  ): string {
+    const server =
+      vendorFor(executable) === "claude"
+        ? (environment.mcp?.claude ?? null)
+        : (environment.mcp?.codex ?? null);
+    return serenaGuidance(server !== null);
+  }
+
+  private async resolveMcpWhitelist(
+    config: OrchestratorConfig
+  ): Promise<McpWhitelist | null> {
+    const resolver = this.adapters.resolveMcpWhitelist?.bind(this.adapters);
+    if (resolver === undefined) {
+      return null;
+    }
+    const codexExecutable =
+      vendorUsage(config).find((entry) => entry.vendor === "codex")
+        ?.executable ?? null;
+    try {
+      return await resolver({ repoRoot: this.repoRoot, codexExecutable });
+    } catch (error) {
+      if (
+        error instanceof TerminalRunStateError ||
+        error instanceof ProjectSetupRequiredError
+      )
+        throw error;
+      this.info(`MCP whitelist unavailable: ${errorMessage(error)}`);
+      return null;
+    }
+  }
+
+  private info(message: string): void {
+    this.report({ kind: "info", message });
+  }
+
+  /**
+   * Forwards one action inside a model turn structurally. The presenter decides
+   * how much of it to show, which it cannot do from a pre-formatted string.
+   */
+  private modelProgress(label: string, event: ModelProgressEvent): void {
+    this.report({
+      kind: "model_action",
+      label,
+      action: event.kind,
+      status: event.status,
+      detail: event.detail,
+      actionId: event.id ?? null
+    });
+  }
+
+  /**
+   * Names the uncommitted changes a run starts on top of. They stay out of the
+   * reviewed set, so the developer should know they were carried in rather than
+   * silently attributed to the run.
+   */
+  private reportBaseline(state: RunState): void {
+    const entries = state.baseline ?? [];
+    if (entries.length === 0) {
+      return;
+    }
+    const shown = entries.slice(0, 5).map((entry) => entry.path);
+    const remainder = entries.length - shown.length;
+    const suffix = remainder > 0 ? ` (+${remainder} more)` : "";
+    this.info(
+      `Starting on ${entries.length} carried-in change${entries.length === 1 ? "" : "s"}, excluded from review: ${shown.join(", ")}${suffix}`
+    );
+  }
+
+  private async activity<T>(
+    label: string,
+    detail: string | ActivityDetail,
+    operation: () => Promise<T>,
+    succeeded: (result: T) => boolean = () => true
+  ): Promise<T> {
+    const id = `activity-${++this.progressSequence}`;
+    const startedAt = Date.now();
+    const resolved: ActivityDetail =
+      typeof detail === "string" ? { detail, descriptor: undefined } : detail;
+    this.report({
+      kind: "activity_started",
+      id,
+      label,
+      detail: resolved.detail,
+      descriptor: resolved.descriptor
+    });
+    try {
+      const result = await operation();
+      this.report({
+        kind: succeeded(result) ? "activity_completed" : "activity_failed",
+        id,
+        label,
+        durationMs: Date.now() - startedAt
+      });
+      return result;
+    } catch (error) {
+      if (
+        error instanceof TerminalRunStateError ||
+        error instanceof ProjectSetupRequiredError
+      )
+        throw error;
+      this.report({
+        kind: "activity_failed",
+        id,
+        label,
+        durationMs: Date.now() - startedAt
+      });
+      throw error;
+    }
+  }
+
+  private async assertProjectGuidance(layoutOnly = true): Promise<void> {
+    const result = await inspectProjectAdoption(this.repoRoot, { layoutOnly });
+    if (result.classification === "ready") return;
+    const remedy = layoutOnly
+      ? "Repair or migrate the instruction files with your own client or editor, then inspect banzai status and use the existing resume, retry or recovery action. Any saved decision remains saved; do not submit it again. Alternatively, cancel the unfinished run before using CLI setup."
+      : "Run banzai setup in a terminal, or explicitly invoke banzai:project-manifest in your client, then submit the task again.";
+    throw new ProjectSetupRequiredError(
+      `${adoptionDiagnostic(result)}. ${remedy}`
+    );
+  }
+
+  private async beforeModelAttempt(
+    commitTransition?: () => Promise<void>
+  ): Promise<void> {
+    await this.assertProjectGuidance();
+    const state = await this.store.requireActiveState();
+    if (state.artifactBinding !== undefined) {
+      await inspectBoundWork(this.repoRoot, state.artifactBinding);
+    }
+    await commitTransition?.();
+  }
+
+  async start(input: StartRunInput): Promise<RunState> {
+    try {
+      requireSlug(input.slug);
+      if (input.request.trim().length === 0) {
+        throw new BanzaiError(
+          "EMPTY_REQUEST",
+          "The feature request cannot be empty."
+        );
+      }
+      // Validate before lock acquisition because the lock initializes the local
+      // run directory. Reload under the lock below so a concurrent config edit
+      // cannot swap policy after this mutation-free validation boundary.
+      await loadConfig(this.repoRoot);
+      await currentCommit(this.repoRoot);
+      await this.assertProjectGuidance(false);
+      const lock = await this.store.acquireLock();
+      try {
+        this.info(`Preparing run ${input.slug} in ${this.repoRoot}`);
+        const config = await loadConfig(this.repoRoot);
+        const baseCommit = await currentCommit(this.repoRoot);
+        const createdAt = now();
+        const state: RunState = {
+          schemaVersion: 4,
+          contractVersion: CONTRACT_VERSION,
+          runId: runId(input.slug),
+          slug: input.slug,
+          request: input.request,
+          repoRoot: this.repoRoot,
+          status: "created",
+          createdAt,
+          updatedAt: createdAt,
+          baseCommit,
+          baseline: [],
+          workflowSelection: null,
+          planArtifacts: null,
+          planApproval: null,
+          planTaskCompletion: null,
+          adrDecisions: [],
+          pendingHumanDecision: null,
+          humanDecisions: [],
+          sessions: { planner: null, implementer: null, reviewer: null },
+          pendingReviewRotationReason: null,
+          reviewIteration: 0,
+          latestReview: null,
+          triage: null,
+          triageHistory: [],
+          fixCycle: 0,
+          workspaceDigest: null,
+          verification: [],
+          metrics: {
+            completedAttemptIds: [],
+            usageAccountedAttemptIds: [],
+            attempts: {
+              selection: 0,
+              plan: 0,
+              implementation: 0,
+              fix: 0,
+              review: 0,
+              verification: 0
+            },
+            modelDurationMs: 0,
+            usage: {
+              inputTokens: 0,
+              cachedInputTokens: 0,
+              outputTokens: 0,
+              costUsd: null
+            },
+            reviewFindingCount: 0,
+            sessions: { fresh: 0, resumed: 0 },
+            reviews: { full: 0, delta: 0, rotations: 0 },
+            triage: { accepted: 0, rejected: 0, deferred: 0 }
+          },
+          activeAttempt: null,
+          activeProcess: null,
+          blockedFrom: null,
+          blockReason: null
+        };
+        await this.assertProjectGuidance(false);
+        const activeId = await this.store.readActiveRunId();
+        if (activeId !== null) {
+          const active = await this.store.readState(activeId);
+          if (!TERMINAL_STATUSES.has(active.status)) {
+            throw new BanzaiError(
+              "ACTIVE_RUN_EXISTS",
+              `Run ${activeId} is still ${active.status}.`
+            );
+          }
+        }
+        state.artifactBinding = await createWork({
+          repoRoot: this.repoRoot,
+          slug: state.slug,
+          mode: "workflow",
+          creationId: randomUUID()
+        });
+        await this.store.createRun(state);
+        await this.observeHumanTime(state, "run_created");
+        await this.assertProjectGuidance();
+        try {
+          await this.activity(
+            "Preflight",
+            "Node, contracts, executables, verification commands, and subscription authentication",
+            async () => {
+              await this.preflight(config);
+            }
+          );
+          state.baseCommit = await this.activity(
+            "Repository check",
+            "current commit and carried-in changes",
+            async () => {
+              state.baseline = await repositoryBaseline(this.repoRoot);
+              return await currentCommit(this.repoRoot);
+            }
+          );
+          this.reportBaseline(state);
+        } catch (error) {
+          if (
+            error instanceof TerminalRunStateError ||
+            error instanceof ProjectSetupRequiredError
+          )
+            throw error;
+          return await this.recordStartFailure(state, error);
+        }
+        transitionState(state, "selecting");
+        await this.store.writeState(state);
+        this.info(`Created run ${state.runId}; selecting workflow`);
+        return await this.executeSelection(state, config);
+      } finally {
+        await lock.release();
+      }
+    } catch (error) {
+      if (error instanceof TerminalRunStateError) return error.state;
+      throw error;
+    }
+  }
+
+  async resume(): Promise<RunState> {
+    try {
+      const lock = await this.store.acquireLock();
+      try {
+        const state = await this.store.requireActiveState();
+        this.info(`Resuming run ${state.runId} from ${state.status}`);
+        if (TERMINAL_STATUSES.has(state.status)) {
+          return state;
+        }
+        const config = await loadConfig(this.repoRoot);
+        assertContractParity();
+
+        if (state.recovery?.recoveryAttemptId === null) {
+          const authorization = await this.store.readRecoveryAuthorization(
+            state.runId,
+            state.recovery.authorizationId
+          );
+          return await this.executeAuthorizedRecovery(
+            state,
+            config,
+            authorization
+          );
+        }
+
+        if (state.activeAttempt !== null) {
+          const retry = await this.retryEligibility(state);
+          if (
+            retry.eligible &&
+            retry.attemptId === state.activeAttempt.id &&
+            state.planTaskCompletion?.status === "invalid" &&
+            state.planTaskCompletion.sourceAttemptId === state.activeAttempt.id
+          ) {
+            this.info(
+              `Attempt ${state.activeAttempt.id} has rejected completion evidence; use banzai retry to repair it.`
+            );
+            return state;
+          }
+          this.info(`Reconciling recorded attempt ${state.activeAttempt.id}`);
+          return await this.reconcileAttempt(state, config);
+        }
+
+        if (
+          [
+            "created",
+            "selecting",
+            "planning",
+            "plan_approved",
+            "implementing",
+            "verifying",
+            "reviewing",
+            "fixing"
+          ].includes(state.status)
+        ) {
+          await this.assertProjectGuidance();
+        }
+        switch (state.status) {
+          case "created":
+            transitionState(state, "selecting");
+            await this.store.writeState(state);
+            return await this.executeSelection(state, config);
+          case "selecting":
+            return await this.executeSelection(state, config);
+          case "planning":
+            return await this.executePlan(state, config);
+          case "plan_approved":
+            return await this.executeImplementation(state, config);
+          case "implementing":
+            return await this.executeImplementation(state, config);
+          case "verifying":
+            return await this.executeVerification(state, config);
+          case "reviewing":
+            return await this.executeReview(state, config);
+          case "fixing":
+            return await this.executeFix(state, config);
+          case "needs_adr_approval":
+          case "needs_plan_approval":
+          case "needs_human_decision":
+          case "needs_triage":
+          case "blocked":
+            return state;
+          default:
+            return state;
+        }
+      } finally {
+        await lock.release();
+      }
+    } catch (error) {
+      if (error instanceof TerminalRunStateError) return error.state;
+      throw error;
+    }
+  }
+
+  async retry(): Promise<RunState> {
+    try {
+      let expectedAttemptId: string | null;
+      let expectedRunId: string;
+      let retryCheckpoint: RunState["blockedFrom"];
+      let planningCheckpointRejection: string | null = null;
+      const eligibilityLock = await this.store.acquireLock();
+      try {
+        const state = await this.store.requireActiveState();
+        expectedRunId = state.runId;
+        const retry = await this.retryEligibility(state);
+        if (!retry.eligible) {
+          throw new BanzaiError("RETRY_NOT_ALLOWED", retry.reason);
+        }
+        await this.assertProjectGuidance();
+        if (state.activeAttempt?.kind === "plan") {
+          const source = await this.store.readRunAttempt(
+            state.runId,
+            state.activeAttempt
+          );
+          if (
+            source.failureCode !== "PLAN_TASK_COMPLETION_INVALID" &&
+            (await this.store.readTerminalCheckpointIfExists(
+              state.runId,
+              state.activeAttempt
+            )) !== null
+          ) {
+            this.info(
+              "Reconciling the saved planning terminal result before retry"
+            );
+            const reconciled = await this.reconcileAttempt(
+              state,
+              await loadConfig(this.repoRoot)
+            );
+            if (
+              reconciled.status !== "blocked" ||
+              !reconciled.blockReason?.startsWith(
+                "[INVALID_TERMINAL_CHECKPOINT]"
+              ) ||
+              !(await this.retryEligibility(reconciled)).eligible
+            ) {
+              return reconciled;
+            }
+            // Rejected proof cannot become completion or reusable session state.
+            // An explicitly retryable failed planner may still start new work.
+            planningCheckpointRejection = reconciled.blockReason;
+          }
+        }
+        expectedAttemptId = retry.attemptId;
+        retryCheckpoint =
+          state.activeAttempt === null ? state.blockedFrom : null;
+        this.info(
+          retryCheckpoint === "created"
+            ? "Retry requested for startup checks"
+            : retryCheckpoint === "reviewing"
+              ? "Retry requested for review checks"
+              : retryCheckpoint === "verifying"
+                ? state.planTaskCompletion?.status === "invalid"
+                  ? `Retry requested to repair completion evidence rejected for ${expectedAttemptId}`
+                  : `Retry requested for verification attempt ${expectedAttemptId}`
+                : `Retry requested for failed attempt ${expectedAttemptId}`
+        );
+      } finally {
+        await eligibilityLock.release();
+      }
+
+      let config: OrchestratorConfig;
+      try {
+        config = await loadConfig(this.repoRoot);
+        await this.activity(
+          "Retry preflight",
+          "rechecking tools, contracts, verification commands, and subscription authentication",
+          async () => {
+            await this.preflight(config);
+          }
+        );
+      } catch (error) {
+        if (
+          error instanceof TerminalRunStateError ||
+          error instanceof ProjectSetupRequiredError
+        )
+          throw error;
+        if (retryCheckpoint === null) {
+          throw error;
+        }
+        const failureLock = await this.store.acquireLock();
+        try {
+          const state = await this.store.readState(expectedRunId);
+          if (
+            (await this.store.readActiveRunId()) !== expectedRunId &&
+            !TERMINAL_STATUSES.has(state.status)
+          ) {
+            throw new BanzaiError(
+              "RETRY_STATE_CHANGED",
+              "The active run changed during retry."
+            );
+          }
+          if (state.status === "cancelled") {
+            return state;
+          }
+          const retry = await this.retryEligibility(state);
+          if (
+            !retry.eligible ||
+            retry.attemptId !== expectedAttemptId ||
+            state.blockedFrom !== retryCheckpoint
+          ) {
+            throw new BanzaiError(
+              "RETRY_STATE_CHANGED",
+              "The retry checkpoint changed while preflight was running."
+            );
+          }
+          if (retryCheckpoint === "created") {
+            return await this.recordStartFailure(state, error);
+          }
+          if (retryCheckpoint === "reviewing") {
+            return await this.recordReviewCheckFailure(state, error);
+          }
+          if (
+            retryCheckpoint === "verifying" &&
+            state.planTaskCompletion?.status === "invalid"
+          ) {
+            // A completion-repair retry has no verification attempt identity to
+            // record a check failure against; the run stays blocked as it was.
+            throw error;
+          }
+          if (retryCheckpoint === "verifying" && expectedAttemptId !== null) {
+            return await this.recordVerificationRetryCheckFailure(
+              state,
+              expectedAttemptId,
+              error
+            );
+          }
+          throw error;
+        } finally {
+          await failureLock.release();
+        }
+      }
+
+      const executionLock = await this.store.acquireLock();
+      try {
+        const state = await this.store.readState(expectedRunId);
+        if (
+          (await this.store.readActiveRunId()) !== expectedRunId &&
+          !TERMINAL_STATUSES.has(state.status)
+        ) {
+          throw new BanzaiError(
+            "RETRY_STATE_CHANGED",
+            "The active run changed during retry."
+          );
+        }
+        if (state.status === "cancelled") {
+          return state;
+        }
+        const retry = await this.retryEligibility(state);
+        if (!retry.eligible || retry.attemptId !== expectedAttemptId) {
+          throw new BanzaiError(
+            "RETRY_STATE_CHANGED",
+            retry.eligible
+              ? "The failed attempt changed while retry preflight was running."
+              : retry.reason
+          );
+        }
+        await this.assertProjectGuidance();
+        const pendingTransition: (() => Promise<unknown>)[] = [];
+        const commitTransition = async () => {
+          for (const publish of pendingTransition) await publish();
+          pendingTransition.length = 0;
+        };
+        if (retryCheckpoint === "created") {
+          try {
+            state.baseCommit = await this.activity(
+              "Repository check",
+              "current commit and carried-in changes",
+              async () => {
+                state.baseline = await repositoryBaseline(this.repoRoot);
+                return await currentCommit(this.repoRoot);
+              }
+            );
+            this.reportBaseline(state);
+          } catch (error) {
+            if (
+              error instanceof TerminalRunStateError ||
+              error instanceof ProjectSetupRequiredError
+            )
+              throw error;
+            return await this.recordStartFailure(state, error);
+          }
+          transitionState(state, "created");
+          pendingTransition.push(
+            async () =>
+              await this.store.appendEvent(
+                state.runId,
+                "run.start_retry_requested",
+                {
+                  baseCommit: state.baseCommit
+                }
+              )
+          );
+          transitionState(state, "selecting");
+          pendingTransition.push(async () => {
+            await this.store.writeState(state);
+          });
+          this.info(
+            `Startup checks passed; selecting workflow for ${state.runId}`
+          );
+          return await this.executeSelection(state, config, commitTransition);
+        }
+        if (retryCheckpoint === "reviewing") {
+          transitionState(state, "reviewing");
+          pendingTransition.push(async () => {
+            await this.store.writeState(state);
+          });
+          pendingTransition.push(
+            async () =>
+              await this.store.appendEvent(
+                state.runId,
+                "review.checks_retry_requested",
+                {}
+              )
+          );
+          this.info("Retrying review checks before starting a fresh review");
+          return await this.executeReview(state, config, commitTransition);
+        }
+        const rejectedCompletion =
+          state.planTaskCompletion?.status === "invalid"
+            ? state.planTaskCompletion
+            : null;
+        if (
+          rejectedCompletion !== null &&
+          (retryCheckpoint === "verifying" ||
+            retryCheckpoint === "implementing" ||
+            retryCheckpoint === "plan_approved" ||
+            state.activeAttempt?.kind === "implementation") &&
+          PLAN_BUNDLE_COMPLETION_VIOLATIONS.has(rejectedCompletion.violation)
+        ) {
+          return await this.retryIntoPlanning(
+            state,
+            config,
+            rejectedCompletion.sourceAttemptId
+          );
+        }
+        if (retryCheckpoint === "verifying" && rejectedCompletion !== null) {
+          await this.validateBaseCommit(state);
+          await this.validateApproval(state);
+          state.activeAttempt = null;
+          state.activeProcess = null;
+          transitionState(state, "implementing");
+          pendingTransition.push(async () => {
+            await this.store.writeState(state);
+          });
+          pendingTransition.push(
+            async () =>
+              await this.store.appendEvent(
+                state.runId,
+                "attempt.retry_requested",
+                {
+                  failedAttemptId: rejectedCompletion.sourceAttemptId,
+                  kind: "implementation",
+                  retryFrom: "implementing"
+                }
+              )
+          );
+          pendingTransition.push(
+            async () =>
+              await this.store.appendEvent(
+                state.runId,
+                "plan_task_completion.retry_requested",
+                { failedAttemptId: rejectedCompletion.sourceAttemptId }
+              )
+          );
+          this.info(
+            "Repairing rejected completion evidence with a fresh implementation attempt"
+          );
+          return await this.executeImplementation(
+            state,
+            config,
+            null,
+            commitTransition
+          );
+        }
+        if (retryCheckpoint === "verifying" && expectedAttemptId !== null) {
+          await this.validateBaseCommit(state);
+          transitionState(state, "verifying");
+          state.activeProcess = null;
+          pendingTransition.push(async () => {
+            await this.store.writeState(state);
+          });
+          pendingTransition.push(
+            async () =>
+              await this.store.appendEvent(
+                state.runId,
+                "verification.retry_requested",
+                { attemptId: expectedAttemptId }
+              )
+          );
+          this.info(
+            `Retrying verification attempt ${expectedAttemptId} with a new physical identity`
+          );
+          return await this.executeVerification(
+            state,
+            config,
+            undefined,
+            expectedAttemptId,
+            commitTransition
+          );
+        }
+        if (retryCheckpoint === "fixing") {
+          transitionState(state, "fixing");
+          pendingTransition.push(async () => {
+            await this.store.writeState(state);
+          });
+          pendingTransition.push(
+            async () =>
+              await this.store.appendEvent(
+                state.runId,
+                "fix.checks_retry_requested",
+                {}
+              )
+          );
+          this.info("Retrying fix checks before starting a fresh fix attempt");
+          return await this.executeFix(state, config, null, commitTransition);
+        }
+        if (
+          retryCheckpoint === "implementing" ||
+          retryCheckpoint === "plan_approved"
+        ) {
+          transitionState(state, retryCheckpoint);
+          pendingTransition.push(async () => {
+            await this.store.writeState(state);
+          });
+          pendingTransition.push(
+            async () =>
+              await this.store.appendEvent(
+                state.runId,
+                "implementation.checks_retry_requested",
+                {}
+              )
+          );
+          this.info(
+            "Retrying implementation checks before starting a fresh attempt"
+          );
+          return await this.executeImplementation(
+            state,
+            config,
+            null,
+            commitTransition
+          );
+        }
+        const failedAttempt = state.activeAttempt;
+        const retryFrom = state.blockedFrom;
+        if (failedAttempt === null || retryFrom === null) {
+          throw new BanzaiError(
+            "INVALID_RETRY_STATE",
+            "Retry state changed while the command was being validated."
+          );
+        }
+
+        await this.validateBaseCommit(state);
+
+        if (failedAttempt.kind === "review") {
+          state.reviewIteration = state.latestReview?.iteration ?? 0;
+        }
+        const planningSource =
+          failedAttempt.kind === "plan"
+            ? await this.store.readRunAttempt(state.runId, failedAttempt)
+            : null;
+        // Keep the failed planner reference until beginAttempt replaces it. A
+        // crash in the transition gap must not silently lose retry context.
+        if (planningSource === null) state.activeAttempt = null;
+        state.activeProcess = null;
+        transitionState(state, retryFrom);
+        pendingTransition.push(async () => {
+          await this.store.writeState(state);
+        });
+        pendingTransition.push(
+          async () =>
+            await this.store.appendEvent(
+              state.runId,
+              "attempt.retry_requested",
+              {
+                failedAttemptId: failedAttempt.id,
+                kind: failedAttempt.kind,
+                retryFrom
+              }
+            )
+        );
+        this.info(`Retrying ${failedAttempt.kind} with a new attempt`);
+
+        if (retryFrom === "selecting") {
+          return await this.executeSelection(state, config, commitTransition);
+        }
+        if (retryFrom === "planning") {
+          return await this.executePlan(
+            state,
+            config,
+            planningSource,
+            planningCheckpointRejection,
+            commitTransition
+          );
+        }
+        if (retryFrom === "reviewing") {
+          return await this.executeReview(state, config, commitTransition);
+        }
+        if (retryFrom === "implementing") {
+          await this.validateApproval(state);
+          pendingTransition.push(
+            async () =>
+              await this.store.appendEvent(
+                state.runId,
+                "plan_task_completion.retry_requested",
+                { failedAttemptId: failedAttempt.id }
+              )
+          );
+          return await this.executeImplementation(
+            state,
+            config,
+            null,
+            commitTransition
+          );
+        }
+        if (retryFrom === "fixing") {
+          // Reachable only through the completion-evidence repair eligibility: a
+          // fix whose refreshed ledger was rejected reruns with the same triage
+          // scope and the persisted rejection diagnostic.
+          await this.validateApproval(state);
+          pendingTransition.push(
+            async () =>
+              await this.store.appendEvent(
+                state.runId,
+                "plan_task_completion.retry_requested",
+                { failedAttemptId: failedAttempt.id }
+              )
+          );
+          return await this.executeFix(state, config, null, commitTransition);
+        }
+        throw new BanzaiError(
+          "INVALID_RETRY_STATE",
+          `Retry cannot continue from ${retryFrom}.`
+        );
+      } finally {
+        await executionLock.release();
+      }
+    } catch (error) {
+      if (error instanceof TerminalRunStateError) return error.state;
+      throw error;
+    }
+  }
+
+  /**
+   * Whether the approved planning artifacts can be restored from the approval
+   * snapshot: an approval exists, the snapshot verifies byte-for-byte against
+   * its recorded digest, and the on-disk bundle currently diverges from it.
+   */
+  async restoreEligibility(): Promise<{ eligible: boolean; reason: string }> {
+    const state = await this.store.requireActiveState();
+    return await this.restoreEligibilityFor(state);
+  }
+
+  private async restoreEligibilityFor(
+    state: RunState
+  ): Promise<{ eligible: boolean; reason: string }> {
+    const approval = state.planApproval;
+    if (approval === null) {
+      return {
+        eligible: false,
+        reason: "The run has no recorded plan approval."
+      };
+    }
+    const snapshot = await this.store.readApprovalSnapshot(state.runId);
+    if (snapshot === null) {
+      return {
+        eligible: false,
+        reason:
+          "This run predates approval snapshots; restore the approved bytes manually or cancel the run."
+      };
+    }
+    const verified =
+      snapshot.digest === approval.digest &&
+      digestArtifactEntries(
+        snapshot.entries.map((entry) => ({
+          path: entry.path,
+          sha256: entry.sha256
+        }))
+      ) === approval.digest &&
+      snapshot.entries.every(
+        (entry) => hashArtifactBytes(entry.contents) === entry.sha256
+      ) &&
+      JSON.stringify(snapshot.entries.map((entry) => entry.path).sort()) ===
+        JSON.stringify([...approval.paths].sort());
+    if (!verified) {
+      return {
+        eligible: false,
+        reason:
+          "The stored approval snapshot does not verify against the recorded approval digest."
+      };
+    }
+    const current = await digestArtifactBundle(
+      this.repoRoot,
+      approval.paths
+    ).catch(() => null);
+    if (current !== null && current.digest === approval.digest) {
+      return {
+        eligible: false,
+        reason:
+          "The approved planning artifacts already match the recorded approval."
+      };
+    }
+    return {
+      eligible: true,
+      reason:
+        "The approved planning artifacts diverged from the recorded approval and can be restored from the snapshot."
+    };
+  }
+
+  /**
+   * Rewrites the approved artifact paths with the exact bytes the human
+   * approved, verified against the recorded approval digest. An explicit
+   * operator action for an externally mutated bundle — the runner never
+   * chooses the content, it only reinstates what the human approved.
+   */
+  async restoreApproval(): Promise<string[]> {
+    const lock = await this.store.acquireLock();
+    try {
+      const state = await this.store.requireActiveState();
+      const eligibility = await this.restoreEligibilityFor(state);
+      if (!eligibility.eligible) {
+        throw new BanzaiError("RESTORE_NOT_ALLOWED", eligibility.reason);
+      }
+      const snapshot = await this.store.readApprovalSnapshot(state.runId);
+      if (snapshot === null) {
+        throw new BanzaiError(
+          "RESTORE_NOT_ALLOWED",
+          "The approval snapshot disappeared while restoring."
+        );
+      }
+      const restored: string[] = [];
+      for (const entry of snapshot.entries) {
+        const absolute = path.resolve(this.repoRoot, entry.path);
+        await mkdir(path.dirname(absolute), { recursive: true });
+        await writeFile(absolute, entry.contents);
+        restored.push(entry.path);
+      }
+      await this.store.appendEvent(state.runId, "approval.restored", {
+        digest: state.planApproval?.digest ?? null,
+        paths: restored
+      });
+      this.info(
+        `Restored ${restored.length} approved planning artifact${restored.length === 1 ? "" : "s"} from the approval snapshot`
+      );
+      return restored;
+    } finally {
+      await lock.release();
+    }
+  }
+
+  /**
+   * Reruns planning after a plan-bundle-level completion rejection: the
+   * recorded approval is voided so the planner may correct the bundle, the
+   * stale completion checkpoint is cleared so the next implementation starts
+   * fresh instead of receiving a repair context for a plan that no longer
+   * exists, and a new plan-approval gate follows. Evidence repair can never
+   * fix a defect that lives in the immutable approved plan itself.
+   */
+  private async retryIntoPlanning(
+    state: RunState,
+    config: OrchestratorConfig,
+    failedAttemptId: string
+  ): Promise<RunState> {
+    await this.validateBaseCommit(state);
+    const violation =
+      state.planTaskCompletion?.status === "invalid"
+        ? state.planTaskCompletion.violation
+        : null;
+    state.activeAttempt = null;
+    state.activeProcess = null;
+    state.planApproval = null;
+    state.planTaskCompletion = null;
+    transitionState(state, "planning");
+    const pendingTransition: (() => Promise<unknown>)[] = [];
+    const commitTransition = async () => {
+      for (const publish of pendingTransition) await publish();
+      pendingTransition.length = 0;
+    };
+    pendingTransition.push(async () => {
+      await this.store.writeState(state);
+    });
+    pendingTransition.push(
+      async () =>
+        await this.store.appendEvent(state.runId, "attempt.retry_requested", {
+          failedAttemptId,
+          kind: "implementation",
+          retryFrom: "planning"
+        })
+    );
+    pendingTransition.push(
+      async () =>
+        await this.store.appendEvent(state.runId, "plan_approval.voided", {
+          violation
+        })
+    );
+    this.info("Rerunning planning to correct the invalid approved plan bundle");
+    return await this.executePlan(state, config, null, null, commitTransition);
+  }
+
+  async recover(input: RecoverInput, autoResume = true): Promise<RunState> {
+    try {
+      const lock = await this.store.acquireLock();
+      try {
+        const state = await this.store.requireActiveState();
+        const eligibility = await this.recoveryEligibility(state);
+        if (!eligibility.eligible) {
+          throw new BanzaiError("RECOVERY_NOT_ALLOWED", eligibility.reason);
+        }
+        if (
+          input.attemptId !== eligibility.attemptId ||
+          input.recoveryIdentity !== eligibility.recoveryIdentity ||
+          (input as { unknownSideEffectsAccepted: unknown })
+            .unknownSideEffectsAccepted !== true
+        ) {
+          throw new BanzaiError(
+            "RECOVERY_STALE",
+            "Recovery authorization does not match the exact current attempt and workspace identity."
+          );
+        }
+        if (
+          input.decidedBy.length === 0 ||
+          input.decidedBy.length > 200 ||
+          /[\0\r\n]/u.test(input.decidedBy)
+        ) {
+          throw new BanzaiError(
+            "INVALID_RECOVERY_DECISION_MAKER",
+            "Recovery decision maker must be a bounded single-line value."
+          );
+        }
+        if (
+          eligibility.phase === null ||
+          eligibility.sourceKind === null ||
+          eligibility.workspace === null ||
+          eligibility.baseCommit === null ||
+          eligibility.configurationDigest === null
+        ) {
+          throw new BanzaiError(
+            "RECOVERY_STATE_CHANGED",
+            "Recovery eligibility changed before authorization persistence."
+          );
+        }
+        await this.assertProjectGuidance();
+        const attempt: RecoveryAuthorization["attempt"] = {
+          id: eligibility.attemptId,
+          kind: eligibility.phase,
+          mutable: true
+        };
+        let authorization: RecoveryAuthorization;
+        if (
+          state.recovery?.sourceAttemptId === attempt.id &&
+          state.recovery.recoveryAttemptId === null
+        ) {
+          authorization = await this.store.readRecoveryAuthorization(
+            state.runId,
+            state.recovery.authorizationId
+          );
+        } else {
+          const authorizationId = `recovery-${eligibility.recoveryIdentity.slice(0, 24)}`;
+          const proposed: RecoveryAuthorization = {
+            schema: RECOVERY_AUTHORIZATION_SCHEMA,
+            schemaVersion: RECOVERY_AUTHORIZATION_SCHEMA_VERSION,
+            authorizationId,
+            runId: state.runId,
+            attempt,
+            phase: attempt.kind,
+            recoveryIdentity: eligibility.recoveryIdentity,
+            workspaceDigest: eligibility.workspace.digest,
+            baseCommit: eligibility.baseCommit,
+            approvalDigest: eligibility.approvalDigest,
+            workflowDigest: eligibility.workflowDigest,
+            scopeDigest: eligibility.scopeDigest,
+            configurationDigest: eligibility.configurationDigest,
+            decidedBy: input.decidedBy,
+            decidedAt: now(),
+            unknownSideEffectsAccepted: true
+          };
+          const existing = await this.store.readRecoveryAuthorizationIfExists(
+            state.runId,
+            authorizationId
+          );
+          authorization = existing ?? proposed;
+          if (
+            authorization.runId !== proposed.runId ||
+            authorization.attempt.id !== proposed.attempt.id ||
+            authorization.phase !== proposed.phase ||
+            authorization.recoveryIdentity !== proposed.recoveryIdentity ||
+            authorization.workspaceDigest !== proposed.workspaceDigest ||
+            authorization.baseCommit !== proposed.baseCommit ||
+            authorization.approvalDigest !== proposed.approvalDigest ||
+            authorization.workflowDigest !== proposed.workflowDigest ||
+            authorization.scopeDigest !== proposed.scopeDigest ||
+            authorization.configurationDigest !== proposed.configurationDigest
+          ) {
+            throw new BanzaiError(
+              "RECOVERY_AUTHORIZATION_CONFLICT",
+              "Persisted recovery authorization conflicts with the current recovery identity."
+            );
+          }
+          if (existing === null) {
+            await this.store.writeRecoveryAuthorization(
+              state.runId,
+              authorization
+            );
+          }
+          state.recovery = {
+            authorizationId: authorization.authorizationId,
+            sourceAttemptId: attempt.id,
+            recoveryAttemptId: null,
+            stage: "authorized"
+          };
+          await this.store.writeState(state);
+          await this.store.appendEvent(state.runId, "recovery.authorized", {
+            authorizationId: authorization.authorizationId,
+            attemptId: attempt.id,
+            phase: attempt.kind,
+            sourceKind: eligibility.sourceKind,
+            decidedBy: input.decidedBy
+          });
+        }
+        if (!autoResume) {
+          return state;
+        }
+        const config = await loadConfig(this.repoRoot);
+        assertContractParity();
+        return await this.executeAuthorizedRecovery(
+          state,
+          config,
+          authorization
+        );
+      } finally {
+        await lock.release();
+      }
+    } catch (error) {
+      if (error instanceof TerminalRunStateError) return error.state;
+      throw error;
+    }
+  }
+
+  async approvePlan(approvedBy: string, autoResume = true): Promise<RunState> {
+    try {
+      const lock = await this.store.acquireLock();
+      try {
+        const state = await this.store.requireActiveState();
+        requireState(state, ["needs_plan_approval"], "Plan approval");
+        // Approval binds whatever bytes exist right now, so the canonical task
+        // grammar is checked against those exact bytes: an on-disk edit between
+        // the gate and the approval cannot smuggle in a malformed heading.
+        await this.approvedTaskIds(state);
+        const bundle = await digestArtifactBundle(
+          this.repoRoot,
+          artifactPaths(state)
+        );
+        // Snapshot the exact approved bytes beside the run evidence: the bundle
+        // paths are typically uncommitted, so without this an external mutation
+        // would leave no recoverable approved form, only a digest.
+        const snapshotEntries: {
+          path: string;
+          sha256: string;
+          contents: Buffer;
+        }[] = [];
+        for (const entry of bundle.entries) {
+          const contents = await readFile(
+            path.resolve(this.repoRoot, entry.path)
+          );
+          if (hashArtifactBytes(contents) !== entry.sha256) {
+            throw new BanzaiError(
+              "APPROVAL_INVALIDATED",
+              `Approved artifact ${entry.path} changed while the approval was being recorded; review and approve again.`
+            );
+          }
+          snapshotEntries.push({
+            path: entry.path,
+            sha256: entry.sha256,
+            contents
+          });
+        }
+        state.planApproval = {
+          kind: "plan",
+          digest: bundle.digest,
+          approvedAt: now(),
+          approvedBy,
+          paths: bundle.paths
+        };
+        await this.store.writeApprovalSnapshot(
+          state.runId,
+          bundle.digest,
+          snapshotEntries
+        );
+        transitionState(state, "plan_approved");
+        await this.store.writeState(state);
+        const timingEvent = await this.store.appendEvent(
+          state.runId,
+          "approval.plan",
+          {
+            approvedBy,
+            digest: bundle.digest,
+            paths: bundle.paths
+          }
+        );
+        await this.observeHumanTime(
+          state,
+          "decision_recorded",
+          "approval.plan",
+          timingEvent.at
+        );
+        if (!autoResume) {
+          return state;
+        }
+        const config = await loadConfig(this.repoRoot);
+        return await this.executeImplementation(state, config);
+      } finally {
+        await lock.release();
+      }
+    } catch (error) {
+      if (error instanceof TerminalRunStateError) return error.state;
+      throw error;
+    }
+  }
+
+  async decideAdr(input: {
+    id: string;
+    decision: AdrDecision["decision"];
+    note: string | null;
+    decidedBy: string;
+    autoResume: boolean;
+  }): Promise<RunState> {
+    try {
+      const lock = await this.store.acquireLock();
+      try {
+        const state = await this.store.requireActiveState();
+        requireState(state, ["needs_adr_approval"], "ADR decision");
+        if (input.id.trim().length === 0) {
+          throw new BanzaiError("INVALID_ADR", "ADR id cannot be empty.");
+        }
+        state.adrDecisions = state.adrDecisions.filter(
+          (decision) => decision.id !== input.id
+        );
+        state.adrDecisions.push({
+          id: input.id,
+          decision: input.decision,
+          note: input.note,
+          decidedAt: now(),
+          decidedBy: input.decidedBy
+        });
+        transitionState(state, "planning");
+        await this.store.writeState(state);
+        const timingEvent = await this.store.appendEvent(
+          state.runId,
+          "approval.adr",
+          {
+            id: input.id,
+            decision: input.decision,
+            decidedBy: input.decidedBy
+          }
+        );
+        await this.observeHumanTime(
+          state,
+          "decision_recorded",
+          "approval.adr",
+          timingEvent.at
+        );
+        if (!input.autoResume) {
+          return state;
+        }
+        return await this.executePlan(state, await loadConfig(this.repoRoot));
+      } finally {
+        await lock.release();
+      }
+    } catch (error) {
+      if (error instanceof TerminalRunStateError) return error.state;
+      throw error;
+    }
+  }
+
+  async answerHumanDecision(
+    input: HumanDecisionInput,
+    autoResume = true
+  ): Promise<RunState> {
+    try {
+      const lock = await this.store.acquireLock();
+      try {
+        const state = await this.store.requireActiveState();
+        requireState(state, ["needs_human_decision"], "Human decision");
+        const pending = state.pendingHumanDecision ?? null;
+        if (pending === null) {
+          throw new BanzaiError(
+            "INVALID_STATE",
+            "The run has no persisted human decision request."
+          );
+        }
+        if (pending.kind !== "escalation") {
+          throw new BanzaiError(
+            "INVALID_DECISION",
+            "Decision consultation requires a keyed consultation answer."
+          );
+        }
+        if (
+          input.answers.length !== Math.max(1, pending.questions.length) ||
+          input.answers.some((answer) => answer.trim().length === 0)
+        ) {
+          throw new BanzaiError(
+            "INVALID_DECISION",
+            "Every human decision question requires a non-empty answer."
+          );
+        }
+        const decision: HumanDecisionRecord = {
+          ...pending,
+          answers: [...input.answers],
+          decidedAt: now(),
+          decidedBy: input.decidedBy
+        };
+        state.humanDecisions = [...(state.humanDecisions ?? []), decision];
+        state.pendingHumanDecision = null;
+        state.planApproval = null;
+        const reselectLiteWorkflow =
+          pending.phase === "implementation" &&
+          state.workflowSelection?.workflow !== undefined &&
+          state.workflowSelection.workflow !== "strict";
+        if (reselectLiteWorkflow) {
+          state.workflowSelection = null;
+          state.sessions.implementer = null;
+          transitionState(state, "selecting");
+        } else {
+          transitionState(state, "planning");
+        }
+        await this.store.writeState(state);
+        const timingEvent = await this.store.appendEvent(
+          state.runId,
+          "decision.human",
+          {
+            phase: decision.phase,
+            gate: decision.gate,
+            questions: decision.questions,
+            decidedBy: decision.decidedBy
+          }
+        );
+        await this.observeHumanTime(
+          state,
+          "decision_recorded",
+          "decision.human",
+          timingEvent.at
+        );
+        if (!autoResume) {
+          return state;
+        }
+        const config = await loadConfig(this.repoRoot);
+        return reselectLiteWorkflow
+          ? await this.executeSelection(state, config)
+          : await this.executePlan(state, config);
+      } finally {
+        await lock.release();
+      }
+    } catch (error) {
+      if (error instanceof TerminalRunStateError) return error.state;
+      throw error;
+    }
+  }
+
+  async answerDecisionConsultation(
+    input: DecisionConsultationInput,
+    autoResume = true
+  ): Promise<RunState> {
+    try {
+      if (Buffer.byteLength(JSON.stringify(input), "utf8") > 64 * 1024) {
+        throw new BanzaiError(
+          "INVALID_DECISION",
+          "Consultation answer document is too large."
+        );
+      }
+      decisionIdentifier(input.runId, "runId", 300);
+      decisionIdentifier(input.requestId, "requestId");
+      decisionIdentifier(input.roundId, "roundId");
+      decisionText(input.decidedBy, "decidedBy", 200);
+      const lock = await this.store.acquireLock();
+      try {
+        const state = await this.store.requireActiveState();
+        requireState(state, ["needs_human_decision"], "Decision consultation");
+        if (state.runId !== input.runId) {
+          throw new BanzaiError(
+            "INVALID_DECISION",
+            "Consultation answer does not match the active run."
+          );
+        }
+        const pending = state.pendingHumanDecision ?? null;
+        if (pending?.kind !== "decision_consultation") {
+          throw new BanzaiError(
+            "INVALID_DECISION",
+            "The run has no pending decision consultation."
+          );
+        }
+        if (
+          pending.request.requestId !== input.requestId ||
+          pending.request.roundId !== input.roundId
+        ) {
+          throw new BanzaiError(
+            "INVALID_DECISION",
+            "Consultation answer is stale for the active request or round."
+          );
+        }
+        const priorDecisionIds = new Set(
+          (state.humanDecisions ?? []).flatMap((decision) =>
+            decision.kind === "decision_consultation"
+              ? decision.request.decisions.map((card) => card.decisionId)
+              : []
+          )
+        );
+        const repeated = pending.request.decisions.find((decision) =>
+          priorDecisionIds.has(decision.decisionId)
+        );
+        if (repeated !== undefined) {
+          throw new BanzaiError(
+            "INVALID_DECISION",
+            `Decision ${repeated.decisionId} was already answered in this run.`
+          );
+        }
+        const answers = parseDecisionConsultationAnswers(
+          input.answers,
+          pending.request
+        );
+        const decidedAt = now();
+        const decision: HumanDecisionRecord = {
+          ...pending,
+          runId: state.runId,
+          requestId: pending.request.requestId,
+          roundId: pending.request.roundId,
+          answers,
+          decidedAt,
+          decidedBy: input.decidedBy
+        };
+        state.humanDecisions = [...(state.humanDecisions ?? []), decision];
+        state.pendingHumanDecision = null;
+        state.planApproval = null;
+        transitionState(state, "planning");
+        await this.store.writeState(state);
+        const optionAnswers = answers.filter(
+          (answer) => answer.response.kind === "option"
+        ).length;
+        const timingEvent = await this.store.appendEvent(
+          state.runId,
+          "decision.consultation.answered",
+          {
+            cardCount: answers.length,
+            answerModes: {
+              option: optionAnswers,
+              preference: answers.length - optionAnswers
+            },
+            completion: "answered"
+          }
+        );
+        await this.observeHumanTime(
+          state,
+          "decision_recorded",
+          "decision.consultation.answered",
+          timingEvent.at
+        );
+        if (!autoResume) {
+          return state;
+        }
+        return await this.executePlan(state, await loadConfig(this.repoRoot));
+      } finally {
+        await lock.release();
+      }
+    } catch (error) {
+      if (error instanceof TerminalRunStateError) return error.state;
+      throw error;
+    }
+  }
+
+  async triage(input: TriageInput, autoResume = true): Promise<RunState> {
+    try {
+      const lock = await this.store.acquireLock();
+      try {
+        const state = await this.store.requireActiveState();
+        requireState(state, ["needs_triage"], "Review triage");
+        const review = await this.readLatestReview(state);
+        const items = this.validateTriage(review.findings, input);
+        const triage: TriageRecord = {
+          reviewIteration: state.reviewIteration,
+          decidedAt: now(),
+          decidedBy: input.decidedBy,
+          items
+        };
+        state.triage = triage;
+        state.triageHistory.push(triage);
+        state.metrics.triage.accepted += items.filter(
+          (item) => item.disposition === "accepted"
+        ).length;
+        state.metrics.triage.rejected += items.filter(
+          (item) => item.disposition === "rejected"
+        ).length;
+        state.metrics.triage.deferred += items.filter(
+          (item) => item.disposition === "deferred"
+        ).length;
+        const timingEvent = await this.store.appendEvent(
+          state.runId,
+          "review.triaged",
+          {
+            reviewIteration: state.reviewIteration,
+            decidedBy: input.decidedBy,
+            items
+          }
+        );
+        await this.observeHumanTime(
+          state,
+          "decision_recorded",
+          "review.triaged",
+          timingEvent.at
+        );
+        const accepted = items.filter(
+          (item) => item.disposition === "accepted"
+        );
+        if (
+          review.findings.some(
+            (finding) =>
+              accepted.some((item) => item.findingId === finding.id) &&
+              (finding.severity === "blocker" ||
+                finding.category === "security")
+          )
+        ) {
+          state.pendingReviewRotationReason = "accepted-high-risk-finding";
+        }
+        if (accepted.length === 0) {
+          try {
+            await this.revalidateTaskCompletion(state);
+          } catch (error) {
+            if (
+              error instanceof TerminalRunStateError ||
+              error instanceof ProjectSetupRequiredError
+            )
+              throw error;
+            return await this.blockForCompletionFailure(
+              state,
+              state.planTaskCompletion?.sourceAttemptId ?? "legacy",
+              error
+            );
+          }
+          state.pendingReviewRotationReason = null;
+          transitionState(state, "done");
+          await this.store.writeState(state);
+          return state;
+        }
+        const config = await loadConfig(this.repoRoot);
+        if (state.fixCycle >= config.maxFixCycles) {
+          blockState(state, "Maximum fix-cycle count reached.");
+          await this.store.writeState(state);
+          return state;
+        }
+        transitionState(state, "fixing");
+        await this.store.writeState(state);
+        if (!autoResume) {
+          return state;
+        }
+        return await this.executeFix(state, config);
+      } finally {
+        await lock.release();
+      }
+    } catch (error) {
+      if (error instanceof TerminalRunStateError) return error.state;
+      throw error;
+    }
+  }
+
+  async cancel(input: CancelRunInput = {}): Promise<CancellationResult> {
+    if (
+      (input.reason !== undefined && !isCancellationReason(input.reason)) ||
+      (input.channel !== undefined &&
+        !["cli", "interactive"].includes(input.channel)) ||
+      (input.channel === "interactive" && input.reason !== undefined) ||
+      (input.expectedRunId !== undefined &&
+        !cancellationId(input.expectedRunId))
+    ) {
+      throw new BanzaiError(
+        "INVALID_CANCELLATION_INPUT",
+        "Invalid cancellation input."
+      );
+    }
+    const initial = await this.store.requireActiveState();
+    const runId = input.expectedRunId ?? initial.runId;
+    const result: CancellationResult = {
+      outcome: "unconfirmed",
+      runId,
+      state: null,
+      stopRequest: "no_active_process",
+      observation: "not_applicable",
+      receipt: null
+    };
+    if (initial.runId !== runId)
+      return { ...result, outcome: "active_run_changed" };
+    let context: CancellationContext = emptyCancellationContext();
+    const contextLinks: CancellationContextLinks = {
+      activeVerification: false,
+      adr: null
+    };
+    const transitionIdentity: { id: string | null } = { id: null };
+    let stopRequest: StopRequest = "no_active_process";
+    try {
+      const committed = await this.store.commitCancellation(
+        runId,
+        (state, raw) => {
+          const at = now();
+          if (state.activeProcess != null)
+            stopRequest = terminateProcessGroup(state.activeProcess.pid);
+          try {
+            context = captureCancellationContext(raw);
+            contextLinks.activeVerification =
+              state.activeProcess?.kind === "verification";
+            const adr = Array.isArray(state.adrDecisions)
+              ? state.adrDecisions.at(-1)
+              : undefined;
+            if (adr !== undefined)
+              contextLinks.adr = {
+                id: adr.id,
+                decision: adr.decision,
+                decidedAt: adr.decidedAt
+              };
+          } catch {
+            context = emptyCancellationContext();
+          }
+          transitionIdentity.id = randomUUID();
+          transitionState(state, "cancelled");
+          state.activeProcess = null;
+          state.pendingHumanDecision = null;
+          state.cancellation = {
+            schemaVersion: 1,
+            id: transitionIdentity.id,
+            at
+          };
+        }
+      );
+      result.outcome = committed.outcome;
+      result.state = committed.state;
+      result.stopRequest = stopRequest;
+      if (committed.outcome !== "cancelled") return result;
+    } catch {
+      // A state replacement may have succeeded even when its cleanup failed.
+      const current = await this.store.readState(runId).catch(() => null);
+      if (
+        current?.status === "cancelled" &&
+        transitionIdentity.id !== null &&
+        current.cancellation?.id === transitionIdentity.id
+      ) {
+        return {
+          ...result,
+          outcome: "cancelled",
+          state: current,
+          stopRequest,
+          observation: "unsaved"
+        };
+      }
+      if (
+        current !== null &&
+        !TERMINAL_STATUSES.has(current.status) &&
+        (await this.store.readActiveRunId().catch(() => null)) === runId &&
+        current.activeProcess?.pid === initial.activeProcess?.pid &&
+        current.activeProcess != null
+      ) {
+        stopRequest = terminateProcessGroup(current.activeProcess.pid);
+      }
+      return { ...result, stopRequest };
+    }
+    const state = result.state;
+    if (state.cancellation === undefined) return result;
+    result.observation = "unsaved";
+    try {
+      const anchor = decodeCancellationAnchor(state.cancellation);
+      const relative = `.banzai/runs/${runId}/events.jsonl`;
+      const before = await readCancellationFile(
+        this.repoRoot,
+        relative,
+        CANCELLATION_LIMITS.events
+      );
+      try {
+        context = await enrichCancellationContext(
+          this.repoRoot,
+          runId,
+          anchor.at,
+          context,
+          contextLinks,
+          before
+        );
+      } catch {
+        /* Retain independently captured state context. */
+      }
+      const observation = decodeCancellationObservation(
+        {
+          schema: CANCELLATION_SCHEMA,
+          schemaVersion: 1,
+          cancellationId: anchor.id,
+          runId,
+          cancelledAt: anchor.at,
+          context,
+          response: initialCancellationResponse(input, anchor.at)
+        },
+        runId,
+        anchor
+      );
+      const decoded = decodeCancellationEvents(before);
+      if (
+        !["available", "missing"].includes(decoded.availability) ||
+        decoded.events.length > 0
+      )
+        return result;
+      let eventAt: string | null = null;
+      try {
+        const event = await this.store.appendEvent(
+          runId,
+          "run.cancelled",
+          { ...observation },
+          before.fingerprint
+        );
+        eventAt = event.at;
+      } catch {
+        /* Reconcile an ambiguous append by reading; never append again. */
+      }
+      const after = decodeCancellationEvents(
+        await readCancellationFile(
+          this.repoRoot,
+          relative,
+          CANCELLATION_LIMITS.events
+        )
+      );
+      const resolved = resolveCancellation(
+        state,
+        runId,
+        after.events,
+        after.availability
+      );
+      if (
+        resolved.observation === null ||
+        JSON.stringify(resolved.observation) !== JSON.stringify(observation) ||
+        !["available", "unanswered"].includes(resolved.availability)
+      )
+        return result;
+      result.observation = "available";
+      eventAt ??=
+        after.events.find((e) => e.type === "run.cancelled")?.at ?? null;
+      if (eventAt !== null)
+        await this.observeHumanTime(
+          state,
+          "run_cancelled",
+          "run.cancelled",
+          eventAt
+        );
+      if (
+        input.channel === "interactive" &&
+        resolved.response?.state === "pending"
+      ) {
+        const receipt: CancellationReceipt = Object.freeze({
+          kind: "cancellation-first-response"
+        });
+        this.cancellationReceipts.set(receipt, observation);
+        result.receipt = receipt;
+      }
+    } catch {
+      /* Optional observation capture never undoes the confirmed transition. */
+    }
+    return result;
+  }
+
+  async recordCancellationResponse(
+    receipt: CancellationReceipt,
+    answer: CancellationAnswer
+  ): Promise<CancellationResponseResult> {
+    const observation = this.cancellationReceipts.get(receipt);
+    if (observation === undefined)
+      return { outcome: "unavailable", response: null };
+    let response;
+    try {
+      response = cancellationResponse(answer, now());
+    } catch {
+      return { outcome: "unavailable", response: null };
+    }
+    const { runId, cancellationId: id } = observation;
+    const relative = `.banzai/runs/${runId}/events.jsonl`;
+    const read = async () => {
+      const state = await this.store.readState(runId);
+      const file = await readCancellationFile(
+        this.repoRoot,
+        relative,
+        CANCELLATION_LIMITS.events
+      );
+      const events = decodeCancellationEvents(file);
+      return {
+        file,
+        resolved: resolveCancellation(
+          state,
+          runId,
+          events.events,
+          events.availability
+        )
+      };
+    };
+    const existing = (
+      resolved: Awaited<ReturnType<typeof read>>["resolved"]
+    ): CancellationResponseResult | null => {
+      if (
+        resolved.observation === null ||
+        JSON.stringify(resolved.observation) !== JSON.stringify(observation)
+      )
+        return { outcome: "conflict", response: null };
+      if (
+        resolved.response !== null &&
+        ["available", "interrupted"].includes(resolved.availability)
+      ) {
+        const stored = resolved.response;
+        return {
+          outcome:
+            stored.state === response.state &&
+            stored.reason === response.reason &&
+            stored.provenance === response.provenance &&
+            stored.channel === response.channel
+              ? "saved"
+              : "conflict",
+          response: stored
+        };
+      }
+      return resolved.availability === "unanswered"
+        ? null
+        : { outcome: "unavailable", response: null };
+    };
+    try {
+      const before = await read();
+      const previous = existing(before.resolved);
+      if (previous !== null) return previous;
+      try {
+        await this.store.appendEvent(
+          runId,
+          "run.cancellation_response",
+          {
+            schema: CANCELLATION_SCHEMA,
+            schemaVersion: 1,
+            cancellationId: id,
+            runId,
+            response
+          },
+          before.file.fingerprint
+        );
+      } catch {
+        /* First-write races and partial writes are resolved without retry. */
+      }
+      return (
+        existing((await read()).resolved) ?? {
+          outcome: "unavailable",
+          response: null
+        }
+      );
+    } catch {
+      return { outcome: "unavailable", response: null };
+    }
+  }
+
+  async status(): Promise<WorkflowStatus> {
+    const state = await this.store.requireActiveState();
+    let planApprovalValid: boolean | null = null;
+    if (state.planApproval !== null) {
+      try {
+        const bundle = await digestArtifactBundle(
+          this.repoRoot,
+          state.planApproval.paths
+        );
+        planApprovalValid = bundle.digest === state.planApproval.digest;
+      } catch {
+        planApprovalValid = false;
+      }
+    }
+    let reviewValid: boolean | null = null;
+    if (state.latestReview !== null) {
+      reviewValid =
+        (await workspaceDigest(this.repoRoot, {
+          artifactBinding: state.artifactBinding,
+          excludedPaths:
+            state.latestReview.artifactPath === undefined
+              ? []
+              : [state.latestReview.artifactPath],
+          baseline: state.baseline
+        })) === state.latestReview.workspaceDigest;
+    }
+    const latestReview =
+      state.latestReview === null ? null : await this.readLatestReview(state);
+    const retry = await this.retryEligibility(state);
+    const recovery = await this.recoveryEligibility(state);
+    const taskCompletion = await this.taskCompletionStatus(state);
+    return {
+      state,
+      planApprovalValid,
+      reviewValid,
+      latestReview,
+      retry,
+      recovery,
+      nextAction: this.nextAction(state, retry, recovery),
+      taskCompletion
+    };
+  }
+
+  private async taskCompletionStatus(
+    state: RunState
+  ): Promise<WorkflowTaskCompletionStatus> {
+    if ((state.workflowSelection?.workflow ?? "strict") !== "strict") {
+      return {
+        state: "not_applicable",
+        source: "unknown",
+        completed: null,
+        total: null,
+        diagnostics: []
+      };
+    }
+    let total: number | null = null;
+    try {
+      total = (await this.approvedTaskIds(state)).length;
+    } catch {
+      // A bounded diagnostic below owns the observable invalid evidence.
+    }
+    const checkpoint = state.planTaskCompletion;
+    if (checkpoint === undefined) {
+      const implementationReport = path.posix.join(
+        "documentation",
+        "features",
+        state.slug,
+        "implementation-report.md"
+      );
+      let diagnostic =
+        "Run predates the canonical task-completion ledger; exact completion is unknown.";
+      try {
+        const contents = await readFile(
+          path.join(this.repoRoot, implementationReport),
+          "utf8"
+        );
+        parsePlanTaskCompletionProjection(contents);
+        diagnostic =
+          "Run predates the canonical task-completion ledger; a report table cannot establish exact completion retroactively.";
+      } catch (error) {
+        if (
+          error instanceof TerminalRunStateError ||
+          error instanceof ProjectSetupRequiredError
+        )
+          throw error;
+        if (error instanceof PlanTaskCompletionError) {
+          diagnostic = error.message;
+        }
+      }
+      return {
+        state: "legacy",
+        source: "legacy",
+        completed: null,
+        total,
+        diagnostics: [
+          {
+            code: "PLAN_TASK_COMPLETION_LEGACY",
+            taskId: null,
+            message: diagnostic
+          }
+        ]
+      };
+    }
+    if (checkpoint === null) {
+      return {
+        state: "unknown",
+        source: "unknown",
+        completed: null,
+        total,
+        diagnostics: [
+          {
+            code: "PLAN_TASK_COMPLETION_MISSING",
+            taskId: null,
+            message: "Run has not persisted canonical task-completion evidence."
+          }
+        ]
+      };
+    }
+    if (checkpoint.status === "invalid") {
+      return {
+        state: "inconsistent",
+        source: "structured completion evidence",
+        completed: null,
+        total,
+        diagnostics: [
+          {
+            code: checkpoint.errorCode,
+            taskId: checkpoint.taskId,
+            message: `Completion evidence failed: ${checkpoint.violation}.`
+          }
+        ]
+      };
+    }
+    try {
+      const allowBlockedFixReportRefresh =
+        state.status === "blocked" &&
+        state.blockedFrom === "fixing" &&
+        state.activeAttempt === null;
+      const validated = await this.revalidateTaskCompletion(
+        state,
+        allowBlockedFixReportRefresh,
+        false
+      );
+      return {
+        state:
+          validated.summary.counts.completed === validated.summary.counts.total
+            ? "complete"
+            : "incomplete",
+        source: "structured completion evidence",
+        completed: validated.summary.counts.completed,
+        total: validated.summary.counts.total,
+        diagnostics: []
+      };
+    } catch (error) {
+      if (
+        error instanceof TerminalRunStateError ||
+        error instanceof ProjectSetupRequiredError
+      )
+        throw error;
+      const completionError =
+        error instanceof PlanTaskCompletionError ? error : null;
+      return {
+        state: "inconsistent",
+        source: "structured completion evidence",
+        completed: null,
+        total,
+        diagnostics: [
+          {
+            code: "PLAN_TASK_COMPLETION_INVALID",
+            taskId: completionError?.taskId ?? null,
+            message:
+              completionError?.message ??
+              "Canonical task-completion evidence cannot be revalidated."
+          }
+        ]
+      };
+    }
+  }
+
+  private async retryEligibility(state: RunState): Promise<RetryEligibility> {
+    if (state.status !== "blocked") {
+      return {
+        eligible: false,
+        reason: `Retry requires a blocked run, but the run is ${state.status}.`,
+        attemptId: null
+      };
+    }
+    if (state.activeProcess !== null) {
+      return {
+        eligible: false,
+        reason: "Retry is unavailable while a model process is still active.",
+        attemptId: state.activeAttempt?.id ?? null
+      };
+    }
+    const attempt = state.activeAttempt;
+    if (attempt === null) {
+      if (state.blockedFrom === "created") {
+        return {
+          eligible: true,
+          reason:
+            "Startup checks can be retried after resolving the reported prerequisite.",
+          attemptId: null
+        };
+      }
+      if (state.blockedFrom === "reviewing") {
+        return {
+          eligible: true,
+          reason:
+            "Review checks can be retried after resolving the reported prerequisite.",
+          attemptId: null
+        };
+      }
+      if (
+        state.blockedFrom === "verifying" &&
+        state.planTaskCompletion?.status === "invalid"
+      ) {
+        // Completion revalidation rejected the evidence before verification
+        // commands ran — for example a fix attempt edited the frozen Plan
+        // Task Completion projection. The already-authorized completion
+        // repair applies; there is no failed verification attempt to retry.
+        return {
+          eligible: true,
+          reason: PLAN_BUNDLE_COMPLETION_VIOLATIONS.has(
+            state.planTaskCompletion.violation
+          )
+            ? "The approved plan bundle is invalid; retry reruns planning for a corrected bundle and a new approval."
+            : `Completion evidence rejected at revalidation can be repaired with a new implementation attempt.`,
+          attemptId: state.planTaskCompletion.sourceAttemptId
+        };
+      }
+      if (state.blockedFrom === "verifying") {
+        try {
+          if (!(await this.store.verificationLedgerSupported(state.runId))) {
+            return {
+              eligible: false,
+              reason:
+                "Legacy verification evidence has no retryable durable attempt identity. Inspect the checkout, then cancel the run.",
+              attemptId: null
+            };
+          }
+          const latest = (
+            await this.store.readVerificationAttempts(state.runId)
+          ).at(-1);
+          if (latest?.status === "failed") {
+            return {
+              eligible: true,
+              reason: `Failed verification attempt ${latest.id} can be retried explicitly.`,
+              attemptId: latest.id
+            };
+          }
+        } catch {
+          return {
+            eligible: false,
+            reason:
+              "Verification evidence is malformed or conflicting. Audit the run before continuing.",
+            attemptId: null
+          };
+        }
+      }
+      // Pre-attempt checks block only through validateApproval, whose block
+      // reason is the runner's own text; every other blocked-from-fixing state
+      // without an attempt (a completed prerequisite-blocked fix) belongs to
+      // the recovery path and must not gain a retry here.
+      const approvalInvalidated =
+        state.blockReason?.startsWith("Approved planning artifacts changed") ===
+        true;
+      if (approvalInvalidated && state.blockedFrom === "fixing") {
+        return {
+          eligible: true,
+          reason:
+            "Fix checks can be retried after resolving the reported prerequisite.",
+          attemptId: null
+        };
+      }
+      if (
+        approvalInvalidated &&
+        (state.blockedFrom === "implementing" ||
+          state.blockedFrom === "plan_approved")
+      ) {
+        return {
+          eligible: true,
+          reason:
+            "Implementation checks can be retried after resolving the reported prerequisite.",
+          attemptId: null
+        };
+      }
+      return {
+        eligible: false,
+        reason:
+          "This blocked state is not tied to a failed attempt. Resolve it manually or cancel the run.",
+        attemptId: null
+      };
+    }
+    const record = await this.store.readRunAttempt(state.runId, attempt);
+    if (
+      record.status === "failed" &&
+      record.failureCode === "CONTEXT_BUDGET_EXCEEDED"
+    ) {
+      const expectedStatus =
+        attempt.kind === "selection"
+          ? "selecting"
+          : attempt.kind === "plan"
+            ? "planning"
+            : attempt.kind === "implementation"
+              ? "implementing"
+              : attempt.kind === "fix"
+                ? "fixing"
+                : "reviewing";
+      if (state.blockedFrom === expectedStatus) {
+        return {
+          eligible: true,
+          reason: `Context-budget-blocked ${attempt.kind} attempt ${attempt.id} can be retried explicitly after policy or authorized input changes because no vendor process started.`,
+          attemptId: attempt.id
+        };
+      }
+    }
+    if (attempt.mutable) {
+      const checkpoint = state.planTaskCompletion;
+      if (
+        ((attempt.kind === "implementation" &&
+          state.blockedFrom === "implementing") ||
+          (attempt.kind === "fix" && state.blockedFrom === "fixing")) &&
+        record.status === "failed" &&
+        // The runner itself classified this failure as completion evidence
+        // when it wrote the invalid checkpoint: a result rejected by ledger
+        // validation keeps its decoded evidence, and a result whose decode
+        // failed on a completion field keeps only the diagnostic — the repair
+        // replaces the whole result either way, so neither is a dead end.
+        record.failureCode === "PLAN_TASK_COMPLETION_INVALID" &&
+        checkpoint?.status === "invalid" &&
+        checkpoint.sourceAttemptId === attempt.id
+      ) {
+        return {
+          eligible: true,
+          reason: PLAN_BUNDLE_COMPLETION_VIOLATIONS.has(checkpoint.violation)
+            ? "The approved plan bundle is invalid; retry reruns planning for a corrected bundle and a new approval."
+            : `Completion evidence for ${attempt.kind} attempt ${attempt.id} can be repaired with a new attempt.`,
+          attemptId: attempt.id
+        };
+      }
+      return {
+        eligible: false,
+        reason:
+          "Failed mutable attempts cannot be retried because their repository side effects may be incomplete. Inspect the checkout, then cancel the run.",
+        attemptId: attempt.id
+      };
+    }
+    const isRetryableInterruption = isRetryableInterruptedAttempt(
+      attempt,
+      record
+    );
+    if (record.status !== "failed" && !isRetryableInterruption) {
+      return {
+        eligible: false,
+        reason:
+          record.status === "started"
+            ? "Interrupted attempts cannot be retried automatically. Inspect the checkout, then cancel the run."
+            : `Attempt ${attempt.id} is ${record.status}, not failed.`,
+        attemptId: attempt.id
+      };
+    }
+    const expectedStatus =
+      attempt.kind === "selection"
+        ? "selecting"
+        : attempt.kind === "plan"
+          ? "planning"
+          : attempt.kind === "implementation"
+            ? "implementing"
+            : attempt.kind === "review"
+              ? "reviewing"
+              : null;
+    if (expectedStatus === null || state.blockedFrom !== expectedStatus) {
+      return {
+        eligible: false,
+        reason: `The failed ${attempt.kind} attempt is inconsistent with blockedFrom=${state.blockedFrom ?? "null"}.`,
+        attemptId: attempt.id
+      };
+    }
+    return {
+      eligible: true,
+      reason:
+        record.status === "started"
+          ? `Interrupted ${attempt.kind} attempt ${attempt.id} can be retried explicitly because it was read-only.`
+          : `Failed ${attempt.kind} attempt ${attempt.id} can be retried explicitly.`,
+      attemptId: attempt.id
+    };
+  }
+
+  private async prerequisiteBlockedFixScope(
+    state: RunState,
+    record: AttemptRecord,
+    requirePersistedBlock: boolean
+  ): Promise<PrerequisiteBlockedFixScope> {
+    const attempt = record.attempt;
+    if (
+      attempt.kind !== "fix" ||
+      !attempt.mutable ||
+      record.status !== "completed" ||
+      record.result === null ||
+      (record.recoveryOf ?? null) !== null ||
+      (record.recoveryAuthorizationId ?? null) !== null
+    ) {
+      throw new BanzaiError(
+        "RECOVERY_SOURCE_INVALID",
+        "Prerequisite recovery requires an unrecovered completed fix attempt."
+      );
+    }
+    const result = parsePersistedPhaseResult(record.result);
+    if (
+      result.phase !== "fix" ||
+      result.outcome !== "blocked" ||
+      result.gate !== null ||
+      result.taskCompletion !== null ||
+      (requirePersistedBlock && result.summary !== state.blockReason)
+    ) {
+      throw new BanzaiError(
+        "RECOVERY_SOURCE_INVALID",
+        "The completed fix result does not match the current prerequisite block."
+      );
+    }
+    if (
+      (state.workflowSelection?.workflow ?? "strict") !== "strict" ||
+      state.latestReview === null ||
+      state.triage === null ||
+      state.reviewIteration !== state.latestReview.iteration ||
+      state.triage.reviewIteration !== state.latestReview.iteration
+    ) {
+      throw new BanzaiError(
+        "RECOVERY_SCOPE_INVALID",
+        "Prerequisite recovery requires one current strict review and triage."
+      );
+    }
+    const review = await this.readLatestReview(state);
+    const reviewFindingIds = review.findings.map((finding) => finding.id);
+    const reviewFindingIdSet = new Set(reviewFindingIds);
+    const triagedIds = state.triage.items.map((item) => item.findingId);
+    if (
+      new Set(triagedIds).size !== triagedIds.length ||
+      triagedIds.length !== reviewFindingIds.length ||
+      triagedIds.some((id) => !reviewFindingIdSet.has(id))
+    ) {
+      throw new BanzaiError(
+        "RECOVERY_SCOPE_INVALID",
+        "Current triage does not exactly cover the current review."
+      );
+    }
+    const acceptedFindingIds = state.triage.items
+      .filter((item) => item.disposition === "accepted")
+      .map((item) => item.findingId)
+      .sort();
+    const acceptedFindingIdSet = new Set(acceptedFindingIds);
+    const resolvedFindingIds = [...result.resolvedFindingIds].sort();
+    if (
+      acceptedFindingIds.length === 0 ||
+      resolvedFindingIds.length === 0 ||
+      new Set(resolvedFindingIds).size !== resolvedFindingIds.length ||
+      resolvedFindingIds.some((id) => !acceptedFindingIdSet.has(id))
+    ) {
+      throw new BanzaiError(
+        "RECOVERY_SCOPE_INVALID",
+        "The blocked fix result does not prove valid partial accepted-finding progress."
+      );
+    }
+    const resolvedFindingIdSet = new Set(resolvedFindingIds);
+    const remainingFindingIds = acceptedFindingIds.filter(
+      (id) => !resolvedFindingIdSet.has(id)
+    );
+    const prerequisites = [...result.questions, ...result.requestedVerification]
+      .map((item) => item.trim())
+      .filter((item) => {
+        const referencedFindingIds = review.findings
+          .filter((finding) => {
+            const escaped = finding.id.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+            return (
+              new RegExp(
+                `(^|[^A-Za-z0-9_:-])${escaped}($|[^A-Za-z0-9_:-])`,
+                "u"
+              ).test(item) ||
+              finding.evidence.some((evidence) => item.includes(evidence.path))
+            );
+          })
+          .map((finding) => finding.id);
+        return (
+          referencedFindingIds.length === 0 ||
+          referencedFindingIds.every((findingId) =>
+            remainingFindingIds.includes(findingId)
+          )
+        );
+      });
+    if (
+      remainingFindingIds.length === 0 ||
+      prerequisites.length === 0 ||
+      prerequisites.some((item) => item.length === 0)
+    ) {
+      throw new BanzaiError(
+        "RECOVERY_SCOPE_INVALID",
+        "The blocked fix result has no remaining accepted scope or concrete prerequisite."
+      );
+    }
+    const sourceAttempt = {
+      id: attempt.id,
+      kind: "fix" as const,
+      mutable: true as const
+    };
+    const typedRecord = record as AttemptRecord<PhaseResult>;
+    const reviewDigest = digestCanonicalJson(review);
+    const scopeDigest = digestCanonicalJson({
+      version: 2,
+      sourceKind: "prerequisite_blocked_fix",
+      reviewIteration: state.latestReview.iteration,
+      reviewDigest,
+      acceptedFindingIds,
+      sourceAttempt,
+      sourceResultDigest: digestCanonicalJson(result),
+      resolvedFindingIds,
+      remainingFindingIds
+    });
+    return {
+      attempt: sourceAttempt,
+      record: typedRecord,
+      result,
+      reviewDigest,
+      acceptedFindingIds,
+      resolvedFindingIds,
+      remainingFindingIds,
+      prerequisites,
+      scopeDigest
+    };
+  }
+
+  private async prerequisiteBlockedFixSource(
+    state: RunState
+  ): Promise<PrerequisiteBlockedFixScope> {
+    const records = await this.store.readRunAttempts(state.runId);
+    const candidates: PrerequisiteBlockedFixScope[] = [];
+    for (const record of records) {
+      if (
+        record.attempt.kind !== "fix" ||
+        record.status !== "completed" ||
+        record.result === null
+      ) {
+        continue;
+      }
+      try {
+        candidates.push(
+          await this.prerequisiteBlockedFixScope(state, record, true)
+        );
+      } catch {
+        // Only an exact current completed-blocked result is a candidate. A
+        // malformed or historical record cannot be used to reconstruct scope.
+      }
+    }
+    if (candidates.length !== 1) {
+      throw new BanzaiError(
+        "RECOVERY_SOURCE_AMBIGUOUS",
+        candidates.length === 0
+          ? "No exact completed prerequisite-blocked fix source is available."
+          : "Multiple completed blocked fix attempts match the current review; recovery is ambiguous."
+      );
+    }
+    const source = candidates[0];
+    if (source === undefined) {
+      throw new BanzaiError(
+        "RECOVERY_SOURCE_AMBIGUOUS",
+        "No exact completed prerequisite-blocked fix source is available."
+      );
+    }
+    const descendants = records.filter(
+      (record) => (record.recoveryOf ?? null) === source.attempt.id
+    );
+    const descendant = descendants[0];
+    const preparedDescendant =
+      descendants.length === 1 &&
+      descendant !== undefined &&
+      state.recovery?.sourceAttemptId === source.attempt.id &&
+      state.recovery.recoveryAttemptId === null &&
+      state.recovery.stage === "source_preserved" &&
+      descendant.attempt.id ===
+        `fix-recovery-${state.recovery.authorizationId.replace(/^recovery-/u, "")}` &&
+      descendant.status === "started" &&
+      descendant.result === null &&
+      descendant.recoveryAuthorizationId === state.recovery.authorizationId;
+    if (descendants.length > 0 && !preparedDescendant) {
+      throw new BanzaiError(
+        "RECOVERY_ALREADY_STARTED",
+        "A recovery descendant already exists for the completed blocked fix source."
+      );
+    }
+    if (
+      state.recovery !== undefined &&
+      state.recovery !== null &&
+      (state.recovery.sourceAttemptId !== source.attempt.id ||
+        state.recovery.recoveryAttemptId !== null)
+    ) {
+      throw new BanzaiError(
+        "RECOVERY_STATE_CHANGED",
+        "Persisted recovery state does not match the completed blocked fix source."
+      );
+    }
+    const checkpoint = await this.store.readTerminalCheckpointIfExists(
+      state.runId,
+      source.attempt
+    );
+    if (
+      checkpoint !== null &&
+      (checkpoint.baseCommit !== state.baseCommit ||
+        checkpoint.approvalDigest !== state.planApproval?.digest ||
+        checkpoint.scopeDigest !==
+          this.attemptScopeDigest(state, source.attempt) ||
+        digestCanonicalJson(checkpoint.result) !==
+          digestCanonicalJson(source.result))
+    ) {
+      throw new BanzaiError(
+        "INVALID_TERMINAL_CHECKPOINT",
+        "The completed blocked source conflicts with its terminal checkpoint."
+      );
+    }
+    return source;
+  }
+
+  private async prerequisiteBlockedFixRecoveryEligibility(
+    state: RunState
+  ): Promise<RecoveryEligibility> {
+    if (
+      state.blockedFrom !== "fixing" ||
+      state.activeAttempt !== null ||
+      (state.activeProcess !== null &&
+        this.store.processAlive(state.activeProcess.pid))
+    ) {
+      return recoveryIneligible(
+        "Prerequisite recovery requires a completed blocked fix with no active attempt or process.",
+        null,
+        "fix"
+      );
+    }
+    try {
+      if ((await currentCommit(this.repoRoot)) !== state.baseCommit) {
+        return recoveryIneligible(
+          "Recovery is unavailable because checkout HEAD changed.",
+          null,
+          "fix"
+        );
+      }
+      await this.validateApproval(state);
+      await this.revalidateTaskCompletion(state, true, false);
+      const source = await this.prerequisiteBlockedFixSource(state);
+      const config = await loadConfig(this.repoRoot);
+      assertContractParity();
+      const settings = config.models.implementer;
+      const vendor =
+        vendorFor(settings.executable) ?? FALLBACK_VENDOR.implementer;
+      const configurationDigest = digestCanonicalJson({
+        version: 1,
+        vendor,
+        executableDigest: digestCanonicalJson(settings.executable),
+        model: settings.model,
+        effort: settings.effort
+      });
+      const snapshot = await workspaceSnapshot(this.repoRoot, {
+        artifactBinding: state.artifactBinding,
+        baseline: state.baseline
+      });
+      if (snapshot.baseCommit !== state.baseCommit) {
+        return recoveryIneligible(
+          "Recovery is unavailable because the workspace base commit changed.",
+          source.attempt.id,
+          "fix"
+        );
+      }
+      const counts = await workspaceChangeCounts(this.repoRoot, snapshot);
+      const recoveryIdentity = digestCanonicalJson({
+        version: 2,
+        sourceKind: "prerequisite_blocked_fix",
+        runId: state.runId,
+        attempt: source.attempt,
+        phase: "fix",
+        baseCommit: state.baseCommit,
+        workspaceDigest: snapshot.digest,
+        approvalDigest: state.planApproval?.digest ?? null,
+        workflowDigest: null,
+        scopeDigest: source.scopeDigest,
+        configurationDigest
+      });
+      if (
+        state.recovery?.sourceAttemptId === source.attempt.id &&
+        state.recovery.recoveryAttemptId === null
+      ) {
+        const authorization = await this.store.readRecoveryAuthorization(
+          state.runId,
+          state.recovery.authorizationId
+        );
+        if (
+          authorization.attempt.id !== source.attempt.id ||
+          authorization.recoveryIdentity !== recoveryIdentity
+        ) {
+          return recoveryIneligible(
+            "Persisted recovery authorization is stale or inconsistent.",
+            source.attempt.id,
+            "fix"
+          );
+        }
+      }
+      return {
+        eligible: true,
+        reason: `Completed blocked fix attempt ${source.attempt.id} may be recovered for remaining accepted findings ${source.remainingFindingIds.join(", ")} after ${source.prerequisites.length} operator prerequisite${source.prerequisites.length === 1 ? "" : "s"}.`,
+        warning:
+          "The source attempt remains completed and blocked. Recovery authorizes one new fix attempt for the exact remaining accepted scope after the displayed prerequisites are addressed.",
+        sourceKind: "prerequisite_blocked_fix",
+        attemptId: source.attempt.id,
+        phase: "fix",
+        resolvedFindingIds: source.resolvedFindingIds,
+        remainingFindingIds: source.remainingFindingIds,
+        prerequisites: source.prerequisites,
+        authorization: "plan_approval",
+        recoveryIdentity,
+        workspace: { digest: snapshot.digest, ...counts },
+        baseCommit: state.baseCommit,
+        approvalDigest: state.planApproval?.digest ?? null,
+        workflowDigest: null,
+        scopeDigest: source.scopeDigest,
+        configurationDigest
+      };
+    } catch (error) {
+      if (
+        error instanceof TerminalRunStateError ||
+        error instanceof ProjectSetupRequiredError
+      )
+        throw error;
+      return recoveryIneligible(
+        error instanceof BanzaiError
+          ? error.message
+          : "Prerequisite recovery preconditions could not be validated; inspect or cancel the run.",
+        state.recovery?.sourceAttemptId ?? null,
+        "fix"
+      );
+    }
+  }
+
+  private async recoveryEligibility(
+    state: RunState
+  ): Promise<RecoveryEligibility> {
+    if (state.status !== "blocked") {
+      return recoveryIneligible(
+        `Recovery requires a blocked run, but the run is ${state.status}.`
+      );
+    }
+    const attempt = state.activeAttempt;
+    if (attempt === null && state.blockedFrom === "fixing") {
+      return await this.prerequisiteBlockedFixRecoveryEligibility(state);
+    }
+    if (
+      attempt === null ||
+      !attempt.mutable ||
+      (attempt.kind !== "implementation" && attempt.kind !== "fix")
+    ) {
+      return recoveryIneligible(
+        "Recovery requires an interrupted mutable implementation or fix attempt.",
+        attempt?.id ?? null
+      );
+    }
+    const phase = attempt.kind;
+    const expectedBlockedFrom =
+      phase === "implementation" ? "implementing" : "fixing";
+    if (state.blockedFrom !== expectedBlockedFrom) {
+      return recoveryIneligible(
+        `The interrupted ${phase} attempt is inconsistent with blockedFrom=${state.blockedFrom ?? "null"}.`,
+        attempt.id,
+        phase
+      );
+    }
+    if (
+      state.activeProcess !== null &&
+      this.store.processAlive(state.activeProcess.pid)
+    ) {
+      return recoveryIneligible(
+        "Recovery is unavailable while the model process is still active.",
+        attempt.id,
+        phase
+      );
+    }
+    let record: AttemptRecord;
+    try {
+      record = await this.store.readRunAttempt(state.runId, attempt);
+    } catch {
+      return recoveryIneligible(
+        "Recovery attempt evidence is unreadable or inconsistent.",
+        attempt.id,
+        phase
+      );
+    }
+    try {
+      const checkpoint = await this.store.readTerminalCheckpointIfExists(
+        state.runId,
+        attempt
+      );
+      if (checkpoint !== null) {
+        const completionEvidenceRejected =
+          record.status === "failed" &&
+          record.result !== null &&
+          record.failureCode === "PLAN_TASK_COMPLETION_INVALID" &&
+          state.planTaskCompletion?.status === "invalid" &&
+          state.planTaskCompletion.sourceAttemptId === attempt.id;
+        return recoveryIneligible(
+          completionEvidenceRejected
+            ? "The terminal checkpoint result was rejected by completion validation; use banzai retry to repair its evidence."
+            : "A terminal checkpoint exists; use banzai resume so Banzai can reconcile proven completion.",
+          attempt.id,
+          phase,
+          true
+        );
+      }
+    } catch {
+      return recoveryIneligible(
+        "Terminal checkpoint evidence is malformed or conflicting; inspect or cancel the run.",
+        attempt.id,
+        phase
+      );
+    }
+    const recoverableFailedAttempt =
+      record.status === "failed" &&
+      record.failureCause !== null &&
+      record.failureCause !== undefined &&
+      RECOVERABLE_MUTABLE_FAILURE_CAUSES.has(record.failureCause);
+    if (
+      (record.status !== "started" &&
+        record.status !== "interrupted" &&
+        !recoverableFailedAttempt) ||
+      record.result !== null
+    ) {
+      return recoveryIneligible(
+        `Attempt ${attempt.id} is not an uncompleted interruption.`,
+        attempt.id,
+        phase
+      );
+    }
+    if (
+      state.recovery?.sourceAttemptId === attempt.id &&
+      state.recovery.recoveryAttemptId !== null
+    ) {
+      return recoveryIneligible(
+        "A later recovery attempt already supersedes this interruption.",
+        attempt.id,
+        phase
+      );
+    }
+    try {
+      if ((await currentCommit(this.repoRoot)) !== state.baseCommit) {
+        return recoveryIneligible(
+          "Recovery is unavailable because checkout HEAD changed.",
+          attempt.id,
+          phase
+        );
+      }
+      const config = await loadConfig(this.repoRoot);
+      assertContractParity();
+      const settings = config.models.implementer;
+      const vendor =
+        vendorFor(settings.executable) ?? FALLBACK_VENDOR.implementer;
+      const route = state.workflowSelection?.workflow ?? "strict";
+      let approvalDigest: string | null = null;
+      let workflowDigest: string | null = null;
+      if (route === "strict" || phase === "fix") {
+        await this.validateApproval(state);
+        approvalDigest = state.planApproval?.digest ?? null;
+      } else {
+        workflowDigest = this.validateWorkflowSelection(state).digest;
+      }
+      if (phase === "fix") {
+        await this.revalidateTaskCompletion(state);
+        if (
+          !state.triage?.items.some((item) => item.disposition === "accepted")
+        ) {
+          return recoveryIneligible(
+            "Fix recovery requires a non-empty current accepted-finding scope.",
+            attempt.id,
+            phase
+          );
+        }
+      }
+      const scopeDigest = this.attemptScopeDigest(state, attempt);
+      const configurationDigest = digestCanonicalJson({
+        version: 1,
+        vendor,
+        executableDigest: digestCanonicalJson(settings.executable),
+        model: settings.model,
+        effort: settings.effort
+      });
+      const snapshot = await workspaceSnapshot(this.repoRoot, {
+        artifactBinding: state.artifactBinding,
+        baseline: state.baseline
+      });
+      if (snapshot.baseCommit !== state.baseCommit) {
+        return recoveryIneligible(
+          "Recovery is unavailable because the workspace base commit changed.",
+          attempt.id,
+          phase
+        );
+      }
+      const counts = await workspaceChangeCounts(this.repoRoot, snapshot);
+      const recoveryIdentity = digestCanonicalJson({
+        version: 1,
+        runId: state.runId,
+        attempt,
+        phase,
+        baseCommit: state.baseCommit,
+        workspaceDigest: snapshot.digest,
+        approvalDigest,
+        workflowDigest,
+        scopeDigest,
+        configurationDigest
+      });
+      if (
+        state.recovery?.sourceAttemptId === attempt.id &&
+        state.recovery.recoveryAttemptId === null
+      ) {
+        const authorization = await this.store.readRecoveryAuthorization(
+          state.runId,
+          state.recovery.authorizationId
+        );
+        if (
+          authorization.attempt.id !== attempt.id ||
+          authorization.recoveryIdentity !== recoveryIdentity
+        ) {
+          return recoveryIneligible(
+            "Persisted recovery authorization is stale or inconsistent.",
+            attempt.id,
+            phase
+          );
+        }
+      }
+      return {
+        eligible: true,
+        reason: `Interrupted ${phase} attempt ${attempt.id} may be recovered only with current explicit authorization.`,
+        warning: RECOVERY_WARNING,
+        sourceKind: "interrupted",
+        attemptId: attempt.id,
+        phase,
+        resolvedFindingIds: [],
+        remainingFindingIds: [],
+        prerequisites: [],
+        authorization:
+          approvalDigest === null ? "workflow_selection" : "plan_approval",
+        recoveryIdentity,
+        workspace: { digest: snapshot.digest, ...counts },
+        baseCommit: state.baseCommit,
+        approvalDigest,
+        workflowDigest,
+        scopeDigest,
+        configurationDigest
+      };
+    } catch {
+      return recoveryIneligible(
+        "Recovery preconditions could not be validated; inspect or cancel the run.",
+        attempt.id,
+        phase
+      );
+    }
+  }
+
+  private async executeAuthorizedRecovery(
+    state: RunState,
+    config: OrchestratorConfig,
+    authorization: RecoveryAuthorization
+  ): Promise<RunState> {
+    await this.assertProjectGuidance();
+    await this.preflightVendor("implementer", config.models.implementer);
+    const persistedSourceRecord = await this.store.readRunAttempt(
+      state.runId,
+      authorization.attempt
+    );
+    const prerequisiteSource =
+      authorization.phase === "fix" &&
+      persistedSourceRecord.status === "completed" &&
+      persistedSourceRecord.result !== null
+        ? await this.prerequisiteBlockedFixScope(
+            state,
+            persistedSourceRecord,
+            false
+          )
+        : null;
+    const sourceAlreadyInterrupted =
+      state.recovery?.sourceAttemptId === authorization.attempt.id &&
+      state.recovery.recoveryAttemptId === null &&
+      state.recovery.stage === "source_interrupted";
+    const sourceAlreadyPreserved =
+      state.recovery?.sourceAttemptId === authorization.attempt.id &&
+      state.recovery.recoveryAttemptId === null &&
+      state.recovery.stage === "source_preserved";
+    const eligibilityState = sourceAlreadyInterrupted
+      ? {
+          ...state,
+          status: "blocked" as const,
+          blockedFrom:
+            authorization.phase === "implementation"
+              ? ("implementing" as const)
+              : ("fixing" as const),
+          activeAttempt: authorization.attempt,
+          activeProcess: null
+        }
+      : sourceAlreadyPreserved && prerequisiteSource !== null
+        ? {
+            ...state,
+            status: "blocked" as const,
+            blockedFrom: "fixing" as const,
+            blockReason: prerequisiteSource.result.summary,
+            activeAttempt: null,
+            activeProcess: null
+          }
+        : state;
+    const eligibility = await this.recoveryEligibility(eligibilityState);
+    await this.assertProjectGuidance();
+    const workspace = eligibility.workspace;
+    const expectedSourceKind =
+      prerequisiteSource === null
+        ? ("interrupted" as const)
+        : ("prerequisite_blocked_fix" as const);
+    if (
+      !eligibility.eligible ||
+      workspace === null ||
+      eligibility.sourceKind !== expectedSourceKind ||
+      eligibility.attemptId !== authorization.attempt.id ||
+      eligibility.phase !== authorization.phase ||
+      eligibility.recoveryIdentity !== authorization.recoveryIdentity ||
+      workspace.digest !== authorization.workspaceDigest ||
+      eligibility.baseCommit !== authorization.baseCommit ||
+      eligibility.approvalDigest !== authorization.approvalDigest ||
+      eligibility.workflowDigest !== authorization.workflowDigest ||
+      eligibility.scopeDigest !== authorization.scopeDigest ||
+      eligibility.configurationDigest !== authorization.configurationDigest
+    ) {
+      state.recovery = null;
+      state.activeAttempt =
+        prerequisiteSource === null ? authorization.attempt : null;
+      if (state.status !== "blocked") {
+        blockState(
+          state,
+          "Recovery authorization no longer matches the exact current workspace."
+        );
+      }
+      await this.store.writeState(state);
+      await this.store.appendEvent(state.runId, "recovery.invalidated", {
+        authorizationId: authorization.authorizationId,
+        attemptId: authorization.attempt.id
+      });
+      throw new BanzaiError(
+        "RECOVERY_STALE",
+        eligibility.eligible
+          ? "Recovery authorization no longer matches the exact current workspace."
+          : eligibility.reason
+      );
+    }
+    const sourceAttempt = authorization.attempt;
+    if (
+      (prerequisiteSource === null &&
+        !sourceAlreadyInterrupted &&
+        state.activeAttempt?.id !== authorization.attempt.id) ||
+      (prerequisiteSource !== null &&
+        !sourceAlreadyPreserved &&
+        state.activeAttempt !== null)
+    ) {
+      throw new BanzaiError(
+        "RECOVERY_STATE_CHANGED",
+        "The recovery source changed before recovery execution."
+      );
+    }
+    await this.assertProjectGuidance();
+    const pendingTransition: (() => Promise<unknown>)[] = [];
+    const commitTransition = async () => {
+      for (const publish of pendingTransition) await publish();
+      pendingTransition.length = 0;
+    };
+    if (!sourceAlreadyInterrupted && !sourceAlreadyPreserved) {
+      if (prerequisiteSource === null) {
+        persistedSourceRecord.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION;
+        persistedSourceRecord.status = "interrupted";
+        persistedSourceRecord.completedAt = null;
+        persistedSourceRecord.interruptedAt ??= now();
+        persistedSourceRecord.durationMs = null;
+        persistedSourceRecord.recoveryOf ??= null;
+        persistedSourceRecord.recoveryAuthorizationId ??= null;
+        pendingTransition.push(async () => {
+          await this.store.writeRunAttempt(state.runId, persistedSourceRecord);
+        });
+      }
+      state.activeAttempt = null;
+      state.activeProcess = null;
+      transitionState(
+        state,
+        authorization.phase === "implementation" ? "implementing" : "fixing"
+      );
+      state.recovery = {
+        authorizationId: authorization.authorizationId,
+        sourceAttemptId: sourceAttempt.id,
+        recoveryAttemptId: null,
+        stage:
+          prerequisiteSource === null
+            ? "source_interrupted"
+            : "source_preserved"
+      };
+      pendingTransition.push(async () => {
+        await this.store.writeState(state);
+      });
+      pendingTransition.push(
+        async () =>
+          await this.store.appendEvent(
+            state.runId,
+            prerequisiteSource === null
+              ? "attempt.interrupted"
+              : "attempt.blocked_source_preserved",
+            {
+              attemptId: sourceAttempt.id,
+              kind: sourceAttempt.kind,
+              recoveryAuthorizationId: authorization.authorizationId
+            }
+          )
+      );
+    }
+    this.info(
+      prerequisiteSource === null
+        ? `Recovering interrupted ${authorization.phase} attempt ${sourceAttempt.id} from the authorized workspace`
+        : `Recovering remaining accepted findings from completed blocked fix attempt ${sourceAttempt.id}`
+    );
+    try {
+      return authorization.phase === "implementation"
+        ? await this.executeImplementation(
+            state,
+            config,
+            authorization,
+            commitTransition
+          )
+        : await this.executeFix(state, config, authorization, commitTransition);
+    } catch (error) {
+      if (
+        error instanceof TerminalRunStateError ||
+        error instanceof ProjectSetupRequiredError
+      )
+        throw error;
+      const current = await this.store.readState(state.runId);
+      if (
+        current.activeAttempt === null &&
+        current.recovery?.stage !== "source_interrupted" &&
+        current.recovery?.stage !== "source_preserved"
+      ) {
+        current.activeAttempt =
+          prerequisiteSource === null ? sourceAttempt : null;
+        current.recovery = null;
+        blockState(current, `Recovery checks failed: ${errorMessage(error)}`);
+        await this.store.writeState(current);
+      }
+      throw error;
+    }
+  }
+
+  private async recordStartFailure(
+    state: RunState,
+    error: unknown
+  ): Promise<RunState> {
+    const reason = checkFailureReason(error);
+    blockState(state, reason);
+    state.activeAttempt = null;
+    state.activeProcess = null;
+    await this.store.writeState(state);
+    await this.store.appendEvent(state.runId, "run.start_failed", {
+      reason
+    });
+    return state;
+  }
+
+  private async recordReviewCheckFailure(
+    state: RunState,
+    error: unknown
+  ): Promise<RunState> {
+    const reason = checkFailureReason(error);
+    state.pendingReviewRotationReason = "unreliable-review";
+    blockState(state, reason);
+    state.activeAttempt = null;
+    state.activeProcess = null;
+    await this.store.writeState(state);
+    await this.store.appendEvent(state.runId, "review.checks_failed", {
+      reason
+    });
+    return state;
+  }
+
+  private async recordVerificationRetryCheckFailure(
+    state: RunState,
+    attemptId: string,
+    error: unknown
+  ): Promise<RunState> {
+    const reason = checkFailureReason(error);
+    blockState(state, reason);
+    state.activeAttempt = null;
+    state.activeProcess = null;
+    await this.store.writeState(state);
+    await this.store.appendEvent(
+      state.runId,
+      "verification.retry_preflight_failed",
+      { attemptId, reason }
+    );
+    return state;
+  }
+
+  private nextAction(
+    state: RunState,
+    retry: RetryEligibility,
+    recovery: RecoveryEligibility
+  ): string | null {
+    if (state.status === "needs_adr_approval") {
+      return "banzai approve adr";
+    }
+    if (state.status === "needs_plan_approval") {
+      return "banzai approve plan";
+    }
+    if (state.status === "needs_human_decision") {
+      return "banzai";
+    }
+    if (state.status === "needs_triage") {
+      return "banzai triage";
+    }
+    if (state.status === "blocked") {
+      return retry.eligible
+        ? "banzai retry"
+        : recovery.terminalCheckpointPresent === true
+          ? "banzai resume"
+          : recovery.eligible
+            ? "banzai recover"
+            : "banzai cancel";
+    }
+    if (
+      [
+        "created",
+        "selecting",
+        "planning",
+        "plan_approved",
+        "implementing",
+        "verifying",
+        "reviewing",
+        "fixing"
+      ].includes(state.status)
+    ) {
+      return "banzai resume";
+    }
+    return null;
+  }
+
+  /**
+   * Runs the subscription check that belongs to the configured executable. An
+   * executable belonging to neither vendor falls back to the adapter that will
+   * actually run the role, so a custom wrapper is still checked rather than
+   * silently skipped.
+   */
+  private async preflightVendor(
+    role: ModelRole,
+    settings: ModelSettings
+  ): Promise<void> {
+    const vendor = vendorFor(settings.executable) ?? FALLBACK_VENDOR[role];
+    if (vendor === "claude") {
+      await this.adapters.preflightClaude(settings);
+      return;
+    }
+    await this.adapters.preflightCodex(settings);
+  }
+
+  /**
+   * Claude phases run with `--permission-mode dontAsk`, so a tool the loaded
+   * settings never granted is refused with no way to approve it mid-run. The
+   * refusal costs a whole phase, and the model reports it as its own failure,
+   * so the run stops on the one condition that was decidable before it started.
+   */
+  private async assertClaudePermissions(
+    config: OrchestratorConfig
+  ): Promise<void> {
+    const demand = claudePermissionDemand(config);
+    if (!claudePermissionDemanded(demand)) {
+      return;
+    }
+    let settingSources: string | null;
+    try {
+      const resolved = await resolveClaudeInvocationScope(
+        config.claudeEnvironment
+      );
+      settingSources = resolved.scope.settingSources;
+    } catch {
+      // An unverifiable environment is the environment check's failure to
+      // report, and it surfaces on the first phase either way.
+      return;
+    }
+    const audit = await inspectClaudePermissions({
+      repoRoot: this.repoRoot,
+      demand,
+      settingSources
+    });
+    for (const advisory of audit.advisories) {
+      this.info(`Claude permissions: ${advisory}`);
+    }
+    if (audit.blocking.length === 0) {
+      return;
+    }
+    throw new BanzaiError(
+      "CLAUDE_PERMISSIONS_UNAVAILABLE",
+      `${audit.blocking.join(" ")} Fix it before the run: ${claudePermissionRemediation(audit)}.`
+    );
+  }
+
+  private async preflight(config: OrchestratorConfig): Promise<void> {
+    validateNodeVersion();
+    assertContractParity();
+    const environment = subscriptionOnlyEnvironment();
+    await assertExecutable("git", this.repoRoot, environment);
+    for (const usage of vendorUsage(config)) {
+      await assertExecutable(usage.executable, this.repoRoot, environment);
+    }
+    for (const verification of flattenVerificationCommands(config)) {
+      await assertExecutable(verification.command, this.repoRoot, environment);
+    }
+    // One check per vendor/executable pair, so roles sharing a vendor are not
+    // checked twice while the implementer is no longer skipped entirely.
+    const checked = new Set<string>();
+    for (const role of MODEL_ROLES) {
+      const settings = config.models[role];
+      const vendor = vendorFor(settings.executable) ?? FALLBACK_VENDOR[role];
+      const key = `${vendor}:${settings.executable}`;
+      if (checked.has(key)) {
+        continue;
+      }
+      checked.add(key);
+      await this.preflightVendor(role, settings);
+    }
+    await this.assertClaudePermissions(config);
+  }
+
+  private async validateApproval(state: RunState): Promise<void> {
+    if (state.planApproval === null) {
+      throw new BanzaiError(
+        "PLAN_NOT_APPROVED",
+        "Implementation requires explicit plan approval."
+      );
+    }
+    const bundle = await digestArtifactBundle(
+      this.repoRoot,
+      state.planApproval.paths
+    );
+    if (bundle.digest !== state.planApproval.digest) {
+      blockState(
+        state,
+        "Approved planning artifacts changed. Restore the approved bundle (banzai restore) and retry, or cancel the run and approve a revised plan in a new run."
+      );
+      await this.store.writeState(state);
+      await this.store.appendEvent(state.runId, "approval.invalidated", {
+        previousDigest: state.planApproval.digest,
+        currentDigest: bundle.digest
+      });
+      throw new BanzaiError(
+        "APPROVAL_INVALIDATED",
+        "Approved planning artifacts changed. Run `banzai restore` to write back the approved bytes and then `banzai retry`, or cancel the run and approve a revised plan in a new run."
+      );
+    }
+  }
+
+  private completionPlanPath(state: RunState): string {
+    const planPath = state.planArtifacts?.plan ?? null;
+    if (planPath === null) {
+      throw new PlanTaskCompletionError(
+        "approved_plan_invalid",
+        "Strict completion validation cannot identify the approved plan."
+      );
+    }
+    return planPath;
+  }
+
+  private async approvedTaskIds(state: RunState): Promise<string[]> {
+    return parseApprovedPlanTaskIds(
+      await readFile(
+        path.join(this.repoRoot, this.completionPlanPath(state)),
+        "utf8"
+      )
+    );
+  }
+
+  /**
+   * The persisted failure message of a rejected completion source attempt, so
+   * a repair prompt names the exact offending field instead of only a
+   * violation class. A missing or unreadable record degrades to null; the
+   * repair stays available without it.
+   */
+  private async completionRepairDiagnostic(
+    state: RunState,
+    sourceAttemptId: string,
+    sourceAttemptKind: "implementation" | "fix" = "implementation"
+  ): Promise<string | null> {
+    try {
+      const record = await this.store.readRunAttempt(state.runId, {
+        id: sourceAttemptId,
+        kind: sourceAttemptKind,
+        mutable: true
+      });
+      return record.error;
+    } catch {
+      return null;
+    }
+  }
+
+  private async validateImplementationCompletion(
+    state: RunState,
+    attempt: AttemptReference,
+    result: PersistedPhaseResult
+  ): Promise<ValidatedPlanTaskCompletion> {
+    if (state.planApproval === null) {
+      throw new PlanTaskCompletionError(
+        "approval_invalid",
+        "Strict completion validation requires an approved plan bundle."
+      );
+    }
+    return await validatePlanTaskCompletion({
+      repoRoot: this.repoRoot,
+      artifactBinding: state.artifactBinding,
+      sourceAttemptId: attempt.id,
+      result,
+      planPath: this.completionPlanPath(state),
+      approval: state.planApproval,
+      baseline: state.baseline
+    });
+  }
+
+  private completionInvalidCheckpoint(
+    sourceAttemptId: string,
+    error: PlanTaskCompletionError,
+    sourceAttemptKind: "implementation" | "fix" = "implementation"
+  ): NonNullable<RunState["planTaskCompletion"]> {
+    return {
+      schemaVersion: 1,
+      status: "invalid",
+      sourceAttemptId,
+      sourceAttemptKind,
+      errorCode: "PLAN_TASK_COMPLETION_INVALID",
+      violation: error.violation,
+      taskId: error.taskId,
+      recordedAt: now()
+    };
+  }
+
+  private async recordCompletionFailure(
+    state: RunState,
+    record: AttemptRecord,
+    adapterResult: AdapterResult<PhaseResult>,
+    error: PlanTaskCompletionError,
+    context: SessionContext
+  ): Promise<RunState> {
+    await this.writeAttemptOutput(
+      state,
+      record,
+      adapterResult.stdout,
+      adapterResult.stderr
+    );
+    record.status = "failed";
+    record.completedAt = now();
+    record.result = adapterResult.result;
+    record.sessionId = adapterResult.sessionId;
+    record.durationMs =
+      Date.parse(record.completedAt) - Date.parse(record.startedAt);
+    record.usage = adapterResult.usage;
+    record.error = `[PLAN_TASK_COMPLETION_INVALID] ${error.message}`;
+    record.failureCode = "PLAN_TASK_COMPLETION_INVALID";
+    await this.store.writeRunAttempt(state.runId, record);
+    const current = await this.store.readState(state.runId);
+    if (current.status === "cancelled") {
+      return current;
+    }
+    state.sessions.implementer = sessionBinding(
+      adapterResult.sessionId ?? record.resumeSessionId ?? null,
+      { ...context, role: "implementer" }
+    );
+    state.planTaskCompletion = this.completionInvalidCheckpoint(
+      record.attempt.id,
+      error,
+      record.attempt.kind === "fix" ? "fix" : "implementation"
+    );
+    state.activeProcess = null;
+    // The attempt ran a full model turn before its ledger was rejected, so the
+    // same rule as every other failure applies: failed usage counts toward
+    // consumption but never toward completion. Omitting it here made a blocked
+    // run report the token total it had before the phase ever started.
+    if (record.usage !== null) {
+      state.metrics.usage.inputTokens += record.usage.inputTokens;
+      state.metrics.usage.cachedInputTokens += record.usage.cachedInputTokens;
+      state.metrics.usage.outputTokens += record.usage.outputTokens;
+      if (record.usage.costUsd !== null) {
+        state.metrics.usage.costUsd =
+          (state.metrics.usage.costUsd ?? 0) + record.usage.costUsd;
+      }
+    }
+    blockState(state, `[PLAN_TASK_COMPLETION_INVALID] ${error.message}`);
+    await this.store.writeState(state);
+    await this.store.appendEvent(state.runId, "attempt.failed", {
+      attemptId: record.attempt.id,
+      kind: record.attempt.kind,
+      error: `[PLAN_TASK_COMPLETION_INVALID] ${error.message}`
+    });
+    await this.store.appendEvent(
+      state.runId,
+      "plan_task_completion.validation_failed",
+      {
+        attemptId: record.attempt.id,
+        code: "PLAN_TASK_COMPLETION_INVALID",
+        violation: error.violation,
+        taskId: error.taskId
+      }
+    );
+    return state;
+  }
+
+  private async revalidateTaskCompletion(
+    state: RunState,
+    allowReportRefresh = false,
+    persistReportRefresh = true
+  ): Promise<ValidatedPlanTaskCompletion> {
+    const checkpoint = state.planTaskCompletion;
+    if (checkpoint === undefined || checkpoint === null) {
+      throw new PlanTaskCompletionError(
+        "missing_ledger",
+        "Run has no canonical plan-task completion checkpoint."
+      );
+    }
+    if (checkpoint.status !== "valid") {
+      throw new PlanTaskCompletionError(
+        checkpoint.violation,
+        "Run has an invalid plan-task completion checkpoint.",
+        checkpoint.taskId
+      );
+    }
+    const attempt = {
+      id: checkpoint.sourceAttemptId,
+      kind: checkpoint.sourceAttemptKind ?? ("implementation" as const),
+      mutable: true
+    };
+    const record = await this.store
+      .readRunAttempt(state.runId, attempt)
+      .catch(() => null);
+    if (record?.status !== "completed" || record.result === null) {
+      throw new PlanTaskCompletionError(
+        "source_attempt_invalid",
+        "Canonical completion source attempt is missing or not completed."
+      );
+    }
+    let result: PersistedPhaseResult;
+    try {
+      result = parsePersistedPhaseResult(record.result);
+    } catch {
+      throw new PlanTaskCompletionError(
+        "source_attempt_invalid",
+        "Canonical completion source attempt result is malformed."
+      );
+    }
+    if (state.planApproval === null) {
+      throw new PlanTaskCompletionError(
+        "approval_invalid",
+        "Canonical completion source has no plan approval."
+      );
+    }
+    const validated = await validatePlanTaskCompletion({
+      repoRoot: this.repoRoot,
+      artifactBinding: state.artifactBinding,
+      sourceAttemptId: checkpoint.sourceAttemptId,
+      result,
+      planPath: this.completionPlanPath(state),
+      approval: state.planApproval,
+      baseline: state.baseline
+    });
+    if (!summariesMatch(checkpoint, validated.summary)) {
+      const sameCanonicalSource =
+        checkpoint.sourceAttemptId === validated.summary.sourceAttemptId &&
+        checkpoint.approvalDigest === validated.summary.approvalDigest &&
+        checkpoint.planTaskDigest === validated.summary.planTaskDigest &&
+        checkpoint.ledgerDigest === validated.summary.ledgerDigest;
+      if (!allowReportRefresh || !sameCanonicalSource) {
+        throw new PlanTaskCompletionError(
+          "summary_mismatch",
+          "Persisted plan-task completion summary is stale or contradictory."
+        );
+      }
+      if (persistReportRefresh) {
+        // The refreshed summary keeps the checkpoint's provenance: the fresh
+        // validation cannot know which phase authored the ledger.
+        state.planTaskCompletion =
+          checkpoint.sourceAttemptKind === undefined
+            ? validated.summary
+            : {
+                ...validated.summary,
+                sourceAttemptKind: checkpoint.sourceAttemptKind
+              };
+        await this.store.writeState(state);
+      }
+    }
+    return validated;
+  }
+
+  private async blockForCompletionFailure(
+    state: RunState,
+    sourceAttemptId: string,
+    error: unknown
+  ): Promise<RunState> {
+    const completionError =
+      error instanceof PlanTaskCompletionError
+        ? error
+        : new PlanTaskCompletionError(
+            "source_attempt_invalid",
+            errorMessage(error)
+          );
+    state.planTaskCompletion = this.completionInvalidCheckpoint(
+      sourceAttemptId,
+      completionError,
+      state.planTaskCompletion?.sourceAttemptId === sourceAttemptId
+        ? (state.planTaskCompletion.sourceAttemptKind ?? "implementation")
+        : "implementation"
+    );
+    state.activeProcess = null;
+    blockState(
+      state,
+      `[PLAN_TASK_COMPLETION_INVALID] ${completionError.message}`
+    );
+    await this.store.writeState(state);
+    await this.store.appendEvent(
+      state.runId,
+      "plan_task_completion.validation_failed",
+      {
+        attemptId: sourceAttemptId,
+        code: "PLAN_TASK_COMPLETION_INVALID",
+        violation: completionError.violation,
+        taskId: completionError.taskId
+      }
+    );
+    return state;
+  }
+
+  private validateWorkflowSelection(
+    state: RunState
+  ): WorkflowSelectionRecord & {
+    workflow: Exclude<WorkflowRoute, "strict">;
+  } {
+    const selection = state.workflowSelection ?? null;
+    if (selection === null || selection.workflow === "strict") {
+      throw new BanzaiError(
+        "WORKFLOW_NOT_AUTHORIZED",
+        "Lite implementation requires a persisted feature or quick-fix selection."
+      );
+    }
+    const currentDigest = workflowAuthorizationDigest({
+      runId: state.runId,
+      request: state.request,
+      ...selection
+    });
+    if (currentDigest !== selection.digest) {
+      throw new BanzaiError(
+        "WORKFLOW_AUTHORIZATION_INVALID",
+        "Persisted workflow selection does not match its authorization digest."
+      );
+    }
+    return selection as WorkflowSelectionRecord & {
+      workflow: Exclude<WorkflowRoute, "strict">;
+    };
+  }
+
+  private async validateBaseCommit(state: RunState): Promise<void> {
+    if (state.artifactBinding)
+      await inspectBoundWork(this.repoRoot, state.artifactBinding);
+    const current = await currentCommit(this.repoRoot);
+    if (current !== state.baseCommit) {
+      blockState(
+        state,
+        "The checkout HEAD changed during the run. Start a new run from the intended branch and commit."
+      );
+      await this.store.writeState(state);
+      throw new BanzaiError(
+        "BASE_COMMIT_CHANGED",
+        "The checkout HEAD changed during the run."
+      );
+    }
+  }
+
+  private newAttempt(
+    state: RunState,
+    kind: AttemptReference["kind"],
+    mutable: boolean
+  ): AttemptReference {
+    return {
+      id: `${kind}-${state.reviewIteration + 1}-${randomUUID().slice(0, 8)}`,
+      kind,
+      mutable
+    };
+  }
+
+  private async beginAttempt(
+    state: RunState,
+    attempt: AttemptReference,
+    policy: AttemptPolicy
+  ): Promise<AttemptRecord> {
+    const record: AttemptRecord = {
+      schemaVersion: MODEL_ATTEMPT_SCHEMA_VERSION,
+      attempt,
+      status: "started",
+      startedAt: now(),
+      completedAt: null,
+      interruptedAt: null,
+      recoveryOf: null,
+      recoveryAuthorizationId: null,
+      result: null,
+      sessionId: null,
+      rawStdoutPath: null,
+      rawStderrPath: null,
+      durationMs: null,
+      usage: null,
+      error: null,
+      failureCode: null,
+      reviewCandidate: null,
+      sessionMode: policy.sessionMode,
+      reviewMode: policy.reviewMode ?? null,
+      rotationReason: policy.rotationReason ?? null,
+      resumeSessionId: policy.resumeSessionId,
+      sessionContext: policy.sessionContext
+    };
+    if (attempt.kind === "selection") {
+      state.metrics.attempts.selection =
+        (state.metrics.attempts.selection ?? 0) + 1;
+    } else {
+      state.metrics.attempts[attempt.kind] += 1;
+    }
+    state.metrics.sessions[policy.sessionMode] += 1;
+    if (policy.reviewMode !== undefined) {
+      state.metrics.reviews[policy.reviewMode] += 1;
+      if (
+        policy.rotationReason !== null &&
+        policy.rotationReason !== "primary-review"
+      ) {
+        state.metrics.reviews.rotations += 1;
+      }
+    }
+    state.activeAttempt = attempt;
+    await this.store.writeState(state);
+    await this.store.writeRunAttempt(state.runId, record);
+    const timingEvent = await this.store.appendEvent(
+      state.runId,
+      "attempt.started",
+      {
+        attemptId: attempt.id,
+        kind: attempt.kind,
+        mutable: attempt.mutable,
+        sessionMode: policy.sessionMode,
+        reviewMode: policy.reviewMode ?? null,
+        rotationReason: policy.rotationReason ?? null
+      }
+    );
+    await this.observeHumanTime(
+      state,
+      "checkpoint",
+      "attempt.started",
+      timingEvent.at,
+      attempt.id
+    );
+    return record;
+  }
+
+  private recoveryAttempt(
+    authorization: RecoveryAuthorization
+  ): AttemptReference {
+    return {
+      id: `${authorization.phase}-recovery-${authorization.authorizationId.replace(/^recovery-/u, "")}`,
+      kind: authorization.phase,
+      mutable: true
+    };
+  }
+
+  private async beginRecoveryAttempt(
+    state: RunState,
+    authorization: RecoveryAuthorization,
+    policy: AttemptPolicy
+  ): Promise<AttemptRecord> {
+    const attempt = this.recoveryAttempt(authorization);
+    let record = await this.store.readRunAttemptIfExists(state.runId, attempt);
+    if (record === null) {
+      record = {
+        schemaVersion: MODEL_ATTEMPT_SCHEMA_VERSION,
+        attempt,
+        status: "started",
+        startedAt: now(),
+        completedAt: null,
+        interruptedAt: null,
+        recoveryOf: authorization.attempt.id,
+        recoveryAuthorizationId: authorization.authorizationId,
+        result: null,
+        sessionId: null,
+        rawStdoutPath: null,
+        rawStderrPath: null,
+        durationMs: null,
+        usage: null,
+        error: null,
+        failureCode: null,
+        reviewCandidate: null,
+        sessionMode: policy.sessionMode,
+        reviewMode: policy.reviewMode ?? null,
+        rotationReason: policy.rotationReason ?? null,
+        resumeSessionId: policy.resumeSessionId,
+        sessionContext: policy.sessionContext
+      };
+      await this.store.writeRunAttempt(state.runId, record);
+    } else if (
+      record.status !== "started" ||
+      record.result !== null ||
+      record.recoveryOf !== authorization.attempt.id ||
+      record.recoveryAuthorizationId !== authorization.authorizationId ||
+      record.attempt.kind !== authorization.phase ||
+      record.sessionMode !== policy.sessionMode ||
+      record.resumeSessionId !== policy.resumeSessionId ||
+      JSON.stringify(record.sessionContext) !==
+        JSON.stringify(policy.sessionContext)
+    ) {
+      throw new BanzaiError(
+        "RECOVERY_ATTEMPT_CONFLICT",
+        "Persisted recovery attempt conflicts with its authorization."
+      );
+    }
+    if (
+      state.recovery?.sourceAttemptId !== authorization.attempt.id ||
+      state.recovery.authorizationId !== authorization.authorizationId ||
+      state.recovery.recoveryAttemptId !== null ||
+      (state.recovery.stage !== "source_interrupted" &&
+        state.recovery.stage !== "source_preserved")
+    ) {
+      throw new BanzaiError(
+        "RECOVERY_STATE_CHANGED",
+        "Recovery state changed before the new attempt could be linked."
+      );
+    }
+    state.metrics.attempts[attempt.kind] += 1;
+    state.metrics.sessions[policy.sessionMode] += 1;
+    state.activeAttempt = attempt;
+    state.recovery = {
+      authorizationId: authorization.authorizationId,
+      sourceAttemptId: authorization.attempt.id,
+      recoveryAttemptId: attempt.id,
+      stage: "attempt_started"
+    };
+    await this.store.writeState(state);
+    const timingEvent = await this.store.appendEvent(
+      state.runId,
+      "attempt.recovery_started",
+      {
+        sourceAttemptId: authorization.attempt.id,
+        attemptId: attempt.id,
+        kind: attempt.kind
+      }
+    );
+    await this.observeHumanTime(
+      state,
+      "checkpoint",
+      "attempt.recovery_started",
+      timingEvent.at,
+      attempt.id
+    );
+    return record;
+  }
+
+  private async processStarted(
+    state: RunState,
+    attempt: Pick<AttemptReference, "kind"> | { kind: "verification" },
+    pid: number
+  ): Promise<void> {
+    state.activeProcess = { pid, kind: attempt.kind, startedAt: now() };
+    try {
+      await this.store.writeState(state);
+    } catch (error) {
+      if (error instanceof TerminalRunStateError) terminateProcessGroup(pid);
+      throw error;
+    }
+  }
+
+  private attemptScopeDigest(
+    state: RunState,
+    attempt: AttemptReference
+  ): string | null {
+    if (attempt.kind !== "fix" && !state.artifactBinding) {
+      return null;
+    }
+    const acceptedFindingIds =
+      state.triage?.items
+        .filter((item) => item.disposition === "accepted")
+        .map((item) => item.findingId)
+        .sort() ?? [];
+    return digestCanonicalJson(
+      state.artifactBinding
+        ? {
+            version: 2,
+            artifactBindingDigest: state.artifactBinding.sha256,
+            phase: attempt.kind,
+            acceptedFindingIds: attempt.kind === "fix" ? acceptedFindingIds : []
+          }
+        : { version: 1, acceptedFindingIds }
+    );
+  }
+
+  private terminalCheckpointWriter<T extends TerminalCheckpointResult>(
+    state: RunState,
+    attempt: AttemptReference,
+    settings: ModelSettings,
+    policy: Pick<AttemptPolicy, "sessionMode" | "sessionContext">
+  ): (terminal: AdapterTerminalSuccess<T>) => Promise<void> {
+    return async (terminal) => {
+      const current = await this.store.readState(state.runId);
+      if (
+        current.activeAttempt?.id !== attempt.id ||
+        current.activeAttempt.kind !== attempt.kind ||
+        current.activeAttempt.mutable !== attempt.mutable
+      ) {
+        throw new BanzaiError(
+          "TERMINAL_CHECKPOINT_STATE_CHANGED",
+          "The active attempt changed before terminal success could be persisted."
+        );
+      }
+      await this.validateSavedArtifactScope(current, attempt);
+      if (
+        attempt.kind === "plan" ||
+        attempt.kind === "implementation" ||
+        attempt.kind === "fix"
+      )
+        this.validateArtifactRoleReferences(
+          current,
+          terminal.result as PersistedPhaseResult
+        );
+      const vendor =
+        vendorFor(settings.executable) ??
+        FALLBACK_VENDOR[policy.sessionContext.role];
+      const checkpoint: Omit<
+        TerminalAttemptCheckpoint<T>,
+        "integrityDigest"
+      > = {
+        schema: TERMINAL_CHECKPOINT_SCHEMA,
+        schemaVersion: TERMINAL_CHECKPOINT_SCHEMA_VERSION,
+        runId: current.runId,
+        attempt,
+        phase: attempt.kind,
+        configuration: {
+          vendor,
+          executableDigest: digestCanonicalJson(settings.executable),
+          model: settings.model,
+          effort: settings.effort,
+          sessionMode: policy.sessionMode,
+          sessionContextDigest: digestCanonicalJson(policy.sessionContext)
+        },
+        resultContract: terminalResultContract(attempt.kind),
+        terminal: {
+          classification: terminal.classification,
+          observedAt: terminal.observedAt
+        },
+        result: terminal.result,
+        sessionId: terminal.sessionId,
+        usage: terminal.usage,
+        baseCommit: current.baseCommit,
+        approvalDigest: current.planApproval?.digest ?? null,
+        workflowDigest:
+          current.planApproval === null
+            ? (current.workflowSelection?.digest ?? null)
+            : null,
+        scopeDigest: this.attemptScopeDigest(current, attempt)
+      };
+      const persisted: TerminalAttemptCheckpoint<T> = {
+        ...checkpoint,
+        integrityDigest: terminalCheckpointIntegrity(checkpoint)
+      };
+      await this.store.writeTerminalCheckpoint(current.runId, persisted);
+      await this.store.appendEvent(
+        current.runId,
+        "attempt.terminal_checkpoint",
+        {
+          attemptId: attempt.id,
+          kind: attempt.kind,
+          classification: terminal.classification
+        }
+      );
+    };
+  }
+
+  private async completeAttempt<
+    T extends WorkflowSelectionResult | PhaseResult | ReviewResult
+  >(
+    state: RunState,
+    record: AttemptRecord,
+    adapterResult: AdapterResult<T>
+  ): Promise<boolean> {
+    if (record.result === null) {
+      await this.persistAdapterResult(state, record, adapterResult);
+    }
+    record.status = "completed";
+    record.completedAt = now();
+    record.durationMs =
+      Date.parse(record.completedAt) - Date.parse(record.startedAt);
+    await this.store.writeRunAttempt(state.runId, record);
+    const current = await this.store.readState(state.runId);
+    if (current.status === "cancelled") {
+      return false;
+    }
+    this.accountCompletedAttempt(state, record);
+    state.activeProcess = null;
+    await this.store.writeState(state);
+    return true;
+  }
+
+  private async persistAdapterResult<
+    T extends WorkflowSelectionResult | PhaseResult | ReviewResult
+  >(
+    state: RunState,
+    record: AttemptRecord,
+    adapterResult: AdapterResult<T>
+  ): Promise<void> {
+    await this.writeAttemptOutput(
+      state,
+      record,
+      adapterResult.stdout,
+      adapterResult.stderr
+    );
+    record.usage = adapterResult.usage;
+    if (
+      record.planningContext !== undefined &&
+      record.sessionId !== null &&
+      adapterResult.sessionId !== null &&
+      record.sessionId !== adapterResult.sessionId
+    ) {
+      throw new BanzaiError(
+        "SESSION_ID_CONFLICT",
+        "The planning result conflicts with its announced session identity."
+      );
+    }
+    record.result = adapterResult.result;
+    record.sessionId = adapterResult.sessionId ?? record.sessionId;
+    record.durationMs = Date.now() - Date.parse(record.startedAt);
+    await this.store.writeRunAttempt(state.runId, record);
+  }
+
+  private async writeAttemptOutput(
+    state: RunState,
+    record: AttemptRecord,
+    stdout: string,
+    stderr: string
+  ): Promise<void> {
+    const stdoutPath = path.relative(
+      this.store.runDirectory(state.runId),
+      await this.store.writeText(
+        state.runId,
+        `attempts/${record.attempt.id}.stdout.log`,
+        redactSensitiveText(stdout)
+      )
+    );
+    const stderrPath = path.relative(
+      this.store.runDirectory(state.runId),
+      await this.store.writeText(
+        state.runId,
+        `attempts/${record.attempt.id}.stderr.log`,
+        redactSensitiveText(stderr)
+      )
+    );
+    record.rawStdoutPath = stdoutPath;
+    record.rawStderrPath = stderrPath;
+  }
+
+  private async failAttempt(
+    state: RunState,
+    record: AttemptRecord,
+    error: unknown
+  ): Promise<RunState> {
+    if (error instanceof TerminalRunStateError) return error.state;
+    const completionError =
+      (record.attempt.kind === "implementation" ||
+        record.attempt.kind === "fix") &&
+      (state.workflowSelection?.workflow ?? "strict") === "strict" &&
+      error instanceof BanzaiError &&
+      ["PLAN_TASK_COMPLETION_INVALID", "PHASE_RESULT_SCHEMA_MISMATCH"].includes(
+        error.code
+      )
+        ? error instanceof PlanTaskCompletionError
+          ? error
+          : new PlanTaskCompletionError("source_attempt_invalid", error.message)
+        : null;
+    record.status = "failed";
+    record.completedAt = now();
+    record.durationMs =
+      Date.parse(record.completedAt) - Date.parse(record.startedAt);
+    record.error =
+      completionError === null
+        ? errorMessage(error)
+        : `[PLAN_TASK_COMPLETION_INVALID] ${completionError.message}`;
+    record.failureCode =
+      completionError === null
+        ? error instanceof BanzaiError
+          ? error.code
+          : null
+        : "PLAN_TASK_COMPLETION_INVALID";
+    const failureCause = classifyModelFailure(error);
+    record.failureCause = failureCause;
+    if (
+      error instanceof ProcessExitError &&
+      record.rawStdoutPath === null &&
+      record.rawStderrPath === null
+    ) {
+      await this.writeAttemptOutput(state, record, error.stdout, error.stderr);
+    }
+    // A process that failed still spent what its own stream reports. Dropping it
+    // makes every later cost measurement a fiction.
+    if (record.usage === null && error instanceof ProcessExitError) {
+      record.usage = error.usage;
+    }
+    await this.store.writeRunAttempt(state.runId, record);
+    const current = await this.store.readState(state.runId);
+    if (current.status === "cancelled") {
+      return current;
+    }
+    state.activeProcess = null;
+    // Failed usage counts toward consumption but never toward completion:
+    // `completedAttemptIds` stays untouched, so no verdict, review, or finding
+    // metric can be derived from it.
+    this.accountAttemptUsage(state, record);
+    if (record.attempt.kind === "review") {
+      if (
+        error instanceof BanzaiError &&
+        error.code === "ARTIFACT_PHASE_SCOPE_INVALID"
+      ) {
+        state.reviewIteration = state.latestReview?.iteration ?? 0;
+        state.pendingReviewRotationReason = "unreliable-review";
+      } else if (INTEGRITY_NEUTRAL_FAILURE_CAUSES.has(failureCause)) {
+        // `executeReview` advanced the reviewed-workspace digest before starting
+        // the process. Leaving it advanced would make the retry fail the
+        // policy's `unreliable-review` check and rotate anyway, so preserving
+        // continuity means putting it back to the last review that succeeded.
+        if (state.latestReview !== null) {
+          state.workspaceDigest = state.latestReview.workspaceDigest;
+        }
+      } else {
+        state.pendingReviewRotationReason = "previous-review-failed";
+      }
+    }
+    if (completionError !== null) {
+      state.planTaskCompletion = this.completionInvalidCheckpoint(
+        record.attempt.id,
+        completionError,
+        record.attempt.kind === "fix" ? "fix" : "implementation"
+      );
+    }
+    blockState(
+      state,
+      completionError === null
+        ? `${record.attempt.kind} failed: ${errorMessage(error)}`
+        : `[PLAN_TASK_COMPLETION_INVALID] ${completionError.message}`
+    );
+    await this.store.writeState(state);
+    await this.store.appendEvent(state.runId, "attempt.failed", {
+      attemptId: record.attempt.id,
+      kind: record.attempt.kind,
+      cause: failureCause,
+      error: errorMessage(error)
+    });
+    if (completionError !== null) {
+      await this.store.appendEvent(
+        state.runId,
+        "plan_task_completion.validation_failed",
+        {
+          attemptId: record.attempt.id,
+          code: "PLAN_TASK_COMPLETION_INVALID",
+          violation: completionError.violation,
+          taskId: completionError.taskId
+        }
+      );
+    }
+    return state;
+  }
+
+  private contextAuthority(
+    state: RunState,
+    config: OrchestratorConfig,
+    phase: AttemptReference["kind"]
+  ): ContextAuthorityEntry[] {
+    const entries: ContextAuthorityEntry[] = [
+      { class: "project_instructions", count: 1 },
+      { class: "project_manifest", count: 1 }
+    ];
+    const approved = state.planApproval?.paths ?? [];
+    const count = (pattern: RegExp): number =>
+      approved.filter((item) => pattern.test(item)).length;
+    const descriptionCount = count(/\/description\.md$/u);
+    const adrCount = count(/\/decisions\/[^/]+\.md$/u);
+    const planCount = count(/\/plan\.md$/u);
+    if (descriptionCount > 0) {
+      entries.push({ class: "feature_description", count: descriptionCount });
+    }
+    if (adrCount > 0) {
+      entries.push({ class: "architecture_decision", count: adrCount });
+    }
+    if (planCount > 0) {
+      entries.push({ class: "development_plan", count: planCount });
+    }
+    if (phase === "review") {
+      entries.push({ class: "implementation_report", count: 1 });
+      entries.push({ class: "test_report", count: 1 });
+    }
+    if (phase === "fix" && state.latestReview !== null) {
+      entries.push({ class: "review_artifact", count: 1 });
+    }
+    const decisions = state.humanDecisions?.length ?? 0;
+    if (decisions > 0) {
+      entries.push({ class: "human_decision", count: decisions });
+    }
+    if (config.verification.profiles.length > 0) {
+      entries.push({
+        class: "verification_profile",
+        count: config.verification.profiles.length
+      });
+    }
+    return entries;
+  }
+
+  private artifactWritePaths(
+    state: RunState,
+    phase: AttemptReference["kind"]
+  ): string[] {
+    const roles = state.artifactBinding?.binding.artifacts;
+    if (roles === undefined) return [];
+    if (phase === "plan")
+      return [roles.description, roles.plan].filter(
+        (item): item is string => item !== undefined
+      );
+    if (phase !== "implementation" && phase !== "fix") return [];
+    const workflow = state.workflowSelection?.workflow ?? "strict";
+    return (
+      workflow === "strict"
+        ? [roles.implementationReport, roles.testReport]
+        : workflow === "feature"
+          ? [roles.work]
+          : [roles.changeReport]
+    ).filter((item): item is string => item !== undefined);
+  }
+
+  private artifactInstructions(
+    state: RunState,
+    phase: AttemptReference["kind"]
+  ): string {
+    if (state.artifactBinding === undefined) return "";
+    return (
+      `\n\nArtifact storage authority (run state v4):\n${JSON.stringify(state.artifactBinding, null, 2)}\n` +
+      `Use these exact bound artifact role paths. Any fixed documentation work paths in legacy instructions are replaced by this binding. Public ADRs, product documentation and the project manifest keep their existing repository paths.\n` +
+      `Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(state, phase))}. Other bound roles are read-only; their presence does not grant writes. Read ignored required evidence directly. Do not acquire standalone claims or modify the binding, declarations, runner state, approvals or another work item.\n` +
+      (state.workflowSelection?.workflow === "feature"
+        ? "For lite feature work, artifacts.implementationReport may reference the bound work.md; do not create a second report.\n"
+        : state.workflowSelection?.workflow === "quick-fix"
+          ? "For quick-fix, artifacts.implementationReport may reference the bound changeReport only when the existing report trigger applies; otherwise keep it null.\n"
+          : "")
+    );
+  }
+
+  private async checkArtifactPhaseScope(
+    state: RunState,
+    phase: AttemptReference["kind"],
+    before: Awaited<ReturnType<typeof workspaceSnapshot>>
+  ): Promise<void> {
+    const bound = state.artifactBinding;
+    if (bound === undefined) return;
+    const after = await workspaceSnapshot(this.repoRoot, {
+      baseline: state.baseline,
+      artifactBinding: bound,
+      excludedPaths:
+        phase === "review"
+          ? [reviewArtifactPath(state.slug, state.reviewIteration, bound)]
+          : []
+    });
+    const allowed = new Set(this.artifactWritePaths(state, phase));
+    for (const change of workspaceChanges(before, after)) {
+      const candidate = change.path;
+      const privatePath =
+        candidate === ".banzai" || candidate.startsWith(".banzai/");
+      const legacyWork =
+        /^documentation\/(?:features|development-plans|changes)\//.test(
+          candidate
+        );
+      const prohibited =
+        phase === "selection" ||
+        phase === "review" ||
+        (privatePath && !allowed.has(candidate)) ||
+        (legacyWork && !allowed.has(candidate)) ||
+        (phase === "plan" &&
+          !allowed.has(candidate) &&
+          !isDocumentationPath(candidate));
+      if (prohibited)
+        throw new BanzaiError(
+          "ARTIFACT_PHASE_SCOPE_INVALID",
+          `Phase ${phase} changed an unauthorized artifact or source path: ${candidate}`
+        );
+    }
+  }
+
+  private async validateSavedArtifactScope(
+    state: RunState,
+    attempt: AttemptReference
+  ): Promise<void> {
+    if (!state.artifactBinding) return;
+    const bytes = await readArtifactBytes(
+      this.repoRoot,
+      `.banzai/runs/${state.runId}/attempts/${attempt.id}.artifact-workspace.json`,
+      { limit: 2 * 1024 * 1024 }
+    );
+    const before = JSON.parse(
+      bytes?.toString("utf8") ?? "null"
+    ) as WorkspaceSnapshot | null;
+    if (
+      before?.schemaVersion !== 2 ||
+      before.baseCommit !== state.baseCommit ||
+      before.artifactBindingDigest !== state.artifactBinding.sha256 ||
+      !Array.isArray(before.entries) ||
+      before.digest !==
+        createHash("sha256")
+          .update(
+            JSON.stringify({
+              version: 2,
+              baseCommit: before.baseCommit,
+              artifactBindingDigest: before.artifactBindingDigest,
+              entries: before.entries
+            })
+          )
+          .digest("hex")
+    )
+      throw new BanzaiError(
+        "ARTIFACT_RECOVERY_REQUIRED",
+        "Original attempt artifact workspace evidence is missing or inconsistent."
+      );
+    await this.checkArtifactPhaseScope(state, attempt.kind, before);
+  }
+
+  private validateArtifactRoleReferences(
+    state: RunState,
+    result: PersistedPhaseResult
+  ): void {
+    const roles = state.artifactBinding?.binding.artifacts;
+    if (roles === undefined) return;
+    for (const role of [
+      "description",
+      "plan",
+      "implementationReport",
+      "testReport"
+    ] as const) {
+      const reference = result.artifacts[role];
+      if (reference === null) continue;
+      const workflow = state.workflowSelection?.workflow ?? "strict";
+      const expected =
+        role === "implementationReport" && workflow !== "strict"
+          ? workflow === "feature"
+            ? roles.work
+            : roles.changeReport
+          : roles[role];
+      if (reference !== expected)
+        throw new BanzaiError(
+          "ARTIFACT_PHASE_SCOPE_INVALID",
+          `Result ${role} does not match the persisted work binding.`
+        );
+    }
+    if (
+      result.artifacts.adrs.some(
+        (value) =>
+          !/^documentation\/decisions\/[0-9]{4}-[a-z0-9-]+\.md$/.test(value)
+      )
+    ) {
+      throw new BanzaiError(
+        "ARTIFACT_PHASE_SCOPE_INVALID",
+        "ADR references must retain their public decision paths."
+      );
+    }
+  }
+
+  private async invokeWithContext<T>(input: {
+    state: RunState;
+    attempt: AttemptReference;
+    config: OrchestratorConfig;
+    settings: ModelSettings;
+    role: ModelRole;
+    sessionMode: SessionMode;
+    kind: "primary" | "review_artifact_repair";
+    prompt: PromptEnvelope;
+    outputIdentity: OutputContractIdentity;
+    invoke: (
+      outputContract: OutputContractEnvelope
+    ) => Promise<AdapterResult<T>>;
+  }): Promise<AdapterResult<T>> {
+    const vendor =
+      vendorFor(input.settings.executable) ?? FALLBACK_VENDOR[input.role];
+    const outputContract = resolveOutputContract(vendor, input.outputIdentity);
+    const runnerPayload = measureRunnerPayload(input.prompt, outputContract);
+    const preCallValues: Partial<Record<ContextMetric, number>> = {
+      runner_payload_bytes: runnerPayload.totalBytes
+    };
+    const preCallBudgets = evaluateContextBudgets(
+      input.config.context,
+      input.attempt.kind,
+      input.role,
+      preCallValues
+    );
+    const enforced = preCallBudgets.find(
+      (evaluation) => evaluation.result === "enforced_exceeded"
+    );
+    const measuredAt = now();
+    const started = await this.store.beginContextInvocation(
+      input.state.runId,
+      input.attempt,
+      {
+        kind: input.kind,
+        workflow: input.state.workflowSelection?.workflow ?? "unselected",
+        phase: input.attempt.kind,
+        role: input.role,
+        vendor,
+        sessionMode: input.sessionMode,
+        measuredAt,
+        completedAt: enforced === undefined ? null : now(),
+        outcome: enforced === undefined ? "pending" : "budget_exceeded",
+        runnerPayload,
+        authority: this.contextAuthority(
+          input.state,
+          input.config,
+          input.attempt.kind
+        ),
+        sessionInventory: emptyContextInventory(),
+        vendorUsage: emptyContextVendorUsage(),
+        budgets: preCallBudgets
+      }
+    );
+    if (enforced !== undefined) {
+      throw new BanzaiError(
+        "CONTEXT_BUDGET_EXCEEDED",
+        `Context budget exceeded for phase ${input.attempt.kind}, role ${input.role}: measured ${runnerPayload.totalBytes} bytes, limit ${enforced.maximum}.`
+      );
+    }
+
+    const finish = async (
+      outcome: "completed" | "failed",
+      evidence: {
+        usage: ModelUsage | null;
+        inventory?: SessionInventory | null;
+        turnCount?: number | null;
+      }
+    ): Promise<void> => {
+      const inventory = evidence.inventory ?? null;
+      const values: Partial<Record<ContextMetric, number>> = {
+        runner_payload_bytes: runnerPayload.totalBytes
+      };
+      if (evidence.usage !== null) {
+        values.vendor_input_tokens = evidence.usage.inputTokens;
+        values.vendor_cached_input_tokens = evidence.usage.cachedInputTokens;
+        values.vendor_output_tokens = evidence.usage.outputTokens;
+        if (evidence.usage.costUsd !== null) {
+          values.vendor_cost_usd = evidence.usage.costUsd;
+        }
+      }
+      if (evidence.turnCount !== null && evidence.turnCount !== undefined) {
+        values.vendor_turns = evidence.turnCount;
+      }
+      if (inventory !== null) {
+        values.session_tools = inventory.toolCount;
+        if (inventory.mcpServerCount !== undefined) {
+          values.session_mcp_servers = inventory.mcpServerCount;
+        }
+        if (inventory.skillCount !== undefined) {
+          values.session_skills = inventory.skillCount;
+        }
+        if (inventory.commandCount !== undefined) {
+          values.session_commands = inventory.commandCount;
+        }
+      }
+      await this.store.finishContextInvocation(
+        input.state.runId,
+        input.attempt,
+        started.ordinal,
+        {
+          completedAt: now(),
+          outcome,
+          sessionInventory:
+            inventory === null
+              ? emptyContextInventory()
+              : {
+                  toolCount: available(inventory.toolCount),
+                  mcpServerCount:
+                    inventory.mcpServerCount === undefined
+                      ? unavailable()
+                      : available(inventory.mcpServerCount),
+                  skillCount:
+                    inventory.skillCount === undefined
+                      ? unavailable()
+                      : available(inventory.skillCount),
+                  commandCount:
+                    inventory.commandCount === undefined
+                      ? unavailable()
+                      : available(inventory.commandCount),
+                  digest: available(inventory.digest)
+                },
+          vendorUsage:
+            evidence.usage === null
+              ? {
+                  ...emptyContextVendorUsage(),
+                  turns:
+                    evidence.turnCount === null ||
+                    evidence.turnCount === undefined
+                      ? unavailable()
+                      : available(evidence.turnCount)
+                }
+              : {
+                  inputTokens: available(evidence.usage.inputTokens),
+                  cachedInputTokens: available(
+                    evidence.usage.cachedInputTokens
+                  ),
+                  outputTokens: available(evidence.usage.outputTokens),
+                  costUsd:
+                    evidence.usage.costUsd === null
+                      ? unavailable()
+                      : available(evidence.usage.costUsd),
+                  turns:
+                    evidence.turnCount === null ||
+                    evidence.turnCount === undefined
+                      ? unavailable()
+                      : available(evidence.turnCount)
+                },
+          budgets: evaluateContextBudgets(
+            input.config.context,
+            input.attempt.kind,
+            input.role,
+            values
+          )
+        }
+      );
+    };
+
+    let result: AdapterResult<T> | undefined;
+    try {
+      const before =
+        input.state.artifactBinding === undefined
+          ? null
+          : await workspaceSnapshot(this.repoRoot, {
+              baseline: input.state.baseline,
+              artifactBinding: input.state.artifactBinding,
+              excludedPaths:
+                input.attempt.kind === "review"
+                  ? [
+                      reviewArtifactPath(
+                        input.state.slug,
+                        input.state.reviewIteration,
+                        input.state.artifactBinding
+                      )
+                    ]
+                  : []
+            });
+      if (before !== null)
+        await writeFile(
+          path.join(
+            this.store.runDirectory(input.state.runId),
+            "attempts",
+            `${input.attempt.id}.artifact-workspace.json`
+          ),
+          JSON.stringify(before) + "\n",
+          { flag: "wx", mode: 0o600 }
+        );
+      result = await input.invoke(outputContract);
+      if (before !== null)
+        await this.checkArtifactPhaseScope(
+          input.state,
+          input.attempt.kind,
+          before
+        );
+    } catch (error) {
+      if (
+        error instanceof TerminalRunStateError ||
+        error instanceof ProjectSetupRequiredError
+      )
+        throw error;
+      await finish("failed", {
+        usage:
+          error instanceof ProcessExitError
+            ? error.usage
+            : (result?.usage ?? null),
+        inventory:
+          error instanceof ProcessExitError
+            ? error.inventory
+            : (result?.inventory ?? null),
+        turnCount:
+          error instanceof ProcessExitError
+            ? error.turnCount
+            : (result?.turnCount ?? null)
+      });
+      throw error;
+    }
+    await finish("completed", result);
+    return result;
+  }
+
+  private async executeSelection(
+    state: RunState,
+    config: OrchestratorConfig,
+    commitTransition?: () => Promise<void>
+  ): Promise<RunState> {
+    if (!(await hasRunnerWorkOwnership(this.repoRoot, state.artifactBinding)))
+      return withRunnerWorkOwnership(this.repoRoot, state.artifactBinding, () =>
+        this.executeSelection(state, config, commitTransition)
+      );
+    requireState(state, ["selecting"], "Workflow selection");
+    await this.assertProjectGuidance();
+    await this.beforeModelAttempt(commitTransition);
+    const attempt = this.newAttempt(state, "selection", false);
+    const record = await this.beginAttempt(state, attempt, {
+      sessionMode: "fresh",
+      resumeSessionId: null,
+      sessionContext: sessionContext("planner", config.models.planner)
+    });
+    try {
+      await this.activity(
+        "Workflow selection checks",
+        `${config.models.planner.executable} subscription authentication`,
+        async () => {
+          await this.preflightVendor("planner", config.models.planner);
+        }
+      );
+      // Resolved before the phase banner: the invocation scope carries the
+      // run-level MCP whitelist, which reports on first resolution and would
+      // otherwise print as if it were the phase's own first action.
+      const environment = await this.invocationScope(state.runId, config);
+      const prompt = workflowSelectionPromptEnvelope(
+        state.request,
+        state.humanDecisions ?? []
+      );
+      const result = await this.activity(
+        "Workflow selection",
+        {
+          detail: modelActivityDetail(
+            config.models.planner,
+            attempt,
+            PHASE_SKILLS.Selection
+          ),
+          descriptor: phaseDescriptor(
+            config.models.planner,
+            "fresh",
+            PHASE_SKILLS.Selection
+          )
+        },
+        async () =>
+          await this.invokeWithContext({
+            state,
+            attempt,
+            config,
+            settings: config.models.planner,
+            role: "planner",
+            sessionMode: "fresh",
+            kind: "primary",
+            prompt,
+            outputIdentity: "workflow-selection/v1",
+            invoke: async (outputContract) =>
+              await this.adapters.runSelection({
+                repoRoot: this.repoRoot,
+                runDirectory: this.store.runDirectory(state.runId),
+                attemptId: attempt.id,
+                environment,
+                prompt: prompt.rendered,
+                promptEnvelope: prompt,
+                outputContract,
+                settings: config.models.planner,
+                env: {
+                  ...process.env,
+                  // Runner mode plus no authorization digest makes the hook deny
+                  // writes even if a vendor bypasses its read-only tool surface.
+                  BANZAI_RUN_ID: state.runId
+                },
+                onStart: async (pid) => {
+                  await this.processStarted(state, attempt, pid);
+                },
+                onProgress: (event) => {
+                  this.modelProgress("Workflow selection", event);
+                },
+                onTerminalSuccess: this.terminalCheckpointWriter(
+                  state,
+                  attempt,
+                  config.models.planner,
+                  {
+                    sessionMode: "fresh",
+                    sessionContext: sessionContext(
+                      "planner",
+                      config.models.planner
+                    )
+                  }
+                )
+              })
+          })
+      );
+      if (!(await this.completeAttempt(state, record, result))) {
+        return await this.store.readState(state.runId);
+      }
+      try {
+        return await this.applyWorkflowSelection(
+          state,
+          attempt,
+          result.result,
+          config
+        );
+      } catch (error) {
+        if (
+          error instanceof TerminalRunStateError ||
+          error instanceof ProjectSetupRequiredError
+        )
+          throw error;
+        state.activeAttempt = null;
+        blockState(state, errorMessage(error));
+        await this.store.writeState(state);
+        return state;
+      }
+    } catch (error) {
+      if (
+        error instanceof TerminalRunStateError ||
+        error instanceof ProjectSetupRequiredError
+      )
+        throw error;
+      return await this.failAttempt(state, record, error);
+    }
+  }
+
+  private async applyWorkflowSelection(
+    state: RunState,
+    attempt: AttemptReference,
+    result: WorkflowSelectionResult,
+    config: OrchestratorConfig
+  ): Promise<RunState> {
+    const workflow = effectiveWorkflow(result);
+    const selectedAt = now();
+    const fallbackReasons: string[] = [];
+    if (result.recommendedWorkflow !== "strict" && workflow === "strict") {
+      if (result.confidence !== "high") {
+        fallbackReasons.push(`confidence=${result.confidence}`);
+      }
+      if (result.escalationTriggers.length > 0) {
+        fallbackReasons.push(
+          `triggers=${result.escalationTriggers.join(", ")}`
+        );
+      }
+    }
+    const reason =
+      fallbackReasons.length > 0
+        ? `${result.reason} Conservative strict fallback (${fallbackReasons.join("; ")}).`
+        : result.reason;
+    const selectionWithoutDigest = {
+      ...result,
+      workflow,
+      reason,
+      selectedAt,
+      attemptId: attempt.id
+    };
+    const selection: WorkflowSelectionRecord = {
+      ...selectionWithoutDigest,
+      digest: workflowAuthorizationDigest({
+        runId: state.runId,
+        request: state.request,
+        ...selectionWithoutDigest
+      })
+    };
+    state.workflowSelection = selection;
+    state.activeAttempt = null;
+    transitionState(
+      state,
+      selection.workflow === "strict" ? "planning" : "implementing"
+    );
+    await this.store.writeState(state);
+    await this.store.appendEvent(state.runId, "workflow.selected", {
+      attemptId: attempt.id,
+      recommendedWorkflow: selection.recommendedWorkflow,
+      workflow: selection.workflow,
+      confidence: selection.confidence,
+      reason: selection.reason,
+      escalationTriggers: selection.escalationTriggers,
+      skills: workflowSkills(selection.workflow)
+    });
+    this.info(
+      `ROUTE ${selection.workflow} - ${selection.reason} skills=${workflowSkills(selection.workflow).join(" -> ")}`
+    );
+    return selection.workflow === "strict"
+      ? await this.executePlan(state, config)
+      : await this.executeImplementation(state, config);
+  }
+
+  private async executePlan(
+    state: RunState,
+    config: OrchestratorConfig,
+    retrySource: AttemptRecord | null = null,
+    checkpointRejection: string | null = null,
+    commitTransition?: () => Promise<void>
+  ): Promise<RunState> {
+    if (!(await hasRunnerWorkOwnership(this.repoRoot, state.artifactBinding)))
+      return withRunnerWorkOwnership(this.repoRoot, state.artifactBinding, () =>
+        this.executePlan(
+          state,
+          config,
+          retrySource,
+          checkpointRejection,
+          commitTransition
+        )
+      );
+    requireState(state, ["planning"], "Planning");
+    await this.assertProjectGuidance();
+    await this.activity(
+      "Planning checks",
+      `${config.models.planner.executable} subscription authentication`,
+      async () => {
+        await this.preflightVendor("planner", config.models.planner);
+      }
+    );
+    const plannerBinding = sessionBindingMatches(
+      state.sessions.planner,
+      config.models.planner,
+      "planner"
+    )
+      ? state.sessions.planner
+      : null;
+    const environment = await this.invocationScope(state.runId, config, false);
+    let prompt = appendPromptComponent(
+      planningPromptEnvelope(
+        state.slug,
+        state.request,
+        state.adrDecisions,
+        state.humanDecisions ?? []
+      ),
+      "phase_instructions",
+      this.serenaGuidanceFor(environment, config.models.planner.executable)
+    );
+    prompt = appendPromptComponent(
+      prompt,
+      "phase_instructions",
+      this.artifactInstructions(state, "plan")
+    );
+    const invocationDigest = digestCanonicalJson({
+      environment,
+      prompt: prompt.rendered,
+      outputContract: resolveOutputContract(
+        vendorFor(config.models.planner.executable) ?? "codex",
+        "phase-result/v3"
+      ).serialized
+    });
+    let resumeSessionId = plannerBinding?.id ?? null;
+    if (retrySource !== null) {
+      const context = retrySource.planningContext;
+      const compatibleSession =
+        retrySource.sessionContext !== undefined &&
+        sessionBindingMatches(
+          sessionBinding(retrySource.sessionId, retrySource.sessionContext),
+          config.models.planner,
+          "planner"
+        );
+      const supportedFailure =
+        !TERMINAL_INTEGRITY_FAILURE_CODES.has(retrySource.failureCode ?? "") &&
+        (RECOVERABLE_MUTABLE_FAILURE_CAUSES.has(
+          retrySource.failureCause ?? "unclassified"
+        ) ||
+          PLANNING_REPAIR_FAILURE_CODES.has(retrySource.failureCode ?? ""));
+      let reason =
+        checkpointRejection !== null
+          ? "saved terminal evidence was rejected"
+          : !supportedFailure
+            ? "the failure does not permit session reuse"
+            : !compatibleSession
+              ? "the saved session is missing or planner settings changed"
+              : (context?.workspaceDigest ?? null) === null
+                ? "saved planning context is unavailable"
+                : context?.invocationDigest !== invocationDigest
+                  ? "planning instructions or tool configuration changed"
+                  : null;
+      if (
+        reason === null &&
+        context !== undefined &&
+        (await workspaceDigest(this.repoRoot, {
+          artifactBinding: state.artifactBinding
+        })) !== context.workspaceDigest
+      ) {
+        reason = "the workspace changed since the failed attempt";
+      }
+      resumeSessionId = reason === null ? retrySource.sessionId : null;
+      prompt = planningRetryPromptEnvelope(
+        prompt,
+        retrySource,
+        redactSensitiveText(
+          [
+            checkpointRejection,
+            retrySource.error ?? "No failure diagnostic was recorded."
+          ]
+            .filter((message) => message !== null)
+            .join("\n")
+        ).slice(0, 2000),
+        resumeSessionId === null ? "fresh" : "resumed"
+      );
+      this.info(
+        resumeSessionId === null
+          ? `Continuing planning from existing artifacts in a fresh session: ${reason}`
+          : "Continuing planning in the saved planner session"
+      );
+    }
+    await this.beforeModelAttempt(commitTransition);
+    await this.invocationScope(state.runId, config);
+    const attempt = this.newAttempt(state, "plan", false);
+    const record = await this.beginAttempt(state, attempt, {
+      sessionMode: resumeSessionId === null ? "fresh" : "resumed",
+      resumeSessionId,
+      sessionContext: sessionContext("planner", config.models.planner)
+    });
+    record.planningContext = {
+      invocationDigest,
+      workspaceDigest: null,
+      artifactPaths: [],
+      retryOf: retrySource?.attempt.id ?? null
+    };
+    await this.store.writeRunAttempt(state.runId, record);
+    try {
+      const result = await this.activity(
+        "Planning",
+        {
+          detail: modelActivityDetail(
+            config.models.planner,
+            attempt,
+            PHASE_SKILLS.Planning
+          ),
+          descriptor: phaseDescriptor(
+            config.models.planner,
+            resumeSessionId === null ? "fresh" : "resumed",
+            PHASE_SKILLS.Planning
+          )
+        },
+        async () =>
+          await this.invokeWithContext({
+            state,
+            attempt,
+            config,
+            settings: config.models.planner,
+            role: "planner",
+            sessionMode: resumeSessionId === null ? "fresh" : "resumed",
+            kind: "primary",
+            prompt,
+            outputIdentity: "phase-result/v3",
+            invoke: async (outputContract) =>
+              await this.adapters.runPhase({
+                repoRoot: this.repoRoot,
+                runDirectory: this.store.runDirectory(state.runId),
+                attemptId: attempt.id,
+                environment,
+                prompt: prompt.rendered,
+                promptEnvelope: prompt,
+                outputContract,
+                settings: config.models.planner,
+                resumeSessionId,
+                env: state.artifactBinding
+                  ? {
+                      ...process.env,
+                      BANZAI_RUN_ID: state.runId,
+                      BANZAI_APPROVAL_DIGEST: "",
+                      BANZAI_WORKFLOW_DIGEST: "",
+                      BANZAI_REVIEW_ARTIFACT: ""
+                    }
+                  : process.env,
+                onSessionStarted: async (sessionId) => {
+                  const current = await this.store.readState(state.runId);
+                  if (
+                    current.status === "cancelled" ||
+                    current.activeAttempt?.id !== attempt.id ||
+                    (resumeSessionId !== null &&
+                      resumeSessionId !== sessionId) ||
+                    (record.sessionId !== null &&
+                      record.sessionId !== sessionId)
+                  ) {
+                    throw new BanzaiError(
+                      "SESSION_ID_CONFLICT",
+                      "The planner session no longer matches the active attempt."
+                    );
+                  }
+                  record.sessionId = sessionId;
+                  await this.store.writeRunAttempt(state.runId, record);
+                },
+                onStart: async (pid) => {
+                  await this.processStarted(state, attempt, pid);
+                },
+                onProgress: (event) => {
+                  this.modelProgress("Planning", event);
+                },
+                onTerminalSuccess: this.terminalCheckpointWriter(
+                  state,
+                  attempt,
+                  config.models.planner,
+                  {
+                    sessionMode: resumeSessionId === null ? "fresh" : "resumed",
+                    sessionContext: sessionContext(
+                      "planner",
+                      config.models.planner
+                    )
+                  }
+                )
+              })
+          })
+      );
+      await this.persistAdapterResult(state, record, result);
+      // A malformed Implementation Tasks heading fails the attempt here,
+      // before it completes, so the failure stays retryable and the plan
+      // stays the planner's to fix — never discovered post-approval on an
+      // immutable bundle where only rerunning planning could correct it.
+      await this.validatePlanningResult(result.result);
+      if (!(await this.completeAttempt(state, record, result))) {
+        return await this.store.readState(state.runId);
+      }
+      try {
+        return await this.applyPhaseResult(
+          state,
+          attempt,
+          result.result,
+          result.sessionId ?? resumeSessionId,
+          sessionContext("planner", config.models.planner)
+        );
+      } catch (error) {
+        if (
+          error instanceof TerminalRunStateError ||
+          error instanceof ProjectSetupRequiredError
+        )
+          throw error;
+        state.activeAttempt = null;
+        blockState(state, errorMessage(error));
+        await this.store.writeState(state);
+        return state;
+      }
+    } catch (error) {
+      if (
+        error instanceof TerminalRunStateError ||
+        error instanceof ProjectSetupRequiredError
+      )
+        throw error;
+      // Capture the stopped workspace, not the pre-planning tree: planning may
+      // have written documentation. Missing evidence only disables cache reuse.
+      try {
+        const snapshot = await workspaceSnapshot(this.repoRoot, {
+          artifactBinding: state.artifactBinding
+        });
+        record.planningContext.workspaceDigest =
+          snapshot.baseCommit === state.baseCommit ? snapshot.digest : null;
+        record.planningContext.artifactPaths = snapshot.entries
+          .filter(
+            (entry) =>
+              entry.kind === "file" &&
+              (entry.path.startsWith("documentation/") ||
+                entry.path === "PROJECT_MANIFEST.md" ||
+                this.artifactWritePaths(state, "plan").includes(entry.path)) &&
+              entry.path.length <= 300
+          )
+          .map((entry) => entry.path)
+          .slice(0, 128);
+      } catch {
+        record.planningContext.workspaceDigest = null;
+      }
+      return await this.failAttempt(state, record, error);
+    }
+  }
+
+  private async executeImplementation(
+    state: RunState,
+    config: OrchestratorConfig,
+    recovery: RecoveryAuthorization | null = null,
+    commitTransition?: () => Promise<void>
+  ): Promise<RunState> {
+    if (!(await hasRunnerWorkOwnership(this.repoRoot, state.artifactBinding)))
+      return withRunnerWorkOwnership(this.repoRoot, state.artifactBinding, () =>
+        this.executeImplementation(state, config, recovery, commitTransition)
+      );
+    requireState(state, ["plan_approved", "implementing"], "Implementation");
+    await this.assertProjectGuidance();
+    const route = state.workflowSelection?.workflow ?? "strict";
+    const lite = route !== "strict";
+    if (recovery === null) {
+      await this.activity(
+        "Implementation checks",
+        `base commit, ${lite ? "persisted workflow selection" : "approved plan bundle"}, and ${config.models.implementer.executable} subscription authentication`,
+        async () => {
+          await this.validateBaseCommit(state);
+          if (lite) {
+            this.validateWorkflowSelection(state);
+          } else {
+            await this.validateApproval(state);
+          }
+          await this.preflightVendor("implementer", config.models.implementer);
+        }
+      );
+    }
+    const implementerBinding = sessionBindingMatches(
+      state.sessions.implementer,
+      config.models.implementer,
+      "implementer"
+    )
+      ? state.sessions.implementer
+      : null;
+    const plannerBinding =
+      !lite &&
+      sessionBindingMatches(
+        state.sessions.planner,
+        config.models.implementer,
+        "planner"
+      )
+        ? state.sessions.planner
+        : null;
+    const resumeSessionId =
+      implementerBinding?.id ?? plannerBinding?.id ?? null;
+    await this.beforeModelAttempt(commitTransition);
+    if (state.status === "plan_approved") {
+      transitionState(state, "implementing");
+      await this.store.writeState(state);
+    }
+    const attempt =
+      recovery === null
+        ? this.newAttempt(state, "implementation", true)
+        : this.recoveryAttempt(recovery);
+    const policy: AttemptPolicy = {
+      sessionMode: resumeSessionId === null ? "fresh" : "resumed",
+      resumeSessionId,
+      sessionContext: sessionContext("implementer", config.models.implementer)
+    };
+    const record =
+      recovery === null
+        ? await this.beginAttempt(state, attempt, policy)
+        : await this.beginRecoveryAttempt(state, recovery, policy);
+    try {
+      const approval = state.planApproval;
+      const selection = lite ? this.validateWorkflowSelection(state) : null;
+      if (!lite && approval === null) {
+        throw new BanzaiError("PLAN_NOT_APPROVED", "Plan approval is missing.");
+      }
+      const basePrompt =
+        selection === null
+          ? implementationPromptEnvelope(
+              state.slug,
+              approval?.digest ?? "",
+              approval?.paths ?? [],
+              config.verification.profiles,
+              await this.approvedTaskIds(state),
+              state.planTaskCompletion?.status === "invalid"
+                ? {
+                    sourceAttemptId: state.planTaskCompletion.sourceAttemptId,
+                    violation: state.planTaskCompletion.violation,
+                    taskId: state.planTaskCompletion.taskId,
+                    diagnostic: await this.completionRepairDiagnostic(
+                      state,
+                      state.planTaskCompletion.sourceAttemptId,
+                      state.planTaskCompletion.sourceAttemptKind ??
+                        "implementation"
+                    )
+                  }
+                : null,
+              state.humanDecisions ?? []
+            )
+          : liteImplementationPromptEnvelope(
+              state.slug,
+              state.request,
+              selection.workflow,
+              selection.digest,
+              config.verification.profiles,
+              state.humanDecisions ?? []
+            );
+      const prompt =
+        recovery === null
+          ? basePrompt
+          : recoveryPromptEnvelope(
+              basePrompt,
+              recovery.attempt.id,
+              "implementation"
+            );
+      const authorizationEnvironment =
+        selection === null
+          ? { BANZAI_APPROVAL_DIGEST: approval?.digest ?? "" }
+          : { BANZAI_WORKFLOW_DIGEST: selection.digest };
+      // Resolved before the phase banner: the invocation scope carries the
+      // run-level MCP whitelist, which reports on first resolution and would
+      // otherwise print as if it were the phase's own first action.
+      const environment = await this.invocationScope(state.runId, config);
+      const invocationPrompt = appendPromptComponent(
+        prompt,
+        "phase_instructions",
+        this.serenaGuidanceFor(
+          environment,
+          config.models.implementer.executable
+        ) + this.artifactInstructions(state, attempt.kind)
+      );
+      const result = await this.activity(
+        "Implementation",
+        {
+          detail: modelActivityDetail(
+            config.models.implementer,
+            attempt,
+            selection === null
+              ? PHASE_SKILLS.Implementation
+              : workflowSkills(selection.workflow)
+          ),
+          descriptor: phaseDescriptor(
+            config.models.implementer,
+            resumeSessionId === null ? "fresh" : "resumed",
+            selection === null
+              ? PHASE_SKILLS.Implementation
+              : workflowSkills(selection.workflow)
+          )
+        },
+        async () =>
+          await this.invokeWithContext({
+            state,
+            attempt,
+            config,
+            settings: config.models.implementer,
+            role: "implementer",
+            sessionMode: resumeSessionId === null ? "fresh" : "resumed",
+            kind: "primary",
+            prompt: invocationPrompt,
+            outputIdentity: "phase-result/v3",
+            invoke: async (outputContract) =>
+              await this.adapters.runPhase({
+                repoRoot: this.repoRoot,
+                runDirectory: this.store.runDirectory(state.runId),
+                attemptId: attempt.id,
+                environment,
+                prompt: invocationPrompt.rendered,
+                promptEnvelope: invocationPrompt,
+                outputContract,
+                settings: config.models.implementer,
+                resumeSessionId,
+                env: {
+                  ...process.env,
+                  BANZAI_RUN_ID: state.runId,
+                  ...authorizationEnvironment
+                },
+                onStart: async (pid) => {
+                  await this.processStarted(state, attempt, pid);
+                },
+                onProgress: (event) => {
+                  this.modelProgress("Implementation", event);
+                },
+                onTerminalSuccess: this.terminalCheckpointWriter(
+                  state,
+                  attempt,
+                  config.models.implementer,
+                  {
+                    sessionMode: resumeSessionId === null ? "fresh" : "resumed",
+                    sessionContext: sessionContext(
+                      "implementer",
+                      config.models.implementer
+                    )
+                  }
+                )
+              })
+          })
+      );
+      if (result.result.phase !== "implementation") {
+        throw new BanzaiError(
+          "PHASE_RESULT_MISMATCH",
+          `Attempt implementation returned phase ${result.result.phase}.`
+        );
+      }
+      if (selection === null) {
+        try {
+          if (
+            result.result.outcome === "completed" &&
+            result.result.gate === null
+          ) {
+            const validated = await this.validateImplementationCompletion(
+              state,
+              attempt,
+              result.result
+            );
+            state.planTaskCompletion = validated.summary;
+          } else {
+            validatePlanTaskCompletionLedgerShape(
+              await this.approvedTaskIds(state),
+              result.result.taskCompletion,
+              result.result.outcome
+            );
+          }
+        } catch (error) {
+          if (
+            error instanceof TerminalRunStateError ||
+            error instanceof ProjectSetupRequiredError
+          )
+            throw error;
+          if (!(error instanceof PlanTaskCompletionError)) {
+            throw error;
+          }
+          return await this.recordCompletionFailure(
+            state,
+            record,
+            result,
+            error,
+            sessionContext("implementer", config.models.implementer)
+          );
+        }
+      } else if (result.result.taskCompletion !== null) {
+        throw new BanzaiError(
+          "PLAN_TASK_COMPLETION_INVALID",
+          "Lite implementation must not return strict plan-task completion evidence."
+        );
+      }
+      if (!(await this.completeAttempt(state, record, result))) {
+        return await this.store.readState(state.runId);
+      }
+      try {
+        return await this.applyPhaseResult(
+          state,
+          attempt,
+          result.result,
+          result.sessionId ?? resumeSessionId,
+          sessionContext("implementer", config.models.implementer)
+        );
+      } catch (error) {
+        if (
+          error instanceof TerminalRunStateError ||
+          error instanceof ProjectSetupRequiredError
+        )
+          throw error;
+        state.activeAttempt = null;
+        blockState(state, errorMessage(error));
+        await this.store.writeState(state);
+        return state;
+      }
+    } catch (error) {
+      if (
+        error instanceof TerminalRunStateError ||
+        error instanceof ProjectSetupRequiredError
+      )
+        throw error;
+      return await this.failAttempt(state, record, error);
+    }
+  }
+
+  private async executeFix(
+    state: RunState,
+    config: OrchestratorConfig,
+    recovery: RecoveryAuthorization | null = null,
+    commitTransition?: () => Promise<void>
+  ): Promise<RunState> {
+    if (!(await hasRunnerWorkOwnership(this.repoRoot, state.artifactBinding)))
+      return withRunnerWorkOwnership(this.repoRoot, state.artifactBinding, () =>
+        this.executeFix(state, config, recovery, commitTransition)
+      );
+    requireState(state, ["fixing"], "Fix");
+    await this.assertProjectGuidance();
+    if (recovery === null) {
+      await this.activity(
+        "Fix checks",
+        `base commit, approved plan bundle, and ${config.models.implementer.executable} subscription authentication`,
+        async () => {
+          await this.validateBaseCommit(state);
+          await this.validateApproval(state);
+          await this.preflightVendor("implementer", config.models.implementer);
+        }
+      );
+    }
+    const review = await this.readLatestReview(state);
+    const acceptedIds = new Set(
+      state.triage?.items
+        .filter((item) => item.disposition === "accepted")
+        .map((item) => item.findingId) ?? []
+    );
+    let findings = review.findings.filter((finding) =>
+      acceptedIds.has(finding.id)
+    );
+    let prerequisiteRecovery: PrerequisiteBlockedFixScope | null = null;
+    if (recovery !== null) {
+      const sourceRecord = await this.store.readRunAttempt(
+        state.runId,
+        recovery.attempt
+      );
+      if (sourceRecord.status === "completed" && sourceRecord.result !== null) {
+        prerequisiteRecovery = await this.prerequisiteBlockedFixScope(
+          state,
+          sourceRecord,
+          false
+        );
+        if (prerequisiteRecovery.scopeDigest !== recovery.scopeDigest) {
+          throw new BanzaiError(
+            "RECOVERY_STALE",
+            "The completed blocked source scope changed before fix execution."
+          );
+        }
+        const remainingIds = new Set(prerequisiteRecovery.remainingFindingIds);
+        findings = review.findings.filter((finding) =>
+          remainingIds.has(finding.id)
+        );
+      }
+    }
+    if (findings.length === 0) {
+      throw new BanzaiError(
+        "EMPTY_FIX_SCOPE",
+        "Fixing requires at least one accepted finding."
+      );
+    }
+    const implementerBinding = sessionBindingMatches(
+      state.sessions.implementer,
+      config.models.implementer,
+      "implementer"
+    )
+      ? state.sessions.implementer
+      : null;
+    const resumeSessionId = implementerBinding?.id ?? null;
+    await this.beforeModelAttempt(commitTransition);
+    const attempt =
+      recovery === null
+        ? this.newAttempt(state, "fix", true)
+        : this.recoveryAttempt(recovery);
+    const policy: AttemptPolicy = {
+      sessionMode: resumeSessionId === null ? "fresh" : "resumed",
+      resumeSessionId,
+      sessionContext: sessionContext("implementer", config.models.implementer)
+    };
+    const record =
+      recovery === null
+        ? await this.beginAttempt(state, attempt, policy)
+        : await this.beginRecoveryAttempt(state, recovery, policy);
+    try {
+      const approval = state.planApproval;
+      if (approval === null) {
+        throw new BanzaiError("PLAN_NOT_APPROVED", "Plan approval is missing.");
+      }
+      // Resolved before the phase banner: the invocation scope carries the
+      // run-level MCP whitelist, which reports on first resolution and would
+      // otherwise print as if it were the phase's own first action.
+      const environment = await this.invocationScope(state.runId, config);
+      const fixCompletionRepair =
+        state.planTaskCompletion?.status === "invalid" &&
+        state.planTaskCompletion.sourceAttemptKind === "fix"
+          ? {
+              sourceAttemptId: state.planTaskCompletion.sourceAttemptId,
+              violation: state.planTaskCompletion.violation,
+              taskId: state.planTaskCompletion.taskId,
+              diagnostic: await this.completionRepairDiagnostic(
+                state,
+                state.planTaskCompletion.sourceAttemptId,
+                "fix"
+              )
+            }
+          : null;
+      const basePrompt = fixPromptEnvelope(
+        state.slug,
+        approval.digest,
+        findings,
+        config.verification.profiles,
+        state.latestReview?.artifactPath ?? null,
+        state.humanDecisions ?? [],
+        fixCompletionRepair
+      );
+      const recoveredPrompt =
+        recovery === null
+          ? basePrompt
+          : recoveryPromptEnvelope(
+              basePrompt,
+              recovery.attempt.id,
+              "fix",
+              prerequisiteRecovery === null
+                ? null
+                : {
+                    resolvedFindingIds: prerequisiteRecovery.resolvedFindingIds,
+                    remainingFindingIds:
+                      prerequisiteRecovery.remainingFindingIds,
+                    prerequisites: prerequisiteRecovery.prerequisites
+                  }
+            );
+      const invocationPrompt = appendPromptComponent(
+        recoveredPrompt,
+        "phase_instructions",
+        this.serenaGuidanceFor(
+          environment,
+          config.models.implementer.executable
+        ) + this.artifactInstructions(state, attempt.kind)
+      );
+      const result = await this.activity(
+        "Fix",
+        {
+          detail: `${modelActivityDetail(
+            config.models.implementer,
+            attempt,
+            PHASE_SKILLS.Fix
+          )} findings=${findings.length}`,
+          descriptor: phaseDescriptor(
+            config.models.implementer,
+            resumeSessionId === null ? "fresh" : "resumed",
+            PHASE_SKILLS.Fix
+          )
+        },
+        async () =>
+          await this.invokeWithContext({
+            state,
+            attempt,
+            config,
+            settings: config.models.implementer,
+            role: "implementer",
+            sessionMode: resumeSessionId === null ? "fresh" : "resumed",
+            kind: "primary",
+            prompt: invocationPrompt,
+            outputIdentity: "phase-result/v3",
+            invoke: async (outputContract) =>
+              await this.adapters.runPhase({
+                repoRoot: this.repoRoot,
+                runDirectory: this.store.runDirectory(state.runId),
+                attemptId: attempt.id,
+                environment,
+                prompt: invocationPrompt.rendered,
+                promptEnvelope: invocationPrompt,
+                outputContract,
+                settings: config.models.implementer,
+                resumeSessionId,
+                env: {
+                  ...process.env,
+                  BANZAI_RUN_ID: state.runId,
+                  BANZAI_APPROVAL_DIGEST: approval.digest
+                },
+                onStart: async (pid) => {
+                  await this.processStarted(state, attempt, pid);
+                },
+                onProgress: (event) => {
+                  this.modelProgress("Fix", event);
+                },
+                onTerminalSuccess: this.terminalCheckpointWriter(
+                  state,
+                  attempt,
+                  config.models.implementer,
+                  {
+                    sessionMode: resumeSessionId === null ? "fresh" : "resumed",
+                    sessionContext: sessionContext(
+                      "implementer",
+                      config.models.implementer
+                    )
+                  }
+                )
+              })
+          })
+      );
+      if (result.result.taskCompletion !== null) {
+        // ADR 0025: an accepted-finding fix may refresh the canonical ledger
+        // when its own changes made the recorded evidence stale. The identical
+        // fail-closed validation applies — approved task set and order,
+        // evidence inside the authorized changed surface, projection parity —
+        // and a completed fix outcome still requires every task completed, so
+        // a status downgrade cannot ride in as a refresh.
+        try {
+          const validated = await validatePlanTaskCompletion({
+            repoRoot: this.repoRoot,
+            artifactBinding: state.artifactBinding,
+            sourceAttemptId: attempt.id,
+            result: result.result,
+            planPath: this.completionPlanPath(state),
+            approval,
+            baseline: state.baseline
+          });
+          state.planTaskCompletion = {
+            ...validated.summary,
+            sourceAttemptKind: "fix"
+          };
+          await this.store.appendEvent(
+            state.runId,
+            "plan_task_completion.refreshed",
+            {
+              attemptId: attempt.id,
+              ledgerDigest: validated.summary.ledgerDigest
+            }
+          );
+        } catch (error) {
+          if (
+            error instanceof TerminalRunStateError ||
+            error instanceof ProjectSetupRequiredError
+          )
+            throw error;
+          if (error instanceof PlanTaskCompletionError) {
+            return await this.recordCompletionFailure(
+              state,
+              record,
+              result,
+              error,
+              sessionContext("implementer", config.models.implementer)
+            );
+          }
+          throw error;
+        }
+      }
+      if (!(await this.completeAttempt(state, record, result))) {
+        return await this.store.readState(state.runId);
+      }
+      try {
+        return await this.applyPhaseResult(
+          state,
+          attempt,
+          result.result,
+          result.sessionId ?? resumeSessionId,
+          sessionContext("implementer", config.models.implementer)
+        );
+      } catch (error) {
+        if (
+          error instanceof TerminalRunStateError ||
+          error instanceof ProjectSetupRequiredError
+        )
+          throw error;
+        state.activeAttempt = null;
+        blockState(state, errorMessage(error));
+        await this.store.writeState(state);
+        return state;
+      }
+    } catch (error) {
+      if (
+        error instanceof TerminalRunStateError ||
+        error instanceof ProjectSetupRequiredError
+      )
+        throw error;
+      return await this.failAttempt(state, record, error);
+    }
+  }
+
+  /**
+   * Names what a phase produced, once. The artifacts and the task ledger are
+   * known only when the result parses, so this is a completion summary rather
+   * than live progress: neither vendor streams either of them.
+   */
+  private reportPhaseOutcome(
+    kind: AttemptReference["kind"],
+    result: PersistedPhaseResult
+  ): void {
+    // Verb-leading clauses, so the sentence reads whichever parts are present:
+    // a noun-phrase list produces "Produced 27 files changed".
+    const clauses: string[] = [];
+    if (kind === "plan") {
+      const written: string[] = [];
+      if (result.artifacts.description !== null) {
+        written.push("a description");
+      }
+      const adrs = result.artifacts.adrs.length;
+      if (adrs > 0) {
+        written.push(adrs === 1 ? "an ADR" : `${adrs} ADRs`);
+      }
+      if (result.artifacts.plan !== null) {
+        written.push("a plan");
+      }
+      if (written.length > 0) {
+        clauses.push(`wrote ${listPhrase(written)}`);
+      }
+    } else {
+      const tasks = result.taskCompletion?.tasks ?? [];
+      if (tasks.length > 0) {
+        const completed = tasks.filter(
+          (task) => task.status === "completed"
+        ).length;
+        clauses.push(`completed ${completed}/${tasks.length} plan tasks`);
+      }
+      const reports: string[] = [];
+      if (result.artifacts.implementationReport !== null) {
+        reports.push("an implementation report");
+      }
+      if (result.artifacts.testReport !== null) {
+        reports.push("a test report");
+      }
+      if (reports.length > 0) {
+        clauses.push(`wrote ${listPhrase(reports)}`);
+      }
+      const touched = result.touchedPaths.length;
+      if (touched > 0) {
+        clauses.push(`changed ${touched} file${touched === 1 ? "" : "s"}`);
+      }
+    }
+    const sentence = clauses.join(", ");
+    if (sentence.length > 0) {
+      this.info(`${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}`);
+    }
+  }
+
+  private async applyPhaseResult(
+    state: RunState,
+    attempt: AttemptReference,
+    result: PersistedPhaseResult,
+    sessionId: string | null,
+    context: SessionContext
+  ): Promise<RunState> {
+    this.validateArtifactRoleReferences(state, result);
+    if (result.phase !== attempt.kind) {
+      throw new BanzaiError(
+        "PHASE_RESULT_MISMATCH",
+        `Attempt ${attempt.kind} returned phase ${result.phase}.`
+      );
+    }
+    this.reportPhaseOutcome(attempt.kind, result);
+    if (attempt.kind === "plan") {
+      state.sessions.planner = sessionBinding(sessionId, {
+        ...context,
+        role: "planner"
+      });
+      state.planArtifacts = result.artifacts;
+      if (result.outcome === "blocked") {
+        blockState(state, result.summary);
+      } else if (result.gate === "adr_approval") {
+        transitionState(state, "needs_adr_approval");
+      } else if (result.gate === "decision_consultation") {
+        const request =
+          "decisionConsultation" in result ? result.decisionConsultation : null;
+        if (request === null) {
+          throw new BanzaiError(
+            "INVALID_RESULT",
+            "Decision consultation gate is missing its typed request."
+          );
+        }
+        const priorRequestIds = new Set<string>();
+        const priorRoundIds = new Set<string>();
+        const priorDecisionIds = new Set<string>();
+        for (const decision of state.humanDecisions ?? []) {
+          if (decision.kind !== "decision_consultation") continue;
+          priorRequestIds.add(decision.requestId);
+          priorRoundIds.add(decision.roundId);
+          for (const card of decision.request.decisions) {
+            priorDecisionIds.add(card.decisionId);
+          }
+        }
+        if (
+          priorRequestIds.has(request.requestId) ||
+          priorRoundIds.has(request.roundId) ||
+          request.decisions.some((card) =>
+            priorDecisionIds.has(card.decisionId)
+          )
+        ) {
+          throw new BanzaiError(
+            "INVALID_RESULT",
+            "Decision consultation reused an answered request, round, or decision identity."
+          );
+        }
+        state.pendingHumanDecision = {
+          kind: "decision_consultation",
+          phase: "plan",
+          gate: "decision_consultation",
+          summary: result.summary,
+          request,
+          requestedAt: now()
+        };
+        transitionState(state, "needs_human_decision");
+      } else if (result.gate === "escalation") {
+        state.pendingHumanDecision = {
+          kind: "escalation",
+          phase: "plan",
+          gate: result.gate,
+          summary: result.summary,
+          questions: result.questions,
+          requestedAt: now()
+        };
+        transitionState(state, "needs_human_decision");
+      } else {
+        artifactPaths(state);
+        transitionState(state, "needs_plan_approval");
+      }
+    } else {
+      state.sessions.implementer = sessionBinding(sessionId, {
+        ...context,
+        role: "implementer"
+      });
+      if (result.outcome === "needs_human_decision" && result.gate !== null) {
+        if (result.gate !== "escalation") {
+          throw new BanzaiError(
+            "INVALID_RESULT",
+            "Only escalation is valid outside the planning consultation gate."
+          );
+        }
+        if (
+          attempt.kind === "implementation" &&
+          state.workflowSelection?.workflow !== undefined &&
+          state.workflowSelection.workflow !== "strict"
+        ) {
+          const snapshot = await workspaceSnapshot(this.repoRoot, {
+            artifactBinding: state.artifactBinding,
+            baseline: state.baseline
+          });
+          const sourceChanges = snapshot.entries
+            .map((entry) => entry.path)
+            .filter(
+              (entryPath) =>
+                !isDocumentationPath(entryPath) &&
+                !(
+                  state.artifactBinding &&
+                  ownsArtifact(state.artifactBinding.binding, entryPath)
+                )
+            );
+          if (sourceChanges.length > 0) {
+            blockState(
+              state,
+              `Lite workflow requested escalation after source changes: ${sourceChanges.join(", ")}. Inspect the checkout and cancel the run.`
+            );
+            state.activeAttempt = null;
+            await this.store.writeState(state);
+            return state;
+          }
+        }
+        state.pendingHumanDecision = {
+          kind: "escalation",
+          phase: attempt.kind,
+          gate: result.gate,
+          summary: result.summary,
+          questions: result.questions,
+          requestedAt: now()
+        };
+        transitionState(state, "needs_human_decision");
+      } else if (result.outcome !== "completed" || result.gate !== null) {
+        blockState(state, result.summary);
+      } else {
+        if (attempt.kind === "fix") {
+          state.fixCycle += 1;
+        }
+        transitionState(state, "verifying");
+        state.verification = [];
+      }
+    }
+    state.activeAttempt = null;
+    await this.store.writeState(state);
+    const timingEvent = await this.store.appendEvent(
+      state.runId,
+      "attempt.applied",
+      {
+        attemptId: attempt.id,
+        kind: attempt.kind,
+        outcome: result.outcome,
+        gate: result.gate,
+        status: state.status
+      }
+    );
+    await this.observeHumanTime(
+      state,
+      "gate_pending",
+      "attempt.applied",
+      timingEvent.at,
+      attempt.id
+    );
+    if (
+      state.pendingHumanDecision?.kind === "decision_consultation" &&
+      state.pendingHumanDecision.request.requestId ===
+        ("decisionConsultation" in result
+          ? result.decisionConsultation?.requestId
+          : undefined)
+    ) {
+      await this.store.appendEvent(
+        state.runId,
+        "decision.consultation.requested",
+        {
+          cardCount: state.pendingHumanDecision.request.decisions.length,
+          completion: "pending"
+        }
+      );
+    }
+    if (state.status === "verifying") {
+      return await this.executeVerification(
+        state,
+        await loadConfig(this.repoRoot),
+        attempt.kind === "implementation" || attempt.kind === "fix"
+          ? attempt
+          : undefined
+      );
+    }
+    return state;
+  }
+
+  private async verificationSourceAttempt(
+    state: RunState,
+    records: readonly VerificationAttemptRecord[],
+    sourceAttempt?: AttemptReference
+  ): Promise<AttemptReference & { kind: "implementation" | "fix" }> {
+    if (
+      sourceAttempt !== undefined &&
+      (sourceAttempt.kind === "implementation" || sourceAttempt.kind === "fix")
+    ) {
+      return {
+        id: sourceAttempt.id,
+        kind: sourceAttempt.kind,
+        mutable: sourceAttempt.mutable
+      };
+    }
+    const latest = records.at(-1);
+    if (latest !== undefined) {
+      return {
+        id: latest.round.sourceAttemptId,
+        kind: latest.round.sourceAttemptKind,
+        mutable: true
+      };
+    }
+    for (const attemptId of [...state.metrics.completedAttemptIds].reverse()) {
+      for (const kind of ["fix", "implementation"] as const) {
+        const attempt = { id: attemptId, kind, mutable: true };
+        const record = await this.store.readRunAttemptIfExists(
+          state.runId,
+          attempt
+        );
+        if (record?.status === "completed") {
+          return attempt;
+        }
+      }
+    }
+    throw new BanzaiError(
+      "VERIFICATION_ROUND_SOURCE_MISSING",
+      "Verification cannot identify its completed implementation or fix attempt."
+    );
+  }
+
+  private verificationRound(
+    records: readonly VerificationAttemptRecord[],
+    sourceAttempt: AttemptReference & { kind: "implementation" | "fix" }
+  ): VerificationAttemptRecord["round"] {
+    const existing = records.find(
+      (record) => record.round.sourceAttemptId === sourceAttempt.id
+    );
+    if (existing !== undefined) {
+      if (existing.round.sourceAttemptKind !== sourceAttempt.kind) {
+        throw new BanzaiError(
+          "VERIFICATION_ATTEMPT_CONFLICT",
+          "Verification round source identity has conflicting kinds."
+        );
+      }
+      return existing.round;
+    }
+    const roundIds = new Set(records.map((record) => record.round.id));
+    return {
+      id: `verification-round-${sourceAttempt.id}`,
+      ordinal: roundIds.size + 1,
+      sourcePhase: sourceAttempt.kind,
+      sourceAttemptId: sourceAttempt.id,
+      sourceAttemptKind: sourceAttempt.kind
+    };
+  }
+
+  private reconcileVerificationState(
+    state: RunState,
+    records: readonly VerificationAttemptRecord[],
+    round: VerificationAttemptRecord["round"],
+    descriptors: readonly VerificationCommandDescriptor[]
+  ): void {
+    const byIdentity = new Map(
+      descriptors.map((descriptor) => [
+        `${descriptor.profileOrdinal}:${descriptor.commandOrdinal}`,
+        descriptor
+      ])
+    );
+    const roundRecords = records.filter((item) => item.round.id === round.id);
+    for (const record of roundRecords) {
+      const descriptor = byIdentity.get(
+        `${record.command.profileOrdinal}:${record.command.commandOrdinal}`
+      );
+      if (
+        descriptor === undefined ||
+        !verificationCommandMatches(record, descriptor)
+      ) {
+        throw new BanzaiError(
+          "VERIFICATION_CONFIGURATION_CHANGED",
+          "Configured verification commands changed during an open verification round."
+        );
+      }
+    }
+    const retained: VerificationResult[] = [];
+    for (const descriptor of descriptors) {
+      const record = roundRecords
+        .filter(
+          (item) =>
+            item.command.profileOrdinal === descriptor.profileOrdinal &&
+            item.command.commandOrdinal === descriptor.commandOrdinal &&
+            (item.status === "completed" || item.status === "failed") &&
+            item.exitCode !== null &&
+            item.completedAt !== null &&
+            item.stdout !== null &&
+            item.stderr !== null
+        )
+        .at(-1);
+      if (record === undefined) {
+        continue;
+      }
+      if (
+        record.exitCode === null ||
+        record.completedAt === null ||
+        record.stdout === null ||
+        record.stderr === null
+      ) {
+        continue;
+      }
+      retained.push({
+        name: descriptor.command.name,
+        command: descriptor.command.command,
+        args: descriptor.command.args,
+        exitCode: record.exitCode,
+        signal: record.signal,
+        stdoutPath: record.stdout.relativePath,
+        stderrPath: record.stderr.relativePath,
+        startedAt: record.startedAt,
+        completedAt: record.completedAt
+      });
+    }
+    state.metrics.attempts.verification = records.length;
+    state.verification = retained;
+  }
+
+  private async executeVerification(
+    state: RunState,
+    config: OrchestratorConfig,
+    sourceAttempt?: AttemptReference,
+    retryOf?: string,
+    commitTransition?: () => Promise<void>
+  ): Promise<RunState> {
+    if (!(await hasRunnerWorkOwnership(this.repoRoot, state.artifactBinding)))
+      return withRunnerWorkOwnership(this.repoRoot, state.artifactBinding, () =>
+        this.executeVerification(
+          state,
+          config,
+          sourceAttempt,
+          retryOf,
+          commitTransition
+        )
+      );
+    requireState(state, ["verifying"], "Verification");
+    await this.beforeModelAttempt(commitTransition);
+    if ((state.workflowSelection?.workflow ?? "strict") === "strict") {
+      try {
+        await this.revalidateTaskCompletion(
+          state,
+          sourceAttempt?.kind === "fix"
+        );
+      } catch (error) {
+        if (
+          error instanceof TerminalRunStateError ||
+          error instanceof ProjectSetupRequiredError
+        )
+          throw error;
+        return await this.blockForCompletionFailure(
+          state,
+          state.planTaskCompletion?.sourceAttemptId ??
+            sourceAttempt?.id ??
+            "legacy",
+          error
+        );
+      }
+    }
+    if (!(await this.store.verificationLedgerSupported(state.runId))) {
+      return await this.executeLegacyVerification(state, config);
+    }
+    let records = await this.store.readVerificationAttempts(state.runId);
+    const source = await this.verificationSourceAttempt(
+      state,
+      records,
+      sourceAttempt
+    );
+    const round = this.verificationRound(records, source);
+    const descriptors = describeVerificationCommands(config);
+    if (
+      retryOf !== undefined &&
+      !records.some(
+        (record) =>
+          record.id === retryOf &&
+          record.round.id === round.id &&
+          record.status === "failed"
+      )
+    ) {
+      blockState(
+        state,
+        "The requested verification retry does not match a failed attempt in the open round."
+      );
+      await this.store.writeState(state);
+      return state;
+    }
+    try {
+      this.reconcileVerificationState(state, records, round, descriptors);
+    } catch (error) {
+      if (
+        error instanceof TerminalRunStateError ||
+        error instanceof ProjectSetupRequiredError
+      )
+        throw error;
+      state.activeProcess = null;
+      blockState(state, errorMessage(error));
+      await this.store.writeState(state);
+      return state;
+    }
+    await this.store.writeState(state);
+
+    for (let index = 0; index < descriptors.length; index += 1) {
+      const descriptor = descriptors[index];
+      if (descriptor === undefined) {
+        continue;
+      }
+      const command = descriptor.command;
+      const commandRecords = records.filter(
+        (record) =>
+          record.round.id === round.id &&
+          record.command.profileOrdinal === descriptor.profileOrdinal &&
+          record.command.commandOrdinal === descriptor.commandOrdinal
+      );
+      if (
+        commandRecords.some(
+          (record) => record.status === "completed" && record.exitCode === 0
+        )
+      ) {
+        continue;
+      }
+      const failed = [...commandRecords]
+        .reverse()
+        .find((record) => record.status === "failed");
+      const retryingFailed = failed !== undefined && failed.id === retryOf;
+      if (failed !== undefined && !retryingFailed) {
+        blockState(
+          state,
+          failed.exitCode === null
+            ? `Verification "${command.name}" could not run.`
+            : `Verification "${command.name}" failed with exit code ${failed.exitCode}.`
+        );
+        state.activeProcess = null;
+        await this.store.writeState(state);
+        return state;
+      }
+      const started = commandRecords.find(
+        (record) => record.status === "started"
+      );
+      let restartOf: string | null = null;
+      if (started !== undefined) {
+        if (
+          state.activeProcess?.kind === "verification" &&
+          this.store.processAlive(state.activeProcess.pid)
+        ) {
+          blockState(
+            state,
+            "A recorded verification process is still live; recovery will not start a duplicate command."
+          );
+          await this.store.writeState(state);
+          return state;
+        }
+        const interrupted = terminalVerificationRecord(started, {
+          status: "interrupted",
+          completedAt: now(),
+          exitCode: null,
+          signal: null,
+          failureCategory: "runner_failure",
+          stdout: null,
+          stderr: null
+        });
+        await this.store.finishVerificationAttempt(state.runId, interrupted);
+        await this.store.appendEvent(state.runId, "verification.interrupted", {
+          attemptId: interrupted.id,
+          sequence: interrupted.sequence,
+          roundId: round.id
+        });
+        restartOf = interrupted.id;
+        state.activeProcess = null;
+        records = await this.store.readVerificationAttempts(state.runId);
+        this.reconcileVerificationState(state, records, round, descriptors);
+        await this.store.writeState(state);
+      }
+
+      const record = await this.store.beginVerificationAttempt(state.runId, {
+        round,
+        descriptor,
+        startedAt: now(),
+        retryOf: retryingFailed ? failed.id : null,
+        restartOf
+      });
+      records = [...records, record].sort(
+        (left, right) => left.sequence - right.sequence
+      );
+      state.metrics.attempts.verification = records.length;
+      await this.store.writeState(state);
+      await this.store.appendEvent(state.runId, "verification.started", {
+        attemptId: record.id,
+        sequence: record.sequence,
+        roundId: round.id,
+        profileId: descriptor.profileId,
+        profileOrdinal: descriptor.profileOrdinal,
+        commandOrdinal: descriptor.commandOrdinal,
+        restartOf
+      });
+      let result;
+      try {
+        result = await this.activity(
+          `Verification ${index + 1}/${descriptors.length}`,
+          `${command.name}: ${commandDisplay(command.command, command.args)}`,
+          async () =>
+            await this.processRunner({
+              command: command.command,
+              args: command.args,
+              cwd: this.repoRoot,
+              env: subscriptionOnlyEnvironment(),
+              timeoutMs: command.timeoutMs,
+              onStart: async (pid) => {
+                await this.processStarted(state, { kind: "verification" }, pid);
+              }
+            }),
+          (processResult) => processResult.exitCode === 0
+        );
+      } catch (error) {
+        const current = await this.store.readState(state.runId);
+        const interrupted = current.status === "cancelled";
+        const terminal = terminalVerificationRecord(record, {
+          status: interrupted ? "interrupted" : "failed",
+          completedAt: now(),
+          exitCode: null,
+          signal: null,
+          failureCategory: verificationFailureCategory(error),
+          stdout: null,
+          stderr: null
+        });
+        await this.store.finishVerificationAttempt(state.runId, terminal);
+        if (current.status === "cancelled") {
+          return current;
+        }
+        records = await this.store.readVerificationAttempts(state.runId);
+        this.reconcileVerificationState(state, records, round, descriptors);
+        state.activeProcess = null;
+        blockState(
+          state,
+          `Verification "${command.name}" could not run: ${errorMessage(error)}`
+        );
+        await this.store.writeState(state);
+        return state;
+      }
+      const logStem = `${String(record.sequence).padStart(6, "0")}-${command.name.replace(/[^a-z0-9]+/gi, "-")}`;
+      const stdoutEvidence = await this.store.writeVerificationLog(
+        state.runId,
+        `verification/${logStem}.stdout.log`,
+        redactSensitiveText(result.stdout)
+      );
+      const stderrEvidence = await this.store.writeVerificationLog(
+        state.runId,
+        `verification/${logStem}.stderr.log`,
+        redactSensitiveText(result.stderr)
+      );
+      const terminal = terminalVerificationRecord(record, {
+        status: result.exitCode === 0 ? "completed" : "failed",
+        completedAt: result.completedAt,
+        exitCode: result.exitCode,
+        signal: result.signal,
+        failureCategory: result.exitCode === 0 ? null : "command_exit",
+        stdout: stdoutEvidence,
+        stderr: stderrEvidence
+      });
+      await this.store.finishVerificationAttempt(state.runId, terminal);
+      const current = await this.store.readState(state.runId);
+      if (current.status === "cancelled") {
+        return current;
+      }
+      records = await this.store.readVerificationAttempts(state.runId);
+      this.reconcileVerificationState(state, records, round, descriptors);
+      state.activeProcess = null;
+      await this.store.writeState(state);
+      await this.store.appendEvent(state.runId, "verification.completed", {
+        attemptId: terminal.id,
+        sequence: terminal.sequence,
+        roundId: round.id,
+        status: terminal.status,
+        exitCode: result.exitCode,
+        signal: result.signal
+      });
+      if (result.exitCode !== 0) {
+        blockState(
+          state,
+          `Verification "${command.name}" failed with exit code ${result.exitCode}.`
+        );
+        await this.store.writeState(state);
+        return state;
+      }
+    }
+    const workflow = state.workflowSelection?.workflow ?? "strict";
+    if (workflow !== "strict") {
+      transitionState(state, "done");
+      await this.store.writeState(state);
+      await this.store.appendEvent(state.runId, "run.completed", {
+        workflow,
+        verificationCount: state.verification.length
+      });
+      return state;
+    }
+    transitionState(state, "reviewing");
+    await this.store.writeState(state);
+    return await this.executeReview(state, config);
+  }
+
+  private async executeLegacyVerification(
+    state: RunState,
+    config: OrchestratorConfig
+  ): Promise<RunState> {
+    state.verification = [];
+    const commands = flattenVerificationCommands(config);
+    for (let index = 0; index < commands.length; index += 1) {
+      const command = commands[index];
+      if (command === undefined) {
+        continue;
+      }
+      const startedAt = now();
+      state.metrics.attempts.verification += 1;
+      let result;
+      try {
+        result = await this.activity(
+          `Verification ${index + 1}/${commands.length}`,
+          `${command.name}: ${commandDisplay(command.command, command.args)}`,
+          async () =>
+            await this.processRunner({
+              command: command.command,
+              args: command.args,
+              cwd: this.repoRoot,
+              env: subscriptionOnlyEnvironment(),
+              timeoutMs: command.timeoutMs,
+              onStart: async (pid) => {
+                await this.processStarted(state, { kind: "verification" }, pid);
+              }
+            }),
+          (processResult) => processResult.exitCode === 0
+        );
+      } catch (error) {
+        const current = await this.store.readState(state.runId);
+        if (current.status === "cancelled") {
+          return current;
+        }
+        state.activeProcess = null;
+        blockState(
+          state,
+          `Verification "${command.name}" could not run: ${errorMessage(error)}`
+        );
+        await this.store.writeState(state);
+        return state;
+      }
+      const current = await this.store.readState(state.runId);
+      if (current.status === "cancelled") {
+        return current;
+      }
+      const logStem = `${index + 1}-${command.name.replace(/[^a-z0-9]+/gi, "-")}`;
+      const stdoutRelative = `verification/${logStem}.stdout.log`;
+      const stderrRelative = `verification/${logStem}.stderr.log`;
+      await this.store.writeText(
+        state.runId,
+        stdoutRelative,
+        redactSensitiveText(result.stdout)
+      );
+      await this.store.writeText(
+        state.runId,
+        stderrRelative,
+        redactSensitiveText(result.stderr)
+      );
+      state.verification.push({
+        name: command.name,
+        command: command.command,
+        args: command.args,
+        exitCode: result.exitCode,
+        signal: result.signal,
+        stdoutPath: stdoutRelative,
+        stderrPath: stderrRelative,
+        startedAt,
+        completedAt: result.completedAt
+      });
+      state.activeProcess = null;
+      await this.store.writeState(state);
+      await this.store.appendEvent(state.runId, "verification.completed", {
+        name: command.name,
+        exitCode: result.exitCode,
+        signal: result.signal
+      });
+      if (result.exitCode !== 0) {
+        blockState(
+          state,
+          `Verification "${command.name}" failed with exit code ${result.exitCode}.`
+        );
+        await this.store.writeState(state);
+        return state;
+      }
+    }
+    const workflow = state.workflowSelection?.workflow ?? "strict";
+    if (workflow !== "strict") {
+      transitionState(state, "done");
+      await this.store.writeState(state);
+      await this.store.appendEvent(state.runId, "run.completed", {
+        workflow,
+        verificationCount: state.verification.length
+      });
+      return state;
+    }
+    transitionState(state, "reviewing");
+    await this.store.writeState(state);
+    return await this.executeReview(state, config);
+  }
+
+  private async executeReview(
+    state: RunState,
+    config: OrchestratorConfig,
+    commitTransition?: () => Promise<void>
+  ): Promise<RunState> {
+    if (!(await hasRunnerWorkOwnership(this.repoRoot, state.artifactBinding)))
+      return withRunnerWorkOwnership(this.repoRoot, state.artifactBinding, () =>
+        this.executeReview(state, config, commitTransition)
+      );
+    requireState(state, ["reviewing"], "Review");
+    await this.assertProjectGuidance();
+    let validatedCompletion: ValidatedPlanTaskCompletion;
+    try {
+      validatedCompletion = await this.revalidateTaskCompletion(state);
+    } catch (error) {
+      if (
+        error instanceof TerminalRunStateError ||
+        error instanceof ProjectSetupRequiredError
+      )
+        throw error;
+      return await this.blockForCompletionFailure(
+        state,
+        state.planTaskCompletion?.sourceAttemptId ?? "legacy",
+        error
+      );
+    }
+    const iteration = state.reviewIteration + 1;
+    const artifactPath = reviewArtifactPath(
+      state.slug,
+      iteration,
+      state.artifactBinding
+    );
+    let snapshot: Awaited<ReturnType<typeof workspaceSnapshot>>;
+    try {
+      snapshot = await this.activity(
+        "Review checks",
+        `base commit, approved plan bundle, workspace snapshot, and ${config.models.reviewer.executable} subscription authentication`,
+        async () => {
+          await this.validateBaseCommit(state);
+          await this.validateApproval(state);
+          await this.preflightVendor("reviewer", config.models.reviewer);
+          return await workspaceSnapshot(this.repoRoot, {
+            artifactBinding: state.artifactBinding,
+            excludedPaths: [artifactPath],
+            baseline: state.baseline
+          });
+        }
+      );
+    } catch (error) {
+      if (
+        error instanceof TerminalRunStateError ||
+        error instanceof ProjectSetupRequiredError
+      )
+        throw error;
+      const current = await this.store.readState(state.runId);
+      if (current.status === "cancelled") {
+        return current;
+      }
+      return await this.recordReviewCheckFailure(state, error);
+    }
+    const beforeDigest = snapshot.digest;
+    const reviewerVendor = vendorFor(config.models.reviewer.executable);
+    const environment = await this.invocationScope(state.runId, config, false);
+    const currentInvocationDigest =
+      reviewerVendor === "claude" ? invocationScopeDigest(environment) : null;
+    const policy = reviewExecutionPolicy(
+      state,
+      config.models.reviewer,
+      currentInvocationDigest
+    );
+    const changes =
+      policy.reviewMode === "delta" && state.sessions.reviewer !== null
+        ? workspaceChanges(
+            state.sessions.reviewer.lastSnapshot,
+            snapshot
+          ).filter((change) => change.path !== state.latestReview?.artifactPath)
+        : [];
+    await this.beforeModelAttempt(commitTransition);
+    await this.invocationScope(state.runId, config);
+    state.workspaceDigest = beforeDigest;
+    state.reviewIteration = iteration;
+    const attempt = this.newAttempt(state, "review", false);
+    const candidateAbsolutePath = this.store.reviewCandidatePath(
+      state.runId,
+      attempt
+    );
+    const candidatePath = path
+      .relative(this.repoRoot, candidateAbsolutePath)
+      .split(path.sep)
+      .join(path.posix.sep);
+    const candidateEvidencePath = path
+      .relative(this.store.runDirectory(state.runId), candidateAbsolutePath)
+      .split(path.sep)
+      .join(path.posix.sep);
+    const artifactMode: ReviewArtifactMode = "runner-rendered";
+    const artifact: ReviewArtifactContext = {
+      path: artifactPath,
+      candidatePath,
+      slug: state.slug,
+      iteration,
+      approvedArtifactPaths: state.planApproval?.paths ?? [],
+      workspaceDigest: beforeDigest,
+      verification: state.verification,
+      taskCompletion: {
+        approvalDigest: validatedCompletion.summary.approvalDigest,
+        ledgerDigest: validatedCompletion.summary.ledgerDigest,
+        planTaskDigest: validatedCompletion.summary.planTaskDigest,
+        completed: validatedCompletion.summary.counts.completed,
+        total: validatedCompletion.summary.counts.total,
+        implementationReport:
+          validatedCompletion.summary.implementationReport.path,
+        testReport: validatedCompletion.summary.testReport.path,
+        tasks: validatedCompletion.tasks
+      }
+    };
+    const record = await this.beginAttempt(state, attempt, policy);
+    const candidateEvidence: ReviewCandidateEvidence = {
+      source: artifactMode,
+      evidencePath: candidateEvidencePath,
+      intendedArtifactPath: artifactPath,
+      sha256: null,
+      validation: "pending",
+      validationCode: null,
+      validationError: null,
+      canonical: false
+    };
+    record.reviewCandidate = candidateEvidence;
+    await this.store.writeRunAttempt(state.runId, record);
+    try {
+      if (state.planApproval === null)
+        throw new BanzaiError(
+          "INVALID_REVIEW_SCOPE",
+          "Review requires an exact approved scope."
+        );
+      const frozen = sealReviewSnapshot({
+        schema: state.artifactBinding
+          ? "banzai-review-snapshot/v2"
+          : "banzai-review-snapshot/v1",
+        schemaVersion: state.artifactBinding ? 2 : 1,
+        ...(state.artifactBinding
+          ? { artifactBinding: state.artifactBinding }
+          : {}),
+        runId: state.runId,
+        attemptId: attempt.id,
+        outputContract: "review-result/v2",
+        baseCommit: state.baseCommit,
+        approval: state.planApproval,
+        approvedArtifacts: await reviewApprovedArtifacts(
+          this.repoRoot,
+          state.planApproval.paths
+        ),
+        workspace: snapshot,
+        reviewMode: policy.reviewMode,
+        changes,
+        anchor: state.latestReview,
+        fullReviewAnchor:
+          state.sessions.reviewer?.outputContract === "review-result/v2"
+            ? {
+                iteration: state.sessions.reviewer.lastFullIteration,
+                sessionId: state.sessions.reviewer.id,
+                approvalDigest: state.sessions.reviewer.approvalDigest,
+                outputContract: "review-result/v2"
+              }
+            : null,
+        triage: state.triageHistory,
+        requiredFindingIds:
+          state.triage?.items
+            .filter((item) => item.disposition === "accepted")
+            .map((item) => item.findingId) ?? [],
+        completionSource: {
+          ...validatedCompletion.summary,
+          sourceAttemptKind:
+            state.planTaskCompletion?.sourceAttemptKind ?? "implementation"
+        },
+        artifact
+      });
+      record.reviewContext = {
+        outputContract: "review-result/v2",
+        snapshotDigest: frozen.digest
+      };
+      await this.store.writeRunAttempt(state.runId, record);
+      await this.store.writeReviewSnapshot(state.runId, attempt, frozen);
+      artifact.snapshot = frozen;
+    } catch (error) {
+      return await this.failAttempt(state, record, error);
+    }
+    let result: AdapterResult<ReviewResult>;
+    let validatedCandidate: ValidatedReviewCandidate;
+    let inventoryChanged: boolean;
+    const invokeReviewer = async (
+      label: string,
+      detail: string | ActivityDetail,
+      prompt: PromptEnvelope,
+      resumeSessionId: string | null,
+      kind: "primary"
+    ): Promise<AdapterResult<ReviewResult>> =>
+      await this.activity(
+        label,
+        detail,
+        async () =>
+          await this.invokeWithContext({
+            state,
+            attempt,
+            config,
+            settings: config.models.reviewer,
+            role: "reviewer",
+            sessionMode: resumeSessionId === null ? "fresh" : "resumed",
+            kind,
+            prompt,
+            outputIdentity: "review-result/v2",
+            invoke: async (outputContract) =>
+              await this.adapters.runReview({
+                repoRoot: this.repoRoot,
+                runId: state.runId,
+                runDirectory: this.store.runDirectory(state.runId),
+                attemptId: attempt.id,
+                approvalDigest: state.planApproval?.digest ?? "",
+                artifact,
+                prompt: prompt.rendered,
+                promptEnvelope: prompt,
+                outputContract,
+                settings: config.models.reviewer,
+                resumeSessionId,
+                environment,
+                env: process.env,
+                onStart: async (pid) => {
+                  await this.processStarted(state, attempt, pid);
+                },
+                onProgress: (event) => {
+                  this.modelProgress(label, event);
+                },
+                onTerminalSuccess: this.terminalCheckpointWriter(
+                  state,
+                  attempt,
+                  config.models.reviewer,
+                  policy
+                )
+              })
+          })
+      );
+    const recordCandidateDigest = async (): Promise<void> => {
+      const contents = await readFile(candidateAbsolutePath, "utf8").catch(
+        () => null
+      );
+      if (contents === null) {
+        return;
+      }
+      await chmod(candidateAbsolutePath, 0o600);
+      candidateEvidence.sha256 = createHash("sha256")
+        .update(contents)
+        .digest("hex");
+      await this.store.writeRunAttempt(state.runId, record);
+    };
+    try {
+      result = await invokeReviewer(
+        `Review ${iteration}`,
+        {
+          detail: `${modelActivityDetail(
+            config.models.reviewer,
+            attempt,
+            PHASE_SKILLS.Review
+          )} session=${policy.sessionMode} review=${policy.reviewMode} rotation=${policy.rotationReason ?? "none"}`,
+          descriptor: phaseDescriptor(
+            config.models.reviewer,
+            policy.sessionMode,
+            PHASE_SKILLS.Review
+          )
+        },
+        appendPromptComponent(
+          reviewPromptEnvelope({
+            slug: state.slug,
+            iteration,
+            artifactMode,
+            reviewSnapshot: artifact.snapshot,
+            reviewArtifactPath: artifactPath,
+            reviewCandidatePath: candidatePath,
+            artifactPaths: state.planApproval.paths,
+            workspaceDigest: beforeDigest,
+            workspaceEntries: snapshot.entries,
+            evidenceRoot: this.store.runDirectory(state.runId),
+            verification: state.verification,
+            reviewMode: policy.reviewMode,
+            rotationReason: policy.rotationReason,
+            workspaceChanges: changes,
+            triageHistory: state.triageHistory,
+            taskCompletion: artifact.taskCompletion
+          }),
+          "phase_instructions",
+          this.serenaGuidanceFor(environment, config.models.reviewer.executable)
+        ),
+        policy.resumeSessionId,
+        "primary"
+      );
+      inventoryChanged = await this.recordInventoryDrift(state, policy, result);
+      await this.persistAdapterResult(state, record, result);
+      result.result = parseCurrentReviewResult(result.result);
+      const frozen = artifact.snapshot;
+      validateReviewScope(parseCurrentReviewResult(result.result), {
+        snapshotDigest: frozen.digest,
+        approvedArtifactPaths: frozen.approval.paths,
+        requiredFindingIds: frozen.requiredFindingIds
+      });
+      this.validateReviewResultForApplication(state, result.result);
+      await this.store.writeText(
+        state.runId,
+        candidateEvidencePath,
+        renderReviewArtifact(result.result, artifact)
+      );
+      await recordCandidateDigest();
+      validatedCandidate = await validateReviewArtifact(
+        this.repoRoot,
+        result.result,
+        artifact
+      );
+      this.validateReviewResultForApplication(state, result.result);
+      candidateEvidence.sha256 = validatedCandidate.sha256;
+      candidateEvidence.validation = "passed";
+      await this.store.writeRunAttempt(state.runId, record);
+    } catch (error) {
+      if (
+        error instanceof TerminalRunStateError ||
+        error instanceof ProjectSetupRequiredError
+      )
+        throw error;
+      (record.reviewDiagnostics ??= []).push({
+        stage: "render_validation",
+        code:
+          error instanceof BanzaiError ? error.code : "REVIEW_RENDER_FAILED",
+        message: errorMessage(error)
+      });
+      if (record.result !== null) {
+        candidateEvidence.validation = "failed";
+        candidateEvidence.validationCode =
+          error instanceof BanzaiError ? error.code : null;
+        candidateEvidence.validationError = errorMessage(error);
+      }
+      return await this.failAttempt(state, record, error);
+    }
+    try {
+      const afterDigest = await workspaceDigest(this.repoRoot, {
+        artifactBinding: state.artifactBinding,
+        excludedPaths: [artifactPath],
+        baseline: state.baseline
+      });
+      if (beforeDigest !== afterDigest) {
+        if (!(await this.completeAttempt(state, record, result))) {
+          return await this.store.readState(state.runId);
+        }
+        state.activeAttempt = null;
+        state.reviewIteration = state.latestReview?.iteration ?? 0;
+        state.pendingReviewRotationReason = "unreliable-review";
+        blockState(
+          state,
+          "Repository changed during source-read-only review outside the designated review artifact; result is stale."
+        );
+        await this.store.writeState(state);
+        return state;
+      }
+      if (!(await this.completeAttempt(state, record, result))) {
+        return await this.store.readState(state.runId);
+      }
+      await this.validateBaseCommit(state);
+      await this.validateApproval(state);
+      const completionNow = await this.revalidateTaskCompletion(state);
+      if (
+        artifact.snapshot.completionSource === null ||
+        !summariesMatch(
+          artifact.snapshot.completionSource,
+          completionNow.summary
+        ) ||
+        artifact.snapshot.completionSource.sourceAttemptKind !==
+          (state.planTaskCompletion?.sourceAttemptKind ?? "implementation")
+      )
+        throw new BanzaiError(
+          "INVALID_REVIEW_SNAPSHOT",
+          "Completion evidence changed after review snapshot."
+        );
+      await publishReviewArtifact(this.repoRoot, artifact, validatedCandidate);
+      return await this.applyReviewResult(
+        state,
+        attempt,
+        result.result,
+        snapshot,
+        policy,
+        result.sessionId ?? policy.resumeSessionId,
+        {
+          invocationDigest: currentInvocationDigest,
+          inventoryDigest: result.inventory?.digest ?? null,
+          inventoryChanged
+        }
+      );
+    } catch (error) {
+      if (
+        error instanceof TerminalRunStateError ||
+        error instanceof ProjectSetupRequiredError
+      )
+        throw error;
+      (record.reviewDiagnostics ??= []).push({
+        stage: "publication_application",
+        code:
+          error instanceof BanzaiError
+            ? error.code
+            : "REVIEW_PUBLICATION_FAILED",
+        message: errorMessage(error)
+      });
+      await this.store.writeRunAttempt(state.runId, record);
+      if (error instanceof PlanTaskCompletionError) {
+        return await this.blockForCompletionFailure(
+          await this.store.readState(state.runId),
+          state.planTaskCompletion?.sourceAttemptId ?? attempt.id,
+          error
+        );
+      }
+      record.error = errorMessage(error);
+      record.failureCode =
+        error instanceof BanzaiError ? error.code : "REVIEW_PUBLICATION_FAILED";
+      await this.store.writeRunAttempt(state.runId, record);
+      const current = await this.store.readState(state.runId);
+      if (current.status === "done" || current.status === "cancelled")
+        return current;
+      await this.store.appendEvent(state.runId, "review.publication_failed", {
+        attemptId: attempt.id,
+        code: record.failureCode
+      });
+      current.pendingReviewRotationReason = "unreliable-review";
+      blockState(current, errorMessage(error));
+      await this.store.writeState(current);
+      return current;
+    }
+  }
+
+  private validateReviewResultForApplication(
+    state: RunState,
+    result: ReviewResult
+  ): void {
+    const expectedPrefix = `R${state.reviewIteration}-F`;
+    if (
+      result.findings.some((finding) => !finding.id.startsWith(expectedPrefix))
+    ) {
+      throw new BanzaiError(
+        "FINDING_ITERATION_MISMATCH",
+        `Review ${state.reviewIteration} returned an invalid finding id.`
+      );
+    }
+    const acceptedPrevious =
+      state.triage?.items
+        .filter((item) => item.disposition === "accepted")
+        .map((item) => item.findingId) ?? [];
+    if (
+      state.triage !== null &&
+      !(result.schemaVersion === 2 && result.verdict === "blocked") &&
+      acceptedPrevious.some((id) => !result.reviewedFindingIds.includes(id))
+    ) {
+      throw new BanzaiError(
+        "INCOMPLETE_REREVIEW",
+        "Re-review did not report every previously accepted finding id."
+      );
+    }
+  }
+
+  /**
+   * Compares the inventory a resumed session reported against the inventory
+   * recorded when it was created. A mismatch already cost a full re-cache, so it
+   * is recorded and rotated deliberately instead of being absorbed silently.
+   */
+  private async recordInventoryDrift(
+    state: RunState,
+    policy: ReviewExecutionPolicy,
+    result: AdapterResult<ReviewResult>
+  ): Promise<boolean> {
+    const recorded = state.sessions.reviewer?.inventoryDigest;
+    const observed = result.inventory ?? null;
+    if (
+      policy.sessionMode !== "resumed" ||
+      observed === null ||
+      recorded === undefined ||
+      recorded === observed.digest
+    ) {
+      return false;
+    }
+    await this.store.appendEvent(state.runId, "review.inventory_changed", {
+      iteration: state.reviewIteration,
+      recordedDigest: recorded,
+      observedDigest: observed.digest,
+      observedToolCount: observed.toolCount
+    });
+    this.info(
+      `Resumed reviewer session reported ${observed.toolCount} tools, not the inventory it was created with; the next review rotates.`
+    );
+    return true;
+  }
+
+  private async applyReviewResult(
+    state: RunState,
+    attempt: AttemptReference,
+    result: ReviewResult,
+    snapshot: WorkspaceSnapshot,
+    policy: ReviewExecutionPolicy,
+    sessionId: string | null,
+    session: {
+      invocationDigest: string | null;
+      inventoryDigest: string | null;
+      inventoryChanged: boolean;
+    } = {
+      invocationDigest: null,
+      inventoryDigest: null,
+      inventoryChanged: false
+    }
+  ): Promise<RunState> {
+    this.validateReviewResultForApplication(state, result);
+    const resultRelative = `reviews/review-${state.reviewIteration}.json`;
+    const canonicalJson = `${JSON.stringify(result, null, 2)}\n`;
+    if (result.schemaVersion === 2)
+      await this.store.writeReviewResult(
+        state.runId,
+        state.reviewIteration,
+        result
+      );
+    else await this.store.writeText(state.runId, resultRelative, canonicalJson);
+
+    const previousReviewer = state.sessions.reviewer;
+    const reviewer: ReviewerSessionBinding | null =
+      sessionId === null
+        ? null
+        : {
+            id: sessionId,
+            ...policy.sessionContext,
+            role: "reviewer",
+            outputContract:
+              result.schemaVersion === 2
+                ? "review-result/v2"
+                : "review-result/v1",
+            approvalDigest: state.planApproval?.digest ?? "",
+            lastSnapshot: snapshot,
+            lastFullIteration:
+              policy.reviewMode === "full"
+                ? state.reviewIteration
+                : (previousReviewer?.lastFullIteration ??
+                  state.reviewIteration),
+            consecutiveDeltaReviews:
+              policy.reviewMode === "full"
+                ? 0
+                : (previousReviewer?.consecutiveDeltaReviews ?? 0) + 1,
+            ...(session.invocationDigest === null
+              ? {}
+              : { invocationDigest: session.invocationDigest }),
+            ...(session.inventoryDigest === null
+              ? {}
+              : { inventoryDigest: session.inventoryDigest })
+          };
+    state.sessions.reviewer = reviewer;
+    state.latestReview = {
+      outputContract:
+        result.schemaVersion === 2 ? "review-result/v2" : "review-result/v1",
+      iteration: state.reviewIteration,
+      resultPath: resultRelative,
+      artifactPath: reviewArtifactPath(
+        state.slug,
+        state.reviewIteration,
+        state.artifactBinding
+      ),
+      workspaceDigest: snapshot.digest,
+      verdict: result.verdict,
+      sessionMode: policy.sessionMode,
+      mode: policy.reviewMode,
+      rotationReason: policy.rotationReason
+    };
+    state.metrics.reviewFindingCount += result.findings.length;
+    this.info(
+      `Review ${state.reviewIteration}: ${reviewVerdictText(result.verdict)}, ${result.findings.length} finding${result.findings.length === 1 ? "" : "s"}`
+    );
+    state.workspaceDigest = snapshot.digest;
+    state.activeAttempt = null;
+    state.pendingReviewRotationReason =
+      result.verdict === "blocked"
+        ? "previous-review-blocked"
+        : result.verdict === "replan_required"
+          ? "unreliable-review"
+          : result.verdict === "changes_requested" && reviewer === null
+            ? "missing-session"
+            : session.inventoryChanged
+              ? "session-inventory-changed"
+              : null;
+    if (result.verdict === "pass") {
+      try {
+        await this.revalidateTaskCompletion(state);
+      } catch (error) {
+        if (
+          error instanceof TerminalRunStateError ||
+          error instanceof ProjectSetupRequiredError
+        )
+          throw error;
+        return await this.blockForCompletionFailure(
+          state,
+          state.planTaskCompletion?.sourceAttemptId ?? "legacy",
+          error
+        );
+      }
+      transitionState(state, "done");
+    } else if (result.verdict === "changes_requested") {
+      transitionState(state, "needs_triage");
+    } else {
+      blockState(state, `Review verdict ${result.verdict}: ${result.summary}`);
+    }
+    if (result.schemaVersion !== 2) await this.store.writeState(state);
+    const timingEvent = await this.store.appendEvent(
+      state.runId,
+      "review.completed",
+      {
+        attemptId: attempt.id,
+        iteration: state.reviewIteration,
+        verdict: result.verdict,
+        artifactPath: state.latestReview.artifactPath,
+        findingIds: result.findings.map((finding) => finding.id),
+        workspaceDigest: snapshot.digest,
+        sessionMode: policy.sessionMode,
+        reviewMode: policy.reviewMode,
+        rotationReason: policy.rotationReason
+      },
+      undefined,
+      result.schemaVersion === 2
+    );
+    if (result.schemaVersion === 2) await this.store.writeState(state);
+    await this.observeHumanTime(
+      state,
+      "gate_pending",
+      "review.completed",
+      timingEvent.at,
+      attempt.id
+    );
+    return state;
+  }
+
+  private async readLatestReview(state: RunState): Promise<ReviewResult> {
+    if (state.latestReview === null) {
+      throw new BanzaiError("REVIEW_NOT_FOUND", "No review is available.");
+    }
+    const raw = await readFile(
+      path.join(
+        this.store.runDirectory(state.runId),
+        state.latestReview.resultPath
+      ),
+      "utf8"
+    );
+    const value = JSON.parse(raw) as unknown;
+    const identity: unknown = state.latestReview.outputContract;
+    if (
+      identity !== undefined &&
+      identity !== "review-result/v1" &&
+      identity !== "review-result/v2"
+    )
+      throw new BanzaiError(
+        "REVIEW_RESULT_SCHEMA_MISMATCH",
+        "Canonical review output identity is unsupported."
+      );
+    return identity === "review-result/v2"
+      ? parseCurrentReviewResult(value)
+      : parseReviewResult(value);
+  }
+
+  private validateTriage(
+    findings: ReviewFinding[],
+    input: TriageInput
+  ): TriageItem[] {
+    const findingIds = new Set(findings.map((finding) => finding.id));
+    const assignments: [FindingDisposition, string[]][] = [
+      ["accepted", input.accepted],
+      ["rejected", input.rejected],
+      ["deferred", input.deferred]
+    ];
+    const seen = new Set<string>();
+    const items: TriageItem[] = [];
+    for (const [disposition, ids] of assignments) {
+      for (const findingId of ids) {
+        if (!findingIds.has(findingId)) {
+          throw new BanzaiError(
+            "UNKNOWN_FINDING",
+            `Review does not contain finding ${findingId}.`
+          );
+        }
+        if (seen.has(findingId)) {
+          throw new BanzaiError(
+            "DUPLICATE_TRIAGE",
+            `Finding ${findingId} has multiple dispositions.`
+          );
+        }
+        seen.add(findingId);
+        items.push({ findingId, disposition, note: input.note });
+      }
+    }
+    if (seen.size !== findingIds.size) {
+      const missing = [...findingIds].filter((id) => !seen.has(id));
+      throw new BanzaiError(
+        "INCOMPLETE_TRIAGE",
+        `Every finding needs a disposition. Missing: ${missing.join(", ")}`
+      );
+    }
+    return items;
+  }
+
+  private checkpointSettings(
+    attempt: AttemptReference,
+    config: OrchestratorConfig
+  ): { settings: ModelSettings; role: SessionContext["role"] } {
+    if (attempt.kind === "selection" || attempt.kind === "plan") {
+      return { settings: config.models.planner, role: "planner" };
+    }
+    if (attempt.kind === "review") {
+      return { settings: config.models.reviewer, role: "reviewer" };
+    }
+    return { settings: config.models.implementer, role: "implementer" };
+  }
+
+  private accountCompletedAttempt(
+    state: RunState,
+    record: AttemptRecord
+  ): void {
+    if (state.metrics.completedAttemptIds.includes(record.attempt.id)) {
+      return;
+    }
+    this.accountAttemptUsage(state, record);
+    state.metrics.completedAttemptIds.push(record.attempt.id);
+    state.metrics.modelDurationMs += record.durationMs ?? 0;
+  }
+
+  private accountAttemptUsage(state: RunState, record: AttemptRecord): void {
+    const accounted = (state.metrics.usageAccountedAttemptIds ??= [
+      ...state.metrics.completedAttemptIds
+    ]);
+    if (accounted.includes(record.attempt.id)) return;
+    if (record.usage !== null) {
+      state.metrics.usage.inputTokens += record.usage.inputTokens;
+      state.metrics.usage.cachedInputTokens += record.usage.cachedInputTokens;
+      state.metrics.usage.outputTokens += record.usage.outputTokens;
+      if (record.usage.costUsd !== null) {
+        state.metrics.usage.costUsd =
+          (state.metrics.usage.costUsd ?? 0) + record.usage.costUsd;
+      }
+      accounted.push(record.attempt.id);
+    }
+  }
+
+  private async validatePlanningResult(
+    result: PersistedPhaseResult
+  ): Promise<void> {
+    if (result.gate !== "plan_approval" || result.artifacts.plan === null)
+      return;
+    try {
+      parseApprovedPlanTaskIds(
+        await readFile(path.join(this.repoRoot, result.artifacts.plan), "utf8")
+      );
+    } catch (error) {
+      if (
+        error instanceof TerminalRunStateError ||
+        error instanceof ProjectSetupRequiredError
+      )
+        throw error;
+      if (error instanceof PlanTaskCompletionError) throw error;
+      throw new PlanTaskCompletionError(
+        "approved_plan_invalid",
+        `The planning artifact could not be read: ${errorMessage(error)}`
+      );
+    }
+  }
+
+  private async validateTerminalCheckpointResult(
+    state: RunState,
+    attempt: AttemptReference,
+    result: TerminalCheckpointResult
+  ): Promise<void> {
+    await this.validateSavedArtifactScope(state, attempt);
+    if (attempt.kind === "selection") {
+      return;
+    }
+    if (attempt.kind === "review") {
+      this.validateReviewResultForApplication(state, result as ReviewResult);
+      const record = await this.store.readRunAttempt(state.runId, attempt);
+      if (
+        record.reviewContext !== undefined ||
+        (result as ReviewResult).schemaVersion === 2
+      ) {
+        const frozen = await this.store.readReviewSnapshot(
+          state.runId,
+          attempt
+        );
+        if (record.reviewContext?.snapshotDigest !== frozen.digest)
+          throw new BanzaiError(
+            "INVALID_REVIEW_SNAPSHOT",
+            "Checkpoint snapshot binding is missing or conflicting."
+          );
+        validateReviewScope(parseCurrentReviewResult(result), {
+          snapshotDigest: frozen.digest,
+          approvedArtifactPaths: frozen.approval.paths,
+          requiredFindingIds: frozen.requiredFindingIds
+        });
+      }
+      return;
+    }
+    const phaseResult = parsePersistedPhaseResult(result);
+    this.validateArtifactRoleReferences(state, phaseResult);
+    if (phaseResult.phase !== attempt.kind) {
+      throw new BanzaiError(
+        "PHASE_RESULT_MISMATCH",
+        `Attempt ${attempt.kind} returned phase ${phaseResult.phase}.`
+      );
+    }
+    if (attempt.kind === "plan") {
+      await this.validatePlanningResult(phaseResult);
+      return;
+    }
+    if (attempt.kind === "fix") {
+      if (phaseResult.taskCompletion !== null) {
+        // ADR 0025: a fix may refresh the canonical ledger. The reconciled
+        // result is validated exactly like the live path validates it, and the
+        // checkpoint records the fix attempt as the canonical source.
+        if (state.planApproval === null) {
+          throw new PlanTaskCompletionError(
+            "approval_invalid",
+            "Strict completion validation requires an approved plan bundle."
+          );
+        }
+        state.planTaskCompletion = {
+          ...(
+            await validatePlanTaskCompletion({
+              repoRoot: this.repoRoot,
+              artifactBinding: state.artifactBinding,
+              sourceAttemptId: attempt.id,
+              result: phaseResult,
+              planPath: this.completionPlanPath(state),
+              approval: state.planApproval,
+              baseline: state.baseline
+            })
+          ).summary,
+          sourceAttemptKind: "fix"
+        };
+      }
+      return;
+    }
+    if ((state.workflowSelection?.workflow ?? "strict") !== "strict") {
+      if (phaseResult.taskCompletion !== null) {
+        throw new BanzaiError(
+          "PLAN_TASK_COMPLETION_INVALID",
+          "Lite implementation must not return strict plan-task completion evidence."
+        );
+      }
+      return;
+    }
+    if (phaseResult.outcome === "completed" && phaseResult.gate === null) {
+      state.planTaskCompletion = (
+        await this.validateImplementationCompletion(state, attempt, phaseResult)
+      ).summary;
+      return;
+    }
+    validatePlanTaskCompletionLedgerShape(
+      await this.approvedTaskIds(state),
+      phaseResult.taskCompletion,
+      phaseResult.outcome
+    );
+  }
+
+  private async promoteTerminalCheckpoint(
+    state: RunState,
+    attempt: AttemptReference,
+    record: AttemptRecord,
+    config: OrchestratorConfig
+  ): Promise<string | null> {
+    const checkpoint = await this.store.readTerminalCheckpointIfExists(
+      state.runId,
+      attempt
+    );
+    if (checkpoint === null) {
+      return null;
+    }
+    if (TERMINAL_INTEGRITY_FAILURE_CODES.has(record.failureCode ?? "")) {
+      throw new BanzaiError(
+        "TERMINAL_CHECKPOINT_CONFLICT",
+        "Conflicting terminal or session evidence cannot be reconciled as success."
+      );
+    }
+    const { settings, role } = this.checkpointSettings(attempt, config);
+    const expectedContext =
+      record.sessionContext ?? sessionContext(role, settings);
+    const expectedApprovalDigest = state.planApproval?.digest ?? null;
+    const expectedWorkflowDigest =
+      state.planApproval === null
+        ? (state.workflowSelection?.digest ?? null)
+        : null;
+    const expectedResultContract =
+      attempt.kind === "review" && record.reviewContext === undefined
+        ? "review-result/v1"
+        : terminalResultContract(attempt.kind);
+    const resultContractMatches =
+      checkpoint.resultContract === expectedResultContract ||
+      (expectedResultContract === "phase-result/v3" &&
+        checkpoint.resultContract === "phase-result/v2");
+    if (
+      checkpoint.runId !== state.runId ||
+      checkpoint.attempt.id !== attempt.id ||
+      checkpoint.attempt.kind !== attempt.kind ||
+      checkpoint.attempt.mutable !== attempt.mutable ||
+      checkpoint.phase !== attempt.kind ||
+      !resultContractMatches ||
+      checkpoint.baseCommit !== state.baseCommit ||
+      checkpoint.approvalDigest !== expectedApprovalDigest ||
+      checkpoint.workflowDigest !== expectedWorkflowDigest ||
+      checkpoint.scopeDigest !== this.attemptScopeDigest(state, attempt) ||
+      checkpoint.configuration.vendor !==
+        (vendorFor(settings.executable) ?? FALLBACK_VENDOR[role]) ||
+      checkpoint.configuration.executableDigest !==
+        digestCanonicalJson(settings.executable) ||
+      checkpoint.configuration.model !== settings.model ||
+      checkpoint.configuration.effort !== settings.effort ||
+      checkpoint.configuration.sessionMode !==
+        (record.sessionMode ?? "fresh") ||
+      checkpoint.configuration.sessionContextDigest !==
+        digestCanonicalJson(expectedContext) ||
+      state.recovery?.sourceAttemptId === attempt.id
+    ) {
+      throw new BanzaiError(
+        "TERMINAL_CHECKPOINT_MISMATCH",
+        "Terminal checkpoint does not match the active run, attempt, authorization, or model context."
+      );
+    }
+    await this.validateBaseCommit(state);
+    if (expectedApprovalDigest !== null) {
+      await this.validateApproval(state);
+    } else if (expectedWorkflowDigest !== null) {
+      if (attempt.kind === "plan") {
+        const selection = state.workflowSelection ?? null;
+        if (
+          selection?.workflow !== "strict" ||
+          workflowAuthorizationDigest({
+            runId: state.runId,
+            request: state.request,
+            ...selection
+          }) !== selection.digest
+        ) {
+          throw new BanzaiError(
+            "WORKFLOW_AUTHORIZATION_INVALID",
+            "Planning checkpoint requires the unchanged strict workflow selection."
+          );
+        }
+      } else {
+        this.validateWorkflowSelection(state);
+      }
+    }
+    await this.validateTerminalCheckpointResult(
+      state,
+      attempt,
+      checkpoint.result
+    );
+    if (record.status === "completed") {
+      if (
+        record.result === null ||
+        JSON.stringify(record.result) !== JSON.stringify(checkpoint.result)
+      ) {
+        throw new BanzaiError(
+          "TERMINAL_CHECKPOINT_CONFLICT",
+          "Completed attempt result conflicts with its terminal checkpoint."
+        );
+      }
+      return null;
+    }
+    if (
+      (record.status !== "started" && record.status !== "failed") ||
+      (record.result !== null &&
+        JSON.stringify(record.result) !== JSON.stringify(checkpoint.result))
+    ) {
+      throw new BanzaiError(
+        "TERMINAL_CHECKPOINT_CONFLICT",
+        `Terminal checkpoint cannot promote an attempt in ${record.status} state.`
+      );
+    }
+    if (
+      state.metrics.usageAccountedAttemptIds === undefined &&
+      record.status === "failed" &&
+      record.usage !== null
+    ) {
+      state.metrics.usageAccountedAttemptIds = [
+        ...state.metrics.completedAttemptIds,
+        record.attempt.id
+      ];
+    }
+    record.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION;
+    record.result = checkpoint.result;
+    record.sessionId = checkpoint.sessionId;
+    record.usage = checkpoint.usage;
+    return checkpoint.terminal.observedAt;
+  }
+
+  private async finalizeTerminalCheckpoint(
+    state: RunState,
+    record: AttemptRecord,
+    terminalObservedAt: string | null
+  ): Promise<void> {
+    if (terminalObservedAt === null) {
+      return;
+    }
+    record.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION;
+    record.status = "completed";
+    record.completedAt = terminalObservedAt;
+    record.interruptedAt = null;
+    record.recoveryOf ??= null;
+    record.recoveryAuthorizationId ??= null;
+    record.durationMs = Math.max(
+      0,
+      Date.parse(terminalObservedAt) - Date.parse(record.startedAt)
+    );
+    record.error = null;
+    record.failureCode = null;
+    await this.store.writeRunAttempt(state.runId, record);
+    state.activeProcess = null;
+    await this.store.writeState(state);
+    await this.store.appendEvent(state.runId, "attempt.terminal_reconciled", {
+      attemptId: record.attempt.id,
+      kind: record.attempt.kind
+    });
+  }
+
+  private async reconcileAttempt(
+    state: RunState,
+    config: OrchestratorConfig
+  ): Promise<RunState> {
+    const attempt = state.activeAttempt;
+    if (attempt === null) {
+      return state;
+    }
+    const record = await this.store.readRunAttempt(state.runId, attempt);
+    let terminalObservedAt: string | null;
+    try {
+      terminalObservedAt = await this.promoteTerminalCheckpoint(
+        state,
+        attempt,
+        record,
+        config
+      );
+    } catch (error) {
+      if (
+        error instanceof TerminalRunStateError ||
+        error instanceof ProjectSetupRequiredError
+      )
+        throw error;
+      if (attempt.kind === "plan" && error instanceof PlanTaskCompletionError) {
+        record.status = "failed";
+        record.error = error.message;
+        record.failureCode = error.code;
+        await this.store.writeRunAttempt(state.runId, record);
+      }
+      state.activeProcess = null;
+      blockState(state, `[INVALID_TERMINAL_CHECKPOINT] ${errorMessage(error)}`);
+      await this.store.writeState(state);
+      await this.store.appendEvent(
+        state.runId,
+        "attempt.terminal_checkpoint_rejected",
+        { attemptId: attempt.id, kind: attempt.kind }
+      );
+      return state;
+    }
+    const recoveringStartedReview =
+      attempt.kind === "review" &&
+      record.status === "started" &&
+      record.result !== null &&
+      record.reviewCandidate?.validation === "passed";
+    if (
+      (record.status === "completed" ||
+        recoveringStartedReview ||
+        terminalObservedAt !== null) &&
+      record.result !== null
+    ) {
+      if (attempt.kind === "plan" && state.status === "blocked") {
+        if (state.blockedFrom !== "planning") {
+          throw new BanzaiError(
+            "TERMINAL_CHECKPOINT_MISMATCH",
+            "Planning completion does not match the blocked phase."
+          );
+        }
+        transitionState(state, "planning");
+      }
+      state.activeProcess = null;
+      await this.store.appendEvent(state.runId, "attempt.reconciled", {
+        attemptId: attempt.id,
+        kind: attempt.kind
+      });
+      if (attempt.kind === "selection") {
+        await this.finalizeTerminalCheckpoint(
+          state,
+          record,
+          terminalObservedAt
+        );
+        this.accountCompletedAttempt(state, record);
+        return await this.applyWorkflowSelection(
+          state,
+          attempt,
+          record.result as WorkflowSelectionResult,
+          config
+        );
+      }
+      if (attempt.kind === "review") {
+        if (
+          record.reviewContext !== undefined &&
+          state.status === "blocked" &&
+          state.blockedFrom === "reviewing"
+        )
+          transitionState(state, "reviewing");
+        let validatedCompletion: ValidatedPlanTaskCompletion;
+        try {
+          validatedCompletion = await this.revalidateTaskCompletion(state);
+        } catch (error) {
+          if (
+            error instanceof TerminalRunStateError ||
+            error instanceof ProjectSetupRequiredError
+          )
+            throw error;
+          return await this.blockForCompletionFailure(
+            state,
+            state.planTaskCompletion?.sourceAttemptId ?? "legacy",
+            error
+          );
+        }
+        const artifactPath = reviewArtifactPath(
+          state.slug,
+          state.reviewIteration,
+          state.artifactBinding
+        );
+        const snapshot = await workspaceSnapshot(this.repoRoot, {
+          artifactBinding: state.artifactBinding,
+          excludedPaths: [artifactPath],
+          baseline: state.baseline
+        });
+        if (
+          state.workspaceDigest === null ||
+          snapshot.digest !== state.workspaceDigest
+        ) {
+          state.activeAttempt = null;
+          state.reviewIteration = state.latestReview?.iteration ?? 0;
+          state.pendingReviewRotationReason = "unreliable-review";
+          blockState(
+            state,
+            "Repository changed before the completed review could be reconciled."
+          );
+          await this.store.writeState(state);
+          return state;
+        }
+        const result = record.result as ReviewResult;
+        let candidateValidated = false;
+        try {
+          const candidateEvidence = record.reviewCandidate;
+          const expectedCandidateEvidencePath = path
+            .relative(
+              this.store.runDirectory(state.runId),
+              this.store.reviewCandidatePath(state.runId, attempt)
+            )
+            .split(path.sep)
+            .join(path.posix.sep);
+          if (
+            candidateEvidence !== null &&
+            candidateEvidence !== undefined &&
+            (candidateEvidence.evidencePath !== expectedCandidateEvidencePath ||
+              !new Set<string>(["reviewer-write", "runner-rendered"]).has(
+                candidateEvidence.source
+              ) ||
+              (candidateEvidence as { canonical: unknown }).canonical !== false)
+          ) {
+            throw new BanzaiError(
+              "INVALID_REVIEW_CANDIDATE_EVIDENCE",
+              "Review attempt has malformed candidate evidence identity."
+            );
+          }
+          const candidatePath =
+            candidateEvidence === null || candidateEvidence === undefined
+              ? artifactPath
+              : path
+                  .relative(
+                    this.repoRoot,
+                    path.join(
+                      this.store.runDirectory(state.runId),
+                      candidateEvidence.evidencePath
+                    )
+                  )
+                  .split(path.sep)
+                  .join(path.posix.sep);
+          let artifact: ReviewArtifactContext = {
+            path: artifactPath,
+            candidatePath,
+            slug: state.slug,
+            iteration: state.reviewIteration,
+            approvedArtifactPaths: state.planApproval?.paths ?? [],
+            workspaceDigest: snapshot.digest,
+            verification: state.verification,
+            taskCompletion: {
+              approvalDigest: validatedCompletion.summary.approvalDigest,
+              ledgerDigest: validatedCompletion.summary.ledgerDigest,
+              planTaskDigest: validatedCompletion.summary.planTaskDigest,
+              completed: validatedCompletion.summary.counts.completed,
+              total: validatedCompletion.summary.counts.total,
+              implementationReport:
+                validatedCompletion.summary.implementationReport.path,
+              testReport: validatedCompletion.summary.testReport.path,
+              tasks: validatedCompletion.tasks
+            }
+          };
+          if (
+            record.reviewContext !== undefined ||
+            result.schemaVersion === 2
+          ) {
+            if (
+              record.reviewContext?.outputContract !== "review-result/v2" ||
+              candidateEvidence?.source !== "runner-rendered"
+            )
+              throw new BanzaiError(
+                "INVALID_REVIEW_SNAPSHOT",
+                "New review is missing its recorded contract or runner-owned candidate."
+              );
+            const frozen = await this.store.readReviewSnapshot(
+              state.runId,
+              attempt
+            );
+            if (
+              frozen.digest !== record.reviewContext.snapshotDigest ||
+              frozen.baseCommit !== state.baseCommit ||
+              frozen.workspace.digest !== snapshot.digest ||
+              frozen.artifact.path !== artifactPath ||
+              frozen.artifact.candidatePath !== candidatePath ||
+              frozen.artifact.iteration !== state.reviewIteration ||
+              frozen.approval.digest !== state.planApproval?.digest ||
+              frozen.completionSource === null ||
+              !summariesMatch(
+                frozen.completionSource,
+                validatedCompletion.summary
+              ) ||
+              frozen.completionSource.sourceAttemptKind !==
+                (state.planTaskCompletion?.sourceAttemptKind ??
+                  "implementation")
+            )
+              throw new BanzaiError(
+                "INVALID_REVIEW_SNAPSHOT",
+                "Original review snapshot conflicts with current authority or completion evidence."
+              );
+            await this.validateBaseCommit(state);
+            await this.validateApproval(state);
+            validateReviewScope(parseCurrentReviewResult(result), {
+              snapshotDigest: frozen.digest,
+              approvedArtifactPaths: frozen.approval.paths,
+              requiredFindingIds: frozen.requiredFindingIds
+            });
+            artifact = { ...frozen.artifact, snapshot: frozen };
+            try {
+              await readFile(
+                this.store.reviewCandidatePath(state.runId, attempt)
+              );
+            } catch (error) {
+              if (
+                (error as NodeJS.ErrnoException).code !== "ENOENT" ||
+                candidateEvidence.validation === "failed" ||
+                (await this.store.readTerminalCheckpointIfExists(
+                  state.runId,
+                  attempt
+                )) === null
+              )
+                throw error;
+              await this.store.writeText(
+                state.runId,
+                candidateEvidence.evidencePath,
+                renderReviewArtifact(result, artifact)
+              );
+            }
+          }
+          const candidate =
+            candidateEvidence === null || candidateEvidence === undefined
+              ? await validateHistoricalReviewArtifact(
+                  this.repoRoot,
+                  result,
+                  artifact
+                )
+              : await validateReviewArtifact(this.repoRoot, result, artifact);
+          if (candidateEvidence !== null && candidateEvidence !== undefined) {
+            if (
+              candidateEvidence.intendedArtifactPath !== artifactPath ||
+              candidateEvidence.validation === "failed" ||
+              (candidateEvidence.sha256 !== null &&
+                candidateEvidence.sha256 !== candidate.sha256)
+            ) {
+              throw new BanzaiError(
+                "INVALID_REVIEW_CANDIDATE_EVIDENCE",
+                "Completed review attempt has inconsistent candidate validation evidence."
+              );
+            }
+            if (candidateEvidence.validation === "pending") {
+              candidateEvidence.sha256 = candidate.sha256;
+              candidateEvidence.validation = "passed";
+              await this.store.writeRunAttempt(state.runId, record);
+            }
+            this.validateReviewResultForApplication(state, result);
+            if (recoveringStartedReview) {
+              if (
+                !(await this.completeAttempt(state, record, {
+                  result,
+                  sessionId: record.sessionId,
+                  stdout: "",
+                  stderr: "",
+                  usage: record.usage
+                }))
+              ) {
+                return await this.store.readState(state.runId);
+              }
+            }
+            candidateValidated = true;
+            await publishReviewArtifact(this.repoRoot, artifact, candidate);
+          }
+        } catch (error) {
+          if (
+            error instanceof TerminalRunStateError ||
+            error instanceof ProjectSetupRequiredError
+          )
+            throw error;
+          if (record.reviewContext !== undefined) {
+            (record.reviewDiagnostics ??= []).push({
+              stage: "recovery",
+              code:
+                error instanceof BanzaiError
+                  ? error.code
+                  : "REVIEW_RECOVERY_FAILED",
+              message: errorMessage(error)
+            });
+            record.error = errorMessage(error);
+            record.failureCode =
+              error instanceof BanzaiError
+                ? error.code
+                : "REVIEW_PUBLICATION_FAILED";
+            if (!candidateValidated) {
+              record.status = "failed";
+              if (record.reviewCandidate) {
+                record.reviewCandidate.validation = "failed";
+                record.reviewCandidate.validationCode = record.failureCode;
+                record.reviewCandidate.validationError = record.error;
+              }
+            }
+            await this.store.writeRunAttempt(state.runId, record);
+            state.pendingReviewRotationReason = candidateValidated
+              ? "unreliable-review"
+              : "previous-review-failed";
+            blockState(state, record.error);
+            await this.store.writeState(state);
+            return state;
+          }
+          state.activeAttempt = null;
+          state.reviewIteration = state.latestReview?.iteration ?? 0;
+          state.pendingReviewRotationReason = "unreliable-review";
+          blockState(state, errorMessage(error));
+          await this.store.writeState(state);
+          return state;
+        }
+        await this.finalizeTerminalCheckpoint(
+          state,
+          record,
+          terminalObservedAt
+        );
+        if (!recoveringStartedReview) {
+          this.accountCompletedAttempt(state, record);
+        }
+        const storedContext = record.sessionContext;
+        const policy: ReviewExecutionPolicy = {
+          sessionMode: record.sessionMode ?? "fresh",
+          reviewMode: record.reviewMode ?? "full",
+          rotationReason:
+            record.rotationReason === undefined
+              ? "legacy-state"
+              : record.rotationReason,
+          resumeSessionId: record.resumeSessionId ?? null,
+          sessionContext: {
+            role: "reviewer",
+            executable:
+              storedContext?.executable ?? config.models.reviewer.executable,
+            model: storedContext?.model ?? config.models.reviewer.model,
+            effort: storedContext?.effort ?? config.models.reviewer.effort
+          }
+        };
+        return await this.applyReviewResult(
+          state,
+          attempt,
+          result,
+          snapshot,
+          policy,
+          record.sessionId ?? policy.resumeSessionId
+        );
+      }
+      if (
+        attempt.kind === "implementation" &&
+        (state.workflowSelection?.workflow ?? "strict") === "strict"
+      ) {
+        try {
+          state.planTaskCompletion = (
+            await this.validateImplementationCompletion(
+              state,
+              attempt,
+              parsePersistedPhaseResult(record.result)
+            )
+          ).summary;
+        } catch (error) {
+          if (
+            error instanceof TerminalRunStateError ||
+            error instanceof ProjectSetupRequiredError
+          )
+            throw error;
+          return await this.blockForCompletionFailure(state, attempt.id, error);
+        }
+      }
+      await this.finalizeTerminalCheckpoint(state, record, terminalObservedAt);
+      this.accountCompletedAttempt(state, record);
+      return await this.applyPhaseResult(
+        state,
+        attempt,
+        record.result as PhaseResult,
+        record.sessionId ?? record.resumeSessionId ?? null,
+        record.sessionContext ??
+          sessionContext(
+            attempt.kind === "plan" ? "planner" : "implementer",
+            attempt.kind === "plan"
+              ? config.models.planner
+              : config.models.implementer
+          )
+      );
+    }
+    const isRetryableInterruption = isRetryableInterruptedAttempt(
+      attempt,
+      record
+    );
+    if (isRetryableInterruption && attempt.kind === "review") {
+      state.reviewIteration = state.latestReview?.iteration ?? 0;
+      state.pendingReviewRotationReason = "previous-review-interrupted";
+    }
+    blockState(
+      state,
+      record.status === "started" || record.status === "interrupted"
+        ? isRetryableInterruption
+          ? `Attempt ${attempt.id} was interrupted. Use banzai retry to start a fresh read-only ${attempt.kind} attempt.`
+          : `Attempt ${attempt.id} was interrupted. It will not be repeated automatically.`
+        : (record.error ?? `Attempt ${attempt.id} failed.`)
+    );
+    state.activeProcess = null;
+    await this.store.writeState(state);
+    return state;
+  }
+}
+
+export function defaultDecisionMaker(): string {
+  return os.userInfo().username;
+}

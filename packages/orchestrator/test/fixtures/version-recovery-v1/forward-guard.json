@@ -1,0 +1,76 @@
+{
+  "sourceSha256": "49ab987cce9b69dfb4209c61fa49e3e58d8f59ce2cca32601a8aa19092f00c7f",
+  "scenario": "forward",
+  "phase": "guard",
+  "targetVersion": "1.19.1",
+  "ownerPid": 424242,
+  "originals": [
+    {
+      "path": ".agents/plugins/marketplace.json",
+      "mode": 420,
+      "contents": "ewogICJwbHVnaW5zIjogWwogICAgewogICAgICAidmVyc2lvbiI6ICIxLjE5LjAiCiAgICB9CiAgXQp9Cg=="
+    },
+    {
+      "path": "marketplace.json",
+      "mode": 420,
+      "contents": "ewogICJwbHVnaW5zIjogWwogICAgewogICAgICAidmVyc2lvbiI6ICIxLjE5LjAiCiAgICB9CiAgXQp9Cg=="
+    },
+    {
+      "path": "package-lock.json",
+      "mode": 420,
+      "contents": "ewogICJwYWNrYWdlcyI6IHsKICAgICJwYWNrYWdlcy9vcmNoZXN0cmF0b3IiOiB7CiAgICAgICJ2ZXJzaW9uIjogIjEuMTkuMCIKICAgIH0KICB9Cn0K"
+    },
+    {
+      "path": "packages/orchestrator/package.json",
+      "mode": 420,
+      "contents": "ewogICJ2ZXJzaW9uIjogIjEuMTkuMCIKfQo="
+    },
+    {
+      "path": "plugins/banzai/.claude-plugin/plugin.json",
+      "mode": 420,
+      "contents": "ewogICJ2ZXJzaW9uIjogIjEuMTkuMCIKfQo="
+    },
+    {
+      "path": "plugins/banzai/.codex-plugin/plugin.json",
+      "mode": 420,
+      "contents": "ewogICJ2ZXJzaW9uIjogIjEuMTkuMCIKfQo="
+    }
+  ],
+  "retained": [
+    {
+      "path": ".agents/plugins/marketplace.json",
+      "mode": 420,
+      "contents": "ewogICJwbHVnaW5zIjogWwogICAgewogICAgICAidmVyc2lvbiI6ICIxLjE5LjEiCiAgICB9CiAgXQp9Cg=="
+    },
+    {
+      "path": ".banzai-version-set.guard",
+      "mode": 384,
+      "contents": "ewogICJmb3JtYXQiOiAxLAogICJ0cmFuc2FjdGlvbiI6IHsKICAgICJmb3JtYXQiOiAxLAogICAgIm93bmVyUGlkIjogNDI0MjQyLAogICAgInRhcmdldFZlcnNpb24iOiAiMS4xOS4xIiwKICAgICJmaWxlcyI6IFsKICAgICAgewogICAgICAgICJpbmRleCI6IDAsCiAgICAgICAgInBhdGgiOiAicGx1Z2lucy9iYW56YWkvLmNsYXVkZS1wbHVnaW4vcGx1Z2luLmpzb24iLAogICAgICAgICJwb2ludGVyIjogIi92ZXJzaW9uIiwKICAgICAgICAibW9kZSI6IDQyMCwKICAgICAgICAib3JpZ2luYWxEaWdlc3QiOiAiMmM5YzlmOTJjM2YzZjE3YjNkMjM4Y2U4YjdjYTZlOTYzOGUwOGNmM2E4MWE3OGYxNmIxYjU1NWY5MmJkM2QwMSIsCiAgICAgICAgImNhbmRpZGF0ZURpZ2VzdCI6ICI5OWUzNzA5YjkyY2I1NTU4YzdjNzYyNDQ3OWY1ZmFhYTJhOWZjYzFkYzA3NTZhMDJjNmE4YmYzMDZhOGNkMjJkIgogICAgICB9LAogICAgICB7CiAgICAgICAgImluZGV4IjogMSwKICAgICAgICAicGF0aCI6ICJwbHVnaW5zL2JhbnphaS8uY29kZXgtcGx1Z2luL3BsdWdpbi5qc29uIiwKICAgICAgICAicG9pbnRlciI6ICIvdmVyc2lvbiIsCiAgICAgICAgIm1vZGUiOiA0MjAsCiAgICAgICAgIm9yaWdpbmFsRGlnZXN0IjogIjJjOWM5ZjkyYzNmM2YxN2IzZDIzOGNlOGI3Y2E2ZTk2MzhlMDhjZjNhODFhNzhmMTZiMWI1NTVmOTJiZDNkMDEiLAogICAgICAgICJjYW5kaWRhdGVEaWdlc3QiOiAiOTllMzcwOWI5MmNiNTU1OGM3Yzc2MjQ0NzlmNWZhYWEyYTlmY2MxZGMwNzU2YTAyYzZhOGJmMzA2YThjZDIyZCIKICAgICAgfSwKICAgICAgewogICAgICAgICJpbmRleCI6IDIsCiAgICAgICAgInBhdGgiOiAibWFya2V0cGxhY2UuanNvbiIsCiAgICAgICAgInBvaW50ZXIiOiAiL3BsdWdpbnMvMC92ZXJzaW9uIiwKICAgICAgICAibW9kZSI6IDQyMCwKICAgICAgICAib3JpZ2luYWxEaWdlc3QiOiAiNTY3ODUwMzUyM2ZlNGQ2NjYyNDY3NWJjM2M2MTBkNzA0ZjE3MGFlOGJiMmUwMWE4ZGUzMWUxZTcwZTVjNDI5NyIsCiAgICAgICAgImNhbmRpZGF0ZURpZ2VzdCI6ICIzOTkzZjcwOWQzNjM2NjZjMjU4MTAxYzlmNGM5ZGY5NTdiYjg0Y2NkMTA2OTA5NzA5NmMzNDJjOGRiZDYwMGRmIgogICAgICB9LAogICAgICB7CiAgICAgICAgImluZGV4IjogMywKICAgICAgICAicGF0aCI6ICIuYWdlbnRzL3BsdWdpbnMvbWFya2V0cGxhY2UuanNvbiIsCiAgICAgICAgInBvaW50ZXIiOiAiL3BsdWdpbnMvMC92ZXJzaW9uIiwKICAgICAgICAibW9kZSI6IDQyMCwKICAgICAgICAib3JpZ2luYWxEaWdlc3QiOiAiNTY3ODUwMzUyM2ZlNGQ2NjYyNDY3NWJjM2M2MTBkNzA0ZjE3MGFlOGJiMmUwMWE4ZGUzMWUxZTcwZTVjNDI5NyIsCiAgICAgICAgImNhbmRpZGF0ZURpZ2VzdCI6ICIzOTkzZjcwOWQzNjM2NjZjMjU4MTAxYzlmNGM5ZGY5NTdiYjg0Y2NkMTA2OTA5NzA5NmMzNDJjOGRiZDYwMGRmIgogICAgICB9LAogICAgICB7CiAgICAgICAgImluZGV4IjogNCwKICAgICAgICAicGF0aCI6ICJwYWNrYWdlcy9vcmNoZXN0cmF0b3IvcGFja2FnZS5qc29uIiwKICAgICAgICAicG9pbnRlciI6ICIvdmVyc2lvbiIsCiAgICAgICAgIm1vZGUiOiA0MjAsCiAgICAgICAgIm9yaWdpbmFsRGlnZXN0IjogIjJjOWM5ZjkyYzNmM2YxN2IzZDIzOGNlOGI3Y2E2ZTk2MzhlMDhjZjNhODFhNzhmMTZiMWI1NTVmOTJiZDNkMDEiLAogICAgICAgICJjYW5kaWRhdGVEaWdlc3QiOiAiOTllMzcwOWI5MmNiNTU1OGM3Yzc2MjQ0NzlmNWZhYWEyYTlmY2MxZGMwNzU2YTAyYzZhOGJmMzA2YThjZDIyZCIKICAgICAgfSwKICAgICAgewogICAgICAgICJpbmRleCI6IDUsCiAgICAgICAgInBhdGgiOiAicGFja2FnZS1sb2NrLmpzb24iLAogICAgICAgICJwb2ludGVyIjogIi9wYWNrYWdlcy9wYWNrYWdlc34xb3JjaGVzdHJhdG9yL3ZlcnNpb24iLAogICAgICAgICJtb2RlIjogNDIwLAogICAgICAgICJvcmlnaW5hbERpZ2VzdCI6ICI5ZmM1NTI1Y2MxYjFmZGM5NWJjMjM3N2QyN2E4NWNkZTA2YzE3NmFkNDAwYzg4NTlhNzA4NmNkODc2ODA1MmUwIiwKICAgICAgICAiY2FuZGlkYXRlRGlnZXN0IjogIjFmYzM2OGJiMTJjMmUwMDI2Y2JhYTBhZGEzMzk0MThiMGZkYmNiZmRmYjQ4Y2RkZTA5OWRhZDI2YmU0ZjQ0YWQiCiAgICAgIH0KICAgIF0KICB9LAogICJvcmlnaW5hbHMiOiBbCiAgICAiZXdvZ0lDSjJaWEp6YVc5dUlqb2dJakV1TVRrdU1DSUtmUW89IiwKICAgICJld29nSUNKMlpYSnphVzl1SWpvZ0lqRXVNVGt1TUNJS2ZRbz0iLAogICAgImV3b2dJQ0p3YkhWbmFXNXpJam9nV3dvZ0lDQWdld29nSUNBZ0lDQWlkbVZ5YzJsdmJpSTZJQ0l4TGpFNUxqQWlDaUFnSUNCOUNpQWdYUXA5Q2c9PSIsCiAgICAiZXdvZ0lDSndiSFZuYVc1eklqb2dXd29nSUNBZ2V3b2dJQ0FnSUNBaWRtVnljMmx2YmlJNklDSXhMakU1TGpBaUNpQWdJQ0I5Q2lBZ1hRcDlDZz09IiwKICAgICJld29nSUNKMlpYSnphVzl1SWpvZ0lqRXVNVGt1TUNJS2ZRbz0iLAogICAgImV3b2dJQ0p3WVdOcllXZGxjeUk2SUhzS0lDQWdJQ0p3WVdOcllXZGxjeTl2Y21Ob1pYTjBjbUYwYjNJaU9pQjdDaUFnSUNBZ0lDSjJaWEp6YVc5dUlqb2dJakV1TVRrdU1DSUtJQ0FnSUgwS0lDQjlDbjBLIgogIF0sCiAgImNhbmRpZGF0ZXMiOiBbCiAgICAiZXdvZ0lDSjJaWEp6YVc5dUlqb2dJakV1TVRrdU1TSUtmUW89IiwKICAgICJld29nSUNKMlpYSnphVzl1SWpvZ0lqRXVNVGt1TVNJS2ZRbz0iLAogICAgImV3b2dJQ0p3YkhWbmFXNXpJam9nV3dvZ0lDQWdld29nSUNBZ0lDQWlkbVZ5YzJsdmJpSTZJQ0l4TGpFNUxqRWlDaUFnSUNCOUNpQWdYUXA5Q2c9PSIsCiAgICAiZXdvZ0lDSndiSFZuYVc1eklqb2dXd29nSUNBZ2V3b2dJQ0FnSUNBaWRtVnljMmx2YmlJNklDSXhMakU1TGpFaUNpQWdJQ0I5Q2lBZ1hRcDlDZz09IiwKICAgICJld29nSUNKMlpYSnphVzl1SWpvZ0lqRXVNVGt1TVNJS2ZRbz0iLAogICAgImV3b2dJQ0p3WVdOcllXZGxjeUk2SUhzS0lDQWdJQ0p3WVdOcllXZGxjeTl2Y21Ob1pYTjBjbUYwYjNJaU9pQjdDaUFnSUNBZ0lDSjJaWEp6YVc5dUlqb2dJakV1TVRrdU1TSUtJQ0FnSUgwS0lDQjlDbjBLIgogIF0KfQo="
+    },
+    {
+      "path": "marketplace.json",
+      "mode": 420,
+      "contents": "ewogICJwbHVnaW5zIjogWwogICAgewogICAgICAidmVyc2lvbiI6ICIxLjE5LjEiCiAgICB9CiAgXQp9Cg=="
+    },
+    {
+      "path": "package-lock.json",
+      "mode": 420,
+      "contents": "ewogICJwYWNrYWdlcyI6IHsKICAgICJwYWNrYWdlcy9vcmNoZXN0cmF0b3IiOiB7CiAgICAgICJ2ZXJzaW9uIjogIjEuMTkuMSIKICAgIH0KICB9Cn0K"
+    },
+    {
+      "path": "packages/orchestrator/package.json",
+      "mode": 420,
+      "contents": "ewogICJ2ZXJzaW9uIjogIjEuMTkuMSIKfQo="
+    },
+    {
+      "path": "plugins/banzai/.claude-plugin/plugin.json",
+      "mode": 420,
+      "contents": "ewogICJ2ZXJzaW9uIjogIjEuMTkuMSIKfQo="
+    },
+    {
+      "path": "plugins/banzai/.codex-plugin/plugin.json",
+      "mode": 420,
+      "contents": "ewogICJ2ZXJzaW9uIjogIjEuMTkuMSIKfQo="
+    }
+  ]
+}

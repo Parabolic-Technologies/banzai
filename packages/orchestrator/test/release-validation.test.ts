@@ -1,0 +1,1907 @@
+import assert from "node:assert/strict";
+import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import {
+  access,
+  chmod,
+  cp,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  symlink,
+  unlink,
+  writeFile
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import test from "node:test";
+import {
+  createNodeVersionFileSystem,
+  recoverProjectVersion,
+  setProjectVersion,
+  VersionOperationError,
+  type VersionFileSystem
+} from "../scripts/release-version.mjs";
+
+const REPOSITORY_ROOT = path.resolve(process.cwd(), "../..");
+const VALIDATOR = path.join(process.cwd(), "scripts", "check-release.mjs");
+const RECOVERY_DIRECTORY = ".banzai-version-set";
+const RECOVERY_GUARD = `${RECOVERY_DIRECTORY}.guard`;
+const RELEASE_VERSION_MODULE = path.join(
+  process.cwd(),
+  "scripts",
+  "release-version.mjs"
+);
+
+const VERSION_SURFACES = [
+  {
+    relativePath: "package.json",
+    keys: ["version"],
+    missingCode: "INVALID_RELEASE_FIELD"
+  },
+  {
+    relativePath: "package-lock.json",
+    keys: ["version"],
+    missingCode: "MISSING_RELEASE_FIELD"
+  },
+  {
+    relativePath: "package-lock.json",
+    keys: ["packages", "", "version"],
+    missingCode: "MISSING_RELEASE_FIELD"
+  },
+  {
+    relativePath: "plugins/banzai/.claude-plugin/plugin.json",
+    keys: ["version"],
+    missingCode: "INVALID_RELEASE_FIELD"
+  },
+  {
+    relativePath: "plugins/banzai/.codex-plugin/plugin.json",
+    keys: ["version"],
+    missingCode: "INVALID_RELEASE_FIELD"
+  },
+  {
+    relativePath: "marketplace.json",
+    keys: ["plugins", "0", "version"],
+    missingCode: "INVALID_RELEASE_FIELD"
+  },
+  {
+    relativePath: ".agents/plugins/marketplace.json",
+    keys: ["plugins", "0", "version"],
+    missingCode: "INVALID_RELEASE_FIELD"
+  },
+  {
+    relativePath: "packages/orchestrator/package.json",
+    keys: ["version"],
+    missingCode: "INVALID_RELEASE_FIELD"
+  },
+  {
+    relativePath: "package-lock.json",
+    keys: ["packages", "packages/orchestrator", "version"],
+    missingCode: "MISSING_RELEASE_FIELD"
+  }
+] as const;
+
+type VersionSurface = (typeof VERSION_SURFACES)[number];
+
+const FIXTURE_PATHS = [
+  "release-policy.json",
+  ".github/workflows/ci.yml",
+  "package.json",
+  "package-lock.json",
+  "README.md",
+  "PROJECT_MANIFEST.md",
+  "CONTRIBUTING.md",
+  "marketplace.json",
+  ".agents/plugins/marketplace.json",
+  ".claude-plugin/marketplace.json",
+  "documentation/release-checklist.md",
+  "documentation/decisions/README.md",
+  "plugins/banzai",
+  "packages/orchestrator/README.md",
+  "documentation/orchestrator.md",
+  "packages/orchestrator/package.json",
+  "packages/orchestrator/src",
+  "packages/orchestrator/test",
+  "packages/orchestrator/scripts/build.mjs",
+  "packages/orchestrator/scripts/artifact-readers-build.mjs",
+  "packages/orchestrator/scripts/check-dist.mjs",
+  "packages/orchestrator/scripts/release-version.mjs",
+  "packages/orchestrator/scripts/smoke-committed.mjs",
+  "packages/orchestrator/scripts/version-recover.mjs",
+  "packages/orchestrator/scripts/version-set.mjs",
+  "packages/orchestrator/dist"
+] as const;
+
+function replacePolicyFragment(
+  contents: string,
+  fragment: string,
+  replacement: string
+): string {
+  const pattern = new RegExp(
+    fragment
+      .split(/\s+/)
+      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("\\s+")
+  );
+  assert.match(contents, pattern, `fixture fragment missing: ${fragment}`);
+  return contents.replace(pattern, replacement);
+}
+
+async function setLegacyLayoutRelease(
+  root: string,
+  version: string
+): Promise<void> {
+  const target = path.join(
+    root,
+    "plugins/banzai/skills/project-manifest/references/layout-migration.md"
+  );
+  const contents = await readFile(target, "utf8");
+  await writeFile(
+    target,
+    contents.replace(
+      /^- Last legacy-compatible release: `[^`]+`$/m,
+      `- Last legacy-compatible release: \`${version}\``
+    ),
+    "utf8"
+  );
+}
+
+async function releaseFixture(): Promise<string> {
+  const parent = await mkdtemp(path.join(tmpdir(), "banzai-release-fixture-"));
+  const root = path.join(parent, "repository");
+  for (const relativePath of FIXTURE_PATHS) {
+    await cp(
+      path.join(REPOSITORY_ROOT, relativePath),
+      path.join(root, relativePath),
+      { recursive: true }
+    );
+  }
+  // cp preserves checkout modes; the fixture needs safe version metadata.
+  for (const relativePath of new Set(
+    VERSION_SURFACES.map((surface) => surface.relativePath)
+  )) {
+    await chmod(path.join(root, relativePath), 0o644);
+  }
+  // Build a valid current candidate independently of the writer under test.
+  for (const surface of VERSION_SURFACES)
+    await setSurfaceVersion(root, surface, "1.19.0");
+  await setLegacyLayoutRelease(root, "1.18.0");
+  // The copied dist embeds the checkout version. Rebuild for the fixture's
+  // pinned version so later releases still exercise the intended diagnostics.
+  await symlink(
+    path.join(REPOSITORY_ROOT, "node_modules"),
+    path.join(root, "node_modules"),
+    "dir"
+  );
+  const packageRoot = path.join(root, "packages/orchestrator");
+  const build = spawnSync(
+    process.execPath,
+    [path.join(packageRoot, "scripts/build.mjs")],
+    { cwd: packageRoot, encoding: "utf8" }
+  );
+  assert.equal(build.status, 0, build.stderr);
+  return root;
+}
+
+function validate(root: string): SpawnSyncReturns<string> {
+  return spawnSync(process.execPath, [VALIDATOR, "--root", root], {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+}
+
+async function mutateJson(
+  root: string,
+  relativePath: string,
+  mutate: (value: Record<string, unknown>) => void
+): Promise<void> {
+  const target = path.join(root, relativePath);
+  const value = JSON.parse(await readFile(target, "utf8")) as Record<
+    string,
+    unknown
+  >;
+  mutate(value);
+  await writeFile(target, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function versionField(
+  value: Record<string, unknown>,
+  surface: VersionSurface
+): { parent: Record<string, unknown>; key: string } {
+  const keys = [...surface.keys];
+  const key = keys.pop();
+  assert.ok(key !== undefined);
+  let current: unknown = value;
+  for (const segment of keys) {
+    assert.ok(typeof current === "object" && current !== null);
+    current = (current as Record<string, unknown>)[segment];
+  }
+  assert.ok(typeof current === "object" && current !== null);
+  return { parent: current as Record<string, unknown>, key };
+}
+
+async function setSurfaceVersion(
+  root: string,
+  surface: VersionSurface,
+  version: unknown
+): Promise<void> {
+  await mutateJson(root, surface.relativePath, (value) => {
+    const field = versionField(value, surface);
+    field.parent[field.key] = version;
+  });
+}
+
+async function removeSurfaceVersion(
+  root: string,
+  surface: VersionSurface
+): Promise<void> {
+  await mutateJson(root, surface.relativePath, (value) => {
+    const field = versionField(value, surface);
+    assert.equal(Reflect.deleteProperty(field.parent, field.key), true);
+  });
+}
+
+async function readSurfaceVersion(
+  root: string,
+  surface: VersionSurface
+): Promise<unknown> {
+  const value = JSON.parse(
+    await readFile(path.join(root, surface.relativePath), "utf8")
+  ) as Record<string, unknown>;
+  const field = versionField(value, surface);
+  return field.parent[field.key];
+}
+
+async function snapshotVersionSurfaces(
+  root: string
+): Promise<Map<string, { contents: Buffer; mode: number }>> {
+  const snapshot = new Map<string, { contents: Buffer; mode: number }>();
+  for (const surface of VERSION_SURFACES) {
+    const target = path.join(root, surface.relativePath);
+    snapshot.set(surface.relativePath, {
+      contents: await readFile(target),
+      mode: (await lstat(target)).mode & 0o7777
+    });
+  }
+  return snapshot;
+}
+
+async function assertVersionSnapshot(
+  root: string,
+  expected: Map<string, { contents: Buffer; mode: number }>
+): Promise<void> {
+  for (const [relativePath, snapshot] of expected) {
+    const target = path.join(root, relativePath);
+    assert.deepEqual(await readFile(target), snapshot.contents, relativePath);
+    assert.equal(
+      (await lstat(target)).mode & 0o7777,
+      snapshot.mode,
+      relativePath
+    );
+  }
+}
+
+async function withFixture(
+  exercise: (root: string) => Promise<void>
+): Promise<void> {
+  const root = await releaseFixture();
+  try {
+    await exercise(root);
+  } finally {
+    await rm(path.dirname(root), { recursive: true, force: true });
+  }
+}
+
+async function leaveCleanupGuardWithJournal(root: string): Promise<void> {
+  const canonicalRoot = await realpath(root);
+  const helper = path.join(
+    path.dirname(root),
+    "kill-before-journal-removal.mjs"
+  );
+  const source = `
+import { createNodeVersionFileSystem, setProjectVersion } from ${JSON.stringify(pathToFileURL(RELEASE_VERSION_MODULE).href)};
+const root = ${JSON.stringify(canonicalRoot)};
+const transaction = ${JSON.stringify(path.join(canonicalRoot, RECOVERY_DIRECTORY))};
+const base = createNodeVersionFileSystem();
+const fileSystem = {
+  ...base,
+  async remove(target, options) {
+    if (target === transaction && options?.recursive === true) {
+      process.kill(process.pid, "SIGKILL");
+    }
+    await base.remove(target, options);
+  }
+};
+await setProjectVersion({ root, targetVersion: "1.20.0", ownerPid: process.pid, fileSystem });
+`;
+  await writeFile(helper, source, "utf8");
+  const killed = spawnSync(process.execPath, [helper], {
+    cwd: root,
+    encoding: "utf8",
+    timeout: 10_000
+  });
+  assert.equal(killed.status, null, `${killed.stdout}\n${killed.stderr}`);
+  assert.equal(killed.signal, "SIGKILL");
+  await access(path.join(root, RECOVERY_DIRECTORY));
+  await access(path.join(root, RECOVERY_GUARD));
+}
+
+test("release validation accepts the all-equal nine-field release train", async () => {
+  await withFixture(async (root) => {
+    assert.deepEqual(
+      await Promise.all(
+        VERSION_SURFACES.map((surface) => readSurfaceVersion(root, surface))
+      ),
+      Array<string>(9).fill("1.19.0")
+    );
+    const result = validate(root);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "release validation passed\n");
+    assert.equal(result.stderr, "");
+  });
+});
+
+for (const [relativePath, fragment] of [
+  ["plugins/banzai/policies/test-assurance.md", "## Test Assurance"],
+  [
+    "plugins/banzai/skills/test-writing/SKILL.md",
+    "**Risk and Contract Assurance Map**"
+  ],
+  [
+    "plugins/banzai/skills/feature-review/SKILL.md",
+    "the plausible regression mechanism;"
+  ]
+] as const) {
+  test(`release validation protects test-assurance policy in ${relativePath}`, async () => {
+    await withFixture(async (root) => {
+      const target = path.join(root, relativePath);
+      const contents = await readFile(target, "utf8");
+      await writeFile(
+        target,
+        replacePolicyFragment(contents, fragment, "REMOVED"),
+        "utf8"
+      );
+      const result = validate(root);
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /^TEST_ASSURANCE_POLICY_DRIFT /);
+    });
+  });
+}
+
+for (const [relativePath, fragment] of [
+  ["plugins/banzai/policies/security-assurance.md", "## Security Assurance"],
+  [
+    "plugins/banzai/policies/security-assurance.md",
+    "Cross-principal reachability"
+  ],
+  [
+    "plugins/banzai/skills/feature-description/SKILL.md",
+    "Security Assurance policy in the installed `policies/security-assurance.md`"
+  ],
+  [
+    "plugins/banzai/skills/development-plan/SKILL.md",
+    "Security Assurance policy in the installed `policies/security-assurance.md`"
+  ],
+  [
+    "plugins/banzai/skills/quick-fix/SKILL.md",
+    "Security Assurance policy in the installed `policies/security-assurance.md`"
+  ],
+  [
+    "plugins/banzai/skills/feature-review/SKILL.md",
+    "mechanism reachable in this codebase"
+  ],
+  ["plugins/banzai/skills/quick-fix/SKILL.md", "the security exposure result"]
+] as const) {
+  test(`release validation protects security-assurance policy in ${relativePath} (${fragment})`, async () => {
+    await withFixture(async (root) => {
+      const target = path.join(root, relativePath);
+      const contents = await readFile(target, "utf8");
+      await writeFile(
+        target,
+        replacePolicyFragment(contents, fragment, "REMOVED"),
+        "utf8"
+      );
+      const result = validate(root);
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /^SECURITY_ASSURANCE_POLICY_DRIFT /);
+    });
+  });
+}
+
+test("release validation rejects a duplicated security assurance policy heading", async () => {
+  await withFixture(async (root) => {
+    const target = path.join(
+      root,
+      "plugins/banzai/policies/security-assurance.md"
+    );
+    const contents = await readFile(target, "utf8");
+    await writeFile(
+      target,
+      `${contents}\n## Security Assurance\n\nDuplicate.\n`,
+      "utf8"
+    );
+    const result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^SECURITY_ASSURANCE_POLICY_DRIFT /);
+  });
+});
+
+test("release validation accepts a security assurance reference that wraps across lines", async () => {
+  await withFixture(async (root) => {
+    const target = path.join(
+      root,
+      "plugins/banzai/skills/feature-description/SKILL.md"
+    );
+    const contents = await readFile(target, "utf8");
+    await writeFile(
+      target,
+      replacePolicyFragment(
+        contents,
+        "Security Assurance policy in the installed `policies/security-assurance.md`",
+        "Security Assurance\n  policy in the installed `policies/security-assurance.md`"
+      ),
+      "utf8"
+    );
+    const result = validate(root);
+    assert.equal(result.status, 0, result.stderr);
+  });
+});
+
+for (const [relativePath, fragment] of [
+  ["plugins/banzai/policies/engineering-quality.md", "## Engineering Quality"],
+  [
+    "plugins/banzai/policies/engineering-quality.md",
+    "unnecessarily couple stable logic to volatile"
+  ],
+  [
+    "plugins/banzai/policies/engineering-quality.md",
+    "Engineering Quality detects missing assurance ownership"
+  ],
+  [
+    "plugins/banzai/policies/engineering-quality.md",
+    "Any later blocker-eligibility proposal must require high confidence"
+  ],
+  [
+    "plugins/banzai/skills/feature-description/SKILL.md",
+    "canonical Engineering Quality policy in the installed `policies/engineering-quality.md`"
+  ],
+  ["plugins/banzai/skills/feature-review/SKILL.md", "only as one `EQ-SHADOW:`"],
+  [
+    "packages/orchestrator/src/prompts.ts",
+    "Resolution review is closure-oriented, not discovery-oriented"
+  ]
+] as const) {
+  test(`release validation protects engineering-quality policy in ${relativePath} (${fragment})`, async () => {
+    await withFixture(async (root) => {
+      const target = path.join(root, relativePath);
+      const contents = await readFile(target, "utf8");
+      await writeFile(
+        target,
+        replacePolicyFragment(contents, fragment, "REMOVED"),
+        "utf8"
+      );
+      const result = validate(root);
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /^ENGINEERING_QUALITY_POLICY_DRIFT /);
+    });
+  });
+}
+
+test("release validation rejects a duplicated engineering quality policy heading", async () => {
+  await withFixture(async (root) => {
+    const target = path.join(
+      root,
+      "plugins/banzai/policies/engineering-quality.md"
+    );
+    const contents = await readFile(target, "utf8");
+    await writeFile(
+      target,
+      `${contents}\n## Engineering Quality\n\nDuplicate.\n`,
+      "utf8"
+    );
+    const result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^ENGINEERING_QUALITY_POLICY_DRIFT /);
+  });
+});
+
+test("release validation rejects an Engineering Quality rule moved outside the canonical section", async () => {
+  await withFixture(async (root) => {
+    const target = path.join(
+      root,
+      "plugins/banzai/policies/engineering-quality.md"
+    );
+    const contents = await readFile(target, "utf8");
+    const ruleStart = contents.indexOf(
+      "### EQ-10 — Incremental legacy evolution"
+    );
+    const policyEnd = contents.indexOf(
+      "\n### Finding and shadow semantics",
+      ruleStart
+    );
+    assert.ok(ruleStart >= 0 && policyEnd > ruleStart);
+    const ruleBlock = contents.slice(ruleStart, policyEnd);
+    const moved = `${contents.slice(0, ruleStart)}${contents.slice(policyEnd)}\n## Outside canonical policy\n\n${ruleBlock.trim()}\n`;
+    await writeFile(target, moved, "utf8");
+    const result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^ENGINEERING_QUALITY_POLICY_DRIFT /);
+  });
+});
+
+test("release validation accepts an engineering quality reference that wraps across lines", async () => {
+  await withFixture(async (root) => {
+    const target = path.join(
+      root,
+      "plugins/banzai/skills/feature-description/SKILL.md"
+    );
+    const contents = await readFile(target, "utf8");
+    await writeFile(
+      target,
+      replacePolicyFragment(
+        contents,
+        "canonical Engineering Quality policy in the installed `policies/engineering-quality.md`",
+        "canonical Engineering Quality\n  policy in the installed `policies/engineering-quality.md`"
+      ),
+      "utf8"
+    );
+    const result = validate(root);
+    assert.equal(result.status, 0, result.stderr);
+  });
+});
+
+test("release validation rejects a complete Engineering Quality rule copy in a consuming skill", async () => {
+  await withFixture(async (root) => {
+    const target = path.join(
+      root,
+      "plugins/banzai/skills/feature-description/SKILL.md"
+    );
+    const contents = await readFile(target, "utf8");
+    const copiedRuleIds = Array.from(
+      { length: 10 },
+      (_, index) => `EQ-${String(index + 1).padStart(2, "0")}`
+    ).join(", ");
+    await writeFile(target, `${contents}\n${copiedRuleIds}\n`, "utf8");
+    const result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^ENGINEERING_QUALITY_POLICY_DRIFT /);
+  });
+});
+
+test("release validation protects Engineering Quality authority precedence", async () => {
+  await withFixture(async (root) => {
+    const target = path.join(root, "plugins/banzai/AGENTS.md");
+    const contents = await readFile(target, "utf8");
+    await writeFile(
+      target,
+      contents.replace(
+        "1. explicit approved user or specification decision;\n2. accepted ADR;",
+        "1. accepted ADR;\n2. explicit approved user or specification decision;"
+      ),
+      "utf8"
+    );
+    const result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^ENGINEERING_QUALITY_POLICY_DRIFT /);
+  });
+});
+
+for (const [relativePath, fragment] of [
+  [
+    "plugins/banzai/policies/decision-consultation.md",
+    "Consultation is not approval or permission."
+  ],
+  [
+    "plugins/banzai/skills/feature-description/SKILL.md",
+    "decision provenance, not approval or broader authority"
+  ],
+  [
+    "plugins/banzai/skills/architecture-decision/SKILL.md",
+    "separate non-authorizing prerequisite"
+  ],
+  ["plugins/banzai/skills/development-plan/SKILL.md", "only gate that"],
+  [
+    "plugins/banzai/skills/code-writing/SKILL.md",
+    "contracts/v3/phase-result.schema.json"
+  ],
+  ["plugins/banzai/skills/test-writing/SKILL.md", "decisionConsultation: null"],
+  [
+    "plugins/banzai/skills/feature/SKILL.md",
+    "cannot use the planning-only consultation gate"
+  ],
+  [
+    "plugins/banzai/skills/quick-fix/SKILL.md",
+    "contracts/v3/phase-result.schema.json"
+  ],
+  [
+    "packages/orchestrator/src/prompts.ts",
+    "stop before authoring a Proposed ADR or plan that selects an option"
+  ],
+  ["README.md", "There are five decision gates"],
+  ["documentation/orchestrator.md", "A v1 answer cannot answer a"],
+  [
+    "packages/orchestrator/src/cli.ts",
+    "Five human decision gates remain distinct"
+  ],
+  ["PROJECT_MANIFEST.md", "five workflow gates can stop work"],
+  [
+    "plugins/banzai/documentation/README.md",
+    "v3/phase-result.schema.json # current consultation-aware phase hand-off"
+  ],
+  [
+    "packages/orchestrator/test/agent-control.test.ts",
+    "HISTORICAL ANSWER CANARY"
+  ],
+  [
+    "packages/orchestrator/test/evaluation.test.ts",
+    "FORBIDDEN-CONSULTATION-ANSWER"
+  ],
+  [
+    "packages/orchestrator/scripts/smoke-committed.mjs",
+    "evaluation leaked consultation history"
+  ]
+] as const) {
+  test(`release validation protects decision-consultation policy in ${relativePath}`, async () => {
+    await withFixture(async (root) => {
+      const target = path.join(root, relativePath);
+      const contents = await readFile(target, "utf8");
+      assert.ok(contents.includes(fragment));
+      await writeFile(target, contents.replaceAll(fragment, "REMOVED"), "utf8");
+      const result = validate(root);
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /^DECISION_CONSULTATION_POLICY_DRIFT /);
+    });
+  });
+}
+
+test("release validation pins the phase-result v3 manifest and schema identity", async () => {
+  await withFixture(async (root) => {
+    await mutateJson(
+      root,
+      "plugins/banzai/contracts/contract.json",
+      (value) => {
+        (value.schemas as Record<string, unknown>).phaseResult =
+          "./v2/phase-result.schema.json";
+      }
+    );
+    let result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^INVALID_CONTRACT_REFERENCE /);
+
+    await cp(
+      path.join(REPOSITORY_ROOT, "plugins/banzai/contracts/contract.json"),
+      path.join(root, "plugins/banzai/contracts/contract.json")
+    );
+    await mutateJson(
+      root,
+      "plugins/banzai/contracts/v3/phase-result.schema.json",
+      (value) => {
+        const properties = value.properties as Record<string, unknown>;
+        (properties.schemaVersion as Record<string, unknown>).const = 4;
+      }
+    );
+    result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^CONTRACT_VERSION_MISMATCH /);
+  });
+});
+
+for (const relativePath of [
+  "plugins/banzai/contracts/v1/phase-result.schema.json",
+  "plugins/banzai/contracts/v2/phase-result.schema.json"
+] as const) {
+  test(`release validation byte-protects legacy contract ${relativePath}`, async () => {
+    await withFixture(async (root) => {
+      const target = path.join(root, relativePath);
+      await writeFile(target, `${await readFile(target, "utf8")}\n`, "utf8");
+      const result = validate(root);
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /^LEGACY_CONTRACT_DRIFT /);
+    });
+  });
+}
+
+test("release validation protects run-state v4 and agent-control 3.0 identities", async () => {
+  await withFixture(async (root) => {
+    const typesPath = path.join(root, "packages/orchestrator/src/types.ts");
+    const accepted = await readFile(typesPath, "utf8");
+    await writeFile(
+      typesPath,
+      accepted.replace(
+        "export interface RunState {\n  schemaVersion: 3 | 4;",
+        "export interface RunState {\n  schemaVersion: 2;"
+      ),
+      "utf8"
+    );
+    let result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^STATE_CONTRACT_DRIFT /);
+
+    await writeFile(
+      typesPath,
+      accepted.replace(
+        '"banzai-agent-status/v2" as const',
+        '"banzai-agent-status/v1" as const'
+      ),
+      "utf8"
+    );
+    result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^CONTRACT_VERSION_MISMATCH /);
+  });
+});
+
+for (const [relativePath, fragment] of [
+  ["plugins/banzai/skills/orchestrate/SKILL.md", "banzai control capabilities"],
+  [
+    "plugins/banzai/skills/orchestrate/SKILL.md",
+    "disable-model-invocation: true"
+  ],
+  [
+    "plugins/banzai/skills/orchestrate/SKILL.md",
+    "never select it from prompt wording alone"
+  ],
+  [
+    "plugins/banzai/skills/orchestrate/SKILL.md",
+    "only when the user invokes it explicitly by name"
+  ],
+  [
+    "plugins/banzai/skills/orchestrate/agents/openai.yaml",
+    "allow_implicit_invocation: false"
+  ],
+  [
+    "plugins/banzai/skills/orchestrate/SKILL.md",
+    "with writable stdin, write the complete document"
+  ],
+  [
+    "plugins/banzai/skills/orchestrate/SKILL.md",
+    "exact supported v3 declaration"
+  ],
+  ["plugins/banzai/skills/orchestrate/SKILL.md", "banzai-agent-answer/v2"],
+  [
+    "plugins/banzai/skills/orchestrate/SKILL.md",
+    "Never select, infer, rewrite"
+  ],
+  [
+    "plugins/banzai/skills/orchestrate/SKILL.md",
+    "A consultation answer records preference provenance only."
+  ],
+  [
+    "plugins/banzai/skills/orchestrate/SKILL.md",
+    "A terminal `done` or `cancelled` projection does not block a new run."
+  ],
+  [
+    "plugins/banzai/skills/orchestrate/references/control-protocol.md",
+    "| `approve_plan` |"
+  ],
+  [
+    "plugins/banzai/skills/orchestrate/references/control-protocol.md",
+    "banzai-agent-capabilities/v3"
+  ],
+  [
+    "plugins/banzai/skills/orchestrate/references/control-protocol.md",
+    'controlContractVersion: "3.0.0"'
+  ],
+  [
+    "plugins/banzai/skills/orchestrate/references/control-protocol.md",
+    "| `answer_consultation` |"
+  ],
+  [
+    "plugins/banzai/skills/orchestrate/references/control-protocol.md",
+    "live-session/write-stdin mechanism"
+  ],
+  [
+    "plugins/banzai/skills/orchestrate/references/control-protocol.md",
+    "Only a non-terminal `activeRun` blocks `control start`."
+  ],
+  [
+    "plugins/banzai/skills/orchestrate/references/control-protocol.md",
+    "| `recover` |"
+  ],
+  ["plugins/banzai/skills/orchestrate/SKILL.md", "banzai-agent-recovery/v1"],
+  [
+    "plugins/banzai/skills/orchestrate/SKILL.md",
+    "Never convert a `null` completion count to zero"
+  ]
+] as const) {
+  test(`release validation protects orchestration policy in ${relativePath}`, async () => {
+    await withFixture(async (root) => {
+      const target = path.join(root, relativePath);
+      const contents = await readFile(target, "utf8");
+      assert.ok(contents.includes(fragment));
+      await writeFile(
+        target,
+        replacePolicyFragment(contents, fragment, "REMOVED"),
+        "utf8"
+      );
+      const result = validate(root);
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /^ORCHESTRATE_SKILL_POLICY_DRIFT /);
+    });
+  });
+}
+
+test("release policy pins Git-capable Node images", async () => {
+  const policy = JSON.parse(
+    await readFile(path.join(REPOSITORY_ROOT, "release-policy.json"), "utf8")
+  ) as {
+    node: {
+      supported: { image: string }[];
+      forward: { image: string };
+    };
+  };
+  for (const lane of [...policy.node.supported, policy.node.forward]) {
+    assert.match(lane.image, /^node:\d+\.\d+\.\d+-bookworm$/);
+    assert.doesNotMatch(lane.image, /-slim$/);
+  }
+});
+
+for (const [relativePath, fragment] of [
+  [
+    "CONTRIBUTING.md",
+    "one root-owned release-train version across nine persisted fields"
+  ],
+  ["documentation/release-checklist.md", "complete included-change scope"],
+  ["documentation/orchestrator.md", "npm run version:set -- <version>"]
+] as const) {
+  test(`release validation protects unified version guidance in ${relativePath}`, async () => {
+    await withFixture(async (root) => {
+      const target = path.join(root, relativePath);
+      const contents = await readFile(target, "utf8");
+      assert.ok(contents.includes(fragment));
+      await writeFile(
+        target,
+        replacePolicyFragment(contents, fragment, "REMOVED"),
+        "utf8"
+      );
+      const result = validate(root);
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /^DOCUMENTATION_POLICY_DRIFT /);
+    });
+  });
+}
+
+test("release validation rejects a missing CI container safe.directory step", async () => {
+  await withFixture(async (root) => {
+    const ciPath = path.join(root, ".github/workflows/ci.yml");
+    const ci = await readFile(ciPath, "utf8");
+    await writeFile(
+      ciPath,
+      ci.replace(
+        '      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"\n',
+        ""
+      ),
+      "utf8"
+    );
+    const result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^CI_POLICY_DRIFT /);
+  });
+});
+
+test("release validation rejects a missing CI Git preflight", async () => {
+  await withFixture(async (root) => {
+    const ciPath = path.join(root, ".github/workflows/ci.yml");
+    const ci = await readFile(ciPath, "utf8");
+    await writeFile(
+      ciPath,
+      ci.replace("      - run: git --version\n", ""),
+      "utf8"
+    );
+    const result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^CI_POLICY_DRIFT /);
+  });
+});
+
+for (const surface of VERSION_SURFACES) {
+  test(`release validation rejects version drift in ${surface.relativePath} ${surface.keys.join("/")}`, async () => {
+    await withFixture(async (root) => {
+      await setSurfaceVersion(root, surface, "1.19.1");
+      const before = await snapshotVersionSurfaces(root);
+      const expectedPath =
+        surface.relativePath === "package.json"
+          ? "plugins/banzai/.claude-plugin/plugin.json"
+          : surface.relativePath;
+      const result = validate(root);
+      assert.equal(result.status, 1);
+      assert.match(
+        result.stderr,
+        new RegExp(
+          `^RELEASE_TRAIN_VERSION_MISMATCH ${expectedPath.replaceAll("/", "\\/")}:`
+        )
+      );
+      assert.match(result.stderr, /differs from root package.json/);
+      await assertVersionSnapshot(root, before);
+    });
+  });
+
+  test(`release validation rejects a non-canonical version in ${surface.relativePath} ${surface.keys.join("/")}`, async () => {
+    await withFixture(async (root) => {
+      await setSurfaceVersion(root, surface, "01.19.0");
+      const result = validate(root);
+      assert.equal(result.status, 1);
+      assert.match(
+        result.stderr,
+        new RegExp(
+          `^INVALID_RELEASE_FIELD ${surface.relativePath.replaceAll("/", "\\/")}:`
+        )
+      );
+    });
+  });
+
+  test(`release validation rejects a missing version in ${surface.relativePath} ${surface.keys.join("/")}`, async () => {
+    await withFixture(async (root) => {
+      await removeSurfaceVersion(root, surface);
+      const result = validate(root);
+      assert.equal(result.status, 1);
+      assert.match(
+        result.stderr,
+        new RegExp(
+          `^${surface.missingCode} ${surface.relativePath.replaceAll("/", "\\/")}:`
+        )
+      );
+    });
+  });
+}
+
+for (const parity of ["equal", "unequal"] as const) {
+  test(`release validation blocks ${parity} release surfaces when transaction state exists without mutation`, async () => {
+    await withFixture(async (root) => {
+      if (parity === "unequal") {
+        await setSurfaceVersion(root, VERSION_SURFACES[5], "1.19.1");
+      }
+      await chmod(path.join(root, VERSION_SURFACES[2].relativePath), 0o600);
+      const transaction = path.join(root, RECOVERY_DIRECTORY);
+      await mkdir(transaction, { mode: 0o700 });
+      await writeFile(path.join(transaction, "canary"), "retained\n", {
+        mode: 0o600
+      });
+      const before = await snapshotVersionSurfaces(root);
+
+      const result = validate(root);
+
+      assert.equal(result.status, 1);
+      assert.match(
+        result.stderr,
+        /^UNRESOLVED_VERSION_TRANSACTION \.banzai-version-set:/
+      );
+      await assertVersionSnapshot(root, before);
+      assert.equal(
+        await readFile(path.join(transaction, "canary"), "utf8"),
+        "retained\n"
+      );
+    });
+  });
+}
+
+test("cleanup sync failure and failed restoration retain validator-visible recovery evidence", async () => {
+  await withFixture(async (root) => {
+    const before = await snapshotVersionSurfaces(root);
+    const canonicalRoot = await realpath(root);
+    const base = createNodeVersionFileSystem();
+    const transaction = path.join(canonicalRoot, RECOVERY_DIRECTORY);
+    const targets = new Set(
+      VERSION_SURFACES.map((surface) =>
+        path.join(canonicalRoot, surface.relativePath)
+      )
+    );
+    let transactionRemoved = false;
+    let cleanupSyncFailed = false;
+    const fileSystem: VersionFileSystem = {
+      ...base,
+      async remove(target, options) {
+        await base.remove(target, options);
+        if (target === transaction && options?.recursive === true) {
+          transactionRemoved = true;
+        }
+      },
+      async syncDirectory(directory) {
+        if (
+          transactionRemoved &&
+          !cleanupSyncFailed &&
+          directory === canonicalRoot
+        ) {
+          cleanupSyncFailed = true;
+          throw new Error("injected post-removal repository sync failure");
+        }
+        await base.syncDirectory(directory);
+      },
+      async move(source, target) {
+        if (cleanupSyncFailed && targets.has(target)) {
+          throw new Error("injected restoration failure");
+        }
+        await base.move(source, target);
+      }
+    };
+
+    await assert.rejects(
+      setProjectVersion({
+        root,
+        targetVersion: "1.20.0",
+        ownerPid: process.pid,
+        fileSystem
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof VersionOperationError);
+        assert.equal(error.code, "VERSION_RESTORE_FAILED");
+        return true;
+      }
+    );
+
+    await access(path.join(root, RECOVERY_GUARD));
+    assert.deepEqual(
+      await Promise.all(
+        VERSION_SURFACES.map((surface) => readSurfaceVersion(root, surface))
+      ),
+      Array<string>(9).fill("1.20.0")
+    );
+    const blocked = validate(root);
+    assert.equal(blocked.status, 1);
+    assert.match(
+      blocked.stderr,
+      /^UNRESOLVED_VERSION_TRANSACTION \.banzai-version-set\.guard:/
+    );
+    await assert.rejects(recoverProjectVersion({ root }), (error: unknown) => {
+      assert.ok(error instanceof VersionOperationError);
+      assert.equal(error.code, "VERSION_TRANSACTION_ACTIVE");
+      return true;
+    });
+    await access(path.join(root, RECOVERY_GUARD));
+
+    const recovered = await recoverProjectVersion({
+      root,
+      isProcessAlive: () => false
+    });
+    assert.equal(recovered.action, "restored");
+    await assertVersionSnapshot(root, before);
+    assert.equal(validate(root).status, 0);
+  });
+});
+
+test("SIGKILL after journal removal retains validator-visible recoverable originals", async () => {
+  await withFixture(async (root) => {
+    const before = await snapshotVersionSurfaces(root);
+    const canonicalRoot = await realpath(root);
+    const helper = path.join(path.dirname(root), "kill-final-cleanup.mjs");
+    const source = `
+import { createNodeVersionFileSystem, setProjectVersion } from ${JSON.stringify(pathToFileURL(RELEASE_VERSION_MODULE).href)};
+const root = ${JSON.stringify(canonicalRoot)};
+const transaction = ${JSON.stringify(path.join(canonicalRoot, RECOVERY_DIRECTORY))};
+const base = createNodeVersionFileSystem();
+const fileSystem = {
+  ...base,
+  async remove(target, options) {
+    await base.remove(target, options);
+    if (target === transaction && options?.recursive === true) {
+      process.kill(process.pid, "SIGKILL");
+    }
+  }
+};
+await setProjectVersion({ root, targetVersion: "1.20.0", ownerPid: process.pid, fileSystem });
+`;
+    await writeFile(helper, source, "utf8");
+
+    const killed = spawnSync(process.execPath, [helper], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 10_000
+    });
+    assert.equal(killed.status, null, `${killed.stdout}\n${killed.stderr}`);
+    assert.equal(killed.signal, "SIGKILL");
+    await access(path.join(root, RECOVERY_GUARD));
+
+    const blocked = validate(root);
+    assert.equal(blocked.status, 1);
+    assert.match(
+      blocked.stderr,
+      /^UNRESOLVED_VERSION_TRANSACTION \.banzai-version-set\.guard:/
+    );
+
+    const recovered = await recoverProjectVersion({
+      root,
+      isProcessAlive: () => false
+    });
+    assert.equal(recovered.action, "restored");
+    await assertVersionSnapshot(root, before);
+    assert.equal(validate(root).status, 0);
+  });
+});
+
+test("release validation blocks an incomplete cleanup-guard temporary without mutation", async () => {
+  await withFixture(async (root) => {
+    const temporary = path.join(root, `${RECOVERY_GUARD}.tmp`);
+    await writeFile(temporary, "incomplete\n", { mode: 0o600 });
+    const before = await snapshotVersionSurfaces(root);
+
+    const result = validate(root);
+
+    assert.equal(result.status, 1);
+    assert.match(
+      result.stderr,
+      /^UNRESOLVED_VERSION_TRANSACTION \.banzai-version-set\.guard\.tmp:/
+    );
+    await assertVersionSnapshot(root, before);
+    assert.equal(await readFile(temporary, "utf8"), "incomplete\n");
+  });
+});
+
+for (const scenario of [
+  {
+    name: "unexpected root entry",
+    async mutate(root: string): Promise<() => Promise<void>> {
+      const retained = path.join(root, RECOVERY_DIRECTORY, "unexpected");
+      await writeFile(retained, "do not delete\n", { mode: 0o600 });
+      return async () => {
+        assert.equal(await readFile(retained, "utf8"), "do not delete\n");
+      };
+    }
+  },
+  {
+    name: "unexpected nested entry",
+    async mutate(root: string): Promise<() => Promise<void>> {
+      const retained = path.join(
+        root,
+        RECOVERY_DIRECTORY,
+        "candidate",
+        "unexpected"
+      );
+      await writeFile(retained, "do not delete\n", { mode: 0o600 });
+      return async () => {
+        assert.equal(await readFile(retained, "utf8"), "do not delete\n");
+      };
+    }
+  },
+  {
+    name: "symlinked expected backup",
+    async mutate(root: string): Promise<() => Promise<void>> {
+      const outside = path.join(path.dirname(root), "outside-backup");
+      const retained = path.join(root, RECOVERY_DIRECTORY, "original", "00");
+      await writeFile(outside, "outside canary\n", { mode: 0o600 });
+      await unlink(retained);
+      await symlink(outside, retained);
+      return async () => {
+        assert.equal((await lstat(retained)).isSymbolicLink(), true);
+        assert.equal(await readFile(outside, "utf8"), "outside canary\n");
+      };
+    }
+  },
+  {
+    name: "mismatched transaction record",
+    async mutate(root: string): Promise<() => Promise<void>> {
+      const retained = path.join(root, RECOVERY_DIRECTORY, "transaction.json");
+      const value = JSON.parse(await readFile(retained, "utf8")) as Record<
+        string,
+        unknown
+      >;
+      value.ownerPid = Number(value.ownerPid) + 1;
+      const contents = `${JSON.stringify(value, null, 2)}\n`;
+      await writeFile(retained, contents, { mode: 0o600 });
+      return async () => {
+        assert.equal(await readFile(retained, "utf8"), contents);
+      };
+    }
+  },
+  {
+    name: "mismatched retained backup",
+    async mutate(root: string): Promise<() => Promise<void>> {
+      const retained = path.join(root, RECOVERY_DIRECTORY, "candidate", "00");
+      await writeFile(retained, "mismatched backup\n", { mode: 0o600 });
+      return async () => {
+        assert.equal(await readFile(retained, "utf8"), "mismatched backup\n");
+      };
+    }
+  }
+] as const) {
+  test(`guard recovery rejects and preserves a coexisting journal with ${scenario.name}`, async () => {
+    await withFixture(async (root) => {
+      await leaveCleanupGuardWithJournal(root);
+      const assertRetained = await scenario.mutate(root);
+      const beforeRecovery = await snapshotVersionSurfaces(root);
+      const guard = path.join(root, RECOVERY_GUARD);
+      const guardBefore = await readFile(guard);
+
+      const blocked = validate(root);
+      assert.equal(blocked.status, 1);
+      assert.match(
+        blocked.stderr,
+        /^UNRESOLVED_VERSION_TRANSACTION \.banzai-version-set:/
+      );
+      await assert.rejects(
+        recoverProjectVersion({
+          root,
+          isProcessAlive: () => false
+        }),
+        (error: unknown) => {
+          assert.ok(error instanceof VersionOperationError);
+          assert.equal(error.code, "INVALID_VERSION_TRANSACTION");
+          return true;
+        }
+      );
+
+      await assertVersionSnapshot(root, beforeRecovery);
+      assert.deepEqual(await readFile(guard), guardBefore);
+      await access(path.join(root, RECOVERY_DIRECTORY));
+      await assertRetained();
+      assert.equal(validate(root).status, 1);
+    });
+  });
+}
+
+test("guard recovery accepts an authenticated partially removed coexisting journal", async () => {
+  await withFixture(async (root) => {
+    const originals = await snapshotVersionSurfaces(root);
+    await leaveCleanupGuardWithJournal(root);
+    const transaction = path.join(root, RECOVERY_DIRECTORY);
+    await unlink(path.join(transaction, "transaction.json"));
+    await unlink(path.join(transaction, "ready"));
+    await unlink(path.join(transaction, "original", "00"));
+    await unlink(path.join(transaction, "candidate", "05"));
+
+    const blocked = validate(root);
+    assert.equal(blocked.status, 1);
+    assert.match(
+      blocked.stderr,
+      /^UNRESOLVED_VERSION_TRANSACTION \.banzai-version-set:/
+    );
+
+    const recovered = await recoverProjectVersion({
+      root,
+      isProcessAlive: () => false
+    });
+
+    assert.equal(recovered.action, "restored");
+    await assertVersionSnapshot(root, originals);
+    await assert.rejects(access(transaction), { code: "ENOENT" });
+    await assert.rejects(access(path.join(root, RECOVERY_GUARD)), {
+      code: "ENOENT"
+    });
+    assert.equal(validate(root).status, 0);
+  });
+});
+
+for (const [name, mutate] of [
+  [
+    "redirected root authority",
+    (policy: Record<string, unknown>): void => {
+      const project = policy.project as { versionAuthority: { path: string } };
+      project.versionAuthority.path = "../outside.json";
+    }
+  ],
+  [
+    "missing root authority",
+    (policy: Record<string, unknown>): void => {
+      delete policy.project;
+    }
+  ],
+  [
+    "duplicated root lockfile mirror",
+    (policy: Record<string, unknown>): void => {
+      const project = policy.project as { lockfileMirrors: unknown[] };
+      project.lockfileMirrors[1] = structuredClone(project.lockfileMirrors[0]);
+    }
+  ],
+  [
+    "legacy co-authority alongside mirrors",
+    (policy: Record<string, unknown>): void => {
+      const plugin = policy.plugin as Record<string, unknown>;
+      plugin.versionSources = structuredClone(plugin.versionMirrors);
+    }
+  ],
+  [
+    "reordered plugin sources",
+    (policy: Record<string, unknown>): void => {
+      const plugin = policy.plugin as Record<string, unknown>;
+      (plugin.versionMirrors as unknown[]).reverse();
+    }
+  ],
+  [
+    "duplicated plugin source",
+    (policy: Record<string, unknown>): void => {
+      const plugin = policy.plugin as Record<string, unknown>;
+      const sources = plugin.versionMirrors as Record<string, unknown>[];
+      const source = sources[0];
+      assert.ok(source);
+      sources[1] = structuredClone(source);
+    }
+  ],
+  [
+    "escaping plugin source",
+    (policy: Record<string, unknown>): void => {
+      const plugin = policy.plugin as Record<string, unknown>;
+      const sources = plugin.versionMirrors as Record<string, unknown>[];
+      const source = sources[0];
+      assert.ok(source);
+      source.path = "../outside.json";
+    }
+  ],
+  [
+    "missing orchestrator mirror",
+    (policy: Record<string, unknown>): void => {
+      const orchestrator = policy.orchestrator as Record<string, unknown>;
+      delete orchestrator.packageVersionMirror;
+    }
+  ],
+  [
+    "unsafe recovery directory",
+    (policy: Record<string, unknown>): void => {
+      const transaction = policy.versionTransaction as Record<string, unknown>;
+      transaction.recoveryDirectory = "/tmp/version-state";
+    }
+  ]
+] as const) {
+  test(`release validation rejects ${name} in the fixed version policy`, async () => {
+    await withFixture(async (root) => {
+      await mutateJson(root, "release-policy.json", mutate);
+      const result = validate(root);
+      assert.equal(result.status, 1);
+      assert.match(
+        result.stderr,
+        /^INVALID_RELEASE_POLICY release-policy\.json:/
+      );
+    });
+  });
+}
+
+for (const [name, mutate] of [
+  [
+    "missing version:set wiring",
+    (rootPackage: Record<string, unknown>): void => {
+      delete (rootPackage.scripts as Record<string, unknown>)["version:set"];
+    }
+  ],
+  [
+    "changed version:recover wiring",
+    (rootPackage: Record<string, unknown>): void => {
+      (rootPackage.scripts as Record<string, unknown>)["version:recover"] =
+        "node elsewhere.mjs";
+    }
+  ]
+] as const) {
+  test(`release validation rejects ${name}`, async () => {
+    await withFixture(async (root) => {
+      await mutateJson(root, "package.json", mutate);
+      const result = validate(root);
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /^INVALID_RELEASE_POLICY package\.json:/);
+    });
+  });
+}
+
+test("release validation keeps the Claude marketplace versionless", async () => {
+  await withFixture(async (root) => {
+    await mutateJson(root, ".claude-plugin/marketplace.json", (value) => {
+      const plugin = (value.plugins as Record<string, unknown>[])[0];
+      assert.ok(plugin);
+      plugin.version = "1.19.0";
+    });
+    const result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(
+      result.stderr,
+      /^INVALID_MARKETPLACE \.claude-plugin\/marketplace\.json:/
+    );
+  });
+});
+
+test("release validation never invokes version synchronization or recovery", async () => {
+  await withFixture(async (root) => {
+    const canary = path.join(root, "version-command-invoked");
+    const marker = `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(canary)}, "invoked\\n"); process.exitCode = 91;\n`;
+    await writeFile(
+      path.join(root, "packages/orchestrator/scripts/version-set.mjs"),
+      marker,
+      "utf8"
+    );
+    await writeFile(
+      path.join(root, "packages/orchestrator/scripts/version-recover.mjs"),
+      marker,
+      "utf8"
+    );
+
+    const result = validate(root);
+
+    assert.equal(result.status, 0, result.stderr);
+    await assert.rejects(access(canary));
+  });
+});
+
+test("release validation rejects malformed manifests", async () => {
+  await withFixture(async (root) => {
+    await writeFile(
+      path.join(root, "plugins/banzai/.codex-plugin/plugin.json"),
+      "{ malformed\n",
+      "utf8"
+    );
+    const result = validate(root);
+    assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+    assert.match(result.stderr, /^MALFORMED_RELEASE_JSON /);
+  });
+});
+
+for (const [relativePath, code] of [
+  ["plugins/banzai/hooks/spec-gate.cjs", "MISSING_RELEASE_FILE"],
+  ["plugins/banzai/skills/code-writing/SKILL.md", "MISSING_RELEASE_FILE"],
+  ["plugins/banzai/skills/orchestrate/SKILL.md", "MISSING_RELEASE_FILE"],
+  [
+    "plugins/banzai/contracts/v1/review-result.schema.json",
+    "MISSING_RELEASE_FILE"
+  ],
+  [
+    "plugins/banzai/contracts/v2/phase-result.schema.json",
+    "MISSING_RELEASE_FILE"
+  ],
+  [
+    "plugins/banzai/contracts/v3/phase-result.schema.json",
+    "MISSING_RELEASE_FILE"
+  ]
+] as const) {
+  test(`release validation rejects missing ${relativePath}`, async () => {
+    await withFixture(async (root) => {
+      await unlink(path.join(root, relativePath));
+      const result = validate(root);
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, new RegExp(`^${code} `));
+    });
+  });
+}
+
+test("release validation requires the committed CLI to remain executable", async () => {
+  await withFixture(async (root) => {
+    const bundle = path.join(root, "packages/orchestrator/dist/banzai.mjs");
+    await chmod(bundle, 0o644);
+    const result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^NON_EXECUTABLE_DISTRIBUTION /);
+  });
+});
+
+test("release validation rejects Node and GitHub Actions policy drift", async () => {
+  await withFixture(async (root) => {
+    await mutateJson(root, "package.json", (value) => {
+      (value.engines as Record<string, unknown>).node = ">=22";
+    });
+    let result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^NODE_POLICY_DRIFT /);
+
+    await cp(
+      path.join(REPOSITORY_ROOT, "package.json"),
+      path.join(root, "package.json")
+    );
+    await setSurfaceVersion(root, VERSION_SURFACES[0], "1.19.0");
+    const ciPath = path.join(root, ".github/workflows/ci.yml");
+    const ci = await readFile(ciPath, "utf8");
+    await writeFile(
+      ciPath,
+      ci.replace(
+        "      - run: npm run release:check",
+        "      - run: codex auth status"
+      ),
+      "utf8"
+    );
+    result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^CI_POLICY_DRIFT /);
+  });
+});
+
+test("default CI lanes reject vendor calls and live CI requires explicit opt-in", async () => {
+  await withFixture(async (root) => {
+    const ciPath = path.join(root, ".github/workflows/ci.yml");
+    const accepted = await readFile(ciPath, "utf8");
+    await writeFile(
+      ciPath,
+      accepted.replace(
+        "      - run: npm run release:check",
+        "      - run: npm run release:check\n      - run: codex --version"
+      ),
+      "utf8"
+    );
+    let result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^CI_VENDOR_BOUNDARY /);
+
+    for (const guard of [
+      "github.event_name == 'workflow_dispatch' &&",
+      "inputs.live_compatibility == true &&",
+      "github.ref_protected == true &&",
+      "vars.BANZAI_LIVE_COMPATIBILITY == '1'"
+    ]) {
+      assert.ok(accepted.includes(guard));
+      await writeFile(ciPath, accepted.replace(guard, "true"), "utf8");
+      result = validate(root);
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /^CI_POLICY_DRIFT /);
+    }
+  });
+});
+
+test("release validation rejects weakened GitHub CI evidence and live isolation", async () => {
+  await withFixture(async (root) => {
+    const ciPath = path.join(root, ".github/workflows/ci.yml");
+    const accepted = await readFile(ciPath, "utf8");
+    for (const [before, after, code] of [
+      ["  push:\n", "", "CI_POLICY_DRIFT"],
+      ["    branches: [main]\n", "", "CI_POLICY_DRIFT"],
+      [
+        "    branches: [main]\n",
+        "    branches: [main, dev]\n",
+        "CI_POLICY_DRIFT"
+      ],
+      ["  pull_request:\n", "  pull_request_target:\n", "CI_POLICY_DRIFT"],
+      ["        default: false", "        default: true", "CI_POLICY_DRIFT"],
+      ["  contents: read", "  contents: write", "CI_POLICY_DRIFT"],
+      [
+        "    container: node:22.20.0-bookworm",
+        "    container: node:22-bookworm",
+        "CI_POLICY_DRIFT"
+      ],
+      [
+        "  release_check_node_22:\n",
+        "  release_check_node_22:\n    continue-on-error: true\n",
+        "CI_POLICY_DRIFT"
+      ],
+      [
+        "  release_check_node_22:\n",
+        "  release_check_node_22:\n    needs: forward_compatibility_node_26\n",
+        "CI_POLICY_DRIFT"
+      ],
+      [
+        "  release_check_node_22:\n",
+        "  release_check_node_22:\n    if: false\n",
+        "CI_POLICY_DRIFT"
+      ],
+      ["    continue-on-error: true\n", "", "CI_POLICY_DRIFT"],
+      [
+        "          persist-credentials: false",
+        "          persist-credentials: true",
+        "CI_POLICY_DRIFT"
+      ],
+      [
+        "    runs-on: [self-hosted, linux, banzai-live]",
+        "    runs-on: ubuntu-24.04",
+        "CI_POLICY_DRIFT"
+      ],
+      [
+        "          package-manager-cache: false",
+        "          package-manager-cache: true",
+        "CI_POLICY_DRIFT"
+      ],
+      [
+        "      - run: npm run compatibility:live -- --confirm-live",
+        "      - run: npm run compatibility:live -- --confirm-live\n      - uses: actions/upload-artifact@v4",
+        "CI_LIVE_RETENTION"
+      ],
+      [
+        "      - run: npm run release:check",
+        "      - run: npm run release:check\n      - uses: actions/cache@v4",
+        "CI_CACHE_BOUNDARY"
+      ],
+      ["  release_check_node_22:\n", "  unexpected_job:\n", "CI_POLICY_DRIFT"],
+      [
+        "      vars.BANZAI_LIVE_COMPATIBILITY == '1'",
+        "      vars.BANZAI_LIVE_COMPATIBILITY == '1' || true",
+        "CI_POLICY_DRIFT"
+      ]
+    ]) {
+      assert.ok(
+        before !== undefined && after !== undefined && code !== undefined
+      );
+      assert.ok(
+        accepted.includes(before),
+        `fixture fragment missing: ${before}`
+      );
+      await writeFile(ciPath, accepted.replace(before, after), "utf8");
+      const result = validate(root);
+      assert.equal(result.status, 1, `accepted CI mutation: ${after}`);
+      assert.match(result.stderr, new RegExp(`^${code} `));
+    }
+  });
+});
+
+test("GitHub CI replaces GitLab while allowing unrelated GitHub metadata", async () => {
+  await withFixture(async (root) => {
+    await writeFile(
+      path.join(root, ".github/CODEOWNERS"),
+      "# Maintainer ownership\n",
+      "utf8"
+    );
+    let result = validate(root);
+    assert.equal(result.status, 0, result.stderr);
+
+    await writeFile(
+      path.join(root, ".gitlab-ci.yml"),
+      "stages: [quality]\n",
+      "utf8"
+    );
+    result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^UNEXPECTED_GITLAB_CI /);
+  });
+});
+
+test("release validation rejects source drift against committed dist", async () => {
+  await withFixture(async (root) => {
+    const packageRoot = path.join(root, "packages/orchestrator");
+    const cliPath = path.join(packageRoot, "src/cli.ts");
+    const cli = await readFile(cliPath, "utf8");
+    await writeFile(cliPath, cli.replace("Usage:", "Changed usage:"), "utf8");
+    const stale = validate(root);
+    assert.equal(stale.status, 1);
+    assert.match(stale.stderr, /^STALE_DISTRIBUTION /);
+    assert.equal(
+      (await readdir(packageRoot)).some((entry) =>
+        entry.startsWith(".dist-check-")
+      ),
+      false
+    );
+  });
+});
+
+for (const relativePath of [
+  "packages/orchestrator/dist/banzai.mjs",
+  "packages/orchestrator/dist/banzai.mjs.map"
+]) {
+  test(`release validation rejects stale ${relativePath}`, async () => {
+    await withFixture(async (root) => {
+      const target = path.join(root, relativePath);
+      await writeFile(
+        target,
+        `${await readFile(target, "utf8")}stale\n`,
+        "utf8"
+      );
+      const stale = validate(root);
+      assert.equal(stale.status, 1);
+      assert.match(stale.stderr, /^STALE_DISTRIBUTION /);
+      assert.equal(
+        (await readdir(path.join(root, "packages/orchestrator"))).some(
+          (entry) => entry.startsWith(".dist-check-")
+        ),
+        false
+      );
+    });
+  });
+
+  test(`release validation rejects missing ${relativePath}`, async () => {
+    await withFixture(async (root) => {
+      await unlink(path.join(root, relativePath));
+      const stale = validate(root);
+      assert.equal(stale.status, 1);
+      assert.match(stale.stderr, /^STALE_DISTRIBUTION /);
+      assert.equal(
+        (await readdir(path.join(root, "packages/orchestrator"))).some(
+          (entry) => entry.startsWith(".dist-check-")
+        ),
+        false
+      );
+    });
+  });
+}
+
+test("test driver is non-TTY and removes output after success and failure", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "banzai-test-driver-"));
+  const testRoot = path.join(root, "test");
+  const outputRoot = path.join(root, "output");
+  const nestedEnvironment = { ...process.env };
+  delete nestedEnvironment.NODE_TEST_CONTEXT;
+  try {
+    await cp(
+      path.join(REPOSITORY_ROOT, "package.json"),
+      path.join(root, "package.json")
+    );
+    await mkdir(testRoot);
+    await writeFile(
+      path.join(testRoot, "fixture.test.ts"),
+      'import assert from "node:assert/strict"; import test from "node:test"; test("non tty", () => assert.equal(Boolean(process.stdin.isTTY), false));\n',
+      "utf8"
+    );
+    let result = spawnSync(
+      process.execPath,
+      [
+        path.join(process.cwd(), "scripts/test.mjs"),
+        "--test-root",
+        testRoot,
+        "--output-root",
+        outputRoot
+      ],
+      {
+        cwd: process.cwd(),
+        env: nestedEnvironment,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"]
+      }
+    );
+    assert.equal(result.status, 0, result.stderr);
+    await assert.rejects(access(outputRoot));
+
+    await writeFile(
+      path.join(testRoot, "fixture.test.ts"),
+      'import test from "node:test"; test("failure", () => { throw new Error("expected fixture failure"); });\n',
+      "utf8"
+    );
+    result = spawnSync(
+      process.execPath,
+      [
+        path.join(process.cwd(), "scripts/test.mjs"),
+        "--test-root",
+        testRoot,
+        "--output-root",
+        outputRoot
+      ],
+      {
+        cwd: process.cwd(),
+        env: nestedEnvironment,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"]
+      }
+    );
+    assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+    await assert.rejects(access(outputRoot));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+for (const scenario of [
+  {
+    name: "extra shim line",
+    file: "CLAUDE.md",
+    mutate: (text: string) => `${text}\nExtra.\n`
+  },
+  {
+    name: "process include",
+    file: "AGENTS.md",
+    mutate: (text: string) => `${text}\n@other.md\n`
+  },
+  {
+    name: "missing process section",
+    file: "AGENTS.md",
+    mutate: (text: string) => text.replace("## Policies", "## Removed")
+  },
+  {
+    name: "missing index policy",
+    file: "AGENTS.md",
+    mutate: (text: string) =>
+      text
+        .split("\n")
+        .filter((line) => !line.startsWith("| Decision Consultation"))
+        .join("\n")
+  },
+  {
+    name: "omitted index consumer",
+    file: "AGENTS.md",
+    mutate: (text: string) =>
+      text.replace(/(\| Security Assurance[^\n]*?)`feature`, /, "$1")
+  },
+  {
+    name: "omitted policy header consumer",
+    file: "policies/security-assurance.md",
+    mutate: (text: string) => text.replace("`feature`, ", "")
+  },
+  {
+    name: "missing matrix read",
+    file: "skills/feature/SKILL.md",
+    mutate: (text: string) =>
+      text.replace(/\s+- `security-assurance\.md` before[^\n]+\n/, "\n")
+  },
+  {
+    name: "missing plan authority section",
+    file: "policies/plan-task-completion.md",
+    mutate: (text: string) => text.replace("## Plan Authority", "## Removed")
+  },
+  {
+    name: "missing plan authority owner",
+    file: "policies/plan-task-completion.md",
+    mutate: (text: string) => text.replace("ADR-0038 (Plan Authority); ", "")
+  },
+  {
+    name: "missing conditional plan policy read",
+    file: "skills/feature-review/SKILL.md",
+    mutate: (text: string) =>
+      text.replace(/\s+- `plan-task-completion\.md` when[^\n]+\n/, "\n")
+  },
+  {
+    name: "conditional read made mandatory",
+    file: "skills/code-writing/SKILL.md",
+    mutate: (text: string) =>
+      text.replace(
+        "`security-assurance.md` when",
+        "`security-assurance.md` before"
+      )
+  },
+  {
+    name: "unexpected test-writing EQ read",
+    file: "skills/test-writing/SKILL.md",
+    mutate: (text: string) => `${text}\nRead engineering-quality.md.\n`
+  },
+  {
+    name: "unauthorized bootstrap exemption",
+    file: "skills/feature/SKILL.md",
+    mutate: (text: string) => `${text}\nApply the bootstrap source rule.\n`
+  },
+  {
+    name: "stale policy reference",
+    file: "skills/quick-fix/SKILL.md",
+    mutate: (text: string) =>
+      `${text}\nSecurity Assurance policy in \`CLAUDE.md\`.\n`
+  },
+  {
+    name: "stale reference inside an allowed layout sentence",
+    file: "skills/quick-fix/SKILL.md",
+    mutate: (text: string) =>
+      `${text}\nFor this layout read the policy from \`CLAUDE.md\`.\n`
+  },
+  {
+    name: "missing migration approval",
+    file: "skills/project-manifest/references/layout-migration.md",
+    mutate: (text: string) =>
+      text.replace("Apply only after approval", "Apply immediately")
+  }
+]) {
+  test(`instruction layout rejects ${scenario.name}`, async () => {
+    await withFixture(async (root) => {
+      const target = path.join(root, "plugins/banzai", scenario.file);
+      const before = await readFile(target, "utf8");
+      const after = scenario.mutate(before);
+      assert.notEqual(
+        after,
+        before,
+        "fixture must change the guarded contract"
+      );
+      await writeFile(target, after, "utf8");
+      const result = validate(root);
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /^INSTRUCTION_LAYOUT_DRIFT /);
+    });
+  });
+}
+
+for (const version of ["1.19.1", "01.18.0", "not-a-version"]) {
+  test(`instruction layout rejects legacy release ${version}`, async () => {
+    await withFixture(async (root) => {
+      await setLegacyLayoutRelease(root, version);
+      const result = validate(root);
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /^INSTRUCTION_LAYOUT_DRIFT /);
+    });
+  });
+}
+
+test("instruction layout permits the unreleased source version and unchanged hook free paths", async () => {
+  await withFixture(async (root) => {
+    await setLegacyLayoutRelease(root, "1.19.0");
+    const result = validate(root);
+    assert.equal(result.status, 0, result.stderr);
+  });
+});
+
+test("instruction layout inventory cannot drop a required policy", async () => {
+  await withFixture(async (root) => {
+    await mutateJson(root, "release-policy.json", (value) => {
+      const plugin = value.plugin as { requiredPaths: string[] };
+      plugin.requiredPaths = plugin.requiredPaths.filter(
+        (item) => !item.endsWith("policies/plan-task-completion.md")
+      );
+    });
+    const result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^INSTRUCTION_LAYOUT_DRIFT /);
+  });
+});
+
+test("instruction layout rejects a missing packaged policy file", async () => {
+  await withFixture(async (root) => {
+    await unlink(
+      path.join(root, "plugins/banzai/policies/plan-task-completion.md")
+    );
+    const result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^MISSING_RELEASE_FILE /);
+  });
+});

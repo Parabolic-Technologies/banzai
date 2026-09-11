@@ -1,0 +1,5 @@
+{
+  "layout": "target",
+  "behavior": "stop_missing_policy",
+  "diagnostic": "Installed policies/test-assurance.md is unreadable."
+}

@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="520" viewBox="0 0 960 520" style="max-width:100%;height:auto" role="img" aria-labelledby="title description">
+  <title id="title">A strict Banzai workflow</title>
+  <desc id="description">An illustrated workflow, not a recorded run. The planner prepares requirements, decisions and a plan. A human approves before implementation. The builder implements and verification runs. An independent reviewer reads the artifacts and source. A passing review completes the run; findings go to human triage. Accepted fixes repeat verification and review.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M0 0 8 4 0 8" fill="none" stroke="#5B6577" stroke-width="1.5"/>
+    </marker>
+  </defs>
+  <rect width="960" height="520" rx="20" fill="#F4F5F7"/>
+  <g font-family="system-ui, -apple-system, sans-serif">
+    <text x="32" y="46" font-size="25" font-weight="700" fill="#0F1B2D">A strict Banzai workflow</text>
+    <text x="32" y="74" font-size="15" fill="#5B6577">Illustrated walkthrough · Codex and Claude Code</text>
+
+    <rect x="32" y="100" width="896" height="48" rx="10" fill="#0B1526"/>
+    <text x="52" y="130" font-size="17" fill="#F4F5F7">Your request + your repository + your verification commands</text>
+
+    <g fill="#FFFFFF" stroke="#D8DDE5">
+      <rect x="32" y="181" width="272" height="148" rx="12"/>
+      <rect x="344" y="181" width="272" height="148" rx="12"/>
+      <rect x="656" y="181" width="272" height="148" rx="12"/>
+    </g>
+    <g fill="#FF5A3C" font-size="13" font-weight="700" letter-spacing="1">
+      <text x="52" y="210">01 · PLANNER</text>
+      <text x="364" y="210">02 · BUILDER + CHECKS</text>
+      <text x="676" y="210">03 · REVIEWER</text>
+    </g>
+    <g fill="#0F1B2D" font-size="21" font-weight="700">
+      <text x="52" y="241">Plan the change</text>
+      <text x="364" y="241">Implement + verify</text>
+      <text x="676" y="241">Independent review</text>
+    </g>
+    <g fill="#5B6577" font-size="15">
+      <text x="52" y="272">Requirements, decisions, plan</text>
+      <text x="52" y="297">Grounded in repository evidence</text>
+      <text x="364" y="272">Code and tests for approved work</text>
+      <text x="364" y="297">Your configured checks run</text>
+      <text x="676" y="272">Current source + artifacts</text>
+      <text x="676" y="297">No builder conversation</text>
+    </g>
+
+    <g fill="none" stroke="#5B6577" stroke-width="2" marker-end="url(#arrow)">
+      <path d="M616 254 H647"/>
+      <path d="M168 329 V350"/>
+      <path d="M304 384 H324 V254 H335"/>
+      <path d="M792 329 V350"/>
+    </g>
+    <g fill="#FFF1EB" stroke="#FF5A3C">
+      <rect x="32" y="359" width="272" height="65" rx="10"/>
+      <rect x="656" y="359" width="272" height="65" rx="10"/>
+    </g>
+    <g fill="#0F1B2D" font-size="16" font-weight="600">
+      <text x="52" y="386">You decide + approve the plan</text>
+      <text x="676" y="386">You triage any findings</text>
+    </g>
+    <g fill="#5B6577" font-size="14">
+      <text x="52" y="409">Before implementation starts</text>
+      <text x="676" y="409">Accept · reject · defer</text>
+    </g>
+    <text x="32" y="464" font-size="15" fill="#0F1B2D">Passing review or no accepted findings → complete</text>
+    <text x="32" y="492" font-size="15" fill="#5B6577">Accepted findings → scoped fixes → verification → bounded re-review</text>
+  </g>
+</svg>

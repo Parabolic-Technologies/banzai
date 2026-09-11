@@ -1,0 +1,6 @@
+interface:
+  display_name: "Banzai Orchestrate"
+  short_description: "Supervise one Banzai run by explicit invocation"
+  default_prompt: "Use $banzai:orchestrate to supervise one local Banzai CLI run."
+policy:
+  allow_implicit_invocation: false

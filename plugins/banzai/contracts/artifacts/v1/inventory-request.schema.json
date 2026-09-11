@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "title": "Banzai artifact inventory request v1",
+  "properties": {
+    "schema": {
+      "const": "banzai-artifact-request/v1"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "repoRoot": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workPaths": {
+      "type": "array",
+      "maxItems": 25000,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      }
+    },
+    "runIds": {
+      "type": "array",
+      "maxItems": 25000,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-zA-Z0-9_-]+$"
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "schemaVersion",
+    "repoRoot"
+  ],
+  "anyOf": [
+    {
+      "required": [
+        "workPaths"
+      ],
+      "properties": {
+        "workPaths": {
+          "minItems": 1
+        }
+      }
+    },
+    {
+      "required": [
+        "runIds"
+      ],
+      "properties": {
+        "runIds": {
+          "minItems": 1
+        }
+      }
+    }
+  ]
+}

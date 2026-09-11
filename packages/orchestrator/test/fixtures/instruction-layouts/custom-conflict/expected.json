@@ -1,0 +1,5 @@
+{
+  "layout": "partial",
+  "behavior": "stop_conflict",
+  "diagnostic": "Retained automatic-commit rule conflicts with packaged Git approval."
+}

@@ -1,0 +1,79 @@
+{
+  "name": "@parabolic-technologies/banzai",
+  "version": "2.3.0",
+  "private": false,
+  "description": "Spec-driven AI development CLI for Codex and Claude Code, with human approvals and independent review for complex changes.",
+  "keywords": [
+    "ai",
+    "ai-coding",
+    "ai-agents",
+    "agentic-development",
+    "agent-orchestration",
+    "spec-driven-development",
+    "claude-code",
+    "codex",
+    "multi-model",
+    "code-review",
+    "developer-tools",
+    "cli"
+  ],
+  "type": "module",
+  "bin": {
+    "banzai": "dist/banzai.mjs"
+  },
+  "files": [
+    "dist/",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "engines": {
+    "node": ">=22.20.0 <23 || >=24.11.1 <25"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:check": "node scripts/check-dist.mjs",
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "lint": "eslint . --format ./scripts/eslint-formatter.mjs",
+    "lint:fix": "eslint . --fix --format ./scripts/eslint-formatter.mjs",
+    "format:check": "prettier --check .",
+    "format": "prettier --write .",
+    "test": "node scripts/test.mjs",
+    "release:validate": "node scripts/check-release.mjs",
+    "smoke:committed": "node scripts/smoke-committed.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.25.0",
+    "eslint": "^10.8.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.8.0",
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.65.0"
+  },
+  "dependencies": {
+    "@inquirer/core": "^11.2.1",
+    "@inquirer/prompts": "^8.5.2"
+  },
+  "license": "Apache-2.0",
+  "author": {
+    "name": "Alexander Torosh",
+    "email": "alexander@parabolic.io",
+    "url": "https://github.com/alexander-torosh"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Parabolic-Technologies/banzai.git",
+    "directory": "packages/orchestrator"
+  },
+  "homepage": "https://github.com/Parabolic-Technologies/banzai#readme",
+  "bugs": {
+    "url": "https://github.com/Parabolic-Technologies/banzai/issues",
+    "email": "alexander@parabolic.io"
+  }
+}

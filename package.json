@@ -1,0 +1,46 @@
+{
+  "version": "2.3.0",
+  "name": "banzai-spec-driven-dev",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.20.0 <23 || >=24.11.1 <25"
+  },
+  "scripts": {
+    "build": "npm run build --workspace @parabolic-technologies/banzai",
+    "build:check": "npm run build:check --workspace @parabolic-technologies/banzai",
+    "install:orchestrator": "npm run build --workspace @parabolic-technologies/banzai && npm link --workspace @parabolic-technologies/banzai",
+    "typecheck": "npm run typecheck --workspace @parabolic-technologies/banzai",
+    "lint": "npm run lint --workspace @parabolic-technologies/banzai",
+    "lint:fix": "npm run lint:fix --workspace @parabolic-technologies/banzai",
+    "format:check": "npm run format:check --workspace @parabolic-technologies/banzai",
+    "format": "npm run format --workspace @parabolic-technologies/banzai",
+    "test": "npm run test --workspace @parabolic-technologies/banzai",
+    "verify": "npm run typecheck && npm run lint && npm run test && npm run build:check",
+    "release:validate": "npm run release:validate --workspace @parabolic-technologies/banzai",
+    "smoke:committed": "npm run smoke:committed --workspace @parabolic-technologies/banzai",
+    "release:check": "node packages/orchestrator/scripts/release-check.mjs",
+    "version:set": "node packages/orchestrator/scripts/version-set.mjs",
+    "version:recover": "node packages/orchestrator/scripts/version-recover.mjs",
+    "compatibility:live": "node packages/orchestrator/dist/banzai.mjs compatibility live",
+    "banzai": "node packages/orchestrator/dist/banzai.mjs",
+    "publication:check": "node packages/orchestrator/scripts/publication-release.mjs"
+  },
+  "license": "Apache-2.0",
+  "author": {
+    "name": "Alexander Torosh",
+    "email": "alexander@parabolic.io",
+    "url": "https://github.com/alexander-torosh"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Parabolic-Technologies/banzai.git"
+  },
+  "homepage": "https://github.com/Parabolic-Technologies/banzai#readme",
+  "bugs": {
+    "url": "https://github.com/Parabolic-Technologies/banzai/issues",
+    "email": "alexander@parabolic.io"
+  }
+}

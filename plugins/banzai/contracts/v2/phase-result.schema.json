@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://banzai.local/contracts/v2/phase-result.schema.json",
+  "title": "Banzai orchestrated phase result",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 2
+    },
+    "contractVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "phase": {
+      "type": "string",
+      "enum": ["plan", "implementation", "fix"]
+    },
+    "outcome": {
+      "type": "string",
+      "description": "Use needs_human_decision whenever gate is non-null. Use completed only with gate null.",
+      "enum": ["completed", "needs_human_decision", "blocked"]
+    },
+    "gate": {
+      "type": ["string", "null"],
+      "description": "A non-null gate transfers control to the human through the interactive orchestrator and requires outcome needs_human_decision.",
+      "enum": ["adr_approval", "plan_approval", "escalation", null]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": { "type": ["string", "null"] },
+        "plan": { "type": ["string", "null"] },
+        "adrs": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "implementationReport": { "type": ["string", "null"] },
+        "testReport": { "type": ["string", "null"] }
+      },
+      "required": [
+        "description",
+        "plan",
+        "adrs",
+        "implementationReport",
+        "testReport"
+      ]
+    },
+    "taskCompletion": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schemaVersion": { "type": "integer", "const": 1 },
+            "tasks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "taskId": { "type": "string" },
+                  "status": {
+                    "type": "string",
+                    "enum": ["completed", "incomplete", "blocked"]
+                  },
+                  "evidence": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "path": { "type": "string" },
+                        "detail": { "type": "string" }
+                      },
+                      "required": ["path", "detail"]
+                    }
+                  },
+                  "gap": {
+                    "anyOf": [
+                      { "type": "null" },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "reportPath": { "type": "string" },
+                          "section": { "type": "string" },
+                          "detail": { "type": "string" }
+                        },
+                        "required": ["reportPath", "section", "detail"]
+                      }
+                    ]
+                  }
+                },
+                "required": ["taskId", "status", "evidence", "gap"]
+              }
+            }
+          },
+          "required": ["schemaVersion", "tasks"]
+        }
+      ]
+    },
+    "touchedPaths": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "questions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "resolvedFindingIds": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "requestedVerification": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "contractVersion",
+    "phase",
+    "outcome",
+    "gate",
+    "summary",
+    "artifacts",
+    "taskCompletion",
+    "touchedPaths",
+    "questions",
+    "resolvedFindingIds",
+    "requestedVerification"
+  ]
+}

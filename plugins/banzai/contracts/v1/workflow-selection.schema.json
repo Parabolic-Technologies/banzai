@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://banzai.local/contracts/v1/workflow-selection.schema.json",
+  "title": "Banzai automatic workflow selection",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "contractVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "recommendedWorkflow": {
+      "type": "string",
+      "enum": [
+        "quick-fix",
+        "feature",
+        "strict"
+      ]
+    },
+    "confidence": {
+      "type": "string",
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "escalationTriggers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "contractVersion",
+    "recommendedWorkflow",
+    "confidence",
+    "reason",
+    "escalationTriggers"
+  ]
+}

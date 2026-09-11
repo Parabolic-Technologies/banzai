@@ -1,0 +1,22 @@
+{
+  "name": "banzai-plugins",
+  "interface": {
+    "displayName": "Banzai Plugins"
+  },
+  "plugins": [
+    {
+      "name": "banzai",
+      "description": "Spec-driven development workflow built for a multi-model plan, implementation, and independent review loop, with a lightweight feature flow, conditional ADR governance, quick fixes, feature review, and status helpers.",
+      "version": "2.3.0",
+      "source": {
+        "source": "local",
+        "path": "./plugins/banzai"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

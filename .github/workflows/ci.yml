@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      live_compatibility:
+        description: Run live vendor compatibility on the dedicated protected runner
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  release_check_node_22:
+    runs-on: ubuntu-24.04
+    container: node:22.20.0-bookworm
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - run: git --version
+      - run: python3 --version
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: npm ci
+      - run: npm run release:check
+
+  release_check_node_24:
+    runs-on: ubuntu-24.04
+    container: node:24.11.1-bookworm
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - run: git --version
+      - run: python3 --version
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: npm ci
+      - run: npm run release:check
+
+  forward_compatibility_node_26:
+    runs-on: ubuntu-24.04
+    container: node:26.7.0-bookworm
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - run: git --version
+      - run: python3 --version
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: npm ci
+      - run: npm run release:check
+
+  live_vendor_compatibility:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.live_compatibility == true &&
+      github.ref_protected == true &&
+      vars.BANZAI_LIVE_COMPATIBILITY == '1'
+    runs-on: [self-hosted, linux, banzai-live]
+    continue-on-error: true
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.11.1
+          package-manager-cache: false
+      - run: git --version
+      - run: npm ci
+      - run: npm run compatibility:live -- --confirm-live

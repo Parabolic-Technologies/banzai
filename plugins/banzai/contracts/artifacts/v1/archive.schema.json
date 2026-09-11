@@ -1,0 +1,294 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schemaVersion",
+    "bundleId",
+    "createdAt",
+    "sources",
+    "entries",
+    "dependencies",
+    "retention"
+  ],
+  "properties": {
+    "schema": {
+      "const": "banzai-artifact-archive/v1"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "bundleId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "projectIdentity",
+          "sourceCommit",
+          "workIds",
+          "runIds"
+        ],
+        "properties": {
+          "id": {
+            "const": "project"
+          },
+          "projectIdentity": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "sourceCommit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "workIds": {
+            "type": "array",
+            "maxItems": 25000,
+            "items": {
+              "type": "string"
+            }
+          },
+          "runIds": {
+            "type": "array",
+            "maxItems": 25000,
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "entries": {
+      "type": "array",
+      "maxItems": 25000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sourceId",
+          "path",
+          "size",
+          "mode",
+          "sha256",
+          "object"
+        ],
+        "properties": {
+          "sourceId": {
+            "const": "project"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "mode": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 511
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "object": {
+            "type": "string",
+            "pattern": "^objects/[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "maxItems": 250000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sourceId",
+          "from",
+          "to",
+          "required",
+          "status"
+        ],
+        "properties": {
+          "sourceId": {
+            "const": "project"
+          },
+          "from": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "to": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "included",
+              "external",
+              "missing"
+            ]
+          }
+        }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy",
+        "rules",
+        "deletionAuthorized",
+        "ownerPolicy",
+        "pins"
+      ],
+      "properties": {
+        "policy": {
+          "enum": [
+            "banzai",
+            "unspecified",
+            "owner"
+          ]
+        },
+        "rules": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {}
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "activeOrPinned",
+                "supportedAuthority",
+                "closedWork",
+                "releaseAndMigration",
+                "unreferencedLogs",
+                "invalidCandidates",
+                "dependencies"
+              ],
+              "properties": {
+                "activeOrPinned": {
+                  "const": "no-expiry"
+                },
+                "supportedAuthority": {
+                  "const": "support-plus-24-months"
+                },
+                "closedWork": {
+                  "const": "at-least-24-months"
+                },
+                "releaseAndMigration": {
+                  "const": "project-lifetime"
+                },
+                "unreferencedLogs": {
+                  "const": "30-days-after-closure"
+                },
+                "invalidCandidates": {
+                  "const": "90-days-after-closure"
+                },
+                "dependencies": {
+                  "const": "override-expiry"
+                }
+              }
+            }
+          ]
+        },
+        "deletionAuthorized": {
+          "const": false
+        },
+        "ownerPolicy": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "ownerId",
+                "recordedAt",
+                "terms"
+              ],
+              "properties": {
+                "ownerId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "recordedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "terms": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 10000
+                }
+              }
+            }
+          ]
+        },
+        "pins": {
+          "type": "array",
+          "maxItems": 25000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "sourceId",
+              "workId",
+              "reason",
+              "recordedAt"
+            ],
+            "properties": {
+              "sourceId": {
+                "const": "project"
+              },
+              "workId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "recordedAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Banzai offline artifact archive v1"
+}

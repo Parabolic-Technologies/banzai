@@ -1,0 +1,22 @@
+{
+  "name": "banzai",
+  "displayName": "Banzai",
+  "version": "2.3.0",
+  "description": "Spec-driven development workflow built for a multi-model plan, implementation, and independent review loop, with a lightweight feature flow, conditional ADR governance, quick fixes, feature review, and status helpers. The engineer decides at ADR acceptance, plan approval, and review triage. New work artifacts default to local ignored .banzai/work/ storage; ADRs and maintained project documentation remain in the repository.",
+  "author": {
+    "name": "Alexander Torosh",
+    "email": "alexander@parabolic.io",
+    "url": "https://github.com/alexander-torosh"
+  },
+  "repository": "https://github.com/Parabolic-Technologies/banzai",
+  "keywords": [
+    "spec-driven",
+    "workflow",
+    "adr",
+    "lite",
+    "strict",
+    "process"
+  ],
+  "skills": "./skills/",
+  "license": "Apache-2.0"
+}

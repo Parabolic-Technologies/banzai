@@ -1,0 +1,1107 @@
+import assert from "node:assert/strict";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readlink,
+  rm,
+  symlink,
+  writeFile
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
+import type { ClaudePermissionAudit } from "../src/claude-permissions.js";
+import { CONFIG_FILE, DEFAULT_CONFIG } from "../src/config.js";
+import { renderDoctorJson, renderDoctorText } from "../src/doctor-cli.js";
+import {
+  inspectDoctor,
+  type DoctorDependencies,
+  type DoctorReport
+} from "../src/doctor.js";
+import type {
+  OrchestratorConfig,
+  VerificationProjectType
+} from "../src/types.js";
+import { snapshotTree } from "./helpers.js";
+import { writeAdoptedGuidance } from "./adoption-fixtures.js";
+import { ADOPTED_AGENTS } from "./adoption-fixtures.js";
+
+const CHECK_ORDER = [
+  "repository.git",
+  "project.guidance",
+  "runtime.node",
+  "runtime.platform",
+  "contract.parity",
+  "config.present",
+  "config.valid",
+  "config.version",
+  "claude.environment",
+  "claude.permissions",
+  "project.types",
+  "verification.profiles",
+  "verification.substantive",
+  "executables.models",
+  "executables.verification",
+  "authentication.models",
+  "run.active",
+  "run.lock"
+];
+
+test("doctor adoption classifications remain independent of verification and expose only bounded diagnostics", async (t) => {
+  for (const classification of [
+    "ready",
+    "setup_required",
+    "migration_required",
+    "needs_attention"
+  ])
+    await t.test(classification, async () => {
+      const repository = await temporaryRoot();
+      try {
+        await writeConfig(repository.root, DEFAULT_CONFIG);
+        if (classification === "setup_required")
+          await writeFile(
+            path.join(repository.root, "AGENTS.md"),
+            "# FORBIDDEN-GUIDANCE\nPersonal rules."
+          );
+        if (classification === "migration_required") {
+          await rm(path.join(repository.root, "AGENTS.md"));
+          await writeFile(
+            path.join(repository.root, "CLAUDE.md"),
+            "## Engineering Quality\nFORBIDDEN-GUIDANCE"
+          );
+        }
+        if (classification === "needs_attention")
+          await writeFile(
+            path.join(repository.root, "AGENTS.md"),
+            `@/FORBIDDEN-HOST-PATH\n${ADOPTED_AGENTS}`
+          );
+        const before = await snapshotTree(repository.root);
+        const report = await inspectDoctor(repository.root, dependencies());
+        assert.equal(
+          checkStatus(report, "project.guidance"),
+          classification === "ready" ? "pass" : "fail"
+        );
+        assert.equal(checkStatus(report, "verification.profiles"), "fail");
+        assert.equal(report.ready, false);
+        assert.deepEqual(
+          report.checks.map((item) => item.id),
+          CHECK_ORDER
+        );
+        assert.doesNotMatch(
+          renderDoctorJson(report) + renderDoctorText(report),
+          /FORBIDDEN-GUIDANCE|FORBIDDEN-HOST-PATH/
+        );
+        assert.deepEqual(await snapshotTree(repository.root), before);
+      } finally {
+        await repository.dispose();
+      }
+    });
+});
+
+async function temporaryRoot(): Promise<{
+  root: string;
+  dispose(): Promise<void>;
+}> {
+  const root = await mkdtemp(path.join(tmpdir(), "banzai-doctor-test-"));
+  await writeAdoptedGuidance(root);
+  return {
+    root,
+    dispose: async () => {
+      await rm(root, { recursive: true, force: true });
+    }
+  };
+}
+
+function dependencies(options?: {
+  unavailable?: readonly string[];
+  liveness?: "live" | "stale";
+  resolveClaudeInvocationScope?: NonNullable<
+    DoctorDependencies["resolveClaudeInvocationScope"]
+  >;
+  inspectClaudePermissions?: NonNullable<
+    DoctorDependencies["inspectClaudePermissions"]
+  >;
+}): DoctorDependencies {
+  const unavailable = new Set(options?.unavailable ?? []);
+  return {
+    async executableAvailable(command) {
+      return !unavailable.has(command);
+    },
+    processAlive() {
+      return options?.liveness ?? "live";
+    },
+    ...(options?.resolveClaudeInvocationScope === undefined
+      ? {}
+      : {
+          resolveClaudeInvocationScope: options.resolveClaudeInvocationScope
+        }),
+    ...(options?.inspectClaudePermissions === undefined
+      ? {}
+      : { inspectClaudePermissions: options.inspectClaudePermissions })
+  };
+}
+
+function substantiveConfig(
+  projectType: VerificationProjectType = "node"
+): OrchestratorConfig {
+  const config = structuredClone(DEFAULT_CONFIG);
+  config.verification.profiles.push({
+    id: projectType,
+    projectType,
+    commands: [
+      {
+        name: `${projectType} verification`,
+        command: "project-check",
+        args: ["verify"],
+        timeoutMs: 1_000
+      }
+    ]
+  });
+  return config;
+}
+
+function locallyExecutableConfig(
+  command = process.execPath
+): OrchestratorConfig {
+  const config = substantiveConfig("node");
+  config.models.planner.executable = process.execPath;
+  config.models.implementer.executable = process.execPath;
+  config.models.reviewer.executable = process.execPath;
+  const nodeProfile = config.verification.profiles.find(
+    (profile) => profile.projectType === "node"
+  );
+  assert.ok(nodeProfile);
+  const nodeCommand = nodeProfile.commands[0];
+  assert.ok(nodeCommand);
+  nodeCommand.command = command;
+  return config;
+}
+
+async function writeConfig(
+  root: string,
+  config: unknown = substantiveConfig()
+): Promise<void> {
+  await mkdir(path.join(root, ".banzai"), { recursive: true });
+  await writeFile(
+    path.join(root, CONFIG_FILE),
+    typeof config === "string"
+      ? config
+      : `${JSON.stringify(config, null, 2)}\n`,
+    "utf8"
+  );
+}
+
+function checkStatus(report: DoctorReport, id: string): string | undefined {
+  return report.checks.find((item) => item.id === id)?.status;
+}
+
+test("reports a deterministic ready Node project without mutating it", async () => {
+  const repository = await temporaryRoot();
+  try {
+    await writeFile(path.join(repository.root, "package.json"), "{}\n", "utf8");
+    await writeConfig(repository.root);
+    const before = await snapshotTree(repository.root);
+
+    const first = await inspectDoctor(repository.root, dependencies());
+    const second = await inspectDoctor(repository.root, dependencies());
+
+    assert.equal(first.ready, true);
+    assert.deepEqual(first.projectTypes, ["node"]);
+    assert.deepEqual(
+      first.checks.map((item) => item.id),
+      CHECK_ORDER
+    );
+    assert.deepEqual(second, first);
+    assert.equal(checkStatus(first, "authentication.models"), "warning");
+    assert.match(
+      first.checks.find((item) => item.id === "authentication.models")
+        ?.message ?? "",
+      /not checked.*not authentication proof.*startup preflight/s
+    );
+    assert.equal(first.summary.warnings, 1);
+    assert.equal(
+      first.summary.passed +
+        first.summary.warnings +
+        first.summary.failed +
+        first.summary.skipped,
+      CHECK_ORDER.length
+    );
+    assert.deepEqual(await snapshotTree(repository.root), before);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("requires substantive coverage for every detected project type", async () => {
+  const repository = await temporaryRoot();
+  try {
+    await writeFile(path.join(repository.root, "package.json"), "{}\n", "utf8");
+    await writeFile(
+      path.join(repository.root, "composer.json"),
+      "{}\n",
+      "utf8"
+    );
+    await writeConfig(repository.root, substantiveConfig("node"));
+
+    const partial = await inspectDoctor(repository.root, dependencies());
+    assert.equal(partial.ready, false);
+    assert.deepEqual(partial.projectTypes, ["node", "php"]);
+    assert.equal(checkStatus(partial, "verification.profiles"), "fail");
+    assert.equal(checkStatus(partial, "verification.substantive"), "pass");
+    assert.equal(
+      partial.checks.find((item) => item.id === "verification.profiles")
+        ?.message,
+      "Missing profiles for: php; hygiene-only detected types: none; covered: node; unused profiles: none."
+    );
+    const substantiveMessage =
+      partial.checks.find((item) => item.id === "verification.substantive")
+        ?.message ?? "";
+    assert.equal(
+      substantiveMessage,
+      "1 substantive verification command is configured for detected project types."
+    );
+    const json = JSON.parse(renderDoctorJson(partial)) as DoctorReport;
+    assert.equal(
+      json.checks.find((item) => item.id === "verification.substantive")
+        ?.message,
+      substantiveMessage
+    );
+    assert.match(
+      renderDoctorText(partial),
+      /\[PASS\] verification\.substantive \(verification\): 1 substantive verification command is configured for detected project types\./
+    );
+
+    const coveredConfig = substantiveConfig("node");
+    coveredConfig.verification.profiles.push({
+      id: "php",
+      projectType: "php",
+      commands: [
+        {
+          name: "php verification",
+          command: "project-check",
+          args: ["verify"],
+          timeoutMs: 1_000
+        }
+      ]
+    });
+    await writeConfig(repository.root, coveredConfig);
+    const covered = await inspectDoctor(repository.root, dependencies());
+    assert.equal(
+      covered.checks.find((item) => item.id === "verification.substantive")
+        ?.message,
+      "2 substantive verification commands are configured for detected project types."
+    );
+
+    await rm(path.join(repository.root, "composer.json"));
+    await writeConfig(repository.root, DEFAULT_CONFIG);
+    const missingProfile = await inspectDoctor(repository.root, dependencies());
+    assert.equal(
+      missingProfile.checks.find((item) => item.id === "verification.profiles")
+        ?.message,
+      "Missing profiles for: node; hygiene-only detected types: none; covered: none; unused profiles: none."
+    );
+    assert.equal(
+      missingProfile.checks.find(
+        (item) => item.id === "verification.substantive"
+      )?.message,
+      "No substantive verification command is configured for detected project types or unused project profiles."
+    );
+
+    const matchingHygiene = structuredClone(DEFAULT_CONFIG);
+    const matchingProfile = matchingHygiene.verification.profiles[0];
+    assert.ok(matchingProfile);
+    matchingProfile.id = "node";
+    matchingProfile.projectType = "node";
+    await writeConfig(repository.root, matchingHygiene);
+    const hygieneOnly = await inspectDoctor(repository.root, dependencies());
+    assert.equal(
+      hygieneOnly.checks.find((item) => item.id === "verification.profiles")
+        ?.message,
+      "Missing profiles for: none; hygiene-only detected types: node; covered: none; unused profiles: none."
+    );
+
+    await writeConfig(repository.root, substantiveConfig("rust"));
+    const unusedSubstantive = await inspectDoctor(
+      repository.root,
+      dependencies()
+    );
+    assert.equal(
+      unusedSubstantive.checks.find(
+        (item) => item.id === "verification.profiles"
+      )?.message,
+      "Missing profiles for: node; hygiene-only detected types: none; covered: none; unused profiles: rust."
+    );
+    assert.equal(
+      unusedSubstantive.checks.find(
+        (item) => item.id === "verification.substantive"
+      )?.message,
+      "No substantive verification command is configured for detected project types; 1 substantive command is configured for unused project profiles."
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("supports custom projects and keeps unused profiles as warnings", async () => {
+  const repository = await temporaryRoot();
+  try {
+    const config = substantiveConfig("custom");
+    config.verification.profiles.push({
+      id: "unused-node",
+      projectType: "node",
+      commands: [
+        {
+          name: "unused",
+          command: "unused-check",
+          args: [],
+          timeoutMs: 1_000
+        }
+      ]
+    });
+    await writeConfig(repository.root, config);
+    const report = await inspectDoctor(repository.root, dependencies());
+    assert.deepEqual(report.projectTypes, ["custom"]);
+    assert.equal(checkStatus(report, "verification.profiles"), "warning");
+    assert.equal(report.ready, true);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("distinguishes missing malformed unsupported invalid and legacy config", async () => {
+  const repository = await temporaryRoot();
+  try {
+    const missing = await inspectDoctor(repository.root, dependencies());
+    assert.equal(checkStatus(missing, "config.present"), "fail");
+    assert.equal(checkStatus(missing, "config.valid"), "skipped");
+    assert.equal(checkStatus(missing, "config.version"), "skipped");
+    assert.equal(checkStatus(missing, "verification.profiles"), "skipped");
+
+    await writeConfig(repository.root, "{not-json");
+    const malformed = await inspectDoctor(repository.root, dependencies());
+    assert.equal(checkStatus(malformed, "config.present"), "pass");
+    assert.equal(checkStatus(malformed, "config.valid"), "fail");
+    assert.equal(checkStatus(malformed, "config.version"), "skipped");
+
+    await writeConfig(repository.root, {
+      ...structuredClone(DEFAULT_CONFIG),
+      schemaVersion: 99
+    });
+    const unsupported = await inspectDoctor(repository.root, dependencies());
+    assert.equal(checkStatus(unsupported, "config.valid"), "fail");
+    assert.equal(checkStatus(unsupported, "config.version"), "fail");
+
+    const invalid = structuredClone(DEFAULT_CONFIG);
+    const invalidProfile = invalid.verification.profiles[0];
+    assert.ok(invalidProfile);
+    invalidProfile.commands = [];
+    await writeConfig(repository.root, invalid);
+    const invalidProfiles = await inspectDoctor(
+      repository.root,
+      dependencies()
+    );
+    assert.equal(checkStatus(invalidProfiles, "config.valid"), "fail");
+    assert.equal(checkStatus(invalidProfiles, "config.version"), "pass");
+    assert.equal(
+      checkStatus(invalidProfiles, "verification.profiles"),
+      "skipped"
+    );
+
+    const legacy = {
+      ...structuredClone(DEFAULT_CONFIG),
+      schemaVersion: 1,
+      verification: [
+        {
+          name: "legacy project check",
+          command: "project-check",
+          args: ["verify"],
+          timeoutMs: 1_000
+        }
+      ]
+    };
+    await writeConfig(repository.root, legacy);
+    const legacyReport = await inspectDoctor(repository.root, dependencies());
+    assert.equal(checkStatus(legacyReport, "config.valid"), "pass");
+    assert.equal(checkStatus(legacyReport, "config.version"), "fail");
+    assert.equal(checkStatus(legacyReport, "verification.profiles"), "fail");
+    assert.equal(
+      checkStatus(legacyReport, "verification.substantive"),
+      "skipped"
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("reports verified degraded ambient and invalid Claude environments without exposing paths", async () => {
+  const repository = await temporaryRoot();
+  try {
+    await writeConfig(repository.root, substantiveConfig("custom"));
+    const verified = await inspectDoctor(repository.root, dependencies());
+    assert.equal(checkStatus(verified, "claude.environment"), "pass");
+
+    const degraded = await inspectDoctor(
+      repository.root,
+      dependencies({
+        async resolveClaudeInvocationScope() {
+          return {
+            scope: {
+              strictMcpConfig: true,
+              settingSources: null,
+              pluginDirectory: null
+            },
+            degradedReason: "FORBIDDEN-RAW-DEGRADATION-REASON"
+          };
+        }
+      })
+    );
+    assert.equal(checkStatus(degraded, "claude.environment"), "warning");
+    assert.equal(degraded.ready, true);
+    assert.doesNotMatch(JSON.stringify(degraded), /FORBIDDEN/);
+
+    const ambientConfig = substantiveConfig("custom");
+    ambientConfig.claudeEnvironment.mode = "ambient";
+    await writeConfig(repository.root, ambientConfig);
+    const ambient = await inspectDoctor(
+      repository.root,
+      dependencies({
+        async resolveClaudeInvocationScope() {
+          throw new Error("ambient mode must not resolve a plugin");
+        }
+      })
+    );
+    assert.equal(checkStatus(ambient, "claude.environment"), "warning");
+    assert.equal(ambient.ready, true);
+
+    const invalidPlugin = path.join(repository.root, "wrong-plugin");
+    await mkdir(path.join(invalidPlugin, ".claude-plugin"), {
+      recursive: true
+    });
+    await writeFile(
+      path.join(invalidPlugin, ".claude-plugin", "plugin.json"),
+      `${JSON.stringify({ name: "not-banzai", skills: "./skills/" })}\n`,
+      "utf8"
+    );
+    const invalidConfig = substantiveConfig("custom");
+    invalidConfig.claudeEnvironment.pluginDirectory = invalidPlugin;
+    await writeConfig(repository.root, invalidConfig);
+    const invalid = await inspectDoctor(repository.root, dependencies());
+    assert.equal(checkStatus(invalid, "claude.environment"), "fail");
+    assert.equal(invalid.ready, false);
+    assert.equal(JSON.stringify(invalid).includes(repository.root), false);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("reports Claude permission readiness only for the roles that depend on it", async () => {
+  const repository = await temporaryRoot();
+  const audit = (
+    blocking: string[],
+    advisories: string[]
+  ): ClaudePermissionAudit => ({
+    demand: { planningWrites: true, shellCommands: true },
+    sources: ["project"],
+    trust: "trusted",
+    tools: [],
+    blocking,
+    advisories
+  });
+  try {
+    // The default reviewer-only Claude configuration depends on no ambient
+    // rule, so the check stays out of readiness entirely.
+    await writeConfig(repository.root, substantiveConfig("custom"));
+    const reviewerOnly = await inspectDoctor(
+      repository.root,
+      dependencies({
+        async inspectClaudePermissions() {
+          throw new Error("a reviewer-only configuration must not be audited");
+        }
+      })
+    );
+    assert.equal(checkStatus(reviewerOnly, "claude.permissions"), "skipped");
+    assert.equal(reviewerOnly.ready, true);
+
+    const planning = substantiveConfig("custom");
+    planning.models.planner.executable = "claude";
+    planning.models.planner.model = "claude-opus-5";
+    await writeConfig(repository.root, planning);
+
+    const granted = await inspectDoctor(
+      repository.root,
+      dependencies({
+        async inspectClaudePermissions() {
+          return audit([], []);
+        }
+      })
+    );
+    assert.equal(checkStatus(granted, "claude.permissions"), "pass");
+
+    const degraded = await inspectDoctor(
+      repository.root,
+      dependencies({
+        async inspectClaudePermissions() {
+          return audit([], ["No loaded permission rule grants Bash."]);
+        }
+      })
+    );
+    assert.equal(checkStatus(degraded, "claude.permissions"), "warning");
+    assert.equal(degraded.ready, true);
+
+    const blocked = await inspectDoctor(
+      repository.root,
+      dependencies({
+        async inspectClaudePermissions(input) {
+          assert.equal(input.repoRoot, repository.root);
+          assert.equal(input.settingSources, "project");
+          assert.deepEqual(input.demand, {
+            planningWrites: true,
+            shellCommands: true
+          });
+          return audit(["No loaded permission rule grants Write."], []);
+        }
+      })
+    );
+    assert.equal(checkStatus(blocked, "claude.permissions"), "fail");
+    assert.equal(blocked.ready, false);
+    assert.equal(JSON.stringify(blocked).includes(repository.root), false);
+
+    // An environment that cannot be resolved is the environment check's
+    // failure; the permission check has no sources to read and says so.
+    const unresolvable = await inspectDoctor(
+      repository.root,
+      dependencies({
+        async resolveClaudeInvocationScope() {
+          throw new Error("unverifiable");
+        },
+        async inspectClaudePermissions() {
+          throw new Error("an unverifiable environment must not be audited");
+        }
+      })
+    );
+    assert.equal(checkStatus(unresolvable, "claude.permissions"), "skipped");
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("reports unavailable configured executables without running them", async () => {
+  const repository = await temporaryRoot();
+  try {
+    await writeConfig(repository.root, substantiveConfig("custom"));
+    const report = await inspectDoctor(
+      repository.root,
+      dependencies({ unavailable: ["codex", "project-check"] })
+    );
+    assert.equal(checkStatus(report, "executables.models"), "fail");
+    assert.equal(checkStatus(report, "executables.verification"), "fail");
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("default executable inspection rejects directories and accepts executable files and symlinks", async () => {
+  const repository = await temporaryRoot();
+  try {
+    await writeFile(path.join(repository.root, "package.json"), "{}\n", "utf8");
+    await writeConfig(repository.root, locallyExecutableConfig("."));
+
+    const directoryCommand = await inspectDoctor(repository.root);
+    assert.equal(
+      checkStatus(directoryCommand, "executables.verification"),
+      "fail"
+    );
+    assert.equal(directoryCommand.ready, false);
+
+    const executablePath = path.join(repository.root, "verify-tool");
+    await writeFile(executablePath, "#!/bin/sh\nexit 0\n", "utf8");
+    await chmod(executablePath, 0o755);
+    await writeConfig(
+      repository.root,
+      locallyExecutableConfig("./verify-tool")
+    );
+    const executableFile = await inspectDoctor(repository.root);
+    assert.equal(
+      checkStatus(executableFile, "executables.verification"),
+      "pass"
+    );
+    assert.equal(executableFile.ready, true);
+
+    await symlink("verify-tool", path.join(repository.root, "verify-link"));
+    await writeConfig(
+      repository.root,
+      locallyExecutableConfig("./verify-link")
+    );
+    const executableSymlink = await inspectDoctor(repository.root);
+    assert.equal(
+      checkStatus(executableSymlink, "executables.verification"),
+      "pass"
+    );
+    assert.equal(executableSymlink.ready, true);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("rejects symlinked Banzai and runs boundaries without reading external evidence", async () => {
+  const repository = await temporaryRoot();
+  const external = await temporaryRoot();
+  try {
+    await writeFile(path.join(repository.root, "package.json"), "{}\n", "utf8");
+    await writeConfig(external.root, locallyExecutableConfig());
+    const externalBanzai = path.join(external.root, ".banzai");
+    const localBanzai = path.join(repository.root, ".banzai");
+    await symlink(externalBanzai, localBanzai);
+    const beforeRepository = await snapshotTree(repository.root);
+    const beforeExternal = await snapshotTree(external.root);
+
+    const escapedBanzai = await inspectDoctor(repository.root, dependencies());
+    assert.equal(checkStatus(escapedBanzai, "config.present"), "fail");
+    assert.equal(checkStatus(escapedBanzai, "run.active"), "fail");
+    assert.equal(checkStatus(escapedBanzai, "run.lock"), "fail");
+    assert.equal(escapedBanzai.ready, false);
+    assert.equal(await readlink(localBanzai), externalBanzai);
+    assert.deepEqual(await snapshotTree(repository.root), beforeRepository);
+    assert.deepEqual(await snapshotTree(external.root), beforeExternal);
+
+    await rm(localBanzai);
+    await writeConfig(repository.root, locallyExecutableConfig());
+    await writeFile(
+      path.join(repository.root, ".banzai", "active-run.json"),
+      JSON.stringify({ schemaVersion: 1, runId: "safe-run" }),
+      "utf8"
+    );
+    const externalRuns = path.join(external.root, "external-runs");
+    const externalRun = path.join(externalRuns, "safe-run");
+    await mkdir(externalRun, { recursive: true });
+    await writeFile(
+      path.join(externalRun, "state.json"),
+      JSON.stringify({
+        schemaVersion: 2,
+        runId: "safe-run",
+        repoRoot: repository.root,
+        status: "done"
+      }),
+      "utf8"
+    );
+    const localRuns = path.join(repository.root, ".banzai", "runs");
+    await symlink(externalRuns, localRuns);
+
+    const escapedRuns = await inspectDoctor(repository.root, dependencies());
+    assert.equal(checkStatus(escapedRuns, "run.active"), "fail");
+    assert.equal(escapedRuns.ready, false);
+    assert.equal(await readlink(localRuns), externalRuns);
+  } finally {
+    await repository.dispose();
+    await external.dispose();
+  }
+});
+
+test("rejects final config pointer state and lock symlinks outside their boundaries", async () => {
+  const repository = await temporaryRoot();
+  const external = await temporaryRoot();
+  try {
+    await writeFile(path.join(repository.root, "package.json"), "{}\n", "utf8");
+    await mkdir(path.join(repository.root, ".banzai"), { recursive: true });
+    const externalConfig = path.join(external.root, "config.json");
+    await writeFile(
+      externalConfig,
+      `${JSON.stringify(locallyExecutableConfig(), null, 2)}\n`,
+      "utf8"
+    );
+    const localConfig = path.join(repository.root, CONFIG_FILE);
+    await symlink(externalConfig, localConfig);
+    const configEscape = await inspectDoctor(repository.root, dependencies());
+    assert.equal(checkStatus(configEscape, "config.present"), "fail");
+    assert.equal(configEscape.ready, false);
+    await rm(localConfig);
+    await writeConfig(repository.root, locallyExecutableConfig());
+
+    const externalPointer = path.join(external.root, "active-run.json");
+    await writeFile(
+      externalPointer,
+      JSON.stringify({ schemaVersion: 1, runId: "safe-run" }),
+      "utf8"
+    );
+    const localPointer = path.join(
+      repository.root,
+      ".banzai",
+      "active-run.json"
+    );
+    await symlink(externalPointer, localPointer);
+    const pointerEscape = await inspectDoctor(repository.root, dependencies());
+    assert.equal(checkStatus(pointerEscape, "run.active"), "fail");
+    await rm(localPointer);
+    await writeFile(
+      localPointer,
+      JSON.stringify({ schemaVersion: 1, runId: "safe-run" }),
+      "utf8"
+    );
+
+    const localRun = path.join(repository.root, ".banzai", "runs", "safe-run");
+    await mkdir(localRun, { recursive: true });
+    const externalState = path.join(external.root, "state.json");
+    await writeFile(
+      externalState,
+      JSON.stringify({
+        schemaVersion: 2,
+        runId: "safe-run",
+        repoRoot: repository.root,
+        status: "done"
+      }),
+      "utf8"
+    );
+    await symlink(externalState, path.join(localRun, "state.json"));
+    const stateEscape = await inspectDoctor(repository.root, dependencies());
+    assert.equal(checkStatus(stateEscape, "run.active"), "fail");
+
+    const externalLock = path.join(external.root, "runner.lock");
+    await writeFile(
+      externalLock,
+      JSON.stringify({
+        schemaVersion: 1,
+        pid: 123,
+        token: "external-token",
+        createdAt: "2026-08-04T00:00:00.000Z"
+      }),
+      "utf8"
+    );
+    await symlink(
+      externalLock,
+      path.join(repository.root, ".banzai", "runner.lock")
+    );
+    const lockEscape = await inspectDoctor(repository.root, dependencies());
+    assert.equal(checkStatus(lockEscape, "run.lock"), "fail");
+  } finally {
+    await repository.dispose();
+    await external.dispose();
+  }
+});
+
+async function writeRunState(
+  root: string,
+  options: {
+    pointer?: unknown;
+    state?: unknown;
+    runId?: string;
+  } = {}
+): Promise<void> {
+  const runId = options.runId ?? "safe-run";
+  const runDirectory = path.join(root, ".banzai", "runs", runId);
+  await mkdir(runDirectory, { recursive: true });
+  await writeFile(
+    path.join(root, ".banzai", "active-run.json"),
+    JSON.stringify(options.pointer ?? { schemaVersion: 1, runId }, null, 2),
+    "utf8"
+  );
+  if (options.state !== null) {
+    await writeFile(
+      path.join(runDirectory, "state.json"),
+      JSON.stringify(
+        options.state ?? {
+          schemaVersion: 2,
+          runId,
+          repoRoot: root,
+          status: "done"
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+  }
+}
+
+test("distinguishes terminal active malformed unsafe missing and mismatched run state", async () => {
+  const repository = await temporaryRoot();
+  try {
+    await writeConfig(repository.root, substantiveConfig("custom"));
+    await writeRunState(repository.root);
+    assert.equal(
+      checkStatus(
+        await inspectDoctor(repository.root, dependencies()),
+        "run.active"
+      ),
+      "pass"
+    );
+
+    await writeRunState(repository.root, {
+      state: {
+        schemaVersion: 2,
+        runId: "safe-run",
+        repoRoot: repository.root,
+        status: "implementing"
+      }
+    });
+    assert.equal(
+      checkStatus(
+        await inspectDoctor(repository.root, dependencies()),
+        "run.active"
+      ),
+      "warning"
+    );
+
+    await writeFile(
+      path.join(repository.root, ".banzai", "active-run.json"),
+      "{bad",
+      "utf8"
+    );
+    assert.equal(
+      checkStatus(
+        await inspectDoctor(repository.root, dependencies()),
+        "run.active"
+      ),
+      "fail"
+    );
+
+    await writeRunState(repository.root, {
+      pointer: { schemaVersion: 2, runId: "safe-run" },
+      state: null
+    });
+    assert.match(
+      (await inspectDoctor(repository.root, dependencies())).checks.find(
+        (item) => item.id === "run.active"
+      )?.message ?? "",
+      /unsupported structure/
+    );
+
+    const pointerPath = path.join(
+      repository.root,
+      ".banzai",
+      "active-run.json"
+    );
+    await rm(pointerPath);
+    await symlink("missing-pointer-target", pointerPath);
+    assert.match(
+      (await inspectDoctor(repository.root, dependencies())).checks.find(
+        (item) => item.id === "run.active"
+      )?.message ?? "",
+      /unreadable or escapes/
+    );
+    await rm(pointerPath);
+
+    await writeRunState(repository.root, {
+      pointer: { schemaVersion: 1, runId: "../escape" },
+      state: null
+    });
+    assert.match(
+      (await inspectDoctor(repository.root, dependencies())).checks.find(
+        (item) => item.id === "run.active"
+      )?.message ?? "",
+      /unsafe/
+    );
+
+    await writeRunState(repository.root, {
+      runId: "missing-run",
+      state: null
+    });
+    assert.match(
+      (await inspectDoctor(repository.root, dependencies())).checks.find(
+        (item) => item.id === "run.active"
+      )?.message ?? "",
+      /missing state/
+    );
+
+    await writeRunState(repository.root, {
+      state: {
+        schemaVersion: 2,
+        runId: "different-run",
+        repoRoot: repository.root,
+        status: "done"
+      }
+    });
+    assert.match(
+      (await inspectDoctor(repository.root, dependencies())).checks.find(
+        (item) => item.id === "run.active"
+      )?.message ?? "",
+      /do not match/
+    );
+
+    await writeRunState(repository.root, {
+      state: {
+        schemaVersion: 2,
+        runId: "safe-run",
+        repoRoot: path.join(repository.root, "other-checkout"),
+        status: "done"
+      }
+    });
+    assert.match(
+      (await inspectDoctor(repository.root, dependencies())).checks.find(
+        (item) => item.id === "run.active"
+      )?.message ?? "",
+      /do not match this checkout/
+    );
+
+    await writeRunState(repository.root);
+    await writeFile(
+      path.join(repository.root, ".banzai", "runs", "safe-run", "state.json"),
+      "{bad",
+      "utf8"
+    );
+    assert.match(
+      (await inspectDoctor(repository.root, dependencies())).checks.find(
+        (item) => item.id === "run.active"
+      )?.message ?? "",
+      /state is malformed/
+    );
+
+    await writeRunState(repository.root, {
+      state: {
+        schemaVersion: 99,
+        runId: "safe-run",
+        repoRoot: repository.root,
+        status: "done"
+      }
+    });
+    assert.match(
+      (await inspectDoctor(repository.root, dependencies())).checks.find(
+        (item) => item.id === "run.active"
+      )?.message ?? "",
+      /unsupported structure/
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("distinguishes absent live stale malformed and unsupported runner locks", async () => {
+  const repository = await temporaryRoot();
+  const lockPath = path.join(repository.root, ".banzai", "runner.lock");
+  try {
+    await writeConfig(repository.root, substantiveConfig("custom"));
+    assert.equal(
+      checkStatus(
+        await inspectDoctor(repository.root, dependencies()),
+        "run.lock"
+      ),
+      "pass"
+    );
+
+    const lock = {
+      schemaVersion: 1,
+      pid: 123,
+      token: "FORBIDDEN-LOCK-TOKEN",
+      createdAt: "2026-08-04T00:00:00.000Z"
+    };
+    await writeFile(lockPath, JSON.stringify(lock), "utf8");
+    const before = await snapshotTree(path.join(repository.root, ".banzai"));
+    assert.equal(
+      checkStatus(
+        await inspectDoctor(
+          repository.root,
+          dependencies({ liveness: "live" })
+        ),
+        "run.lock"
+      ),
+      "warning"
+    );
+    assert.equal(
+      checkStatus(
+        await inspectDoctor(
+          repository.root,
+          dependencies({ liveness: "stale" })
+        ),
+        "run.lock"
+      ),
+      "warning"
+    );
+    assert.deepEqual(
+      await snapshotTree(path.join(repository.root, ".banzai")),
+      before
+    );
+
+    await writeFile(lockPath, "{bad", "utf8");
+    assert.equal(
+      checkStatus(
+        await inspectDoctor(repository.root, dependencies()),
+        "run.lock"
+      ),
+      "fail"
+    );
+    await writeFile(
+      lockPath,
+      JSON.stringify({ ...lock, schemaVersion: 2 }),
+      "utf8"
+    );
+    assert.equal(
+      checkStatus(
+        await inspectDoctor(repository.root, dependencies()),
+        "run.lock"
+      ),
+      "fail"
+    );
+
+    await rm(lockPath);
+    await writeFile(
+      path.join(repository.root, "outside-lock.json"),
+      JSON.stringify(lock),
+      "utf8"
+    );
+    await symlink("../outside-lock.json", lockPath);
+    assert.match(
+      (await inspectDoctor(repository.root, dependencies())).checks.find(
+        (item) => item.id === "run.lock"
+      )?.message ?? "",
+      /unreadable or escapes/
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("never exports private persisted config state environment or source canaries", async () => {
+  const repository = await temporaryRoot();
+  try {
+    await writeConfig(repository.root, substantiveConfig("custom"));
+    await writeFile(
+      path.join(repository.root, "source.txt"),
+      "FORBIDDEN-SOURCE-CONTENT\n",
+      "utf8"
+    );
+    await writeRunState(repository.root, {
+      state: {
+        schemaVersion: 2,
+        runId: "safe-run",
+        repoRoot: repository.root,
+        status: "done",
+        request: "FORBIDDEN-REQUEST-TEXT",
+        slug: "FORBIDDEN-SLUG",
+        blockReason: "FORBIDDEN-RAW-ERROR",
+        approvalDigest: "FORBIDDEN-DIGEST",
+        rawOutput: "FORBIDDEN-MODEL-OUTPUT"
+      }
+    });
+    await writeFile(
+      path.join(repository.root, ".banzai", "runner.lock"),
+      JSON.stringify({
+        schemaVersion: 1,
+        pid: 123,
+        token: "FORBIDDEN-LOCK-TOKEN",
+        createdAt: "2026-08-04T00:00:00.000Z"
+      }),
+      "utf8"
+    );
+    const before = await snapshotTree(repository.root);
+    const output = JSON.stringify(
+      await inspectDoctor(repository.root, dependencies({ liveness: "stale" }))
+    );
+    assert.doesNotMatch(output, /FORBIDDEN/);
+    assert.equal(output.includes(repository.root), false);
+    assert.equal(output.includes("123"), false);
+    assert.deepEqual(await snapshotTree(repository.root), before);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("does not create local state when the Banzai directory is absent", async () => {
+  const repository = await temporaryRoot();
+  try {
+    const before = await snapshotTree(repository.root);
+    await inspectDoctor(repository.root, dependencies());
+    assert.deepEqual(await snapshotTree(repository.root), before);
+  } finally {
+    await repository.dispose();
+  }
+});

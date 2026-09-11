@@ -1,0 +1,252 @@
+{
+  "schemaVersion": 1,
+  "node": {
+    "engines": ">=22.20.0 <23 || >=24.11.1 <25",
+    "buildTarget": "node22",
+    "supported": [
+      {
+        "major": 22,
+        "version": "22.20.0",
+        "image": "node:22.20.0-bookworm",
+        "job": "release_check_node_22",
+        "required": true
+      },
+      {
+        "major": 24,
+        "version": "24.11.1",
+        "image": "node:24.11.1-bookworm",
+        "job": "release_check_node_24",
+        "required": true
+      }
+    ],
+    "forward": {
+      "major": 26,
+      "version": "26.7.0",
+      "image": "node:26.7.0-bookworm",
+      "job": "forward_compatibility_node_26",
+      "required": false
+    }
+  },
+  "plugin": {
+    "versionMirrors": [
+      {
+        "path": "plugins/banzai/.claude-plugin/plugin.json",
+        "pointer": "/version"
+      },
+      {
+        "path": "plugins/banzai/.codex-plugin/plugin.json",
+        "pointer": "/version"
+      },
+      {
+        "path": "marketplace.json",
+        "pointer": "/plugins/0/version"
+      },
+      {
+        "path": ".agents/plugins/marketplace.json",
+        "pointer": "/plugins/0/version"
+      }
+    ],
+    "jsonDocuments": [
+      "plugins/banzai/.claude-plugin/plugin.json",
+      "plugins/banzai/.codex-plugin/plugin.json",
+      "marketplace.json",
+      ".agents/plugins/marketplace.json",
+      ".claude-plugin/marketplace.json",
+      "plugins/banzai/hooks/hooks.json",
+      "plugins/banzai/contracts/contract.json",
+      "plugins/banzai/contracts/v1/workflow-selection.schema.json",
+      "plugins/banzai/contracts/v1/phase-result.schema.json",
+      "plugins/banzai/contracts/v1/review-result.schema.json",
+      "plugins/banzai/contracts/v2/phase-result.schema.json",
+      "plugins/banzai/contracts/v2/review-result.schema.json",
+      "plugins/banzai/contracts/v3/phase-result.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/acquire-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/archive.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/create-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/export-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/initialize-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/inspect-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/inventory-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/layout.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/release-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/restore-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/result.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/verify-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/work-binding.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/write-request.schema.json"
+    ],
+    "requiredPaths": [
+      "plugins/banzai/hooks/spec-gate.cjs",
+      "plugins/banzai/skills/architecture-decision/SKILL.md",
+      "plugins/banzai/skills/code-writing/SKILL.md",
+      "plugins/banzai/skills/development-plan/SKILL.md",
+      "plugins/banzai/skills/feature-description/SKILL.md",
+      "plugins/banzai/skills/feature-review/SKILL.md",
+      "plugins/banzai/skills/feature-status/SKILL.md",
+      "plugins/banzai/skills/feature/SKILL.md",
+      "plugins/banzai/skills/orchestrate/SKILL.md",
+      "plugins/banzai/skills/orchestrate/references/control-protocol.md",
+      "plugins/banzai/skills/project-manifest/SKILL.md",
+      "plugins/banzai/skills/quick-fix/SKILL.md",
+      "plugins/banzai/skills/test-writing/SKILL.md",
+      "plugins/banzai/contracts/README.md",
+      "plugins/banzai/contracts/contract.json",
+      "plugins/banzai/contracts/v1/workflow-selection.schema.json",
+      "plugins/banzai/contracts/v1/phase-result.schema.json",
+      "plugins/banzai/contracts/v1/review-result.schema.json",
+      "plugins/banzai/contracts/v2/phase-result.schema.json",
+      "plugins/banzai/contracts/v2/review-result.schema.json",
+      "plugins/banzai/contracts/v3/phase-result.schema.json",
+      "plugins/banzai/.claude-plugin/plugin.json",
+      "plugins/banzai/.codex-plugin/plugin.json",
+      "packages/orchestrator/package.json",
+      "packages/orchestrator/dist/banzai.mjs",
+      "packages/orchestrator/dist/banzai.mjs.map",
+      "plugins/banzai/AGENTS.md",
+      "plugins/banzai/CLAUDE.md",
+      "plugins/banzai/policies/decision-consultation.md",
+      "plugins/banzai/policies/test-assurance.md",
+      "plugins/banzai/policies/security-assurance.md",
+      "plugins/banzai/policies/engineering-quality.md",
+      "plugins/banzai/policies/plan-task-completion.md",
+      "plugins/banzai/skills/project-manifest/references/layout-migration.md",
+      "plugins/banzai/policies/artifact-storage.md",
+      "plugins/banzai/lib/artifact-storage.mjs",
+      "plugins/banzai/scripts/artifacts.cjs",
+      "plugins/banzai/lib/artifact-archive.mjs",
+      "plugins/banzai/lib/project-adoption.mjs",
+      "plugins/banzai/lib/review-snapshot.mjs",
+      "plugins/banzai/contracts/artifacts/v1/acquire-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/archive.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/create-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/export-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/initialize-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/inspect-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/inventory-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/layout.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/release-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/restore-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/result.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/verify-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/work-binding.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/write-request.schema.json",
+      "plugins/banzai/lib/artifact-readers.mjs"
+    ]
+  },
+  "contracts": {
+    "phaseResult": {
+      "currentPath": "plugins/banzai/contracts/v3/phase-result.schema.json",
+      "currentSchemaVersion": 3,
+      "legacy": [
+        {
+          "path": "plugins/banzai/contracts/v1/phase-result.schema.json",
+          "schemaVersion": 1,
+          "sha256": "62b390d3ac0e4bb5f552fa902be0e23644b3928a482fc258f5892404bb205f77"
+        },
+        {
+          "path": "plugins/banzai/contracts/v2/phase-result.schema.json",
+          "schemaVersion": 2,
+          "sha256": "7ede6c88fca7d95b6a7693017f45e9c01339461aa5991e03efabe9598f3ea7fd"
+        }
+      ]
+    },
+    "reviewResult": {
+      "currentPath": "plugins/banzai/contracts/v2/review-result.schema.json",
+      "currentSchemaVersion": 2,
+      "legacy": [
+        {
+          "path": "plugins/banzai/contracts/v1/review-result.schema.json",
+          "sha256": "bc8e5b8f9da3160799a6fa4d5efa1c607eda86400e94f6cdd57b666697f15d78"
+        }
+      ]
+    },
+    "state": {
+      "currentSchemaVersion": 4,
+      "legacySchemaVersions": [1, 2, 3]
+    },
+    "agentControl": {
+      "contractVersion": "3.0.0",
+      "capabilities": "banzai-agent-capabilities/v3",
+      "status": "banzai-agent-status/v2",
+      "request": "banzai-agent-request/v1",
+      "answer": "banzai-agent-answer/v2",
+      "legacyAnswer": "banzai-agent-answer/v1",
+      "recovery": "banzai-agent-recovery/v1"
+    },
+    "evaluation": {
+      "export": "banzai-evaluation-export/v1",
+      "kpi": "banzai-evaluation-kpi/v1"
+    }
+  },
+  "orchestrator": {
+    "packageVersionMirror": "packages/orchestrator/package.json",
+    "lockfileMirror": "package-lock.json",
+    "lockfileVersionPointer": "/packages/packages~1orchestrator/version"
+  },
+  "versionTransaction": {
+    "recoveryDirectory": ".banzai-version-set"
+  },
+  "distribution": {
+    "bundle": "packages/orchestrator/dist/banzai.mjs",
+    "sourceMap": "packages/orchestrator/dist/banzai.mjs.map",
+    "mode": "0755"
+  },
+  "documentation": {
+    "policyBlockStart": "<!-- release-policy:start -->",
+    "policyBlockEnd": "<!-- release-policy:end -->",
+    "paths": [
+      "CONTRIBUTING.md",
+      "documentation/orchestrator.md",
+      "documentation/release-checklist.md"
+    ]
+  },
+  "ci": {
+    "workflow": ".github/workflows/ci.yml",
+    "liveJob": "live_vendor_compatibility",
+    "liveInput": "live_compatibility",
+    "liveEnableVariable": "BANZAI_LIVE_COMPATIBILITY",
+    "liveEnableValue": "1",
+    "liveRunnerTag": "banzai-live"
+  },
+  "live": {
+    "summarySchema": "banzai-live-compatibility/v2",
+    "summarySchemaVersion": 2,
+    "maxInvocations": 2,
+    "perInvocationTimeoutMs": 300000,
+    "totalTimeoutMs": 900000,
+    "minimumCliVersions": {
+      "codex": "0.145.0",
+      "claude": "2.1.218"
+    },
+    "authRootVariables": {
+      "codex": "BANZAI_LIVE_CODEX_AUTH_ROOT",
+      "claude": "BANZAI_LIVE_CLAUDE_AUTH_ROOT"
+    },
+    "models": {
+      "codex": {
+        "model": "gpt-5.6-luna",
+        "effort": "low"
+      },
+      "claude": {
+        "model": "claude-haiku-4-5",
+        "effort": "low"
+      }
+    }
+  },
+  "project": {
+    "versionAuthority": {
+      "path": "package.json",
+      "pointer": "/version"
+    },
+    "lockfileMirrors": [
+      {
+        "path": "package-lock.json",
+        "pointer": "/version"
+      },
+      {
+        "path": "package-lock.json",
+        "pointer": "/packages//version"
+      }
+    ]
+  }
+}

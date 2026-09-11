@@ -1,0 +1,937 @@
+{
+  "schema": "banzai-publication-inventory/v1",
+  "schemaVersion": 1,
+  "mode": "clean",
+  "entries": [
+    {
+      "path": "AGENTS.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "CLAUDE.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "CODE_OF_CONDUCT.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "PROJECT_MANIFEST.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "README.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "SECURITY.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "TERMS_OF_USE.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "THIRD_PARTY_NOTICES.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "TRADEMARKS.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "assets/demo/strict-workflow.svg",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "assets/logo/README.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "assets/logo/banzai-avatar-192.png",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "assets/logo/banzai-avatar-512.png",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "assets/logo/banzai-avatar.svg",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "assets/logo/banzai-logo-dark.svg",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "assets/logo/banzai-logo-light.svg",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "assets/logo/banzai-logo.svg",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "assets/logo/banzai-mark-256.png",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "assets/logo/banzai-mark.svg",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "assets/logo/banzai-social-preview.png",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "assets/logo/banzai-social-preview.svg",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/README.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/artifact-archive.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/artifact-policy-migration.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/artifact-storage.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/context/README.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0001-automatic-workflow-selection.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0002-session-affinity-and-bounded-reviewer-continuity.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0003-versioned-evaluation-export-contract.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0004-privacy-minimized-read-only-evaluation-boundary.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0005-traceable-evaluation-aggregation.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0006-versioned-verification-profiles.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0007-project-type-verification-readiness.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0008-read-only-doctor-diagnostics.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0009-supported-node-release-matrix.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0010-blocking-and-advisory-release-evidence.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0011-protected-live-vendor-compatibility.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0012-independent-product-versioning-and-release-policy.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0013-risk-driven-test-assurance.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0014-human-triaged-review-closure.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0015-durable-verification-attempt-ledger.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0016-orchestrated-plan-task-completion-evidence.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0017-versioned-plan-task-completion-ledger.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0018-agent-supervised-banzai-cli-control.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0019-attempt-owned-review-candidates.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0020-scoped-claude-subprocess-environment.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0021-failure-classified-reviewer-continuity.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0022-availability-gated-serena-mcp-whitelist.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0023-durable-terminal-attempt-checkpoints.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0024-operator-authorized-prerequisite-blocked-fix-recovery.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0025-fix-authored-completion-ledger-refresh.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0026-derived-evaluation-kpi-projection-contract.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0027-exposure-driven-security-assurance.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0028-phase-context-accounting-and-budget-policy.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0029-eslint-backed-orchestrator-import-boundary-policy.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0030-vendor-neutral-engineering-quality-policy.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0031-interactive-decision-consultation.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0032-unified-banzai-release-train-version.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0033-root-package-version-authority.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0034-durable-human-time-observations.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0035-cancellation-observations-and-report.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0036-vendor-neutral-policy-files-and-instruction-delivery.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0037-unified-runner-rendered-review-artifacts.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0038-explicit-plan-authority.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0039-npm-trusted-publishing-on-github-release.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0040-project-adoption-preflight-and-interactive-setup.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0041-artifact-retention-and-publication-boundary.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/README.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/engineering-quality.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/evaluation/README.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/evaluation/effectiveness-study.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/evaluation/engineering-quality-shadow.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/evaluation/reviewer-calibration/README.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/evaluation/reviewer-calibration/comparison-protocol.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/evaluation/task-worksheet.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/getting-started.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/historical-references.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/orchestrator.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/publication-boundary.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/release-checklist.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/releases/2.2.0.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/releases/2.2.1.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/releases/2.2.2.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/releases/2.3.0.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/releases/public-publication.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/security-assurance.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/verification-examples.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/MODULES.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/README.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/README.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/absent-agents-legacy/after/AGENTS.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/absent-agents-legacy/after/CLAUDE.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/absent-agents-legacy/before/CLAUDE.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/approved-migration/after/AGENTS.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/approved-migration/after/CLAUDE.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/approved-migration/before/AGENTS.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/approved-migration/before/CLAUDE.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/custom-conflict/before/AGENTS.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/custom-conflict/before/CLAUDE.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/custom-content-migration/after/AGENTS.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/custom-content-migration/after/CLAUDE.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/custom-content-migration/before/AGENTS.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/custom-content-migration/before/CLAUDE.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/declined-migration/after/AGENTS.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/declined-migration/after/CLAUDE.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/declined-migration/before/AGENTS.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/declined-migration/before/CLAUDE.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/fresh-adoption/after/AGENTS.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/fresh-adoption/after/CLAUDE.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/interrupted-migration/after/AGENTS.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/interrupted-migration/after/CLAUDE.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/interrupted-migration/before/AGENTS.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/interrupted-migration/before/CLAUDE.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/missing-policy/before/AGENTS.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/missing-policy/before/CLAUDE.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/update-without-migration/before/AGENTS.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/instruction-layouts/update-without-migration/before/CLAUDE.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/plan-authority/opted-in-plan.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/fixtures/version-recovery-v1/README.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/.claude-plugin/plugin.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/.claude/settings.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/.codex-plugin/plugin.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/AGENTS.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/CLAUDE.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/LICENSE",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/NOTICE",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/PROJECT_MANIFEST.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/README.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/artifacts/v1/acquire-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/artifacts/v1/archive.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/artifacts/v1/create-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/artifacts/v1/export-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/artifacts/v1/initialize-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/artifacts/v1/inspect-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/artifacts/v1/inventory-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/artifacts/v1/layout.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/artifacts/v1/release-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/artifacts/v1/restore-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/artifacts/v1/result.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/artifacts/v1/verify-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/artifacts/v1/work-binding.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/artifacts/v1/write-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/contract.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/v1/phase-result.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/v1/review-result.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/v1/workflow-selection.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/v2/phase-result.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/v2/review-result.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/v3/phase-result.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/documentation/README.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/documentation/changes/.gitkeep",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/documentation/decisions/README.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/documentation/development-plans/.gitkeep",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/documentation/features/.gitkeep",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/hooks/README.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/hooks/hooks.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/hooks/spec-gate.cjs",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/lib/artifact-archive.mjs",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/lib/artifact-readers.mjs",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/lib/artifact-storage.d.mts",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/lib/artifact-storage.mjs",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/lib/project-adoption.mjs",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/lib/review-snapshot.mjs",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/policies/artifact-storage.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/policies/decision-consultation.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/policies/engineering-quality.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/policies/plan-task-completion.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/policies/security-assurance.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/policies/test-assurance.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/scripts/artifacts.cjs",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/skills/architecture-decision/SKILL.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/skills/code-writing/SKILL.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/skills/development-plan/SKILL.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/skills/feature-description/SKILL.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/skills/feature-review/SKILL.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/skills/feature-status/SKILL.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/skills/feature/SKILL.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/skills/orchestrate/SKILL.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/skills/orchestrate/agents/openai.yaml",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/skills/orchestrate/references/control-protocol.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/skills/project-manifest/SKILL.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/skills/project-manifest/agents/openai.yaml",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/skills/project-manifest/references/layout-migration.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/skills/quick-fix/SKILL.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/skills/test-writing/SKILL.md",
+      "classification": "product",
+      "sha256": null
+    }
+  ]
+}

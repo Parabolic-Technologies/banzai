@@ -1,0 +1,6 @@
+# Generated bundle committed for distribution; esbuild owns its formatting.
+dist/
+
+# Transient build outputs.
+.test-dist/
+.dist-check-*/

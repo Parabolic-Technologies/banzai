@@ -1,0 +1,5 @@
+{
+  "layout": "partial",
+  "behavior": "approved_completion",
+  "diagnostic": "Conflicting process and legacy policy sources."
+}

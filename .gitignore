@@ -1,0 +1,44 @@
+# Claude local settings files
+.claude/settings.local.json
+plugins/*/.claude/settings.local.json
+
+# Application build artifacts
+node_modules/
+dist/
+!packages/orchestrator/dist/
+!packages/orchestrator/dist/banzai.mjs
+!packages/orchestrator/dist/banzai.mjs.map
+build/
+coverage/
+packages/orchestrator/.test-dist/
+packages/orchestrator/.dist-check-*/
+.banzai-version-set/
+.banzai-version-set.guard
+.banzai-version-set.guard.tmp
+
+# Local execution evidence and credentials do not belong in source releases.
+/.banzai/*
+!/.banzai/artifacts.json
+.banzai/runs/
+.banzai/active-run.json
+.banzai/runner.lock
+/.banzai/work/
+/.banzai/.artifact-init.lock
+/.banzai/preparation/
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.p12
+*.pfx
+
+# OS / editor noise
+.DS_Store
+*.swp
+
+# Private documentation
+/documentation/features/
+/documentation/development-plans/
+/documentation/changes/

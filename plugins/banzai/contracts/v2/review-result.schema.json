@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://banzai.local/contracts/v2/review-result.schema.json",
+  "title": "Banzai orchestrated review result",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "contractVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["pass", "changes_requested", "replan_required", "blocked"]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    },
+    "reviewedFindingIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "deferredCoverage": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "schemaVersion": {
+      "type": "integer",
+      "const": 2
+    },
+    "reviewNotes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "scopeAcknowledgment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "snapshotDigest": {
+          "type": "string"
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["reviewed", "not_reviewed"]
+              },
+              "reason": {
+                "type": ["string", "null"]
+              }
+            },
+            "required": ["path", "status", "reason"]
+          }
+        }
+      },
+      "required": ["schemaVersion", "snapshotDigest", "artifacts"]
+    }
+  },
+  "required": [
+    "contractVersion",
+    "verdict",
+    "summary",
+    "findings",
+    "reviewedFindingIds",
+    "deferredCoverage",
+    "schemaVersion",
+    "reviewNotes",
+    "scopeAcknowledgment"
+  ],
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^R[1-9][0-9]*-F[1-9][0-9]*$"
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["blocker", "should_fix", "nit"]
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "spec",
+            "plan",
+            "adr",
+            "correctness",
+            "test",
+            "security",
+            "maintainability",
+            "documentation"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "line": {
+                "type": ["integer", "null"],
+                "minimum": 1
+              },
+              "detail": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["path", "line", "detail"]
+          }
+        },
+        "violates": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reproduction": {
+          "type": ["string", "null"]
+        },
+        "fixAcceptance": {
+          "type": "string",
+          "minLength": 1
+        },
+        "confidence": {
+          "type": "string",
+          "enum": ["high", "medium", "low"]
+        }
+      },
+      "required": [
+        "id",
+        "severity",
+        "category",
+        "summary",
+        "evidence",
+        "violates",
+        "reproduction",
+        "fixAcceptance",
+        "confidence"
+      ]
+    }
+  }
+}
