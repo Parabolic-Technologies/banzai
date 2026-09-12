@@ -46,3 +46,13 @@ export function checkInstructionPayloads(
     npm: Map<string, Buffer>;
   }
 ): Promise<{ resourceCount: number; distributions: string[] }>;
+
+export function evolveGuidanceBaseline(
+  root: string,
+  authorization: unknown,
+  options?: { check?: boolean }
+): Promise<{ changed: boolean; sha256: string }>;
+export function describeGuidanceTransition(root: string): Promise<{
+  predecessorSha256: string;
+  changes: { key: string; before: string | null; after: string }[];
+}>;

@@ -118,3 +118,33 @@ Any future blocker proposal must also satisfy the canonical policy's accepted
 high-confidence, exact-evidence, material-impact, approved-invariant, and
 observable-closure threshold. Meeting that threshold is eligibility evidence,
 not authorization for hard enforcement.
+
+## Maintained instruction baseline
+
+ADR-0044 preserves `packages/orchestrator/phase-guidance-baseline.json` and its
+original canonical pin as immutable extraction evidence. Ongoing expectations
+live in `phase-guidance-current.json` (`banzai-instruction-baseline/v1`) with a
+separate `.sha256` pin and ordered transitions. Each transition retains exact
+old/new resource or section identities, predecessor/successor expectation digests
+and accepted public ADR/scope references. The first inventory also pins phase and
+policy resources that were not individually pinned in the original extraction.
+
+After an authorized instruction edit, run
+`node packages/orchestrator/scripts/instruction-baseline.mjs --describe` for a
+read-only scope proposal. Prepare a private authorization JSON with
+`schema: "banzai-instruction-authorization/v1"`, `schemaVersion: 1`, the exact
+`predecessorSha256`, ordered `scope` keys, and `authorities` entries containing
+public ADR `path`, current `sha256` and a bounded `scope` explanation. Preview with
+`--authorization <file> --check`, then invoke without `--check` to publish the
+reviewable baseline/pin transition. Repeated matching invocation is idempotent.
+An interrupted two-file publication retains a private journal; retry only the
+same authorization and unchanged source. Mismatched partial inputs fail closed.
+
+Build, tests, build:check and release checks never regenerate baselines. They
+validate the original root, current pin, transition linkage, exact scope,
+Accepted authority, normalized expectations and independent structural duties.
+Retained Orchestrated Mode blocks, hook registration, plugin discovery and
+version-only manifest normalization retain their original boundaries. An
+unrecorded change remains `INSTRUCTION_RESOURCE_DRIFT`; changing hashes without a
+valid transition does not authorize it. Hashes establish consistency, not human
+approval or semantic correctness. Normal review and human gates still apply.

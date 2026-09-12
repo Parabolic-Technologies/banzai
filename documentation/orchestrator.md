@@ -1851,3 +1851,29 @@ are absent.
 ## Artifact storage commands
 
 `banzai artifacts` and the plugin-only helper share the [artifact storage](artifact-storage.md) request/result contract. [Offline archive operations](artifact-archive.md) preserve original evidence. The [publication boundary](publication-boundary.md) governs indexed and distribution bytes.
+
+## Proportionate verification and focused closure
+
+Projects can explicitly opt into config 3 as described in
+[verification examples](verification-examples.md#explicit-equivalent-evidence-config-3).
+Only new enabled runs use state 5, binding v2 and verification ledger 2; existing
+runs retain their versions. Decisions and applicability records are separate from
+v1 physical leaves. The runner decides under work ownership after approval and
+completion checks, and revalidates source, authority and origins before review,
+pass application, zero-accepted triage and lite completion. Failures and interrupted
+attempts retain existing explicit retry/recovery boundaries.
+
+Review snapshot v3 and runner-rendered `banzai-feature-review/v4` freeze current
+executed/reused/pending evidence and direct physical origins. Historical formats
+keep their decoders/rendering. Review-result v2 and task-completion v1 remain
+unchanged. Offline archive v1 retains the binding, decisions, applicability,
+physical origins and logs through required dependency closure. A restored copy
+retains historical proof; it does not gain same-repository reuse authority.
+
+For an accepted-finding closure, keep unaffected report text and add one bounded
+record: accepted ID, changed scope, decision, executed/reused/historical/pending
+references and limitations. Inspect current claims for contradictions and correct
+only affected claims. A consistency sweep does not execute commands. Resolution
+review receives the accepted IDs, delta, current authority and evidence, preserving
+independent review and human triage. Runner instruction and policy bodies remain
+complete on every model call.

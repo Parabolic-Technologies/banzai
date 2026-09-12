@@ -1,3 +1,10 @@
+import {
+  safePath,
+  readBytes as readArtifactBytes,
+  parseBinding
+} from "./artifact-storage.js";
+import { readVerificationOrigins } from "./verification-evidence.js";
+import { createHash } from "node:crypto";
 import type { Dirent } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
@@ -14,6 +21,8 @@ import {
   type EvaluationCompleteness,
   type EvaluationEventSource,
   type EvaluationExport,
+  type EvaluationExportV2,
+  type EvaluationVerificationV2,
   type EvaluationExportOptions,
   type EvaluationFailureCategory,
   type EvaluationIssue,
@@ -36,6 +45,7 @@ import {
   type EvaluationRotationReason,
   type ReviewVerdict,
   type RunStatus,
+  type RunState,
   type SessionMode,
   type VerificationAttemptRecord,
   type VerificationAttemptStatus,
@@ -47,7 +57,9 @@ import {
   parseEvaluationReviewSource,
   parseEvaluationStateSource,
   parseVerificationAttemptRecord,
-  parseVerificationLedger
+  parseVerificationLedger,
+  parseVerificationDecision,
+  parseVerificationApplicability
 } from "./validation.js";
 
 export const EVALUATION_WORKFLOW_ORDER = [
@@ -2318,6 +2330,15 @@ async function collectCandidate(
     stateIssues = parsed.issues.map((item) =>
       evaluationIssue(runKey, null, "state", item)
     );
+    if (state.schemaVersion === 5 && options.schemaVersion !== 2)
+      stateIssues.push(
+        directIssue(
+          runKey,
+          "verification",
+          "VERIFICATION_HISTORY_INCOMPLETE",
+          "verificationEvidence"
+        )
+      );
   } catch (error) {
     const code =
       error instanceof BanzaiError &&
@@ -2435,6 +2456,15 @@ export async function collectEvaluationExport(
 ): Promise<EvaluationExport> {
   const runsDirectory = path.join(repoRoot, ".banzai", "runs");
   const candidates = await candidateDirectories(runsDirectory);
+  return collectEvaluationCandidates(repoRoot, options, candidates);
+}
+
+async function collectEvaluationCandidates(
+  repoRoot: string,
+  options: EvaluationExportOptions,
+  candidates: readonly string[]
+): Promise<EvaluationExport> {
+  const runsDirectory = path.join(repoRoot, ".banzai", "runs");
   const candidateSet = new Set(candidates);
   for (const runId of options.runIds) {
     if (!candidateSet.has(runId)) {
@@ -2499,5 +2529,253 @@ export async function collectEvaluationExport(
       runs.filter((run) => run.cohortMembership === "included")
     ),
     issues: sortedIssues
+  };
+}
+
+/** Opt-in projection; all values are ordinal or allow-listed numeric evidence. */
+async function collectVerificationV2(
+  repoRoot: string,
+  runId: string
+): Promise<EvaluationVerificationV2> {
+  const result: EvaluationVerificationV2 = {
+    coverage: "incomplete",
+    physicalAttempts: [],
+    dispositions: []
+  };
+  if (!/^[a-z0-9][a-z0-9.-]{0,199}$/u.test(runId)) return result;
+  const base = `.banzai/runs/${runId}`;
+  const hash = (value: string | Buffer) =>
+    createHash("sha256").update(value).digest("hex");
+  const observed = new Map<string, string>();
+  const read = async (relative: string): Promise<Buffer> => {
+    const bytes = await readArtifactBytes(repoRoot, `${base}/${relative}`, {
+      limit: 16 * 1024 * 1024
+    });
+    if (bytes === null || bytes.length > 16 * 1024 * 1024)
+      throw new Error("Invalid verification evidence file.");
+    observed.set(relative, hash(bytes));
+    return bytes;
+  };
+  const inventory = async (relative: string): Promise<string[]> => {
+    const target = await safePath(repoRoot, `${base}/${relative}`, {
+      directory: true
+    });
+    const entries = await readdir(target);
+    if (entries.length > 10000)
+      throw new Error("Verification evidence inventory exceeded its bound.");
+    return entries.sort();
+  };
+  const json = async (relative: string): Promise<unknown> =>
+    JSON.parse((await read(relative)).toString("utf8")) as unknown;
+  try {
+    if (
+      parseVerificationLedger(await json("verification-attempts/ledger.json"))
+        .schemaVersion !== 2
+    )
+      return result;
+    const state = (await json("state.json")) as {
+      schemaVersion?: number;
+      artifactBinding?: { binding?: { workId?: string } };
+      verificationEvidence?: RunState["verificationEvidence"];
+    };
+    if (state.schemaVersion !== 5 || !state.artifactBinding?.binding?.workId)
+      return result;
+    const binding = parseBinding(state.artifactBinding.binding);
+    if (binding.schemaVersion !== 2) return result;
+    const attempts: VerificationAttemptRecord[] = [];
+    for (const entry of await inventory("verification-attempts")) {
+      if (entry === "ledger.json") continue;
+      const attempt = parseVerificationAttemptRecord(
+        await json(`verification-attempts/${entry}`)
+      );
+      if (
+        entry !==
+        `verification-${String(attempt.sequence).padStart(6, "0")}-${attempt.id}.json`
+      )
+        throw new Error("Attempt identity mismatch.");
+      attempts.push(attempt);
+    }
+    if (
+      new Set(attempts.map((item) => item.id)).size !== attempts.length ||
+      attempts.some((item, index) => item.sequence !== index + 1)
+    )
+      throw new Error("Incomplete attempt sequence.");
+    result.physicalAttempts = attempts.map((attempt, index) => ({
+      ordinal: index + 1,
+      status: attempt.status,
+      durationMs: attempt.durationMs
+    }));
+    const decisions = [];
+    for (const entry of await inventory("verification/decisions")) {
+      const decision = parseVerificationDecision(
+        await json(`verification/decisions/${entry}`)
+      );
+      if (
+        entry !== `${decision.sha256}.json` ||
+        decision.workId !== state.artifactBinding.binding.workId
+      )
+        throw new Error("Decision identity mismatch.");
+      decisions.push(decision);
+    }
+    const applications = [];
+    for (const entry of await inventory("verification/applications")) {
+      const application = parseVerificationApplicability(
+        await json(`verification/applications/${entry}`)
+      );
+      if (
+        entry !== `${application.sha256}.json` ||
+        application.workId !== state.artifactBinding.binding.workId
+      )
+        throw new Error("Application identity mismatch.");
+      applications.push(application);
+    }
+    const origins = await readVerificationOrigins(
+      { repoRoot, directory: `${base}/verification`, workId: binding.workId },
+      attempts
+    );
+    const rounds = [...new Set(decisions.map((item) => item.roundId))].sort();
+    let complete =
+      rounds.length > 0 &&
+      origins.length === attempts.length &&
+      attempts.every((item) => item.status !== "started");
+    for (const [roundIndex, roundId] of rounds.entries()) {
+      const candidates = applications.filter(
+        (item) => item.roundId === roundId && item.complete
+      );
+      const current =
+        state.verificationEvidence?.decision.roundId === roundId
+          ? state.verificationEvidence.applicability
+          : null;
+      const application =
+        current ?? (candidates.length === 1 ? candidates[0] : null);
+      const decision =
+        decisions.find((item) => item.sha256 === application?.decisionSha256) ??
+        decisions.find((item) => item.roundId === roundId);
+      if (!decision) throw new Error("Missing decision round.");
+      if (
+        !application?.complete ||
+        !applications.some(
+          (item) => JSON.stringify(item) === JSON.stringify(application)
+        )
+      )
+        complete = false;
+      if (
+        application &&
+        (application.roundId !== decision.roundId ||
+          application.workId !== decision.workId ||
+          application.candidateDigest !== decision.candidateDigest ||
+          application.dispositions.length !== decision.actions.length ||
+          application.dispositions.some(
+            (item, index) => item.checkId !== decision.actions[index]?.checkId
+          ))
+      )
+        throw new Error("Application decision mismatch.");
+      for (const [checkIndex, action] of decision.actions.entries()) {
+        const disposition = application?.dispositions.find(
+          (item) => item.checkId === action.checkId
+        );
+        let origin: number | null = null;
+        let kind: "executed" | "reused" | "pending" = "pending";
+        if (disposition?.origin) {
+          const index = attempts.findIndex(
+            (item) => item.id === disposition.origin?.attemptId
+          );
+          const physical = attempts[index];
+          if (
+            !physical ||
+            hash(JSON.stringify(physical)) !==
+              disposition.origin.recordDigest ||
+            physical.status !== "completed" ||
+            physical.exitCode !== 0 ||
+            physical.signal !== null ||
+            physical.failureCategory !== null
+          )
+            throw new Error("Missing successful physical origin.");
+          const source = origins.find((item) => item.attemptId === physical.id);
+          if (
+            !source ||
+            !source.logsIntact ||
+            source.workId !== decision.workId ||
+            source.checkId !== action.checkId ||
+            source.roundId !== disposition.origin.roundId ||
+            JSON.stringify(source.identity) !== JSON.stringify(action.identity)
+          )
+            throw new Error("Invalid physical provenance.");
+          const input = source.before.checks.find(
+            (item) => item.checkId === action.checkId
+          );
+          if (
+            disposition.kind === "reused" &&
+            (action.action !== "reuse" ||
+              JSON.stringify(action.origin) !==
+                JSON.stringify(disposition.origin) ||
+              !source.complete ||
+              source.roundId === roundId ||
+              input?.inputDigest !== action.inputDigest ||
+              input.environmentDigest !== action.environmentDigest)
+          )
+            throw new Error("Invalid reuse provenance.");
+          if (
+            disposition.kind === "executed" &&
+            (action.action !== "execute" ||
+              physical.round.id !== roundId ||
+              source.before.candidateDigest !== decision.candidateDigest ||
+              !source.complete)
+          )
+            throw new Error("Invalid executed disposition.");
+          origin = index + 1;
+          kind = disposition.kind;
+        } else complete = false;
+        result.dispositions.push({
+          round: roundIndex + 1,
+          check: checkIndex + 1,
+          kind,
+          origin
+        });
+      }
+    }
+    for (const [relative, sha256] of observed)
+      if (hash(await read(relative)) !== sha256)
+        throw new Error("Verification evidence changed during export.");
+    result.coverage = complete ? "exact" : "incomplete";
+  } catch {
+    result.coverage = "incomplete";
+  }
+  return result;
+}
+
+export async function collectEvaluationExportV2(
+  repoRoot: string,
+  options: EvaluationExportOptions
+): Promise<EvaluationExportV2> {
+  // One inventory owns ordinals for both projections. A concurrently created
+  // directory must never pair one run's metrics with another run's origins.
+  const candidates = await candidateDirectories(
+    path.join(repoRoot, ".banzai/runs")
+  );
+  const base = await collectEvaluationCandidates(
+    repoRoot,
+    {
+      ...options,
+      schemaVersion: 2
+    },
+    candidates
+  );
+  const ids = new Map(
+    candidates.map((id, index) => [opaqueKey("run", index), id])
+  );
+  return {
+    ...base,
+    schema: "banzai-evaluation-export/v2",
+    schemaVersion: 2,
+    runs: await Promise.all(
+      base.runs.map(async (run) => ({
+        ...run,
+        verificationEvidence: await collectVerificationV2(
+          repoRoot,
+          ids.get(run.runKey) ?? ""
+        )
+      }))
+    )
   };
 }

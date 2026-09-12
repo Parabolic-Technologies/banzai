@@ -118,3 +118,25 @@ hashes and restoration, including owner-confirmed off-machine custody, before
 removing a last copy. Restoring historical bytes does not approve resuming a run
 against a different source baseline. Credential material must not be deliberately
 archived and rejected private contents must not appear in diagnostics.
+
+
+## Explicit verification-enabled work
+
+ADR-0043 adds `banzai-work-binding/v2` only for new private work created with a
+`banzai-artifact-request/v2` create request. Existing v1 requests/bindings keep
+their exact meaning and are never migrated in place. V2 adds the exact
+`.banzai/work/<work-id>/verification` role as `verificationDirectory`. The shared
+verification helper owns that directory under the exclusive work claim; it is
+not a model-writable report role. Runner evidence remains in its own run storage.
+Inspect/acquire/write/release envelopes and existing report triggers stay v1.
+
+Standalone callers invoke `../scripts/verification.cjs <inspect|decide|execute>
+--json <request-file>` relative to this policy. Requests use
+banzai-verification-request/v1 with schemaVersion=1, repoRoot, exact workPath and
+a caller-selected roundId UUID. Execute selects one configured checkId, with an
+exact retryOf only for a failed attempt in the same round. The helper reads the
+project verification section and bound authority; requests cannot supply a
+command or output path. Keep request files private. Inspect/decide are read-only;
+execute persists decisions, actual physical leaves/logs and applicability. A
+reused disposition creates no physical attempt. Do not reclaim unresolved claims
+or incomplete attempts; use the existing owner recovery boundary.

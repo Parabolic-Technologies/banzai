@@ -175,9 +175,13 @@ test("plan policy delivers the approved convention and preserves the completion 
     ),
     convention
   );
-  const completion = policy.slice(
-    policy.indexOf("## Plan Task Completion Evidence\n")
-  );
+  const completion =
+    policy
+      .slice(
+        policy.indexOf("## Plan Task Completion Evidence\n"),
+        policy.indexOf("### Opt-in verification obligations")
+      )
+      .trimEnd() + "\n";
   // ADR-0038 adds authority interpretation; it does not amend completion prose.
   assert.equal(
     createHash("sha256").update(completion).digest("hex"),

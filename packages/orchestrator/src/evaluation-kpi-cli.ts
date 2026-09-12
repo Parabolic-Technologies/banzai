@@ -1,7 +1,10 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { BanzaiError } from "./errors.js";
-import { collectEvaluationExport } from "./evaluation.js";
+import {
+  collectEvaluationExport,
+  collectEvaluationExportV2
+} from "./evaluation.js";
 import {
   normalizedInstant,
   optionValue,
@@ -10,11 +13,14 @@ import {
 } from "./evaluation-cli.js";
 import {
   decodeEvaluationExportInput,
-  deriveEvaluationKpiReport
+  deriveEvaluationKpiReport,
+  decodeEvaluationExportV2Input,
+  deriveEvaluationKpiV2
 } from "./evaluation-kpi.js";
 import {
   renderEvaluationKpiJson,
-  renderEvaluationKpiMarkdown
+  renderEvaluationKpiMarkdown,
+  renderEvaluationKpiV2Markdown
 } from "./evaluation-kpi-render.js";
 import type { EvaluationExport, EvaluationKpiOptions } from "./types.js";
 
@@ -29,6 +35,7 @@ export function parseEvaluationKpiArgs(
   let format: EvaluationKpiOptions["format"] = "markdown";
   let from: string | null = null;
   let to: string | null = null;
+  let schemaVersion: 1 | 2 | undefined;
   let jsonSeen = false;
   let fromSeen = false;
   let toSeen = false;
@@ -37,6 +44,17 @@ export function parseEvaluationKpiArgs(
 
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
+    if (argument === "--schema-version") {
+      const value = optionValue(args, index);
+      if (schemaVersion !== undefined || !["1", "2"].includes(value))
+        throw new BanzaiError(
+          "INVALID_EVAL_OPTION",
+          "Evaluation schema version must be 1 or 2 and specified once."
+        );
+      schemaVersion = value === "1" ? 1 : 2;
+      index += 1;
+      continue;
+    }
     if (argument === "--json") {
       if (jsonSeen) {
         throw new BanzaiError(
@@ -103,6 +121,7 @@ export function parseEvaluationKpiArgs(
     );
   }
   return {
+    ...(schemaVersion === undefined ? {} : { schemaVersion }),
     format,
     from,
     to,
@@ -133,6 +152,28 @@ export async function executeEvaluationKpiFromInputs(
   options: EvaluationKpiOptions,
   io: EvaluationIO
 ): Promise<void> {
+  if (options.schemaVersion === 2) {
+    const inputs = [];
+    for (const file of options.inputs) {
+      let text: string;
+      try {
+        text = await readFile(file, "utf8");
+      } catch {
+        throw new BanzaiError(
+          "INVALID_EVAL_INPUT",
+          "Evaluation KPI input cannot be read."
+        );
+      }
+      inputs.push(decodeEvaluationExportV2Input(text, file));
+    }
+    const report = deriveEvaluationKpiV2(inputs);
+    io.stdout(
+      options.format === "json"
+        ? JSON.stringify(report, null, 2) + "\n"
+        : renderEvaluationKpiV2Markdown(report)
+    );
+    return;
+  }
   const sources: { label: string; report: EvaluationExport }[] = [];
   for (const [index, file] of options.inputs.entries()) {
     let text: string;
@@ -162,6 +203,16 @@ export async function executeEvaluationKpiFromCheckout(
   options: EvaluationKpiOptions,
   io: EvaluationIO
 ): Promise<void> {
+  if (options.schemaVersion === 2) {
+    const exported = await collectEvaluationExportV2(repoRoot, options);
+    const report = deriveEvaluationKpiV2([exported]);
+    io.stdout(
+      options.format === "json"
+        ? JSON.stringify(report, null, 2) + "\n"
+        : renderEvaluationKpiV2Markdown(report)
+    );
+    return;
+  }
   const report = await collectEvaluationExport(repoRoot, {
     format: "json",
     from: options.from,

@@ -750,7 +750,7 @@ Review snapshot digest: ${input.reviewSnapshot?.digest ?? "unavailable"}`
       text: `Runner evidence root (read-only):
 ${input.evidenceRoot}
 Deterministic verification evidence:
-${JSON.stringify(input.verification, null, 2)}`
+${JSON.stringify(input.reviewSnapshot?.artifact.verificationEvidence ?? input.verification, null, 2)}`
     },
     {
       category: "workspace_evidence",

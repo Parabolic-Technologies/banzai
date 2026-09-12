@@ -162,7 +162,7 @@ export function assessVerificationProfiles(
   projectTypes: readonly VerificationProjectType[]
 ): VerificationProfileAssessment {
   const profiles = config.verification.profiles;
-  const explicit = config.schemaVersion === 2;
+  const explicit = config.schemaVersion >= 2;
   const requestedTypes = new Set(projectTypes);
   const matchingProfiles = explicit
     ? profiles.filter((profile) => requestedTypes.has(profile.projectType))

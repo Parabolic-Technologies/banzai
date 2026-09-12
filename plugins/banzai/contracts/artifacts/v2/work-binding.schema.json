@@ -1,0 +1,331 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schemaVersion",
+    "workId",
+    "slug",
+    "mode",
+    "layout",
+    "createdAt",
+    "sourceCommit",
+    "artifacts"
+  ],
+  "properties": {
+    "schema": {
+      "const": "banzai-work-binding/v2"
+    },
+    "schemaVersion": {
+      "const": 2
+    },
+    "workId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "slug": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "mode": {
+      "enum": [
+        "strict",
+        "lite",
+        "fix",
+        "workflow"
+      ]
+    },
+    "layout": {
+      "const": "private"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "sourceCommit": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+        }
+      ]
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reviewDirectory",
+        "verificationDirectory"
+      ],
+      "properties": {
+        "reviewDirectory": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001f\\u007f]).+$"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001f\\u007f]).+$"
+        },
+        "plan": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001f\\u007f]).+$"
+        },
+        "implementationReport": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001f\\u007f]).+$"
+        },
+        "testReport": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001f\\u007f]).+$"
+        },
+        "work": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001f\\u007f]).+$"
+        },
+        "changeReport": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001f\\u007f]).+$"
+        },
+        "verificationDirectory": {
+          "type": "string",
+          "pattern": "^\\.banzai/work/[a-f0-9-]{36}/verification$"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "strict"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "artifacts": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "reviewDirectory",
+              "description",
+              "plan",
+              "implementationReport",
+              "testReport"
+            ],
+            "properties": {
+              "reviewDirectory": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001f\\u007f]).+$"
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001f\\u007f]).+$"
+              },
+              "plan": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001f\\u007f]).+$"
+              },
+              "implementationReport": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001f\\u007f]).+$"
+              },
+              "testReport": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001f\\u007f]).+$"
+              },
+              "verificationDirectory": {
+                "type": "string",
+                "pattern": "^\\.banzai/work/[a-f0-9-]{36}/verification$"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "lite"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "artifacts": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "reviewDirectory",
+              "work"
+            ],
+            "properties": {
+              "reviewDirectory": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001f\\u007f]).+$"
+              },
+              "work": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001f\\u007f]).+$"
+              },
+              "verificationDirectory": {
+                "type": "string",
+                "pattern": "^\\.banzai/work/[a-f0-9-]{36}/verification$"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "fix"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "artifacts": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "reviewDirectory",
+              "changeReport"
+            ],
+            "properties": {
+              "reviewDirectory": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001f\\u007f]).+$"
+              },
+              "changeReport": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001f\\u007f]).+$"
+              },
+              "verificationDirectory": {
+                "type": "string",
+                "pattern": "^\\.banzai/work/[a-f0-9-]{36}/verification$"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "workflow"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "artifacts": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "reviewDirectory",
+              "description",
+              "plan",
+              "implementationReport",
+              "testReport",
+              "work",
+              "changeReport"
+            ],
+            "properties": {
+              "reviewDirectory": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001f\\u007f]).+$"
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001f\\u007f]).+$"
+              },
+              "plan": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001f\\u007f]).+$"
+              },
+              "implementationReport": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001f\\u007f]).+$"
+              },
+              "testReport": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001f\\u007f]).+$"
+              },
+              "work": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001f\\u007f]).+$"
+              },
+              "changeReport": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500,
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*[\\\\\\u0000-\\u001f\\u007f]).+$"
+              },
+              "verificationDirectory": {
+                "type": "string",
+                "pattern": "^\\.banzai/work/[a-f0-9-]{36}/verification$"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

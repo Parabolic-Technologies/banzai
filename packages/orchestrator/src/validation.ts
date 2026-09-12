@@ -1,3 +1,4 @@
+import { parseVerificationConfiguration } from "./verification-evidence.js";
 import { createHash } from "node:crypto";
 import { BanzaiError } from "./errors.js";
 import { vendorFor } from "./models.js";
@@ -2168,6 +2169,15 @@ export function parseConfig(value: unknown): OrchestratorConfig {
         }
       ]
     };
+  } else if (record.schemaVersion === 3) {
+    try {
+      verification = parseVerificationConfiguration(record.verification);
+    } catch {
+      throw new BanzaiError(
+        "INVALID_CONFIG",
+        "Invalid schema 3 verification configuration."
+      );
+    }
   } else if (record.schemaVersion === 2) {
     const verificationRecord = requireRecord(
       record.verification,
@@ -2195,7 +2205,7 @@ export function parseConfig(value: unknown): OrchestratorConfig {
   } else {
     throw new BanzaiError(
       "INVALID_CONFIG",
-      "Config must use schemaVersion 1 or 2."
+      "Config must use schemaVersion 1, 2 or 3."
     );
   }
 
@@ -2500,10 +2510,10 @@ export function parseVerificationLedger(value: unknown): VerificationLedger {
   const code = "VERIFICATION_LEDGER_MALFORMED";
   const record = verificationRecord(value, code, "ledger");
   verificationKeys(record, ["schemaVersion"], code, "ledger");
-  if (record.schemaVersion !== VERIFICATION_LEDGER_SCHEMA_VERSION) {
+  if (record.schemaVersion !== 1 && record.schemaVersion !== 2) {
     throw verificationEvidenceError(code, "schemaVersion");
   }
-  return { schemaVersion: VERIFICATION_LEDGER_SCHEMA_VERSION };
+  return { schemaVersion: record.schemaVersion };
 }
 
 export function parseVerificationAttemptRecord(
@@ -3012,7 +3022,7 @@ function emptyStateMetrics(
 
 function parseStateMetrics(
   value: unknown,
-  schemaVersion: 1 | 2 | 3 | 4,
+  schemaVersion: 1 | 2 | 3 | 4 | 5,
   issues: EvaluationSourceIssue[]
 ): EvaluationStateMetricSource {
   if (!isRecord(value)) {
@@ -3259,7 +3269,8 @@ export function parseEvaluationStateSource(
     value.schemaVersion !== 1 &&
     value.schemaVersion !== 2 &&
     value.schemaVersion !== 3 &&
-    value.schemaVersion !== 4
+    value.schemaVersion !== 4 &&
+    value.schemaVersion !== 5
   ) {
     throw new BanzaiError(
       "EVALUATION_STATE_SCHEMA_UNSUPPORTED",
@@ -3777,3 +3788,10 @@ export function parseEvaluationEventSource(
       : "other"
   };
 }
+
+export { parseVerificationDecision } from "./verification-evidence.js";
+export {
+  parseVerificationApplicability,
+  parseVerificationOriginStart,
+  parseVerificationOriginFinish
+} from "./verification-evidence.js";

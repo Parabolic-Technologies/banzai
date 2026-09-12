@@ -349,6 +349,16 @@
       "sha256": null
     },
     {
+      "path": "documentation/decisions/0043-proportionate-verification-evidence.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0044-instruction-baseline-evolution.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
       "path": "documentation/decisions/README.md",
       "classification": "maintainer",
       "sha256": null
@@ -439,6 +449,11 @@
       "sha256": null
     },
     {
+      "path": "documentation/releases/2.5.0.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
       "path": "documentation/releases/public-publication.md",
       "classification": "maintainer",
       "sha256": null
@@ -460,6 +475,26 @@
     },
     {
       "path": "packages/orchestrator/README.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/phase-guidance-current.json",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/phase-guidance-current.sha256",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/scripts/instruction-baseline.mjs",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/src/verification-evidence.ts",
       "classification": "maintainer",
       "sha256": null
     },
@@ -729,6 +764,16 @@
       "sha256": null
     },
     {
+      "path": "plugins/banzai/contracts/artifacts/v2/create-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/artifacts/v2/work-binding.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
       "path": "plugins/banzai/contracts/contract.json",
       "classification": "product",
       "sha256": null
@@ -760,6 +805,31 @@
     },
     {
       "path": "plugins/banzai/contracts/v3/phase-result.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/verification/v1/applicability.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/verification/v1/decision.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/verification/v1/execute-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/verification/v1/inspect-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/verification/v1/result.schema.json",
       "classification": "product",
       "sha256": null
     },
@@ -879,6 +949,36 @@
       "sha256": null
     },
     {
+      "path": "plugins/banzai/lib/verification-evidence.d.mts",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/lib/verification-evidence.mjs",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/lib/verification-helper.d.mts",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/lib/verification-helper.mjs",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/lib/verification-store.d.mts",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/lib/verification-store.mjs",
+      "classification": "product",
+      "sha256": null
+    },
+    {
       "path": "plugins/banzai/phases/feature.md",
       "classification": "product",
       "sha256": null
@@ -940,6 +1040,11 @@
     },
     {
       "path": "plugins/banzai/scripts/artifacts.cjs",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/scripts/verification.cjs",
       "classification": "product",
       "sha256": null
     },

@@ -46,7 +46,8 @@ Otherwise verification and a final summary suffice; no change report is required
    observed results, search the complete current `test-report.md`,
    `implementation-report.md`, and the fix's change report when it exists or is
    required for every test-count and command-result claim. Update every current
-   claim from a command actually run in this fix, or label earlier evidence
+   claim from a command actually run in this fix or a validated equivalent
+   disposition with its exact physical origin, or label earlier evidence
    explicitly `historical/pre-fix` with its scope. Keep all three artifacts
    mutually consistent, and never leave an old unqualified count or command
    outcome describing the current tree. In orchestrated mode, when runner-owned
@@ -58,7 +59,9 @@ Otherwise verification and a final summary suffice; no change report is required
 7. If no upstream feature artifact exists, state that instead of inventing one.
 8. Run focused affected checks. In orchestrated mode, do not repeat supplied
    full-scope runner commands; if the manifest final suite is absent, run it once
-   and report the gap. In standalone mode, run one final applicable suite.
+   and report the gap. In standalone mode, run one final applicable suite unless
+   the shared deterministic owner establishes a permitted equivalent disposition
+   under Test Assurance. Keep every unsupported or mandatory fresh check.
 9. Run formatter check/fix only as final review, if configured. If it rewrites
    files, rerun affected checks.
 10. Self-review for ADR and applicable Engineering Quality conformance, side
@@ -83,3 +86,10 @@ Use the resolved `changeReport` artifact:
 10. verification commands and outcomes;
 11. assurance critique result.
 
+
+Use one compact closure record per accepted finding: ID, changed scope, decision,
+executed/reused/historical/pending references and limitations. Preserve unaffected
+report text while correcting every affected current claim. Do not rewrite reports
+or rerun a suite merely to update narrative. The resolution reviewer receives the
+accepted IDs, bounded delta, current authority and exact evidence/origins, with
+existing independent review and human triage; omit builder transcripts.

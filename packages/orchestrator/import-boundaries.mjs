@@ -12,6 +12,7 @@ const ADR_0035 = "ADR-0035";
 const ADR_0040 = "ADR-0040";
 const ADR_0041 = "ADR-0041";
 const ADR_0042 = "ADR-0042";
+const ADR_0043 = "ADR-0043";
 const POLICY_ADR_AUTHORITIES = new Set([
   ADR_0026,
   ADR_0028,
@@ -20,7 +21,8 @@ const POLICY_ADR_AUTHORITIES = new Set([
   ADR_0035,
   ADR_0040,
   ADR_0041,
-  ADR_0042
+  ADR_0042,
+  ADR_0043
 ]);
 const POLICY_ERROR_CODE = "IMPORT_BOUNDARY_POLICY_INVALID";
 const IMPORTER_PATTERN =
@@ -45,6 +47,18 @@ const boundary = (
  * broaden it.
  */
 export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
+  boundary(
+    "src/verification-evidence.ts",
+    "shared-verification-evidence",
+    [ADR_0043],
+    [
+      permission(
+        "../../../plugins/banzai/lib/verification-evidence.mjs",
+        ADR_0043
+      ),
+      permission("../../../plugins/banzai/lib/verification-store.mjs", ADR_0043)
+    ]
+  ),
   boundary("src/phase-resources.ts", "embedded-phase-resources", [ADR_0042]),
   boundary(
     "src/phase-instructions.ts",
@@ -427,8 +441,10 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/evaluation.ts",
     "evaluation-export",
-    [MANIFEST_MODULES, MANIFEST_ARCHITECTURE],
+    [MANIFEST_MODULES, MANIFEST_ARCHITECTURE, ADR_0041, ADR_0043],
     [
+      permission("./artifact-storage.js", ADR_0041),
+      permission("./verification-evidence.js", ADR_0043),
       permission("./errors.js", MANIFEST_ARCHITECTURE),
       permission("./types.js", MANIFEST_ARCHITECTURE),
       permission("./validation.js", MANIFEST_MODULES)
@@ -554,8 +570,9 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/plan-task-completion.ts",
     "plan-task-completion",
-    [MANIFEST_MODULES, MANIFEST_ARCHITECTURE, ADR_0041],
+    [MANIFEST_MODULES, MANIFEST_ARCHITECTURE, ADR_0041, ADR_0043],
     [
+      permission("./verification-evidence.js", ADR_0043),
       permission("./artifact-storage.js", ADR_0041),
       permission("./errors.js", MANIFEST_ARCHITECTURE),
       permission("./git.js", MANIFEST_MODULES),
@@ -621,8 +638,16 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/store.ts",
     "run-store",
-    [MANIFEST_MODULES, MANIFEST_ARCHITECTURE, ADR_0028, ADR_0035, ADR_0041],
     [
+      MANIFEST_MODULES,
+      MANIFEST_ARCHITECTURE,
+      ADR_0028,
+      ADR_0035,
+      ADR_0041,
+      ADR_0043
+    ],
+    [
+      permission("./verification-evidence.js", ADR_0043),
       permission("./artifact-storage.js", ADR_0041),
       permission("./review-snapshot.js", MANIFEST_MODULES),
       permission("./cancellation.js", ADR_0035),
@@ -643,18 +668,20 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/types.ts",
     "foundational-types",
-    [MANIFEST_ARCHITECTURE, ADR_0041],
+    [MANIFEST_ARCHITECTURE, ADR_0041, ADR_0043],
     [],
     [
       permission("./git.js", MANIFEST_ARCHITECTURE),
-      permission("./artifact-storage.js", ADR_0041)
+      permission("./artifact-storage.js", ADR_0041),
+      permission("./verification-evidence.js", ADR_0043)
     ]
   ),
   boundary(
     "src/validation.ts",
     "runtime-validation",
-    [MANIFEST_MODULES, MANIFEST_ARCHITECTURE],
+    [MANIFEST_MODULES, MANIFEST_ARCHITECTURE, ADR_0043],
     [
+      permission("./verification-evidence.js", ADR_0043),
       permission("./errors.js", MANIFEST_ARCHITECTURE),
       permission("./models.js", MANIFEST_MODULES),
       permission("./types.js", MANIFEST_ARCHITECTURE)
@@ -684,10 +711,12 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       ADR_0034,
       ADR_0035,
       ADR_0040,
+      ADR_0043,
       ADR_0041,
       ADR_0042
     ],
     [
+      permission("./verification-evidence.js", ADR_0043),
       permission("./phase-instructions.js", ADR_0042),
       permission("./artifact-storage.js", ADR_0041),
       permission("./project-adoption.js", ADR_0040),
@@ -764,7 +793,11 @@ function validTargetShape(target) {
     typeof target !== "string" ||
     (!target.startsWith("./") && !target.startsWith("../")) ||
     (!TARGET_EXTENSION_PATTERN.test(target) &&
-      target !== "../../../plugins/banzai/lib/artifact-storage.mjs") ||
+      ![
+        "../../../plugins/banzai/lib/artifact-storage.mjs",
+        "../../../plugins/banzai/lib/verification-evidence.mjs",
+        "../../../plugins/banzai/lib/verification-store.mjs"
+      ].includes(target)) ||
     TARGET_META_PATTERN.test(target) ||
     target.includes("//")
   ) {

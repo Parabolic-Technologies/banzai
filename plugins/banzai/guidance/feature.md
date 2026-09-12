@@ -19,7 +19,9 @@ and policies; entry, host transport and contract mechanics remain with the calle
 9. Run focused affected checks. In orchestrated mode, do not repeat supplied
    full-scope runner commands; run the manifest's applicable final suite once
    only when it is absent from that block and record the gap. In standalone mode,
-   run one final applicable suite after the work stabilizes.
+   run one final applicable suite after the work stabilizes unless the shared
+   deterministic owner establishes a permitted equivalent disposition under Test
+   Assurance. Unsupported evidence retains fresh execution.
 10. Self-review for correctness, applicable Engineering Quality constraints,
     missing material evidence, ADR conformance, async/concurrency, doc drift,
     and scope creep.

@@ -1,4 +1,22 @@
 import {
+  captureVerificationInputs,
+  decideVerification,
+  evidenceDigest,
+  parseVerificationConfiguration,
+  parseVerificationObligations,
+  sameVerificationCapture,
+  persistVerificationDecision,
+  persistVerificationOriginStart,
+  persistVerificationOriginFinish,
+  readVerificationOrigins,
+  verificationApplicability,
+  persistVerificationApplicability
+} from "./verification-evidence.js";
+import type {
+  VerificationCapture,
+  VerificationStorage
+} from "./verification-evidence.js";
+import {
   hasRunnerWorkOwnership,
   withRunnerWorkOwnership,
   createWork,
@@ -88,6 +106,7 @@ import type { CancellationContextLinks } from "./cancellation-evidence.js";
 import { reviewVerdictText } from "./vocabulary.js";
 import {
   parseApprovedPlanTaskIds,
+  validatePlanVerificationObligations,
   parsePlanTaskCompletionProjection,
   PlanTaskCompletionError,
   summariesMatch,
@@ -1303,7 +1322,8 @@ export class WorkflowRunner {
         const baseCommit = await currentCommit(this.repoRoot);
         const createdAt = now();
         const state: RunState = {
-          schemaVersion: 4,
+          schemaVersion:
+            config.schemaVersion === 3 && config.verification.policy ? 5 : 4,
           contractVersion: CONTRACT_VERSION,
           runId: runId(input.slug),
           slug: input.slug,
@@ -1373,7 +1393,8 @@ export class WorkflowRunner {
           repoRoot: this.repoRoot,
           slug: state.slug,
           mode: "workflow",
-          creationId: randomUUID()
+          creationId: randomUUID(),
+          schemaVersion: state.schemaVersion === 5 ? 2 : 1
         });
         await this.store.createRun(state);
         await this.observeHumanTime(state, "run_created");
@@ -2264,6 +2285,15 @@ export class WorkflowRunner {
         // grammar is checked against those exact bytes: an on-disk edit between
         // the gate and the approval cannot smuggle in a malformed heading.
         await this.approvedTaskIds(state);
+        const approvalConfig = await loadConfig(this.repoRoot);
+        if (approvalConfig.schemaVersion === 3)
+          validatePlanVerificationObligations(
+            await readFile(
+              path.join(this.repoRoot, this.completionPlanPath(state)),
+              "utf8"
+            ),
+            approvalConfig.verification
+          );
         const bundle = await digestArtifactBundle(
           this.repoRoot,
           artifactPaths(state)
@@ -2653,6 +2683,8 @@ export class WorkflowRunner {
               error
             );
           }
+          if (!(await this.requireVerificationApplicability(state)))
+            return state;
           state.pendingReviewRotationReason = null;
           transitionState(state, "done");
           await this.store.writeState(state);
@@ -7052,6 +7084,151 @@ export class WorkflowRunner {
     state.verification = retained;
   }
 
+  private verificationStorage(state: RunState): VerificationStorage {
+    if (state.schemaVersion !== 5 || !state.artifactBinding)
+      throw new BanzaiError(
+        "VERIFICATION_EVIDENCE_INVALID",
+        "Verification applicability requires its original work binding."
+      );
+    return {
+      repoRoot: this.repoRoot,
+      workId: state.artifactBinding.binding.workId,
+      directory: `.banzai/runs/${state.runId}/verification`
+    };
+  }
+
+  private verificationAuthority(state: RunState): string {
+    return evidenceDigest({
+      binding: state.artifactBinding?.sha256,
+      approval: state.planApproval?.digest ?? null,
+      workflow: state.workflowSelection
+    });
+  }
+
+  private async captureVerification(
+    state: RunState,
+    config: OrchestratorConfig
+  ): Promise<VerificationCapture> {
+    if (config.schemaVersion !== 3 || !config.verification.policy)
+      throw new BanzaiError(
+        "VERIFICATION_CONFIGURATION_CHANGED",
+        "Verification-enabled runs require their explicit project policy."
+      );
+    const configuration = parseVerificationConfiguration(config.verification);
+    const input = {
+      repoRoot: this.repoRoot,
+      configuration,
+      workId: this.verificationStorage(state).workId,
+      evidenceDirectories: [
+        `.banzai/runs/${state.runId}`,
+        ".banzai/runner.lock"
+      ]
+    };
+    const before = await captureVerificationInputs(input);
+    const after = await captureVerificationInputs(input);
+    return sameVerificationCapture(before, after) ||
+      (!before.complete && !after.complete)
+      ? after
+      : {
+          complete: false,
+          reason: "inputs_unavailable",
+          candidateDigest: null,
+          checks: []
+        };
+  }
+
+  private async prepareVerificationDecision(
+    state: RunState,
+    config: OrchestratorConfig,
+    round: VerificationAttemptRecord["round"],
+    records: VerificationAttemptRecord[]
+  ): Promise<VerificationCapture> {
+    const storage = this.verificationStorage(state);
+    const configuration = parseVerificationConfiguration(config.verification);
+    const strict = (state.workflowSelection?.workflow ?? "strict") === "strict";
+    const plan = strict
+      ? await readFile(
+          path.join(this.repoRoot, this.completionPlanPath(state)),
+          "utf8"
+        )
+      : null;
+    const current = await this.captureVerification(state, config);
+    const origins = await readVerificationOrigins(storage, records);
+    const decision = decideVerification({
+      workId: storage.workId,
+      roundId: round.id,
+      configuration,
+      authorityDigest: this.verificationAuthority(state),
+      strict,
+      obligations: parseVerificationObligations(plan, configuration),
+      capture: current,
+      origins
+    });
+    await persistVerificationDecision(storage, decision);
+    state.verificationEvidence = { decision, applicability: null };
+    return current;
+  }
+
+  private async requireVerificationApplicability(
+    state: RunState,
+    config?: OrchestratorConfig
+  ): Promise<boolean> {
+    if (state.schemaVersion !== 5) return true;
+    if (!(await hasRunnerWorkOwnership(this.repoRoot, state.artifactBinding)))
+      return withRunnerWorkOwnership(this.repoRoot, state.artifactBinding, () =>
+        this.requireVerificationApplicability(state, config)
+      );
+    try {
+      const currentConfig = await loadConfig(this.repoRoot);
+      if (
+        config &&
+        JSON.stringify(currentConfig.verification) !==
+          JSON.stringify(config.verification)
+      )
+        throw new BanzaiError(
+          "VERIFICATION_CONFIGURATION_CHANGED",
+          "Project verification policy changed during execution."
+        );
+      const evidence = state.verificationEvidence;
+      const configuration = parseVerificationConfiguration(
+        currentConfig.verification
+      );
+      if (
+        evidence?.decision.authorityDigest !==
+          this.verificationAuthority(state) ||
+        evidence.decision.configurationDigest !==
+          evidenceDigest({ schema: 3, verification: configuration })
+      )
+        throw new BanzaiError(
+          "VERIFICATION_EVIDENCE_INVALID",
+          "Verification authority changed or evidence is missing."
+        );
+      const storage = this.verificationStorage(state);
+      const origins = await readVerificationOrigins(
+        storage,
+        await this.store.readVerificationAttempts(state.runId)
+      );
+      const current = await this.captureVerification(state, currentConfig);
+      const applicability = verificationApplicability(
+        evidence.decision,
+        origins,
+        current
+      );
+      await persistVerificationApplicability(storage, applicability);
+      evidence.applicability = applicability;
+      if (!applicability.complete)
+        throw new BanzaiError(
+          "VERIFICATION_EVIDENCE_INVALID",
+          "Current verification evidence is incomplete or its inputs changed. Required verification must be re-established."
+        );
+      return true;
+    } catch (error) {
+      blockState(state, errorMessage(error));
+      await this.store.writeState(state);
+      return false;
+    }
+  }
+
   private async executeVerification(
     state: RunState,
     config: OrchestratorConfig,
@@ -7104,6 +7281,21 @@ export class WorkflowRunner {
     );
     const round = this.verificationRound(records, source);
     const descriptors = describeVerificationCommands(config);
+    let evidenceBefore: VerificationCapture | null = null;
+    if (state.schemaVersion === 5) {
+      try {
+        evidenceBefore = await this.prepareVerificationDecision(
+          state,
+          config,
+          round,
+          records
+        );
+      } catch (error) {
+        blockState(state, errorMessage(error));
+        await this.store.writeState(state);
+        return state;
+      }
+    }
     if (
       retryOf !== undefined &&
       !records.some(
@@ -7142,6 +7334,10 @@ export class WorkflowRunner {
         continue;
       }
       const command = descriptor.command;
+      if (
+        state.verificationEvidence?.decision.actions[index]?.action === "reuse"
+      )
+        continue;
       const commandRecords = records.filter(
         (record) =>
           record.round.id === round.id &&
@@ -7208,6 +7404,14 @@ export class WorkflowRunner {
         await this.store.writeState(state);
       }
 
+      if (state.schemaVersion === 5) {
+        const latestCapture = await this.captureVerification(state, config);
+        if (latestCapture.candidateDigest !== evidenceBefore?.candidateDigest) {
+          blockState(state, "Verification inputs changed before invocation.");
+          await this.store.writeState(state);
+          return state;
+        }
+      }
       const record = await this.store.beginVerificationAttempt(state.runId, {
         round,
         descriptor,
@@ -7215,6 +7419,13 @@ export class WorkflowRunner {
         retryOf: retryingFailed ? failed.id : null,
         restartOf
       });
+      if (evidenceBefore && state.verificationEvidence)
+        await persistVerificationOriginStart(
+          this.verificationStorage(state),
+          record,
+          state.verificationEvidence.decision,
+          evidenceBefore
+        );
       records = [...records, record].sort(
         (left, right) => left.sequence - right.sequence
       );
@@ -7239,7 +7450,11 @@ export class WorkflowRunner {
               command: command.command,
               args: command.args,
               cwd: this.repoRoot,
-              env: subscriptionOnlyEnvironment(),
+              env:
+                state.schemaVersion === 5
+                  ? (parseVerificationConfiguration(config.verification).policy
+                      ?.dependencies.environment ?? {})
+                  : subscriptionOnlyEnvironment(),
               timeoutMs: command.timeoutMs,
               onStart: async (pid) => {
                 await this.processStarted(state, { kind: "verification" }, pid);
@@ -7260,6 +7475,12 @@ export class WorkflowRunner {
           stderr: null
         });
         await this.store.finishVerificationAttempt(state.runId, terminal);
+        if (evidenceBefore)
+          await persistVerificationOriginFinish(
+            this.verificationStorage(state),
+            terminal,
+            await this.captureVerification(state, config)
+          );
         if (current.status === "cancelled") {
           return current;
         }
@@ -7294,6 +7515,12 @@ export class WorkflowRunner {
         stderr: stderrEvidence
       });
       await this.store.finishVerificationAttempt(state.runId, terminal);
+      if (evidenceBefore)
+        await persistVerificationOriginFinish(
+          this.verificationStorage(state),
+          terminal,
+          await this.captureVerification(state, config)
+        );
       const current = await this.store.readState(state.runId);
       if (current.status === "cancelled") {
         return current;
@@ -7319,6 +7546,8 @@ export class WorkflowRunner {
         return state;
       }
     }
+    if (!(await this.requireVerificationApplicability(state, config)))
+      return state;
     const workflow = state.workflowSelection?.workflow ?? "strict";
     if (workflow !== "strict") {
       transitionState(state, "done");
@@ -7447,6 +7676,8 @@ export class WorkflowRunner {
         this.executeReview(state, config, commitTransition)
       );
     requireState(state, ["reviewing"], "Review");
+    if (!(await this.requireVerificationApplicability(state, config)))
+      return state;
     await this.assertProjectGuidance();
     let validatedCompletion: ValidatedPlanTaskCompletion;
     try {
@@ -7558,6 +7789,30 @@ export class WorkflowRunner {
         tasks: validatedCompletion.tasks
       }
     };
+    if (
+      state.schemaVersion === 5 &&
+      state.verificationEvidence?.applicability
+    ) {
+      const attempts = await this.store.readVerificationAttempts(state.runId);
+      const origins = await readVerificationOrigins(
+        this.verificationStorage(state),
+        attempts
+      );
+      artifact.verificationEvidence = {
+        ...state.verificationEvidence,
+        applicability: state.verificationEvidence.applicability,
+        origins,
+        attempts: origins.map((origin) => {
+          const attempt = attempts.find((item) => item.id === origin.attemptId);
+          if (!attempt)
+            throw new BanzaiError(
+              "VERIFICATION_EVIDENCE_INVALID",
+              "Physical origin is missing."
+            );
+          return attempt;
+        })
+      };
+    }
     const record = await this.beginAttempt(state, attempt, policy);
     const candidateEvidence: ReviewCandidateEvidence = {
       source: artifactMode,
@@ -7578,10 +7833,14 @@ export class WorkflowRunner {
           "Review requires an exact approved scope."
         );
       const frozen = sealReviewSnapshot({
-        schema: state.artifactBinding
-          ? "banzai-review-snapshot/v2"
-          : "banzai-review-snapshot/v1",
-        schemaVersion: state.artifactBinding ? 2 : 1,
+        schema:
+          state.schemaVersion === 5
+            ? "banzai-review-snapshot/v3"
+            : state.artifactBinding
+              ? "banzai-review-snapshot/v2"
+              : "banzai-review-snapshot/v1",
+        schemaVersion:
+          state.schemaVersion === 5 ? 3 : state.artifactBinding ? 2 : 1,
         ...(state.artifactBinding
           ? { artifactBinding: state.artifactBinding }
           : {}),
@@ -8034,6 +8293,7 @@ export class WorkflowRunner {
               ? "session-inventory-changed"
               : null;
     if (result.verdict === "pass") {
+      if (!(await this.requireVerificationApplicability(state))) return state;
       try {
         await this.revalidateTaskCompletion(state);
       } catch (error) {

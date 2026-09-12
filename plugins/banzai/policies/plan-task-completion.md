@@ -105,3 +105,22 @@ an orchestrated approval, unlike choosing a compliant implementation under it.
   approval, reports, source, tests, or review evidence requires an
   artifact/evidence audit and is never silently repaired by editing an approved
   plan.
+
+
+### Opt-in verification obligations
+
+A new strict plan relying on ADR-0043 contains exactly one fenced
+`banzai-verification-obligations/v1` JSON inventory inside its approved bytes.
+It carries schema/schemaVersion, complete=true, planRemainderSha256 and an ordered
+checks array of configured check IDs and fresh/equivalent_evidence modes. The
+remainder digest covers every byte outside that complete fence. The owner reviews
+completeness and consistency with all prose commitments before bundle approval.
+Missing, duplicated, stale, ambiguous or contradictory inventories deny reuse;
+legacy plans retain their original obligations. Release checks are always fresh.
+Changing the inventory requires normal plan approval; no prose claim upgrades it.
+
+Equivalent verification does not replace task-completion validation. Preserve the
+canonical task records and exact report projection, immutable approved artifacts,
+and existing report-digest versus complete fix-ledger refresh boundaries. Inspect
+current claims for contradictions, update only affected claims and attach one
+bounded closure record; a claim sweep is a consistency check, not a command run.

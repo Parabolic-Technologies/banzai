@@ -261,9 +261,11 @@ function renderCurrentReviewArtifact(
   }[result.verdict];
   return [
     "# Implementation Review",
-    snapshot.schemaVersion === 2
-      ? "- Format: `banzai-feature-review/v3`"
-      : "- Format: `banzai-feature-review/v2`",
+    snapshot.schemaVersion === 3
+      ? "- Format: `banzai-feature-review/v4`"
+      : snapshot.schemaVersion === 2
+        ? "- Format: `banzai-feature-review/v3`"
+        : "- Format: `banzai-feature-review/v2`",
     reviewValue({
       slug: context.slug,
       iteration: context.iteration,
@@ -271,7 +273,7 @@ function renderCurrentReviewArtifact(
       artifactPath: context.path,
       workspaceDigest: context.workspaceDigest,
       snapshotDigest: snapshot.digest,
-      ...(snapshot.schemaVersion === 2
+      ...(snapshot.schemaVersion >= 2
         ? {
             workId: snapshot.artifactBinding?.binding.workId,
             snapshotSchema: snapshot.schema
@@ -291,7 +293,9 @@ function renderCurrentReviewArtifact(
       artifacts: coverage
     }),
     "### Recorded verification (runner evidence)",
-    reviewValue(snapshot.artifact.verification),
+    reviewValue(
+      snapshot.artifact.verificationEvidence ?? snapshot.artifact.verification
+    ),
     "### Validated plan task completion (runner evidence)",
     reviewValue({
       source: snapshot.completionSource,

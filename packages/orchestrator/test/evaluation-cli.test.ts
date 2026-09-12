@@ -276,3 +276,36 @@ test("readable partial CLI export preserves every run-tree byte", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("explicit evaluation v2 remains read-only and never infers legacy origins", async () => {
+  const root = await createEvaluationRoot();
+  try {
+    await writeEvaluationRun(root, "legacy", {
+      state: evaluationStateFixture()
+    });
+    const before = await snapshotTree(root);
+    const output: string[] = [];
+    await executeEvaluationExport(root, ["--schema-version", "2", "--json"], {
+      stdout: (text) => output.push(text),
+      stderr: () => {}
+    });
+    const result = JSON.parse(output.join("")) as {
+      schema: string;
+      runs: { verificationEvidence: { coverage: string } }[];
+    };
+    assert.equal(result.schema, "banzai-evaluation-export/v2");
+    assert.equal(result.runs[0]?.verificationEvidence.coverage, "incomplete");
+    assert.deepEqual(await snapshotTree(root), before);
+    assert.throws(() =>
+      parseEvaluationExportArgs([
+        "--schema-version",
+        "2",
+        "--schema-version",
+        "1"
+      ])
+    );
+    assert.throws(() => parseEvaluationExportArgs(["--schema-version", "3"]));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -166,3 +166,97 @@ The reference lists all supported [root markers and profile types](orchestrator.
 Do not add a marker just to make doctor ready; configure checks that actually
 cover the repository. A ready report describes the declared setup, not whether
 the selected tests provide sufficient assurance.
+
+## Explicit equivalent evidence (config 3)
+
+Config 1 and 2 keep their existing execution behavior. To opt a project into
+ADR-0043, explicitly set the full configuration's `schemaVersion` to 3, give
+every command a globally unique kebab-case `id`, and add a verification `policy`.
+Preserve models, contractVersion and the other existing configuration fields.
+New checks default to `evidence: "fresh"`; `release:check` always executes afresh.
+
+A policy has this shape (replace every example boundary with reviewed project
+facts; this is not a ready-to-run configuration):
+
+```json
+{
+  "schema": "banzai-verification-policy/v1",
+  "schemaVersion": 1,
+  "explanatory": [
+    {
+      "path": "docs/overview.md",
+      "regions": [
+        { "start": "<!-- explanation start -->", "end": "<!-- explanation end -->" }
+      ]
+    }
+  ],
+  "dependencies": {
+    "complete": false,
+    "exclude": [],
+    "toolchain": ["/absolute/canonical/path/to/node"],
+    "environment": { "LANG": "C", "TZ": "UTC" },
+    "volatile": []
+  }
+}
+```
+
+An eligible command adds `evidence: "equivalent_evidence"` and
+`ignoreExplanatory: true`. Its command, ordered profile, policy, authority,
+protected inputs and environment must match a direct successful physical origin
+from the same repository and work. A command that consumes the explanatory text
+keeps `ignoreExplanatory: false`. An empty `regions` array declares a whole
+explanatory Markdown file. Boundaries and all complementary text remain protected;
+code fences and executable embeds invalidate an explanatory declaration. Mixed
+`PROJECT_MANIFEST.md` and `MODULES.md` declarations require regions; they cannot
+be exempted as whole files. Runner evidence excludes its own run directory and
+transient runner lock; helper claims are transient ownership metadata.
+
+`complete` is the project's reviewed dependency assertion. Keep it false when
+closure is unknown. Capture includes staged, working, untracked and ignored files,
+including actual installed dependency bytes; a lockfile alone is insufficient.
+Exclusions are explicit project-owned dependency boundaries. Excluding a report
+is valid only if the check does not consume it; approval and completion authority
+remain independently enforced. Links, special files, unreadable or unstable
+inputs conservatively deny reuse. Limits are 50,000 files and 512 MiB per capture.
+When capture is unavailable, a configured process can still execute and its
+physical result remains recorded, but current applicability stays pending and
+runner completion is blocked. Resolve the unavailable input boundary before
+applying that result; two null capture digests do not establish unchanged inputs.
+
+Toolchain entries are canonical absolute regular-file paths and must include
+the resolved executable and every external dependency needed for stable evidence.
+The helper captures their actual bytes. Config-3 policy execution passes only the
+explicit non-secret `PATH`, `LANG`, `LC_ALL` and `TZ` environment values. No ambient
+secret is hashed to establish equivalence. Network, clock, service, secret or
+other external dependencies without stable evidence belong in `volatile` and
+remain non-reusable. This is a declared project boundary, not automatic semantic
+dependency analysis; a declaration cannot substitute for missing evidence.
+
+New strict plans additionally need the owner-approved
+`banzai-verification-obligations/v1` fenced inventory described in the supplied
+Plan Authority policy. Missing, ambiguous or stale inventories retain fresh
+checks. Existing approved plans are not silently upgraded.
+
+For standalone work, explicitly create a new private binding with an artifact
+create request using `banzai-artifact-request/v2` and `schemaVersion: 2`. Existing
+v1 bindings remain unchanged. The installed `scripts/verification.cjs` accepts
+`inspect`, `decide` and `execute` with `--json <private-request-file>`:
+
+```json
+{
+  "schema": "banzai-verification-request/v1",
+  "schemaVersion": 1,
+  "repoRoot": "/absolute/project/root",
+  "workPath": ".banzai/work/11111111-1111-4111-8111-111111111111/work.json",
+  "roundId": "22222222-2222-4222-8222-222222222222",
+  "checkId": "unit"
+}
+```
+
+`checkId` is supplied only to execute, which selects that configured check. Use
+one round ID for the ordered checks of one candidate. A failed attempt requires
+its exact `retryOf`; an unresolved start requires owner recovery. Requests never
+supply arbitrary commands or output paths. Inspect/decide do not write evidence.
+A reuse disposition preserves its original attempt/round/digest; it creates no
+new process, exit code, log or duration. Unsupported policy/binding/helper paths
+retain the existing applicable final verification workflow.

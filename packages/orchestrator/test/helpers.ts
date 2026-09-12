@@ -484,3 +484,10 @@ export async function createTestRepository(
     }
   };
 }
+
+/** Assert required fixture structure without weakening production decoders. */
+export function requiredFixture<T>(value: T | null | undefined): T {
+  if (value === undefined || value === null)
+    throw new Error("Required fixture value is missing.");
+  return value;
+}

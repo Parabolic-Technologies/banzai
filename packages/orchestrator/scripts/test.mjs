@@ -13,6 +13,7 @@ function pathsFromArguments(args) {
   let testRoot = path.join(packageRoot, "test");
   let outputRoot = path.join(packageRoot, ".test-dist");
   let pattern = null;
+  const files = [];
   for (let index = 0; index < args.length; index += 2) {
     const option = args[index];
     const value = args[index + 1];
@@ -25,17 +26,30 @@ function pathsFromArguments(args) {
       outputRoot = path.resolve(value);
     } else if (option === "--pattern") {
       pattern = value;
+    } else if (option === "--file") {
+      if (
+        !value.endsWith(".test.ts") ||
+        value.includes("\\") ||
+        path.posix.isAbsolute(value) ||
+        value.split("/").some((part) => !part || part === "." || part === "..")
+      ) {
+        throw new Error(
+          "Invalid test file. Use an exact test-root-relative .test.ts path."
+        );
+      }
+      files.push(value);
     } else {
       throw new Error("Invalid test-driver options.");
     }
   }
-  return { testRoot, outputRoot, pattern };
+  return { testRoot, outputRoot, pattern, files: [...new Set(files)].sort() };
 }
 
-const { testRoot, outputRoot, pattern } = pathsFromArguments(
+const { testRoot, outputRoot, pattern, files } = pathsFromArguments(
   process.argv.slice(2)
 );
 let child = null;
+let interrupted = false;
 
 function stopChild() {
   if (child?.pid === undefined) {
@@ -53,15 +67,30 @@ function stopChild() {
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
+    interrupted = true;
     stopChild();
     process.exitCode = 1;
   });
 }
 
 try {
-  const entries = (await readdir(testRoot, { recursive: true }))
-    .filter((entry) => entry.endsWith(".test.ts"))
-    .map((entry) => path.join(testRoot, entry));
+  const discovered = (
+    await readdir(testRoot, { recursive: true, withFileTypes: true })
+  )
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".test.ts"))
+    .map((entry) =>
+      path
+        .relative(testRoot, path.join(entry.parentPath, entry.name))
+        .split(path.sep)
+        .join("/")
+    )
+    .sort();
+  if (files.some((file) => !discovered.includes(file))) {
+    throw new Error("Selected test file was not found in the test root.");
+  }
+  const entries = (files.length === 0 ? discovered : files).map((entry) =>
+    path.join(testRoot, entry)
+  );
 
   if (entries.length === 0) {
     throw new Error("No orchestrator tests found.");
@@ -85,6 +114,7 @@ try {
 
   const testFiles = (await readdir(outputRoot, { recursive: true }))
     .filter((entry) => entry.endsWith(".test.mjs"))
+    .sort()
     .map((entry) => path.join(outputRoot, entry));
 
   const testArguments = [
@@ -93,6 +123,8 @@ try {
     ...(pattern === null ? [] : [`--test-name-pattern=${pattern}`]),
     ...testFiles
   ];
+  if (interrupted)
+    throw new Error("Test driver interrupted before test execution.");
   child = spawn(process.execPath, testArguments, {
     cwd: packageRoot,
     detached: process.platform !== "win32",
@@ -110,7 +142,7 @@ try {
       resolve(code ?? 1);
     });
   });
-  process.exitCode = exitCode;
+  process.exitCode = interrupted ? 1 : exitCode;
 } finally {
   stopChild();
   await rm(outputRoot, { recursive: true, force: true });

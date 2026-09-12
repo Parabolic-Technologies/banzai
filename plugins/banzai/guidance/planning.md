@@ -42,6 +42,12 @@ and policies; entry, host transport and contract mechanics remain with the calle
    applicable Engineering Quality constraints and their task/evidence owner; do
    not add a ten-row checklist or per-rule `N/A` list.
 
+When a new plan explicitly relies on equivalent verification, include the
+versioned obligation inventory described by Plan Authority and Task Completion.
+List every configured check in order, retain mandatory fresh requirements, bind
+the complete surrounding prose and obtain normal bundle approval. Missing or
+ambiguous commitments preserve fresh execution.
+
 ## Rules
 
 - Specify exact contracts, signatures, state shapes, identifiers, config keys,

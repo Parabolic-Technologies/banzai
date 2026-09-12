@@ -395,6 +395,16 @@ test("distinguishes missing malformed unsupported invalid and legacy config", as
     assert.equal(checkStatus(unsupported, "config.valid"), "fail");
     assert.equal(checkStatus(unsupported, "config.version"), "fail");
 
+    const optedIn = structuredClone(DEFAULT_CONFIG);
+    optedIn.schemaVersion = 3;
+    for (const profile of optedIn.verification.profiles)
+      for (const [index, command] of profile.commands.entries())
+        command.id = `${profile.id}-${index + 1}`;
+    await writeConfig(repository.root, optedIn);
+    const supported = await inspectDoctor(repository.root, dependencies());
+    assert.equal(checkStatus(supported, "config.version"), "pass");
+    assert.equal(checkStatus(supported, "config.valid"), "pass");
+
     const invalid = structuredClone(DEFAULT_CONFIG);
     const invalidProfile = invalid.verification.profiles[0];
     assert.ok(invalidProfile);
