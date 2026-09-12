@@ -442,5 +442,10 @@ Implementation and independent review must confirm:
 
 ## Lifecycle Links
 
+- Amended by [ADR-0042](./0042-runner-delivered-phase-instructions.md), accepted
+  2026-09-11: runner implementation/assurance receive their complete obligations
+  through embedded instructions instead of required host skill loading.
+  Approved task authority, completion ledger/projection, reporting and fix
+  refresh remain binding. Implementation of this amendment is Planned.
 - Supersedes: ADR-0016
 - Superseded by: None

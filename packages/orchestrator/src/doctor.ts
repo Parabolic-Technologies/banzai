@@ -4,6 +4,9 @@ import path from "node:path";
 import process from "node:process";
 import {
   resolveClaudeInvocationScope,
+  vendorFor,
+  FALLBACK_VENDOR,
+  MODEL_ROLES,
   type ResolvedClaudeInvocationScope
 } from "./adapters.js";
 import {
@@ -19,6 +22,12 @@ import {
   inspectProjectAdoption
 } from "./project-adoption.js";
 import { assertContractParity } from "./contracts.js";
+import {
+  combineInstructionParity,
+  inspectInstructionParity,
+  instructionParityDiagnostic,
+  instructionPhasesForRole
+} from "./phase-instructions.js";
 import { CONTRACT_VERSION } from "./types.js";
 import type {
   ClaudeEnvironmentSettings,
@@ -60,8 +69,8 @@ export interface DoctorSummary {
 }
 
 export interface DoctorReport {
-  schema: "banzai-doctor/v2";
-  schemaVersion: 2;
+  schema: "banzai-doctor/v3";
+  schemaVersion: 3;
   ready: boolean;
   projectTypes: VerificationProjectType[];
   summary: DoctorSummary;
@@ -326,6 +335,59 @@ async function claudeEnvironmentCheck(
       "The explicitly configured Banzai plugin directory cannot be verified; model invocation will fail closed."
     );
   }
+}
+
+async function claudeInstructionsCheck(
+  config: OrchestratorConfig | null,
+  dependencies: DoctorDependencies
+): Promise<DoctorCheck> {
+  if (config === null)
+    return check(
+      "claude.instructions",
+      "config",
+      "warning",
+      "Instruction resource parity is unverifiable without a valid configuration."
+    );
+  let directory: string | null;
+  try {
+    const resolved = await (
+      dependencies.resolveClaudeInvocationScope ?? resolveClaudeInvocationScope
+    )(config.claudeEnvironment);
+    directory =
+      config.claudeEnvironment.mode === "ambient"
+        ? null
+        : resolved.scope.pluginDirectory;
+  } catch {
+    // The independent structural check remains failed; absent evidence cannot mask it.
+    return check(
+      "claude.instructions",
+      "config",
+      "warning",
+      "Instruction resource parity is unverifiable because the invocation environment cannot be verified."
+    );
+  }
+  const results = await Promise.all(
+    MODEL_ROLES.map((role) =>
+      inspectInstructionParity(
+        (vendorFor(config.models[role].executable) ?? FALLBACK_VENDOR[role]) ===
+          "claude"
+          ? directory
+          : null,
+        instructionPhasesForRole(role, null) ?? []
+      )
+    )
+  );
+  const parity = combineInstructionParity(results);
+  return check(
+    "claude.instructions",
+    "config",
+    parity.state === "verified"
+      ? "pass"
+      : parity.state === "mismatch"
+        ? "fail"
+        : "warning",
+    instructionParityDiagnostic(parity)
+  );
 }
 
 /**
@@ -792,6 +854,7 @@ export async function inspectDoctor(
   }
   checks.push(configVersionCheck(configDocument));
   checks.push(await claudeEnvironmentCheck(config, dependencies));
+  checks.push(await claudeInstructionsCheck(config, dependencies));
   checks.push(await claudePermissionsCheck(repoRoot, config, dependencies));
 
   let projectTypes: VerificationProjectType[] = [];
@@ -962,8 +1025,8 @@ export async function inspectDoctor(
 
   const reportSummary = summary(checks);
   return {
-    schema: "banzai-doctor/v2",
-    schemaVersion: 2,
+    schema: "banzai-doctor/v3",
+    schemaVersion: 3,
     ready: reportSummary.failed === 0,
     projectTypes,
     summary: reportSummary,

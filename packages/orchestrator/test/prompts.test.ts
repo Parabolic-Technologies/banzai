@@ -1,3 +1,4 @@
+import { phaseInstructionParts } from "../src/phase-instructions.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
@@ -19,11 +20,12 @@ import {
   serenaGuidance,
   workflowSelectionPrompt,
   workflowSelectionPromptEnvelope,
-  workflowSkills
+  workflowPhases
 } from "../src/prompts.js";
 import { resolveOutputContract } from "../src/output-contract.js";
-import { appendPromptComponent } from "../src/prompt-envelope.js";
+import { insertPhaseInstructions } from "../src/prompt-envelope.js";
 import type {
+  InstructionPhase,
   PromptComponent,
   PromptEnvelope,
   VerificationProfile
@@ -63,7 +65,7 @@ function golden(text: string): { bytes: number; sha256: string } {
   };
 }
 
-test("prompt bytes preserve unchanged phase baselines and record the approved plan authority projections", () => {
+test("frozen output contracts and legacy repair bytes survive direct phase delivery", () => {
   const selection = workflowSelectionPrompt("Змінити café.");
   const planning = planningPrompt("context-budget", "Змінити café.", [], []);
   const implementation = implementationPrompt(
@@ -159,80 +161,108 @@ test("prompt bytes preserve unchanged phase baselines and record the approved pl
     )
   };
 
-  assert.deepEqual(actual, {
-    selection: {
-      bytes: 1445,
-      sha256: "c85500098930aa505495128c3dfef0cacdd2559e69b7d367f11847fdec353e50"
-    },
-    planning: {
-      bytes: 4062,
-      sha256: "79713de11307c95777c54596bccb0c747c378ce74b6b2880d834c2738a9236e1"
-    },
-    implementation: {
-      bytes: 6216,
-      sha256: "76dc182a0826a08c97849cf086c7ad10dbedb8f757f40805801d89cf67f8b247"
-    },
-    lite: {
-      bytes: 3317,
-      sha256: "2643ead42301d5df2b8c878fa602795612433069ecbd40105e24ec220e94827d"
-    },
-    fix: {
-      bytes: 6204,
-      sha256: "c32bc71ef10ea763e799b36faa5d432ab98dad2487b54e1b68cfa8535ca9b433"
-    },
-    recovery: {
-      bytes: 6894,
-      sha256: "c30f1443d2a7113a2c844cadc17aaf371f7e76ee4cd24c52f36a972db623afbb"
-    },
-    prerequisiteRecovery: {
-      bytes: 7280,
-      sha256: "f17b3588e160fadc72802e7aca1e02bd317998291c5976c641c57615e0fb30b3"
-    },
-    reviewFullV2: {
-      bytes: 6982,
-      sha256: "c2028e523732f8c778433a41625bd10553fb551481a4aa988a1e1613197c64f2"
-    },
-    reviewDeltaV2: {
-      bytes: 7426,
-      sha256: "72fefcd5bfc24601a975b3fec98bc0b71166edaf9399470c25ab5e25cb5e3f43"
-    },
-    repair: {
-      bytes: 944,
-      sha256: "0a2f1405bdc58618e7d741b5212c207bb35702eb8424d358e2090ec7c43f3ef4"
-    },
-    serenaAbsent: {
-      bytes: 0,
-      sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-    },
-    serenaPresent: {
-      bytes: 416,
-      sha256: "a7a4ad508b36a4414284f0db39c7ce2b95e3f14833abbc161e62c83dc014abab"
-    },
-    claudeSelectionContract: {
-      bytes: 575,
-      sha256: "f8bcb1e1955b66eb5cb26ad8ea9777410cfc00f1053d75c6af98a2e60f774e15"
-    },
-    codexSelectionContract: {
-      bytes: 913,
-      sha256: "4e0acd9ebaa3b42e6120cf0d1ec4370800a802dddd9e2674f79149b285300cb8"
-    },
-    claudePhaseContract: {
-      bytes: 4926,
-      sha256: "5547e2f2e40782998e2db1a96ce31c68d37c9318ad61b44aafa9422e13469801"
-    },
-    codexPhaseContract: {
-      bytes: 12889,
-      sha256: "538fd24f386f0aafb5b44d5e52951d4ceaaf11b0a220559f36b6d51f0f5fd8dc"
-    },
-    claudeReviewContract: {
-      bytes: 1624,
-      sha256: "3a0b2c368c7976b5e842ab28a0d6b9d5d65d510e1f90c203f8a0eaad2e4b9def"
-    },
-    codexReviewContract: {
-      bytes: 3206,
-      sha256: "bc8e5b8f9da3160799a6fa4d5efa1c607eda86400e94f6cdd57b666697f15d78"
-    }
-  });
+  const frozen = (values: typeof actual) =>
+    Object.fromEntries(
+      Object.entries(values).filter(
+        ([key]) =>
+          key.endsWith("Contract") || key === "repair" || key === "serenaAbsent"
+      )
+    );
+  assert.deepEqual(
+    frozen(actual),
+    frozen({
+      selection: {
+        bytes: 1445,
+        sha256:
+          "c85500098930aa505495128c3dfef0cacdd2559e69b7d367f11847fdec353e50"
+      },
+      planning: {
+        bytes: 4062,
+        sha256:
+          "79713de11307c95777c54596bccb0c747c378ce74b6b2880d834c2738a9236e1"
+      },
+      implementation: {
+        bytes: 6216,
+        sha256:
+          "76dc182a0826a08c97849cf086c7ad10dbedb8f757f40805801d89cf67f8b247"
+      },
+      lite: {
+        bytes: 3317,
+        sha256:
+          "2643ead42301d5df2b8c878fa602795612433069ecbd40105e24ec220e94827d"
+      },
+      fix: {
+        bytes: 6204,
+        sha256:
+          "c32bc71ef10ea763e799b36faa5d432ab98dad2487b54e1b68cfa8535ca9b433"
+      },
+      recovery: {
+        bytes: 6894,
+        sha256:
+          "c30f1443d2a7113a2c844cadc17aaf371f7e76ee4cd24c52f36a972db623afbb"
+      },
+      prerequisiteRecovery: {
+        bytes: 7280,
+        sha256:
+          "f17b3588e160fadc72802e7aca1e02bd317998291c5976c641c57615e0fb30b3"
+      },
+      reviewFullV2: {
+        bytes: 6982,
+        sha256:
+          "c2028e523732f8c778433a41625bd10553fb551481a4aa988a1e1613197c64f2"
+      },
+      reviewDeltaV2: {
+        bytes: 7426,
+        sha256:
+          "72fefcd5bfc24601a975b3fec98bc0b71166edaf9399470c25ab5e25cb5e3f43"
+      },
+      repair: {
+        bytes: 944,
+        sha256:
+          "0a2f1405bdc58618e7d741b5212c207bb35702eb8424d358e2090ec7c43f3ef4"
+      },
+      serenaAbsent: {
+        bytes: 0,
+        sha256:
+          "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      serenaPresent: {
+        bytes: 416,
+        sha256:
+          "a7a4ad508b36a4414284f0db39c7ce2b95e3f14833abbc161e62c83dc014abab"
+      },
+      claudeSelectionContract: {
+        bytes: 575,
+        sha256:
+          "f8bcb1e1955b66eb5cb26ad8ea9777410cfc00f1053d75c6af98a2e60f774e15"
+      },
+      codexSelectionContract: {
+        bytes: 913,
+        sha256:
+          "4e0acd9ebaa3b42e6120cf0d1ec4370800a802dddd9e2674f79149b285300cb8"
+      },
+      claudePhaseContract: {
+        bytes: 4926,
+        sha256:
+          "5547e2f2e40782998e2db1a96ce31c68d37c9318ad61b44aafa9422e13469801"
+      },
+      codexPhaseContract: {
+        bytes: 12889,
+        sha256:
+          "538fd24f386f0aafb5b44d5e52951d4ceaaf11b0a220559f36b6d51f0f5fd8dc"
+      },
+      claudeReviewContract: {
+        bytes: 1624,
+        sha256:
+          "3a0b2c368c7976b5e842ab28a0d6b9d5d65d510e1f90c203f8a0eaad2e4b9def"
+      },
+      codexReviewContract: {
+        bytes: 3206,
+        sha256:
+          "bc8e5b8f9da3160799a6fa4d5efa1c607eda86400e94f6cdd57b666697f15d78"
+      }
+    })
+  );
   assert.equal(
     workflowSelectionPromptEnvelope("Змінити café.").rendered,
     selection
@@ -389,11 +419,11 @@ test("prompt envelopes bind adversarial multibyte markers to trusted source segm
   const selection = workflowSelectionPromptEnvelope(request, decisions);
   assert.equal(
     componentText(selection, "user_request_scope"),
-    `Original task request:\n${request}\n\n`
+    `\n\nOriginal task request:\n${request}`
   );
   assert.equal(
     componentText(selection, "human_decisions"),
-    `Recorded escalation decisions and answers:\n${JSON.stringify(decisions, null, 2)}`
+    `\n\nRecorded escalation decisions and answers:\n${JSON.stringify(decisions, null, 2)}`
   );
   assertSourceCategory(selection, request, "user_request_scope");
   assertSourceCategory(selection, encoded(humanValue), "human_decisions");
@@ -406,11 +436,11 @@ test("prompt envelopes bind adversarial multibyte markers to trusted source segm
   );
   assert.equal(
     componentText(planning, "user_request_scope"),
-    `User request:\n${request}\n\n`
+    `\n\nFeature slug: "context-budget"\nUser request:\n${request}`
   );
   assert.equal(
     componentText(planning, "approved_requirements_architecture"),
-    `Recorded ADR decisions:\n${JSON.stringify(adrs, null, 2)}\n\n`
+    `\n\nRecorded ADR decisions:\n${JSON.stringify(adrs, null, 2)}`
   );
   assertSourceCategory(
     planning,
@@ -429,11 +459,11 @@ test("prompt envelopes bind adversarial multibyte markers to trusted source segm
   );
   assert.equal(
     componentText(implementation, "approved_requirements_architecture"),
-    `Approved artifact paths:\n- ${pathValue}\n`
+    `\n\nApproved bundle digest: approval-digest\nApproved artifact paths:\n- ${pathValue}`
   );
   assert.equal(
     componentText(implementation, "completion_evidence"),
-    "Approved task IDs:\n- T001\n"
+    "\n\nApproved task IDs:\n- T001"
   );
   assert.equal(
     implementation.components.some(
@@ -473,7 +503,7 @@ test("prompt envelopes bind adversarial multibyte markers to trusted source segm
   );
   assert.equal(
     componentText(lite, "user_request_scope"),
-    `Original task request:\n${request}\n\n`
+    `\n\nFeature slug: "context-budget"\nOriginal task request:\n${request}`
   );
   assertSourceCategory(lite, encoded(humanValue), "human_decisions");
 
@@ -487,7 +517,7 @@ test("prompt envelopes bind adversarial multibyte markers to trusted source segm
   );
   assert.equal(
     componentText(fix, "review_triage_evidence"),
-    `Latest review artifact: ${pathValue}\nAccepted findings:\n${JSON.stringify(findings, null, 2)}\n`
+    `\n\nLatest review artifact: ${pathValue}\nAccepted findings:\n${JSON.stringify(findings, null, 2)}`
   );
   assertSourceCategory(fix, encoded(findingValue), "review_triage_evidence");
   assertSourceCategory(fix, encoded(humanValue), "human_decisions");
@@ -618,11 +648,7 @@ test("prompt envelopes bind adversarial multibyte markers to trusted source segm
     "recovery_instructions"
   );
 
-  const withSerena = appendPromptComponent(
-    planning,
-    "phase_instructions",
-    serenaGuidance(true)
-  );
+  const withSerena = insertPhaseInstructions(planning, [serenaGuidance(true)]);
   assertSourceCategory(
     withSerena,
     "The Serena MCP server's read-only symbol tools",
@@ -660,20 +686,18 @@ test("the selector prompt carries the complete conservative routing policy", () 
   assert.match(prompt, /Do not invoke skills, edit files, run shell commands/);
 });
 
-test("workflow skill labels are exact and route-specific", () => {
-  assert.deepEqual(workflowSkills("quick-fix"), ["$banzai:quick-fix"]);
-  assert.deepEqual(workflowSkills("feature"), ["$banzai:feature"]);
-  assert.deepEqual(workflowSkills("strict"), [
-    "$banzai:feature-description",
-    "$banzai:architecture-decision (when applicable)",
-    "$banzai:development-plan",
-    "$banzai:code-writing",
-    "$banzai:test-writing",
-    "$banzai:feature-review"
+test("workflow progress labels name route-specific responsibilities", () => {
+  assert.deepEqual(workflowPhases("quick-fix"), ["quick-fix"]);
+  assert.deepEqual(workflowPhases("feature"), ["feature"]);
+  assert.deepEqual(workflowPhases("strict"), [
+    "planning",
+    "implementation",
+    "review",
+    "fix"
   ]);
 });
 
-test("lite execution invokes only the selected route skill", () => {
+test("lite execution receives its selected phase without skill choreography", () => {
   const prompt = liteImplementationPrompt(
     "small-fix",
     "Fix the existing label.",
@@ -681,14 +705,9 @@ test("lite execution invokes only the selected route skill", () => {
     "workflow-digest",
     verificationProfiles
   );
-
-  assert.match(
-    prompt,
-    /Use the available Skill tool to load only the installed \$banzai:quick-fix skill/
-  );
-  assert.doesNotMatch(prompt, /\$banzai:feature(?:\s|$)/);
-  assert.doesNotMatch(prompt, /\$banzai:code-writing/);
-  assert.doesNotMatch(prompt, /\$banzai:feature-review/);
+  assert.match(prompt, /# Lite Quick-Fix Phase/);
+  assert.match(prompt, /# Fix Guidance/);
+  assert.doesNotMatch(prompt, /Use the available Skill tool|\$banzai:/);
   assert.match(prompt, /runner owns deterministic verification/);
 });
 
@@ -753,7 +772,7 @@ test("builder prompts expose ordered runner profiles and verification ownership"
   }
 });
 
-test("phase prompts require skill loading and the v3 completion boundary", () => {
+test("phase prompts deliver implementation and assurance with the unchanged v3 completion boundary", () => {
   const implementation = implementationPrompt(
     "example",
     "approval-digest",
@@ -770,8 +789,8 @@ test("phase prompts require skill loading and the v3 completion boundary", () =>
   );
   const fix = fixPrompt("example", "approval-digest", [], verificationProfiles);
 
-  assert.match(implementation, /available Skill tool.*code-writing/s);
-  assert.match(implementation, /then load \$banzai:test-writing/);
+  assert.match(implementation, /# Implementation Guidance/);
+  assert.match(implementation, /# Assurance Guidance/);
   assert.match(implementation, /schemaVersion=3/);
   assert.match(implementation, /decisionConsultation=null/);
   assert.match(implementation, /sole canonical completion source/);
@@ -799,7 +818,7 @@ test("phase prompts require skill loading and the v3 completion boundary", () =>
   assert.match(implementation, /at most 500 characters/);
   assert.match(implementation, /at most 16 entries/);
   for (const prompt of [lite, fix]) {
-    assert.match(prompt, /available Skill tool/);
+    assert.doesNotMatch(prompt, /available Skill tool|\$banzai:/);
   }
   assert.match(lite, /schemaVersion=3 with taskCompletion=null/);
   assert.match(lite, /decisionConsultation=null/);
@@ -896,7 +915,7 @@ test("projection repair prompt keeps correct records and teaches the escaping gr
 test("serena guidance is empty without a whitelist and steers symbol lookup with one", () => {
   assert.equal(serenaGuidance(false), "");
   const guidance = serenaGuidance(true);
-  assert.match(guidance, /^\n\n/);
+  assert.doesNotMatch(guidance, /^\n/);
   assert.match(guidance, /read-only symbol tools/);
   assert.match(guidance, /find_symbol/);
   assert.match(guidance, /find_referencing_symbols/);
@@ -1185,7 +1204,7 @@ test("review prompt exposes validated completion evidence and fail-closed pass p
     }
   });
 
-  assert.match(prompt, /available Skill tool.*feature-review/);
+  assert.match(prompt, /# Review Guidance/);
   assert.match(prompt, /Validated plan task completion/);
   assert.match(prompt, /approval-digest/);
   assert.match(prompt, /T001/);
@@ -1372,4 +1391,107 @@ test("review prompt uses runner evidence and sets a material threshold for test 
     prompt,
     /missing load-bearing safety or contract evidence remain actionable/
   );
+});
+
+test("all six envelopes deliver each complete resource once before evidence and own two LF separator bytes", () => {
+  const inputs: [InstructionPhase, PromptEnvelope][] = [
+    ["planning", planningPromptEnvelope("scope", "Змінити café 東京", [], [])],
+    [
+      "implementation",
+      implementationPromptEnvelope(
+        "scope",
+        "digest",
+        ["description.md"],
+        verificationProfiles,
+        ["T001"]
+      )
+    ],
+    [
+      "feature",
+      liteImplementationPromptEnvelope(
+        "scope",
+        "Змінити café 東京",
+        "feature",
+        "digest",
+        verificationProfiles
+      )
+    ],
+    [
+      "quick-fix",
+      liteImplementationPromptEnvelope(
+        "scope",
+        "Змінити café 東京",
+        "quick-fix",
+        "digest",
+        verificationProfiles
+      )
+    ],
+    ["fix", fixPromptEnvelope("scope", "digest", [], verificationProfiles)],
+    [
+      "review",
+      reviewPromptEnvelope({
+        slug: "scope",
+        iteration: 1,
+        artifactMode: "runner-rendered",
+        reviewArtifactPath: "review-1.md",
+        reviewCandidatePath: "candidate.md",
+        artifactPaths: ["description.md"],
+        workspaceDigest: "d".repeat(64),
+        workspaceEntries: [],
+        evidenceRoot: ".banzai/runs/r",
+        verification: [],
+        reviewMode: "full",
+        rotationReason: "primary-review",
+        workspaceChanges: [],
+        triageHistory: []
+      })
+    ]
+  ];
+  for (const [phase, original] of inputs) {
+    const envelope = insertPhaseInstructions(original, [
+      "Bound work and capabilities 🧪",
+      serenaGuidance(true)
+    ]);
+    assert.equal(
+      envelope.rendered,
+      envelope.components.map((part) => part.text).join("")
+    );
+    assert.equal(envelope.components[0]?.category, "common_instructions");
+    for (const resource of phaseInstructionParts(phase)) {
+      assert.equal(
+        envelope.components.filter(
+          (part) =>
+            part.category === "phase_instructions" &&
+            part.text === "\n\n" + resource
+        ).length,
+        1,
+        phase
+      );
+      assert.equal(envelope.rendered.split(resource).length - 1, 1, phase);
+    }
+    assert.ok(
+      envelope.components.slice(1).every((part) => part.text.startsWith("\n\n"))
+    );
+    const categories = envelope.components.map((part) => part.category);
+    const firstEvidence = categories.findIndex(
+      (category) =>
+        category !== "common_instructions" && category !== "phase_instructions"
+    );
+    assert.ok(firstEvidence > 0);
+    assert.ok(
+      categories
+        .slice(firstEvidence)
+        .every((category) => category !== "phase_instructions")
+    );
+    assert.doesNotMatch(
+      envelope.rendered,
+      /Use the available Skill tool|\$banzai:/
+    );
+    const bytes = envelope.components.reduce(
+      (sum, part) => sum + Buffer.byteLength(part.text, "utf8"),
+      0
+    );
+    assert.equal(bytes, Buffer.byteLength(envelope.rendered, "utf8"));
+    assert.ok(bytes > envelope.rendered.length);
+  }
 });

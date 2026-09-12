@@ -3,10 +3,12 @@
 - Owner decision: ADR-0041
 - Consumers: `feature-description`, `architecture-decision`, `development-plan`, `code-writing`, `test-writing`, `feature-review`, `feature-status`, `feature`, `quick-fix`, `project-manifest`; conditional: None
 - Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)
+- Runner consumers: planning, implementation, review, fix, feature, quick-fix.
+- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.
 
 ## Artifact Storage
 
-Resolve this policy relative to the installed skill as
+Standalone callers resolve this policy relative to the installed skill as
 `../../policies/artifact-storage.md`. Use the helper shipped in that same plugin:
 `../../scripts/artifacts.cjs` from the skill directory. Do not substitute a
 project policy copy, plugin-cache destination or npm CLI prerequisite.
@@ -25,7 +27,13 @@ Banzai source checkout or installed plugin directories.
 
 ## Resolve Before Reading or Writing
 
-After normal project guidance prerequisites, invoke the local helper with
+The procedure in this section is for standalone callers. Runner phases use the
+supplied binding, role paths and exact phase grants; the runner alone resolves
+work, creates bindings and acquires/releases claims. A runner phase does not
+invoke this helper or acquire a standalone claim. Missing supplied authority
+stops dependent work instead of selecting or creating another work item.
+
+For standalone callers, after normal project guidance prerequisites, invoke the local helper with
 `node <installed-plugin>/scripts/artifacts.cjs <operation> --json <request-file>`.
 Requests follow `contracts/artifacts/v1/*-request.schema.json`; every request has
 `schema: "banzai-artifact-request/v1"`, `schemaVersion: 1` and an absolute local

@@ -434,6 +434,11 @@
       "sha256": null
     },
     {
+      "path": "documentation/releases/2.4.0.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
       "path": "documentation/releases/public-publication.md",
       "classification": "maintainer",
       "sha256": null
@@ -784,6 +789,51 @@
       "sha256": null
     },
     {
+      "path": "plugins/banzai/guidance/architecture.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/guidance/assurance.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/guidance/feature.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/guidance/fix.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/guidance/implementation.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/guidance/manifest.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/guidance/planning.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/guidance/requirements.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/guidance/review.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
       "path": "plugins/banzai/hooks/README.md",
       "classification": "product",
       "sha256": null
@@ -825,6 +875,36 @@
     },
     {
       "path": "plugins/banzai/lib/review-snapshot.mjs",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/phases/feature.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/phases/fix.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/phases/implementation.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/phases/planning.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/phases/quick-fix.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/phases/review.md",
       "classification": "product",
       "sha256": null
     },

@@ -300,7 +300,13 @@ Owner: release maintainer with the owner's delivery authorization.
   relationship where available, clean installation and GitHub asset contents.
   Record verified delivery facts in the existing publication record once.
 - Verify plugin delivery separately; CLI npm publication does not update
-  already-installed skills. Use the supported plugin update path and restart
+  already-installed skills. Runner phase/guidance/policy and hook identities are
+  compared separately from release labels. A confirmed mismatch refuses a model
+  call before an attempt; missing evidence remains a reported limitation. Rebuild
+  the runner from current source, update the plugin to the matching release, or
+  explicitly select ambient mode (unverifiable). These remedies do not migrate
+  work, alter bindings, waive report triggers or grant new artifact writes.
+  Use the supported plugin update path and restart
   sessions as required before declaring local adoption complete.
 
 The npm rule is permanent per published name/version; unpublishing cannot free

@@ -28,12 +28,16 @@ approved plan reconciles it.
 
 ## Execution Modes
 
-The same skills run in two modes:
+Banzai supports orchestrated runner phases and standalone skill sessions:
 
 - Orchestrated, the default for CLI work: the `banzai` CLI first asks the
   configured planner model to select `quick-fix`, `feature`, or `strict` through
   a read-only structured contract. It then drives the selected route, owns
   deterministic verification, and collects every human decision interactively.
+  For each phase of the selected route, the runner supplies embedded phase
+  instructions, shared guidance and applicable policies directly to the model;
+  it does not load or chain standalone chat skills. Workflow selection remains
+  prompt-only.
   Strict code phases receive `BANZAI_RUN_ID` plus
   `BANZAI_APPROVAL_DIGEST`; lite code receives `BANZAI_RUN_ID` plus
   `BANZAI_WORKFLOW_DIGEST`. Both orchestrated reviewers are read-only and
@@ -52,21 +56,19 @@ decision changes.
 
 ## Roles
 
-Orchestrated work assigns skills to three model roles so review stays
-independent:
+Orchestrated work assigns phase responsibilities to three model roles so review stays independent:
 
-- planner: read-only workflow selection, then `feature-description`,
-  `architecture-decision`, and `development-plan` for strict work;
-- implementer: `feature` or `quick-fix` for lite work; `code-writing`,
-  `test-writing`, and accepted-finding `quick-fix` for strict work;
-- reviewer: `feature-review`, source-read-only, with no planner or implementer
+- planner: read-only workflow selection, then strict requirements, conditional
+  architecture decisions and development planning;
+- implementer: lite feature or quick-fix work; strict implementation and
+  assurance, followed by accepted-finding fixes when human triage requires them;
+- reviewer: independent source-read-only review, with no planner or implementer
   transcript. Compatible strict planning, implementation, and fixes share one
   builder lineage. The primary review starts a fresh independent reviewer;
   routine re-review may resume that reviewer for at most two deltas before a
-  fresh full review. Claude may write only the designated attempt-owned review
-  candidate, while a read-only Codex review returns structured evidence for the
-  runner to render as a candidate. The runner alone validates and publishes the
-  durable canonical review artifact.
+  fresh full review. Both vendors return structured review evidence. The runner
+  alone renders and validates the attempt-owned candidate and publishes the
+  canonical review artifact.
 
 The reviewer never fixes its own findings. The implementer never triages them.
 The fixer may read the review artifact for cross-model context, but only the

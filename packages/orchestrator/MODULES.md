@@ -100,10 +100,12 @@ is a navigational reference and is updated with the module it describes.
   missing Python fails the suite.
 - `doctor-cli.ts` — exact doctor argument contract, injected stdout/stderr
   composition, canonical JSON serialization, and deterministic human
-  projection for `banzai-doctor/v2`, including explicit unavailable project
+  projection for `banzai-doctor/v3`, including explicit unavailable project
   types when marker evidence cannot be read.
 - `doctor.ts` — fixed-order Project Verification Readiness checks, with
-  `project.guidance` immediately after `repository.git` and schema version 2. Uses direct
+  `project.guidance` immediately after `repository.git` and schema version 3. `claude.instructions` follows `claude.environment`
+  and precedes `claude.permissions`; it compares the configured role union and
+  preserves mismatch/bounded-failure/unverifiable precedence. Uses direct
   privacy-bounded config, active-pointer/state, and lock reads plus injected
   executable/liveness probes; resolves relative and empty `PATH` components
   against the discovered checkout, requires absolute canonical persisted
@@ -263,9 +265,12 @@ is a navigational reference and is updated with the module it describes.
   terminal leaves idempotently, links interrupted restarts, and retains only the
   latest round in state. Review captures the adapter result and redacted output
   before candidate validation, persists typed failure evidence, and publishes
-  only validated candidate proof bytes into canonical review state. It resolves
-  and memoizes the Claude invocation scope per configuration and reports a
-  degraded resolution once per run, classifies every model failure into a closed
+  only validated candidate proof bytes into canonical review state. It refreshes
+  Claude invocation scope filesystem verification on every resolution, while
+  retaining the configuration-keyed MCP whitelist cache. Before each model
+  attempt it rechecks applicable structural scope and instruction resource
+  parity, and reports a degraded resolution once per run. It classifies every
+  model failure into a closed
   cause set, preserves the reviewer session binding and the reviewed-workspace
   digest across integrity-neutral failures, records failed-attempt usage in run
   metrics without marking the attempt completed. New v2 reviews persist an
@@ -454,9 +459,16 @@ is a navigational reference and is updated with the module it describes.
   complete setup, then need a commit before task input or creation. Failures
   exit with code 1;
   doctor and cancellation reporting retain their bounded Git diagnostics.
-- `prompts.ts` — the phase prompt texts and `workflowSkills`, the required
-  Banzai skill chain per route. Planning, strict implementation, review and
-  accepted-finding fix prompts project the installed plan policy's authority
+- `phase-resources.ts` — generated committed exact resource text and SHA-256
+  identities; imports nothing. `phase-instructions.ts` validates/selects that
+  data and compares only declared resources inside a supplied verified plugin
+  directory using bounded non-following reads. Its four outcomes distinguish
+  confirmed mismatch from absent evidence. Workflow enforces before attempts;
+  doctor only diagnoses. No runtime filesystem fallback loads instructions.
+- `prompts.ts` — the phase prompt texts and `workflowPhases`, the supplied
+  phase responsibilities per route. Planning, strict implementation, review and
+  accepted-finding fix prompts inline canonical shared guidance and policy
+  bodies and preserve the plan policy's authority
   convention: explicit obligations, labeled discretion only under applicable
   approved meaning, and required evidence despite report corrections. Legacy
   directives, approval bytes and completion contracts remain binding.
@@ -514,10 +526,10 @@ is a navigational reference and is updated with the module it describes.
   progress vocabulary to stderr and keeps stdout machine-readable. Styling is
   injected, not detected: with no styler the output is byte-identical to the
   unstyled form, and with one it renders a model phase's `PhaseDescriptor` as a
-  width-filling banner, follows it with the phase's skill chain on its own line,
+  width-filling banner, follows it with the supplied phase responsibilities on their own line,
   and colours only failure. The chain is what distinguishes a lite route's
   single phase from a strict one: `feature` and `quick-fix` transition straight
-  to `implementing` and run one skill, so without it a lite run reads as an
+  to `implementing` and receive one phase, so without it a lite run reads as an
   implementation that skipped planning. `resolveProgressLevel` picks
   `quiet | normal | verbose` from an explicit `--quiet`/`--verbose` flag, then
   `BANZAI_PROGRESS`, then the `normal` default; an unrecognized value is
@@ -593,7 +605,9 @@ is a navigational reference and is updated with the module it describes.
   fragments, short references without a complete skill copy, and
   shadow/resolution prompt wiring. Authority ordering is checked in its own
   section. These policy checks match whitespace-normalized text, so rewrapped
-  Markdown passes while a removal or relocated rule fails. Neither performs
+  portable guidance passes while a removal or relocated rule fails; retained
+  skill skeletons and Orchestrated Mode blocks remain byte-frozen. These
+  checks do not perform
   semantic analysis of target-project source.
 - `smoke-committed.mjs` runs help, control capabilities, init, no-run control
   status, ready doctor JSON, evaluation JSON, context JSON over a historical
@@ -604,7 +618,8 @@ is a navigational reference and is updated with the module it describes.
   schema identities, deterministic bytes, no mutation, and unconditional
   cleanup. Help and capability release versions must match the candidate's
   package mirror; machine-contract identities remain separately pinned.
-- `release-check.mjs` composes `verify`, `format:check`, release validation, and
+- `release-check.mjs` composes `verify`, `format:check`, release validation,
+  actual publication checks and
   committed smoke with a vendor-free environment and tracked-tree mutation
   detection. Its default component list excludes version synchronization and
   recovery.
@@ -652,3 +667,31 @@ bytes. `bundlePath` verification/restore preserve explicit pins and owner policy
 required Markdown authority closure and a private restored manifest receipt.
 Managed work/run/control destination ancestry is rejected before staging.
 Doctor's read-only active-state check supports v4 and validates binding identity.
+
+## Runner instruction generation and parity
+
+`phase-resources-build.mjs` owns the six-phase/nine-guidance/six-policy inventory
+and hook reference identities. `build.mjs` explicitly regenerates the committed
+module; typecheck/lint/test never repair it. `check-dist.mjs` compares it and the
+bundle/map. Extraction validation pins the pre-change skill inventory, portable
+clause transformations, unchanged skill skeletons and Orchestrated Mode blocks.
+Publication checks inspect actual source/plugin archives, npm bytes and source-map
+content against the same candidate; indexed/working instruction skew fails.
+
+Prompts compose common instructions, phase/guidance/policies and exact work
+roles/capabilities before request, human decisions, approved architecture,
+verification, workspace, completion, triage and recovery evidence. Each following
+block owns exactly two LF separator bytes; source-body newlines remain intact.
+Selection is prompt-only. Every continuation resends the complete payload under
+existing budgets. Review/selection write sets remain empty, strict implementation
+keeps implementation/test reports and strict fix keeps those plus changeReport.
+Standalone role readers, conditional report triggers and historical evidence
+projections retain their existing behavior.
+
+Structural scope verification is refreshed before instruction comparison.
+`INSTRUCTION_RESOURCE_MISMATCH` bypasses failed-attempt/activity handling before
+attempt publication, retaining durable decisions and recovery/retry authority.
+Codex/ambient/unresolved scopes are unverifiable; bounded resource failures do not
+claim match. Diagnostics offer rebuild, matching plugin update or explicit ambient
+mode without performing any of them. Tool inventories and real Skill telemetry
+remain available; progress names supplied phases rather than inferred skill loads.

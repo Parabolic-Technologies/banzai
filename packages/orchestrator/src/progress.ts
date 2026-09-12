@@ -102,25 +102,14 @@ function phaseBanner(
   return `${styler.dim("──")} ${styler.bold(label)} ${styler.dim(`${rule}${tail}`)}`;
 }
 
-/**
- * The skill chain the phase runs, on its own line so it never competes with the
- * banner for width. It is what distinguishes a lite route's single phase from a
- * strict one: without it, a `feature` run reads as an implementation that
- * skipped planning rather than as the one-phase workflow it is.
- */
-function skillLines(
-  skills: readonly string[],
+/** Runner phase responsibilities; real vendor Skill actions are reported separately. */
+function phaseLines(
+  phases: readonly string[],
   width: number,
   styler: Styler
 ): string[] {
-  const named = skills
-    .map((skill) => (skill.startsWith("$") ? skill.slice(1) : skill))
-    // The selection router reports a placeholder rather than a skill.
-    .filter((skill) => skill.includes(":"));
-  if (named.length === 0) {
-    return [];
-  }
-  return wrapText(`skills: ${named.join(" → ")}`, width, "   ").map((line) =>
+  if (phases.length === 0) return [];
+  return wrapText(`phases: ${phases.join(" → ")}`, width, "   ").map((line) =>
     styler.dim(`   ${line.trimStart()}`)
   );
 }
@@ -337,7 +326,7 @@ export class TerminalProgressReporter {
     if (this.styler.enabled && descriptor !== undefined) {
       const width = resolveWidth(this.columns());
       this.emit(phaseBanner(label, descriptor, width, this.styler));
-      for (const line of skillLines(descriptor.skills, width, this.styler)) {
+      for (const line of phaseLines(descriptor.phases, width, this.styler)) {
         this.emit(line);
       }
     } else {

@@ -4,6 +4,10 @@ import { access, lstat, readFile, readdir, realpath } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { promisify } from "node:util";
+import {
+  instructionConsumerText,
+  validateGuidanceExtraction
+} from "./phase-resources-build.mjs";
 
 const execFileAsync = promisify(execFile);
 const scriptPackageRoot = path.resolve(
@@ -1771,7 +1775,9 @@ async function validateTestAssurancePolicy(root) {
     ]
   ]);
   for (const [relativePath, fragments] of requiredFragments) {
-    const contents = flatText(await readText(root, relativePath));
+    const contents = flatText(
+      await instructionConsumerText(root, relativePath)
+    );
     for (const fragment of fragments) {
       if (!contents.includes(fragment)) {
         fail(
@@ -1838,8 +1844,13 @@ async function validateSecurityAssurancePolicy(root) {
     "plugins/banzai/skills/quick-fix/SKILL.md",
     "plugins/banzai/skills/test-writing/SKILL.md"
   ]) {
-    const contents = flat(await readText(root, relativePath));
-    if (!contents.includes(reference)) {
+    const contents = flat(await instructionConsumerText(root, relativePath));
+    if (
+      !contents.includes(reference) &&
+      !contents.includes(
+        "Security Assurance policy (`security-assurance.md`) supplied by the active execution context"
+      )
+    ) {
       fail(
         "SECURITY_ASSURANCE_POLICY_DRIFT",
         relativePath,
@@ -1851,7 +1862,7 @@ async function validateSecurityAssurancePolicy(root) {
   // report has to be a named landing place for the exposure result. Without
   // this the lite path silently records nothing.
   const quickFixPath = "plugins/banzai/skills/quick-fix/SKILL.md";
-  const quickFix = flat(await readText(root, quickFixPath));
+  const quickFix = flat(await instructionConsumerText(root, quickFixPath));
   for (const fragment of [
     "record the class in the change report when one is required, and in the final report otherwise",
     "the security exposure result"
@@ -1865,7 +1876,7 @@ async function validateSecurityAssurancePolicy(root) {
     }
   }
   const reviewPath = "plugins/banzai/skills/feature-review/SKILL.md";
-  const review = flat(await readText(root, reviewPath));
+  const review = flat(await instructionConsumerText(root, reviewPath));
   for (const fragment of [
     "Security Assurance",
     "the mechanism reachable in this codebase",
@@ -2009,7 +2020,7 @@ async function validateEngineeringQualityPolicy(root) {
     "plugins/banzai/skills/feature-review/SKILL.md"
   ];
   for (const relativePath of consumingSkills) {
-    const contents = flat(await readText(root, relativePath));
+    const contents = flat(await instructionConsumerText(root, relativePath));
     if (!contents.includes(reference)) {
       fail(
         "ENGINEERING_QUALITY_POLICY_DRIFT",
@@ -2032,7 +2043,7 @@ async function validateEngineeringQualityPolicy(root) {
   }
 
   const reviewPath = "plugins/banzai/skills/feature-review/SKILL.md";
-  const review = flat(await readText(root, reviewPath));
+  const review = flat(await instructionConsumerText(root, reviewPath));
   for (const fragment of [
     "Freeze the ordinary findings, severities, and verdict",
     "only as one `EQ-SHADOW:` string in existing free-form `deferredCoverage`",
@@ -2053,7 +2064,7 @@ async function validateEngineeringQualityPolicy(root) {
   const promptPath = "packages/orchestrator/src/prompts.ts";
   const prompt = flat(await readText(root, promptPath));
   for (const fragment of [
-    "canonical vendor-neutral Engineering Quality policy from the installed policies/engineering-quality.md",
+    "canonical vendor-neutral Engineering Quality policy from the supplied Engineering Quality policy",
     "freeze ordinary findings, their severities, and the verdict",
     "only as an EQ-SHADOW: string in existing free-form deferredCoverage",
     "additional review prose in reviewNotes",
@@ -2288,7 +2299,9 @@ async function validateDecisionConsultationPolicy(root) {
     ]
   ]);
   for (const [relativePath, fragments] of requiredFragments) {
-    const contents = flatText(await readText(root, relativePath));
+    const contents = flatText(
+      await instructionConsumerText(root, relativePath)
+    );
     for (const fragment of fragments) {
       if (!contents.includes(fragment)) {
         fail(
@@ -2309,7 +2322,9 @@ async function validateDecisionConsultationPolicy(root) {
     "plugins/banzai/hooks/README.md",
     "documentation/release-checklist.md"
   ]) {
-    const contents = flatText(await readText(root, relativePath));
+    const contents = flatText(
+      await instructionConsumerText(root, relativePath)
+    );
     if (/four (?:human )?(?:decision )?gates/i.test(contents)) {
       fail(
         "DECISION_CONSULTATION_POLICY_DRIFT",
@@ -2483,6 +2498,15 @@ async function validateRepository(root) {
   await validateEngineeringQualityPolicy(root);
   await validateDecisionConsultationPolicy(root);
   await validateOrchestrateSkill(root);
+  try {
+    await validateGuidanceExtraction(root);
+  } catch {
+    fail(
+      "INSTRUCTION_RESOURCE_DRIFT",
+      "plugins/banzai",
+      "Canonical instruction resources, extraction evidence or consumer boundaries differ."
+    );
+  }
 
   const rootScripts = record(rootPackage.scripts, "package.json", "scripts");
   requireExact(

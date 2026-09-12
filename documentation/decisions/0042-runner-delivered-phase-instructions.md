@@ -2,14 +2,23 @@
 
 ## Status / Date / Owner / Decision Makers
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-11
 - Owner: Banzai maintainers
-- Decision makers: Repository owner
+- Decision makers: Repository owner; explicitly accepted in chat on 2026-09-11
+  (English translation: `Accept ADR-0042`).
+- Acceptance date: 2026-09-11
+- Lifecycle note: the accepted body retains its proposal-stage wording and
+  historical preparation statements. This acceptance authorizes the dependent
+  development plan; plan approval remains required before implementation.
 - Rework 1: revised on 2026-09-11 at the owner's request after independent
   proposal review. The changes address diagnostic versioning, review-guidance
   extraction, generated-source tracking and document structure. This revision
   records neither ADR acceptance nor independent confirmation of closure.
+- Rework 2: the independent resolution review confirmed all four Rework 1
+  corrections. Align the remaining optional check-naming/category nit with its
+  configuration-dependent neighbours; delivery and readiness behavior stay the
+  same. ADR acceptance remains a separate owner decision.
 
 ## Related Artifacts
 
@@ -345,8 +354,8 @@ doctor readiness; ADR-0008 as amended by ADR-0040 D7 and the manifest section 10
 therefore require a new diagnostic identity. Emit `banzai-doctor/v3`,
 `schemaVersion: 3`, for new doctor reports. Preserve the other top-level fields
 and their order (`ready`, `projectTypes`, `summary`, `checks`), the check shape,
-and the existing status enum. Insert exactly one check, `runtime.instructions`
-in category `runtime`, immediately after `claude.environment` and before
+and the existing status enum. Insert exactly one check, `claude.instructions`
+in category `config`, immediately after `claude.environment` and before
 `claude.permissions`; preserve all other check order.
 
 Assess the applicable resource union for configured model roles without running
@@ -407,7 +416,7 @@ enum or privacy allow-list changes are authorized here.
 
 | Existing decision | Narrow amendment proposed here | Preserved authority |
 | --- | --- | --- |
-| ADR-0008, as amended by ADR-0040 D7 | New doctor reports use v3 and add exactly the readiness-changing runtime.instructions check specified in section 6. | Read-only/offline and privacy boundaries, deterministic field/check order outside the stated insertion, status meanings, derived readiness/exit behavior and historical v1/v2 meaning. |
+| ADR-0008, as amended by ADR-0040 D7 | New doctor reports use v3 and add exactly the readiness-changing claude.instructions check in category config, after claude.environment and before claude.permissions, as specified in section 6. | Read-only/offline and privacy boundaries, deterministic field/check order outside the stated insertion, status meanings, derived readiness/exit behavior and historical v1/v2 meaning. |
 | ADR-0036, as amended by 0040/0041 | Runner consumers receive the phase union inline from embedded canonical resources; source availability becomes a build guarantee. | Six-policy meanings, conditional duties, standalone relative loading and adoption ownership. |
 | ADR-0017, as amended by 0025/0041 | Replace the actual skill-load requirement for runner implementation/assurance with deterministic delivery of their complete obligations. | Approved tasks, completion ledger/projection, report duties and fix refresh. |
 | ADR-0020, as amended by 0022 | Replace phase-level successful skill-call confirmation with delivery/authority checks and independently reported installed-resource parity. Retain eleven-skill structural verification. | Setting-source scoping, verified plugin directory, hooks, explicit failure/degradation and truthful confirmation scope. |
@@ -460,7 +469,7 @@ established authentication and hook controls are retained, not redesigned:
 | Build and publication | One inventory covers every phase/guidance/policy; a clean clone verifies without prior generation; missing/invalid/stale fixtures fail without repairing tracked bytes; generated text, bundle and source maps retain exact bytes; actual distributions pass classified resource and embedded-content checks. |
 | Context and sessions | Composition/separator tests count every byte once under existing categories; fresh/resumed/retry/recovery fixtures resend complete payloads and preserve budget refusals and rotation meanings. |
 | Plugin integrity and parity | Eleven-skill/hook structure checks remain; fixtures exercise all four parity states, hook skew, mixed mismatch/unreadable results, structural refusal precedence, preflight and per-call checks, doctor/progress and all three remedies. |
-| Doctor contract | v3 identity/schemaVersion, exact runtime.instructions position/category/status semantics, mixed evidence, canonical JSON/human projection and derived readiness/exit counts; missing/invalid config and independent failures; historical v1/v2 unchanged; no filesystem mutation or vendor/configured-command invocation. |
+| Doctor contract | v3 identity/schemaVersion, exact claude.instructions position in category config and status semantics, mixed evidence, canonical JSON/human projection and derived readiness/exit counts; missing/invalid config and independent failures; historical v1/v2 unchanged; no filesystem mutation or vendor/configured-command invocation. |
 | Refusal lifecycle | Mismatch before initial or resumed attempts leaves attempt count, usage, durable checkpoint, decisions and prior failure/recovery authority unchanged; no automatic remediation occurs. |
 | Artifact and permission authority | Strict implementation/fix, both lite routes, read-only review and selection preserve grants, report triggers, binding/claim ownership and legacy surfaces; chat-consumer fixtures read runner-produced bound work. |
 | Frozen evidence | Equivalent persisted evidence produces unchanged evaluation/KPI/context projections; no fabricated Skill events, historical retrofit or private-resource leakage. |
@@ -478,6 +487,13 @@ by preparing this decision.
 
 ## Lifecycle Links
 
+- Accepted on 2026-09-11 by the owner's explicit decision after Rework 2.
+  This lifecycle record supersedes pending-acceptance statements in the retained
+  body. The decision body is immutable from acceptance.
+- Reciprocal amendment links are recorded in ADR-0008, ADR-0017, ADR-0020,
+  ADR-0029, ADR-0036 and ADR-0040 lifecycle metadata; all remain Accepted.
+- The dependent plan belongs to the selected private work binding. Preparing it
+  does not approve its implementation bundle or authorize live/client delivery.
 - Supersedes: None in full.
 - Superseded by: None.
 - Proposes the narrow amendments to ADR-0008 (including ADR-0040 D7), ADR-0017,

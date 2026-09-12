@@ -3,6 +3,8 @@
 - Owner decision: ADR-0031
 - Consumers: None; conditional: `feature-description`, `architecture-decision`, `development-plan`
 - Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)
+- Runner consumers: planning (conditional).
+- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.
 
 ## Decision Consultation
 

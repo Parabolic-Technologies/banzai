@@ -323,6 +323,11 @@ Implementation and review must confirm all of the following:
 
 ## Lifecycle Links
 
+- Amended by [ADR-0042](./0042-runner-delivered-phase-instructions.md), accepted
+  2026-09-11: runner phase confirmation uses deterministic instruction delivery
+  and separately reported resource parity instead of successful skill calls.
+  Retain eleven-skill structural verification, hooks and existing scope/failure
+  boundaries. Implementation of this amendment is Planned.
 - Supersedes: None
 - Superseded by: None
 - Amended by: ADR-0022, Availability-gated Serena MCP whitelist (Accepted

@@ -504,6 +504,11 @@ Implementation and review must establish:
 
 ## Lifecycle Links
 
+- Amended by [ADR-0042](./0042-runner-delivered-phase-instructions.md), accepted
+  2026-09-11: runner phases receive the stated six-policy duty union inline
+  from embedded canonical resources. Retain substantive/conditional duties,
+  standalone relative loading and adoption ownership; required runner resource
+  availability becomes a build guarantee. Implementation is Planned.
 - Amended by [ADR-0040](./0040-project-adoption-preflight-and-interactive-setup.md),
   accepted 2026-09-10: add shared CLI adoption preflight, explicit foreground
   setup, a common source-repository exception and the scaffold-marker contract.

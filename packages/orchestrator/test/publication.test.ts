@@ -1,9 +1,14 @@
+import {
+  INSTRUCTION_RESOURCE_IDS,
+  GENERATED_PHASE_RESOURCE_PATH
+} from "../scripts/phase-resources-build.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { createTestRepository } from "./helpers.js";
 
@@ -222,5 +227,183 @@ test("accepted F8 rejects force-added environment variants and real tar/map payl
     );
   } finally {
     await repository.dispose();
+  }
+});
+
+test("actual source/plugin/npm archive resources and source-map bytes must describe one candidate", async () => {
+  const { readTar, inspectPublicationFiles } = (await import(
+    pathToFileURL(path.resolve("scripts/publication-check.mjs")).href
+  )) as typeof import("../scripts/publication-check.mjs");
+  const { checkInstructionPayloads } = (await import(
+    pathToFileURL(path.resolve("scripts/phase-resources-build.mjs")).href
+  )) as typeof import("../scripts/phase-resources-build.mjs");
+  const root = path.resolve(process.cwd(), "../..");
+  const fixture = await createTestRepository();
+  try {
+    const resources = INSTRUCTION_RESOURCE_IDS.map(
+      (id) => `plugins/banzai/${id}`
+    );
+    const sourceNames = [
+      ...resources,
+      GENERATED_PHASE_RESOURCE_PATH,
+      "packages/orchestrator/dist/banzai.mjs",
+      "packages/orchestrator/dist/banzai.mjs.map"
+    ];
+    const sourceRoot = path.join(fixture.root, "source");
+    for (const name of sourceNames) {
+      const target = path.join(sourceRoot, name);
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, await readFile(path.join(root, name)));
+    }
+    const npmRoot = path.join(fixture.root, "npm");
+    for (const name of [
+      "package.json",
+      "README.md",
+      "LICENSE",
+      "NOTICE",
+      "dist/banzai.mjs",
+      "dist/banzai.mjs.map"
+    ]) {
+      const target = path.join(npmRoot, "package", name);
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(
+        target,
+        await readFile(path.join(root, "packages/orchestrator", name))
+      );
+    }
+    const archive = async (
+      directory: string,
+      name: string,
+      files: string[]
+    ) => {
+      const target = path.join(fixture.root, `${name}.tar`);
+      await execute("tar", ["-cf", target, "-C", directory, ...files], {
+        env: { ...process.env, COPYFILE_DISABLE: "1" }
+      });
+      return readTar(await readFile(target));
+    };
+    const source = await archive(sourceRoot, "source", ["."]);
+    const plugin = await archive(sourceRoot, "plugin", ["plugins/banzai"]);
+    const npm = await archive(npmRoot, "npm", ["package"]);
+    assert.equal(npm.size, 6);
+    assert.equal(
+      (await checkInstructionPayloads(root, { source, plugin, npm }))
+        .resourceCount,
+      23
+    );
+    const policy = JSON.parse(
+      await readFile(path.join(root, "publication-policy.json"), "utf8")
+    ) as unknown;
+    for (const [distribution, files] of [
+      ["source", source],
+      ["plugin", plugin],
+      ["npm", npm]
+    ] as const)
+      inspectPublicationFiles(policy, files, { distribution });
+    for (const [files, key] of [
+      [source, "plugins/banzai/phases/fix.md"],
+      [plugin, "plugins/banzai/guidance/review.md"],
+      [npm, "package/dist/banzai.mjs"],
+      [source, GENERATED_PHASE_RESOURCE_PATH]
+    ] as const) {
+      const original = files.get(key);
+      assert.ok(original);
+      files.set(key, Buffer.concat([original, Buffer.from(" \n")]));
+      await assert.rejects(
+        checkInstructionPayloads(root, { source, plugin, npm }),
+        /INSTRUCTION_PAYLOAD_MISMATCH/
+      );
+      files.delete(key);
+      await assert.rejects(
+        checkInstructionPayloads(root, { source, plugin, npm }),
+        /INSTRUCTION_PAYLOAD_MISMATCH/
+      );
+      files.set(key, original);
+    }
+    // Matching distribution files do not excuse an incorrect embedded source map.
+    const originalMap = npm.get("package/dist/banzai.mjs.map");
+    assert.ok(originalMap);
+    const map = JSON.parse(originalMap.toString("utf8")) as {
+      sources: string[];
+      sourcesContent: string[];
+    };
+    const index = map.sources.findIndex((id) =>
+      id.endsWith("/src/phase-resources.ts")
+    );
+    assert.ok(index >= 0);
+    map.sourcesContent[index] =
+      (map.sourcesContent[index] ?? "") + "\n// skew\n";
+    const skew = Buffer.from(JSON.stringify(map));
+    npm.set("package/dist/banzai.mjs.map", skew);
+    source.set("packages/orchestrator/dist/banzai.mjs.map", skew);
+    await assert.rejects(
+      checkInstructionPayloads(root, { source, plugin, npm }),
+      /source map resource bytes/
+    );
+    npm.set("package/dist/banzai.mjs.map", originalMap);
+    source.set("packages/orchestrator/dist/banzai.mjs.map", originalMap);
+    const originalBundle = npm.get("package/dist/banzai.mjs");
+    assert.ok(originalBundle);
+    const changedBundle = Buffer.from(
+      originalBundle
+        .toString("utf8")
+        .replace(
+          "var EMBEDDED_PHASE_RESOURCES =",
+          "var OTHER_PHASE_RESOURCES ="
+        )
+    );
+    npm.set("package/dist/banzai.mjs", changedBundle);
+    source.set("packages/orchestrator/dist/banzai.mjs", changedBundle);
+    await assert.rejects(
+      checkInstructionPayloads(root, { source, plugin, npm }),
+      /bundled instruction identities/
+    );
+    // Privacy inspection decodes embedded bodies instead of scanning only quoted JS.
+    const generated = JSON.parse(
+      /export const EMBEDDED_PHASE_RESOURCES = ([\s\S]*?) as const;/.exec(
+        map.sourcesContent[index] ?? ""
+      )?.[1] ?? ""
+    ) as Record<string, { text?: string; sha256: string }>;
+    const resource = generated["phases/fix.md"];
+    assert.ok(resource);
+    // Resource prose can contain TypeScript examples without ending the module.
+    resource.text = "Example: const value = {} as const;\n";
+    resource.sha256 = digest(resource.text);
+    map.sourcesContent[index] =
+      `export const EMBEDDED_PHASE_RESOURCES = ${JSON.stringify(generated)} as const;`;
+    inspectPublicationFiles(
+      policy,
+      new Map([
+        ["package/dist/banzai.mjs.map", Buffer.from(JSON.stringify(map))]
+      ]),
+      { distribution: "npm" }
+    );
+    resource.text =
+      '{"schema":"banzai-work-binding/v1","workId":"private-canary"}';
+    resource.sha256 = digest(resource.text);
+    map.sourcesContent[index] =
+      `export const EMBEDDED_PHASE_RESOURCES = ${JSON.stringify(generated)} as const;`;
+    const privateMap = new Map([
+      ["package/dist/banzai.mjs.map", Buffer.from(JSON.stringify(map))]
+    ]);
+    assert.throws(
+      () =>
+        inspectPublicationFiles(policy, privateMap, { distribution: "npm" }),
+      /PUBLICATION_PRIVATE_CONTENT/
+    );
+    const unclassified = new Map(plugin);
+    unclassified.set(
+      "plugins/banzai/guidance/unknown.md",
+      Buffer.from("unclassified")
+    );
+    assert.throws(
+      () =>
+        inspectPublicationFiles(policy, unclassified, {
+          distribution: "plugin"
+        }),
+      /PUBLICATION_UNCLASSIFIED/
+    );
+  } finally {
+    await fixture.dispose();
   }
 });

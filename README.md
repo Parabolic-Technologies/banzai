@@ -46,7 +46,7 @@ Banzai ships as two separately installed parts:
 | Part         | What it is                                                                                                                                                                                                             |
 | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Orchestrator | The local `banzai` CLI, distributed as `@parabolic-technologies/banzai` on npm. Coordinates the selected workflow, runs configured checks, and presents human decisions. Strict work includes an independent reviewer. |
-| Plugin       | Workflow skills for Claude Code and Codex. The orchestrator invokes them; you can also use them directly in one client.                                                                                                |
+| Plugin       | Workflow skills for Claude Code and Codex. Standalone skills share guidance and policies with embedded orchestrator phases.                                                                                                |
 
 Use the orchestrator to coordinate a complete run, or use the
 [plugin directly](#using-the-plugin-without-the-orchestrator) to guide an agent
@@ -66,7 +66,7 @@ banzai
   -> quick-fix         implementer -> verification -> done
   -> feature           implementer -> verification -> done
   -> strict
-       -> plan         feature-description, architecture-decision, development-plan
+       -> plan         requirements, conditional architecture, development planning
        -> [you: ADR decisions and plan approval]
        -> implementation -> verification -> independent review
        -> passing review -> done
@@ -75,9 +75,13 @@ banzai
           -> accepted findings -> accepted-only fixes -> verification -> re-review
 ```
 
+Runner phases receive canonical instructions, shared guidance and applicable
+policies directly; they do not load or chain standalone chat skills. Selection
+remains prompt-only.
+
 Automatic selection is the default. The planner chooses the smallest safe route
 from the request and Banzai escalation rules, prints the route, reason, and
-skills, and falls back to `strict` whenever a lite route is uncertain.
+phase responsibilities, and falls back to `strict` whenever a lite route is uncertain.
 
 In strict work, compatible planning, implementation, and fixes can share a
 builder session lineage. The primary reviewer starts fresh with no builder
@@ -174,8 +178,10 @@ and troubleshooting.
 commands, conventions, and active architecture decisions.
 
 The project process lives in `AGENTS.md`; `CLAUDE.md` is an `@AGENTS.md` shim.
-The five policies stay in the installed plugin's `policies/` directory and are
-read by consuming skills, never copied into the project. Updating the plugin
+The six policies stay in the installed plugin's `policies/` directory. Standalone
+skills read them relatively; the runner embeds the required phase union with
+shared guidance and resends it on every call. Policy bodies are never copied into
+the project. Updating the plugin
 does not migrate existing project files. On a legacy layout, affected work
 stops with: **legacy Banzai layout: run `project-manifest` to migrate**.
 Invoke `project-manifest` explicitly to review and approve one migration diff
@@ -347,7 +353,7 @@ layout, dependency-injection technique, or function-size rule.
 
 The canonical policy ships in
 [`plugins/banzai/policies/engineering-quality.md`](plugins/banzai/policies/engineering-quality.md).
-Consuming skills explicitly read the installed file on either host. Maintainer guidance is in
+Standalone consuming skills explicitly read the installed file on either host; runner phases receive its body inline. Maintainer guidance is in
 [`documentation/engineering-quality.md`](documentation/engineering-quality.md).
 
 The first release is non-blocking shadow mode for EQ-only concerns. An ordinary
@@ -379,7 +385,7 @@ IDs. The sampled rollout procedure and promotion evidence are documented in
   [`documentation/release-checklist.md`](documentation/release-checklist.md)
 - Maintaining this repository — release gate, version parity, conventions:
   [`CONTRIBUTING.md`](CONTRIBUTING.md)
-- Current release notes: [2.3.0](documentation/releases/2.3.0.md).
+- Current release notes: [2.4.0](documentation/releases/2.4.0.md).
 
 ## Author and License
 

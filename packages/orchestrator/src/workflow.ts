@@ -2,6 +2,7 @@ import {
   hasRunnerWorkOwnership,
   withRunnerWorkOwnership,
   createWork,
+  artifactRoles,
   inspectBoundWork,
   readBytes as readArtifactBytes,
   ownsArtifact
@@ -20,6 +21,13 @@ import {
   sealReviewSnapshot,
   reviewApprovedArtifacts
 } from "./review-snapshot.js";
+import {
+  combineInstructionParity,
+  inspectInstructionParity,
+  instructionParityDiagnostic,
+  instructionPhasesForRole
+} from "./phase-instructions.js";
+import type { InstructionPhase, InstructionParity } from "./types.js";
 import { assertContractParity } from "./contracts.js";
 import {
   claudePermissionDemand,
@@ -45,6 +53,7 @@ import {
   errorMessage,
   ProcessExitError,
   ProjectSetupRequiredError,
+  InstructionResourceMismatchError,
   TerminalRunStateError
 } from "./errors.js";
 import {
@@ -108,9 +117,9 @@ import {
   reviewPromptEnvelope,
   serenaGuidance,
   workflowSelectionPromptEnvelope,
-  workflowSkills
+  workflowPhases
 } from "./prompts.js";
-import { appendPromptComponent } from "./prompt-envelope.js";
+import { insertPhaseInstructions } from "./prompt-envelope.js";
 import { resolveOutputContract } from "./output-contract.js";
 import {
   FALLBACK_VENDOR,
@@ -220,16 +229,12 @@ import {
 
 const TERMINAL_STATUSES = new Set(["done", "cancelled"]);
 const MAX_CONSECUTIVE_DELTA_REVIEWS = 2;
-const PHASE_SKILLS = {
-  Selection: ["none (read-only router)"],
-  Planning: [
-    "banzai:feature-description",
-    "banzai:architecture-decision",
-    "banzai:development-plan"
-  ],
-  Implementation: ["banzai:code-writing", "banzai:test-writing"],
-  Fix: ["banzai:quick-fix"],
-  Review: ["banzai:feature-review"]
+const PHASE_PHASES = {
+  Selection: ["selection"],
+  Planning: ["planning"],
+  Implementation: ["implementation"],
+  Fix: ["fix"],
+  Review: ["review"]
 } as const;
 
 interface AttemptPolicy {
@@ -846,10 +851,10 @@ function listPhrase(items: readonly string[]): string {
 function modelActivityDetail(
   settings: ModelSettings,
   attempt: AttemptReference,
-  skills: readonly string[]
+  phases: readonly string[]
 ): string {
   const timeoutMinutes = Math.ceil(settings.timeoutMs / 60_000);
-  return `${settings.executable} model=${settings.model} effort=${settings.effort} attempt=${attempt.id} timeout=${timeoutMinutes}m skills=${skills.join(" -> ")}`;
+  return `${settings.executable} model=${settings.model} effort=${settings.effort} attempt=${attempt.id} timeout=${timeoutMinutes}m phases=${phases.join(" -> ")}`;
 }
 
 /**
@@ -860,7 +865,7 @@ function modelActivityDetail(
 function phaseDescriptor(
   settings: ModelSettings,
   sessionMode: SessionMode,
-  skills: readonly string[]
+  phases: readonly string[]
 ): PhaseDescriptor {
   return {
     executable: settings.executable,
@@ -868,7 +873,7 @@ function phaseDescriptor(
     effort: settings.effort,
     sessionMode,
     timeoutMs: settings.timeoutMs,
-    skills
+    phases
   };
 }
 
@@ -1026,7 +1031,7 @@ export class WorkflowRunner {
 
   /**
    * Resolves how much ambient Claude Code environment spawned processes may see.
-   * Filesystem verification is memoized per configuration, and a degraded
+   * Filesystem verification is refreshed for every resolution, and a degraded
    * resolution is reported once per run so the weaker isolation is never silent.
    */
   private async invocationScope(
@@ -1035,10 +1040,10 @@ export class WorkflowRunner {
     report = true
   ): Promise<ClaudeInvocationScope> {
     const key = JSON.stringify(config.claudeEnvironment);
+    const resolved = await resolveClaudeInvocationScope(
+      config.claudeEnvironment
+    );
     if (this.resolvedScope?.key !== key) {
-      const resolved = await resolveClaudeInvocationScope(
-        config.claudeEnvironment
-      );
       this.resolvedScope = {
         key,
         ...resolved,
@@ -1047,6 +1052,7 @@ export class WorkflowRunner {
       this.reportedScopeDegradation = false;
       this.reportedMcpWhitelist = false;
     }
+    this.resolvedScope = { ...this.resolvedScope, ...resolved };
     const current = this.resolvedScope;
     if (
       report &&
@@ -1124,7 +1130,8 @@ export class WorkflowRunner {
     } catch (error) {
       if (
         error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError
+        error instanceof ProjectSetupRequiredError ||
+        error instanceof InstructionResourceMismatchError
       )
         throw error;
       this.info(`MCP whitelist unavailable: ${errorMessage(error)}`);
@@ -1198,7 +1205,8 @@ export class WorkflowRunner {
     } catch (error) {
       if (
         error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError
+        error instanceof ProjectSetupRequiredError ||
+        error instanceof InstructionResourceMismatchError
       )
         throw error;
       this.report({
@@ -1223,14 +1231,54 @@ export class WorkflowRunner {
   }
 
   private async beforeModelAttempt(
-    commitTransition?: () => Promise<void>
+    commitTransition?: () => Promise<void>,
+    invocation?: {
+      config: OrchestratorConfig;
+      role: ModelRole;
+      phase: InstructionPhase | "selection";
+    }
   ): Promise<void> {
     await this.assertProjectGuidance();
     const state = await this.store.requireActiveState();
     if (state.artifactBinding !== undefined) {
       await inspectBoundWork(this.repoRoot, state.artifactBinding);
     }
+    if (invocation !== undefined) {
+      await this.assertInstructionParity(invocation.config, [
+        {
+          role: invocation.role,
+          phases: invocation.phase === "selection" ? [] : [invocation.phase]
+        }
+      ]);
+    }
     await commitTransition?.();
+  }
+
+  private async assertInstructionParity(
+    config: OrchestratorConfig,
+    demands: { role: ModelRole; phases: InstructionPhase[] }[]
+  ): Promise<void> {
+    // Structural refusal precedes content evidence, and is deliberately not cached.
+    const resolved = await resolveClaudeInvocationScope(
+      config.claudeEnvironment
+    );
+    const results: InstructionParity[] = [];
+    for (const demand of demands) {
+      const vendor =
+        vendorFor(config.models[demand.role].executable) ??
+        FALLBACK_VENDOR[demand.role];
+      results.push(
+        await inspectInstructionParity(
+          vendor === "claude" ? resolved.scope.pluginDirectory : null,
+          demand.phases
+        )
+      );
+    }
+    const parity = combineInstructionParity(results);
+    const diagnostic = instructionParityDiagnostic(parity);
+    this.info(diagnostic);
+    if (parity.state === "mismatch")
+      throw new InstructionResourceMismatchError(diagnostic);
   }
 
   async start(input: StartRunInput): Promise<RunState> {
@@ -1350,7 +1398,8 @@ export class WorkflowRunner {
         } catch (error) {
           if (
             error instanceof TerminalRunStateError ||
-            error instanceof ProjectSetupRequiredError
+            error instanceof ProjectSetupRequiredError ||
+            error instanceof InstructionResourceMismatchError
           )
             throw error;
           return await this.recordStartFailure(state, error);
@@ -1539,7 +1588,8 @@ export class WorkflowRunner {
       } catch (error) {
         if (
           error instanceof TerminalRunStateError ||
-          error instanceof ProjectSetupRequiredError
+          error instanceof ProjectSetupRequiredError ||
+          error instanceof InstructionResourceMismatchError
         )
           throw error;
         if (retryCheckpoint === null) {
@@ -1642,7 +1692,8 @@ export class WorkflowRunner {
           } catch (error) {
             if (
               error instanceof TerminalRunStateError ||
-              error instanceof ProjectSetupRequiredError
+              error instanceof ProjectSetupRequiredError ||
+              error instanceof InstructionResourceMismatchError
             )
               throw error;
             return await this.recordStartFailure(state, error);
@@ -2592,7 +2643,8 @@ export class WorkflowRunner {
           } catch (error) {
             if (
               error instanceof TerminalRunStateError ||
-              error instanceof ProjectSetupRequiredError
+              error instanceof ProjectSetupRequiredError ||
+              error instanceof InstructionResourceMismatchError
             )
               throw error;
             return await this.blockForCompletionFailure(
@@ -2998,7 +3050,8 @@ export class WorkflowRunner {
       } catch (error) {
         if (
           error instanceof TerminalRunStateError ||
-          error instanceof ProjectSetupRequiredError
+          error instanceof ProjectSetupRequiredError ||
+          error instanceof InstructionResourceMismatchError
         )
           throw error;
         if (error instanceof PlanTaskCompletionError) {
@@ -3072,7 +3125,8 @@ export class WorkflowRunner {
     } catch (error) {
       if (
         error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError
+        error instanceof ProjectSetupRequiredError ||
+        error instanceof InstructionResourceMismatchError
       )
         throw error;
       const completionError =
@@ -3641,7 +3695,8 @@ export class WorkflowRunner {
     } catch (error) {
       if (
         error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError
+        error instanceof ProjectSetupRequiredError ||
+        error instanceof InstructionResourceMismatchError
       )
         throw error;
       return recoveryIneligible(
@@ -4050,7 +4105,8 @@ export class WorkflowRunner {
     } catch (error) {
       if (
         error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError
+        error instanceof ProjectSetupRequiredError ||
+        error instanceof InstructionResourceMismatchError
       )
         throw error;
       const current = await this.store.readState(state.runId);
@@ -4223,6 +4279,15 @@ export class WorkflowRunner {
   private async preflight(config: OrchestratorConfig): Promise<void> {
     validateNodeVersion();
     assertContractParity();
+    const state = await this.store.requireActiveState();
+    const route = state.workflowSelection?.workflow ?? null;
+    await this.assertInstructionParity(
+      config,
+      MODEL_ROLES.flatMap((role) => {
+        const phases = instructionPhasesForRole(role, route);
+        return phases === null ? [] : [{ role, phases }];
+      })
+    );
     const environment = subscriptionOnlyEnvironment();
     await assertExecutable("git", this.repoRoot, environment);
     for (const usage of vendorUsage(config)) {
@@ -5161,17 +5226,72 @@ export class WorkflowRunner {
     state: RunState,
     phase: AttemptReference["kind"]
   ): string {
-    if (state.artifactBinding === undefined) return "";
-    return (
-      `\n\nArtifact storage authority (run state v4):\n${JSON.stringify(state.artifactBinding, null, 2)}\n` +
-      `Use these exact bound artifact role paths. Any fixed documentation work paths in legacy instructions are replaced by this binding. Public ADRs, product documentation and the project manifest keep their existing repository paths.\n` +
-      `Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(state, phase))}. Other bound roles are read-only; their presence does not grant writes. Read ignored required evidence directly. Do not acquire standalone claims or modify the binding, declarations, runner state, approvals or another work item.\n` +
-      (state.workflowSelection?.workflow === "feature"
-        ? "For lite feature work, artifacts.implementationReport may reference the bound work.md; do not create a second report.\n"
-        : state.workflowSelection?.workflow === "quick-fix"
-          ? "For quick-fix, artifacts.implementationReport may reference the bound changeReport only when the existing report trigger applies; otherwise keep it null.\n"
-          : "")
-    );
+    const workflow = state.workflowSelection?.workflow ?? "strict";
+    const bound = state.artifactBinding;
+    const roles =
+      bound === undefined
+        ? artifactRoles(state.runId, state.slug, "workflow", "legacy")
+        : bound.binding.artifacts;
+    if (bound === undefined) {
+      requireSlug(state.slug);
+      for (const role of [
+        "description",
+        "plan",
+        "implementationReport",
+        "testReport"
+      ] as const) {
+        const recorded = state.planArtifacts?.[role];
+        if (recorded) roles[role] = recorded;
+      }
+      if (state.planTaskCompletion?.status === "valid") {
+        roles.implementationReport =
+          state.planTaskCompletion.implementationReport.path;
+        roles.testReport = state.planTaskCompletion.testReport.path;
+      }
+    }
+    const legacyOutputs =
+      phase === "plan"
+        ? [roles.description, roles.plan]
+        : phase === "implementation" || phase === "fix"
+          ? workflow === "strict"
+            ? [
+                roles.implementationReport,
+                roles.testReport,
+                ...(phase === "fix" ? [roles.changeReport] : [])
+              ]
+            : workflow === "feature"
+              ? [roles.work]
+              : [roles.changeReport]
+          : [];
+    const writes =
+      bound === undefined
+        ? legacyOutputs.filter((item): item is string => item !== undefined)
+        : this.artifactWritePaths(state, phase);
+    return [
+      bound === undefined
+        ? "Legacy artifact surface (no persisted work binding):"
+        : "Artifact storage authority (run state v4):",
+      JSON.stringify(
+        bound ?? { runId: state.runId, slug: state.slug, artifacts: roles },
+        null,
+        2
+      ),
+      "Use these exact artifact role paths. Public ADRs, product documentation and the project manifest keep their existing repository paths.",
+      bound === undefined
+        ? `Required work output paths in this legacy phase: ${JSON.stringify(writes)}. Existing legacy scope and approved-byte validation remain authoritative; these destinations create no new binding or permission.`
+        : `Artifact writes allowed in this phase: ${JSON.stringify(writes)}.`,
+      phase === "review" || phase === "selection"
+        ? "Model artifact write set: []. Every role is read-only, including canonical reviews and attempt-owned candidates."
+        : "Other artifact roles are read-only; their presence does not grant writes.",
+      "Read ignored required evidence directly. Do not initialize, create or rebind work, invoke the standalone artifact helper, acquire standalone claims, or modify declarations, runner state, approvals or another work item.",
+      workflow === "feature"
+        ? "For lite feature work, artifacts.implementationReport may reference the work role; do not create a second report."
+        : workflow === "quick-fix"
+          ? "For quick-fix, artifacts.implementationReport may reference the changeReport only when the existing report trigger applies; otherwise keep it null."
+          : ""
+    ]
+      .filter((part) => part.length > 0)
+      .join("\n");
   }
 
   private async checkArtifactPhaseScope(
@@ -5489,7 +5609,8 @@ export class WorkflowRunner {
     } catch (error) {
       if (
         error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError
+        error instanceof ProjectSetupRequiredError ||
+        error instanceof InstructionResourceMismatchError
       )
         throw error;
       await finish("failed", {
@@ -5523,7 +5644,11 @@ export class WorkflowRunner {
       );
     requireState(state, ["selecting"], "Workflow selection");
     await this.assertProjectGuidance();
-    await this.beforeModelAttempt(commitTransition);
+    await this.beforeModelAttempt(commitTransition, {
+      config,
+      role: "planner",
+      phase: "selection"
+    });
     const attempt = this.newAttempt(state, "selection", false);
     const record = await this.beginAttempt(state, attempt, {
       sessionMode: "fresh",
@@ -5542,9 +5667,12 @@ export class WorkflowRunner {
       // run-level MCP whitelist, which reports on first resolution and would
       // otherwise print as if it were the phase's own first action.
       const environment = await this.invocationScope(state.runId, config);
-      const prompt = workflowSelectionPromptEnvelope(
-        state.request,
-        state.humanDecisions ?? []
+      const prompt = insertPhaseInstructions(
+        workflowSelectionPromptEnvelope(
+          state.request,
+          state.humanDecisions ?? []
+        ),
+        [this.artifactInstructions(state, "selection")]
       );
       const result = await this.activity(
         "Workflow selection",
@@ -5552,12 +5680,12 @@ export class WorkflowRunner {
           detail: modelActivityDetail(
             config.models.planner,
             attempt,
-            PHASE_SKILLS.Selection
+            PHASE_PHASES.Selection
           ),
           descriptor: phaseDescriptor(
             config.models.planner,
             "fresh",
-            PHASE_SKILLS.Selection
+            PHASE_PHASES.Selection
           )
         },
         async () =>
@@ -5621,7 +5749,8 @@ export class WorkflowRunner {
       } catch (error) {
         if (
           error instanceof TerminalRunStateError ||
-          error instanceof ProjectSetupRequiredError
+          error instanceof ProjectSetupRequiredError ||
+          error instanceof InstructionResourceMismatchError
         )
           throw error;
         state.activeAttempt = null;
@@ -5632,7 +5761,8 @@ export class WorkflowRunner {
     } catch (error) {
       if (
         error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError
+        error instanceof ProjectSetupRequiredError ||
+        error instanceof InstructionResourceMismatchError
       )
         throw error;
       return await this.failAttempt(state, record, error);
@@ -5691,10 +5821,10 @@ export class WorkflowRunner {
       confidence: selection.confidence,
       reason: selection.reason,
       escalationTriggers: selection.escalationTriggers,
-      skills: workflowSkills(selection.workflow)
+      phases: workflowPhases(selection.workflow)
     });
     this.info(
-      `ROUTE ${selection.workflow} - ${selection.reason} skills=${workflowSkills(selection.workflow).join(" -> ")}`
+      `ROUTE ${selection.workflow} - ${selection.reason} phases=${workflowPhases(selection.workflow).join(" -> ")}`
     );
     return selection.workflow === "strict"
       ? await this.executePlan(state, config)
@@ -5735,20 +5865,17 @@ export class WorkflowRunner {
       ? state.sessions.planner
       : null;
     const environment = await this.invocationScope(state.runId, config, false);
-    let prompt = appendPromptComponent(
+    let prompt = insertPhaseInstructions(
       planningPromptEnvelope(
         state.slug,
         state.request,
         state.adrDecisions,
         state.humanDecisions ?? []
       ),
-      "phase_instructions",
-      this.serenaGuidanceFor(environment, config.models.planner.executable)
-    );
-    prompt = appendPromptComponent(
-      prompt,
-      "phase_instructions",
-      this.artifactInstructions(state, "plan")
+      [
+        this.artifactInstructions(state, "plan"),
+        this.serenaGuidanceFor(environment, config.models.planner.executable)
+      ]
     );
     const invocationDigest = digestCanonicalJson({
       environment,
@@ -5815,7 +5942,11 @@ export class WorkflowRunner {
           : "Continuing planning in the saved planner session"
       );
     }
-    await this.beforeModelAttempt(commitTransition);
+    await this.beforeModelAttempt(commitTransition, {
+      config,
+      role: "planner",
+      phase: "planning"
+    });
     await this.invocationScope(state.runId, config);
     const attempt = this.newAttempt(state, "plan", false);
     const record = await this.beginAttempt(state, attempt, {
@@ -5837,12 +5968,12 @@ export class WorkflowRunner {
           detail: modelActivityDetail(
             config.models.planner,
             attempt,
-            PHASE_SKILLS.Planning
+            PHASE_PHASES.Planning
           ),
           descriptor: phaseDescriptor(
             config.models.planner,
             resumeSessionId === null ? "fresh" : "resumed",
-            PHASE_SKILLS.Planning
+            PHASE_PHASES.Planning
           )
         },
         async () =>
@@ -5935,7 +6066,8 @@ export class WorkflowRunner {
       } catch (error) {
         if (
           error instanceof TerminalRunStateError ||
-          error instanceof ProjectSetupRequiredError
+          error instanceof ProjectSetupRequiredError ||
+          error instanceof InstructionResourceMismatchError
         )
           throw error;
         state.activeAttempt = null;
@@ -5946,7 +6078,8 @@ export class WorkflowRunner {
     } catch (error) {
       if (
         error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError
+        error instanceof ProjectSetupRequiredError ||
+        error instanceof InstructionResourceMismatchError
       )
         throw error;
       // Capture the stopped workspace, not the pre-planning tree: planning may
@@ -6022,7 +6155,11 @@ export class WorkflowRunner {
         : null;
     const resumeSessionId =
       implementerBinding?.id ?? plannerBinding?.id ?? null;
-    await this.beforeModelAttempt(commitTransition);
+    await this.beforeModelAttempt(commitTransition, {
+      config,
+      role: "implementer",
+      phase: lite ? route : "implementation"
+    });
     if (state.status === "plan_approved") {
       transitionState(state, "implementing");
       await this.store.writeState(state);
@@ -6093,14 +6230,13 @@ export class WorkflowRunner {
       // run-level MCP whitelist, which reports on first resolution and would
       // otherwise print as if it were the phase's own first action.
       const environment = await this.invocationScope(state.runId, config);
-      const invocationPrompt = appendPromptComponent(
-        prompt,
-        "phase_instructions",
+      const invocationPrompt = insertPhaseInstructions(prompt, [
+        this.artifactInstructions(state, attempt.kind),
         this.serenaGuidanceFor(
           environment,
           config.models.implementer.executable
-        ) + this.artifactInstructions(state, attempt.kind)
-      );
+        )
+      ]);
       const result = await this.activity(
         "Implementation",
         {
@@ -6108,15 +6244,15 @@ export class WorkflowRunner {
             config.models.implementer,
             attempt,
             selection === null
-              ? PHASE_SKILLS.Implementation
-              : workflowSkills(selection.workflow)
+              ? PHASE_PHASES.Implementation
+              : workflowPhases(selection.workflow)
           ),
           descriptor: phaseDescriptor(
             config.models.implementer,
             resumeSessionId === null ? "fresh" : "resumed",
             selection === null
-              ? PHASE_SKILLS.Implementation
-              : workflowSkills(selection.workflow)
+              ? PHASE_PHASES.Implementation
+              : workflowPhases(selection.workflow)
           )
         },
         async () =>
@@ -6195,7 +6331,8 @@ export class WorkflowRunner {
         } catch (error) {
           if (
             error instanceof TerminalRunStateError ||
-            error instanceof ProjectSetupRequiredError
+            error instanceof ProjectSetupRequiredError ||
+            error instanceof InstructionResourceMismatchError
           )
             throw error;
           if (!(error instanceof PlanTaskCompletionError)) {
@@ -6229,7 +6366,8 @@ export class WorkflowRunner {
       } catch (error) {
         if (
           error instanceof TerminalRunStateError ||
-          error instanceof ProjectSetupRequiredError
+          error instanceof ProjectSetupRequiredError ||
+          error instanceof InstructionResourceMismatchError
         )
           throw error;
         state.activeAttempt = null;
@@ -6240,7 +6378,8 @@ export class WorkflowRunner {
     } catch (error) {
       if (
         error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError
+        error instanceof ProjectSetupRequiredError ||
+        error instanceof InstructionResourceMismatchError
       )
         throw error;
       return await this.failAttempt(state, record, error);
@@ -6317,7 +6456,11 @@ export class WorkflowRunner {
       ? state.sessions.implementer
       : null;
     const resumeSessionId = implementerBinding?.id ?? null;
-    await this.beforeModelAttempt(commitTransition);
+    await this.beforeModelAttempt(commitTransition, {
+      config,
+      role: "implementer",
+      phase: "fix"
+    });
     const attempt =
       recovery === null
         ? this.newAttempt(state, "fix", true)
@@ -6379,26 +6522,25 @@ export class WorkflowRunner {
                     prerequisites: prerequisiteRecovery.prerequisites
                   }
             );
-      const invocationPrompt = appendPromptComponent(
-        recoveredPrompt,
-        "phase_instructions",
+      const invocationPrompt = insertPhaseInstructions(recoveredPrompt, [
+        this.artifactInstructions(state, attempt.kind),
         this.serenaGuidanceFor(
           environment,
           config.models.implementer.executable
-        ) + this.artifactInstructions(state, attempt.kind)
-      );
+        )
+      ]);
       const result = await this.activity(
         "Fix",
         {
           detail: `${modelActivityDetail(
             config.models.implementer,
             attempt,
-            PHASE_SKILLS.Fix
+            PHASE_PHASES.Fix
           )} findings=${findings.length}`,
           descriptor: phaseDescriptor(
             config.models.implementer,
             resumeSessionId === null ? "fresh" : "resumed",
-            PHASE_SKILLS.Fix
+            PHASE_PHASES.Fix
           )
         },
         async () =>
@@ -6481,7 +6623,8 @@ export class WorkflowRunner {
         } catch (error) {
           if (
             error instanceof TerminalRunStateError ||
-            error instanceof ProjectSetupRequiredError
+            error instanceof ProjectSetupRequiredError ||
+            error instanceof InstructionResourceMismatchError
           )
             throw error;
           if (error instanceof PlanTaskCompletionError) {
@@ -6510,7 +6653,8 @@ export class WorkflowRunner {
       } catch (error) {
         if (
           error instanceof TerminalRunStateError ||
-          error instanceof ProjectSetupRequiredError
+          error instanceof ProjectSetupRequiredError ||
+          error instanceof InstructionResourceMismatchError
         )
           throw error;
         state.activeAttempt = null;
@@ -6521,7 +6665,8 @@ export class WorkflowRunner {
     } catch (error) {
       if (
         error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError
+        error instanceof ProjectSetupRequiredError ||
+        error instanceof InstructionResourceMismatchError
       )
         throw error;
       return await this.failAttempt(state, record, error);
@@ -6935,7 +7080,8 @@ export class WorkflowRunner {
       } catch (error) {
         if (
           error instanceof TerminalRunStateError ||
-          error instanceof ProjectSetupRequiredError
+          error instanceof ProjectSetupRequiredError ||
+          error instanceof InstructionResourceMismatchError
         )
           throw error;
         return await this.blockForCompletionFailure(
@@ -6979,7 +7125,8 @@ export class WorkflowRunner {
     } catch (error) {
       if (
         error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError
+        error instanceof ProjectSetupRequiredError ||
+        error instanceof InstructionResourceMismatchError
       )
         throw error;
       state.activeProcess = null;
@@ -7307,7 +7454,8 @@ export class WorkflowRunner {
     } catch (error) {
       if (
         error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError
+        error instanceof ProjectSetupRequiredError ||
+        error instanceof InstructionResourceMismatchError
       )
         throw error;
       return await this.blockForCompletionFailure(
@@ -7341,7 +7489,8 @@ export class WorkflowRunner {
     } catch (error) {
       if (
         error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError
+        error instanceof ProjectSetupRequiredError ||
+        error instanceof InstructionResourceMismatchError
       )
         throw error;
       const current = await this.store.readState(state.runId);
@@ -7367,7 +7516,11 @@ export class WorkflowRunner {
             snapshot
           ).filter((change) => change.path !== state.latestReview?.artifactPath)
         : [];
-    await this.beforeModelAttempt(commitTransition);
+    await this.beforeModelAttempt(commitTransition, {
+      config,
+      role: "reviewer",
+      phase: "review"
+    });
     await this.invocationScope(state.runId, config);
     state.workspaceDigest = beforeDigest;
     state.reviewIteration = iteration;
@@ -7550,15 +7703,15 @@ export class WorkflowRunner {
           detail: `${modelActivityDetail(
             config.models.reviewer,
             attempt,
-            PHASE_SKILLS.Review
+            PHASE_PHASES.Review
           )} session=${policy.sessionMode} review=${policy.reviewMode} rotation=${policy.rotationReason ?? "none"}`,
           descriptor: phaseDescriptor(
             config.models.reviewer,
             policy.sessionMode,
-            PHASE_SKILLS.Review
+            PHASE_PHASES.Review
           )
         },
-        appendPromptComponent(
+        insertPhaseInstructions(
           reviewPromptEnvelope({
             slug: state.slug,
             iteration,
@@ -7577,8 +7730,13 @@ export class WorkflowRunner {
             triageHistory: state.triageHistory,
             taskCompletion: artifact.taskCompletion
           }),
-          "phase_instructions",
-          this.serenaGuidanceFor(environment, config.models.reviewer.executable)
+          [
+            this.artifactInstructions(state, "review"),
+            this.serenaGuidanceFor(
+              environment,
+              config.models.reviewer.executable
+            )
+          ]
         ),
         policy.resumeSessionId,
         "primary"
@@ -7611,7 +7769,8 @@ export class WorkflowRunner {
     } catch (error) {
       if (
         error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError
+        error instanceof ProjectSetupRequiredError ||
+        error instanceof InstructionResourceMismatchError
       )
         throw error;
       (record.reviewDiagnostics ??= []).push({
@@ -7684,7 +7843,8 @@ export class WorkflowRunner {
     } catch (error) {
       if (
         error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError
+        error instanceof ProjectSetupRequiredError ||
+        error instanceof InstructionResourceMismatchError
       )
         throw error;
       (record.reviewDiagnostics ??= []).push({
@@ -7879,7 +8039,8 @@ export class WorkflowRunner {
       } catch (error) {
         if (
           error instanceof TerminalRunStateError ||
-          error instanceof ProjectSetupRequiredError
+          error instanceof ProjectSetupRequiredError ||
+          error instanceof InstructionResourceMismatchError
         )
           throw error;
         return await this.blockForCompletionFailure(
@@ -8044,7 +8205,8 @@ export class WorkflowRunner {
     } catch (error) {
       if (
         error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError
+        error instanceof ProjectSetupRequiredError ||
+        error instanceof InstructionResourceMismatchError
       )
         throw error;
       if (error instanceof PlanTaskCompletionError) throw error;
@@ -8329,7 +8491,8 @@ export class WorkflowRunner {
     } catch (error) {
       if (
         error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError
+        error instanceof ProjectSetupRequiredError ||
+        error instanceof InstructionResourceMismatchError
       )
         throw error;
       if (attempt.kind === "plan" && error instanceof PlanTaskCompletionError) {
@@ -8400,7 +8563,8 @@ export class WorkflowRunner {
         } catch (error) {
           if (
             error instanceof TerminalRunStateError ||
-            error instanceof ProjectSetupRequiredError
+            error instanceof ProjectSetupRequiredError ||
+            error instanceof InstructionResourceMismatchError
           )
             throw error;
           return await this.blockForCompletionFailure(
@@ -8602,7 +8766,8 @@ export class WorkflowRunner {
         } catch (error) {
           if (
             error instanceof TerminalRunStateError ||
-            error instanceof ProjectSetupRequiredError
+            error instanceof ProjectSetupRequiredError ||
+            error instanceof InstructionResourceMismatchError
           )
             throw error;
           if (record.reviewContext !== undefined) {
@@ -8691,7 +8856,8 @@ export class WorkflowRunner {
         } catch (error) {
           if (
             error instanceof TerminalRunStateError ||
-            error instanceof ProjectSetupRequiredError
+            error instanceof ProjectSetupRequiredError ||
+            error instanceof InstructionResourceMismatchError
           )
             throw error;
           return await this.blockForCompletionFailure(state, attempt.id, error);

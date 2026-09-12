@@ -130,7 +130,23 @@
       "plugins/banzai/contracts/artifacts/v1/verify-request.schema.json",
       "plugins/banzai/contracts/artifacts/v1/work-binding.schema.json",
       "plugins/banzai/contracts/artifacts/v1/write-request.schema.json",
-      "plugins/banzai/lib/artifact-readers.mjs"
+      "plugins/banzai/lib/artifact-readers.mjs",
+      "plugins/banzai/phases/planning.md",
+      "plugins/banzai/phases/implementation.md",
+      "plugins/banzai/phases/review.md",
+      "plugins/banzai/phases/fix.md",
+      "plugins/banzai/phases/feature.md",
+      "plugins/banzai/phases/quick-fix.md",
+      "plugins/banzai/guidance/requirements.md",
+      "plugins/banzai/guidance/architecture.md",
+      "plugins/banzai/guidance/planning.md",
+      "plugins/banzai/guidance/implementation.md",
+      "plugins/banzai/guidance/assurance.md",
+      "plugins/banzai/guidance/review.md",
+      "plugins/banzai/guidance/feature.md",
+      "plugins/banzai/guidance/fix.md",
+      "plugins/banzai/guidance/manifest.md",
+      "packages/orchestrator/src/phase-resources.ts"
     ]
   },
   "contracts": {
@@ -162,7 +178,11 @@
     },
     "state": {
       "currentSchemaVersion": 4,
-      "legacySchemaVersions": [1, 2, 3]
+      "legacySchemaVersions": [
+        1,
+        2,
+        3
+      ]
     },
     "agentControl": {
       "contractVersion": "3.0.0",

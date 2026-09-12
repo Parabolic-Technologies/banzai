@@ -1829,11 +1829,11 @@ export interface PhaseDescriptor {
   sessionMode: SessionMode;
   timeoutMs: number;
   /**
-   * The skill chain the phase runs. It is what distinguishes a lite route's
+   * The phase chain the runner supplies. It is what distinguishes a lite route's
    * single phase from a strict one, so a reader can tell which workflow is
    * actually executing rather than inferring it from the phase name.
    */
-  skills: readonly string[];
+  phases: readonly string[];
 }
 
 export type ProgressEvent =
@@ -1991,4 +1991,15 @@ export interface VendorAdapters {
   runReview(
     request: ReviewAdapterRequest
   ): Promise<AdapterResult<ReviewResult>>;
+}
+
+export type InstructionPhase =
+  "planning" | "implementation" | "review" | "fix" | "feature" | "quick-fix";
+
+/** Ephemeral comparison evidence; never added to persisted or exported contracts. */
+export interface InstructionParity {
+  state: "verified" | "mismatch" | "unverifiable" | "bounded_failure";
+  resourceIds: string[];
+  mismatched: string[];
+  unavailable: string[];
 }

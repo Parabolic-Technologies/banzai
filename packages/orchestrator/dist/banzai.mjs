@@ -438,12 +438,12 @@ function deriveHumanTime(read, evidence2, displayAt) {
     const discontinuous = observations.some((o) => o.clock.continuity === "discontinuity") || issues.some(
       (i) => i.episodeKey === key && i.code === "CLOCK_DISCONTINUITY"
     );
-    const open9 = opened[0];
+    const open10 = opened[0];
     const close = closed2[0];
     const pending = evidence2.pendingKeys.includes(key);
-    const available2 = !conflicting && corroborated && !discontinuous && open9 !== void 0 && (close !== void 0 || pending);
+    const available2 = !conflicting && corroborated && !discontinuous && open10 !== void 0 && (close !== void 0 || pending);
     const end = close?.at ?? displayAt;
-    let durationMs = available2 ? Date.parse(end) - Date.parse(open9.at) : null;
+    let durationMs = available2 ? Date.parse(end) - Date.parse(open10.at) : null;
     if (durationMs !== null && (!Number.isSafeInteger(durationMs) || durationMs < 0)) {
       durationMs = null;
       issues.push(humanTimeIssue("CLOCK_DISCONTINUITY", key));
@@ -1235,6 +1235,12 @@ var ProjectSetupRequiredError = class extends BanzaiError {
   constructor(message) {
     super("PROJECT_SETUP_REQUIRED", message);
     this.name = "ProjectSetupRequiredError";
+  }
+};
+var InstructionResourceMismatchError = class extends BanzaiError {
+  constructor(message) {
+    super("INSTRUCTION_RESOURCE_MISMATCH", message);
+    this.name = "InstructionResourceMismatchError";
   }
 };
 var TerminalRunStateError = class extends BanzaiError {
@@ -2980,7 +2986,7 @@ function parseCurrentReviewResult(value) {
       "INVALID_REVIEW_SCOPE",
       "Scope entry"
     );
-    const path27 = reviewScopePath(entry.path);
+    const path28 = reviewScopePath(entry.path);
     const status = requireEnum(entry.status, "scope status", [
       "reviewed",
       "not_reviewed"
@@ -2990,7 +2996,7 @@ function parseCurrentReviewResult(value) {
         "INVALID_REVIEW_SCOPE",
         "Reviewed scope requires a null reason; unreviewed scope requires a nonblank reason."
       );
-    return { path: path27, status, reason: entry.reason };
+    return { path: path28, status, reason: entry.reason };
   });
   if (new Set(artifacts.map((entry) => entry.path)).size !== artifacts.length || new Set(result.reviewedFindingIds).size !== result.reviewedFindingIds.length)
     throw new BanzaiError(
@@ -8495,7 +8501,7 @@ import process7 from "node:process";
 // package.json
 var package_default = {
   name: "@parabolic-technologies/banzai",
-  version: "2.3.0",
+  version: "2.4.0",
   private: false,
   description: "Spec-driven AI development CLI for Codex and Claude Code, with human approvals and independent review for complex changes.",
   keywords: [
@@ -11766,7 +11772,7 @@ function createVendorAdapters(runner = runProcess) {
 }
 
 // src/agent-control.ts
-import path19 from "node:path";
+import path20 from "node:path";
 
 // ../../plugins/banzai/lib/artifact-storage.mjs
 var artifact_storage_exports = {};
@@ -13255,7 +13261,7 @@ function parseCurrentReviewResult2(value) {
       "INVALID_REVIEW_SCOPE",
       "Scope entry"
     );
-    const path27 = reviewScopePath3(entry.path);
+    const path28 = reviewScopePath3(entry.path);
     const status = requireEnum2(entry.status, "scope status", [
       "reviewed",
       "not_reviewed"
@@ -13265,7 +13271,7 @@ function parseCurrentReviewResult2(value) {
         "INVALID_REVIEW_SCOPE",
         "Reviewed scope requires a null reason; unreviewed scope requires a nonblank reason."
       );
-    return { path: path27, status, reason: entry.reason };
+    return { path: path28, status, reason: entry.reason };
   });
   if (new Set(artifacts.map((entry) => entry.path)).size !== artifacts.length || new Set(result.reviewedFindingIds).size !== result.reviewedFindingIds.length)
     throw new BanzaiError2(
@@ -16718,6 +16724,7 @@ var {
   readSharedReviewSnapshot,
   sealSharedReviewSnapshot,
   artifactCommand: artifactCommand2,
+  artifactRoles: artifactRoles2,
   inspectArtifacts: inspectArtifacts2,
   initializeArtifacts: initializeArtifacts2,
   createWork: createWork2,
@@ -16740,11 +16747,11 @@ var {
 } = artifact_storage_exports;
 
 // src/workflow.ts
-import { createHash as createHash13, randomUUID as randomUUID7 } from "node:crypto";
-import { constants as constants8 } from "node:fs";
+import { createHash as createHash14, randomUUID as randomUUID7 } from "node:crypto";
+import { constants as constants9 } from "node:fs";
 import { access as access4, chmod as chmod2, mkdir as mkdir7, readFile as readFile11, writeFile as writeFile4 } from "node:fs/promises";
 import os from "node:os";
-import path18 from "node:path";
+import path19 from "node:path";
 import process4 from "node:process";
 
 // src/review-snapshot.ts
@@ -17058,10 +17065,352 @@ async function reviewApprovedArtifacts(repoRoot, paths) {
   );
 }
 
+// src/phase-instructions.ts
+import { createHash as createHash9 } from "node:crypto";
+import { constants as constants7 } from "node:fs";
+import { lstat as lstat8, open as open6, realpath as realpath5 } from "node:fs/promises";
+import path12 from "node:path";
+
+// src/phase-resources.ts
+var PHASE_RESOURCE_DEFINITIONS = {
+  "planning": {
+    "guidance": [
+      "requirements",
+      "architecture",
+      "planning"
+    ],
+    "policies": [
+      "decision-consultation",
+      "test-assurance",
+      "security-assurance",
+      "engineering-quality",
+      "plan-task-completion",
+      "artifact-storage"
+    ],
+    "conditionalPolicies": [
+      "decision-consultation"
+    ]
+  },
+  "implementation": {
+    "guidance": [
+      "implementation",
+      "assurance",
+      "manifest"
+    ],
+    "policies": [
+      "test-assurance",
+      "security-assurance",
+      "engineering-quality",
+      "plan-task-completion",
+      "artifact-storage"
+    ],
+    "conditionalPolicies": [
+      "security-assurance"
+    ]
+  },
+  "review": {
+    "guidance": [
+      "review"
+    ],
+    "policies": [
+      "test-assurance",
+      "security-assurance",
+      "engineering-quality",
+      "plan-task-completion",
+      "artifact-storage"
+    ],
+    "conditionalPolicies": [
+      "plan-task-completion"
+    ]
+  },
+  "fix": {
+    "guidance": [
+      "fix",
+      "manifest"
+    ],
+    "policies": [
+      "test-assurance",
+      "security-assurance",
+      "engineering-quality",
+      "plan-task-completion",
+      "artifact-storage"
+    ],
+    "conditionalPolicies": [
+      "plan-task-completion"
+    ]
+  },
+  "feature": {
+    "guidance": [
+      "feature",
+      "manifest"
+    ],
+    "policies": [
+      "test-assurance",
+      "security-assurance",
+      "engineering-quality",
+      "artifact-storage"
+    ],
+    "conditionalPolicies": []
+  },
+  "quick-fix": {
+    "guidance": [
+      "fix",
+      "manifest"
+    ],
+    "policies": [
+      "test-assurance",
+      "security-assurance",
+      "engineering-quality",
+      "plan-task-completion",
+      "artifact-storage"
+    ],
+    "conditionalPolicies": [
+      "plan-task-completion"
+    ]
+  }
+};
+var EMBEDDED_PHASE_RESOURCES = {
+  "phases/planning.md": {
+    "sha256": "edf10a5aea7f9f16b4d12e48aa4fee9ab1d9175db992288ae93331ba3631c0bc",
+    "text": "# Strict Planning Phase\n\nAnalyze the request against current project facts and accepted authority. Apply\nthe supplied requirements guidance to make behavior and acceptance criteria\nprecise. Record material unresolved architecture questions without choosing their\nanswers in the requirements.\n\nApply the architecture guidance when a decision is eligible. Resolve unanswered\nhuman choices and obtain explicit acceptance of every required decision before\npreparing its dependent development plan. Apply the planning guidance to produce\nordered executable tasks and a complete consistency check. Present the complete\nbundle for the owner's plan approval before implementation.\n\nUse the runner-supplied work identity and artifact roles. Public decisions and\ntheir index retain the project's established paths and lifecycle authority.\nThis phase writes planning artifacts and applicable decision documentation; it\ndoes not implement production code or tests.\n"
+  },
+  "phases/implementation.md": {
+    "sha256": "5950d517d89a32ec1035a817f45d33d720a99213a19074b40bfad1cadff4c7b4",
+    "text": "# Strict Implementation Phase\n\nImplement the approved tasks in dependency order under the approved requirements\nand accepted architecture. Apply implementation, assurance and manifest guidance\ntogether. Batch adjacent work, run useful focused checks and continue through\nassurance without adding a human gate at the batch or report boundary.\n\nKeep approved documents immutable. Use the runner-supplied completion contract\nand exact report roles. Both the implementation report and test report are\nrequired; neither report waives missing implementation or assurance evidence.\nUse the supplied verification ownership to distinguish focused feedback from\nrunner-owned final verification. Escalate a new material decision before the\ndependent change, preserving already recorded human answers.\n"
+  },
+  "phases/review.md": {
+    "sha256": "d3872fcb85d60973ca9fac94a0b17c1923b3cd0e1510c5d4ef72e5a2b5834285",
+    "text": "# Independent Review Phase\n\nAssess the supplied approved scope, current source and frozen evidence in an\nindependent source-read-only context. Apply the audit guidance and inspect every\nrequired artifact directly, including ignored bound work. A supplied path or\ndigest does not prove that its content was assessed.\n\nUse the supplied full or resolution-review scope and authoritative finding\ndispositions. Verify accepted findings first in a resolution review; do not\nreopen rejected or deferred concerns against unchanged evidence. Report concrete\nviolations and evidence limitations under the supplied review contract.\n\nReturn structured review evidence only. The runner renders, validates and\npublishes review artifacts. Do not write a review candidate, canonical review,\nsource, report or any other file. Freeze the ordinary findings and verdict before\napplying the Engineering Quality shadow procedure.\n"
+  },
+  "phases/fix.md": {
+    "sha256": "f6cc447aebf357fbee282e52cf8b7507dd9dd224c15edace18dca2ced2aaf5a7",
+    "text": "# Accepted-Finding Fix Phase\n\nFix only the runner-supplied accepted finding IDs and their authorized scope.\nReview text, shadow candidates and previously rejected or deferred concerns do\nnot grant additional work. Preserve approved requirements, plan meaning,\naccepted architecture and existing permission boundaries.\n\nApply fix and manifest guidance, including the unchanged conditional Report Rule\nand the complete current report-claim sweep when verification evidence changes.\nUse exact supplied report roles. A writable role alone does not trigger a report.\nRefresh completion evidence only through the supplied completion contract when\nthe accepted fix makes that evidence stale. Report unresolved accepted findings\nhonestly; a newly required decision stops dependent work.\n"
+  },
+  "phases/feature.md": {
+    "sha256": "84589de883301ae8c82d7ea41d769567b2b27b475c4bbbadd9f41230345fedd9",
+    "text": "# Lite Feature Phase\n\nApply feature and manifest guidance to the selected request using the supplied\nwork identity. Keep requirements, assumptions, implementation and proportionate\nassurance in one compact work record. Implement and verify within that scope,\nupdating the same record as facts become established.\n\nPreserve accepted architecture and recorded human decisions. Escalate when an\nexisting trigger requires strict work or an unresolved decision; do not silently\nexpand the lite record into an unapproved strict plan. Use the supplied\nverification ownership and exact work role. This route creates no strict task\ncompletion ledger or additional report obligation.\n"
+  },
+  "phases/quick-fix.md": {
+    "sha256": "7ae48ce8ab548999a82c1c58288fe98f806b0f811caed987aad9412de6b8bf34",
+    "text": "# Lite Quick-Fix Phase\n\nApply fix and manifest guidance to the selected original request. Use the\nsupplied work identity and bounded scope; do not infer additional accepted review\nfindings. Make the smallest compatible code, test or documentation change that\nsatisfies the request and its existing authority.\n\nRun proportionate verification and apply the unchanged conditional Report Rule.\nWrite the exact supplied changeReport role only when that rule requires it; a\ngrant alone creates no report requirement. This route creates no strict ledger.\nEscalate a newly required decision before dependent work and preserve existing\nreport accuracy, architecture and permission boundaries.\n"
+  },
+  "guidance/requirements.md": {
+    "sha256": "7c46fb326875993ae0a5fad7d5115ccc7b78d726b0700e1258348693dced5541",
+    "text": "# Requirements Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Clarification Loop\n\n- Ask concrete, batched questions for unpinned product decisions.\n- First inspect the manifest, accepted ADRs, executable/public contracts,\n  and relevant source, tests and documentation. Consult the owner only for a\n  remaining choice that can materially change requirements, architecture,\n  compatibility, risk, a quality attribute or scope. Apply Decision Consultation\n  when its conditions hold; never select or infer the human answer.\n- Choose a default only when the manifest or existing behavior determines it\n  and the decision has no escalation trigger.\n- Record every decision under **Resolved Assumptions** with one tag:\n  `User-confirmed`, `Sensible default`, or `Manifest convention`.\n- Continue until **Open Questions & Risks** is `None outstanding`.\n- Record ADR-eligible technical questions under **Architecture Decision Needs**;\n  do not choose a technical solution in this phase.\n- Do not repeat an answered decision against unchanged evidence. Treat exact\n  keyed answers as decision provenance, not approval or broader authority; a\n  newly justified round uses new IDs.\n\n## Document\n\n1. `# Feature: <Name>` and `Slug: <slug>`.\n2. **Overview**: behavior, primary flow, key constraint, non-goals.\n3. **Functional Requirements**: numbered `FR1`, `FR2`; single, testable\n   statements with exact names for assets, APIs, events, fields, formats, sort\n   order, and states.\n4. **User Stories & Acceptance Criteria**: Given/When/Then for observable\n   behavior.\n5. **Platform Specifics**: only touched constraints from the manifest.\n6. **Security Exposure**: one line per applicable exposure class naming the\n   mechanism and the FR numbers that satisfy it; or one line stating that no\n   class applies and why.\n7. **Architecture Decision Needs**: decision question, drivers, affected FRs or\n   quality attributes, and relevant existing ADRs; or `None`.\n8. **Resolved Assumptions**: numbered product decisions with provenance.\n9. **Open Questions & Risks**: must be `None outstanding` before hand-off.\n\n## Rules\n\n- No file layout, class design, or implementation detail.\n- Do not put options, solution selection, or ADR rationale in the description.\n- If an FR cannot map to acceptance criteria, rewrite it.\n- Apply the Security Assurance policy (`security-assurance.md`) supplied by the active execution context. Every applicable exposure\n  class becomes an ordinary numbered FR with acceptance criteria; a security\n  requirement that cannot map to acceptance criteria is rewritten like any\n  other. Do not write a per-class `N/A` list.\n- Inspect only load-bearing context relevant to the requested change. Turn a\n  materially applicable observable Engineering Quality constraint into an\n  ordinary FR and acceptance criterion. Leave internal design constraints to an\n  ADR decision need or the development plan.\n- Do not create an Engineering Quality section, a ten-rule checklist, or\n  per-rule `N/A` entries. Generic preference is not a requirement.\n- Quote user-facing strings exactly.\n- Pin enable/disable states, error paths, and interruption behavior.\n\n"
+  },
+  "guidance/architecture.md": {
+    "sha256": "3e42656a440dcdc813710d8b5e0e2e0d5476f9b498d1f244e7d97677c512e751",
+    "text": "# Architecture Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Proposal\n\n1. State one decision question and its owner. Split independent decisions.\n2. Search the decision log for duplicates, conflicts, and decisions this one\n   would deprecate or supersede.\n3. Choose the next unused four-digit ID and recheck for collisions before write.\n4. Evaluate viable options against requirements, quality attributes, security,\n   current facts, accepted ADRs, cost, risk, reversibility, and operational\n   impact. A new or changed trust boundary, authorization model, or\n   secret-handling approach is ADR-eligible; apply the Security Assurance\n   policy (`security-assurance.md`) supplied by the active execution context when weighing options. Use materially applicable\n   Engineering Quality properties as decision drivers, not as a preselected\n   architecture pattern or methodology.\n5. Write the ADR with status `Proposed`.\n6. Update `documentation/decisions/README.md` with the proposed record.\n7. Present the proposal and wait for an explicit human lifecycle decision.\n\n## ADR Document\n\nWrite these sections:\n\n1. `# ADR NNNN: <Title>`.\n2. **Status / Date / Owner / Decision Makers**.\n3. **Related Artifacts**: feature, plan, manifest sections, and related ADRs.\n4. **Context and Decision Drivers**: current/target distinction, requirements,\n   constraints, and quality attributes.\n5. **Options Considered**: material benefits, costs, risks, and rejection reason\n   for each non-selected viable option.\n6. **Decision**: direct, imperative outcome. Keep implementation steps out.\n7. **Consequences**: positive, negative, risks, and required follow-ups.\n8. **Compliance and Confirmation**: observable checks for implementation and\n   review.\n9. **Lifecycle Links**: `Supersedes`, `Superseded by`, or `None`.\n\n## Lifecycle\n\n- `Proposed`: revise, accept, or reject after review. Planning cannot rely on it.\n- `Accepted`: record approval date and decision makers. The body becomes\n  immutable and can guide planning before implementation exists.\n- `Rejected`: preserve the proposal and add the rejection reason.\n- `Superseded`: allowed only when a linked replacement ADR is accepted.\n- `Deprecated`: use when the decision no longer applies without replacement.\n\n## Apply The Decision\n\n- Rework: keep `Proposed`, revise the proposal, and request another review.\n- Accept: set `Accepted`, record approval date and decision makers, update the\n  decision index, and add a `Planned` row to the manifest's active ADR index.\n  The row carries only ID, title, path, and state; rationale, options, and\n  consequences stay in the ADR body. The manifest stays current state and the\n  ADR is approved target intent: `code-writing` moves the row to `Implemented`\n  only after verification, and any current/target difference must be explicit\n  in `plan.md`.\n- Reject: set `Rejected`, record the reason, and update the decision index.\n- Supersede: accept the replacement first, then change only status and lifecycle\n  links on the older ADR, keep both in the decision log, and update both\n  indexes.\n- Deprecate: require explicit approval, record why it no longer applies, and\n  remove it from the manifest's active index.\n\nUpdate the decision-log row after every lifecycle change. Change an accepted\ndecision only with a new Proposed ADR; never rewrite its context, options,\ndecision, or consequences.\n\nEngineering Quality does not expand ADR eligibility. Keep a local, reversible\nimplementation choice in the calling plan even when one policy property informs\nit; create an ADR only when the existing eligibility threshold is met.\n\n"
+  },
+  "guidance/planning.md": {
+    "sha256": "ecd5eb1ba3e3bf35199d93da13f2dc4a7f3fb51816f07d3c2f73cce7eb431fce",
+    "text": '# Planning Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Document\n\n1. `# Development Plan: <Name>`, slug, link to description, accepted ADRs, and\n   manifest facts used.\n2. **Plan Authority**: copy the document convention (heading and three paragraphs)\n   from the installed `policies/plan-task-completion.md`, before Technical\n   Breakdown and Implementation Tasks. Make obligations explicit; add labeled\n   optional guidance only when useful. Required behavior and safety constraints\n   belong in binding text. Do not add a classification template to every task.\n3. **Technical Breakdown** in dependency order, only for materially affected\n   areas. Establish behavior, invariants, scope and relevant boundaries; retain\n   necessary contract, dependency, failure/lifecycle and compatibility constraints.\n   Name enforcement points for recorded security exposures and specific manifest\n   facts that will become stale. Omit unaffected layers and empty sections.\n4. **Implementation Tasks**: one canonical heading per task in the exact form\n   `- [ ] **T001 - Title**`, `- [ ] **T002 - Title**`, in dependency order.\n   The heading line ends at the closing `**`: no trailing annotation,\n   emphasis, or continuation after it, and the box stays unchecked even in a\n   revised plan whose earlier tasks were already implemented \u2014 put provenance\n   notes such as "added from review finding" in the task body below the\n   heading. A heading outside this grammar fails deterministic validation\n   before the plan can be approved. Each task establishes behavior and binding\n   invariants, affected files/units and boundaries, necessary implementation\n   constraints, dependencies, FR/acceptance/ADR mapping, proportionate assurance\n   and completion evidence, and review\n   batch. For every material claim introduced by the change, name an existing\n   proportionate evidence owner such as Test Assurance, Security Assurance,\n   contract verification, a configured check, or justified inspection; do not\n   create another test by default. Mark tasks that need separate approval. After\n   strict orchestrated approval these checkboxes become an immutable approved\n   work set; execution status is recorded in the structured completion ledger\n   and its report projection, never by marking them `[x]`.\n5. **Consistency Check**: map every FR and acceptance criterion to tasks, map\n   every accepted ADR constraint or confirmation method, confirm there are no\n   unresolved Proposed ADRs, name required manifest transitions, and state the\n   plan\'s own security exposure or that none applies. Name only materially\n   applicable Engineering Quality constraints and their task/evidence owner; do\n   not add a ten-row checklist or per-rule `N/A` list.\n\n## Rules\n\n- Specify exact contracts, signatures, state shapes, identifiers, config keys,\n  locations or techniques when applicable authority or a concrete constraint\n  requires them, including internal details. Link existing authoritative\n  definitions instead of copying them; do not authorize future contract changes\n  through a link. Leave routine private mechanics open where no such constraint\n  applies, under the installed plan policy.\n- Omit speculative layers, exhaustive file trees, function inventories and\n  pseudocode bodies. Do not write function bodies.\n- Map every FR and acceptance criterion to the plan.\n- Do not repeat ADR option analysis or rationale; link the accepted ADR.\n- If planning discovers a material human-owned choice or conflicts with an\n  accepted ADR, stop dependent work. Resolve the choice through Decision\n  Consultation when applicable; an ADR-eligible result requires an architecture\n  decision before a dependent plan. Never infer or repeat an answered choice\n  against unchanged evidence.\n- State thread/actor/context boundaries when relevant.\n- Do not introduce an unapproved dependency. If one is required, stop for\n  explicit approval and ADR evaluation; after approval, include install,\n  lockfile, verification, and manifest tasks.\n- Follow the Engineering Quality authority order. Use the smallest compatible\n  design that satisfies the description and accepted decisions; do not mandate\n  a generic architecture, abstraction, directory, or dependency-injection\n  technique.\n- Apply the Security Assurance policy (`security-assurance.md`) supplied by the active execution context. For each exposure the\n  description recorded, name the enforcement point \u2014 the module or boundary\n  applying the control \u2014 and map its requirement to a task like any other.\n- Apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Plan evidence for material\n  guarantees and plausible regressions; do not require one test per requirement,\n  branch, helper, edge case, or traceability row.\n\n'
+  },
+  "guidance/implementation.md": {
+    "sha256": "50b91df23f9e115d2bfc6f870e4c296bdc7de0aacf1662056e5fa2f42dd1304f",
+    "text": "# Implementation Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Implementation Rules\n\n1. Follow the approved task order and preserve approved task meaning.\n2. Group adjacent steps with no escalation trigger into batches. Report a batch\n   and continue; a batch boundary is not a gate.\n3. Stop before any planned or discovered escalation trigger; name it and wait\n   for explicit approval.\n4. After each batch, run focused affected checks that give useful feedback.\n5. Do not run formatter in batch loops. Run it only during final verification.\n6. Apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Preserve tests that protect\n   material guarantees. Add, consolidate, or remove tests only when the resulting\n   evidence remains proportionate and non-redundant.\n7. Do not add unapproved dependencies. Add only dependencies explicitly\n   authorized by the approved plan, then update the lockfile and manifest.\n8. Apply the Engineering Quality authority order and materially applicable\n   constraints. Keep work within approved scope, use the smallest compatible\n   implementation, and reuse repository mechanisms and evidence owners rather\n   than creating an EQ checklist, methodology, or test quota.\n9. Apply each linked ADR's compliance and confirmation constraints.\n10. Make important implementation dependencies, boundary behavior, failure and\n    lifecycle consequences, and compatibility changes explicit when the plan\n    identifies them; do not invent those concerns for an unaffected surface.\n11. Comment sparingly and with high signal. Write a comment only to explain\n    why: a constraint, trade-off, invariant, side effect, or non-obvious\n    behavior. Do not narrate what the code visibly does.\n12. When Serena MCP tools are listed, prefer `find_symbol`,\n    `find_referencing_symbols`, and `get_symbols_overview` over pattern search\n    or line-window reads for code.\n\n## Deviations\n\nApply Plan Authority (`plan-task-completion.md`) supplied by the active execution context.\nSatisfy binding requirements within approved scope; a different compliant choice\nunder explicitly optional guidance is not a deviation and needs no reapproval or\nreport entry merely for differing. Preserve legacy approved meanings and exact\ndirectives; private appearance alone does not make a constraint optional.\n\nRecord material decisions and real deviations proportionately, with rationale\nand confirmation that `description.md` still holds. A missing/deprecated API,\nframework behavior or correctness gap may require a deviation, but documenting\nit does not authorize a changed commitment. Use existing escalation/reapproval\nfor conflicts. Record material Engineering Quality deviations in the existing\nimplementation report, not a separate artifact or mandatory per-rule checklist.\n\nIf a deviation conflicts with or invalidates an accepted ADR, stop before the\nconflicting change. Require a superseding architecture proposal, then revise and reapprove\nthe plan. Never edit the accepted ADR body.\n\n## Final Verification\n\nBefore the report:\n\n1. Trace every FR and acceptance criterion to implementation and proportionate\n   assurance evidence.\n2. Confirm every resolved assumption is honored.\n3. Trace every accepted ADR compliance/confirmation item to code, tests, or an\n   explicitly owned non-automated check.\n4. Confirm every plan task is complete or reported as a gap.\n5. Confirm each material claim has the proportionate evidence owner assigned by\n   the plan and that applicable Engineering Quality constraints and deviations\n   match the current implementation.\n6. Run formatter check/fix if configured.\n7. In orchestrated mode, do not repeat a full-scope command supplied in the\n   runner verification block. If the manifest's applicable final suite is absent\n   from that block, run it once and record the configuration gap.\n8. In standalone mode, run the applicable typecheck, lint, and final test suite\n   once.\n9. If formatting changed files, rerun affected checks.\n10. Set verified ADR entries in the manifest index to `Implemented`; leave\n    unimplemented accepted decisions as `Planned`.\n11. Update only the manifest facts the change made stale, following the\n    `project-manifest` writing rules: rewrite the affected bullet, add or remove\n    module entries, and record no delivery narrative, verification history, or\n    test counts. Those belong in the implementation and test reports.\n\n## Implementation Report\n\nWrite the resolved `implementationReport` artifact:\n\n1. title, slug, links to description and plan;\n2. files created/modified/deleted and new folders/modules;\n3. FR/story trace plus final verification commands and outcomes;\n4. ADR conformance and confirmation evidence;\n5. statement: no functional gap and no scope expansion, or list gaps;\n6. deviations from plan;\n7. assurance evidence added, reused, consolidated, or intentionally deferred,\n   and the material guarantee each automated test can fail to protect;\n8. material Engineering Quality deviations and their authority, impact, and\n   evidence owner, or `None`;\n9. notes for assurance.\n\n"
+  },
+  "guidance/assurance.md": {
+    "sha256": "3da316eeb09de70849c77e8a1ec86ac1987d5b8dac85be4bd0e8ca819facc032",
+    "text": "# Assurance Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Rules\n\n- Use the manifest's test framework, layout, and import pattern.\n- Read linked accepted ADRs and test their compliance/confirmation criteria when\n  automation is appropriate.\n- Stop and report if the implementation relies on a non-Accepted ADR.\n- No new test dependency, framework, or runner without explicit approval and\n  manifest update. Test counts, case inventories, and run results go in\n  `test-report.md`, never in the manifest.\n- Mirror production layout in test paths.\n- Keep test doubles together; fakes record calls/arguments and use the same\n  event/callback/state mechanism as production.\n- Match the code's async/concurrency context.\n- Name tests `<unit>_<condition>_<expectedResult>` unless the manifest says\n  otherwise.\n- Preserve existing tests that assert behavior; delete generated stubs.\n- Delete hollow tests.\n- Comment sparingly and with high signal. Write a comment only to explain why:\n  a constraint, trade-off, invariant, side effect, or non-obvious behavior. Do\n  not narrate what the test visibly does.\n- Apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Test count, coverage\n  percentage, syntactic reach, and private implementation structure are not\n  completion criteria unless the manifest records an explicit approved policy.\n- A valid result may add no test, reuse existing evidence, use a non-unit owner,\n  consolidate redundant tests, or narrow an overstated report claim.\n  Claim narrowing cannot discharge a required check or missing material evidence.\n- For strict plans, apply Plan Authority (`plan-task-completion.md`) supplied by the active execution context: protect binding obligations, including\n  legacy directives, without turning an optional private choice into a test target.\n\n## What To Test\n\n- First protect material business rules, public or persisted contracts,\n  authorization/security/privacy boundaries, state transitions, recovery,\n  decision tables, and confirmed regressions.\n- Choose the smallest realistic test level that observes the guarantee. One test\n  may protect several requirements.\n- A security requirement recorded under the Security Assurance policy (`security-assurance.md`) supplied by the active execution context is a material guarantee: give it evidence at the proportionate\n  level, with no separate security-test quota.\n- Test a pure helper directly only when its behavior is itself a material\n  contract or the direct test is the clearest non-redundant evidence.\n- Environment-sensitive values: assert round trips, not local literal strings.\n\nNot unit-testable behavior goes in the report with owner:\nUI/snapshot, integration/smoke, e2e, or platform behavior.\nApply the same rule to ADR confirmation that requires operational, security,\nperformance, or architecture review rather than a unit test.\n\n## Suite Runs\n\n- Run focused affected tests while developing or critiquing evidence.\n- In orchestrated mode, do not repeat a full-scope command listed in the runner\n  verification block. If the manifest's applicable final suite is absent, run\n  it once and record the configuration gap.\n- In standalone mode, run the applicable final suite once after tests stabilize.\n- Fix failures before proceeding.\n- Never claim tests pass without a run.\n\n## Critique Loop\n\nCheck for:\n\n- unasserted error paths;\n- unprotected material guarantees;\n- tangled assertions;\n- hollow tests;\n- implementation-coupled or redundant tests;\n- disproportionate doubles and suite cost;\n- unused helper parameters.\n\nRun one focused pass. Run a second pass only if the first changed the assurance\nportfolio or found a material gap.\n\n## Test Report\n\nWrite the resolved `testReport` artifact:\n\n1. title, slug, related artifacts;\n2. framework/layout/doubles note;\n3. focused feedback commands and outcomes plus the runner-owned final commands,\n   standalone final suite, or recorded runner-profile gap as applicable;\n4. files added/removed/changed;\n5. **Risk and Contract Assurance Map** with material guarantee, impact or\n   regression risk, best evidence level, existing/new evidence, and deferred\n   evidence owner;\n6. shared evidence, no-new-test, test-consolidation, claim-narrowing, non-unit,\n   and non-automated ADR decisions with reasons and owners;\n7. critique loop result.\n\n"
+  },
+  "guidance/manifest.md": {
+    "sha256": "55cec3804b4b2aa099354fb0818c770e9bb52ea69c1e4559d336db8cb99ac65b",
+    "text": "# Manifest Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Maintenance\n\nRun after changes to:\n\n- architecture;\n- modules/components;\n- build/config settings;\n- environment keys;\n- dependencies;\n- conventions;\n- implementation or supersession of an accepted ADR.\n\n## Required Sections\n\nKeep these headings in order:\n\n1. **Project Overview**\n2. **Platform & Tooling**\n3. **Architecture**\n4. **Project Structure**\n5. **Key Modules & Components**\n6. **State & Data Flow**\n7. **Dependencies**\n8. **Testing**\n9. **Conventions**\n10. **Technical Constraints & Decision Index**\n\nWrite `None` with a reason when a section is empty.\n\n## Writing Rules\n\n- Record facts, not preferences.\n- Quote config keys, target names, and versions exactly.\n- State the operational effect of load-bearing current constraints; keep their\n  trade-offs in ADRs.\n- Use concise present-tense bullets: one current fact per bullet. When a fact\n  changes, rewrite its bullet; do not append the new state after the old one.\n- Do not include code in the manifest.\n- Keep ADR rationale, alternatives, consequences, and history out of the\n  manifest; link the active accepted ADR instead.\n- Keep the manifest current-state only. Implementation history, release\n  narrative, per-change delivery summaries, and past verification results\n  belong in ADRs, feature reports, and change records; link them, do not\n  restate them.\n- Keep the whole manifest readable in one pass; every skill loads it before\n  work. When a section outgrows a few screens, move detail to a linked\n  maintainer reference instead of growing the manifest.\n- In **Key Modules & Components**, give each unit one bullet: path, role,\n  public interface or contract, and the load-bearing invariant. Keep\n  step-by-step behavior, edge-case narratives, and rendering detail in source,\n  tests, or a linked maintainer reference.\n- In **Decision Index**, keep one row per active accepted ADR with ID, title,\n  path, and `Planned`/`Implemented` state. Link the decision log for rejected\n  and superseded records; add no per-ADR delivery prose.\n- Keep section 9 limited to repository-specific conventions supported by\n  configuration, approved guidance, or dominant evidence. Do not insert generic\n  function-size, decomposition, abstraction, control-flow, comment, naming,\n  directory, or pattern preferences.\n- In **Testing**, record the current assurance priorities, allowed test-double\n  boundaries, final-suite owner, and explicit coverage threshold or `None` as\n  project facts rather than universal preferences. Record the required suite\n  and at most the latest recorded result; per-change test counts and covered\n  guarantees stay in feature test reports.\n\n## Checklist\n\n- Replace `Recommended (not yet present)` once code exists.\n- Update modules for added/renamed/removed units.\n- Add approved dependencies.\n- Add new build/config/env/resource facts.\n- Keep active ADR links and `Planned`/`Implemented` states current.\n- Report, rather than hide, a difference between current manifest facts and\n  accepted ADR intent.\n- Re-read every section and remove stale claims.\n\n"
+  },
+  "guidance/review.md": {
+    "sha256": "e881366ad065ad28838e19d0116b8323b466ef9f2712fba785d08a43e3ea658b",
+    "text": "# Review Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Read\n\n- the resolved `work` artifact, if present.\n- the resolved `description` artifact, if present.\n- the resolved `plan` artifact, if present.\n- the resolved `implementationReport` artifact, if present.\n- the resolved `testReport` artifact, if present.\n- `documentation/decisions/README.md` and ADRs linked by feature artifacts,\n  source boundaries, or the manifest.\n- `PROJECT_MANIFEST.md`.\n- Source and tests.\n\nWhen Serena MCP tools are listed, prefer `find_symbol`,\n`find_referencing_symbols`, and `get_symbols_overview` over pattern search or\nline-window reads for code.\n\nStop if neither lite nor strict artifacts exist. Flag partial strict artifact\nsets.\n\n## Audit\n\nFor each finding, cite `file:line`.\n\n1. Spec compliance: every FR/acceptance criterion implemented; no scope\n   expansion.\n2. Resolved assumptions: states, gates, errors, interruptions honored.\n3. Plan conformance: apply Plan Authority (`plan-task-completion.md`) supplied by the active execution context; task statuses match code/reports and real\n   deviations are recorded proportionately. Optional-guidance differences alone\n   are not findings, but independently supported defects still are. Preserve\n   legacy meaning and explicit approved directives even when another approach\n   seems equivalent; keep existing severity rules. In\n   an approved orchestrated run, unchecked immutable boxes define the work set\n   and are not a finding by themselves. Apply the same evidence hierarchy as\n   `feature-status`: inspect the runner-supplied validated completion summary\n   and task records, then check material consistency with the implementation\n   report, required assurance, approval digest, state, and source. The runner's\n   deterministic checks remain the primary enforcement boundary; a reviewer\n   must not return `pass` when required evidence is absent, a task is incomplete\n   or blocked, or a material contradiction is visible. Report a finding only for a\n   material contradiction or gap, never merely to request checkbox mutation.\n4. ADR lifecycle: required decisions exist, relied-on ADRs are `Accepted`,\n   supersession links are reciprocal, and accepted bodies were not rewritten.\n5. ADR conformance: implementation and tests satisfy decision, consequences,\n   and confirmation criteria; no architecturally significant choice is hidden\n   only in a plan or manifest.\n6. Report accuracy: file lists and verification claims match reality.\n7. Verification: inspect current runner evidence. Rerun only a focused\n   reproduction or missing, stale, inconsistent, or directly material command;\n   record why. Run the formatter check only when that evidence is specifically\n   required. Never run formatter fixes in review.\n8. Manifest conformance: current facts, active ADR index, naming, errors,\n   organization, async model, localization, dependency policy.\n9. Maintainability: report dead generality, needless indirection, unclear\n   responsibility, or comment/documentation behavior as an ordinary finding\n   only when exact evidence shows current material impact or a violated approved\n   authority. A preferred pattern, decomposition, control-flow style, or generic\n   cleanliness opinion is not a finding.\n10. Repository conventions: apply only manifest facts, configured rules,\n    approved guidance, and dominant local conventions relevant to the changed\n    surface. Do not invent generic naming, comment, size, or directory rules.\n11. Tests: apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Reject hollow, redundant,\n    implementation-mirroring, or disproportionate tests. Confirm the Risk and\n    Contract Assurance Map does not overstate its evidence.\n12. Docs: no stale artifact, ADR, decision-index, or manifest statements.\n13. Security: apply the Security Assurance policy (`security-assurance.md`) supplied by the active execution context against the diff as built.\n    Each recorded exposure has a named enforcement point and proportionate\n    evidence; a recorded no-exposure claim still holds for the code that\n    exists. Use the `security` category.\n14. Engineering Quality: after the ordinary audit and verdict are frozen, apply\n    the shadow procedure below. Do not use an EQ-only concern to retroactively\n    create or re-severity an ordinary finding.\n\nFor a missing-test finding, the existing finding fields must together identify:\n\n- the material observable guarantee;\n- the plausible regression mechanism;\n- why current evidence cannot detect it;\n- the proportionate evidence level and observable fix acceptance.\n\nCoverage percentage, syntactic reach, a private helper, or a traceability row\nalone is not a finding. A false report claim remains a finding, but its fix may\neither add proportionate evidence or narrow the claim truthfully. Missing\nmaterial contract or safety evidence and failed required checks remain actionable;\nclaim narrowing cannot discharge an actual mandatory requirement.\n\nA security finding obeys the same rule: it must name the exposure class, the\nmechanism reachable in this codebase, why current evidence does not cover it,\nand the observable fix acceptance. An exposure-class label, a generic threat\nname, or a framework default alone is not a finding.\n\n## Engineering Quality Shadow Procedure\n\n1. Complete audit items 1\u201313 under their existing authorities. Freeze the\n   ordinary findings, severities, and verdict before classifying Engineering\n   Quality overlap or looking for an incremental EQ-only candidate.\n2. An already-valid ordinary finding may add exactly one primary `EQ-NN` to its\n   existing `violates` array. The finding must qualify without that mapping, and\n   the mapping changes neither severity nor verdict.\n3. Record a genuinely incremental EQ-only candidate only as one `EQ-SHADOW:`\n   string in existing free-form `deferredCoverage`. It must include a\n   review-local candidate ID, primary rule ID, suggested severity, confidence,\n   exact evidence and stable location, concrete impact, smallest reasonable\n   remediation, relevant authority references, verification method, semantic\n   dedupe key, and `waiver=not_applicable (shadow-only)`.\n4. Use the dedupe identity defined by the canonical policy. Merge wording-only\n   duplicates and line-number drift into one record. Ordinary deferred-coverage\n   prose remains valid.\n5. A shadow record is not a finding: it cannot affect ordinary findings,\n   severity, verdict, mandatory human triage, accepted scope, fixing,\n   completion, or a gate. Do not put it in `findings`, and do not promote it even\n   when its suggested severity is `blocker`.\n\nRecommended human-readable form, as a semantic evaluation convention only:\n\n```text\nEQ-SHADOW: candidateId=EQ-S1; ruleId=EQ-04; severity=should_fix; confidence=high; evidence=src/config.ts:84 ConfigLoader.parseConfig; impact=malformed persisted values reach process invocation; remediation=validate with the existing config decoder; references=FR3 and manifest section 6; verification=focused malformed-value rejection plus legacy-valid acceptance; dedupeKey=EQ-04|ConfigLoader.parseConfig|FR3|invalid-config; waiver=not_applicable (shadow-only)\n```\n\nNo EQ-specific field is mandatory in the review-result contract. Do not change the\nstructured schema, parser, or runtime validation to interpret the string.\n\n"
+  },
+  "guidance/fix.md": {
+    "sha256": "0dcccc947849448bb295f54bb765b2b34b90cb3c15360381bd3c0217e74617a1",
+    "text": "# Fix Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Report Rule\n\nWrite the resolved `changeReport` artifact when the fix:\n\n- changes user-visible behavior or a public contract;\n- fixes a documented bug;\n- applies or skips review findings;\n- changes `description.md`, `work.md`, `plan.md`, `test-report.md`,\n  `review-<iteration>.md`, or `PROJECT_MANIFEST.md`;\n- creates, supersedes, deprecates, or changes lifecycle metadata on an ADR;\n- touches an escalation trigger;\n- records a material Engineering Quality deviation;\n- is requested to have an audit trail.\n\nOtherwise verification and a final summary suffice; no change report is required.\n\n## Workflow\n\n1. Read relevant active accepted ADRs and the triaged review artifact when\n   review findings initiated the fix. Require explicit accepted finding IDs;\n   never infer acceptance from the review file alone. For defects, write a\n   failing regression test first only when it protects a material observable\n   regression not already covered and can be done without production changes.\n3. Follow the Engineering Quality authority order and make the smallest\n   compatible code/test/doc change that satisfies the request or accepted\n   finding. Do not turn a shadow candidate, rejected concern, or alternative\n   design opinion into extra scope. For approved strict plans, apply Plan Authority\n   (`plan-task-completion.md`) supplied by the active execution context: preserve binding directives\n   and legacy meaning; a suggested remedy remains optional unless an applicable\n   explicit human decision makes it mandatory. Correcting a report cannot replace\n   satisfying a required check or missing material evidence.\n   Comment sparingly and with high signal:\n   write a comment only to explain why, a constraint, trade-off, invariant,\n   side effect, or non-obvious behavior, and do not narrate what the code\n   visibly does.\n4. Keep feature artifacts and manifest in sync when behavior, design,\n   architecture, build settings, or conventions change. Rewrite only the\n   stale manifest facts under the `project-manifest` writing rules; fix\n   narrative and verification results belong in the change report.\n5. After changing tests or verification commands, including their expected or\n   observed results, search the complete current `test-report.md`,\n   `implementation-report.md`, and the fix's change report when it exists or is\n   required for every test-count and command-result claim. Update every current\n   claim from a command actually run in this fix, or label earlier evidence\n   explicitly `historical/pre-fix` with its scope. Keep all three artifacts\n   mutually consistent, and never leave an old unqualified count or command\n   outcome describing the current tree. In orchestrated mode, when runner-owned\n   final verification has not run yet, record only\n   `pending at fix handoff; durable runner evidence owns the eventual result`\n   instead of predicting it or copying an earlier total as current.\n6. Never rewrite an accepted ADR body. Route a changed accepted decision to a\n   superseding ADR and reapproved strict plan.\n7. If no upstream feature artifact exists, state that instead of inventing one.\n8. Run focused affected checks. In orchestrated mode, do not repeat supplied\n   full-scope runner commands; if the manifest final suite is absent, run it once\n   and report the gap. In standalone mode, run one final applicable suite.\n9. Run formatter check/fix only as final review, if configured. If it rewrites\n   files, rerun affected checks.\n10. Self-review for ADR and applicable Engineering Quality conformance, side\n    effects, missing material negative evidence, disproportionate tests, and doc\n    drift. Fix in-scope findings and rerun affected checks.\n11. Write/update the change report when required.\n\n## Change Report\n\nUse the resolved `changeReport` artifact:\n\n1. title, date, affected feature and ADR links;\n2. what changed;\n3. why;\n4. security exposure: one line per applicable class with the control applied,\n   or one line stating that none applies;\n5. files changed: production/tests/docs;\n6. skipped review findings, if any;\n7. documentation sync;\n8. ADR conformance or lifecycle result;\n9. material Engineering Quality deviations, or `None`;\n10. verification commands and outcomes;\n11. assurance critique result.\n\n"
+  },
+  "guidance/feature.md": {
+    "sha256": "d6ea97c20587be8f300bbdc7996b26cca8df9059e3244cb98288de18eec6f7e5",
+    "text": "# Feature Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Workflow\n\n1. Read relevant code, tests, docs, existing artifacts, and manifest sections.\n3. Ask only blocking questions. Record local default decisions with reason and\n   provenance.\n4. Identify relevant active ADRs and apply the ADR eligibility check.\n5. Create/update the resolved `work` artifact.\n7. Apply the Engineering Quality authority order and only constraints material\n   to the changed surface. Keep the change bounded and use the smallest\n   compatible repository mechanism; do not add a checklist or methodology.\n8. Implement code and proportionate assurance evidence together under the Test\n   Assurance policy (`test-assurance.md`) supplied by the active execution context. Every material claim needs an identifiable\n   existing evidence owner, but Engineering Quality does not select tests.\n9. Run focused affected checks. In orchestrated mode, do not repeat supplied\n   full-scope runner commands; run the manifest's applicable final suite once\n   only when it is absent from that block and record the gap. In standalone mode,\n   run one final applicable suite after the work stabilizes.\n10. Self-review for correctness, applicable Engineering Quality constraints,\n    missing material evidence, ADR conformance, async/concurrency, doc drift,\n    and scope creep.\n11. After code stabilizes, run formatter check/fix if configured. If it\n    rewrites files, rerun affected checks.\n12. Update `work.md` and manifest if stale. Change only the manifest facts this\n    work made stale, under the `project-manifest` writing rules; verification\n    results and delivery narrative stay in `work.md`. Record only material\n    Engineering Quality deviations in the existing **Deviations & Follow-ups**\n    section.\n\n## `work.md`\n\nWrite these sections:\n\n1. `# Feature: <Name>` and `Slug: <slug>`.\n2. **Related artifacts**: include relevant accepted ADRs or `None`.\n3. **Goal**: capability, value, explicit non-goals.\n4. **Requirements**: numbered `FR1`, `FR2`; each concrete and verifiable.\n5. **Assumptions & Decisions**: numbered, tagged `User-confirmed`,\n   `Sensible default`, or `Manifest convention`; exclude ADR-eligible choices.\n   Include one line per applicable security exposure class naming its mechanism\n   and the requirement covering it, or one line stating that none applies.\n6. **Implementation Plan**: ordered bullets naming units, materially changed\n   boundaries or dependency/lifecycle/compatibility constraints when present,\n   assurance evidence owners, and manifest follow-up. Do not add a per-rule\n   checklist.\n7. **Files Changed**: production, tests, docs/config; one-line reason each.\n8. **Verification**: commands, outcomes, and FR-to-implementation/assurance\n   mapping.\n9. **Deviations & Follow-ups**: deviations, limits, or `None`.\n\n## Rules\n\n- Keep `work.md` compact. Escalate if requirements or plan outgrow it.\n- Do not duplicate ADR context or rationale in `work.md`; link the decision.\n- Tests must be able to fail for real behavior.\n- No hollow tests.\n- Do not add a test solely for count, coverage percentage, a private branch, or\n  a helper. Existing evidence or no new test is valid when proportionate and\n  recorded accurately.\n- No new dependency without approval and manifest update.\n- Comment sparingly and with high signal. Write a comment only to explain why:\n  a constraint, trade-off, invariant, side effect, or non-obvious behavior. Do\n  not narrate what the code visibly does.\n"
+  },
+  "policies/decision-consultation.md": {
+    "sha256": "82a869ef55849063b96742f5a60474bcf54492b737ca2703380d4a53f46f26d5",
+    "text": "# Decision Consultation\n\n- Owner decision: ADR-0031\n- Consumers: None; conditional: `feature-description`, `architecture-decision`, `development-plan`\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning (conditional).\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Decision Consultation\n\nAn unresolved material choice in strict planning is raised as\n`gate=decision_consultation` only after repository analysis. Present one to three\nbounded cards with independent stable IDs, the exact question, why it matters,\naffected requirements, repository-relative evidence, viable options and their\nmaterial consequences, response mode, human owner, and an advisory\nrecommendation only when evidence supports one.\n\nDo not write a Proposed ADR or plan that selects an option while its prerequisite\nconsultation is unanswered. Record exact keyed human answers as decision\nprovenance, analyze them again, and do not repeat an answered decision against\nunchanged evidence. A new round requires a newly justified independent choice\nand new identities.\n\nConsultation is not approval or permission. An answer, including `Use\nrecommendation`, never accepts an ADR, approves a plan, authorizes code, fixes,\ntriage, recovery, release, or an external side effect. The later ADR and plan\ngates remain separate. In standalone mode present the same cards in chat; in\norchestrated mode return the typed request with `questions=[]` and let the CLI or\ncompatible supervisor relay only the current user's exact answer.\n"
+  },
+  "policies/test-assurance.md": {
+    "sha256": "b424e894274e32d4051f80324f855bb58ff6645634eb4856cd48b6f6bef28d82",
+    "text": "# Test Assurance\n\n- Owner decision: ADR-0013/0014\n- Consumers: `development-plan`, `code-writing`, `test-writing`, `feature-review`, `feature`, `quick-fix`; conditional: `project-manifest`\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning, implementation, review, fix, feature, quick-fix.\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Test Assurance\n\n- Add or retain a test only when it protects a material observable guarantee or\n  plausible regression that equivalent existing evidence does not already\n  protect.\n- Prioritize business rules, public and persisted contracts, authorization,\n  security, privacy, state transitions, recovery, decision tables, and confirmed\n  defects.\n- Test count, coverage percentage, a syntactic branch, a private helper, or the\n  ability to add another assertion is not enough by itself. An explicit approved\n  project threshold recorded in `PROJECT_MANIFEST.md` remains authoritative.\n- Boundary fakes, stubs, and injected runners are appropriate when they preserve\n  the production command, event, callback, or state contract and make unstable\n  dependencies deterministic. Reject tests that mock the unit under test,\n  reproduce private call order, mirror implementation structure, or duplicate\n  an already protected guarantee.\n- One behavioral test may protect several requirements. Existing evidence, a\n  non-unit evidence owner, or no new automated test is valid when proportionate\n  and recorded accurately. Consolidate or remove redundant, hollow, obsolete,\n  or implementation-coupled tests only when their guarantees remain protected.\n- Reports must claim only behavior demonstrated by assertions or other recorded\n  evidence. Narrowing an overstated claim is a valid correction; do not add a\n  low-value test merely to preserve broader prose.\n- Missing material contract or safety evidence, failed verification, hollow\n  tests, and false evidence claims remain actionable. Lower test volume is not a\n  goal independent of assurance.\n"
+  },
+  "policies/security-assurance.md": {
+    "sha256": "b42cef3a0ccec8e4ba5e23057a4c788fc32227e9a3bca454d9d82d43589d4b74",
+    "text": "# Security Assurance\n\n- Owner decision: ADR-0027\n- Consumers: `feature-description`, `development-plan`, `feature-review`, `feature`, `quick-fix`; conditional: `architecture-decision`, `code-writing`, `test-writing`, `project-manifest`\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning, implementation (conditional), review, fix, feature, quick-fix.\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Security Assurance\n\nAssess the surface **this change creates or widens**, not the whole system. An\nestablished control the change only uses is not re-litigated.\n\nExposure classes, judged by mechanism rather than by topic word:\n\n1. Untrusted input reaches an interpreter or resource path: a query, filesystem\n   path, template, command, deserializer, or markup renderer.\n2. An identity or access decision: new or changed authentication,\n   authorization, role, tenant, ownership, or capability check.\n3. Secret material: how a credential, token, or key is obtained, stored,\n   transmitted, and kept out of logs and errors.\n4. Personal or regulated data: collection, retention, export, and appearance in\n   logs or error messages.\n5. Cross-principal reachability: one user's or tenant's data reachable by\n   another through identifiers, listings, caches, or shared state.\n6. An outbound request or redirect whose destination an input can influence.\n7. A destructive or irreversible effect: deletion, overwrite, money movement,\n   external publication, or mass mutation.\n\nRules:\n\n- Each applicable class produces at least one requirement written in the same\n  testable form as any other requirement, and the plan names the enforcement\n  point \u2014 the module or boundary where the control is applied.\n- Security requirements are material guarantees under Test Assurance and take\n  their evidence level from it. There is no separate security-test quota.\n- When no class applies, record one line naming that and why. Never write a\n  section of per-class `N/A` entries.\n- These are not evidence: generic security advice, a restatement of a framework\n  or platform default, \"be careful\" prose, and a threat with no mechanism\n  reachable in the current codebase.\n- A security finding must name the exposure class, the reachable mechanism, why\n  current evidence does not cover it, and the observable fix acceptance. A\n  class label alone is not a finding.\n\nDivision of labor with the escalation triggers in the project `AGENTS.md`: a trigger governs work\nwhose topic is security; this exposure review governs work whose topic is not.\nIntroducing or widening a security control is an escalation trigger. Complying\nwith an already established, unchanged control is not, so ordinary work that\nmerely touches an applicable class stays on its normal route.\n"
+  },
+  "policies/engineering-quality.md": {
+    "sha256": "b87dbd4849192be70dc0305411a4f88f731111ce5c613502492aced5d233b119",
+    "text": "# Engineering Quality\n\n- Owner decision: ADR-0030\n- Consumers: `feature-description`, `architecture-decision`, `development-plan`, `code-writing`, `feature-review`, `feature`, `quick-fix`, `project-manifest`; conditional: None\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning, implementation, review, fix, feature, quick-fix.\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Engineering Quality\n\nThis policy is vendor-neutral. The installed `policies/engineering-quality.md` is only its current storage and\ndelivery surface; the policy does not depend on Claude-specific tools,\npermissions, hooks, commands, sessions, or behavior. Skills and prompts\nreference this section instead of copying the complete rule set. Future Codex\nor other-vendor delivery must preserve these semantics without interpreting the\nfilename as policy authority.\n\nApply the authority order in the project `AGENTS.md` before any generic quality preference. When two\nremedies satisfy the same higher authority, use the smallest compatible\nremediation rather than requiring a preferred pattern.\n\n### EQ-01 \u2014 Local authority and context\n\nFollow approved requirements, accepted ADRs, executable and public contracts,\nmanifest facts, established invariants, and dominant repository conventions.\nDeviate only when the task, an approved decision, or a concrete correctness,\nsecurity, lifecycle, or compatibility need requires it. Generic preference does\nnot override repository authority.\n\nAlways active. An objective conflict with approved authority may be actionable;\na merely different local style is not.\n\n### EQ-02 \u2014 Cohesive responsibilities and explicit boundaries\n\nKeep changed responsibilities together when they share purpose, dependencies,\nlifecycle, and verification needs. Separate them when those concerns materially\ndiffer. Make important boundaries recognizable without arbitrary\nfragmentation.\n\nContextual and advisory unless a concrete consequence independently violates a\nstronger rule. It requires no function or file size, layer, service class, or\ndirectory pattern and never creates a blocker by itself.\n\n### EQ-03 \u2014 Dependency direction and visibility\n\nDo not introduce dependency edges that violate the repository's intended\ndependency direction or unnecessarily couple stable logic to volatile\nimplementation details. Make important runtime dependencies and mutable\ncollaborators visible at an appropriate existing composition or usage boundary.\n\nContextual. It assumes no domain-centric architecture and requires neither\ninterfaces nor a dependency-injection container. A mechanically forbidden edge\nor unapproved dependency may remain actionable under existing repository rules.\n\n### EQ-04 \u2014 Boundary contracts and ingress validation\n\nAt important public, process, network, persistence, filesystem, user-input, or\ninter-module boundaries, make input, output, failure, and compatibility\nsemantics clear using repository-appropriate mechanisms. Validate external or\nuntrusted data at the first boundary where the system assumes it is trustworthy;\nstatic types alone do not validate external bytes.\n\nContextual. A demonstrable contract, correctness, or security consequence may\nbe actionable under existing rules.\n\n### EQ-05 \u2014 Failure semantics and resource lifecycle\n\nPreserve useful failure meaning, original causes, and diagnostic context. Do not\nsilently turn failure into success. For resources with lifecycle semantics,\nidentify ownership and proportionate cleanup behavior for success, failure,\ncancellation, timeout, shutdown, and partial initialization where applicable.\n\nContextual. It requires no universal error hierarchy or resource-management\npattern. Reproducible data loss, leaks, hangs, swallowed failure, or violated\nlifecycle contracts may remain actionable under existing rules.\n\n### EQ-06 \u2014 Proportional design\n\nPrefer existing language, runtime, framework, platform, and project mechanisms\nwhen adequate. Prefer straightforward control and data flow. Add an abstraction\nor dependency only when it provides a concrete benefit such as isolating\nvolatility, enforcing a useful contract, removing meaningful duplication,\nsimplifying usage, or enabling necessary verification.\n\nAlways considered and advisory by default. It is not a ban on abstraction and\nnever creates a blocker by itself.\n\n### EQ-07 \u2014 Bounded change scope\n\nKeep the change within the approved task, plan, or accepted-finding scope. Do\nnot bundle unrelated cleanup, migration, abstraction work, dependency changes,\nor architecture refactoring unless required for correctness or explicitly\napproved.\n\nAlways active. Objective scope expansion remains actionable through existing\napproval, plan, baseline, and accepted-finding enforcement.\n\n### EQ-08 \u2014 Assurance ownership\n\nMaterial claims introduced by a change must have an identifiable,\nproportionate evidence owner. Reuse existing assurance mechanisms rather than\nduplicating them. Test Assurance, Security Assurance, contract verification,\nconfigured checks, or justified inspection may own evidence that compatibility\nis preserved, malformed input is rejected, cancellation cleans up resources,\npersisted data survives migration, or a failure remains observable.\n\nContextual. Engineering Quality detects missing assurance ownership; it does\nnot select tests, create a test quota, or require another test when equivalent\nevidence already exists.\n\n### EQ-09 \u2014 Compatibility\n\nPreserve public APIs, persisted formats, events, protocols, CLI behavior, and\nother externally depended-on semantics unless an approved specification or ADR\nintentionally changes them and defines the relevant migration consequences.\n\nContextual. A high-confidence unapproved breaking change may remain actionable\nunder existing contract, specification, or ADR authority.\n\n### EQ-10 \u2014 Incremental legacy evolution\n\nWhen changing legacy code, prefer a bounded seam, adapter, characterization\nevidence, staged migration, or similarly incremental path when it materially\nreduces risk. Do not demand an incremental technique when a direct local change\nis safer and simpler.\n\nContextual and advisory. It never creates a blocker by itself; a concrete scope\nor compatibility consequence may be reported under the existing authority it\nviolates.\n\n### Finding and shadow semantics\n\nAn actionable Engineering Quality concern must identify a primary rule ID,\nseverity, confidence, exact evidence and location, concrete impact, the smallest\nreasonable remediation, relevant specification, ADR, contract, manifest, or\naccepted-finding authority, a verification method, a stable deduplication\nidentity, and waiver state when applicable. Its identity is the primary rule,\nstable code or contract locus, violated authority, and impact class; wording or\nline-number drift does not create a new concern. Generic design preference\nwithout exact evidence and material impact is not actionable.\n\nIn initial shadow mode, complete the ordinary review first and freeze its\nfindings, severities, and verdict. An ordinary finding that already qualifies\nwithout Engineering Quality may add exactly one primary `EQ-NN` mapping to its\nexisting `violates` list; the mapping cannot create the finding or change its\nseverity or verdict. A genuinely incremental EQ-only candidate may be recorded\nonly as an `EQ-SHADOW:` string in existing free-form `deferredCoverage`. It is\nnot a finding, receives no mandatory human triage, cannot be accepted, never\nenters fixer scope, and cannot affect severity, verdict, completion, or any\ngate. Its suggested severity remains non-authoritative, and its waiver state is\n`not_applicable` because triage does not apply. Ordinary deferred-coverage prose\nremains valid. In reviewer-write mode, copy every structured `EQ-SHADOW:` record\nbyte-for-byte into the canonical Markdown Deferred Coverage section;\nrunner-rendered mode already projects the structured value. This retention rule\ndoes not parse or validate the record. The human-readable shape is an evaluation\nconvention, not a runtime parser or versioned contract.\n\nResolution review is closure-oriented, not discovery-oriented. It first\nverifies every immediately preceding accepted finding ID. A new finding or\nshadow candidate is permitted only when introduced by the fix, newly observable\nbecause the changed evidence surface exposes it, a direct regression of another\napproved contract or established invariant, or a previously unobservable\ncritical correctness, security, or lifecycle issue. Name the new evidence and a\ndistinct deduplication identity. A stylistic opinion, preferred decomposition,\nor alternative design is insufficient. Rejected or deferred findings must not\nreopen against unchanged evidence and authority, including after reviewer\nrotation.\n\n### Enforcement boundaries\n\nThe initial release adds no EQ-native runtime blocker. Existing objective\napproval, contract, scope, dependency, verification, correctness, security,\ntest, lifecycle, compatibility, review, and triage mechanisms retain their\ncurrent enforcement and severity. `EQ-02`, `EQ-06`, and `EQ-10` never create\nblockers by themselves.\n\nAny later blocker-eligibility proposal must require high confidence, exact\ncurrent evidence, current material impact, a violated approved authority,\ncorrectness, security, data-integrity, lifecycle-safety, required-assurance,\nscope, or compatibility invariant, and observable closure. Meeting this\nthreshold does not authorize hard enforcement; a separate approved decision is\nstill required.\n\nEngineering Quality adds no phase, skill, hook, gate, test quota, architecture\nmethodology, static analyzer, or runtime contract.\n"
+  },
+  "policies/plan-task-completion.md": {
+    "sha256": "b8b6119d0b394fd046edcf7b8e218dca464846d2ca962e46c20edc27d940f6a3",
+    "text": "# Plan Authority and Task Completion Evidence\n\n- Owner decision: ADR-0038 (Plan Authority); ADR-0017/0025 (Plan Task Completion Evidence)\n- Consumers: `development-plan`, `code-writing`; conditional: `test-writing`, `feature-review`, `feature-status`, `quick-fix`\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning, implementation, review (conditional), fix (conditional), quick-fix (conditional).\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Plan Authority\n\nApplicable approved requirements, accepted ADR constraints, public and persisted\ncontracts, security and authorization boundaries, transaction and lifecycle\nguarantees, compatibility, scope, and required verification evidence are binding.\nExact internal details remain binding when required by applicable authority or\nconcrete constraints; unlabelled explicit directives remain binding.\n\nOnly paragraphs or list items prefixed `Optional implementation guidance:` are\nnon-binding suggestions. A label covers that paragraph or list item, including\nits nested content, and ends before the next sibling block. A different compliant\nimplementation within approved scope needs no reapproval, finding or deviation\nreport merely for differing from this guidance.\n\nGuidance never overrides binding authority or expands scope. Resolve conflicts\nand ambiguous commitments before dependent work; missing or ambiguous optionality\ndoes not waive an explicit commitment.\n\n### Applying the convention\n\nNew plans copy the `Plan Authority` heading and its three paragraphs above,\nbefore Technical Breakdown and Implementation Tasks. This document convention\ntravels with the approved bytes; neither plugin version nor conversation supplies\nit. Optional guidance is useful only when it helps implement the task. Put required\nbehavior and safety constraints in binding text, never solely in guidance.\n\nApply the new convention only where the approved plan explicitly establishes it.\nLegacy plans keep their approved meaning, including their own explicit optionality;\ndo not retrofit this section or infer new discretion from a label alone. An exact\ninternal directive remains binding even when another approach seems equivalent.\nLinks to authoritative definitions preserve their applicable approved meaning;\nthey do not authorize later contract changes. Never rewrite historical plans,\nsnapshots, findings or triage to fit this convention.\n\nUse the project's existing authority order and conflict/escalation handling.\nChanging an approved commitment requires the applicable ADR and plan reapproval\npath; a deviation report records a deviation and cannot authorize it. Approval\nbinds the whole bundle, including guidance: editing optional text still invalidates\nan orchestrated approval, unlike choosing a compliant implementation under it.\n\n- Planner/approver: make behavior, invariants, scope/boundaries, dependencies,\n  requirement/acceptance/ADR links, necessary constraints and proportionate\n  evidence explicit. Review obligations and marked discretion at the existing gate.\n- Implementer/assurance: satisfy binding requirements within approved scope.\n  Record material decisions and real deviations proportionately in existing\n  reports; a merely different permitted helper, constant or decomposition needs\n  no entry and grants no extra scope.\n- Reviewer: report concrete binding-authority violations and independently\n  supported correctness, security, compatibility, evidence or maintainability\n  defects, including defects in code that follows all guidance. A difference from\n  optional guidance alone is not a finding. Keep existing severity, EQ shadow,\n  independent review, closure and unchanged-evidence rediscovery rules.\n- Fixer: fix only accepted findings under existing authority. A suggested remedy\n  stays optional unless an applicable explicit human decision makes it mandatory;\n  do not waive an accepted directive or turn a recommendation into additional work.\n- Completion/status: structural validity does not prove substantive fulfillment.\n  Failed required checks, missing material evidence and false success claims\n  remain actionable. Correcting a report cannot discharge a mandatory requirement;\n  pending or unavailable evidence does not become a pass.\n\n## Plan Task Completion Evidence\n\n- In strict orchestrated work, the approved description, plan, and accepted ADR\n  bodies are immutable. Unchecked plan boxes define the approved work set; they\n  are not mutable execution status and must not be marked `[x]` after approval.\n- Persisted orchestrator state owns lifecycle status and `nextAction`. A\n  terminal `done` run with `nextAction: null` is never routed back to\n  `code-writing` solely because its immutable plan boxes remain unchecked.\n- New strict implementation results use the versioned structured\n  `taskCompletion` ledger as the sole source of truth. It has exactly one\n  ordered record for every approved `TNNN`, with status `completed`,\n  `incomplete`, or `blocked`, bounded repository-relative evidence, and a\n  report gap/deviation reference when the status is not completed. An\n  accepted-finding fix whose changes made that evidence stale may return a\n  complete refreshed ledger (ADR 0025) \u2014 same task set and order, statuses\n  unchanged, evidence describing the current tree \u2014 validated by the same\n  fail-closed pipeline; there is still exactly one canonical ledger at a time.\n- The implementation report contains the deterministic\n  `banzai-plan-task-completion/v1` Markdown projection of that ledger. Persisted\n  state contains a validated summary, never a separately authored ledger. The\n  runner checks approval digest, task coverage/order, path scope, required\n  reports, and structured/report/state parity before verification, review, and\n  terminal success.\n- `outcome=completed` is invalid when any task is missing, malformed,\n  incomplete, or blocked. Validation fails closed as\n  `PLAN_TASK_COMPLETION_INVALID`; verification and review do not start, and a\n  normally returned invalid implementation result may be retried after the\n  evidence is corrected without editing the approved plan.\n- A legacy orchestrated run without the structured ledger keeps its persisted\n  lifecycle and next action, but task completion is `legacy`, `unknown`, or\n  `inconsistent`; report prose is never retrofitted into canonical `N/N`.\n- Active orchestrated runs remain active even when partial report evidence is\n  present. For standalone work without external completion evidence, checked\n  and unchecked plan boxes retain their normal completed/incomplete meaning.\n- Status and review name the evidence source: `structured completion evidence`,\n  `plan checkbox`, `legacy`, `unknown`, or `inconsistent`. Contradictory state,\n  approval, reports, source, tests, or review evidence requires an\n  artifact/evidence audit and is never silently repaired by editing an approved\n  plan.\n"
+  },
+  "policies/artifact-storage.md": {
+    "sha256": "4907011de4522ccb55245e507083c15193935f38cc17e2cf6b172b0bbbfe0683",
+    "text": "# Artifact Storage\n\n- Owner decision: ADR-0041\n- Consumers: `feature-description`, `architecture-decision`, `development-plan`, `code-writing`, `test-writing`, `feature-review`, `feature-status`, `feature`, `quick-fix`, `project-manifest`; conditional: None\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning, implementation, review, fix, feature, quick-fix.\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Artifact Storage\n\nStandalone callers resolve this policy relative to the installed skill as\n`../../policies/artifact-storage.md`. Use the helper shipped in that same plugin:\n`../../scripts/artifacts.cjs` from the skill directory. Do not substitute a\nproject policy copy, plugin-cache destination or npm CLI prerequisite.\n\nStorage does not grant authority. Existing requirements, accepted ADRs, approved\nbytes, task order, human gates and reviewer independence retain their meaning.\nStandalone use retains skill/human authority; it does not create runner-owned\napprovals, completion ledgers or recovery checkpoints.\n\nThe shared declaration is `.banzai/artifacts.json`. New eligible projects use\nignored `.banzai/work/<work-id>/` for internal work. `.banzai/runs/<run-id>/`\nremains runner-owned. Product guidance, public contracts, ADRs/indexes and the\nproject manifest remain repository documentation. Repository visibility and\narchive custody belong to that project; client evidence never belongs in the\nBanzai source checkout or installed plugin directories.\n\n## Resolve Before Reading or Writing\n\nThe procedure in this section is for standalone callers. Runner phases use the\nsupplied binding, role paths and exact phase grants; the runner alone resolves\nwork, creates bindings and acquires/releases claims. A runner phase does not\ninvoke this helper or acquire a standalone claim. Missing supplied authority\nstops dependent work instead of selecting or creating another work item.\n\nFor standalone callers, after normal project guidance prerequisites, invoke the local helper with\n`node <installed-plugin>/scripts/artifacts.cjs <operation> --json <request-file>`.\nRequests follow `contracts/artifacts/v1/*-request.schema.json`; every request has\n`schema: \"banzai-artifact-request/v1\"`, `schemaVersion: 1` and an absolute local\n`repoRoot`. Store temporary request/input files privately with mode `0600` and\nremove only your own temporary files when finished. The helper outputs one\nversioned JSON result and exits nonzero on failure. Never infer success from\npartial output or print token/input contents in reports.\n\nRequest files, `inputFile` and `inventoryFile` accept OS temporary directories\nwith symlinked ancestors; their leaf must be a regular non-symlink file. Artifact\npaths and private work roots retain full ancestor-symlink checks. Use physical\nabsolute paths without symlink ancestors for archive bundles and export/restore\ndestinations.\n\n1. Use `inspect` with an explicit `workPath`/`workId` when continuing work.\n   Otherwise inspect available identities. Multiple candidates require an\n   explicit selection; a matching slug or newest timestamp is not authority to\n   choose one. Read resolved ignored files directly, not only through Git-aware\n   search. Missing required evidence blocks the dependent step.\n2. Loading the plugin, status, review-only discovery and questions do not run\n   `initialize` or `create`. For authorized setup or first artifact writing,\n   after existing prerequisites pass, `initialize` safely establishes the layout\n   and effective ignores. It neither initializes Git nor stages files.\n3. For genuinely new work, retain a caller-generated UUID `creationId`, then\n   `create` with that ID, bounded slug and `strict`, `lite` or `fix` mode. Retry\n   using the same ID after an interrupted response. Persisted `work.json`\n   supplies exact role paths; use them instead of a hard-coded legacy path.\n   For unbound recognized legacy work, `inspect` its conventional file/directory\n   `workPath`. Explicitly select `legacySelection` (or one `legacyCandidates`\n   entry), then register it with `create` using the returned exact `creationId`,\n   slug and mode. This content-bound continuation identity preserves original\n   roles, bytes and recorded Git provenance, even after a private default is\n   declared. A stale identity requires inspection again. Registration never\n   grants a new approval; hand off the resulting immutable `work.json`.\n4. Before a standalone artifact write, `acquire` the selected work using a\n   bounded local `ownerId`. `write` takes its token, an exact artifact role path,\n   a private `inputFile` and `expectedSha256` (`null` means create-only).\n   Conditional-write conflicts require reading current evidence, not retrying\n   with a guessed hash. `release` only your token in success/error cleanup.\n   Runner phases hold the same exclusive work claim through mutable processing.\n   Another work item is independent; do not remove its claim.\n5. Handoff includes the project and exact work path/identity plus actual decision\n   and evidence references. Release the writer claim before a normal handoff.\n   After a crashed writer, inspect the claim, verify that its original process\n   has stopped and obtain the owner's explicit recovery decision before removing\n   that exact stale claim. Never steal a claim based on elapsed time alone.\n\nRead-only inspections never repair declarations. Missing declarations alongside\nprivate evidence, unsupported schemas, unsafe ancestors, unreadable files or\nbroad ignores produce bounded repair diagnostics. Do not fall back to public\nworkflow paths. Recognized legacy work keeps its recorded paths; ordinary\ndocumentation is not a legacy marker. An existing legacy project stays legacy\nuntil explicit migration. A declaration change cannot move an existing binding.\n\nPublic ADR/manifest/product-guide edits use their established repository paths\nand existing approval rules; the private helper is not a blanket write grant\nfor them. In orchestrated mode, use the run's supplied binding and exact phase\ngrants. The runner owns its state, approvals, candidate publication and recovery;\nstandalone claims never replace those checks. Existing hooks have host-specific\nlimits and do not sandbox unrestricted shell tools.\n\n## Required Evidence and Publication\n\nStrict work retains description, plan, implementation/test reports and each\nindependent review iteration. Lite work needs one `work.md`; quick-fix retains\nits existing report trigger. Read-only work, initialization and individual\nattempts do not require additional prose reports. Keep the completion projection\nand required report sections. Refer to canonical runner verification identities\nor deterministic projections instead of model-authoring duplicate totals;\nstandalone reports preserve actual command/result evidence when no runner ledger\nexists.\n\nPrivate files are durable evidence, not disposable scratch. Ignore rules prevent\nordinary staging, not force-add, third-party synchronization or model processing\nauthorized by the workflow. Do not stage internal artifacts for convenience.\nExplicit public promotion requires maintained, sanitized product information and\nnormal review; it cannot replace private approval or completion evidence.\n\nRetain active/pinned work and dependency closure. Archive operations are local,\nexplicit and backend-neutral; no automatic upload or prune is implied. Verify\nhashes and restoration, including owner-confirmed off-machine custody, before\nremoving a last copy. Restoring historical bytes does not approve resuming a run\nagainst a different source baseline. Credential material must not be deliberately\narchived and rejected private contents must not appear in diagnostics.\n"
+  },
+  "hooks/hooks.json": {
+    "sha256": "eb5bce1be31c2dde64a55ae9af27fe0c176cedc911a76209aa5110493238f3a9"
+  },
+  "hooks/spec-gate.cjs": {
+    "sha256": "7c6869e8fc72b9d3304b2c42cd37ee95178f0e82e9cc29027de96c853ca92206"
+  }
+};
+
+// src/phase-instructions.ts
+var HOOK_IDS = [
+  "hooks/hooks.json",
+  "hooks/spec-gate.cjs"
+];
+var MAX_RESOURCE_BYTES = 1024 * 1024;
+var INSTRUCTION_REMEDIES = "Rebuild the orchestrator bundle from current source; update the installed plugin to the matching release; or explicitly select ambient mode, which is reported as unverifiable.";
+function instructionPhasesForRole(role, route) {
+  if (role === "planner")
+    return route === null || route === "strict" ? ["planning"] : null;
+  if (role === "reviewer")
+    return route === null || route === "strict" ? ["review"] : null;
+  if (route === null) return ["implementation", "fix", "feature", "quick-fix"];
+  return route === "strict" ? ["implementation", "fix"] : [route];
+}
+function instructionResourceIds(phases) {
+  return [
+    .../* @__PURE__ */ new Set([
+      ...HOOK_IDS,
+      ...phases.flatMap((phase) => {
+        const definition = Object.entries(PHASE_RESOURCE_DEFINITIONS).find(
+          ([name]) => name === phase
+        )?.[1];
+        if (definition === void 0)
+          throw new BanzaiError(
+            "INSTRUCTION_RESOURCE_INVALID",
+            "Embedded instruction phase is invalid. Run `npm run build`."
+          );
+        return [
+          `phases/${phase}.md`,
+          ...definition.guidance.map(
+            (name) => `guidance/${name}.md`
+          ),
+          ...definition.policies.map(
+            (name) => `policies/${name}.md`
+          )
+        ];
+      })
+    ])
+  ];
+}
+async function installedDigest(directory2, id) {
+  const root = await realpath5(directory2);
+  let target = root;
+  for (const part of id.split("/")) {
+    target = path12.join(target, part);
+    const entry = await lstat8(target);
+    if (entry.isSymbolicLink()) throw new Error("Unsafe instruction resource");
+  }
+  const handle = await open6(
+    target,
+    constants7.O_RDONLY | constants7.O_NOFOLLOW | constants7.O_NONBLOCK
+  );
+  try {
+    const before = await handle.stat();
+    if (!before.isFile() || before.size > MAX_RESOURCE_BYTES)
+      throw new Error("Unbounded instruction resource");
+    if (await realpath5(target) !== target)
+      throw new Error("Unsafe instruction resource");
+    const bytes = Buffer.alloc(MAX_RESOURCE_BYTES + 1);
+    let length = 0;
+    while (length < bytes.length) {
+      const read = await handle.read(
+        bytes,
+        length,
+        bytes.length - length,
+        length
+      );
+      if (read.bytesRead === 0) break;
+      length += read.bytesRead;
+    }
+    const after = await handle.stat();
+    if (length > MAX_RESOURCE_BYTES || before.size !== length || before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs)
+      throw new Error("Changing instruction resource");
+    return createHash9("sha256").update(bytes.subarray(0, length)).digest("hex");
+  } finally {
+    await handle.close();
+  }
+}
+async function inspectInstructionParity(directory2, phases) {
+  const resourceIds = instructionResourceIds(phases);
+  if (directory2 === null)
+    return {
+      state: "unverifiable",
+      resourceIds,
+      mismatched: [],
+      unavailable: []
+    };
+  const mismatched = [];
+  const unavailable2 = [];
+  for (const id of resourceIds) {
+    try {
+      if (await installedDigest(directory2, id) !== EMBEDDED_PHASE_RESOURCES[id].sha256)
+        mismatched.push(id);
+    } catch {
+      unavailable2.push(id);
+    }
+  }
+  return {
+    state: mismatched.length > 0 ? "mismatch" : unavailable2.length > 0 ? "bounded_failure" : "verified",
+    resourceIds,
+    mismatched,
+    unavailable: unavailable2
+  };
+}
+function combineInstructionParity(results) {
+  const state = ["mismatch", "bounded_failure", "unverifiable"].find(
+    (candidate) => results.some((result) => result.state === candidate)
+  ) ?? (results.length === 0 ? "unverifiable" : "verified");
+  return {
+    state,
+    resourceIds: [...new Set(results.flatMap((result) => result.resourceIds))],
+    mismatched: [...new Set(results.flatMap((result) => result.mismatched))],
+    unavailable: [...new Set(results.flatMap((result) => result.unavailable))]
+  };
+}
+function instructionParityDiagnostic(result) {
+  if (result.state === "verified")
+    return `Instruction resources verified (${result.resourceIds.join(", ")}); this does not prove full transitive plugin integrity or model compliance.`;
+  if (result.state === "mismatch")
+    return `Instruction resource mismatch: ${result.mismatched.join(", ")}. ${INSTRUCTION_REMEDIES}`;
+  if (result.state === "bounded_failure")
+    return `Instruction resource comparison has bounded failures: ${result.unavailable.join(", ")}. Parity is not verified. ${INSTRUCTION_REMEDIES}`;
+  return `Instruction resource parity is unverifiable for Codex, ambient or unresolved-directory scope. ${INSTRUCTION_REMEDIES}`;
+}
+function resourceText(id) {
+  const resource = Reflect.get(EMBEDDED_PHASE_RESOURCES, id);
+  if (typeof resource !== "object" || resource === null || !("text" in resource) || typeof resource.text !== "string" || !resource.text.trim() || !("sha256" in resource) || createHash9("sha256").update(resource.text, "utf8").digest("hex") !== resource.sha256) {
+    throw new BanzaiError(
+      "INSTRUCTION_RESOURCE_INVALID",
+      "Embedded instruction resources are invalid. Run `npm run build`."
+    );
+  }
+  return resource.text;
+}
+function phaseInstructionParts(phase) {
+  instructionResourceIds([phase]);
+  const definition = PHASE_RESOURCE_DEFINITIONS[phase];
+  return [
+    resourceText(`phases/${phase}.md`),
+    ...definition.guidance.map((name) => resourceText(`guidance/${name}.md`)),
+    ...definition.policies.map((name) => resourceText(`policies/${name}.md`))
+  ];
+}
+
 // src/claude-permissions.ts
 import { readFile as readFile6 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
-import path12 from "node:path";
+import path13 from "node:path";
 var ALL_SOURCES = [
   "user",
   "project",
@@ -17079,8 +17428,8 @@ function stringArray2(value) {
   return Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : [];
 }
 function ruleTool(rule) {
-  const open9 = rule.indexOf("(");
-  return (open9 === -1 ? rule : rule.slice(0, open9)).trim();
+  const open10 = rule.indexOf("(");
+  return (open10 === -1 ? rule : rule.slice(0, open10)).trim();
 }
 function namesTool(rule, tool) {
   return ruleTool(rule) === tool;
@@ -17098,16 +17447,16 @@ function configDirectory(env) {
 }
 function trustFile(env) {
   const configured = configDirectory(env);
-  return configured === null ? path12.join(homeDirectory(env), ".claude.json") : path12.join(configured, ".claude.json");
+  return configured === null ? path13.join(homeDirectory(env), ".claude.json") : path13.join(configured, ".claude.json");
 }
 function settingsFile(source, repoRoot, env) {
   if (source === "user") {
-    return path12.join(
-      configDirectory(env) ?? path12.join(homeDirectory(env), ".claude"),
+    return path13.join(
+      configDirectory(env) ?? path13.join(homeDirectory(env), ".claude"),
       "settings.json"
     );
   }
-  return path12.join(
+  return path13.join(
     repoRoot,
     ".claude",
     source === "project" ? "settings.json" : "settings.local.json"
@@ -17207,7 +17556,7 @@ function claudePermissionDemanded(demand) {
 }
 async function inspectClaudePermissions(input) {
   const env = input.env ?? process.env;
-  const repoRoot = path12.resolve(input.repoRoot);
+  const repoRoot = path13.resolve(input.repoRoot);
   const demand = input.demand;
   const sources = parseSources(input.settingSources);
   const [managed, trust, loaded, unloadedLocal] = await Promise.all([
@@ -17315,9 +17664,9 @@ function claudePermissionRemediation(audit) {
 
 // src/config.ts
 import { access as access3, mkdir as mkdir4, readFile as readFile7, writeFile as writeFile2 } from "node:fs/promises";
-import path13 from "node:path";
+import path14 from "node:path";
 var CONFIG_DIRECTORY = ".banzai";
-var CONFIG_FILE = path13.join(CONFIG_DIRECTORY, "config.json");
+var CONFIG_FILE = path14.join(CONFIG_DIRECTORY, "config.json");
 var DEFAULT_CONFIG = {
   schemaVersion: 2,
   contractVersion: CONTRACT_VERSION,
@@ -17376,7 +17725,7 @@ async function pathExists(filePath) {
   }
 }
 async function loadConfig(repoRoot) {
-  const configPath = path13.join(repoRoot, CONFIG_FILE);
+  const configPath = path14.join(repoRoot, CONFIG_FILE);
   let raw;
   try {
     raw = await readFile7(configPath, "utf8");
@@ -17526,7 +17875,7 @@ async function applyModelUpdates(repoRoot, updates) {
   if (updates.length === 0) {
     return;
   }
-  const configPath = path13.join(repoRoot, CONFIG_FILE);
+  const configPath = path14.join(repoRoot, CONFIG_FILE);
   let raw;
   try {
     raw = await readFile7(configPath, "utf8");
@@ -17591,8 +17940,8 @@ async function applyModelUpdates(repoRoot, updates) {
   await writeFile2(configPath, updatedRaw, "utf8");
 }
 async function initializeConfig(repoRoot) {
-  const banzaiDirectory = path13.join(repoRoot, CONFIG_DIRECTORY);
-  const configPath = path13.join(repoRoot, CONFIG_FILE);
+  const banzaiDirectory = path14.join(repoRoot, CONFIG_DIRECTORY);
+  const configPath = path14.join(repoRoot, CONFIG_FILE);
   await mkdir4(banzaiDirectory, { recursive: true });
   let configCreated = false;
   if (!await pathExists(configPath)) {
@@ -17607,7 +17956,7 @@ async function initializeConfig(repoRoot) {
     );
     configCreated = true;
   }
-  const ignorePath = path13.join(repoRoot, ".gitignore");
+  const ignorePath = path14.join(repoRoot, ".gitignore");
   const requiredEntries = [
     ".banzai/runs/",
     ".banzai/active-run.json",
@@ -18422,9 +18771,9 @@ function pendingRotationText(reason) {
 }
 
 // src/plan-task-completion.ts
-import { createHash as createHash9 } from "node:crypto";
-import { lstat as lstat8, readFile as readFile8, realpath as realpath5 } from "node:fs/promises";
-import path14 from "node:path";
+import { createHash as createHash10 } from "node:crypto";
+import { lstat as lstat9, readFile as readFile8, realpath as realpath6 } from "node:fs/promises";
+import path15 from "node:path";
 var PROJECTION_FORMAT = "banzai-plan-task-completion/v1";
 var SECTION_HEADING = "## Plan Task Completion";
 var TASK_HEADING = /^- \[ \] \*\*(T[0-9]{3}) - (.+)\*\*\s*$/u;
@@ -18451,7 +18800,7 @@ function completionFailure(violation, message, taskId = null) {
   throw new PlanTaskCompletionError(violation, message, taskId);
 }
 function digest2(value) {
-  return createHash9("sha256").update(JSON.stringify(value)).digest("hex");
+  return createHash10("sha256").update(JSON.stringify(value)).digest("hex");
 }
 function parseApprovedPlanTaskIds(markdown) {
   const headings2 = [...markdown.matchAll(/^## Implementation Tasks\s*$/gmu)];
@@ -18657,7 +19006,7 @@ function parsePlanTaskCompletionProjection(markdown) {
   };
 }
 function normalizedRepositoryPath(relativePath2, requiredReports = /* @__PURE__ */ new Set()) {
-  if (relativePath2.length === 0 || relativePath2.includes("\\") || /[\u0000-\u001f\u007f-\u009f]/u.test(relativePath2) || relativePath2.length > 500 || path14.posix.isAbsolute(relativePath2) || path14.posix.normalize(relativePath2) !== relativePath2 || relativePath2 === ".." || relativePath2.startsWith("../")) {
+  if (relativePath2.length === 0 || relativePath2.includes("\\") || /[\u0000-\u001f\u007f-\u009f]/u.test(relativePath2) || relativePath2.length > 500 || path15.posix.isAbsolute(relativePath2) || path15.posix.normalize(relativePath2) !== relativePath2 || relativePath2 === ".." || relativePath2.startsWith("../")) {
     return completionFailure(
       "invalid_evidence_path",
       "Completion evidence path must be normalized and repository-relative."
@@ -18683,13 +19032,13 @@ async function validateEvidenceFile(repoRoot, relativePath2, allowedPaths, appro
       taskId
     );
   }
-  const repositoryRoot = await realpath5(repoRoot);
-  const absolutePath = path14.resolve(repositoryRoot, normalized);
+  const repositoryRoot = await realpath6(repoRoot);
+  const absolutePath = path15.resolve(repositoryRoot, normalized);
   let resolvedPath;
   let metadata;
   try {
-    metadata = await lstat8(absolutePath);
-    resolvedPath = await realpath5(absolutePath);
+    metadata = await lstat9(absolutePath);
+    resolvedPath = await realpath6(absolutePath);
   } catch {
     return completionFailure(
       "missing_evidence_path",
@@ -18697,7 +19046,7 @@ async function validateEvidenceFile(repoRoot, relativePath2, allowedPaths, appro
       taskId
     );
   }
-  if (!metadata.isFile() || metadata.isSymbolicLink() || !resolvedPath.startsWith(`${repositoryRoot}${path14.sep}`)) {
+  if (!metadata.isFile() || metadata.isSymbolicLink() || !resolvedPath.startsWith(`${repositoryRoot}${path15.sep}`)) {
     return completionFailure(
       "invalid_evidence_path",
       `${taskId} evidence must be a regular file inside the repository.`,
@@ -18799,16 +19148,16 @@ async function readRequiredReport(repoRoot, relativePath2, violation, requiredRe
   const normalized = normalizedRepositoryPath(relativePath2, requiredReports);
   if (relativePath2.startsWith(".banzai/"))
     await safePath2(repoRoot, relativePath2);
-  const absolute = path14.resolve(repoRoot, normalized);
+  const absolute = path15.resolve(repoRoot, normalized);
   let contents;
   try {
-    const metadata = await lstat8(absolute);
+    const metadata = await lstat9(absolute);
     if (!metadata.isFile() || metadata.isSymbolicLink()) {
       throw new Error("not a regular file");
     }
-    const root = await realpath5(repoRoot);
-    const resolved = await realpath5(absolute);
-    if (!resolved.startsWith(`${root}${path14.sep}`)) {
+    const root = await realpath6(repoRoot);
+    const resolved = await realpath6(absolute);
+    if (!resolved.startsWith(`${root}${path15.sep}`)) {
       throw new Error("outside repository");
     }
     contents = await readFile8(absolute, "utf8");
@@ -18821,7 +19170,7 @@ async function readRequiredReport(repoRoot, relativePath2, violation, requiredRe
   return {
     path: normalized,
     contents,
-    sha256: createHash9("sha256").update(contents).digest("hex")
+    sha256: createHash10("sha256").update(contents).digest("hex")
   };
 }
 async function validatePlanTaskCompletion(input) {
@@ -18854,7 +19203,7 @@ async function validatePlanTaskCompletion(input) {
     );
   }
   const plan = await readFile8(
-    path14.resolve(input.repoRoot, input.planPath),
+    path15.resolve(input.repoRoot, input.planPath),
     "utf8"
   ).catch(
     () => completionFailure(
@@ -18980,24 +19329,28 @@ function createPromptEnvelope(components) {
     components: nonEmpty2.map((component) => ({ ...component }))
   };
 }
-function promptEnvelopeFromSections(rendered, boundaries) {
-  const ordered = [...boundaries].filter(
-    (boundary) => boundary.index >= 0 && boundary.index <= rendered.length
-  ).sort((left, right) => left.index - right.index);
-  if (ordered[0]?.index !== 0) {
-    ordered.unshift({ index: 0, category: "phase_instructions" });
-  }
-  const components = [];
-  for (const [position, boundary] of ordered.entries()) {
-    const next = ordered[position + 1]?.index ?? rendered.length;
-    if (next > boundary.index) {
-      components.push({
-        category: boundary.category,
-        text: rendered.slice(boundary.index, next)
-      });
-    }
-  }
-  return createPromptEnvelope(components);
+function composePromptComponents(components) {
+  return createPromptEnvelope(
+    components.filter((component) => component.text.length > 0).map((component, index) => ({
+      category: component.category,
+      text: (index === 0 ? "" : "\n\n") + component.text
+    }))
+  );
+}
+function insertPhaseInstructions(prompt, instructions) {
+  const firstEvidence = prompt.components.findIndex(
+    (component) => component.category !== "common_instructions" && component.category !== "phase_instructions"
+  );
+  const position = firstEvidence < 0 ? prompt.components.length : firstEvidence;
+  const added = instructions.filter((text) => text.length > 0).map((text) => ({
+    category: "phase_instructions",
+    text: "\n\n" + text
+  }));
+  return createPromptEnvelope([
+    ...prompt.components.slice(0, position),
+    ...added,
+    ...prompt.components.slice(position)
+  ]);
 }
 function promptEnvelope(prompt) {
   return typeof prompt === "string" ? createPromptEnvelope([{ category: "phase_instructions", text: prompt }]) : prompt;
@@ -19009,11 +19362,11 @@ function appendPromptComponent(prompt, category, text) {
 
 // src/prompts.ts
 var COMMON = `You are operating inside the Banzai local orchestrator.
-The installed Banzai skills and the versioned contracts supplied by the runner are authoritative.
+The phase instructions, guidance, policies and versioned contracts supplied by the runner are authoritative.
 Do not create commits, switch branches, stash, reset, create worktrees, or perform external writes.
 A gate is the only way to reach the human, and the interactive CLI answers it.
 Do not stop to ask for confirmation, acknowledgement, or permission to continue:
-run the phase's skills to completion and report progress in the durable artifacts.
+complete the phase responsibilities and report progress in the durable artifacts.
 When requesting any non-null gate, return outcome=needs_human_decision.
 Return outcome=completed only with gate=null. Return outcome=blocked only for a
 failure that a human decision cannot resolve through the requested gate.
@@ -19021,13 +19374,11 @@ Return only the structured result required by the supplied JSON schema.
 Every phase result uses schemaVersion=3. Set decisionConsultation=null unless
 this is the strict planning phase returning gate=decision_consultation.`;
 function serenaGuidance(available2) {
-  return available2 ? "\n\nThe Serena MCP server's read-only symbol tools are whitelisted in this session. Prefer find_symbol, find_referencing_symbols, get_symbols_overview, find_declaration, and get_diagnostics_for_file over grep, sed, or cat line windows when locating or tracing code symbols; use shell search only for non-code text. Shell-proxy instructions such as RTK govern how shell commands run and do not override this preference." : "";
+  return available2 ? "The Serena MCP server's read-only symbol tools are whitelisted in this session. Prefer find_symbol, find_referencing_symbols, get_symbols_overview, find_declaration, and get_diagnostics_for_file over grep, sed, or cat line windows when locating or tracing code symbols; use shell search only for non-code text. Shell-proxy instructions such as RTK govern how shell commands run and do not override this preference." : "";
 }
-function recoveryPrompt(basePrompt, sourceAttemptId, kind, prerequisiteBlocked = null) {
+function recoveryInstructions(sourceAttemptId, kind, prerequisiteBlocked = null) {
   if (prerequisiteBlocked !== null) {
-    return `${basePrompt}
-
-## Operator-authorized prerequisite-blocked fix recovery
+    return `## Operator-authorized prerequisite-blocked fix recovery
 
 The current operator explicitly authorized one new fix attempt after completed attempt ${sourceAttemptId} returned a durable blocked result.
 The source attempt remains completed and blocked; do not relabel it, reconstruct it as interrupted, or repeat findings it already resolved.
@@ -19041,9 +19392,7 @@ ${JSON.stringify(prerequisiteBlocked.prerequisites, null, 2)}
 Inspect the current checkout and durable approved artifacts. Treat newly supplied migration, schema, test, or report evidence as input to verify, never as completion merely because it exists. Fix only the remaining accepted finding IDs above. Previously resolved, rejected, deferred, and unrelated findings are out of scope.
 Return a fresh complete phase-result-v3 result with taskCompletion=null and decisionConsultation=null for this new attempt. Every normal verification, independent review, and human-triage rule still applies.`;
   }
-  return `${basePrompt}
-
-## Operator-authorized interrupted-attempt recovery
+  return `## Operator-authorized interrupted-attempt recovery
 
 The current operator explicitly authorized a new ${kind} attempt after interruption of attempt ${sourceAttemptId}.
 Inspect the current checkout and durable approved artifacts before acting. Assume no prior task or finding completed merely because files, tests, reports, or raw result artifacts exist.
@@ -19052,39 +19401,32 @@ Return a fresh complete structured result for this new attempt. Every normal com
 }
 function recoveryPromptEnvelope(basePrompt, sourceAttemptId, kind, prerequisiteBlocked = null) {
   const base = promptEnvelope(basePrompt);
-  const rendered = recoveryPrompt(
-    base.rendered,
-    sourceAttemptId,
-    kind,
-    prerequisiteBlocked
-  );
   return appendPromptComponent(
     base,
     "recovery_instructions",
-    rendered.slice(base.rendered.length)
+    "\n\n" + recoveryInstructions(sourceAttemptId, kind, prerequisiteBlocked)
   );
 }
-function trustedSectionBoundary(rendered, end, exactSection) {
-  const index = end - exactSection.length;
-  if (index < 0 || rendered.slice(index, end) !== exactSection) {
-    throw new Error("Prompt section composition does not match its envelope.");
-  }
-  return index;
-}
-var ROUTE_SKILLS = {
-  "quick-fix": ["$banzai:quick-fix"],
-  feature: ["$banzai:feature"],
-  strict: [
-    "$banzai:feature-description",
-    "$banzai:architecture-decision (when applicable)",
-    "$banzai:development-plan",
-    "$banzai:code-writing",
-    "$banzai:test-writing",
-    "$banzai:feature-review"
-  ]
+var ROUTE_PHASES = {
+  "quick-fix": ["quick-fix"],
+  feature: ["feature"],
+  strict: ["planning", "implementation", "review", "fix"]
 };
-function workflowSkills(route) {
-  return ROUTE_SKILLS[route];
+function workflowPhases(route) {
+  return ROUTE_PHASES[route];
+}
+function phaseEnvelope(phase, components) {
+  return composePromptComponents([
+    {
+      category: "common_instructions",
+      text: phase === "review" ? REVIEW_COMMON : COMMON
+    },
+    ...phaseInstructionParts(phase).map((body) => ({
+      category: "phase_instructions",
+      text: body
+    })),
+    ...components
+  ]);
 }
 function renderPlannedVerification(profiles) {
   return JSON.stringify(
@@ -19102,16 +19444,18 @@ function renderPlannedVerification(profiles) {
     2
   );
 }
-function builderVerificationInstructions(profiles) {
+function builderVerificationInstructions() {
   return `The runner will execute the supplied verification profiles in the displayed profile and command order after this phase completes.
 Run focused affected tests for implementation feedback. Do not rerun a supplied full-scope command merely to reproduce the runner's final evidence.
 Compare the supplied commands with the applicable final suite recorded in PROJECT_MANIFEST.md. If that suite is absent, run it once and record the verification-readiness gap.
 The structured result's requestedVerification field records a request only; it never causes the runner to execute an unconfigured model-selected command.
-Supplied runner verification profiles:
-${renderPlannedVerification(profiles)}`;
+`;
 }
-function workflowSelectionPrompt(request, humanDecisions = []) {
-  return `You are the read-only workflow selector for the Banzai local orchestrator.
+function workflowSelectionPromptEnvelope(request, humanDecisions = []) {
+  return composePromptComponents([
+    {
+      category: "phase_instructions",
+      text: `You are the read-only workflow selector for the Banzai local orchestrator.
 Return only the structured result required by the supplied JSON schema.
 Do not invoke skills, edit files, run shell commands, or ask the human questions.
 
@@ -19130,54 +19474,28 @@ repeated verification failure that changes the plan.
 Use confidence=high only when the request and any read-only repository evidence
 make a lite route clearly safe. Use strict for medium or low confidence. List
 every matched escalation trigger in escalationTriggers; use an empty array when
-none match. Keep reason concise and specific.
-
-Original task request:
-${request}
-
-Recorded escalation decisions and answers:
-${JSON.stringify(humanDecisions, null, 2)}`;
-}
-function workflowSelectionPromptEnvelope(request, humanDecisions = []) {
-  const rendered = workflowSelectionPrompt(request, humanDecisions);
-  const humanSection = `Recorded escalation decisions and answers:
-${JSON.stringify(humanDecisions, null, 2)}`;
-  const humanBoundary = trustedSectionBoundary(
-    rendered,
-    rendered.length,
-    humanSection
-  );
-  const requestSection = `Original task request:
-${request}
-
-`;
-  const requestBoundary = trustedSectionBoundary(
-    rendered,
-    humanBoundary,
-    requestSection
-  );
-  return promptEnvelopeFromSections(rendered, [
-    { index: 0, category: "phase_instructions" },
-    {
-      index: requestBoundary,
-      category: "user_request_scope"
+none match. Keep reason concise and specific.`
     },
     {
-      index: humanBoundary,
-      category: "human_decisions"
+      category: "user_request_scope",
+      text: `Original task request:
+${request}`
+    },
+    {
+      category: "human_decisions",
+      text: `Recorded escalation decisions and answers:
+${JSON.stringify(humanDecisions, null, 2)}`
     }
   ]);
 }
-function planningPrompt(slug, request, adrDecisions, humanDecisions = []) {
-  return `${COMMON}
-
-Phase: plan
-Use the available Skill tool to load the installed $banzai:feature-description,
-$banzai:architecture-decision, and $banzai:development-plan skills as
-applicable, chained in one session.
-Do not stop between them: the description is approved as part of the plan bundle,
+function planningPromptEnvelope(slug, request, adrDecisions, humanDecisions = []) {
+  return phaseEnvelope("planning", [
+    {
+      category: "phase_instructions",
+      text: `Phase: plan
+Continue through the planning responsibilities: the description is approved as part of the plan bundle,
 not on its own.
-Planning may write only durable files under documentation/ and PROJECT_MANIFEST.md.
+Use only the exact supplied planning write roles and the existing public ADR/manifest authority.
 Inspect the current repository and existing project evidence before deciding
 that human input is needed. If a material architecture or product choice is
 still genuinely unresolved and blocks sound requirements, an ADR, or the plan,
@@ -19199,63 +19517,27 @@ Otherwise stop with outcome=needs_human_decision and gate=plan_approval only
 after the consistency-checked plan exists.
 The interactive orchestrator will ask the human for that decision. Never edit
 production code.
-Apply Plan Authority from the installed policies/plan-task-completion.md. New plans include its document convention and make binding behavior, scope, constraints and evidence explicit while leaving routine private choices open. Use only materially affected breakdown areas and useful labeled guidance; keep required behavior and safety outside guidance. Present obligations and marked discretion in the exact bundle at the existing plan gate.
+Apply Plan Authority from the supplied Plan Authority and Task Completion policy. New plans include its document convention and make binding behavior, scope, constraints and evidence explicit while leaving routine private choices open. Use only materially affected breakdown areas and useful labeled guidance; keep required behavior and safety outside guidance. Present obligations and marked discretion in the exact bundle at the existing plan gate.
 In plan.md's Implementation Tasks section every task heading is exactly "- [ ] **TNNN - Title**" alone on its line, ending at the closing **: no trailing annotation or continuation, and the box stays unchecked even for tasks already implemented in earlier attempts. Put provenance notes in the task body below the heading; a heading outside this grammar fails deterministic validation before the plan can be approved.
 Return phase-result schemaVersion=3 with taskCompletion=null; planning never
 authors implementation completion evidence. Use decisionConsultation only with
-gate=decision_consultation and set it to null for ADR or plan approval.
-
-Feature slug: ${JSON.stringify(slug)}
+gate=decision_consultation and set it to null for ADR or plan approval.`
+    },
+    {
+      category: "user_request_scope",
+      text: `Feature slug: ${JSON.stringify(slug)}
 User request:
-${request}
-
-Recorded ADR decisions:
-${JSON.stringify(adrDecisions, null, 2)}
-
-Recorded human decision answers:
-${JSON.stringify(humanDecisions, null, 2)}`;
-}
-function planningPromptEnvelope(slug, request, adrDecisions, humanDecisions = []) {
-  const rendered = planningPrompt(slug, request, adrDecisions, humanDecisions);
-  const humanSection = `Recorded human decision answers:
-${JSON.stringify(humanDecisions, null, 2)}`;
-  const humanBoundary = trustedSectionBoundary(
-    rendered,
-    rendered.length,
-    humanSection
-  );
-  const architectureSection = `Recorded ADR decisions:
-${JSON.stringify(adrDecisions, null, 2)}
-
-`;
-  const architectureBoundary = trustedSectionBoundary(
-    rendered,
-    humanBoundary,
-    architectureSection
-  );
-  const requestSection = `User request:
-${request}
-
-`;
-  const requestBoundary = trustedSectionBoundary(
-    rendered,
-    architectureBoundary,
-    requestSection
-  );
-  return promptEnvelopeFromSections(rendered, [
-    { index: 0, category: "common_instructions" },
-    { index: COMMON.length, category: "phase_instructions" },
-    {
-      index: requestBoundary,
-      category: "user_request_scope"
+${request}`
     },
     {
-      index: architectureBoundary,
-      category: "approved_requirements_architecture"
+      category: "human_decisions",
+      text: `Recorded human decision answers:
+${JSON.stringify(humanDecisions, null, 2)}`
     },
     {
-      index: humanBoundary,
-      category: "human_decisions"
+      category: "approved_requirements_architecture",
+      text: `Recorded ADR decisions:
+${JSON.stringify(adrDecisions, null, 2)}`
     }
   ]);
 }
@@ -19276,13 +19558,13 @@ Inspect existing description.md, plan.md, and relevant ADRs; verify their curren
 Return one complete current phase-result-v3 result for this new attempt. If planning is already ready, validate the bundle and return its normal human decision gate. Never change production code, infer human approval, or modify Banzai control state.`
   );
 }
-function implementationPrompt(slug, approvalDigest, artifactPaths2, verificationProfiles, approvedTaskIds = [], completionRepair = null, humanDecisions = []) {
-  return `${COMMON}
-
-Phase: implementation
-Use the available Skill tool to load the installed $banzai:code-writing skill, then load $banzai:test-writing, chained in one session.
+function implementationPromptEnvelope(slug, approvalDigest, artifactPaths2, verificationProfiles, approvedTaskIds = [], completionRepair = null, humanDecisions = []) {
+  return phaseEnvelope("implementation", [
+    {
+      category: "phase_instructions",
+      text: `Phase: implementation
 Implement only the approved plan and accepted ADRs.
-Apply Plan Authority from the installed policies/plan-task-completion.md: satisfy binding obligations within approved scope, preserve legacy meaning and explicit directives, and resolve conflicts before dependent work. Choosing differently under explicitly optional guidance alone needs no reapproval or deviation entry; record material decisions and real deviations proportionately. Correcting a report cannot discharge a required check or missing material evidence.
+Apply Plan Authority from the supplied Plan Authority and Task Completion policy: satisfy binding obligations within approved scope, preserve legacy meaning and explicit directives, and resolve conflicts before dependent work. Choosing differently under explicitly optional guidance alone needs no reapproval or deviation entry; record material decisions and real deviations proportionately. Correcting a report cannot discharge a required check or missing material evidence.
 There is no human confirmation between code, tests, verification, and review:
 report each boundary in the durable artifacts and continue.
 Return outcome=completed with gate=null only after implementation-report.md and test-report.md both exist.
@@ -19295,170 +19577,96 @@ Before returning the final structured result, reread the written Plan Task Compl
 If new architecture or scope is required, stop with gate=escalation and do not improvise.
 Recorded human decisions below are authoritative operator input: honor them, and do not re-raise a question an existing recorded decision already answers. Escalate only a decision no recorded answer covers.
 Do not substitute model-requested commands for configured runner verification; the runner owns deterministic verification.
-${builderVerificationInstructions(verificationProfiles)}
-
-Feature slug: ${JSON.stringify(slug)}
-Approved bundle digest: ${approvalDigest}
+${builderVerificationInstructions()}`
+    },
+    {
+      category: "user_request_scope",
+      text: `Feature slug: ${JSON.stringify(slug)}`
+    },
+    {
+      category: "human_decisions",
+      text: `Recorded human decision answers:
+${JSON.stringify(humanDecisions, null, 2)}`
+    },
+    {
+      category: "approved_requirements_architecture",
+      text: `Approved bundle digest: ${approvalDigest}
 Approved artifact paths:
-${artifactPaths2.map((item) => `- ${item}`).join("\n")}
-Approved task IDs:
-${approvedTaskIds.map((item) => `- ${item}`).join("\n")}
-Recorded human decision answers:
-${JSON.stringify(humanDecisions, null, 2)}
-${completionRepair === null ? "" : `This is a completion-evidence repair retry for rejected attempt ${completionRepair.sourceAttemptId}.
+${artifactPaths2.map((item) => `- ${item}`).join("\n")}`
+    },
+    {
+      category: "verification_evidence",
+      text: `Supplied runner verification profiles:
+${renderPlannedVerification(verificationProfiles)}`
+    },
+    {
+      category: "completion_evidence",
+      text: `Approved task IDs:
+${approvedTaskIds.map((item) => `- ${item}`).join("\n")}`
+    },
+    {
+      category: "recovery_instructions",
+      text: completionRepair === null ? "" : `This is a completion-evidence repair retry for rejected attempt ${completionRepair.sourceAttemptId}.
 Rejected violation: ${completionRepair.violation}.
 Rejected task: ${completionRepair.taskId ?? "not task-specific"}.
 Rejected diagnostic: ${completionRepair.diagnostic ?? "not recorded"}.
 Repair only the named completion-evidence violation.${completionRepair.violation.startsWith("report_projection") ? "" : " Do not leave the rejected task record unchanged."}
 ${completionRepair.violation === "evidence_scope_violation" ? "For evidence_scope_violation, replace every out-of-scope evidence path in the rejected task. Evidence must cite a regular file created or modified relative to the run baseline, or an exact required implementation or test report. Carried-in unchanged source and test files remain outside the authorized changed surface even when this attempt reads or verifies them. For a read-only confirmation task, record the confirmation in a required report and cite that report instead." : completionRepair.violation === "source_attempt_invalid" ? "For source_attempt_invalid, the rejected structured result failed decoding \u2014 commonly a completion ledger field outside its bounds; the diagnostic above names the exact field. Field bounds: every taskId is TNNN; every evidence path and detail and every gap reportPath, section, and detail is a non-empty single-line string of at most 500 characters; an evidence array holds at most 16 entries. Bring the offending value within bounds in the report table and the structured ledger identically. Shortening an over-bound value to fit while preserving its meaning is required by the grammar and is not a rewording violation." : completionRepair.violation.startsWith("report_projection") ? "For a report projection violation, first decide which side of the divergence is true. When the structured records are correct and only the section text drifted, rewrite only the Plan Task Completion section so it decodes to exactly the ledger records: keep the required heading, format line, and four-column table; remove Markdown backticks around whole JSON cells; escape & as &amp;, | as &#124;, < as &lt;, and > as &gt; inside the Evidence and Gap JSON cells; and do not change record content that already matches the ledger. When the table diverged because an accepted review finding showed a completion record was overstated, do not restore the false claim: return the corrected full ledger with a matching report projection, give every non-completed record a gap reference to a required report heading, and return outcome=needs_human_decision with gate=escalation naming the contradiction instead of outcome=completed." : "Change the rejected record only as needed to satisfy the named violation and keep every unaffected task record stable."}
 
-Reread the current Plan Task Completion section before returning; its parsed values and the final taskCompletion ledger must be JSON-identical. Do not duplicate prior records or edit the approved plan.`}`;
-}
-function implementationPromptEnvelope(slug, approvalDigest, artifactPaths2, verificationProfiles, approvedTaskIds = [], completionRepair = null, humanDecisions = []) {
-  const rendered = implementationPrompt(
-    slug,
-    approvalDigest,
-    artifactPaths2,
-    verificationProfiles,
-    approvedTaskIds,
-    completionRepair,
-    humanDecisions
-  );
-  const withoutRepair = completionRepair === null ? rendered : implementationPrompt(
-    slug,
-    approvalDigest,
-    artifactPaths2,
-    verificationProfiles,
-    approvedTaskIds,
-    null,
-    humanDecisions
-  );
-  const repairBoundary = withoutRepair.length;
-  if (!rendered.startsWith(withoutRepair)) {
-    throw new Error("Prompt repair composition does not match its envelope.");
-  }
-  const humanSection = `Recorded human decision answers:
-${JSON.stringify(humanDecisions, null, 2)}
-`;
-  const humanBoundary = trustedSectionBoundary(
-    withoutRepair,
-    withoutRepair.length,
-    humanSection
-  );
-  const taskSection = `Approved task IDs:
-${approvedTaskIds.map((item) => `- ${item}`).join("\n")}
-`;
-  const taskBoundary = trustedSectionBoundary(
-    withoutRepair,
-    humanBoundary,
-    taskSection
-  );
-  const artifactSection = `Approved artifact paths:
-${artifactPaths2.map((item) => `- ${item}`).join("\n")}
-`;
-  const artifactBoundary = trustedSectionBoundary(
-    withoutRepair,
-    taskBoundary,
-    artifactSection
-  );
-  const boundaries = [
-    { index: 0, category: "common_instructions" },
-    { index: COMMON.length, category: "phase_instructions" },
-    {
-      index: artifactBoundary,
-      category: "approved_requirements_architecture"
-    },
-    {
-      index: taskBoundary,
-      category: "completion_evidence"
-    },
-    {
-      index: humanBoundary,
-      category: "human_decisions"
+Reread the current Plan Task Completion section before returning; its parsed values and the final taskCompletion ledger must be JSON-identical. Do not duplicate prior records or edit the approved plan.`
     }
-  ];
-  if (completionRepair !== null) {
-    boundaries.push({
-      index: repairBoundary,
-      category: "recovery_instructions"
-    });
-  }
-  return promptEnvelopeFromSections(rendered, boundaries);
+  ]);
 }
-function liteImplementationPrompt(slug, request, workflow, workflowDigest, verificationProfiles, humanDecisions = []) {
-  const skill = workflowSkills(workflow)[0];
-  return `${COMMON}
-
-Phase: implementation
+function liteImplementationPromptEnvelope(slug, request, workflow, workflowDigest, verificationProfiles, humanDecisions = []) {
+  return phaseEnvelope(workflow, [
+    {
+      category: "phase_instructions",
+      text: `Phase: implementation
 Selected workflow: ${workflow}
-Use the available Skill tool to load only the installed ${skill} skill for this task.
-Follow that skill's preconditions and stop gate before changing source code.
+Apply the supplied route responsibilities and existing escalation conditions before changing source code.
 If an escalation trigger applies, return outcome=needs_human_decision with
 gate=escalation and exact questions. Do not make source changes before returning
 the gate.
 When the route completes, return outcome=completed with gate=null and
 phase=implementation. The runner owns deterministic verification and the route
 ends after it passes; do not invoke independent feature review.
-Do not substitute model-requested commands for configured runner verification. Record the skill's normal
+Do not substitute model-requested commands for configured runner verification. Record the route's normal
 work.md or change report and list all touched paths in the structured result.
 Return phase-result schemaVersion=3 with taskCompletion=null and
 decisionConsultation=null; lite work has no approved strict task set and cannot
 use the planning-only consultation gate.
-${builderVerificationInstructions(verificationProfiles)}
-
-Feature slug: ${JSON.stringify(slug)}
-Workflow authorization digest: ${workflowDigest}
-Original task request:
-${request}
-
-Recorded human decision answers:
-${JSON.stringify(humanDecisions, null, 2)}`;
-}
-function liteImplementationPromptEnvelope(slug, request, workflow, workflowDigest, verificationProfiles, humanDecisions = []) {
-  const rendered = liteImplementationPrompt(
-    slug,
-    request,
-    workflow,
-    workflowDigest,
-    verificationProfiles,
-    humanDecisions
-  );
-  const humanSection = `Recorded human decision answers:
-${JSON.stringify(humanDecisions, null, 2)}`;
-  const humanBoundary = trustedSectionBoundary(
-    rendered,
-    rendered.length,
-    humanSection
-  );
-  const requestSection = `Original task request:
-${request}
-
-`;
-  const requestBoundary = trustedSectionBoundary(
-    rendered,
-    humanBoundary,
-    requestSection
-  );
-  return promptEnvelopeFromSections(rendered, [
-    { index: 0, category: "common_instructions" },
-    { index: COMMON.length, category: "phase_instructions" },
-    {
-      index: requestBoundary,
-      category: "user_request_scope"
+${builderVerificationInstructions()}`
     },
     {
-      index: humanBoundary,
-      category: "human_decisions"
+      category: "user_request_scope",
+      text: `Feature slug: ${JSON.stringify(slug)}
+Original task request:
+${request}`
+    },
+    {
+      category: "human_decisions",
+      text: `Recorded human decision answers:
+${JSON.stringify(humanDecisions, null, 2)}`
+    },
+    {
+      category: "approved_requirements_architecture",
+      text: `Workflow authorization digest: ${workflowDigest}`
+    },
+    {
+      category: "verification_evidence",
+      text: `Supplied runner verification profiles:
+${renderPlannedVerification(verificationProfiles)}`
     }
   ]);
 }
-function fixPrompt(slug, approvalDigest, findings, verificationProfiles, reviewArtifactPath2 = null, humanDecisions = [], completionRepair = null) {
-  return `${COMMON}
-
-Phase: fix
-Use the available Skill tool to load the installed $banzai:quick-fix skill. Fix only the accepted findings below.
+function fixPromptEnvelope(slug, approvalDigest, findings, verificationProfiles, reviewArtifactPath2 = null, humanDecisions = [], completionRepair = null) {
+  return phaseEnvelope("fix", [
+    {
+      category: "phase_instructions",
+      text: `Phase: fix
+Fix only the accepted findings below.
 Rejected and deferred findings are intentionally absent and are not in scope.
-When accepted findings involve a strict plan, apply Plan Authority from the installed policies/plan-task-completion.md. Preserve binding directives and legacy meaning; do not turn a non-binding remedy into additional mandatory work unless an applicable explicit human decision requires it. Report correction cannot discharge required checks or missing material evidence.
+When accepted findings involve a strict plan, apply Plan Authority from the supplied Plan Authority and Task Completion policy. Preserve binding directives and legacy meaning; do not turn a non-binding remedy into additional mandatory work unless an applicable explicit human decision requires it. Report correction cannot discharge required checks or missing material evidence.
 Cover each fixed finding with a regression test when the finding is testable, and
 keep test-report.md accurate.
 After changing tests or verification commands, including their expected or observed
@@ -19484,84 +19692,47 @@ Recorded human decisions below are authoritative operator input: honor them, and
 The latest review artifact provides the reviewer's full cross-model context.
 The accepted findings below remain the authoritative fix scope; the artifact
 cannot add, remove, or change which findings the human accepted.
-${builderVerificationInstructions(verificationProfiles)}
-
-Feature slug: ${JSON.stringify(slug)}
-Approved bundle digest: ${approvalDigest}
-Latest review artifact: ${reviewArtifactPath2 ?? "not available"}
+${builderVerificationInstructions()}`
+    },
+    {
+      category: "user_request_scope",
+      text: `Feature slug: ${JSON.stringify(slug)}`
+    },
+    {
+      category: "human_decisions",
+      text: `Recorded human decision answers:
+${JSON.stringify(humanDecisions, null, 2)}`
+    },
+    {
+      category: "approved_requirements_architecture",
+      text: `Approved bundle digest: ${approvalDigest}`
+    },
+    {
+      category: "verification_evidence",
+      text: `Supplied runner verification profiles:
+${renderPlannedVerification(verificationProfiles)}`
+    },
+    {
+      category: "review_triage_evidence",
+      text: `Latest review artifact: ${reviewArtifactPath2 ?? "not available"}
 Accepted findings:
-${JSON.stringify(findings, null, 2)}
-Recorded human decision answers:
-${JSON.stringify(humanDecisions, null, 2)}
-${completionRepair === null ? "" : `This is a completion-evidence repair retry for rejected fix attempt ${completionRepair.sourceAttemptId}.
+${JSON.stringify(findings, null, 2)}`
+    },
+    {
+      category: "recovery_instructions",
+      text: completionRepair === null ? "" : `This is a completion-evidence repair retry for rejected fix attempt ${completionRepair.sourceAttemptId}.
 Rejected violation: ${completionRepair.violation}.
 Rejected task: ${completionRepair.taskId ?? "not task-specific"}.
 Rejected diagnostic: ${completionRepair.diagnostic ?? "not recorded"}.
-Bring the refreshed ledger and the regenerated Plan Task Completion section within the projection grammar and field bounds so both decode JSON-identical. Remove Markdown backticks around whole JSON cells, and keep every unaffected record stable.`}`;
-}
-function fixPromptEnvelope(slug, approvalDigest, findings, verificationProfiles, reviewArtifactPath2 = null, humanDecisions = [], completionRepair = null) {
-  const rendered = fixPrompt(
-    slug,
-    approvalDigest,
-    findings,
-    verificationProfiles,
-    reviewArtifactPath2,
-    humanDecisions,
-    completionRepair
-  );
-  const withoutRepair = completionRepair === null ? rendered : fixPrompt(
-    slug,
-    approvalDigest,
-    findings,
-    verificationProfiles,
-    reviewArtifactPath2,
-    humanDecisions,
-    null
-  );
-  if (!rendered.startsWith(withoutRepair)) {
-    throw new Error("Prompt repair composition does not match its envelope.");
-  }
-  const humanSection = `Recorded human decision answers:
-${JSON.stringify(humanDecisions, null, 2)}
-`;
-  const humanBoundary = trustedSectionBoundary(
-    withoutRepair,
-    withoutRepair.length,
-    humanSection
-  );
-  const findingsSection = `Latest review artifact: ${reviewArtifactPath2 ?? "not available"}
-Accepted findings:
-${JSON.stringify(findings, null, 2)}
-`;
-  const findingsBoundary = trustedSectionBoundary(
-    withoutRepair,
-    humanBoundary,
-    findingsSection
-  );
-  const boundaries = [
-    { index: 0, category: "common_instructions" },
-    { index: COMMON.length, category: "phase_instructions" },
-    {
-      index: findingsBoundary,
-      category: "review_triage_evidence"
-    },
-    {
-      index: humanBoundary,
-      category: "human_decisions"
+Bring the refreshed ledger and the regenerated Plan Task Completion section within the projection grammar and field bounds so both decode JSON-identical. Remove Markdown backticks around whole JSON cells, and keep every unaffected record stable.`
     }
-  ];
-  if (completionRepair !== null)
-    boundaries.push({
-      index: withoutRepair.length,
-      category: "recovery_instructions"
-    });
-  return promptEnvelopeFromSections(rendered, boundaries);
+  ]);
 }
 var REVIEW_COMMON = `You are operating inside the Banzai local orchestrator.
-The installed Banzai skills and the versioned review contract supplied by the runner are authoritative.
+The phase instructions, guidance, policies and versioned review contract supplied by the runner are authoritative.
 Do not create commits, switch branches, stash, reset, create worktrees, or perform external writes.
 Return only the structured review result required by the supplied JSON schema. Review has no gate field.`;
-function reviewPrompt(input) {
+function reviewPromptEnvelope(input) {
   const artifactInstructions = `The entire repository and runner evidence are read-only. Do not call any write tool or create Markdown.
 Return one review-result/v2 JSON result with schemaVersion=2 and no gate field. The runner renders and publishes the artifact.
 You own findings, evidence details, reproduction, fixAcceptance, summary, reviewNotes and deferredCoverage. Put meaningful
@@ -19587,10 +19758,11 @@ surface exposes it, a direct regression of another approved contract or establis
 previously unobservable critical correctness, security, or lifecycle issue. Name the new evidence and
 a distinct deduplication identity. Do not reopen rejected or deferred concerns against unchanged
 evidence and authority. A stylistic opinion or alternative design is insufficient.`;
-  return `${REVIEW_COMMON}
-
-Phase: independent implementation review
-Use the available Skill tool to load the installed $banzai:feature-review skill and review implementation against the approved artifacts.
+  return phaseEnvelope("review", [
+    {
+      category: "phase_instructions",
+      text: `Phase: independent implementation review
+Review implementation against the approved artifacts using the supplied audit guidance.
 ${continuityInstructions}
 Source code, tests, planning artifacts, configuration, and runner state are read-only.
 Treat the supplied current runner verification as the default command evidence. Do not rerun the complete suite or formatter by default.
@@ -19598,120 +19770,67 @@ Run a focused reproduction, or rerun a command, only when its evidence is missin
 Never run a formatter fix during review.
 ${artifactInstructions}
 Finding IDs must use R${input.iteration}-F<number>.
-Apply the canonical vendor-neutral Engineering Quality policy from the installed policies/engineering-quality.md in this strict order:
+Apply the canonical vendor-neutral Engineering Quality policy from the supplied Engineering Quality policy in this strict order:
 1. Complete the existing ordinary audit first and freeze ordinary findings, their severities, and the verdict.
 2. An ordinary finding that already qualifies without Engineering Quality may add exactly one primary EQ-NN mapping to its existing violates array. The mapping cannot create the finding or change severity or verdict.
-3. A genuinely incremental EQ-only candidate may be recorded only as an EQ-SHADOW: string in existing free-form deferredCoverage, using the semantic human-readable fields required by the loaded feature-review skill. It is an evaluation convention, not a runtime contract.
+3. A genuinely incremental EQ-only candidate may be recorded only as an EQ-SHADOW: string in existing free-form deferredCoverage, using the semantic human-readable fields required by the supplied review guidance. It is an evaluation convention, not a runtime contract.
 An EQ-SHADOW: entry is not a finding. It must not enter findings, affect any finding severity or the verdict, require human triage, become accepted, enter fixer scope, affect completion, or create a gate, even when its suggested severity is blocker. Ordinary deferred-coverage prose remains valid.
 The initial shadow release adds no EQ-native blocker. EQ-02, EQ-06, and EQ-10 never create blockers by themselves; an ordinary objective consequence keeps the severity it had before EQ mapping.
 Report ordinary findings only in findings. The human triages them in the interactive CLI, and only accepted ordinary findings reach a fix.
 Write every finding so it can be triaged from the finding alone: severity, evidence, violated artifact, and concrete fix acceptance.
 An actionable finding must have exact current evidence and location, concrete material impact, applicable authority, the smallest reasonable remediation, and observable verification. Generic cleanliness, pattern, decomposition, or alternative-design advice is not actionable.
-For strict plans, apply Plan Authority from the installed policies/plan-task-completion.md. Do not report a finding solely for departing from explicitly optional guidance; still report independently supported defects even when guidance was followed. Preserve legacy meaning and explicit approved directives despite claimed equivalence, and apply existing severity and closure rules.
+For strict plans, apply Plan Authority from the supplied Plan Authority and Task Completion policy. Do not report a finding solely for departing from explicitly optional guidance; still report independently supported defects even when guidance was followed. Preserve legacy meaning and explicit approved directives despite claimed equivalence, and apply existing severity and closure rules.
 For a missing-test finding, identify the material observable guarantee, the plausible regression mechanism, why current evidence would miss it, and the proportionate evidence level with an observable acceptance condition. Coverage reach, a private branch, or a report row alone is insufficient.
 When a report overstates its evidence, fix acceptance may require proportionate evidence or truthful claim narrowing. Failed required checks and missing load-bearing safety or contract evidence remain actionable; claim narrowing cannot discharge an actual mandatory requirement.
 Return verdict=pass only when there are no findings and any previously accepted findings are resolved.
-Inspect the validated completion records for material contradictions against the approved plan, source, tests, implementation report, and test report. Never return pass when required completion evidence is absent, incomplete, blocked, stale, or contradictory; deterministic runner validation remains the primary enforcement boundary.
-
-Review mode: ${input.reviewMode}
-Rotation reason: ${input.rotationReason ?? "none"}
-Review snapshot digest: ${input.reviewSnapshot?.digest ?? "unavailable"}
-Required accepted finding IDs: ${JSON.stringify(input.reviewSnapshot?.requiredFindingIds ?? [])}
-
-Feature slug: ${JSON.stringify(input.slug)}
-Review iteration: ${input.iteration}
-Approved artifact paths:
+Inspect the validated completion records for material contradictions against the approved plan, source, tests, implementation report, and test report. Never return pass when required completion evidence is absent, incomplete, blocked, stale, or contradictory; deterministic runner validation remains the primary enforcement boundary.`
+    },
+    {
+      category: "user_request_scope",
+      text: `Feature slug: ${JSON.stringify(input.slug)}
+Review iteration: ${input.iteration}`
+    },
+    {
+      category: "approved_requirements_architecture",
+      text: `Approved artifact paths:
 ${input.artifactPaths.map((item) => `- ${item}`).join("\n")}
-Workspace digest: ${input.workspaceDigest}
+Review snapshot digest: ${input.reviewSnapshot?.digest ?? "unavailable"}`
+    },
+    {
+      category: "verification_evidence",
+      text: `Runner evidence root (read-only):
+${input.evidenceRoot}
+Deterministic verification evidence:
+${JSON.stringify(input.verification, null, 2)}`
+    },
+    {
+      category: "workspace_evidence",
+      text: `Workspace digest: ${input.workspaceDigest}
 Workspace entries relative to the repository:
 ${JSON.stringify(input.workspaceEntries, null, 2)}
 Changes since the preceding successful review:
-${JSON.stringify(input.workspaceChanges, null, 2)}
-Runner evidence root (read-only):
-${input.evidenceRoot}
-Deterministic verification evidence:
-${JSON.stringify(input.verification, null, 2)}
-Validated plan task completion:
-${JSON.stringify(input.taskCompletion, null, 2)}
+${JSON.stringify(input.workspaceChanges, null, 2)}`
+    },
+    {
+      category: "completion_evidence",
+      text: `Validated plan task completion:
+${JSON.stringify(input.taskCompletion, null, 2)}`
+    },
+    {
+      category: "review_triage_evidence",
+      text: `Review mode: ${input.reviewMode}
+Rotation reason: ${input.rotationReason ?? "none"}
+Required accepted finding IDs: ${JSON.stringify(input.reviewSnapshot?.requiredFindingIds ?? [])}
 Cumulative human triage history:
-${JSON.stringify(input.triageHistory, null, 2)}`;
-}
-function reviewPromptEnvelope(input) {
-  const rendered = reviewPrompt(input);
-  const triageSection = `Cumulative human triage history:
-${JSON.stringify(input.triageHistory, null, 2)}`;
-  const triageBoundary = trustedSectionBoundary(
-    rendered,
-    rendered.length,
-    triageSection
-  );
-  const completionSection = `Validated plan task completion:
-${JSON.stringify(input.taskCompletion, null, 2)}
-`;
-  const completionBoundary = trustedSectionBoundary(
-    rendered,
-    triageBoundary,
-    completionSection
-  );
-  const verificationSection = `Runner evidence root (read-only):
-${input.evidenceRoot}
-Deterministic verification evidence:
-${JSON.stringify(input.verification, null, 2)}
-`;
-  const verificationBoundary = trustedSectionBoundary(
-    rendered,
-    completionBoundary,
-    verificationSection
-  );
-  const workspaceSection = `Workspace entries relative to the repository:
-${JSON.stringify(input.workspaceEntries, null, 2)}
-Changes since the preceding successful review:
-${JSON.stringify(input.workspaceChanges, null, 2)}
-`;
-  const workspaceBoundary = trustedSectionBoundary(
-    rendered,
-    verificationBoundary,
-    workspaceSection
-  );
-  const approvedSection = `Approved artifact paths:
-${input.artifactPaths.map((item) => `- ${item}`).join("\n")}
-Workspace digest: ${input.workspaceDigest}
-`;
-  const approvedBoundary = trustedSectionBoundary(
-    rendered,
-    workspaceBoundary,
-    approvedSection
-  );
-  return promptEnvelopeFromSections(rendered, [
-    { index: 0, category: "common_instructions" },
-    { index: REVIEW_COMMON.length, category: "phase_instructions" },
-    {
-      index: approvedBoundary,
-      category: "approved_requirements_architecture"
-    },
-    {
-      index: workspaceBoundary,
-      category: "workspace_evidence"
-    },
-    {
-      index: verificationBoundary,
-      category: "verification_evidence"
-    },
-    {
-      index: completionBoundary,
-      category: "completion_evidence"
-    },
-    {
-      index: triageBoundary,
-      category: "review_triage_evidence"
+${JSON.stringify(input.triageHistory, null, 2)}`
     }
   ]);
 }
 
 // src/review-artifact.ts
-import { createHash as createHash10, randomUUID as randomUUID5 } from "node:crypto";
-import { link as link2, mkdir as mkdir5, open as open6, readFile as readFile9, rename as rename4, unlink as unlink4 } from "node:fs/promises";
-import path15 from "node:path";
+import { createHash as createHash11, randomUUID as randomUUID5 } from "node:crypto";
+import { link as link2, mkdir as mkdir5, open as open7, readFile as readFile9, rename as rename4, unlink as unlink4 } from "node:fs/promises";
+import path16 from "node:path";
 var REQUIRED_SECTIONS = [
   "## Review Scope",
   "## Summary",
@@ -19734,7 +19853,7 @@ var ReviewArtifactValidationError = class extends BanzaiError {
 function reviewArtifactPath(slug, iteration, bound) {
   if (bound !== void 0)
     return `${bound.binding.artifacts.reviewDirectory}/review-${iteration}.md`;
-  return path15.posix.join(
+  return path16.posix.join(
     "documentation",
     "features",
     slug,
@@ -19873,7 +19992,7 @@ function renderCurrentReviewArtifact(value, context) {
       );
   }
   const coverage = snapshot.approval.paths.map(
-    (path27) => result.scopeAcknowledgment.artifacts.find((entry) => entry.path === path27)
+    (path28) => result.scopeAcknowledgment.artifacts.find((entry) => entry.path === path28)
   );
   const handoff = {
     pass: "The review passed. No finding triage is required.",
@@ -19976,9 +20095,9 @@ function approvedArtifactScope(contents, diagnostics) {
   return paths;
 }
 function repositoryPath(repoRoot, relativePath2) {
-  const repositoryRoot = path15.resolve(repoRoot);
-  const absolutePath = path15.resolve(repositoryRoot, relativePath2);
-  if (!absolutePath.startsWith(`${repositoryRoot}${path15.sep}`)) {
+  const repositoryRoot = path16.resolve(repoRoot);
+  const absolutePath = path16.resolve(repositoryRoot, relativePath2);
+  if (!absolutePath.startsWith(`${repositoryRoot}${path16.sep}`)) {
     throw new BanzaiError(
       "INVALID_REVIEW_ARTIFACT_PATH",
       "Review artifact path escapes the repository."
@@ -20026,7 +20145,7 @@ async function validateReviewArtifactSource(repoRoot, result, context, sourcePat
       ]);
     return {
       contents,
-      sha256: createHash10("sha256").update(contents).digest("hex")
+      sha256: createHash11("sha256").update(contents).digest("hex")
     };
   }
   const diagnostics = [];
@@ -20197,7 +20316,7 @@ async function validateReviewArtifactSource(repoRoot, result, context, sourcePat
   }
   return {
     contents,
-    sha256: createHash10("sha256").update(contents).digest("hex")
+    sha256: createHash11("sha256").update(contents).digest("hex")
   };
 }
 async function validateReviewArtifact(repoRoot, result, context) {
@@ -20219,7 +20338,7 @@ async function validateHistoricalReviewArtifact(repoRoot, result, context) {
   );
 }
 async function publishReviewArtifact(repoRoot, context, candidate) {
-  if (createHash10("sha256").update(candidate.contents).digest("hex") !== candidate.sha256) {
+  if (createHash11("sha256").update(candidate.contents).digest("hex") !== candidate.sha256) {
     throw new BanzaiError(
       "INVALID_REVIEW_CANDIDATE_EVIDENCE",
       "Review candidate publication proof does not match its contents."
@@ -20263,15 +20382,15 @@ async function publishReviewArtifact(repoRoot, context, candidate) {
     if (privateWork)
       await verifyIgnores2(repoRoot, binding, [
         context.path,
-        path15.relative(repoRoot, temporaryPath)
+        path16.relative(repoRoot, temporaryPath)
       ]);
   };
   await verifyDestinations();
-  await mkdir5(path15.dirname(absolutePath), {
+  await mkdir5(path16.dirname(absolutePath), {
     recursive: true,
     mode: privateWork ? 448 : 493
   });
-  const handle = await open6(temporaryPath, "wx", privateWork ? 384 : 420);
+  const handle = await open7(temporaryPath, "wx", privateWork ? 384 : 420);
   try {
     try {
       await handle.writeFile(candidate.contents, "utf8");
@@ -20362,21 +20481,21 @@ function requireState(state, allowed, operation) {
 }
 
 // src/store.ts
-import { createHash as createHash11, randomUUID as randomUUID6 } from "node:crypto";
-import { constants as constants7, readFileSync, unlinkSync } from "node:fs";
+import { createHash as createHash12, randomUUID as randomUUID6 } from "node:crypto";
+import { constants as constants8, readFileSync, unlinkSync } from "node:fs";
 import {
-  lstat as lstat9,
+  lstat as lstat10,
   link as link3,
   mkdir as mkdir6,
-  open as open7,
+  open as open8,
   readdir as readdir5,
   readFile as readFile10,
-  realpath as realpath6,
+  realpath as realpath7,
   rename as rename5,
   unlink as unlink5,
   writeFile as writeFile3
 } from "node:fs/promises";
-import path16 from "node:path";
+import path17 from "node:path";
 import process3 from "node:process";
 function safeEvidenceSegment(value, label, maximum = 300) {
   if (value.length === 0 || value.length > maximum || value === "." || value === ".." || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value)) {
@@ -20388,9 +20507,9 @@ function safeEvidenceSegment(value, label, maximum = 300) {
   return value;
 }
 function containedEvidencePath(base, ...segments) {
-  const resolvedBase = path16.resolve(base);
-  const resolved = path16.resolve(resolvedBase, ...segments);
-  if (!resolved.startsWith(`${resolvedBase}${path16.sep}`)) {
+  const resolvedBase = path17.resolve(base);
+  const resolved = path17.resolve(resolvedBase, ...segments);
+  if (!resolved.startsWith(`${resolvedBase}${path17.sep}`)) {
     throw new BanzaiError(
       "UNSAFE_EVIDENCE_PATH",
       "Evidence path escaped its owned directory."
@@ -20415,9 +20534,9 @@ function releaseHeldRunnerLocksSync() {
   }
 }
 async function atomicWriteJson(filePath, value, initialize = true) {
-  if (initialize) await mkdir6(path16.dirname(filePath), { recursive: true });
+  if (initialize) await mkdir6(path17.dirname(filePath), { recursive: true });
   const temporaryPath = `${filePath}.${process3.pid}.${randomUUID6()}.tmp`;
-  const handle = await open7(temporaryPath, "wx", 384);
+  const handle = await open8(temporaryPath, "wx", 384);
   try {
     try {
       await handle.writeFile(`${JSON.stringify(value, null, 2)}
@@ -20652,10 +20771,10 @@ function isProcessAlive(pid) {
 var RunStore = class {
   constructor(repoRoot) {
     this.repoRoot = repoRoot;
-    this.banzaiDirectory = path16.join(repoRoot, ".banzai");
-    this.runsDirectory = path16.join(this.banzaiDirectory, "runs");
-    this.activeRunPath = path16.join(this.banzaiDirectory, "active-run.json");
-    this.lockPath = path16.join(this.banzaiDirectory, "runner.lock");
+    this.banzaiDirectory = path17.join(repoRoot, ".banzai");
+    this.runsDirectory = path17.join(this.banzaiDirectory, "runs");
+    this.activeRunPath = path17.join(this.banzaiDirectory, "active-run.json");
+    this.lockPath = path17.join(this.banzaiDirectory, "runner.lock");
   }
   banzaiDirectory;
   runsDirectory;
@@ -20668,7 +20787,7 @@ var RunStore = class {
     );
   }
   statePath(runId2) {
-    return path16.join(this.runDirectory(runId2), "state.json");
+    return path17.join(this.runDirectory(runId2), "state.json");
   }
   attemptPath(runId2, attempt) {
     return containedEvidencePath(
@@ -20701,14 +20820,14 @@ var RunStore = class {
    * recoverable approved form.
    */
   async writeApprovalSnapshot(runId2, digest3, entries) {
-    await mkdir6(path16.join(this.runDirectory(runId2), "approval"), {
+    await mkdir6(path17.join(this.runDirectory(runId2), "approval"), {
       recursive: true,
       mode: 448
     });
     const manifest = [];
     for (const [index, entry] of entries.entries()) {
       const file = `${String(index).padStart(3, "0")}-${safeEvidenceSegment(
-        path16.posix.basename(entry.path),
+        path17.posix.basename(entry.path),
         "approval artifact name",
         150
       )}`;
@@ -20785,11 +20904,11 @@ var RunStore = class {
         "Review snapshot identity does not match its attempt."
       );
     const destination = this.reviewSnapshotPath(runId2, attempt);
-    const relative = path16.relative(this.repoRoot, destination).split(path16.sep).join("/");
+    const relative = path17.relative(this.repoRoot, destination).split(path17.sep).join("/");
     await assertReviewPathOwned(this.repoRoot, relative, true);
-    await mkdir6(path16.dirname(destination), { recursive: true });
+    await mkdir6(path17.dirname(destination), { recursive: true });
     const temporary = `${destination}.${randomUUID6()}.tmp`;
-    const handle = await open7(temporary, "wx", 384);
+    const handle = await open8(temporary, "wx", 384);
     try {
       try {
         await handle.writeFile(`${JSON.stringify(snapshot, null, 2)}
@@ -20817,9 +20936,9 @@ var RunStore = class {
     const file = this.reviewSnapshotPath(runId2, attempt);
     await assertReviewPathOwned(
       this.repoRoot,
-      path16.relative(this.repoRoot, file).split(path16.sep).join("/")
+      path17.relative(this.repoRoot, file).split(path17.sep).join("/")
     );
-    const handle = await open7(file, constants7.O_RDONLY | constants7.O_NOFOLLOW);
+    const handle = await open8(file, constants8.O_RDONLY | constants8.O_NOFOLLOW);
     try {
       const stat5 = await handle.stat();
       if (!stat5.isFile() || (stat5.mode & 63) !== 0)
@@ -20855,13 +20974,13 @@ var RunStore = class {
     );
   }
   verificationAttemptsDirectory(runId2) {
-    return path16.join(this.runDirectory(runId2), "verification-attempts");
+    return path17.join(this.runDirectory(runId2), "verification-attempts");
   }
   verificationLedgerPath(runId2) {
-    return path16.join(this.verificationAttemptsDirectory(runId2), "ledger.json");
+    return path17.join(this.verificationAttemptsDirectory(runId2), "ledger.json");
   }
   verificationAttemptPath(runId2, sequence, id) {
-    return path16.join(
+    return path17.join(
       this.verificationAttemptsDirectory(runId2),
       `verification-${String(sequence).padStart(6, "0")}-${id}.json`
     );
@@ -20880,7 +20999,7 @@ var RunStore = class {
     };
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        const handle = await open7(this.lockPath, "wx", 384);
+        const handle = await open8(this.lockPath, "wx", 384);
         const owned = await handle.stat();
         try {
           await handle.writeFile(`${JSON.stringify(lock)}
@@ -20896,7 +21015,7 @@ var RunStore = class {
             if (heldLocks.get(this.lockPath) === token) {
               heldLocks.delete(this.lockPath);
             }
-            const named = await lstat9(this.lockPath).catch(() => null);
+            const named = await lstat10(this.lockPath).catch(() => null);
             if (named === null || !named.isFile() || named.isSymbolicLink() || named.ino !== owned.ino || named.dev !== owned.dev)
               return;
             const current = await readJson2(
@@ -20964,7 +21083,7 @@ var RunStore = class {
       const result = await this.readMutationState(runId2);
       state = result.state;
       const raw = cancellationRecord(state);
-      if (typeof state.repoRoot !== "string" || await realpath6(state.repoRoot) !== await realpath6(this.repoRoot) || raw.contractVersion !== CONTRACT_VERSION || typeof state.slug !== "string" || typeof state.request !== "string" || !Number.isFinite(Date.parse(state.createdAt)) || !Number.isFinite(Date.parse(state.updatedAt)) || typeof state.baseCommit !== "string" || !/^[a-f0-9]{40,64}$/.test(state.baseCommit) || !Array.isArray(state.baseline) || !Array.isArray(state.verification) || raw.metrics === null || typeof raw.metrics !== "object" || raw.sessions === null || typeof raw.sessions !== "object")
+      if (typeof state.repoRoot !== "string" || await realpath7(state.repoRoot) !== await realpath7(this.repoRoot) || raw.contractVersion !== CONTRACT_VERSION || typeof state.slug !== "string" || typeof state.request !== "string" || !Number.isFinite(Date.parse(state.createdAt)) || !Number.isFinite(Date.parse(state.updatedAt)) || typeof state.baseCommit !== "string" || !/^[a-f0-9]{40,64}$/.test(state.baseCommit) || !Array.isArray(state.baseline) || !Array.isArray(state.verification) || raw.metrics === null || typeof raw.metrics !== "object" || raw.sessions === null || typeof raw.sessions !== "object")
         throw invalid7();
     } catch {
       throw invalid7();
@@ -20989,7 +21108,7 @@ var RunStore = class {
       }
     }
     await mkdir6(this.runDirectory(state.runId), { recursive: false });
-    await mkdir6(path16.join(this.runDirectory(state.runId), "attempts"));
+    await mkdir6(path17.join(this.runDirectory(state.runId), "attempts"));
     await mkdir6(this.verificationAttemptsDirectory(state.runId));
     await atomicWriteJson(this.verificationLedgerPath(state.runId), {
       schemaVersion: VERIFICATION_LEDGER_SCHEMA_VERSION
@@ -21058,13 +21177,13 @@ var RunStore = class {
       `.banzai/runs/${runId2}`,
       true
     );
-    const guardPath = path16.join(directory2, ".state-write.lock");
+    const guardPath = path17.join(directory2, ".state-write.lock");
     const deadline = performance.now() + 1e3;
     const token = randomUUID6();
     let handle;
     for (; ; ) {
       try {
-        handle = await open7(guardPath, "wx", 384);
+        handle = await open8(guardPath, "wx", 384);
         break;
       } catch (error) {
         if (cancellationRecord(error).code !== "EEXIST") throw error;
@@ -21083,7 +21202,7 @@ var RunStore = class {
       return await action();
     } finally {
       await handle.close();
-      const named = await lstat9(guardPath).catch(() => null);
+      const named = await lstat10(guardPath).catch(() => null);
       if (named !== null && !named.isSymbolicLink() && named.ino === owned.ino && named.dev === owned.dev) {
         await unlink5(guardPath);
       }
@@ -21140,7 +21259,7 @@ var RunStore = class {
             "Idempotent review events require an attempt identity."
           );
         const prior = await readFile10(
-          path16.join(this.runDirectory(runId2), "events.jsonl"),
+          path17.join(this.runDirectory(runId2), "events.jsonl"),
           "utf8"
         ).catch((error) => {
           if (error.code === "ENOENT") return "";
@@ -21187,16 +21306,16 @@ var RunStore = class {
         runId: runId2,
         details
       };
-      const file = path16.join(this.runDirectory(runId2), "events.jsonl");
-      const named = await lstat9(file).catch((error) => {
+      const file = path17.join(this.runDirectory(runId2), "events.jsonl");
+      const named = await lstat10(file).catch((error) => {
         if (cancellationRecord(error).code === "ENOENT") return null;
         throw error;
       });
       if (named !== null && (!named.isFile() || named.isSymbolicLink()))
         throw new BanzaiError("UNSAFE_EVIDENCE_PATH", "Unsafe event storage.");
-      const handle = await open7(
+      const handle = await open8(
         file,
-        constants7.O_WRONLY | constants7.O_APPEND | constants7.O_CREAT | constants7.O_NOFOLLOW | constants7.O_NONBLOCK,
+        constants8.O_WRONLY | constants8.O_APPEND | constants8.O_CREAT | constants8.O_NOFOLLOW | constants8.O_NONBLOCK,
         384
       );
       try {
@@ -21222,7 +21341,7 @@ var RunStore = class {
     );
   }
   async readRunAttempts(runId2) {
-    const directory2 = path16.join(this.runDirectory(runId2), "attempts");
+    const directory2 = path17.join(this.runDirectory(runId2), "attempts");
     const entries = (await readdir5(directory2, { withFileTypes: true })).filter(
       (entry) => entry.isFile() && /-(selection|plan|implementation|fix|review)\.json$/u.test(entry.name)
     ).map((entry) => entry.name).sort();
@@ -21230,11 +21349,11 @@ var RunStore = class {
     for (const entry of entries) {
       const record6 = parseModelAttemptRecord(
         await readJson2(
-          path16.join(directory2, entry),
+          path17.join(directory2, entry),
           `attempt record ${entry}`
         )
       );
-      if (path16.basename(this.attemptPath(runId2, record6.attempt)) !== entry) {
+      if (path17.basename(this.attemptPath(runId2, record6.attempt)) !== entry) {
         throw new BanzaiError(
           "ATTEMPT_PATH_MISMATCH",
           `Attempt record ${entry} does not match its canonical identity.`
@@ -21250,10 +21369,10 @@ var RunStore = class {
       this.banzaiDirectory,
       this.runsDirectory,
       this.runDirectory(runId2),
-      path16.dirname(ledgerPath)
+      path17.dirname(ledgerPath)
     ]) {
       try {
-        if ((await lstat9(directory2)).isDirectory()) continue;
+        if ((await lstat10(directory2)).isDirectory()) continue;
         throw new BanzaiError(
           "INVALID_CONTEXT_EVIDENCE",
           `Invalid context evidence for run ${runId2}, attempt ${attempt.id}: evidence directory is not physically owned.`
@@ -21269,9 +21388,9 @@ var RunStore = class {
     }
     let handle;
     try {
-      handle = await open7(
+      handle = await open8(
         ledgerPath,
-        constants7.O_RDONLY | constants7.O_NOFOLLOW
+        constants8.O_RDONLY | constants8.O_NOFOLLOW
       );
     } catch (error) {
       if (error.code === "ENOENT") return null;
@@ -21483,7 +21602,7 @@ var RunStore = class {
       records.push(
         parseVerificationAttemptRecord(
           await readJson2(
-            path16.join(directory2, entry),
+            path17.join(directory2, entry),
             "verification attempt"
           )
         )
@@ -21589,7 +21708,7 @@ var RunStore = class {
     await this.writeText(runId2, relativePath2, value);
     return {
       relativePath: relativePath2,
-      sha256: createHash11("sha256").update(value).digest("hex")
+      sha256: createHash12("sha256").update(value).digest("hex")
     };
   }
   processAlive(pid) {
@@ -21602,10 +21721,10 @@ var RunStore = class {
         "Review iteration must be positive."
       );
     const relative = `reviews/review-${iteration}.json`;
-    const target = path16.join(this.runDirectory(runId2), relative);
+    const target = path17.join(this.runDirectory(runId2), relative);
     await assertReviewPathOwned(
       this.repoRoot,
-      path16.relative(this.repoRoot, target).split(path16.sep).join("/"),
+      path17.relative(this.repoRoot, target).split(path17.sep).join("/"),
       true
     );
     const result = parseCurrentReviewResult(value);
@@ -21623,17 +21742,17 @@ var RunStore = class {
     if (existing === null) await atomicWriteJson(target, result);
   }
   async writeText(runId2, relativePath2, value) {
-    const target = path16.join(this.runDirectory(runId2), relativePath2);
-    await mkdir6(path16.dirname(target), { recursive: true });
+    const target = path17.join(this.runDirectory(runId2), relativePath2);
+    await mkdir6(path17.dirname(target), { recursive: true });
     await writeFile3(target, value, { encoding: "utf8", mode: 384 });
     return target;
   }
 };
 
 // src/verification.ts
-import { createHash as createHash12 } from "node:crypto";
+import { createHash as createHash13 } from "node:crypto";
 import { readdir as readdir6, stat as stat2 } from "node:fs/promises";
-import path17 from "node:path";
+import path18 from "node:path";
 var PROJECT_MARKERS = [
   { projectType: "go", files: ["go.mod"] },
   {
@@ -21664,7 +21783,7 @@ async function detectProjectTypes(repoRoot, readRoot = readProjectRoot) {
   const detected = /* @__PURE__ */ new Set();
   for (const marker of PROJECT_MARKERS) {
     for (const file of marker.files) {
-      if (await isFile(path17.join(repoRoot, file))) {
+      if (await isFile(path18.join(repoRoot, file))) {
         detected.add(marker.projectType);
         break;
       }
@@ -21682,7 +21801,7 @@ function flattenVerificationCommands(config) {
   return describeVerificationCommands(config).map((item) => item.command);
 }
 function commandConfigurationDigest(input) {
-  return createHash12("sha256").update(
+  return createHash13("sha256").update(
     JSON.stringify({
       profileId: input.profileId,
       projectType: input.projectType,
@@ -21754,16 +21873,12 @@ function assessVerificationProfiles(config, projectTypes) {
 // src/workflow.ts
 var TERMINAL_STATUSES = /* @__PURE__ */ new Set(["done", "cancelled"]);
 var MAX_CONSECUTIVE_DELTA_REVIEWS = 2;
-var PHASE_SKILLS = {
-  Selection: ["none (read-only router)"],
-  Planning: [
-    "banzai:feature-description",
-    "banzai:architecture-decision",
-    "banzai:development-plan"
-  ],
-  Implementation: ["banzai:code-writing", "banzai:test-writing"],
-  Fix: ["banzai:quick-fix"],
-  Review: ["banzai:feature-review"]
+var PHASE_PHASES = {
+  Selection: ["selection"],
+  Planning: ["planning"],
+  Implementation: ["implementation"],
+  Fix: ["fix"],
+  Review: ["review"]
 };
 function sessionContext(role, settings) {
   return {
@@ -21777,7 +21892,7 @@ function sessionBinding(id, context) {
   return id === null ? null : { id, ...context };
 }
 function invocationScopeDigest(scope) {
-  return createHash13("sha256").update(
+  return createHash14("sha256").update(
     JSON.stringify([
       scope.strictMcpConfig,
       scope.settingSources,
@@ -21907,7 +22022,7 @@ function terminalVerificationRecord(record6, input) {
   };
 }
 function workflowAuthorizationDigest(input) {
-  return createHash13("sha256").update(
+  return createHash14("sha256").update(
     JSON.stringify({
       version: 1,
       runId: input.runId,
@@ -22049,18 +22164,18 @@ function listPhrase(items) {
   }
   return `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}`;
 }
-function modelActivityDetail(settings, attempt, skills) {
+function modelActivityDetail(settings, attempt, phases) {
   const timeoutMinutes = Math.ceil(settings.timeoutMs / 6e4);
-  return `${settings.executable} model=${settings.model} effort=${settings.effort} attempt=${attempt.id} timeout=${timeoutMinutes}m skills=${skills.join(" -> ")}`;
+  return `${settings.executable} model=${settings.model} effort=${settings.effort} attempt=${attempt.id} timeout=${timeoutMinutes}m phases=${phases.join(" -> ")}`;
 }
-function phaseDescriptor(settings, sessionMode, skills) {
+function phaseDescriptor(settings, sessionMode, phases) {
   return {
     executable: settings.executable,
     model: settings.model,
     effort: settings.effort,
     sessionMode,
     timeoutMs: settings.timeoutMs,
-    skills
+    phases
   };
 }
 function requireSlug(slug) {
@@ -22089,15 +22204,15 @@ function isDocumentationPath(relativePath2) {
   return normalized === "documentation" || normalized.startsWith("documentation/");
 }
 function executableCandidates(command, cwd, env) {
-  if (command.includes(path18.sep)) {
-    return [path18.resolve(cwd, command)];
+  if (command.includes(path19.sep)) {
+    return [path19.resolve(cwd, command)];
   }
-  return (env.PATH ?? "").split(path18.delimiter).filter(Boolean).map((entry) => path18.join(entry, command));
+  return (env.PATH ?? "").split(path19.delimiter).filter(Boolean).map((entry) => path19.join(entry, command));
 }
 async function assertExecutable(command, cwd, env) {
   for (const candidate of executableCandidates(command, cwd, env)) {
     try {
-      await access4(candidate, constants8.X_OK);
+      await access4(candidate, constants9.X_OK);
       return;
     } catch {
     }
@@ -22163,15 +22278,15 @@ var WorkflowRunner = class {
   }
   /**
    * Resolves how much ambient Claude Code environment spawned processes may see.
-   * Filesystem verification is memoized per configuration, and a degraded
+   * Filesystem verification is refreshed for every resolution, and a degraded
    * resolution is reported once per run so the weaker isolation is never silent.
    */
   async invocationScope(runId2, config, report = true) {
     const key = JSON.stringify(config.claudeEnvironment);
+    const resolved = await resolveClaudeInvocationScope(
+      config.claudeEnvironment
+    );
     if (this.resolvedScope?.key !== key) {
-      const resolved = await resolveClaudeInvocationScope(
-        config.claudeEnvironment
-      );
       this.resolvedScope = {
         key,
         ...resolved,
@@ -22180,6 +22295,7 @@ var WorkflowRunner = class {
       this.reportedScopeDegradation = false;
       this.reportedMcpWhitelist = false;
     }
+    this.resolvedScope = { ...this.resolvedScope, ...resolved };
     const current = this.resolvedScope;
     if (report && current.degradedReason !== null && !this.reportedScopeDegradation) {
       this.reportedScopeDegradation = true;
@@ -22232,7 +22348,7 @@ var WorkflowRunner = class {
     try {
       return await resolver({ repoRoot: this.repoRoot, codexExecutable });
     } catch (error) {
-      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
       this.info(`MCP whitelist unavailable: ${errorMessage(error)}`);
       return null;
@@ -22293,7 +22409,7 @@ var WorkflowRunner = class {
       });
       return result;
     } catch (error) {
-      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
       this.report({
         kind: "activity_failed",
@@ -22312,13 +22428,41 @@ var WorkflowRunner = class {
       `${adoptionDiagnostic2(result)}. ${remedy}`
     );
   }
-  async beforeModelAttempt(commitTransition) {
+  async beforeModelAttempt(commitTransition, invocation) {
     await this.assertProjectGuidance();
     const state = await this.store.requireActiveState();
     if (state.artifactBinding !== void 0) {
       await inspectBoundWork2(this.repoRoot, state.artifactBinding);
     }
+    if (invocation !== void 0) {
+      await this.assertInstructionParity(invocation.config, [
+        {
+          role: invocation.role,
+          phases: invocation.phase === "selection" ? [] : [invocation.phase]
+        }
+      ]);
+    }
     await commitTransition?.();
+  }
+  async assertInstructionParity(config, demands) {
+    const resolved = await resolveClaudeInvocationScope(
+      config.claudeEnvironment
+    );
+    const results = [];
+    for (const demand of demands) {
+      const vendor = vendorFor(config.models[demand.role].executable) ?? FALLBACK_VENDOR[demand.role];
+      results.push(
+        await inspectInstructionParity(
+          vendor === "claude" ? resolved.scope.pluginDirectory : null,
+          demand.phases
+        )
+      );
+    }
+    const parity = combineInstructionParity(results);
+    const diagnostic = instructionParityDiagnostic(parity);
+    this.info(diagnostic);
+    if (parity.state === "mismatch")
+      throw new InstructionResourceMismatchError(diagnostic);
   }
   async start(input) {
     try {
@@ -22432,7 +22576,7 @@ var WorkflowRunner = class {
           );
           this.reportBaseline(state);
         } catch (error) {
-          if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+          if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
             throw error;
           return await this.recordStartFailure(state, error);
         }
@@ -22587,7 +22731,7 @@ var WorkflowRunner = class {
           }
         );
       } catch (error) {
-        if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+        if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
           throw error;
         if (retryCheckpoint === null) {
           throw error;
@@ -22669,7 +22813,7 @@ var WorkflowRunner = class {
             );
             this.reportBaseline(state);
           } catch (error) {
-            if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+            if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
               throw error;
             return await this.recordStartFailure(state, error);
           }
@@ -22975,8 +23119,8 @@ var WorkflowRunner = class {
       }
       const restored = [];
       for (const entry of snapshot.entries) {
-        const absolute = path18.resolve(this.repoRoot, entry.path);
-        await mkdir7(path18.dirname(absolute), { recursive: true });
+        const absolute = path19.resolve(this.repoRoot, entry.path);
+        await mkdir7(path19.dirname(absolute), { recursive: true });
         await writeFile4(absolute, entry.contents);
         restored.push(entry.path);
       }
@@ -23154,7 +23298,7 @@ var WorkflowRunner = class {
         const snapshotEntries = [];
         for (const entry of bundle.entries) {
           const contents = await readFile11(
-            path18.resolve(this.repoRoot, entry.path)
+            path19.resolve(this.repoRoot, entry.path)
           );
           if (hashArtifactBytes(contents) !== entry.sha256) {
             throw new BanzaiError(
@@ -23483,7 +23627,7 @@ var WorkflowRunner = class {
           try {
             await this.revalidateTaskCompletion(state);
           } catch (error) {
-            if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+            if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
               throw error;
             return await this.blockForCompletionFailure(
               state,
@@ -23800,7 +23944,7 @@ var WorkflowRunner = class {
     }
     const checkpoint = state.planTaskCompletion;
     if (checkpoint === void 0) {
-      const implementationReport = path18.posix.join(
+      const implementationReport = path19.posix.join(
         "documentation",
         "features",
         state.slug,
@@ -23809,13 +23953,13 @@ var WorkflowRunner = class {
       let diagnostic = "Run predates the canonical task-completion ledger; exact completion is unknown.";
       try {
         const contents = await readFile11(
-          path18.join(this.repoRoot, implementationReport),
+          path19.join(this.repoRoot, implementationReport),
           "utf8"
         );
         parsePlanTaskCompletionProjection(contents);
         diagnostic = "Run predates the canonical task-completion ledger; a report table cannot establish exact completion retroactively.";
       } catch (error) {
-        if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+        if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
           throw error;
         if (error instanceof PlanTaskCompletionError) {
           diagnostic = error.message;
@@ -23880,7 +24024,7 @@ var WorkflowRunner = class {
         diagnostics: []
       };
     } catch (error) {
-      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
       const completionError3 = error instanceof PlanTaskCompletionError ? error : null;
       return {
@@ -24276,7 +24420,7 @@ var WorkflowRunner = class {
         configurationDigest
       };
     } catch (error) {
-      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
       return recoveryIneligible(
         error instanceof BanzaiError ? error.message : "Prerequisite recovery preconditions could not be validated; inspect or cancel the run.",
@@ -24581,7 +24725,7 @@ var WorkflowRunner = class {
         commitTransition
       ) : await this.executeFix(state, config, authorization, commitTransition);
     } catch (error) {
-      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
       const current = await this.store.readState(state.runId);
       if (current.activeAttempt === null && current.recovery?.stage !== "source_interrupted" && current.recovery?.stage !== "source_preserved") {
@@ -24712,6 +24856,15 @@ var WorkflowRunner = class {
   async preflight(config) {
     validateNodeVersion();
     assertContractParity();
+    const state = await this.store.requireActiveState();
+    const route = state.workflowSelection?.workflow ?? null;
+    await this.assertInstructionParity(
+      config,
+      MODEL_ROLES.flatMap((role) => {
+        const phases = instructionPhasesForRole(role, route);
+        return phases === null ? [] : [{ role, phases }];
+      })
+    );
     const environment = subscriptionOnlyEnvironment();
     await assertExecutable("git", this.repoRoot, environment);
     for (const usage of vendorUsage(config)) {
@@ -24773,7 +24926,7 @@ var WorkflowRunner = class {
   async approvedTaskIds(state) {
     return parseApprovedPlanTaskIds(
       await readFile11(
-        path18.join(this.repoRoot, this.completionPlanPath(state)),
+        path19.join(this.repoRoot, this.completionPlanPath(state)),
         "utf8"
       )
     );
@@ -25279,7 +25432,7 @@ var WorkflowRunner = class {
     await this.store.writeRunAttempt(state.runId, record6);
   }
   async writeAttemptOutput(state, record6, stdout, stderr) {
-    const stdoutPath = path18.relative(
+    const stdoutPath = path19.relative(
       this.store.runDirectory(state.runId),
       await this.store.writeText(
         state.runId,
@@ -25287,7 +25440,7 @@ var WorkflowRunner = class {
         redactSensitiveText(stdout)
       )
     );
-    const stderrPath = path18.relative(
+    const stderrPath = path19.relative(
       this.store.runDirectory(state.runId),
       await this.store.writeText(
         state.runId,
@@ -25421,14 +25574,44 @@ var WorkflowRunner = class {
     ] : workflow === "feature" ? [roles.work] : [roles.changeReport]).filter((item) => item !== void 0);
   }
   artifactInstructions(state, phase) {
-    if (state.artifactBinding === void 0) return "";
-    return `
-
-Artifact storage authority (run state v4):
-${JSON.stringify(state.artifactBinding, null, 2)}
-Use these exact bound artifact role paths. Any fixed documentation work paths in legacy instructions are replaced by this binding. Public ADRs, product documentation and the project manifest keep their existing repository paths.
-Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(state, phase))}. Other bound roles are read-only; their presence does not grant writes. Read ignored required evidence directly. Do not acquire standalone claims or modify the binding, declarations, runner state, approvals or another work item.
-` + (state.workflowSelection?.workflow === "feature" ? "For lite feature work, artifacts.implementationReport may reference the bound work.md; do not create a second report.\n" : state.workflowSelection?.workflow === "quick-fix" ? "For quick-fix, artifacts.implementationReport may reference the bound changeReport only when the existing report trigger applies; otherwise keep it null.\n" : "");
+    const workflow = state.workflowSelection?.workflow ?? "strict";
+    const bound = state.artifactBinding;
+    const roles = bound === void 0 ? artifactRoles2(state.runId, state.slug, "workflow", "legacy") : bound.binding.artifacts;
+    if (bound === void 0) {
+      requireSlug(state.slug);
+      for (const role of [
+        "description",
+        "plan",
+        "implementationReport",
+        "testReport"
+      ]) {
+        const recorded = state.planArtifacts?.[role];
+        if (recorded) roles[role] = recorded;
+      }
+      if (state.planTaskCompletion?.status === "valid") {
+        roles.implementationReport = state.planTaskCompletion.implementationReport.path;
+        roles.testReport = state.planTaskCompletion.testReport.path;
+      }
+    }
+    const legacyOutputs = phase === "plan" ? [roles.description, roles.plan] : phase === "implementation" || phase === "fix" ? workflow === "strict" ? [
+      roles.implementationReport,
+      roles.testReport,
+      ...phase === "fix" ? [roles.changeReport] : []
+    ] : workflow === "feature" ? [roles.work] : [roles.changeReport] : [];
+    const writes = bound === void 0 ? legacyOutputs.filter((item) => item !== void 0) : this.artifactWritePaths(state, phase);
+    return [
+      bound === void 0 ? "Legacy artifact surface (no persisted work binding):" : "Artifact storage authority (run state v4):",
+      JSON.stringify(
+        bound ?? { runId: state.runId, slug: state.slug, artifacts: roles },
+        null,
+        2
+      ),
+      "Use these exact artifact role paths. Public ADRs, product documentation and the project manifest keep their existing repository paths.",
+      bound === void 0 ? `Required work output paths in this legacy phase: ${JSON.stringify(writes)}. Existing legacy scope and approved-byte validation remain authoritative; these destinations create no new binding or permission.` : `Artifact writes allowed in this phase: ${JSON.stringify(writes)}.`,
+      phase === "review" || phase === "selection" ? "Model artifact write set: []. Every role is read-only, including canonical reviews and attempt-owned candidates." : "Other artifact roles are read-only; their presence does not grant writes.",
+      "Read ignored required evidence directly. Do not initialize, create or rebind work, invoke the standalone artifact helper, acquire standalone claims, or modify declarations, runner state, approvals or another work item.",
+      workflow === "feature" ? "For lite feature work, artifacts.implementationReport may reference the work role; do not create a second report." : workflow === "quick-fix" ? "For quick-fix, artifacts.implementationReport may reference the changeReport only when the existing report trigger applies; otherwise keep it null." : ""
+    ].filter((part) => part.length > 0).join("\n");
   }
   async checkArtifactPhaseScope(state, phase, before) {
     const bound = state.artifactBinding;
@@ -25463,7 +25646,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
     const before = JSON.parse(
       bytes?.toString("utf8") ?? "null"
     );
-    if (before?.schemaVersion !== 2 || before.baseCommit !== state.baseCommit || before.artifactBindingDigest !== state.artifactBinding.sha256 || !Array.isArray(before.entries) || before.digest !== createHash13("sha256").update(
+    if (before?.schemaVersion !== 2 || before.baseCommit !== state.baseCommit || before.artifactBindingDigest !== state.artifactBinding.sha256 || !Array.isArray(before.entries) || before.digest !== createHash14("sha256").update(
       JSON.stringify({
         version: 2,
         baseCommit: before.baseCommit,
@@ -25630,7 +25813,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
       });
       if (before !== null)
         await writeFile4(
-          path18.join(
+          path19.join(
             this.store.runDirectory(input.state.runId),
             "attempts",
             `${input.attempt.id}.artifact-workspace.json`
@@ -25646,7 +25829,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
           before
         );
     } catch (error) {
-      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
       await finish("failed", {
         usage: error instanceof ProcessExitError ? error.usage : result?.usage ?? null,
@@ -25667,7 +25850,11 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
       );
     requireState(state, ["selecting"], "Workflow selection");
     await this.assertProjectGuidance();
-    await this.beforeModelAttempt(commitTransition);
+    await this.beforeModelAttempt(commitTransition, {
+      config,
+      role: "planner",
+      phase: "selection"
+    });
     const attempt = this.newAttempt(state, "selection", false);
     const record6 = await this.beginAttempt(state, attempt, {
       sessionMode: "fresh",
@@ -25683,9 +25870,12 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
         }
       );
       const environment = await this.invocationScope(state.runId, config);
-      const prompt = workflowSelectionPromptEnvelope(
-        state.request,
-        state.humanDecisions ?? []
+      const prompt = insertPhaseInstructions(
+        workflowSelectionPromptEnvelope(
+          state.request,
+          state.humanDecisions ?? []
+        ),
+        [this.artifactInstructions(state, "selection")]
       );
       const result = await this.activity(
         "Workflow selection",
@@ -25693,12 +25883,12 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
           detail: modelActivityDetail(
             config.models.planner,
             attempt,
-            PHASE_SKILLS.Selection
+            PHASE_PHASES.Selection
           ),
           descriptor: phaseDescriptor(
             config.models.planner,
             "fresh",
-            PHASE_SKILLS.Selection
+            PHASE_PHASES.Selection
           )
         },
         async () => await this.invokeWithContext({
@@ -25758,7 +25948,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
           config
         );
       } catch (error) {
-        if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+        if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
           throw error;
         state.activeAttempt = null;
         blockState(state, errorMessage(error));
@@ -25766,7 +25956,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
         return state;
       }
     } catch (error) {
-      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
       return await this.failAttempt(state, record6, error);
     }
@@ -25815,10 +26005,10 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
       confidence: selection.confidence,
       reason: selection.reason,
       escalationTriggers: selection.escalationTriggers,
-      skills: workflowSkills(selection.workflow)
+      phases: workflowPhases(selection.workflow)
     });
     this.info(
-      `ROUTE ${selection.workflow} - ${selection.reason} skills=${workflowSkills(selection.workflow).join(" -> ")}`
+      `ROUTE ${selection.workflow} - ${selection.reason} phases=${workflowPhases(selection.workflow).join(" -> ")}`
     );
     return selection.workflow === "strict" ? await this.executePlan(state, config) : await this.executeImplementation(state, config);
   }
@@ -25850,20 +26040,17 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
       "planner"
     ) ? state.sessions.planner : null;
     const environment = await this.invocationScope(state.runId, config, false);
-    let prompt = appendPromptComponent(
+    let prompt = insertPhaseInstructions(
       planningPromptEnvelope(
         state.slug,
         state.request,
         state.adrDecisions,
         state.humanDecisions ?? []
       ),
-      "phase_instructions",
-      this.serenaGuidanceFor(environment, config.models.planner.executable)
-    );
-    prompt = appendPromptComponent(
-      prompt,
-      "phase_instructions",
-      this.artifactInstructions(state, "plan")
+      [
+        this.artifactInstructions(state, "plan"),
+        this.serenaGuidanceFor(environment, config.models.planner.executable)
+      ]
     );
     const invocationDigest = digestCanonicalJson({
       environment,
@@ -25906,7 +26093,11 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
         resumeSessionId === null ? `Continuing planning from existing artifacts in a fresh session: ${reason}` : "Continuing planning in the saved planner session"
       );
     }
-    await this.beforeModelAttempt(commitTransition);
+    await this.beforeModelAttempt(commitTransition, {
+      config,
+      role: "planner",
+      phase: "planning"
+    });
     await this.invocationScope(state.runId, config);
     const attempt = this.newAttempt(state, "plan", false);
     const record6 = await this.beginAttempt(state, attempt, {
@@ -25928,12 +26119,12 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
           detail: modelActivityDetail(
             config.models.planner,
             attempt,
-            PHASE_SKILLS.Planning
+            PHASE_PHASES.Planning
           ),
           descriptor: phaseDescriptor(
             config.models.planner,
             resumeSessionId === null ? "fresh" : "resumed",
-            PHASE_SKILLS.Planning
+            PHASE_PHASES.Planning
           )
         },
         async () => await this.invokeWithContext({
@@ -26009,7 +26200,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
           sessionContext("planner", config.models.planner)
         );
       } catch (error) {
-        if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+        if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
           throw error;
         state.activeAttempt = null;
         blockState(state, errorMessage(error));
@@ -26017,7 +26208,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
         return state;
       }
     } catch (error) {
-      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
       try {
         const snapshot = await workspaceSnapshot(this.repoRoot, {
@@ -26070,7 +26261,11 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
       "planner"
     ) ? state.sessions.planner : null;
     const resumeSessionId = implementerBinding?.id ?? plannerBinding?.id ?? null;
-    await this.beforeModelAttempt(commitTransition);
+    await this.beforeModelAttempt(commitTransition, {
+      config,
+      role: "implementer",
+      phase: lite ? route : "implementation"
+    });
     if (state.status === "plan_approved") {
       transitionState(state, "implementing");
       await this.store.writeState(state);
@@ -26120,26 +26315,25 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
       );
       const authorizationEnvironment = selection === null ? { BANZAI_APPROVAL_DIGEST: approval?.digest ?? "" } : { BANZAI_WORKFLOW_DIGEST: selection.digest };
       const environment = await this.invocationScope(state.runId, config);
-      const invocationPrompt2 = appendPromptComponent(
-        prompt,
-        "phase_instructions",
+      const invocationPrompt2 = insertPhaseInstructions(prompt, [
+        this.artifactInstructions(state, attempt.kind),
         this.serenaGuidanceFor(
           environment,
           config.models.implementer.executable
-        ) + this.artifactInstructions(state, attempt.kind)
-      );
+        )
+      ]);
       const result = await this.activity(
         "Implementation",
         {
           detail: modelActivityDetail(
             config.models.implementer,
             attempt,
-            selection === null ? PHASE_SKILLS.Implementation : workflowSkills(selection.workflow)
+            selection === null ? PHASE_PHASES.Implementation : workflowPhases(selection.workflow)
           ),
           descriptor: phaseDescriptor(
             config.models.implementer,
             resumeSessionId === null ? "fresh" : "resumed",
-            selection === null ? PHASE_SKILLS.Implementation : workflowSkills(selection.workflow)
+            selection === null ? PHASE_PHASES.Implementation : workflowPhases(selection.workflow)
           )
         },
         async () => await this.invokeWithContext({
@@ -26211,7 +26405,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
             );
           }
         } catch (error) {
-          if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+          if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
             throw error;
           if (!(error instanceof PlanTaskCompletionError)) {
             throw error;
@@ -26242,7 +26436,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
           sessionContext("implementer", config.models.implementer)
         );
       } catch (error) {
-        if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+        if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
           throw error;
         state.activeAttempt = null;
         blockState(state, errorMessage(error));
@@ -26250,7 +26444,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
         return state;
       }
     } catch (error) {
-      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
       return await this.failAttempt(state, record6, error);
     }
@@ -26318,7 +26512,11 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
       "implementer"
     ) ? state.sessions.implementer : null;
     const resumeSessionId = implementerBinding?.id ?? null;
-    await this.beforeModelAttempt(commitTransition);
+    await this.beforeModelAttempt(commitTransition, {
+      config,
+      role: "implementer",
+      phase: "fix"
+    });
     const attempt = recovery === null ? this.newAttempt(state, "fix", true) : this.recoveryAttempt(recovery);
     const policy = {
       sessionMode: resumeSessionId === null ? "fresh" : "resumed",
@@ -26361,26 +26559,25 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
           prerequisites: prerequisiteRecovery.prerequisites
         }
       );
-      const invocationPrompt2 = appendPromptComponent(
-        recoveredPrompt,
-        "phase_instructions",
+      const invocationPrompt2 = insertPhaseInstructions(recoveredPrompt, [
+        this.artifactInstructions(state, attempt.kind),
         this.serenaGuidanceFor(
           environment,
           config.models.implementer.executable
-        ) + this.artifactInstructions(state, attempt.kind)
-      );
+        )
+      ]);
       const result = await this.activity(
         "Fix",
         {
           detail: `${modelActivityDetail(
             config.models.implementer,
             attempt,
-            PHASE_SKILLS.Fix
+            PHASE_PHASES.Fix
           )} findings=${findings.length}`,
           descriptor: phaseDescriptor(
             config.models.implementer,
             resumeSessionId === null ? "fresh" : "resumed",
-            PHASE_SKILLS.Fix
+            PHASE_PHASES.Fix
           )
         },
         async () => await this.invokeWithContext({
@@ -26453,7 +26650,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
             }
           );
         } catch (error) {
-          if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+          if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
             throw error;
           if (error instanceof PlanTaskCompletionError) {
             return await this.recordCompletionFailure(
@@ -26479,7 +26676,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
           sessionContext("implementer", config.models.implementer)
         );
       } catch (error) {
-        if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+        if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
           throw error;
         state.activeAttempt = null;
         blockState(state, errorMessage(error));
@@ -26487,7 +26684,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
         return state;
       }
     } catch (error) {
-      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
       return await this.failAttempt(state, record6, error);
     }
@@ -26821,7 +27018,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
           sourceAttempt?.kind === "fix"
         );
       } catch (error) {
-        if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+        if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
           throw error;
         return await this.blockForCompletionFailure(
           state,
@@ -26854,7 +27051,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
     try {
       this.reconcileVerificationState(state, records, round, descriptors);
     } catch (error) {
-      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
       state.activeProcess = null;
       blockState(state, errorMessage(error));
@@ -27156,7 +27353,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
     try {
       validatedCompletion = await this.revalidateTaskCompletion(state);
     } catch (error) {
-      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
       return await this.blockForCompletionFailure(
         state,
@@ -27187,7 +27384,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
         }
       );
     } catch (error) {
-      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
       const current = await this.store.readState(state.runId);
       if (current.status === "cancelled") {
@@ -27208,7 +27405,11 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
       state.sessions.reviewer.lastSnapshot,
       snapshot
     ).filter((change) => change.path !== state.latestReview?.artifactPath) : [];
-    await this.beforeModelAttempt(commitTransition);
+    await this.beforeModelAttempt(commitTransition, {
+      config,
+      role: "reviewer",
+      phase: "review"
+    });
     await this.invocationScope(state.runId, config);
     state.workspaceDigest = beforeDigest;
     state.reviewIteration = iteration;
@@ -27217,8 +27418,8 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
       state.runId,
       attempt
     );
-    const candidatePath = path18.relative(this.repoRoot, candidateAbsolutePath).split(path18.sep).join(path18.posix.sep);
-    const candidateEvidencePath = path18.relative(this.store.runDirectory(state.runId), candidateAbsolutePath).split(path18.sep).join(path18.posix.sep);
+    const candidatePath = path19.relative(this.repoRoot, candidateAbsolutePath).split(path19.sep).join(path19.posix.sep);
+    const candidateEvidencePath = path19.relative(this.store.runDirectory(state.runId), candidateAbsolutePath).split(path19.sep).join(path19.posix.sep);
     const artifactMode = "runner-rendered";
     const artifact = {
       path: artifactPath,
@@ -27352,7 +27553,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
         return;
       }
       await chmod2(candidateAbsolutePath, 384);
-      candidateEvidence.sha256 = createHash13("sha256").update(contents).digest("hex");
+      candidateEvidence.sha256 = createHash14("sha256").update(contents).digest("hex");
       await this.store.writeRunAttempt(state.runId, record6);
     };
     try {
@@ -27362,15 +27563,15 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
           detail: `${modelActivityDetail(
             config.models.reviewer,
             attempt,
-            PHASE_SKILLS.Review
+            PHASE_PHASES.Review
           )} session=${policy.sessionMode} review=${policy.reviewMode} rotation=${policy.rotationReason ?? "none"}`,
           descriptor: phaseDescriptor(
             config.models.reviewer,
             policy.sessionMode,
-            PHASE_SKILLS.Review
+            PHASE_PHASES.Review
           )
         },
-        appendPromptComponent(
+        insertPhaseInstructions(
           reviewPromptEnvelope({
             slug: state.slug,
             iteration,
@@ -27389,8 +27590,13 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
             triageHistory: state.triageHistory,
             taskCompletion: artifact.taskCompletion
           }),
-          "phase_instructions",
-          this.serenaGuidanceFor(environment, config.models.reviewer.executable)
+          [
+            this.artifactInstructions(state, "review"),
+            this.serenaGuidanceFor(
+              environment,
+              config.models.reviewer.executable
+            )
+          ]
         ),
         policy.resumeSessionId,
         "primary"
@@ -27421,7 +27627,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
       candidateEvidence.validation = "passed";
       await this.store.writeRunAttempt(state.runId, record6);
     } catch (error) {
-      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
       (record6.reviewDiagnostics ??= []).push({
         stage: "render_validation",
@@ -27484,7 +27690,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
         }
       );
     } catch (error) {
-      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
       (record6.reviewDiagnostics ??= []).push({
         stage: "publication_application",
@@ -27609,7 +27815,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
       try {
         await this.revalidateTaskCompletion(state);
       } catch (error) {
-        if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+        if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
           throw error;
         return await this.blockForCompletionFailure(
           state,
@@ -27656,7 +27862,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
       throw new BanzaiError("REVIEW_NOT_FOUND", "No review is available.");
     }
     const raw = await readFile11(
-      path18.join(
+      path19.join(
         this.store.runDirectory(state.runId),
         state.latestReview.resultPath
       ),
@@ -27744,10 +27950,10 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
       return;
     try {
       parseApprovedPlanTaskIds(
-        await readFile11(path18.join(this.repoRoot, result.artifacts.plan), "utf8")
+        await readFile11(path19.join(this.repoRoot, result.artifacts.plan), "utf8")
       );
     } catch (error) {
-      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
       if (error instanceof PlanTaskCompletionError) throw error;
       throw new PlanTaskCompletionError(
@@ -27953,7 +28159,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
         config
       );
     } catch (error) {
-      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
       if (attempt.kind === "plan" && error instanceof PlanTaskCompletionError) {
         record6.status = "failed";
@@ -28008,7 +28214,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
         try {
           validatedCompletion = await this.revalidateTaskCompletion(state);
         } catch (error) {
-          if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+          if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
             throw error;
           return await this.blockForCompletionFailure(
             state,
@@ -28041,10 +28247,10 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
         let candidateValidated = false;
         try {
           const candidateEvidence = record6.reviewCandidate;
-          const expectedCandidateEvidencePath = path18.relative(
+          const expectedCandidateEvidencePath = path19.relative(
             this.store.runDirectory(state.runId),
             this.store.reviewCandidatePath(state.runId, attempt)
-          ).split(path18.sep).join(path18.posix.sep);
+          ).split(path19.sep).join(path19.posix.sep);
           if (candidateEvidence !== null && candidateEvidence !== void 0 && (candidateEvidence.evidencePath !== expectedCandidateEvidencePath || !(/* @__PURE__ */ new Set(["reviewer-write", "runner-rendered"])).has(
             candidateEvidence.source
           ) || candidateEvidence.canonical !== false)) {
@@ -28053,13 +28259,13 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
               "Review attempt has malformed candidate evidence identity."
             );
           }
-          const candidatePath = candidateEvidence === null || candidateEvidence === void 0 ? artifactPath : path18.relative(
+          const candidatePath = candidateEvidence === null || candidateEvidence === void 0 ? artifactPath : path19.relative(
             this.repoRoot,
-            path18.join(
+            path19.join(
               this.store.runDirectory(state.runId),
               candidateEvidence.evidencePath
             )
-          ).split(path18.sep).join(path18.posix.sep);
+          ).split(path19.sep).join(path19.posix.sep);
           let artifact = {
             path: artifactPath,
             candidatePath,
@@ -28155,7 +28361,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
             await publishReviewArtifact(this.repoRoot, artifact, candidate);
           }
         } catch (error) {
-          if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+          if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
             throw error;
           if (record6.reviewContext !== void 0) {
             (record6.reviewDiagnostics ??= []).push({
@@ -28224,7 +28430,7 @@ Artifact writes allowed in this phase: ${JSON.stringify(this.artifactWritePaths(
             parsePersistedPhaseResult(record6.result)
           )).summary;
         } catch (error) {
-          if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError)
+          if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
             throw error;
           return await this.blockForCompletionFailure(state, attempt.id, error);
         }
@@ -28508,7 +28714,7 @@ function boundedNullableString(value, label, maximum = MAX_REASON_LENGTH) {
 }
 function boundedPath(value, label) {
   boundedString(value, label, MAX_PATH_LENGTH);
-  if (path19.posix.isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value) || value.includes("\\") || path19.posix.normalize(value) !== value || value.split("/").some((segment) => segment === "." || segment === "..")) {
+  if (path20.posix.isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value) || value.includes("\\") || path20.posix.normalize(value) !== value || value.split("/").some((segment) => segment === "." || segment === "..")) {
     throw statusError(
       `${label} must be a normalized repository-relative path.`
     );
@@ -28725,7 +28931,7 @@ function pendingGate(status) {
       kind: "adr_approval",
       artifactPaths: artifactPaths2,
       adrIds: artifactPaths2.map((value) => {
-        const match = /^(\d{4})-/.exec(path19.posix.basename(value));
+        const match = /^(\d{4})-/.exec(path20.posix.basename(value));
         if (match?.[1] === void 0) {
           throw statusError("An ADR artifact path has no stable numeric ID.");
         }
@@ -29116,8 +29322,8 @@ async function executeAgentControlCommand(command, createRunner, io, defaultDeci
 // src/ansi.ts
 var ESC = "\x1B[";
 var RESET = `${ESC}0m`;
-function code(open9) {
-  const prefix = `${ESC}${open9}m`;
+function code(open10) {
+  const prefix = `${ESC}${open10}m`;
   return (value) => `${prefix}${value}${RESET}`;
 }
 var BRAND = {
@@ -29217,9 +29423,9 @@ function resolveCliMode(args, inputIsTty, outputIsTty) {
 }
 
 // src/context-report.ts
-import { constants as constants9 } from "node:fs";
-import { lstat as lstat10, open as open8, readdir as readdir7 } from "node:fs/promises";
-import path20 from "node:path";
+import { constants as constants10 } from "node:fs";
+import { lstat as lstat11, open as open9, readdir as readdir7 } from "node:fs/promises";
+import path21 from "node:path";
 var WORKFLOWS2 = [
   "unselected",
   "quick-fix",
@@ -29544,7 +29750,7 @@ function missing2(error) {
 }
 async function ownedDirectoryStatus(directory2) {
   try {
-    return (await lstat10(directory2)).isDirectory() ? "owned" : "invalid";
+    return (await lstat11(directory2)).isDirectory() ? "owned" : "invalid";
   } catch (error) {
     return missing2(error) ? "missing" : "invalid";
   }
@@ -29579,7 +29785,7 @@ async function runDirectories(runsDirectory) {
 async function readOwnedText(file) {
   let handle;
   try {
-    handle = await open8(file, constants9.O_RDONLY | constants9.O_NOFOLLOW);
+    handle = await open9(file, constants10.O_RDONLY | constants10.O_NOFOLLOW);
   } catch (error) {
     return missing2(error) ? { status: "missing" } : { status: "invalid" };
   }
@@ -29602,7 +29808,7 @@ async function readJson3(file) {
   }
 }
 async function readRunMetadata(runDirectory, runId2) {
-  const value = await readJson3(path20.join(runDirectory, "state.json"));
+  const value = await readJson3(path21.join(runDirectory, "state.json"));
   const state = record3(value);
   const selection = record3(state?.workflowSelection);
   if (state?.runId !== runId2 || typeof state.createdAt !== "string" || !Number.isFinite(Date.parse(state.createdAt))) {
@@ -29615,7 +29821,7 @@ async function readRunMetadata(runDirectory, runId2) {
   };
 }
 async function collectRunAttempts(runDirectory, runId2, workflow) {
-  const attemptsDirectory = path20.join(runDirectory, "attempts");
+  const attemptsDirectory = path21.join(runDirectory, "attempts");
   const directoryStatus = await ownedDirectoryStatus(attemptsDirectory);
   if (directoryStatus === "missing") return [];
   if (directoryStatus === "invalid") {
@@ -29639,7 +29845,7 @@ async function collectRunAttempts(runDirectory, runId2, workflow) {
   const attempts = [];
   const seen = /* @__PURE__ */ new Set();
   for (const file of files) {
-    const raw = await readJson3(path20.join(attemptsDirectory, file));
+    const raw = await readJson3(path21.join(attemptsDirectory, file));
     const canonical = decodeCanonicalAttempt(raw, file, runId2);
     if (seen.has(canonical.attempt.id)) {
       invalid6(
@@ -29649,7 +29855,7 @@ async function collectRunAttempts(runDirectory, runId2, workflow) {
       );
     }
     seen.add(canonical.attempt.id);
-    const contextFile = path20.join(
+    const contextFile = path21.join(
       attemptsDirectory,
       `${canonical.attempt.id}.context.json`
     );
@@ -29691,7 +29897,7 @@ function inCohort(createdAt, options) {
   return (options.from === null || timestamp >= Date.parse(options.from)) && (options.to === null || timestamp < Date.parse(options.to));
 }
 async function collectContextReport(repoRoot, options) {
-  const banzaiDirectory = path20.join(repoRoot, ".banzai");
+  const banzaiDirectory = path21.join(repoRoot, ".banzai");
   const banzaiStatus = await ownedDirectoryStatus(banzaiDirectory);
   if (banzaiStatus === "invalid") {
     throw new BanzaiError(
@@ -29699,7 +29905,7 @@ async function collectContextReport(repoRoot, options) {
       "Context evaluation evidence could not be read safely."
     );
   }
-  const runsDirectory = path20.join(banzaiDirectory, "runs");
+  const runsDirectory = path21.join(banzaiDirectory, "runs");
   const candidates = banzaiStatus === "missing" ? [] : await runDirectories(runsDirectory);
   const candidateSet = new Set(candidates);
   for (const runId2 of options.runIds) {
@@ -29715,7 +29921,7 @@ async function collectContextReport(repoRoot, options) {
   const evidence2 = [];
   let includedRunCount = 0;
   for (const runId2 of selected) {
-    const runDirectory = path20.join(runsDirectory, runId2);
+    const runDirectory = path21.join(runsDirectory, runId2);
     if (await ownedDirectoryStatus(runDirectory) !== "owned") {
       throw new BanzaiError(
         "EVAL_READ_FAILED",
@@ -29895,9 +30101,9 @@ async function executeContextReportWithOptions(repoRoot, options, io) {
 }
 
 // src/doctor.ts
-import { constants as constants10 } from "node:fs";
-import { access as access5, lstat as lstat11, readFile as readFile12, realpath as realpath7, stat as stat3 } from "node:fs/promises";
-import path21 from "node:path";
+import { constants as constants11 } from "node:fs";
+import { access as access5, lstat as lstat12, readFile as readFile12, realpath as realpath8, stat as stat3 } from "node:fs/promises";
+import path22 from "node:path";
 import process5 from "node:process";
 var RUN_STATUSES3 = /* @__PURE__ */ new Set([
   "created",
@@ -29920,15 +30126,15 @@ function isRecord4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function executableCandidates2(command, cwd, env) {
-  if (command.includes(path21.sep)) {
-    return [path21.resolve(cwd, command)];
+  if (command.includes(path22.sep)) {
+    return [path22.resolve(cwd, command)];
   }
   if (env.PATH === void 0) {
     return [];
   }
-  return env.PATH.split(path21.delimiter).map(
-    (entry) => path21.join(
-      entry.length === 0 || !path21.isAbsolute(entry) ? path21.resolve(cwd, entry) : entry,
+  return env.PATH.split(path22.delimiter).map(
+    (entry) => path22.join(
+      entry.length === 0 || !path22.isAbsolute(entry) ? path22.resolve(cwd, entry) : entry,
       command
     )
   );
@@ -29936,7 +30142,7 @@ function executableCandidates2(command, cwd, env) {
 async function executableAvailable(command, cwd, env) {
   for (const candidate of executableCandidates2(command, cwd, env)) {
     try {
-      await access5(candidate, constants10.X_OK);
+      await access5(candidate, constants11.X_OK);
       if ((await stat3(candidate)).isFile()) {
         return true;
       }
@@ -29974,35 +30180,35 @@ function isMissingFile2(error) {
 async function readBoundedFile(filePath, boundaryPath, repoRoot) {
   let resolvedRoot;
   try {
-    resolvedRoot = await realpath7(repoRoot);
+    resolvedRoot = await realpath8(repoRoot);
   } catch {
     throw new Error("repository root cannot be resolved");
   }
-  const lexicalRoot = path21.resolve(repoRoot);
-  const lexicalBoundary = path21.resolve(boundaryPath);
-  const relativeBoundary = path21.relative(lexicalRoot, lexicalBoundary);
-  if (relativeBoundary.length === 0 || relativeBoundary === ".." || relativeBoundary.startsWith(`..${path21.sep}`) || path21.isAbsolute(relativeBoundary)) {
+  const lexicalRoot = path22.resolve(repoRoot);
+  const lexicalBoundary = path22.resolve(boundaryPath);
+  const relativeBoundary = path22.relative(lexicalRoot, lexicalBoundary);
+  if (relativeBoundary.length === 0 || relativeBoundary === ".." || relativeBoundary.startsWith(`..${path22.sep}`) || path22.isAbsolute(relativeBoundary)) {
     throw new Error("control boundary is outside the repository");
   }
-  await lstat11(boundaryPath);
+  await lstat12(boundaryPath);
   let resolvedBoundary;
   try {
-    resolvedBoundary = await realpath7(boundaryPath);
+    resolvedBoundary = await realpath8(boundaryPath);
     const boundaryStat = await stat3(resolvedBoundary);
-    if (resolvedBoundary !== path21.resolve(resolvedRoot, relativeBoundary) || !boundaryStat.isDirectory()) {
+    if (resolvedBoundary !== path22.resolve(resolvedRoot, relativeBoundary) || !boundaryStat.isDirectory()) {
       throw new Error("control boundary escapes the repository");
     }
   } catch {
     throw new Error("control boundary cannot be resolved safely");
   }
-  await lstat11(filePath);
+  await lstat12(filePath);
   let resolvedFile;
   try {
-    resolvedFile = await realpath7(filePath);
+    resolvedFile = await realpath8(filePath);
   } catch {
     throw new Error("control file cannot be resolved");
   }
-  if (resolvedFile !== resolvedBoundary && !resolvedFile.startsWith(`${resolvedBoundary}${path21.sep}`)) {
+  if (resolvedFile !== resolvedBoundary && !resolvedFile.startsWith(`${resolvedBoundary}${path22.sep}`)) {
     throw new Error("control file escapes its boundary");
   }
   return await readFile12(resolvedFile, "utf8");
@@ -30085,6 +30291,42 @@ async function claudeEnvironmentCheck(config, dependencies) {
       "The explicitly configured Banzai plugin directory cannot be verified; model invocation will fail closed."
     );
   }
+}
+async function claudeInstructionsCheck(config, dependencies) {
+  if (config === null)
+    return check(
+      "claude.instructions",
+      "config",
+      "warning",
+      "Instruction resource parity is unverifiable without a valid configuration."
+    );
+  let directory2;
+  try {
+    const resolved = await (dependencies.resolveClaudeInvocationScope ?? resolveClaudeInvocationScope)(config.claudeEnvironment);
+    directory2 = config.claudeEnvironment.mode === "ambient" ? null : resolved.scope.pluginDirectory;
+  } catch {
+    return check(
+      "claude.instructions",
+      "config",
+      "warning",
+      "Instruction resource parity is unverifiable because the invocation environment cannot be verified."
+    );
+  }
+  const results = await Promise.all(
+    MODEL_ROLES.map(
+      (role) => inspectInstructionParity(
+        (vendorFor(config.models[role].executable) ?? FALLBACK_VENDOR[role]) === "claude" ? directory2 : null,
+        instructionPhasesForRole(role, null) ?? []
+      )
+    )
+  );
+  const parity = combineInstructionParity(results);
+  return check(
+    "claude.instructions",
+    "config",
+    parity.state === "verified" ? "pass" : parity.state === "mismatch" ? "fail" : "warning",
+    instructionParityDiagnostic(parity)
+  );
 }
 async function claudePermissionsCheck(repoRoot, config, dependencies) {
   if (config === null) {
@@ -30175,8 +30417,8 @@ async function configuredExecutableCheck(id, commands, repoRoot, dependencies) {
   );
 }
 async function activeRunCheck(repoRoot) {
-  const banzaiRoot = path21.join(repoRoot, ".banzai");
-  const pointerPath = path21.join(banzaiRoot, "active-run.json");
+  const banzaiRoot = path22.join(repoRoot, ".banzai");
+  const pointerPath = path22.join(banzaiRoot, "active-run.json");
   let pointerRaw;
   try {
     pointerRaw = await readBoundedFile(pointerPath, banzaiRoot, repoRoot);
@@ -30220,8 +30462,8 @@ async function activeRunCheck(repoRoot) {
       "The active-run pointer contains an unsafe run identifier."
     );
   }
-  const runsRoot = path21.join(banzaiRoot, "runs");
-  const statePath = path21.join(runsRoot, pointer.runId, "state.json");
+  const runsRoot = path22.join(banzaiRoot, "runs");
+  const statePath = path22.join(runsRoot, pointer.runId, "state.json");
   let stateRaw;
   try {
     stateRaw = await readBoundedFile(statePath, runsRoot, repoRoot);
@@ -30268,8 +30510,8 @@ async function activeRunCheck(repoRoot) {
     }
   }
   const [stateRepoRoot, checkoutRoot] = await Promise.all([
-    path21.isAbsolute(state.repoRoot) ? realpath7(state.repoRoot).catch(() => null) : Promise.resolve(null),
-    realpath7(repoRoot).catch(() => null)
+    path22.isAbsolute(state.repoRoot) ? realpath8(state.repoRoot).catch(() => null) : Promise.resolve(null),
+    realpath8(repoRoot).catch(() => null)
   ]);
   if (state.runId !== pointer.runId || stateRepoRoot === null || checkoutRoot === null || stateRepoRoot !== checkoutRoot) {
     return check(
@@ -30299,8 +30541,8 @@ function isRfc3339Instant(value) {
   return Number.isFinite(time) && new Date(time).toISOString() === value;
 }
 async function runnerLockCheck(repoRoot, dependencies) {
-  const banzaiRoot = path21.join(repoRoot, ".banzai");
-  const lockPath = path21.join(banzaiRoot, "runner.lock");
+  const banzaiRoot = path22.join(repoRoot, ".banzai");
+  const lockPath = path22.join(banzaiRoot, "runner.lock");
   let raw;
   try {
     raw = await readBoundedFile(lockPath, banzaiRoot, repoRoot);
@@ -30414,9 +30656,9 @@ async function inspectDoctor(repoRoot, dependencies = DEFAULT_DEPENDENCIES) {
   let configDocument = null;
   let config = null;
   try {
-    const banzaiRoot = path21.join(repoRoot, ".banzai");
+    const banzaiRoot = path22.join(repoRoot, ".banzai");
     const raw = await readBoundedFile(
-      path21.join(repoRoot, CONFIG_FILE),
+      path22.join(repoRoot, CONFIG_FILE),
       banzaiRoot,
       repoRoot
     );
@@ -30469,6 +30711,7 @@ async function inspectDoctor(repoRoot, dependencies = DEFAULT_DEPENDENCIES) {
   }
   checks.push(configVersionCheck(configDocument));
   checks.push(await claudeEnvironmentCheck(config, dependencies));
+  checks.push(await claudeInstructionsCheck(config, dependencies));
   checks.push(await claudePermissionsCheck(repoRoot, config, dependencies));
   let projectTypes = [];
   let projectTypesReadable = false;
@@ -30620,8 +30863,8 @@ async function inspectDoctor(repoRoot, dependencies = DEFAULT_DEPENDENCIES) {
   );
   const reportSummary = summary(checks);
   return {
-    schema: "banzai-doctor/v2",
-    schemaVersion: 2,
+    schema: "banzai-doctor/v3",
+    schemaVersion: 3,
     ready: reportSummary.failed === 0,
     projectTypes,
     summary: reportSummary,
@@ -30674,7 +30917,7 @@ async function executeDoctor(repoRoot, args, io, inspect = inspectDoctor) {
 
 // src/evaluation-kpi-cli.ts
 import { readFile as readFile13 } from "node:fs/promises";
-import path22 from "node:path";
+import path23 from "node:path";
 
 // src/evaluation-kpi.ts
 var KPI_WORKFLOW_ORDER = [
@@ -31468,7 +31711,7 @@ async function executeEvaluationKpiFromInputs(options, io) {
       );
     }
     sources.push({
-      label: `${index + 1}: ${path22.basename(file)}`,
+      label: `${index + 1}: ${path23.basename(file)}`,
       report: decodeEvaluationExportInput(text, file)
     });
   }
@@ -31859,24 +32102,24 @@ function createInterruptHandler(dependencies) {
 }
 
 // src/live-compatibility.ts
-import { createHash as createHash14 } from "node:crypto";
+import { createHash as createHash15 } from "node:crypto";
 import {
   access as access6,
   chmod as chmod3,
   cp,
-  lstat as lstat12,
+  lstat as lstat13,
   mkdir as mkdir8,
   mkdtemp,
   readFile as readFile14,
   readdir as readdir8,
   readlink,
-  realpath as realpath8,
+  realpath as realpath9,
   rm,
   stat as stat4,
   writeFile as writeFile5
 } from "node:fs/promises";
 import os2 from "node:os";
-import path23 from "node:path";
+import path24 from "node:path";
 
 // ../../release-policy.json
 var release_policy_default = {
@@ -32011,7 +32254,23 @@ var release_policy_default = {
       "plugins/banzai/contracts/artifacts/v1/verify-request.schema.json",
       "plugins/banzai/contracts/artifacts/v1/work-binding.schema.json",
       "plugins/banzai/contracts/artifacts/v1/write-request.schema.json",
-      "plugins/banzai/lib/artifact-readers.mjs"
+      "plugins/banzai/lib/artifact-readers.mjs",
+      "plugins/banzai/phases/planning.md",
+      "plugins/banzai/phases/implementation.md",
+      "plugins/banzai/phases/review.md",
+      "plugins/banzai/phases/fix.md",
+      "plugins/banzai/phases/feature.md",
+      "plugins/banzai/phases/quick-fix.md",
+      "plugins/banzai/guidance/requirements.md",
+      "plugins/banzai/guidance/architecture.md",
+      "plugins/banzai/guidance/planning.md",
+      "plugins/banzai/guidance/implementation.md",
+      "plugins/banzai/guidance/assurance.md",
+      "plugins/banzai/guidance/review.md",
+      "plugins/banzai/guidance/feature.md",
+      "plugins/banzai/guidance/fix.md",
+      "plugins/banzai/guidance/manifest.md",
+      "packages/orchestrator/src/phase-resources.ts"
     ]
   },
   contracts: {
@@ -32043,7 +32302,11 @@ var release_policy_default = {
     },
     state: {
       currentSchemaVersion: 4,
-      legacySchemaVersions: [1, 2, 3]
+      legacySchemaVersions: [
+        1,
+        2,
+        3
+      ]
     },
     agentControl: {
       contractVersion: "3.0.0",
@@ -32405,8 +32668,8 @@ async function inspectAuthRoot(root) {
   async function visit(directory2) {
     const entries = await readdir8(directory2, { withFileTypes: true });
     for (const entry of entries) {
-      const entryPath = path23.join(directory2, entry.name);
-      const metadata2 = await lstat12(entryPath);
+      const entryPath = path24.join(directory2, entry.name);
+      const metadata2 = await lstat13(entryPath);
       if (metadata2.isSymbolicLink()) {
         throw new BanzaiError(
           "LIVE_AUTH_UNAVAILABLE",
@@ -32451,7 +32714,7 @@ async function secureCopiedTree(root) {
   await chmod3(root, 448);
   const entries = await readdir8(root, { withFileTypes: true });
   for (const entry of entries) {
-    const entryPath = path23.join(root, entry.name);
+    const entryPath = path24.join(root, entry.name);
     if (entry.isDirectory()) {
       await secureCopiedTree(entryPath);
     } else {
@@ -32466,8 +32729,8 @@ async function copyAuthRoot(repositoryRoot, sourceValue3, target) {
       "Live subscription auth root is unavailable."
     );
   }
-  const source = await realpath8(sourceValue3).catch(() => null);
-  if (source === null || source === repositoryRoot || source.startsWith(`${repositoryRoot}${path23.sep}`)) {
+  const source = await realpath9(sourceValue3).catch(() => null);
+  if (source === null || source === repositoryRoot || source.startsWith(`${repositoryRoot}${path24.sep}`)) {
     throw new BanzaiError(
       "LIVE_AUTH_UNAVAILABLE",
       "Live auth root is inside the repository or unavailable."
@@ -32491,8 +32754,8 @@ async function treeDigest(root, excludedPrefixes = []) {
       )) {
         continue;
       }
-      const absolutePath = path23.join(directory2, child.name);
-      const metadata = await lstat12(absolutePath);
+      const absolutePath = path24.join(directory2, child.name);
+      const metadata = await lstat13(absolutePath);
       const mode = metadata.mode & 511;
       if (metadata.isDirectory()) {
         entries.push(`${relativePath2}\0directory\0${mode}`);
@@ -32502,28 +32765,28 @@ async function treeDigest(root, excludedPrefixes = []) {
           `${relativePath2}\0symlink\0${mode}\0${await readlink(absolutePath)}`
         );
       } else if (metadata.isFile()) {
-        const digest3 = createHash14("sha256").update(await readFile14(absolutePath)).digest("hex");
+        const digest3 = createHash15("sha256").update(await readFile14(absolutePath)).digest("hex");
         entries.push(`${relativePath2}\0file\0${mode}\0${digest3}`);
       }
     }
   }
   await visit(root, "");
-  return createHash14("sha256").update(entries.join("\n")).digest("hex");
+  return createHash15("sha256").update(entries.join("\n")).digest("hex");
 }
 async function prepareScenario(root, rawRoot) {
-  await mkdir8(path23.join(root, path23.dirname(DESCRIPTION_ARTIFACT)), {
+  await mkdir8(path24.join(root, path24.dirname(DESCRIPTION_ARTIFACT)), {
     recursive: true
   });
-  await mkdir8(path23.join(root, path23.dirname(PLAN_ARTIFACT)), {
+  await mkdir8(path24.join(root, path24.dirname(PLAN_ARTIFACT)), {
     recursive: true
   });
   await writeFile5(
-    path23.join(root, DESCRIPTION_ARTIFACT),
+    path24.join(root, DESCRIPTION_ARTIFACT),
     "# Live Compatibility Fixture\n\nPermission isolation fixture.\n",
     "utf8"
   );
   await writeFile5(
-    path23.join(root, PLAN_ARTIFACT),
+    path24.join(root, PLAN_ARTIFACT),
     "# Live Compatibility Plan\n\nNo source mutation is authorized.\n",
     "utf8"
   );
@@ -32531,18 +32794,18 @@ async function prepareScenario(root, rawRoot) {
     DESCRIPTION_ARTIFACT,
     PLAN_ARTIFACT
   ]);
-  const stateDirectory = path23.join(root, ".banzai", "runs", RUN_ID);
+  const stateDirectory = path24.join(root, ".banzai", "runs", RUN_ID);
   await mkdir8(stateDirectory, { recursive: true });
-  await mkdir8(path23.join(stateDirectory, "attempts"), { recursive: true });
+  await mkdir8(path24.join(stateDirectory, "attempts"), { recursive: true });
   await mkdir8(rawRoot, { recursive: true });
   await writeFile5(
-    path23.join(root, ".banzai", "active-run.json"),
+    path24.join(root, ".banzai", "active-run.json"),
     `${JSON.stringify({ schemaVersion: 1, runId: RUN_ID }, null, 2)}
 `,
     "utf8"
   );
   await writeFile5(
-    path23.join(stateDirectory, "state.json"),
+    path24.join(stateDirectory, "state.json"),
     `${JSON.stringify(
       {
         schemaVersion: 2,
@@ -32566,7 +32829,7 @@ async function prepareScenario(root, rawRoot) {
     "utf8"
   );
   await writeFile5(
-    path23.join(root, WRITE_PROBE),
+    path24.join(root, WRITE_PROBE),
     `'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
@@ -32597,7 +32860,7 @@ try {
     ".banzai",
     REVIEW_ARTIFACT
   ]);
-  const controlBefore = await treeDigest(path23.join(root, ".banzai"), [
+  const controlBefore = await treeDigest(path24.join(root, ".banzai"), [
     "runs/live-compatibility/attempts/review-1.review-candidate.md"
   ]);
   const artifact = {
@@ -32762,11 +33025,11 @@ async function runReviewScenario(vendor, scenario, environment, baseRunner, run,
       now2() - started
     );
     if (valid) {
-      await mkdir8(path23.join(scenario.root, path23.dirname(REVIEW_CANDIDATE)), {
+      await mkdir8(path24.join(scenario.root, path24.dirname(REVIEW_CANDIDATE)), {
         recursive: true
       });
       await writeFile5(
-        path23.join(scenario.root, REVIEW_CANDIDATE),
+        path24.join(scenario.root, REVIEW_CANDIDATE),
         renderReviewArtifact(result, scenario.artifact),
         "utf8"
       );
@@ -32810,16 +33073,16 @@ async function runReviewScenario(vendor, scenario, environment, baseRunner, run,
     ".banzai",
     REVIEW_ARTIFACT
   ]);
-  const controlAfter = await treeDigest(path23.join(scenario.root, ".banzai"), [
+  const controlAfter = await treeDigest(path24.join(scenario.root, ".banzai"), [
     "runs/live-compatibility/attempts/review-1.review-candidate.md"
   ]);
-  if (sourceAfter !== scenario.sourceBefore || controlAfter !== scenario.controlBefore || await access6(path23.join(scenario.root, SOURCE_CANARY)).then(
+  if (sourceAfter !== scenario.sourceBefore || controlAfter !== scenario.controlBefore || await access6(path24.join(scenario.root, SOURCE_CANARY)).then(
     () => true,
     () => false
-  ) || await access6(path23.join(scenario.root, CONTROL_CANARY)).then(
+  ) || await access6(path24.join(scenario.root, CONTROL_CANARY)).then(
     () => true,
     () => false
-  ) || await access6(path23.join(scenario.root, OTHER_ARTIFACT)).then(
+  ) || await access6(path24.join(scenario.root, OTHER_ARTIFACT)).then(
     () => true,
     () => false
   )) {
@@ -32906,8 +33169,8 @@ async function candidateClones(repositoryRoot, temporaryRoot, environment, baseR
       "stdout"
     )).trim();
     const clones = {
-      codex: path23.join(temporaryRoot, "codex-candidate"),
-      claude: path23.join(temporaryRoot, "claude-candidate")
+      codex: path24.join(temporaryRoot, "codex-candidate"),
+      claude: path24.join(temporaryRoot, "claude-candidate")
     };
     for (const clone of Object.values(clones)) {
       await runOwnedProcess(
@@ -33017,7 +33280,7 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
       const parent = dependencies.temporaryParent ?? os2.tmpdir();
       await mkdir8(parent, { recursive: true });
       temporaryRoot = await mkdtemp(
-        path23.join(parent, "banzai-live-compatibility-")
+        path24.join(parent, "banzai-live-compatibility-")
       );
       const safeEnvironment = subscriptionOnlyEnvironment(environment);
       const clones = await candidateClones(
@@ -33029,10 +33292,10 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
         now2
       );
       if (clones !== null) {
-        const authRoot = path23.join(temporaryRoot, "auth");
+        const authRoot = path24.join(temporaryRoot, "auth");
         await mkdir8(authRoot, { recursive: true, mode: 448 });
-        const codexAuth = path23.join(authRoot, "codex");
-        const claudeAuth = path23.join(authRoot, "claude");
+        const codexAuth = path24.join(authRoot, "codex");
+        const claudeAuth = path24.join(authRoot, "claude");
         let authReady = true;
         try {
           await copyAuthRoot(
@@ -33089,11 +33352,11 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
           if (codexReady && claudeReady) {
             const codexScenario = await prepareScenario(
               clones.codex,
-              path23.join(temporaryRoot, "raw", "codex")
+              path24.join(temporaryRoot, "raw", "codex")
             );
             const claudeScenario = await prepareScenario(
               clones.claude,
-              path23.join(temporaryRoot, "raw", "claude")
+              path24.join(temporaryRoot, "raw", "claude")
             );
             await runReviewScenario(
               "codex",
@@ -33102,7 +33365,7 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
               baseRunner,
               run,
               now2,
-              path23.join(clones.codex, "plugins", "banzai")
+              path24.join(clones.codex, "plugins", "banzai")
             );
             await runReviewScenario(
               "claude",
@@ -33111,7 +33374,7 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
               baseRunner,
               run,
               now2,
-              path23.join(clones.claude, "plugins", "banzai")
+              path24.join(clones.claude, "plugins", "banzai")
             );
             updateCheck(
               run,
@@ -33218,8 +33481,8 @@ async function executeLiveCompatibility(repoRoot, args, io, dependencies) {
 }
 
 // src/interactive.ts
-import { createHash as createHash15 } from "node:crypto";
-import path24 from "node:path";
+import { createHash as createHash16 } from "node:crypto";
+import path25 from "node:path";
 async function describeRepository(options) {
   if (options.repository === void 0) {
     return null;
@@ -33234,7 +33497,7 @@ function nonEmpty(value) {
   return value.trim().length > 0 ? true : "A value is required.";
 }
 function generateFeatureSlug(request) {
-  const digest3 = createHash15("sha256").update(request.trim().normalize("NFKC")).digest("hex").slice(0, 8);
+  const digest3 = createHash16("sha256").update(request.trim().normalize("NFKC")).digest("hex").slice(0, 8);
   const normalized = request.normalize("NFKD").replace(new RegExp("\\p{Mark}+", "gu"), "").toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   if (normalized.length > 64) {
     const prefix = normalized.slice(0, 55).replace(/-+$/g, "");
@@ -33259,7 +33522,7 @@ async function statusOrNull(runner) {
   }
 }
 function adrIdFromArtifact(artifact) {
-  const basename = path24.basename(artifact, path24.extname(artifact));
+  const basename = path25.basename(artifact, path25.extname(artifact));
   const match = /^(?:adr[-_])?([0-9]+)/i.exec(basename);
   return match?.[1] === void 0 ? basename : `ADR-${match[1]}`;
 }
@@ -34078,7 +34341,7 @@ function renderHeader(io, styler, repoRoot, identity, config, authentication) {
     `${styler.brand(MARK_TOP)}    ${styler.bold("banzai")} ${dim(`v${VERSION}`)}   ${dim("spec-driven run orchestrator")}`
   );
   const location = [
-    path24.basename(repoRoot),
+    path25.basename(repoRoot),
     identity?.branch == null ? null : styler.cyan(identity.branch),
     identity?.commit == null ? null : dim(`@ ${identity.commit.slice(0, 7)}`),
     identity === null || identity.carriedInChanges === 0 ? null : dim(
@@ -34097,7 +34360,7 @@ function renderHeader(io, styler, repoRoot, identity, config, authentication) {
     ...entries.map((entry) => SHORT_ROLE_LABELS[entry.role].length)
   );
   const vendorWidth = Math.max(
-    ...entries.map((entry) => path24.basename(entry.executable).length)
+    ...entries.map((entry) => path25.basename(entry.executable).length)
   );
   const modelWidth = Math.max(...entries.map((entry) => entry.model.length));
   io.writeLine();
@@ -34105,7 +34368,7 @@ function renderHeader(io, styler, repoRoot, identity, config, authentication) {
     const reason = readiness.get(entry.executable);
     const marker = reason === void 0 ? "" : reason === null ? styler.green("\u2713") : styler.red("\u2717");
     io.writeLine(
-      `    ${SHORT_ROLE_LABELS[entry.role].padEnd(roleWidth)}  ${path24.basename(entry.executable).padEnd(vendorWidth)} ${styler.bold(entry.model)}${" ".repeat(
+      `    ${SHORT_ROLE_LABELS[entry.role].padEnd(roleWidth)}  ${path25.basename(entry.executable).padEnd(vendorWidth)} ${styler.bold(entry.model)}${" ".repeat(
         modelWidth - entry.model.length
       )}  ${dim(`${entry.effort} \xB7 ${entry.timeout}`)}  ${marker}`.trimEnd()
     );
@@ -34603,7 +34866,7 @@ function writeBuilderSessionStatus(io, settings) {
 }
 
 // src/progress.ts
-import path25 from "node:path";
+import path26 from "node:path";
 var LEVELS = /* @__PURE__ */ new Set(["quiet", "normal", "verbose"]);
 function resolveProgressLevel(args, env) {
   if (args.includes("--verbose")) {
@@ -34630,7 +34893,7 @@ function singleLine(value) {
   return value.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").replace(/\s+/g, " ").trim();
 }
 function phaseBanner(label, descriptor, width, styler) {
-  const vendor = path25.basename(descriptor.executable);
+  const vendor = path26.basename(descriptor.executable);
   const timeout = `${Math.ceil(descriptor.timeoutMs / 6e4)}m cap`;
   const facts = [
     vendor,
@@ -34644,12 +34907,9 @@ function phaseBanner(label, descriptor, width, styler) {
   const rule = "\u2500".repeat(Math.max(1, width - head.length - tail.length));
   return `${styler.dim("\u2500\u2500")} ${styler.bold(label)} ${styler.dim(`${rule}${tail}`)}`;
 }
-function skillLines(skills, width, styler) {
-  const named = skills.map((skill) => skill.startsWith("$") ? skill.slice(1) : skill).filter((skill) => skill.includes(":"));
-  if (named.length === 0) {
-    return [];
-  }
-  return wrapText(`skills: ${named.join(" \u2192 ")}`, width, "   ").map(
+function phaseLines(phases, width, styler) {
+  if (phases.length === 0) return [];
+  return wrapText(`phases: ${phases.join(" \u2192 ")}`, width, "   ").map(
     (line) => styler.dim(`   ${line.trimStart()}`)
   );
 }
@@ -34793,7 +35053,7 @@ var TerminalProgressReporter = class {
     if (this.styler.enabled && descriptor !== void 0) {
       const width = resolveWidth(this.columns());
       this.emit(phaseBanner(label, descriptor, width, this.styler));
-      for (const line of skillLines(descriptor.skills, width, this.styler)) {
+      for (const line of phaseLines(descriptor.phases, width, this.styler)) {
         this.emit(line);
       }
     } else {
@@ -35093,8 +35353,8 @@ async function runForegroundClient(launch) {
 }
 
 // src/setup-client.ts
-import path26 from "node:path";
-import { realpath as realpath9 } from "node:fs/promises";
+import path27 from "node:path";
+import { realpath as realpath10 } from "node:fs/promises";
 var SETUP_SKILLS = {
   codex: "$banzai:project-manifest",
   claude: "/banzai:project-manifest"
@@ -35113,7 +35373,7 @@ function record5(value) {
 async function verifiedSetupPlugin(directory2, vendor) {
   let root;
   try {
-    root = await realpath9(directory2);
+    root = await realpath10(directory2);
   } catch {
     return null;
   }
@@ -35192,7 +35452,7 @@ async function discoverPlugin(vendor, executable, repoRoot, env, runner) {
   const candidates = [];
   for (const value of marketplaces) {
     const marketplace = record5(value);
-    if (typeof marketplace.name !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(marketplace.name) || typeof marketplace.root !== "string" || !path26.isAbsolute(marketplace.root))
+    if (typeof marketplace.name !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(marketplace.name) || typeof marketplace.root !== "string" || !path27.isAbsolute(marketplace.root))
       continue;
     const listed = record5(
       await query([
@@ -35207,7 +35467,7 @@ async function discoverPlugin(vendor, executable, repoRoot, env, runner) {
     for (const item of listed) {
       const plugin = record5(item);
       const source = record5(plugin.source);
-      if (plugin.name !== "banzai" || plugin.marketplaceName !== marketplace.name || plugin.installed !== true || plugin.enabled !== true || source.source !== "local" || typeof source.path !== "string" || !path26.isAbsolute(source.path))
+      if (plugin.name !== "banzai" || plugin.marketplaceName !== marketplace.name || plugin.installed !== true || plugin.enabled !== true || source.source !== "local" || typeof source.path !== "string" || !path27.isAbsolute(source.path))
         continue;
       const verified = await verifiedSetupPlugin(source.path, vendor);
       if (verified !== null) candidates.push(verified);

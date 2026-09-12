@@ -17,7 +17,8 @@ import {
   CONTEXT_ATTEMPT_SCHEMA,
   CONTEXT_ATTEMPT_SCHEMA_VERSION,
   type ContextAttemptLedger,
-  type ContextPolicy
+  type ContextPolicy,
+  type PromptComponent
 } from "../src/types.js";
 
 test("context accounting uses exact UTF-8 bytes and keeps surfaces separate", () => {
@@ -42,6 +43,82 @@ test("context accounting uses exact UTF-8 bytes and keeps surfaces separate", ()
   assert.deepEqual(
     measured.components.map((component) => component.category),
     ["phase_instructions", "user_request_scope", "output_contract"]
+  );
+});
+
+test("context accounting aggregates out-of-order components by category without reordering the prompt", () => {
+  // Rendering order and report category order are independent contracts: the
+  // dispatched bytes keep the composer's order while the report sums by category.
+  const components: PromptComponent[] = [
+    { category: "common_instructions", text: "Runner: " },
+    { category: "human_decisions", text: "\n\nРішення: café" },
+    { category: "user_request_scope", text: "\n\nЗапит: 東京" },
+    { category: "verification_evidence", text: "\n\nverify" },
+    { category: "phase_instructions", text: "\n\nBound roles 🧪" },
+    { category: "phase_instructions", text: "\n\nSerena guidance" }
+  ];
+  const envelope = createPromptEnvelope(components);
+  const contract = resolveOutputContract("codex", "phase-result/v3");
+  const measured = measureRunnerPayload(envelope, contract);
+
+  assert.equal(
+    envelope.rendered,
+    components.map((component) => component.text).join("")
+  );
+  assert.deepEqual(
+    envelope.components.map((component) => component.category),
+    components.map((component) => component.category)
+  );
+  assert.equal(
+    measured.promptBytes,
+    Buffer.byteLength(envelope.rendered, "utf8")
+  );
+  assert.ok(measured.promptBytes > envelope.rendered.length);
+  assert.deepEqual(
+    measured.components.map((component) => component.category),
+    [
+      "common_instructions",
+      "phase_instructions",
+      "user_request_scope",
+      "human_decisions",
+      "verification_evidence",
+      "output_contract"
+    ]
+  );
+  const expected = new Map<string, number>();
+  for (const component of components) {
+    expected.set(
+      component.category,
+      (expected.get(component.category) ?? 0) +
+        Buffer.byteLength(component.text, "utf8")
+    );
+  }
+  for (const component of measured.components) {
+    if (component.category === "output_contract") continue;
+    assert.equal(
+      component.bytes,
+      expected.get(component.category),
+      component.category
+    );
+  }
+  assert.equal(
+    measured.components.find(
+      (component) => component.category === "phase_instructions"
+    )?.bytes,
+    Buffer.byteLength("\n\nBound roles 🧪", "utf8") +
+      Buffer.byteLength("\n\nSerena guidance", "utf8")
+  );
+  assert.equal(
+    measured.outputSchemaBytes,
+    Buffer.byteLength(contract.serialized, "utf8")
+  );
+  assert.equal(
+    measured.totalBytes,
+    measured.promptBytes + measured.outputSchemaBytes
+  );
+  assert.equal(
+    measured.components.reduce((sum, component) => sum + component.bytes, 0),
+    measured.totalBytes
   );
 });
 

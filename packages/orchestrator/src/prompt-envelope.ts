@@ -18,6 +18,42 @@ export function createPromptEnvelope(
   };
 }
 
+export function composePromptComponents(
+  components: readonly PromptComponent[]
+): PromptEnvelope {
+  return createPromptEnvelope(
+    components
+      .filter((component) => component.text.length > 0)
+      .map((component, index) => ({
+        category: component.category,
+        text: (index === 0 ? "" : "\n\n") + component.text
+      }))
+  );
+}
+
+export function insertPhaseInstructions(
+  prompt: PromptEnvelope,
+  instructions: readonly string[]
+): PromptEnvelope {
+  const firstEvidence = prompt.components.findIndex(
+    (component) =>
+      component.category !== "common_instructions" &&
+      component.category !== "phase_instructions"
+  );
+  const position = firstEvidence < 0 ? prompt.components.length : firstEvidence;
+  const added = instructions
+    .filter((text) => text.length > 0)
+    .map((text): PromptComponent => ({
+      category: "phase_instructions",
+      text: "\n\n" + text
+    }));
+  return createPromptEnvelope([
+    ...prompt.components.slice(0, position),
+    ...added,
+    ...prompt.components.slice(position)
+  ]);
+}
+
 export function promptEnvelopeFromSections(
   rendered: string,
   boundaries: readonly {

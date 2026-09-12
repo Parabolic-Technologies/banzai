@@ -11,6 +11,7 @@ const ADR_0034 = "ADR-0034";
 const ADR_0035 = "ADR-0035";
 const ADR_0040 = "ADR-0040";
 const ADR_0041 = "ADR-0041";
+const ADR_0042 = "ADR-0042";
 const POLICY_ADR_AUTHORITIES = new Set([
   ADR_0026,
   ADR_0028,
@@ -18,7 +19,8 @@ const POLICY_ADR_AUTHORITIES = new Set([
   ADR_0034,
   ADR_0035,
   ADR_0040,
-  ADR_0041
+  ADR_0041,
+  ADR_0042
 ]);
 const POLICY_ERROR_CODE = "IMPORT_BOUNDARY_POLICY_INVALID";
 const IMPORTER_PATTERN =
@@ -43,6 +45,17 @@ const boundary = (
  * broaden it.
  */
 export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
+  boundary("src/phase-resources.ts", "embedded-phase-resources", [ADR_0042]),
+  boundary(
+    "src/phase-instructions.ts",
+    "phase-instructions",
+    [ADR_0042],
+    [
+      permission("./phase-resources.js", ADR_0042),
+      permission("./errors.js", ADR_0042)
+    ],
+    [permission("./types.js", ADR_0042)]
+  ),
   boundary(
     "src/artifact-storage.ts",
     "shared-artifact-storage",
@@ -345,8 +358,9 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/doctor.ts",
     "doctor-diagnostics",
-    [MANIFEST_ARCHITECTURE, MANIFEST_MODULES, ADR_0040, ADR_0041],
+    [MANIFEST_ARCHITECTURE, MANIFEST_MODULES, ADR_0040, ADR_0041, ADR_0042],
     [
+      permission("./phase-instructions.js", ADR_0042),
       permission("./artifact-storage.js", ADR_0041),
       permission("./project-adoption.js", ADR_0040),
       permission("./adapters.js", MANIFEST_MODULES),
@@ -574,8 +588,9 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/prompts.ts",
     "prompt-construction",
-    [MANIFEST_MODULES, MANIFEST_ARCHITECTURE, ADR_0028],
+    [MANIFEST_MODULES, MANIFEST_ARCHITECTURE, ADR_0028, ADR_0042],
     [
+      permission("./phase-instructions.js", ADR_0042),
       permission("./prompt-envelope.js", ADR_0028),
       permission("./review-artifact.js", MANIFEST_MODULES)
     ],
@@ -669,9 +684,11 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       ADR_0034,
       ADR_0035,
       ADR_0040,
-      ADR_0041
+      ADR_0041,
+      ADR_0042
     ],
     [
+      permission("./phase-instructions.js", ADR_0042),
       permission("./artifact-storage.js", ADR_0041),
       permission("./project-adoption.js", ADR_0040),
       permission("./review-snapshot.js", MANIFEST_MODULES),
