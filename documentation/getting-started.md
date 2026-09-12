@@ -114,7 +114,8 @@ banzai doctor
 Resolve every failed check and review the warnings. For structured diagnostic
 output, use `banzai doctor --json`.
 
-Doctor v2 checks structural project guidance, configuration, declared project
+Doctor v3 checks structural project guidance, configuration, installed instruction
+resource parity, declared project
 coverage, executable paths, and
 local state. It does not execute your verification commands or call either
 model vendor. Its authentication advisory is expected: a ready report does

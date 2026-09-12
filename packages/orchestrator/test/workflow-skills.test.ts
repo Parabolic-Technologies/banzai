@@ -12,7 +12,27 @@ import {
 const REPOSITORY_ROOT = path.resolve(process.cwd(), "../..");
 
 async function productSource(relativePath: string): Promise<string> {
-  return await readFile(path.join(REPOSITORY_ROOT, relativePath), "utf8");
+  const source = await readFile(
+    path.join(REPOSITORY_ROOT, relativePath),
+    "utf8"
+  );
+  if (!/^plugins\/banzai\/skills\/[^/]+\/SKILL\.md$/.test(relativePath)) {
+    return source;
+  }
+  const names = new Set(
+    [
+      ...source.matchAll(/\]\(\.\.\/\.\.\/guidance\/([a-z-]+)\.md#[a-z-]+\)/g)
+    ].map((match) => match[1])
+  );
+  const guidance = await Promise.all(
+    [...names].map((name) =>
+      readFile(
+        path.join(REPOSITORY_ROOT, `plugins/banzai/guidance/${name}.md`),
+        "utf8"
+      )
+    )
+  );
+  return [source, ...guidance].join("\n\n");
 }
 
 const ENGINEERING_QUALITY_SKILLS = [
@@ -511,4 +531,33 @@ test("standalone review keeps durable Markdown while orchestration returns only 
   assert.match(review, /review-result\/v2/);
   assert.match(review, /reviewNotes/);
   assert.match(review, /not independent proof/);
+});
+
+test("packaged process distinguishes runner delivery from standalone entry without changing policy or review authority", async () => {
+  const text = await productSource("plugins/banzai/AGENTS.md");
+  assert.match(
+    text,
+    /Banzai supports orchestrated runner phases and standalone skill sessions/
+  );
+  assert.match(
+    text,
+    /runner supplies embedded phase\s+instructions, shared guidance and applicable policies directly/
+  );
+  assert.match(text, /Workflow selection remains\s+prompt-only/);
+  assert.match(text, /Both vendors return structured review evidence/);
+  assert.match(
+    text,
+    /runner\s+alone renders and validates the attempt-owned candidate/
+  );
+  assert.match(text, /standalone|Standalone/);
+  assert.match(text, /banzai-feature-review\/v1/);
+  assert.match(text, /maximum|at most two deltas/);
+  assert.doesNotMatch(text, /Claude may write only|^@/m);
+  const start = text.indexOf("## Policies\n");
+  const end = text.indexOf("\n## ", start);
+  // Exact process policy index bytes from the approved 3c00d9f baseline.
+  assert.equal(
+    createHash("sha256").update(text.slice(start, end)).digest("hex"),
+    "2221cdf98b1cd1dcbb5700ae54690b825090a19cec455e1bae25740c77250b0e"
+  );
 });

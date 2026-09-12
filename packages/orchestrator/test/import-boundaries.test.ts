@@ -171,7 +171,11 @@ test("import_boundaries_permissions_are_exact_and_authorized", () => {
   const modules = [...discoverProductionModules(SOURCE_ROOT)];
 
   const wildcard = mutablePolicy();
-  first(first(wildcard).runtime).target = "./*";
+  first(
+    first(
+      wildcard.filter((entry) => entry.importer === "src/artifact-storage.ts")
+    ).runtime
+  ).target = "./*";
   const wildcardError = policyError(
     () => validateImportBoundaryPolicy(wildcard, modules),
     "target_invalid"
@@ -179,7 +183,11 @@ test("import_boundaries_permissions_are_exact_and_authorized", () => {
   assert.doesNotMatch(wildcardError.message, /\.\/\*/);
 
   const absolute = mutablePolicy();
-  first(first(absolute).runtime).target = "/tmp/private.ts";
+  first(
+    first(
+      absolute.filter((entry) => entry.importer === "src/artifact-storage.ts")
+    ).runtime
+  ).target = "/tmp/private.ts";
   const absoluteError = policyError(
     () => validateImportBoundaryPolicy(absolute, modules),
     "target_invalid"
@@ -187,7 +195,13 @@ test("import_boundaries_permissions_are_exact_and_authorized", () => {
   assert.doesNotMatch(absoluteError.message, /\/tmp\/private/);
 
   const missingAuthority = mutablePolicy();
-  first(first(missingAuthority).runtime).authority = "ADR-9999";
+  first(
+    first(
+      missingAuthority.filter(
+        (entry) => entry.importer === "src/artifact-storage.ts"
+      )
+    ).runtime
+  ).authority = "ADR-9999";
   policyError(
     () => validateImportBoundaryPolicy(missingAuthority, modules),
     "permission_authority_invalid"
@@ -208,7 +222,11 @@ test("import_boundaries_permissions_are_exact_and_authorized", () => {
   );
 
   const duplicateTarget = mutablePolicy();
-  const duplicateEntry = first(duplicateTarget);
+  const duplicateEntry = first(
+    duplicateTarget.filter(
+      (entry) => entry.importer === "src/artifact-storage.ts"
+    )
+  );
   duplicateEntry.runtime = [
     ...duplicateEntry.runtime,
     structuredClone(first(duplicateEntry.runtime))
@@ -222,7 +240,11 @@ test("import_boundaries_permissions_are_exact_and_authorized", () => {
 test("import_boundaries_reject_nonexistent_adr_authority", () => {
   const modules = [...discoverProductionModules(SOURCE_ROOT)];
   const nonexistentAuthority = mutablePolicy();
-  const entry = first(nonexistentAuthority);
+  const entry = first(
+    nonexistentAuthority.filter(
+      (entry) => entry.importer === "src/artifact-storage.ts"
+    )
+  );
   entry.authorities = [...entry.authorities, "ADR-9999"];
   first(entry.runtime).authority = "ADR-9999";
 

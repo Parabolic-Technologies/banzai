@@ -116,7 +116,7 @@ if (command === "help") {
     await new Promise(() => {});
   }
   if (variant === "stderr") process.stderr.write("private output\\n");
-  process.stdout.write(variant === "malformed-doctor" ? "{bad\\n" : JSON.stringify({ schema: "banzai-doctor/v2", schemaVersion: 2, ready: variant !== "not-ready" }) + "\\n");
+  process.stdout.write(variant === "malformed-doctor" ? "{bad\\n" : JSON.stringify({ schema: "banzai-doctor/v3", schemaVersion: 3, ready: variant !== "not-ready" }) + "\\n");
 } else if (command === "control status") {
   process.stdout.write(variant === "malformed-status" ? "{bad\\n" : JSON.stringify({ schema: "banzai-agent-status/v2", schemaVersion: 2, activeRun: await activeStatus() }) + "\\n");
 } else if (command === "control answer --by Smoke User --no-resume") {
@@ -222,9 +222,9 @@ test("forward release smoke accepts synchronized metadata and a freshly rebuilt 
       "packages/orchestrator/src",
       "packages/orchestrator/scripts/build.mjs",
       "packages/orchestrator/scripts/artifact-readers-build.mjs",
+      "packages/orchestrator/scripts/phase-resources-build.mjs",
       "packages/orchestrator/scripts/smoke-committed.mjs",
-      "plugins/banzai/contracts",
-      "plugins/banzai/lib"
+      "plugins/banzai"
     ]) {
       const target = path.join(root, relative);
       await mkdir(path.dirname(target), { recursive: true });
@@ -251,7 +251,7 @@ test("forward release smoke accepts synchronized metadata and a freshly rebuilt 
     const built = spawnSync(
       process.execPath,
       [path.join(root, "packages/orchestrator/scripts/build.mjs")],
-      { encoding: "utf8" }
+      { cwd: path.join(root, "packages/orchestrator"), encoding: "utf8" }
     );
     assert.equal(built.status, 0, built.stderr);
     const scratch = path.join(root, "scratch");

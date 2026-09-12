@@ -1,3 +1,4 @@
+import { checkInstructionPayloads } from "./phase-resources-build.mjs";
 import {
   mkdtemp,
   mkdir,
@@ -42,21 +43,18 @@ try {
   await execute("tar", ["-czf", sourceArchive, "-C", source, "."], {
     env: { ...process.env, COPYFILE_DISABLE: "1" }
   });
-  results.sourceArchive = inspectPublicationFiles(
-    policy,
-    readTar(await readFile(sourceArchive))
-  );
+  const sourceFiles = readTar(await readFile(sourceArchive));
+  results.sourceArchive = inspectPublicationFiles(policy, sourceFiles);
   const pluginArchive = path.join(scratch, "plugin.tar.gz");
   await execute(
     "tar",
     ["-czf", pluginArchive, "-C", source, "plugins/banzai"],
     { env: { ...process.env, COPYFILE_DISABLE: "1" } }
   );
-  results.pluginArchive = inspectPublicationFiles(
-    policy,
-    readTar(await readFile(pluginArchive)),
-    { distribution: "plugin" }
-  );
+  const pluginFiles = readTar(await readFile(pluginArchive));
+  results.pluginArchive = inspectPublicationFiles(policy, pluginFiles, {
+    distribution: "plugin"
+  });
   await execute(
     "npm",
     [
@@ -81,11 +79,15 @@ try {
     throw new Error(
       "PUBLICATION_PACKAGE_INVALID: npm did not produce exactly one package."
     );
-  results.npmTarball = inspectPublicationFiles(
-    policy,
-    readTar(await readFile(path.join(scratch, packages[0]))),
-    { distribution: "npm" }
-  );
+  const npmFiles = readTar(await readFile(path.join(scratch, packages[0])));
+  results.npmTarball = inspectPublicationFiles(policy, npmFiles, {
+    distribution: "npm"
+  });
+  results.instructions = await checkInstructionPayloads(root, {
+    source: sourceFiles,
+    plugin: pluginFiles,
+    npm: npmFiles
+  });
   process.stdout.write(JSON.stringify(results) + "\n");
 } catch (error) {
   process.stderr.write(`${error.message}\n`);

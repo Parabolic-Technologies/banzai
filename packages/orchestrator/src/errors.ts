@@ -26,6 +26,14 @@ export class ProjectSetupRequiredError extends BanzaiError {
   }
 }
 
+/** A refused call preserves the last durable checkpoint and all retry authority. */
+export class InstructionResourceMismatchError extends BanzaiError {
+  constructor(message: string) {
+    super("INSTRUCTION_RESOURCE_MISMATCH", message);
+    this.name = "InstructionResourceMismatchError";
+  }
+}
+
 /** A cooperating state writer lost to a terminal transition; never a model failure. */
 export class TerminalRunStateError extends BanzaiError {
   constructor(readonly state: RunState) {

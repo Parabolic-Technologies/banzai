@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { build } from "esbuild";
 import { artifactReaderBytes } from "./artifact-readers-build.mjs";
+import { checkPhaseResourceBytes } from "./phase-resources-build.mjs";
 
 const execFileAsync = promisify(execFile);
 const defaultPackageRoot = path.resolve(
@@ -30,6 +31,7 @@ function optionsFromArguments(args) {
 }
 
 async function checkDistribution(packageRoot, smokeRequired) {
+  await checkPhaseResourceBytes(path.resolve(packageRoot, "../.."));
   const generatedReaders = Buffer.from(await artifactReaderBytes(packageRoot));
   const shippedReaders = await readFile(
     path.resolve(packageRoot, "../../plugins/banzai/lib/artifact-readers.mjs")

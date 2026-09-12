@@ -1,0 +1,539 @@
+{
+  "baselineCommit": "3c00d9f197d458ec4741a20acbdb286e23171e4a",
+  "authority": "ADR-0042 sections 1-2",
+  "normalization": "Collapse Unicode whitespace to one ASCII space, then trim.",
+  "sources": [
+    {
+      "skill": "feature-description",
+      "guidance": "requirements",
+      "sourceSha256": "b3334c2b00147a83338839841226463ac042f7c007e13ccbcb7e44f0409a8e5b",
+      "skeletonSha256": "56c1c9cab2eff3a3688b10d1849b112e57ebc7c5548808ae045e9719fb809ae2",
+      "sections": [
+        {
+          "section": "Clarification Loop",
+          "originalSha256": "7d2d21f05faf3b93458ef4f69630cbd2651c85f554a311ffe0327bc6c1773c5a",
+          "originalNormalizedSha256": "6f0ded2a278e8488a145970cf24b41c46a386ae9c921690d51e7b93672e2ee66",
+          "guidanceNormalizedSha256": "0c089ae1a72b5a427ce01c7a1a57b95cf2d97ea083690f418a3b83d56986d973",
+          "consumerNormalizedSha256": "8bbc07dea9015ca6d9dbcb65e86220564a93f2e7cd417e77f998c6f2e254f152",
+          "transformations": [
+            {
+              "from": "- In orchestrated strict planning, first inspect the manifest, accepted ADRs,\n  executable/public contracts, and relevant source, tests, and documentation.\n  Use `decision_consultation` only for a remaining choice that can materially\n  change requirements, architecture, compatibility, risk, a quality attribute,\n  or scope. In standalone mode present the same bounded cards in chat.\n- Each consultation card carries the fields defined under **Decision\n  Consultation** in the installed `policies/decision-consultation.md`, including repository-relative evidence and a\n  recommendation only when current evidence supports it. Never select or infer\n  the human answer.\n",
+              "to": "- First inspect the manifest, accepted ADRs, executable/public contracts,\n  and relevant source, tests and documentation. Consult the owner only for a\n  remaining choice that can materially change requirements, architecture,\n  compatibility, risk, a quality attribute or scope. Apply Decision Consultation\n  when its conditions hold; never select or infer the human answer.\n",
+              "reason": "Consultation transport and structured field spelling stay with the caller."
+            }
+          ]
+        },
+        {
+          "section": "Document",
+          "originalSha256": "d5522418168a9b504db4322929baf41ca0166f86b86a56f21653a67f2c642524",
+          "originalNormalizedSha256": "eba0117ecb6e24ad2cc8ab882fb1cd633683b5545c9e7ff2de9d6a8bbf166e91",
+          "guidanceNormalizedSha256": "eba0117ecb6e24ad2cc8ab882fb1cd633683b5545c9e7ff2de9d6a8bbf166e91",
+          "consumerNormalizedSha256": "f01000bf0349da3e7863ba26e31af0ccabca3c2bae7f1ddc0f3b4ae6a149a021",
+          "transformations": []
+        },
+        {
+          "section": "Rules",
+          "originalSha256": "843a2ed4a636f050e810b5b1f7dc93f5b72e9abd324a25e0b4be9bb245043a53",
+          "originalNormalizedSha256": "08123b45c2449816ed6d8c89412d3a99e51c08ba122e37389ae7b522bfc551cd",
+          "guidanceNormalizedSha256": "9cf4fbd6f8ea74486dc9be0635423c1f632defa2c6d01bc9ec81575d4a89490c",
+          "consumerNormalizedSha256": "360e107f38f0ec8f1e2db7f6be535990122b06788bfd139e96fb8ba2fdb3fbf1",
+          "transformations": [
+            {
+              "from": "in the installed\n  `policies/security-assurance.md`",
+              "to": "(`security-assurance.md`) supplied by the active execution context",
+              "reason": "Policy delivery is caller-owned; substantive policy applicability is unchanged."
+            }
+          ]
+        }
+      ],
+      "orchestratedSha256": "d19760ea2298e184733b264500c37b10b929d99554f438fb625ce36ab7311d72"
+    },
+    {
+      "skill": "architecture-decision",
+      "guidance": "architecture",
+      "sourceSha256": "fb4039f6f93b6375f75f012896796da5ced8811ff9a034907b2129684728f041",
+      "skeletonSha256": "60569f9c1d97bbc7a026dd285571bbd6fd2a69fd17a7464034f2bddd866dffcd",
+      "sections": [
+        {
+          "section": "Proposal",
+          "originalSha256": "da5cbc33562e209cf91dddb729baf4378db71fd2a0fccc34a9b1db5ad8be3d2c",
+          "originalNormalizedSha256": "7f682fc26df604f3359993690f817739b89793c2b4f084e5da081c94157e0ce8",
+          "guidanceNormalizedSha256": "d1537645ac8845267e2ac69f0e060a08fc346748463d33e0e168bf32197e95a6",
+          "consumerNormalizedSha256": "2d8b77ed4b5df04462419000fe9703b69ce368ec35e7eb7c870c3867696cd9b8",
+          "transformations": [
+            {
+              "from": "in the installed\n   `policies/security-assurance.md`",
+              "to": "(`security-assurance.md`) supplied by the active execution context",
+              "reason": "Policy delivery is caller-owned; substantive policy applicability is unchanged."
+            }
+          ]
+        },
+        {
+          "section": "ADR Document",
+          "originalSha256": "9972c81e7c4aa25f3d1a969e6280bb390851811c3d46b0ae496e74ea79cb9226",
+          "originalNormalizedSha256": "54eece3168dd1d29bb11f07ec33bf36651168ba214d80b13ae1d0c46aec8ff3c",
+          "guidanceNormalizedSha256": "54eece3168dd1d29bb11f07ec33bf36651168ba214d80b13ae1d0c46aec8ff3c",
+          "consumerNormalizedSha256": "2b4da2dc5ba95ccb30b50dc4b7b5d563a28382fa9b3de32f7be1a28665bfbbc2",
+          "transformations": []
+        },
+        {
+          "section": "Lifecycle",
+          "originalSha256": "df5e2640fced1747daeee5af7a5a4712d9a17fda60cbd4a915c4a935f363b544",
+          "originalNormalizedSha256": "6902a5ac53bf647129d3efe15e42b2e1513c6f0f99471e3e9172990a2935d98f",
+          "guidanceNormalizedSha256": "6902a5ac53bf647129d3efe15e42b2e1513c6f0f99471e3e9172990a2935d98f",
+          "consumerNormalizedSha256": "ae77cfc5bbea06e176855a94568b810e90711e3c36b03d2e50f99523ae4e00f3",
+          "transformations": []
+        },
+        {
+          "section": "Apply The Decision",
+          "originalSha256": "f1db9e38132c3fdcad3da14b85181eb55a94213c7f6ef7682ede4f13e101aa36",
+          "originalNormalizedSha256": "bf615d281347374fdeb021709e410dba31c748c19242c2121cd5c748b9e7e7db",
+          "guidanceNormalizedSha256": "bf615d281347374fdeb021709e410dba31c748c19242c2121cd5c748b9e7e7db",
+          "consumerNormalizedSha256": "ffe4012bf50abea49fe893470266f4c207a7f09b5657efebf3c592e77974079f",
+          "transformations": []
+        }
+      ],
+      "orchestratedSha256": "01dd9184965f56c71b6a7032b4109e8f066be62ccab8aeb61c794d6ea7a29d55"
+    },
+    {
+      "skill": "development-plan",
+      "guidance": "planning",
+      "sourceSha256": "23f1ebf18800d4a5f48f5f1b0167e76d29e18deef06555e02b21ca13d94c6bd7",
+      "skeletonSha256": "b024e5567b0d8411e02eb3beb3371c21e6cd917282e4bc9c38ee14c42dbc8343",
+      "sections": [
+        {
+          "section": "Document",
+          "originalSha256": "e4e0d20156d1d474cb8ff53466738dafaa22d7f7ec4c8e49d6bfc92f0689d08c",
+          "originalNormalizedSha256": "825371f511210f1068709dd487540af062ec7f4f31df40b06de6601c5e6dcad6",
+          "guidanceNormalizedSha256": "825371f511210f1068709dd487540af062ec7f4f31df40b06de6601c5e6dcad6",
+          "consumerNormalizedSha256": "e21d42ab849aa5734f0a9a377c9ff21bc19acd75f8dd95593c50bf659496216d",
+          "transformations": []
+        },
+        {
+          "section": "Rules",
+          "originalSha256": "a917f47b4e8cacc3e1b8a964b15512539b86d19138b42a6eead3df9f4de1a98d",
+          "originalNormalizedSha256": "a4c29b347bf06dcddc7cccaf9c9d65ff95eb3be46b6a8916c73f943e0d435355",
+          "guidanceNormalizedSha256": "cdb150a68803330334ea8b75bee54f21ace675aa5dba6dc30ed8124b4cc844a0",
+          "consumerNormalizedSha256": "0e03238133dc098c702f7e4000413c73f2ce0d15a82f8b50150d0e9c66f88c53",
+          "transformations": [
+            {
+              "from": "- If planning discovers a new material human-owned choice, stop before writing\n  a dependent plan and return one to three bounded decision cards with the\n  fields defined under **Decision Consultation** in the installed `policies/decision-consultation.md`, including\n  repository-relative evidence. Never select, infer, or repeat an answered\n  choice against unchanged evidence. After its keyed answer is re-analyzed,\n  route an ADR-eligible result to `architecture-decision`.\n- If planning conflicts with an accepted ADR, stop and route to\n  `architecture-decision`.\n",
+              "to": "- If planning discovers a material human-owned choice or conflicts with an\n  accepted ADR, stop dependent work. Resolve the choice through Decision\n  Consultation when applicable; an ADR-eligible result requires an architecture\n  decision before a dependent plan. Never infer or repeat an answered choice\n  against unchanged evidence.\n",
+              "reason": "Standalone skill routing and consultation transport stay with the caller."
+            },
+            {
+              "from": "in the installed\n  `policies/security-assurance.md`",
+              "to": "(`security-assurance.md`) supplied by the active execution context",
+              "reason": "Policy delivery is caller-owned; substantive policy applicability is unchanged."
+            },
+            {
+              "from": "in the installed\n  `policies/test-assurance.md`",
+              "to": "(`test-assurance.md`) supplied by the active execution context",
+              "reason": "Policy delivery is caller-owned; substantive policy applicability is unchanged."
+            }
+          ]
+        }
+      ],
+      "orchestratedSha256": "3b2177a86411ea1b758059a3fdca50d8b61734ffc926d06e3965255cc2a40f97"
+    },
+    {
+      "skill": "code-writing",
+      "guidance": "implementation",
+      "sourceSha256": "8b611efc54d4df870c8aaf7ee3c74074f6a92c4e090d7102b357d9fec353e4f6",
+      "skeletonSha256": "5c12eb2b908f888ad7d4fcfc86b1a818f9311a2bed7704da70160e2ceb181ddb",
+      "sections": [
+        {
+          "section": "Implementation Rules",
+          "originalSha256": "a230bf5c0f1bb1280ce0e415066a43b4ce4d8a836e26da05cbae1017ad27bc16",
+          "originalNormalizedSha256": "a14914f41201a8995f27d51ad672428a129068f392d1f560baf03cc86425720c",
+          "guidanceNormalizedSha256": "93a97309e6675b49c5fe0d61f40e36d43a5c9126df904b5132b7a609cfc84f8c",
+          "consumerNormalizedSha256": "ee9a7c98be224dc74ebc71422eae0c80e7cb232fad99f94cfdc46c7bec05ff51",
+          "transformations": [
+            {
+              "from": "1. Follow the plan's task order. Outside orchestrated mode, mark only completed\n   tasks `[x]`; do not change approved task meaning silently. In orchestrated\n   mode, leave the plan unchanged and record completion once in the structured\n   ledger, then project the same records into the implementation report.\n",
+              "to": "1. Follow the approved task order and preserve approved task meaning.\n",
+              "reason": "Execution-specific checkbox and structured ledger mechanics remain with the caller."
+            },
+            {
+              "from": "in the installed\n   `policies/test-assurance.md`",
+              "to": "(`test-assurance.md`) supplied by the active execution context",
+              "reason": "Policy delivery is caller-owned; substantive policy applicability is unchanged."
+            }
+          ]
+        },
+        {
+          "section": "Deviations",
+          "originalSha256": "cf45aa1c323da9b505c90b4f2c9455e56f7c14357cb40cb7f80a56f9157eba27",
+          "originalNormalizedSha256": "644ed9bfe12bbca30ffa4f1893b5029241b17d1f29891177045f977684da9d90",
+          "guidanceNormalizedSha256": "ffc345a65c97d3a616853888fcbef1c651e15cc4809a718f941404d57ac5cbcf",
+          "consumerNormalizedSha256": "0d7910a8f6e373dcdd630cf1e60de693c1c2861f203268770c0a0cb2bda2c285",
+          "transformations": [
+            {
+              "from": "Route to `architecture-decision` for a superseding proposal,\nthen revise and reapprove the plan.",
+              "to": "Require a superseding architecture proposal, then revise and reapprove\nthe plan.",
+              "reason": "Preserve decision authority without invoking a standalone skill."
+            },
+            {
+              "from": "in the installed `policies/plan-task-completion.md`",
+              "to": "(`plan-task-completion.md`) supplied by the active execution context",
+              "reason": "Policy delivery is caller-owned; substantive policy applicability is unchanged."
+            }
+          ]
+        },
+        {
+          "section": "Final Verification",
+          "originalSha256": "e3f7013302e42175cc2a142ff3f279863e4411371fa56e8f963f142fbb7f8f12",
+          "originalNormalizedSha256": "1879301460170c7a8ee18c23318425c1dca72aa65049e2204ff4423faa520c0f",
+          "guidanceNormalizedSha256": "1879301460170c7a8ee18c23318425c1dca72aa65049e2204ff4423faa520c0f",
+          "consumerNormalizedSha256": "2ba9e7aa4edae8d103aa1ee525e22bb8e69f22c3db3f42b409b9172ce12f49f7",
+          "transformations": []
+        },
+        {
+          "section": "Implementation Report",
+          "originalSha256": "d552b6d25a84241058e57e1d46766405a2b6a52365dd5a96ec533754531e8e82",
+          "originalNormalizedSha256": "b8259f3039b33569ce55a57d37cee5cf9dc8fa165a0829373aaed884e55b8722",
+          "guidanceNormalizedSha256": "24bfdeb8a2657d6ea239bfbf94c79559becfdfb85852e2bd06dc86e43542badc",
+          "consumerNormalizedSha256": "4f6011d936b59a357d8e3c402a4cac7105307c92bbd9a5e36f573b8b41f94caa",
+          "transformations": [
+            {
+              "from": "Include a **Plan Task Completion** table with exactly one row per approved\n`TNNN` task, in plan order. Each row contains task ID, `completed`, `incomplete`,\nor `blocked` status, a JSON array of bounded repository-relative evidence\nobjects, and a JSON gap object or `null`. Precede the table with\n`` Format: `banzai-plan-task-completion/v1` `` and use the exact columns `Task`,\n`Status`, `Evidence`, and `Gap or deviation`. Create the task records once and\nreuse them verbatim in the table and the structured `taskCompletion` ledger;\nafter parsing, the two must be JSON-identical. In orchestrated mode the runner\nprompt supplies the exact cell escaping, field bounds, and a canonical row;\nfollow it verbatim and reread the written table before returning the result.\n\nEvery completed task needs at least one existing regular repository file in\nthe approved run's changed scope, with a bounded detail. Every incomplete or\nblocked task needs a gap/deviation reference to an existing implementation or\ntest report heading. Never update approved plan checkboxes to mirror the ledger.\nA changed-scope evidence path must name a file created or modified relative to\nthe run baseline, or an exact required implementation or test report. Carried-in\nunchanged source and test files are not completion evidence even when the task\nonly reads or verifies them; record that confirmation in a required report and\ncite the report instead. Do not return `outcome=completed` while any required\ntask is incomplete or blocked.\n\n",
+              "to": "",
+              "reason": "Structured completion grammar remains in skill and runner prompt code."
+            },
+            {
+              "from": "`documentation/features/<slug>/implementation-report.md`",
+              "to": "the resolved `implementationReport` artifact",
+              "reason": "Use the caller-resolved role in either supported artifact layout."
+            },
+            {
+              "from": "9. notes for `test-writing`.",
+              "to": "9. notes for assurance.",
+              "reason": "Name the responsibility without a skill invocation."
+            }
+          ]
+        }
+      ],
+      "orchestratedSha256": "362857459588cf2a4df6f64876352035e52b0c14aea9cfa093b24c97cb0db855"
+    },
+    {
+      "skill": "test-writing",
+      "guidance": "assurance",
+      "sourceSha256": "6612423b9a02ca38e3510c8e0eb07ee53ee15684c8b41c2053680bcd74d68637",
+      "skeletonSha256": "307fa1de8b8d008dda113bc32bedde12dd7983aa86528a95a3e7eaf85788b785",
+      "sections": [
+        {
+          "section": "Rules",
+          "originalSha256": "fa1a7338cffcf2cfa6adcdd07e469b3c6ab8a724e83d8a1866f2ebb430274868",
+          "originalNormalizedSha256": "c15961cc4005b10f6fe3d8dc5796215cd0a25c6e08d6eb288cf618efac0207d9",
+          "guidanceNormalizedSha256": "fd100354ec67ac6d8a0697475114fb89729317cc985bd28acff116b83bad7e9d",
+          "consumerNormalizedSha256": "26650deaa4670e2075c821f7e3b32d0044854cb6883e1589bd64827e85836a1f",
+          "transformations": [
+            {
+              "from": "in the installed\n  `policies/test-assurance.md`",
+              "to": "(`test-assurance.md`) supplied by the active execution context",
+              "reason": "Policy delivery is caller-owned; substantive policy applicability is unchanged."
+            },
+            {
+              "from": "in the installed\n  `policies/plan-task-completion.md`",
+              "to": "(`plan-task-completion.md`) supplied by the active execution context",
+              "reason": "Policy delivery is caller-owned; substantive policy applicability is unchanged."
+            }
+          ]
+        },
+        {
+          "section": "What To Test",
+          "originalSha256": "b233859b7ac6437b1342770e766874a49fb26b629e2304f7d286c912c19b5645",
+          "originalNormalizedSha256": "3f65fac5e47f27d562e7c30152164451750a628a24fbd1cbc7d4c9731caa213d",
+          "guidanceNormalizedSha256": "eafce80219bfccf1b839da13fde70e082e2fde360a10fee94e7e9a631a44c0f8",
+          "consumerNormalizedSha256": "7562f5bf5a5181bdc7f2e3bb364903ae68cb6faceb13ed40adcfe56069124700",
+          "transformations": [
+            {
+              "from": "in the installed\n  `policies/security-assurance.md`",
+              "to": "(`security-assurance.md`) supplied by the active execution context",
+              "reason": "Policy delivery is caller-owned; substantive policy applicability is unchanged."
+            }
+          ]
+        },
+        {
+          "section": "Suite Runs",
+          "originalSha256": "15ca7737dc294dded757cc0121eb2830cf686cbd70d6654c23e5043eb555bd98",
+          "originalNormalizedSha256": "296e9b5a82f5c68818161413e4f1573585008b215991af7446ffc6b0ba141ef0",
+          "guidanceNormalizedSha256": "296e9b5a82f5c68818161413e4f1573585008b215991af7446ffc6b0ba141ef0",
+          "consumerNormalizedSha256": "84bcf2d1b88c8fe5ebbca84e3a510ffed985190ee52a53b4e7a35d715db9da2f",
+          "transformations": []
+        },
+        {
+          "section": "Critique Loop",
+          "originalSha256": "213e88c86397b4d3864ce41d86c573e7b742731a044bcb8f6e7b38ff4581a63c",
+          "originalNormalizedSha256": "b920a720f576e2610178e3324a39188a0f022c60274c34bc2568c695bd64c2c2",
+          "guidanceNormalizedSha256": "b920a720f576e2610178e3324a39188a0f022c60274c34bc2568c695bd64c2c2",
+          "consumerNormalizedSha256": "56e22fd9a79f8a4f299bf3292c9f445a9915a3a8e6c3b4c2e64bdba1e72845dc",
+          "transformations": []
+        },
+        {
+          "section": "Test Report",
+          "originalSha256": "cc9ab37382aa04508498a6f5e2bbe73d288bf6e750b16fa7d0899a05e58c01ec",
+          "originalNormalizedSha256": "86ff188a1548a75c0c0a52d57463e5852dd02b0c7e34545817f1f9242820f14b",
+          "guidanceNormalizedSha256": "c71e7c4aa5971b7d3f825e3b99139d2a543f741e5c72af1d127d3e71e7ecb3e7",
+          "consumerNormalizedSha256": "a8a7c5a336b8f398caee7b476ede130318590eda4e526fc5a75e0b61457283f9",
+          "transformations": [
+            {
+              "from": "`documentation/features/<slug>/test-report.md`",
+              "to": "the resolved `testReport` artifact",
+              "reason": "Use the caller-resolved role in either supported artifact layout."
+            }
+          ]
+        }
+      ],
+      "orchestratedSha256": "78e98afffbe448074bd28a3678203767a06bb532a8173670be9f9347418b34af"
+    },
+    {
+      "skill": "feature-review",
+      "guidance": "review",
+      "sourceSha256": "5fae21bc7a0939d2c76765aef5ce58f90bddf35159ff2743a70230914c7b8585",
+      "skeletonSha256": "94a347c2476563cdfe85ce46165c89d326e1001dc8b8c61a783abb072d75e189",
+      "sections": [
+        {
+          "section": "Read",
+          "originalSha256": "f6003f25a1d1cdb7b4a22dfd0690342ec00fbb79fdfccd31a4b7e81bcfd7d7cc",
+          "originalNormalizedSha256": "1f2a8fd61387bd40b38c9aee54753f349b88bb347ae46e55bdcf7ca44133d45d",
+          "guidanceNormalizedSha256": "4557812a227d34babfdbc399d5c4676ad83011924ab3d14101c024d1345faadb",
+          "consumerNormalizedSha256": "fa6f54a4e7eec1e116af6ed7fb945f4c6d07d89178a05bb127371d5f5c036a41",
+          "transformations": [
+            {
+              "from": "`documentation/features/<slug>/work.md`",
+              "to": "the resolved `work` artifact",
+              "reason": "Use the caller-resolved role in either supported artifact layout."
+            },
+            {
+              "from": "`documentation/features/<slug>/description.md`",
+              "to": "the resolved `description` artifact",
+              "reason": "Use the caller-resolved role in either supported artifact layout."
+            },
+            {
+              "from": "`documentation/development-plans/<slug>/plan.md`",
+              "to": "the resolved `plan` artifact",
+              "reason": "Use the caller-resolved role in either supported artifact layout."
+            },
+            {
+              "from": "`documentation/features/<slug>/implementation-report.md`",
+              "to": "the resolved `implementationReport` artifact",
+              "reason": "Use the caller-resolved role in either supported artifact layout."
+            },
+            {
+              "from": "`documentation/features/<slug>/test-report.md`",
+              "to": "the resolved `testReport` artifact",
+              "reason": "Use the caller-resolved role in either supported artifact layout."
+            }
+          ]
+        },
+        {
+          "section": "Audit",
+          "originalSha256": "cbf82ea312590a8188f2919923bc626154ac8477e646c7038b6fd2af64307d2a",
+          "originalNormalizedSha256": "9eb16748c13515fb59dfdb05e078248dd4ede41a498abca87edb856896ec44cc",
+          "guidanceNormalizedSha256": "b1753502329bf42c6873e815d129be74c939771b6eece33ecc196f8de5d4ae98",
+          "consumerNormalizedSha256": "f17c6db47806cb534f022b04193e97ca0ae10dad7c3b236587cc792cd1fbce46",
+          "transformations": [
+            {
+              "from": "in the installed\n   `policies/plan-task-completion.md`",
+              "to": "(`plan-task-completion.md`) supplied by the active execution context",
+              "reason": "Policy delivery is caller-owned; substantive policy applicability is unchanged."
+            },
+            {
+              "from": "in the installed\n    `policies/test-assurance.md`",
+              "to": "(`test-assurance.md`) supplied by the active execution context",
+              "reason": "Policy delivery is caller-owned; substantive policy applicability is unchanged."
+            },
+            {
+              "from": "in the installed\n    `policies/security-assurance.md`",
+              "to": "(`security-assurance.md`) supplied by the active execution context",
+              "reason": "Policy delivery is caller-owned; substantive policy applicability is unchanged."
+            }
+          ]
+        },
+        {
+          "section": "Engineering Quality Shadow Procedure",
+          "originalSha256": "ce5d528fc062e2833caaa1fca5ab2f3cb4ea938a13203f6fe9d7c1b89cf21df1",
+          "originalNormalizedSha256": "56593ce0d446c6f3b08cb90421b8ace416517f384179cf11344d0290a2330efb",
+          "guidanceNormalizedSha256": "56593ce0d446c6f3b08cb90421b8ace416517f384179cf11344d0290a2330efb",
+          "consumerNormalizedSha256": "e67bde92713d55f5f8e1c77342df1d519cea8e041f8806de7b281169ddd539dc",
+          "transformations": []
+        }
+      ],
+      "orchestratedSha256": "4389fc16d30259ecea16720894fb03d6eece5c0cdd0c3193d2fad3efa115b09e"
+    },
+    {
+      "skill": "feature",
+      "guidance": "feature",
+      "sourceSha256": "19bce60ec479452491d71039c22cc99632ed7c3332bb2fedfb7d1b46842bb200",
+      "skeletonSha256": "1060f37e503331564cb898304a8cbc58319b16a7765d01197bb74794e14b603f",
+      "sections": [
+        {
+          "section": "Workflow",
+          "originalSha256": "dd90079bcc6807605c1c52926b27f5ad37fa45262c5647bb50b2ad5370f51cc5",
+          "originalNormalizedSha256": "a4ad4c122593acddf6803783ddfa51a35d8c9bee2ff9ef4da132c9e38e0a834b",
+          "guidanceNormalizedSha256": "a05276d3029a2967a6c00e208da06623414694d7a324176371b3f54505a56b66",
+          "consumerNormalizedSha256": "e15490d99837a03b6efef9026e418baf0ce17b3228aebcb0c48361645c0b0578",
+          "transformations": [
+            {
+              "from": "2. Pick a short kebab-case slug.\n",
+              "to": "",
+              "reason": "The selected work identity belongs to the caller."
+            },
+            {
+              "from": "6. Apply the stop gate.\n",
+              "to": "",
+              "reason": "Entry and stop-gate mechanics stay in the standalone skill and runner."
+            },
+            {
+              "from": "13. Report changed paths, verification outcomes, deviations, and follow-ups. The\n    stop gate above is the only place this skill waits.\n",
+              "to": "",
+              "reason": "Host final reporting stays in the skill."
+            },
+            {
+              "from": "`documentation/features/<slug>/work.md`",
+              "to": "the resolved `work` artifact",
+              "reason": "Use the caller-resolved role in either supported artifact layout."
+            },
+            {
+              "from": "in the installed\n   `policies/test-assurance.md`",
+              "to": "(`test-assurance.md`) supplied by the active execution context",
+              "reason": "Policy delivery is caller-owned; substantive policy applicability is unchanged."
+            }
+          ]
+        },
+        {
+          "section": "`work.md`",
+          "originalSha256": "edbe8fa7f91d60b6c59effd32c7fdedccae2cbd9b551027a08ef260085da9c9b",
+          "originalNormalizedSha256": "f290bea34cdace4910d85952b1bda0f7e396ecc31557f80fd58e505dd0e6c0c0",
+          "guidanceNormalizedSha256": "f290bea34cdace4910d85952b1bda0f7e396ecc31557f80fd58e505dd0e6c0c0",
+          "consumerNormalizedSha256": "e1aa62db0b9d9411e270fb720510106fd93605aff7317a381a84fce000b8d767",
+          "transformations": []
+        },
+        {
+          "section": "Rules",
+          "originalSha256": "bd09a7ed7f22dc916d9dd1c8d728a50e0a9cb78e3e78eb2246bf44392b224a3b",
+          "originalNormalizedSha256": "999278837a9835c1e6e8280427380b080a387c7c2f693dea97487c9ec0abd6ce",
+          "guidanceNormalizedSha256": "999278837a9835c1e6e8280427380b080a387c7c2f693dea97487c9ec0abd6ce",
+          "consumerNormalizedSha256": "d9fa280ba5acedfe8fb9bc966c209c3516ef5fce1a2d4c90837768906eaa7a8c",
+          "transformations": []
+        }
+      ],
+      "orchestratedSha256": "dc4b9d46ba7fce63bd4bd4527e822f180cba4660f96268bced395b66feb1988f"
+    },
+    {
+      "skill": "quick-fix",
+      "guidance": "fix",
+      "sourceSha256": "31ecce5ce77c78c2bc55304bc3b2e4dcf32487a7c9b954e950ea8260256ad797",
+      "skeletonSha256": "0f6bfe5146b81c985c87fb9b07f792879115b616bab61aac391f98193daf3351",
+      "sections": [
+        {
+          "section": "Report Rule",
+          "originalSha256": "815c6f5b147d134587f186793a4b3ef5c051c0a608290ea6e7fe3d9264886679",
+          "originalNormalizedSha256": "6685fa642241cc95d81e8ec14ebfdc29ecafa9107475e0100f47967da0da0095",
+          "guidanceNormalizedSha256": "8161059bc3f1065638c8da9322f9a02829d4bc0d860a1781473017e91844e939",
+          "consumerNormalizedSha256": "2200adba089c3c585b554b1b0a9cabe3f0f74e6ac1d8cd45c91103b7e770da39",
+          "transformations": [
+            {
+              "from": "Otherwise finish with chat summary and verification.",
+              "to": "Otherwise verification and a final summary suffice; no change report is required.",
+              "reason": "Preserve the no-report outcome independently of transport."
+            },
+            {
+              "from": "`documentation/changes/<name>.md`",
+              "to": "the resolved `changeReport` artifact",
+              "reason": "Use the caller-resolved role in either supported artifact layout."
+            }
+          ]
+        },
+        {
+          "section": "Workflow",
+          "originalSha256": "d2fde19c0fa3ed473f72ceaf90900143167eb9ce2355a7201a692e5e8d7e1c8a",
+          "originalNormalizedSha256": "4f39e16eefb777b7d70421904df7a0970b79e15edc3db2c448c6355bac45ac61",
+          "guidanceNormalizedSha256": "8cf4ce454bd0e56d0b1cdb018e3377b914a388169938b97cc81b779880687cf4",
+          "consumerNormalizedSha256": "5f80e2b98fd2062d16ae1081bab3d6d91d7fe189ad6bdfe6c51589bf73884038",
+          "transformations": [
+            {
+              "from": "2. Apply the stop gate.\n",
+              "to": "",
+              "reason": "Entry and stop-gate mechanics stay in the standalone skill and runner."
+            },
+            {
+              "from": "12. Report.\n",
+              "to": "",
+              "reason": "Host final reporting stays in the skill."
+            },
+            {
+              "from": "in the installed `policies/plan-task-completion.md`",
+              "to": "(`plan-task-completion.md`) supplied by the active execution context",
+              "reason": "Policy delivery is caller-owned; substantive policy applicability is unchanged."
+            }
+          ]
+        },
+        {
+          "section": "Change Report",
+          "originalSha256": "377ed791d394bf14e79f63956f7d1dc84923cf22a2ea61aadda28d79b0719597",
+          "originalNormalizedSha256": "a435dee30b809b8ac711f94bea8a3a190f655fae6bcc42f3c77dd085b2500493",
+          "guidanceNormalizedSha256": "4be8e3ef0bc55349f2acf905f43b637d14664616ca72f06f877f5f41c008f19a",
+          "consumerNormalizedSha256": "ec4049539973e80f78450b38b59ccf376674fc3d8f44a2caad68cc9bac510e7f",
+          "transformations": [
+            {
+              "from": "`documentation/changes/<name>.md`",
+              "to": "the resolved `changeReport` artifact",
+              "reason": "Use the caller-resolved role in either supported artifact layout."
+            }
+          ]
+        }
+      ],
+      "orchestratedSha256": "3ce384950e2d383f815023a00d9847db2d9990f4b718550294520698cd94b947"
+    },
+    {
+      "skill": "project-manifest",
+      "guidance": "manifest",
+      "sourceSha256": "8e81eba82bfd8cbb50b9cbf5b5160d054c434075507ce1542008f71d3cde63ab",
+      "skeletonSha256": "d8ddc4cb844685c75a2e5e8914398b18dc76bd376713122f20af6e767388ec2e",
+      "sections": [
+        {
+          "section": "Maintenance",
+          "originalSha256": "19a6f67eb8ee3f5642bf80d56d8c3b8bd5e27bdb184c5b62a0ed45c72c7bfe8d",
+          "originalNormalizedSha256": "f24e190b00863c04b99d2a4c4a4f0cef7e8ed0a214d06219693b85db3491c1fe",
+          "guidanceNormalizedSha256": "f24e190b00863c04b99d2a4c4a4f0cef7e8ed0a214d06219693b85db3491c1fe",
+          "consumerNormalizedSha256": "3f3f730a748133ad617d3174f29c354809747bb6d9dcf1eaec8f8e1872a736e9",
+          "transformations": []
+        },
+        {
+          "section": "Required Sections",
+          "originalSha256": "8ba29d23041c14d4d8079bedf810500d572734aa6411a86f3e609036bc384352",
+          "originalNormalizedSha256": "22a8fe01930411a8e2fbd2dd325ac1bddd954ed8c58429bfeb6b5d299826b834",
+          "guidanceNormalizedSha256": "22a8fe01930411a8e2fbd2dd325ac1bddd954ed8c58429bfeb6b5d299826b834",
+          "consumerNormalizedSha256": "09de6e4168e59fc6c3b871d31a1e23ab3a7e027a8b0e8f27c3a5dbad5f77ca54",
+          "transformations": []
+        },
+        {
+          "section": "Writing Rules",
+          "originalSha256": "7a3f847cf22e5caa28e5f678b77ec9cad39e399f4de84722b8654ff78a079c6d",
+          "originalNormalizedSha256": "fefad73ef15ea5a567391a13bd65b1b2a5b8fff8f0b9fe4ea86449750465743d",
+          "guidanceNormalizedSha256": "fefad73ef15ea5a567391a13bd65b1b2a5b8fff8f0b9fe4ea86449750465743d",
+          "consumerNormalizedSha256": "1a65dac6a7a1437fba0b46675a8895b08846334846ae2f176160dcff548871a4",
+          "transformations": []
+        },
+        {
+          "section": "Checklist",
+          "originalSha256": "e5ddad891d9524baaf19c7c6ba900c2b26040c515fd6dc52b8726f7597069981",
+          "originalNormalizedSha256": "b229547ffe670151742356374661c17c3abda00d3576bf961bd9fbb782d04494",
+          "guidanceNormalizedSha256": "b229547ffe670151742356374661c17c3abda00d3576bf961bd9fbb782d04494",
+          "consumerNormalizedSha256": "1a49bc5351e1b4d8da7539be676862b42d51e0bd647c1162ea33481875b7b282",
+          "transformations": []
+        }
+      ]
+    }
+  ],
+  "preservedFiles": {
+    "plugins/banzai/skills/feature-status/SKILL.md": "40efcb189e362549a89170f54d5f792069cb78133af4d533e34550c11071d84f",
+    "plugins/banzai/skills/orchestrate/SKILL.md": "aee22a0d272bfa6712580a556cc6d5b2457a406ca8b2e500c1d7a283d6d2fd48",
+    "plugins/banzai/.claude-plugin/plugin.json": "e19ac79164452fd255ba30e272205edf5c8bfadaaafdcfe02cc096dbdffb8188",
+    "plugins/banzai/.codex-plugin/plugin.json": "02ada6292ef3295b4e8b664542544696b38128d0c0ef580249c8d1b81ef2ee22",
+    "plugins/banzai/hooks/hooks.json": "eb5bce1be31c2dde64a55ae9af27fe0c176cedc911a76209aa5110493238f3a9",
+    "plugins/banzai/hooks/spec-gate.cjs": "7c6869e8fc72b9d3304b2c42cd37ee95178f0e82e9cc29027de96c853ca92206"
+  }
+}

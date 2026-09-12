@@ -2178,3 +2178,6 @@ export function createVendorAdapters(
     }
   };
 }
+
+// Share the existing adapter dispatch identity with offline invocation diagnostics.
+export { vendorFor, FALLBACK_VENDOR, MODEL_ROLES } from "./models.js";

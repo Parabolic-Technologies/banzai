@@ -285,5 +285,10 @@ Implementation and review must confirm all of the following:
 
 ## Lifecycle Links
 
+- Amended by [ADR-0042](./0042-runner-delivered-phase-instructions.md), accepted
+  2026-09-11: authorize only its section 3 generated-resource/instruction module
+  boundaries and exact additional consumer edges. Preserve the explicit map;
+  no wildcard or arbitrary Markdown import permission is added. Implementation
+  of this amendment is Planned.
 - Supersedes: None
 - Superseded by: None

@@ -220,6 +220,11 @@ Implementation and review must confirm:
 
 ## Lifecycle Links
 
+- Amended by [ADR-0042](./0042-runner-delivered-phase-instructions.md), accepted
+  2026-09-11: new doctor reports use v3 with `claude.instructions` in category
+  `config` after `claude.environment` and before `claude.permissions`.
+  Preserve read-only/privacy rules, derived readiness and historical v1/v2
+  meaning. Implementation of this amendment is Planned.
 - Amended by [ADR-0040](./0040-project-adoption-preflight-and-interactive-setup.md),
   accepted 2026-09-10: newly emitted doctor reports use v2 with the shared
   project-guidance readiness check. The offline, read-only, privacy and

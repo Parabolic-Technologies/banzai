@@ -169,8 +169,8 @@ observable test level.
 ## Engineering Quality Shadow Review
 
 The installed plugin carries one vendor-neutral Engineering Quality policy in
-`policies/engineering-quality.md`. Consuming skills explicitly read that file
-relative to their installed `SKILL.md`. Planning and implementation skills
+`policies/engineering-quality.md`. Standalone consuming skills explicitly read that file
+relative to their installed `SKILL.md`; runner phases receive the same body inline. Planning and implementation skills
 apply only properties material to the changed repository surface; Test
 Assurance continues to own test selection, while configured checks, contract
 verification, Security Assurance, or justified inspection may own other
@@ -573,6 +573,42 @@ Existing approval, triage, resume, retry, cancel, human status, interactive,
 and `status --json` commands retain their behavior. A supervisor refreshes
 control status after those commands instead of parsing their human prose.
 
+## Runner instruction delivery
+
+The runner embeds six phase resources (`planning`, `implementation`, `review`,
+`fix`, `feature`, `quick-fix`), nine shared guidance resources and their ordered
+six-policy unions from the plugin. Standalone skills load the shared guidance
+relatively. Selection remains prompt-only. Every fresh or resumed call, retry
+and authorized recovery receives the complete applicable payload, exact bound
+artifact roles and existing write capabilities. Review and selection have no
+model artifact writes; the runner alone renders review artifacts. Existing
+implementation/fix grants, report triggers, completion evidence and human gates
+remain unchanged. Required bytes count against existing context budgets.
+
+Structural plugin verification still requires all eleven skills and the two
+hook events/script. Separately, preflight compares the applicable route union
+and each call rechecks its actual phase against the supplied verified directory.
+Matching raw identities are verified; a readable mismatch refuses the call with
+`INSTRUCTION_RESOURCE_MISMATCH` before creating an attempt. Saved decisions,
+checkpoints, prior failures and retry/recovery authority remain intact. Missing,
+unreadable or unsafe resources are bounded failures; Codex, ambient mode and an
+unresolved directory are unverifiable. Evidence limitations alone do not block,
+and structural invalid-directory refusal takes precedence. These checks do not
+prove full transitive plugin integrity, model compliance or resource immutability
+during a running session.
+
+The three remedies are to rebuild the orchestrator bundle from current source,
+update the installed plugin to the matching release, or explicitly select
+ambient mode (reported as unverifiable). Banzai performs none automatically.
+After remediation, use the existing status-directed resume, retry or recovery
+operation; do not resubmit a saved human decision.
+
+Explicit `npm run build` refreshes committed `src/phase-resources.ts` and the
+bundle/map. Typecheck, lint and tests never generate it. `build:check` compares
+source/generated/bundle bytes without repair. Publication checks compare the
+same candidate across actual indexed source/plugin archives, npm payload and
+source map, rejecting staged/working instruction skew.
+
 ## Project Verification Readiness
 
 For ready-to-adapt snippets and setup guidance, see
@@ -581,7 +617,7 @@ For ready-to-adapt snippets and setup guidance, see
 
 `banzai doctor` inspects the current Git checkout and writes a deterministic
 human report to stdout. `banzai doctor --json` writes the authoritative
-`banzai-doctor/v2` object instead. It exits 0 exactly when no check failed and
+`banzai-doctor/v3` object instead. It exits 0 exactly when no check failed and
 exits 1 when the checkout is not ready. Warnings, including a live or stale
 valid runner lock, remain visible without changing readiness.
 
@@ -594,12 +630,15 @@ order, sorted project types, two-space JSON, and final newline are stable for
 automation. Expected readiness findings stay in the selected stdout report;
 unexpected CLI failures go to stderr.
 
-Doctor v2 uses `schemaVersion: 2` and inserts exactly one `project.guidance`
-repository check immediately after `repository.git`. The remaining fields and
-check order are unchanged. Consumers of historical v1 reports must recognize
-this new identity: a guidance failure now makes `ready` false. No v1 output
-flag or change to historical reports is provided. It shares bounded structural
-inspection with setup and new-run preflight and executes no client or repair.
+Doctor v3 uses `schemaVersion: 3`. It retains `project.guidance` after
+`repository.git` and inserts `claude.instructions` in category `config`, after
+`claude.environment` and before `claude.permissions`. This checks the applicable
+instruction and hook resource union for configured roles. A confirmed mismatch
+is a failure; unverifiable or bounded-failure evidence is a warning. A mismatch
+wins mixed evidence, then bounded failure, then unverifiable. Configuration and
+structural-plugin failures remain independent. Historical v1/v2 reports retain
+their identities; consumers must recognize v3. There is no legacy-output flag.
+The check is offline, read-only and does not execute a vendor or repair files.
 
 Doctor also emits an `authentication.models` advisory: it does not invoke a
 vendor, so authentication readiness is not checked and executable availability
@@ -911,7 +950,7 @@ With terminal input and output attached, the runner opens a minimal
 state-driven interface. When no run exists, it collects the task request,
 derives a deterministic kebab-case slug, and shows that slug before the start
 confirmation. The planner then selects and displays `quick-fix`, `feature`, or
-`strict` with its reason and skill chain.
+`strict` with its reason and phase responsibilities.
 
 The request prompt enables terminal bracketed-paste mode. A multiline paste is
 captured through its closing marker and rendered as
@@ -1491,9 +1530,10 @@ review when strict, and accepted-finding fixes, and names what each phase
 produced when it completes. Without a live line, a heartbeat is printed every 30
 seconds naming the actions still running.
 Codex `--json` and Claude `--output-format stream-json` events are normalized
-into the same model, action, skill, and usage lines. Every phase's required
-Banzai skill chain is included in its start line; observable Claude `Skill`
-calls and supported Codex skill events are reported as they occur. Because
+into the same model, action, skill, and usage lines. The supplied phase responsibilities appear in each start line; observable
+Claude `Skill` calls and supported Codex skill events are reported only when
+they occur. Available inventories remain unchanged. Fewer Skill events prove
+neither model compliance nor lower cost. Because
 implementation, verification, and review advance without a gate, this progress
 stream is how an approved run reports itself until the next decision.
 

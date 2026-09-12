@@ -1,3 +1,7 @@
+import {
+  INSTRUCTION_RESOURCE_IDS,
+  resourceDigest
+} from "./phase-resources-build.mjs";
 import { readFile, lstat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
@@ -93,6 +97,60 @@ export function parsePublicationPolicy(value) {
 }
 function scanContents(name, bytes) {
   const text = bytes.toString("utf8");
+  if (
+    /^plugins\/banzai\/(?:phases|guidance|policies)\//.test(name) &&
+    (/"schema"\s*:\s*"banzai-(?:work-binding|artifact-archive)\/v1"/.test(
+      text
+    ) ||
+      /(?:\/Users\/|\/home\/)[^\s"']+/.test(text))
+  )
+    fail(
+      "PUBLICATION_PRIVATE_CONTENT",
+      name,
+      "Instruction resources contain private work or host identity."
+    );
+  if (/(?:^|\/)phase-resources\.ts$/.test(name)) {
+    const match = text.match(
+      /export const EMBEDDED_PHASE_RESOURCES = ([\s\S]*) as const;\s*$/
+    );
+    let resources;
+    try {
+      resources = JSON.parse(match?.[1] ?? "");
+    } catch {
+      fail(
+        "PUBLICATION_INSTRUCTIONS_INVALID",
+        name,
+        "Embedded instruction inventory is malformed."
+      );
+    }
+    if (
+      !resources ||
+      typeof resources !== "object" ||
+      Array.isArray(resources) ||
+      JSON.stringify(Object.keys(resources)) !==
+        JSON.stringify(INSTRUCTION_RESOURCE_IDS)
+    )
+      fail(
+        "PUBLICATION_INSTRUCTIONS_INVALID",
+        name,
+        "Embedded instruction inventory differs."
+      );
+    for (const id of INSTRUCTION_RESOURCE_IDS) {
+      const resource = resources[id];
+      if (!id.startsWith("hooks/")) {
+        if (
+          typeof resource?.text !== "string" ||
+          resourceDigest(resource.text) !== resource.sha256
+        )
+          fail(
+            "PUBLICATION_INSTRUCTIONS_INVALID",
+            name,
+            "Embedded instruction bytes differ from their identity."
+          );
+        scanContents(`plugins/banzai/${id}`, Buffer.from(resource.text));
+      }
+    }
+  }
   // Purposefully bounded signals, not a claim of exhaustive secret detection.
   if (/-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----/u.test(text))
     fail(

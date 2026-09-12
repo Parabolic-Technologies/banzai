@@ -20,6 +20,11 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 import {
+  checkPhaseResourceBytes,
+  phaseResourceBytes,
+  validateGuidanceExtraction
+} from "../scripts/phase-resources-build.mjs";
+import {
   createNodeVersionFileSystem,
   recoverProjectVersion,
   setProjectVersion,
@@ -108,6 +113,8 @@ const FIXTURE_PATHS = [
   "packages/orchestrator/test",
   "packages/orchestrator/scripts/build.mjs",
   "packages/orchestrator/scripts/artifact-readers-build.mjs",
+  "packages/orchestrator/scripts/phase-resources-build.mjs",
+  "packages/orchestrator/phase-guidance-baseline.json",
   "packages/orchestrator/scripts/check-dist.mjs",
   "packages/orchestrator/scripts/release-version.mjs",
   "packages/orchestrator/scripts/smoke-committed.mjs",
@@ -297,6 +304,149 @@ async function withFixture(
   }
 }
 
+test("phase resources reject byte skew and missing generated source without repairing the candidate", async () => {
+  await withFixture(async (root) => {
+    await checkPhaseResourceBytes(root);
+    const generatedPath = path.join(
+      root,
+      "packages/orchestrator/src/phase-resources.ts"
+    );
+    const original = await readFile(generatedPath);
+    const resourcePath = path.join(root, "plugins/banzai/phases/review.md");
+    const resource = await readFile(resourcePath);
+    await writeFile(resourcePath, Buffer.concat([resource, Buffer.from("\n")]));
+    assert.notEqual(await phaseResourceBytes(root), original.toString("utf8"));
+    await assert.rejects(
+      checkPhaseResourceBytes(root),
+      /src\/phase-resources.ts is missing or stale.*npm run build/
+    );
+    assert.deepEqual(await readFile(generatedPath), original);
+    await writeFile(resourcePath, resource);
+    await unlink(generatedPath);
+    await assert.rejects(
+      checkPhaseResourceBytes(root),
+      /src\/phase-resources.ts is missing or stale/
+    );
+    await assert.rejects(access(generatedPath));
+    await writeFile(
+      generatedPath,
+      original
+        .toString("utf8")
+        .replace("# Strict Planning Phase", "# Stale Planning Phase")
+    );
+    await assert.rejects(
+      checkPhaseResourceBytes(root),
+      /src\/phase-resources.ts is missing or stale/
+    );
+  });
+});
+
+test("phase resource generation rejects absent invalid and escaping input with bounded diagnostics", async () => {
+  await withFixture(async (root) => {
+    const target = path.join(root, "plugins/banzai/phases/review.md");
+    const original = await readFile(target);
+    for (const invalid of [
+      Buffer.alloc(0),
+      Buffer.from(" \n"),
+      Buffer.from([0xff])
+    ]) {
+      await writeFile(target, invalid);
+      await assert.rejects(
+        phaseResourceBytes(root),
+        /Instruction resource phases\/review.md is missing, unreadable, unsafe or invalid UTF-8/
+      );
+    }
+    await unlink(target);
+    await assert.rejects(
+      phaseResourceBytes(root),
+      /Instruction resource phases\/review.md/
+    );
+    const outside = path.join(path.dirname(root), "private-canary.md");
+    await writeFile(outside, "PRIVATE_RESOURCE_CONTENT_CANARY");
+    await symlink(outside, target);
+    await assert.rejects(phaseResourceBytes(root), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.doesNotMatch(
+        error.message,
+        /PRIVATE_RESOURCE_CONTENT_CANARY|private-canary|banzai-release-fixture/
+      );
+      return /phases\/review.md/.test(error.message);
+    });
+    await unlink(target);
+    await writeFile(target, original);
+  });
+});
+
+test("shared guidance preserves the frozen extraction and conditional consumer duties", async () => {
+  await withFixture(async (root) => {
+    await validateGuidanceExtraction(root);
+    const target = path.join(root, "plugins/banzai/guidance/fix.md");
+    const original = await readFile(target, "utf8");
+    await writeFile(
+      target,
+      original.replace("fixes a documented bug", "optionally documents bugs")
+    );
+    await assert.rejects(
+      validateGuidanceExtraction(root),
+      /Shared guidance or consumer drift: fix\/Report Rule/
+    );
+    await writeFile(target, original.replaceAll("\n", "\n\n"));
+    await validateGuidanceExtraction(root);
+    await writeFile(target, original);
+    const sourcePath = path.join(
+      root,
+      "plugins/banzai/skills/quick-fix/SKILL.md"
+    );
+    const source = await readFile(sourcePath, "utf8");
+    await writeFile(
+      sourcePath,
+      source.replace("## Orchestrated Mode", "## Changed Mode")
+    );
+    await assert.rejects(
+      validateGuidanceExtraction(root),
+      /Non-enumerated skill change|Retained Orchestrated Mode/
+    );
+    await writeFile(sourcePath, source);
+    const policyPath = path.join(
+      root,
+      "plugins/banzai/policies/security-assurance.md"
+    );
+    const policySource = await readFile(policyPath, "utf8");
+    await writeFile(
+      policyPath,
+      policySource.replace("implementation (conditional)", "implementation")
+    );
+    await assert.rejects(
+      validateGuidanceExtraction(root),
+      /Runner policy consumer drift: policies\/security-assurance.md/
+    );
+    await writeFile(
+      policyPath,
+      policySource.replace(
+        "planning, implementation",
+        "selection, planning, implementation"
+      )
+    );
+    await assert.rejects(
+      validateGuidanceExtraction(root),
+      /Runner policy consumer drift/
+    );
+    await writeFile(policyPath, policySource);
+    const extra = path.join(root, "plugins/banzai/phases/selection.md");
+    await writeFile(extra, "Do not add a selection resource.");
+    await assert.rejects(
+      validateGuidanceExtraction(root),
+      /Unexpected instruction resource inventory/
+    );
+    await unlink(extra);
+    await writeFile(target, "Injected extra preface.\n" + original);
+    await assert.rejects(
+      validateGuidanceExtraction(root),
+      /Non-enumerated guidance preface/
+    );
+  });
+});
+
 async function leaveCleanupGuardWithJournal(root: string): Promise<void> {
   const canonicalRoot = await realpath(root);
   const helper = path.join(
@@ -349,13 +499,10 @@ test("release validation accepts the all-equal nine-field release train", async 
 for (const [relativePath, fragment] of [
   ["plugins/banzai/policies/test-assurance.md", "## Test Assurance"],
   [
-    "plugins/banzai/skills/test-writing/SKILL.md",
+    "plugins/banzai/guidance/assurance.md",
     "**Risk and Contract Assurance Map**"
   ],
-  [
-    "plugins/banzai/skills/feature-review/SKILL.md",
-    "the plausible regression mechanism;"
-  ]
+  ["plugins/banzai/guidance/review.md", "the plausible regression mechanism;"]
 ] as const) {
   test(`release validation protects test-assurance policy in ${relativePath}`, async () => {
     await withFixture(async (root) => {
@@ -380,21 +527,18 @@ for (const [relativePath, fragment] of [
     "Cross-principal reachability"
   ],
   [
-    "plugins/banzai/skills/feature-description/SKILL.md",
-    "Security Assurance policy in the installed `policies/security-assurance.md`"
+    "plugins/banzai/guidance/requirements.md",
+    "Security Assurance policy (`security-assurance.md`) supplied by the active execution context"
   ],
   [
-    "plugins/banzai/skills/development-plan/SKILL.md",
-    "Security Assurance policy in the installed `policies/security-assurance.md`"
+    "plugins/banzai/guidance/planning.md",
+    "Security Assurance policy (`security-assurance.md`) supplied by the active execution context"
   ],
   [
     "plugins/banzai/skills/quick-fix/SKILL.md",
     "Security Assurance policy in the installed `policies/security-assurance.md`"
   ],
-  [
-    "plugins/banzai/skills/feature-review/SKILL.md",
-    "mechanism reachable in this codebase"
-  ],
+  ["plugins/banzai/guidance/review.md", "mechanism reachable in this codebase"],
   ["plugins/banzai/skills/quick-fix/SKILL.md", "the security exposure result"]
 ] as const) {
   test(`release validation protects security-assurance policy in ${relativePath} (${fragment})`, async () => {
@@ -433,20 +577,27 @@ test("release validation rejects a duplicated security assurance policy heading"
 
 test("release validation accepts a security assurance reference that wraps across lines", async () => {
   await withFixture(async (root) => {
-    const target = path.join(
-      root,
-      "plugins/banzai/skills/feature-description/SKILL.md"
-    );
+    const target = path.join(root, "plugins/banzai/guidance/requirements.md");
     const contents = await readFile(target, "utf8");
     await writeFile(
       target,
       replacePolicyFragment(
         contents,
-        "Security Assurance policy in the installed `policies/security-assurance.md`",
-        "Security Assurance\n  policy in the installed `policies/security-assurance.md`"
+        "Security Assurance policy (`security-assurance.md`) supplied by the active execution context",
+        "Security Assurance\n  policy (`security-assurance.md`) supplied by the active execution context"
       ),
       "utf8"
     );
+    await validateGuidanceExtraction(root);
+    const stale = validate(root);
+    assert.equal(stale.status, 1);
+    assert.match(stale.stderr, /^STALE_DISTRIBUTION /);
+    const build = spawnSync(
+      process.execPath,
+      [path.join(root, "packages/orchestrator/scripts/build.mjs")],
+      { cwd: path.join(root, "packages/orchestrator"), encoding: "utf8" }
+    );
+    assert.equal(build.status, 0, build.stderr);
     const result = validate(root);
     assert.equal(result.status, 0, result.stderr);
   });
@@ -470,7 +621,7 @@ for (const [relativePath, fragment] of [
     "plugins/banzai/skills/feature-description/SKILL.md",
     "canonical Engineering Quality policy in the installed `policies/engineering-quality.md`"
   ],
-  ["plugins/banzai/skills/feature-review/SKILL.md", "only as one `EQ-SHADOW:`"],
+  ["plugins/banzai/guidance/review.md", "only as one `EQ-SHADOW:`"],
   [
     "packages/orchestrator/src/prompts.ts",
     "Resolution review is closure-oriented, not discovery-oriented"
@@ -534,7 +685,7 @@ test("release validation rejects an Engineering Quality rule moved outside the c
   });
 });
 
-test("release validation accepts an engineering quality reference that wraps across lines", async () => {
+test("release validation preserves frozen skill source bytes even for a normalized policy reference rewrap", async () => {
   await withFixture(async (root) => {
     const target = path.join(
       root,
@@ -551,7 +702,8 @@ test("release validation accepts an engineering quality reference that wraps acr
       "utf8"
     );
     const result = validate(root);
-    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^INSTRUCTION_RESOURCE_DRIFT /);
   });
 });
 
@@ -597,7 +749,7 @@ for (const [relativePath, fragment] of [
     "Consultation is not approval or permission."
   ],
   [
-    "plugins/banzai/skills/feature-description/SKILL.md",
+    "plugins/banzai/guidance/requirements.md",
     "decision provenance, not approval or broader authority"
   ],
   [

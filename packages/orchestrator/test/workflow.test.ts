@@ -1,10 +1,12 @@
+import { instructionPluginFixture } from "./phase-instruction-fixtures.js";
 import { inspectDoctor } from "../src/doctor.js";
 import { spawn, spawnSync } from "node:child_process";
 import {
   acquireWork,
   createWork,
   releaseWork,
-  artifactCommand
+  artifactCommand,
+  inspectArtifacts
 } from "../src/artifact-storage.js";
 import { reviewResultSchema } from "../src/contracts.js";
 import { collectEvaluationExport } from "../src/evaluation.js";
@@ -22,7 +24,7 @@ import { InteractiveHumanTime } from "../src/interactive-human-time.js";
 import { HumanTimeStore } from "../src/human-time-store.js";
 import type { HumanTimeBoundary } from "../src/human-time.js";
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   chmod,
   mkdir,
@@ -31,6 +33,7 @@ import {
   realpath,
   rm,
   stat,
+  symlink,
   writeFile
 } from "node:fs/promises";
 import path from "node:path";
@@ -419,6 +422,7 @@ class FakeAdapters implements VendorAdapters {
   codexPreflights = 0;
   claudePreflights = 0;
   onCodexPreflight: (() => Promise<void>) | null = null;
+  onClaudePreflight: (() => Promise<void>) | null = null;
   claudePreflightErrors: Error[] = [];
   selectionPrompts: string[] = [];
   selectionErrors: Error[] = [];
@@ -465,6 +469,7 @@ class FakeAdapters implements VendorAdapters {
 
   async preflightClaude(): Promise<void> {
     this.claudePreflights += 1;
+    await this.onClaudePreflight?.();
     const error = this.claudePreflightErrors.shift();
     if (error !== undefined) {
       throw error;
@@ -924,7 +929,7 @@ test("a quick-fix route skips strict planning and independent review", async () 
     assert.equal(state.metrics.attempts.plan, 0);
     assert.equal(state.metrics.attempts.review, 0);
     assert.equal(adapters.phasePrompts.length, 1);
-    assert.match(adapters.phasePrompts[0] ?? "", /\$banzai:quick-fix/);
+    assert.match(adapters.phasePrompts[0] ?? "", /# Lite Quick-Fix Phase/);
     assert.match(adapters.phasePrompts[0] ?? "", /"id": "custom"/);
     assert.match(
       adapters.phasePrompts[0] ?? "",
@@ -1356,7 +1361,7 @@ test("an enforced mutable payload budget blocks before source mutation and stays
   }
 });
 
-test("a feature route invokes the feature skill and ends after verification", async () => {
+test("a feature route receives its embedded phase and ends after verification", async () => {
   const repository = await createTestRepository();
   try {
     const adapters = new FakeAdapters();
@@ -1376,8 +1381,11 @@ test("a feature route invokes the feature skill and ends after verification", as
     assert.equal(state.status, "done");
     assert.equal(state.workflowSelection?.workflow, "feature");
     assert.equal(state.reviewIteration, 0);
-    assert.match(adapters.phasePrompts[0] ?? "", /\$banzai:feature/);
-    assert.doesNotMatch(adapters.phasePrompts[0] ?? "", /feature-review/);
+    assert.match(adapters.phasePrompts[0] ?? "", /# Lite Feature Phase/);
+    assert.doesNotMatch(
+      adapters.phasePrompts[0] ?? "",
+      /Use the available Skill tool/
+    );
     assert.match(adapters.phasePrompts[0] ?? "", /"id": "custom"/);
   } finally {
     await repository.dispose();
@@ -2224,7 +2232,12 @@ test("a Codex reviewer gets its artifact rendered by the runner", async () => {
     assert.equal(prompt.includes("You may use Write"), false);
     // No whitelist resolver on these adapters: the prompt must stay
     // byte-identical to its pre-whitelist form.
-    assert.equal(prompt.includes("Serena MCP"), false);
+    assert.equal(
+      prompt.includes(
+        "The Serena MCP server's read-only symbol tools are whitelisted"
+      ),
+      false
+    );
 
     const artifact = path.join(
       repository.root,
@@ -2291,9 +2304,7 @@ test("workflow reports preflight and model phase progress", async () => {
           event.label === "Planning" &&
           event.detail.includes("model=") &&
           event.detail.includes("attempt=") &&
-          event.detail.includes(
-            "skills=banzai:feature-description -> banzai:architecture-decision -> banzai:development-plan"
-          )
+          event.detail.includes("phases=planning")
       )
     );
     // Model actions are forwarded structurally, so a presenter can filter them
@@ -2319,11 +2330,42 @@ test("workflow reports preflight and model phase progress", async () => {
   }
 });
 
-for (const artifactLayout of ["legacy", "private"] as const)
-  test(`end-to-end workflow fixes only accepted findings and finishes after re-review (${artifactLayout})`, async () => {
+for (const [artifactLayout, writeChangeReport] of [
+  ["legacy", false],
+  ["legacy", true],
+  ["private", false],
+  ["private", true]
+] as const)
+  test(`end-to-end workflow fixes only accepted findings and finishes after re-review (${artifactLayout}, change report ${writeChangeReport ? "written" : "absent"})`, async () => {
     const repository = await createTestRepository({ artifactLayout });
     try {
-      const adapters = new FakeAdapters();
+      class ReportAdapters extends FakeAdapters {
+        override async runPhase(
+          request: PhaseAdapterRequest
+        ): Promise<AdapterResult<PhaseResult>> {
+          const result = await super.runPhase(request);
+          if (result.result.phase === "fix" && writeChangeReport) {
+            const state = JSON.parse(
+              await readFile(
+                path.join(request.runDirectory, "state.json"),
+                "utf8"
+              )
+            ) as RunState;
+            const report =
+              state.artifactBinding?.binding.artifacts.changeReport;
+            assert.ok(report);
+            await mkdir(path.dirname(path.join(request.repoRoot, report)), {
+              recursive: true
+            });
+            await writeFile(
+              path.join(request.repoRoot, report),
+              "# Change report\n\nResolved R1-F1.\n"
+            );
+          }
+          return result;
+        }
+      }
+      const adapters = new ReportAdapters();
       adapters.reviewResults.push(
         {
           contractVersion: CONTRACT_VERSION,
@@ -2414,7 +2456,41 @@ for (const artifactLayout of ["legacy", "private"] as const)
       assert.ok(implementationPrompt);
       assert.match(implementationPrompt, /"id": "custom"/);
       assert.ok(fixPrompt?.includes("R1-F1"));
-      assert.equal(fixPrompt?.includes("R1-F2"), false);
+      assert.ok(fixPrompt);
+      const roles = done.artifactBinding?.binding.artifacts;
+      assert.ok(roles?.changeReport);
+      const grants = (prompt: string) =>
+        JSON.parse(
+          /Artifact writes allowed in this phase: (\[[^\n]*\])\./u.exec(
+            prompt
+          )?.[1] ?? "null"
+        ) as string[];
+      assert.deepEqual(grants(fixPrompt), [
+        roles.implementationReport,
+        roles.testReport,
+        roles.changeReport
+      ]);
+      assert.deepEqual(grants(implementationPrompt), [
+        roles.implementationReport,
+        roles.testReport
+      ]);
+      assert.deepEqual(done.artifactBinding, planned.artifactBinding);
+      if (writeChangeReport) {
+        assert.match(
+          await readFile(
+            path.join(repository.root, roles.changeReport),
+            "utf8"
+          ),
+          /Resolved R1-F1/u
+        );
+      } else {
+        // A write grant alone does not impose report existence at the runner boundary.
+        await assert.rejects(
+          readFile(path.join(repository.root, roles.changeReport)),
+          { code: "ENOENT" }
+        );
+      }
+      assert.equal(fixPrompt.includes("R1-F2"), false);
       assert.match(fixPrompt, /Approved planning artifacts are immutable/);
       assert.ok(
         fixPrompt.includes(
@@ -5316,8 +5392,12 @@ test("transport-failed mutable implementation offers explicit recovery without w
   }
 });
 
-async function authorizedImplementationRecoveryFixture() {
+async function authorizedImplementationRecoveryFixture(
+  pluginDirectory?: string
+) {
   const repository = await createTestRepository();
+  if (pluginDirectory !== undefined)
+    await configureInstructionPlugin(repository.root, pluginDirectory);
   const adapters = new FakeAdapters();
   adapters.implementationErrors.push(new Error("implementation interrupted"));
   adapters.reviewResults.push(passingReview());
@@ -8947,43 +9027,90 @@ for (const artifactLayout of ["legacy", "private"] as const) {
 }
 
 for (const artifactLayout of ["legacy", "private"] as const) {
-  test(`artifact storage ${artifactLayout} phase rejects another workflow's report`, async () => {
+  for (const workflow of ["strict", "feature", "quick-fix"] as const)
+    test(`artifact storage ${artifactLayout} ${workflow} implementation rejects another workflow's report`, async () => {
+      const repository = await createTestRepository({ artifactLayout });
+      try {
+        class WrongRoleAdapters extends FakeAdapters {
+          override async runPhase(
+            request: PhaseAdapterRequest
+          ): Promise<AdapterResult<PhaseResult>> {
+            const result = await super.runPhase(request);
+            if (result.result.phase !== "implementation") return result;
+            const state = JSON.parse(
+              await readFile(
+                path.join(request.runDirectory, "state.json"),
+                "utf8"
+              )
+            ) as RunState;
+            const roles = state.artifactBinding?.binding.artifacts;
+            const wrongRole =
+              workflow === "quick-fix"
+                ? roles?.implementationReport
+                : roles?.changeReport;
+            assert.ok(wrongRole);
+            await mkdir(path.dirname(path.join(request.repoRoot, wrongRole)), {
+              recursive: true
+            });
+            await writeFile(
+              path.join(request.repoRoot, wrongRole),
+              "Unauthorized report.\n"
+            );
+            return result;
+          }
+        }
+        const adapters = new WrongRoleAdapters();
+        adapters.selectionResults.push(
+          selectionResult({ recommendedWorkflow: workflow })
+        );
+        const runner = new WorkflowRunner(repository.root, adapters);
+        let state = await runner.start({
+          slug: "example",
+          request: "Implement the fixture."
+        });
+        if (workflow === "strict") state = await runner.approvePlan("human");
+        assert.equal(state.status, "blocked");
+        assert.match(state.blockReason ?? "", /unauthorized artifact/u);
+      } finally {
+        await repository.dispose();
+      }
+    });
+}
+
+for (const artifactLayout of ["legacy", "private"] as const) {
+  test(`artifact storage ${artifactLayout} quick-fix without a report trigger completes without a report`, async () => {
     const repository = await createTestRepository({ artifactLayout });
     try {
-      class WrongRoleAdapters extends FakeAdapters {
+      class NoReportAdapters extends FakeAdapters {
         override async runPhase(
           request: PhaseAdapterRequest
         ): Promise<AdapterResult<PhaseResult>> {
           const result = await super.runPhase(request);
-          const state = JSON.parse(
-            await readFile(
-              path.join(request.runDirectory, "state.json"),
-              "utf8"
-            )
-          ) as RunState;
-          const wrongRole =
-            state.artifactBinding?.binding.artifacts.changeReport;
-          assert.ok(wrongRole);
-          await mkdir(path.dirname(path.join(request.repoRoot, wrongRole)), {
-            recursive: true
-          });
-          await writeFile(
-            path.join(request.repoRoot, wrongRole),
-            "Unauthorized report.\n"
+          const report = result.result.artifacts.implementationReport;
+          assert.ok(report);
+          await rm(path.join(request.repoRoot, report));
+          result.result.artifacts.implementationReport = null;
+          assert.match(
+            request.prompt,
+            /only when the existing report trigger applies; otherwise keep it null/u
           );
           return result;
         }
       }
-      const adapters = new WrongRoleAdapters();
+      const adapters = new NoReportAdapters();
       adapters.selectionResults.push(
-        selectionResult({ recommendedWorkflow: "feature" })
+        selectionResult({ recommendedWorkflow: "quick-fix" })
       );
       const state = await new WorkflowRunner(repository.root, adapters).start({
         slug: "example",
-        request: "Implement the fixture."
+        request: "Make a routine internal cleanup with no report trigger."
       });
-      assert.equal(state.status, "blocked");
-      assert.match(state.blockReason ?? "", /unauthorized artifact/u);
+      assert.equal(state.status, "done", state.blockReason ?? "");
+      const report = state.artifactBinding?.binding.artifacts.changeReport;
+      assert.ok(report);
+      await assert.rejects(readFile(path.join(repository.root, report)), {
+        code: "ENOENT"
+      });
     } finally {
       await repository.dispose();
     }
@@ -9192,4 +9319,340 @@ test("accepted F10 public doctor recognizes actual v4 runs and rejects binding d
   } finally {
     await repository.dispose();
   }
+});
+
+async function configureInstructionPlugin(
+  repoRoot: string,
+  directory: string,
+  claudePlanner = false
+): Promise<void> {
+  const configPath = path.join(repoRoot, ".banzai/config.json");
+  const config = JSON.parse(
+    await readFile(configPath, "utf8")
+  ) as OrchestratorConfig;
+  config.claudeEnvironment = { mode: "scoped", pluginDirectory: directory };
+  const executable = path.join(directory, "claude");
+  await symlink(process.execPath, executable);
+  config.models.implementer.executable = executable;
+  if (claudePlanner) config.models.planner.executable = executable;
+  await mkdir(path.join(repoRoot, ".claude"), { recursive: true });
+  await writeFile(
+    path.join(repoRoot, ".claude/settings.json"),
+    JSON.stringify({ permissions: { allow: ["Write", "Edit", "Bash(*)"] } })
+  );
+  await writeFile(configPath, JSON.stringify(config));
+}
+
+test("instruction preflight refuses resource skew before any model or attempt and preserves structural refusal precedence", async (t) => {
+  for (const structural of [false, true])
+    await t.test(
+      structural ? "invalid hook" : "resource mismatch",
+      async () => {
+        const repository = await createTestRepository({
+          artifactLayout: "private"
+        });
+        const plugin = await instructionPluginFixture();
+        try {
+          await configureInstructionPlugin(repository.root, plugin.directory);
+          await writeFile(
+            path.join(plugin.directory, "phases/fix.md"),
+            "PRIVATE-SKEW-CANARY"
+          );
+          if (structural)
+            await rm(path.join(plugin.directory, "hooks/spec-gate.cjs"));
+          const adapters = new FakeAdapters();
+          const runner = new WorkflowRunner(repository.root, adapters);
+          if (structural) {
+            const state = await runner.start({
+              slug: "example",
+              request: "Plan it."
+            });
+            assert.equal(state.status, "blocked");
+            assert.equal(
+              (await runner.status()).state.metrics.attempts.plan,
+              0
+            );
+          } else {
+            await assert.rejects(
+              runner.start({ slug: "example", request: "Plan it." }),
+              { code: "INSTRUCTION_RESOURCE_MISMATCH" }
+            );
+            const status = await runner.status();
+            assert.equal(status.state.status, "created");
+            assert.equal(status.state.activeAttempt, null);
+            assert.equal(status.state.blockReason, null);
+            assert.deepEqual(
+              await runner.store.readRunAttempts(status.state.runId),
+              []
+            );
+            assert.equal(status.state.metrics.usage.inputTokens, 0);
+          }
+          assert.equal(
+            adapters.selectionPrompts.length +
+              adapters.phasePrompts.length +
+              adapters.reviewPrompts.length,
+            0
+          );
+          assert.equal(adapters.codexPreflights + adapters.claudePreflights, 0);
+        } finally {
+          await plugin.dispose();
+          await repository.dispose();
+        }
+      }
+    );
+});
+
+test("instruction per-call refusal retains saved approval and triage, exact bindings and usage in private and legacy work", async (t) => {
+  for (const layout of ["private", "legacy"] as const)
+    for (const gate of ["approval", "triage"] as const)
+      await t.test(`${layout} ${gate}`, async () => {
+        const repository = await createTestRepository({
+          artifactLayout: layout
+        });
+        const plugin = await instructionPluginFixture();
+        try {
+          await configureInstructionPlugin(repository.root, plugin.directory);
+          const adapters = new FakeAdapters();
+          if (gate === "triage")
+            adapters.reviewResults.push({
+              ...passingReview(),
+              verdict: "changes_requested",
+              findings: [finding("R1-F1", "Repair it.")]
+            });
+          adapters.reviewResults.push(
+            passingReview(gate === "triage" ? ["R1-F1"] : [])
+          );
+          const runner = new WorkflowRunner(repository.root, adapters);
+          await runner.start({ slug: "example", request: "Implement it." });
+          if (gate === "triage") await runner.approvePlan("human");
+          const prior = (await runner.status()).state;
+          const resource = path.join(
+            plugin.directory,
+            `phases/${gate === "triage" ? "fix" : "implementation"}.md`
+          );
+          const original = await readFile(resource);
+          await writeFile(
+            resource,
+            Buffer.concat([original, Buffer.from("\n")])
+          );
+          const calls = adapters.phasePrompts.length;
+          await assert.rejects(
+            gate === "approval"
+              ? runner.approvePlan("human")
+              : runner.triage({
+                  accepted: ["R1-F1"],
+                  rejected: [],
+                  deferred: [],
+                  note: null,
+                  decidedBy: "human"
+                }),
+            { code: "INSTRUCTION_RESOURCE_MISMATCH" }
+          );
+          const saved = (await runner.status()).state;
+          assert.equal(
+            saved.status,
+            gate === "approval" ? "plan_approved" : "fixing"
+          );
+          assert.ok(saved.planApproval);
+          if (gate === "triage")
+            assert.equal(saved.triage?.items[0]?.disposition, "accepted");
+          assert.deepEqual(saved.metrics, {
+            ...prior.metrics,
+            triage:
+              gate === "triage"
+                ? { accepted: 1, rejected: 0, deferred: 0 }
+                : prior.metrics.triage
+          });
+          assert.deepEqual(saved.artifactBinding, prior.artifactBinding);
+          assert.equal(saved.activeAttempt, null);
+          assert.equal(saved.blockReason, null);
+          const before = await snapshotTree(
+            path.join(repository.root, ".banzai")
+          );
+          const projectionOptions = {
+            format: "json" as const,
+            from: null,
+            to: null,
+            runIds: []
+          };
+          const projections = async () => {
+            const evaluation = await collectEvaluationExport(
+              repository.root,
+              projectionOptions
+            );
+            return {
+              evaluation,
+              kpi: deriveEvaluationKpiReport([
+                { label: "instruction-fixture", report: evaluation }
+              ]),
+              context: await collectContextReport(
+                repository.root,
+                projectionOptions
+              )
+            };
+          };
+          const beforeProjections = await projections();
+          await assert.rejects(runner.resume(), {
+            code: "INSTRUCTION_RESOURCE_MISMATCH"
+          });
+          assert.deepEqual(
+            await snapshotTree(path.join(repository.root, ".banzai")),
+            before
+          );
+          assert.deepEqual(await projections(), beforeProjections);
+          assert.equal(adapters.phasePrompts.length, calls);
+          await writeFile(resource, original);
+          assert.equal((await runner.resume()).status, "done");
+          const bound = saved.artifactBinding;
+          assert.ok(bound);
+          // Standalone status/review use this same explicit binding reader.
+          const unrelated = await createWork({
+            repoRoot: repository.root,
+            slug: "unrelated",
+            mode: "strict",
+            creationId: randomUUID()
+          });
+          const consumerBefore = await snapshotTree(
+            path.join(repository.root, ".banzai")
+          );
+          const selected = await inspectArtifacts({
+            repoRoot: repository.root,
+            workId: bound.binding.workId
+          });
+          assert.deepEqual(selected.work, bound);
+          assert.notEqual(
+            selected.work.binding.workId,
+            unrelated.binding.workId
+          );
+          assert.deepEqual(
+            await snapshotTree(path.join(repository.root, ".banzai")),
+            consumerBefore
+          );
+          const roles = selected.work.binding.artifacts;
+          assert.ok(roles);
+          for (const prompt of [
+            ...adapters.phasePrompts,
+            ...adapters.reviewPrompts
+          ]) {
+            for (const role of [
+              "description",
+              "plan",
+              "implementationReport",
+              "testReport",
+              "work",
+              "changeReport"
+            ] as const) {
+              const target = roles[role];
+              assert.ok(target);
+              assert.ok(prompt.includes(target), role);
+            }
+            assert.doesNotMatch(
+              prompt,
+              /Use the available Skill tool|\$banzai:/
+            );
+          }
+          assert.match(
+            adapters.reviewPrompts[0] ?? "",
+            /Model artifact write set: \[\]/
+          );
+          assert.match(
+            adapters.selectionPrompts[0] ?? "",
+            /Model artifact write set: \[\]/
+          );
+        } finally {
+          await plugin.dispose();
+          await repository.dispose();
+        }
+      });
+});
+
+test("late instruction skew preserves the failed planner retry and authorized recovery snapshots", async (t) => {
+  await t.test("planner retry after authentication", async () => {
+    const repository = await createTestRepository();
+    const plugin = await instructionPluginFixture();
+    const previousClaudeConfig = process.env.CLAUDE_CONFIG_DIR;
+    try {
+      process.env.CLAUDE_CONFIG_DIR = plugin.directory;
+      await writeFile(
+        path.join(plugin.directory, ".claude.json"),
+        JSON.stringify({
+          projects: { [repository.root]: { hasTrustDialogAccepted: true } }
+        })
+      );
+      await configureInstructionPlugin(repository.root, plugin.directory, true);
+      const adapters = new FakeAdapters();
+      adapters.planErrors.push(
+        new BanzaiError("MODEL_TIMEOUT", "Planner timed out.")
+      );
+      const runner = new WorkflowRunner(repository.root, adapters);
+      const blocked = await runner.start({
+        slug: "example",
+        request: "Plan it."
+      });
+      assert.equal(blocked.status, "blocked");
+      assert.match(blocked.blockReason ?? "", /Planner timed out/);
+      const before = await snapshotTree(path.join(repository.root, ".banzai"));
+      const prior = await runner.status();
+      const initial = adapters.claudePreflights;
+      const resource = path.join(plugin.directory, "phases/planning.md");
+      const original = await readFile(resource);
+      adapters.onClaudePreflight = async () => {
+        if (adapters.claudePreflights === initial + 3)
+          await writeFile(resource, "changed");
+      };
+      await assert.rejects(runner.retry(), {
+        code: "INSTRUCTION_RESOURCE_MISMATCH"
+      });
+      assert.deepEqual(
+        await snapshotTree(path.join(repository.root, ".banzai")),
+        before
+      );
+      assert.deepEqual((await runner.status()).retry, prior.retry);
+      assert.equal(adapters.phasePrompts.length, 1);
+      adapters.onClaudePreflight = null;
+      await writeFile(resource, original);
+      assert.equal((await runner.retry()).status, "needs_plan_approval");
+      assert.match(adapters.phasePrompts[1] ?? "", /# Planning Guidance/);
+    } finally {
+      if (previousClaudeConfig === undefined)
+        delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = previousClaudeConfig;
+      await plugin.dispose();
+      await repository.dispose();
+    }
+  });
+  await t.test("authorized implementation recovery", async () => {
+    const plugin = await instructionPluginFixture();
+    const fixture = await authorizedImplementationRecoveryFixture(
+      plugin.directory
+    );
+    try {
+      const { repository, runner, adapters } = fixture;
+      const resource = path.join(plugin.directory, "phases/implementation.md");
+      const original = await readFile(resource);
+      await writeFile(resource, "changed");
+      const prior = await runner.status();
+      const before = await snapshotTree(path.join(repository.root, ".banzai"));
+      const calls = adapters.phasePrompts.length;
+      await assert.rejects(runner.resume(), {
+        code: "INSTRUCTION_RESOURCE_MISMATCH"
+      });
+      assert.deepEqual(
+        await snapshotTree(path.join(repository.root, ".banzai")),
+        before
+      );
+      assert.deepEqual((await runner.status()).recovery, prior.recovery);
+      assert.equal(adapters.phasePrompts.length, calls);
+      await writeFile(resource, original);
+      assert.equal((await runner.resume()).status, "done");
+      assert.match(adapters.phasePrompts.at(-1) ?? "", /# Assurance Guidance/);
+      assert.match(
+        adapters.phasePrompts.at(-1) ?? "",
+        /Operator-authorized interrupted-attempt recovery/
+      );
+    } finally {
+      await fixture.repository.dispose();
+      await plugin.dispose();
+    }
+  });
 });

@@ -1,9 +1,11 @@
+import { instructionPluginFixture } from "./phase-instruction-fixtures.js";
 import assert from "node:assert/strict";
 import {
   chmod,
   mkdir,
   mkdtemp,
   readlink,
+  readFile,
   rm,
   symlink,
   writeFile
@@ -37,6 +39,7 @@ const CHECK_ORDER = [
   "config.valid",
   "config.version",
   "claude.environment",
+  "claude.instructions",
   "claude.permissions",
   "project.types",
   "verification.profiles",
@@ -219,7 +222,7 @@ test("reports a deterministic ready Node project without mutating it", async () 
         ?.message ?? "",
       /not checked.*not authentication proof.*startup preflight/s
     );
-    assert.equal(first.summary.warnings, 1);
+    assert.equal(first.summary.warnings, 2);
     assert.equal(
       first.summary.passed +
         first.summary.warnings +
@@ -1102,6 +1105,58 @@ test("does not create local state when the Banzai directory is absent", async ()
     await inspectDoctor(repository.root, dependencies());
     assert.deepEqual(await snapshotTree(repository.root), before);
   } finally {
+    await repository.dispose();
+  }
+});
+
+test("doctor v3 compares mixed role unions without hiding structural failures or mutating evidence", async () => {
+  const repository = await temporaryRoot();
+  const plugin = await instructionPluginFixture();
+  try {
+    const config = substantiveConfig();
+    for (const role of ["planner", "implementer", "reviewer"] as const)
+      config.models[role].executable = "claude";
+    config.claudeEnvironment = {
+      mode: "scoped",
+      pluginDirectory: plugin.directory
+    };
+    await writeConfig(repository.root, config);
+    const before = await snapshotTree(repository.root);
+    const verified = await inspectDoctor(repository.root, dependencies());
+    assert.equal(verified.schema, "banzai-doctor/v3");
+    assert.equal(verified.schemaVersion, 3);
+    assert.equal(checkStatus(verified, "claude.instructions"), "pass");
+    assert.deepEqual(
+      verified.checks.map((entry) => entry.id),
+      CHECK_ORDER
+    );
+    assert.deepEqual(await snapshotTree(repository.root), before);
+    const target = path.join(plugin.directory, "phases/fix.md");
+    const original = await readFile(target);
+    await writeFile(target, "PRIVATE-INSTRUCTION-CANARY");
+    await rm(path.join(plugin.directory, "guidance/requirements.md"));
+    config.models.reviewer.executable = "codex";
+    await writeConfig(repository.root, config);
+    const mixed = await inspectDoctor(repository.root, dependencies());
+    assert.equal(checkStatus(mixed, "claude.instructions"), "fail");
+    assert.equal(mixed.ready, false);
+    assert.doesNotMatch(renderDoctorJson(mixed), /PRIVATE-INSTRUCTION-CANARY/);
+    assert.ok(!renderDoctorJson(mixed).includes(plugin.directory));
+    await writeFile(target, original);
+    assert.equal(
+      checkStatus(
+        await inspectDoctor(repository.root, dependencies()),
+        "claude.instructions"
+      ),
+      "warning"
+    );
+    await rm(path.join(plugin.directory, "hooks/spec-gate.cjs"));
+    const invalid = await inspectDoctor(repository.root, dependencies());
+    assert.equal(checkStatus(invalid, "claude.environment"), "fail");
+    assert.equal(checkStatus(invalid, "claude.instructions"), "warning");
+    assert.equal(invalid.ready, false);
+  } finally {
+    await plugin.dispose();
     await repository.dispose();
   }
 });

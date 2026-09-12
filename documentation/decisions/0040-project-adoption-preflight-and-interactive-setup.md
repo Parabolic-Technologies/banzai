@@ -461,6 +461,11 @@ ledger.
 
 ## Lifecycle Links
 
+- Amended by [ADR-0042](./0042-runner-delivered-phase-instructions.md), accepted
+  2026-09-11: newly emitted doctor v3 replaces D7's v2 default and adds the exact
+  `claude.instructions` readiness check. Historical v1/v2 meaning, adoption,
+  setup and the read-only/privacy boundary remain binding. Implementation of
+  this amendment is Planned.
 - Supersedes: None.
 - Superseded by: None.
 - Amends [ADR-0036](./0036-vendor-neutral-policy-files-and-instruction-delivery.md):

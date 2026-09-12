@@ -16,6 +16,7 @@ export const {
   readSharedReviewSnapshot,
   sealSharedReviewSnapshot,
   artifactCommand,
+  artifactRoles,
   inspectArtifacts,
   initializeArtifacts,
   createWork,

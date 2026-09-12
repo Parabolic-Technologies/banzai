@@ -18,7 +18,7 @@ installed policy source. These files describe nothing here.
 - Purpose: source repository for Banzai spec-driven development, shipped under
   one root-owned release-train version as two independently usable and
   separately deliverable parts — a plugin of workflow skills for Claude Code
-  and Codex, and a local orchestrator CLI (`banzai`) that drives those skills
+  and Codex, and a local orchestrator CLI (`banzai`) that delivers phase instructions
   across a planner, an implementer, and an independent reviewer.
 - Primary users: engineers who install the plugin in Claude Code and Codex and
   run the `banzai` CLI inside their own repositories. Work in this repository
@@ -52,10 +52,12 @@ installed policy source. These files describe nothing here.
   collapsed bracketed-paste request prompt.
 - **Package manager:** `npm` with `package-lock.json` (`lockfileVersion: 3`) and
   `workspaces: ["packages/*"]`.
-- **Build:** `npm run build` — bundles `packages/orchestrator/src/cli.ts` into
+- **Build:** `npm run build` — explicitly regenerates committed phase-resource
+  and artifact-reader modules, then bundles `packages/orchestrator/src/cli.ts` into
   the committed `packages/orchestrator/dist/banzai.mjs` (plus `.map`) with a
   `#!/usr/bin/env node` banner and mode `0755`.
-- **Build check:** `npm run build:check` — rebuilds into a temp directory,
+- **Build check:** `npm run build:check` — compares generated phase-resource
+  bytes without repair, then rebuilds into a temp directory,
   compares bytes against the committed `dist/`, then smoke-runs the committed
   executable and asserts its non-TTY help output. Temporary output is removed
   on success and failure.
@@ -67,7 +69,8 @@ installed policy source. These files describe nothing here.
 - **Full gate:** `npm run verify` — `typecheck`, then `lint`, then `test`, then
   `build:check`. The formatter is deliberately not part of this gate.
 - **Release-confidence gate:** `npm run release:check` — preserves `verify`
-  semantics, then adds formatter, nine-field release-train validation, and a
+  semantics, then adds formatter, nine-field release-train validation, actual
+  source/plugin/npm publication checks, and a
   disposable committed-bundle smoke. It snapshots tracked bytes and modes,
   fails if a component mutates them, and never invokes version synchronization
   or recovery.
@@ -272,7 +275,7 @@ setup reuses the existing runner lock without stale ownership reclamation.
     `eslint.config.mjs`, `tsconfig.json`, `README.md` (npm landing page),
     and `MODULES.md` (per-module maintainer reference linked from section 5).
   - `plugins/banzai/` — `skills/<name>/SKILL.md`,
-    `skills/project-manifest/references/layout-migration.md`, `policies/`, `contracts/`, `hooks/`,
+    `skills/project-manifest/references/layout-migration.md`, `policies/`, `phases/`, `guidance/`, `contracts/`, `hooks/`,
     `documentation/` (placeholder template tree), `.claude-plugin/plugin.json`,
     `.codex-plugin/plugin.json`, `.claude/settings.json`, packaged
     `AGENTS.md` / `CLAUDE.md` / `PROJECT_MANIFEST.md` templates.
@@ -403,7 +406,7 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
 - `setup-client.ts` / `foreground-client.ts` — locally verified explicit
   project-manifest invocation, selected subscription authentication, filtered
   environment, foreground terminal ownership and bounded child cleanup.
-- `doctor-cli.ts` / `doctor.ts` — read-only fixed-order `banzai-doctor/v2`
+- `doctor-cli.ts` / `doctor.ts` — read-only fixed-order `banzai-doctor/v3`
   readiness checks; constructs no `RunStore`, adapters, or `WorkflowRunner`.
 - `live-compatibility-cli.ts` / `live-compatibility.ts` — the protected,
   explicitly confirmed live vendor probe producing closed
@@ -448,9 +451,16 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
 - `git.ts` — repository discovery, commit/branch, `digestArtifactBundle`,
   `repositoryBaseline`, and `workspaceSnapshot`/`workspaceDigest`/
   `workspaceChanges` over staged, unstaged, and untracked evidence.
-- `prompts.ts` — phase prompt texts, `workflowSkills` (the required skill chain
+- `phase-resources.ts` — committed generated raw UTF-8 bodies and SHA-256
+  identities for six phases, nine guidance files, six policies and two hook
+  references. Explicit build generates; check-dist only compares.
+- `phase-instructions.ts` — ordered resource delivery and bounded installed
+  identity comparison. Only prompts, workflow and doctor consume it. It imports
+  phase-resources/errors at runtime and types only for declarations; generated
+  resources import nothing. No adapter resource edge exists.
+- `prompts.ts` — phase prompt texts, `workflowPhases` (the supplied phase responsibilities
   per route), and `serenaGuidance`. Strict planning, implementation, review and
-  accepted-finding fixes project the installed plan policy while preserving
+  accepted-finding fixes inline the applicable shared guidance and policies while preserving
   approved scope, legacy directives and required evidence.
 - `review-artifact.ts` — deterministic `banzai-feature-review/v3` rendering for
   bound snapshots, retaining historical v1/v2 rendering,
@@ -483,11 +493,19 @@ Repository release scripts (`packages/orchestrator/scripts/`):
 - `release-version.mjs`, `version-set.mjs`, `version-recover.mjs` — the
   explicit nine-field/seven-file version transaction with durable journal,
   cleanup guard, authenticated restoration, and legacy format-1 recovery.
+- `phase-resources-build.mjs` — one exact resource inventory, immutable
+  normalized extraction evidence, generated-source parity and actual
+  source/plugin/npm/source-map comparison; rejects indexed/working skew.
 - `build.mjs`, `check-dist.mjs`, `test.mjs`, `eslint-formatter.mjs` — the
   esbuild bundle, dist parity check, `.test-dist/` test runner, and
   deterministic lint output.
 
 Plugin (`plugins/banzai/`):
+
+- `phases/` and `guidance/` — six runner processes and nine shared portable
+  guidance files outside skill discovery. Standalone skill consumers read
+  guidance relatively; retained Orchestrated Mode sections are transitional
+  source and are not consumed by the runner.
 
 - `skills/<name>/SKILL.md` — eleven skills, each with `name`, `description`, and
   `user-invocable` frontmatter: `architecture-decision`, `code-writing`,
@@ -507,8 +525,10 @@ Plugin (`plugins/banzai/`):
   execution modes, roles, routing, explicit outer orchestration and recursion
   guards, escalation triggers, ADR eligibility, the five decision gates, and
   the hook contract, with a policy index. `CLAUDE.md` is the `@AGENTS.md` shim.
-- `policies/` — five owner files for Decision Consultation, Test Assurance,
-  Security Assurance, Engineering Quality, and Plan Authority/Task Completion.
+- `policies/` — six owner files for Decision Consultation, Test Assurance,
+  Security Assurance, Engineering Quality, Plan Authority/Task Completion and
+  Artifact Storage. Runner phases inline their ordered applicable union;
+  inclusion preserves conditional applicability.
   `plan-task-completion.md` owns ADR-0038's explicit approved-plan convention
   separately from ADR-0017/0025's completion section. Only plans establishing
   the convention gain its labeled discretion; legacy approved meanings remain.
@@ -540,7 +560,7 @@ Plugin (`plugins/banzai/`):
   `PROJECT_MANIFEST.md` in the session directory or a parent — and the hook
   stays silent in repositories without that evidence.
 - `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` — plugin manifests,
-  currently version `2.3.0`. The Codex manifest additionally declares the hook
+  currently version `2.4.0`. The Codex manifest additionally declares the hook
   and the store interface metadata.
 - `PROJECT_MANIFEST.md`, `AGENTS.md`, `CLAUDE.md`, and the placeholder
   `documentation/` tree (`README.md`, `decisions/README.md`, `.gitkeep` files) —
@@ -549,8 +569,19 @@ Plugin (`plugins/banzai/`):
 
 ## 6. State & Data Flow
 
+- The runner supplies phase/guidance/policy instructions directly on every
+  fresh, resumed, retry and recovery call; selection is prompt-only. Bound
+  roles and existing phase write sets precede mutable request/evidence blocks.
+  Report duties, conditional changeReport triggers, approval immutability,
+  standalone role readers and runner-only review rendering remain unchanged.
+
 New runs use state v4 with an immutable artifact binding from creation. Storage
 mode `workflow` supplies capacity; `workflowSelection` retains phase authority.
+For work artifacts, strict implementation grants only the bound `implementationReport` and
+`testReport`; strict fix also grants the existing bound `changeReport` in the
+runner's phase-scope check and the hook's write-role set. This grant does not
+change the quick-fix report trigger. Feature and quick-fix retain their bound
+`work` and `changeReport` grants respectively.
 Workspace v2 includes only the selected ignored work with the binding digest.
 Exact bound reports can satisfy completion evidence; arbitrary runner/control
 paths cannot. Attempt-owned workspace evidence also guards terminal reconciliation.
@@ -618,8 +649,9 @@ attempt, approval marker or transcript.
   `reviewing`, `needs_triage`, `fixing`, to `done`, `blocked`, or `cancelled`.
 - Run lifecycle: request → generated slug → start confirmation → persisted
   request → preflight and repository baseline → read-only structured workflow
-  selection → route. `quick-fix` and `feature` run the lite skill and
-  deterministic verification, then finish. `strict` runs planning, the ADR and
+  selection → route. `quick-fix` and `feature` execute their runner-delivered
+  lite phase instructions and deterministic verification, then finish. `strict`
+  runs planning, the ADR and
   plan-approval gates, implementation, verification, independent review, then
   either completes directly when triage accepts no finding or runs accepted-only
   fixes, verification, and re-review. Matching planner and implementer settings
@@ -785,7 +817,7 @@ attempt, approval marker or transcript.
   bounded readers. It also reads the Claude permission rules and workspace trust
   record a spawned session would honor, and fails readiness when the tools a
   Claude planning phase must call are ungranted or refused. Persisted repository roots must be absolute and compare
-  through canonical identity. Its `banzai-doctor/v2` JSON is authoritative and
+  through canonical identity. Its `banzai-doctor/v3` JSON is authoritative and
   the human report is a deterministic projection. It executes no configured
   command, authentication, model, recovery, or network path and writes no state,
   source, config, lock, approval marker, or report file. A fixed advisory says
@@ -856,6 +888,12 @@ attempt, approval marker or transcript.
   a manifest update. Pre-existing dependencies need no retroactive approval.
 
 ## 8. Testing
+
+- Instruction assurance covers exact raw embedding and normalized extraction,
+  phase/category byte accounting, per-call parity refusal and preserved
+  continuation authority, doctor v3, standalone binding readers, and actual
+  archive/bundle/map identity and privacy boundaries. Deterministic fixtures do
+  not establish installed-client compatibility or model compliance.
 
 - Framework: the Node.js built-in test runner (`node --test`) with
   `node:assert/strict`. Tests are written in TypeScript and bundled by esbuild
@@ -1217,13 +1255,24 @@ status` reports only whether credentials are visible and stored, so a
   evaluation-export, and KPI contracts. Context-report semantic or privacy
   changes require a new context-report version; no context field may be added
   to either frozen evaluation contract.
-- Doctor contract `banzai-doctor/v2` is an independent fixed-order local
-  diagnostic (`schemaVersion: 2`) with JSON-authoritative and human-projection
+- Doctor contract `banzai-doctor/v3` is an independent fixed-order local
+  diagnostic (`schemaVersion: 3`) with JSON-authoritative and human-projection
   output. `project.guidance` follows `repository.git`; all remaining fields and
-  check ordering are preserved. Historical v1 evidence retains its identity. Exit 0 means
+  check ordering are preserved except `claude.instructions` after
+  `claude.environment` and before `claude.permissions`, in category `config`.
+  Historical v1/v2 evidence retains its identity. Exit 0 means
   no failed check; exit 1 means not ready, while warnings remain ready. Doctor
   is offline and read-only, runs no configured command or vendor path, and does
   not enforce readiness in normal workflow commands. Its
+  `claude.instructions` reports verified resource identities, mismatch (fail),
+  bounded failure or unverifiable (warning), with mismatch taking precedence.
+  Codex/ambient/unresolved scopes cannot produce verified parity. The separate
+  workflow preflight and actual-phase pre-call checks refuse confirmed mismatch
+  with `INSTRUCTION_RESOURCE_MISMATCH` before attempt creation, preserving
+  checkpoints, decisions and retry/recovery authority. Diagnostics name only
+  bounded product resource IDs and the three advisory remedies: rebuild the
+  source bundle, update the installed plugin to the matching release, or
+  explicitly select ambient mode (unverifiable). Its
   `claude.environment` check reports verified scoping, explicit ambient mode,
   automatic MCP-only degradation, or a fail-closed invalid explicit plugin
   directory using fixed privacy-safe messages. Its `claude.permissions` check
@@ -1243,7 +1292,9 @@ status` reports only whether credentials are visible and stored, so a
   fallback.
 - Build-time coupling: `src/contracts.ts` imports JSON from
   `plugins/banzai/contracts/`, outside the workspace. A contract edit is not
-  live until the orchestrator is rebuilt. `src/live-compatibility.ts` also
+  live until the orchestrator is rebuilt. The same explicit-build rule applies
+  to phase, guidance and policy resource bodies; all repeated prompt bytes are
+  measured under existing context categories, with output contracts separate. `src/live-compatibility.ts` also
   embeds root `release-policy.json`; policy edits require the same rebuild.
 - Required GitHub Actions jobs run the complete deterministic release gate on
   each supported Node lane. Forward and live jobs are advisory; unavailable forward
@@ -1267,7 +1318,7 @@ status` reports only whether credentials are visible and stored, so a
   source, and the only root Claude settings file is the ignored
   `.claude/settings.local.json`. `plugins/banzai/.claude/settings.json` is
   packaged plugin content, not this repository's configuration.
-- Current Banzai release-train version is `2.3.0`, owned solely by root
+- Current Banzai release-train version is `2.4.0`, owned solely by root
   `package.json.version` and mirrored by four plugin/marketplace fields, the
   orchestrator package, and three `package-lock.json` fields (top-level, root
   package, and workspace package). All nine fields across seven files agree.
@@ -1324,3 +1375,4 @@ restate them here. Paths are relative to `documentation/decisions/`.
 | ADR-0039 | npm trusted publishing on GitHub Release              | `0039-npm-trusted-publishing-on-github-release.md`              | Implemented |
 | ADR-0040 | Project adoption preflight and interactive setup | `0040-project-adoption-preflight-and-interactive-setup.md` | Planned |
 | ADR-0041 | Artifact retention and publication boundary | `0041-artifact-retention-and-publication-boundary.md` | Planned |
+| ADR-0042 | Runner-delivered phase instructions | `0042-runner-delivered-phase-instructions.md` | Planned |

@@ -3,6 +3,8 @@
 - Owner decision: ADR-0027
 - Consumers: `feature-description`, `development-plan`, `feature-review`, `feature`, `quick-fix`; conditional: `architecture-decision`, `code-writing`, `test-writing`, `project-manifest`
 - Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)
+- Runner consumers: planning, implementation (conditional), review, fix, feature, quick-fix.
+- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.
 
 ## Security Assurance
 

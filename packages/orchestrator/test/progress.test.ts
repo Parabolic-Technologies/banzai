@@ -81,7 +81,7 @@ test("a model phase renders a banner only when styling is on", () => {
       effort: "xhigh",
       sessionMode: "fresh",
       timeoutMs: 1_800_000,
-      skills: ["banzai:feature-review"]
+      phases: ["review"]
     }
   } as const;
 
@@ -161,7 +161,7 @@ test("a narrow terminal keeps the banner readable instead of negative-width", ()
       effort: "xhigh",
       sessionMode: "resumed",
       timeoutMs: 3_600_000,
-      skills: []
+      phases: []
     }
   });
   reporter.close();
@@ -659,8 +659,8 @@ test("a live line never outgrows the terminal row it owns", () => {
   }
 });
 
-test("a phase banner names the skill chain it runs", () => {
-  const render = (skills: readonly string[]): string[] => {
+test("a phase banner names delivered phases without claiming Skill events", () => {
+  const render = (phases: readonly string[]): string[] => {
     const lines: string[] = [];
     const reporter = new TerminalProgressReporter(
       (line) => lines.push(line),
@@ -678,7 +678,7 @@ test("a phase banner names the skill chain it runs", () => {
         effort: "xhigh",
         sessionMode: "fresh",
         timeoutMs: 3_600_000,
-        skills
+        phases
       }
     });
     reporter.close();
@@ -687,28 +687,19 @@ test("a phase banner names the skill chain it runs", () => {
 
   // A lite route runs one phase; without the chain it reads as an
   // implementation that skipped planning rather than the whole workflow.
-  assert.deepEqual(render(["$banzai:feature"]).slice(1), [
-    "   skills: banzai:feature"
-  ]);
-  // The `$` is a prompt-substitution marker, not part of the skill's name.
-  assert.deepEqual(render(["banzai:quick-fix"]).slice(1), [
-    "   skills: banzai:quick-fix"
-  ]);
+  assert.deepEqual(render(["feature"]).slice(1), ["   phases: feature"]);
+  // The route is displayed as a phase responsibility.
+  assert.deepEqual(render(["quick-fix"]).slice(1), ["   phases: quick-fix"]);
   // A long strict chain wraps instead of crushing the rule.
-  const strict = render([
-    "banzai:feature-description",
-    "banzai:architecture-decision",
-    "banzai:development-plan"
-  ]);
+  const strict = render(["planning", "planning", "planning"]);
   assert.equal(
     strict.slice(1).join(" ").replace(/\s+/g, " ").trim(),
-    "skills: banzai:feature-description → banzai:architecture-decision → banzai:development-plan"
+    "phases: planning → planning → planning"
   );
   for (const line of strict) {
     assert.ok(line.length <= 96, line);
   }
-  // The selection router reports a placeholder, which is not a skill chain.
-  assert.deepEqual(render(["none (read-only router)"]).slice(1), []);
+  assert.deepEqual(render(["selection"]).slice(1), ["   phases: selection"]);
   assert.deepEqual(render([]).slice(1), []);
 });
 
@@ -727,7 +718,7 @@ test("the live phase line names the phase and what is running it", () => {
       effort: "xhigh",
       sessionMode: "fresh",
       timeoutMs: 3_600_000,
-      skills: ["banzai:feature"]
+      phases: ["feature"]
     }
   });
   reporter.close();
