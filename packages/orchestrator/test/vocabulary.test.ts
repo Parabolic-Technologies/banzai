@@ -15,7 +15,6 @@ import {
 const ROTATION_REASONS: ReviewRotationReason[] = [
   "primary-review",
   "missing-session",
-  "legacy-state",
   "settings-changed",
   "approval-changed",
   "previous-review-failed",

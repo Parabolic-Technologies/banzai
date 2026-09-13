@@ -46,7 +46,7 @@ async function add(
   status = "cancelled"
 ) {
   const before = evaluationStateFixture({
-    schemaVersion: 3,
+    schemaVersion: 5,
     status: "planning",
     extra: { runId: id }
   });
@@ -81,7 +81,7 @@ async function root() {
   return await mkdtemp(path.join(tmpdir(), "banzai-cancellation-report-"));
 }
 
-test("cancellation: report conserves mixed-cohort denominators and separates legacy, missing, malformed and conflicting evidence", async () => {
+test("cancellation: report conserves mixed-cohort denominators and separates missing, malformed and conflicting evidence", async () => {
   const directory = await root();
   try {
     await add(directory, "run-a", "plan_unsuitable");
@@ -146,7 +146,6 @@ test("cancellation: report conserves mixed-cohort denominators and separates leg
       1
     );
     for (const availability of [
-      "legacy_absent",
       "malformed",
       "missing",
       "conflicting",
@@ -156,7 +155,7 @@ test("cancellation: report conserves mixed-cohort denominators and separates leg
         document.summary.observationAvailability.find(
           (r) => r.availability === availability
         )?.count,
-        1
+        availability === "conflicting" ? 2 : 1
       );
     const total =
       document.summary.reasons.reduce((n, r) => n + r.count, 0) +
@@ -436,7 +435,7 @@ test("cancellation: unsafe paths, oversized inputs and changed sources stay visi
   }
 });
 
-test("cancellation: exact duplicates count once; pending and missing legacy markers never become unspecified", async () => {
+test("cancellation: exact duplicates count once; pending and missing markers never become unspecified", async () => {
   const directory = await root();
   try {
     const duplicate = await add(directory, "run-a", "other");

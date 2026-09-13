@@ -1,4 +1,4 @@
-import { BanzaiError } from "./errors.js";
+import { BanzaiError, ResourceVersionUnsupportedError } from "./errors.js";
 import {
   CANCELLATION_AVAILABILITIES,
   CANCELLATION_REASONS,
@@ -559,7 +559,8 @@ export async function collectCancellationReport(
     );
     const state = parse(stateFile);
     try {
-      if (state.runId !== runId) throw new Error();
+      if (state.runId !== runId || !Object.hasOwn(state, "schemaVersion"))
+        throw new Error();
       const decoded = parseEvaluationStateSource(state).value;
       row.lifecycle = {
         value: decoded.status.value,
@@ -572,7 +573,8 @@ export async function collectCancellationReport(
       };
       if (decoded.status.value === null)
         issue("state", "lifecycle", "MALFORMED_EVIDENCE");
-    } catch {
+    } catch (error) {
+      if (error instanceof ResourceVersionUnsupportedError) throw error;
       issue(
         "state",
         "state",
@@ -665,12 +667,15 @@ export async function collectCancellationReport(
         "ledger"
       );
       try {
-        parseVerificationLedger(parse(ledgerFile));
+        const ledger = parse(ledgerFile);
+        if (!Object.hasOwn(ledger, "schemaVersion")) throw new Error();
+        parseVerificationLedger(ledger);
         sources.inventory.verification =
           verificationDirectory.availability === "available"
             ? "complete"
             : "unavailable";
-      } catch {
+      } catch (error) {
+        if (error instanceof ResourceVersionUnsupportedError) throw error;
         issue("verification", "ledger", "VERIFICATION_INVENTORY_UNAVAILABLE");
       }
       let bytes = 0;
@@ -704,6 +709,7 @@ export async function collectCancellationReport(
           try {
             if (file.availability !== "available") throw new Error();
             const raw = parse(file);
+            if (!Object.hasOwn(raw, "schemaVersion")) throw new Error();
             if (kind === "model") {
               const decoded = parseEvaluationAttemptSource(raw).value;
               if (
@@ -751,7 +757,8 @@ export async function collectCancellationReport(
               identities.add(record.id);
               sources.verification.push(record);
             }
-          } catch {
+          } catch (error) {
+            if (error instanceof ResourceVersionUnsupportedError) throw error;
             sources.inventory[kind] = "incomplete";
             sources[
               kind === "model" ? "modelInvalid" : "verificationInvalid"

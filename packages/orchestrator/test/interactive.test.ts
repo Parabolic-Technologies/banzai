@@ -1,3 +1,4 @@
+import { boundWorkFixture } from "./helpers.js";
 import { deriveHumanTime, emptyHumanTimeEvidence } from "../src/human-time.js";
 import type {
   HumanTimeGateway,
@@ -44,7 +45,8 @@ function runState(
 ): RunState {
   const timestamp = "2026-07-27T12:00:00.000Z";
   return {
-    schemaVersion: 3,
+    schemaVersion: 5,
+    artifactBinding: boundWorkFixture(),
     contractVersion: CONTRACT_VERSION,
     runId: "run-example",
     slug: "example",
@@ -995,6 +997,7 @@ test("interactive status exposes bounded session and review policy evidence", as
   const runner = new FakeRunner([
     workflowStatus(state, {
       latestReview: {
+        schemaVersion: 2,
         contractVersion: CONTRACT_VERSION,
         verdict: "changes_requested",
         summary: "One finding needs triage.",
@@ -1086,6 +1089,7 @@ test("interactive status distinguishes human-triaged completion from review pass
   const runner = new FakeRunner([
     workflowStatus(state, {
       latestReview: {
+        schemaVersion: 2,
         contractVersion: CONTRACT_VERSION,
         verdict: "changes_requested",
         summary: "One finding was triaged.",
@@ -1437,6 +1441,7 @@ test("interactive consultation pause and declined final confirmation do not muta
 
 test("interactive mode triages every finding before applying the decision", async () => {
   const review: ReviewResult = {
+    schemaVersion: 2,
     contractVersion: CONTRACT_VERSION,
     verdict: "changes_requested",
     summary: "Two findings need triage.",
@@ -2117,6 +2122,7 @@ test("human time: blank, invalid and explicit zero input have distinct effects; 
 
 test("human time: editing between triage findings retains prior choices and adds no post-gate prompt", async () => {
   const review: ReviewResult = {
+    schemaVersion: 2,
     contractVersion: CONTRACT_VERSION,
     verdict: "changes_requested",
     summary: "Two findings.",

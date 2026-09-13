@@ -1,3 +1,4 @@
+import { boundWorkFixture } from "./helpers.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import packageManifest from "../package.json" with { type: "json" };
@@ -22,8 +23,7 @@ import {
   AGENT_ANSWER_SCHEMA,
   AGENT_RECOVERY_SCHEMA,
   AGENT_REQUEST_SCHEMA,
-  CONTRACT_VERSION,
-  LEGACY_AGENT_ANSWER_SCHEMA
+  CONTRACT_VERSION
 } from "../src/types.js";
 import type { WorkflowStatus } from "../src/workflow.js";
 
@@ -31,7 +31,8 @@ const TIMESTAMP = "2026-08-17T12:00:00.000Z";
 
 function state(overrides: Partial<RunState> = {}): RunState {
   return {
-    schemaVersion: 3,
+    schemaVersion: 5,
+    artifactBinding: boundWorkFixture(),
     contractVersion: CONTRACT_VERSION,
     runId: "20260817120000-agent-task-12345678",
     slug: "agent-task",
@@ -135,6 +136,7 @@ function workflowStatus(
 
 function review(): ReviewResult {
   return {
+    schemaVersion: 2,
     contractVersion: CONTRACT_VERSION,
     verdict: "changes_requested",
     summary: "One current finding requires human triage.",
@@ -233,7 +235,7 @@ test("agent control capabilities declare the exact offline v2 operation set", ()
   const capabilities = agentControlCapabilities();
   assert.equal(capabilities.schema, "banzai-agent-capabilities/v3");
   assert.equal(capabilities.schemaVersion, 3);
-  assert.equal(capabilities.controlContractVersion, "3.0.0");
+  assert.equal(capabilities.controlContractVersion, "4.0.0");
   assert.equal(capabilities.orchestratorVersion, packageManifest.version);
   assert.equal(capabilities.umbrellaContractVersion, CONTRACT_VERSION);
   assert.deepEqual(Object.keys(capabilities.operations), [
@@ -252,8 +254,7 @@ test("agent control capabilities declare the exact offline v2 operation set", ()
     AGENT_REQUEST_SCHEMA
   ]);
   assert.deepEqual(capabilities.operations.answer.inputSchemas, [
-    AGENT_ANSWER_SCHEMA,
-    LEGACY_AGENT_ANSWER_SCHEMA
+    AGENT_ANSWER_SCHEMA
   ]);
   assert.deepEqual(capabilities.operations.recover.inputSchemas, [
     AGENT_RECOVERY_SCHEMA
@@ -269,13 +270,17 @@ test("agent control capabilities declare the exact offline v2 operation set", ()
       ttyRequired: false
     }))
   );
+  assert.deepEqual(capabilities.artifactStorage.bindingSchemas, [
+    "banzai-work-binding/v2"
+  ]);
+  assert.deepEqual(capabilities.artifactStorage.layouts, ["private"]);
   assert.equal(
     renderAgentControlJson(capabilities),
     `${JSON.stringify(capabilities, null, 2)}\n`
   );
 });
 
-test("request and legacy escalation decoders preserve arbitrary text as data", () => {
+test("request text stays inert while removed answer versions are rejected", () => {
   const request =
     "  line one\n'\" `touch /tmp/owned` $(touch /tmp/owned); | > $VALUE  ";
   assert.deepEqual(
@@ -288,17 +293,19 @@ test("request and legacy escalation decoders preserve arbitrary text as data", (
     ),
     { schema: AGENT_REQUEST_SCHEMA, schemaVersion: 1, request }
   );
-  const answers = ["  first; $(false)  ", "second\nanswer | `false`"];
-  assert.deepEqual(
-    decodeAgentControlAnswer(
-      encoded({
-        schema: LEGACY_AGENT_ANSWER_SCHEMA,
-        schemaVersion: 1,
-        answers
-      })
-    ),
-    { schema: LEGACY_AGENT_ANSWER_SCHEMA, schemaVersion: 1, answers }
-  );
+  for (const schemaVersion of [1, 3]) {
+    const input = encoded({
+      schema: `banzai-agent-answer/v${schemaVersion}`,
+      schemaVersion,
+      answers: ["exact text"]
+    });
+    const before = Buffer.from(input);
+    assert.throws(
+      () => decodeAgentControlAnswer(input),
+      hasCode("RESOURCE_VERSION_UNSUPPORTED")
+    );
+    assert.deepEqual(input, before);
+  }
 });
 
 test("v2 consultation answer decoder preserves keyed preference text as data", () => {
@@ -370,7 +377,7 @@ test("agent control decoders reject malformed unsupported and oversized document
           request: "valid"
         })
       ),
-    hasCode("CONTROL_SCHEMA_UNSUPPORTED")
+    hasCode("RESOURCE_VERSION_UNSUPPORTED")
   );
   assert.throws(
     () =>
@@ -384,12 +391,12 @@ test("agent control decoders reject malformed unsupported and oversized document
       () =>
         decodeAgentControlAnswer(
           encoded({
-            schema: LEGACY_AGENT_ANSWER_SCHEMA,
+            schema: "banzai-agent-answer/v1",
             schemaVersion: 1,
             answers
           })
         ),
-      hasCode("INVALID_CONTROL_INPUT")
+      hasCode("RESOURCE_VERSION_UNSUPPORTED")
     );
   }
   for (const invalid of [

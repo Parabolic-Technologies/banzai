@@ -1,8 +1,5 @@
-import { BanzaiError } from "./errors.js";
-import {
-  collectEvaluationExport,
-  collectEvaluationExportV2
-} from "./evaluation.js";
+import { BanzaiError, ResourceVersionUnsupportedError } from "./errors.js";
+import { collectEvaluationExport } from "./evaluation.js";
 import {
   renderEvaluationJson,
   renderEvaluationMarkdown
@@ -45,7 +42,7 @@ export function parseEvaluationExportArgs(
   let format: EvaluationExportOptions["format"] = "markdown";
   let from: string | null = null;
   let to: string | null = null;
-  let schemaVersion: 1 | 2 | undefined;
+  let schemaVersion: 2 | undefined;
   let jsonSeen = false;
   let fromSeen = false;
   let toSeen = false;
@@ -55,12 +52,18 @@ export function parseEvaluationExportArgs(
     const argument = args[index];
     if (argument === "--schema-version") {
       const value = optionValue(args, index);
-      if (schemaVersion !== undefined || !["1", "2"].includes(value))
+      if (schemaVersion !== undefined)
         throw new BanzaiError(
           "INVALID_EVAL_OPTION",
-          "Evaluation schema version must be 1 or 2 and specified once."
+          "Evaluation schema version must be specified once."
         );
-      schemaVersion = value === "1" ? 1 : 2;
+      if (value !== "2")
+        throw new ResourceVersionUnsupportedError(
+          "evaluation schema",
+          value,
+          "2"
+        );
+      schemaVersion = 2;
       index += 1;
       continue;
     }
@@ -119,7 +122,7 @@ export function parseEvaluationExportArgs(
     );
   }
   return {
-    ...(schemaVersion === undefined ? {} : { schemaVersion }),
+    schemaVersion: 2,
     format,
     from,
     to,
@@ -133,10 +136,7 @@ export async function executeEvaluationExport(
   io: EvaluationIO
 ): Promise<void> {
   const options = parseEvaluationExportArgs(args);
-  const report =
-    options.schemaVersion === 2
-      ? await collectEvaluationExportV2(repoRoot, options)
-      : await collectEvaluationExport(repoRoot, options);
+  const report = await collectEvaluationExport(repoRoot, options);
   io.stdout(
     options.format === "json"
       ? renderEvaluationJson(report)
@@ -145,10 +145,9 @@ export async function executeEvaluationExport(
   if (
     report.issues.length > 0 ||
     report.cohort.unresolvedRunCount > 0 ||
-    (report.schemaVersion === 2 &&
-      report.runs.some(
-        (run) => run.verificationEvidence.coverage === "incomplete"
-      ))
+    report.runs.some(
+      (run) => run.verificationEvidence.coverage === "incomplete"
+    )
   ) {
     io.stderr(
       "[EVAL_PARTIAL] Export includes incomplete evidence; inspect the structured issues in the report.\n"

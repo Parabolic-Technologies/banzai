@@ -40,149 +40,6 @@ const TRANSACTION_TEMP_SUFFIX = ".banzai-version-set.tmp";
 const RECOVERY_GUARD = `${RECOVERY_DIRECTORY}.guard`;
 const RECOVERY_GUARD_TEMPORARY = `${RECOVERY_GUARD}.tmp`;
 
-interface RetainedFixtureFile {
-  path: string;
-  mode: number;
-  contents: string;
-}
-
-interface LegacyFixture {
-  sourceSha256: string;
-  originals: RetainedFixtureFile[];
-  retained: RetainedFixtureFile[];
-}
-
-async function legacyFixture(
-  name: string
-): Promise<{ fixture: Fixture; archive: LegacyFixture }> {
-  const archive = JSON.parse(
-    await readFile(
-      path.join(
-        process.cwd(),
-        "test/fixtures/version-recovery-v1",
-        `${name}.json`
-      ),
-      "utf8"
-    )
-  ) as LegacyFixture;
-  assert.equal(
-    archive.sourceSha256,
-    "49ab987cce9b69dfb4209c61fa49e3e58d8f59ce2cca32601a8aa19092f00c7f"
-  );
-  const parent = await mkdtemp(path.join(tmpdir(), "banzai-v1-recovery-test-"));
-  const root = await realpath(parent);
-  for (const entry of archive.retained) {
-    const target = path.join(root, entry.path);
-    await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
-    await writeFile(target, Buffer.from(entry.contents, "base64"));
-    await chmod(target, entry.mode);
-  }
-  return { fixture: { parent, root }, archive };
-}
-
-for (const name of [
-  "initial-ready",
-  "initial-guard",
-  "forward-ready",
-  "forward-guard"
-]) {
-  test(`legacy ${name} recovery restores the captured original bytes and modes without current policy`, async () => {
-    const { fixture, archive } = await legacyFixture(name);
-    try {
-      await assertPathAbsent(path.join(fixture.root, "release-policy.json"));
-      const result = await recoverProjectVersion({
-        root: fixture.root,
-        isProcessAlive: () => false
-      });
-      assert.equal(result.action, "restored");
-      assert.equal(result.paths.length, 6);
-      for (const entry of archive.originals) {
-        const target = path.join(fixture.root, entry.path);
-        assert.deepEqual(
-          await readFile(target),
-          Buffer.from(entry.contents, "base64")
-        );
-        assert.equal((await lstat(target)).mode & 0o777, entry.mode);
-      }
-      await assertTransactionAbsent(fixture.root);
-    } finally {
-      await disposeFixture(fixture);
-    }
-  });
-
-  for (const drift of ["contents", "mode"] as const) {
-    test(`legacy ${name} recovery preserves all evidence on later ${drift} drift`, async () => {
-      const { fixture } = await legacyFixture(name);
-      try {
-        const target = path.join(
-          fixture.root,
-          "packages/orchestrator/package.json"
-        );
-        if (drift === "contents")
-          await writeFile(target, '{"version":"later edit"}\n');
-        else await chmod(target, 0o600);
-        const before = await snapshotTree(fixture.root);
-        await expectVersionError(
-          recoverProjectVersion({
-            root: fixture.root,
-            isProcessAlive: () => false
-          }),
-          "INVALID_VERSION_TRANSACTION"
-        );
-        assert.deepEqual(await snapshotTree(fixture.root), before);
-      } finally {
-        await disposeFixture(fixture);
-      }
-    });
-  }
-}
-
-test("legacy pre-ready cleanup and interrupted guard cleanup keep format 1 evidence", async () => {
-  const { fixture, archive } = await legacyFixture("initial-ready");
-  try {
-    for (const entry of archive.originals)
-      await writeFile(
-        path.join(fixture.root, entry.path),
-        Buffer.from(entry.contents, "base64")
-      );
-    await rm(path.join(fixture.root, RECOVERY_DIRECTORY, "ready"));
-    const base = createNodeVersionFileSystem();
-    const fileSystem: VersionFileSystem = {
-      ...base,
-      async remove(target, options) {
-        if (target === path.join(fixture.root, RECOVERY_GUARD))
-          throw new Error("retain guard for inspection");
-        await base.remove(target, options);
-      }
-    };
-    await assert.rejects(
-      recoverProjectVersion({
-        root: fixture.root,
-        isProcessAlive: () => false,
-        fileSystem
-      })
-    );
-    const guard = JSON.parse(
-      await readFile(path.join(fixture.root, RECOVERY_GUARD), "utf8")
-    ) as { format: number; transaction: { format: number } };
-    assert.equal(guard.format, 1);
-    assert.equal(guard.transaction.format, 1);
-    const result = await recoverProjectVersion({
-      root: fixture.root,
-      isProcessAlive: () => false
-    });
-    assert.equal(result.action, "restored");
-    for (const entry of archive.originals)
-      assert.deepEqual(
-        await readFile(path.join(fixture.root, entry.path)),
-        Buffer.from(entry.contents, "base64")
-      );
-    await assertTransactionAbsent(fixture.root);
-  } finally {
-    await disposeFixture(fixture);
-  }
-});
-
 for (const killAt of ["first-replacement", "journal-removal"] as const) {
   for (const corruption of [
     "unknown format",
@@ -212,7 +69,7 @@ for (const killAt of ["first-replacement", "journal-removal"] as const) {
         assert.ok(lockfile);
         if (corruption === "unknown format") record.format = 99;
         else if (corruption === "wrong transition")
-          record.transition = "forward";
+          record.transition = "invalid";
         else lockfile.pointers = ["/version", "/packages//version", "/version"];
         await writeFile(retained, JSON.stringify(value, null, 2) + "\n");
         const before = await snapshotTree(fixture.root);
@@ -221,7 +78,9 @@ for (const killAt of ["first-replacement", "journal-removal"] as const) {
             root: fixture.root,
             isProcessAlive: () => false
           }),
-          "INVALID_VERSION_TRANSACTION"
+          corruption === "unknown format" && !guarded
+            ? "RESOURCE_VERSION_UNSUPPORTED"
+            : "INVALID_VERSION_TRANSACTION"
         );
         assert.deepEqual(await snapshotTree(fixture.root), before);
       } finally {
@@ -231,26 +90,54 @@ for (const killAt of ["first-replacement", "journal-removal"] as const) {
   }
 }
 
-test("bootstrap rejects partial insertions and the old independent migration before mutation", async () => {
-  for (const inserted of [[0], [6], [7], [0, 6], [6, 7], [0, 7], []]) {
+test("version synchronization refuses missing authority fields before mutation", async () => {
+  for (const index of [0, 6, 7]) {
     const fixture = await versionFixture();
     try {
-      for (const index of inserted)
-        await writeSurfaceVersion(fixture.root, index, "1.19.0");
-      if (inserted.length === 0) {
-        for (const index of [1, 2, 3, 4])
-          await writeSurfaceVersion(fixture.root, index, "1.18.1");
-        for (const index of [5, 8])
-          await writeSurfaceVersion(fixture.root, index, "0.8.2");
-      }
+      await writeSurfaceVersion(fixture.root, index, undefined);
       const before = await snapshotTree(fixture.root);
-      await expectVersionError(
+      await assert.rejects(
         setProjectVersion({
           root: fixture.root,
           targetVersion: "1.19.0",
           ownerPid: process.pid
         }),
-        "INVALID_VERSION_TRANSITION"
+        { code: "MISSING_VERSION_FIELD" }
+      );
+      assert.deepEqual(await snapshotTree(fixture.root), before);
+    } finally {
+      await disposeFixture(fixture);
+    }
+  }
+});
+
+test("format 1 recovery is rejected before changing retained transaction evidence", async () => {
+  for (const killAt of ["first-replacement", "journal-removal"] as const) {
+    const fixture = await versionFixture();
+    try {
+      await runKilledTransaction(fixture, killAt);
+      const recordPath = path.join(
+        fixture.root,
+        killAt === "journal-removal"
+          ? RECOVERY_GUARD
+          : `${RECOVERY_DIRECTORY}/transaction.json`
+      );
+      const record = JSON.parse(await readFile(recordPath, "utf8")) as {
+        format: number;
+      };
+      record.format = 1;
+      await writeFile(recordPath, JSON.stringify(record));
+      const before = await snapshotTree(fixture.root);
+      const error = await expectVersionError(
+        recoverProjectVersion({
+          root: fixture.root,
+          isProcessAlive: () => false
+        }),
+        "RESOURCE_VERSION_UNSUPPORTED"
+      );
+      assert.match(
+        error.message,
+        /^version transaction version 1 is not supported; 3\.x supports 2; last read by release-train major 2$/u
       );
       assert.deepEqual(await snapshotTree(fixture.root), before);
     } finally {
@@ -377,10 +264,8 @@ async function versionFixture(): Promise<Fixture> {
     await chmod(target, 0o644);
   }
   for (let index = 0; index < VERSION_SURFACES.length; index += 1) {
-    await writeSurfaceVersion(root, index, "1.19.0");
+    await writeSurfaceVersion(root, index, "1.18.0");
   }
-  for (const index of [0, 6, 7])
-    await writeSurfaceVersion(root, index, undefined);
   return { parent, root };
 }
 
@@ -529,61 +414,6 @@ function targetPaths(root: string): Set<string> {
   );
 }
 
-test("bootstrap inserts exactly three fields and preserves unrelated bytes and modes", async () => {
-  const fixture = await versionFixture();
-  try {
-    const restricted = VERSION_SURFACES[2];
-    assert.ok(restricted);
-    await chmod(path.join(fixture.root, restricted.path), 0o600);
-    const unrelated = path.join(fixture.root, "unrelated.txt");
-    await writeFile(unrelated, "unrelated canary\n", "utf8");
-    const before = await snapshotSurfaces(fixture.root);
-    const result = await setProjectVersion({
-      root: fixture.root,
-      targetVersion: "1.19.0",
-      ownerPid: process.pid
-    });
-
-    assert.equal(result.transition, "bootstrap");
-    assert.equal(result.version, "1.19.0");
-    assert.deepEqual(result.paths, [
-      ...new Set(VERSION_SURFACES.map((surface) => surface.path))
-    ]);
-    assert.deepEqual(
-      await surfaceVersions(fixture.root),
-      Array<string>(9).fill("1.19.0")
-    );
-    assert.equal(result.fieldCount, 9);
-    for (const [relativePath, snapshot] of before) {
-      let expected = snapshot.contents.toString("utf8");
-      if (
-        relativePath === "package.json" ||
-        relativePath === "package-lock.json"
-      ) {
-        expected = expected.replace("{\n", '{\n  "version": "1.19.0",\n');
-      }
-      if (relativePath === "package-lock.json") {
-        expected = expected.replace(
-          '    "": {\n',
-          '    "": {\n      "version": "1.19.0",\n'
-        );
-      }
-      assert.deepEqual(
-        await readFile(path.join(fixture.root, relativePath)),
-        Buffer.from(expected)
-      );
-      assert.equal(
-        (await lstat(path.join(fixture.root, relativePath))).mode & 0o7777,
-        snapshot.mode
-      );
-    }
-    assert.equal(await readFile(unrelated, "utf8"), "unrelated canary\n");
-    await assertTransactionAbsent(fixture.root);
-  } finally {
-    await disposeFixture(fixture);
-  }
-});
-
 test("unified updates require a strictly greater target and compare unbounded integers", async () => {
   const fixture = await versionFixture();
   try {
@@ -693,7 +523,7 @@ for (const [name, mutate] of [
   [
     "plugin-set drift",
     async (root: string): Promise<void> =>
-      writeSurfaceVersion(root, 1, "1.18.0")
+      writeSurfaceVersion(root, 1, "1.18.2")
   ],
   [
     "orchestrator-pair drift",
@@ -758,8 +588,8 @@ const invalidDocumentCases: readonly {
       await writeFile(
         target,
         contents.replace(
-          '"version": "1.19.0"',
-          '"version": "1.19.0",\n  "version": "1.19.0"'
+          '"version": "1.18.0"',
+          '"version": "1.18.0",\n  "version": "1.18.0"'
         ),
         "utf8"
       );
@@ -864,7 +694,7 @@ test("fixed policy paths symlinks and unsafe modes fail without touching outside
     );
     assert.equal(
       pointerValue(JSON.parse(await readFile(outside, "utf8")), "/version"),
-      undefined
+      "1.18.0"
     );
   } finally {
     await disposeFixture(symlinkFixture);

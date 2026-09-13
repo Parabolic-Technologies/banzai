@@ -8,7 +8,7 @@ user-invocable: true
 
 Use for strict mode requirements. Write no code.
 
-Output: `documentation/features/<slug>/description.md`.
+Output: `<description role>`.
 
 Apply the canonical Engineering Quality policy in the installed
 `policies/engineering-quality.md`; this skill adds
@@ -18,8 +18,7 @@ only requirements-specific responsibilities and does not copy its rule set.
 
 Before artifact discovery or writing, read the installed
 `../../policies/artifact-storage.md` and resolve the selected work through its
-plugin-local helper. Use the returned role paths for internal work artifacts;
-`documentation/` work paths below describe the explicit legacy layout only.
+plugin-local helper. Use the returned private role paths for internal work artifacts.
 Keep ADRs, indexes, manifests and maintained product guidance at their existing
 repository paths. Status/loading stays read-only, and orchestrated work follows
 the persisted run binding and exact phase grants.
@@ -30,16 +29,12 @@ the persisted run binding and exact phase grants.
   assembled it into this session. Before requirements discovery,
   recognize the layout: target when `AGENTS.md` carries `## Authority` and
   `## Policies` with no line beginning with `@`, and the `CLAUDE.md` shim is
-  absent or carries no policy heading; legacy layout when `CLAUDE.md` carries
-  `## Engineering Quality` and `AGENTS.md` is absent or lacks `## Authority`.
+  absent or carries no policy heading.
   Policy headings for layout recognition are `## Decision Consultation`,
   `## Test Assurance`, `## Security Assurance`, `## Engineering Quality`,
   and `## Plan Task Completion Evidence`.
-  On legacy stop with "legacy Banzai layout: run `project-manifest` to migrate"
-  and ask the user to run `project-manifest`; read neither legacy policy
-  copies nor installed replacements as applicable rules, and never scaffold or
-  migrate files. On partial report the exact ambiguity and stop without source
-  changes, precedence guesses or reconstructed rules.
+  On partial report the exact ambiguity and stop without source changes,
+  precedence guesses or reconstructed rules.
   Unadopted means neither file has `## Authority` or a policy heading; keep
   existing missing-manifest behavior. Every other combination, including an
   unreadable file, is partial. Skip this recognition rule in the plugin source
@@ -47,7 +42,7 @@ the persisted run binding and exact phase grants.
 - Policies, resolved as `../../policies/<name>.md` from this `SKILL.md`,
   never from the project working directory or a fixed plugin cache path.
   Stop before affected work if a required source is absent or unreadable;
-  never substitute a project copy, a legacy inline policy or memory:
+  never substitute a project copy, an inline policy or memory:
   - `decision-consultation.md` when strict planning frames an unresolved material human-owned choice, before drafting dependent artifacts.
   - `security-assurance.md` before assessing changed exposures and their requirements or evidence.
   - `engineering-quality.md` before discovery, design, implementation, fix or review judgment within this skill.

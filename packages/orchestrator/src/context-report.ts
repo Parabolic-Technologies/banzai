@@ -2,10 +2,11 @@ import { constants } from "node:fs";
 import { lstat, open, readdir } from "node:fs/promises";
 import path from "node:path";
 import { decodeContextAttemptLedger } from "./context-accounting.js";
-import { BanzaiError } from "./errors.js";
+import { BanzaiError, ResourceVersionUnsupportedError } from "./errors.js";
 import {
   CONTEXT_REPORT_SCHEMA,
   CONTEXT_REPORT_SCHEMA_VERSION,
+  MODEL_ATTEMPT_SCHEMA_VERSION,
   PROMPT_COMPONENT_CATEGORY_ORDER,
   type AttemptReference,
   type ContextAttemptLedger,
@@ -157,6 +158,13 @@ function decodeCanonicalAttempt(
   runId: string
 ): ContextCanonicalAttempt {
   const item = record(value);
+  if (item !== null && item.schemaVersion !== MODEL_ATTEMPT_SCHEMA_VERSION) {
+    throw new ResourceVersionUnsupportedError(
+      "model attempt",
+      String(item.schemaVersion),
+      MODEL_ATTEMPT_SCHEMA_VERSION
+    );
+  }
   const identity = record(item?.attempt);
   const safeAttemptId = safeIdentifier(identity?.id) ? identity.id : "unknown";
   if (item === null || identity === null) {
@@ -533,6 +541,13 @@ async function readRunMetadata(
 ): Promise<ContextRunMetadata | null> {
   const value = await readJson(path.join(runDirectory, "state.json"));
   const state = record(value);
+  if (state !== null && state.schemaVersion !== 5) {
+    throw new ResourceVersionUnsupportedError(
+      "run state",
+      String(state.schemaVersion),
+      5
+    );
+  }
   const selection = record(state?.workflowSelection);
   if (
     state?.runId !== runId ||

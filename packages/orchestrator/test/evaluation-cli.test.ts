@@ -53,6 +53,7 @@ const INVALID_ARGUMENT_CASES: { args: string[]; code: string }[] = [
 
 test("parses the exact evaluation export option contract and normalizes selectors", () => {
   assert.deepEqual(parseEvaluationExportArgs([]), {
+    schemaVersion: 2,
     format: "markdown",
     from: null,
     to: null,
@@ -73,6 +74,7 @@ test("parses the exact evaluation export option contract and normalizes selector
       "z-run"
     ]),
     {
+      schemaVersion: 2,
       format: "json",
       from: "2026-07-01T00:00:00.000Z",
       to: "2026-07-02T00:00:00.000Z",
@@ -115,7 +117,7 @@ test("writes Markdown or authoritative JSON only to stdout for an empty cohort",
     assert.doesNotThrow(() => JSON.parse(jsonOut[0] ?? ""));
     assert.equal(
       (JSON.parse(jsonOut[0] ?? "") as { schema: string }).schema,
-      "banzai-evaluation-export/v1"
+      "banzai-evaluation-export/v2"
     );
     assert.deepEqual(jsonErr, []);
     assert.deepEqual(await snapshotTree(runsRoot), before);
@@ -243,7 +245,8 @@ test("complete and filtered CLI exports preserve every run-tree byte", async () 
         stderr: (value) => stderr.push(value)
       });
       assert.equal(stdout.length, 1);
-      assert.deepEqual(stderr, []);
+      assert.equal(stderr.length, 1);
+      assert.match(stderr[0] ?? "", /EVAL_PARTIAL/);
       assert.deepEqual(await snapshotTree(runsRoot), before);
     }
   } finally {

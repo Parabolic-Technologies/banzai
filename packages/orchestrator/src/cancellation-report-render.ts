@@ -68,7 +68,7 @@ export function renderCancellationMarkdown(
       (r) => `| ${r.availability} | ${r.count} | ${fraction(r.ratio)} |`
     ),
     "",
-    "Legacy absence, missing evidence, an unanswered prompt and an explicit unspecified response have different meanings.",
+    "Missing evidence, an unanswered prompt and an explicit unspecified response have different meanings.",
     "",
     "## Workflow and cancellation phase",
     "",

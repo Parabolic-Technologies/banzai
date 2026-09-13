@@ -8,7 +8,6 @@ import {
 } from "./evaluation.js";
 import type {
   EvaluationBreakdown,
-  EvaluationExport,
   EvaluationIssueCode,
   EvaluationMetricSet,
   EvidenceValue,
@@ -93,7 +92,7 @@ function breakdownRow(label: string, summary: EvaluationBreakdown): string[] {
 }
 
 function issueCounts(
-  report: EvaluationExport
+  report: EvaluationExportV2
 ): [EvaluationIssueCode, number][] {
   const counts = new Map<EvaluationIssueCode, number>();
   for (const issue of report.issues) {
@@ -107,36 +106,11 @@ function issueCounts(
   });
 }
 
-export function renderEvaluationJson(
-  report: EvaluationExport | EvaluationExportV2
-): string {
+export function renderEvaluationJson(report: EvaluationExportV2): string {
   return `${JSON.stringify(report, null, 2)}\n`;
 }
 
-export function renderEvaluationMarkdown(
-  report: EvaluationExport | EvaluationExportV2
-): string {
-  if (report.schemaVersion === 2) {
-    const base = renderEvaluationMarkdown({
-      ...report,
-      schema: "banzai-evaluation-export/v1",
-      schemaVersion: 1
-    });
-    return (
-      base.replace(
-        "banzai-evaluation-export/v1` (version 1)",
-        "banzai-evaluation-export/v2` (version 2)"
-      ) +
-      "\n## Verification applicability\n\n" +
-      report.runs
-        .map(
-          (run) =>
-            `- ${run.runKey}: coverage=${run.verificationEvidence.coverage}, physical attempts=${run.verificationEvidence.physicalAttempts.length}, reused checks=${run.verificationEvidence.dispositions.filter((item) => item.kind === "reused").length}`
-        )
-        .join("\n") +
-      "\n"
-    );
-  }
+export function renderEvaluationMarkdown(report: EvaluationExportV2): string {
   const lines: string[] = [
     "# Banzai Evaluation Export",
     "",
@@ -294,6 +268,15 @@ export function renderEvaluationMarkdown(
     "",
     "Run and attempt keys are export-local opaque ordinals, not anonymized stable identities. Exact model IDs and timestamps may remain linkable. Prompts, reasoning, transcripts, raw output, commands, source content, repository paths, credentials, environment values, slugs, and exact persisted identifiers are excluded.",
     ""
+  );
+  lines.push(
+    "",
+    "## Verification applicability",
+    "",
+    ...report.runs.map(
+      (run) =>
+        `- ${run.runKey}: coverage=${run.verificationEvidence.coverage}, physical attempts=${run.verificationEvidence.physicalAttempts.length}, reused checks=${run.verificationEvidence.dispositions.filter((item) => item.kind === "reused").length}`
+    )
   );
   return lines.join("\n");
 }

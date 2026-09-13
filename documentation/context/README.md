@@ -4,7 +4,7 @@ Banzai records privacy-safe evidence about the context it controls for every
 model invocation. The attempt-owned contract is
 `banzai-context-attempt/v1`; the independent cross-run report contract is
 `banzai-context-report/v1`. Neither contract changes the model-facing umbrella
-contract, `banzai-evaluation-export/v1`, or `banzai-evaluation-kpi/v1`.
+contract, `banzai-evaluation-export/v2`, or `banzai-evaluation-kpi/v2`.
 
 ## Evidence Surfaces
 

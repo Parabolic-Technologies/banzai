@@ -2,7 +2,11 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "schemaVersion", "layout"],
+  "required": [
+    "schema",
+    "schemaVersion",
+    "layout"
+  ],
   "properties": {
     "schema": {
       "const": "banzai-artifact-layout/v1"
@@ -11,7 +15,7 @@
       "const": 1
     },
     "layout": {
-      "enum": ["private", "legacy"]
+      "const": "private"
     }
   }
 }

@@ -121,6 +121,7 @@ async function writeRun(
     options.malformedState === true
       ? "not-json"
       : JSON.stringify({
+          schemaVersion: 5,
           runId,
           createdAt: options.createdAt ?? "2026-08-23T10:00:00.000Z",
           workflowSelection: { workflow: options.workflow ?? "strict" }
@@ -133,6 +134,7 @@ async function writeRun(
   await writeFile(
     path.join(attempts, `${attempt.id}-${attempt.kind}.json`),
     JSON.stringify({
+      schemaVersion: 2,
       attempt,
       status: options.status ?? "completed",
       usage: options.usage ?? null
@@ -436,6 +438,7 @@ test("context collector rejects unsafe run names and symlinked owned leaves with
     await writeFile(
       externalState,
       JSON.stringify({
+        schemaVersion: 5,
         runId: stateRunId,
         createdAt: "2026-08-23T10:00:00.000Z",
         workflowSelection: { workflow: "strict" },
@@ -524,6 +527,7 @@ test("context collector rejects a symlinked attempts directory before reading ex
     await writeFile(
       path.join(runDirectory, "state.json"),
       JSON.stringify({
+        schemaVersion: 5,
         runId,
         createdAt: "2026-08-23T10:00:00.000Z",
         workflowSelection: { workflow: "strict" }
@@ -537,6 +541,7 @@ test("context collector rejects a symlinked attempts directory before reading ex
     await writeFile(
       canonicalFile,
       JSON.stringify({
+        schemaVersion: 2,
         attempt,
         status: "completed",
         usage: null,

@@ -25,7 +25,7 @@ test("JSON serialization is canonical, deterministic, and newline terminated", a
     assert.equal(second, first);
     assert.match(
       first,
-      /^\{\n {2}"schema": "banzai-evaluation-export\/v1",\n {2}"schemaVersion": 1,/
+      /^\{\n {2}"schema": "banzai-evaluation-export\/v2",\n {2}"schemaVersion": 2,/
     );
     assert.ok(first.endsWith("}\n"));
     assert.doesNotMatch(first, /\n\n$/);
@@ -68,7 +68,7 @@ test("Markdown is a stable compact projection with ordered sections and explicit
       );
       previous = current;
     }
-    assert.match(first, /Schema: `banzai-evaluation-export\/v1` \(version 1\)/);
+    assert.match(first, /Schema: `banzai-evaluation-export\/v2` \(version 2\)/);
     assert.match(first, /\| Runs \| 0 \|/);
     assert.match(first, /\| Reported cost \(USD\) \| unavailable \|/);
     assert.match(first, /\| Human minutes \| unavailable \|/);

@@ -23,9 +23,9 @@ supervisor independently reads Engineering Quality.
 
 Skills and orchestrator prompts carry short references and phase-specific
 responsibilities. Projects receive process text and an index, never copied
-policy bodies. Legacy projects stop until an explicitly invoked
-`project-manifest` migration diff is approved; partial layouts stop for
-resolution. See [the migration procedure](../plugins/banzai/skills/project-manifest/references/layout-migration.md).
+policy bodies. Partial instruction layouts stop for resolution through explicit
+project setup and approved merges. The supported target layout keeps process in
+root `AGENTS.md`, with host-specific includes in `CLAUDE.md` when present.
 Automatic ingress, tool reads and application need separate host evidence;
 filenames and source tests do not establish effective delivery. Policy semantics
 remain independent of Claude tools, hooks, permissions, commands and sessions.

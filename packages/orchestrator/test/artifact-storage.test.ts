@@ -59,8 +59,8 @@ test("R4-F1 standalone invocation inputs allow symlinked parents while artifact 
       await writeFile(
         requestFile,
         JSON.stringify({
-          schema: "banzai-artifact-request/v1",
-          schemaVersion: 1,
+          schema: "banzai-artifact-request/v2",
+          schemaVersion: 2,
           repoRoot: root,
           ...fields
         }),
@@ -265,55 +265,35 @@ test("artifact storage first use is read-only until writing and works without ru
   }
 });
 
-test("artifact storage legacy and recovery classifications never silently migrate work", async () => {
+test("artifact storage ignores old documentation bundles and creates only private work", async () => {
   const repository = await createTestRepository({ artifactLayout: null });
   try {
     const root = await realpath(repository.root);
-    await mkdir(path.join(root, "documentation/features/old"), {
-      recursive: true
-    });
-    await writeFile(
-      path.join(root, "documentation/features/old/work.md"),
-      "# Feature: Old\n\nSlug: `old`\n"
-    );
-    assert.equal((await inspectArtifacts({ repoRoot: root })).layout, "legacy");
+    const old = "documentation/features/old/work.md";
+    await mkdir(path.dirname(path.join(root, old)), { recursive: true });
+    await writeFile(path.join(root, old), "# Original approved bytes\n");
+    const before = await snapshotTree(root);
+    const inspection = await inspectArtifacts({ repoRoot: root });
+    assert.equal(inspection.classification, "fresh");
+    assert.equal(inspection.layout, "private");
+    assert.deepEqual(await snapshotTree(root), before);
     await assert.rejects(
-      initializeArtifacts({ repoRoot: root, layout: "private" }),
-      code("ARTIFACT_RECOVERY_REQUIRED")
+      inspectArtifacts({ repoRoot: root, workPath: old }),
+      code("ARTIFACT_INPUT_INVALID")
     );
     const work = await createWork({
       repoRoot: root,
-      slug: "new",
+      slug: "old",
       mode: "lite",
       creationId: randomUUID()
     });
+    assert.equal(work.binding.schemaVersion, 2);
+    assert.ok(work.binding.artifacts.work?.startsWith(".banzai/work/"));
     assert.equal(
-      work.binding.artifacts.work,
-      "documentation/features/new/work.md"
+      await readFile(path.join(root, old), "utf8"),
+      "# Original approved bytes\n"
     );
-    await assert.rejects(
-      createWork({
-        repoRoot: root,
-        slug: "new",
-        mode: "lite",
-        creationId: randomUUID()
-      }),
-      code("ARTIFACT_WORK_AMBIGUOUS")
-    );
-    const declarationPath = path.join(root, ".banzai/artifacts.json");
-    const declaration = JSON.parse(
-      await readFile(declarationPath, "utf8")
-    ) as Record<string, unknown>;
-    await writeFile(
-      declarationPath,
-      JSON.stringify({ ...declaration, layout: "private" })
-    );
-    assert.deepEqual(
-      (await inspectArtifacts({ repoRoot: root, workId: work.binding.workId }))
-        .work,
-      work
-    );
-    await rm(declarationPath);
+    await rm(path.join(root, ".banzai/artifacts.json"));
     await assert.rejects(
       inspectArtifacts({ repoRoot: root }),
       code("ARTIFACT_RECOVERY_REQUIRED")
@@ -447,8 +427,8 @@ test("artifact storage plugin processes converge on first use and reject a confl
     const root = await realpath(repository.root);
     const requestPath = path.join(root, "request.json");
     const envelope = {
-      schema: "banzai-artifact-request/v1",
-      schemaVersion: 1,
+      schema: "banzai-artifact-request/v2",
+      schemaVersion: 2,
       repoRoot: root
     };
     await writeFile(requestPath, JSON.stringify(envelope));
@@ -586,8 +566,8 @@ test("artifact storage archive round trip preserves originals, proves closure an
       await writeFile(
         requestFile,
         JSON.stringify({
-          schema: "banzai-artifact-request/v1",
-          schemaVersion: 1,
+          schema: "banzai-artifact-request/v2",
+          schemaVersion: 2,
           repoRoot: root,
           ...fields
         })
@@ -724,8 +704,8 @@ const artifactRequest = async (
   await writeFile(
     filename,
     JSON.stringify({
-      schema: "banzai-artifact-request/v1",
-      schemaVersion: 1,
+      schema: "banzai-artifact-request/v2",
+      schemaVersion: 2,
       repoRoot: root,
       ...fields
     })
@@ -828,182 +808,138 @@ test("accepted F1 rejects selected UUID and nested ignore negations before publi
   }
 });
 
-test("accepted F3 serializes separate-process legacy slug ownership and idempotent retries", async () => {
-  const repository = await createTestRepository({ artifactLayout: "legacy" });
+test("all artifact operations reject request v1 before any project mutation", async () => {
+  const repository = await createTestRepository();
   try {
     const root = await realpath(repository.root);
-    const requests = await Promise.all(
-      Array.from({ length: 8 }, async () => {
-        const creationId = randomUUID();
-        const filename = path.join(root, `${creationId}.json`);
-        const input = {
-          schema: "banzai-artifact-request/v1",
-          schemaVersion: 1,
-          repoRoot: root,
-          creationId,
-          slug: "concurrent-legacy",
-          mode: "lite" as const
-        };
-        await writeFile(filename, JSON.stringify(input));
-        return { filename, input };
-      })
+    const requestFile = path.join(root, "old-request.json");
+    await writeFile(
+      requestFile,
+      JSON.stringify({
+        schema: "banzai-artifact-request/v1",
+        schemaVersion: 1,
+        repoRoot: root
+      }),
+      { mode: 0o600 }
     );
-    const results = await Promise.all(
-      requests.map(async (request) => {
-        try {
-          return JSON.parse(
-            (
-              await execute(process.execPath, [
-                commandPath,
-                "create",
-                "--json",
-                request.filename
-              ])
-            ).stdout
-          ) as { ok: boolean };
-        } catch (error) {
-          return JSON.parse((error as { stdout: string }).stdout) as {
-            ok: boolean;
-          };
-        }
-      })
-    );
-    assert.equal(results.filter((result) => result.ok).length, 1);
-    const winner = requests[results.findIndex((result) => result.ok)];
-    assert.ok(winner);
-    assert.equal(
-      (await createWork(winner.input)).binding.workId,
-      winner.input.creationId
-    );
-    assert.equal(
-      (
-        await createWork({
-          ...winner.input,
-          creationId: randomUUID(),
-          slug: "independent"
-        })
-      ).binding.slug,
-      "independent"
-    );
+    const before = await snapshotTree(root);
+    for (const operation of [
+      "inventory",
+      "export",
+      "verify",
+      "restore",
+      "inspect",
+      "initialize",
+      "create",
+      "acquire",
+      "write",
+      "release"
+    ]) {
+      const response = await artifactCommand([
+        operation,
+        "--json",
+        requestFile
+      ]);
+      assert.equal(response.ok, false);
+      assert.equal(
+        response.error?.code,
+        "RESOURCE_VERSION_UNSUPPORTED",
+        operation
+      );
+      assert.match(
+        response.error.message,
+        /^artifact request version .+ is not supported; 3\.x supports .+; last read by release-train major 2$/u,
+        operation
+      );
+      assert.deepEqual(await snapshotTree(root), before, operation);
+    }
   } finally {
     await repository.dispose();
   }
 });
 
-for (const mode of ["strict", "lite", "fix"] as const) {
-  test(`accepted F4 continues original ${mode} standalone work with immutable explicit identity`, async () => {
-    const repository = await createTestRepository({ artifactLayout: null });
-    try {
-      const root = await realpath(repository.root);
-      const relative =
-        mode === "fix"
-          ? "documentation/changes/old.md"
-          : `documentation/features/old/${mode === "lite" ? "work" : "description"}.md`;
-      await mkdir(path.dirname(path.join(root, relative)), { recursive: true });
-      const original =
-        mode === "fix"
-          ? "# Change Report: Old\nOriginal decision.\n"
-          : "# Feature: Old\n\nSlug: `old`\nOriginal approved bytes.\n";
-      await writeFile(path.join(root, relative), original);
-      const before = await inspectArtifacts({
-        repoRoot: root,
-        workPath: relative
-      });
-      assert.equal(before.layout, "legacy");
-      assert.equal(before.legacySelection?.mode, mode);
-      await initializeArtifacts({ repoRoot: root });
-      const selected = (
-        await inspectArtifacts({ repoRoot: root, workPath: relative })
-      ).legacySelection;
-      assert.deepEqual(selected, before.legacySelection);
-      assert.ok(selected);
-      await assert.rejects(
+test("a removed artifact declaration layout is refused without changing evidence", async () => {
+  const repository = await createTestRepository();
+  try {
+    const root = await realpath(repository.root);
+    const declarationPath = path.join(root, ".banzai/artifacts.json");
+    const declaration = JSON.parse(
+      await readFile(declarationPath, "utf8")
+    ) as Record<string, unknown>;
+    await writeFile(
+      declarationPath,
+      JSON.stringify({ ...declaration, layout: "legacy" })
+    );
+    const before = await snapshotTree(root);
+    for (const action of [
+      () => inspectArtifacts({ repoRoot: root }),
+      () => initializeArtifacts({ repoRoot: root }),
+      () =>
         createWork({
           repoRoot: root,
-          slug: "old",
-          mode,
+          slug: "blocked",
+          mode: "lite",
           creationId: randomUUID()
-        }),
-        code("ARTIFACT_WORK_AMBIGUOUS")
-      );
-      // Original work remains legacy even after the owner's default changes.
-      await writeFile(
-        path.join(root, ".banzai/artifacts.json"),
-        JSON.stringify({
-          schema: "banzai-artifact-layout/v1",
-          schemaVersion: 1,
-          layout: "private"
         })
-      );
-      await writeFile(
-        path.join(root, relative),
-        original + "changed after selection\n"
-      );
-      await assert.rejects(
-        createWork({
-          repoRoot: root,
-          slug: selected.slug,
-          mode,
-          creationId: selected.creationId
-        }),
-        code("ARTIFACT_WORK_AMBIGUOUS")
-      );
-      await assert.rejects(
-        readFile(
-          path.join(root, `.banzai/work/${selected.creationId}/work.json`)
-        ),
-        { code: "ENOENT" }
-      );
-      await writeFile(path.join(root, relative), original);
-      const bound = await createWork({
-        repoRoot: root,
-        slug: selected.slug,
-        mode,
-        creationId: selected.creationId
+    ]) {
+      await assert.rejects(action(), {
+        code: "RESOURCE_VERSION_UNSUPPORTED",
+        message:
+          /^artifact layout version legacy is not supported; 3\.x supports private; last read by release-train major 2$/u
       });
-      assert.deepEqual(bound.binding.artifacts, selected.artifacts);
-      assert.equal(await readFile(path.join(root, relative), "utf8"), original);
-      const workPath = `.banzai/work/${bound.binding.workId}/work.json`;
-      const handedOff = await artifactRequest(root, "inspect", { workPath });
-      assert.equal(handedOff.ok, true);
-      const handoffFile = path.join(root, "handoff.json");
-      await writeFile(
-        handoffFile,
-        JSON.stringify({
-          schema: "banzai-artifact-request/v1",
-          schemaVersion: 1,
-          repoRoot: root,
-          workPath
-        })
-      );
-      const fresh = JSON.parse(
-        (
-          await execute(process.execPath, [
-            commandPath,
-            "inspect",
-            "--json",
-            handoffFile
-          ])
-        ).stdout
-      ) as { result: { work: { binding: { workId: string } } } };
-      assert.equal(fresh.result.work.binding.workId, bound.binding.workId);
-      assert.equal(
-        (await inspectArtifacts({ repoRoot: root, workPath: relative })).work
-          ?.binding.workId,
-        bound.binding.workId
-      );
-      const claim = await acquireWork({
-        repoRoot: root,
-        workPath,
-        ownerId: "next-session"
-      });
-      await releaseWork({ repoRoot: root, workPath, token: claim.token });
-      assert.equal(await readFile(path.join(root, relative), "utf8"), original);
-    } finally {
-      await repository.dispose();
+      assert.deepEqual(await snapshotTree(root), before);
     }
-  });
-}
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("binding v1 is refused by readers and writers without changing files or claims", async () => {
+  const repository = await createTestRepository();
+  try {
+    const root = await realpath(repository.root);
+    const work = await createWork({
+      repoRoot: root,
+      slug: "current",
+      mode: "lite",
+      creationId: randomUUID()
+    });
+    const workPath = `.banzai/work/${work.binding.workId}`;
+    await writeFile(
+      path.join(root, workPath, "work.json"),
+      JSON.stringify({
+        ...work.binding,
+        schema: "banzai-work-binding/v1",
+        schemaVersion: 1
+      })
+    );
+    const before = await snapshotTree(root);
+    for (const action of [
+      () => readBinding(root, workPath),
+      () => inspectArtifacts({ repoRoot: root, workPath }),
+      () => acquireWork({ repoRoot: root, workPath, ownerId: "test" }),
+      () => releaseWork({ repoRoot: root, workPath, token: randomUUID() }),
+      () =>
+        writeArtifact({
+          repoRoot: root,
+          workPath,
+          token: randomUUID(),
+          artifactPath: `${workPath}/work.md`,
+          inputFile: path.join(root, "missing.md"),
+          expectedSha256: null
+        })
+    ]) {
+      await assert.rejects(action(), {
+        code: "RESOURCE_VERSION_UNSUPPORTED",
+        message:
+          /^.+ version .+ is not supported; 3\.x supports .+; last read by release-train major 2$/u
+      });
+      assert.deepEqual(await snapshotTree(root), before);
+    }
+  } finally {
+    await repository.dispose();
+  }
+});
 
 test("accepted F5 F6 F7 F9 archive reviewed bytes, mandatory Markdown authority, pins and safe restore ancestry", async () => {
   const repository = await createTestRepository({ artifactLayout: "private" });
@@ -1037,7 +973,7 @@ test("accepted F5 F6 F7 F9 archive reviewed bytes, mandatory Markdown authority,
         evaluationStateFixture({
           workflow: "feature",
           extra: {
-            schemaVersion: 4,
+            schemaVersion: 5,
             runId,
             slug: "pinned",
             repoRoot: root,
@@ -1263,8 +1199,8 @@ test("accepted F11 standalone and bundled CLI outputs validate against the shipp
     await writeFile(
       request,
       JSON.stringify({
-        schema: "banzai-artifact-request/v1",
-        schemaVersion: 1,
+        schema: "banzai-artifact-request/v2",
+        schemaVersion: 2,
         repoRoot: root
       })
     );
@@ -1297,15 +1233,15 @@ test("accepted F11 standalone and bundled CLI outputs validate against the shipp
         restore: { bundlePath, destination: `${bundlePath}-restored` }
       })) {
         const input = {
-          schema: "banzai-artifact-request/v1",
-          schemaVersion: 1,
+          schema: "banzai-artifact-request/v2",
+          schemaVersion: 2,
           repoRoot: root,
           ...fields
         };
         const contract = JSON.parse(
           await readFile(
             path.resolve(
-              `../../plugins/banzai/contracts/artifacts/v1/${operation}-request.schema.json`
+              `../../plugins/banzai/contracts/artifacts/v2/${operation}-request.schema.json`
             ),
             "utf8"
           )
@@ -1351,6 +1287,101 @@ test("accepted F11 standalone and bundled CLI outputs validate against the shipp
             JSON.stringify(response)
           );
       }
+    }
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("standalone verification refuses unsupported ledgers before claims or evidence creation", async () => {
+  const repository = await createTestRepository({ artifactLayout: "private" });
+  try {
+    const root = await realpath(repository.root);
+    const created = await createWork({
+      repoRoot: root,
+      slug: "ledger-preflight",
+      mode: "lite",
+      creationId: randomUUID()
+    });
+    const workPath = `.banzai/work/${created.binding.workId}/work.json`;
+    const evidence = created.binding.artifacts.verificationDirectory;
+    assert.ok(evidence);
+    await mkdir(path.join(root, evidence), { recursive: true });
+    await writeFile(
+      path.join(root, evidence, "ledger.json"),
+      '{"schemaVersion":1}\n'
+    );
+    await writeFile(
+      path.join(root, ".banzai/config.json"),
+      JSON.stringify({
+        schemaVersion: 3,
+        verification: {
+          profiles: [
+            {
+              id: "project",
+              projectType: "custom",
+              commands: [
+                {
+                  id: "unit",
+                  name: "Unit",
+                  command: process.execPath,
+                  args: [
+                    "-e",
+                    "require('node:fs').writeFileSync('unexpected-check', 'ran')"
+                  ],
+                  timeoutMs: 1000
+                }
+              ]
+            }
+          ]
+        }
+      })
+    );
+    const request = {
+      schema: "banzai-verification-request/v1",
+      schemaVersion: 1,
+      repoRoot: root,
+      workPath,
+      roundId: randomUUID()
+    };
+    const refused = (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal(
+        (error as Error & { code: string }).code,
+        "RESOURCE_VERSION_UNSUPPORTED"
+      );
+      assert.equal(
+        error.message,
+        "verification ledger version 1 is not supported; 3.x supports 2; last read by release-train major 2"
+      );
+      return true;
+    };
+    for (const operation of ["inspect", "decide", "execute"]) {
+      const before = await snapshotTree(root);
+      await assert.rejects(
+        verificationOperation(operation, {
+          ...request,
+          ...(operation === "execute" ? { checkId: "unit" } : {})
+        }),
+        refused
+      );
+      assert.deepEqual(await snapshotTree(root), before);
+    }
+    // A held owner claim must never be consulted or replaced on version refusal.
+    const claim = await acquireWork({
+      repoRoot: root,
+      workPath,
+      ownerId: "preflight-owner"
+    });
+    try {
+      const before = await snapshotTree(root);
+      await assert.rejects(
+        verificationOperation("execute", { ...request, checkId: "unit" }),
+        refused
+      );
+      assert.deepEqual(await snapshotTree(root), before);
+    } finally {
+      await releaseWork({ repoRoot: root, workPath, token: claim.token });
     }
   } finally {
     await repository.dispose();
@@ -1504,8 +1535,8 @@ test("standalone verification owns binding v2 evidence and reuses direct physica
       await writeFile(
         archiveRequest,
         JSON.stringify({
-          schema: "banzai-artifact-request/v1",
-          schemaVersion: 1,
+          schema: "banzai-artifact-request/v2",
+          schemaVersion: 2,
           repoRoot: root,
           ...fields
         })
@@ -1577,21 +1608,21 @@ test("standalone verification owns binding v2 evidence and reuses direct physica
         command: "arbitrary"
       })
     );
-    const legacy = await createWork({
+    const current = await createWork({
       repoRoot: root,
-      slug: "legacy-evidence",
+      slug: "fresh-evidence",
       mode: "lite",
       creationId: randomUUID()
     });
-    assert.equal(legacy.binding.schemaVersion, 1);
+    assert.equal(current.binding.schemaVersion, 2);
     assert.equal(
       (
         await verificationOperation("decide", {
           ...request,
-          workPath: `.banzai/work/${legacy.binding.workId}/work.json`
+          workPath: `.banzai/work/${current.binding.workId}/work.json`
         })
       ).supported,
-      false
+      true
     );
   } finally {
     await repository.dispose();
@@ -1798,7 +1829,7 @@ test("binding schemas accept helper outputs for every mode and retain closed rol
       ): ((value: unknown) => boolean) & { errors?: unknown };
     };
     const root = await realpath(repository.root);
-    for (const schemaVersion of [1, 2] as const) {
+    for (const schemaVersion of [2] as const) {
       const schema = JSON.parse(
         await readFile(
           path.resolve(

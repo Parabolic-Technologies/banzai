@@ -17,6 +17,7 @@ import {
   verifyArchive,
   restoreArtifacts,
 } from "./artifact-archive.mjs";
+import pluginMetadata from "../.claude-plugin/plugin.json" with { type: "json" };
 import { constants } from "node:fs";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
@@ -36,8 +37,8 @@ import { createHash, randomUUID } from "node:crypto";
 
 const execute = promisify(execFile);
 export const DECLARATION_SCHEMA = "banzai-artifact-layout/v1";
-export const BINDING_SCHEMA = "banzai-work-binding/v1";
-export const REQUEST_SCHEMA = "banzai-artifact-request/v1";
+export const BINDING_SCHEMA = "banzai-work-binding/v2";
+export const REQUEST_SCHEMA = "banzai-artifact-request/v2";
 export const RESULT_SCHEMA = "banzai-artifact-result/v1";
 export const METADATA_LIMIT = 64 * 1024;
 export const DISCOVERY_LIMIT = 1000;
@@ -48,7 +49,7 @@ const UUID =
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const MODES = ["strict", "lite", "fix", "workflow"];
-const LAYOUTS = ["private", "legacy"];
+const LAYOUTS = ["private"];
 const CLAIM = ".writer-claim.json";
 const INIT_LOCK = ".banzai/.artifact-init.lock";
 const runnerOwnership = new AsyncLocalStorage();
@@ -63,6 +64,14 @@ export class ArtifactStorageError extends Error {
 
 export function fail(code, message) {
   throw new ArtifactStorageError(code, message);
+}
+
+export function unsupportedResourceVersion(resource, found, supported) {
+  const major = Number(pluginMetadata.version.split(".")[0]);
+  fail(
+    "RESOURCE_VERSION_UNSUPPORTED",
+    `${resource} version ${found} is not supported; ${major}.x supports ${supported}; last read by release-train major ${major - 1}`,
+  );
 }
 
 export function digestBytes(value) {
@@ -319,47 +328,32 @@ export async function projectRoot(input) {
 }
 
 export function parseDeclaration(value) {
+  if (value !== null && typeof value === "object") {
+    if (value.schema !== DECLARATION_SCHEMA || value.schemaVersion !== 1)
+      unsupportedResourceVersion("artifact declaration", `${value.schema} (schemaVersion ${value.schemaVersion})`, DECLARATION_SCHEMA);
+    if (value.layout !== "private")
+      unsupportedResourceVersion("artifact layout", value.layout, "private");
+  }
   exactObject(value, ["schema", "schemaVersion", "layout"]);
-  if (value.schema !== DECLARATION_SCHEMA || value.schemaVersion !== 1)
-    fail(
-      "ARTIFACT_VERSION_UNSUPPORTED",
-      "Unsupported artifact declaration version.",
-    );
-  if (!LAYOUTS.includes(value.layout))
-    fail(
-      "ARTIFACT_INPUT_INVALID",
-      "Artifact layout must be private or legacy.",
-    );
   return value;
 }
 
-export function artifactRoles(workId, slug, mode, layout) {
-  const directory =
-    layout === "private"
-      ? `${WORK_ROOT}/${workId}`
-      : `documentation/features/${slug}`;
-  const roles = { reviewDirectory: directory };
-  if (mode === "strict" || mode === "workflow")
-    Object.assign(roles, {
-      description: `${directory}/description.md`,
-      plan:
-        layout === "private"
-          ? `${directory}/plan.md`
-          : `documentation/development-plans/${slug}/plan.md`,
-      implementationReport: `${directory}/implementation-report.md`,
-      testReport: `${directory}/test-report.md`,
-    });
-  if (mode === "lite" || mode === "workflow")
-    roles.work = `${directory}/work.md`;
-  if (mode === "fix" || mode === "workflow")
-    roles.changeReport =
-      layout === "private"
-        ? `${directory}/change-report.md`
-        : `documentation/changes/${slug}.md`;
+export function artifactRoles(workId, _slug, mode, layout) {
+  if (layout !== "private") unsupportedResourceVersion("artifact layout", layout, "private");
+  const directory = `${WORK_ROOT}/${workId}`;
+  const roles = { reviewDirectory: directory, verificationDirectory: `${directory}/verification` };
+  if (mode === "strict" || mode === "workflow") Object.assign(roles, {
+    description: `${directory}/description.md`, plan: `${directory}/plan.md`,
+    implementationReport: `${directory}/implementation-report.md`, testReport: `${directory}/test-report.md`,
+  });
+  if (mode === "lite" || mode === "workflow") roles.work = `${directory}/work.md`;
+  if (mode === "fix" || mode === "workflow") roles.changeReport = `${directory}/change-report.md`;
   return roles;
 }
 
 export function parseBinding(value) {
+  if (value !== null && typeof value === "object" && (value.schema !== BINDING_SCHEMA || value.schemaVersion !== 2))
+    unsupportedResourceVersion("work binding", `${value.schema} (schemaVersion ${value.schemaVersion})`, BINDING_SCHEMA);
   exactObject(value, [
     "schema",
     "schemaVersion",
@@ -371,12 +365,7 @@ export function parseBinding(value) {
     "sourceCommit",
     "artifacts",
   ]);
-  if (!((value.schema === BINDING_SCHEMA && value.schemaVersion === 1) ||
-    (value.schema === "banzai-work-binding/v2" && value.schemaVersion === 2 && value.layout === "private")))
-    fail(
-      "ARTIFACT_VERSION_UNSUPPORTED",
-      "Unsupported artifact work binding version.",
-    );
+
   if (
     !UUID.test(value.workId) ||
     typeof value.slug !== "string" ||
@@ -403,7 +392,6 @@ export function parseBinding(value) {
     value.mode,
     value.layout,
   );
-  if (value.schemaVersion === 2) expected.verificationDirectory = `${WORK_ROOT}/${value.workId}/verification`;
   exactObject(value.artifacts, Object.keys(expected));
   for (const key of Object.keys(expected)) {
     relativePath(value.artifacts[key]);
@@ -434,146 +422,6 @@ async function directories(root, relative, optional = true) {
     if (error instanceof ArtifactStorageError) throw error;
     fail("ARTIFACT_IO_ERROR", "Artifact directories could not be inspected.");
   }
-}
-
-async function readHeader(root, relative) {
-  const target = await safePath(root, relative, { missing: true });
-  let handle;
-  try {
-    handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const buffer = Buffer.alloc(METADATA_LIMIT);
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-    return buffer.subarray(0, bytesRead).toString("utf8");
-  } catch (error) {
-    if (error.code === "ENOENT") return null;
-    fail(
-      "ARTIFACT_IO_ERROR",
-      "Legacy artifact evidence could not be inspected.",
-    );
-  } finally {
-    await handle?.close();
-  }
-}
-
-async function legacyEvidence(root, declared = false) {
-  const evidence = [];
-  let count = 0;
-  for (const folder of [
-    "documentation/features",
-    "documentation/development-plans",
-  ]) {
-    for (const entry of await directories(root, folder)) {
-      if (++count > DISCOVERY_LIMIT)
-        fail(
-          "ARTIFACT_DISCOVERY_LIMIT",
-          "Legacy artifact discovery exceeded its bound.",
-        );
-      if (entry.isSymbolicLink())
-        fail(
-          "ARTIFACT_UNSAFE_PATH",
-          "Legacy artifact discovery encountered a symlink.",
-        );
-      if (!entry.isDirectory()) continue;
-      const files = folder.endsWith("features")
-        ? ["description.md", "work.md"]
-        : ["plan.md"];
-      for (const name of files) {
-        const relative = `${folder}/${entry.name}/${name}`;
-        const header = await readHeader(root, relative);
-        if (header === null) continue;
-        if (
-          (/^# Feature: /mu.test(header) &&
-            header.includes(`Slug: \`${entry.name}\``)) ||
-          (/^# Development Plan: /mu.test(header) &&
-            header.includes(`/features/${entry.name}/description.md`))
-        )
-          evidence.push(relative);
-      }
-    }
-  }
-  for (const entry of await directories(root, "documentation/changes")) {
-    if (++count > DISCOVERY_LIMIT) fail("ARTIFACT_DISCOVERY_LIMIT", "Legacy change discovery exceeded its bound.");
-    if (!entry.isFile() || !/^[a-z0-9]+(?:-[a-z0-9]+)*\.md$/u.test(entry.name)) continue;
-    const relative = `documentation/changes/${entry.name}`;
-    if (/^# Change Report:/mu.test(await readHeader(root, relative) ?? "")) evidence.push(relative);
-  }
-  const manifest = await readHeader(root, "PROJECT_MANIFEST.md");
-  const refs =
-    manifest?.match(
-      /documentation\/(?:features|changes|development-plans)\/[a-z0-9/.-]+\.md/gu,
-    ) ?? [];
-  for (const relative of [...new Set(refs)]) {
-    if (++count > DISCOVERY_LIMIT)
-      fail(
-        "ARTIFACT_DISCOVERY_LIMIT",
-        "Legacy reference discovery exceeded its bound.",
-      );
-    if ((await readHeader(root, relative)) !== null) evidence.push(relative);
-  }
-  for (const entry of await directories(root, ".banzai/runs")) {
-    if (++count > DISCOVERY_LIMIT)
-      fail("ARTIFACT_DISCOVERY_LIMIT", "Run discovery exceeded its bound.");
-    if (!entry.isDirectory())
-      fail(
-        "ARTIFACT_RECOVERY_REQUIRED",
-        "Runner evidence requires explicit inspection.",
-      );
-    const state = await readJson(
-      root,
-      `.banzai/runs/${entry.name}/state.json`,
-      true,
-    );
-    if (
-      state === null ||
-      ![1, 2, 3, 4, 5].includes(state.schemaVersion) ||
-      state.runId !== entry.name
-    )
-      fail(
-        "ARTIFACT_RECOVERY_REQUIRED",
-        "Unrecognized runner evidence requires recovery.",
-      );
-    if (state.schemaVersion >= 4 && !declared)
-      fail(
-        "ARTIFACT_RECOVERY_REQUIRED",
-        "A bound run without its artifact declaration requires recovery.",
-      );
-    if (state.schemaVersion < 4) evidence.push(`.banzai/runs/${entry.name}/state.json`);
-  }
-  return [...new Set(evidence)].sort();
-}
-
-async function legacyCandidates(root, evidence, boundWorks) {
-  const groups = new Map();
-  for (const relative of evidence) {
-    const match = /^documentation\/(features|development-plans|changes)\/([a-z0-9-]+)(?:\.md|\/)/u.exec(relative);
-    if (!match || boundWorks.some(work => work.binding.layout === "legacy" && work.binding.slug === match[2])) continue;
-    const slug = match[2];
-    const mode = match[1] === "changes" ? "fix" : relative.endsWith("/work.md") ? "lite" : "strict";
-    groups.set(`${slug}:${mode}`, { slug, mode });
-  }
-  const candidates = [];
-  for (const {slug, mode} of groups.values()) {
-    const artifacts = artifactRoles("00000000-0000-4000-8000-000000000000", slug, mode, "legacy");
-    const originals = [];
-    for (const [role, relative] of Object.entries(artifacts)) {
-      if (role === "reviewDirectory") {
-        for (const entry of await directories(root, relative)) {
-          if (!/^review-[1-9][0-9]*\.md$/u.test(entry.name)) continue;
-          const bytes = await readBytes(root, `${relative}/${entry.name}`);
-          originals.push({ path: `${relative}/${entry.name}`, sha256: digestBytes(bytes) });
-        }
-      } else {
-        const bytes = await readBytes(root, relative, { optional: true });
-        if (bytes !== null) originals.push({ path: relative, sha256: digestBytes(bytes) });
-      }
-    }
-    let sourceCommit = null;
-    try { sourceCommit = (await git(root, ["log", "-1", "--format=%H", "--", ...originals.map(item => item.path)])).stdout.trim() || null; } catch { /* Uncommitted standalone evidence has no recorded Git provenance. */ }
-    const identity = digestBytes(canonicalJson({ slug, mode, originals, sourceCommit }));
-    const creationId = `${identity.slice(0,8)}-${identity.slice(8,12)}-4${identity.slice(13,16)}-8${identity.slice(17,20)}-${identity.slice(20,32)}`;
-    candidates.push({ slug, mode, creationId, workPath: mode === "fix" ? artifacts.changeReport : artifacts.reviewDirectory, artifacts, originals, sourceCommit });
-  }
-  return candidates;
 }
 
 export async function readBinding(root, workPath) {
@@ -613,20 +461,8 @@ export async function inspectArtifacts(input) {
   const selector =
     input.workPath ??
     (input.workId === undefined ? null : `${WORK_ROOT}/${input.workId}`);
-  if (selector !== null && !selector.startsWith(`${WORK_ROOT}/`)) {
-    relativePath(selector);
-    const current = await inspectArtifacts({ repoRoot: root });
-    const matches = current.legacyCandidates.filter(item => item.workPath === selector || Object.values(item.artifacts).includes(selector));
-    const bound = [];
-    for (const candidate of current.candidates) {
-      const selected = await readBinding(root, candidate.workPath);
-      if (selected.binding.layout === "legacy" && Object.values(selected.binding.artifacts).includes(selector)) bound.push(candidate);
-    }
-    if (matches.length === 0 && bound.length === 1) return inspectArtifacts({ repoRoot: root, workId: bound[0].workId });
-    if (matches.length !== 1 || bound.length)
-      fail("ARTIFACT_WORK_AMBIGUOUS", "Select one recognized original legacy bundle or its registered work ID.");
-    return { ...current, legacyCandidates: matches, legacySelection: matches[0] };
-  }
+  if (selector !== null && !selector.startsWith(`${WORK_ROOT}/`))
+    fail("ARTIFACT_INPUT_INVALID", "Select an exact private work path or work ID.");
   if (selector !== null) {
     const selected = await readBinding(root, selector);
     if (declaration === null)
@@ -648,9 +484,9 @@ export async function inspectArtifacts(input) {
           workPath: `${WORK_ROOT}/${selected.binding.workId}/work.json`,
         },
       ],
-      legacyEvidence: [],
-      legacyCandidates: [],
-      legacySelection: null,
+
+
+
     };
   }
   const entries = await directories(root, WORK_ROOT);
@@ -670,17 +506,10 @@ export async function inspectArtifacts(input) {
       "ARTIFACT_RECOVERY_REQUIRED",
       "Private work exists without its declaration. Recover the declaration from verified bindings.",
     );
-  const legacy = await legacyEvidence(root, declaration !== null);
-  const continuations = await legacyCandidates(root, legacy, works);
   return {
     projectRoot: root,
-    classification:
-      declaration !== null
-        ? "declared"
-        : legacy.length > 0
-          ? "legacy"
-          : "fresh",
-    layout: declaration?.layout ?? (legacy.length > 0 ? "legacy" : "private"),
+    classification: declaration === null ? "fresh" : "declared",
+    layout: "private",
     declaration,
     work: null,
     candidates: works.map((item) => ({
@@ -689,9 +518,9 @@ export async function inspectArtifacts(input) {
       mode: item.binding.mode,
       workPath: `${WORK_ROOT}/${item.binding.workId}/work.json`,
     })),
-    legacyEvidence: legacy,
-    legacyCandidates: continuations,
-    legacySelection: null,
+
+
+
   };
 }
 
@@ -774,23 +603,14 @@ export async function initializeArtifacts(input) {
   if (input.layout !== undefined && !LAYOUTS.includes(input.layout))
     fail(
       "ARTIFACT_INPUT_INVALID",
-      "Artifact layout must be private or legacy.",
-    );
-  if (
-    input.layout !== undefined &&
-    input.layout !== before.layout &&
-    (before.declaration !== null || before.classification === "legacy")
-  )
-    fail(
-      "ARTIFACT_RECOVERY_REQUIRED",
-      "Changing an existing layout requires an explicit storage migration.",
+      "Artifact layout must be private.",
     );
   const root = before.projectRoot;
   const adoption = await inspectProjectAdoption(root);
   if (adoption.classification !== "ready")
     fail(
       "ARTIFACT_SETUP_REQUIRED",
-      "Complete normal project guidance setup or migration before initializing artifact storage.",
+      "Complete normal project guidance setup before initializing artifact storage.",
     );
   await git(root, ["rev-parse", "--show-toplevel"]).catch(() =>
     fail(
@@ -853,8 +673,8 @@ export async function initializeArtifacts(input) {
 }
 
 export async function createWork(input) {
-  if (input.schemaVersion !== undefined && ![1, 2].includes(input.schemaVersion))
-    fail("ARTIFACT_VERSION_UNSUPPORTED", "Unsupported new work binding version.");
+  if (input.schemaVersion !== undefined && input.schemaVersion !== 2)
+    unsupportedResourceVersion("work binding", input.schemaVersion, 2);
   if (
     !UUID.test(input.creationId) ||
     typeof input.slug !== "string" ||
@@ -870,7 +690,7 @@ export async function createWork(input) {
   const root = state.projectRoot;
   const directory = `${WORK_ROOT}/${input.creationId}`;
   return withInitializationLock(root, async () => {
-    const state = await inspectArtifacts({ repoRoot: root });
+    await inspectArtifacts({ repoRoot: root });
     const existing = await readJson(root, `${directory}/work.json`, true);
     if (existing !== null) {
       const bound = parseBinding(existing);
@@ -878,7 +698,7 @@ export async function createWork(input) {
         bound.workId !== input.creationId ||
         bound.slug !== input.slug ||
         bound.mode !== input.mode ||
-        bound.schemaVersion !== (input.schemaVersion === 2 ? 2 : 1)
+        bound.schemaVersion !== 2
       )
         fail(
           "ARTIFACT_OWNERSHIP_CONFLICT",
@@ -888,41 +708,8 @@ export async function createWork(input) {
       return readBinding(root, directory);
     }
     await verifyIgnores(root);
-    const continuation = state.legacyCandidates.find(item => item.slug === input.slug && item.mode === input.mode && item.creationId === input.creationId);
-    if (!continuation) {
-      const legacyRoles = artifactRoles(input.creationId, input.slug, "workflow", "legacy");
-      for (const [role, relative] of Object.entries(legacyRoles))
-        if (role !== "reviewDirectory" && (await readBytes(root, relative, { optional: true })) !== null)
-          fail("ARTIFACT_WORK_AMBIGUOUS", "Original legacy evidence occupies this slug. Inspect its current continuation identity; stale selections cannot create replacement private work.");
-    }
-    const layout = continuation ? "legacy" : state.layout;
-    const roles = artifactRoles(
-      input.creationId,
-      input.slug,
-      input.mode,
-      layout,
-    );
-    if (input.schemaVersion === 2) {
-      if (layout !== "private") fail("ARTIFACT_INPUT_INVALID", "Verification-enabled work requires a new private binding.");
-      roles.verificationDirectory = `${directory}/verification`;
-    }
-    if (layout === "legacy") {
-      for (const [role, relative] of Object.entries(roles)) {
-        if (
-          !continuation && role !== "reviewDirectory" &&
-          (await readBytes(root, relative, { optional: true })) !== null
-        )
-          fail(
-            "ARTIFACT_WORK_AMBIGUOUS",
-            "Legacy artifacts already occupy this slug. Inspect their original workPath and register using its exact continuation creationId, slug and mode.",
-          );
-      }
-      if (state.candidates.some((work) => work.slug === input.slug))
-        fail(
-          "ARTIFACT_WORK_AMBIGUOUS",
-          "Legacy work with this slug is already bound. Select its work ID.",
-        );
-    }
+    const layout = "private";
+    const roles = artifactRoles(input.creationId, input.slug, input.mode, layout);
     const staging = `${WORK_ROOT}/.create-${input.creationId}`;
     await verifyIgnores(root, { workId: input.creationId, layout, artifacts: roles }, [`${staging}/work.json`]);
     await makeDirectories(root, staging);
@@ -934,13 +721,12 @@ export async function createWork(input) {
     } catch {
       /* Standalone work may precede the first commit. */
     }
-    if (continuation) sourceCommit = continuation.sourceCommit;
     const staged = await readJson(root, `${staging}/work.json`, true);
     const binding =
       staged === null
         ? parseBinding({
-            schema: input.schemaVersion === 2 ? "banzai-work-binding/v2" : BINDING_SCHEMA,
-            schemaVersion: input.schemaVersion === 2 ? 2 : 1,
+            schema: BINDING_SCHEMA,
+            schemaVersion: 2,
             workId: input.creationId,
             slug: input.slug,
             mode: input.mode,
@@ -1151,6 +937,7 @@ async function requireClaim(input) {
 }
 
 export async function writeArtifact(input) {
+  await requireClaim(input);
   const root = await projectRoot(input.repoRoot);
   return withInitializationLock(root, () => writeClaimedArtifact(input));
 }
@@ -1221,6 +1008,7 @@ async function writeClaimedArtifact(input) {
 }
 
 export async function releaseWork(input) {
+  await requireClaim(input);
   const root = await projectRoot(input.repoRoot);
   return withInitializationLock(root, async () => {
     const work = await requireClaim(input);
@@ -1249,17 +1037,9 @@ export async function runArtifactOperation(operation, input) {
   const fields = operationFields[operation];
   if (fields === undefined)
     fail("ARTIFACT_INPUT_INVALID", "Unsupported artifact operation.");
-  exactObject(
-    input,
-    ["schema", "schemaVersion", "repoRoot", ...fields[0]],
-    fields[1],
-  );
-  if (!((input.schema === REQUEST_SCHEMA && input.schemaVersion === 1) ||
-    (operation === "create" && input.schema === "banzai-artifact-request/v2" && input.schemaVersion === 2)))
-    fail(
-      "ARTIFACT_VERSION_UNSUPPORTED",
-      "Unsupported artifact request version.",
-    );
+  if (input?.schema !== REQUEST_SCHEMA || input?.schemaVersion !== 2)
+    unsupportedResourceVersion("artifact request", `${input?.schema} (schemaVersion ${input?.schemaVersion})`, REQUEST_SCHEMA);
+  exactObject(input, ["schema", "schemaVersion", "repoRoot", ...fields[0]], fields[1]);
   const operations = {
     inventory: inventoryArtifacts,
     export: exportArtifacts,

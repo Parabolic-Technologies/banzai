@@ -51,8 +51,8 @@ test("adoption structural matrix preserves bounded reasons and unchanged files",
       agents: "# Personal rules\nBe precise."
     },
     {
-      name: "legacy",
-      expected: "migration_required",
+      name: "partial inline policy",
+      expected: "needs_attention",
       agents: null,
       claude: "## Engineering Quality\nOld rules."
     },
@@ -142,6 +142,14 @@ test("adoption structural matrix preserves bounded reasons and unchanged files",
           /FORBIDDEN|secret\/path|<T>|Project Overview/
         );
         assert.ok(!diagnostic.includes(root));
+        if (fixture.name === "partial inline policy")
+          assert.ok(
+            result.issues.some(
+              (issue) =>
+                issue.reason ===
+                "CLAUDE.md contains Engineering Quality while AGENTS.md lacks Authority; instruction layout is partial."
+            )
+          );
         if (fixture.name === "marker")
           assert.equal(result.issues[0]?.reason, "scaffold marker present");
       } finally {
@@ -266,17 +274,9 @@ test("adoption product source pins the shared identity predicate and approved sc
     path.join(root, "plugins/banzai/skills/project-manifest/SKILL.md"),
     "utf8"
   );
-  const migration = await readFile(
-    path.join(
-      root,
-      "plugins/banzai/skills/project-manifest/references/layout-migration.md"
-    ),
-    "utf8"
-  );
   const section = (text: string) =>
     text.split("## Source Repository Exception\n")[1]?.split("\n## ")[0];
   assert.ok(section(skill));
-  assert.equal(section(skill), section(migration));
   for (const required of [
     "at least one",
     "every present",
@@ -310,7 +310,7 @@ test("adoption product source pins the shared identity predicate and approved sc
   assert.match(skill, /^disable-model-invocation: true$/m);
   assert.match(
     skill,
-    /A declined migration leaves project files byte-identical/
+    /On partial report the exact ambiguity without changing source/
   );
   const supervisor = await readFile(
     path.join(

@@ -2,7 +2,7 @@
 
 `publication-policy.json` classifies documentation and plugin resources. Product,
 maintainer and reviewed example entries are eligible for publication. New internal
-work evidence is excluded even when a local task still uses legacy paths.
+work evidence is excluded from public publication surfaces.
 
 The declared mode is never weakened automatically:
 

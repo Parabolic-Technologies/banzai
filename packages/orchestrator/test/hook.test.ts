@@ -20,7 +20,11 @@ import {
   WorkflowRunner,
   workflowAuthorizationDigest
 } from "../src/workflow.js";
-import { createTestRepository, evaluationStateFixture } from "./helpers.js";
+import {
+  createTestRepository,
+  evaluationStateFixture,
+  snapshotTree
+} from "./helpers.js";
 
 const hookPath = path.resolve(
   process.cwd(),
@@ -110,8 +114,14 @@ test("a root project manifest gates manual sessions from any subdirectory", asyn
 test("orchestrated hook allows a valid bundle and denies drift or state writes", async () => {
   const repository = await createTestRepository();
   try {
-    const description = "documentation/features/example/description.md";
-    const plan = "documentation/development-plans/example/plan.md";
+    const bound = await createWork({
+      repoRoot: repository.root,
+      slug: "example",
+      mode: "workflow",
+      creationId: randomUUID()
+    });
+    const { description, plan } = bound.binding.artifacts;
+    assert.ok(description && plan);
     await mkdir(path.join(repository.root, path.dirname(description)), {
       recursive: true
     });
@@ -139,6 +149,13 @@ test("orchestrated hook allows a valid bundle and denies drift or state writes",
     await writeFile(
       path.join(runDirectory, "state.json"),
       JSON.stringify({
+        schemaVersion: 5,
+        artifactBinding: bound,
+        activeAttempt: {
+          id: "implementation-1",
+          kind: "implementation",
+          mutable: true
+        },
         runId,
         repoRoot: repository.root,
         status: "implementing",
@@ -160,13 +177,14 @@ test("orchestrated hook allows a valid bundle and denies drift or state writes",
     assert.equal(approvedArtifactWrite.decision, "deny");
     assert.match(
       approvedArtifactWrite.reason,
-      /approved planning artifacts are immutable/
+      /control files are not model-writable/
     );
 
+    assert.ok(bound.binding.artifacts.implementationReport);
     const implementationReportWrite = runHook({
       cwd: repository.root,
       env,
-      target: "documentation/features/example/implementation-report.md"
+      target: bound.binding.artifacts.implementationReport
     });
     assert.equal(implementationReportWrite.decision, "allow");
 
@@ -190,8 +208,14 @@ test("orchestrated hook allows a valid bundle and denies drift or state writes",
 test("orchestrated reviewer cannot write even with stale inherited authorization", async () => {
   const repository = await createTestRepository();
   try {
-    const description = "documentation/features/example/description.md";
-    const plan = "documentation/development-plans/example/plan.md";
+    const bound = await createWork({
+      repoRoot: repository.root,
+      slug: "example",
+      mode: "workflow",
+      creationId: randomUUID()
+    });
+    const { description, plan } = bound.binding.artifacts;
+    assert.ok(description && plan);
     const attemptId = "review-2-abcd1234";
     await mkdir(path.join(repository.root, path.dirname(description)), {
       recursive: true
@@ -221,6 +245,8 @@ test("orchestrated reviewer cannot write even with stale inherited authorization
     await writeFile(
       path.join(runDirectory, "state.json"),
       JSON.stringify({
+        schemaVersion: 5,
+        artifactBinding: bound,
         runId,
         slug: "example",
         repoRoot: repository.root,
@@ -280,6 +306,12 @@ test("orchestrated reviewer cannot write even with stale inherited authorization
 test("lite orchestrated writes require a matching persisted workflow digest", async () => {
   const repository = await createTestRepository();
   try {
+    const bound = await createWork({
+      repoRoot: repository.root,
+      slug: "lite",
+      mode: "workflow",
+      creationId: randomUUID()
+    });
     const runId = "lite-run";
     const request = "Fix the existing label.";
     const runDirectory = path.join(repository.root, ".banzai", "runs", runId);
@@ -306,6 +338,13 @@ test("lite orchestrated writes require a matching persisted workflow digest", as
     });
     const statePath = path.join(runDirectory, "state.json");
     const state = {
+      schemaVersion: 5,
+      artifactBinding: bound,
+      activeAttempt: {
+        id: "implementation-1",
+        kind: "implementation",
+        mutable: true
+      },
       runId,
       request,
       repoRoot: repository.root,
@@ -326,10 +365,11 @@ test("lite orchestrated writes require a matching persisted workflow digest", as
     assert.equal(sourceWrite.decision, "allow");
     assert.match(sourceWrite.reason, /valid quick-fix workflow authorization/);
 
+    assert.ok(bound.binding.artifacts.changeReport);
     const reportWrite = runHook({
       cwd: repository.root,
       env,
-      target: "documentation/changes/small-fix.md"
+      target: bound.binding.artifacts.changeReport
     });
     assert.equal(reportWrite.decision, "allow");
 
@@ -373,6 +413,12 @@ test("lite orchestrated writes require a matching persisted workflow digest", as
 test("plan and workflow authorizations cannot be crossed or combined", async () => {
   const repository = await createTestRepository();
   try {
+    const bound = await createWork({
+      repoRoot: repository.root,
+      slug: "mixed",
+      mode: "workflow",
+      creationId: randomUUID()
+    });
     const runId = "mixed-run";
     const runDirectory = path.join(repository.root, ".banzai", "runs", runId);
     await mkdir(runDirectory, { recursive: true });
@@ -384,6 +430,13 @@ test("plan and workflow authorizations cannot be crossed or combined", async () 
     await writeFile(
       path.join(runDirectory, "state.json"),
       JSON.stringify({
+        schemaVersion: 5,
+        artifactBinding: bound,
+        activeAttempt: {
+          id: "implementation-1",
+          kind: "implementation",
+          mutable: true
+        },
         runId,
         request: "Fix it.",
         repoRoot: repository.root,
@@ -465,7 +518,7 @@ test("runner mode fails closed when an edit target cannot be parsed", async () =
   }
 });
 
-for (const stateVersion of [4, 5] as const)
+for (const stateVersion of [5] as const)
   test(`v${stateVersion} hook enforces bound phase roles, read-only selection/review and private layout`, async () => {
     const repository = await createTestRepository({
       artifactLayout: "private"
@@ -475,7 +528,7 @@ for (const stateVersion of [4, 5] as const)
       const bound = await createWork({
         repoRoot: root,
         slug: "hook-bound",
-        schemaVersion: stateVersion === 5 ? 2 : 1,
+        schemaVersion: 2,
         mode: "workflow",
         creationId: randomUUID()
       });
@@ -591,14 +644,10 @@ for (const stateVersion of [4, 5] as const)
           "src/example.ts"
         ])
           expect(target, "allow");
-        for (const target of [
-          ...forbidden,
-          roles.plan,
-          roles.description,
-          `documentation/features/hook-bound/implementation-report.md`
-        ])
+        for (const target of [...forbidden, roles.plan, roles.description])
           expect(target, "deny");
         expect(roles.changeReport, phase === "fix" ? "allow" : "deny");
+        expect("documentation/product-guide.md", "allow");
       }
       await save("plan", "planning", {
         artifactBinding: { ...bound, sha256: "0".repeat(64) }
@@ -612,7 +661,7 @@ for (const stateVersion of [4, 5] as const)
     }
   });
 
-for (const artifactLayout of ["private", "legacy"] as const)
+for (const artifactLayout of ["private"] as const)
   test(`bound artifact grants have runner and hook allow/deny parity (${artifactLayout})`, async () => {
     const repository = await createTestRepository({ artifactLayout });
     try {
@@ -672,17 +721,10 @@ for (const artifactLayout of ["private", "legacy"] as const)
           "fix",
           "review"
         ] as const) {
-          // Legacy hooks defer broader documentation scope to the runner. Compare
-          // their shared strict-fix report/approved-byte boundary without changing it.
-          if (
-            artifactLayout === "legacy" &&
-            (workflow !== "strict" || phase !== "fix")
-          )
-            continue;
           const state = evaluationStateFixture({
             workflow,
             extra: {
-              schemaVersion: 4,
+              schemaVersion: 5,
               runId,
               repoRoot: root,
               artifactBinding: bound,
@@ -748,7 +790,6 @@ for (const artifactLayout of ["private", "legacy"] as const)
                       : [roles.implementationReport, roles.testReport]
                 : [];
           for (const target of targets) {
-            if (artifactLayout === "legacy" && target === roles.work) continue;
             const allowed = expected.includes(target);
             const label: string = [workflow, phase, target].join(": ");
             assert.equal(
@@ -827,6 +868,68 @@ test("R4-F4 manual hook defers only for validated private role paths", async () 
       runHook({ cwd: root, target: bound.binding.artifacts.work }).decision,
       "deny"
     );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("hook denies unsupported states and bindings before any write including documentation", async () => {
+  const repository = await createTestRepository();
+  try {
+    const bound = await createWork({
+      repoRoot: repository.root,
+      slug: "unsupported",
+      mode: "workflow",
+      creationId: randomUUID()
+    });
+    const runId = "unsupported";
+    const runRoot = path.join(repository.root, ".banzai/runs", runId);
+    await mkdir(runRoot, { recursive: true });
+    await writeFile(
+      path.join(repository.root, ".banzai/active-run.json"),
+      JSON.stringify({ schemaVersion: 1, runId })
+    );
+    assert.ok(bound.binding.artifacts.implementationReport);
+    const states = [1, 2, 3, 4, 6].map((schemaVersion) => ({
+      schemaVersion,
+      artifactBinding: bound
+    }));
+    states.push({
+      schemaVersion: 5,
+      artifactBinding: {
+        ...bound,
+        binding: { ...bound.binding, schemaVersion: 1 }
+      }
+    } as unknown as (typeof states)[number]);
+    for (const state of states) {
+      await writeFile(
+        path.join(runRoot, "state.json"),
+        JSON.stringify({
+          ...state,
+          runId,
+          repoRoot: repository.root,
+          status: "implementing"
+        })
+      );
+      const before = await snapshotTree(repository.root);
+      for (const target of [
+        "src/example.ts",
+        "documentation/guide.md",
+        bound.binding.artifacts.implementationReport
+      ]) {
+        const result = runHook({
+          cwd: repository.root,
+          target,
+          env: { BANZAI_RUN_ID: runId, BANZAI_APPROVAL_DIGEST: "approved" }
+        });
+        assert.equal(result.decision, "deny");
+        assert.match(
+          result.reason,
+          /version .* is not supported; .* supports .*; last read by release-train major/u
+        );
+        assert.deepEqual(await snapshotTree(repository.root), before);
+      }
+    }
   } finally {
     await repository.dispose();
   }

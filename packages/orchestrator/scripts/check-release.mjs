@@ -1,5 +1,4 @@
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
 import { access, lstat, readFile, readdir, realpath } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -223,6 +222,233 @@ function semanticVersion(value, relativePath, label) {
   return version;
 }
 
+function validateCompatibilityShape(compatibility) {
+  const policyPath = "release-policy.json";
+  const declaration = record(compatibility, policyPath, "compatibility");
+  requireObjectKeys(
+    declaration,
+    ["major", "families"],
+    "INVALID_RELEASE_POLICY",
+    policyPath,
+    "compatibility"
+  );
+  if (!Number.isSafeInteger(declaration.major) || declaration.major < 1)
+    fail(
+      "INVALID_RELEASE_POLICY",
+      policyPath,
+      "compatibility.major must be a positive integer"
+    );
+  const families = array(
+    declaration.families,
+    policyPath,
+    "compatibility.families"
+  );
+  if (families.length === 0)
+    fail(
+      "INVALID_RELEASE_POLICY",
+      policyPath,
+      "compatibility families must not be empty"
+    );
+  const ids = new Set();
+  for (const value of families) {
+    const family = record(value, policyPath, "compatibility family");
+    requireObjectKeys(
+      family,
+      ["id", "supported", "removed", "schemaFiles", "removedTokens"],
+      "INVALID_RELEASE_POLICY",
+      policyPath,
+      "compatibility family"
+    );
+    if (
+      typeof family.id !== "string" ||
+      !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(family.id) ||
+      ids.has(family.id)
+    )
+      fail(
+        "INVALID_RELEASE_POLICY",
+        policyPath,
+        "compatibility family IDs must be unique kebab-case names"
+      );
+    ids.add(family.id);
+    for (const key of [
+      "supported",
+      "removed",
+      "schemaFiles",
+      "removedTokens"
+    ]) {
+      const values = family[key];
+      if (!Array.isArray(values))
+        fail(
+          "INVALID_RELEASE_POLICY",
+          policyPath,
+          `${family.id}.${key} must be an array`
+        );
+      for (const item of values)
+        nonEmptyString(item, policyPath, `${family.id}.${key}`);
+      if (
+        new Set(values).size !== values.length ||
+        (key === "supported" && values.length === 0)
+      )
+        fail(
+          "INVALID_RELEASE_POLICY",
+          policyPath,
+          `${family.id}.${key} has duplicate or missing values`
+        );
+    }
+    if (family.supported.some((version) => family.removed.includes(version)))
+      fail(
+        "INVALID_RELEASE_POLICY",
+        policyPath,
+        `${family.id} supports a removed version`
+      );
+    for (const schemaPath of family.schemaFiles) {
+      if (
+        !/^plugins\/banzai\/contracts\/(?:[a-z0-9-]+\/)*[a-z0-9-]+\.schema\.json$/.test(
+          schemaPath
+        )
+      )
+        fail(
+          "INVALID_RELEASE_POLICY",
+          policyPath,
+          `${family.id} has an invalid schema path`
+        );
+    }
+  }
+  return declaration;
+}
+
+async function validateCompatibility(root, policy, releaseVersion) {
+  const { major, families } = policy.compatibility;
+  const [releaseMajor, minor, patch] = releaseVersion.split(".").map(Number);
+  requireExact(
+    major,
+    releaseMajor,
+    "CONTRACT_POLICY_DRIFT",
+    "release-policy.json",
+    "compatibility major differs from release-train major"
+  );
+  if (minor === 0 && patch === 0) {
+    for (const family of families) {
+      if (family.supported.length !== 1)
+        fail(
+          "MAJOR_TARGET_MULTIPLE_VERSIONS",
+          "release-policy.json",
+          `${family.id} must support exactly one version at a major boundary`
+        );
+    }
+  }
+  const declared = new Map();
+  for (const family of families) {
+    for (const schemaPath of family.schemaFiles) {
+      if (declared.has(schemaPath))
+        fail(
+          "SUPPORTED_VERSION_UNDECLARED",
+          schemaPath,
+          "schema belongs to more than one family"
+        );
+      declared.set(schemaPath, family);
+      const info = await lstat(repositoryPath(root, schemaPath)).catch(
+        () => null
+      );
+      if (!info?.isFile())
+        fail(
+          "SUPPORTED_VERSION_UNDECLARED",
+          schemaPath,
+          "declared schema is missing or is not a regular file"
+        );
+      const schema = await readJson(root, schemaPath);
+      const version = schemaPath.match(/\/v(\d+)\//)?.[1];
+      const shape = schema.$ref?.startsWith("#/$defs/")
+        ? schema.$defs?.[schema.$ref.slice("#/$defs/".length)]
+        : schema;
+      const identity = shape?.properties?.schema?.const;
+      const schemaVersion = shape?.properties?.schemaVersion?.const;
+      const supported =
+        identity ??
+        `${["phase-result", "review-result", "workflow-selection"].includes(family.id) ? "" : "banzai-"}${family.id}/v${version}`;
+      if (
+        !family.supported.includes(supported) ||
+        (schemaVersion !== undefined && String(schemaVersion) !== version)
+      )
+        fail(
+          "CONTRACT_POLICY_DRIFT",
+          schemaPath,
+          "schema identity or version differs from its declared family"
+        );
+      if (schema.$id !== undefined) {
+        const expectedId = `https://banzai.local/contracts/${schemaPath.slice("plugins/banzai/contracts/".length)}`;
+        requireExact(
+          schema.$id,
+          expectedId,
+          "CONTRACT_POLICY_DRIFT",
+          schemaPath,
+          "schema $id"
+        );
+      }
+    }
+  }
+  async function scan(directory) {
+    for (const entry of await readdir(repositoryPath(root, directory), {
+      withFileTypes: true
+    })) {
+      const relativePath = `${directory}/${entry.name}`;
+      if (entry.isDirectory()) await scan(relativePath);
+      else if (
+        entry.name.endsWith(".schema.json") &&
+        !declared.has(relativePath)
+      )
+        fail(
+          "SUPPORTED_VERSION_UNDECLARED",
+          relativePath,
+          "shipped schema is not declared"
+        );
+    }
+  }
+  await scan("plugins/banzai/contracts");
+  const tokens = families.flatMap((family) => family.removedTokens);
+  if (tokens.length > 0) {
+    const { stdout } = await execFileAsync(
+      "git",
+      [
+        "ls-files",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "-z",
+        "--",
+        "*.md"
+      ],
+      { cwd: root, maxBuffer: 16 * 1024 * 1024 }
+    );
+    for (const relativePath of [
+      ...new Set(stdout.split("\0").filter(Boolean))
+    ].sort()) {
+      if (
+        relativePath.startsWith("documentation/decisions/") ||
+        relativePath.startsWith("documentation/releases/")
+      )
+        continue;
+      const metadata = await lstat(repositoryPath(root, relativePath)).catch(
+        (error) => {
+          if (error.code === "ENOENT") return null;
+          throw error;
+        }
+      );
+      // The candidate may include an unstaged deletion. Its old index entry
+      // does not make the removed document part of the current source tree.
+      if (metadata === null) continue;
+      const contents = await readText(root, relativePath);
+      const token = tokens.find((value) => contents.includes(value));
+      if (token)
+        fail(
+          "REMOVED_VERSION_DOCUMENTED",
+          relativePath,
+          `removed compatibility identifier: ${token}`
+        );
+    }
+  }
+}
+
 function validatePolicyShape(policy) {
   const policyPath = "release-policy.json";
   const root = record(policy, policyPath, "policy");
@@ -361,126 +587,103 @@ function validatePolicyShape(policy) {
     policyPath,
     "version transaction recovery directory"
   );
+  validateCompatibilityShape(root.compatibility);
   const contracts = record(root.contracts, policyPath, "contracts");
-  const phaseResult = record(
-    contracts.phaseResult,
-    policyPath,
-    "contracts.phaseResult"
+  const families = new Map(
+    root.compatibility.families.map((family) => [family.id, family])
   );
-  requireExact(
-    phaseResult.currentPath,
-    "plugins/banzai/contracts/v3/phase-result.schema.json",
-    "CONTRACT_POLICY_DRIFT",
-    policyPath,
-    "current phase-result path"
-  );
-  requireExact(
-    phaseResult.currentSchemaVersion,
-    3,
-    "CONTRACT_POLICY_DRIFT",
-    policyPath,
-    "current phase-result schema version"
-  );
-  const legacyPhaseResults = array(
-    phaseResult.legacy,
-    policyPath,
-    "contracts.phaseResult.legacy"
-  );
-  requireJsonExact(
-    legacyPhaseResults.map((entry) => {
-      const legacy = record(entry, policyPath, "legacy phase-result");
-      return [legacy.path, legacy.schemaVersion, legacy.sha256];
-    }),
-    [
-      [
-        "plugins/banzai/contracts/v1/phase-result.schema.json",
-        1,
-        "62b390d3ac0e4bb5f552fa902be0e23644b3928a482fc258f5892404bb205f77"
-      ],
-      [
-        "plugins/banzai/contracts/v2/phase-result.schema.json",
-        2,
-        "7ede6c88fca7d95b6a7693017f45e9c01339461aa5991e03efabe9598f3ea7fd"
-      ]
-    ],
-    "CONTRACT_POLICY_DRIFT",
-    policyPath,
-    "legacy phase-result identities"
-  );
-  requireJsonExact(
-    contracts.reviewResult,
-    {
-      currentPath: "plugins/banzai/contracts/v2/review-result.schema.json",
-      currentSchemaVersion: 2,
-      legacy: [
-        {
-          path: "plugins/banzai/contracts/v1/review-result.schema.json",
-          sha256:
-            "bc8e5b8f9da3160799a6fa4d5efa1c607eda86400e94f6cdd57b666697f15d78"
-        }
-      ]
-    },
-    "CONTRACT_POLICY_DRIFT",
-    policyPath,
-    "review-result identities"
-  );
+  for (const [key, id] of [
+    ["phaseResult", "phase-result"],
+    ["reviewResult", "review-result"]
+  ]) {
+    const contract = record(contracts[key], policyPath, `contracts.${key}`);
+    requireObjectKeys(
+      contract,
+      ["currentPath", "currentSchemaVersion"],
+      "CONTRACT_POLICY_DRIFT",
+      policyPath,
+      key
+    );
+    const family = families.get(id);
+    if (
+      !family?.schemaFiles.includes(contract.currentPath) ||
+      !family.supported.includes(`${id}/v${contract.currentSchemaVersion}`)
+    )
+      fail(
+        "CONTRACT_POLICY_DRIFT",
+        policyPath,
+        `${key} differs from the compatibility declaration`
+      );
+  }
   const state = record(contracts.state, policyPath, "contracts.state");
-  requireExact(
-    state.currentSchemaVersion,
-    4,
+  requireObjectKeys(
+    state,
+    ["currentSchemaVersion"],
     "CONTRACT_POLICY_DRIFT",
     policyPath,
-    "current state schema version"
+    "state"
   );
-  requireJsonExact(
-    state.legacySchemaVersions,
-    [1, 2, 3],
-    "CONTRACT_POLICY_DRIFT",
-    policyPath,
-    "legacy state schema versions"
-  );
+  if (
+    !families
+      .get("run-state")
+      ?.supported.includes(String(state.currentSchemaVersion))
+  )
+    fail(
+      "CONTRACT_POLICY_DRIFT",
+      policyPath,
+      "run-state differs from the compatibility declaration"
+    );
   const control = record(
     contracts.agentControl,
     policyPath,
     "contracts.agentControl"
   );
-  const expectedControl = {
-    contractVersion: "3.0.0",
-    capabilities: "banzai-agent-capabilities/v3",
-    status: "banzai-agent-status/v2",
-    request: "banzai-agent-request/v1",
-    answer: "banzai-agent-answer/v2",
-    legacyAnswer: "banzai-agent-answer/v1",
-    recovery: "banzai-agent-recovery/v1"
-  };
-  for (const [key, expected] of Object.entries(expectedControl)) {
-    requireExact(
-      control[key],
-      expected,
-      "CONTRACT_POLICY_DRIFT",
-      policyPath,
-      `agent-control ${key}`
-    );
+  requireObjectKeys(
+    control,
+    [
+      "contractVersion",
+      "capabilities",
+      "status",
+      "request",
+      "answer",
+      "recovery"
+    ],
+    "CONTRACT_POLICY_DRIFT",
+    policyPath,
+    "agent-control"
+  );
+  semanticVersion(
+    control.contractVersion,
+    policyPath,
+    "agent control contract version"
+  );
+  for (const key of [
+    "capabilities",
+    "status",
+    "request",
+    "answer",
+    "recovery"
+  ]) {
+    if (!families.get(`agent-${key}`)?.supported.includes(control[key]))
+      fail(
+        "CONTRACT_POLICY_DRIFT",
+        policyPath,
+        `agent-${key} differs from the compatibility declaration`
+      );
   }
   const evaluation = record(
     contracts.evaluation,
     policyPath,
     "contracts.evaluation"
   );
-  requireExact(
-    evaluation.export,
-    "banzai-evaluation-export/v1",
-    "CONTRACT_POLICY_DRIFT",
-    policyPath,
-    "evaluation export identity"
-  );
-  requireExact(
-    evaluation.kpi,
-    "banzai-evaluation-kpi/v1",
-    "CONTRACT_POLICY_DRIFT",
-    policyPath,
-    "evaluation KPI identity"
-  );
+  for (const key of ["export", "kpi"]) {
+    if (!families.get(`evaluation-${key}`)?.supported.includes(evaluation[key]))
+      fail(
+        "CONTRACT_POLICY_DRIFT",
+        policyPath,
+        `evaluation-${key} differs from the compatibility declaration`
+      );
+  }
   return root;
 }
 
@@ -672,17 +875,17 @@ async function validateContracts(root, policy) {
   );
   requireExact(
     schemas.phaseResult,
-    "./v3/phase-result.schema.json",
+    `./${phasePolicy.currentPath.slice("plugins/banzai/contracts/".length)}`,
     "INVALID_CONTRACT_REFERENCE",
     manifestPath,
-    "phaseResult must reference the current v3 schema"
+    "phaseResult must reference its declared current schema"
   );
   requireExact(
     schemas.reviewResult,
-    "./v2/review-result.schema.json",
+    `./${policy.contracts.reviewResult.currentPath.slice("plugins/banzai/contracts/".length)}`,
     "INVALID_CONTRACT_REFERENCE",
     manifestPath,
-    "reviewResult must reference the current v2 schema"
+    "reviewResult must reference its declared current schema"
   );
   const reviewSchema = await readJson(
     root,
@@ -690,29 +893,18 @@ async function validateContracts(root, policy) {
   );
   requireExact(
     reviewSchema.properties?.schemaVersion?.const,
-    2,
+    policy.contracts.reviewResult.currentSchemaVersion,
     "CONTRACT_POLICY_DRIFT",
     policy.contracts.reviewResult.currentPath,
     "review-result schema version"
   );
   requireExact(
     reviewSchema.$id,
-    "https://banzai.local/contracts/v2/review-result.schema.json",
+    `https://banzai.local/contracts/${policy.contracts.reviewResult.currentPath.slice("plugins/banzai/contracts/".length)}`,
     "CONTRACT_POLICY_DRIFT",
     policy.contracts.reviewResult.currentPath,
     "review-result identity"
   );
-  for (const legacy of policy.contracts.reviewResult.legacy) {
-    requireExact(
-      createHash("sha256")
-        .update(await readText(root, legacy.path))
-        .digest("hex"),
-      legacy.sha256,
-      "LEGACY_CONTRACT_DRIFT",
-      legacy.path,
-      "byte-preserved legacy review-result"
-    );
-  }
   for (const key of ["workflowSelection", "phaseResult", "reviewResult"]) {
     const reference = nonEmptyString(
       schemas[key],
@@ -795,55 +987,6 @@ async function validateContracts(root, policy) {
     );
   }
 
-  for (const entry of array(
-    phasePolicy.legacy,
-    "release-policy.json",
-    "contracts.phaseResult.legacy"
-  )) {
-    const legacy = record(entry, "release-policy.json", "legacy phase-result");
-    const relativePath = nonEmptyString(
-      legacy.path,
-      "release-policy.json",
-      "legacy phase-result path"
-    );
-    const raw = await readText(root, relativePath);
-    const digest = createHash("sha256").update(raw).digest("hex");
-    requireExact(
-      digest,
-      legacy.sha256,
-      "LEGACY_CONTRACT_DRIFT",
-      relativePath,
-      "byte-preserved legacy phase-result"
-    );
-    const schema = record(
-      await readJson(root, relativePath),
-      relativePath,
-      "legacy phase-result schema"
-    );
-    requireExact(
-      schema.$id,
-      `https://banzai.local/contracts/v${legacy.schemaVersion}/phase-result.schema.json`,
-      "LEGACY_CONTRACT_DRIFT",
-      relativePath,
-      "legacy phase-result identity"
-    );
-    const properties = record(schema.properties, relativePath, "properties");
-    requireJsonExact(
-      record(properties.gate, relativePath, "gate").enum,
-      ["adr_approval", "plan_approval", "escalation", null],
-      "LEGACY_CONTRACT_DRIFT",
-      relativePath,
-      "legacy phase-result gates"
-    );
-    if (Object.hasOwn(properties, "decisionConsultation")) {
-      fail(
-        "LEGACY_CONTRACT_DRIFT",
-        relativePath,
-        "legacy phase-result cannot be overwritten with consultation fields"
-      );
-    }
-  }
-
   const typesPath = "packages/orchestrator/src/types.ts";
   const typesSource = await readText(root, typesPath);
   const match = typesSource.match(/CONTRACT_VERSION\s*=\s*["']([^"']+)["']/);
@@ -863,27 +1006,23 @@ async function validateContracts(root, policy) {
     fail(
       "CONTRACT_VERSION_MISMATCH",
       typesPath,
-      "runner phase-result schema version must be 3"
+      "runner phase-result schema version differs from release policy"
     );
   }
-  if (
-    !/export interface RunState\s*{\s*schemaVersion:\s*3\s*\|\s*4\s*\|\s*5;/.test(
-      typesSource
-    )
-  ) {
-    fail(
-      "STATE_CONTRACT_DRIFT",
-      typesPath,
-      "current run state must retain v3/v4 and support opt-in v5"
-    );
-  }
-  if (!/schemaVersion:\s*1\s*\|\s*2;/.test(typesSource)) {
-    fail(
-      "STATE_CONTRACT_DRIFT",
-      typesPath,
-      "legacy phase-result/state readers must preserve v1/v2"
-    );
-  }
+  const stateVersions = typesSource
+    .match(/export interface RunState\s*{\s*schemaVersion:\s*([^;]+);/)?.[1]
+    ?.split("|")
+    .map((value) => value.trim());
+  const supportedStateVersions = policy.compatibility.families.find(
+    (family) => family.id === "run-state"
+  ).supported;
+  requireJsonExact(
+    stateVersions?.sort(),
+    [...supportedStateVersions].sort(),
+    "CONTRACT_POLICY_DRIFT",
+    typesPath,
+    "run-state supported versions"
+  );
 
   const contractConstants = new Map([
     [
@@ -894,7 +1033,6 @@ async function validateContracts(root, policy) {
     ["AGENT_STATUS_SCHEMA", policy.contracts.agentControl.status],
     ["AGENT_REQUEST_SCHEMA", policy.contracts.agentControl.request],
     ["AGENT_ANSWER_SCHEMA", policy.contracts.agentControl.answer],
-    ["LEGACY_AGENT_ANSWER_SCHEMA", policy.contracts.agentControl.legacyAnswer],
     ["AGENT_RECOVERY_SCHEMA", policy.contracts.agentControl.recovery],
     ["EVALUATION_EXPORT_SCHEMA", policy.contracts.evaluation.export],
     ["EVALUATION_KPI_SCHEMA", policy.contracts.evaluation.kpi]
@@ -911,63 +1049,25 @@ async function validateContracts(root, policy) {
       );
     }
   }
-  for (const [name, expected] of [
-    ["AGENT_CAPABILITIES_SCHEMA_VERSION", 3],
-    ["AGENT_STATUS_SCHEMA_VERSION", 2],
-    ["AGENT_ANSWER_SCHEMA_VERSION", 2],
-    ["AGENT_REQUEST_SCHEMA_VERSION", 1],
-    ["AGENT_RECOVERY_SCHEMA_VERSION", 1]
+  for (const [name, identity] of [
+    [
+      "AGENT_CAPABILITIES_SCHEMA_VERSION",
+      policy.contracts.agentControl.capabilities
+    ],
+    ["AGENT_STATUS_SCHEMA_VERSION", policy.contracts.agentControl.status],
+    ["AGENT_ANSWER_SCHEMA_VERSION", policy.contracts.agentControl.answer],
+    ["AGENT_REQUEST_SCHEMA_VERSION", policy.contracts.agentControl.request],
+    ["AGENT_RECOVERY_SCHEMA_VERSION", policy.contracts.agentControl.recovery],
+    ["EVALUATION_EXPORT_SCHEMA_VERSION", policy.contracts.evaluation.export],
+    ["EVALUATION_KPI_SCHEMA_VERSION", policy.contracts.evaluation.kpi]
   ]) {
+    const expected = identity.match(/\/v(\d+)$/)?.[1];
     const constant = typesSource.match(new RegExp(`${name}\\s*=\\s*(\\d+)`));
     if (constant?.[1] !== String(expected)) {
       fail(
         "CONTRACT_VERSION_MISMATCH",
         typesPath,
         `${name} does not match release policy`
-      );
-    }
-  }
-
-  const storePath = "packages/orchestrator/src/store.ts";
-  const store = flatText(await readText(root, storePath));
-  for (const fragment of [
-    "if (state.schemaVersion === 2)",
-    "schemaVersion: 3",
-    "humanDecisions"
-  ]) {
-    if (!store.includes(fragment)) {
-      fail(
-        "STATE_CONTRACT_DRIFT",
-        storePath,
-        `missing current/legacy state fragment: ${fragment}`
-      );
-    }
-  }
-  if (
-    !/if\s*\(\s*state\.schemaVersion === 3\s*\|\|\s*state\.schemaVersion === 4\s*\|\|\s*state\.schemaVersion === 5\s*\)/u.test(
-      store
-    )
-  )
-    fail(
-      "STATE_CONTRACT_DRIFT",
-      storePath,
-      "current state reads must retain v3/v4 and support v5"
-    );
-  const validationPath = "packages/orchestrator/src/validation.ts";
-  const validation = flatText(await readText(root, validationPath));
-  for (const fragment of [
-    "value.schemaVersion !== 1",
-    "value.schemaVersion !== 2",
-    "value.schemaVersion !== 3",
-    "value.schemaVersion !== 4",
-    "value.schemaVersion !== 5",
-    "schemaVersion >= 2"
-  ]) {
-    if (!validation.includes(fragment)) {
-      fail(
-        "STATE_CONTRACT_DRIFT",
-        validationPath,
-        `missing evaluation state compatibility fragment: ${fragment}`
       );
     }
   }
@@ -1414,7 +1514,6 @@ const STALE_CLAUDE_REFERENCE_PATTERNS = [
 ];
 const INSTRUCTION_LAYOUT_ALLOWED_CONTEXTS = [
   "## Engineering Quality",
-  "legacy Banzai layout",
   "@AGENTS.md",
   "Free paths",
   "free path",
@@ -1422,7 +1521,6 @@ const INSTRUCTION_LAYOUT_ALLOWED_CONTEXTS = [
   "copy these",
   "Never overwrite",
   "isFreePath",
-  "migration",
   "shim",
   "host-specific",
   "layout"
@@ -1432,7 +1530,6 @@ async function validateInstructionLayout(root) {
   const code = "INSTRUCTION_LAYOUT_DRIFT";
   const plugin = "plugins/banzai";
   const processPath = `${plugin}/AGENTS.md`;
-  const migrationPath = `${plugin}/skills/project-manifest/references/layout-migration.md`;
   const shim = await readText(root, `${plugin}/CLAUDE.md`, code);
   requireExact(
     shim,
@@ -1494,7 +1591,6 @@ async function validateInstructionLayout(root) {
   const layoutPaths = [
     processPath,
     `${plugin}/CLAUDE.md`,
-    migrationPath,
     ...policyNames.map((name) => `${plugin}/policies/${name}.md`)
   ];
   for (const relativePath of layoutPaths) {
@@ -1593,11 +1689,9 @@ async function validateInstructionLayout(root) {
       );
     }
   }
-  const diagnostic = "legacy Banzai layout: run `project-manifest` to migrate";
   const bootstrapPaths = new Set([
     `${plugin}/skills/project-manifest/SKILL.md`,
-    `${plugin}/skills/feature-status/SKILL.md`,
-    migrationPath
+    `${plugin}/skills/feature-status/SKILL.md`
   ]);
   for (const skill of skills) {
     const relativePath = `${plugin}/skills/${skill}/SKILL.md`;
@@ -1629,8 +1723,8 @@ async function validateInstructionLayout(root) {
         JSON.stringify(expectedReads.map(([name]) => name).sort())
       )
         fail(code, relativePath, "Sources names an extra or missing policy");
-      if (!flatText(contents).includes(diagnostic))
-        fail(code, relativePath, "missing legacy diagnostic");
+      if (!flatText(sources).includes("On partial report the exact ambiguity"))
+        fail(code, relativePath, "missing partial-layout diagnostic boundary");
       if (
         !sources.includes("../../policies/<name>.md") ||
         !sources.includes("the project root `AGENTS.md`") ||
@@ -1650,7 +1744,9 @@ async function validateInstructionLayout(root) {
     if (bootstrapPaths.has(relativePath)) {
       const flat = flatText(contents);
       if (
-        !flat.includes("bootstrap source rule") ||
+        !flat.includes(
+          "for the report only; project policy bodies are never applicable rules."
+        ) ||
         !flat.includes("installed plugin's packaged `AGENTS.md`")
       )
         fail(code, relativePath, "missing bootstrap source rule");
@@ -1682,11 +1778,7 @@ async function validateInstructionLayout(root) {
       (/bootstrap source rule/i.test(flat) ||
         flat.includes("installed plugin's packaged `AGENTS.md`"))
     )
-      fail(
-        code,
-        relativePath,
-        "bootstrap exemption outside its two skills and migration reference"
-      );
+      fail(code, relativePath, "bootstrap exemption outside its two skills");
     if (STALE_CLAUDE_REFERENCE_PATTERNS.some((pattern) => pattern.test(flat)))
       fail(code, relativePath, "obsolete CLAUDE process or policy reference");
     if (
@@ -1716,54 +1808,6 @@ async function validateInstructionLayout(root) {
         );
     }
   }
-  const migration = await readText(root, migrationPath, code);
-  for (const fragment of [
-    "bootstrap source rule",
-    "installed plugin's packaged `AGENTS.md`",
-    "Apply only after approval",
-    "byte-identical",
-    "## Project Rules",
-    "host-specific",
-    "unclassified"
-  ]) {
-    if (!flatText(migration).includes(fragment))
-      fail(code, migrationPath, `missing migration boundary: ${fragment}`);
-  }
-  const literals = migration
-    .split("\n")
-    .filter((line) => line.startsWith("- Last legacy-compatible release:"));
-  const match =
-    literals.length === 1
-      ? literals[0].match(
-          /^- Last legacy-compatible release: `(\d+\.\d+\.\d+)`$/
-        )
-      : null;
-  if (!match)
-    fail(code, migrationPath, "expected one literal legacy release version");
-  let legacy;
-  try {
-    legacy = semanticVersion(match[1], migrationPath, "legacy release");
-  } catch {
-    fail(code, migrationPath, "legacy release is not SemVer");
-  }
-  const current = semanticVersion(
-    (await readJson(root, "package.json")).version,
-    "package.json",
-    "version"
-  );
-  const legacyParts = legacy.split(".").map(BigInt);
-  const currentParts = current.split(".").map(BigInt);
-  const different = legacyParts.findIndex(
-    (part, index) => part !== currentParts[index]
-  );
-  // An unreleased tree keeps the existing version. Shipping requires the
-  // release checklist's strictly-lower comparison after version selection.
-  if (different >= 0 && legacyParts[different] > currentParts[different])
-    fail(
-      code,
-      migrationPath,
-      "legacy release is greater than the current source version"
-    );
 }
 
 async function validateTestAssurancePolicy(root) {
@@ -2181,7 +2225,7 @@ async function validateDecisionConsultationPolicy(root) {
         "There are five decision gates",
         "Consultation is conditional, planning-only, and concise",
         "it does not accept an ADR, approve a plan",
-        "control contract `2.0.0`"
+        "control contract `4.0.0`"
       ]
     ],
     [
@@ -2191,11 +2235,10 @@ async function validateDecisionConsultationPolicy(root) {
         "banzai-agent-capabilities/v3",
         "banzai-agent-status/v2",
         "banzai-agent-answer/v2",
-        "A v1 answer cannot answer a consultation.",
-        "New run state uses schema version 4",
+        "answer uses v2 only.",
+        "Run state uses schema version 5",
         "The model hand-off uses phase-result v3.",
-        "phase-result v1 and v2 remain read-only legacy inputs",
-        "Evaluation export and KPI stay on their independent privacy-minimized v1 contracts."
+        "Evaluation export and KPI use independent privacy-minimized v2 contracts."
       ]
     ],
     [
@@ -2204,7 +2247,7 @@ async function validateDecisionConsultationPolicy(root) {
         "Five human decision gates remain distinct",
         "Consultation records preference provenance; it is not approval or execution authority.",
         "banzai-agent-answer/v2",
-        "banzai-agent-answer/v1"
+        "banzai-agent-answer/v2"
       ]
     ],
     [
@@ -2212,16 +2255,14 @@ async function validateDecisionConsultationPolicy(root) {
       [
         "the five decision gates",
         "five workflow gates can stop work",
-        "phase-result schema v3 and state schema v4 with explicit v1/v2/v3 legacy readers",
-        "control contract version `3.0.0`",
-        "phase-result v3 is current",
-        "phase-result v1/v2 remain byte-preserved legacy reader surfaces"
+        "phase-result v3",
+        "control contract version `4.0.0`",
+        "phase-result v3"
       ]
     ],
     [
       "plugins/banzai/contracts/README.md",
       [
-        "v2/phase-result.schema.json` is the preserved legacy",
         "v3/phase-result.schema.json` is the current hand-off",
         "planning-only `decision_consultation` gate"
       ]
@@ -2229,7 +2270,6 @@ async function validateDecisionConsultationPolicy(root) {
     [
       "plugins/banzai/documentation/README.md",
       [
-        "v2/phase-result.schema.json # legacy task-completion attempts",
         "v3/phase-result.schema.json # current consultation-aware phase hand-off",
         "v3 implementation results carry the canonical per-task completion ledger",
         "required nullable planning-only consultation field"
@@ -2283,8 +2323,8 @@ async function validateDecisionConsultationPolicy(root) {
         "FORBIDDEN-CONSULTATION-ANSWER",
         "FORBIDDEN-CONSULTATION-DECIDER",
         "FORBIDDEN-EVENT-CONSULTATION-ANSWER",
-        "banzai-evaluation-export/v1",
-        "banzai-evaluation-kpi/v1"
+        "banzai-evaluation-export/v2",
+        "banzai-evaluation-kpi/v2"
       ]
     ],
     [
@@ -2364,7 +2404,6 @@ async function validateOrchestrateSkill(root) {
         "exact supported v3 declaration",
         "banzai-agent-request/v1",
         "banzai-agent-answer/v2",
-        "banzai-agent-answer/v1",
         "banzai-agent-recovery/v1",
         "answer_escalation",
         "answer_consultation",
@@ -2391,10 +2430,9 @@ async function validateOrchestrateSkill(root) {
       [
         "banzai-agent-capabilities/v3",
         "banzai-agent-status/v2",
-        'controlContractVersion: "3.0.0"',
+        'controlContractVersion: "4.0.0"',
         "banzai-agent-request/v1",
         "banzai-agent-answer/v2",
-        "banzai-agent-answer/v1",
         "banzai-agent-recovery/v1",
         "input limit is 64 KiB",
         "live-session/write-stdin mechanism",
@@ -2429,6 +2467,12 @@ async function validateRepository(root) {
     await readJson(root, "release-policy.json")
   );
   await validateNoVersionTransaction(root, policy);
+  const releaseVersion = semanticVersion(
+    (await readJson(root, "package.json")).version,
+    "package.json",
+    "project version"
+  );
+  await validateCompatibility(root, policy, releaseVersion);
   await validateRequiredPaths(root, policy);
 
   for (const relativePath of array(
@@ -2672,14 +2716,20 @@ async function validateRepository(root) {
   await validateDocumentation(root, policy);
 }
 
-try {
-  await validateRepository(parseArguments(process.argv.slice(2)));
-  process.stdout.write("release validation passed\n");
-} catch (error) {
-  const message =
-    error instanceof ReleaseValidationError
-      ? error.message
-      : "RELEASE_VALIDATION_FAILED check-release.mjs: unexpected validation failure";
-  process.stderr.write(`${message}\n`);
-  process.exitCode = 1;
-}
+if (
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+)
+  try {
+    await validateRepository(parseArguments(process.argv.slice(2)));
+    process.stdout.write("release validation passed\n");
+  } catch (error) {
+    const message =
+      error instanceof ReleaseValidationError
+        ? error.message
+        : "RELEASE_VALIDATION_FAILED check-release.mjs: unexpected validation failure";
+    process.stderr.write(`${message}\n`);
+    process.exitCode = 1;
+  }
+
+export { validateCompatibilityShape, validateCompatibility };

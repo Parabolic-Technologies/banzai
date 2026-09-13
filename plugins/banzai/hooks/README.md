@@ -37,7 +37,7 @@ implementation provides `BANZAI_RUN_ID` and `BANZAI_WORKFLOW_DIGEST`. Both
 orchestrated reviewers receive only `BANZAI_RUN_ID` and
 `BANZAI_APPROVAL_DIGEST` as runner context for required reads; review and
 selection provide no artifact write authorization. The runner owns rendering,
-validation and publication of `banzai-feature-review/v2` Markdown. The hook:
+validation and publication of `banzai-feature-review/v4` Markdown. The hook:
 
 - requires the run to be the active run in `.banzai/active-run.json`;
 - denies every mutation while state is `reviewing` or an active review attempt
@@ -57,7 +57,7 @@ validation and publication of `banzai-feature-review/v2` Markdown. The hook:
 
 Missing, partial, invalid, or stale runner context fails closed. When these
 variables are absent, the existing manual session gate is unchanged.
-Standalone reviewers own durable `banzai-feature-review/v1` Markdown under that
+Standalone reviewers own durable `banzai-standalone-review/v1` Markdown under that
 manual gate; they do not require an orchestrator.
 
 ## Product Notes

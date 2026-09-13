@@ -35,7 +35,11 @@ import {
 } from "../src/context-accounting.js";
 import { createPromptEnvelope } from "../src/prompt-envelope.js";
 import { resolveOutputContract } from "../src/output-contract.js";
-import { createTestRepository } from "./helpers.js";
+import {
+  createTestRepository,
+  snapshotTree,
+  boundWorkFixture
+} from "./helpers.js";
 
 async function pathExists(filePath: string): Promise<boolean> {
   try {
@@ -66,7 +70,7 @@ test("context ledgers append atomically and preserve pre-call evidence", async (
         createPromptEnvelope([
           { category: "review_triage_evidence", text: "review" }
         ]),
-        resolveOutputContract("claude", "review-result/v1")
+        resolveOutputContract("claude", "review-result/v2")
       ),
       authority: [{ class: "review_artifact", count: 1 }],
       sessionInventory: emptyContextInventory(),
@@ -134,7 +138,7 @@ test("context ledger reads reject a final symlink without consuming its target",
         createPromptEnvelope([
           { category: "review_triage_evidence", text: "review" }
         ]),
-        resolveOutputContract("claude", "review-result/v1")
+        resolveOutputContract("claude", "review-result/v2")
       ),
       authority: [{ class: "review_artifact", count: 1 }],
       sessionInventory: emptyContextInventory(),
@@ -185,7 +189,7 @@ test("context ledger reads reject a symlinked attempts directory without consumi
         createPromptEnvelope([
           { category: "review_triage_evidence", text: "review" }
         ]),
-        resolveOutputContract("claude", "review-result/v1")
+        resolveOutputContract("claude", "review-result/v2")
       ),
       authority: [{ class: "review_artifact", count: 1 }],
       sessionInventory: emptyContextInventory(),
@@ -265,7 +269,8 @@ test("attempt enumeration reads only canonical records and rejects identity mism
       recoveryOf: null,
       recoveryAuthorizationId: null,
       result: {
-        schemaVersion: 2,
+        schemaVersion: 3,
+        decisionConsultation: null,
         contractVersion: CONTRACT_VERSION,
         phase: "fix",
         outcome: "blocked",
@@ -399,14 +404,15 @@ test("terminal checkpoints and recovery authorizations are private immutable evi
       sessionMode: "fresh",
       sessionContextDigest: "b".repeat(64)
     },
-    resultContract: "phase-result/v2",
+    resultContract: "phase-result/v3",
     terminal: {
       classification: "codex_turn_completed",
       observedAt: "2026-08-18T13:23:43.000Z"
     },
     result: {
       contractVersion: CONTRACT_VERSION,
-      schemaVersion: 2,
+      schemaVersion: 3,
+      decisionConsultation: null,
       phase: "implementation",
       outcome: "completed",
       summary: "Implementation completed.",
@@ -528,158 +534,40 @@ test("runner lock excludes another coordinator and releases by token", async () 
   }
 });
 
-test("schema version one state drops unbound sessions and preserves durable evidence", async () => {
+test("removed run states reject reads and mutation before locks or events", async () => {
   const repository = await createTestRepository();
-  const store = new RunStore(repository.root);
-  const runId = "legacy-run";
-  const timestamp = "2026-07-31T00:00:00.000Z";
-  const legacy = {
-    schemaVersion: 1,
-    contractVersion: CONTRACT_VERSION,
-    runId,
-    slug: "legacy",
-    request: "Legacy request",
-    repoRoot: repository.root,
-    status: "needs_triage",
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    baseCommit: "a".repeat(40),
-    planArtifacts: null,
-    planApproval: null,
-    adrDecisions: [],
-    sessions: { planner: "planner-old", implementer: "implementer-old" },
-    reviewIteration: 1,
-    latestReview: {
-      iteration: 1,
-      resultPath: "reviews/review-1.json",
-      workspaceDigest: "digest",
-      verdict: "changes_requested"
-    },
-    triage: {
-      reviewIteration: 1,
-      decidedAt: timestamp,
-      decidedBy: "developer",
-      items: [{ findingId: "R1-F1", disposition: "accepted", note: null }]
-    },
-    fixCycle: 0,
-    workspaceDigest: "digest",
-    verification: [],
-    metrics: {
-      completedAttemptIds: [],
-      attempts: {
-        plan: 1,
-        implementation: 1,
-        fix: 0,
-        review: 1,
-        verification: 1
-      },
-      modelDurationMs: 1,
-      usage: {
-        inputTokens: 1,
-        cachedInputTokens: 0,
-        outputTokens: 1,
-        costUsd: null
-      },
-      reviewFindingCount: 1,
-      triage: { accepted: 1, rejected: 0, deferred: 0 }
-    },
-    activeAttempt: null,
-    activeProcess: null,
-    blockedFrom: null,
-    blockReason: null
-  };
   try {
+    const store = new RunStore(repository.root);
+    const runId = "unsupported-run";
     await mkdir(store.runDirectory(runId), { recursive: true });
-    await writeFile(store.statePath(runId), JSON.stringify(legacy), "utf8");
-
-    const state = await store.readState(runId);
-
-    assert.equal(state.schemaVersion, 3);
-    assert.deepEqual(state.sessions, {
-      planner: null,
-      implementer: null,
-      reviewer: null
-    });
-    assert.equal(state.pendingReviewRotationReason, "legacy-state");
-    assert.equal(state.latestReview?.mode, "full");
-    assert.equal(state.triageHistory.length, 1);
-    assert.equal(state.triageHistory[0]?.items[0]?.findingId, "R1-F1");
-    assert.deepEqual(state.metrics.sessions, { fresh: 0, resumed: 0 });
-
-    await store.writeState(state);
-    const persisted = JSON.parse(
-      await readFile(path.join(store.runDirectory(runId), "state.json"), "utf8")
-    ) as { schemaVersion: number };
-    assert.equal(persisted.schemaVersion, 3);
-
-    const versionTwoRunId = "legacy-v2-run";
-    await mkdir(store.runDirectory(versionTwoRunId), { recursive: true });
     await writeFile(
-      store.statePath(versionTwoRunId),
-      JSON.stringify({
-        ...state,
-        schemaVersion: 2,
-        runId: versionTwoRunId,
-        status: "needs_human_decision",
-        pendingHumanDecision: {
-          phase: "plan",
-          gate: "escalation",
-          summary: "Legacy escalation",
-          questions: ["Choose the existing behavior."],
-          requestedAt: timestamp
-        },
-        humanDecisions: []
-      }),
-      "utf8"
+      store.activeRunPath,
+      JSON.stringify({ schemaVersion: 1, runId })
     );
-    const versionTwo = await store.readState(versionTwoRunId);
-    assert.equal(versionTwo.schemaVersion, 3);
-    assert.equal(versionTwo.pendingHumanDecision?.kind, "escalation");
-    assert.equal(
-      versionTwo.pendingHumanDecision.questions[0],
-      "Choose the existing behavior."
-    );
-
-    const malformedRunId = "malformed-v3-run";
-    await mkdir(store.runDirectory(malformedRunId), { recursive: true });
-    await writeFile(
-      store.statePath(malformedRunId),
-      JSON.stringify({
-        ...state,
-        runId: malformedRunId,
-        status: "needs_human_decision",
-        pendingHumanDecision: {
-          kind: "unknown_decision",
-          phase: "plan",
-          gate: "decision_consultation",
-          summary: "Malformed",
-          request: null,
-          requestedAt: timestamp
-        },
-        humanDecisions: []
-      }),
-      "utf8"
-    );
-    await assert.rejects(
-      store.readState(malformedRunId),
-      (error: unknown) =>
-        error instanceof BanzaiError && error.code === "STATE_READ_FAILED"
-    );
-
-    const terminalRunId = "legacy-terminal-run";
-    await mkdir(store.runDirectory(terminalRunId), { recursive: true });
-    await writeFile(
-      store.statePath(terminalRunId),
-      JSON.stringify({
-        ...legacy,
-        runId: terminalRunId,
-        status: "done",
-        latestReview: { ...legacy.latestReview, verdict: "pass" }
-      }),
-      "utf8"
-    );
-    const terminal = await store.readState(terminalRunId);
-    assert.equal(terminal.pendingReviewRotationReason, null);
+    for (const schemaVersion of [1, 2, 3, 4, 6]) {
+      const state = { schemaVersion, runId, status: "created" };
+      await writeFile(store.statePath(runId), JSON.stringify(state));
+      const before = await snapshotTree(path.join(repository.root, ".banzai"));
+      for (const action of [
+        () => store.readState(runId),
+        () => store.acquireLock(),
+        () => store.appendEvent(runId, "fixture", {}),
+        () =>
+          store.commitCancellation(runId, () => {
+            throw new Error("must not execute");
+          })
+      ]) {
+        await assert.rejects(action, {
+          code: "RESOURCE_VERSION_UNSUPPORTED",
+          message:
+            /^.+ version .+ is not supported; 3\.x supports .+; last read by release-train major 2$/u
+        });
+        assert.deepEqual(
+          await snapshotTree(path.join(repository.root, ".banzai")),
+          before
+        );
+      }
+    }
   } finally {
     await repository.dispose();
   }
@@ -715,10 +603,10 @@ test("verification ledger leaves allocate in order and terminal evidence is immu
     });
     await writeFile(
       store.verificationLedgerPath(runId),
-      JSON.stringify({ schemaVersion: 1 }),
+      JSON.stringify({ schemaVersion: 2 }),
       "utf8"
     );
-    assert.equal(await store.verificationLedgerSupported(runId), true);
+    assert.deepEqual(await store.readVerificationAttempts(runId), []);
 
     const first = await store.beginVerificationAttempt(runId, {
       round,
@@ -782,7 +670,7 @@ test("verification ledger leaves allocate in order and terminal evidence is immu
 
     await writeFile(store.verificationLedgerPath(runId), "{", "utf8");
     await assert.rejects(
-      store.verificationLedgerSupported(runId),
+      store.readVerificationAttempts(runId),
       (error: unknown) =>
         error instanceof BanzaiError &&
         error.code === "VERIFICATION_LEDGER_MALFORMED" &&
@@ -883,6 +771,60 @@ test("releasing a lock normally leaves nothing for an interrupt to drop", async 
 
     releaseHeldRunnerLocksSync();
     assert.equal(await pathExists(store.lockPath), false);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("state 5 requires binding v2 and an explicit recovery stage without repair", async () => {
+  const repository = await createTestRepository();
+  try {
+    const store = new RunStore(repository.root);
+    const runId = "state-window";
+    const artifactBinding = boundWorkFixture();
+    const state = {
+      schemaVersion: 5,
+      artifactBinding,
+      status: "created",
+      pendingHumanDecision: null,
+      humanDecisions: []
+    };
+    await mkdir(store.runDirectory(runId), { recursive: true });
+    for (const [value, code] of [
+      [
+        {
+          ...state,
+          artifactBinding: {
+            ...artifactBinding,
+            binding: {
+              ...artifactBinding.binding,
+              schemaVersion: 1,
+              schema: "banzai-work-binding/v1"
+            }
+          }
+        },
+        "RESOURCE_VERSION_UNSUPPORTED"
+      ],
+      [
+        {
+          ...state,
+          recovery: {
+            sourceAttemptId: "implementation-1",
+            recoveryAttemptId: null
+          }
+        },
+        "STATE_READ_FAILED"
+      ],
+      [{ ...state, artifactBinding: null }, "ARTIFACT_RECOVERY_REQUIRED"]
+    ] as const) {
+      await writeFile(store.statePath(runId), JSON.stringify(value));
+      const before = await snapshotTree(path.join(repository.root, ".banzai"));
+      await assert.rejects(store.readState(runId), { code });
+      assert.deepEqual(
+        await snapshotTree(path.join(repository.root, ".banzai")),
+        before
+      );
+    }
   } finally {
     await repository.dispose();
   }

@@ -1,6 +1,6 @@
+import { ResourceVersionUnsupportedError } from "./errors.js";
 import {
   phaseResultSchema,
-  legacyReviewResultSchema,
   reviewResultSchema,
   workflowSelectionSchema
 } from "./contracts.js";
@@ -15,11 +15,15 @@ export function claudeJsonSchema(schema: object): Record<string, unknown> {
   return clone;
 }
 
-function schemaFor(identity: OutputContractIdentity): object {
+function schemaFor(identity: string): object {
   if (identity === "workflow-selection/v1") return workflowSelectionSchema;
   if (identity === "phase-result/v3") return phaseResultSchema;
-  if (identity === "review-result/v1") return legacyReviewResultSchema;
-  return reviewResultSchema;
+  if (identity === "review-result/v2") return reviewResultSchema;
+  throw new ResourceVersionUnsupportedError(
+    "output contract",
+    identity,
+    "workflow-selection/v1, phase-result/v3, review-result/v2"
+  );
 }
 
 export function resolveOutputContract(

@@ -10,7 +10,7 @@ export async function artifactReaderBytes(packageRoot) {
     absWorkingDir: packageRoot,
     stdin: {
       contents:
-        'export { parseTerminalAttemptCheckpoint, parseRecoveryAuthorization, parseModelAttemptRecord, parseVerificationAttemptRecord, parseEvaluationStateSource, parsePersistedPhaseResult, parseReviewResult, parseCurrentReviewResult } from "./src/validation.ts";',
+        'export { parseTerminalAttemptCheckpoint, parseRecoveryAuthorization, parseModelAttemptRecord, parseVerificationAttemptRecord, parseVerificationLedger, parseEvaluationStateSource, parsePersistedPhaseResult, parseReviewResult, parseCurrentReviewResult } from "./src/validation.ts";',
       resolveDir: packageRoot,
       sourcefile: "artifact-readers-entry.mjs"
     },

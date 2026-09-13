@@ -560,6 +560,26 @@ function sortedExpectations(value) {
   );
 }
 
+function retainedAuthorityDigest(text, expected) {
+  if (resourceDigest(text) === expected) return true;
+  const lifecycle = text.lastIndexOf("\n## Lifecycle Links\n");
+  if (lifecycle < 0) return false;
+  // Only an exact historical prefix plus appended lifecycle bullets is admissible.
+  // No body edits, replacement metadata, extra sections or arbitrary suffixes qualify.
+  for (const match of text.matchAll(/^-(?= )/gmu)) {
+    if (match.index <= lifecycle) continue;
+    const suffix = text.slice(match.index);
+    if (
+      !suffix
+        .split("\n")
+        .every((line) => line === "" || /^- |^ {2}/u.test(line))
+    )
+      continue;
+    if (resourceDigest(text.slice(0, match.index)) === expected) return true;
+  }
+  return false;
+}
+
 async function validateAuthorities(root, authorities) {
   if (
     !Array.isArray(authorities) ||
@@ -584,7 +604,7 @@ async function validateAuthorities(root, authorities) {
     seen.add(authority.path);
     const text = await baselineFile(root, authority.path);
     if (
-      resourceDigest(text) !== authority.sha256 ||
+      !retainedAuthorityDigest(text, authority.sha256) ||
       !/^- Status: Accepted\s*$/mu.test(text)
     )
       throw new Error(
@@ -615,6 +635,11 @@ async function applyTransition(root, original, previous, transition) {
     ...Object.keys(rootExpectations(original)),
     ...rawResourceKeys()
   ]);
+  const compatibilityTransition = transition.authorities.some(
+    (authority) =>
+      authority.path ===
+      "documentation/decisions/0045-major-bounded-compatibility-window.md"
+  );
   const next = { ...previous };
   let last = null;
   for (const change of transition.changes) {
@@ -625,9 +650,11 @@ async function applyTransition(root, original, previous, transition) {
       !SHA256.test(change.after) ||
       change.before !== (previous[change.key] ?? null) ||
       change.before === change.after ||
-      /\/(?:orchestrate)\/SKILL\.md|\/\.(?:claude|codex)-plugin\/plugin\.json|\/hooks\/hooks\.json/u.test(
+      /\/\.(?:claude|codex)-plugin\/plugin\.json|\/hooks\/hooks\.json/u.test(
         change.key
-      )
+      ) ||
+      (change.key === "plugins/banzai/skills/orchestrate/SKILL.md" &&
+        !compatibilityTransition)
     )
       throw new Error("Invalid or protected instruction transition scope.");
     last = change.key;

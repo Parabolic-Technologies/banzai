@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import type { Dirent } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { BanzaiError } from "./errors.js";
+import { BanzaiError, ResourceVersionUnsupportedError } from "./errors.js";
 import {
   EVALUATION_EXPORT_SCHEMA,
   EVALUATION_EXPORT_SCHEMA_VERSION,
@@ -106,7 +106,6 @@ export const EVALUATION_ATTEMPT_OUTCOME_ORDER = [
 export const EVALUATION_ROTATION_REASON_ORDER = [
   "primary-review",
   "missing-session",
-  "legacy-state",
   "settings-changed",
   "approval-changed",
   "previous-review-failed",
@@ -175,7 +174,6 @@ export const EVALUATION_ISSUE_CODE_ORDER = [
   "STATE_SCHEMA_UNSUPPORTED",
   "STATE_FIELD_MISSING",
   "STATE_FIELD_INVALID",
-  "LEGACY_FIELD_ABSENT",
   "ATTEMPT_DIRECTORY_MISSING",
   "ATTEMPT_MALFORMED",
   "ATTEMPT_DUPLICATE",
@@ -193,7 +191,6 @@ export const EVALUATION_ISSUE_CODE_ORDER = [
   "VERIFICATION_ATTEMPT_CONFLICT",
   "VERIFICATION_SEQUENCE_CONFLICT",
   "VERIFICATION_SEQUENCE_MISSING",
-  "VERIFICATION_HISTORY_INCOMPLETE",
   "PLAN_TASK_COMPLETION_INVALID",
   "ACTIVE_ATTEMPT_INCOMPLETE"
 ] as const satisfies readonly EvaluationIssueCode[];
@@ -726,7 +723,14 @@ async function collectAttempts(
     try {
       const decoded = parseEvaluationAttemptSource(result.value);
       parsed.push({ source: decoded.value, issues: decoded.issues });
-    } catch {
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "RESOURCE_VERSION_UNSUPPORTED"
+      )
+        throw error;
       issues.push(directIssue(runKey, "attempt", "ATTEMPT_MALFORMED"));
       invalidCount += 1;
     }
@@ -783,103 +787,6 @@ async function collectAttempts(
   };
 }
 
-function verificationDuration(
-  source: EvaluationStateSource["verification"][number]
-): EvidenceValue<number> {
-  if (source.startedAt.value === null || source.completedAt.value === null) {
-    return {
-      value: null,
-      evidence:
-        source.startedAt.evidence === "invalid" ||
-        source.completedAt.evidence === "invalid"
-          ? "invalid"
-          : "unknown"
-    };
-  }
-  const duration =
-    Date.parse(source.completedAt.value) - Date.parse(source.startedAt.value);
-  return duration >= 0
-    ? { value: duration, evidence: "derived" }
-    : { value: null, evidence: "invalid" };
-}
-
-function legacyVerificationSource(
-  source: EvaluationStateSource["verification"][number]
-): VerificationEvidenceSource {
-  return {
-    validStructure: source.validStructure,
-    status: { value: "completed", evidence: "observed" },
-    exitCode: source.exitCode,
-    signalPresent: source.signalPresent,
-    durationMs: verificationDuration(source)
-  };
-}
-
-function collectLegacyVerification(
-  state: EvaluationStateSource
-): VerificationCollection {
-  const sources = state.verification.map(legacyVerificationSource);
-  const entries = state.verification.map((item, index) => ({
-    ordinal: index + 1,
-    status: "completed" as const,
-    exitCode: item.exitCode,
-    signalPresent: item.signalPresent,
-    durationMs: verificationDuration(item)
-  }));
-  const cumulative = state.metrics.attempts.verification.value;
-  const activeCount = state.activeVerification.value === true ? 1 : 0;
-  const activeUnknownCount =
-    state.activeVerification.value === null &&
-    state.activeVerification.evidence !== "invalid"
-      ? 1
-      : 0;
-  const activeInvalidCount =
-    state.activeVerification.evidence === "invalid" ? 1 : 0;
-  const metricRetainedCount =
-    cumulative === null ? entries.length : Math.min(entries.length, cumulative);
-  const metricActiveCount =
-    cumulative === null
-      ? activeCount
-      : Math.min(activeCount, Math.max(0, cumulative - metricRetainedCount));
-  const metricObservedCount = metricRetainedCount + metricActiveCount;
-  const retainedCountInvalidCount = entries.length - metricRetainedCount;
-  const activeCountInvalidCount = activeCount - metricActiveCount;
-  const countInvalidCount = retainedCountInvalidCount + activeCountInvalidCount;
-  const historicalUnknownCount =
-    cumulative === null &&
-    state.metrics.attempts.verification.evidence !== "invalid"
-      ? 1
-      : cumulative === null
-        ? 0
-        : Math.max(0, cumulative - metricObservedCount);
-  const historicalInvalidCount =
-    cumulative === null &&
-    state.metrics.attempts.verification.evidence === "invalid"
-      ? 1
-      : 0;
-  return {
-    entries,
-    sources,
-    retainedSources: state.verification,
-    metricSources: sources.slice(0, metricRetainedCount),
-    activeCount,
-    metricActiveCount,
-    activeUnknownCount,
-    activeInvalidCount,
-    listUnknownCount:
-      state.verificationList.value === null &&
-      state.verificationList.evidence !== "invalid"
-        ? 1
-        : 0,
-    listInvalidCount: state.verificationList.evidence === "invalid" ? 1 : 0,
-    historicalUnknownCount,
-    historicalInvalidCount,
-    retainedCountInvalidCount,
-    activeCountInvalidCount,
-    countInvalidCount
-  };
-}
-
 function ledgerVerificationSource(
   record: VerificationAttemptRecord
 ): VerificationEvidenceSource {
@@ -908,11 +815,8 @@ async function collectVerification(
 ): Promise<{ collection: VerificationCollection; issues: EvaluationIssue[] }> {
   const directory = path.join(runDirectory, "verification-attempts");
   const entries = await childDirectoryEntries(directory);
-  if (entries === null) {
-    return { collection: collectLegacyVerification(state), issues: [] };
-  }
   const issues: EvaluationIssue[] = [];
-  if (entries === undefined) {
+  if (entries === undefined || entries === null) {
     issues.push(
       directIssue(
         runKey,
@@ -955,7 +859,14 @@ async function collectVerification(
   } else {
     try {
       parseVerificationLedger(marker.value);
-    } catch {
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "RESOURCE_VERSION_UNSUPPORTED"
+      )
+        throw error;
       issues.push(
         directIssue(
           runKey,
@@ -996,7 +907,14 @@ async function collectVerification(
         file,
         record: parseVerificationAttemptRecord(result.value)
       });
-    } catch {
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "RESOURCE_VERSION_UNSUPPORTED"
+      )
+        throw error;
       invalidCount += 1;
       issues.push(
         directIssue(
@@ -1215,7 +1133,14 @@ async function collectReviews(
           evaluationIssue(runKey, null, "review", item)
         )
       );
-    } catch {
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "RESOURCE_VERSION_UNSUPPORTED"
+      )
+        throw error;
       issues.push(directIssue(runKey, "review", "REVIEW_MALFORMED"));
       invalidCount += 1;
     }
@@ -1284,7 +1209,14 @@ async function collectEvents(
     }
     try {
       events.push(parseEvaluationEventSource(JSON.parse(line)));
-    } catch {
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "RESOURCE_VERSION_UNSUPPORTED"
+      )
+        throw error;
       issues.push(directIssue(runKey, "event", "EVENT_LINE_MALFORMED"));
       invalidCount += 1;
     }
@@ -1339,7 +1271,7 @@ function resolveAttemptCoverage(
   let genericUnknownCount = attempts.unknownCount;
   let genericInvalidCount = attempts.invalidCount;
   for (const source of attempts.sources) {
-    if (source.schemaVersion.value === 1 || source.schemaVersion.value === 2) {
+    if (source.schemaVersion.value === 2) {
       continue;
     }
     excluded.add(source.identity);
@@ -1371,7 +1303,7 @@ function resolveAttemptCoverage(
       ? undefined
       : attempts.sources.find((item) => item.identity === identity);
   const exact =
-    (source?.schemaVersion.value === 1 || source?.schemaVersion.value === 2) &&
+    source?.schemaVersion.value === 2 &&
     expectedKind !== null &&
     source.kind.value === expectedKind &&
     source.status.value !== null;
@@ -1394,9 +1326,7 @@ function resolveAttemptCoverage(
   }
   const alreadyRepresented =
     (identity !== null && attempts.conflictedIdentities.has(identity)) ||
-    (source !== undefined &&
-      source.schemaVersion.value !== 1 &&
-      source.schemaVersion.value !== 2) ||
+    (source !== undefined && source.schemaVersion.value !== 2) ||
     (source === undefined && attempts.directoryUnavailable);
   const sourceContradictsActive =
     source !== undefined &&
@@ -2330,16 +2260,8 @@ async function collectCandidate(
     stateIssues = parsed.issues.map((item) =>
       evaluationIssue(runKey, null, "state", item)
     );
-    if (state.schemaVersion === 5 && options.schemaVersion !== 2)
-      stateIssues.push(
-        directIssue(
-          runKey,
-          "verification",
-          "VERIFICATION_HISTORY_INCOMPLETE",
-          "verificationEvidence"
-        )
-      );
   } catch (error) {
+    if (error instanceof ResourceVersionUnsupportedError) throw error;
     const code =
       error instanceof BanzaiError &&
       error.code === "EVALUATION_STATE_SCHEMA_UNSUPPORTED"
@@ -2385,23 +2307,7 @@ async function collectCandidate(
     issues.push(directIssue(runKey, "event", "PLAN_TASK_COMPLETION_INVALID"));
   }
   const verification = verificationEvidence.collection;
-  if (
-    verification.historicalUnknownCount > 0 ||
-    verification.countInvalidCount > 0
-  ) {
-    issues.push(
-      directIssue(
-        runKey,
-        "verification",
-        "VERIFICATION_HISTORY_INCOMPLETE",
-        "metrics.attempts.verification"
-      )
-    );
-  }
-  const workflow: EvidenceValue<WorkflowRoute> =
-    state.workflow.evidence === "legacy_absent" && state.schemaVersion === 1
-      ? { value: "strict", evidence: "inferred_legacy" }
-      : state.workflow;
+  const workflow = state.workflow;
   const addIssue = (item: EvaluationIssue): void => {
     issues.push({ ...item, runKey });
   };
@@ -2450,20 +2356,13 @@ async function candidateDirectories(runsDirectory: string): Promise<string[]> {
     .sort((left, right) => left.localeCompare(right));
 }
 
-export async function collectEvaluationExport(
-  repoRoot: string,
-  options: EvaluationExportOptions
-): Promise<EvaluationExport> {
-  const runsDirectory = path.join(repoRoot, ".banzai", "runs");
-  const candidates = await candidateDirectories(runsDirectory);
-  return collectEvaluationCandidates(repoRoot, options, candidates);
-}
+export const collectEvaluationExport = collectEvaluationExportV2;
 
 async function collectEvaluationCandidates(
   repoRoot: string,
   options: EvaluationExportOptions,
   candidates: readonly string[]
-): Promise<EvaluationExport> {
+): Promise<Omit<EvaluationExport, "runs"> & { runs: EvaluationRun[] }> {
   const runsDirectory = path.join(repoRoot, ".banzai", "runs");
   const candidateSet = new Set(candidates);
   for (const runId of options.runIds) {
@@ -2532,7 +2431,7 @@ async function collectEvaluationCandidates(
   };
 }
 
-/** Opt-in projection; all values are ordinal or allow-listed numeric evidence. */
+/** Current projection; all values are ordinal or allow-listed numeric evidence. */
 async function collectVerificationV2(
   repoRoot: string,
   runId: string
@@ -2568,11 +2467,7 @@ async function collectVerificationV2(
   const json = async (relative: string): Promise<unknown> =>
     JSON.parse((await read(relative)).toString("utf8")) as unknown;
   try {
-    if (
-      parseVerificationLedger(await json("verification-attempts/ledger.json"))
-        .schemaVersion !== 2
-    )
-      return result;
+    parseVerificationLedger(await json("verification-attempts/ledger.json"));
     const state = (await json("state.json")) as {
       schemaVersion?: number;
       artifactBinding?: { binding?: { workId?: string } };
@@ -2581,7 +2476,6 @@ async function collectVerificationV2(
     if (state.schemaVersion !== 5 || !state.artifactBinding?.binding?.workId)
       return result;
     const binding = parseBinding(state.artifactBinding.binding);
-    if (binding.schemaVersion !== 2) return result;
     const attempts: VerificationAttemptRecord[] = [];
     for (const entry of await inventory("verification-attempts")) {
       if (entry === "ledger.json") continue;
@@ -2738,7 +2632,14 @@ async function collectVerificationV2(
       if (hash(await read(relative)) !== sha256)
         throw new Error("Verification evidence changed during export.");
     result.coverage = complete ? "exact" : "incomplete";
-  } catch {
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "RESOURCE_VERSION_UNSUPPORTED"
+    )
+      throw error;
     result.coverage = "incomplete";
   }
   return result;

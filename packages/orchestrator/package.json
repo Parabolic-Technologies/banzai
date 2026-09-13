@@ -1,6 +1,6 @@
 {
   "name": "@parabolic-technologies/banzai",
-  "version": "2.5.0",
+  "version": "3.0.0",
   "private": false,
   "description": "Spec-driven AI development CLI for Codex and Claude Code, with human approvals and independent review for complex changes.",
   "keywords": [

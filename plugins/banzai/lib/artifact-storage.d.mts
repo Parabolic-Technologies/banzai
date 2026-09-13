@@ -1,15 +1,15 @@
 export interface WorkBinding {
-  schema: "banzai-work-binding/v1" | "banzai-work-binding/v2";
-  schemaVersion: 1 | 2;
+  schema: "banzai-work-binding/v2";
+  schemaVersion: 2;
   workId: string;
   slug: string;
   mode: "strict" | "lite" | "fix" | "workflow";
-  layout: "private" | "legacy";
+  layout: "private";
   createdAt: string;
   sourceCommit: string | null;
   artifacts: {
     reviewDirectory: string;
-    verificationDirectory?: string;
+    verificationDirectory: string;
     description?: string;
     plan?: string;
     implementationReport?: string;
@@ -25,21 +25,12 @@ export interface BoundWork {
 export interface LayoutDeclaration {
   schema: "banzai-artifact-layout/v1";
   schemaVersion: 1;
-  layout: "private" | "legacy";
-}
-export interface LegacySelection {
-  slug: string;
-  mode: WorkBinding["mode"];
-  creationId: string;
-  workPath: string;
-  artifacts: WorkBinding["artifacts"];
-  originals: { path: string; sha256: string }[];
-  sourceCommit: string | null;
+  layout: "private";
 }
 export interface ArtifactInspection {
   projectRoot: string;
-  classification: "declared" | "legacy" | "fresh";
-  layout: "private" | "legacy";
+  classification: "declared" | "fresh";
+  layout: "private";
   declaration: LayoutDeclaration | null;
   work: BoundWork | null;
   candidates: {
@@ -48,9 +39,6 @@ export interface ArtifactInspection {
     mode: WorkBinding["mode"];
     workPath: string;
   }[];
-  legacyEvidence: string[];
-  legacyCandidates: LegacySelection[];
-  legacySelection: LegacySelection | null;
 }
 export interface ArtifactResponse {
   schema: "banzai-artifact-result/v1";
@@ -65,14 +53,15 @@ export class ArtifactStorageError extends Error {
   constructor(code: string, message: string);
 }
 export const DECLARATION_SCHEMA: "banzai-artifact-layout/v1";
-export const BINDING_SCHEMA: "banzai-work-binding/v1";
-export const REQUEST_SCHEMA: "banzai-artifact-request/v1";
+export const BINDING_SCHEMA: "banzai-work-binding/v2";
+export const REQUEST_SCHEMA: "banzai-artifact-request/v2";
 export const RESULT_SCHEMA: "banzai-artifact-result/v1";
 export const METADATA_LIMIT: number;
 export const DISCOVERY_LIMIT: number;
 export const DECLARATION_PATH: string;
 export const WORK_ROOT: string;
 export function fail(code: string, message: string): never;
+export function unsupportedResourceVersion(resource: string, found: string | number, supported: string | number): never;
 export function digestBytes(value: string | Uint8Array): string;
 export function canonicalJson(value: unknown): string;
 export function exactObject(
@@ -163,7 +152,7 @@ export function runArtifactOperation(
 export function artifactCommand(args: string[]): Promise<ArtifactResponse>;
 
 export type AdoptionClassification =
-  "ready" | "setup_required" | "migration_required" | "needs_attention";
+  "ready" | "setup_required" | "needs_attention";
 export interface AdoptionIssue {
   file: string;
   reason: string;

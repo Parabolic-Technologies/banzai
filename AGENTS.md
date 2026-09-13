@@ -49,7 +49,6 @@ Resolve new internal work through the installed plugin's artifact-storage policy
 and helper. Keep descriptions, plans, reports and reviews in ignored
 `.banzai/work/<work-id>/`; orchestrator execution evidence stays in ignored
 `.banzai/runs/<run-id>/`. Public product guides, ADRs and the project manifest keep
-their maintained repository paths. Do not create new workflow evidence under
-`documentation/features/`, `documentation/development-plans/` or
-`documentation/changes/`. Preserved older work remains historical evidence under
-its original private archive identity; it is not an active workflow in this snapshot.
+their maintained repository paths. Preserved older work remains historical
+evidence under its original private archive identity; it is not an active
+workflow in this snapshot.

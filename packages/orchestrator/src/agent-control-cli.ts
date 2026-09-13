@@ -196,21 +196,7 @@ export async function executeAgentControlCommand(
     const answer = decoded.value;
     const current = await runner.status();
     const pending = current.state.pendingHumanDecision ?? null;
-    if (answer.schema === "banzai-agent-answer/v1") {
-      if (pending?.kind === "decision_consultation") {
-        throw new BanzaiError(
-          "CONTROL_SCHEMA_UNSUPPORTED",
-          "Agent answer v1 cannot represent or answer a decision consultation."
-        );
-      }
-      await runner.answerHumanDecision(
-        {
-          answers: answer.answers,
-          decidedBy: command.decidedBy ?? defaultDecisionMaker
-        },
-        command.autoResume
-      );
-    } else {
+    {
       if (
         pending?.kind !== "decision_consultation" ||
         current.state.runId !== answer.runId ||

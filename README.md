@@ -182,13 +182,9 @@ The six policies stay in the installed plugin's `policies/` directory. Standalon
 skills read them relatively; the runner embeds the required phase union with
 shared guidance and resends it on every call. Policy bodies are never copied into
 the project. Updating the plugin
-does not migrate existing project files. On a legacy layout, affected work
-stops with: **legacy Banzai layout: run `project-manifest` to migrate**.
-Invoke `project-manifest` explicitly to review and approve one migration diff
-that preserves shared project rules and confirmed host-specific notes.
-A declined migration leaves project files unchanged; an ambiguous or
-interrupted layout remains stopped. See the
-[migration procedure](plugins/banzai/skills/project-manifest/references/layout-migration.md).
+does not change existing project files. A partial instruction layout stops
+affected work with an exact ambiguity report. Explicit project setup can propose
+concrete merges for approval; no compatibility migration is provided.
 
 Banzai's default Claude environment isolates MCP and scopes settings when it
 can verify a Banzai plugin directory. An unresolved directory leaves ambient
@@ -233,7 +229,7 @@ mutable work. Interrupted implementation is never silently retried. Details:
 
 To supervise a run from a chat agent, explicitly invoke `/banzai:orchestrate`
 (Claude Code) or `$banzai:orchestrate` (Codex); the skill can never select
-itself. Compatible supervisors require control contract `2.0.0`; see
+itself. Compatible supervisors require control contract `4.0.0`; see
 [agent control](documentation/orchestrator.md#agent-control) for exact schemas
 and compatibility checks.
 
@@ -336,9 +332,9 @@ documentation/
 
 Lite work normally needs only `work.md`. Accepted ADR bodies are immutable;
 changed decisions use a linked superseding ADR. Each `review-<iteration>.md` is
-self-contained: the runner renders and publishes `banzai-feature-review/v2` for
+self-contained: the runner renders and publishes `banzai-feature-review/v4` for
 read-only orchestrated reviewers; standalone reviewers own durable
-`banzai-feature-review/v1` Markdown. A human or another model can continue the
+`banzai-standalone-review/v1` Markdown. A human or another model can continue the
 review from either artifact without a copied transcript.
 
 ## Engineering Quality
@@ -400,4 +396,4 @@ See [NOTICE](NOTICE), [third-party information](THIRD_PARTY_NOTICES.md),
 Using Banzai does not require open-sourcing your own project. Community
 participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-Work artifacts default to [local private storage](documentation/artifact-storage.md) after normal project setup. Shared ADRs and current product guides remain public; existing work retains explicit legacy paths.
+Work artifacts default to [local private storage](documentation/artifact-storage.md) after normal project setup. Shared ADRs and current product guides remain public; all work uses explicit private role paths.

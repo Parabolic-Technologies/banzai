@@ -53,7 +53,7 @@ export function setProjectVersion(options: {
   fileSystem?: VersionFileSystem;
 }): Promise<{
   version: string;
-  transition: "bootstrap" | "forward";
+  transition: "forward";
   fieldCount: number;
   paths: string[];
 }>;

@@ -208,7 +208,7 @@ export interface WorkspaceEntry {
 }
 
 export interface WorkspaceSnapshot {
-  schemaVersion?: 2;
+  schemaVersion: 2;
   artifactBindingDigest?: string;
   baseCommit: string;
   digest: string;
@@ -370,28 +370,24 @@ export async function workspaceSnapshot(
     }
     entries.push(entry);
   }
-  if (options.artifactBinding !== undefined) {
-    const identity = {
-      version: 2,
-      baseCommit,
-      artifactBindingDigest: options.artifactBinding.sha256,
-      entries
-    };
-    const digest = createHash("sha256")
-      .update(JSON.stringify(identity))
-      .digest("hex");
-    return {
-      schemaVersion: 2,
-      baseCommit,
-      artifactBindingDigest: identity.artifactBindingDigest,
-      digest,
-      entries
-    };
-  }
+  const identity = {
+    version: 2,
+    baseCommit,
+    artifactBindingDigest: options.artifactBinding?.sha256 ?? null,
+    entries
+  };
   const digest = createHash("sha256")
-    .update(JSON.stringify({ version: 1, baseCommit, entries }))
+    .update(JSON.stringify(identity))
     .digest("hex");
-  return { baseCommit, digest, entries };
+  return {
+    schemaVersion: 2,
+    baseCommit,
+    ...(options.artifactBinding
+      ? { artifactBindingDigest: options.artifactBinding.sha256 }
+      : {}),
+    digest,
+    entries
+  };
 }
 
 export async function workspaceDigest(

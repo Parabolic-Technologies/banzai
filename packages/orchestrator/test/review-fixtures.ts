@@ -1,3 +1,9 @@
+import { boundWorkFixture } from "./helpers.js";
+import {
+  evidenceDigest,
+  verificationApplicability
+} from "../src/verification-evidence.js";
+import { createHash } from "node:crypto";
 import type {
   CurrentReviewResult,
   ReviewArtifactContext,
@@ -10,14 +16,50 @@ import { sealReviewSnapshot } from "../src/review-snapshot.js";
 export function reviewSnapshotFixture(
   overrides: Partial<Omit<ReviewSnapshot, "digest">> = {}
 ): ReviewSnapshot {
+  const bound = overrides.artifactBinding ?? boundWorkFixture();
+  const { description, plan } = bound.binding.artifacts;
+  if (!description || !plan) throw new Error("Fixture requires strict roles.");
+  const decisionBody = {
+    schema: "banzai-verification-decision/v1" as const,
+    schemaVersion: 1 as const,
+    workId: bound.binding.workId,
+    roundId: "fixture-round",
+    candidateDigest: null,
+    authorityDigest: "a".repeat(64),
+    configurationDigest: "b".repeat(64),
+    actions: []
+  };
+  const decision = { ...decisionBody, sha256: evidenceDigest(decisionBody) };
+  const applicability = verificationApplicability(decision, [], {
+    complete: false,
+    reason: "policy_disabled",
+    candidateDigest: null,
+    checks: []
+  });
+  const workspaceDigest = createHash("sha256")
+    .update(
+      JSON.stringify({
+        version: 2,
+        baseCommit: "c".repeat(40),
+        artifactBindingDigest: bound.sha256,
+        entries: []
+      })
+    )
+    .digest("hex");
   const artifact: ReviewArtifactContext = {
-    path: "documentation/features/example/review-1.md",
+    path: `${bound.binding.artifacts.reviewDirectory}/review-1.md`,
     candidatePath:
       ".banzai/runs/review-fixture/attempts/review-1.review-candidate.md",
     slug: "example",
     iteration: 1,
-    approvedArtifactPaths: ["docs/description.md", "docs/plan.md"],
-    workspaceDigest: "b".repeat(64),
+    approvedArtifactPaths: [description, plan],
+    workspaceDigest,
+    verificationEvidence: {
+      decision,
+      applicability,
+      origins: [],
+      attempts: []
+    },
     verification: [
       {
         name: "unit ` tests",
@@ -37,8 +79,9 @@ export function reviewSnapshotFixture(
     sha256: "e".repeat(64)
   }));
   const body = {
-    schema: "banzai-review-snapshot/v1" as const,
-    schemaVersion: 1 as const,
+    schema: "banzai-review-snapshot/v3" as const,
+    schemaVersion: 3 as const,
+    artifactBinding: bound,
     runId: "review-fixture",
     attemptId: "review-1",
     outputContract: "review-result/v2" as const,
@@ -52,6 +95,8 @@ export function reviewSnapshotFixture(
     },
     approvedArtifacts,
     workspace: {
+      schemaVersion: 2 as const,
+      artifactBindingDigest: bound.sha256,
       baseCommit: "c".repeat(40),
       digest: artifact.workspaceDigest,
       entries: []

@@ -1,6 +1,6 @@
 import { parseVerificationConfiguration } from "./verification-evidence.js";
 import { createHash } from "node:crypto";
-import { BanzaiError } from "./errors.js";
+import { BanzaiError, ResourceVersionUnsupportedError } from "./errors.js";
 import { vendorFor } from "./models.js";
 import {
   CONTRACT_VERSION,
@@ -55,17 +55,28 @@ import {
   type TerminalAttemptCheckpoint,
   type TerminalCheckpointResult,
   type TerminalResultContract,
-  type VerificationCommand,
+  type VerificationProjectType,
   type VerificationAttemptFailureCategory,
   type VerificationAttemptLogEvidence,
   type VerificationAttemptRecord,
   type VerificationAttemptStatus,
   type VerificationLedger,
-  type VerificationProfile,
-  type VerificationProjectType,
   type WorkflowRoute,
   type WorkflowSelectionResult
 } from "./types.js";
+
+const VERIFICATION_PROJECT_TYPES = [
+  "repository",
+  "node",
+  "php",
+  "python",
+  "go",
+  "rust",
+  "ruby",
+  "jvm",
+  "dotnet",
+  "custom"
+] as const satisfies readonly VerificationProjectType[];
 
 const VERIFICATION_ATTEMPT_STATUSES = [
   "started",
@@ -710,6 +721,12 @@ export function parseWorkflowSelectionResult(
 
 export function parsePhaseResult(value: unknown): PhaseResult {
   const record = requireRecord(value, "phase result");
+  if (record.schemaVersion !== PHASE_RESULT_SCHEMA_VERSION)
+    throw new ResourceVersionUnsupportedError(
+      "phase result",
+      String(record.schemaVersion),
+      PHASE_RESULT_SCHEMA_VERSION
+    );
   exactKeys(
     record,
     [
@@ -730,12 +747,6 @@ export function parsePhaseResult(value: unknown): PhaseResult {
     "INVALID_RESULT",
     "Phase result"
   );
-  if (record.schemaVersion !== PHASE_RESULT_SCHEMA_VERSION) {
-    throw new BanzaiError(
-      "PHASE_RESULT_SCHEMA_MISMATCH",
-      `Phase result must use schema ${PHASE_RESULT_SCHEMA_VERSION}.`
-    );
-  }
   if (record.contractVersion !== CONTRACT_VERSION) {
     throw new BanzaiError(
       "CONTRACT_VERSION_MISMATCH",
@@ -820,134 +831,7 @@ export function parsePhaseResult(value: unknown): PhaseResult {
 export function parsePersistedPhaseResult(
   value: unknown
 ): PersistedPhaseResult {
-  const record = requireRecord(value, "persisted phase result");
-  if (record.schemaVersion === PHASE_RESULT_SCHEMA_VERSION) {
-    return parsePhaseResult(record);
-  }
-  const schemaVersion =
-    record.schemaVersion === 2
-      ? 2
-      : record.schemaVersion === undefined || record.schemaVersion === 1
-        ? 1
-        : null;
-  if (schemaVersion === null) {
-    throw new BanzaiError(
-      "PHASE_RESULT_SCHEMA_MISMATCH",
-      "Persisted phase result schema is unsupported."
-    );
-  }
-  exactKeys(
-    record,
-    schemaVersion === 1
-      ? [
-          ...(Object.hasOwn(record, "schemaVersion") ? ["schemaVersion"] : []),
-          "contractVersion",
-          "phase",
-          "outcome",
-          "gate",
-          "summary",
-          "artifacts",
-          "touchedPaths",
-          "questions",
-          "resolvedFindingIds",
-          "requestedVerification"
-        ]
-      : [
-          "schemaVersion",
-          "contractVersion",
-          "phase",
-          "outcome",
-          "gate",
-          "summary",
-          "artifacts",
-          "taskCompletion",
-          "touchedPaths",
-          "questions",
-          "resolvedFindingIds",
-          "requestedVerification"
-        ],
-    "INVALID_RESULT",
-    "Persisted phase result"
-  );
-  if (record.contractVersion !== CONTRACT_VERSION) {
-    throw new BanzaiError(
-      "CONTRACT_VERSION_MISMATCH",
-      `Phase result must use contract ${CONTRACT_VERSION}.`
-    );
-  }
-  const phase = requireEnum(record.phase, "phase", [
-    "plan",
-    "implementation",
-    "fix"
-  ] as const);
-  const gate =
-    record.gate === null
-      ? null
-      : requireEnum(record.gate, "gate", [
-          "adr_approval",
-          "plan_approval",
-          "escalation"
-        ] as const);
-  const reportedOutcome = requireEnum(record.outcome, "outcome", [
-    "completed",
-    "needs_human_decision",
-    "blocked"
-  ] as const);
-  const outcome =
-    reportedOutcome === "completed" && gate !== null
-      ? "needs_human_decision"
-      : reportedOutcome;
-  if (outcome === "needs_human_decision" && gate === null) {
-    throw new BanzaiError(
-      "INVALID_RESULT",
-      "needs_human_decision requires a non-null gate."
-    );
-  }
-  let artifacts: PhaseArtifacts;
-  if (schemaVersion === 1) {
-    const legacyArtifacts = consultationRecord(record.artifacts, "artifacts", [
-      "description",
-      "plan",
-      "adrs",
-      "implementationReport"
-    ]);
-    artifacts = {
-      description: requireNullableString(
-        legacyArtifacts.description,
-        "artifacts.description"
-      ),
-      plan: requireNullableString(legacyArtifacts.plan, "artifacts.plan"),
-      adrs: requireStringArray(legacyArtifacts.adrs, "artifacts.adrs"),
-      implementationReport: requireNullableString(
-        legacyArtifacts.implementationReport,
-        "artifacts.implementationReport"
-      ),
-      testReport: null
-    };
-  } else {
-    artifacts = parseArtifacts(record.artifacts);
-  }
-  return {
-    schemaVersion,
-    contractVersion: CONTRACT_VERSION,
-    phase,
-    outcome,
-    gate,
-    summary: requireString(record.summary, "summary"),
-    artifacts,
-    taskCompletion:
-      schemaVersion === 1 ? null : parseTaskCompletion(record.taskCompletion),
-    touchedPaths: requireStringArray(record.touchedPaths, "touchedPaths"),
-    questions: requireStringArray(record.questions, "questions"),
-    resolvedFindingIds: requireStringArray(
-      record.resolvedFindingIds,
-      "resolvedFindingIds"
-    ),
-    requestedVerification: requireStringArray(
-      record.requestedVerification,
-      "requestedVerification"
-    )
-  };
+  return parsePhaseResult(value);
 }
 
 function parseEvidence(value: unknown, findingId: string): ReviewEvidence {
@@ -1012,7 +896,9 @@ function parseFinding(value: unknown): ReviewFinding {
   };
 }
 
-function parseReviewFields(value: unknown): ReviewResult {
+function parseReviewFields(
+  value: unknown
+): Omit<ReviewResult, "schemaVersion"> {
   const record = requireRecord(value, "review result");
   if (record.contractVersion !== CONTRACT_VERSION) {
     throw new BanzaiError(
@@ -1064,17 +950,8 @@ function parseReviewFields(value: unknown): ReviewResult {
   };
 }
 
-/** Historical reads dispatch explicitly; new invocations use the strict v2 decoder. */
-export function parseReviewResult(value: unknown): ReviewResult {
-  const record = requireRecord(value, "review result");
-  if (
-    record.schemaVersion !== undefined ||
-    record.scopeAcknowledgment !== undefined ||
-    record.reviewNotes !== undefined
-  ) {
-    return parseCurrentReviewResult(value);
-  }
-  return parseReviewFields(value);
+export function parseReviewResult(value: unknown): CurrentReviewResult {
+  return parseCurrentReviewResult(value);
 }
 
 export function reviewScopePath(value: unknown): string {
@@ -1096,9 +973,10 @@ export function reviewScopePath(value: unknown): string {
 export function parseCurrentReviewResult(value: unknown): CurrentReviewResult {
   const record = requireRecord(value, "review result");
   if (record.schemaVersion !== 2)
-    throw new BanzaiError(
-      "REVIEW_RESULT_SCHEMA_MISMATCH",
-      "New reviews require review-result/v2."
+    throw new ResourceVersionUnsupportedError(
+      "review result",
+      String(record.schemaVersion),
+      2
     );
   exactKeys(
     record,
@@ -1129,7 +1007,7 @@ export function parseCurrentReviewResult(value: unknown): CurrentReviewResult {
     record.deferredCoverage,
     "deferredCoverage"
   );
-  // V1 field decoding preserves prose; v2 also rejects unexpected nested data.
+  // Field decoding preserves prose; current results reject unexpected nested data.
   for (const [index, item] of (record.findings as unknown[]).entries()) {
     const finding = requireRecord(item, "finding");
     const parsedFinding = result.findings[index];
@@ -1448,38 +1326,11 @@ function parseEvidenceUsage(
 
 function parseCheckpointResult(
   kind: AttemptReference["kind"],
-  value: unknown,
-  resultContract: TerminalResultContract
+  value: unknown
 ): TerminalCheckpointResult {
-  if (kind === "selection") {
-    return parseWorkflowSelectionResult(value);
-  }
-  if (kind === "review") {
-    if (resultContract === "review-result/v2")
-      return parseCurrentReviewResult(value);
-    const legacy = requireRecord(value, "legacy review");
-    if (
-      legacy.schemaVersion !== undefined ||
-      legacy.scopeAcknowledgment !== undefined ||
-      legacy.reviewNotes !== undefined
-    )
-      return recoveryEvidenceError(
-        "INVALID_TERMINAL_CHECKPOINT",
-        "Legacy checkpoint cannot carry a new review result."
-      );
-    return parseReviewFields(value);
-  }
-  if (resultContract === "phase-result/v3") {
-    return parsePhaseResult(value);
-  }
-  const result = parsePersistedPhaseResult(value);
-  if (result.schemaVersion !== 2) {
-    return recoveryEvidenceError(
-      "INVALID_TERMINAL_CHECKPOINT",
-      "Legacy phase-result/v2 checkpoint must contain a v2 result."
-    );
-  }
-  return result;
+  if (kind === "selection") return parseWorkflowSelectionResult(value);
+  if (kind === "review") return parseReviewResult(value);
+  return parsePhaseResult(value);
 }
 
 export function terminalCheckpointIntegrity(
@@ -1576,24 +1427,14 @@ export function parseTerminalAttemptCheckpoint(
     attempt.kind === "selection"
       ? "workflow-selection/v1"
       : attempt.kind === "review"
-        ? resultContract === "review-result/v2"
-          ? "review-result/v2"
-          : "review-result/v1"
-        : resultContract === "phase-result/v2"
-          ? "phase-result/v2"
-          : "phase-result/v3";
-  if (
-    resultContract !== expectedContract ||
-    (attempt.kind !== "selection" &&
-      attempt.kind !== "review" &&
-      resultContract !== "phase-result/v2" &&
-      resultContract !== "phase-result/v3")
-  ) {
-    return recoveryEvidenceError(
-      code,
-      `Checkpoint result contract must be ${expectedContract}.`
+        ? "review-result/v2"
+        : "phase-result/v3";
+  if (resultContract !== expectedContract)
+    throw new ResourceVersionUnsupportedError(
+      "checkpoint result contract",
+      String(resultContract),
+      expectedContract
     );
-  }
   if (!isRecord(value.terminal)) {
     return recoveryEvidenceError(code, "terminal must be an object.");
   }
@@ -1655,7 +1496,7 @@ export function parseTerminalAttemptCheckpoint(
         "terminal.observedAt"
       )
     },
-    result: parseCheckpointResult(attempt.kind, value.result, expectedContract),
+    result: parseCheckpointResult(attempt.kind, value.result),
     sessionId: evidenceNullableString(value.sessionId, code, "sessionId", 300),
     usage: parseEvidenceUsage(value.usage, code, "usage"),
     baseCommit: evidenceString(value.baseCommit, code, "baseCommit", 100),
@@ -1849,15 +1690,12 @@ export function parseModelAttemptRecord<T>(value: unknown): AttemptRecord<T> {
     code,
     "Attempt record"
   );
-  if (
-    value.schemaVersion !== 1 &&
-    value.schemaVersion !== MODEL_ATTEMPT_SCHEMA_VERSION
-  ) {
-    return recoveryEvidenceError(
-      code,
-      "Attempt schema version is unsupported."
+  if (value.schemaVersion !== MODEL_ATTEMPT_SCHEMA_VERSION)
+    throw new ResourceVersionUnsupportedError(
+      "model attempt",
+      String(value.schemaVersion),
+      MODEL_ATTEMPT_SCHEMA_VERSION
     );
-  }
   const attempt = parseEvidenceAttempt(value.attempt, code, "attempt");
   if (
     value.rotationReason != null &&
@@ -1865,7 +1703,6 @@ export function parseModelAttemptRecord<T>(value: unknown): AttemptRecord<T> {
       ![
         "primary-review",
         "missing-session",
-        "legacy-state",
         "settings-changed",
         "approval-changed",
         "previous-review-failed",
@@ -1999,13 +1836,12 @@ export function parseModelAttemptRecord<T>(value: unknown): AttemptRecord<T> {
   const status = value.status;
   if (
     typeof status !== "string" ||
-    !["started", "completed", "failed", "interrupted"].includes(status) ||
-    (value.schemaVersion === 1 && status === "interrupted")
+    !["started", "completed", "failed", "interrupted"].includes(status)
   ) {
     return recoveryEvidenceError(code, "Attempt status is unsupported.");
   }
   evidenceTimestamp(value.startedAt, code, "startedAt");
-  if (value.schemaVersion === MODEL_ATTEMPT_SCHEMA_VERSION) {
+  {
     if (
       !Object.hasOwn(value, "interruptedAt") ||
       !Object.hasOwn(value, "recoveryOf") ||
@@ -2071,75 +1907,15 @@ function parseModelSettings(value: unknown, label: string): ModelSettings {
   };
 }
 
-function parseVerificationCommand(
-  value: unknown,
-  label: string
-): VerificationCommand {
-  const record = requireRecord(value, label);
-  if (
-    !Array.isArray(record.args) ||
-    record.args.some((item) => typeof item !== "string")
-  ) {
-    throw new BanzaiError(
-      "INVALID_CONFIG",
-      `${label}.args must be an array of strings.`
-    );
-  }
-  return {
-    name: requireString(record.name, `${label}.name`),
-    command: requireString(record.command, `${label}.command`),
-    args: [...(record.args as string[])],
-    timeoutMs: requirePositiveInteger(record.timeoutMs, `${label}.timeoutMs`)
-  };
-}
-
-const VERIFICATION_PROJECT_TYPES = [
-  "repository",
-  "node",
-  "php",
-  "python",
-  "go",
-  "rust",
-  "ruby",
-  "jvm",
-  "dotnet",
-  "custom"
-] as const satisfies readonly VerificationProjectType[];
-
-function parseVerificationProfile(
-  value: unknown,
-  index: number
-): VerificationProfile {
-  const label = `verification.profiles[${index}]`;
-  const record = requireRecord(value, label);
-  const id = requireString(record.id, `${label}.id`);
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)) {
-    throw new BanzaiError(
-      "INVALID_CONFIG",
-      `${label}.id must be a kebab-case identifier.`
-    );
-  }
-  if (!Array.isArray(record.commands) || record.commands.length === 0) {
-    throw new BanzaiError(
-      "INVALID_CONFIG",
-      `${label}.commands must contain at least one deterministic verification command.`
-    );
-  }
-  return {
-    id,
-    projectType: requireEnum(
-      record.projectType,
-      `${label}.projectType`,
-      VERIFICATION_PROJECT_TYPES
-    ),
-    commands: record.commands.map((command, commandIndex) =>
-      parseVerificationCommand(command, `${label}.commands[${commandIndex}]`)
-    )
-  };
-}
-
 export function parseConfig(value: unknown): OrchestratorConfig {
   const record = requireRecord(value, "config");
+  if (record.schemaVersion !== 3) {
+    throw new ResourceVersionUnsupportedError(
+      "orchestrator config",
+      String(record.schemaVersion),
+      3
+    );
+  }
   if (record.contractVersion !== CONTRACT_VERSION) {
     throw new BanzaiError(
       "INVALID_CONFIG",
@@ -2148,64 +1924,12 @@ export function parseConfig(value: unknown): OrchestratorConfig {
   }
   const models = requireRecord(record.models, "models");
   let verification: OrchestratorConfig["verification"];
-  if (record.schemaVersion === 1) {
-    if (
-      !Array.isArray(record.verification) ||
-      record.verification.length === 0
-    ) {
-      throw new BanzaiError(
-        "INVALID_CONFIG",
-        "Config must declare at least one deterministic verification command."
-      );
-    }
-    verification = {
-      profiles: [
-        {
-          id: "legacy",
-          projectType: "custom",
-          commands: record.verification.map((command, index) =>
-            parseVerificationCommand(command, `verification[${index}]`)
-          )
-        }
-      ]
-    };
-  } else if (record.schemaVersion === 3) {
-    try {
-      verification = parseVerificationConfiguration(record.verification);
-    } catch {
-      throw new BanzaiError(
-        "INVALID_CONFIG",
-        "Invalid schema 3 verification configuration."
-      );
-    }
-  } else if (record.schemaVersion === 2) {
-    const verificationRecord = requireRecord(
-      record.verification,
-      "verification"
-    );
-    if (
-      !Array.isArray(verificationRecord.profiles) ||
-      verificationRecord.profiles.length === 0
-    ) {
-      throw new BanzaiError(
-        "INVALID_CONFIG",
-        "verification.profiles must contain at least one profile."
-      );
-    }
-    const profiles = verificationRecord.profiles.map(parseVerificationProfile);
-    if (
-      new Set(profiles.map((profile) => profile.id)).size !== profiles.length
-    ) {
-      throw new BanzaiError(
-        "INVALID_CONFIG",
-        "Verification profile ids must be unique."
-      );
-    }
-    verification = { profiles };
-  } else {
+  try {
+    verification = parseVerificationConfiguration(record.verification);
+  } catch {
     throw new BanzaiError(
       "INVALID_CONFIG",
-      "Config must use schemaVersion 1, 2 or 3."
+      "Invalid schema 3 verification configuration."
     );
   }
 
@@ -2510,9 +2234,12 @@ export function parseVerificationLedger(value: unknown): VerificationLedger {
   const code = "VERIFICATION_LEDGER_MALFORMED";
   const record = verificationRecord(value, code, "ledger");
   verificationKeys(record, ["schemaVersion"], code, "ledger");
-  if (record.schemaVersion !== 1 && record.schemaVersion !== 2) {
-    throw verificationEvidenceError(code, "schemaVersion");
-  }
+  if (record.schemaVersion !== 2)
+    throw new ResourceVersionUnsupportedError(
+      "verification ledger",
+      String(record.schemaVersion),
+      2
+    );
   return { schemaVersion: record.schemaVersion };
 }
 
@@ -2781,7 +2508,6 @@ const REVIEW_VERDICTS = [
 const ROTATION_REASONS = [
   "primary-review",
   "missing-session",
-  "legacy-state",
   "settings-changed",
   "approval-changed",
   "previous-review-failed",
@@ -2801,8 +2527,8 @@ function observed<T>(value: T): EvidenceValue<T> {
   return { value, evidence: "observed" };
 }
 
-function absent<T>(legacy = false): EvidenceValue<T> {
-  return { value: null, evidence: legacy ? "legacy_absent" : "unknown" };
+function absent<T>(): EvidenceValue<T> {
+  return { value: null, evidence: "unknown" };
 }
 
 function invalid<T>(): EvidenceValue<T> {
@@ -2828,29 +2554,22 @@ function sourceValue<T>(
   issues: EvaluationSourceIssue[],
   parse: (value: unknown) => T | undefined,
   options: {
-    legacyAbsent?: boolean;
     nullable?: boolean;
     required?: boolean;
   } = {}
 ): EvidenceValue<T> {
   if (!Object.hasOwn(record, key)) {
     if (options.required ?? true) {
-      issue(
-        issues,
-        options.legacyAbsent === true
-          ? "LEGACY_FIELD_ABSENT"
-          : "STATE_FIELD_MISSING",
-        field
-      );
+      issue(issues, "STATE_FIELD_MISSING", field);
     }
-    return absent(options.legacyAbsent);
+    return absent();
   }
   const value = record[key];
   if (value === null && options.nullable === true) {
     return notApplicable();
   }
   if (value === null) {
-    return absent(options.legacyAbsent);
+    return absent();
   }
   const parsed = parse(value);
   if (parsed === undefined) {
@@ -2959,14 +2678,12 @@ function metricValue(
   key: string,
   field: string,
   issues: EvaluationSourceIssue[],
-  legacyAbsent = false,
   nullable = false
 ): EvidenceValue<number> {
   if (record === null) {
-    return absent(legacyAbsent);
+    return absent();
   }
   return sourceValue(record, key, field, issues, nonNegativeNumber, {
-    legacyAbsent,
     nullable
   });
 }
@@ -2974,30 +2691,24 @@ function metricValue(
 function childRecord(
   value: unknown,
   field: string,
-  issues: EvaluationSourceIssue[],
-  legacyAbsent = false
+  issues: EvaluationSourceIssue[]
 ): Record<string, unknown> | null {
   if (isRecord(value)) {
     return value;
   }
   issue(
     issues,
-    legacyAbsent ? "LEGACY_FIELD_ABSENT" : "STATE_FIELD_INVALID",
+    value === undefined ? "STATE_FIELD_MISSING" : "STATE_FIELD_INVALID",
     field
   );
   return null;
 }
 
 function emptyStateMetrics(
-  legacy: boolean,
   issues: EvaluationSourceIssue[]
 ): EvaluationStateMetricSource {
-  const missing = (): EvidenceValue<number> => absent(legacy);
-  issue(
-    issues,
-    legacy ? "LEGACY_FIELD_ABSENT" : "STATE_FIELD_MISSING",
-    "metrics"
-  );
+  const missing = (): EvidenceValue<number> => absent();
+  issue(issues, "STATE_FIELD_MISSING", "metrics");
   return {
     attempts: {
       selection: missing(),
@@ -3022,26 +2733,15 @@ function emptyStateMetrics(
 
 function parseStateMetrics(
   value: unknown,
-  schemaVersion: 1 | 2 | 3 | 4 | 5,
   issues: EvaluationSourceIssue[]
 ): EvaluationStateMetricSource {
   if (!isRecord(value)) {
-    return emptyStateMetrics(schemaVersion === 1, issues);
+    return emptyStateMetrics(issues);
   }
   const attempts = childRecord(value.attempts, "metrics.attempts", issues);
   const usage = childRecord(value.usage, "metrics.usage", issues);
-  const sessions = childRecord(
-    value.sessions,
-    "metrics.sessions",
-    issues,
-    schemaVersion === 1
-  );
-  const reviews = childRecord(
-    value.reviews,
-    "metrics.reviews",
-    issues,
-    schemaVersion === 1
-  );
+  const sessions = childRecord(value.sessions, "metrics.sessions", issues);
+  const reviews = childRecord(value.reviews, "metrics.reviews", issues);
   const triage = childRecord(value.triage, "metrics.triage", issues);
   return {
     attempts: {
@@ -3049,8 +2749,7 @@ function parseStateMetrics(
         attempts,
         "selection",
         "metrics.attempts.selection",
-        issues,
-        schemaVersion === 1
+        issues
       ),
       plan: metricValue(attempts, "plan", "metrics.attempts.plan", issues),
       implementation: metricValue(
@@ -3097,7 +2796,6 @@ function parseStateMetrics(
         "costUsd",
         "metrics.usage.costUsd",
         issues,
-        false,
         true
       )
     },
@@ -3108,42 +2806,22 @@ function parseStateMetrics(
       issues
     ),
     sessions: {
-      fresh: metricValue(
-        sessions,
-        "fresh",
-        "metrics.sessions.fresh",
-        issues,
-        schemaVersion === 1
-      ),
+      fresh: metricValue(sessions, "fresh", "metrics.sessions.fresh", issues),
       resumed: metricValue(
         sessions,
         "resumed",
         "metrics.sessions.resumed",
-        issues,
-        schemaVersion === 1
+        issues
       )
     },
     reviews: {
-      full: metricValue(
-        reviews,
-        "full",
-        "metrics.reviews.full",
-        issues,
-        schemaVersion === 1
-      ),
-      delta: metricValue(
-        reviews,
-        "delta",
-        "metrics.reviews.delta",
-        issues,
-        schemaVersion === 1
-      ),
+      full: metricValue(reviews, "full", "metrics.reviews.full", issues),
+      delta: metricValue(reviews, "delta", "metrics.reviews.delta", issues),
       rotations: metricValue(
         reviews,
         "rotations",
         "metrics.reviews.rotations",
-        issues,
-        schemaVersion === 1
+        issues
       )
     },
     triage: {
@@ -3265,16 +2943,11 @@ export function parseEvaluationStateSource(
   if (!isRecord(value)) {
     throw evaluationError("Persisted state is not a supported object.");
   }
-  if (
-    value.schemaVersion !== 1 &&
-    value.schemaVersion !== 2 &&
-    value.schemaVersion !== 3 &&
-    value.schemaVersion !== 4 &&
-    value.schemaVersion !== 5
-  ) {
-    throw new BanzaiError(
-      "EVALUATION_STATE_SCHEMA_UNSUPPORTED",
-      "Persisted state uses an unsupported schema."
+  if (value.schemaVersion !== 5) {
+    throw new ResourceVersionUnsupportedError(
+      "run state",
+      String(value.schemaVersion),
+      "5"
     );
   }
   const schemaVersion = value.schemaVersion;
@@ -3289,12 +2962,8 @@ export function parseEvaluationStateSource(
       (item) => enumValue(item, WORKFLOW_ROUTES)
     );
   } else if (!Object.hasOwn(value, "workflowSelection")) {
-    workflow = absent(schemaVersion === 1);
-    issue(
-      issues,
-      schemaVersion === 1 ? "LEGACY_FIELD_ABSENT" : "STATE_FIELD_MISSING",
-      "workflowSelection"
-    );
+    workflow = absent();
+    issue(issues, "STATE_FIELD_MISSING", "workflowSelection");
   } else if (value.workflowSelection === null) {
     workflow = absent();
   } else {
@@ -3320,21 +2989,18 @@ export function parseEvaluationStateSource(
 
   let triage: Record<FindingDisposition, number>;
   let triageIsCumulative: boolean;
-  if (schemaVersion >= 2) {
-    if (Array.isArray(value.triageHistory)) {
-      triage = triageCounts(value.triageHistory, issues, "triageHistory");
-      triageIsCumulative = true;
-    } else {
-      issue(issues, "STATE_FIELD_INVALID", "triageHistory");
-      triage = { accepted: 0, rejected: 0, deferred: 0 };
-      triageIsCumulative = false;
-    }
+  if (Array.isArray(value.triageHistory)) {
+    triage = triageCounts(value.triageHistory, issues, "triageHistory");
+    triageIsCumulative = true;
   } else {
-    issue(issues, "LEGACY_FIELD_ABSENT", "triageHistory");
-    triage =
-      value.triage === null || value.triage === undefined
-        ? { accepted: 0, rejected: 0, deferred: 0 }
-        : triageCounts([value.triage], issues, "triage");
+    issue(
+      issues,
+      value.triageHistory === undefined
+        ? "STATE_FIELD_MISSING"
+        : "STATE_FIELD_INVALID",
+      "triageHistory"
+    );
+    triage = { accepted: 0, rejected: 0, deferred: 0 };
     triageIsCumulative = false;
   }
 
@@ -3472,7 +3138,7 @@ export function parseEvaluationStateSource(
       triageIsCumulative,
       verificationList,
       verification,
-      metrics: parseStateMetrics(value.metrics, schemaVersion, issues)
+      metrics: parseStateMetrics(value.metrics, issues)
     },
     issues
   };
@@ -3484,20 +3150,15 @@ function attemptEvidence<T>(
   field: string,
   issues: EvaluationSourceIssue[],
   parse: (value: unknown) => T | undefined,
-  nullable = false,
-  legacyAbsent = false
+  nullable = false
 ): EvidenceValue<T> {
   if (!Object.hasOwn(record, key)) {
-    issue(
-      issues,
-      legacyAbsent ? "LEGACY_FIELD_ABSENT" : "STATE_FIELD_MISSING",
-      field
-    );
-    return absent(legacyAbsent);
+    issue(issues, "STATE_FIELD_MISSING", field);
+    return absent();
   }
   const value = record[key];
   if (value === null) {
-    return nullable ? notApplicable() : absent(legacyAbsent);
+    return nullable ? notApplicable() : absent();
   }
   const parsed = parse(value);
   if (parsed === undefined) {
@@ -3521,6 +3182,13 @@ export function parseEvaluationAttemptSource(
 ): EvaluationDecoded<EvaluationAttemptSource> {
   if (!isRecord(value) || !isRecord(value.attempt)) {
     throw evaluationError("Persisted attempt is not a supported object.");
+  }
+  if (value.schemaVersion !== 2) {
+    throw new ResourceVersionUnsupportedError(
+      "model attempt",
+      String(value.schemaVersion),
+      "2"
+    );
   }
   const issues: EvaluationSourceIssue[] = [];
   const identity = stringValue(value.attempt.id);
@@ -3554,8 +3222,8 @@ export function parseEvaluationAttemptSource(
 
   let sessionMode: EvidenceValue<SessionMode>;
   if (!Object.hasOwn(value, "sessionMode")) {
-    issue(issues, "LEGACY_FIELD_ABSENT", "sessionMode");
-    sessionMode = absent(true);
+    issue(issues, "STATE_FIELD_MISSING", "sessionMode");
+    sessionMode = absent();
   } else {
     sessionMode = attemptEvidence(
       value,
@@ -3578,8 +3246,7 @@ export function parseEvaluationAttemptSource(
       "reviewMode",
       issues,
       (item) => enumValue(item, ["full", "delta"] as const),
-      false,
-      !Object.hasOwn(value, "reviewMode")
+      false
     );
     rotationReason = attemptEvidence(
       value,
@@ -3587,8 +3254,7 @@ export function parseEvaluationAttemptSource(
       "rotationReason",
       issues,
       (item) => enumValue(item, ROTATION_REASONS),
-      true,
-      !Object.hasOwn(value, "rotationReason")
+      true
     );
   }
 
@@ -3629,11 +3295,11 @@ export function parseEvaluationAttemptSource(
       issue(issues, "STATE_FIELD_INVALID", "sessionContext.executable");
     }
   } else {
-    issue(issues, "LEGACY_FIELD_ABSENT", "sessionContext");
+    issue(issues, "STATE_FIELD_MISSING", "sessionContext");
     model = {
-      vendor: absent(true),
-      model: absent(true),
-      effort: absent(true)
+      vendor: absent(),
+      model: absent(),
+      effort: absent()
     };
   }
 
@@ -3690,9 +3356,8 @@ export function parseEvaluationAttemptSource(
         "schemaVersion",
         "schemaVersion",
         issues,
-        (item) => (item === 1 || item === 2 ? item : undefined),
-        false,
-        !Object.hasOwn(value, "schemaVersion")
+        (item) => (item === 2 ? item : undefined),
+        false
       ),
       kind,
       mutable: attemptEvidence(
@@ -3741,6 +3406,13 @@ export function parseEvaluationReviewSource(
 ): EvaluationDecoded<EvaluationReviewSource> {
   if (!isRecord(value) || !Array.isArray(value.findings)) {
     throw evaluationError("Persisted review is not a supported object.");
+  }
+  if (value.schemaVersion !== 2) {
+    throw new ResourceVersionUnsupportedError(
+      "review result",
+      String(value.schemaVersion),
+      "2"
+    );
   }
   const issues: EvaluationSourceIssue[] = [];
   const verdict = sourceValue(value, "verdict", "verdict", issues, (item) =>

@@ -172,9 +172,7 @@ plugin manifests, `marketplace.json`, `.agents/plugins/marketplace.json`, and
 For a product release, select one explicit canonical SemVer target from the
 highest impact among all included plugin and orchestrator changes, then run
 `npm run version:set -- <version>`. Normal updates require nine equal current
-values and a strictly greater target. The explicit bootstrap accepts only the
-six-field `1.19.0` state with all three new root fields absent and target
-`1.19.0`. Partial insertion or editing only the root first is invalid. The
+values and a strictly greater target. Missing authority fields are invalid. The
 command changes only these nine fields and never runs from build, test,
 validation, or release checks. Before removing the main transaction directory,
 the command durably writes a fixed `.banzai-version-set.guard` containing the
@@ -186,12 +184,10 @@ against a coexisting guard before it changes targets or recursively cleans the
 journal. Use it only to restore the exact originals from an incomplete local
 synchronization transaction, not to choose a release rollback version. Each
 physical file has one original/candidate snapshot; all three lockfile edits are
-coordinated. Recovery reads old six-file format 1 and grouped seven-file format
-2 using their original fixed targets, independently of the current write policy.
-It preserves later target edits or mode changes by refusing restoration before
-any write. Historical independent-version recovery requires matching historical
-candidate/tooling before another migration; the new writer does not accept the
-old `1.18.1`/`0.8.2` pre-state.
+coordinated. Recovery reads only grouped seven-file format 2, independently of
+the current write policy. It preserves later target edits or mode changes by
+refusing restoration before any write. Unsupported journal formats fail closed
+with `RESOURCE_VERSION_UNSUPPORTED`.
 
 The common source version does not merge delivery evidence or compatibility
 contracts. Record plugin and orchestrator delivery/install/publication states

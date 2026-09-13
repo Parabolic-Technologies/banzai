@@ -20,7 +20,6 @@ import {
   hasRunnerWorkOwnership,
   withRunnerWorkOwnership,
   createWork,
-  artifactRoles,
   inspectBoundWork,
   readBytes as readArtifactBytes,
   ownsArtifact
@@ -68,6 +67,7 @@ import {
 } from "./context-accounting.js";
 import {
   BanzaiError,
+  ResourceVersionUnsupportedError,
   errorMessage,
   ProcessExitError,
   ProjectSetupRequiredError,
@@ -107,7 +107,6 @@ import { reviewVerdictText } from "./vocabulary.js";
 import {
   parseApprovedPlanTaskIds,
   validatePlanVerificationObligations,
-  parsePlanTaskCompletionProjection,
   PlanTaskCompletionError,
   summariesMatch,
   validatePlanTaskCompletionLedgerShape,
@@ -157,7 +156,6 @@ import {
   renderReviewArtifact,
   publishReviewArtifact,
   reviewArtifactPath,
-  validateHistoricalReviewArtifact,
   validateReviewArtifact,
   type ValidatedReviewCandidate
 } from "./review-artifact.js";
@@ -236,7 +234,6 @@ import {
   digestCanonicalJson,
   parseDecisionConsultationAnswers,
   parsePersistedPhaseResult,
-  parseReviewResult,
   parseCurrentReviewResult,
   validateReviewScope,
   terminalCheckpointIntegrity
@@ -412,17 +409,13 @@ export function reviewExecutionPolicy(
   if (reviewer.consecutiveDeltaReviews >= MAX_CONSECUTIVE_DELTA_REVIEWS) {
     return fresh("delta-limit-reached");
   }
-  if (
-    reviewer.outputContract !== undefined &&
-    !["review-result/v1", "review-result/v2"].includes(reviewer.outputContract)
-  ) {
-    throw new BanzaiError(
-      "REVIEW_RESULT_SCHEMA_MISMATCH",
-      "Reviewer session has an unsupported output-contract identity."
+  if (reviewer.outputContract !== "review-result/v2") {
+    throw new ResourceVersionUnsupportedError(
+      "reviewer output contract",
+      String(reviewer.outputContract),
+      "review-result/v2"
     );
   }
-  if (reviewer.outputContract !== "review-result/v2")
-    return fresh("output-contract-not-reusable");
   return {
     sessionMode: "resumed",
     reviewMode: "delta",
@@ -643,14 +636,8 @@ export interface WorkflowStatus {
 
 export interface WorkflowTaskCompletionStatus {
   state:
-    | "complete"
-    | "incomplete"
-    | "inconsistent"
-    | "legacy"
-    | "unknown"
-    | "not_applicable";
-  source:
-    "structured completion evidence" | "plan checkbox" | "legacy" | "unknown";
+    "complete" | "incomplete" | "inconsistent" | "unknown" | "not_applicable";
+  source: "structured completion evidence" | "plan checkbox" | "unknown";
   completed: number | null;
   total: number | null;
   diagnostics: {
@@ -1259,9 +1246,7 @@ export class WorkflowRunner {
   ): Promise<void> {
     await this.assertProjectGuidance();
     const state = await this.store.requireActiveState();
-    if (state.artifactBinding !== undefined) {
-      await inspectBoundWork(this.repoRoot, state.artifactBinding);
-    }
+    await inspectBoundWork(this.repoRoot, state.artifactBinding);
     if (invocation !== undefined) {
       await this.assertInstructionParity(invocation.config, [
         {
@@ -1320,10 +1305,28 @@ export class WorkflowRunner {
         this.info(`Preparing run ${input.slug} in ${this.repoRoot}`);
         const config = await loadConfig(this.repoRoot);
         const baseCommit = await currentCommit(this.repoRoot);
+        const activeId = await this.store.readActiveRunId();
+        if (activeId !== null) {
+          const active = await this.store.readState(activeId);
+          if (!TERMINAL_STATUSES.has(active.status)) {
+            throw new BanzaiError(
+              "ACTIVE_RUN_EXISTS",
+              `Run ${activeId} is still ${active.status}.`
+            );
+          }
+        }
+        await this.assertProjectGuidance(false);
+        const artifactBinding = await createWork({
+          repoRoot: this.repoRoot,
+          slug: input.slug,
+          mode: "workflow",
+          creationId: randomUUID(),
+          schemaVersion: 2
+        });
         const createdAt = now();
         const state: RunState = {
-          schemaVersion:
-            config.schemaVersion === 3 && config.verification.policy ? 5 : 4,
+          schemaVersion: 5,
+          artifactBinding,
           contractVersion: CONTRACT_VERSION,
           runId: runId(input.slug),
           slug: input.slug,
@@ -1379,23 +1382,6 @@ export class WorkflowRunner {
           blockReason: null
         };
         await this.assertProjectGuidance(false);
-        const activeId = await this.store.readActiveRunId();
-        if (activeId !== null) {
-          const active = await this.store.readState(activeId);
-          if (!TERMINAL_STATUSES.has(active.status)) {
-            throw new BanzaiError(
-              "ACTIVE_RUN_EXISTS",
-              `Run ${activeId} is still ${active.status}.`
-            );
-          }
-        }
-        state.artifactBinding = await createWork({
-          repoRoot: this.repoRoot,
-          slug: state.slug,
-          mode: "workflow",
-          creationId: randomUUID(),
-          schemaVersion: state.schemaVersion === 5 ? 2 : 1
-        });
         await this.store.createRun(state);
         await this.observeHumanTime(state, "run_created");
         await this.assertProjectGuidance();
@@ -2286,14 +2272,13 @@ export class WorkflowRunner {
         // the gate and the approval cannot smuggle in a malformed heading.
         await this.approvedTaskIds(state);
         const approvalConfig = await loadConfig(this.repoRoot);
-        if (approvalConfig.schemaVersion === 3)
-          validatePlanVerificationObligations(
-            await readFile(
-              path.join(this.repoRoot, this.completionPlanPath(state)),
-              "utf8"
-            ),
-            approvalConfig.verification
-          );
+        validatePlanVerificationObligations(
+          await readFile(
+            path.join(this.repoRoot, this.completionPlanPath(state)),
+            "utf8"
+          ),
+          approvalConfig.verification
+        );
         const bundle = await digestArtifactBundle(
           this.repoRoot,
           artifactPaths(state)
@@ -2679,7 +2664,7 @@ export class WorkflowRunner {
               throw error;
             return await this.blockForCompletionFailure(
               state,
-              state.planTaskCompletion?.sourceAttemptId ?? "legacy",
+              state.planTaskCompletion?.sourceAttemptId ?? null,
               error
             );
           }
@@ -3062,49 +3047,7 @@ export class WorkflowRunner {
       // A bounded diagnostic below owns the observable invalid evidence.
     }
     const checkpoint = state.planTaskCompletion;
-    if (checkpoint === undefined) {
-      const implementationReport = path.posix.join(
-        "documentation",
-        "features",
-        state.slug,
-        "implementation-report.md"
-      );
-      let diagnostic =
-        "Run predates the canonical task-completion ledger; exact completion is unknown.";
-      try {
-        const contents = await readFile(
-          path.join(this.repoRoot, implementationReport),
-          "utf8"
-        );
-        parsePlanTaskCompletionProjection(contents);
-        diagnostic =
-          "Run predates the canonical task-completion ledger; a report table cannot establish exact completion retroactively.";
-      } catch (error) {
-        if (
-          error instanceof TerminalRunStateError ||
-          error instanceof ProjectSetupRequiredError ||
-          error instanceof InstructionResourceMismatchError
-        )
-          throw error;
-        if (error instanceof PlanTaskCompletionError) {
-          diagnostic = error.message;
-        }
-      }
-      return {
-        state: "legacy",
-        source: "legacy",
-        completed: null,
-        total,
-        diagnostics: [
-          {
-            code: "PLAN_TASK_COMPLETION_LEGACY",
-            taskId: null,
-            message: diagnostic
-          }
-        ]
-      };
-    }
-    if (checkpoint === null) {
+    if (checkpoint === null || checkpoint === undefined) {
       return {
         state: "unknown",
         source: "unknown",
@@ -3234,14 +3177,6 @@ export class WorkflowRunner {
       }
       if (state.blockedFrom === "verifying") {
         try {
-          if (!(await this.store.verificationLedgerSupported(state.runId))) {
-            return {
-              eligible: false,
-              reason:
-                "Legacy verification evidence has no retryable durable attempt identity. Inspect the checkout, then cancel the run.",
-              attemptId: null
-            };
-          }
           const latest = (
             await this.store.readVerificationAttempts(state.runId)
           ).at(-1);
@@ -3252,7 +3187,8 @@ export class WorkflowRunner {
               attemptId: latest.id
             };
           }
-        } catch {
+        } catch (error) {
+          if (error instanceof ResourceVersionUnsupportedError) throw error;
           return {
             eligible: false,
             reason:
@@ -4611,7 +4547,7 @@ export class WorkflowRunner {
 
   private async blockForCompletionFailure(
     state: RunState,
-    sourceAttemptId: string,
+    sourceAttemptId: string | null,
     error: unknown
   ): Promise<RunState> {
     const completionError =
@@ -4621,13 +4557,16 @@ export class WorkflowRunner {
             "source_attempt_invalid",
             errorMessage(error)
           );
-    state.planTaskCompletion = this.completionInvalidCheckpoint(
-      sourceAttemptId,
-      completionError,
-      state.planTaskCompletion?.sourceAttemptId === sourceAttemptId
-        ? (state.planTaskCompletion.sourceAttemptKind ?? "implementation")
-        : "implementation"
-    );
+    state.planTaskCompletion =
+      sourceAttemptId === null
+        ? null
+        : this.completionInvalidCheckpoint(
+            sourceAttemptId,
+            completionError,
+            state.planTaskCompletion?.sourceAttemptId === sourceAttemptId
+              ? (state.planTaskCompletion.sourceAttemptKind ?? "implementation")
+              : "implementation"
+          );
     state.activeProcess = null;
     blockState(
       state,
@@ -4676,8 +4615,7 @@ export class WorkflowRunner {
   }
 
   private async validateBaseCommit(state: RunState): Promise<void> {
-    if (state.artifactBinding)
-      await inspectBoundWork(this.repoRoot, state.artifactBinding);
+    await inspectBoundWork(this.repoRoot, state.artifactBinding);
     const current = await currentCommit(this.repoRoot);
     if (current !== state.baseCommit) {
       blockState(
@@ -4892,24 +4830,17 @@ export class WorkflowRunner {
     state: RunState,
     attempt: AttemptReference
   ): string | null {
-    if (attempt.kind !== "fix" && !state.artifactBinding) {
-      return null;
-    }
     const acceptedFindingIds =
       state.triage?.items
         .filter((item) => item.disposition === "accepted")
         .map((item) => item.findingId)
         .sort() ?? [];
-    return digestCanonicalJson(
-      state.artifactBinding
-        ? {
-            version: 2,
-            artifactBindingDigest: state.artifactBinding.sha256,
-            phase: attempt.kind,
-            acceptedFindingIds: attempt.kind === "fix" ? acceptedFindingIds : []
-          }
-        : { version: 1, acceptedFindingIds }
-    );
+    return digestCanonicalJson({
+      version: 2,
+      artifactBindingDigest: state.artifactBinding.sha256,
+      phase: attempt.kind,
+      acceptedFindingIds: attempt.kind === "fix" ? acceptedFindingIds : []
+    });
   }
 
   private terminalCheckpointWriter<T extends TerminalCheckpointResult>(
@@ -5233,8 +5164,7 @@ export class WorkflowRunner {
     state: RunState,
     phase: AttemptReference["kind"]
   ): string[] {
-    const roles = state.artifactBinding?.binding.artifacts;
-    if (roles === undefined) return [];
+    const roles = state.artifactBinding.binding.artifacts;
     if (phase === "plan")
       return [roles.description, roles.plan].filter(
         (item): item is string => item !== undefined
@@ -5260,58 +5190,12 @@ export class WorkflowRunner {
   ): string {
     const workflow = state.workflowSelection?.workflow ?? "strict";
     const bound = state.artifactBinding;
-    const roles =
-      bound === undefined
-        ? artifactRoles(state.runId, state.slug, "workflow", "legacy")
-        : bound.binding.artifacts;
-    if (bound === undefined) {
-      requireSlug(state.slug);
-      for (const role of [
-        "description",
-        "plan",
-        "implementationReport",
-        "testReport"
-      ] as const) {
-        const recorded = state.planArtifacts?.[role];
-        if (recorded) roles[role] = recorded;
-      }
-      if (state.planTaskCompletion?.status === "valid") {
-        roles.implementationReport =
-          state.planTaskCompletion.implementationReport.path;
-        roles.testReport = state.planTaskCompletion.testReport.path;
-      }
-    }
-    const legacyOutputs =
-      phase === "plan"
-        ? [roles.description, roles.plan]
-        : phase === "implementation" || phase === "fix"
-          ? workflow === "strict"
-            ? [
-                roles.implementationReport,
-                roles.testReport,
-                ...(phase === "fix" ? [roles.changeReport] : [])
-              ]
-            : workflow === "feature"
-              ? [roles.work]
-              : [roles.changeReport]
-          : [];
-    const writes =
-      bound === undefined
-        ? legacyOutputs.filter((item): item is string => item !== undefined)
-        : this.artifactWritePaths(state, phase);
+    const writes = this.artifactWritePaths(state, phase);
     return [
-      bound === undefined
-        ? "Legacy artifact surface (no persisted work binding):"
-        : "Artifact storage authority (run state v4):",
-      JSON.stringify(
-        bound ?? { runId: state.runId, slug: state.slug, artifacts: roles },
-        null,
-        2
-      ),
+      "Artifact storage authority (run state v5):",
+      JSON.stringify(bound, null, 2),
       "Use these exact artifact role paths. Public ADRs, product documentation and the project manifest keep their existing repository paths.",
-      bound === undefined
-        ? `Required work output paths in this legacy phase: ${JSON.stringify(writes)}. Existing legacy scope and approved-byte validation remain authoritative; these destinations create no new binding or permission.`
-        : `Artifact writes allowed in this phase: ${JSON.stringify(writes)}.`,
+      `Artifact writes allowed in this phase: ${JSON.stringify(writes)}.`,
       phase === "review" || phase === "selection"
         ? "Model artifact write set: []. Every role is read-only, including canonical reviews and attempt-owned candidates."
         : "Other artifact roles are read-only; their presence does not grant writes.",
@@ -5332,7 +5216,6 @@ export class WorkflowRunner {
     before: Awaited<ReturnType<typeof workspaceSnapshot>>
   ): Promise<void> {
     const bound = state.artifactBinding;
-    if (bound === undefined) return;
     const after = await workspaceSnapshot(this.repoRoot, {
       baseline: state.baseline,
       artifactBinding: bound,
@@ -5346,15 +5229,10 @@ export class WorkflowRunner {
       const candidate = change.path;
       const privatePath =
         candidate === ".banzai" || candidate.startsWith(".banzai/");
-      const legacyWork =
-        /^documentation\/(?:features|development-plans|changes)\//.test(
-          candidate
-        );
       const prohibited =
         phase === "selection" ||
         phase === "review" ||
         (privatePath && !allowed.has(candidate)) ||
-        (legacyWork && !allowed.has(candidate)) ||
         (phase === "plan" &&
           !allowed.has(candidate) &&
           !isDocumentationPath(candidate));
@@ -5370,7 +5248,6 @@ export class WorkflowRunner {
     state: RunState,
     attempt: AttemptReference
   ): Promise<void> {
-    if (!state.artifactBinding) return;
     const bytes = await readArtifactBytes(
       this.repoRoot,
       `.banzai/runs/${state.runId}/attempts/${attempt.id}.artifact-workspace.json`,
@@ -5407,8 +5284,7 @@ export class WorkflowRunner {
     state: RunState,
     result: PersistedPhaseResult
   ): void {
-    const roles = state.artifactBinding?.binding.artifacts;
-    if (roles === undefined) return;
+    const roles = state.artifactBinding.binding.artifacts;
     for (const role of [
       "description",
       "plan",
@@ -5604,40 +5480,35 @@ export class WorkflowRunner {
 
     let result: AdapterResult<T> | undefined;
     try {
-      const before =
-        input.state.artifactBinding === undefined
-          ? null
-          : await workspaceSnapshot(this.repoRoot, {
-              baseline: input.state.baseline,
-              artifactBinding: input.state.artifactBinding,
-              excludedPaths:
-                input.attempt.kind === "review"
-                  ? [
-                      reviewArtifactPath(
-                        input.state.slug,
-                        input.state.reviewIteration,
-                        input.state.artifactBinding
-                      )
-                    ]
-                  : []
-            });
-      if (before !== null)
-        await writeFile(
-          path.join(
-            this.store.runDirectory(input.state.runId),
-            "attempts",
-            `${input.attempt.id}.artifact-workspace.json`
-          ),
-          JSON.stringify(before) + "\n",
-          { flag: "wx", mode: 0o600 }
-        );
+      const before = await workspaceSnapshot(this.repoRoot, {
+        baseline: input.state.baseline,
+        artifactBinding: input.state.artifactBinding,
+        excludedPaths:
+          input.attempt.kind === "review"
+            ? [
+                reviewArtifactPath(
+                  input.state.slug,
+                  input.state.reviewIteration,
+                  input.state.artifactBinding
+                )
+              ]
+            : []
+      });
+      await writeFile(
+        path.join(
+          this.store.runDirectory(input.state.runId),
+          "attempts",
+          `${input.attempt.id}.artifact-workspace.json`
+        ),
+        JSON.stringify(before) + "\n",
+        { flag: "wx", mode: 0o600 }
+      );
       result = await input.invoke(outputContract);
-      if (before !== null)
-        await this.checkArtifactPhaseScope(
-          input.state,
-          input.attempt.kind,
-          before
-        );
+      await this.checkArtifactPhaseScope(
+        input.state,
+        input.attempt.kind,
+        before
+      );
     } catch (error) {
       if (
         error instanceof TerminalRunStateError ||
@@ -6030,15 +5901,13 @@ export class WorkflowRunner {
                 outputContract,
                 settings: config.models.planner,
                 resumeSessionId,
-                env: state.artifactBinding
-                  ? {
-                      ...process.env,
-                      BANZAI_RUN_ID: state.runId,
-                      BANZAI_APPROVAL_DIGEST: "",
-                      BANZAI_WORKFLOW_DIGEST: "",
-                      BANZAI_REVIEW_ARTIFACT: ""
-                    }
-                  : process.env,
+                env: {
+                  ...process.env,
+                  BANZAI_RUN_ID: state.runId,
+                  BANZAI_APPROVAL_DIGEST: "",
+                  BANZAI_WORKFLOW_DIGEST: "",
+                  BANZAI_REVIEW_ARTIFACT: ""
+                },
                 onSessionStarted: async (sessionId) => {
                   const current = await this.store.readState(state.runId);
                   if (
@@ -6867,10 +6736,7 @@ export class WorkflowRunner {
             .filter(
               (entryPath) =>
                 !isDocumentationPath(entryPath) &&
-                !(
-                  state.artifactBinding &&
-                  ownsArtifact(state.artifactBinding.binding, entryPath)
-                )
+                !ownsArtifact(state.artifactBinding.binding, entryPath)
             );
           if (sourceChanges.length > 0) {
             blockState(
@@ -7085,11 +6951,6 @@ export class WorkflowRunner {
   }
 
   private verificationStorage(state: RunState): VerificationStorage {
-    if (state.schemaVersion !== 5 || !state.artifactBinding)
-      throw new BanzaiError(
-        "VERIFICATION_EVIDENCE_INVALID",
-        "Verification applicability requires its original work binding."
-      );
     return {
       repoRoot: this.repoRoot,
       workId: state.artifactBinding.binding.workId,
@@ -7099,7 +6960,7 @@ export class WorkflowRunner {
 
   private verificationAuthority(state: RunState): string {
     return evidenceDigest({
-      binding: state.artifactBinding?.sha256,
+      binding: state.artifactBinding.sha256,
       approval: state.planApproval?.digest ?? null,
       workflow: state.workflowSelection
     });
@@ -7109,11 +6970,6 @@ export class WorkflowRunner {
     state: RunState,
     config: OrchestratorConfig
   ): Promise<VerificationCapture> {
-    if (config.schemaVersion !== 3 || !config.verification.policy)
-      throw new BanzaiError(
-        "VERIFICATION_CONFIGURATION_CHANGED",
-        "Verification-enabled runs require their explicit project policy."
-      );
     const configuration = parseVerificationConfiguration(config.verification);
     const input = {
       repoRoot: this.repoRoot,
@@ -7173,7 +7029,6 @@ export class WorkflowRunner {
     state: RunState,
     config?: OrchestratorConfig
   ): Promise<boolean> {
-    if (state.schemaVersion !== 5) return true;
     if (!(await hasRunnerWorkOwnership(this.repoRoot, state.artifactBinding)))
       return withRunnerWorkOwnership(this.repoRoot, state.artifactBinding, () =>
         this.requireVerificationApplicability(state, config)
@@ -7265,13 +7120,10 @@ export class WorkflowRunner {
           state,
           state.planTaskCompletion?.sourceAttemptId ??
             sourceAttempt?.id ??
-            "legacy",
+            null,
           error
         );
       }
-    }
-    if (!(await this.store.verificationLedgerSupported(state.runId))) {
-      return await this.executeLegacyVerification(state, config);
     }
     let records = await this.store.readVerificationAttempts(state.runId);
     const source = await this.verificationSourceAttempt(
@@ -7281,8 +7133,8 @@ export class WorkflowRunner {
     );
     const round = this.verificationRound(records, source);
     const descriptors = describeVerificationCommands(config);
-    let evidenceBefore: VerificationCapture | null = null;
-    if (state.schemaVersion === 5) {
+    let evidenceBefore: VerificationCapture;
+    {
       try {
         evidenceBefore = await this.prepareVerificationDecision(
           state,
@@ -7404,9 +7256,9 @@ export class WorkflowRunner {
         await this.store.writeState(state);
       }
 
-      if (state.schemaVersion === 5) {
+      {
         const latestCapture = await this.captureVerification(state, config);
-        if (latestCapture.candidateDigest !== evidenceBefore?.candidateDigest) {
+        if (latestCapture.candidateDigest !== evidenceBefore.candidateDigest) {
           blockState(state, "Verification inputs changed before invocation.");
           await this.store.writeState(state);
           return state;
@@ -7419,7 +7271,7 @@ export class WorkflowRunner {
         retryOf: retryingFailed ? failed.id : null,
         restartOf
       });
-      if (evidenceBefore && state.verificationEvidence)
+      if (state.verificationEvidence)
         await persistVerificationOriginStart(
           this.verificationStorage(state),
           record,
@@ -7451,10 +7303,8 @@ export class WorkflowRunner {
               args: command.args,
               cwd: this.repoRoot,
               env:
-                state.schemaVersion === 5
-                  ? (parseVerificationConfiguration(config.verification).policy
-                      ?.dependencies.environment ?? {})
-                  : subscriptionOnlyEnvironment(),
+                parseVerificationConfiguration(config.verification).policy
+                  ?.dependencies.environment ?? subscriptionOnlyEnvironment(),
               timeoutMs: command.timeoutMs,
               onStart: async (pid) => {
                 await this.processStarted(state, { kind: "verification" }, pid);
@@ -7475,12 +7325,11 @@ export class WorkflowRunner {
           stderr: null
         });
         await this.store.finishVerificationAttempt(state.runId, terminal);
-        if (evidenceBefore)
-          await persistVerificationOriginFinish(
-            this.verificationStorage(state),
-            terminal,
-            await this.captureVerification(state, config)
-          );
+        await persistVerificationOriginFinish(
+          this.verificationStorage(state),
+          terminal,
+          await this.captureVerification(state, config)
+        );
         if (current.status === "cancelled") {
           return current;
         }
@@ -7515,12 +7364,11 @@ export class WorkflowRunner {
         stderr: stderrEvidence
       });
       await this.store.finishVerificationAttempt(state.runId, terminal);
-      if (evidenceBefore)
-        await persistVerificationOriginFinish(
-          this.verificationStorage(state),
-          terminal,
-          await this.captureVerification(state, config)
-        );
+      await persistVerificationOriginFinish(
+        this.verificationStorage(state),
+        terminal,
+        await this.captureVerification(state, config)
+      );
       const current = await this.store.readState(state.runId);
       if (current.status === "cancelled") {
         return current;
@@ -7563,109 +7411,6 @@ export class WorkflowRunner {
     return await this.executeReview(state, config);
   }
 
-  private async executeLegacyVerification(
-    state: RunState,
-    config: OrchestratorConfig
-  ): Promise<RunState> {
-    state.verification = [];
-    const commands = flattenVerificationCommands(config);
-    for (let index = 0; index < commands.length; index += 1) {
-      const command = commands[index];
-      if (command === undefined) {
-        continue;
-      }
-      const startedAt = now();
-      state.metrics.attempts.verification += 1;
-      let result;
-      try {
-        result = await this.activity(
-          `Verification ${index + 1}/${commands.length}`,
-          `${command.name}: ${commandDisplay(command.command, command.args)}`,
-          async () =>
-            await this.processRunner({
-              command: command.command,
-              args: command.args,
-              cwd: this.repoRoot,
-              env: subscriptionOnlyEnvironment(),
-              timeoutMs: command.timeoutMs,
-              onStart: async (pid) => {
-                await this.processStarted(state, { kind: "verification" }, pid);
-              }
-            }),
-          (processResult) => processResult.exitCode === 0
-        );
-      } catch (error) {
-        const current = await this.store.readState(state.runId);
-        if (current.status === "cancelled") {
-          return current;
-        }
-        state.activeProcess = null;
-        blockState(
-          state,
-          `Verification "${command.name}" could not run: ${errorMessage(error)}`
-        );
-        await this.store.writeState(state);
-        return state;
-      }
-      const current = await this.store.readState(state.runId);
-      if (current.status === "cancelled") {
-        return current;
-      }
-      const logStem = `${index + 1}-${command.name.replace(/[^a-z0-9]+/gi, "-")}`;
-      const stdoutRelative = `verification/${logStem}.stdout.log`;
-      const stderrRelative = `verification/${logStem}.stderr.log`;
-      await this.store.writeText(
-        state.runId,
-        stdoutRelative,
-        redactSensitiveText(result.stdout)
-      );
-      await this.store.writeText(
-        state.runId,
-        stderrRelative,
-        redactSensitiveText(result.stderr)
-      );
-      state.verification.push({
-        name: command.name,
-        command: command.command,
-        args: command.args,
-        exitCode: result.exitCode,
-        signal: result.signal,
-        stdoutPath: stdoutRelative,
-        stderrPath: stderrRelative,
-        startedAt,
-        completedAt: result.completedAt
-      });
-      state.activeProcess = null;
-      await this.store.writeState(state);
-      await this.store.appendEvent(state.runId, "verification.completed", {
-        name: command.name,
-        exitCode: result.exitCode,
-        signal: result.signal
-      });
-      if (result.exitCode !== 0) {
-        blockState(
-          state,
-          `Verification "${command.name}" failed with exit code ${result.exitCode}.`
-        );
-        await this.store.writeState(state);
-        return state;
-      }
-    }
-    const workflow = state.workflowSelection?.workflow ?? "strict";
-    if (workflow !== "strict") {
-      transitionState(state, "done");
-      await this.store.writeState(state);
-      await this.store.appendEvent(state.runId, "run.completed", {
-        workflow,
-        verificationCount: state.verification.length
-      });
-      return state;
-    }
-    transitionState(state, "reviewing");
-    await this.store.writeState(state);
-    return await this.executeReview(state, config);
-  }
-
   private async executeReview(
     state: RunState,
     config: OrchestratorConfig,
@@ -7691,7 +7436,7 @@ export class WorkflowRunner {
         throw error;
       return await this.blockForCompletionFailure(
         state,
-        state.planTaskCompletion?.sourceAttemptId ?? "legacy",
+        state.planTaskCompletion?.sourceAttemptId ?? null,
         error
       );
     }
@@ -7789,10 +7534,7 @@ export class WorkflowRunner {
         tasks: validatedCompletion.tasks
       }
     };
-    if (
-      state.schemaVersion === 5 &&
-      state.verificationEvidence?.applicability
-    ) {
+    if (state.verificationEvidence?.applicability) {
       const attempts = await this.store.readVerificationAttempts(state.runId);
       const origins = await readVerificationOrigins(
         this.verificationStorage(state),
@@ -7833,17 +7575,9 @@ export class WorkflowRunner {
           "Review requires an exact approved scope."
         );
       const frozen = sealReviewSnapshot({
-        schema:
-          state.schemaVersion === 5
-            ? "banzai-review-snapshot/v3"
-            : state.artifactBinding
-              ? "banzai-review-snapshot/v2"
-              : "banzai-review-snapshot/v1",
-        schemaVersion:
-          state.schemaVersion === 5 ? 3 : state.artifactBinding ? 2 : 1,
-        ...(state.artifactBinding
-          ? { artifactBinding: state.artifactBinding }
-          : {}),
+        schema: "banzai-review-snapshot/v3",
+        schemaVersion: 3,
+        artifactBinding: state.artifactBinding,
         runId: state.runId,
         attemptId: attempt.id,
         outputContract: "review-result/v2",
@@ -8159,7 +7893,7 @@ export class WorkflowRunner {
         .map((item) => item.findingId) ?? [];
     if (
       state.triage !== null &&
-      !(result.schemaVersion === 2 && result.verdict === "blocked") &&
+      result.verdict !== "blocked" &&
       acceptedPrevious.some((id) => !result.reviewedFindingIds.includes(id))
     ) {
       throw new BanzaiError(
@@ -8220,14 +7954,11 @@ export class WorkflowRunner {
   ): Promise<RunState> {
     this.validateReviewResultForApplication(state, result);
     const resultRelative = `reviews/review-${state.reviewIteration}.json`;
-    const canonicalJson = `${JSON.stringify(result, null, 2)}\n`;
-    if (result.schemaVersion === 2)
-      await this.store.writeReviewResult(
-        state.runId,
-        state.reviewIteration,
-        result
-      );
-    else await this.store.writeText(state.runId, resultRelative, canonicalJson);
+    await this.store.writeReviewResult(
+      state.runId,
+      state.reviewIteration,
+      result
+    );
 
     const previousReviewer = state.sessions.reviewer;
     const reviewer: ReviewerSessionBinding | null =
@@ -8237,10 +7968,7 @@ export class WorkflowRunner {
             id: sessionId,
             ...policy.sessionContext,
             role: "reviewer",
-            outputContract:
-              result.schemaVersion === 2
-                ? "review-result/v2"
-                : "review-result/v1",
+            outputContract: "review-result/v2",
             approvalDigest: state.planApproval?.digest ?? "",
             lastSnapshot: snapshot,
             lastFullIteration:
@@ -8261,8 +7989,7 @@ export class WorkflowRunner {
           };
     state.sessions.reviewer = reviewer;
     state.latestReview = {
-      outputContract:
-        result.schemaVersion === 2 ? "review-result/v2" : "review-result/v1",
+      outputContract: "review-result/v2",
       iteration: state.reviewIteration,
       resultPath: resultRelative,
       artifactPath: reviewArtifactPath(
@@ -8305,7 +8032,7 @@ export class WorkflowRunner {
           throw error;
         return await this.blockForCompletionFailure(
           state,
-          state.planTaskCompletion?.sourceAttemptId ?? "legacy",
+          state.planTaskCompletion?.sourceAttemptId ?? null,
           error
         );
       }
@@ -8315,7 +8042,6 @@ export class WorkflowRunner {
     } else {
       blockState(state, `Review verdict ${result.verdict}: ${result.summary}`);
     }
-    if (result.schemaVersion !== 2) await this.store.writeState(state);
     const timingEvent = await this.store.appendEvent(
       state.runId,
       "review.completed",
@@ -8331,9 +8057,9 @@ export class WorkflowRunner {
         rotationReason: policy.rotationReason
       },
       undefined,
-      result.schemaVersion === 2
+      true
     );
-    if (result.schemaVersion === 2) await this.store.writeState(state);
+    await this.store.writeState(state);
     await this.observeHumanTime(
       state,
       "gate_pending",
@@ -8357,18 +8083,14 @@ export class WorkflowRunner {
     );
     const value = JSON.parse(raw) as unknown;
     const identity: unknown = state.latestReview.outputContract;
-    if (
-      identity !== undefined &&
-      identity !== "review-result/v1" &&
-      identity !== "review-result/v2"
-    )
-      throw new BanzaiError(
-        "REVIEW_RESULT_SCHEMA_MISMATCH",
-        "Canonical review output identity is unsupported."
+    if (identity !== "review-result/v2") {
+      throw new ResourceVersionUnsupportedError(
+        "review output contract",
+        String(identity),
+        "review-result/v2"
       );
-    return identity === "review-result/v2"
-      ? parseCurrentReviewResult(value)
-      : parseReviewResult(value);
+    }
+    return parseCurrentReviewResult(value);
   }
 
   private validateTriage(
@@ -8489,10 +8211,7 @@ export class WorkflowRunner {
     if (attempt.kind === "review") {
       this.validateReviewResultForApplication(state, result as ReviewResult);
       const record = await this.store.readRunAttempt(state.runId, attempt);
-      if (
-        record.reviewContext !== undefined ||
-        (result as ReviewResult).schemaVersion === 2
-      ) {
+      {
         const frozen = await this.store.readReviewSnapshot(
           state.runId,
           attempt
@@ -8599,14 +8318,9 @@ export class WorkflowRunner {
       state.planApproval === null
         ? (state.workflowSelection?.digest ?? null)
         : null;
-    const expectedResultContract =
-      attempt.kind === "review" && record.reviewContext === undefined
-        ? "review-result/v1"
-        : terminalResultContract(attempt.kind);
+    const expectedResultContract = terminalResultContract(attempt.kind);
     const resultContractMatches =
-      checkpoint.resultContract === expectedResultContract ||
-      (expectedResultContract === "phase-result/v3" &&
-        checkpoint.resultContract === "phase-result/v2");
+      checkpoint.resultContract === expectedResultContract;
     if (
       checkpoint.runId !== state.runId ||
       checkpoint.attempt.id !== attempt.id ||
@@ -8829,7 +8543,7 @@ export class WorkflowRunner {
             throw error;
           return await this.blockForCompletionFailure(
             state,
-            state.planTaskCompletion?.sourceAttemptId ?? "legacy",
+            state.planTaskCompletion?.sourceAttemptId ?? null,
             error
           );
         }
@@ -8915,10 +8629,7 @@ export class WorkflowRunner {
               tasks: validatedCompletion.tasks
             }
           };
-          if (
-            record.reviewContext !== undefined ||
-            result.schemaVersion === 2
-          ) {
+          {
             if (
               record.reviewContext?.outputContract !== "review-result/v2" ||
               candidateEvidence?.source !== "runner-rendered"
@@ -8981,15 +8692,12 @@ export class WorkflowRunner {
               );
             }
           }
-          const candidate =
-            candidateEvidence === null || candidateEvidence === undefined
-              ? await validateHistoricalReviewArtifact(
-                  this.repoRoot,
-                  result,
-                  artifact
-                )
-              : await validateReviewArtifact(this.repoRoot, result, artifact);
-          if (candidateEvidence !== null && candidateEvidence !== undefined) {
+          const candidate = await validateReviewArtifact(
+            this.repoRoot,
+            result,
+            artifact
+          );
+          {
             if (
               candidateEvidence.intendedArtifactPath !== artifactPath ||
               candidateEvidence.validation === "failed" ||
@@ -9079,10 +8787,7 @@ export class WorkflowRunner {
         const policy: ReviewExecutionPolicy = {
           sessionMode: record.sessionMode ?? "fresh",
           reviewMode: record.reviewMode ?? "full",
-          rotationReason:
-            record.rotationReason === undefined
-              ? "legacy-state"
-              : record.rotationReason,
+          rotationReason: record.rotationReason ?? null,
           resumeSessionId: record.resumeSessionId ?? null,
           sessionContext: {
             role: "reviewer",

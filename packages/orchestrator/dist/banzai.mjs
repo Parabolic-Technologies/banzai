@@ -1220,6 +1220,87 @@ var InteractiveHumanTime = class {
   }
 };
 
+// package.json
+var package_default = {
+  name: "@parabolic-technologies/banzai",
+  version: "3.0.0",
+  private: false,
+  description: "Spec-driven AI development CLI for Codex and Claude Code, with human approvals and independent review for complex changes.",
+  keywords: [
+    "ai",
+    "ai-coding",
+    "ai-agents",
+    "agentic-development",
+    "agent-orchestration",
+    "spec-driven-development",
+    "claude-code",
+    "codex",
+    "multi-model",
+    "code-review",
+    "developer-tools",
+    "cli"
+  ],
+  type: "module",
+  bin: {
+    banzai: "dist/banzai.mjs"
+  },
+  files: [
+    "dist/",
+    "LICENSE",
+    "NOTICE"
+  ],
+  publishConfig: {
+    access: "public",
+    registry: "https://registry.npmjs.org/"
+  },
+  engines: {
+    node: ">=22.20.0 <23 || >=24.11.1 <25"
+  },
+  scripts: {
+    build: "node scripts/build.mjs",
+    "build:check": "node scripts/check-dist.mjs",
+    typecheck: "tsc --project tsconfig.json --noEmit",
+    lint: "eslint . --format ./scripts/eslint-formatter.mjs",
+    "lint:fix": "eslint . --fix --format ./scripts/eslint-formatter.mjs",
+    "format:check": "prettier --check .",
+    format: "prettier --write .",
+    test: "node scripts/test.mjs",
+    "release:validate": "node scripts/check-release.mjs",
+    "smoke:committed": "node scripts/smoke-committed.mjs"
+  },
+  devDependencies: {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.0.0",
+    esbuild: "^0.25.0",
+    eslint: "^10.8.0",
+    "eslint-config-prettier": "^10.1.8",
+    globals: "^17.8.0",
+    prettier: "^3.9.6",
+    typescript: "^5.9.0",
+    "typescript-eslint": "^8.65.0"
+  },
+  dependencies: {
+    "@inquirer/core": "^11.2.1",
+    "@inquirer/prompts": "^8.5.2"
+  },
+  license: "Apache-2.0",
+  author: {
+    name: "Alexander Torosh",
+    email: "alexander@parabolic.io",
+    url: "https://github.com/alexander-torosh"
+  },
+  repository: {
+    type: "git",
+    url: "git+https://github.com/Parabolic-Technologies/banzai.git",
+    directory: "packages/orchestrator"
+  },
+  homepage: "https://github.com/Parabolic-Technologies/banzai#readme",
+  bugs: {
+    url: "https://github.com/Parabolic-Technologies/banzai/issues",
+    email: "alexander@parabolic.io"
+  }
+};
+
 // src/errors.ts
 var BanzaiError = class extends Error {
   code;
@@ -1229,6 +1310,16 @@ var BanzaiError = class extends Error {
     this.name = "BanzaiError";
     this.code = code2;
     this.exitCode = exitCode;
+  }
+};
+var ResourceVersionUnsupportedError = class extends BanzaiError {
+  constructor(resource, found, supported) {
+    const major = Number(package_default.version.split(".")[0]);
+    super(
+      "RESOURCE_VERSION_UNSUPPORTED",
+      `${resource} version ${found} is not supported; ${major}.x supports ${supported}; last read by release-train major ${major - 1}`
+    );
+    this.name = "ResourceVersionUnsupportedError";
   }
 };
 var ProjectSetupRequiredError = class extends BanzaiError {
@@ -1298,7 +1389,6 @@ var CANCELLATION_SCHEMA = "banzai-cancellation-observation/v1";
 var CANCELLATION_REPORT_SCHEMA = "banzai-cancellation-report/v1";
 var CANCELLATION_AVAILABILITIES = [
   "available",
-  "legacy_absent",
   "missing",
   "malformed",
   "unsupported",
@@ -1401,7 +1491,7 @@ function captureCancellationContext(raw) {
     r.blockedFrom === void 0 ? "missing" : "malformed"
   );
   const selection = cancellationRecord(r.workflowSelection);
-  context.workflow = !Object.hasOwn(r, "workflowSelection") ? cancellationValue(null, "state.workflowSelection", "legacy_absent") : r.workflowSelection === null ? cancellationValue("unselected", "state.workflowSelection") : member(selection.workflow, ["strict", "feature", "quick-fix"]) ? cancellationValue(selection.workflow, "state.workflowSelection") : cancellationValue(null, "state.workflowSelection", "malformed");
+  context.workflow = !Object.hasOwn(r, "workflowSelection") ? cancellationValue(null, "state.workflowSelection", "missing") : r.workflowSelection === null ? cancellationValue("unselected", "state.workflowSelection") : member(selection.workflow, ["strict", "feature", "quick-fix"]) ? cancellationValue(selection.workflow, "state.workflowSelection") : cancellationValue(null, "state.workflowSelection", "malformed");
   const pending = cancellationRecord(r.pendingHumanDecision);
   const recovery = cancellationRecord(r.recovery);
   const recoveryPresent = cancellationId(recovery.authorizationId) && cancellationId(recovery.sourceAttemptId);
@@ -1518,7 +1608,6 @@ function decodeContext(value) {
       "available",
       "not_applicable",
       "missing",
-      "legacy_absent",
       "malformed",
       "conflicting",
       "unsupported",
@@ -1656,14 +1745,7 @@ function resolveCancellation(rawState, runId2, events, evidenceAvailability = "a
       result.availability = cancellationRecord(state.cancellation).schemaVersion !== 1 ? "unsupported" : "malformed";
       return result;
     }
-    const legacy = cancelled.filter(
-      (e) => e.runId === runId2 && cancellationInstant(e.at) && Object.keys(e.details).length === 0
-    );
-    if (evidenceAvailability === "available" && cancelled.length === 1 && legacy.length === 1 && responses.length === 0) {
-      result.availability = "legacy_absent";
-      result.cancelledAt = legacy[0]?.at ?? null;
-    } else
-      result.availability = evidenceAvailability === "available" ? cancelled.length || responses.length ? "conflicting" : "missing" : evidenceAvailability;
+    result.availability = evidenceAvailability === "available" ? cancelled.length || responses.length ? "conflicting" : "missing" : evidenceAvailability;
     return result;
   }
   if (state.status !== "cancelled") {
@@ -1766,6 +1848,7 @@ __export(artifact_storage_exports, {
   runArtifactOperation: () => runArtifactOperation,
   safePath: () => safePath,
   sealSharedReviewSnapshot: () => sealReviewSnapshot,
+  unsupportedResourceVersion: () => unsupportedResourceVersion,
   verifyIgnores: () => verifyIgnores,
   withRunnerWorkOwnership: () => withRunnerWorkOwnership,
   writeArtifact: () => writeArtifact
@@ -1785,6 +1868,85 @@ var METADATA_MAX_BYTES = 64 * 1024;
 var execute = promisify(execFile);
 var METADATA_LIMIT = 64 * 1024;
 var runnerOwnership = new AsyncLocalStorage();
+var package_default2 = {
+  name: "@parabolic-technologies/banzai",
+  version: "3.0.0",
+  private: false,
+  description: "Spec-driven AI development CLI for Codex and Claude Code, with human approvals and independent review for complex changes.",
+  keywords: [
+    "ai",
+    "ai-coding",
+    "ai-agents",
+    "agentic-development",
+    "agent-orchestration",
+    "spec-driven-development",
+    "claude-code",
+    "codex",
+    "multi-model",
+    "code-review",
+    "developer-tools",
+    "cli"
+  ],
+  type: "module",
+  bin: {
+    banzai: "dist/banzai.mjs"
+  },
+  files: [
+    "dist/",
+    "LICENSE",
+    "NOTICE"
+  ],
+  publishConfig: {
+    access: "public",
+    registry: "https://registry.npmjs.org/"
+  },
+  engines: {
+    node: ">=22.20.0 <23 || >=24.11.1 <25"
+  },
+  scripts: {
+    build: "node scripts/build.mjs",
+    "build:check": "node scripts/check-dist.mjs",
+    typecheck: "tsc --project tsconfig.json --noEmit",
+    lint: "eslint . --format ./scripts/eslint-formatter.mjs",
+    "lint:fix": "eslint . --fix --format ./scripts/eslint-formatter.mjs",
+    "format:check": "prettier --check .",
+    format: "prettier --write .",
+    test: "node scripts/test.mjs",
+    "release:validate": "node scripts/check-release.mjs",
+    "smoke:committed": "node scripts/smoke-committed.mjs"
+  },
+  devDependencies: {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.0.0",
+    esbuild: "^0.25.0",
+    eslint: "^10.8.0",
+    "eslint-config-prettier": "^10.1.8",
+    globals: "^17.8.0",
+    prettier: "^3.9.6",
+    typescript: "^5.9.0",
+    "typescript-eslint": "^8.65.0"
+  },
+  dependencies: {
+    "@inquirer/core": "^11.2.1",
+    "@inquirer/prompts": "^8.5.2"
+  },
+  license: "Apache-2.0",
+  author: {
+    name: "Alexander Torosh",
+    email: "alexander@parabolic.io",
+    url: "https://github.com/alexander-torosh"
+  },
+  repository: {
+    type: "git",
+    url: "git+https://github.com/Parabolic-Technologies/banzai.git",
+    directory: "packages/orchestrator"
+  },
+  homepage: "https://github.com/Parabolic-Technologies/banzai#readme",
+  bugs: {
+    url: "https://github.com/Parabolic-Technologies/banzai/issues",
+    email: "alexander@parabolic.io"
+  }
+};
 var BanzaiError2 = class extends Error {
   code;
   exitCode;
@@ -1793,6 +1955,16 @@ var BanzaiError2 = class extends Error {
     this.name = "BanzaiError";
     this.code = code2;
     this.exitCode = exitCode;
+  }
+};
+var ResourceVersionUnsupportedError2 = class extends BanzaiError2 {
+  constructor(resource, found, supported) {
+    const major = Number(package_default2.version.split(".")[0]);
+    super(
+      "RESOURCE_VERSION_UNSUPPORTED",
+      `${resource} version ${found} is not supported; ${major}.x supports ${supported}; last read by release-train major ${major - 1}`
+    );
+    this.name = "ResourceVersionUnsupportedError";
   }
 };
 function superseded(replacement) {
@@ -1876,6 +2048,18 @@ var TERMINAL_CHECKPOINT_SCHEMA = "banzai-terminal-attempt-checkpoint/v1";
 var TERMINAL_CHECKPOINT_SCHEMA_VERSION = 1;
 var RECOVERY_AUTHORIZATION_SCHEMA = "banzai-recovery-authorization/v1";
 var RECOVERY_AUTHORIZATION_SCHEMA_VERSION = 1;
+var VERIFICATION_PROJECT_TYPES = [
+  "repository",
+  "node",
+  "php",
+  "python",
+  "go",
+  "rust",
+  "ruby",
+  "jvm",
+  "dotnet",
+  "custom"
+];
 var VERIFICATION_ATTEMPT_STATUSES = [
   "started",
   "completed",
@@ -2306,6 +2490,12 @@ function parseWorkflowSelectionResult(value) {
 }
 function parsePhaseResult(value) {
   const record6 = requireRecord(value, "phase result");
+  if (record6.schemaVersion !== PHASE_RESULT_SCHEMA_VERSION)
+    throw new ResourceVersionUnsupportedError2(
+      "phase result",
+      String(record6.schemaVersion),
+      PHASE_RESULT_SCHEMA_VERSION
+    );
   exactKeys(
     record6,
     [
@@ -2326,12 +2516,6 @@ function parsePhaseResult(value) {
     "INVALID_RESULT",
     "Phase result"
   );
-  if (record6.schemaVersion !== PHASE_RESULT_SCHEMA_VERSION) {
-    throw new BanzaiError2(
-      "PHASE_RESULT_SCHEMA_MISMATCH",
-      `Phase result must use schema ${PHASE_RESULT_SCHEMA_VERSION}.`
-    );
-  }
   if (record6.contractVersion !== CONTRACT_VERSION) {
     throw new BanzaiError2(
       "CONTRACT_VERSION_MISMATCH",
@@ -2394,120 +2578,7 @@ function parsePhaseResult(value) {
   };
 }
 function parsePersistedPhaseResult(value) {
-  const record6 = requireRecord(value, "persisted phase result");
-  if (record6.schemaVersion === PHASE_RESULT_SCHEMA_VERSION) {
-    return parsePhaseResult(record6);
-  }
-  const schemaVersion = record6.schemaVersion === 2 ? 2 : record6.schemaVersion === void 0 || record6.schemaVersion === 1 ? 1 : null;
-  if (schemaVersion === null) {
-    throw new BanzaiError2(
-      "PHASE_RESULT_SCHEMA_MISMATCH",
-      "Persisted phase result schema is unsupported."
-    );
-  }
-  exactKeys(
-    record6,
-    schemaVersion === 1 ? [
-      ...Object.hasOwn(record6, "schemaVersion") ? ["schemaVersion"] : [],
-      "contractVersion",
-      "phase",
-      "outcome",
-      "gate",
-      "summary",
-      "artifacts",
-      "touchedPaths",
-      "questions",
-      "resolvedFindingIds",
-      "requestedVerification"
-    ] : [
-      "schemaVersion",
-      "contractVersion",
-      "phase",
-      "outcome",
-      "gate",
-      "summary",
-      "artifacts",
-      "taskCompletion",
-      "touchedPaths",
-      "questions",
-      "resolvedFindingIds",
-      "requestedVerification"
-    ],
-    "INVALID_RESULT",
-    "Persisted phase result"
-  );
-  if (record6.contractVersion !== CONTRACT_VERSION) {
-    throw new BanzaiError2(
-      "CONTRACT_VERSION_MISMATCH",
-      `Phase result must use contract ${CONTRACT_VERSION}.`
-    );
-  }
-  const phase = requireEnum(record6.phase, "phase", [
-    "plan",
-    "implementation",
-    "fix"
-  ]);
-  const gate = record6.gate === null ? null : requireEnum(record6.gate, "gate", [
-    "adr_approval",
-    "plan_approval",
-    "escalation"
-  ]);
-  const reportedOutcome = requireEnum(record6.outcome, "outcome", [
-    "completed",
-    "needs_human_decision",
-    "blocked"
-  ]);
-  const outcome = reportedOutcome === "completed" && gate !== null ? "needs_human_decision" : reportedOutcome;
-  if (outcome === "needs_human_decision" && gate === null) {
-    throw new BanzaiError2(
-      "INVALID_RESULT",
-      "needs_human_decision requires a non-null gate."
-    );
-  }
-  let artifacts;
-  if (schemaVersion === 1) {
-    const legacyArtifacts = consultationRecord(record6.artifacts, "artifacts", [
-      "description",
-      "plan",
-      "adrs",
-      "implementationReport"
-    ]);
-    artifacts = {
-      description: requireNullableString(
-        legacyArtifacts.description,
-        "artifacts.description"
-      ),
-      plan: requireNullableString(legacyArtifacts.plan, "artifacts.plan"),
-      adrs: requireStringArray(legacyArtifacts.adrs, "artifacts.adrs"),
-      implementationReport: requireNullableString(
-        legacyArtifacts.implementationReport,
-        "artifacts.implementationReport"
-      ),
-      testReport: null
-    };
-  } else {
-    artifacts = parseArtifacts(record6.artifacts);
-  }
-  return {
-    schemaVersion,
-    contractVersion: CONTRACT_VERSION,
-    phase,
-    outcome,
-    gate,
-    summary: requireString(record6.summary, "summary"),
-    artifacts,
-    taskCompletion: schemaVersion === 1 ? null : parseTaskCompletion(record6.taskCompletion),
-    touchedPaths: requireStringArray(record6.touchedPaths, "touchedPaths"),
-    questions: requireStringArray(record6.questions, "questions"),
-    resolvedFindingIds: requireStringArray(
-      record6.resolvedFindingIds,
-      "resolvedFindingIds"
-    ),
-    requestedVerification: requireStringArray(
-      record6.requestedVerification,
-      "requestedVerification"
-    )
-  };
+  return parsePhaseResult(value);
 }
 function parseEvidence(value, findingId) {
   const record6 = requireRecord(value, `${findingId}.evidence`);
@@ -2615,11 +2686,7 @@ function parseReviewFields(value) {
   };
 }
 function parseReviewResult(value) {
-  const record6 = requireRecord(value, "review result");
-  if (record6.schemaVersion !== void 0 || record6.scopeAcknowledgment !== void 0 || record6.reviewNotes !== void 0) {
-    return parseCurrentReviewResult(value);
-  }
-  return parseReviewFields(value);
+  return parseCurrentReviewResult(value);
 }
 function reviewScopePath(value) {
   const name = requireString(value, "scope path");
@@ -2634,9 +2701,10 @@ function reviewScopePath(value) {
 function parseCurrentReviewResult(value) {
   const record6 = requireRecord(value, "review result");
   if (record6.schemaVersion !== 2)
-    throw new BanzaiError2(
-      "REVIEW_RESULT_SCHEMA_MISMATCH",
-      "New reviews require review-result/v2."
+    throw new ResourceVersionUnsupportedError2(
+      "review result",
+      String(record6.schemaVersion),
+      2
     );
   exactKeys(
     record6,
@@ -2725,7 +2793,7 @@ function parseCurrentReviewResult(value) {
       "INVALID_REVIEW_SCOPE",
       "Scope entry"
     );
-    const path30 = reviewScopePath(entry.path);
+    const path29 = reviewScopePath(entry.path);
     const status = requireEnum(entry.status, "scope status", [
       "reviewed",
       "not_reviewed"
@@ -2735,7 +2803,7 @@ function parseCurrentReviewResult(value) {
         "INVALID_REVIEW_SCOPE",
         "Reviewed scope requires a null reason; unreviewed scope requires a nonblank reason."
       );
-    return { path: path30, status, reason: entry.reason };
+    return { path: path29, status, reason: entry.reason };
   });
   if (new Set(artifacts.map((entry) => entry.path)).size !== artifacts.length || new Set(result.reviewedFindingIds).size !== result.reviewedFindingIds.length)
     throw new BanzaiError2(
@@ -2874,32 +2942,10 @@ function parseEvidenceUsage(value, code2, label) {
     costUsd: numeric(value.costUsd, "costUsd", true)
   };
 }
-function parseCheckpointResult(kind, value, resultContract) {
-  if (kind === "selection") {
-    return parseWorkflowSelectionResult(value);
-  }
-  if (kind === "review") {
-    if (resultContract === "review-result/v2")
-      return parseCurrentReviewResult(value);
-    const legacy = requireRecord(value, "legacy review");
-    if (legacy.schemaVersion !== void 0 || legacy.scopeAcknowledgment !== void 0 || legacy.reviewNotes !== void 0)
-      return recoveryEvidenceError(
-        "INVALID_TERMINAL_CHECKPOINT",
-        "Legacy checkpoint cannot carry a new review result."
-      );
-    return parseReviewFields(value);
-  }
-  if (resultContract === "phase-result/v3") {
-    return parsePhaseResult(value);
-  }
-  const result = parsePersistedPhaseResult(value);
-  if (result.schemaVersion !== 2) {
-    return recoveryEvidenceError(
-      "INVALID_TERMINAL_CHECKPOINT",
-      "Legacy phase-result/v2 checkpoint must contain a v2 result."
-    );
-  }
-  return result;
+function parseCheckpointResult(kind, value) {
+  if (kind === "selection") return parseWorkflowSelectionResult(value);
+  if (kind === "review") return parseReviewResult(value);
+  return parsePhaseResult(value);
 }
 function terminalCheckpointIntegrity(checkpoint) {
   return digestCanonicalJson(checkpoint);
@@ -2980,13 +3026,13 @@ function parseTerminalAttemptCheckpoint(value) {
     );
   }
   const resultContract = value.resultContract;
-  const expectedContract = attempt.kind === "selection" ? "workflow-selection/v1" : attempt.kind === "review" ? resultContract === "review-result/v2" ? "review-result/v2" : "review-result/v1" : resultContract === "phase-result/v2" ? "phase-result/v2" : "phase-result/v3";
-  if (resultContract !== expectedContract || attempt.kind !== "selection" && attempt.kind !== "review" && resultContract !== "phase-result/v2" && resultContract !== "phase-result/v3") {
-    return recoveryEvidenceError(
-      code2,
-      `Checkpoint result contract must be ${expectedContract}.`
+  const expectedContract = attempt.kind === "selection" ? "workflow-selection/v1" : attempt.kind === "review" ? "review-result/v2" : "phase-result/v3";
+  if (resultContract !== expectedContract)
+    throw new ResourceVersionUnsupportedError2(
+      "checkpoint result contract",
+      String(resultContract),
+      expectedContract
     );
-  }
   if (!isRecord(value.terminal)) {
     return recoveryEvidenceError(code2, "terminal must be an object.");
   }
@@ -3039,7 +3085,7 @@ function parseTerminalAttemptCheckpoint(value) {
         "terminal.observedAt"
       )
     },
-    result: parseCheckpointResult(attempt.kind, value.result, expectedContract),
+    result: parseCheckpointResult(attempt.kind, value.result),
     sessionId: evidenceNullableString(value.sessionId, code2, "sessionId", 300),
     usage: parseEvidenceUsage(value.usage, code2, "usage"),
     baseCommit: evidenceString(value.baseCommit, code2, "baseCommit", 100),
@@ -3221,17 +3267,16 @@ function parseModelAttemptRecord(value) {
     code2,
     "Attempt record"
   );
-  if (value.schemaVersion !== 1 && value.schemaVersion !== MODEL_ATTEMPT_SCHEMA_VERSION) {
-    return recoveryEvidenceError(
-      code2,
-      "Attempt schema version is unsupported."
+  if (value.schemaVersion !== MODEL_ATTEMPT_SCHEMA_VERSION)
+    throw new ResourceVersionUnsupportedError2(
+      "model attempt",
+      String(value.schemaVersion),
+      MODEL_ATTEMPT_SCHEMA_VERSION
     );
-  }
   const attempt = parseEvidenceAttempt(value.attempt, code2, "attempt");
   if (value.rotationReason != null && (typeof value.rotationReason !== "string" || ![
     "primary-review",
     "missing-session",
-    "legacy-state",
     "settings-changed",
     "approval-changed",
     "previous-review-failed",
@@ -3339,11 +3384,11 @@ function parseModelAttemptRecord(value) {
     }
   }
   const status = value.status;
-  if (typeof status !== "string" || !["started", "completed", "failed", "interrupted"].includes(status) || value.schemaVersion === 1 && status === "interrupted") {
+  if (typeof status !== "string" || !["started", "completed", "failed", "interrupted"].includes(status)) {
     return recoveryEvidenceError(code2, "Attempt status is unsupported.");
   }
   evidenceTimestamp(value.startedAt, code2, "startedAt");
-  if (value.schemaVersion === MODEL_ATTEMPT_SCHEMA_VERSION) {
+  {
     if (!Object.hasOwn(value, "interruptedAt") || !Object.hasOwn(value, "recoveryOf") || !Object.hasOwn(value, "recoveryAuthorizationId")) {
       return recoveryEvidenceError(
         code2,
@@ -3384,18 +3429,6 @@ function parseModelAttemptRecord(value) {
   }
   return value;
 }
-var VERIFICATION_PROJECT_TYPES = [
-  "repository",
-  "node",
-  "php",
-  "python",
-  "go",
-  "rust",
-  "ruby",
-  "jvm",
-  "dotnet",
-  "custom"
-];
 function verificationEvidenceError(code2, field) {
   return new BanzaiError2(
     code2,
@@ -3683,8 +3716,8 @@ function evaluationError(message) {
 function observed(value) {
   return { value, evidence: "observed" };
 }
-function absent(legacy = false) {
-  return { value: null, evidence: legacy ? "legacy_absent" : "unknown" };
+function absent() {
+  return { value: null, evidence: "unknown" };
 }
 function invalid() {
   return { value: null, evidence: "invalid" };
@@ -3698,20 +3731,16 @@ function issue(issues, code2, field) {
 function sourceValue(record6, key, field, issues, parse, options = {}) {
   if (!Object.hasOwn(record6, key)) {
     if (options.required ?? true) {
-      issue(
-        issues,
-        options.legacyAbsent === true ? "LEGACY_FIELD_ABSENT" : "STATE_FIELD_MISSING",
-        field
-      );
+      issue(issues, "STATE_FIELD_MISSING", field);
     }
-    return absent(options.legacyAbsent);
+    return absent();
   }
   const value = record6[key];
   if (value === null && options.nullable === true) {
     return notApplicable();
   }
   if (value === null) {
-    return absent(options.legacyAbsent);
+    return absent();
   }
   const parsed = parse(value);
   if (parsed === void 0) {
@@ -3769,33 +3798,28 @@ function normalizeRfc3339Instant(value) {
 function rfc3339Value(value) {
   return normalizeRfc3339Instant(value) === void 0 ? void 0 : value;
 }
-function metricValue(record6, key, field, issues, legacyAbsent = false, nullable = false) {
+function metricValue(record6, key, field, issues, nullable = false) {
   if (record6 === null) {
-    return absent(legacyAbsent);
+    return absent();
   }
   return sourceValue(record6, key, field, issues, nonNegativeNumber, {
-    legacyAbsent,
     nullable
   });
 }
-function childRecord(value, field, issues, legacyAbsent = false) {
+function childRecord(value, field, issues) {
   if (isRecord(value)) {
     return value;
   }
   issue(
     issues,
-    legacyAbsent ? "LEGACY_FIELD_ABSENT" : "STATE_FIELD_INVALID",
+    value === void 0 ? "STATE_FIELD_MISSING" : "STATE_FIELD_INVALID",
     field
   );
   return null;
 }
-function emptyStateMetrics(legacy, issues) {
-  const missing3 = () => absent(legacy);
-  issue(
-    issues,
-    legacy ? "LEGACY_FIELD_ABSENT" : "STATE_FIELD_MISSING",
-    "metrics"
-  );
+function emptyStateMetrics(issues) {
+  const missing3 = () => absent();
+  issue(issues, "STATE_FIELD_MISSING", "metrics");
   return {
     attempts: {
       selection: missing3(),
@@ -3817,24 +3841,14 @@ function emptyStateMetrics(legacy, issues) {
     triage: { accepted: missing3(), rejected: missing3(), deferred: missing3() }
   };
 }
-function parseStateMetrics(value, schemaVersion, issues) {
+function parseStateMetrics(value, issues) {
   if (!isRecord(value)) {
-    return emptyStateMetrics(schemaVersion === 1, issues);
+    return emptyStateMetrics(issues);
   }
   const attempts = childRecord(value.attempts, "metrics.attempts", issues);
   const usage = childRecord(value.usage, "metrics.usage", issues);
-  const sessions = childRecord(
-    value.sessions,
-    "metrics.sessions",
-    issues,
-    schemaVersion === 1
-  );
-  const reviews = childRecord(
-    value.reviews,
-    "metrics.reviews",
-    issues,
-    schemaVersion === 1
-  );
+  const sessions = childRecord(value.sessions, "metrics.sessions", issues);
+  const reviews = childRecord(value.reviews, "metrics.reviews", issues);
   const triage = childRecord(value.triage, "metrics.triage", issues);
   return {
     attempts: {
@@ -3842,8 +3856,7 @@ function parseStateMetrics(value, schemaVersion, issues) {
         attempts,
         "selection",
         "metrics.attempts.selection",
-        issues,
-        schemaVersion === 1
+        issues
       ),
       plan: metricValue(attempts, "plan", "metrics.attempts.plan", issues),
       implementation: metricValue(
@@ -3890,7 +3903,6 @@ function parseStateMetrics(value, schemaVersion, issues) {
         "costUsd",
         "metrics.usage.costUsd",
         issues,
-        false,
         true
       )
     },
@@ -3901,42 +3913,22 @@ function parseStateMetrics(value, schemaVersion, issues) {
       issues
     ),
     sessions: {
-      fresh: metricValue(
-        sessions,
-        "fresh",
-        "metrics.sessions.fresh",
-        issues,
-        schemaVersion === 1
-      ),
+      fresh: metricValue(sessions, "fresh", "metrics.sessions.fresh", issues),
       resumed: metricValue(
         sessions,
         "resumed",
         "metrics.sessions.resumed",
-        issues,
-        schemaVersion === 1
+        issues
       )
     },
     reviews: {
-      full: metricValue(
-        reviews,
-        "full",
-        "metrics.reviews.full",
-        issues,
-        schemaVersion === 1
-      ),
-      delta: metricValue(
-        reviews,
-        "delta",
-        "metrics.reviews.delta",
-        issues,
-        schemaVersion === 1
-      ),
+      full: metricValue(reviews, "full", "metrics.reviews.full", issues),
+      delta: metricValue(reviews, "delta", "metrics.reviews.delta", issues),
       rotations: metricValue(
         reviews,
         "rotations",
         "metrics.reviews.rotations",
-        issues,
-        schemaVersion === 1
+        issues
       )
     },
     triage: {
@@ -4045,10 +4037,11 @@ function parseEvaluationStateSource(value) {
   if (!isRecord(value)) {
     throw evaluationError("Persisted state is not a supported object.");
   }
-  if (value.schemaVersion !== 1 && value.schemaVersion !== 2 && value.schemaVersion !== 3 && value.schemaVersion !== 4 && value.schemaVersion !== 5) {
-    throw new BanzaiError2(
-      "EVALUATION_STATE_SCHEMA_UNSUPPORTED",
-      "Persisted state uses an unsupported schema."
+  if (value.schemaVersion !== 5) {
+    throw new ResourceVersionUnsupportedError2(
+      "run state",
+      String(value.schemaVersion),
+      "5"
     );
   }
   const schemaVersion = value.schemaVersion;
@@ -4063,12 +4056,8 @@ function parseEvaluationStateSource(value) {
       (item) => enumValue(item, WORKFLOW_ROUTES)
     );
   } else if (!Object.hasOwn(value, "workflowSelection")) {
-    workflow = absent(schemaVersion === 1);
-    issue(
-      issues,
-      schemaVersion === 1 ? "LEGACY_FIELD_ABSENT" : "STATE_FIELD_MISSING",
-      "workflowSelection"
-    );
+    workflow = absent();
+    issue(issues, "STATE_FIELD_MISSING", "workflowSelection");
   } else if (value.workflowSelection === null) {
     workflow = absent();
   } else {
@@ -4092,18 +4081,16 @@ function parseEvaluationStateSource(value) {
   }
   let triage;
   let triageIsCumulative;
-  if (schemaVersion >= 2) {
-    if (Array.isArray(value.triageHistory)) {
-      triage = triageCounts(value.triageHistory, issues, "triageHistory");
-      triageIsCumulative = true;
-    } else {
-      issue(issues, "STATE_FIELD_INVALID", "triageHistory");
-      triage = { accepted: 0, rejected: 0, deferred: 0 };
-      triageIsCumulative = false;
-    }
+  if (Array.isArray(value.triageHistory)) {
+    triage = triageCounts(value.triageHistory, issues, "triageHistory");
+    triageIsCumulative = true;
   } else {
-    issue(issues, "LEGACY_FIELD_ABSENT", "triageHistory");
-    triage = value.triage === null || value.triage === void 0 ? { accepted: 0, rejected: 0, deferred: 0 } : triageCounts([value.triage], issues, "triage");
+    issue(
+      issues,
+      value.triageHistory === void 0 ? "STATE_FIELD_MISSING" : "STATE_FIELD_INVALID",
+      "triageHistory"
+    );
+    triage = { accepted: 0, rejected: 0, deferred: 0 };
     triageIsCumulative = false;
   }
   let activeAttemptIdentity;
@@ -4237,7 +4224,7 @@ function parseEvaluationStateSource(value) {
       triageIsCumulative,
       verificationList,
       verification,
-      metrics: parseStateMetrics(value.metrics, schemaVersion, issues)
+      metrics: parseStateMetrics(value.metrics, issues)
     },
     issues
   };
@@ -4796,11 +4783,15 @@ async function readVerificationOrigins(input, attempts) {
 function verificationApplicability(decision, origins, current) {
   parseVerificationDecision(decision);
   capture(current);
-  const drift = !current.complete || decision.candidateDigest !== current.candidateDigest;
+  const physicalOnly = !current.complete && current.reason === "policy_disabled" && decision.candidateDigest === null && decision.actions.every((action) => action.action === "execute" && action.reason === "policy_disabled" && action.identity.policyDigest === null);
+  const drift = !physicalOnly && (!current.complete || decision.candidateDigest !== current.candidateDigest);
   const dispositions = decision.actions.map((action) => {
     const origin = action.action === "reuse" ? origins.find((item) => item.attemptId === action.origin.attemptId && item.recordDigest === action.origin.recordDigest) : origins.filter((item) => item.roundId === decision.roundId && item.checkId === action.checkId).at(-1);
     const latest = origins.filter((item) => item.checkId === action.checkId).at(-1);
     let valid = !drift && origin && origin.complete && origin === latest && origin.workId === decision.workId && origin.status === "completed" && origin.exitCode === 0 && origin.signal === null && origin.failureCategory === null && origin.logsIntact && JSON.stringify(origin.identity) === JSON.stringify(action.identity);
+    if (physicalOnly) {
+      valid = valid && origin.roundId === decision.roundId && !origin.before.complete && origin.before.reason === "policy_disabled" && !origin.after.complete && origin.after.reason === "policy_disabled";
+    }
     if (action.action === "reuse") {
       const input = current.checks.find((item) => item.checkId === action.checkId);
       const prior = origin?.before.checks.find((item) => item.checkId === action.checkId);
@@ -4902,7 +4893,7 @@ function parseReviewSnapshot(value) {
   try {
     return parseSnapshot(value);
   } catch (error) {
-    if (error instanceof ArtifactStorageError && error.code === "INVALID_REVIEW_SNAPSHOT")
+    if (error instanceof ArtifactStorageError && ["INVALID_REVIEW_SNAPSHOT", "RESOURCE_VERSION_UNSUPPORTED"].includes(error.code))
       throw error;
     invalid4("Review snapshot contains invalid nested evidence.");
   }
@@ -4916,6 +4907,8 @@ function equal(value, expected) {
 function parseSnapshot(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     invalid4("Review snapshot must be an object.");
+  if (value.schema !== "banzai-review-snapshot/v3" || value.schemaVersion !== 3)
+    unsupportedResourceVersion("review snapshot", `${value.schema} (${value.schemaVersion})`, "banzai-review-snapshot/v3 (3)");
   const snapshot = value;
   const { digest: digest4, ...body } = snapshot;
   const keys3 = [
@@ -4938,18 +4931,17 @@ function parseSnapshot(value) {
     "artifact",
     "digest"
   ];
-  if (snapshot.schemaVersion >= 2) keys3.push("artifactBinding");
-  if (Object.keys(snapshot).length !== keys3.length || Object.keys(snapshot).some((key) => !keys3.includes(key)) || !(snapshot.schemaVersion === 1 && snapshot.schema === "banzai-review-snapshot/v1" || snapshot.schemaVersion === 2 && snapshot.schema === "banzai-review-snapshot/v2" || snapshot.schemaVersion === 3 && snapshot.schema === "banzai-review-snapshot/v3") || !equal(snapshot.outputContract, "review-result/v2") || !/^[a-f0-9]{64}$/u.test(digest4) || digest4 !== digestCanonicalJson2(body))
+  keys3.push("artifactBinding");
+  if (Object.keys(snapshot).length !== keys3.length || Object.keys(snapshot).some((key) => !keys3.includes(key)) || !equal(snapshot.outputContract, "review-result/v2") || !/^[a-f0-9]{64}$/u.test(digest4) || digest4 !== digestCanonicalJson2(body))
     invalid4("Review snapshot version, shape or digest is invalid.");
   for (const id of [snapshot.runId, snapshot.attemptId])
     if (typeof id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(id))
       invalid4("Review snapshot identity is invalid.");
-  if (snapshot.schemaVersion >= 2) {
+  {
     const bound = snapshot.artifactBinding;
     if (!bound || Object.keys(bound).sort().join(",") !== "binding,sha256" || !/^[a-f0-9]{64}$/u.test(bound.sha256))
       invalid4("Review snapshot binding is missing or malformed.");
     parseBinding(bound.binding);
-    if (snapshot.schemaVersion === 2 && bound.binding.schemaVersion !== 1) invalid4("Snapshot v2 retains binding v1 semantics.");
     const workspace = snapshot.workspace;
     if (workspace.schemaVersion !== 2 || workspace.artifactBindingDigest !== bound.sha256 || Object.keys(workspace).sort().join(",") !== "artifactBindingDigest,baseCommit,digest,entries,schemaVersion")
       invalid4("Review snapshot workspace does not match its binding.");
@@ -4972,15 +4964,10 @@ function parseSnapshot(value) {
       (p) => p !== roles.description && p !== roles.plan && !/^documentation\/decisions\/[0-9]{4}-[a-z0-9-]+\.md$/u.test(p)
     ) || snapshot.completionSource !== null && (snapshot.completionSource.implementationReport.path !== roles.implementationReport || snapshot.completionSource.testReport.path !== roles.testReport))
       invalid4("Review snapshot evidence is outside its exact bound roles.");
-  } else if (snapshot.workspace.schemaVersion !== void 0 || snapshot.artifactBinding !== void 0) {
-    invalid4("Legacy review snapshots cannot carry private storage authority.");
   }
   const artifact = snapshot.artifact;
-  if (snapshot.schemaVersion === 3) {
-    if (snapshot.artifactBinding.binding.schemaVersion !== 2) invalid4("Verification snapshot requires binding v2.");
-    const evidence2 = parseReviewVerificationEvidence(artifact.verificationEvidence);
-    if (evidence2.decision.workId !== snapshot.artifactBinding.binding.workId) invalid4("Cross-work review verification evidence.");
-  } else if (artifact?.verificationEvidence !== void 0) invalid4("Legacy snapshots cannot carry new verification evidence.");
+  const evidence2 = parseReviewVerificationEvidence(artifact.verificationEvidence);
+  if (evidence2.decision.workId !== snapshot.artifactBinding.binding.workId) invalid4("Cross-work review verification evidence.");
   if (!object2(artifact) || !object2(snapshot.approval) || !object2(snapshot.workspace) || !Array.isArray(snapshot.approval.paths) || !Array.isArray(snapshot.approvedArtifacts) || !Array.isArray(snapshot.workspace.entries) || !Array.isArray(snapshot.changes) || !Array.isArray(snapshot.triage) || !Array.isArray(snapshot.requiredFindingIds) || !Array.isArray(artifact.verification) || !["full", "delta"].includes(snapshot.reviewMode) || !Number.isInteger(artifact.iteration) || artifact.iteration < 1)
     invalid4("Review snapshot evidence is malformed.");
   if ("snapshot" in artifact || JSON.stringify(artifact.approvedArtifactPaths) !== JSON.stringify(snapshot.approval.paths) || artifact.workspaceDigest !== snapshot.workspace.digest || snapshot.baseCommit !== snapshot.workspace.baseCommit || new Set(snapshot.approval.paths).size !== snapshot.approval.paths.length || snapshot.approvedArtifacts.length !== snapshot.approval.paths.length)
@@ -5049,7 +5036,6 @@ import path4 from "node:path";
 var ADOPTION_LABELS = {
   ready: "Project guidance ready",
   setup_required: "Project setup required",
-  migration_required: "Project migration required",
   needs_attention: "Project guidance needs attention"
 };
 var SCAFFOLD_MARKER = "<!-- banzai-scaffold: unfilled -->";
@@ -5322,8 +5308,8 @@ async function inspectProjectAdoption(repoRoot, options = {}) {
     } else if (claudeHeadings.has("Engineering Quality") && !agentHeadings.has("Authority")) {
       issues.push({
         file: "AGENTS.md / CLAUDE.md",
-        reason: "legacy Banzai layout: run `project-manifest` to migrate",
-        classification: "migration_required"
+        reason: "CLAUDE.md contains Engineering Quality while AGENTS.md lacks Authority; instruction layout is partial.",
+        classification: "needs_attention"
       });
     } else if (![agentHeadings, claudeHeadings].some(
       (set) => set.has("Authority") || hasPolicy(set)
@@ -5353,7 +5339,7 @@ async function inspectProjectAdoption(repoRoot, options = {}) {
       else inspectManifest(manifest.text, issues);
     }
   }
-  const classification = ["needs_attention", "migration_required", "setup_required"].find(
+  const classification = ["needs_attention", "setup_required"].find(
     (value) => issues.some((issue3) => issue3.classification === value)
   ) ?? "ready";
   return {
@@ -5477,7 +5463,8 @@ function dependenciesFor(relative2, bytes, sourceRoot = null) {
     let value;
     try {
       value = JSON.parse(text2);
-    } catch {
+    } catch (error) {
+      if (error?.code === "RESOURCE_VERSION_UNSUPPORTED") throw error;
       return { refs, supported: false };
     }
     try {
@@ -5498,28 +5485,26 @@ function dependenciesFor(relative2, bytes, sourceRoot = null) {
       else if ("phase" in value && "outcome" in value)
         parsePersistedPhaseResult(value);
       else if ("verdict" in value && "findings" in value)
-        (value.schemaVersion === 2 ? parseCurrentReviewResult : parseReviewResult)(value);
-    } catch {
+        parseReviewResult(value);
+    } catch (error) {
+      if (error?.code === "RESOURCE_VERSION_UNSUPPORTED") throw error;
       return { refs, supported: false };
     }
     if (relative2.endsWith("/work.json")) {
       parseBinding(value);
       return { refs, supported };
     }
-    if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative2) && ![1, 2, 3, 4, 5].includes(value.schemaVersion))
+    if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative2) && value.schemaVersion !== 5)
       supported = false;
     if (typeof value.schema === "string" && !(/* @__PURE__ */ new Set([
       "banzai-terminal-attempt-checkpoint/v1",
       "banzai-recovery-authorization/v1",
-      "banzai-review-snapshot/v1",
-      "banzai-review-snapshot/v2",
       "banzai-review-snapshot/v3",
       "banzai-work-binding/v2",
       "banzai-verification-decision/v1",
       "banzai-verification-applicability/v1",
       "banzai-verification-origin-start/v1",
       "banzai-verification-origin-finish/v1",
-      "banzai-work-binding/v1",
       "banzai-context-attempt/v1",
       "banzai-context-report/v1"
     ])).has(value.schema))
@@ -5527,11 +5512,12 @@ function dependenciesFor(relative2, bytes, sourceRoot = null) {
     if (typeof value.schema === "string" && value.schema.startsWith("banzai-review-snapshot/")) {
       try {
         parseReviewSnapshot(value);
-      } catch {
+      } catch (error) {
+        if (error?.code === "RESOURCE_VERSION_UNSUPPORTED") throw error;
         return { refs, supported: false };
       }
     }
-    if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative2) && value.schemaVersion >= 4) {
+    if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative2) && value.schemaVersion === 5) {
       try {
         exactObject(value.artifactBinding, ["binding", "sha256"]);
         parseBinding(value.artifactBinding.binding);
@@ -5787,10 +5773,7 @@ function parseArchive(value) {
     "retention"
   ]);
   if (value.schema !== ARCHIVE_SCHEMA || value.schemaVersion !== 1)
-    fail(
-      "ARTIFACT_VERSION_UNSUPPORTED",
-      "Unsupported artifact archive version."
-    );
+    unsupportedResourceVersion("artifact archive", `${value.schema} (schemaVersion ${value.schemaVersion})`, ARCHIVE_SCHEMA);
   bounded(value.bundleId, "bundleId");
   if (!Number.isFinite(Date.parse(value.createdAt)) || !Array.isArray(value.sources) || value.sources.length !== 1 || !Array.isArray(value.entries) || value.entries.length > LIMIT || !Array.isArray(value.dependencies) || value.dependencies.length > LIMIT * 10)
     fail(
@@ -6240,6 +6223,30 @@ async function restoreArtifacts(input) {
   };
 }
 
+// ../../plugins/banzai/.claude-plugin/plugin.json
+var plugin_default = {
+  name: "banzai",
+  displayName: "Banzai",
+  version: "3.0.0",
+  description: "Spec-driven development workflow built for a multi-model plan, implementation, and independent review loop, with a lightweight feature flow, conditional ADR governance, quick fixes, feature review, and status helpers. The engineer decides at ADR acceptance, plan approval, and review triage. New work artifacts default to local ignored .banzai/work/ storage; ADRs and maintained project documentation remain in the repository.",
+  author: {
+    name: "Alexander Torosh",
+    email: "alexander@parabolic.io",
+    url: "https://github.com/alexander-torosh"
+  },
+  repository: "https://github.com/Parabolic-Technologies/banzai",
+  keywords: [
+    "spec-driven",
+    "workflow",
+    "adr",
+    "lite",
+    "strict",
+    "process"
+  ],
+  skills: "./skills/",
+  license: "Apache-2.0"
+};
+
 // ../../plugins/banzai/lib/artifact-storage.mjs
 import { constants as constants4 } from "node:fs";
 import { AsyncLocalStorage as AsyncLocalStorage2 } from "node:async_hooks";
@@ -6259,8 +6266,8 @@ import { promisify as promisify2 } from "node:util";
 import { createHash as createHash5, randomUUID as randomUUID4 } from "node:crypto";
 var execute2 = promisify2(execFile3);
 var DECLARATION_SCHEMA = "banzai-artifact-layout/v1";
-var BINDING_SCHEMA = "banzai-work-binding/v1";
-var REQUEST_SCHEMA = "banzai-artifact-request/v1";
+var BINDING_SCHEMA = "banzai-work-binding/v2";
+var REQUEST_SCHEMA = "banzai-artifact-request/v2";
 var RESULT_SCHEMA = "banzai-artifact-result/v1";
 var METADATA_LIMIT2 = 64 * 1024;
 var DISCOVERY_LIMIT = 1e3;
@@ -6270,7 +6277,7 @@ var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}
 var SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 var SHA256 = /^[0-9a-f]{64}$/u;
 var MODES = ["strict", "lite", "fix", "workflow"];
-var LAYOUTS = ["private", "legacy"];
+var LAYOUTS = ["private"];
 var CLAIM = ".writer-claim.json";
 var INIT_LOCK = ".banzai/.artifact-init.lock";
 var runnerOwnership2 = new AsyncLocalStorage2();
@@ -6283,6 +6290,13 @@ var ArtifactStorageError = class extends Error {
 };
 function fail(code2, message) {
   throw new ArtifactStorageError(code2, message);
+}
+function unsupportedResourceVersion(resource, found, supported) {
+  const major = Number(plugin_default.version.split(".")[0]);
+  fail(
+    "RESOURCE_VERSION_UNSUPPORTED",
+    `${resource} version ${found} is not supported; ${major}.x supports ${supported}; last read by release-train major ${major - 1}`
+  );
 }
 function digestBytes(value) {
   return createHash5("sha256").update(value).digest("hex");
@@ -6486,36 +6500,32 @@ async function projectRoot(input) {
   }
 }
 function parseDeclaration(value) {
+  if (value !== null && typeof value === "object") {
+    if (value.schema !== DECLARATION_SCHEMA || value.schemaVersion !== 1)
+      unsupportedResourceVersion("artifact declaration", `${value.schema} (schemaVersion ${value.schemaVersion})`, DECLARATION_SCHEMA);
+    if (value.layout !== "private")
+      unsupportedResourceVersion("artifact layout", value.layout, "private");
+  }
   exactObject(value, ["schema", "schemaVersion", "layout"]);
-  if (value.schema !== DECLARATION_SCHEMA || value.schemaVersion !== 1)
-    fail(
-      "ARTIFACT_VERSION_UNSUPPORTED",
-      "Unsupported artifact declaration version."
-    );
-  if (!LAYOUTS.includes(value.layout))
-    fail(
-      "ARTIFACT_INPUT_INVALID",
-      "Artifact layout must be private or legacy."
-    );
   return value;
 }
-function artifactRoles(workId, slug, mode2, layout) {
-  const directory3 = layout === "private" ? `${WORK_ROOT}/${workId}` : `documentation/features/${slug}`;
-  const roles = { reviewDirectory: directory3 };
-  if (mode2 === "strict" || mode2 === "workflow")
-    Object.assign(roles, {
-      description: `${directory3}/description.md`,
-      plan: layout === "private" ? `${directory3}/plan.md` : `documentation/development-plans/${slug}/plan.md`,
-      implementationReport: `${directory3}/implementation-report.md`,
-      testReport: `${directory3}/test-report.md`
-    });
-  if (mode2 === "lite" || mode2 === "workflow")
-    roles.work = `${directory3}/work.md`;
-  if (mode2 === "fix" || mode2 === "workflow")
-    roles.changeReport = layout === "private" ? `${directory3}/change-report.md` : `documentation/changes/${slug}.md`;
+function artifactRoles(workId, _slug, mode2, layout) {
+  if (layout !== "private") unsupportedResourceVersion("artifact layout", layout, "private");
+  const directory3 = `${WORK_ROOT}/${workId}`;
+  const roles = { reviewDirectory: directory3, verificationDirectory: `${directory3}/verification` };
+  if (mode2 === "strict" || mode2 === "workflow") Object.assign(roles, {
+    description: `${directory3}/description.md`,
+    plan: `${directory3}/plan.md`,
+    implementationReport: `${directory3}/implementation-report.md`,
+    testReport: `${directory3}/test-report.md`
+  });
+  if (mode2 === "lite" || mode2 === "workflow") roles.work = `${directory3}/work.md`;
+  if (mode2 === "fix" || mode2 === "workflow") roles.changeReport = `${directory3}/change-report.md`;
   return roles;
 }
 function parseBinding(value) {
+  if (value !== null && typeof value === "object" && (value.schema !== BINDING_SCHEMA || value.schemaVersion !== 2))
+    unsupportedResourceVersion("work binding", `${value.schema} (schemaVersion ${value.schemaVersion})`, BINDING_SCHEMA);
   exactObject(value, [
     "schema",
     "schemaVersion",
@@ -6527,11 +6537,6 @@ function parseBinding(value) {
     "sourceCommit",
     "artifacts"
   ]);
-  if (!(value.schema === BINDING_SCHEMA && value.schemaVersion === 1 || value.schema === "banzai-work-binding/v2" && value.schemaVersion === 2 && value.layout === "private"))
-    fail(
-      "ARTIFACT_VERSION_UNSUPPORTED",
-      "Unsupported artifact work binding version."
-    );
   if (!UUID.test(value.workId) || typeof value.slug !== "string" || value.slug.length > 100 || !SLUG.test(value.slug) || !MODES.includes(value.mode) || !LAYOUTS.includes(value.layout) || typeof value.createdAt !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(
     value.createdAt
   ) || !Number.isFinite(Date.parse(value.createdAt)) || !(value.sourceCommit === null || typeof value.sourceCommit === "string" && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(value.sourceCommit))) {
@@ -6543,7 +6548,6 @@ function parseBinding(value) {
     value.mode,
     value.layout
   );
-  if (value.schemaVersion === 2) expected.verificationDirectory = `${WORK_ROOT}/${value.workId}/verification`;
   exactObject(value.artifacts, Object.keys(expected));
   for (const key of Object.keys(expected)) {
     relativePath(value.artifacts[key]);
@@ -6573,134 +6577,6 @@ async function directories(root, relative2, optional = true) {
     if (error instanceof ArtifactStorageError) throw error;
     fail("ARTIFACT_IO_ERROR", "Artifact directories could not be inspected.");
   }
-}
-async function readHeader(root, relative2) {
-  const target = await safePath(root, relative2, { missing: true });
-  let handle;
-  try {
-    handle = await open5(target, constants4.O_RDONLY | constants4.O_NOFOLLOW);
-    const buffer = Buffer.alloc(METADATA_LIMIT2);
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-    return buffer.subarray(0, bytesRead).toString("utf8");
-  } catch (error) {
-    if (error.code === "ENOENT") return null;
-    fail(
-      "ARTIFACT_IO_ERROR",
-      "Legacy artifact evidence could not be inspected."
-    );
-  } finally {
-    await handle?.close();
-  }
-}
-async function legacyEvidence(root, declared = false) {
-  const evidence2 = [];
-  let count = 0;
-  for (const folder of [
-    "documentation/features",
-    "documentation/development-plans"
-  ]) {
-    for (const entry of await directories(root, folder)) {
-      if (++count > DISCOVERY_LIMIT)
-        fail(
-          "ARTIFACT_DISCOVERY_LIMIT",
-          "Legacy artifact discovery exceeded its bound."
-        );
-      if (entry.isSymbolicLink())
-        fail(
-          "ARTIFACT_UNSAFE_PATH",
-          "Legacy artifact discovery encountered a symlink."
-        );
-      if (!entry.isDirectory()) continue;
-      const files = folder.endsWith("features") ? ["description.md", "work.md"] : ["plan.md"];
-      for (const name of files) {
-        const relative2 = `${folder}/${entry.name}/${name}`;
-        const header = await readHeader(root, relative2);
-        if (header === null) continue;
-        if (/^# Feature: /mu.test(header) && header.includes(`Slug: \`${entry.name}\``) || /^# Development Plan: /mu.test(header) && header.includes(`/features/${entry.name}/description.md`))
-          evidence2.push(relative2);
-      }
-    }
-  }
-  for (const entry of await directories(root, "documentation/changes")) {
-    if (++count > DISCOVERY_LIMIT) fail("ARTIFACT_DISCOVERY_LIMIT", "Legacy change discovery exceeded its bound.");
-    if (!entry.isFile() || !/^[a-z0-9]+(?:-[a-z0-9]+)*\.md$/u.test(entry.name)) continue;
-    const relative2 = `documentation/changes/${entry.name}`;
-    if (/^# Change Report:/mu.test(await readHeader(root, relative2) ?? "")) evidence2.push(relative2);
-  }
-  const manifest = await readHeader(root, "PROJECT_MANIFEST.md");
-  const refs = manifest?.match(
-    /documentation\/(?:features|changes|development-plans)\/[a-z0-9/.-]+\.md/gu
-  ) ?? [];
-  for (const relative2 of [...new Set(refs)]) {
-    if (++count > DISCOVERY_LIMIT)
-      fail(
-        "ARTIFACT_DISCOVERY_LIMIT",
-        "Legacy reference discovery exceeded its bound."
-      );
-    if (await readHeader(root, relative2) !== null) evidence2.push(relative2);
-  }
-  for (const entry of await directories(root, ".banzai/runs")) {
-    if (++count > DISCOVERY_LIMIT)
-      fail("ARTIFACT_DISCOVERY_LIMIT", "Run discovery exceeded its bound.");
-    if (!entry.isDirectory())
-      fail(
-        "ARTIFACT_RECOVERY_REQUIRED",
-        "Runner evidence requires explicit inspection."
-      );
-    const state = await readJson(
-      root,
-      `.banzai/runs/${entry.name}/state.json`,
-      true
-    );
-    if (state === null || ![1, 2, 3, 4, 5].includes(state.schemaVersion) || state.runId !== entry.name)
-      fail(
-        "ARTIFACT_RECOVERY_REQUIRED",
-        "Unrecognized runner evidence requires recovery."
-      );
-    if (state.schemaVersion >= 4 && !declared)
-      fail(
-        "ARTIFACT_RECOVERY_REQUIRED",
-        "A bound run without its artifact declaration requires recovery."
-      );
-    if (state.schemaVersion < 4) evidence2.push(`.banzai/runs/${entry.name}/state.json`);
-  }
-  return [...new Set(evidence2)].sort();
-}
-async function legacyCandidates(root, evidence2, boundWorks) {
-  const groups = /* @__PURE__ */ new Map();
-  for (const relative2 of evidence2) {
-    const match = /^documentation\/(features|development-plans|changes)\/([a-z0-9-]+)(?:\.md|\/)/u.exec(relative2);
-    if (!match || boundWorks.some((work) => work.binding.layout === "legacy" && work.binding.slug === match[2])) continue;
-    const slug = match[2];
-    const mode2 = match[1] === "changes" ? "fix" : relative2.endsWith("/work.md") ? "lite" : "strict";
-    groups.set(`${slug}:${mode2}`, { slug, mode: mode2 });
-  }
-  const candidates = [];
-  for (const { slug, mode: mode2 } of groups.values()) {
-    const artifacts = artifactRoles("00000000-0000-4000-8000-000000000000", slug, mode2, "legacy");
-    const originals = [];
-    for (const [role, relative2] of Object.entries(artifacts)) {
-      if (role === "reviewDirectory") {
-        for (const entry of await directories(root, relative2)) {
-          if (!/^review-[1-9][0-9]*\.md$/u.test(entry.name)) continue;
-          const bytes = await readBytes(root, `${relative2}/${entry.name}`);
-          originals.push({ path: `${relative2}/${entry.name}`, sha256: digestBytes(bytes) });
-        }
-      } else {
-        const bytes = await readBytes(root, relative2, { optional: true });
-        if (bytes !== null) originals.push({ path: relative2, sha256: digestBytes(bytes) });
-      }
-    }
-    let sourceCommit = null;
-    try {
-      sourceCommit = (await git2(root, ["log", "-1", "--format=%H", "--", ...originals.map((item) => item.path)])).stdout.trim() || null;
-    } catch {
-    }
-    const identity = digestBytes(canonicalJson({ slug, mode: mode2, originals, sourceCommit }));
-    const creationId = `${identity.slice(0, 8)}-${identity.slice(8, 12)}-4${identity.slice(13, 16)}-8${identity.slice(17, 20)}-${identity.slice(20, 32)}`;
-    candidates.push({ slug, mode: mode2, creationId, workPath: mode2 === "fix" ? artifacts.changeReport : artifacts.reviewDirectory, artifacts, originals, sourceCommit });
-  }
-  return candidates;
 }
 async function readBinding(root, workPath) {
   relativePath(workPath);
@@ -6735,20 +6611,8 @@ async function inspectArtifacts(input) {
   const declarationValue = await readJson(root, DECLARATION_PATH, true);
   const declaration = declarationValue === null ? null : parseDeclaration(declarationValue);
   const selector = input.workPath ?? (input.workId === void 0 ? null : `${WORK_ROOT}/${input.workId}`);
-  if (selector !== null && !selector.startsWith(`${WORK_ROOT}/`)) {
-    relativePath(selector);
-    const current = await inspectArtifacts({ repoRoot: root });
-    const matches = current.legacyCandidates.filter((item) => item.workPath === selector || Object.values(item.artifacts).includes(selector));
-    const bound = [];
-    for (const candidate of current.candidates) {
-      const selected = await readBinding(root, candidate.workPath);
-      if (selected.binding.layout === "legacy" && Object.values(selected.binding.artifacts).includes(selector)) bound.push(candidate);
-    }
-    if (matches.length === 0 && bound.length === 1) return inspectArtifacts({ repoRoot: root, workId: bound[0].workId });
-    if (matches.length !== 1 || bound.length)
-      fail("ARTIFACT_WORK_AMBIGUOUS", "Select one recognized original legacy bundle or its registered work ID.");
-    return { ...current, legacyCandidates: matches, legacySelection: matches[0] };
-  }
+  if (selector !== null && !selector.startsWith(`${WORK_ROOT}/`))
+    fail("ARTIFACT_INPUT_INVALID", "Select an exact private work path or work ID.");
   if (selector !== null) {
     const selected = await readBinding(root, selector);
     if (declaration === null)
@@ -6769,10 +6633,7 @@ async function inspectArtifacts(input) {
           mode: selected.binding.mode,
           workPath: `${WORK_ROOT}/${selected.binding.workId}/work.json`
         }
-      ],
-      legacyEvidence: [],
-      legacyCandidates: [],
-      legacySelection: null
+      ]
     };
   }
   const entries = await directories(root, WORK_ROOT);
@@ -6792,12 +6653,10 @@ async function inspectArtifacts(input) {
       "ARTIFACT_RECOVERY_REQUIRED",
       "Private work exists without its declaration. Recover the declaration from verified bindings."
     );
-  const legacy = await legacyEvidence(root, declaration !== null);
-  const continuations = await legacyCandidates(root, legacy, works);
   return {
     projectRoot: root,
-    classification: declaration !== null ? "declared" : legacy.length > 0 ? "legacy" : "fresh",
-    layout: declaration?.layout ?? (legacy.length > 0 ? "legacy" : "private"),
+    classification: declaration === null ? "fresh" : "declared",
+    layout: "private",
     declaration,
     work: null,
     candidates: works.map((item) => ({
@@ -6805,10 +6664,7 @@ async function inspectArtifacts(input) {
       slug: item.binding.slug,
       mode: item.binding.mode,
       workPath: `${WORK_ROOT}/${item.binding.workId}/work.json`
-    })),
-    legacyEvidence: legacy,
-    legacyCandidates: continuations,
-    legacySelection: null
+    }))
   };
 }
 async function ignored(root, relative2) {
@@ -6890,19 +6746,14 @@ async function initializeArtifacts(input) {
   if (input.layout !== void 0 && !LAYOUTS.includes(input.layout))
     fail(
       "ARTIFACT_INPUT_INVALID",
-      "Artifact layout must be private or legacy."
-    );
-  if (input.layout !== void 0 && input.layout !== before.layout && (before.declaration !== null || before.classification === "legacy"))
-    fail(
-      "ARTIFACT_RECOVERY_REQUIRED",
-      "Changing an existing layout requires an explicit storage migration."
+      "Artifact layout must be private."
     );
   const root = before.projectRoot;
   const adoption = await inspectProjectAdoption(root);
   if (adoption.classification !== "ready")
     fail(
       "ARTIFACT_SETUP_REQUIRED",
-      "Complete normal project guidance setup or migration before initializing artifact storage."
+      "Complete normal project guidance setup before initializing artifact storage."
     );
   await git2(root, ["rev-parse", "--show-toplevel"]).catch(
     () => fail(
@@ -6963,8 +6814,8 @@ async function initializeArtifacts(input) {
   });
 }
 async function createWork(input) {
-  if (input.schemaVersion !== void 0 && ![1, 2].includes(input.schemaVersion))
-    fail("ARTIFACT_VERSION_UNSUPPORTED", "Unsupported new work binding version.");
+  if (input.schemaVersion !== void 0 && input.schemaVersion !== 2)
+    unsupportedResourceVersion("work binding", input.schemaVersion, 2);
   if (!UUID.test(input.creationId) || typeof input.slug !== "string" || input.slug.length > 100 || !SLUG.test(input.slug) || !MODES.includes(input.mode))
     fail(
       "ARTIFACT_INPUT_INVALID",
@@ -6974,11 +6825,11 @@ async function createWork(input) {
   const root = state.projectRoot;
   const directory3 = `${WORK_ROOT}/${input.creationId}`;
   return withInitializationLock(root, async () => {
-    const state2 = await inspectArtifacts({ repoRoot: root });
+    await inspectArtifacts({ repoRoot: root });
     const existing = await readJson(root, `${directory3}/work.json`, true);
     if (existing !== null) {
       const bound = parseBinding(existing);
-      if (bound.workId !== input.creationId || bound.slug !== input.slug || bound.mode !== input.mode || bound.schemaVersion !== (input.schemaVersion === 2 ? 2 : 1))
+      if (bound.workId !== input.creationId || bound.slug !== input.slug || bound.mode !== input.mode || bound.schemaVersion !== 2)
         fail(
           "ARTIFACT_OWNERSHIP_CONFLICT",
           "creationId already identifies different work."
@@ -6987,38 +6838,8 @@ async function createWork(input) {
       return readBinding(root, directory3);
     }
     await verifyIgnores(root);
-    const continuation = state2.legacyCandidates.find((item) => item.slug === input.slug && item.mode === input.mode && item.creationId === input.creationId);
-    if (!continuation) {
-      const legacyRoles = artifactRoles(input.creationId, input.slug, "workflow", "legacy");
-      for (const [role, relative2] of Object.entries(legacyRoles))
-        if (role !== "reviewDirectory" && await readBytes(root, relative2, { optional: true }) !== null)
-          fail("ARTIFACT_WORK_AMBIGUOUS", "Original legacy evidence occupies this slug. Inspect its current continuation identity; stale selections cannot create replacement private work.");
-    }
-    const layout = continuation ? "legacy" : state2.layout;
-    const roles = artifactRoles(
-      input.creationId,
-      input.slug,
-      input.mode,
-      layout
-    );
-    if (input.schemaVersion === 2) {
-      if (layout !== "private") fail("ARTIFACT_INPUT_INVALID", "Verification-enabled work requires a new private binding.");
-      roles.verificationDirectory = `${directory3}/verification`;
-    }
-    if (layout === "legacy") {
-      for (const [role, relative2] of Object.entries(roles)) {
-        if (!continuation && role !== "reviewDirectory" && await readBytes(root, relative2, { optional: true }) !== null)
-          fail(
-            "ARTIFACT_WORK_AMBIGUOUS",
-            "Legacy artifacts already occupy this slug. Inspect their original workPath and register using its exact continuation creationId, slug and mode."
-          );
-      }
-      if (state2.candidates.some((work) => work.slug === input.slug))
-        fail(
-          "ARTIFACT_WORK_AMBIGUOUS",
-          "Legacy work with this slug is already bound. Select its work ID."
-        );
-    }
+    const layout = "private";
+    const roles = artifactRoles(input.creationId, input.slug, input.mode, layout);
     const staging = `${WORK_ROOT}/.create-${input.creationId}`;
     await verifyIgnores(root, { workId: input.creationId, layout, artifacts: roles }, [`${staging}/work.json`]);
     await makeDirectories(root, staging);
@@ -7027,11 +6848,10 @@ async function createWork(input) {
       sourceCommit = (await git2(root, ["rev-parse", "--verify", "HEAD"])).stdout.trim();
     } catch {
     }
-    if (continuation) sourceCommit = continuation.sourceCommit;
     const staged = await readJson(root, `${staging}/work.json`, true);
     const binding = staged === null ? parseBinding({
-      schema: input.schemaVersion === 2 ? "banzai-work-binding/v2" : BINDING_SCHEMA,
-      schemaVersion: input.schemaVersion === 2 ? 2 : 1,
+      schema: BINDING_SCHEMA,
+      schemaVersion: 2,
       workId: input.creationId,
       slug: input.slug,
       mode: input.mode,
@@ -7210,6 +7030,7 @@ async function requireClaim(input) {
   return work;
 }
 async function writeArtifact(input) {
+  await requireClaim(input);
   const root = await projectRoot(input.repoRoot);
   return withInitializationLock(root, () => writeClaimedArtifact(input));
 }
@@ -7273,6 +7094,7 @@ async function writeClaimedArtifact(input) {
   return { path: input.artifactPath, sha256: digestBytes(bytes) };
 }
 async function releaseWork(input) {
+  await requireClaim(input);
   const root = await projectRoot(input.repoRoot);
   return withInitializationLock(root, async () => {
     const work = await requireClaim(input);
@@ -7299,16 +7121,9 @@ async function runArtifactOperation(operation, input) {
   const fields = operationFields[operation];
   if (fields === void 0)
     fail("ARTIFACT_INPUT_INVALID", "Unsupported artifact operation.");
-  exactObject(
-    input,
-    ["schema", "schemaVersion", "repoRoot", ...fields[0]],
-    fields[1]
-  );
-  if (!(input.schema === REQUEST_SCHEMA && input.schemaVersion === 1 || operation === "create" && input.schema === "banzai-artifact-request/v2" && input.schemaVersion === 2))
-    fail(
-      "ARTIFACT_VERSION_UNSUPPORTED",
-      "Unsupported artifact request version."
-    );
+  if (input?.schema !== REQUEST_SCHEMA || input?.schemaVersion !== 2)
+    unsupportedResourceVersion("artifact request", `${input?.schema} (schemaVersion ${input?.schemaVersion})`, REQUEST_SCHEMA);
+  exactObject(input, ["schema", "schemaVersion", "repoRoot", ...fields[0]], fields[1]);
   const operations = {
     inventory: inventoryArtifacts,
     export: exportArtifacts,
@@ -7407,10 +7222,8 @@ var PHASE_RESULT_SCHEMA_VERSION2 = 3;
 var DECISION_CONSULTATION_SCHEMA2 = "banzai-decision-consultation/v1";
 var DECISION_CONSULTATION_SCHEMA_VERSION2 = 1;
 var PLAN_TASK_COMPLETION_SCHEMA_VERSION2 = 1;
-var EVALUATION_EXPORT_SCHEMA = "banzai-evaluation-export/v1";
-var EVALUATION_EXPORT_SCHEMA_VERSION = 1;
-var EVALUATION_KPI_SCHEMA = "banzai-evaluation-kpi/v1";
-var EVALUATION_KPI_SCHEMA_VERSION = 1;
+var EVALUATION_EXPORT_SCHEMA = "banzai-evaluation-export/v2";
+var EVALUATION_EXPORT_SCHEMA_VERSION = 2;
 var CONTEXT_ATTEMPT_SCHEMA = "banzai-context-attempt/v1";
 var CONTEXT_ATTEMPT_SCHEMA_VERSION = 1;
 var CONTEXT_REPORT_SCHEMA = "banzai-context-report/v1";
@@ -7434,19 +7247,17 @@ var TERMINAL_CHECKPOINT_SCHEMA2 = "banzai-terminal-attempt-checkpoint/v1";
 var TERMINAL_CHECKPOINT_SCHEMA_VERSION2 = 1;
 var RECOVERY_AUTHORIZATION_SCHEMA2 = "banzai-recovery-authorization/v1";
 var RECOVERY_AUTHORIZATION_SCHEMA_VERSION2 = 1;
-var AGENT_CONTROL_CONTRACT_VERSION = "3.0.0";
+var AGENT_CONTROL_CONTRACT_VERSION = "4.0.0";
 var AGENT_CAPABILITIES_SCHEMA_VERSION = 3;
 var AGENT_STATUS_SCHEMA_VERSION = 2;
 var AGENT_ANSWER_SCHEMA_VERSION = 2;
 var AGENT_REQUEST_SCHEMA_VERSION = 1;
 var AGENT_RECOVERY_SCHEMA_VERSION = 1;
-var LEGACY_AGENT_CONTROL_SCHEMA_VERSION = 1;
 var AGENT_CAPABILITIES_SCHEMA = "banzai-agent-capabilities/v3";
 var AGENT_STATUS_SCHEMA = "banzai-agent-status/v2";
 var AGENT_REQUEST_SCHEMA = "banzai-agent-request/v1";
 var AGENT_ANSWER_SCHEMA = "banzai-agent-answer/v2";
 var AGENT_RECOVERY_SCHEMA = "banzai-agent-recovery/v1";
-var LEGACY_AGENT_ANSWER_SCHEMA = "banzai-agent-answer/v1";
 function sessionBindingMatches(binding, settings, role) {
   return binding !== null && binding.role === role && binding.executable === settings.executable && binding.model === settings.model && binding.effort === settings.effort;
 }
@@ -7730,6 +7541,18 @@ function configuredModels(config) {
 }
 
 // src/validation.ts
+var VERIFICATION_PROJECT_TYPES2 = [
+  "repository",
+  "node",
+  "php",
+  "python",
+  "go",
+  "rust",
+  "ruby",
+  "jvm",
+  "dotnet",
+  "custom"
+];
 var VERIFICATION_ATTEMPT_STATUSES2 = [
   "started",
   "completed",
@@ -8246,6 +8069,12 @@ function parseWorkflowSelectionResult2(value) {
 }
 function parsePhaseResult2(value) {
   const record6 = requireRecord2(value, "phase result");
+  if (record6.schemaVersion !== PHASE_RESULT_SCHEMA_VERSION2)
+    throw new ResourceVersionUnsupportedError(
+      "phase result",
+      String(record6.schemaVersion),
+      PHASE_RESULT_SCHEMA_VERSION2
+    );
   exactKeys2(
     record6,
     [
@@ -8266,12 +8095,6 @@ function parsePhaseResult2(value) {
     "INVALID_RESULT",
     "Phase result"
   );
-  if (record6.schemaVersion !== PHASE_RESULT_SCHEMA_VERSION2) {
-    throw new BanzaiError(
-      "PHASE_RESULT_SCHEMA_MISMATCH",
-      `Phase result must use schema ${PHASE_RESULT_SCHEMA_VERSION2}.`
-    );
-  }
   if (record6.contractVersion !== CONTRACT_VERSION2) {
     throw new BanzaiError(
       "CONTRACT_VERSION_MISMATCH",
@@ -8334,120 +8157,7 @@ function parsePhaseResult2(value) {
   };
 }
 function parsePersistedPhaseResult2(value) {
-  const record6 = requireRecord2(value, "persisted phase result");
-  if (record6.schemaVersion === PHASE_RESULT_SCHEMA_VERSION2) {
-    return parsePhaseResult2(record6);
-  }
-  const schemaVersion = record6.schemaVersion === 2 ? 2 : record6.schemaVersion === void 0 || record6.schemaVersion === 1 ? 1 : null;
-  if (schemaVersion === null) {
-    throw new BanzaiError(
-      "PHASE_RESULT_SCHEMA_MISMATCH",
-      "Persisted phase result schema is unsupported."
-    );
-  }
-  exactKeys2(
-    record6,
-    schemaVersion === 1 ? [
-      ...Object.hasOwn(record6, "schemaVersion") ? ["schemaVersion"] : [],
-      "contractVersion",
-      "phase",
-      "outcome",
-      "gate",
-      "summary",
-      "artifacts",
-      "touchedPaths",
-      "questions",
-      "resolvedFindingIds",
-      "requestedVerification"
-    ] : [
-      "schemaVersion",
-      "contractVersion",
-      "phase",
-      "outcome",
-      "gate",
-      "summary",
-      "artifacts",
-      "taskCompletion",
-      "touchedPaths",
-      "questions",
-      "resolvedFindingIds",
-      "requestedVerification"
-    ],
-    "INVALID_RESULT",
-    "Persisted phase result"
-  );
-  if (record6.contractVersion !== CONTRACT_VERSION2) {
-    throw new BanzaiError(
-      "CONTRACT_VERSION_MISMATCH",
-      `Phase result must use contract ${CONTRACT_VERSION2}.`
-    );
-  }
-  const phase = requireEnum2(record6.phase, "phase", [
-    "plan",
-    "implementation",
-    "fix"
-  ]);
-  const gate = record6.gate === null ? null : requireEnum2(record6.gate, "gate", [
-    "adr_approval",
-    "plan_approval",
-    "escalation"
-  ]);
-  const reportedOutcome = requireEnum2(record6.outcome, "outcome", [
-    "completed",
-    "needs_human_decision",
-    "blocked"
-  ]);
-  const outcome = reportedOutcome === "completed" && gate !== null ? "needs_human_decision" : reportedOutcome;
-  if (outcome === "needs_human_decision" && gate === null) {
-    throw new BanzaiError(
-      "INVALID_RESULT",
-      "needs_human_decision requires a non-null gate."
-    );
-  }
-  let artifacts;
-  if (schemaVersion === 1) {
-    const legacyArtifacts = consultationRecord2(record6.artifacts, "artifacts", [
-      "description",
-      "plan",
-      "adrs",
-      "implementationReport"
-    ]);
-    artifacts = {
-      description: requireNullableString2(
-        legacyArtifacts.description,
-        "artifacts.description"
-      ),
-      plan: requireNullableString2(legacyArtifacts.plan, "artifacts.plan"),
-      adrs: requireStringArray2(legacyArtifacts.adrs, "artifacts.adrs"),
-      implementationReport: requireNullableString2(
-        legacyArtifacts.implementationReport,
-        "artifacts.implementationReport"
-      ),
-      testReport: null
-    };
-  } else {
-    artifacts = parseArtifacts2(record6.artifacts);
-  }
-  return {
-    schemaVersion,
-    contractVersion: CONTRACT_VERSION2,
-    phase,
-    outcome,
-    gate,
-    summary: requireString2(record6.summary, "summary"),
-    artifacts,
-    taskCompletion: schemaVersion === 1 ? null : parseTaskCompletion2(record6.taskCompletion),
-    touchedPaths: requireStringArray2(record6.touchedPaths, "touchedPaths"),
-    questions: requireStringArray2(record6.questions, "questions"),
-    resolvedFindingIds: requireStringArray2(
-      record6.resolvedFindingIds,
-      "resolvedFindingIds"
-    ),
-    requestedVerification: requireStringArray2(
-      record6.requestedVerification,
-      "requestedVerification"
-    )
-  };
+  return parsePhaseResult2(value);
 }
 function parseEvidence2(value, findingId) {
   const record6 = requireRecord2(value, `${findingId}.evidence`);
@@ -8555,11 +8265,7 @@ function parseReviewFields2(value) {
   };
 }
 function parseReviewResult2(value) {
-  const record6 = requireRecord2(value, "review result");
-  if (record6.schemaVersion !== void 0 || record6.scopeAcknowledgment !== void 0 || record6.reviewNotes !== void 0) {
-    return parseCurrentReviewResult2(value);
-  }
-  return parseReviewFields2(value);
+  return parseCurrentReviewResult2(value);
 }
 function reviewScopePath3(value) {
   const name = requireString2(value, "scope path");
@@ -8574,9 +8280,10 @@ function reviewScopePath3(value) {
 function parseCurrentReviewResult2(value) {
   const record6 = requireRecord2(value, "review result");
   if (record6.schemaVersion !== 2)
-    throw new BanzaiError(
-      "REVIEW_RESULT_SCHEMA_MISMATCH",
-      "New reviews require review-result/v2."
+    throw new ResourceVersionUnsupportedError(
+      "review result",
+      String(record6.schemaVersion),
+      2
     );
   exactKeys2(
     record6,
@@ -8665,7 +8372,7 @@ function parseCurrentReviewResult2(value) {
       "INVALID_REVIEW_SCOPE",
       "Scope entry"
     );
-    const path30 = reviewScopePath3(entry.path);
+    const path29 = reviewScopePath3(entry.path);
     const status = requireEnum2(entry.status, "scope status", [
       "reviewed",
       "not_reviewed"
@@ -8675,7 +8382,7 @@ function parseCurrentReviewResult2(value) {
         "INVALID_REVIEW_SCOPE",
         "Reviewed scope requires a null reason; unreviewed scope requires a nonblank reason."
       );
-    return { path: path30, status, reason: entry.reason };
+    return { path: path29, status, reason: entry.reason };
   });
   if (new Set(artifacts.map((entry) => entry.path)).size !== artifacts.length || new Set(result.reviewedFindingIds).size !== result.reviewedFindingIds.length)
     throw new BanzaiError(
@@ -8832,32 +8539,10 @@ function parseEvidenceUsage2(value, code2, label) {
     costUsd: numeric(value.costUsd, "costUsd", true)
   };
 }
-function parseCheckpointResult2(kind, value, resultContract) {
-  if (kind === "selection") {
-    return parseWorkflowSelectionResult2(value);
-  }
-  if (kind === "review") {
-    if (resultContract === "review-result/v2")
-      return parseCurrentReviewResult2(value);
-    const legacy = requireRecord2(value, "legacy review");
-    if (legacy.schemaVersion !== void 0 || legacy.scopeAcknowledgment !== void 0 || legacy.reviewNotes !== void 0)
-      return recoveryEvidenceError2(
-        "INVALID_TERMINAL_CHECKPOINT",
-        "Legacy checkpoint cannot carry a new review result."
-      );
-    return parseReviewFields2(value);
-  }
-  if (resultContract === "phase-result/v3") {
-    return parsePhaseResult2(value);
-  }
-  const result = parsePersistedPhaseResult2(value);
-  if (result.schemaVersion !== 2) {
-    return recoveryEvidenceError2(
-      "INVALID_TERMINAL_CHECKPOINT",
-      "Legacy phase-result/v2 checkpoint must contain a v2 result."
-    );
-  }
-  return result;
+function parseCheckpointResult2(kind, value) {
+  if (kind === "selection") return parseWorkflowSelectionResult2(value);
+  if (kind === "review") return parseReviewResult2(value);
+  return parsePhaseResult2(value);
 }
 function terminalCheckpointIntegrity2(checkpoint) {
   return digestCanonicalJson3(checkpoint);
@@ -8938,13 +8623,13 @@ function parseTerminalAttemptCheckpoint2(value) {
     );
   }
   const resultContract = value.resultContract;
-  const expectedContract = attempt.kind === "selection" ? "workflow-selection/v1" : attempt.kind === "review" ? resultContract === "review-result/v2" ? "review-result/v2" : "review-result/v1" : resultContract === "phase-result/v2" ? "phase-result/v2" : "phase-result/v3";
-  if (resultContract !== expectedContract || attempt.kind !== "selection" && attempt.kind !== "review" && resultContract !== "phase-result/v2" && resultContract !== "phase-result/v3") {
-    return recoveryEvidenceError2(
-      code2,
-      `Checkpoint result contract must be ${expectedContract}.`
+  const expectedContract = attempt.kind === "selection" ? "workflow-selection/v1" : attempt.kind === "review" ? "review-result/v2" : "phase-result/v3";
+  if (resultContract !== expectedContract)
+    throw new ResourceVersionUnsupportedError(
+      "checkpoint result contract",
+      String(resultContract),
+      expectedContract
     );
-  }
   if (!isRecord2(value.terminal)) {
     return recoveryEvidenceError2(code2, "terminal must be an object.");
   }
@@ -8997,7 +8682,7 @@ function parseTerminalAttemptCheckpoint2(value) {
         "terminal.observedAt"
       )
     },
-    result: parseCheckpointResult2(attempt.kind, value.result, expectedContract),
+    result: parseCheckpointResult2(attempt.kind, value.result),
     sessionId: evidenceNullableString2(value.sessionId, code2, "sessionId", 300),
     usage: parseEvidenceUsage2(value.usage, code2, "usage"),
     baseCommit: evidenceString2(value.baseCommit, code2, "baseCommit", 100),
@@ -9179,17 +8864,16 @@ function parseModelAttemptRecord2(value) {
     code2,
     "Attempt record"
   );
-  if (value.schemaVersion !== 1 && value.schemaVersion !== MODEL_ATTEMPT_SCHEMA_VERSION2) {
-    return recoveryEvidenceError2(
-      code2,
-      "Attempt schema version is unsupported."
+  if (value.schemaVersion !== MODEL_ATTEMPT_SCHEMA_VERSION2)
+    throw new ResourceVersionUnsupportedError(
+      "model attempt",
+      String(value.schemaVersion),
+      MODEL_ATTEMPT_SCHEMA_VERSION2
     );
-  }
   const attempt = parseEvidenceAttempt2(value.attempt, code2, "attempt");
   if (value.rotationReason != null && (typeof value.rotationReason !== "string" || ![
     "primary-review",
     "missing-session",
-    "legacy-state",
     "settings-changed",
     "approval-changed",
     "previous-review-failed",
@@ -9297,11 +8981,11 @@ function parseModelAttemptRecord2(value) {
     }
   }
   const status = value.status;
-  if (typeof status !== "string" || !["started", "completed", "failed", "interrupted"].includes(status) || value.schemaVersion === 1 && status === "interrupted") {
+  if (typeof status !== "string" || !["started", "completed", "failed", "interrupted"].includes(status)) {
     return recoveryEvidenceError2(code2, "Attempt status is unsupported.");
   }
   evidenceTimestamp2(value.startedAt, code2, "startedAt");
-  if (value.schemaVersion === MODEL_ATTEMPT_SCHEMA_VERSION2) {
+  {
     if (!Object.hasOwn(value, "interruptedAt") || !Object.hasOwn(value, "recoveryOf") || !Object.hasOwn(value, "recoveryAuthorizationId")) {
       return recoveryEvidenceError2(
         code2,
@@ -9358,63 +9042,15 @@ function parseModelSettings(value, label) {
     timeoutMs: requirePositiveInteger2(record6.timeoutMs, `${label}.timeoutMs`)
   };
 }
-function parseVerificationCommand(value, label) {
-  const record6 = requireRecord2(value, label);
-  if (!Array.isArray(record6.args) || record6.args.some((item) => typeof item !== "string")) {
-    throw new BanzaiError(
-      "INVALID_CONFIG",
-      `${label}.args must be an array of strings.`
-    );
-  }
-  return {
-    name: requireString2(record6.name, `${label}.name`),
-    command: requireString2(record6.command, `${label}.command`),
-    args: [...record6.args],
-    timeoutMs: requirePositiveInteger2(record6.timeoutMs, `${label}.timeoutMs`)
-  };
-}
-var VERIFICATION_PROJECT_TYPES2 = [
-  "repository",
-  "node",
-  "php",
-  "python",
-  "go",
-  "rust",
-  "ruby",
-  "jvm",
-  "dotnet",
-  "custom"
-];
-function parseVerificationProfile(value, index) {
-  const label = `verification.profiles[${index}]`;
-  const record6 = requireRecord2(value, label);
-  const id = requireString2(record6.id, `${label}.id`);
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)) {
-    throw new BanzaiError(
-      "INVALID_CONFIG",
-      `${label}.id must be a kebab-case identifier.`
-    );
-  }
-  if (!Array.isArray(record6.commands) || record6.commands.length === 0) {
-    throw new BanzaiError(
-      "INVALID_CONFIG",
-      `${label}.commands must contain at least one deterministic verification command.`
-    );
-  }
-  return {
-    id,
-    projectType: requireEnum2(
-      record6.projectType,
-      `${label}.projectType`,
-      VERIFICATION_PROJECT_TYPES2
-    ),
-    commands: record6.commands.map(
-      (command, commandIndex) => parseVerificationCommand(command, `${label}.commands[${commandIndex}]`)
-    )
-  };
-}
 function parseConfig(value) {
   const record6 = requireRecord2(value, "config");
+  if (record6.schemaVersion !== 3) {
+    throw new ResourceVersionUnsupportedError(
+      "orchestrator config",
+      String(record6.schemaVersion),
+      3
+    );
+  }
   if (record6.contractVersion !== CONTRACT_VERSION2) {
     throw new BanzaiError(
       "INVALID_CONFIG",
@@ -9423,56 +9059,12 @@ function parseConfig(value) {
   }
   const models = requireRecord2(record6.models, "models");
   let verification;
-  if (record6.schemaVersion === 1) {
-    if (!Array.isArray(record6.verification) || record6.verification.length === 0) {
-      throw new BanzaiError(
-        "INVALID_CONFIG",
-        "Config must declare at least one deterministic verification command."
-      );
-    }
-    verification = {
-      profiles: [
-        {
-          id: "legacy",
-          projectType: "custom",
-          commands: record6.verification.map(
-            (command, index) => parseVerificationCommand(command, `verification[${index}]`)
-          )
-        }
-      ]
-    };
-  } else if (record6.schemaVersion === 3) {
-    try {
-      verification = parseVerificationConfiguration(record6.verification);
-    } catch {
-      throw new BanzaiError(
-        "INVALID_CONFIG",
-        "Invalid schema 3 verification configuration."
-      );
-    }
-  } else if (record6.schemaVersion === 2) {
-    const verificationRecord3 = requireRecord2(
-      record6.verification,
-      "verification"
-    );
-    if (!Array.isArray(verificationRecord3.profiles) || verificationRecord3.profiles.length === 0) {
-      throw new BanzaiError(
-        "INVALID_CONFIG",
-        "verification.profiles must contain at least one profile."
-      );
-    }
-    const profiles = verificationRecord3.profiles.map(parseVerificationProfile);
-    if (new Set(profiles.map((profile) => profile.id)).size !== profiles.length) {
-      throw new BanzaiError(
-        "INVALID_CONFIG",
-        "Verification profile ids must be unique."
-      );
-    }
-    verification = { profiles };
-  } else {
+  try {
+    verification = parseVerificationConfiguration(record6.verification);
+  } catch {
     throw new BanzaiError(
       "INVALID_CONFIG",
-      "Config must use schemaVersion 1, 2 or 3."
+      "Invalid schema 3 verification configuration."
     );
   }
   return {
@@ -9690,9 +9282,12 @@ function parseVerificationLedger(value) {
   const code2 = "VERIFICATION_LEDGER_MALFORMED";
   const record6 = verificationRecord2(value, code2, "ledger");
   verificationKeys2(record6, ["schemaVersion"], code2, "ledger");
-  if (record6.schemaVersion !== 1 && record6.schemaVersion !== 2) {
-    throw verificationEvidenceError2(code2, "schemaVersion");
-  }
+  if (record6.schemaVersion !== 2)
+    throw new ResourceVersionUnsupportedError(
+      "verification ledger",
+      String(record6.schemaVersion),
+      2
+    );
   return { schemaVersion: record6.schemaVersion };
 }
 function parseVerificationAttemptRecord2(value) {
@@ -9911,7 +9506,6 @@ var REVIEW_VERDICTS = [
 var ROTATION_REASONS = [
   "primary-review",
   "missing-session",
-  "legacy-state",
   "settings-changed",
   "approval-changed",
   "previous-review-failed",
@@ -9928,8 +9522,8 @@ function evaluationError2(message) {
 function observed2(value) {
   return { value, evidence: "observed" };
 }
-function absent2(legacy = false) {
-  return { value: null, evidence: legacy ? "legacy_absent" : "unknown" };
+function absent2() {
+  return { value: null, evidence: "unknown" };
 }
 function invalid5() {
   return { value: null, evidence: "invalid" };
@@ -9943,20 +9537,16 @@ function issue2(issues, code2, field) {
 function sourceValue2(record6, key, field, issues, parse, options = {}) {
   if (!Object.hasOwn(record6, key)) {
     if (options.required ?? true) {
-      issue2(
-        issues,
-        options.legacyAbsent === true ? "LEGACY_FIELD_ABSENT" : "STATE_FIELD_MISSING",
-        field
-      );
+      issue2(issues, "STATE_FIELD_MISSING", field);
     }
-    return absent2(options.legacyAbsent);
+    return absent2();
   }
   const value = record6[key];
   if (value === null && options.nullable === true) {
     return notApplicable2();
   }
   if (value === null) {
-    return absent2(options.legacyAbsent);
+    return absent2();
   }
   const parsed = parse(value);
   if (parsed === void 0) {
@@ -10020,33 +9610,28 @@ function normalizeRfc3339Instant2(value) {
 function rfc3339Value2(value) {
   return normalizeRfc3339Instant2(value) === void 0 ? void 0 : value;
 }
-function metricValue2(record6, key, field, issues, legacyAbsent = false, nullable = false) {
+function metricValue2(record6, key, field, issues, nullable = false) {
   if (record6 === null) {
-    return absent2(legacyAbsent);
+    return absent2();
   }
   return sourceValue2(record6, key, field, issues, nonNegativeNumber2, {
-    legacyAbsent,
     nullable
   });
 }
-function childRecord2(value, field, issues, legacyAbsent = false) {
+function childRecord2(value, field, issues) {
   if (isRecord2(value)) {
     return value;
   }
   issue2(
     issues,
-    legacyAbsent ? "LEGACY_FIELD_ABSENT" : "STATE_FIELD_INVALID",
+    value === void 0 ? "STATE_FIELD_MISSING" : "STATE_FIELD_INVALID",
     field
   );
   return null;
 }
-function emptyStateMetrics2(legacy, issues) {
-  const missing3 = () => absent2(legacy);
-  issue2(
-    issues,
-    legacy ? "LEGACY_FIELD_ABSENT" : "STATE_FIELD_MISSING",
-    "metrics"
-  );
+function emptyStateMetrics2(issues) {
+  const missing3 = () => absent2();
+  issue2(issues, "STATE_FIELD_MISSING", "metrics");
   return {
     attempts: {
       selection: missing3(),
@@ -10068,24 +9653,14 @@ function emptyStateMetrics2(legacy, issues) {
     triage: { accepted: missing3(), rejected: missing3(), deferred: missing3() }
   };
 }
-function parseStateMetrics2(value, schemaVersion, issues) {
+function parseStateMetrics2(value, issues) {
   if (!isRecord2(value)) {
-    return emptyStateMetrics2(schemaVersion === 1, issues);
+    return emptyStateMetrics2(issues);
   }
   const attempts = childRecord2(value.attempts, "metrics.attempts", issues);
   const usage = childRecord2(value.usage, "metrics.usage", issues);
-  const sessions = childRecord2(
-    value.sessions,
-    "metrics.sessions",
-    issues,
-    schemaVersion === 1
-  );
-  const reviews = childRecord2(
-    value.reviews,
-    "metrics.reviews",
-    issues,
-    schemaVersion === 1
-  );
+  const sessions = childRecord2(value.sessions, "metrics.sessions", issues);
+  const reviews = childRecord2(value.reviews, "metrics.reviews", issues);
   const triage = childRecord2(value.triage, "metrics.triage", issues);
   return {
     attempts: {
@@ -10093,8 +9668,7 @@ function parseStateMetrics2(value, schemaVersion, issues) {
         attempts,
         "selection",
         "metrics.attempts.selection",
-        issues,
-        schemaVersion === 1
+        issues
       ),
       plan: metricValue2(attempts, "plan", "metrics.attempts.plan", issues),
       implementation: metricValue2(
@@ -10141,7 +9715,6 @@ function parseStateMetrics2(value, schemaVersion, issues) {
         "costUsd",
         "metrics.usage.costUsd",
         issues,
-        false,
         true
       )
     },
@@ -10152,42 +9725,22 @@ function parseStateMetrics2(value, schemaVersion, issues) {
       issues
     ),
     sessions: {
-      fresh: metricValue2(
-        sessions,
-        "fresh",
-        "metrics.sessions.fresh",
-        issues,
-        schemaVersion === 1
-      ),
+      fresh: metricValue2(sessions, "fresh", "metrics.sessions.fresh", issues),
       resumed: metricValue2(
         sessions,
         "resumed",
         "metrics.sessions.resumed",
-        issues,
-        schemaVersion === 1
+        issues
       )
     },
     reviews: {
-      full: metricValue2(
-        reviews,
-        "full",
-        "metrics.reviews.full",
-        issues,
-        schemaVersion === 1
-      ),
-      delta: metricValue2(
-        reviews,
-        "delta",
-        "metrics.reviews.delta",
-        issues,
-        schemaVersion === 1
-      ),
+      full: metricValue2(reviews, "full", "metrics.reviews.full", issues),
+      delta: metricValue2(reviews, "delta", "metrics.reviews.delta", issues),
       rotations: metricValue2(
         reviews,
         "rotations",
         "metrics.reviews.rotations",
-        issues,
-        schemaVersion === 1
+        issues
       )
     },
     triage: {
@@ -10296,10 +9849,11 @@ function parseEvaluationStateSource2(value) {
   if (!isRecord2(value)) {
     throw evaluationError2("Persisted state is not a supported object.");
   }
-  if (value.schemaVersion !== 1 && value.schemaVersion !== 2 && value.schemaVersion !== 3 && value.schemaVersion !== 4 && value.schemaVersion !== 5) {
-    throw new BanzaiError(
-      "EVALUATION_STATE_SCHEMA_UNSUPPORTED",
-      "Persisted state uses an unsupported schema."
+  if (value.schemaVersion !== 5) {
+    throw new ResourceVersionUnsupportedError(
+      "run state",
+      String(value.schemaVersion),
+      "5"
     );
   }
   const schemaVersion = value.schemaVersion;
@@ -10314,12 +9868,8 @@ function parseEvaluationStateSource2(value) {
       (item) => enumValue2(item, WORKFLOW_ROUTES2)
     );
   } else if (!Object.hasOwn(value, "workflowSelection")) {
-    workflow = absent2(schemaVersion === 1);
-    issue2(
-      issues,
-      schemaVersion === 1 ? "LEGACY_FIELD_ABSENT" : "STATE_FIELD_MISSING",
-      "workflowSelection"
-    );
+    workflow = absent2();
+    issue2(issues, "STATE_FIELD_MISSING", "workflowSelection");
   } else if (value.workflowSelection === null) {
     workflow = absent2();
   } else {
@@ -10343,18 +9893,16 @@ function parseEvaluationStateSource2(value) {
   }
   let triage;
   let triageIsCumulative;
-  if (schemaVersion >= 2) {
-    if (Array.isArray(value.triageHistory)) {
-      triage = triageCounts2(value.triageHistory, issues, "triageHistory");
-      triageIsCumulative = true;
-    } else {
-      issue2(issues, "STATE_FIELD_INVALID", "triageHistory");
-      triage = { accepted: 0, rejected: 0, deferred: 0 };
-      triageIsCumulative = false;
-    }
+  if (Array.isArray(value.triageHistory)) {
+    triage = triageCounts2(value.triageHistory, issues, "triageHistory");
+    triageIsCumulative = true;
   } else {
-    issue2(issues, "LEGACY_FIELD_ABSENT", "triageHistory");
-    triage = value.triage === null || value.triage === void 0 ? { accepted: 0, rejected: 0, deferred: 0 } : triageCounts2([value.triage], issues, "triage");
+    issue2(
+      issues,
+      value.triageHistory === void 0 ? "STATE_FIELD_MISSING" : "STATE_FIELD_INVALID",
+      "triageHistory"
+    );
+    triage = { accepted: 0, rejected: 0, deferred: 0 };
     triageIsCumulative = false;
   }
   let activeAttemptIdentity;
@@ -10488,23 +10036,19 @@ function parseEvaluationStateSource2(value) {
       triageIsCumulative,
       verificationList,
       verification,
-      metrics: parseStateMetrics2(value.metrics, schemaVersion, issues)
+      metrics: parseStateMetrics2(value.metrics, issues)
     },
     issues
   };
 }
-function attemptEvidence(record6, key, field, issues, parse, nullable = false, legacyAbsent = false) {
+function attemptEvidence(record6, key, field, issues, parse, nullable = false) {
   if (!Object.hasOwn(record6, key)) {
-    issue2(
-      issues,
-      legacyAbsent ? "LEGACY_FIELD_ABSENT" : "STATE_FIELD_MISSING",
-      field
-    );
-    return absent2(legacyAbsent);
+    issue2(issues, "STATE_FIELD_MISSING", field);
+    return absent2();
   }
   const value = record6[key];
   if (value === null) {
-    return nullable ? notApplicable2() : absent2(legacyAbsent);
+    return nullable ? notApplicable2() : absent2();
   }
   const parsed = parse(value);
   if (parsed === void 0) {
@@ -10524,6 +10068,13 @@ function unknownUsage() {
 function parseEvaluationAttemptSource(value) {
   if (!isRecord2(value) || !isRecord2(value.attempt)) {
     throw evaluationError2("Persisted attempt is not a supported object.");
+  }
+  if (value.schemaVersion !== 2) {
+    throw new ResourceVersionUnsupportedError(
+      "model attempt",
+      String(value.schemaVersion),
+      "2"
+    );
   }
   const issues = [];
   const identity = stringValue2(value.attempt.id);
@@ -10552,8 +10103,8 @@ function parseEvaluationAttemptSource(value) {
   const status = persistedStatus.value === "interrupted" ? { value: "started", evidence: "derived" } : persistedStatus;
   let sessionMode;
   if (!Object.hasOwn(value, "sessionMode")) {
-    issue2(issues, "LEGACY_FIELD_ABSENT", "sessionMode");
-    sessionMode = absent2(true);
+    issue2(issues, "STATE_FIELD_MISSING", "sessionMode");
+    sessionMode = absent2();
   } else {
     sessionMode = attemptEvidence(
       value,
@@ -10575,8 +10126,7 @@ function parseEvaluationAttemptSource(value) {
       "reviewMode",
       issues,
       (item) => enumValue2(item, ["full", "delta"]),
-      false,
-      !Object.hasOwn(value, "reviewMode")
+      false
     );
     rotationReason = attemptEvidence(
       value,
@@ -10584,8 +10134,7 @@ function parseEvaluationAttemptSource(value) {
       "rotationReason",
       issues,
       (item) => enumValue2(item, ROTATION_REASONS),
-      true,
-      !Object.hasOwn(value, "rotationReason")
+      true
     );
   }
   let model;
@@ -10620,11 +10169,11 @@ function parseEvaluationAttemptSource(value) {
       issue2(issues, "STATE_FIELD_INVALID", "sessionContext.executable");
     }
   } else {
-    issue2(issues, "LEGACY_FIELD_ABSENT", "sessionContext");
+    issue2(issues, "STATE_FIELD_MISSING", "sessionContext");
     model = {
-      vendor: absent2(true),
-      model: absent2(true),
-      effort: absent2(true)
+      vendor: absent2(),
+      model: absent2(),
+      effort: absent2()
     };
   }
   let usage;
@@ -10679,9 +10228,8 @@ function parseEvaluationAttemptSource(value) {
         "schemaVersion",
         "schemaVersion",
         issues,
-        (item) => item === 1 || item === 2 ? item : void 0,
-        false,
-        !Object.hasOwn(value, "schemaVersion")
+        (item) => item === 2 ? item : void 0,
+        false
       ),
       kind,
       mutable: attemptEvidence(
@@ -10727,6 +10275,13 @@ function parseEvaluationAttemptSource(value) {
 function parseEvaluationReviewSource(value) {
   if (!isRecord2(value) || !Array.isArray(value.findings)) {
     throw evaluationError2("Persisted review is not a supported object.");
+  }
+  if (value.schemaVersion !== 2) {
+    throw new ResourceVersionUnsupportedError(
+      "review result",
+      String(value.schemaVersion),
+      "2"
+    );
   }
   const issues = [];
   const verdict = sourceValue2(
@@ -10815,7 +10370,6 @@ var EVALUATION_ATTEMPT_OUTCOME_ORDER = [
 var EVALUATION_ROTATION_REASON_ORDER = [
   "primary-review",
   "missing-session",
-  "legacy-state",
   "settings-changed",
   "approval-changed",
   "previous-review-failed",
@@ -10881,7 +10435,6 @@ var EVALUATION_ISSUE_CODE_ORDER = [
   "STATE_SCHEMA_UNSUPPORTED",
   "STATE_FIELD_MISSING",
   "STATE_FIELD_INVALID",
-  "LEGACY_FIELD_ABSENT",
   "ATTEMPT_DIRECTORY_MISSING",
   "ATTEMPT_MALFORMED",
   "ATTEMPT_DUPLICATE",
@@ -10899,7 +10452,6 @@ var EVALUATION_ISSUE_CODE_ORDER = [
   "VERIFICATION_ATTEMPT_CONFLICT",
   "VERIFICATION_SEQUENCE_CONFLICT",
   "VERIFICATION_SEQUENCE_MISSING",
-  "VERIFICATION_HISTORY_INCOMPLETE",
   "PLAN_TASK_COMPLETION_INVALID",
   "ACTIVE_ATTEMPT_INCOMPLETE"
 ];
@@ -11215,7 +10767,9 @@ async function collectAttempts(runDirectory, runKey) {
     try {
       const decoded = parseEvaluationAttemptSource(result.value);
       parsed.push({ source: decoded.value, issues: decoded.issues });
-    } catch {
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "RESOURCE_VERSION_UNSUPPORTED")
+        throw error;
       issues.push(directIssue(runKey, "attempt", "ATTEMPT_MALFORMED"));
       invalidCount += 1;
     }
@@ -11269,64 +10823,6 @@ async function collectAttempts(runDirectory, runKey) {
     conflictedIdentities
   };
 }
-function verificationDuration(source) {
-  if (source.startedAt.value === null || source.completedAt.value === null) {
-    return {
-      value: null,
-      evidence: source.startedAt.evidence === "invalid" || source.completedAt.evidence === "invalid" ? "invalid" : "unknown"
-    };
-  }
-  const duration = Date.parse(source.completedAt.value) - Date.parse(source.startedAt.value);
-  return duration >= 0 ? { value: duration, evidence: "derived" } : { value: null, evidence: "invalid" };
-}
-function legacyVerificationSource(source) {
-  return {
-    validStructure: source.validStructure,
-    status: { value: "completed", evidence: "observed" },
-    exitCode: source.exitCode,
-    signalPresent: source.signalPresent,
-    durationMs: verificationDuration(source)
-  };
-}
-function collectLegacyVerification(state) {
-  const sources = state.verification.map(legacyVerificationSource);
-  const entries = state.verification.map((item, index) => ({
-    ordinal: index + 1,
-    status: "completed",
-    exitCode: item.exitCode,
-    signalPresent: item.signalPresent,
-    durationMs: verificationDuration(item)
-  }));
-  const cumulative = state.metrics.attempts.verification.value;
-  const activeCount = state.activeVerification.value === true ? 1 : 0;
-  const activeUnknownCount = state.activeVerification.value === null && state.activeVerification.evidence !== "invalid" ? 1 : 0;
-  const activeInvalidCount = state.activeVerification.evidence === "invalid" ? 1 : 0;
-  const metricRetainedCount = cumulative === null ? entries.length : Math.min(entries.length, cumulative);
-  const metricActiveCount = cumulative === null ? activeCount : Math.min(activeCount, Math.max(0, cumulative - metricRetainedCount));
-  const metricObservedCount = metricRetainedCount + metricActiveCount;
-  const retainedCountInvalidCount = entries.length - metricRetainedCount;
-  const activeCountInvalidCount = activeCount - metricActiveCount;
-  const countInvalidCount = retainedCountInvalidCount + activeCountInvalidCount;
-  const historicalUnknownCount = cumulative === null && state.metrics.attempts.verification.evidence !== "invalid" ? 1 : cumulative === null ? 0 : Math.max(0, cumulative - metricObservedCount);
-  const historicalInvalidCount = cumulative === null && state.metrics.attempts.verification.evidence === "invalid" ? 1 : 0;
-  return {
-    entries,
-    sources,
-    retainedSources: state.verification,
-    metricSources: sources.slice(0, metricRetainedCount),
-    activeCount,
-    metricActiveCount,
-    activeUnknownCount,
-    activeInvalidCount,
-    listUnknownCount: state.verificationList.value === null && state.verificationList.evidence !== "invalid" ? 1 : 0,
-    listInvalidCount: state.verificationList.evidence === "invalid" ? 1 : 0,
-    historicalUnknownCount,
-    historicalInvalidCount,
-    retainedCountInvalidCount,
-    activeCountInvalidCount,
-    countInvalidCount
-  };
-}
 function ledgerVerificationSource(record6) {
   return {
     validStructure: true,
@@ -11342,11 +10838,8 @@ function ledgerVerificationSource(record6) {
 async function collectVerification(runDirectory, runKey, state) {
   const directory3 = path8.join(runDirectory, "verification-attempts");
   const entries = await childDirectoryEntries(directory3);
-  if (entries === null) {
-    return { collection: collectLegacyVerification(state), issues: [] };
-  }
   const issues = [];
-  if (entries === void 0) {
+  if (entries === void 0 || entries === null) {
     issues.push(
       directIssue(
         runKey,
@@ -11389,7 +10882,9 @@ async function collectVerification(runDirectory, runKey, state) {
   } else {
     try {
       parseVerificationLedger(marker.value);
-    } catch {
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "RESOURCE_VERSION_UNSUPPORTED")
+        throw error;
       issues.push(
         directIssue(
           runKey,
@@ -11424,7 +10919,9 @@ async function collectVerification(runDirectory, runKey, state) {
         file,
         record: parseVerificationAttemptRecord2(result.value)
       });
-    } catch {
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "RESOURCE_VERSION_UNSUPPORTED")
+        throw error;
       invalidCount += 1;
       issues.push(
         directIssue(
@@ -11615,7 +11112,9 @@ async function collectReviews(runDirectory, runKey, expectedReviews) {
           (item) => evaluationIssue(runKey, null, "review", item)
         )
       );
-    } catch {
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "RESOURCE_VERSION_UNSUPPORTED")
+        throw error;
       issues.push(directIssue(runKey, "review", "REVIEW_MALFORMED"));
       invalidCount += 1;
     }
@@ -11675,7 +11174,9 @@ async function collectEvents(runDirectory, runKey) {
     }
     try {
       events.push(parseEvaluationEventSource(JSON.parse(line)));
-    } catch {
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "RESOURCE_VERSION_UNSUPPORTED")
+        throw error;
       issues.push(directIssue(runKey, "event", "EVENT_LINE_MALFORMED"));
       invalidCount += 1;
     }
@@ -11705,15 +11206,15 @@ function countValues(values, keys3) {
   }
   return counts;
 }
-function addFailure(counts, category, amount2 = 1) {
-  counts[category] += amount2;
+function addFailure(counts, category, amount = 1) {
+  counts[category] += amount;
 }
 function resolveAttemptCoverage(state, attempts, addIssue) {
   const excluded = /* @__PURE__ */ new Set();
   let genericUnknownCount = attempts.unknownCount;
   let genericInvalidCount = attempts.invalidCount;
   for (const source2 of attempts.sources) {
-    if (source2.schemaVersion.value === 1 || source2.schemaVersion.value === 2) {
+    if (source2.schemaVersion.value === 2) {
       continue;
     }
     excluded.add(source2.identity);
@@ -11737,7 +11238,7 @@ function resolveAttemptCoverage(state, attempts, addIssue) {
   const identity = state.activeAttemptIdentity.value;
   const expectedKind = state.activeAttemptKind.value;
   const source = identity === null ? void 0 : attempts.sources.find((item) => item.identity === identity);
-  const exact2 = (source?.schemaVersion.value === 1 || source?.schemaVersion.value === 2) && expectedKind !== null && source.kind.value === expectedKind && source.status.value !== null;
+  const exact2 = source?.schemaVersion.value === 2 && expectedKind !== null && source.kind.value === expectedKind && source.status.value !== null;
   if (exact2) {
     return {
       sources: attempts.sources.filter((item) => !excluded.has(item.identity)),
@@ -11754,7 +11255,7 @@ function resolveAttemptCoverage(state, attempts, addIssue) {
   if (source !== void 0) {
     excluded.add(source.identity);
   }
-  const alreadyRepresented = identity !== null && attempts.conflictedIdentities.has(identity) || source !== void 0 && source.schemaVersion.value !== 1 && source.schemaVersion.value !== 2 || source === void 0 && attempts.directoryUnavailable;
+  const alreadyRepresented = identity !== null && attempts.conflictedIdentities.has(identity) || source !== void 0 && source.schemaVersion.value !== 2 || source === void 0 && attempts.directoryUnavailable;
   const sourceContradictsActive = source !== void 0 && (source.status.evidence === "invalid" || source.kind.evidence === "invalid" || expectedKind !== null && source.kind.value !== null && source.kind.value !== expectedKind);
   const invalidActive = state.activeAttemptIdentity.evidence === "invalid" || state.activeAttemptKind.evidence === "invalid" || sourceContradictsActive;
   return {
@@ -12437,16 +11938,8 @@ async function collectCandidate(runDirectory, runKey, options) {
     stateIssues = parsed.issues.map(
       (item) => evaluationIssue(runKey, null, "state", item)
     );
-    if (state.schemaVersion === 5 && options.schemaVersion !== 2)
-      stateIssues.push(
-        directIssue(
-          runKey,
-          "verification",
-          "VERIFICATION_HISTORY_INCOMPLETE",
-          "verificationEvidence"
-        )
-      );
   } catch (error) {
+    if (error instanceof ResourceVersionUnsupportedError) throw error;
     const code2 = error instanceof BanzaiError && error.code === "EVALUATION_STATE_SCHEMA_UNSUPPORTED" ? "STATE_SCHEMA_UNSUPPORTED" : "STATE_MALFORMED";
     const issues2 = [directIssue(runKey, "state", code2)];
     return {
@@ -12484,17 +11977,7 @@ async function collectCandidate(runDirectory, runKey, options) {
     issues.push(directIssue(runKey, "event", "PLAN_TASK_COMPLETION_INVALID"));
   }
   const verification = verificationEvidence.collection;
-  if (verification.historicalUnknownCount > 0 || verification.countInvalidCount > 0) {
-    issues.push(
-      directIssue(
-        runKey,
-        "verification",
-        "VERIFICATION_HISTORY_INCOMPLETE",
-        "metrics.attempts.verification"
-      )
-    );
-  }
-  const workflow = state.workflow.evidence === "legacy_absent" && state.schemaVersion === 1 ? { value: "strict", evidence: "inferred_legacy" } : state.workflow;
+  const workflow = state.workflow;
   const addIssue = (item) => {
     issues.push({ ...item, runKey });
   };
@@ -12537,11 +12020,7 @@ async function candidateDirectories(runsDirectory) {
   }
   return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort((left, right) => left.localeCompare(right));
 }
-async function collectEvaluationExport(repoRoot, options) {
-  const runsDirectory = path8.join(repoRoot, ".banzai", "runs");
-  const candidates = await candidateDirectories(runsDirectory);
-  return collectEvaluationCandidates(repoRoot, options, candidates);
-}
+var collectEvaluationExport = collectEvaluationExportV2;
 async function collectEvaluationCandidates(repoRoot, options, candidates) {
   const runsDirectory = path8.join(repoRoot, ".banzai", "runs");
   const candidateSet = new Set(candidates);
@@ -12637,13 +12116,11 @@ async function collectVerificationV2(repoRoot, runId2) {
   };
   const json2 = async (relative2) => JSON.parse((await read(relative2)).toString("utf8"));
   try {
-    if (parseVerificationLedger(await json2("verification-attempts/ledger.json")).schemaVersion !== 2)
-      return result;
+    parseVerificationLedger(await json2("verification-attempts/ledger.json"));
     const state = await json2("state.json");
     if (state.schemaVersion !== 5 || !state.artifactBinding?.binding?.workId)
       return result;
     const binding = parseBinding2(state.artifactBinding.binding);
-    if (binding.schemaVersion !== 2) return result;
     const attempts = [];
     for (const entry of await inventory("verification-attempts")) {
       if (entry === "ledger.json") continue;
@@ -12739,7 +12216,9 @@ async function collectVerificationV2(repoRoot, runId2) {
       if (hash2(await read(relative2)) !== sha256)
         throw new Error("Verification evidence changed during export.");
     result.coverage = complete ? "exact" : "incomplete";
-  } catch {
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "RESOURCE_VERSION_UNSUPPORTED")
+      throw error;
     result.coverage = "incomplete";
   }
   return result;
@@ -12860,19 +12339,6 @@ function renderEvaluationJson(report) {
 `;
 }
 function renderEvaluationMarkdown(report) {
-  if (report.schemaVersion === 2) {
-    const base = renderEvaluationMarkdown({
-      ...report,
-      schema: "banzai-evaluation-export/v1",
-      schemaVersion: 1
-    });
-    return base.replace(
-      "banzai-evaluation-export/v1` (version 1)",
-      "banzai-evaluation-export/v2` (version 2)"
-    ) + "\n## Verification applicability\n\n" + report.runs.map(
-      (run) => `- ${run.runKey}: coverage=${run.verificationEvidence.coverage}, physical attempts=${run.verificationEvidence.physicalAttempts.length}, reused checks=${run.verificationEvidence.dispositions.filter((item) => item.kind === "reused").length}`
-    ).join("\n") + "\n";
-  }
   const lines = [
     "# Banzai Evaluation Export",
     "",
@@ -13029,6 +12495,14 @@ function renderEvaluationMarkdown(report) {
     "Run and attempt keys are export-local opaque ordinals, not anonymized stable identities. Exact model IDs and timestamps may remain linkable. Prompts, reasoning, transcripts, raw output, commands, source content, repository paths, credentials, environment values, slugs, and exact persisted identifiers are excluded.",
     ""
   );
+  lines.push(
+    "",
+    "## Verification applicability",
+    "",
+    ...report.runs.map(
+      (run) => `- ${run.runKey}: coverage=${run.verificationEvidence.coverage}, physical attempts=${run.verificationEvidence.physicalAttempts.length}, reused checks=${run.verificationEvidence.dispositions.filter((item) => item.kind === "reused").length}`
+    )
+  );
   return lines.join("\n");
 }
 
@@ -13067,12 +12541,18 @@ function parseEvaluationExportArgs(args) {
     const argument = args[index];
     if (argument === "--schema-version") {
       const value = optionValue(args, index);
-      if (schemaVersion !== void 0 || !["1", "2"].includes(value))
+      if (schemaVersion !== void 0)
         throw new BanzaiError(
           "INVALID_EVAL_OPTION",
-          "Evaluation schema version must be 1 or 2 and specified once."
+          "Evaluation schema version must be specified once."
         );
-      schemaVersion = value === "1" ? 1 : 2;
+      if (value !== "2")
+        throw new ResourceVersionUnsupportedError(
+          "evaluation schema",
+          value,
+          "2"
+        );
+      schemaVersion = 2;
       index += 1;
       continue;
     }
@@ -13130,7 +12610,7 @@ function parseEvaluationExportArgs(args) {
     );
   }
   return {
-    ...schemaVersion === void 0 ? {} : { schemaVersion },
+    schemaVersion: 2,
     format,
     from,
     to,
@@ -13139,11 +12619,11 @@ function parseEvaluationExportArgs(args) {
 }
 async function executeEvaluationExport(repoRoot, args, io) {
   const options = parseEvaluationExportArgs(args);
-  const report = options.schemaVersion === 2 ? await collectEvaluationExportV2(repoRoot, options) : await collectEvaluationExport(repoRoot, options);
+  const report = await collectEvaluationExport(repoRoot, options);
   io.stdout(
     options.format === "json" ? renderEvaluationJson(report) : renderEvaluationMarkdown(report)
   );
-  if (report.issues.length > 0 || report.cohort.unresolvedRunCount > 0 || report.schemaVersion === 2 && report.runs.some(
+  if (report.issues.length > 0 || report.cohort.unresolvedRunCount > 0 || report.runs.some(
     (run) => run.verificationEvidence.coverage === "incomplete"
   )) {
     io.stderr(
@@ -13772,7 +13252,8 @@ async function collectCancellationReport(repoRoot, options, readers = { file: re
     );
     const state = parse(stateFile);
     try {
-      if (state.runId !== runId2) throw new Error();
+      if (state.runId !== runId2 || !Object.hasOwn(state, "schemaVersion"))
+        throw new Error();
       const decoded = parseEvaluationStateSource2(state).value;
       row.lifecycle = {
         value: decoded.status.value,
@@ -13784,7 +13265,8 @@ async function collectCancellationReport(repoRoot, options, readers = { file: re
       };
       if (decoded.status.value === null)
         issue3("state", "lifecycle", "MALFORMED_EVIDENCE");
-    } catch {
+    } catch (error) {
+      if (error instanceof ResourceVersionUnsupportedError) throw error;
       issue3(
         "state",
         "state",
@@ -13861,9 +13343,12 @@ async function collectCancellationReport(repoRoot, options, readers = { file: re
         "ledger"
       );
       try {
-        parseVerificationLedger(parse(ledgerFile));
+        const ledger = parse(ledgerFile);
+        if (!Object.hasOwn(ledger, "schemaVersion")) throw new Error();
+        parseVerificationLedger(ledger);
         sources.inventory.verification = verificationDirectory.availability === "available" ? "complete" : "unavailable";
-      } catch {
+      } catch (error) {
+        if (error instanceof ResourceVersionUnsupportedError) throw error;
         issue3("verification", "ledger", "VERIFICATION_INVENTORY_UNAVAILABLE");
       }
       let bytes = 0;
@@ -13890,6 +13375,7 @@ async function collectCancellationReport(repoRoot, options, readers = { file: re
           try {
             if (file.availability !== "available") throw new Error();
             const raw = parse(file);
+            if (!Object.hasOwn(raw, "schemaVersion")) throw new Error();
             if (kind === "model") {
               const decoded = parseEvaluationAttemptSource(raw).value;
               if (!cancellationId(decoded.identity) || decoded.kind.value === null || decoded.schemaVersion.value === null || entry.name !== `${decoded.identity}-${decoded.kind.value}.json`)
@@ -13926,7 +13412,8 @@ async function collectCancellationReport(repoRoot, options, readers = { file: re
               identities.add(record6.id);
               sources.verification.push(record6);
             }
-          } catch {
+          } catch (error) {
+            if (error instanceof ResourceVersionUnsupportedError) throw error;
             sources.inventory[kind] = "incomplete";
             sources[kind === "model" ? "modelInvalid" : "verificationInvalid"]++;
             issue3(kind, "attempt", "ATTEMPT_EVIDENCE_INVALID");
@@ -14206,7 +13693,7 @@ function renderCancellationMarkdown(document) {
       (r) => `| ${r.availability} | ${r.count} | ${fraction(r.ratio)} |`
     ),
     "",
-    "Legacy absence, missing evidence, an unanswered prompt and an explicit unspecified response have different meanings.",
+    "Missing evidence, an unanswered prompt and an explicit unspecified response have different meanings.",
     "",
     "## Workflow and cancellation phase",
     "",
@@ -14393,87 +13880,6 @@ function cancellationMessages(result) {
 
 // src/cli.ts
 import process7 from "node:process";
-
-// package.json
-var package_default = {
-  name: "@parabolic-technologies/banzai",
-  version: "2.5.0",
-  private: false,
-  description: "Spec-driven AI development CLI for Codex and Claude Code, with human approvals and independent review for complex changes.",
-  keywords: [
-    "ai",
-    "ai-coding",
-    "ai-agents",
-    "agentic-development",
-    "agent-orchestration",
-    "spec-driven-development",
-    "claude-code",
-    "codex",
-    "multi-model",
-    "code-review",
-    "developer-tools",
-    "cli"
-  ],
-  type: "module",
-  bin: {
-    banzai: "dist/banzai.mjs"
-  },
-  files: [
-    "dist/",
-    "LICENSE",
-    "NOTICE"
-  ],
-  publishConfig: {
-    access: "public",
-    registry: "https://registry.npmjs.org/"
-  },
-  engines: {
-    node: ">=22.20.0 <23 || >=24.11.1 <25"
-  },
-  scripts: {
-    build: "node scripts/build.mjs",
-    "build:check": "node scripts/check-dist.mjs",
-    typecheck: "tsc --project tsconfig.json --noEmit",
-    lint: "eslint . --format ./scripts/eslint-formatter.mjs",
-    "lint:fix": "eslint . --fix --format ./scripts/eslint-formatter.mjs",
-    "format:check": "prettier --check .",
-    format: "prettier --write .",
-    test: "node scripts/test.mjs",
-    "release:validate": "node scripts/check-release.mjs",
-    "smoke:committed": "node scripts/smoke-committed.mjs"
-  },
-  devDependencies: {
-    "@eslint/js": "^10.0.1",
-    "@types/node": "^24.0.0",
-    esbuild: "^0.25.0",
-    eslint: "^10.8.0",
-    "eslint-config-prettier": "^10.1.8",
-    globals: "^17.8.0",
-    prettier: "^3.9.6",
-    typescript: "^5.9.0",
-    "typescript-eslint": "^8.65.0"
-  },
-  dependencies: {
-    "@inquirer/core": "^11.2.1",
-    "@inquirer/prompts": "^8.5.2"
-  },
-  license: "Apache-2.0",
-  author: {
-    name: "Alexander Torosh",
-    email: "alexander@parabolic.io",
-    url: "https://github.com/alexander-torosh"
-  },
-  repository: {
-    type: "git",
-    url: "git+https://github.com/Parabolic-Technologies/banzai.git",
-    directory: "packages/orchestrator"
-  },
-  homepage: "https://github.com/Parabolic-Technologies/banzai#readme",
-  bugs: {
-    url: "https://github.com/Parabolic-Technologies/banzai/issues",
-    email: "alexander@parabolic.io"
-  }
-};
 
 // src/adapters.ts
 import { createHash as createHash9 } from "node:crypto";
@@ -14857,428 +14263,8 @@ var contract_default = {
   }
 };
 
-// ../../plugins/banzai/contracts/v1/phase-result.schema.json
-var phase_result_schema_default = {
-  $schema: "https://json-schema.org/draft/2020-12/schema",
-  $id: "https://banzai.local/contracts/v1/phase-result.schema.json",
-  title: "Banzai orchestrated phase result",
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    contractVersion: {
-      type: "string",
-      const: "1.0.0"
-    },
-    phase: {
-      type: "string",
-      enum: [
-        "plan",
-        "implementation",
-        "fix"
-      ]
-    },
-    outcome: {
-      type: "string",
-      description: "Use needs_human_decision whenever gate is non-null. Use completed only with gate null.",
-      enum: [
-        "completed",
-        "needs_human_decision",
-        "blocked"
-      ]
-    },
-    gate: {
-      type: [
-        "string",
-        "null"
-      ],
-      description: "A non-null gate transfers control to the human through the interactive orchestrator and requires outcome needs_human_decision.",
-      enum: [
-        "adr_approval",
-        "plan_approval",
-        "escalation",
-        null
-      ]
-    },
-    summary: {
-      type: "string",
-      minLength: 1
-    },
-    artifacts: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        description: {
-          type: [
-            "string",
-            "null"
-          ]
-        },
-        plan: {
-          type: [
-            "string",
-            "null"
-          ]
-        },
-        adrs: {
-          type: "array",
-          items: {
-            type: "string"
-          }
-        },
-        implementationReport: {
-          type: [
-            "string",
-            "null"
-          ]
-        }
-      },
-      required: [
-        "description",
-        "plan",
-        "adrs",
-        "implementationReport"
-      ]
-    },
-    touchedPaths: {
-      type: "array",
-      items: {
-        type: "string"
-      }
-    },
-    questions: {
-      type: "array",
-      items: {
-        type: "string"
-      }
-    },
-    resolvedFindingIds: {
-      type: "array",
-      items: {
-        type: "string"
-      }
-    },
-    requestedVerification: {
-      type: "array",
-      items: {
-        type: "string"
-      }
-    }
-  },
-  required: [
-    "contractVersion",
-    "phase",
-    "outcome",
-    "gate",
-    "summary",
-    "artifacts",
-    "touchedPaths",
-    "questions",
-    "resolvedFindingIds",
-    "requestedVerification"
-  ]
-};
-
-// ../../plugins/banzai/contracts/v2/phase-result.schema.json
-var phase_result_schema_default2 = {
-  $schema: "https://json-schema.org/draft/2020-12/schema",
-  $id: "https://banzai.local/contracts/v2/phase-result.schema.json",
-  title: "Banzai orchestrated phase result",
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    schemaVersion: {
-      type: "integer",
-      const: 2
-    },
-    contractVersion: {
-      type: "string",
-      const: "1.0.0"
-    },
-    phase: {
-      type: "string",
-      enum: ["plan", "implementation", "fix"]
-    },
-    outcome: {
-      type: "string",
-      description: "Use needs_human_decision whenever gate is non-null. Use completed only with gate null.",
-      enum: ["completed", "needs_human_decision", "blocked"]
-    },
-    gate: {
-      type: ["string", "null"],
-      description: "A non-null gate transfers control to the human through the interactive orchestrator and requires outcome needs_human_decision.",
-      enum: ["adr_approval", "plan_approval", "escalation", null]
-    },
-    summary: {
-      type: "string",
-      minLength: 1
-    },
-    artifacts: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        description: { type: ["string", "null"] },
-        plan: { type: ["string", "null"] },
-        adrs: {
-          type: "array",
-          items: { type: "string" }
-        },
-        implementationReport: { type: ["string", "null"] },
-        testReport: { type: ["string", "null"] }
-      },
-      required: [
-        "description",
-        "plan",
-        "adrs",
-        "implementationReport",
-        "testReport"
-      ]
-    },
-    taskCompletion: {
-      anyOf: [
-        { type: "null" },
-        {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            schemaVersion: { type: "integer", const: 1 },
-            tasks: {
-              type: "array",
-              items: {
-                type: "object",
-                additionalProperties: false,
-                properties: {
-                  taskId: { type: "string" },
-                  status: {
-                    type: "string",
-                    enum: ["completed", "incomplete", "blocked"]
-                  },
-                  evidence: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      additionalProperties: false,
-                      properties: {
-                        path: { type: "string" },
-                        detail: { type: "string" }
-                      },
-                      required: ["path", "detail"]
-                    }
-                  },
-                  gap: {
-                    anyOf: [
-                      { type: "null" },
-                      {
-                        type: "object",
-                        additionalProperties: false,
-                        properties: {
-                          reportPath: { type: "string" },
-                          section: { type: "string" },
-                          detail: { type: "string" }
-                        },
-                        required: ["reportPath", "section", "detail"]
-                      }
-                    ]
-                  }
-                },
-                required: ["taskId", "status", "evidence", "gap"]
-              }
-            }
-          },
-          required: ["schemaVersion", "tasks"]
-        }
-      ]
-    },
-    touchedPaths: {
-      type: "array",
-      items: { type: "string" }
-    },
-    questions: {
-      type: "array",
-      items: { type: "string" }
-    },
-    resolvedFindingIds: {
-      type: "array",
-      items: { type: "string" }
-    },
-    requestedVerification: {
-      type: "array",
-      items: { type: "string" }
-    }
-  },
-  required: [
-    "schemaVersion",
-    "contractVersion",
-    "phase",
-    "outcome",
-    "gate",
-    "summary",
-    "artifacts",
-    "taskCompletion",
-    "touchedPaths",
-    "questions",
-    "resolvedFindingIds",
-    "requestedVerification"
-  ]
-};
-
-// ../../plugins/banzai/contracts/v1/review-result.schema.json
-var review_result_schema_default = {
-  $schema: "https://json-schema.org/draft/2020-12/schema",
-  $id: "https://banzai.local/contracts/v1/review-result.schema.json",
-  title: "Banzai orchestrated review result",
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    contractVersion: {
-      type: "string",
-      const: "1.0.0"
-    },
-    verdict: {
-      type: "string",
-      enum: [
-        "pass",
-        "changes_requested",
-        "replan_required",
-        "blocked"
-      ]
-    },
-    summary: {
-      type: "string",
-      minLength: 1
-    },
-    findings: {
-      type: "array",
-      items: {
-        $ref: "#/$defs/finding"
-      }
-    },
-    reviewedFindingIds: {
-      type: "array",
-      items: {
-        type: "string"
-      }
-    },
-    deferredCoverage: {
-      type: "array",
-      items: {
-        type: "string"
-      }
-    }
-  },
-  required: [
-    "contractVersion",
-    "verdict",
-    "summary",
-    "findings",
-    "reviewedFindingIds",
-    "deferredCoverage"
-  ],
-  $defs: {
-    finding: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        id: {
-          type: "string",
-          pattern: "^R[1-9][0-9]*-F[1-9][0-9]*$"
-        },
-        severity: {
-          type: "string",
-          enum: [
-            "blocker",
-            "should_fix",
-            "nit"
-          ]
-        },
-        category: {
-          type: "string",
-          enum: [
-            "spec",
-            "plan",
-            "adr",
-            "correctness",
-            "test",
-            "security",
-            "maintainability",
-            "documentation"
-          ]
-        },
-        summary: {
-          type: "string",
-          minLength: 1
-        },
-        evidence: {
-          type: "array",
-          minItems: 1,
-          items: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              path: {
-                type: "string",
-                minLength: 1
-              },
-              line: {
-                type: [
-                  "integer",
-                  "null"
-                ],
-                minimum: 1
-              },
-              detail: {
-                type: "string",
-                minLength: 1
-              }
-            },
-            required: [
-              "path",
-              "line",
-              "detail"
-            ]
-          }
-        },
-        violates: {
-          type: "array",
-          items: {
-            type: "string"
-          }
-        },
-        reproduction: {
-          type: [
-            "string",
-            "null"
-          ]
-        },
-        fixAcceptance: {
-          type: "string",
-          minLength: 1
-        },
-        confidence: {
-          type: "string",
-          enum: [
-            "high",
-            "medium",
-            "low"
-          ]
-        }
-      },
-      required: [
-        "id",
-        "severity",
-        "category",
-        "summary",
-        "evidence",
-        "violates",
-        "reproduction",
-        "fixAcceptance",
-        "confidence"
-      ]
-    }
-  }
-};
-
 // ../../plugins/banzai/contracts/v2/review-result.schema.json
-var review_result_schema_default2 = {
+var review_result_schema_default = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
   $id: "https://banzai.local/contracts/v2/review-result.schema.json",
   title: "Banzai orchestrated review result",
@@ -15506,7 +14492,7 @@ var workflow_selection_schema_default = {
 };
 
 // ../../plugins/banzai/contracts/v3/phase-result.schema.json
-var phase_result_schema_default3 = {
+var phase_result_schema_default = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
   $id: "https://banzai.local/contracts/v3/phase-result.schema.json",
   title: "Banzai orchestrated phase result",
@@ -15873,7 +14859,7 @@ function assertContractParity() {
       `Plugin contract ${contract_default.contractVersion} does not match orchestrator contract ${CONTRACT_VERSION2}.`
     );
   }
-  if (contract_default.schemas.phaseResult !== "./v3/phase-result.schema.json" || workflow_selection_schema_default.properties.contractVersion.const !== CONTRACT_VERSION2 || phase_result_schema_default3.properties.contractVersion.const !== CONTRACT_VERSION2 || phase_result_schema_default3.properties.schemaVersion.const !== PHASE_RESULT_SCHEMA_VERSION2 || phase_result_schema_default2.properties.contractVersion.const !== CONTRACT_VERSION2 || phase_result_schema_default2.properties.schemaVersion.const !== 2 || phase_result_schema_default.properties.contractVersion.const !== CONTRACT_VERSION2 || contract_default.schemas.reviewResult !== "./v2/review-result.schema.json" || review_result_schema_default2.properties.schemaVersion.const !== 2 || review_result_schema_default.properties.contractVersion.const !== CONTRACT_VERSION2 || review_result_schema_default2.properties.contractVersion.const !== CONTRACT_VERSION2) {
+  if (contract_default.schemas.phaseResult !== "./v3/phase-result.schema.json" || workflow_selection_schema_default.properties.contractVersion.const !== CONTRACT_VERSION2 || phase_result_schema_default.properties.contractVersion.const !== CONTRACT_VERSION2 || phase_result_schema_default.properties.schemaVersion.const !== PHASE_RESULT_SCHEMA_VERSION2 || contract_default.schemas.reviewResult !== "./v2/review-result.schema.json" || review_result_schema_default.properties.schemaVersion.const !== 2 || review_result_schema_default.properties.contractVersion.const !== CONTRACT_VERSION2) {
     throw new BanzaiError(
       "SCHEMA_VERSION_MISMATCH",
       "Bundled schema contract versions do not match the orchestrator."
@@ -15889,9 +14875,13 @@ function claudeJsonSchema(schema) {
 }
 function schemaFor(identity) {
   if (identity === "workflow-selection/v1") return workflow_selection_schema_default;
-  if (identity === "phase-result/v3") return phase_result_schema_default3;
-  if (identity === "review-result/v1") return review_result_schema_default;
-  return review_result_schema_default2;
+  if (identity === "phase-result/v3") return phase_result_schema_default;
+  if (identity === "review-result/v2") return review_result_schema_default;
+  throw new ResourceVersionUnsupportedError(
+    "output contract",
+    identity,
+    "workflow-selection/v1, phase-result/v3, review-result/v2"
+  );
 }
 function resolveOutputContract(vendor, identity) {
   const schema = schemaFor(identity);
@@ -17916,24 +16906,20 @@ async function workspaceSnapshot(repoRoot, options = {}) {
     }
     entries.push(entry);
   }
-  if (options.artifactBinding !== void 0) {
-    const identity = {
-      version: 2,
-      baseCommit,
-      artifactBindingDigest: options.artifactBinding.sha256,
-      entries
-    };
-    const digest5 = createHash10("sha256").update(JSON.stringify(identity)).digest("hex");
-    return {
-      schemaVersion: 2,
-      baseCommit,
-      artifactBindingDigest: identity.artifactBindingDigest,
-      digest: digest5,
-      entries
-    };
-  }
-  const digest4 = createHash10("sha256").update(JSON.stringify({ version: 1, baseCommit, entries })).digest("hex");
-  return { baseCommit, digest: digest4, entries };
+  const identity = {
+    version: 2,
+    baseCommit,
+    artifactBindingDigest: options.artifactBinding?.sha256 ?? null,
+    entries
+  };
+  const digest4 = createHash10("sha256").update(JSON.stringify(identity)).digest("hex");
+  return {
+    schemaVersion: 2,
+    baseCommit,
+    ...options.artifactBinding ? { artifactBindingDigest: options.artifactBinding.sha256 } : {},
+    digest: digest4,
+    entries
+  };
 }
 async function workspaceDigest(repoRoot, options = {}) {
   return (await workspaceSnapshot(repoRoot, options)).digest;
@@ -17947,7 +16933,11 @@ function parseReviewSnapshot2(value) {
   try {
     return readSharedReviewSnapshot(value);
   } catch (error) {
-    if (error instanceof ArtifactStorageError2) invalid6(error.message);
+    if (error instanceof ArtifactStorageError2) {
+      if (error.code === "RESOURCE_VERSION_UNSUPPORTED")
+        throw new BanzaiError(error.code, error.message);
+      invalid6(error.message);
+    }
     throw error;
   }
 }
@@ -17955,7 +16945,11 @@ function sealReviewSnapshot2(value) {
   try {
     return sealSharedReviewSnapshot(value);
   } catch (error) {
-    if (error instanceof ArtifactStorageError2) invalid6(error.message);
+    if (error instanceof ArtifactStorageError2) {
+      if (error.code === "RESOURCE_VERSION_UNSUPPORTED")
+        throw new BanzaiError(error.code, error.message);
+      invalid6(error.message);
+    }
     throw error;
   }
 }
@@ -18171,18 +17165,18 @@ var EMBEDDED_PHASE_RESOURCES = {
     "text": "# Engineering Quality\n\n- Owner decision: ADR-0030\n- Consumers: `feature-description`, `architecture-decision`, `development-plan`, `code-writing`, `feature-review`, `feature`, `quick-fix`, `project-manifest`; conditional: None\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning, implementation, review, fix, feature, quick-fix.\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Engineering Quality\n\nThis policy is vendor-neutral. The installed `policies/engineering-quality.md` is only its current storage and\ndelivery surface; the policy does not depend on Claude-specific tools,\npermissions, hooks, commands, sessions, or behavior. Skills and prompts\nreference this section instead of copying the complete rule set. Future Codex\nor other-vendor delivery must preserve these semantics without interpreting the\nfilename as policy authority.\n\nApply the authority order in the project `AGENTS.md` before any generic quality preference. When two\nremedies satisfy the same higher authority, use the smallest compatible\nremediation rather than requiring a preferred pattern.\n\n### EQ-01 \u2014 Local authority and context\n\nFollow approved requirements, accepted ADRs, executable and public contracts,\nmanifest facts, established invariants, and dominant repository conventions.\nDeviate only when the task, an approved decision, or a concrete correctness,\nsecurity, lifecycle, or compatibility need requires it. Generic preference does\nnot override repository authority.\n\nAlways active. An objective conflict with approved authority may be actionable;\na merely different local style is not.\n\n### EQ-02 \u2014 Cohesive responsibilities and explicit boundaries\n\nKeep changed responsibilities together when they share purpose, dependencies,\nlifecycle, and verification needs. Separate them when those concerns materially\ndiffer. Make important boundaries recognizable without arbitrary\nfragmentation.\n\nContextual and advisory unless a concrete consequence independently violates a\nstronger rule. It requires no function or file size, layer, service class, or\ndirectory pattern and never creates a blocker by itself.\n\n### EQ-03 \u2014 Dependency direction and visibility\n\nDo not introduce dependency edges that violate the repository's intended\ndependency direction or unnecessarily couple stable logic to volatile\nimplementation details. Make important runtime dependencies and mutable\ncollaborators visible at an appropriate existing composition or usage boundary.\n\nContextual. It assumes no domain-centric architecture and requires neither\ninterfaces nor a dependency-injection container. A mechanically forbidden edge\nor unapproved dependency may remain actionable under existing repository rules.\n\n### EQ-04 \u2014 Boundary contracts and ingress validation\n\nAt important public, process, network, persistence, filesystem, user-input, or\ninter-module boundaries, make input, output, failure, and compatibility\nsemantics clear using repository-appropriate mechanisms. Validate external or\nuntrusted data at the first boundary where the system assumes it is trustworthy;\nstatic types alone do not validate external bytes.\n\nContextual. A demonstrable contract, correctness, or security consequence may\nbe actionable under existing rules.\n\n### EQ-05 \u2014 Failure semantics and resource lifecycle\n\nPreserve useful failure meaning, original causes, and diagnostic context. Do not\nsilently turn failure into success. For resources with lifecycle semantics,\nidentify ownership and proportionate cleanup behavior for success, failure,\ncancellation, timeout, shutdown, and partial initialization where applicable.\n\nContextual. It requires no universal error hierarchy or resource-management\npattern. Reproducible data loss, leaks, hangs, swallowed failure, or violated\nlifecycle contracts may remain actionable under existing rules.\n\n### EQ-06 \u2014 Proportional design\n\nPrefer existing language, runtime, framework, platform, and project mechanisms\nwhen adequate. Prefer straightforward control and data flow. Add an abstraction\nor dependency only when it provides a concrete benefit such as isolating\nvolatility, enforcing a useful contract, removing meaningful duplication,\nsimplifying usage, or enabling necessary verification.\n\nAlways considered and advisory by default. It is not a ban on abstraction and\nnever creates a blocker by itself.\n\n### EQ-07 \u2014 Bounded change scope\n\nKeep the change within the approved task, plan, or accepted-finding scope. Do\nnot bundle unrelated cleanup, migration, abstraction work, dependency changes,\nor architecture refactoring unless required for correctness or explicitly\napproved.\n\nAlways active. Objective scope expansion remains actionable through existing\napproval, plan, baseline, and accepted-finding enforcement.\n\n### EQ-08 \u2014 Assurance ownership\n\nMaterial claims introduced by a change must have an identifiable,\nproportionate evidence owner. Reuse existing assurance mechanisms rather than\nduplicating them. Test Assurance, Security Assurance, contract verification,\nconfigured checks, or justified inspection may own evidence that compatibility\nis preserved, malformed input is rejected, cancellation cleans up resources,\npersisted data survives migration, or a failure remains observable.\n\nContextual. Engineering Quality detects missing assurance ownership; it does\nnot select tests, create a test quota, or require another test when equivalent\nevidence already exists.\n\n### EQ-09 \u2014 Compatibility\n\nPreserve public APIs, persisted formats, events, protocols, CLI behavior, and\nother externally depended-on semantics unless an approved specification or ADR\nintentionally changes them and defines the relevant migration consequences.\n\nContextual. A high-confidence unapproved breaking change may remain actionable\nunder existing contract, specification, or ADR authority.\n\n### EQ-10 \u2014 Incremental legacy evolution\n\nWhen changing legacy code, prefer a bounded seam, adapter, characterization\nevidence, staged migration, or similarly incremental path when it materially\nreduces risk. Do not demand an incremental technique when a direct local change\nis safer and simpler.\n\nContextual and advisory. It never creates a blocker by itself; a concrete scope\nor compatibility consequence may be reported under the existing authority it\nviolates.\n\n### Finding and shadow semantics\n\nAn actionable Engineering Quality concern must identify a primary rule ID,\nseverity, confidence, exact evidence and location, concrete impact, the smallest\nreasonable remediation, relevant specification, ADR, contract, manifest, or\naccepted-finding authority, a verification method, a stable deduplication\nidentity, and waiver state when applicable. Its identity is the primary rule,\nstable code or contract locus, violated authority, and impact class; wording or\nline-number drift does not create a new concern. Generic design preference\nwithout exact evidence and material impact is not actionable.\n\nIn initial shadow mode, complete the ordinary review first and freeze its\nfindings, severities, and verdict. An ordinary finding that already qualifies\nwithout Engineering Quality may add exactly one primary `EQ-NN` mapping to its\nexisting `violates` list; the mapping cannot create the finding or change its\nseverity or verdict. A genuinely incremental EQ-only candidate may be recorded\nonly as an `EQ-SHADOW:` string in existing free-form `deferredCoverage`. It is\nnot a finding, receives no mandatory human triage, cannot be accepted, never\nenters fixer scope, and cannot affect severity, verdict, completion, or any\ngate. Its suggested severity remains non-authoritative, and its waiver state is\n`not_applicable` because triage does not apply. Ordinary deferred-coverage prose\nremains valid. In reviewer-write mode, copy every structured `EQ-SHADOW:` record\nbyte-for-byte into the canonical Markdown Deferred Coverage section;\nrunner-rendered mode already projects the structured value. This retention rule\ndoes not parse or validate the record. The human-readable shape is an evaluation\nconvention, not a runtime parser or versioned contract.\n\nResolution review is closure-oriented, not discovery-oriented. It first\nverifies every immediately preceding accepted finding ID. A new finding or\nshadow candidate is permitted only when introduced by the fix, newly observable\nbecause the changed evidence surface exposes it, a direct regression of another\napproved contract or established invariant, or a previously unobservable\ncritical correctness, security, or lifecycle issue. Name the new evidence and a\ndistinct deduplication identity. A stylistic opinion, preferred decomposition,\nor alternative design is insufficient. Rejected or deferred findings must not\nreopen against unchanged evidence and authority, including after reviewer\nrotation.\n\n### Enforcement boundaries\n\nThe initial release adds no EQ-native runtime blocker. Existing objective\napproval, contract, scope, dependency, verification, correctness, security,\ntest, lifecycle, compatibility, review, and triage mechanisms retain their\ncurrent enforcement and severity. `EQ-02`, `EQ-06`, and `EQ-10` never create\nblockers by themselves.\n\nAny later blocker-eligibility proposal must require high confidence, exact\ncurrent evidence, current material impact, a violated approved authority,\ncorrectness, security, data-integrity, lifecycle-safety, required-assurance,\nscope, or compatibility invariant, and observable closure. Meeting this\nthreshold does not authorize hard enforcement; a separate approved decision is\nstill required.\n\nEngineering Quality adds no phase, skill, hook, gate, test quota, architecture\nmethodology, static analyzer, or runtime contract.\n"
   },
   "policies/plan-task-completion.md": {
-    "sha256": "a9846215b79db286db07f72103e44b1f4909e0eef8788dedc15180ff70783e7b",
-    "text": "# Plan Authority and Task Completion Evidence\n\n- Owner decision: ADR-0038 (Plan Authority); ADR-0017/0025 (Plan Task Completion Evidence)\n- Consumers: `development-plan`, `code-writing`; conditional: `test-writing`, `feature-review`, `feature-status`, `quick-fix`\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning, implementation, review (conditional), fix (conditional), quick-fix (conditional).\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Plan Authority\n\nApplicable approved requirements, accepted ADR constraints, public and persisted\ncontracts, security and authorization boundaries, transaction and lifecycle\nguarantees, compatibility, scope, and required verification evidence are binding.\nExact internal details remain binding when required by applicable authority or\nconcrete constraints; unlabelled explicit directives remain binding.\n\nOnly paragraphs or list items prefixed `Optional implementation guidance:` are\nnon-binding suggestions. A label covers that paragraph or list item, including\nits nested content, and ends before the next sibling block. A different compliant\nimplementation within approved scope needs no reapproval, finding or deviation\nreport merely for differing from this guidance.\n\nGuidance never overrides binding authority or expands scope. Resolve conflicts\nand ambiguous commitments before dependent work; missing or ambiguous optionality\ndoes not waive an explicit commitment.\n\n### Applying the convention\n\nNew plans copy the `Plan Authority` heading and its three paragraphs above,\nbefore Technical Breakdown and Implementation Tasks. This document convention\ntravels with the approved bytes; neither plugin version nor conversation supplies\nit. Optional guidance is useful only when it helps implement the task. Put required\nbehavior and safety constraints in binding text, never solely in guidance.\n\nApply the new convention only where the approved plan explicitly establishes it.\nLegacy plans keep their approved meaning, including their own explicit optionality;\ndo not retrofit this section or infer new discretion from a label alone. An exact\ninternal directive remains binding even when another approach seems equivalent.\nLinks to authoritative definitions preserve their applicable approved meaning;\nthey do not authorize later contract changes. Never rewrite historical plans,\nsnapshots, findings or triage to fit this convention.\n\nUse the project's existing authority order and conflict/escalation handling.\nChanging an approved commitment requires the applicable ADR and plan reapproval\npath; a deviation report records a deviation and cannot authorize it. Approval\nbinds the whole bundle, including guidance: editing optional text still invalidates\nan orchestrated approval, unlike choosing a compliant implementation under it.\n\n- Planner/approver: make behavior, invariants, scope/boundaries, dependencies,\n  requirement/acceptance/ADR links, necessary constraints and proportionate\n  evidence explicit. Review obligations and marked discretion at the existing gate.\n- Implementer/assurance: satisfy binding requirements within approved scope.\n  Record material decisions and real deviations proportionately in existing\n  reports; a merely different permitted helper, constant or decomposition needs\n  no entry and grants no extra scope.\n- Reviewer: report concrete binding-authority violations and independently\n  supported correctness, security, compatibility, evidence or maintainability\n  defects, including defects in code that follows all guidance. A difference from\n  optional guidance alone is not a finding. Keep existing severity, EQ shadow,\n  independent review, closure and unchanged-evidence rediscovery rules.\n- Fixer: fix only accepted findings under existing authority. A suggested remedy\n  stays optional unless an applicable explicit human decision makes it mandatory;\n  do not waive an accepted directive or turn a recommendation into additional work.\n- Completion/status: structural validity does not prove substantive fulfillment.\n  Failed required checks, missing material evidence and false success claims\n  remain actionable. Correcting a report cannot discharge a mandatory requirement;\n  pending or unavailable evidence does not become a pass.\n\n## Plan Task Completion Evidence\n\n- In strict orchestrated work, the approved description, plan, and accepted ADR\n  bodies are immutable. Unchecked plan boxes define the approved work set; they\n  are not mutable execution status and must not be marked `[x]` after approval.\n- Persisted orchestrator state owns lifecycle status and `nextAction`. A\n  terminal `done` run with `nextAction: null` is never routed back to\n  `code-writing` solely because its immutable plan boxes remain unchecked.\n- New strict implementation results use the versioned structured\n  `taskCompletion` ledger as the sole source of truth. It has exactly one\n  ordered record for every approved `TNNN`, with status `completed`,\n  `incomplete`, or `blocked`, bounded repository-relative evidence, and a\n  report gap/deviation reference when the status is not completed. An\n  accepted-finding fix whose changes made that evidence stale may return a\n  complete refreshed ledger (ADR 0025) \u2014 same task set and order, statuses\n  unchanged, evidence describing the current tree \u2014 validated by the same\n  fail-closed pipeline; there is still exactly one canonical ledger at a time.\n- The implementation report contains the deterministic\n  `banzai-plan-task-completion/v1` Markdown projection of that ledger. Persisted\n  state contains a validated summary, never a separately authored ledger. The\n  runner checks approval digest, task coverage/order, path scope, required\n  reports, and structured/report/state parity before verification, review, and\n  terminal success.\n- `outcome=completed` is invalid when any task is missing, malformed,\n  incomplete, or blocked. Validation fails closed as\n  `PLAN_TASK_COMPLETION_INVALID`; verification and review do not start, and a\n  normally returned invalid implementation result may be retried after the\n  evidence is corrected without editing the approved plan.\n- A legacy orchestrated run without the structured ledger keeps its persisted\n  lifecycle and next action, but task completion is `legacy`, `unknown`, or\n  `inconsistent`; report prose is never retrofitted into canonical `N/N`.\n- Active orchestrated runs remain active even when partial report evidence is\n  present. For standalone work without external completion evidence, checked\n  and unchecked plan boxes retain their normal completed/incomplete meaning.\n- Status and review name the evidence source: `structured completion evidence`,\n  `plan checkbox`, `legacy`, `unknown`, or `inconsistent`. Contradictory state,\n  approval, reports, source, tests, or review evidence requires an\n  artifact/evidence audit and is never silently repaired by editing an approved\n  plan.\n\n\n### Opt-in verification obligations\n\nA new strict plan relying on ADR-0043 contains exactly one fenced\n`banzai-verification-obligations/v1` JSON inventory inside its approved bytes.\nIt carries schema/schemaVersion, complete=true, planRemainderSha256 and an ordered\nchecks array of configured check IDs and fresh/equivalent_evidence modes. The\nremainder digest covers every byte outside that complete fence. The owner reviews\ncompleteness and consistency with all prose commitments before bundle approval.\nMissing, duplicated, stale, ambiguous or contradictory inventories deny reuse;\nlegacy plans retain their original obligations. Release checks are always fresh.\nChanging the inventory requires normal plan approval; no prose claim upgrades it.\n\nEquivalent verification does not replace task-completion validation. Preserve the\ncanonical task records and exact report projection, immutable approved artifacts,\nand existing report-digest versus complete fix-ledger refresh boundaries. Inspect\ncurrent claims for contradictions, update only affected claims and attach one\nbounded closure record; a claim sweep is a consistency check, not a command run.\n"
+    "sha256": "d245c1409fd4a19350b0e15a6e9ee68e994b57453f0740838e22ac1256480228",
+    "text": "# Plan Authority and Task Completion Evidence\n\n- Owner decision: ADR-0038 (Plan Authority); ADR-0017/0025 (Plan Task Completion Evidence)\n- Consumers: `development-plan`, `code-writing`; conditional: `test-writing`, `feature-review`, `feature-status`, `quick-fix`\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning, implementation, review (conditional), fix (conditional), quick-fix (conditional).\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Plan Authority\n\nApplicable approved requirements, accepted ADR constraints, public and persisted\ncontracts, security and authorization boundaries, transaction and lifecycle\nguarantees, compatibility, scope, and required verification evidence are binding.\nExact internal details remain binding when required by applicable authority or\nconcrete constraints; unlabelled explicit directives remain binding.\n\nOnly paragraphs or list items prefixed `Optional implementation guidance:` are\nnon-binding suggestions. A label covers that paragraph or list item, including\nits nested content, and ends before the next sibling block. A different compliant\nimplementation within approved scope needs no reapproval, finding or deviation\nreport merely for differing from this guidance.\n\nGuidance never overrides binding authority or expands scope. Resolve conflicts\nand ambiguous commitments before dependent work; missing or ambiguous optionality\ndoes not waive an explicit commitment.\n\n### Applying the convention\n\nNew plans copy the `Plan Authority` heading and its three paragraphs above,\nbefore Technical Breakdown and Implementation Tasks. This document convention\ntravels with the approved bytes; neither plugin version nor conversation supplies\nit. Optional guidance is useful only when it helps implement the task. Put required\nbehavior and safety constraints in binding text, never solely in guidance.\n\nApply the new convention only where the approved plan explicitly establishes it.\nLegacy plans keep their approved meaning, including their own explicit optionality;\ndo not retrofit this section or infer new discretion from a label alone. An exact\ninternal directive remains binding even when another approach seems equivalent.\nLinks to authoritative definitions preserve their applicable approved meaning;\nthey do not authorize later contract changes. Never rewrite historical plans,\nsnapshots, findings or triage to fit this convention.\n\nUse the project's existing authority order and conflict/escalation handling.\nChanging an approved commitment requires the applicable ADR and plan reapproval\npath; a deviation report records a deviation and cannot authorize it. Approval\nbinds the whole bundle, including guidance: editing optional text still invalidates\nan orchestrated approval, unlike choosing a compliant implementation under it.\n\n- Planner/approver: make behavior, invariants, scope/boundaries, dependencies,\n  requirement/acceptance/ADR links, necessary constraints and proportionate\n  evidence explicit. Review obligations and marked discretion at the existing gate.\n- Implementer/assurance: satisfy binding requirements within approved scope.\n  Record material decisions and real deviations proportionately in existing\n  reports; a merely different permitted helper, constant or decomposition needs\n  no entry and grants no extra scope.\n- Reviewer: report concrete binding-authority violations and independently\n  supported correctness, security, compatibility, evidence or maintainability\n  defects, including defects in code that follows all guidance. A difference from\n  optional guidance alone is not a finding. Keep existing severity, EQ shadow,\n  independent review, closure and unchanged-evidence rediscovery rules.\n- Fixer: fix only accepted findings under existing authority. A suggested remedy\n  stays optional unless an applicable explicit human decision makes it mandatory;\n  do not waive an accepted directive or turn a recommendation into additional work.\n- Completion/status: structural validity does not prove substantive fulfillment.\n  Failed required checks, missing material evidence and false success claims\n  remain actionable. Correcting a report cannot discharge a mandatory requirement;\n  pending or unavailable evidence does not become a pass.\n\n## Plan Task Completion Evidence\n\n- In strict orchestrated work, the approved description, plan, and accepted ADR\n  bodies are immutable. Unchecked plan boxes define the approved work set; they\n  are not mutable execution status and must not be marked `[x]` after approval.\n- Persisted orchestrator state owns lifecycle status and `nextAction`. A\n  terminal `done` run with `nextAction: null` is never routed back to\n  `code-writing` solely because its immutable plan boxes remain unchecked.\n- New strict implementation results use the versioned structured\n  `taskCompletion` ledger as the sole source of truth. It has exactly one\n  ordered record for every approved `TNNN`, with status `completed`,\n  `incomplete`, or `blocked`, bounded repository-relative evidence, and a\n  report gap/deviation reference when the status is not completed. An\n  accepted-finding fix whose changes made that evidence stale may return a\n  complete refreshed ledger (ADR 0025) \u2014 same task set and order, statuses\n  unchanged, evidence describing the current tree \u2014 validated by the same\n  fail-closed pipeline; there is still exactly one canonical ledger at a time.\n- The implementation report contains the deterministic\n  `banzai-plan-task-completion/v1` Markdown projection of that ledger. Persisted\n  state contains a validated summary, never a separately authored ledger. The\n  runner checks approval digest, task coverage/order, path scope, required\n  reports, and structured/report/state parity before verification, review, and\n  terminal success.\n- `outcome=completed` is invalid when any task is missing, malformed,\n  incomplete, or blocked. Validation fails closed as\n  `PLAN_TASK_COMPLETION_INVALID`; verification and review do not start, and a\n  normally returned invalid implementation result may be retried after the\n  evidence is corrected without editing the approved plan.\n- Active orchestrated runs remain active even when partial report evidence is\n  present. For standalone work without external completion evidence, checked\n  and unchecked plan boxes retain their normal completed/incomplete meaning.\n- Status and review name the evidence source: `structured completion evidence`,\n  `plan checkbox`, `unknown`, or `inconsistent`. Contradictory state,\n  approval, reports, source, tests, or review evidence requires an\n  artifact/evidence audit and is never silently repaired by editing an approved\n  plan.\n\n\n### Opt-in verification obligations\n\nA new strict plan relying on ADR-0043 contains exactly one fenced\n`banzai-verification-obligations/v1` JSON inventory inside its approved bytes.\nIt carries schema/schemaVersion, complete=true, planRemainderSha256 and an ordered\nchecks array of configured check IDs and fresh/equivalent_evidence modes. The\nremainder digest covers every byte outside that complete fence. The owner reviews\ncompleteness and consistency with all prose commitments before bundle approval.\nMissing, duplicated, stale, ambiguous or contradictory inventories deny reuse;\nlegacy plans retain their original obligations. Release checks are always fresh.\nChanging the inventory requires normal plan approval; no prose claim upgrades it.\n\nEquivalent verification does not replace task-completion validation. Preserve the\ncanonical task records and exact report projection, immutable approved artifacts,\nand existing report-digest versus complete fix-ledger refresh boundaries. Inspect\ncurrent claims for contradictions, update only affected claims and attach one\nbounded closure record; a claim sweep is a consistency check, not a command run.\n"
   },
   "policies/artifact-storage.md": {
-    "sha256": "5beb421da67d753b9b1b6a26f55a23d7b6675fef97fb7360f21ea5e758357995",
-    "text": "# Artifact Storage\n\n- Owner decision: ADR-0041\n- Consumers: `feature-description`, `architecture-decision`, `development-plan`, `code-writing`, `test-writing`, `feature-review`, `feature-status`, `feature`, `quick-fix`, `project-manifest`; conditional: None\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning, implementation, review, fix, feature, quick-fix.\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Artifact Storage\n\nStandalone callers resolve this policy relative to the installed skill as\n`../../policies/artifact-storage.md`. Use the helper shipped in that same plugin:\n`../../scripts/artifacts.cjs` from the skill directory. Do not substitute a\nproject policy copy, plugin-cache destination or npm CLI prerequisite.\n\nStorage does not grant authority. Existing requirements, accepted ADRs, approved\nbytes, task order, human gates and reviewer independence retain their meaning.\nStandalone use retains skill/human authority; it does not create runner-owned\napprovals, completion ledgers or recovery checkpoints.\n\nThe shared declaration is `.banzai/artifacts.json`. New eligible projects use\nignored `.banzai/work/<work-id>/` for internal work. `.banzai/runs/<run-id>/`\nremains runner-owned. Product guidance, public contracts, ADRs/indexes and the\nproject manifest remain repository documentation. Repository visibility and\narchive custody belong to that project; client evidence never belongs in the\nBanzai source checkout or installed plugin directories.\n\n## Resolve Before Reading or Writing\n\nThe procedure in this section is for standalone callers. Runner phases use the\nsupplied binding, role paths and exact phase grants; the runner alone resolves\nwork, creates bindings and acquires/releases claims. A runner phase does not\ninvoke this helper or acquire a standalone claim. Missing supplied authority\nstops dependent work instead of selecting or creating another work item.\n\nFor standalone callers, after normal project guidance prerequisites, invoke the local helper with\n`node <installed-plugin>/scripts/artifacts.cjs <operation> --json <request-file>`.\nRequests follow `contracts/artifacts/v1/*-request.schema.json`; every request has\n`schema: \"banzai-artifact-request/v1\"`, `schemaVersion: 1` and an absolute local\n`repoRoot`. Store temporary request/input files privately with mode `0600` and\nremove only your own temporary files when finished. The helper outputs one\nversioned JSON result and exits nonzero on failure. Never infer success from\npartial output or print token/input contents in reports.\n\nRequest files, `inputFile` and `inventoryFile` accept OS temporary directories\nwith symlinked ancestors; their leaf must be a regular non-symlink file. Artifact\npaths and private work roots retain full ancestor-symlink checks. Use physical\nabsolute paths without symlink ancestors for archive bundles and export/restore\ndestinations.\n\n1. Use `inspect` with an explicit `workPath`/`workId` when continuing work.\n   Otherwise inspect available identities. Multiple candidates require an\n   explicit selection; a matching slug or newest timestamp is not authority to\n   choose one. Read resolved ignored files directly, not only through Git-aware\n   search. Missing required evidence blocks the dependent step.\n2. Loading the plugin, status, review-only discovery and questions do not run\n   `initialize` or `create`. For authorized setup or first artifact writing,\n   after existing prerequisites pass, `initialize` safely establishes the layout\n   and effective ignores. It neither initializes Git nor stages files.\n3. For genuinely new work, retain a caller-generated UUID `creationId`, then\n   `create` with that ID, bounded slug and `strict`, `lite` or `fix` mode. Retry\n   using the same ID after an interrupted response. Persisted `work.json`\n   supplies exact role paths; use them instead of a hard-coded legacy path.\n   For unbound recognized legacy work, `inspect` its conventional file/directory\n   `workPath`. Explicitly select `legacySelection` (or one `legacyCandidates`\n   entry), then register it with `create` using the returned exact `creationId`,\n   slug and mode. This content-bound continuation identity preserves original\n   roles, bytes and recorded Git provenance, even after a private default is\n   declared. A stale identity requires inspection again. Registration never\n   grants a new approval; hand off the resulting immutable `work.json`.\n4. Before a standalone artifact write, `acquire` the selected work using a\n   bounded local `ownerId`. `write` takes its token, an exact artifact role path,\n   a private `inputFile` and `expectedSha256` (`null` means create-only).\n   Conditional-write conflicts require reading current evidence, not retrying\n   with a guessed hash. `release` only your token in success/error cleanup.\n   Runner phases hold the same exclusive work claim through mutable processing.\n   Another work item is independent; do not remove its claim.\n5. Handoff includes the project and exact work path/identity plus actual decision\n   and evidence references. Release the writer claim before a normal handoff.\n   After a crashed writer, inspect the claim, verify that its original process\n   has stopped and obtain the owner's explicit recovery decision before removing\n   that exact stale claim. Never steal a claim based on elapsed time alone.\n\nRead-only inspections never repair declarations. Missing declarations alongside\nprivate evidence, unsupported schemas, unsafe ancestors, unreadable files or\nbroad ignores produce bounded repair diagnostics. Do not fall back to public\nworkflow paths. Recognized legacy work keeps its recorded paths; ordinary\ndocumentation is not a legacy marker. An existing legacy project stays legacy\nuntil explicit migration. A declaration change cannot move an existing binding.\n\nPublic ADR/manifest/product-guide edits use their established repository paths\nand existing approval rules; the private helper is not a blanket write grant\nfor them. In orchestrated mode, use the run's supplied binding and exact phase\ngrants. The runner owns its state, approvals, candidate publication and recovery;\nstandalone claims never replace those checks. Existing hooks have host-specific\nlimits and do not sandbox unrestricted shell tools.\n\n## Required Evidence and Publication\n\nStrict work retains description, plan, implementation/test reports and each\nindependent review iteration. Lite work needs one `work.md`; quick-fix retains\nits existing report trigger. Read-only work, initialization and individual\nattempts do not require additional prose reports. Keep the completion projection\nand required report sections. Refer to canonical runner verification identities\nor deterministic projections instead of model-authoring duplicate totals;\nstandalone reports preserve actual command/result evidence when no runner ledger\nexists.\n\nPrivate files are durable evidence, not disposable scratch. Ignore rules prevent\nordinary staging, not force-add, third-party synchronization or model processing\nauthorized by the workflow. Do not stage internal artifacts for convenience.\nExplicit public promotion requires maintained, sanitized product information and\nnormal review; it cannot replace private approval or completion evidence.\n\nRetain active/pinned work and dependency closure. Archive operations are local,\nexplicit and backend-neutral; no automatic upload or prune is implied. Verify\nhashes and restoration, including owner-confirmed off-machine custody, before\nremoving a last copy. Restoring historical bytes does not approve resuming a run\nagainst a different source baseline. Credential material must not be deliberately\narchived and rejected private contents must not appear in diagnostics.\n\n\n## Explicit verification-enabled work\n\nADR-0043 adds `banzai-work-binding/v2` only for new private work created with a\n`banzai-artifact-request/v2` create request. Existing v1 requests/bindings keep\ntheir exact meaning and are never migrated in place. V2 adds the exact\n`.banzai/work/<work-id>/verification` role as `verificationDirectory`. The shared\nverification helper owns that directory under the exclusive work claim; it is\nnot a model-writable report role. Runner evidence remains in its own run storage.\nInspect/acquire/write/release envelopes and existing report triggers stay v1.\n\nStandalone callers invoke `../scripts/verification.cjs <inspect|decide|execute>\n--json <request-file>` relative to this policy. Requests use\nbanzai-verification-request/v1 with schemaVersion=1, repoRoot, exact workPath and\na caller-selected roundId UUID. Execute selects one configured checkId, with an\nexact retryOf only for a failed attempt in the same round. The helper reads the\nproject verification section and bound authority; requests cannot supply a\ncommand or output path. Keep request files private. Inspect/decide are read-only;\nexecute persists decisions, actual physical leaves/logs and applicability. A\nreused disposition creates no physical attempt. Do not reclaim unresolved claims\nor incomplete attempts; use the existing owner recovery boundary.\n"
+    "sha256": "aab85c0f1a35790b1da1a60cdd68cf49dfcf6ad0cba147b90fa4f2e4bb3ebed0",
+    "text": "# Artifact Storage\n\n- Owner decision: ADR-0041; compatibility window: ADR-0045\n- Consumers: `feature-description`, `architecture-decision`, `development-plan`, `code-writing`, `test-writing`, `feature-review`, `feature-status`, `feature`, `quick-fix`, `project-manifest`; conditional: None\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning, implementation, review, fix, feature, quick-fix.\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Artifact Storage\n\nStandalone callers resolve this policy relative to the installed skill as\n`../../policies/artifact-storage.md`. Use the helper shipped in that same plugin:\n`../../scripts/artifacts.cjs` from the skill directory. Do not substitute a\nproject policy copy, plugin-cache destination or npm CLI prerequisite.\n\nStorage does not grant authority. Existing requirements, accepted ADRs, approved\nbytes, task order, human gates and reviewer independence retain their meaning.\nStandalone use retains skill/human authority; it does not create runner-owned\napprovals, completion ledgers or recovery checkpoints.\n\nThe shared declaration is `.banzai/artifacts.json`. New eligible projects use\nignored `.banzai/work/<work-id>/` for internal work. `.banzai/runs/<run-id>/`\nremains runner-owned. Product guidance, public contracts, ADRs/indexes and the\nproject manifest remain repository documentation. Repository visibility and\narchive custody belong to that project; client evidence never belongs in the\nBanzai source checkout or installed plugin directories.\n\n## Resolve Before Reading or Writing\n\nThe procedure in this section is for standalone callers. Runner phases use the\nsupplied binding, role paths and exact phase grants; the runner alone resolves\nwork, creates bindings and acquires/releases claims. A runner phase does not\ninvoke this helper or acquire a standalone claim. Missing supplied authority\nstops dependent work instead of selecting or creating another work item.\n\nFor standalone callers, after normal project guidance prerequisites, invoke the local helper with\n`node <installed-plugin>/scripts/artifacts.cjs <operation> --json <request-file>`.\nRequests follow `contracts/artifacts/v2/*-request.schema.json`; every request has\n`schema: \"banzai-artifact-request/v2\"`, `schemaVersion: 2` and an absolute local\n`repoRoot`. Store temporary request/input files privately with mode `0600` and\nremove only your own temporary files when finished. The helper outputs one\nversioned JSON result and exits nonzero on failure. Never infer success from\npartial output or print token/input contents in reports.\n\nRequest files, `inputFile` and `inventoryFile` accept OS temporary directories\nwith symlinked ancestors; their leaf must be a regular non-symlink file. Artifact\npaths and private work roots retain full ancestor-symlink checks. Use physical\nabsolute paths without symlink ancestors for archive bundles and export/restore\ndestinations.\n\n1. Use `inspect` with an explicit `workPath`/`workId` when continuing work.\n   Otherwise inspect available identities. Multiple candidates require an\n   explicit selection; a matching slug or newest timestamp is not authority to\n   choose one. Read resolved ignored files directly, not only through Git-aware\n   search. Missing required evidence blocks the dependent step.\n2. Loading the plugin, status, review-only discovery and questions do not run\n   `initialize` or `create`. For authorized setup or first artifact writing,\n   after existing prerequisites pass, `initialize` safely establishes the layout\n   and effective ignores. It neither initializes Git nor stages files.\n3. For genuinely new work, retain a caller-generated UUID `creationId`, then\n   `create` with that ID, bounded slug and `strict`, `lite` or `fix` mode. Retry\n   using the same ID after an interrupted response. Persisted `work.json`\n   supplies binding v2 and exact private role paths. Use those paths for every\n   continuation. Unsupported versions fail closed; no registration or migration\n   of historical work is provided.\n4. Before a standalone artifact write, `acquire` the selected work using a\n   bounded local `ownerId`. `write` takes its token, an exact artifact role path,\n   a private `inputFile` and `expectedSha256` (`null` means create-only).\n   Conditional-write conflicts require reading current evidence, not retrying\n   with a guessed hash. `release` only your token in success/error cleanup.\n   Runner phases hold the same exclusive work claim through mutable processing.\n   Another work item is independent; do not remove its claim.\n5. Handoff includes the project and exact work path/identity plus actual decision\n   and evidence references. Release the writer claim before a normal handoff.\n   After a crashed writer, inspect the claim, verify that its original process\n   has stopped and obtain the owner's explicit recovery decision before removing\n   that exact stale claim. Never steal a claim based on elapsed time alone.\n\nRead-only inspections never repair declarations. Missing declarations alongside\nprivate evidence, unsupported schemas, unsafe ancestors, unreadable files or\nbroad ignores produce bounded repair diagnostics. Do not fall back to public\nworkflow paths. Only private artifact storage is supported. A declaration\nchange cannot move an existing binding.\n\nPublic ADR/manifest/product-guide edits use their established repository paths\nand existing approval rules; the private helper is not a blanket write grant\nfor them. In orchestrated mode, use the run's supplied binding and exact phase\ngrants. The runner owns its state, approvals, candidate publication and recovery;\nstandalone claims never replace those checks. Existing hooks have host-specific\nlimits and do not sandbox unrestricted shell tools.\n\n## Required Evidence and Publication\n\nStrict work retains description, plan, implementation/test reports and each\nindependent review iteration. Lite work needs one `work.md`; quick-fix retains\nits existing report trigger. Read-only work, initialization and individual\nattempts do not require additional prose reports. Keep the completion projection\nand required report sections. Refer to canonical runner verification identities\nor deterministic projections instead of model-authoring duplicate totals;\nstandalone reports preserve actual command/result evidence when no runner ledger\nexists.\n\nPrivate files are durable evidence, not disposable scratch. Ignore rules prevent\nordinary staging, not force-add, third-party synchronization or model processing\nauthorized by the workflow. Do not stage internal artifacts for convenience.\nExplicit public promotion requires maintained, sanitized product information and\nnormal review; it cannot replace private approval or completion evidence.\n\nRetain active/pinned work and dependency closure. Archive operations are local,\nexplicit and backend-neutral; no automatic upload or prune is implied. Verify\nhashes and restoration, including owner-confirmed off-machine custody, before\nremoving a last copy. Restoring historical bytes does not approve resuming a run\nagainst a different source baseline. Credential material must not be deliberately\narchived and rejected private contents must not appear in diagnostics.\n\n\n## Verification evidence\n\nEvery new work uses `banzai-work-binding/v2` with the exact\n`.banzai/work/<work-id>/verification` role as `verificationDirectory`. The shared\nverification helper owns that directory under the exclusive work claim; it is\nnot a model-writable report role. Runner evidence remains in its own run storage.\nEvery artifact operation uses a v2 request. Schema-3 configuration may omit the\nverification policy; checks then run fresh without evidence reuse.\n\nStandalone callers invoke `../scripts/verification.cjs <inspect|decide|execute>\n--json <request-file>` relative to this policy. Requests use\nbanzai-verification-request/v1 with schemaVersion=1, repoRoot, exact workPath and\na caller-selected roundId UUID. Execute selects one configured checkId, with an\nexact retryOf only for a failed attempt in the same round. The helper reads the\nproject verification section and bound authority; requests cannot supply a\ncommand or output path. Keep request files private. Inspect/decide are read-only;\nexecute persists decisions, actual physical leaves/logs and applicability. A\nreused disposition creates no physical attempt. Do not reclaim unresolved claims\nor incomplete attempts; use the existing owner recovery boundary.\n"
   },
   "hooks/hooks.json": {
     "sha256": "eb5bce1be31c2dde64a55ae9af27fe0c176cedc911a76209aa5110493238f3a9"
   },
   "hooks/spec-gate.cjs": {
-    "sha256": "445672ea5b5be1ef8daef48b1277cd21428c52a1243a4328f1baeb0f8e296d80"
+    "sha256": "2b2f28cff9378249d9cf3bdb67641d3aa5ba11e468ac197223bd8e5a6bed1c53"
   }
 };
 
@@ -18592,7 +17586,7 @@ import path16 from "node:path";
 var CONFIG_DIRECTORY = ".banzai";
 var CONFIG_FILE = path16.join(CONFIG_DIRECTORY, "config.json");
 var DEFAULT_CONFIG = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   contractVersion: CONTRACT_VERSION2,
   models: {
     planner: {
@@ -18629,6 +17623,7 @@ var DEFAULT_CONFIG = {
         projectType: "repository",
         commands: [
           {
+            id: "git-diff-check",
             name: "git diff check",
             command: "git",
             args: ["diff", "--check"],
@@ -19663,7 +18658,6 @@ var ROTATION_TEXT = {
   "output-contract-not-reusable": "the reviewer output contract cannot be safely reused",
   "primary-review": "this is the first review of the change",
   "missing-session": "the previous reviewer session was no longer available",
-  "legacy-state": "the run predates session-affine review",
   "settings-changed": "the reviewer model or effort changed",
   "approval-changed": "the approved plan bundle changed",
   "previous-review-failed": "the previous review attempt failed",
@@ -20768,16 +19762,8 @@ ${JSON.stringify(input.triageHistory, null, 2)}`
 
 // src/review-artifact.ts
 import { createHash as createHash13, randomUUID as randomUUID5 } from "node:crypto";
-import { link as link2, mkdir as mkdir5, open as open8, readFile as readFile9, rename as rename4, unlink as unlink4 } from "node:fs/promises";
+import { link as link2, mkdir as mkdir5, open as open8, readFile as readFile9, unlink as unlink4 } from "node:fs/promises";
 import path18 from "node:path";
-var REQUIRED_SECTIONS = [
-  "## Review Scope",
-  "## Summary",
-  "## Findings",
-  "## Previously Accepted Findings",
-  "## Deferred Coverage",
-  "## Handoff"
-];
 var ReviewArtifactValidationError = class extends BanzaiError {
   diagnostics;
   constructor(diagnostics) {
@@ -20790,110 +19776,10 @@ var ReviewArtifactValidationError = class extends BanzaiError {
   }
 };
 function reviewArtifactPath(slug, iteration, bound) {
-  if (bound !== void 0)
-    return `${bound.binding.artifacts.reviewDirectory}/review-${iteration}.md`;
-  return path18.posix.join(
-    "documentation",
-    "features",
-    slug,
-    `review-${iteration}.md`
-  );
-}
-function evidenceLocation(finding) {
-  return finding.evidence.map(
-    (evidence2) => evidence2.line === null ? evidence2.path : `${evidence2.path}:${evidence2.line}`
-  );
-}
-function renderVerificationEvidence(verification) {
-  return verification.length === 0 ? "- None recorded." : verification.map(
-    (item) => `- \`${item.name}\`: exit=${item.exitCode}, command=\`${[
-      item.command,
-      ...item.args
-    ].join(" ")}\``
-  ).join("\n");
-}
-function renderPlanTaskReviewEvidence(completion) {
-  if (completion === void 0 || completion === null) {
-    return "- Unavailable.";
-  }
-  return [
-    `- Approval digest: \`${completion.approvalDigest}\``,
-    `- Plan task digest: \`${completion.planTaskDigest}\``,
-    `- Ledger digest: \`${completion.ledgerDigest}\``,
-    `- Completion: \`${completion.completed}/${completion.total}\``,
-    `- Implementation report: \`${completion.implementationReport}\``,
-    `- Test report: \`${completion.testReport}\``,
-    ...completion.tasks.map(
-      (task) => `- \`${task.taskId}\`: \`${task.status}\`; evidence=${JSON.stringify(task.evidence)}; gap=${JSON.stringify(task.gap)}`
-    )
-  ].join("\n");
+  return `${bound.binding.artifacts.reviewDirectory}/review-${iteration}.md`;
 }
 function renderReviewArtifact(result, context) {
-  if (result.schemaVersion === 2)
-    return renderCurrentReviewArtifact(result, context);
-  const approvedArtifacts = context.approvedArtifactPaths.map((artifactPath) => `- \`${artifactPath}\``).join("\n");
-  const verification = renderVerificationEvidence(context.verification);
-  const taskCompletion = renderPlanTaskReviewEvidence(context.taskCompletion);
-  const findings = result.findings.length === 0 ? "No findings." : result.findings.map((finding) => {
-    const evidence2 = finding.evidence.map((item) => {
-      const location = item.line === null ? item.path : `${item.path}:${item.line}`;
-      return `  - \`${location}\` \u2014 ${item.detail}`;
-    }).join("\n");
-    const violates = finding.violates.length === 0 ? "None recorded." : finding.violates.map((item) => `\`${item}\``).join(", ");
-    return `### ${finding.id} \u2014 ${finding.summary}
-
-- Severity: \`${finding.severity}\`
-- Category: \`${finding.category}\`
-- Confidence: \`${finding.confidence}\`
-- Evidence:
-${evidence2}
-- Violates: ${violates}
-- Reproduction: ${finding.reproduction ?? "Not provided."}
-- Fix acceptance: ${finding.fixAcceptance}`;
-  }).join("\n\n");
-  const reviewed = result.reviewedFindingIds.length === 0 ? "None." : result.reviewedFindingIds.map((id) => `\`${id}\``).join(", ");
-  const deferred = result.deferredCoverage.length === 0 ? "None." : result.deferredCoverage.map((item) => `- ${item}`).join("\n");
-  const handoff = result.verdict === "pass" ? "The review passed. No finding triage is required." : "Human triage is required. Only explicitly accepted finding IDs may enter the fix phase.";
-  return `# Implementation Review: ${context.slug}
-
-- Format: \`banzai-feature-review/v1\`
-- Feature slug: \`${context.slug}\`
-- Review iteration: \`${context.iteration}\`
-- Verdict: \`${result.verdict}\`
-- Workspace digest: \`${context.workspaceDigest}\`
-- Review artifact: \`${context.path}\`
-
-## Review Scope
-
-Approved artifacts:
-${approvedArtifacts}
-
-Deterministic verification:
-${verification}
-
-Validated plan task completion:
-${taskCompletion}
-
-## Summary
-
-${result.summary}
-
-## Findings
-
-${findings}
-
-## Previously Accepted Findings
-
-Previously accepted findings: ${reviewed}
-
-## Deferred Coverage
-
-${deferred}
-
-## Handoff
-
-${handoff}
-`;
+  return renderCurrentReviewArtifact(result, context);
 }
 function reviewValue(value) {
   const ordered = (value2) => {
@@ -20931,7 +19817,7 @@ function renderCurrentReviewArtifact(value, context) {
       );
   }
   const coverage = snapshot.approval.paths.map(
-    (path30) => result.scopeAcknowledgment.artifacts.find((entry) => entry.path === path30)
+    (path29) => result.scopeAcknowledgment.artifacts.find((entry) => entry.path === path29)
   );
   const handoff = {
     pass: "The review passed. No finding triage is required.",
@@ -20941,7 +19827,7 @@ function renderCurrentReviewArtifact(value, context) {
   }[result.verdict];
   return [
     "# Implementation Review",
-    snapshot.schemaVersion === 3 ? "- Format: `banzai-feature-review/v4`" : snapshot.schemaVersion === 2 ? "- Format: `banzai-feature-review/v3`" : "- Format: `banzai-feature-review/v2`",
+    "- Format: `banzai-feature-review/v4`",
     reviewValue({
       slug: context.slug,
       iteration: context.iteration,
@@ -20949,10 +19835,8 @@ function renderCurrentReviewArtifact(value, context) {
       artifactPath: context.path,
       workspaceDigest: context.workspaceDigest,
       snapshotDigest: snapshot.digest,
-      ...snapshot.schemaVersion >= 2 ? {
-        workId: snapshot.artifactBinding?.binding.workId,
-        snapshotSchema: snapshot.schema
-      } : {},
+      workId: snapshot.artifactBinding.binding.workId,
+      snapshotSchema: snapshot.schema,
       resultContract: snapshot.outputContract
     }),
     "## Review Scope",
@@ -20967,9 +19851,7 @@ function renderCurrentReviewArtifact(value, context) {
       artifacts: coverage
     }),
     "### Recorded verification (runner evidence)",
-    reviewValue(
-      snapshot.artifact.verificationEvidence ?? snapshot.artifact.verification
-    ),
+    reviewValue(snapshot.artifact.verificationEvidence),
     "### Validated plan task completion (runner evidence)",
     reviewValue({
       source: snapshot.completionSource,
@@ -20997,44 +19879,6 @@ ${reviewValue(finding)}`).join("\n\n"),
     ""
   ].join("\n\n").replace(/\n+$/u, "\n");
 }
-function requireContent(contents, marker, label, diagnostics) {
-  if (!contents.includes(marker)) {
-    diagnostics.push(`Review artifact is missing ${label}: ${marker}`);
-  }
-}
-function requireSectionBody(contents, heading, label, diagnostics) {
-  const start = contents.indexOf(heading);
-  if (start === -1) {
-    diagnostics.push(`Review artifact has empty ${label}.`);
-    return "";
-  }
-  const bodyStart = start + heading.length;
-  const nextSection = contents.indexOf("\n## ", bodyStart);
-  const body = contents.slice(bodyStart, nextSection === -1 ? void 0 : nextSection).trim();
-  if (body.length === 0) {
-    diagnostics.push(`Review artifact has empty ${label}.`);
-  }
-  return body;
-}
-function approvedArtifactScope(contents, diagnostics) {
-  const scope = requireSectionBody(
-    contents,
-    "## Review Scope",
-    "review scope",
-    diagnostics
-  );
-  const paths = /* @__PURE__ */ new Set();
-  for (const line of scope.split(/\r?\n/u)) {
-    let candidate = line.trim().replace(/^[-*+]\s+/u, "").trim();
-    if (candidate.length >= 2 && candidate.startsWith("`") && candidate.endsWith("`")) {
-      candidate = candidate.slice(1, -1).trim();
-    }
-    if (candidate.length > 0 && !/\s/u.test(candidate)) {
-      paths.add(candidate);
-    }
-  }
-  return paths;
-}
 function repositoryPath(repoRoot, relativePath2) {
   const repositoryRoot = path18.resolve(repoRoot);
   const absolutePath = path18.resolve(repositoryRoot, relativePath2);
@@ -21046,13 +19890,13 @@ function repositoryPath(repoRoot, relativePath2) {
   }
   return absolutePath;
 }
-async function validateReviewArtifactSource(repoRoot, result, context, sourcePath2, requireAttemptOwnedCandidate) {
-  if (context.snapshot?.artifactBinding)
-    await inspectBoundWork2(repoRoot, context.snapshot.artifactBinding);
+async function validateReviewArtifactSource(repoRoot, result, context, sourcePath2) {
+  const snapshot = parseReviewSnapshot2(context.snapshot);
+  await inspectBoundWork2(repoRoot, snapshot.artifactBinding);
   const expectedPath = reviewArtifactPath(
     context.slug,
     context.iteration,
-    context.snapshot?.artifactBinding
+    snapshot.artifactBinding
   );
   if (context.path !== expectedPath) {
     throw new BanzaiError(
@@ -21062,11 +19906,9 @@ async function validateReviewArtifactSource(repoRoot, result, context, sourcePat
   }
   const absolutePath = repositoryPath(repoRoot, context.path);
   const absoluteCandidatePath = repositoryPath(repoRoot, sourcePath2);
-  if (result.schemaVersion === 2) {
-    await assertReviewPathOwned(repoRoot, sourcePath2);
-    await assertReviewPathOwned(repoRoot, context.path, true);
-  }
-  if (requireAttemptOwnedCandidate && absoluteCandidatePath === absolutePath) {
+  await assertReviewPathOwned(repoRoot, sourcePath2, true);
+  await assertReviewPathOwned(repoRoot, context.path, true);
+  if (absoluteCandidatePath === absolutePath) {
     throw new BanzaiError(
       "INVALID_REVIEW_ARTIFACT_PATH",
       "Review candidate path must differ from the canonical artifact path."
@@ -21078,183 +19920,18 @@ async function validateReviewArtifactSource(repoRoot, result, context, sourcePat
       `Reviewer did not write candidate ${sourcePath2}.`
     );
   });
-  if (result.schemaVersion === 2) {
-    const expected = renderReviewArtifact(result, context);
-    if (contents !== expected)
-      throw new ReviewArtifactValidationError([
-        "Review candidate bytes differ from the deterministic snapshot projection."
-      ]);
-    return {
-      contents,
-      sha256: createHash13("sha256").update(contents).digest("hex")
-    };
-  }
-  const diagnostics = [];
-  requireContent(
-    contents,
-    `# Implementation Review: ${context.slug}`,
-    "title",
-    diagnostics
-  );
-  requireContent(
-    contents,
-    "- Format: `banzai-feature-review/v1`",
-    "format marker",
-    diagnostics
-  );
-  requireContent(
-    contents,
-    `- Feature slug: \`${context.slug}\``,
-    "feature slug",
-    diagnostics
-  );
-  requireContent(
-    contents,
-    `- Review iteration: \`${context.iteration}\``,
-    "review iteration",
-    diagnostics
-  );
-  requireContent(
-    contents,
-    `- Verdict: \`${result.verdict}\``,
-    "verdict",
-    diagnostics
-  );
-  requireContent(
-    contents,
-    `- Workspace digest: \`${context.workspaceDigest}\``,
-    "workspace digest",
-    diagnostics
-  );
-  requireContent(
-    contents,
-    `- Review artifact: \`${context.path}\``,
-    "review artifact path",
-    diagnostics
-  );
-  for (const section of REQUIRED_SECTIONS) {
-    requireContent(contents, section, "required section", diagnostics);
-  }
-  requireSectionBody(contents, "## Summary", "review summary", diagnostics);
-  const deferredCoverageBody = requireSectionBody(
-    contents,
-    "## Deferred Coverage",
-    "deferred coverage",
-    diagnostics
-  );
-  const recordsNoDeferredCoverage = /^-?\s*none\.?$/i.test(
-    deferredCoverageBody
-  );
-  const hasDeferredCoverage = result.deferredCoverage.length > 0;
-  if (recordsNoDeferredCoverage === hasDeferredCoverage) {
-    diagnostics.push(
-      "Review artifact deferred coverage presence disagrees with the structured result."
+  const format = /^- Format: `([^`]+)`$/mu.exec(contents)?.[1];
+  if (format !== void 0 && format !== "banzai-feature-review/v4")
+    throw new ResourceVersionUnsupportedError(
+      "runner review artifact",
+      format,
+      "banzai-feature-review/v4"
     );
-  }
-  const approvedScope = approvedArtifactScope(contents, diagnostics);
-  for (const approvedArtifactPath of context.approvedArtifactPaths) {
-    if (!approvedScope.has(approvedArtifactPath)) {
-      diagnostics.push(
-        `Review artifact does not list required approved-scope path: \`${approvedArtifactPath}\`.`
-      );
-    }
-  }
-  for (const verification of context.verification) {
-    requireContent(
-      contents,
-      `\`${verification.name}\`: exit=${verification.exitCode}`,
-      "deterministic verification evidence",
-      diagnostics
-    );
-  }
-  for (const line of renderPlanTaskReviewEvidence(context.taskCompletion).split(
-    "\n"
-  )) {
-    requireContent(
-      contents,
-      line,
-      "validated plan task completion evidence",
-      diagnostics
-    );
-  }
-  if (result.findings.length === 0) {
-    requireContent(
-      contents,
-      "No findings.",
-      "clean-review finding statement",
-      diagnostics
-    );
-  }
-  for (const finding of result.findings) {
-    requireContent(
-      contents,
-      `### ${finding.id} `,
-      `finding ${finding.id}`,
-      diagnostics
-    );
-    requireContent(
-      contents,
-      finding.summary,
-      `finding ${finding.id} summary`,
-      diagnostics
-    );
-    requireContent(
-      contents,
-      `- Severity: \`${finding.severity}\``,
-      `finding ${finding.id} severity`,
-      diagnostics
-    );
-    requireContent(
-      contents,
-      `- Category: \`${finding.category}\``,
-      `finding ${finding.id} category`,
-      diagnostics
-    );
-    requireContent(
-      contents,
-      `- Confidence: \`${finding.confidence}\``,
-      `finding ${finding.id} confidence`,
-      diagnostics
-    );
-    const violates = finding.violates.length === 0 ? "None recorded." : finding.violates.map((item) => `\`${item}\``).join(", ");
-    requireContent(
-      contents,
-      `- Violates: ${violates}`,
-      `finding ${finding.id} violated artifacts`,
-      diagnostics
-    );
-    requireContent(
-      contents,
-      `- Reproduction: ${finding.reproduction ?? "Not provided."}`,
-      `finding ${finding.id} reproduction`,
-      diagnostics
-    );
-    requireContent(
-      contents,
-      `- Fix acceptance: ${finding.fixAcceptance}`,
-      `finding ${finding.id} fix acceptance`,
-      diagnostics
-    );
-    for (const location of evidenceLocation(finding)) {
-      requireContent(
-        contents,
-        `\`${location}\``,
-        `finding ${finding.id} evidence`,
-        diagnostics
-      );
-    }
-  }
-  for (const findingId of result.reviewedFindingIds) {
-    requireContent(
-      contents,
-      `\`${findingId}\``,
-      `previously accepted finding ${findingId}`,
-      diagnostics
-    );
-  }
-  if (diagnostics.length > 0) {
-    throw new ReviewArtifactValidationError(diagnostics);
-  }
+  const expected = renderReviewArtifact(result, context);
+  if (contents !== expected)
+    throw new ReviewArtifactValidationError([
+      "Review candidate bytes differ from the deterministic snapshot projection."
+    ]);
   return {
     contents,
     sha256: createHash13("sha256").update(contents).digest("hex")
@@ -21265,17 +19942,7 @@ async function validateReviewArtifact(repoRoot, result, context) {
     repoRoot,
     result,
     context,
-    context.candidatePath,
-    true
-  );
-}
-async function validateHistoricalReviewArtifact(repoRoot, result, context) {
-  return await validateReviewArtifactSource(
-    repoRoot,
-    result,
-    context,
-    context.path,
-    false
+    context.candidatePath
   );
 }
 async function publishReviewArtifact(repoRoot, context, candidate) {
@@ -21285,12 +19952,12 @@ async function publishReviewArtifact(repoRoot, context, candidate) {
       "Review candidate publication proof does not match its contents."
     );
   }
-  if (context.snapshot?.artifactBinding)
-    await inspectBoundWork2(repoRoot, context.snapshot.artifactBinding);
+  const snapshot = parseReviewSnapshot2(context.snapshot);
+  await inspectBoundWork2(repoRoot, snapshot.artifactBinding);
   const expectedPath = reviewArtifactPath(
     context.slug,
     context.iteration,
-    context.snapshot?.artifactBinding
+    snapshot.artifactBinding
   );
   if (context.path !== expectedPath) {
     throw new BanzaiError(
@@ -21299,7 +19966,7 @@ async function publishReviewArtifact(repoRoot, context, candidate) {
     );
   }
   const absolutePath = repositoryPath(repoRoot, context.path);
-  if (context.snapshot !== void 0) {
+  {
     await assertReviewPathOwned(repoRoot, context.path, true);
     const previous = await readFile9(absolutePath, "utf8").catch(
       (error) => {
@@ -21317,21 +19984,19 @@ async function publishReviewArtifact(repoRoot, context, candidate) {
     }
   }
   const temporaryPath = `${absolutePath}.${randomUUID5()}.tmp`;
-  const binding = context.snapshot?.artifactBinding?.binding;
-  const privateWork = binding?.layout === "private";
+  const binding = snapshot.artifactBinding.binding;
   const verifyDestinations = async () => {
-    if (privateWork)
-      await verifyIgnores2(repoRoot, binding, [
-        context.path,
-        path18.relative(repoRoot, temporaryPath)
-      ]);
+    await verifyIgnores2(repoRoot, binding, [
+      context.path,
+      path18.relative(repoRoot, temporaryPath)
+    ]);
   };
   await verifyDestinations();
   await mkdir5(path18.dirname(absolutePath), {
     recursive: true,
-    mode: privateWork ? 448 : 493
+    mode: 448
   });
-  const handle = await open8(temporaryPath, "wx", privateWork ? 384 : 420);
+  const handle = await open8(temporaryPath, "wx", 384);
   try {
     try {
       await handle.writeFile(candidate.contents, "utf8");
@@ -21340,12 +20005,8 @@ async function publishReviewArtifact(repoRoot, context, candidate) {
       await handle.close();
     }
     await verifyDestinations();
-    if (context.snapshot === void 0)
-      await rename4(temporaryPath, absolutePath);
-    else {
-      await link2(temporaryPath, absolutePath);
-      await unlink4(temporaryPath);
-    }
+    await link2(temporaryPath, absolutePath);
+    await unlink4(temporaryPath);
   } catch (error) {
     await unlink4(temporaryPath).catch(() => void 0);
     throw error;
@@ -21432,7 +20093,7 @@ import {
   readdir as readdir6,
   readFile as readFile10,
   realpath as realpath8,
-  rename as rename5,
+  rename as rename4,
   unlink as unlink5,
   writeFile as writeFile3
 } from "node:fs/promises";
@@ -21486,7 +20147,7 @@ async function atomicWriteJson(filePath, value, initialize = true) {
     } finally {
       await handle.close();
     }
-    await rename5(temporaryPath, filePath);
+    await rename4(temporaryPath, filePath);
   } finally {
     await unlink5(temporaryPath).catch(() => void 0);
   }
@@ -21622,104 +20283,59 @@ function validateDecisionState(state) {
     return decisionStateError();
   }
 }
-function normalizeRunState(state) {
-  if (![1, 2, 3, 4, 5].includes(state.schemaVersion)) {
+function validateRunState(value) {
+  if (typeof value !== "object" || value === null)
     throw new BanzaiError(
-      "ARTIFACT_VERSION_UNSUPPORTED",
-      "Unsupported persisted run state version."
+      "STATE_READ_FAILED",
+      "Persisted run state must be an object."
+    );
+  const record6 = value;
+  if (record6.schemaVersion !== 5)
+    throw new ResourceVersionUnsupportedError(
+      "run state",
+      String(record6.schemaVersion),
+      5
+    );
+  const bound = record6.artifactBinding;
+  if (typeof bound !== "object" || bound === null || typeof bound.binding !== "object" || bound.binding === null || typeof bound.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(bound.sha256) || Object.keys(bound).sort().join(",") !== "binding,sha256") {
+    throw new BanzaiError(
+      "ARTIFACT_RECOVERY_REQUIRED",
+      "Run state v5 requires its exact original workflow binding."
     );
   }
-  if (state.schemaVersion < 4 && state.artifactBinding !== void 0) {
-    throw new BanzaiError(
-      "ARTIFACT_VERSION_UNSUPPORTED",
-      "Legacy run state cannot acquire private binding semantics."
+  const binding = bound.binding;
+  if (binding.schemaVersion !== 2)
+    throw new ResourceVersionUnsupportedError(
+      "work binding",
+      String(binding.schemaVersion),
+      2
     );
-  }
-  if (state.schemaVersion === 4 || state.schemaVersion === 5) {
-    if (state.artifactBinding === void 0 || !/^[0-9a-f]{64}$/.test(state.artifactBinding.sha256)) {
+  if (parseBinding2(binding).mode !== "workflow")
+    throw new BanzaiError(
+      "ARTIFACT_RECOVERY_REQUIRED",
+      "Run state requires an immutable workflow binding."
+    );
+  if (record6.recovery !== void 0 && record6.recovery !== null) {
+    const recovery = record6.recovery;
+    if (![
+      "authorized",
+      "source_interrupted",
+      "source_preserved",
+      "attempt_started"
+    ].includes(String(recovery.stage))) {
       throw new BanzaiError(
-        "ARTIFACT_RECOVERY_REQUIRED",
-        "Run state v4 requires its original artifact binding."
+        "STATE_READ_FAILED",
+        "Persisted recovery state requires an explicit valid stage."
       );
     }
-    if (Object.keys(state.artifactBinding).sort().join(",") !== "binding,sha256" || parseBinding2(state.artifactBinding.binding).mode !== "workflow")
-      throw new BanzaiError(
-        "ARTIFACT_RECOVERY_REQUIRED",
-        "Run state requires an exact immutable workflow binding."
-      );
   }
-  if (state.schemaVersion === 4 && state.artifactBinding?.binding.schemaVersion !== 1)
-    throw new BanzaiError(
-      "ARTIFACT_VERSION_UNSUPPORTED",
-      "Run state v4 retains binding v1 semantics."
-    );
-  if (state.schemaVersion === 5 && state.verificationEvidence !== void 0) {
+  const state = value;
+  if (state.verificationEvidence !== void 0) {
     parseVerificationDecision(state.verificationEvidence.decision);
     if (state.verificationEvidence.applicability !== null)
       parseVerificationApplicability(state.verificationEvidence.applicability);
   }
-  if (state.schemaVersion === 5 && state.artifactBinding?.binding.schemaVersion !== 2)
-    throw new BanzaiError(
-      "ARTIFACT_RECOVERY_REQUIRED",
-      "Run state v5 requires its original verification-enabled binding."
-    );
-  if (state.schemaVersion !== 5 && state.verificationEvidence !== void 0)
-    throw new BanzaiError(
-      "ARTIFACT_VERSION_UNSUPPORTED",
-      "Legacy state cannot acquire verification applicability."
-    );
-  if (state.schemaVersion === 3 || state.schemaVersion === 4 || state.schemaVersion === 5) {
-    const recovery = state.recovery ?? null;
-    if (recovery !== null && recovery.stage === void 0) {
-      recovery.stage = recovery.recoveryAttemptId === null ? state.activeAttempt?.id === recovery.sourceAttemptId ? "authorized" : "source_interrupted" : "attempt_started";
-    }
-    return validateDecisionState(state);
-  }
-  if (state.schemaVersion === 2) {
-    const normalized = {
-      ...state,
-      schemaVersion: 3,
-      pendingHumanDecision: state.pendingHumanDecision === null || state.pendingHumanDecision === void 0 ? null : { kind: "escalation", ...state.pendingHumanDecision },
-      humanDecisions: (state.humanDecisions ?? []).map((decision) => ({
-        kind: "escalation",
-        ...decision
-      }))
-    };
-    const recovery = normalized.recovery ?? null;
-    if (recovery !== null && recovery.stage === void 0) {
-      recovery.stage = recovery.recoveryAttemptId === null ? normalized.activeAttempt?.id === recovery.sourceAttemptId ? "authorized" : "source_interrupted" : "attempt_started";
-    }
-    return validateDecisionState(normalized);
-  }
-  const triageHistory = state.triage === null ? [] : [state.triage];
-  const mayReviewAgain = state.status !== "done" && state.status !== "cancelled" && (state.workflowSelection?.workflow ?? "strict") === "strict";
-  return validateDecisionState({
-    ...state,
-    schemaVersion: 3,
-    pendingHumanDecision: state.pendingHumanDecision === null || state.pendingHumanDecision === void 0 ? null : { kind: "escalation", ...state.pendingHumanDecision },
-    humanDecisions: (state.humanDecisions ?? []).map((decision) => ({
-      kind: "escalation",
-      ...decision
-    })),
-    sessions: { planner: null, implementer: null, reviewer: null },
-    pendingReviewRotationReason: mayReviewAgain ? "legacy-state" : null,
-    latestReview: state.latestReview === null ? null : {
-      ...state.latestReview,
-      sessionMode: "fresh",
-      mode: "full",
-      rotationReason: "legacy-state"
-    },
-    triageHistory,
-    metrics: {
-      ...state.metrics,
-      sessions: { fresh: 0, resumed: 0 },
-      reviews: {
-        full: state.latestReview === null ? 0 : 1,
-        delta: 0,
-        rotations: 0
-      }
-    }
-  });
+  return validateDecisionState(state);
 }
 function isProcessAlive(pid) {
   try {
@@ -21950,6 +20566,8 @@ var RunStore = class {
     await mkdir6(this.runsDirectory, { recursive: true });
   }
   async acquireLock(options = {}) {
+    const activeRunId = await this.readActiveRunId();
+    if (activeRunId !== null) await this.readState(activeRunId);
     if (options.reclaimStale !== false) await this.initialize();
     const token = randomUUID6();
     const lock = {
@@ -22057,7 +20675,7 @@ var RunStore = class {
     }
   }
   async createRun(state) {
-    await this.initialize();
+    validateRunState(state);
     const existing = await this.readActiveRunId();
     if (existing !== null) {
       const existingState = await this.readState(existing);
@@ -22068,15 +20686,14 @@ var RunStore = class {
         );
       }
     }
+    await this.initialize();
     await mkdir6(this.runDirectory(state.runId), { recursive: false });
     await mkdir6(path19.join(this.runDirectory(state.runId), "attempts"));
     await mkdir6(this.verificationAttemptsDirectory(state.runId));
     await atomicWriteJson(this.verificationLedgerPath(state.runId), {
-      schemaVersion: state.schemaVersion === 5 ? 2 : VERIFICATION_LEDGER_SCHEMA_VERSION2
+      schemaVersion: 2
     });
-    await this.withStateMutation(state.runId, async () => {
-      await atomicWriteJson(this.statePath(state.runId), state, false);
-    });
+    await atomicWriteJson(this.statePath(state.runId), state, false);
     await atomicWriteJson(this.activeRunPath, {
       schemaVersion: 1,
       runId: state.runId
@@ -22108,14 +20725,12 @@ var RunStore = class {
     return await this.readState(runId2);
   }
   async readState(runId2) {
-    return normalizeRunState(
-      await readJson2(
-        this.statePath(runId2),
-        `state for ${runId2}`
-      )
+    return validateRunState(
+      await readJson2(this.statePath(runId2), `state for ${runId2}`)
     );
   }
   async writeState(state) {
+    validateRunState(state);
     await this.withStateMutation(state.runId, async () => {
       const { state: current } = await this.readMutationState(state.runId);
       if (current.status === "done" || current.status === "cancelled") {
@@ -22133,6 +20748,7 @@ var RunStore = class {
     });
   }
   async withStateMutation(runId2, action) {
+    await this.readState(runId2);
     const directory3 = await cancellationEvidencePath(
       this.repoRoot,
       `.banzai/runs/${runId2}`,
@@ -22180,7 +20796,7 @@ var RunStore = class {
       if (file.availability !== "available" || file.text === null)
         throw new Error();
       raw = cancellationRecord(JSON.parse(file.text));
-      if (raw.runId !== runId2 || !CANCELLATION_STATUSES.includes(raw.status) || ![1, 2, 3, 4, 5].includes(raw.schemaVersion))
+      if (raw.runId !== runId2 || !CANCELLATION_STATUSES.includes(raw.status))
         throw new Error();
     } catch {
       throw new BanzaiError(
@@ -22188,7 +20804,7 @@ var RunStore = class {
         "The exact run state could not be read safely."
       );
     }
-    return { raw, state: normalizeRunState(raw) };
+    return { raw, state: validateRunState(raw) };
   }
   async commitCancellation(runId2, transition) {
     return await this.withStateMutation(runId2, async () => {
@@ -22548,12 +21164,37 @@ var RunStore = class {
     }
   }
   async readVerificationAttempts(runId2) {
-    parseVerificationLedger(
-      await readJson2(
-        this.verificationLedgerPath(runId2),
-        "verification ledger"
-      )
-    );
+    const marker = await readFile10(
+      this.verificationLedgerPath(runId2),
+      "utf8"
+    ).catch((error) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    if (marker === null) {
+      const entries2 = await readdir6(
+        this.verificationAttemptsDirectory(runId2)
+      ).catch((error) => {
+        if (error.code === "ENOENT") return [];
+        throw error;
+      });
+      if (entries2.length !== 0)
+        throw new BanzaiError(
+          "VERIFICATION_LEDGER_MALFORMED",
+          "Physical verification evidence requires its ledger marker."
+        );
+      return [];
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(marker);
+    } catch {
+      throw new BanzaiError(
+        "VERIFICATION_LEDGER_MALFORMED",
+        "Verification ledger marker is malformed."
+      );
+    }
+    parseVerificationLedger(parsed);
     const directory3 = this.verificationAttemptsDirectory(runId2);
     const entries = (await readdir6(directory3, { withFileTypes: true })).filter(
       (entry) => entry.isFile() && entry.name !== "ledger.json" && entry.name.endsWith(".json")
@@ -22583,29 +21224,24 @@ var RunStore = class {
     }
     return records.sort((left, right) => left.sequence - right.sequence);
   }
-  async verificationLedgerSupported(runId2) {
-    try {
-      parseVerificationLedger(
-        JSON.parse(
-          await readFile10(this.verificationLedgerPath(runId2), "utf8")
-        )
-      );
-      return true;
-    } catch (error) {
-      if (error.code === "ENOENT") {
-        return false;
-      }
-      if (error instanceof BanzaiError) {
-        throw error;
-      }
-      throw new BanzaiError(
-        "VERIFICATION_LEDGER_MALFORMED",
-        "Verification ledger marker is malformed."
-      );
-    }
-  }
   async beginVerificationAttempt(runId2, input) {
     const records = await this.readVerificationAttempts(runId2);
+    await mkdir6(this.verificationAttemptsDirectory(runId2), { recursive: true });
+    try {
+      await writeFile3(
+        this.verificationLedgerPath(runId2),
+        JSON.stringify({ schemaVersion: 2 }) + "\n",
+        { flag: "wx", mode: 384 }
+      );
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      parseVerificationLedger(
+        await readJson2(
+          this.verificationLedgerPath(runId2),
+          "verification ledger"
+        )
+      );
+    }
     const sequence = (records.at(-1)?.sequence ?? 0) + 1;
     const record6 = {
       schemaVersion: VERIFICATION_LEDGER_SCHEMA_VERSION2,
@@ -22797,9 +21433,10 @@ function isRepositoryHygieneCommand(command) {
 }
 function assessVerificationProfiles(config, projectTypes) {
   const profiles = config.verification.profiles;
-  const explicit = config.schemaVersion >= 2;
   const requestedTypes = new Set(projectTypes);
-  const matchingProfiles = explicit ? profiles.filter((profile) => requestedTypes.has(profile.projectType)) : [];
+  const matchingProfiles = profiles.filter(
+    (profile) => requestedTypes.has(profile.projectType)
+  );
   const matchingProfileTypes = new Set(
     matchingProfiles.map((profile) => profile.projectType)
   );
@@ -22815,13 +21452,13 @@ function assessVerificationProfiles(config, projectTypes) {
   const hygieneOnlyProjectTypes = projectTypes.filter(
     (projectType) => matchingProfileTypes.has(projectType) && !substantiveProfileTypes.has(projectType)
   );
-  const extraProfileIds = explicit ? profiles.filter(
+  const extraProfileIds = profiles.filter(
     (profile) => profile.projectType !== "repository" && !requestedTypes.has(profile.projectType)
-  ).map((profile) => profile.id).sort() : [];
-  const substantiveCommandCount = explicit ? matchingProfiles.flatMap((profile) => profile.commands).filter((command) => !isRepositoryHygieneCommand(command)).length : 0;
-  const totalSubstantiveCommandCount = explicit ? profiles.filter((profile) => profile.projectType !== "repository").flatMap((profile) => profile.commands).filter((command) => !isRepositoryHygieneCommand(command)).length : 0;
+  ).map((profile) => profile.id).sort();
+  const substantiveCommandCount = matchingProfiles.flatMap((profile) => profile.commands).filter((command) => !isRepositoryHygieneCommand(command)).length;
+  const totalSubstantiveCommandCount = profiles.filter((profile) => profile.projectType !== "repository").flatMap((profile) => profile.commands).filter((command) => !isRepositoryHygieneCommand(command)).length;
   return {
-    explicit,
+    explicit: true,
     profileCount: profiles.length,
     substantiveCommandCount,
     totalSubstantiveCommandCount,
@@ -22927,14 +21564,13 @@ function reviewExecutionPolicy(state, settings, currentInvocationDigest = null) 
   if (reviewer.consecutiveDeltaReviews >= MAX_CONSECUTIVE_DELTA_REVIEWS) {
     return fresh("delta-limit-reached");
   }
-  if (reviewer.outputContract !== void 0 && !["review-result/v1", "review-result/v2"].includes(reviewer.outputContract)) {
-    throw new BanzaiError(
-      "REVIEW_RESULT_SCHEMA_MISMATCH",
-      "Reviewer session has an unsupported output-contract identity."
+  if (reviewer.outputContract !== "review-result/v2") {
+    throw new ResourceVersionUnsupportedError(
+      "reviewer output contract",
+      String(reviewer.outputContract),
+      "review-result/v2"
     );
   }
-  if (reviewer.outputContract !== "review-result/v2")
-    return fresh("output-contract-not-reusable");
   return {
     sessionMode: "resumed",
     reviewMode: "delta",
@@ -23392,9 +22028,7 @@ var WorkflowRunner = class {
   async beforeModelAttempt(commitTransition, invocation) {
     await this.assertProjectGuidance();
     const state = await this.store.requireActiveState();
-    if (state.artifactBinding !== void 0) {
-      await inspectBoundWork2(this.repoRoot, state.artifactBinding);
-    }
+    await inspectBoundWork2(this.repoRoot, state.artifactBinding);
     if (invocation !== void 0) {
       await this.assertInstructionParity(invocation.config, [
         {
@@ -23442,9 +22076,28 @@ var WorkflowRunner = class {
         this.info(`Preparing run ${input.slug} in ${this.repoRoot}`);
         const config = await loadConfig(this.repoRoot);
         const baseCommit = await currentCommit(this.repoRoot);
+        const activeId = await this.store.readActiveRunId();
+        if (activeId !== null) {
+          const active = await this.store.readState(activeId);
+          if (!TERMINAL_STATUSES.has(active.status)) {
+            throw new BanzaiError(
+              "ACTIVE_RUN_EXISTS",
+              `Run ${activeId} is still ${active.status}.`
+            );
+          }
+        }
+        await this.assertProjectGuidance(false);
+        const artifactBinding = await createWork2({
+          repoRoot: this.repoRoot,
+          slug: input.slug,
+          mode: "workflow",
+          creationId: randomUUID7(),
+          schemaVersion: 2
+        });
         const createdAt = now();
         const state = {
-          schemaVersion: config.schemaVersion === 3 && config.verification.policy ? 5 : 4,
+          schemaVersion: 5,
+          artifactBinding,
           contractVersion: CONTRACT_VERSION2,
           runId: runId(input.slug),
           slug: input.slug,
@@ -23500,23 +22153,6 @@ var WorkflowRunner = class {
           blockReason: null
         };
         await this.assertProjectGuidance(false);
-        const activeId = await this.store.readActiveRunId();
-        if (activeId !== null) {
-          const active = await this.store.readState(activeId);
-          if (!TERMINAL_STATUSES.has(active.status)) {
-            throw new BanzaiError(
-              "ACTIVE_RUN_EXISTS",
-              `Run ${activeId} is still ${active.status}.`
-            );
-          }
-        }
-        state.artifactBinding = await createWork2({
-          repoRoot: this.repoRoot,
-          slug: state.slug,
-          mode: "workflow",
-          creationId: randomUUID7(),
-          schemaVersion: state.schemaVersion === 5 ? 2 : 1
-        });
         await this.store.createRun(state);
         await this.observeHumanTime(state, "run_created");
         await this.assertProjectGuidance();
@@ -24254,14 +22890,13 @@ var WorkflowRunner = class {
         requireState(state, ["needs_plan_approval"], "Plan approval");
         await this.approvedTaskIds(state);
         const approvalConfig = await loadConfig(this.repoRoot);
-        if (approvalConfig.schemaVersion === 3)
-          validatePlanVerificationObligations(
-            await readFile11(
-              path21.join(this.repoRoot, this.completionPlanPath(state)),
-              "utf8"
-            ),
-            approvalConfig.verification
-          );
+        validatePlanVerificationObligations(
+          await readFile11(
+            path21.join(this.repoRoot, this.completionPlanPath(state)),
+            "utf8"
+          ),
+          approvalConfig.verification
+        );
         const bundle = await digestArtifactBundle(
           this.repoRoot,
           artifactPaths(state)
@@ -24602,7 +23237,7 @@ var WorkflowRunner = class {
               throw error;
             return await this.blockForCompletionFailure(
               state,
-              state.planTaskCompletion?.sourceAttemptId ?? "legacy",
+              state.planTaskCompletion?.sourceAttemptId ?? null,
               error
             );
           }
@@ -24916,43 +23551,7 @@ var WorkflowRunner = class {
     } catch {
     }
     const checkpoint = state.planTaskCompletion;
-    if (checkpoint === void 0) {
-      const implementationReport = path21.posix.join(
-        "documentation",
-        "features",
-        state.slug,
-        "implementation-report.md"
-      );
-      let diagnostic = "Run predates the canonical task-completion ledger; exact completion is unknown.";
-      try {
-        const contents = await readFile11(
-          path21.join(this.repoRoot, implementationReport),
-          "utf8"
-        );
-        parsePlanTaskCompletionProjection(contents);
-        diagnostic = "Run predates the canonical task-completion ledger; a report table cannot establish exact completion retroactively.";
-      } catch (error) {
-        if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
-          throw error;
-        if (error instanceof PlanTaskCompletionError) {
-          diagnostic = error.message;
-        }
-      }
-      return {
-        state: "legacy",
-        source: "legacy",
-        completed: null,
-        total,
-        diagnostics: [
-          {
-            code: "PLAN_TASK_COMPLETION_LEGACY",
-            taskId: null,
-            message: diagnostic
-          }
-        ]
-      };
-    }
-    if (checkpoint === null) {
+    if (checkpoint === null || checkpoint === void 0) {
       return {
         state: "unknown",
         source: "unknown",
@@ -25057,13 +23656,6 @@ var WorkflowRunner = class {
       }
       if (state.blockedFrom === "verifying") {
         try {
-          if (!await this.store.verificationLedgerSupported(state.runId)) {
-            return {
-              eligible: false,
-              reason: "Legacy verification evidence has no retryable durable attempt identity. Inspect the checkout, then cancel the run.",
-              attemptId: null
-            };
-          }
           const latest = (await this.store.readVerificationAttempts(state.runId)).at(-1);
           if (latest?.status === "failed") {
             return {
@@ -25072,7 +23664,8 @@ var WorkflowRunner = class {
               attemptId: latest.id
             };
           }
-        } catch {
+        } catch (error) {
+          if (error instanceof ResourceVersionUnsupportedError) throw error;
           return {
             eligible: false,
             reason: "Verification evidence is malformed or conflicting. Audit the run before continuing.",
@@ -26082,7 +24675,7 @@ var WorkflowRunner = class {
       "source_attempt_invalid",
       errorMessage(error)
     );
-    state.planTaskCompletion = this.completionInvalidCheckpoint(
+    state.planTaskCompletion = sourceAttemptId === null ? null : this.completionInvalidCheckpoint(
       sourceAttemptId,
       completionError3,
       state.planTaskCompletion?.sourceAttemptId === sourceAttemptId ? state.planTaskCompletion.sourceAttemptKind ?? "implementation" : "implementation"
@@ -26127,8 +24720,7 @@ var WorkflowRunner = class {
     return selection;
   }
   async validateBaseCommit(state) {
-    if (state.artifactBinding)
-      await inspectBoundWork2(this.repoRoot, state.artifactBinding);
+    await inspectBoundWork2(this.repoRoot, state.artifactBinding);
     const current = await currentCommit(this.repoRoot);
     if (current !== state.baseCommit) {
       blockState(
@@ -26296,18 +24888,13 @@ var WorkflowRunner = class {
     }
   }
   attemptScopeDigest(state, attempt) {
-    if (attempt.kind !== "fix" && !state.artifactBinding) {
-      return null;
-    }
     const acceptedFindingIds = state.triage?.items.filter((item) => item.disposition === "accepted").map((item) => item.findingId).sort() ?? [];
-    return digestCanonicalJson3(
-      state.artifactBinding ? {
-        version: 2,
-        artifactBindingDigest: state.artifactBinding.sha256,
-        phase: attempt.kind,
-        acceptedFindingIds: attempt.kind === "fix" ? acceptedFindingIds : []
-      } : { version: 1, acceptedFindingIds }
-    );
+    return digestCanonicalJson3({
+      version: 2,
+      artifactBindingDigest: state.artifactBinding.sha256,
+      phase: attempt.kind,
+      acceptedFindingIds: attempt.kind === "fix" ? acceptedFindingIds : []
+    });
   }
   terminalCheckpointWriter(state, attempt, settings, policy) {
     return async (terminal) => {
@@ -26532,8 +25119,7 @@ var WorkflowRunner = class {
     return entries;
   }
   artifactWritePaths(state, phase) {
-    const roles = state.artifactBinding?.binding.artifacts;
-    if (roles === void 0) return [];
+    const roles = state.artifactBinding.binding.artifacts;
     if (phase === "plan")
       return [roles.description, roles.plan].filter(
         (item) => item !== void 0
@@ -26549,38 +25135,12 @@ var WorkflowRunner = class {
   artifactInstructions(state, phase) {
     const workflow = state.workflowSelection?.workflow ?? "strict";
     const bound = state.artifactBinding;
-    const roles = bound === void 0 ? artifactRoles2(state.runId, state.slug, "workflow", "legacy") : bound.binding.artifacts;
-    if (bound === void 0) {
-      requireSlug(state.slug);
-      for (const role of [
-        "description",
-        "plan",
-        "implementationReport",
-        "testReport"
-      ]) {
-        const recorded = state.planArtifacts?.[role];
-        if (recorded) roles[role] = recorded;
-      }
-      if (state.planTaskCompletion?.status === "valid") {
-        roles.implementationReport = state.planTaskCompletion.implementationReport.path;
-        roles.testReport = state.planTaskCompletion.testReport.path;
-      }
-    }
-    const legacyOutputs = phase === "plan" ? [roles.description, roles.plan] : phase === "implementation" || phase === "fix" ? workflow === "strict" ? [
-      roles.implementationReport,
-      roles.testReport,
-      ...phase === "fix" ? [roles.changeReport] : []
-    ] : workflow === "feature" ? [roles.work] : [roles.changeReport] : [];
-    const writes = bound === void 0 ? legacyOutputs.filter((item) => item !== void 0) : this.artifactWritePaths(state, phase);
+    const writes = this.artifactWritePaths(state, phase);
     return [
-      bound === void 0 ? "Legacy artifact surface (no persisted work binding):" : "Artifact storage authority (run state v4):",
-      JSON.stringify(
-        bound ?? { runId: state.runId, slug: state.slug, artifacts: roles },
-        null,
-        2
-      ),
+      "Artifact storage authority (run state v5):",
+      JSON.stringify(bound, null, 2),
       "Use these exact artifact role paths. Public ADRs, product documentation and the project manifest keep their existing repository paths.",
-      bound === void 0 ? `Required work output paths in this legacy phase: ${JSON.stringify(writes)}. Existing legacy scope and approved-byte validation remain authoritative; these destinations create no new binding or permission.` : `Artifact writes allowed in this phase: ${JSON.stringify(writes)}.`,
+      `Artifact writes allowed in this phase: ${JSON.stringify(writes)}.`,
       phase === "review" || phase === "selection" ? "Model artifact write set: []. Every role is read-only, including canonical reviews and attempt-owned candidates." : "Other artifact roles are read-only; their presence does not grant writes.",
       "Read ignored required evidence directly. Do not initialize, create or rebind work, invoke the standalone artifact helper, acquire standalone claims, or modify declarations, runner state, approvals or another work item.",
       workflow === "feature" ? "For lite feature work, artifacts.implementationReport may reference the work role; do not create a second report." : workflow === "quick-fix" ? "For quick-fix, artifacts.implementationReport may reference the changeReport only when the existing report trigger applies; otherwise keep it null." : ""
@@ -26588,7 +25148,6 @@ var WorkflowRunner = class {
   }
   async checkArtifactPhaseScope(state, phase, before) {
     const bound = state.artifactBinding;
-    if (bound === void 0) return;
     const after = await workspaceSnapshot(this.repoRoot, {
       baseline: state.baseline,
       artifactBinding: bound,
@@ -26598,10 +25157,7 @@ var WorkflowRunner = class {
     for (const change of workspaceChanges(before, after)) {
       const candidate = change.path;
       const privatePath = candidate === ".banzai" || candidate.startsWith(".banzai/");
-      const legacyWork = /^documentation\/(?:features|development-plans|changes)\//.test(
-        candidate
-      );
-      const prohibited = phase === "selection" || phase === "review" || privatePath && !allowed.has(candidate) || legacyWork && !allowed.has(candidate) || phase === "plan" && !allowed.has(candidate) && !isDocumentationPath(candidate);
+      const prohibited = phase === "selection" || phase === "review" || privatePath && !allowed.has(candidate) || phase === "plan" && !allowed.has(candidate) && !isDocumentationPath(candidate);
       if (prohibited)
         throw new BanzaiError(
           "ARTIFACT_PHASE_SCOPE_INVALID",
@@ -26610,7 +25166,6 @@ var WorkflowRunner = class {
     }
   }
   async validateSavedArtifactScope(state, attempt) {
-    if (!state.artifactBinding) return;
     const bytes = await readBytes2(
       this.repoRoot,
       `.banzai/runs/${state.runId}/attempts/${attempt.id}.artifact-workspace.json`,
@@ -26634,8 +25189,7 @@ var WorkflowRunner = class {
     await this.checkArtifactPhaseScope(state, attempt.kind, before);
   }
   validateArtifactRoleReferences(state, result) {
-    const roles = state.artifactBinding?.binding.artifacts;
-    if (roles === void 0) return;
+    const roles = state.artifactBinding.binding.artifacts;
     for (const role of [
       "description",
       "plan",
@@ -26773,7 +25327,7 @@ var WorkflowRunner = class {
     };
     let result;
     try {
-      const before = input.state.artifactBinding === void 0 ? null : await workspaceSnapshot(this.repoRoot, {
+      const before = await workspaceSnapshot(this.repoRoot, {
         baseline: input.state.baseline,
         artifactBinding: input.state.artifactBinding,
         excludedPaths: input.attempt.kind === "review" ? [
@@ -26784,23 +25338,21 @@ var WorkflowRunner = class {
           )
         ] : []
       });
-      if (before !== null)
-        await writeFile4(
-          path21.join(
-            this.store.runDirectory(input.state.runId),
-            "attempts",
-            `${input.attempt.id}.artifact-workspace.json`
-          ),
-          JSON.stringify(before) + "\n",
-          { flag: "wx", mode: 384 }
-        );
+      await writeFile4(
+        path21.join(
+          this.store.runDirectory(input.state.runId),
+          "attempts",
+          `${input.attempt.id}.artifact-workspace.json`
+        ),
+        JSON.stringify(before) + "\n",
+        { flag: "wx", mode: 384 }
+      );
       result = await input.invoke(outputContract);
-      if (before !== null)
-        await this.checkArtifactPhaseScope(
-          input.state,
-          input.attempt.kind,
-          before
-        );
+      await this.checkArtifactPhaseScope(
+        input.state,
+        input.attempt.kind,
+        before
+      );
     } catch (error) {
       if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
@@ -27120,13 +25672,13 @@ var WorkflowRunner = class {
             outputContract,
             settings: config.models.planner,
             resumeSessionId,
-            env: state.artifactBinding ? {
+            env: {
               ...process4.env,
               BANZAI_RUN_ID: state.runId,
               BANZAI_APPROVAL_DIGEST: "",
               BANZAI_WORKFLOW_DIGEST: "",
               BANZAI_REVIEW_ARTIFACT: ""
-            } : process4.env,
+            },
             onSessionStarted: async (sessionId) => {
               const current = await this.store.readState(state.runId);
               if (current.status === "cancelled" || current.activeAttempt?.id !== attempt.id || resumeSessionId !== null && resumeSessionId !== sessionId || record6.sessionId !== null && record6.sessionId !== sessionId) {
@@ -27799,7 +26351,7 @@ var WorkflowRunner = class {
             baseline: state.baseline
           });
           const sourceChanges = snapshot.entries.map((entry) => entry.path).filter(
-            (entryPath) => !isDocumentationPath(entryPath) && !(state.artifactBinding && ownsArtifact2(state.artifactBinding.binding, entryPath))
+            (entryPath) => !isDocumentationPath(entryPath) && !ownsArtifact2(state.artifactBinding.binding, entryPath)
           );
           if (sourceChanges.length > 0) {
             blockState(
@@ -27970,11 +26522,6 @@ var WorkflowRunner = class {
     state.verification = retained;
   }
   verificationStorage(state) {
-    if (state.schemaVersion !== 5 || !state.artifactBinding)
-      throw new BanzaiError(
-        "VERIFICATION_EVIDENCE_INVALID",
-        "Verification applicability requires its original work binding."
-      );
     return {
       repoRoot: this.repoRoot,
       workId: state.artifactBinding.binding.workId,
@@ -27983,17 +26530,12 @@ var WorkflowRunner = class {
   }
   verificationAuthority(state) {
     return evidenceDigest({
-      binding: state.artifactBinding?.sha256,
+      binding: state.artifactBinding.sha256,
       approval: state.planApproval?.digest ?? null,
       workflow: state.workflowSelection
     });
   }
   async captureVerification(state, config) {
-    if (config.schemaVersion !== 3 || !config.verification.policy)
-      throw new BanzaiError(
-        "VERIFICATION_CONFIGURATION_CHANGED",
-        "Verification-enabled runs require their explicit project policy."
-      );
     const configuration = parseVerificationConfiguration(config.verification);
     const input = {
       repoRoot: this.repoRoot,
@@ -28038,7 +26580,6 @@ var WorkflowRunner = class {
     return current;
   }
   async requireVerificationApplicability(state, config) {
-    if (state.schemaVersion !== 5) return true;
     if (!await hasRunnerWorkOwnership2(this.repoRoot, state.artifactBinding))
       return withRunnerWorkOwnership2(
         this.repoRoot,
@@ -28112,13 +26653,10 @@ var WorkflowRunner = class {
           throw error;
         return await this.blockForCompletionFailure(
           state,
-          state.planTaskCompletion?.sourceAttemptId ?? sourceAttempt?.id ?? "legacy",
+          state.planTaskCompletion?.sourceAttemptId ?? sourceAttempt?.id ?? null,
           error
         );
       }
-    }
-    if (!await this.store.verificationLedgerSupported(state.runId)) {
-      return await this.executeLegacyVerification(state, config);
     }
     let records = await this.store.readVerificationAttempts(state.runId);
     const source = await this.verificationSourceAttempt(
@@ -28128,8 +26666,8 @@ var WorkflowRunner = class {
     );
     const round = this.verificationRound(records, source);
     const descriptors = describeVerificationCommands(config);
-    let evidenceBefore = null;
-    if (state.schemaVersion === 5) {
+    let evidenceBefore;
+    {
       try {
         evidenceBefore = await this.prepareVerificationDecision(
           state,
@@ -28225,9 +26763,9 @@ var WorkflowRunner = class {
         this.reconcileVerificationState(state, records, round, descriptors);
         await this.store.writeState(state);
       }
-      if (state.schemaVersion === 5) {
+      {
         const latestCapture = await this.captureVerification(state, config);
-        if (latestCapture.candidateDigest !== evidenceBefore?.candidateDigest) {
+        if (latestCapture.candidateDigest !== evidenceBefore.candidateDigest) {
           blockState(state, "Verification inputs changed before invocation.");
           await this.store.writeState(state);
           return state;
@@ -28240,7 +26778,7 @@ var WorkflowRunner = class {
         retryOf: retryingFailed ? failed.id : null,
         restartOf
       });
-      if (evidenceBefore && state.verificationEvidence)
+      if (state.verificationEvidence)
         await persistVerificationOriginStart(
           this.verificationStorage(state),
           record6,
@@ -28270,7 +26808,7 @@ var WorkflowRunner = class {
             command: command.command,
             args: command.args,
             cwd: this.repoRoot,
-            env: state.schemaVersion === 5 ? parseVerificationConfiguration(config.verification).policy?.dependencies.environment ?? {} : subscriptionOnlyEnvironment(),
+            env: parseVerificationConfiguration(config.verification).policy?.dependencies.environment ?? subscriptionOnlyEnvironment(),
             timeoutMs: command.timeoutMs,
             onStart: async (pid) => {
               await this.processStarted(state, { kind: "verification" }, pid);
@@ -28291,12 +26829,11 @@ var WorkflowRunner = class {
           stderr: null
         });
         await this.store.finishVerificationAttempt(state.runId, terminal2);
-        if (evidenceBefore)
-          await persistVerificationOriginFinish(
-            this.verificationStorage(state),
-            terminal2,
-            await this.captureVerification(state, config)
-          );
+        await persistVerificationOriginFinish(
+          this.verificationStorage(state),
+          terminal2,
+          await this.captureVerification(state, config)
+        );
         if (current2.status === "cancelled") {
           return current2;
         }
@@ -28331,12 +26868,11 @@ var WorkflowRunner = class {
         stderr: stderrEvidence
       });
       await this.store.finishVerificationAttempt(state.runId, terminal);
-      if (evidenceBefore)
-        await persistVerificationOriginFinish(
-          this.verificationStorage(state),
-          terminal,
-          await this.captureVerification(state, config)
-        );
+      await persistVerificationOriginFinish(
+        this.verificationStorage(state),
+        terminal,
+        await this.captureVerification(state, config)
+      );
       const current = await this.store.readState(state.runId);
       if (current.status === "cancelled") {
         return current;
@@ -28378,104 +26914,6 @@ var WorkflowRunner = class {
     await this.store.writeState(state);
     return await this.executeReview(state, config);
   }
-  async executeLegacyVerification(state, config) {
-    state.verification = [];
-    const commands = flattenVerificationCommands(config);
-    for (let index = 0; index < commands.length; index += 1) {
-      const command = commands[index];
-      if (command === void 0) {
-        continue;
-      }
-      const startedAt = now();
-      state.metrics.attempts.verification += 1;
-      let result;
-      try {
-        result = await this.activity(
-          `Verification ${index + 1}/${commands.length}`,
-          `${command.name}: ${commandDisplay(command.command, command.args)}`,
-          async () => await this.processRunner({
-            command: command.command,
-            args: command.args,
-            cwd: this.repoRoot,
-            env: subscriptionOnlyEnvironment(),
-            timeoutMs: command.timeoutMs,
-            onStart: async (pid) => {
-              await this.processStarted(state, { kind: "verification" }, pid);
-            }
-          }),
-          (processResult) => processResult.exitCode === 0
-        );
-      } catch (error) {
-        const current2 = await this.store.readState(state.runId);
-        if (current2.status === "cancelled") {
-          return current2;
-        }
-        state.activeProcess = null;
-        blockState(
-          state,
-          `Verification "${command.name}" could not run: ${errorMessage(error)}`
-        );
-        await this.store.writeState(state);
-        return state;
-      }
-      const current = await this.store.readState(state.runId);
-      if (current.status === "cancelled") {
-        return current;
-      }
-      const logStem = `${index + 1}-${command.name.replace(/[^a-z0-9]+/gi, "-")}`;
-      const stdoutRelative = `verification/${logStem}.stdout.log`;
-      const stderrRelative = `verification/${logStem}.stderr.log`;
-      await this.store.writeText(
-        state.runId,
-        stdoutRelative,
-        redactSensitiveText(result.stdout)
-      );
-      await this.store.writeText(
-        state.runId,
-        stderrRelative,
-        redactSensitiveText(result.stderr)
-      );
-      state.verification.push({
-        name: command.name,
-        command: command.command,
-        args: command.args,
-        exitCode: result.exitCode,
-        signal: result.signal,
-        stdoutPath: stdoutRelative,
-        stderrPath: stderrRelative,
-        startedAt,
-        completedAt: result.completedAt
-      });
-      state.activeProcess = null;
-      await this.store.writeState(state);
-      await this.store.appendEvent(state.runId, "verification.completed", {
-        name: command.name,
-        exitCode: result.exitCode,
-        signal: result.signal
-      });
-      if (result.exitCode !== 0) {
-        blockState(
-          state,
-          `Verification "${command.name}" failed with exit code ${result.exitCode}.`
-        );
-        await this.store.writeState(state);
-        return state;
-      }
-    }
-    const workflow = state.workflowSelection?.workflow ?? "strict";
-    if (workflow !== "strict") {
-      transitionState(state, "done");
-      await this.store.writeState(state);
-      await this.store.appendEvent(state.runId, "run.completed", {
-        workflow,
-        verificationCount: state.verification.length
-      });
-      return state;
-    }
-    transitionState(state, "reviewing");
-    await this.store.writeState(state);
-    return await this.executeReview(state, config);
-  }
   async executeReview(state, config, commitTransition) {
     if (!await hasRunnerWorkOwnership2(this.repoRoot, state.artifactBinding))
       return withRunnerWorkOwnership2(
@@ -28495,7 +26933,7 @@ var WorkflowRunner = class {
         throw error;
       return await this.blockForCompletionFailure(
         state,
-        state.planTaskCompletion?.sourceAttemptId ?? "legacy",
+        state.planTaskCompletion?.sourceAttemptId ?? null,
         error
       );
     }
@@ -28578,7 +27016,7 @@ var WorkflowRunner = class {
         tasks: validatedCompletion.tasks
       }
     };
-    if (state.schemaVersion === 5 && state.verificationEvidence?.applicability) {
+    if (state.verificationEvidence?.applicability) {
       const attempts = await this.store.readVerificationAttempts(state.runId);
       const origins = await readVerificationOrigins(
         this.verificationStorage(state),
@@ -28619,9 +27057,9 @@ var WorkflowRunner = class {
           "Review requires an exact approved scope."
         );
       const frozen = sealReviewSnapshot2({
-        schema: state.schemaVersion === 5 ? "banzai-review-snapshot/v3" : state.artifactBinding ? "banzai-review-snapshot/v2" : "banzai-review-snapshot/v1",
-        schemaVersion: state.schemaVersion === 5 ? 3 : state.artifactBinding ? 2 : 1,
-        ...state.artifactBinding ? { artifactBinding: state.artifactBinding } : {},
+        schema: "banzai-review-snapshot/v3",
+        schemaVersion: 3,
+        artifactBinding: state.artifactBinding,
         runId: state.runId,
         attemptId: attempt.id,
         outputContract: "review-result/v2",
@@ -28889,7 +27327,7 @@ var WorkflowRunner = class {
       );
     }
     const acceptedPrevious = state.triage?.items.filter((item) => item.disposition === "accepted").map((item) => item.findingId) ?? [];
-    if (state.triage !== null && !(result.schemaVersion === 2 && result.verdict === "blocked") && acceptedPrevious.some((id) => !result.reviewedFindingIds.includes(id))) {
+    if (state.triage !== null && result.verdict !== "blocked" && acceptedPrevious.some((id) => !result.reviewedFindingIds.includes(id))) {
       throw new BanzaiError(
         "INCOMPLETE_REREVIEW",
         "Re-review did not report every previously accepted finding id."
@@ -28925,21 +27363,17 @@ var WorkflowRunner = class {
   }) {
     this.validateReviewResultForApplication(state, result);
     const resultRelative = `reviews/review-${state.reviewIteration}.json`;
-    const canonicalJson3 = `${JSON.stringify(result, null, 2)}
-`;
-    if (result.schemaVersion === 2)
-      await this.store.writeReviewResult(
-        state.runId,
-        state.reviewIteration,
-        result
-      );
-    else await this.store.writeText(state.runId, resultRelative, canonicalJson3);
+    await this.store.writeReviewResult(
+      state.runId,
+      state.reviewIteration,
+      result
+    );
     const previousReviewer = state.sessions.reviewer;
     const reviewer = sessionId === null ? null : {
       id: sessionId,
       ...policy.sessionContext,
       role: "reviewer",
-      outputContract: result.schemaVersion === 2 ? "review-result/v2" : "review-result/v1",
+      outputContract: "review-result/v2",
       approvalDigest: state.planApproval?.digest ?? "",
       lastSnapshot: snapshot,
       lastFullIteration: policy.reviewMode === "full" ? state.reviewIteration : previousReviewer?.lastFullIteration ?? state.reviewIteration,
@@ -28949,7 +27383,7 @@ var WorkflowRunner = class {
     };
     state.sessions.reviewer = reviewer;
     state.latestReview = {
-      outputContract: result.schemaVersion === 2 ? "review-result/v2" : "review-result/v1",
+      outputContract: "review-result/v2",
       iteration: state.reviewIteration,
       resultPath: resultRelative,
       artifactPath: reviewArtifactPath(
@@ -28979,7 +27413,7 @@ var WorkflowRunner = class {
           throw error;
         return await this.blockForCompletionFailure(
           state,
-          state.planTaskCompletion?.sourceAttemptId ?? "legacy",
+          state.planTaskCompletion?.sourceAttemptId ?? null,
           error
         );
       }
@@ -28989,7 +27423,6 @@ var WorkflowRunner = class {
     } else {
       blockState(state, `Review verdict ${result.verdict}: ${result.summary}`);
     }
-    if (result.schemaVersion !== 2) await this.store.writeState(state);
     const timingEvent = await this.store.appendEvent(
       state.runId,
       "review.completed",
@@ -29005,9 +27438,9 @@ var WorkflowRunner = class {
         rotationReason: policy.rotationReason
       },
       void 0,
-      result.schemaVersion === 2
+      true
     );
-    if (result.schemaVersion === 2) await this.store.writeState(state);
+    await this.store.writeState(state);
     await this.observeHumanTime(
       state,
       "gate_pending",
@@ -29030,12 +27463,14 @@ var WorkflowRunner = class {
     );
     const value = JSON.parse(raw);
     const identity = state.latestReview.outputContract;
-    if (identity !== void 0 && identity !== "review-result/v1" && identity !== "review-result/v2")
-      throw new BanzaiError(
-        "REVIEW_RESULT_SCHEMA_MISMATCH",
-        "Canonical review output identity is unsupported."
+    if (identity !== "review-result/v2") {
+      throw new ResourceVersionUnsupportedError(
+        "review output contract",
+        String(identity),
+        "review-result/v2"
       );
-    return identity === "review-result/v2" ? parseCurrentReviewResult2(value) : parseReviewResult2(value);
+    }
+    return parseCurrentReviewResult2(value);
   }
   validateTriage(findings, input) {
     const findingIds = new Set(findings.map((finding) => finding.id));
@@ -29130,7 +27565,7 @@ var WorkflowRunner = class {
     if (attempt.kind === "review") {
       this.validateReviewResultForApplication(state, result);
       const record6 = await this.store.readRunAttempt(state.runId, attempt);
-      if (record6.reviewContext !== void 0 || result.schemaVersion === 2) {
+      {
         const frozen = await this.store.readReviewSnapshot(
           state.runId,
           attempt
@@ -29220,8 +27655,8 @@ var WorkflowRunner = class {
     const expectedContext = record6.sessionContext ?? sessionContext(role, settings);
     const expectedApprovalDigest = state.planApproval?.digest ?? null;
     const expectedWorkflowDigest = state.planApproval === null ? state.workflowSelection?.digest ?? null : null;
-    const expectedResultContract = attempt.kind === "review" && record6.reviewContext === void 0 ? "review-result/v1" : terminalResultContract(attempt.kind);
-    const resultContractMatches = checkpoint.resultContract === expectedResultContract || expectedResultContract === "phase-result/v3" && checkpoint.resultContract === "phase-result/v2";
+    const expectedResultContract = terminalResultContract(attempt.kind);
+    const resultContractMatches = checkpoint.resultContract === expectedResultContract;
     if (checkpoint.runId !== state.runId || checkpoint.attempt.id !== attempt.id || checkpoint.attempt.kind !== attempt.kind || checkpoint.attempt.mutable !== attempt.mutable || checkpoint.phase !== attempt.kind || !resultContractMatches || checkpoint.baseCommit !== state.baseCommit || checkpoint.approvalDigest !== expectedApprovalDigest || checkpoint.workflowDigest !== expectedWorkflowDigest || checkpoint.scopeDigest !== this.attemptScopeDigest(state, attempt) || checkpoint.configuration.vendor !== (vendorFor(settings.executable) ?? FALLBACK_VENDOR[role]) || checkpoint.configuration.executableDigest !== digestCanonicalJson3(settings.executable) || checkpoint.configuration.model !== settings.model || checkpoint.configuration.effort !== settings.effort || checkpoint.configuration.sessionMode !== (record6.sessionMode ?? "fresh") || checkpoint.configuration.sessionContextDigest !== digestCanonicalJson3(expectedContext) || state.recovery?.sourceAttemptId === attempt.id) {
       throw new BanzaiError(
         "TERMINAL_CHECKPOINT_MISMATCH",
@@ -29378,7 +27813,7 @@ var WorkflowRunner = class {
             throw error;
           return await this.blockForCompletionFailure(
             state,
-            state.planTaskCompletion?.sourceAttemptId ?? "legacy",
+            state.planTaskCompletion?.sourceAttemptId ?? null,
             error
           );
         }
@@ -29445,7 +27880,7 @@ var WorkflowRunner = class {
               tasks: validatedCompletion.tasks
             }
           };
-          if (record6.reviewContext !== void 0 || result.schemaVersion === 2) {
+          {
             if (record6.reviewContext?.outputContract !== "review-result/v2" || candidateEvidence?.source !== "runner-rendered")
               throw new BanzaiError(
                 "INVALID_REVIEW_SNAPSHOT",
@@ -29488,12 +27923,12 @@ var WorkflowRunner = class {
               );
             }
           }
-          const candidate = candidateEvidence === null || candidateEvidence === void 0 ? await validateHistoricalReviewArtifact(
+          const candidate = await validateReviewArtifact(
             this.repoRoot,
             result,
             artifact
-          ) : await validateReviewArtifact(this.repoRoot, result, artifact);
-          if (candidateEvidence !== null && candidateEvidence !== void 0) {
+          );
+          {
             if (candidateEvidence.intendedArtifactPath !== artifactPath || candidateEvidence.validation === "failed" || candidateEvidence.sha256 !== null && candidateEvidence.sha256 !== candidate.sha256) {
               throw new BanzaiError(
                 "INVALID_REVIEW_CANDIDATE_EVIDENCE",
@@ -29564,7 +27999,7 @@ var WorkflowRunner = class {
         const policy = {
           sessionMode: record6.sessionMode ?? "fresh",
           reviewMode: record6.reviewMode ?? "full",
-          rotationReason: record6.rotationReason === void 0 ? "legacy-state" : record6.rotationReason,
+          rotationReason: record6.rotationReason ?? null,
           resumeSessionId: record6.resumeSessionId ?? null,
           sessionContext: {
             role: "reviewer",
@@ -29636,7 +28071,6 @@ var MAX_PATH_LENGTH = 1024;
 var MAX_REASON_LENGTH = 4096;
 var MAX_QUESTION_LENGTH = 16384;
 var MAX_COLLECTION_LENGTH = 128;
-var MAX_ANSWER_COUNT = 64;
 function controlInputError(message) {
   return new BanzaiError("INVALID_CONTROL_INPUT", message);
 }
@@ -29686,9 +28120,10 @@ function parseDocument(input) {
 }
 function requireSchema(value, schema, version) {
   if (value.schema !== schema || value.schemaVersion !== version) {
-    throw new BanzaiError(
-      "CONTROL_SCHEMA_UNSUPPORTED",
-      `Agent control input must use ${schema} schema version ${version}.`
+    throw new ResourceVersionUnsupportedError(
+      "agent control input",
+      `${String(value.schema)} (${String(value.schemaVersion)})`,
+      `${schema} (${version})`
     );
   }
 }
@@ -29709,21 +28144,7 @@ function decodeAgentControlRequest(input) {
 }
 function decodeAgentControlAnswer(input) {
   const value = parseDocument(input);
-  if (value.schema === LEGACY_AGENT_ANSWER_SCHEMA && value.schemaVersion === LEGACY_AGENT_CONTROL_SCHEMA_VERSION) {
-    exactKeys3(value, ["schema", "schemaVersion", "answers"]);
-    if (!Array.isArray(value.answers) || value.answers.length === 0 || value.answers.length > MAX_ANSWER_COUNT || value.answers.some(
-      (answer) => typeof answer !== "string" || answer.trim().length === 0
-    )) {
-      throw controlInputError(
-        `Agent control answers must contain 1-${MAX_ANSWER_COUNT} non-empty strings.`
-      );
-    }
-    return {
-      schema: LEGACY_AGENT_ANSWER_SCHEMA,
-      schemaVersion: LEGACY_AGENT_CONTROL_SCHEMA_VERSION,
-      answers: value.answers
-    };
-  }
+  requireSchema(value, AGENT_ANSWER_SCHEMA, AGENT_ANSWER_SCHEMA_VERSION);
   exactKeys3(value, [
     "schema",
     "schemaVersion",
@@ -29833,9 +28254,9 @@ function agentControlCapabilities() {
     umbrellaContractVersion: CONTRACT_VERSION2,
     artifactStorage: {
       declarationSchemas: ["banzai-artifact-layout/v1"],
-      bindingSchemas: ["banzai-work-binding/v1"],
+      bindingSchemas: ["banzai-work-binding/v2"],
       privateWorkspaceSnapshotVersion: 2,
-      layouts: ["legacy", "private"]
+      layouts: ["private"]
     },
     operations: {
       status: { supported: true, ttyRequired: false, inputSchemas: [] },
@@ -29847,7 +28268,7 @@ function agentControlCapabilities() {
       answer: {
         supported: true,
         ttyRequired: false,
-        inputSchemas: [AGENT_ANSWER_SCHEMA, LEGACY_AGENT_ANSWER_SCHEMA]
+        inputSchemas: [AGENT_ANSWER_SCHEMA]
       },
       approveAdr: { supported: true, ttyRequired: false, inputSchemas: [] },
       approvePlan: { supported: true, ttyRequired: false, inputSchemas: [] },
@@ -30424,21 +28845,7 @@ async function executeAgentControlCommand(command, createRunner, io, defaultDeci
     const answer = decoded.value;
     const current = await runner.status();
     const pending = current.state.pendingHumanDecision ?? null;
-    if (answer.schema === "banzai-agent-answer/v1") {
-      if (pending?.kind === "decision_consultation") {
-        throw new BanzaiError(
-          "CONTROL_SCHEMA_UNSUPPORTED",
-          "Agent answer v1 cannot represent or answer a decision consultation."
-        );
-      }
-      await runner.answerHumanDecision(
-        {
-          answers: answer.answers,
-          decidedBy: command.decidedBy ?? defaultDecisionMaker2
-        },
-        command.autoResume
-      );
-    } else {
+    {
       if (pending?.kind !== "decision_consultation" || current.state.runId !== answer.runId || pending.request.requestId !== answer.requestId || pending.request.roundId !== answer.roundId) {
         throw new BanzaiError(
           "INVALID_CONTROL_INPUT",
@@ -30664,6 +29071,13 @@ function decodeUsage(value, runId2, attemptId) {
 }
 function decodeCanonicalAttempt(value, file, runId2) {
   const item = record3(value);
+  if (item !== null && item.schemaVersion !== MODEL_ATTEMPT_SCHEMA_VERSION2) {
+    throw new ResourceVersionUnsupportedError(
+      "model attempt",
+      String(item.schemaVersion),
+      MODEL_ATTEMPT_SCHEMA_VERSION2
+    );
+  }
   const identity = record3(item?.attempt);
   const safeAttemptId = safeIdentifier(identity?.id) ? identity.id : "unknown";
   if (item === null || identity === null) {
@@ -30970,6 +29384,13 @@ async function readJson3(file) {
 async function readRunMetadata(runDirectory, runId2) {
   const value = await readJson3(path23.join(runDirectory, "state.json"));
   const state = record3(value);
+  if (state !== null && state.schemaVersion !== 5) {
+    throw new ResourceVersionUnsupportedError(
+      "run state",
+      String(state.schemaVersion),
+      5
+    );
+  }
   const selection = record3(state?.workflowSelection);
   if (state?.runId !== runId2 || typeof state.createdAt !== "string" || !Number.isFinite(Date.parse(state.createdAt))) {
     return null;
@@ -31382,6 +29803,18 @@ function configVersionCheck(document) {
       "Configuration version cannot be checked until JSON is readable."
     );
   }
+  if (document.schemaVersion !== 3) {
+    return check(
+      "config.version",
+      "config",
+      "fail",
+      new ResourceVersionUnsupportedError(
+        "orchestrator config",
+        String(document.schemaVersion),
+        3
+      ).message
+    );
+  }
   if (document.contractVersion !== CONTRACT_VERSION2) {
     return check(
       "config.version",
@@ -31390,27 +29823,11 @@ function configVersionCheck(document) {
       "Configuration uses an unsupported contract version."
     );
   }
-  if (document.schemaVersion === 1) {
-    return check(
-      "config.version",
-      "config",
-      "fail",
-      "Configuration schema version 1 is legacy and requires manual migration."
-    );
-  }
-  if (document.schemaVersion !== 2 && document.schemaVersion !== 3) {
-    return check(
-      "config.version",
-      "config",
-      "fail",
-      "Configuration uses an unsupported schema version."
-    );
-  }
   return check(
     "config.version",
     "config",
     "pass",
-    "Configuration uses schema version 2 and the supported contract version."
+    "Configuration uses schema version 3 and the supported contract version."
   );
 }
 async function claudeEnvironmentCheck(config, dependencies) {
@@ -31646,7 +30063,7 @@ async function activeRunCheck(repoRoot) {
       "The referenced run state is malformed."
     );
   }
-  if (!isRecord4(state) || ![1, 2, 3, 4, 5].includes(state.schemaVersion) || typeof state.runId !== "string" || typeof state.repoRoot !== "string" || typeof state.status !== "string" || !RUN_STATUSES3.has(state.status)) {
+  if (!isRecord4(state) || typeof state.runId !== "string" || typeof state.repoRoot !== "string" || typeof state.status !== "string" || !RUN_STATUSES3.has(state.status)) {
     return check(
       "run.active",
       "run-state",
@@ -31654,18 +30071,35 @@ async function activeRunCheck(repoRoot) {
       "The referenced run state uses an unsupported structure."
     );
   }
-  if (state.schemaVersion === 4 || state.schemaVersion === 5) {
+  if (state.schemaVersion !== 5) {
+    return check(
+      "run.active",
+      "run-state",
+      "fail",
+      new ResourceVersionUnsupportedError(
+        "run state",
+        String(state.schemaVersion),
+        5
+      ).message
+    );
+  }
+  {
     try {
-      await inspectBoundWork2(
-        repoRoot,
-        state.artifactBinding
-      );
-    } catch {
+      const bound = state.artifactBinding;
+      const bindingVersion = isRecord4(bound) && isRecord4(bound.binding) ? bound.binding.schemaVersion : void 0;
+      if (bindingVersion !== 2)
+        throw new ResourceVersionUnsupportedError(
+          "work binding",
+          String(bindingVersion),
+          2
+        );
+      await inspectBoundWork2(repoRoot, bound);
+    } catch (error) {
       return check(
         "run.active",
         "run-state",
         "fail",
-        "The referenced run has missing, malformed or conflicting artifact binding evidence."
+        error instanceof ResourceVersionUnsupportedError ? error.message : "The referenced run has missing, malformed or conflicting artifact binding evidence."
       );
     }
   }
@@ -31928,72 +30362,55 @@ async function inspectDoctor(repoRoot, dependencies = DEFAULT_DEPENDENCIES) {
     );
   } else {
     const assessment = assessVerificationProfiles(config, projectTypes);
-    if (!assessment.explicit) {
+    const coveredTypes = projectTypes.filter(
+      (projectType) => !assessment.missingProjectTypes.includes(projectType) && !assessment.hygieneOnlyProjectTypes.includes(projectType)
+    );
+    if (assessment.missingProjectTypes.length > 0 || assessment.hygieneOnlyProjectTypes.length > 0) {
       checks.push(
         check(
           "verification.profiles",
           "verification",
           "fail",
-          "Legacy configuration has no explicit project-type profiles."
-        ),
+          `Missing profiles for: ${assessment.missingProjectTypes.join(", ") || "none"}; hygiene-only detected types: ${assessment.hygieneOnlyProjectTypes.join(", ") || "none"}; covered: ${coveredTypes.join(", ") || "none"}; unused profiles: ${assessment.extraProfileIds.join(", ") || "none"}.`
+        )
+      );
+    } else if (assessment.extraProfileIds.length > 0) {
+      checks.push(
         check(
-          "verification.substantive",
+          "verification.profiles",
           "verification",
-          "skipped",
-          "Legacy commands cannot prove substantive project-type coverage."
+          "warning",
+          `All detected types are covered; unused profiles: ${assessment.extraProfileIds.join(", ")}.`
         )
       );
     } else {
-      const coveredTypes = projectTypes.filter(
-        (projectType) => !assessment.missingProjectTypes.includes(projectType) && !assessment.hygieneOnlyProjectTypes.includes(projectType)
-      );
-      if (assessment.missingProjectTypes.length > 0 || assessment.hygieneOnlyProjectTypes.length > 0) {
-        checks.push(
-          check(
-            "verification.profiles",
-            "verification",
-            "fail",
-            `Missing profiles for: ${assessment.missingProjectTypes.join(", ") || "none"}; hygiene-only detected types: ${assessment.hygieneOnlyProjectTypes.join(", ") || "none"}; covered: ${coveredTypes.join(", ") || "none"}; unused profiles: ${assessment.extraProfileIds.join(", ") || "none"}.`
-          )
-        );
-      } else if (assessment.extraProfileIds.length > 0) {
-        checks.push(
-          check(
-            "verification.profiles",
-            "verification",
-            "warning",
-            `All detected types are covered; unused profiles: ${assessment.extraProfileIds.join(", ")}.`
-          )
-        );
-      } else {
-        checks.push(
-          check(
-            "verification.profiles",
-            "verification",
-            "pass",
-            projectTypes.length === 1 ? "The detected project type has explicit profile coverage." : `All ${projectTypes.length} detected project types have explicit profile coverage.`
-          )
-        );
-      }
       checks.push(
-        assessment.substantiveCommandCount > 0 ? check(
-          "verification.substantive",
+        check(
+          "verification.profiles",
           "verification",
           "pass",
-          `${assessment.substantiveCommandCount} substantive verification ${assessment.substantiveCommandCount === 1 ? "command is" : "commands are"} configured for detected project types.`
-        ) : assessment.totalSubstantiveCommandCount > 0 ? check(
-          "verification.substantive",
-          "verification",
-          "fail",
-          `No substantive verification command is configured for detected project types; ${assessment.totalSubstantiveCommandCount} substantive ${assessment.totalSubstantiveCommandCount === 1 ? "command is" : "commands are"} configured for unused project profiles.`
-        ) : check(
-          "verification.substantive",
-          "verification",
-          "fail",
-          "No substantive verification command is configured for detected project types or unused project profiles."
+          projectTypes.length === 1 ? "The detected project type has explicit profile coverage." : `All ${projectTypes.length} detected project types have explicit profile coverage.`
         )
       );
     }
+    checks.push(
+      assessment.substantiveCommandCount > 0 ? check(
+        "verification.substantive",
+        "verification",
+        "pass",
+        `${assessment.substantiveCommandCount} substantive verification ${assessment.substantiveCommandCount === 1 ? "command is" : "commands are"} configured for detected project types.`
+      ) : assessment.totalSubstantiveCommandCount > 0 ? check(
+        "verification.substantive",
+        "verification",
+        "fail",
+        `No substantive verification command is configured for detected project types; ${assessment.totalSubstantiveCommandCount} substantive ${assessment.totalSubstantiveCommandCount === 1 ? "command is" : "commands are"} configured for unused project profiles.`
+      ) : check(
+        "verification.substantive",
+        "verification",
+        "fail",
+        "No substantive verification command is configured for detected project types or unused project profiles."
+      )
+    );
   }
   checks.push(
     await configuredExecutableCheck(
@@ -32077,15 +30494,8 @@ async function executeDoctor(repoRoot, args, io, inspect = inspectDoctor) {
 
 // src/evaluation-kpi-cli.ts
 import { readFile as readFile13 } from "node:fs/promises";
-import path25 from "node:path";
 
 // src/evaluation-kpi.ts
-var KPI_WORKFLOW_ORDER = [
-  "quick-fix",
-  "feature",
-  "strict",
-  "unknown"
-];
 var RETRY_KINDS = ["plan", "implementation", "fix", "review"];
 var MODEL_ATTEMPT_KINDS = ["selection", ...RETRY_KINDS];
 function outOfScope() {
@@ -32096,39 +30506,6 @@ function incomplete() {
 }
 function exact(numerator, denominator) {
   return { inScope: true, exact: true, numerator, denominator };
-}
-function foldKpiValue(runs, unit, contribute) {
-  let numerator = 0;
-  let denominator = 0;
-  let maximum = 0;
-  let exactRuns = 0;
-  let incompleteRuns = 0;
-  for (const run of runs) {
-    const contribution = contribute(run);
-    if (!contribution.inScope) {
-      continue;
-    }
-    if (!contribution.exact) {
-      incompleteRuns += 1;
-      continue;
-    }
-    exactRuns += 1;
-    numerator += contribution.numerator;
-    denominator += contribution.denominator;
-    if (contribution.numerator > maximum) {
-      maximum = contribution.numerator;
-    }
-  }
-  if (unit === "max") {
-    numerator = denominator === 0 ? 0 : maximum;
-  }
-  const value = denominator === 0 ? null : unit === "ratio" || unit === "mean" ? numerator / denominator : numerator;
-  return {
-    numerator,
-    denominator,
-    value,
-    coverage: { exact: exactRuns, incomplete: incompleteRuns }
-  };
 }
 function completionContribution(run) {
   const terminal = run.terminal.value;
@@ -32304,63 +30681,6 @@ function costContribution(run) {
   }
   return exact(cost.value, 1);
 }
-var UNKNOWN_ROLE = "unknown";
-var MIXED_ROLE = "mixed";
-function roleComponent(attempts) {
-  if (attempts.length === 0) {
-    return UNKNOWN_ROLE;
-  }
-  const triples = /* @__PURE__ */ new Set();
-  for (const attempt of attempts) {
-    const vendor = attempt.model.vendor.value;
-    const model = attempt.model.model.value;
-    const effort = attempt.model.effort.value;
-    if (vendor === null || model === null || effort === null) {
-      return UNKNOWN_ROLE;
-    }
-    triples.add(`${vendor}/${model}/${effort}`);
-  }
-  if (triples.size > 1) {
-    return MIXED_ROLE;
-  }
-  return [...triples][0] ?? UNKNOWN_ROLE;
-}
-function deriveRunSignature(run) {
-  const planner = [];
-  const implementer = [];
-  const reviewer = [];
-  let attributable = modelAttemptSetIsExact(run);
-  for (const attempt of run.attempts) {
-    const kind = attempt.kind.value;
-    if (kind === null) {
-      attributable = false;
-      break;
-    }
-    if (kind === "selection" || kind === "plan") {
-      planner.push(attempt);
-    } else if (kind === "implementation" || kind === "fix") {
-      implementer.push(attempt);
-    } else {
-      reviewer.push(attempt);
-    }
-  }
-  const components = attributable ? {
-    planner: roleComponent(planner),
-    implementer: roleComponent(implementer),
-    reviewer: roleComponent(reviewer)
-  } : {
-    planner: UNKNOWN_ROLE,
-    implementer: UNKNOWN_ROLE,
-    reviewer: UNKNOWN_ROLE
-  };
-  return {
-    ...components,
-    key: `planner=${components.planner} implementer=${components.implementer} reviewer=${components.reviewer}`
-  };
-}
-function compareKeys(left, right) {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
 var KPI_DEFINITIONS = [
   {
     kpi: "completion_rate",
@@ -32468,79 +30788,10 @@ var KPI_DEFINITIONS = [
     contribute: costContribution
   }
 ];
-function deriveEvaluationKpiSource(ordinal, label, report) {
-  const runs = report.runs.filter((run) => run.cohortMembership === "included");
-  const signatureRuns = /* @__PURE__ */ new Map();
-  for (const run of runs) {
-    const signature = deriveRunSignature(run);
-    const existing = signatureRuns.get(signature.key);
-    if (existing === void 0) {
-      signatureRuns.set(signature.key, { signature, runs: [run] });
-    } else {
-      existing.runs.push(run);
-    }
-  }
-  const signatureKeys = [...signatureRuns.keys()].sort(compareKeys);
-  const signatures = signatureKeys.map((key) => {
-    const entry = signatureRuns.get(key);
-    return {
-      planner: entry?.signature.planner ?? UNKNOWN_ROLE,
-      implementer: entry?.signature.implementer ?? UNKNOWN_ROLE,
-      reviewer: entry?.signature.reviewer ?? UNKNOWN_ROLE,
-      key,
-      runCount: entry?.runs.length ?? 0
-    };
-  });
-  const kpis = KPI_DEFINITIONS.map((definition) => {
-    const byWorkflow = definition.withWorkflow ? KPI_WORKFLOW_ORDER.map((workflow) => ({
-      group: workflow,
-      value: foldKpiValue(
-        runs.filter(
-          (run) => (run.workflow.value ?? "unknown") === workflow
-        ),
-        definition.unit,
-        definition.contribute
-      )
-    })) : null;
-    const bySignature = signatureKeys.map((key) => ({
-      group: key,
-      value: foldKpiValue(
-        signatureRuns.get(key)?.runs ?? [],
-        definition.unit,
-        definition.contribute
-      )
-    }));
-    return {
-      kpi: definition.kpi,
-      measure: definition.measure,
-      unit: definition.unit,
-      overall: foldKpiValue(runs, definition.unit, definition.contribute),
-      byWorkflow,
-      bySignature
-    };
-  });
-  return {
-    ordinal,
-    label,
-    includedRunCount: report.cohort.includedRunCount,
-    issueCount: report.issues.length,
-    signatures,
-    kpis
-  };
-}
-function deriveEvaluationKpiReport(sources) {
-  return {
-    schema: EVALUATION_KPI_SCHEMA,
-    schemaVersion: EVALUATION_KPI_SCHEMA_VERSION,
-    sources: sources.map(
-      (source, index) => deriveEvaluationKpiSource(index + 1, source.label, source.report)
-    )
-  };
-}
 function inputError(sourceName, detail) {
   return new BanzaiError(
     "INVALID_EVAL_INPUT",
-    `Evaluation KPI input ${sourceName} is not a usable banzai-evaluation-export/v1 document: ${detail}`
+    `Evaluation KPI input ${sourceName} is not a usable banzai-evaluation-export/v2 document: ${detail}`
   );
 }
 function isRecord5(value) {
@@ -32629,28 +30880,7 @@ function validateRun(sourceName, run, index) {
     throw inputError(sourceName, `runs[${index}] is missing usage metrics`);
   }
 }
-function decodeEvaluationExportInput(text2, sourceName) {
-  let parsed;
-  try {
-    parsed = JSON.parse(text2);
-  } catch {
-    throw inputError(sourceName, "the file is not valid JSON");
-  }
-  if (!isRecord5(parsed)) {
-    throw inputError(sourceName, "the document is not a JSON object");
-  }
-  if (parsed.schema !== EVALUATION_EXPORT_SCHEMA) {
-    throw inputError(
-      sourceName,
-      "the document does not carry the evaluation export schema identity"
-    );
-  }
-  if (parsed.schemaVersion !== 1) {
-    throw inputError(
-      sourceName,
-      "the document carries an unsupported evaluation export schema version"
-    );
-  }
+function validateEvaluationExportFields(parsed, sourceName) {
   const cohort = parsed.cohort;
   if (!isRecord5(cohort) || typeof cohort.includedRunCount !== "number") {
     throw inputError(sourceName, "the document is missing cohort evidence");
@@ -32664,7 +30894,6 @@ function decodeEvaluationExportInput(text2, sourceName) {
   parsed.runs.forEach((run, index) => {
     validateRun(sourceName, run, index);
   });
-  return parsed;
 }
 function decodeEvaluationExportV2Input(text2, sourceName) {
   let parsed;
@@ -32673,16 +30902,17 @@ function decodeEvaluationExportV2Input(text2, sourceName) {
   } catch {
     throw inputError(sourceName, "invalid JSON");
   }
-  if (!isRecord5(parsed) || parsed.schema !== "banzai-evaluation-export/v2" || parsed.schemaVersion !== 2 || !Array.isArray(parsed.runs) || Object.keys(parsed).sort().join(",") !== "aggregates,cohort,issues,runs,schema,schemaVersion")
-    throw inputError(sourceName, "export v2 is required");
-  decodeEvaluationExportInput(
-    JSON.stringify({
-      ...parsed,
-      schema: EVALUATION_EXPORT_SCHEMA,
-      schemaVersion: 1
-    }),
-    sourceName
-  );
+  if (!isRecord5(parsed))
+    throw inputError(sourceName, "the document is not a JSON object");
+  if (parsed.schema !== EVALUATION_EXPORT_SCHEMA || parsed.schemaVersion !== 2)
+    throw new ResourceVersionUnsupportedError(
+      "evaluation export",
+      `${String(parsed.schema)} (${String(parsed.schemaVersion)})`,
+      "banzai-evaluation-export/v2 (2)"
+    );
+  if (!Array.isArray(parsed.runs) || Object.keys(parsed).sort().join(",") !== "aggregates,cohort,issues,runs,schema,schemaVersion")
+    throw inputError(sourceName, "invalid export v2 shape");
+  validateEvaluationExportFields(parsed, sourceName);
   for (const run of parsed.runs) {
     const evidence2 = run.verificationEvidence;
     if (!isRecord5(evidence2) || Object.keys(evidence2).sort().join(",") !== "coverage,dispositions,physicalAttempts" || !["exact", "incomplete"].includes(evidence2.coverage) || !Array.isArray(evidence2.physicalAttempts) || !Array.isArray(evidence2.dispositions))
@@ -32772,105 +31002,6 @@ function deriveEvaluationKpiV2(sources) {
 }
 
 // src/evaluation-kpi-render.ts
-function table3(headers, rows) {
-  return [
-    `| ${headers.join(" | ")} |`,
-    `| ${headers.map(() => "---").join(" | ")} |`,
-    ...rows.map((row) => `| ${row.join(" | ")} |`)
-  ];
-}
-function amount(value) {
-  return Number.isInteger(value) ? String(value) : value.toFixed(2);
-}
-function cell2(unit, item) {
-  const rendered = item.value === null ? "unavailable" : unit === "ratio" ? `${(100 * item.value).toFixed(1)}%` : unit === "mean" ? item.value.toFixed(2) : String(item.value);
-  return `${rendered} (${amount(item.numerator)}/${amount(item.denominator)}; exact ${item.coverage.exact}, incomplete ${item.coverage.incomplete})`;
-}
-function entryRows(entries, unit) {
-  const rows = [];
-  rows.push([
-    "overall",
-    ...entries.map(
-      (entry) => entry === void 0 ? "-" : cell2(unit, entry.overall)
-    )
-  ]);
-  const workflowKeys = [];
-  for (const entry of entries) {
-    for (const group of entry?.byWorkflow ?? []) {
-      if (!workflowKeys.includes(group.group)) {
-        workflowKeys.push(group.group);
-      }
-    }
-  }
-  for (const key of workflowKeys) {
-    rows.push([
-      key,
-      ...entries.map((entry) => {
-        const group = entry?.byWorkflow?.find((item) => item.group === key);
-        return group === void 0 ? "-" : cell2(unit, group.value);
-      })
-    ]);
-  }
-  const signatureKeys = [
-    ...new Set(
-      entries.flatMap(
-        (entry) => (entry?.bySignature ?? []).map((group) => group.group)
-      )
-    )
-  ].sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
-  for (const key of signatureKeys) {
-    rows.push([
-      key,
-      ...entries.map((entry) => {
-        const group = entry?.bySignature.find((item) => item.group === key);
-        return group === void 0 ? "-" : cell2(unit, group.value);
-      })
-    ]);
-  }
-  return rows;
-}
-function renderEvaluationKpiJson(report) {
-  return `${JSON.stringify(report, null, 2)}
-`;
-}
-function renderEvaluationKpiMarkdown(report) {
-  const lines = [
-    "# Banzai Evaluation KPIs",
-    "",
-    `Schema: \`${report.schema}\` (version ${report.schemaVersion})`,
-    "",
-    "## Sources",
-    "",
-    ...table3(
-      ["Ordinal", "Label", "Included runs", "Issues"],
-      report.sources.map((source) => [
-        String(source.ordinal),
-        source.label,
-        String(source.includedRunCount),
-        String(source.issueCount)
-      ])
-    ),
-    "",
-    "Each cell reads `value (numerator/denominator; exact e, incomplete i)`: only runs with exact evidence contribute, and a zero denominator renders as unavailable rather than inventing a value."
-  ];
-  const first = report.sources[0];
-  if (first !== void 0) {
-    first.kpis.forEach((definition, index) => {
-      const entries = report.sources.map((source) => source.kpis[index]);
-      lines.push(
-        "",
-        `## ${definition.kpi} (${definition.measure})`,
-        "",
-        ...table3(
-          ["Row", ...report.sources.map((source) => source.label)],
-          entryRows(entries, definition.unit)
-        )
-      );
-    });
-  }
-  lines.push("");
-  return lines.join("\n");
-}
 function renderEvaluationKpiV2Markdown(report) {
   return "# Banzai Evaluation KPIs\n\nSchema: `banzai-evaluation-kpi/v2` (version 2)\n\nCounts and ratios use exact runs only; incomplete coverage remains explicit.\n\n| Source | Physical attempts | Executed checks | Reused checks | Reuse ratio | Exact / incomplete runs |\n| --- | --- | --- | --- | --- | --- |\n" + report.sources.map(
     (source) => `| ${source.ordinal} | ${source.physicalAttempts} | ${source.executedChecks} | ${source.reusedChecks} | ${source.reuseRatio.value ?? "unavailable"} (${source.reuseRatio.numerator}/${source.reuseRatio.denominator}) | ${source.coverage.exact} / ${source.coverage.incomplete} |`
@@ -32892,12 +31023,18 @@ function parseEvaluationKpiArgs(args) {
     const argument = args[index];
     if (argument === "--schema-version") {
       const value = optionValue(args, index);
-      if (schemaVersion !== void 0 || !["1", "2"].includes(value))
+      if (schemaVersion !== void 0)
         throw new BanzaiError(
           "INVALID_EVAL_OPTION",
-          "Evaluation schema version must be 1 or 2 and specified once."
+          "Evaluation schema version must be specified once."
         );
-      schemaVersion = value === "1" ? 1 : 2;
+      if (value !== "2")
+        throw new ResourceVersionUnsupportedError(
+          "evaluation schema",
+          value,
+          "2"
+        );
+      schemaVersion = 2;
       index += 1;
       continue;
     }
@@ -32966,7 +31103,7 @@ function parseEvaluationKpiArgs(args) {
     );
   }
   return {
-    ...schemaVersion === void 0 ? {} : { schemaVersion },
+    schemaVersion: 2,
     format,
     from,
     to,
@@ -32974,14 +31111,8 @@ function parseEvaluationKpiArgs(args) {
     inputs
   };
 }
-function renderKpi(options, sources, io) {
-  const report = deriveEvaluationKpiReport(sources);
-  io.stdout(
-    options.format === "json" ? renderEvaluationKpiJson(report) : renderEvaluationKpiMarkdown(report)
-  );
-}
 async function executeEvaluationKpiFromInputs(options, io) {
-  if (options.schemaVersion === 2) {
+  {
     const inputs = [];
     for (const file of options.inputs) {
       let text2;
@@ -33001,40 +31132,16 @@ async function executeEvaluationKpiFromInputs(options, io) {
     );
     return;
   }
-  const sources = [];
-  for (const [index, file] of options.inputs.entries()) {
-    let text2;
-    try {
-      text2 = await readFile13(file, "utf8");
-    } catch {
-      throw new BanzaiError(
-        "INVALID_EVAL_INPUT",
-        `Evaluation KPI input ${file} cannot be read.`
-      );
-    }
-    sources.push({
-      label: `${index + 1}: ${path25.basename(file)}`,
-      report: decodeEvaluationExportInput(text2, file)
-    });
-  }
-  renderKpi(options, sources, io);
 }
 async function executeEvaluationKpiFromCheckout(repoRoot, options, io) {
-  if (options.schemaVersion === 2) {
+  {
     const exported = await collectEvaluationExportV2(repoRoot, options);
-    const report2 = deriveEvaluationKpiV2([exported]);
+    const report = deriveEvaluationKpiV2([exported]);
     io.stdout(
-      options.format === "json" ? JSON.stringify(report2, null, 2) + "\n" : renderEvaluationKpiV2Markdown(report2)
+      options.format === "json" ? JSON.stringify(report, null, 2) + "\n" : renderEvaluationKpiV2Markdown(report)
     );
     return;
   }
-  const report = await collectEvaluationExport(repoRoot, {
-    format: "json",
-    from: options.from,
-    to: options.to,
-    runIds: options.runIds
-  });
-  renderKpi(options, [{ label: "current", report }], io);
 }
 
 // src/inquirer-io.ts
@@ -33429,7 +31536,7 @@ import {
   writeFile as writeFile5
 } from "node:fs/promises";
 import os2 from "node:os";
-import path26 from "node:path";
+import path25 from "node:path";
 
 // ../../release-policy.json
 var release_policy_default = {
@@ -33488,26 +31595,28 @@ var release_policy_default = {
       ".claude-plugin/marketplace.json",
       "plugins/banzai/hooks/hooks.json",
       "plugins/banzai/contracts/contract.json",
-      "plugins/banzai/contracts/v1/workflow-selection.schema.json",
-      "plugins/banzai/contracts/v1/phase-result.schema.json",
-      "plugins/banzai/contracts/v1/review-result.schema.json",
-      "plugins/banzai/contracts/v2/phase-result.schema.json",
-      "plugins/banzai/contracts/v2/review-result.schema.json",
-      "plugins/banzai/contracts/v3/phase-result.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/acquire-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/archive.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/create-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/export-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/initialize-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/inspect-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/inventory-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/work-binding.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/acquire-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/create-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/export-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/initialize-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/inspect-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/inventory-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/release-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/restore-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/verify-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/write-request.schema.json",
       "plugins/banzai/contracts/artifacts/v1/layout.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/release-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/restore-request.schema.json",
       "plugins/banzai/contracts/artifacts/v1/result.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/verify-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/work-binding.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/write-request.schema.json"
+      "plugins/banzai/contracts/artifacts/v1/archive.schema.json",
+      "plugins/banzai/contracts/v3/phase-result.schema.json",
+      "plugins/banzai/contracts/v2/review-result.schema.json",
+      "plugins/banzai/contracts/v1/workflow-selection.schema.json",
+      "plugins/banzai/contracts/verification/v1/decision.schema.json",
+      "plugins/banzai/contracts/verification/v1/applicability.schema.json",
+      "plugins/banzai/contracts/verification/v1/inspect-request.schema.json",
+      "plugins/banzai/contracts/verification/v1/execute-request.schema.json",
+      "plugins/banzai/contracts/verification/v1/result.schema.json"
     ],
     requiredPaths: [
       "plugins/banzai/hooks/spec-gate.cjs",
@@ -33525,12 +31634,6 @@ var release_policy_default = {
       "plugins/banzai/skills/test-writing/SKILL.md",
       "plugins/banzai/contracts/README.md",
       "plugins/banzai/contracts/contract.json",
-      "plugins/banzai/contracts/v1/workflow-selection.schema.json",
-      "plugins/banzai/contracts/v1/phase-result.schema.json",
-      "plugins/banzai/contracts/v1/review-result.schema.json",
-      "plugins/banzai/contracts/v2/phase-result.schema.json",
-      "plugins/banzai/contracts/v2/review-result.schema.json",
-      "plugins/banzai/contracts/v3/phase-result.schema.json",
       "plugins/banzai/.claude-plugin/plugin.json",
       "plugins/banzai/.codex-plugin/plugin.json",
       "packages/orchestrator/package.json",
@@ -33543,27 +31646,12 @@ var release_policy_default = {
       "plugins/banzai/policies/security-assurance.md",
       "plugins/banzai/policies/engineering-quality.md",
       "plugins/banzai/policies/plan-task-completion.md",
-      "plugins/banzai/skills/project-manifest/references/layout-migration.md",
       "plugins/banzai/policies/artifact-storage.md",
       "plugins/banzai/lib/artifact-storage.mjs",
       "plugins/banzai/scripts/artifacts.cjs",
       "plugins/banzai/lib/artifact-archive.mjs",
       "plugins/banzai/lib/project-adoption.mjs",
       "plugins/banzai/lib/review-snapshot.mjs",
-      "plugins/banzai/contracts/artifacts/v1/acquire-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/archive.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/create-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/export-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/initialize-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/inspect-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/inventory-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/layout.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/release-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/restore-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/result.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/verify-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/work-binding.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/write-request.schema.json",
       "plugins/banzai/lib/artifact-readers.mjs",
       "plugins/banzai/phases/planning.md",
       "plugins/banzai/phases/implementation.md",
@@ -33580,56 +31668,54 @@ var release_policy_default = {
       "plugins/banzai/guidance/feature.md",
       "plugins/banzai/guidance/fix.md",
       "plugins/banzai/guidance/manifest.md",
-      "packages/orchestrator/src/phase-resources.ts"
+      "packages/orchestrator/src/phase-resources.ts",
+      "plugins/banzai/contracts/artifacts/v2/work-binding.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/acquire-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/create-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/export-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/initialize-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/inspect-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/inventory-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/release-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/restore-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/verify-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/write-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/layout.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/result.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/archive.schema.json",
+      "plugins/banzai/contracts/v3/phase-result.schema.json",
+      "plugins/banzai/contracts/v2/review-result.schema.json",
+      "plugins/banzai/contracts/v1/workflow-selection.schema.json",
+      "plugins/banzai/contracts/verification/v1/decision.schema.json",
+      "plugins/banzai/contracts/verification/v1/applicability.schema.json",
+      "plugins/banzai/contracts/verification/v1/inspect-request.schema.json",
+      "plugins/banzai/contracts/verification/v1/execute-request.schema.json",
+      "plugins/banzai/contracts/verification/v1/result.schema.json"
     ]
   },
   contracts: {
     phaseResult: {
       currentPath: "plugins/banzai/contracts/v3/phase-result.schema.json",
-      currentSchemaVersion: 3,
-      legacy: [
-        {
-          path: "plugins/banzai/contracts/v1/phase-result.schema.json",
-          schemaVersion: 1,
-          sha256: "62b390d3ac0e4bb5f552fa902be0e23644b3928a482fc258f5892404bb205f77"
-        },
-        {
-          path: "plugins/banzai/contracts/v2/phase-result.schema.json",
-          schemaVersion: 2,
-          sha256: "7ede6c88fca7d95b6a7693017f45e9c01339461aa5991e03efabe9598f3ea7fd"
-        }
-      ]
+      currentSchemaVersion: 3
     },
     reviewResult: {
       currentPath: "plugins/banzai/contracts/v2/review-result.schema.json",
-      currentSchemaVersion: 2,
-      legacy: [
-        {
-          path: "plugins/banzai/contracts/v1/review-result.schema.json",
-          sha256: "bc8e5b8f9da3160799a6fa4d5efa1c607eda86400e94f6cdd57b666697f15d78"
-        }
-      ]
+      currentSchemaVersion: 2
     },
     state: {
-      currentSchemaVersion: 4,
-      legacySchemaVersions: [
-        1,
-        2,
-        3
-      ]
+      currentSchemaVersion: 5
     },
     agentControl: {
-      contractVersion: "3.0.0",
+      contractVersion: "4.0.0",
       capabilities: "banzai-agent-capabilities/v3",
       status: "banzai-agent-status/v2",
       request: "banzai-agent-request/v1",
       answer: "banzai-agent-answer/v2",
-      legacyAnswer: "banzai-agent-answer/v1",
       recovery: "banzai-agent-recovery/v1"
     },
     evaluation: {
-      export: "banzai-evaluation-export/v1",
-      kpi: "banzai-evaluation-kpi/v1"
+      export: "banzai-evaluation-export/v2",
+      kpi: "banzai-evaluation-kpi/v2"
     }
   },
   orchestrator: {
@@ -33702,6 +31788,550 @@ var release_policy_default = {
         pointer: "/packages//version"
       }
     ]
+  },
+  compatibility: {
+    major: 3,
+    families: [
+      {
+        id: "run-state",
+        supported: [
+          "5"
+        ],
+        removed: [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "orchestrator-config",
+        supported: [
+          "3"
+        ],
+        removed: [
+          "1",
+          "2"
+        ],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "work-binding",
+        supported: [
+          "banzai-work-binding/v2"
+        ],
+        removed: [
+          "banzai-work-binding/v1"
+        ],
+        schemaFiles: [
+          "plugins/banzai/contracts/artifacts/v2/work-binding.schema.json"
+        ],
+        removedTokens: [
+          "banzai-work-binding/v1"
+        ]
+      },
+      {
+        id: "artifact-request",
+        supported: [
+          "banzai-artifact-request/v2"
+        ],
+        removed: [
+          "banzai-artifact-request/v1"
+        ],
+        schemaFiles: [
+          "plugins/banzai/contracts/artifacts/v2/acquire-request.schema.json",
+          "plugins/banzai/contracts/artifacts/v2/create-request.schema.json",
+          "plugins/banzai/contracts/artifacts/v2/export-request.schema.json",
+          "plugins/banzai/contracts/artifacts/v2/initialize-request.schema.json",
+          "plugins/banzai/contracts/artifacts/v2/inspect-request.schema.json",
+          "plugins/banzai/contracts/artifacts/v2/inventory-request.schema.json",
+          "plugins/banzai/contracts/artifacts/v2/release-request.schema.json",
+          "plugins/banzai/contracts/artifacts/v2/restore-request.schema.json",
+          "plugins/banzai/contracts/artifacts/v2/verify-request.schema.json",
+          "plugins/banzai/contracts/artifacts/v2/write-request.schema.json"
+        ],
+        removedTokens: [
+          "banzai-artifact-request/v1"
+        ]
+      },
+      {
+        id: "artifact-layout",
+        supported: [
+          "banzai-artifact-layout/v1"
+        ],
+        removed: [],
+        schemaFiles: [
+          "plugins/banzai/contracts/artifacts/v1/layout.schema.json"
+        ],
+        removedTokens: []
+      },
+      {
+        id: "artifact-storage-layout",
+        supported: [
+          "private"
+        ],
+        removed: [
+          "legacy"
+        ],
+        schemaFiles: [],
+        removedTokens: [
+          "artifact-policy-migration.md",
+          "legacySelection",
+          "legacyCandidates"
+        ]
+      },
+      {
+        id: "artifact-result",
+        supported: [
+          "banzai-artifact-result/v1"
+        ],
+        removed: [],
+        schemaFiles: [
+          "plugins/banzai/contracts/artifacts/v1/result.schema.json"
+        ],
+        removedTokens: []
+      },
+      {
+        id: "artifact-archive",
+        supported: [
+          "banzai-artifact-archive/v1"
+        ],
+        removed: [],
+        schemaFiles: [
+          "plugins/banzai/contracts/artifacts/v1/archive.schema.json"
+        ],
+        removedTokens: []
+      },
+      {
+        id: "phase-result",
+        supported: [
+          "phase-result/v3"
+        ],
+        removed: [
+          "phase-result/v1",
+          "phase-result/v2"
+        ],
+        schemaFiles: [
+          "plugins/banzai/contracts/v3/phase-result.schema.json"
+        ],
+        removedTokens: [
+          "phase-result/v1",
+          "phase-result/v2"
+        ]
+      },
+      {
+        id: "review-result",
+        supported: [
+          "review-result/v2"
+        ],
+        removed: [
+          "review-result/v1"
+        ],
+        schemaFiles: [
+          "plugins/banzai/contracts/v2/review-result.schema.json"
+        ],
+        removedTokens: [
+          "review-result/v1"
+        ]
+      },
+      {
+        id: "workflow-selection",
+        supported: [
+          "workflow-selection/v1"
+        ],
+        removed: [],
+        schemaFiles: [
+          "plugins/banzai/contracts/v1/workflow-selection.schema.json"
+        ],
+        removedTokens: []
+      },
+      {
+        id: "review-snapshot",
+        supported: [
+          "banzai-review-snapshot/v3"
+        ],
+        removed: [
+          "banzai-review-snapshot/v1",
+          "banzai-review-snapshot/v2"
+        ],
+        schemaFiles: [],
+        removedTokens: [
+          "banzai-review-snapshot/v1",
+          "banzai-review-snapshot/v2"
+        ]
+      },
+      {
+        id: "feature-review",
+        supported: [
+          "banzai-feature-review/v4"
+        ],
+        removed: [
+          "banzai-feature-review/v1",
+          "banzai-feature-review/v2",
+          "banzai-feature-review/v3"
+        ],
+        schemaFiles: [],
+        removedTokens: [
+          "banzai-feature-review/v1",
+          "banzai-feature-review/v2",
+          "banzai-feature-review/v3"
+        ]
+      },
+      {
+        id: "standalone-review",
+        supported: [
+          "banzai-standalone-review/v1"
+        ],
+        removed: [],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "agent-capabilities",
+        supported: [
+          "banzai-agent-capabilities/v3"
+        ],
+        removed: [
+          "banzai-agent-capabilities/v1"
+        ],
+        schemaFiles: [],
+        removedTokens: [
+          "banzai-agent-capabilities/v1"
+        ]
+      },
+      {
+        id: "agent-status",
+        supported: [
+          "banzai-agent-status/v2"
+        ],
+        removed: [
+          "banzai-agent-status/v1"
+        ],
+        schemaFiles: [],
+        removedTokens: [
+          "banzai-agent-status/v1"
+        ]
+      },
+      {
+        id: "agent-answer",
+        supported: [
+          "banzai-agent-answer/v2"
+        ],
+        removed: [
+          "banzai-agent-answer/v1"
+        ],
+        schemaFiles: [],
+        removedTokens: [
+          "banzai-agent-answer/v1"
+        ]
+      },
+      {
+        id: "agent-request",
+        supported: [
+          "banzai-agent-request/v1"
+        ],
+        removed: [],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "agent-recovery",
+        supported: [
+          "banzai-agent-recovery/v1"
+        ],
+        removed: [],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "evaluation-export",
+        supported: [
+          "banzai-evaluation-export/v2"
+        ],
+        removed: [
+          "banzai-evaluation-export/v1"
+        ],
+        schemaFiles: [],
+        removedTokens: [
+          "banzai-evaluation-export/v1",
+          "legacy_absent",
+          "LEGACY_FIELD_ABSENT"
+        ]
+      },
+      {
+        id: "evaluation-kpi",
+        supported: [
+          "banzai-evaluation-kpi/v2"
+        ],
+        removed: [
+          "banzai-evaluation-kpi/v1"
+        ],
+        schemaFiles: [],
+        removedTokens: [
+          "banzai-evaluation-kpi/v1"
+        ]
+      },
+      {
+        id: "model-attempt",
+        supported: [
+          "2"
+        ],
+        removed: [
+          "1"
+        ],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "verification-ledger",
+        supported: [
+          "2"
+        ],
+        removed: [
+          "1"
+        ],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "version-transaction",
+        supported: [
+          "2"
+        ],
+        removed: [
+          "1"
+        ],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "instruction-layout",
+        supported: [
+          "target"
+        ],
+        removed: [
+          "legacy"
+        ],
+        schemaFiles: [],
+        removedTokens: [
+          "layout-migration.md",
+          "Last legacy-compatible release",
+          "legacy Banzai layout"
+        ]
+      },
+      {
+        id: "doctor",
+        supported: [
+          "banzai-doctor/v3"
+        ],
+        removed: [],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "live-compatibility",
+        supported: [
+          "banzai-live-compatibility/v2"
+        ],
+        removed: [],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "context-attempt",
+        supported: [
+          "banzai-context-attempt/v1"
+        ],
+        removed: [],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "context-report",
+        supported: [
+          "banzai-context-report/v1"
+        ],
+        removed: [],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "cancellation-report",
+        supported: [
+          "banzai-cancellation-report/v1"
+        ],
+        removed: [],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "human-time",
+        supported: [
+          "banzai-human-time/v1"
+        ],
+        removed: [],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "plan-task-completion",
+        supported: [
+          "banzai-plan-task-completion/v1"
+        ],
+        removed: [],
+        schemaFiles: [],
+        removedTokens: [
+          "PLAN_TASK_COMPLETION_LEGACY"
+        ]
+      },
+      {
+        id: "terminal-attempt-checkpoint",
+        supported: [
+          "banzai-terminal-attempt-checkpoint/v1"
+        ],
+        removed: [],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "recovery-authorization",
+        supported: [
+          "banzai-recovery-authorization/v1"
+        ],
+        removed: [],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "decision-consultation",
+        supported: [
+          "banzai-decision-consultation/v1"
+        ],
+        removed: [],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "verification-policy",
+        supported: [
+          "banzai-verification-policy/v1"
+        ],
+        removed: [],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "verification-obligations",
+        supported: [
+          "banzai-verification-obligations/v1"
+        ],
+        removed: [],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "verification-origin-start",
+        supported: [
+          "banzai-verification-origin-start/v1"
+        ],
+        removed: [],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "verification-origin-finish",
+        supported: [
+          "banzai-verification-origin-finish/v1"
+        ],
+        removed: [],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "verification-decision",
+        supported: [
+          "banzai-verification-decision/v1"
+        ],
+        removed: [],
+        schemaFiles: [
+          "plugins/banzai/contracts/verification/v1/decision.schema.json"
+        ],
+        removedTokens: []
+      },
+      {
+        id: "verification-applicability",
+        supported: [
+          "banzai-verification-applicability/v1"
+        ],
+        removed: [],
+        schemaFiles: [
+          "plugins/banzai/contracts/verification/v1/applicability.schema.json"
+        ],
+        removedTokens: []
+      },
+      {
+        id: "verification-request",
+        supported: [
+          "banzai-verification-request/v1"
+        ],
+        removed: [],
+        schemaFiles: [
+          "plugins/banzai/contracts/verification/v1/inspect-request.schema.json",
+          "plugins/banzai/contracts/verification/v1/execute-request.schema.json"
+        ],
+        removedTokens: []
+      },
+      {
+        id: "verification-result",
+        supported: [
+          "banzai-verification-result/v1"
+        ],
+        removed: [],
+        schemaFiles: [
+          "plugins/banzai/contracts/verification/v1/result.schema.json"
+        ],
+        removedTokens: []
+      },
+      {
+        id: "cancellation-capabilities",
+        supported: [
+          "banzai-cancellation-capabilities/v1"
+        ],
+        removed: [],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "cancellation-observation",
+        supported: [
+          "banzai-cancellation-observation/v1"
+        ],
+        removed: [],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "live-write-probe",
+        supported: [
+          "banzai-live-write-probe/v1"
+        ],
+        removed: [],
+        schemaFiles: [],
+        removedTokens: []
+      },
+      {
+        id: "instruction-baseline",
+        supported: [
+          "banzai-instruction-baseline/v1"
+        ],
+        removed: [],
+        schemaFiles: [],
+        removedTokens: []
+      }
+    ]
   }
 };
 
@@ -33710,11 +32340,13 @@ var LIVE_COMPATIBILITY_SCHEMA = "banzai-live-compatibility/v2";
 var LIVE_COMPATIBILITY_SCHEMA_VERSION = 2;
 var SOURCE_CANARY = "src/live-source-canary.txt";
 var CONTROL_CANARY = ".banzai/live-control-canary.json";
-var OTHER_ARTIFACT = "documentation/features/live-compatibility/review-other.md";
-var REVIEW_ARTIFACT = "documentation/features/live-compatibility/review-1.md";
+var FIXTURE_WORK_ID = "00000000-0000-4000-8000-000000000001";
+var FIXTURE_WORK = `.banzai/work/${FIXTURE_WORK_ID}`;
+var OTHER_ARTIFACT = `${FIXTURE_WORK}/review-other.md`;
+var REVIEW_ARTIFACT = `${FIXTURE_WORK}/review-1.md`;
 var REVIEW_CANDIDATE = ".banzai/runs/live-compatibility/attempts/review-1.review-candidate.md";
-var DESCRIPTION_ARTIFACT = "documentation/features/live-compatibility/description.md";
-var PLAN_ARTIFACT = "documentation/development-plans/live-compatibility/plan.md";
+var DESCRIPTION_ARTIFACT = `${FIXTURE_WORK}/description.md`;
+var PLAN_ARTIFACT = `${FIXTURE_WORK}/plan.md`;
 var WRITE_PROBE = ".banzai/live-write-probe.cjs";
 var WRITE_PROBE_SCHEMA = "banzai-live-write-probe/v1";
 var RUN_ID = "live-compatibility";
@@ -33740,6 +32372,7 @@ var CHECK_IDS = [
   "cleanup.complete"
 ];
 var EXPECTED_REVIEW_RESULT = {
+  schemaVersion: 2,
   contractVersion: CONTRACT_VERSION2,
   verdict: "pass",
   summary: "Live compatibility permission probe completed.",
@@ -33978,7 +32611,7 @@ async function inspectAuthRoot(root) {
   async function visit(directory3) {
     const entries = await readdir9(directory3, { withFileTypes: true });
     for (const entry of entries) {
-      const entryPath = path26.join(directory3, entry.name);
+      const entryPath = path25.join(directory3, entry.name);
       const metadata2 = await lstat14(entryPath);
       if (metadata2.isSymbolicLink()) {
         throw new BanzaiError(
@@ -34024,7 +32657,7 @@ async function secureCopiedTree(root) {
   await chmod3(root, 448);
   const entries = await readdir9(root, { withFileTypes: true });
   for (const entry of entries) {
-    const entryPath = path26.join(root, entry.name);
+    const entryPath = path25.join(root, entry.name);
     if (entry.isDirectory()) {
       await secureCopiedTree(entryPath);
     } else {
@@ -34040,7 +32673,7 @@ async function copyAuthRoot(repositoryRoot, sourceValue3, target) {
     );
   }
   const source = await realpath10(sourceValue3).catch(() => null);
-  if (source === null || source === repositoryRoot || source.startsWith(`${repositoryRoot}${path26.sep}`)) {
+  if (source === null || source === repositoryRoot || source.startsWith(`${repositoryRoot}${path25.sep}`)) {
     throw new BanzaiError(
       "LIVE_AUTH_UNAVAILABLE",
       "Live auth root is inside the repository or unavailable."
@@ -34064,7 +32697,7 @@ async function treeDigest(root, excludedPrefixes = []) {
       )) {
         continue;
       }
-      const absolutePath = path26.join(directory3, child.name);
+      const absolutePath = path25.join(directory3, child.name);
       const metadata = await lstat14(absolutePath);
       const mode2 = metadata.mode & 511;
       if (metadata.isDirectory()) {
@@ -34084,41 +32717,81 @@ async function treeDigest(root, excludedPrefixes = []) {
   return createHash17("sha256").update(entries.join("\n")).digest("hex");
 }
 async function prepareScenario(root, rawRoot) {
-  await mkdir8(path26.join(root, path26.dirname(DESCRIPTION_ARTIFACT)), {
+  await mkdir8(path25.join(root, path25.dirname(DESCRIPTION_ARTIFACT)), {
     recursive: true
   });
-  await mkdir8(path26.join(root, path26.dirname(PLAN_ARTIFACT)), {
+  await mkdir8(path25.join(root, path25.dirname(PLAN_ARTIFACT)), {
     recursive: true
   });
   await writeFile5(
-    path26.join(root, DESCRIPTION_ARTIFACT),
+    path25.join(root, DESCRIPTION_ARTIFACT),
     "# Live Compatibility Fixture\n\nPermission isolation fixture.\n",
     "utf8"
   );
   await writeFile5(
-    path26.join(root, PLAN_ARTIFACT),
+    path25.join(root, PLAN_ARTIFACT),
     "# Live Compatibility Plan\n\nNo source mutation is authorized.\n",
     "utf8"
+  );
+  const binding = {
+    schema: "banzai-work-binding/v2",
+    schemaVersion: 2,
+    workId: FIXTURE_WORK_ID,
+    slug: "live-compatibility",
+    mode: "strict",
+    layout: "private",
+    createdAt: "2026-09-08T00:00:00.000Z",
+    sourceCommit: null,
+    artifacts: artifactRoles2(
+      FIXTURE_WORK_ID,
+      "live-compatibility",
+      "strict",
+      "private"
+    )
+  };
+  const bindingBytes = canonicalJson2(binding);
+  const bound = {
+    binding,
+    sha256: digestBytes2(bindingBytes)
+  };
+  await writeFile5(path25.join(root, FIXTURE_WORK, "work.json"), bindingBytes, {
+    mode: 384
+  });
+  await writeFile5(
+    path25.join(root, ".banzai/artifacts.json"),
+    JSON.stringify({
+      schema: "banzai-artifact-layout/v1",
+      schemaVersion: 1,
+      layout: "private"
+    })
+  );
+  const ignores = await readFile14(path25.join(root, ".gitignore"), "utf8").catch(
+    () => ""
+  );
+  await writeFile5(
+    path25.join(root, ".gitignore"),
+    ignores + "\n/.banzai/work/\n/.banzai/runs/\n"
   );
   const approval = await digestArtifactBundle(root, [
     DESCRIPTION_ARTIFACT,
     PLAN_ARTIFACT
   ]);
-  const stateDirectory = path26.join(root, ".banzai", "runs", RUN_ID);
+  const stateDirectory = path25.join(root, ".banzai", "runs", RUN_ID);
   await mkdir8(stateDirectory, { recursive: true });
-  await mkdir8(path26.join(stateDirectory, "attempts"), { recursive: true });
+  await mkdir8(path25.join(stateDirectory, "attempts"), { recursive: true });
   await mkdir8(rawRoot, { recursive: true });
   await writeFile5(
-    path26.join(root, ".banzai", "active-run.json"),
+    path25.join(root, ".banzai", "active-run.json"),
     `${JSON.stringify({ schemaVersion: 1, runId: RUN_ID }, null, 2)}
 `,
     "utf8"
   );
   await writeFile5(
-    path26.join(stateDirectory, "state.json"),
+    path25.join(stateDirectory, "state.json"),
     `${JSON.stringify(
       {
-        schemaVersion: 2,
+        schemaVersion: 5,
+        artifactBinding: bound,
         contractVersion: CONTRACT_VERSION2,
         runId: RUN_ID,
         slug: "live-compatibility",
@@ -34139,7 +32812,7 @@ async function prepareScenario(root, rawRoot) {
     "utf8"
   );
   await writeFile5(
-    path26.join(root, WRITE_PROBE),
+    path25.join(root, WRITE_PROBE),
     `'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
@@ -34170,21 +32843,59 @@ try {
     ".banzai",
     REVIEW_ARTIFACT
   ]);
-  const controlBefore = await treeDigest(path26.join(root, ".banzai"), [
-    "runs/live-compatibility/attempts/review-1.review-candidate.md"
+  const controlBefore = await treeDigest(path25.join(root, ".banzai"), [
+    "runs/live-compatibility/attempts/review-1.review-candidate.md",
+    REVIEW_ARTIFACT.slice(".banzai/".length)
   ]);
+  const baseCommit = "disposable-permission-fixture";
+  const entries = (await reviewApprovedArtifacts(root, approval.paths)).map(
+    (entry) => ({ ...entry, kind: "file" })
+  );
+  const workspace = {
+    schemaVersion: 2,
+    baseCommit,
+    artifactBindingDigest: bound.sha256,
+    digest: createHash17("sha256").update(
+      JSON.stringify({
+        version: 2,
+        baseCommit,
+        artifactBindingDigest: bound.sha256,
+        entries
+      })
+    ).digest("hex"),
+    entries
+  };
+  const decisionBody = {
+    schema: "banzai-verification-decision/v1",
+    schemaVersion: 1,
+    workId: binding.workId,
+    roundId: "permission-fixture",
+    candidateDigest: null,
+    authorityDigest: approval.digest,
+    configurationDigest: evidenceDigest({ profiles: [] }),
+    actions: []
+  };
+  const decision = { ...decisionBody, sha256: evidenceDigest(decisionBody) };
+  const applicability = verificationApplicability(decision, [], {
+    complete: false,
+    reason: "policy_disabled",
+    candidateDigest: null,
+    checks: []
+  });
   const artifact = {
     path: REVIEW_ARTIFACT,
     candidatePath: REVIEW_CANDIDATE,
     slug: "live-compatibility",
     iteration: 1,
     approvedArtifactPaths: approval.paths,
-    workspaceDigest: sourceBefore,
-    verification: []
+    workspaceDigest: workspace.digest,
+    verification: [],
+    verificationEvidence: { decision, applicability, origins: [], attempts: [] }
   };
   artifact.snapshot = sealReviewSnapshot2({
-    schema: "banzai-review-snapshot/v1",
-    schemaVersion: 1,
+    schema: "banzai-review-snapshot/v3",
+    schemaVersion: 3,
+    artifactBinding: bound,
     runId: RUN_ID,
     attemptId: "review-1",
     outputContract: "review-result/v2",
@@ -34197,11 +32908,7 @@ try {
       approvedAt: "2026-09-08T00:00:00.000Z"
     },
     approvedArtifacts: await reviewApprovedArtifacts(root, approval.paths),
-    workspace: {
-      baseCommit: "disposable-permission-fixture",
-      digest: sourceBefore,
-      entries: []
-    },
+    workspace,
     reviewMode: "full",
     changes: [],
     anchor: null,
@@ -34335,11 +33042,11 @@ async function runReviewScenario(vendor, scenario, environment, baseRunner, run,
       now2() - started
     );
     if (valid) {
-      await mkdir8(path26.join(scenario.root, path26.dirname(REVIEW_CANDIDATE)), {
+      await mkdir8(path25.join(scenario.root, path25.dirname(REVIEW_CANDIDATE)), {
         recursive: true
       });
       await writeFile5(
-        path26.join(scenario.root, REVIEW_CANDIDATE),
+        path25.join(scenario.root, REVIEW_CANDIDATE),
         renderReviewArtifact(result, scenario.artifact),
         "utf8"
       );
@@ -34383,16 +33090,17 @@ async function runReviewScenario(vendor, scenario, environment, baseRunner, run,
     ".banzai",
     REVIEW_ARTIFACT
   ]);
-  const controlAfter = await treeDigest(path26.join(scenario.root, ".banzai"), [
-    "runs/live-compatibility/attempts/review-1.review-candidate.md"
+  const controlAfter = await treeDigest(path25.join(scenario.root, ".banzai"), [
+    "runs/live-compatibility/attempts/review-1.review-candidate.md",
+    REVIEW_ARTIFACT.slice(".banzai/".length)
   ]);
-  if (sourceAfter !== scenario.sourceBefore || controlAfter !== scenario.controlBefore || await access6(path26.join(scenario.root, SOURCE_CANARY)).then(
+  if (sourceAfter !== scenario.sourceBefore || controlAfter !== scenario.controlBefore || await access6(path25.join(scenario.root, SOURCE_CANARY)).then(
     () => true,
     () => false
-  ) || await access6(path26.join(scenario.root, CONTROL_CANARY)).then(
+  ) || await access6(path25.join(scenario.root, CONTROL_CANARY)).then(
     () => true,
     () => false
-  ) || await access6(path26.join(scenario.root, OTHER_ARTIFACT)).then(
+  ) || await access6(path25.join(scenario.root, OTHER_ARTIFACT)).then(
     () => true,
     () => false
   )) {
@@ -34479,8 +33187,8 @@ async function candidateClones(repositoryRoot, temporaryRoot, environment, baseR
       "stdout"
     )).trim();
     const clones = {
-      codex: path26.join(temporaryRoot, "codex-candidate"),
-      claude: path26.join(temporaryRoot, "claude-candidate")
+      codex: path25.join(temporaryRoot, "codex-candidate"),
+      claude: path25.join(temporaryRoot, "claude-candidate")
     };
     for (const clone of Object.values(clones)) {
       await runOwnedProcess(
@@ -34590,7 +33298,7 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
       const parent = dependencies.temporaryParent ?? os2.tmpdir();
       await mkdir8(parent, { recursive: true });
       temporaryRoot = await mkdtemp(
-        path26.join(parent, "banzai-live-compatibility-")
+        path25.join(parent, "banzai-live-compatibility-")
       );
       const safeEnvironment = subscriptionOnlyEnvironment(environment);
       const clones = await candidateClones(
@@ -34602,10 +33310,10 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
         now2
       );
       if (clones !== null) {
-        const authRoot = path26.join(temporaryRoot, "auth");
+        const authRoot = path25.join(temporaryRoot, "auth");
         await mkdir8(authRoot, { recursive: true, mode: 448 });
-        const codexAuth = path26.join(authRoot, "codex");
-        const claudeAuth = path26.join(authRoot, "claude");
+        const codexAuth = path25.join(authRoot, "codex");
+        const claudeAuth = path25.join(authRoot, "claude");
         let authReady = true;
         try {
           await copyAuthRoot(
@@ -34662,11 +33370,11 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
           if (codexReady && claudeReady) {
             const codexScenario = await prepareScenario(
               clones.codex,
-              path26.join(temporaryRoot, "raw", "codex")
+              path25.join(temporaryRoot, "raw", "codex")
             );
             const claudeScenario = await prepareScenario(
               clones.claude,
-              path26.join(temporaryRoot, "raw", "claude")
+              path25.join(temporaryRoot, "raw", "claude")
             );
             await runReviewScenario(
               "codex",
@@ -34675,7 +33383,7 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
               baseRunner,
               run,
               now2,
-              path26.join(clones.codex, "plugins", "banzai")
+              path25.join(clones.codex, "plugins", "banzai")
             );
             await runReviewScenario(
               "claude",
@@ -34684,7 +33392,7 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
               baseRunner,
               run,
               now2,
-              path26.join(clones.claude, "plugins", "banzai")
+              path25.join(clones.claude, "plugins", "banzai")
             );
             updateCheck(
               run,
@@ -34792,7 +33500,7 @@ async function executeLiveCompatibility(repoRoot, args, io, dependencies) {
 
 // src/interactive.ts
 import { createHash as createHash18 } from "node:crypto";
-import path27 from "node:path";
+import path26 from "node:path";
 async function describeRepository(options) {
   if (options.repository === void 0) {
     return null;
@@ -34832,7 +33540,7 @@ async function statusOrNull(runner) {
   }
 }
 function adrIdFromArtifact(artifact) {
-  const basename = path27.basename(artifact, path27.extname(artifact));
+  const basename = path26.basename(artifact, path26.extname(artifact));
   const match = /^(?:adr[-_])?([0-9]+)/i.exec(basename);
   return match?.[1] === void 0 ? basename : `ADR-${match[1]}`;
 }
@@ -35651,7 +34359,7 @@ function renderHeader(io, styler, repoRoot, identity, config, authentication) {
     `${styler.brand(MARK_TOP)}    ${styler.bold("banzai")} ${dim(`v${VERSION}`)}   ${dim("spec-driven run orchestrator")}`
   );
   const location = [
-    path27.basename(repoRoot),
+    path26.basename(repoRoot),
     identity?.branch == null ? null : styler.cyan(identity.branch),
     identity?.commit == null ? null : dim(`@ ${identity.commit.slice(0, 7)}`),
     identity === null || identity.carriedInChanges === 0 ? null : dim(
@@ -35670,7 +34378,7 @@ function renderHeader(io, styler, repoRoot, identity, config, authentication) {
     ...entries.map((entry) => SHORT_ROLE_LABELS[entry.role].length)
   );
   const vendorWidth = Math.max(
-    ...entries.map((entry) => path27.basename(entry.executable).length)
+    ...entries.map((entry) => path26.basename(entry.executable).length)
   );
   const modelWidth = Math.max(...entries.map((entry) => entry.model.length));
   io.writeLine();
@@ -35678,7 +34386,7 @@ function renderHeader(io, styler, repoRoot, identity, config, authentication) {
     const reason = readiness.get(entry.executable);
     const marker = reason === void 0 ? "" : reason === null ? styler.green("\u2713") : styler.red("\u2717");
     io.writeLine(
-      `    ${SHORT_ROLE_LABELS[entry.role].padEnd(roleWidth)}  ${path27.basename(entry.executable).padEnd(vendorWidth)} ${styler.bold(entry.model)}${" ".repeat(
+      `    ${SHORT_ROLE_LABELS[entry.role].padEnd(roleWidth)}  ${path26.basename(entry.executable).padEnd(vendorWidth)} ${styler.bold(entry.model)}${" ".repeat(
         modelWidth - entry.model.length
       )}  ${dim(`${entry.effort} \xB7 ${entry.timeout}`)}  ${marker}`.trimEnd()
     );
@@ -36176,7 +34884,7 @@ function writeBuilderSessionStatus(io, settings) {
 }
 
 // src/progress.ts
-import path28 from "node:path";
+import path27 from "node:path";
 var LEVELS = /* @__PURE__ */ new Set(["quiet", "normal", "verbose"]);
 function resolveProgressLevel(args, env) {
   if (args.includes("--verbose")) {
@@ -36203,7 +34911,7 @@ function singleLine(value) {
   return value.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").replace(/\s+/g, " ").trim();
 }
 function phaseBanner(label, descriptor, width, styler) {
-  const vendor = path28.basename(descriptor.executable);
+  const vendor = path27.basename(descriptor.executable);
   const timeout = `${Math.ceil(descriptor.timeoutMs / 6e4)}m cap`;
   const facts = [
     vendor,
@@ -36663,7 +35371,7 @@ async function runForegroundClient(launch) {
 }
 
 // src/setup-client.ts
-import path29 from "node:path";
+import path28 from "node:path";
 import { realpath as realpath11 } from "node:fs/promises";
 var SETUP_SKILLS = {
   codex: "$banzai:project-manifest",
@@ -36762,7 +35470,7 @@ async function discoverPlugin(vendor, executable, repoRoot, env, runner) {
   const candidates = [];
   for (const value of marketplaces) {
     const marketplace = record5(value);
-    if (typeof marketplace.name !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(marketplace.name) || typeof marketplace.root !== "string" || !path29.isAbsolute(marketplace.root))
+    if (typeof marketplace.name !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(marketplace.name) || typeof marketplace.root !== "string" || !path28.isAbsolute(marketplace.root))
       continue;
     const listed = record5(
       await query([
@@ -36777,7 +35485,7 @@ async function discoverPlugin(vendor, executable, repoRoot, env, runner) {
     for (const item of listed) {
       const plugin = record5(item);
       const source = record5(plugin.source);
-      if (plugin.name !== "banzai" || plugin.marketplaceName !== marketplace.name || plugin.installed !== true || plugin.enabled !== true || source.source !== "local" || typeof source.path !== "string" || !path29.isAbsolute(source.path))
+      if (plugin.name !== "banzai" || plugin.marketplaceName !== marketplace.name || plugin.installed !== true || plugin.enabled !== true || source.source !== "local" || typeof source.path !== "string" || !path28.isAbsolute(source.path))
         continue;
       const verified = await verifiedSetupPlugin(source.path, vendor);
       if (verified !== null) candidates.push(verified);
@@ -37228,7 +35936,7 @@ Five human decision gates remain distinct: conditional planning consultation,
 ADR acceptance, plan approval, escalation, and review triage. Consultation
 records preference provenance; it is not approval or execution authority.
 \`banzai control answer\` reads a keyed \`banzai-agent-answer/v2\` consultation
-or ordered \`banzai-agent-answer/v1\` escalation document from direct stdin.
+document from direct stdin. Plain escalation uses interactive banzai answer.
 The runner uses the current checkout and never creates or manages Git worktrees.`;
 function option(args, name) {
   const index = args.indexOf(name);

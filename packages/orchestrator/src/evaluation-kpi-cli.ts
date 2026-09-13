@@ -1,10 +1,6 @@
 import { readFile } from "node:fs/promises";
-import path from "node:path";
-import { BanzaiError } from "./errors.js";
-import {
-  collectEvaluationExport,
-  collectEvaluationExportV2
-} from "./evaluation.js";
+import { BanzaiError, ResourceVersionUnsupportedError } from "./errors.js";
+import { collectEvaluationExportV2 } from "./evaluation.js";
 import {
   normalizedInstant,
   optionValue,
@@ -12,17 +8,11 @@ import {
   type EvaluationIO
 } from "./evaluation-cli.js";
 import {
-  decodeEvaluationExportInput,
-  deriveEvaluationKpiReport,
   decodeEvaluationExportV2Input,
   deriveEvaluationKpiV2
 } from "./evaluation-kpi.js";
-import {
-  renderEvaluationKpiJson,
-  renderEvaluationKpiMarkdown,
-  renderEvaluationKpiV2Markdown
-} from "./evaluation-kpi-render.js";
-import type { EvaluationExport, EvaluationKpiOptions } from "./types.js";
+import { renderEvaluationKpiV2Markdown } from "./evaluation-kpi-render.js";
+import type { EvaluationKpiOptions } from "./types.js";
 
 /**
  * The cohort grammar is byte-compatible with `eval export` and shares its
@@ -35,7 +25,7 @@ export function parseEvaluationKpiArgs(
   let format: EvaluationKpiOptions["format"] = "markdown";
   let from: string | null = null;
   let to: string | null = null;
-  let schemaVersion: 1 | 2 | undefined;
+  let schemaVersion: 2 | undefined;
   let jsonSeen = false;
   let fromSeen = false;
   let toSeen = false;
@@ -46,12 +36,18 @@ export function parseEvaluationKpiArgs(
     const argument = args[index];
     if (argument === "--schema-version") {
       const value = optionValue(args, index);
-      if (schemaVersion !== undefined || !["1", "2"].includes(value))
+      if (schemaVersion !== undefined)
         throw new BanzaiError(
           "INVALID_EVAL_OPTION",
-          "Evaluation schema version must be 1 or 2 and specified once."
+          "Evaluation schema version must be specified once."
         );
-      schemaVersion = value === "1" ? 1 : 2;
+      if (value !== "2")
+        throw new ResourceVersionUnsupportedError(
+          "evaluation schema",
+          value,
+          "2"
+        );
+      schemaVersion = 2;
       index += 1;
       continue;
     }
@@ -121,26 +117,13 @@ export function parseEvaluationKpiArgs(
     );
   }
   return {
-    ...(schemaVersion === undefined ? {} : { schemaVersion }),
+    schemaVersion: 2,
     format,
     from,
     to,
     runIds: [...runIds].sort((left, right) => left.localeCompare(right)),
     inputs
   };
-}
-
-function renderKpi(
-  options: EvaluationKpiOptions,
-  sources: { label: string; report: EvaluationExport }[],
-  io: EvaluationIO
-): void {
-  const report = deriveEvaluationKpiReport(sources);
-  io.stdout(
-    options.format === "json"
-      ? renderEvaluationKpiJson(report)
-      : renderEvaluationKpiMarkdown(report)
-  );
 }
 
 /**
@@ -152,7 +135,7 @@ export async function executeEvaluationKpiFromInputs(
   options: EvaluationKpiOptions,
   io: EvaluationIO
 ): Promise<void> {
-  if (options.schemaVersion === 2) {
+  {
     const inputs = [];
     for (const file of options.inputs) {
       let text: string;
@@ -174,23 +157,6 @@ export async function executeEvaluationKpiFromInputs(
     );
     return;
   }
-  const sources: { label: string; report: EvaluationExport }[] = [];
-  for (const [index, file] of options.inputs.entries()) {
-    let text: string;
-    try {
-      text = await readFile(file, "utf8");
-    } catch {
-      throw new BanzaiError(
-        "INVALID_EVAL_INPUT",
-        `Evaluation KPI input ${file} cannot be read.`
-      );
-    }
-    sources.push({
-      label: `${index + 1}: ${path.basename(file)}`,
-      report: decodeEvaluationExportInput(text, file)
-    });
-  }
-  renderKpi(options, sources, io);
 }
 
 /**
@@ -203,7 +169,7 @@ export async function executeEvaluationKpiFromCheckout(
   options: EvaluationKpiOptions,
   io: EvaluationIO
 ): Promise<void> {
-  if (options.schemaVersion === 2) {
+  {
     const exported = await collectEvaluationExportV2(repoRoot, options);
     const report = deriveEvaluationKpiV2([exported]);
     io.stdout(
@@ -213,11 +179,4 @@ export async function executeEvaluationKpiFromCheckout(
     );
     return;
   }
-  const report = await collectEvaluationExport(repoRoot, {
-    format: "json",
-    from: options.from,
-    to: options.to,
-    runIds: options.runIds
-  });
-  renderKpi(options, [{ label: "current", report }], io);
 }

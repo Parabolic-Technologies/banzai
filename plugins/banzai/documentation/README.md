@@ -1,34 +1,37 @@
 # documentation/
 
-Workflow artifact tree.
+Keep maintained project guides and the shared decision log in `documentation/`.
+Internal workflow evidence lives in ignored private work directories. Resolve
+every work through the installed artifact helper and use the exact roles in its
+immutable `work.json` binding; the paths below illustrate those roles.
 
 Lite feature:
 
 ```text
-features/<slug>/work.md
+.banzai/work/<work-id>/work.md
 ```
 
 Strict feature:
 
 ```text
-features/<slug>/description.md
-development-plans/<slug>/plan.md
-features/<slug>/implementation-report.md
-features/<slug>/test-report.md
-features/<slug>/review-<iteration>.md
+.banzai/work/<work-id>/description.md
+.banzai/work/<work-id>/plan.md
+.banzai/work/<work-id>/implementation-report.md
+.banzai/work/<work-id>/test-report.md
+.banzai/work/<work-id>/review-<iteration>.md
 ```
 
 Architecture decisions:
 
 ```text
-decisions/README.md
-decisions/NNNN-<slug>.md
+documentation/decisions/README.md
+documentation/decisions/NNNN-<slug>.md
 ```
 
 Quick-fix report:
 
 ```text
-changes/<name>.md
+.banzai/work/<work-id>/change-report.md
 ```
 
 Optional local orchestrator machine contracts are shipped separately from
@@ -36,9 +39,6 @@ project documentation templates:
 
 ```text
 ../contracts/contract.json
-../contracts/v1/phase-result.schema.json # legacy persisted attempts
-../contracts/v1/review-result.schema.json
-../contracts/v2/phase-result.schema.json # legacy task-completion attempts
 ../contracts/v3/phase-result.schema.json # current consultation-aware phase hand-off
 ```
 
@@ -46,11 +46,13 @@ Rules:
 
 - Use short kebab-case slugs/names.
 - Link related artifacts at the top.
-- Create `changes/<name>.md` only when `quick-fix` requires an audit trail.
+- Write the helper-resolved `changeReport` only when `quick-fix` requires an
+  audit trail. Keep `.banzai/artifacts.json` shared, `.banzai/work/` ignored,
+  and `.banzai/runs/` reserved for ignored orchestrator execution evidence.
 - Each review lands at the next `review-<iteration>.md`. Both orchestrated
   reviewers are read-only; the runner renders, validates and publishes
-  `banzai-feature-review/v2`. Standalone `feature-review` owns a durable
-  `banzai-feature-review/v1` Markdown artifact without the runner.
+  `banzai-feature-review/v4`. Standalone `feature-review` owns a durable
+  `banzai-standalone-review/v1` Markdown artifact without the runner.
 - Keep ADRs in the central decision log and link them from affected feature
   artifacts and the manifest's active decision index. Accepted ADR bodies are
   immutable; supersede a changed decision with a new, linked ADR.

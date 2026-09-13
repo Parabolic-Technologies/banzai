@@ -1,3 +1,4 @@
+import { boundWorkFixture } from "./helpers.js";
 import assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import test from "node:test";
@@ -14,14 +15,14 @@ import {
   AGENT_ANSWER_SCHEMA,
   AGENT_RECOVERY_SCHEMA,
   AGENT_REQUEST_SCHEMA,
-  CONTRACT_VERSION,
-  LEGACY_AGENT_ANSWER_SCHEMA
+  CONTRACT_VERSION
 } from "../src/types.js";
 import type { WorkflowStatus } from "../src/workflow.js";
 
 function currentState(): RunState {
   return {
-    schemaVersion: 3,
+    schemaVersion: 5,
+    artifactBinding: boundWorkFixture(),
     contractVersion: CONTRACT_VERSION,
     runId: "20260817120000-agent-task-12345678",
     slug: "agent-task",
@@ -173,21 +174,6 @@ function consultationState(): RunState {
           }
         ]
       },
-      requestedAt: "2026-08-31T09:00:00.000Z"
-    }
-  };
-}
-
-function escalationState(): RunState {
-  return {
-    ...currentState(),
-    status: "needs_human_decision",
-    pendingHumanDecision: {
-      kind: "escalation",
-      phase: "implementation",
-      gate: "escalation",
-      summary: "Choose the compatibility behavior.",
-      questions: ["Preserve compatibility?"],
       requestedAt: "2026-08-31T09:00:00.000Z"
     }
   };
@@ -391,61 +377,38 @@ test("control start passes metacharacter request data unchanged and refreshes st
   );
 });
 
-test("control answer preserves ordered text provenance and resume choice", async () => {
-  const runner = new FakeRunner();
-  runner.currentStatus = status(escalationState());
-  const answers = ["  accept; $(false)  ", "second\nanswer | `false`"];
-  const output: string[] = [];
-  await executeAgentControlCommand(
-    {
-      command: "answer",
-      decidedBy: "Explicit User",
-      autoResume: false
-    },
-    () => runner,
-    {
-      stdin: stream(
-        document({
-          schema: LEGACY_AGENT_ANSWER_SCHEMA,
-          schemaVersion: 1,
-          answers
-        })
+test("control rejects removed answer documents before runner creation, output or mutation", async () => {
+  for (const schemaVersion of [1, 3]) {
+    let created = false;
+    const output: string[] = [];
+    await assert.rejects(
+      executeAgentControlCommand(
+        { command: "answer", decidedBy: null, autoResume: true },
+        () => {
+          created = true;
+          return new FakeRunner();
+        },
+        {
+          stdin: stream(
+            document({
+              schema: `banzai-agent-answer/v${schemaVersion}`,
+              schemaVersion,
+              answers: ["exact answer"]
+            })
+          ),
+          stdout: (value) => output.push(value)
+        },
+        "user"
       ),
-      stdout: (value) => output.push(value)
-    },
-    "default-user"
-  );
-  assert.deepEqual(runner.answers, [
-    {
-      input: { answers, decidedBy: "Explicit User" },
-      autoResume: false
-    }
-  ]);
-  assert.equal(output.length, 1);
-
-  const defaultRunner = new FakeRunner();
-  defaultRunner.currentStatus = status(escalationState());
-  await executeAgentControlCommand(
-    { command: "answer", decidedBy: null, autoResume: true },
-    () => defaultRunner,
-    {
-      stdin: stream(
-        document({
-          schema: LEGACY_AGENT_ANSWER_SCHEMA,
-          schemaVersion: 1,
-          answers: ["yes"]
-        })
-      ),
-      stdout: () => undefined
-    },
-    "default-user"
-  );
-  assert.deepEqual(defaultRunner.answers, [
-    {
-      input: { answers: ["yes"], decidedBy: "default-user" },
-      autoResume: true
-    }
-  ]);
+      {
+        code: "RESOURCE_VERSION_UNSUPPORTED",
+        message:
+          /^.+ version .+ is not supported; 3\.x supports .+; last read by release-train major 2$/u
+      }
+    );
+    assert.equal(created, false);
+    assert.deepEqual(output, []);
+  }
 });
 
 test("control v2 consultation answer validates exact identities and emits post-mutation status", async () => {
@@ -513,7 +476,7 @@ test("control v2 consultation answer validates exact identities and emits post-m
 test("control rejects v1, stale, and invalid-option consultation answers before mutation", async () => {
   const inputs = [
     {
-      schema: LEGACY_AGENT_ANSWER_SCHEMA,
+      schema: "banzai-agent-answer/v1",
       schemaVersion: 1,
       answers: ["Use run state."]
     },

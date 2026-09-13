@@ -203,7 +203,7 @@ Five human decision gates remain distinct: conditional planning consultation,
 ADR acceptance, plan approval, escalation, and review triage. Consultation
 records preference provenance; it is not approval or execution authority.
 \`banzai control answer\` reads a keyed \`banzai-agent-answer/v2\` consultation
-or ordered \`banzai-agent-answer/v1\` escalation document from direct stdin.
+document from direct stdin. Plain escalation uses interactive banzai answer.
 The runner uses the current checkout and never creates or manages Git worktrees.`;
 
 function option(args: string[], name: string): string | null {

@@ -18,6 +18,7 @@ import {
 } from "../src/evaluation-kpi-cli.js";
 import {
   deriveEvaluationKpiReport,
+  deriveEvaluationKpiSource,
   deriveRunSignature
 } from "../src/evaluation-kpi.js";
 import {
@@ -65,7 +66,7 @@ function kpis(report: EvaluationExport): EvaluationKpiReport {
 }
 
 function retries(report: EvaluationExport) {
-  const source = kpis(report).sources[0];
+  const source = deriveEvaluationKpiSource(1, "current", report);
   assert.ok(source);
   return source.kpis.filter((entry) => entry.kpi === "attempt_retry_ratio");
 }
@@ -449,6 +450,14 @@ for (const loss of LOSS_CASES) {
           JSON.stringify(extra)
         );
       }
+      if (loss === "unsupported-schema" || loss === "absent-schema") {
+        const before = await snapshotTree(root);
+        await assert.rejects(collectEvaluationExport(root, OPTIONS), {
+          code: "RESOURCE_VERSION_UNSUPPORTED"
+        });
+        assert.deepEqual(await snapshotTree(root), before);
+        return;
+      }
       const report = await collectEvaluationExport(root, OPTIONS);
       assert.ok(report.issues.length > 0);
       const run = firstRun(report);
@@ -530,7 +539,7 @@ test("attempt evidence duplicate and historical records retain exact retries des
     const run = firstRun(report);
     assert.equal(run.completeness, "partial");
     assert.ok(run.issueCodes.includes("ATTEMPT_DUPLICATE"));
-    assert.ok(run.issueCodes.includes("VERIFICATION_HISTORY_INCOMPLETE"));
+    assert.ok(run.issueCodes.includes("METRIC_MISMATCH"));
     assert.equal(
       run.metrics.attempts.byOutcome.completed.availability,
       "partial"
@@ -548,17 +557,16 @@ test("attempt evidence duplicate and historical records retain exact retries des
       "codex/gpt-evaluation-model/high"
     );
     const ledgerDir = path.join(directory, "verification-attempts");
-    await mkdir(ledgerDir);
+    await mkdir(ledgerDir, { recursive: true });
     await writeFile(
       path.join(ledgerDir, "ledger.json"),
       JSON.stringify({ schemaVersion: 999 })
     );
-    const invalidVerification = await collectEvaluationExport(root, OPTIONS);
-    assert.equal(
-      firstRun(invalidVerification).metrics.attempts.total.value,
-      null
-    );
-    assert.deepEqual(retries(invalidVerification), retries(report));
+    const beforeUnsupported = await snapshotTree(root);
+    await assert.rejects(collectEvaluationExport(root, OPTIONS), {
+      code: "RESOURCE_VERSION_UNSUPPORTED"
+    });
+    assert.deepEqual(await snapshotTree(root), beforeUnsupported);
     await rm(ledgerDir, { recursive: true });
     await rm(path.join(directory, "attempts"), { recursive: true });
     await fixture(root, []);

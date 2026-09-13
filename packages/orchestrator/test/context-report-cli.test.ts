@@ -37,6 +37,7 @@ test("context CLI reuses export parsing and writes deterministic read-only outpu
       format: "json",
       from: "2026-08-23T00:00:00.000Z",
       to: null,
+      schemaVersion: 2,
       runIds: ["a-run", "z-run"]
     }
   );
@@ -83,6 +84,7 @@ test("context CLI renders interrupted exact and incomplete coverage deterministi
       await writeFile(
         path.join(run, "state.json"),
         JSON.stringify({
+          schemaVersion: 5,
           runId,
           createdAt: "2026-08-23T00:00:00.000Z",
           workflowSelection: { workflow: "strict" }
@@ -92,6 +94,7 @@ test("context CLI renders interrupted exact and incomplete coverage deterministi
       await writeFile(
         path.join(attempts, `${attemptId}-plan.json`),
         JSON.stringify({
+          schemaVersion: 2,
           attempt: { id: attemptId, kind: "plan", mutable: false },
           status: "interrupted",
           usage: null
@@ -215,6 +218,7 @@ test("malformed ledger aborts context CLI with an empty stdout", async () => {
     await writeFile(
       path.join(root, ".banzai", "runs", runId, "state.json"),
       JSON.stringify({
+        schemaVersion: 5,
         runId,
         createdAt: "2026-08-23T00:00:00.000Z",
         workflowSelection: { workflow: "strict" }
@@ -224,6 +228,7 @@ test("malformed ledger aborts context CLI with an empty stdout", async () => {
     await writeFile(
       path.join(attempts, `${attemptId}-plan.json`),
       JSON.stringify({
+        schemaVersion: 2,
         attempt: { id: attemptId, kind: "plan", mutable: false },
         status: "completed",
         usage: null
@@ -297,6 +302,7 @@ test("context CLI rejects a symlinked attempts directory with empty output and n
     await writeFile(
       path.join(runDirectory, "state.json"),
       JSON.stringify({
+        schemaVersion: 5,
         runId,
         createdAt: "2026-08-23T00:00:00.000Z",
         workflowSelection: { workflow: "strict" }
@@ -310,6 +316,7 @@ test("context CLI rejects a symlinked attempts directory with empty output and n
     await writeFile(
       canonicalFile,
       JSON.stringify({
+        schemaVersion: 2,
         attempt: { id: attemptId, kind: "plan", mutable: false },
         status: "completed",
         usage: null,

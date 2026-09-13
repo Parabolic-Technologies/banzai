@@ -197,25 +197,8 @@ Current release-train identity:
 - [ ] Select one explicit canonical SemVer target and record patch/minor/major
       rationale from the highest impact across the complete included plugin and
       orchestrator change set.
-- [ ] For the first release shipping ADR-0036, classify the instruction-layout
-      migration as breaking for adopted projects under the highest-impact rule.
-      Select the release target accordingly and require it to be strictly
-      greater than the last legacy-compatible release, `1.21.0`, recorded in
-      `plugins/banzai/skills/project-manifest/references/layout-migration.md`.
-      Equality is allowed only for the unreleased source tree's local validator;
-      it is not a valid shipping target for this migration.
-- [ ] State the breaking migration in the release notes: updating the plugin
-      stops affected work in legacy projects until an explicitly invoked
-      `project-manifest` migration diff is approved. Name `1.21.0` as the last
-      legacy-compatible release; do not imply automatic migration or downgrade.
-- [ ] Obtain explicit release-owner approval for that one target. Every
-      post-migration target must be strictly greater than the current nine-way
-      release-train value.
-- [ ] For the one bootstrap exception only, verify six existing `1.19.0` fields
-      and absence of root `package.json.version`, lockfile `version`, and
-      `packages[""].version` before selecting the same `1.19.0` target. Partial
-      bootstrap or manual root-first edits are invalid. The writer groups the
-      three lockfile fields into one recoverable document replacement.
+- [ ] Obtain explicit release-owner approval for the target, which must be
+      strictly greater than the current nine-way release-train value.
 - [ ] Confirm repository-maintenance-only CI/scripts/tests/root docs/checklist
       work did not manufacture a release-train bump unless an explicit Banzai
       release is being prepared.
@@ -235,6 +218,20 @@ Current release-train identity:
       compatibility. The release-train version is not a machine-contract
       compatibility signal.
 
+## Major boundary
+
+For every `X.0.0` release:
+
+- [ ] Confirm `release-policy.json.compatibility` declares exactly one supported
+      version per resource family for the target major.
+- [ ] Confirm removed readers, producers, schemas, fixtures, migration procedures
+      and maintained-documentation claims are gone; retained ADR and original
+      extraction evidence stays unchanged except authorized lifecycle metadata.
+- [ ] Confirm the release note has `## Removed compatibility`, lists every removed
+      family/version and states the required operator actions.
+- [ ] Confirm the rollback target is the last release of the previous major,
+      with its complete source/tooling and separately recorded delivery evidence.
+
 ## Workflow and Human Authorization
 
 - [ ] Confirm description, accepted ADRs, approved plan, implementation report,
@@ -252,23 +249,17 @@ Passing automation is evidence only. It is never release authorization.
 
 Before publication:
 
-- [ ] Identify the complete last-known-good candidate and commit. For rollback
-      of the initial unified release this is plugin `1.18.1` plus orchestrator
-      `0.8.2`. Historical candidates retain their complete metadata/tooling
-      format; root-authoritative candidates restore all nine fields together.
+- [ ] Identify the complete last-known-good candidate and commit; restore all
+      nine release-train fields together using that candidate and its tooling.
 - [ ] If local synchronization is incomplete, stop and run
       `npm run version:recover` to restore the transaction's exact originals.
       The fixed cleanup guard preserves those originals while the main journal
       removal is being synced. Recovery must authenticate any coexisting
       journal remnants against that guard before target restoration or
-      recursive cleanup. Recovery supports old six-file format 1 and grouped
-      seven-file format 2 independently of the current write policy; it checks
-      all original/candidate bytes and modes before any restoration. Later edits
-      cause refusal while preserving every target and retained evidence. A
-      recovered independent-version candidate needs its matching historical
-      tooling to continue; it is not a valid new-writer pre-state. This command
-      does not select a release
-      rollback target.
+      recursive cleanup. Recovery accepts only grouped seven-file format 2;
+      it checks all original/candidate bytes and modes before any restoration.
+      Unsupported journal versions and later edits cause refusal while preserving
+      targets and evidence. This command does not select a release rollback target.
 - [ ] Preserve the last known-good install/reinstall instructions and
       marketplace references.
 - [ ] Define how to stop publication before retrying a partial operation.

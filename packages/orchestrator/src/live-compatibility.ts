@@ -1,3 +1,13 @@
+import {
+  artifactRoles,
+  canonicalJson,
+  digestBytes,
+  type ArtifactBoundWork
+} from "./artifact-storage.js";
+import {
+  evidenceDigest,
+  verificationApplicability
+} from "./verification-evidence.js";
 import { createHash } from "node:crypto";
 import {
   access,
@@ -52,15 +62,14 @@ export const LIVE_COMPATIBILITY_SCHEMA_VERSION = 2;
 
 const SOURCE_CANARY = "src/live-source-canary.txt";
 const CONTROL_CANARY = ".banzai/live-control-canary.json";
-const OTHER_ARTIFACT =
-  "documentation/features/live-compatibility/review-other.md";
-const REVIEW_ARTIFACT = "documentation/features/live-compatibility/review-1.md";
+const FIXTURE_WORK_ID = "00000000-0000-4000-8000-000000000001";
+const FIXTURE_WORK = `.banzai/work/${FIXTURE_WORK_ID}`;
+const OTHER_ARTIFACT = `${FIXTURE_WORK}/review-other.md`;
+const REVIEW_ARTIFACT = `${FIXTURE_WORK}/review-1.md`;
 const REVIEW_CANDIDATE =
   ".banzai/runs/live-compatibility/attempts/review-1.review-candidate.md";
-const DESCRIPTION_ARTIFACT =
-  "documentation/features/live-compatibility/description.md";
-const PLAN_ARTIFACT =
-  "documentation/development-plans/live-compatibility/plan.md";
+const DESCRIPTION_ARTIFACT = `${FIXTURE_WORK}/description.md`;
+const PLAN_ARTIFACT = `${FIXTURE_WORK}/plan.md`;
 const WRITE_PROBE = ".banzai/live-write-probe.cjs";
 const WRITE_PROBE_SCHEMA = "banzai-live-write-probe/v1";
 const RUN_ID = "live-compatibility";
@@ -148,6 +157,7 @@ interface Scenario {
 }
 
 const EXPECTED_REVIEW_RESULT: ReviewResult = {
+  schemaVersion: 2,
   contractVersion: CONTRACT_VERSION,
   verdict: "pass",
   summary: "Live compatibility permission probe completed.",
@@ -630,6 +640,45 @@ async function prepareScenario(
     "# Live Compatibility Plan\n\nNo source mutation is authorized.\n",
     "utf8"
   );
+  const binding: ArtifactBoundWork["binding"] = {
+    schema: "banzai-work-binding/v2",
+    schemaVersion: 2,
+    workId: FIXTURE_WORK_ID,
+    slug: "live-compatibility",
+    mode: "strict",
+    layout: "private",
+    createdAt: "2026-09-08T00:00:00.000Z",
+    sourceCommit: null,
+    artifacts: artifactRoles(
+      FIXTURE_WORK_ID,
+      "live-compatibility",
+      "strict",
+      "private"
+    )
+  };
+  const bindingBytes = canonicalJson(binding);
+  const bound: ArtifactBoundWork = {
+    binding,
+    sha256: digestBytes(bindingBytes)
+  };
+  await writeFile(path.join(root, FIXTURE_WORK, "work.json"), bindingBytes, {
+    mode: 0o600
+  });
+  await writeFile(
+    path.join(root, ".banzai/artifacts.json"),
+    JSON.stringify({
+      schema: "banzai-artifact-layout/v1",
+      schemaVersion: 1,
+      layout: "private"
+    })
+  );
+  const ignores = await readFile(path.join(root, ".gitignore"), "utf8").catch(
+    () => ""
+  );
+  await writeFile(
+    path.join(root, ".gitignore"),
+    ignores + "\n/.banzai/work/\n/.banzai/runs/\n"
+  );
   const approval = await digestArtifactBundle(root, [
     DESCRIPTION_ARTIFACT,
     PLAN_ARTIFACT
@@ -647,7 +696,8 @@ async function prepareScenario(
     path.join(stateDirectory, "state.json"),
     `${JSON.stringify(
       {
-        schemaVersion: 2,
+        schemaVersion: 5,
+        artifactBinding: bound,
         contractVersion: CONTRACT_VERSION,
         runId: RUN_ID,
         slug: "live-compatibility",
@@ -699,20 +749,60 @@ try {
     REVIEW_ARTIFACT
   ]);
   const controlBefore = await treeDigest(path.join(root, ".banzai"), [
-    "runs/live-compatibility/attempts/review-1.review-candidate.md"
+    "runs/live-compatibility/attempts/review-1.review-candidate.md",
+    REVIEW_ARTIFACT.slice(".banzai/".length)
   ]);
+  const baseCommit = "disposable-permission-fixture";
+  const entries = (await reviewApprovedArtifacts(root, approval.paths)).map(
+    (entry) => ({ ...entry, kind: "file" as const })
+  );
+  const workspace = {
+    schemaVersion: 2 as const,
+    baseCommit,
+    artifactBindingDigest: bound.sha256,
+    digest: createHash("sha256")
+      .update(
+        JSON.stringify({
+          version: 2,
+          baseCommit,
+          artifactBindingDigest: bound.sha256,
+          entries
+        })
+      )
+      .digest("hex"),
+    entries
+  };
+  const decisionBody = {
+    schema: "banzai-verification-decision/v1" as const,
+    schemaVersion: 1 as const,
+    workId: binding.workId,
+    roundId: "permission-fixture",
+    candidateDigest: null,
+    authorityDigest: approval.digest,
+    configurationDigest: evidenceDigest({ profiles: [] }),
+    actions: []
+  };
+  const decision = { ...decisionBody, sha256: evidenceDigest(decisionBody) };
+  const applicability = verificationApplicability(decision, [], {
+    complete: false,
+    reason: "policy_disabled",
+    candidateDigest: null,
+    checks: []
+  });
   const artifact: ReviewArtifactContext = {
     path: REVIEW_ARTIFACT,
     candidatePath: REVIEW_CANDIDATE,
     slug: "live-compatibility",
     iteration: 1,
     approvedArtifactPaths: approval.paths,
-    workspaceDigest: sourceBefore,
-    verification: []
+    workspaceDigest: workspace.digest,
+    verification: [],
+    verificationEvidence: { decision, applicability, origins: [], attempts: [] }
   };
   artifact.snapshot = sealReviewSnapshot({
-    schema: "banzai-review-snapshot/v1",
-    schemaVersion: 1,
+    schema: "banzai-review-snapshot/v3",
+    schemaVersion: 3,
+    artifactBinding: bound,
     runId: RUN_ID,
     attemptId: "review-1",
     outputContract: "review-result/v2",
@@ -725,11 +815,7 @@ try {
       approvedAt: "2026-09-08T00:00:00.000Z"
     },
     approvedArtifacts: await reviewApprovedArtifacts(root, approval.paths),
-    workspace: {
-      baseCommit: "disposable-permission-fixture",
-      digest: sourceBefore,
-      entries: []
-    },
+    workspace,
     reviewMode: "full",
     changes: [],
     anchor: null,
@@ -944,7 +1030,8 @@ async function runReviewScenario(
     REVIEW_ARTIFACT
   ]);
   const controlAfter = await treeDigest(path.join(scenario.root, ".banzai"), [
-    "runs/live-compatibility/attempts/review-1.review-candidate.md"
+    "runs/live-compatibility/attempts/review-1.review-candidate.md",
+    REVIEW_ARTIFACT.slice(".banzai/".length)
   ]);
   if (
     sourceAfter !== scenario.sourceBefore ||

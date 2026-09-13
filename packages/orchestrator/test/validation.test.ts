@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   assertContractParity,
-  legacyPhaseResultSchema,
-  legacyPhaseResultV2Schema,
   phaseResultSchema,
   reviewResultSchema,
   workflowSelectionSchema
@@ -177,34 +175,24 @@ function assertStructuredOutputSchema(value: unknown, path = "$"): void {
 
 test("configuration decoding keeps versioned verification contracts distinct", () => {
   const current = parseConfig(structuredClone(DEFAULT_CONFIG));
-  assert.equal(current.schemaVersion, 2);
+  assert.equal(current.schemaVersion, 3);
   assert.equal(current.verification.profiles[0]?.projectType, "repository");
 
-  const legacy = parseConfig({
-    ...structuredClone(DEFAULT_CONFIG),
-    schemaVersion: 1,
-    verification: [
-      {
-        name: "legacy check",
-        command: "legacy-tool",
-        args: ["repeat", "repeat"],
-        timeoutMs: 1_000
-      }
-    ]
-  });
-  assert.equal(legacy.schemaVersion, 1);
-  const legacyProfile = legacy.verification.profiles[0];
-  assert.ok(legacyProfile);
-  assert.equal(legacyProfile.id, "legacy");
-  const legacyCommand = legacyProfile.commands[0];
-  assert.ok(legacyCommand);
-  assert.deepEqual(legacyCommand.args, ["repeat", "repeat"]);
+  for (const schemaVersion of [1, 2])
+    assert.throws(() => parseConfig({ ...DEFAULT_CONFIG, schemaVersion }), {
+      code: "RESOURCE_VERSION_UNSUPPORTED",
+      message:
+        /^.+ version .+ is not supported; 3\.x supports .+; last read by release-train major 2$/u
+    });
 
   const duplicateIds = structuredClone(DEFAULT_CONFIG);
   const first = duplicateIds.verification.profiles[0];
   assert.ok(first);
   duplicateIds.verification.profiles.push(structuredClone(first));
-  assert.throws(() => parseConfig(duplicateIds), /profile ids must be unique/);
+  assert.throws(
+    () => parseConfig(duplicateIds),
+    /Invalid schema 3 verification configuration/
+  );
 });
 
 test("an existing config without a Claude environment section defaults to isolation", () => {
@@ -216,7 +204,7 @@ test("an existing config without a Claude environment section defaults to isolat
     mode: "scoped",
     pluginDirectory: null
   });
-  assert.equal(parseConfig(legacy).schemaVersion, 2);
+  assert.equal(parseConfig(legacy).schemaVersion, 3);
 
   const explicit = structuredClone(DEFAULT_CONFIG);
   explicit.claudeEnvironment = {
@@ -244,16 +232,7 @@ test("an existing config without a Claude environment section defaults to isolat
 test("plugin and runner contract versions match", () => {
   assert.doesNotThrow(assertContractParity);
   assert.match(phaseResultSchema.$id, /\/v3\/phase-result\.schema\.json$/);
-  assert.match(
-    legacyPhaseResultSchema.$id,
-    /\/v1\/phase-result\.schema\.json$/
-  );
-  assert.match(
-    legacyPhaseResultV2Schema.$id,
-    /\/v2\/phase-result\.schema\.json$/
-  );
   assert.equal(phaseResultSchema.properties.schemaVersion.const, 3);
-  assert.equal(legacyPhaseResultV2Schema.properties.schemaVersion.const, 2);
   assert.ok(phaseResultSchema.required.includes("taskCompletion"));
   assert.ok(phaseResultSchema.required.includes("decisionConsultation"));
 });
@@ -261,7 +240,6 @@ test("plugin and runner contract versions match", () => {
 test("shared schemas satisfy the OpenAI Structured Outputs subset", () => {
   assertStructuredOutputSchema(workflowSelectionSchema);
   assertStructuredOutputSchema(phaseResultSchema);
-  assertStructuredOutputSchema(legacyPhaseResultV2Schema);
   assertStructuredOutputSchema(reviewResultSchema);
 });
 
@@ -317,7 +295,7 @@ test("phase results require consistent human gates and outcomes", () => {
 test("new phase results require v3 and decode the structured completion ledger", () => {
   assert.throws(
     () => parsePhaseResult(phase({ schemaVersion: 1 })),
-    /Phase result must use schema 3/
+    /phase result version 1 is not supported/
   );
 
   const result = parsePhaseResult(
@@ -546,40 +524,42 @@ test("decision consultation validates one bounded planning-only request", () => 
   );
 });
 
-test("persisted phase results retain truthful v1 and v2 evidence", () => {
+test("persisted hand-off readers reject removed versions without modifying input", () => {
   const current = phase({ phase: "fix", outcome: "blocked", gate: null });
-  const { decisionConsultation: _decisionConsultation, ...legacyV2 } = current;
-  assert.equal(_decisionConsultation, null);
-  assert.equal(
-    parsePersistedPhaseResult({ ...legacyV2, schemaVersion: 2 }).schemaVersion,
-    2
+  assert.deepEqual(
+    parsePersistedPhaseResult(current),
+    parsePhaseResult(current)
   );
-
-  const {
-    schemaVersion: _schemaVersion,
-    taskCompletion: _taskCompletion,
-    artifacts,
-    ...legacyFields
-  } = legacyV2;
-  assert.equal(_schemaVersion, 3);
-  assert.equal(_taskCompletion, null);
-  const { testReport: _testReport, ...legacyArtifacts } = artifacts as Record<
-    string,
-    unknown
-  >;
-  assert.equal(_testReport, null);
-  const legacyV1 = parsePersistedPhaseResult({
-    ...legacyFields,
-    artifacts: legacyArtifacts
-  });
-  assert.equal(legacyV1.schemaVersion, 1);
-  assert.equal(legacyV1.artifacts.testReport, null);
-  assert.equal(legacyV1.taskCompletion, null);
-
-  assert.throws(
-    () => parsePhaseResult({ ...legacyV2, schemaVersion: 2 }),
-    /must use schema 3/
-  );
+  for (const schemaVersion of [undefined, 1, 2, 4]) {
+    const value = { ...current, schemaVersion };
+    const before = structuredClone(value);
+    assert.throws(() => parsePersistedPhaseResult(value), {
+      code: "RESOURCE_VERSION_UNSUPPORTED",
+      message:
+        /^.+ version .+ is not supported; 3\.x supports .+; last read by release-train major 2$/u
+    });
+    assert.deepEqual(value, before);
+  }
+  for (const schemaVersion of [undefined, 1, 3]) {
+    const value = {
+      schemaVersion,
+      contractVersion: CONTRACT_VERSION,
+      verdict: "pass"
+    };
+    const before = structuredClone(value);
+    assert.throws(() => parseReviewResult(value), {
+      code: "RESOURCE_VERSION_UNSUPPORTED",
+      message:
+        /^.+ version .+ is not supported; 3\.x supports .+; last read by release-train major 2$/u
+    });
+    assert.deepEqual(value, before);
+  }
+  for (const schemaVersion of [1, 3])
+    assert.throws(() => parseVerificationLedger({ schemaVersion }), {
+      code: "RESOURCE_VERSION_UNSUPPORTED",
+      message:
+        /^.+ version .+ is not supported; 3\.x supports .+; last read by release-train major 2$/u
+    });
 });
 
 test("review results require stable unique findings and verdict consistency", () => {
@@ -595,6 +575,13 @@ test("review results require stable unique findings and verdict consistency", ()
     confidence: "high"
   };
   const parsed = parseReviewResult({
+    schemaVersion: 2,
+    reviewNotes: [],
+    scopeAcknowledgment: {
+      schemaVersion: 1,
+      snapshotDigest: "a".repeat(64),
+      artifacts: [{ path: "plan.md", status: "reviewed", reason: null }]
+    },
     contractVersion: CONTRACT_VERSION,
     verdict: "changes_requested",
     summary: "One finding.",
@@ -607,6 +594,13 @@ test("review results require stable unique findings and verdict consistency", ()
   assert.throws(
     () =>
       parseReviewResult({
+        schemaVersion: 2,
+        reviewNotes: [],
+        scopeAcknowledgment: {
+          schemaVersion: 1,
+          snapshotDigest: "a".repeat(64),
+          artifacts: [{ path: "plan.md", status: "reviewed", reason: null }]
+        },
         contractVersion: CONTRACT_VERSION,
         verdict: "pass",
         summary: "Contradiction.",
@@ -644,18 +638,23 @@ test("evaluation state decoding keeps bounded provenance and rejects private or 
   assert.doesNotMatch(JSON.stringify(decoded), /PRIVATE CONTRACT CANARY/);
 });
 
-test("evaluation state decoding accepts v1, v2, and consultation-aware v3 without fabricating evidence", () => {
-  for (const schemaVersion of [1, 2, 3] as const) {
-    const decoded = parseEvaluationStateSource(
-      evaluationStateFixture({ schemaVersion })
-    );
-    assert.equal(decoded.value.schemaVersion, schemaVersion);
-    assert.equal(
-      decoded.value.triageIsCumulative,
-      schemaVersion >= 2,
-      `schema v${schemaVersion}`
-    );
+test("evaluation state accepts only v5 and reports missing fields without inference", () => {
+  for (const schemaVersion of [1, 2, 3, 4, 6]) {
+    const input = evaluationStateFixture({ schemaVersion });
+    const before = JSON.stringify(input);
+    assert.throws(() => parseEvaluationStateSource(input), {
+      code: "RESOURCE_VERSION_UNSUPPORTED",
+      message:
+        /^.+ version .+ is not supported; 3\.x supports .+; last read by release-train major 2$/u
+    });
+    assert.equal(JSON.stringify(input), before);
   }
+  const input = evaluationStateFixture();
+  delete input.workflowSelection;
+  delete input.metrics;
+  const result = parseEvaluationStateSource(input);
+  assert.deepEqual(result.value.workflow, { value: null, evidence: "unknown" });
+  assert.ok(result.issues.every((item) => item.code === "STATE_FIELD_MISSING"));
 });
 
 test("evaluation state decoding distinguishes null from malformed workflow selection", () => {
@@ -696,7 +695,7 @@ test("evaluation attempt decoding exposes schema evidence and bounds all persist
   attempt.rotationReason = "PRIVATE ROTATION CANARY";
   const decoded = parseEvaluationAttemptSource(attempt);
   assert.deepEqual(decoded.value.schemaVersion, {
-    value: 1,
+    value: 2,
     evidence: "observed"
   });
   assert.equal(decoded.value.startedAt.evidence, "invalid");
@@ -711,38 +710,30 @@ test("evaluation attempt decoding exposes schema evidence and bounds all persist
   assert.doesNotMatch(JSON.stringify(publicProjection), /PRIVATE/);
 });
 
-test("evaluation attempt schema provenance distinguishes supported, legacy-absent, unsupported, and malformed evidence", () => {
+test("evaluation attempt versions are rejected before numeric evidence is exposed", () => {
   const current = evaluationAttemptFixture({
-    id: "current",
+    id: "attempt-1",
     kind: "implementation"
   });
-  const legacy = structuredClone(current);
-  delete legacy.schemaVersion;
-  const unsupported = structuredClone(current);
-  unsupported.schemaVersion = 999;
-  const malformed = structuredClone(current);
-  malformed.schemaVersion = "1";
-
   assert.deepEqual(parseEvaluationAttemptSource(current).value.schemaVersion, {
-    value: 1,
+    value: 2,
     evidence: "observed"
   });
-  assert.deepEqual(parseEvaluationAttemptSource(legacy).value.schemaVersion, {
-    value: null,
-    evidence: "legacy_absent"
-  });
-  assert.deepEqual(
-    parseEvaluationAttemptSource(unsupported).value.schemaVersion,
-    { value: null, evidence: "invalid" }
-  );
-  assert.deepEqual(
-    parseEvaluationAttemptSource(malformed).value.schemaVersion,
-    { value: null, evidence: "invalid" }
-  );
+  for (const schemaVersion of [undefined, null, 1, 3, "2"]) {
+    const input = { ...current, schemaVersion };
+    const before = JSON.stringify(input);
+    assert.throws(() => parseEvaluationAttemptSource(input), {
+      code: "RESOURCE_VERSION_UNSUPPORTED",
+      message:
+        /^.+ version .+ is not supported; 3\.x supports .+; last read by release-train major 2$/u
+    });
+    assert.equal(JSON.stringify(input), before);
+  }
 });
 
 test("evaluation review and event decoders retain only closed evidence", () => {
   const review = parseEvaluationReviewSource({
+    schemaVersion: 2,
     verdict: "changes_requested",
     summary: "PRIVATE REVIEW SUMMARY",
     findings: [
@@ -808,8 +799,8 @@ test("one strict RFC3339 validator normalizes valid offsets and rejects impossib
 });
 
 test("verification ledger decoding accepts bounded lifecycle evidence and rejects raw result fields", () => {
-  assert.deepEqual(parseVerificationLedger({ schemaVersion: 1 }), {
-    schemaVersion: 1
+  assert.deepEqual(parseVerificationLedger({ schemaVersion: 2 }), {
+    schemaVersion: 2
   });
   const completed = verificationAttemptFixture({ sequence: 1 });
   assert.deepEqual(parseVerificationAttemptRecord(completed), completed);
@@ -903,7 +894,10 @@ test("terminal checkpoint validation binds exact evidence and integrity", () => 
       }),
     (error: unknown) =>
       error instanceof BanzaiError &&
-      error.code === "INVALID_TERMINAL_CHECKPOINT"
+      error.code === "RESOURCE_VERSION_UNSUPPORTED" &&
+      /^.+ version .+ is not supported; 3\.x supports .+; last read by release-train major 2$/u.test(
+        error.message
+      )
   );
   assert.throws(
     () =>

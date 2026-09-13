@@ -61,7 +61,6 @@ const ROTATION_TEXT: Record<ReviewRotationReason, string> = {
     "the reviewer output contract cannot be safely reused",
   "primary-review": "this is the first review of the change",
   "missing-session": "the previous reviewer session was no longer available",
-  "legacy-state": "the run predates session-affine review",
   "settings-changed": "the reviewer model or effort changed",
   "approval-changed": "the approved plan bundle changed",
   "previous-review-failed": "the previous review attempt failed",

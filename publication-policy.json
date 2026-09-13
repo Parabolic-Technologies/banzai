@@ -124,11 +124,6 @@
       "sha256": null
     },
     {
-      "path": "documentation/artifact-policy-migration.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
       "path": "documentation/artifact-storage.md",
       "classification": "maintainer",
       "sha256": null
@@ -359,6 +354,11 @@
       "sha256": null
     },
     {
+      "path": "documentation/decisions/0045-major-bounded-compatibility-window.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
       "path": "documentation/decisions/README.md",
       "classification": "maintainer",
       "sha256": null
@@ -454,6 +454,11 @@
       "sha256": null
     },
     {
+      "path": "documentation/releases/3.0.0.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
       "path": "documentation/releases/public-publication.md",
       "classification": "maintainer",
       "sha256": null
@@ -499,152 +504,7 @@
       "sha256": null
     },
     {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/README.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/absent-agents-legacy/after/AGENTS.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/absent-agents-legacy/after/CLAUDE.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/absent-agents-legacy/before/CLAUDE.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/approved-migration/after/AGENTS.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/approved-migration/after/CLAUDE.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/approved-migration/before/AGENTS.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/approved-migration/before/CLAUDE.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/custom-conflict/before/AGENTS.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/custom-conflict/before/CLAUDE.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/custom-content-migration/after/AGENTS.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/custom-content-migration/after/CLAUDE.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/custom-content-migration/before/AGENTS.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/custom-content-migration/before/CLAUDE.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/declined-migration/after/AGENTS.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/declined-migration/after/CLAUDE.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/declined-migration/before/AGENTS.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/declined-migration/before/CLAUDE.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/fresh-adoption/after/AGENTS.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/fresh-adoption/after/CLAUDE.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/interrupted-migration/after/AGENTS.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/interrupted-migration/after/CLAUDE.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/interrupted-migration/before/AGENTS.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/interrupted-migration/before/CLAUDE.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/missing-policy/before/AGENTS.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/missing-policy/before/CLAUDE.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/update-without-migration/before/AGENTS.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/instruction-layouts/update-without-migration/before/CLAUDE.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
       "path": "packages/orchestrator/test/fixtures/plan-authority/opted-in-plan.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "packages/orchestrator/test/fixtures/version-recovery-v1/README.md",
       "classification": "maintainer",
       "sha256": null
     },
@@ -694,37 +554,7 @@
       "sha256": null
     },
     {
-      "path": "plugins/banzai/contracts/artifacts/v1/acquire-request.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
       "path": "plugins/banzai/contracts/artifacts/v1/archive.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/contracts/artifacts/v1/create-request.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/contracts/artifacts/v1/export-request.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/contracts/artifacts/v1/initialize-request.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/contracts/artifacts/v1/inspect-request.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/contracts/artifacts/v1/inventory-request.schema.json",
       "classification": "product",
       "sha256": null
     },
@@ -734,32 +564,12 @@
       "sha256": null
     },
     {
-      "path": "plugins/banzai/contracts/artifacts/v1/release-request.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/contracts/artifacts/v1/restore-request.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
       "path": "plugins/banzai/contracts/artifacts/v1/result.schema.json",
       "classification": "product",
       "sha256": null
     },
     {
-      "path": "plugins/banzai/contracts/artifacts/v1/verify-request.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/contracts/artifacts/v1/work-binding.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/contracts/artifacts/v1/write-request.schema.json",
+      "path": "plugins/banzai/contracts/artifacts/v2/acquire-request.schema.json",
       "classification": "product",
       "sha256": null
     },
@@ -769,7 +579,47 @@
       "sha256": null
     },
     {
+      "path": "plugins/banzai/contracts/artifacts/v2/export-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/artifacts/v2/initialize-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/artifacts/v2/inspect-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/artifacts/v2/inventory-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/artifacts/v2/release-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/artifacts/v2/restore-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/artifacts/v2/verify-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
       "path": "plugins/banzai/contracts/artifacts/v2/work-binding.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/artifacts/v2/write-request.schema.json",
       "classification": "product",
       "sha256": null
     },
@@ -779,22 +629,7 @@
       "sha256": null
     },
     {
-      "path": "plugins/banzai/contracts/v1/phase-result.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/contracts/v1/review-result.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
       "path": "plugins/banzai/contracts/v1/workflow-selection.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/contracts/v2/phase-result.schema.json",
       "classification": "product",
       "sha256": null
     },
@@ -1105,11 +940,6 @@
     },
     {
       "path": "plugins/banzai/skills/project-manifest/agents/openai.yaml",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/skills/project-manifest/references/layout-migration.md",
       "classification": "product",
       "sha256": null
     },

@@ -373,3 +373,4 @@ requires the subsequent approved plan.
   and [accepted review cleanup](../changes/unified-review-artifacts-implementation-review-cleanup.md).
   Live vendor calls, semantic trials and release/delivery operations still
   require separate authorization.
+- [ADR-0045](./0045-major-bounded-compatibility-window.md) bounds retained versions to the release-train major that introduced them; later majors may remove those readers. Standalone review now uses `banzai-standalone-review/v1`.

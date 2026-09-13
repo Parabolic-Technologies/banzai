@@ -1,7 +1,4 @@
 import contractManifest from "../../../plugins/banzai/contracts/contract.json" with { type: "json" };
-import legacyPhaseResultSchema from "../../../plugins/banzai/contracts/v1/phase-result.schema.json" with { type: "json" };
-import legacyPhaseResultV2Schema from "../../../plugins/banzai/contracts/v2/phase-result.schema.json" with { type: "json" };
-import legacyReviewResultSchema from "../../../plugins/banzai/contracts/v1/review-result.schema.json" with { type: "json" };
 import reviewResultSchema from "../../../plugins/banzai/contracts/v2/review-result.schema.json" with { type: "json" };
 import workflowSelectionSchema from "../../../plugins/banzai/contracts/v1/workflow-selection.schema.json" with { type: "json" };
 import phaseResultSchema from "../../../plugins/banzai/contracts/v3/phase-result.schema.json" with { type: "json" };
@@ -10,9 +7,6 @@ import { CONTRACT_VERSION, PHASE_RESULT_SCHEMA_VERSION } from "./types.js";
 
 export {
   contractManifest,
-  legacyPhaseResultSchema,
-  legacyReviewResultSchema,
-  legacyPhaseResultV2Schema,
   phaseResultSchema,
   reviewResultSchema,
   workflowSelectionSchema
@@ -33,16 +27,9 @@ export function assertContractParity(): void {
     phaseResultSchema.properties.contractVersion.const !== CONTRACT_VERSION ||
     phaseResultSchema.properties.schemaVersion.const !==
       PHASE_RESULT_SCHEMA_VERSION ||
-    legacyPhaseResultV2Schema.properties.contractVersion.const !==
-      CONTRACT_VERSION ||
-    legacyPhaseResultV2Schema.properties.schemaVersion.const !== 2 ||
-    legacyPhaseResultSchema.properties.contractVersion.const !==
-      CONTRACT_VERSION ||
     contractManifest.schemas.reviewResult !==
       "./v2/review-result.schema.json" ||
     reviewResultSchema.properties.schemaVersion.const !== 2 ||
-    legacyReviewResultSchema.properties.contractVersion.const !==
-      CONTRACT_VERSION ||
     reviewResultSchema.properties.contractVersion.const !== CONTRACT_VERSION
   ) {
     throw new BanzaiError(

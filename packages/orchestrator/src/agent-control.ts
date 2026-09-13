@@ -1,8 +1,7 @@
 import path from "node:path";
 import packageManifest from "../package.json" with { type: "json" };
-import { BanzaiError } from "./errors.js";
+import { BanzaiError, ResourceVersionUnsupportedError } from "./errors.js";
 import type {
-  AgentControlAnswerV1,
   AgentControlAnswerV2,
   AgentControlCapabilitiesV3,
   AgentControlNextAction,
@@ -29,9 +28,7 @@ import {
   AGENT_STATUS_SCHEMA_VERSION,
   CONTRACT_VERSION,
   DECISION_CONSULTATION_SCHEMA,
-  DECISION_CONSULTATION_SCHEMA_VERSION,
-  LEGACY_AGENT_ANSWER_SCHEMA,
-  LEGACY_AGENT_CONTROL_SCHEMA_VERSION
+  DECISION_CONSULTATION_SCHEMA_VERSION
 } from "./types.js";
 import { parseDecisionConsultationAnswers } from "./validation.js";
 import {
@@ -47,7 +44,6 @@ const MAX_PATH_LENGTH = 1_024;
 const MAX_REASON_LENGTH = 4_096;
 const MAX_QUESTION_LENGTH = 16_384;
 const MAX_COLLECTION_LENGTH = 128;
-const MAX_ANSWER_COUNT = 64;
 
 function controlInputError(message: string): BanzaiError {
   return new BanzaiError("INVALID_CONTROL_INPUT", message);
@@ -109,14 +105,14 @@ function requireSchema(
   schema:
     | typeof AGENT_REQUEST_SCHEMA
     | typeof AGENT_ANSWER_SCHEMA
-    | typeof AGENT_RECOVERY_SCHEMA
-    | typeof LEGACY_AGENT_ANSWER_SCHEMA,
+    | typeof AGENT_RECOVERY_SCHEMA,
   version: number
 ): void {
   if (value.schema !== schema || value.schemaVersion !== version) {
-    throw new BanzaiError(
-      "CONTROL_SCHEMA_UNSUPPORTED",
-      `Agent control input must use ${schema} schema version ${version}.`
+    throw new ResourceVersionUnsupportedError(
+      "agent control input",
+      `${String(value.schema)} (${String(value.schemaVersion)})`,
+      `${schema} (${version})`
     );
   }
 }
@@ -141,31 +137,9 @@ export function decodeAgentControlRequest(
 
 export function decodeAgentControlAnswer(
   input: Uint8Array
-): AgentControlAnswerV1 | AgentControlAnswerV2 {
+): AgentControlAnswerV2 {
   const value = parseDocument(input);
-  if (
-    value.schema === LEGACY_AGENT_ANSWER_SCHEMA &&
-    value.schemaVersion === LEGACY_AGENT_CONTROL_SCHEMA_VERSION
-  ) {
-    exactKeys(value, ["schema", "schemaVersion", "answers"]);
-    if (
-      !Array.isArray(value.answers) ||
-      value.answers.length === 0 ||
-      value.answers.length > MAX_ANSWER_COUNT ||
-      value.answers.some(
-        (answer) => typeof answer !== "string" || answer.trim().length === 0
-      )
-    ) {
-      throw controlInputError(
-        `Agent control answers must contain 1-${MAX_ANSWER_COUNT} non-empty strings.`
-      );
-    }
-    return {
-      schema: LEGACY_AGENT_ANSWER_SCHEMA,
-      schemaVersion: LEGACY_AGENT_CONTROL_SCHEMA_VERSION,
-      answers: value.answers as string[]
-    };
-  }
+  requireSchema(value, AGENT_ANSWER_SCHEMA, AGENT_ANSWER_SCHEMA_VERSION);
   exactKeys(value, [
     "schema",
     "schemaVersion",
@@ -321,9 +295,9 @@ export function agentControlCapabilities(): AgentControlCapabilitiesV3 {
     umbrellaContractVersion: CONTRACT_VERSION,
     artifactStorage: {
       declarationSchemas: ["banzai-artifact-layout/v1"],
-      bindingSchemas: ["banzai-work-binding/v1"],
+      bindingSchemas: ["banzai-work-binding/v2"],
       privateWorkspaceSnapshotVersion: 2,
-      layouts: ["legacy", "private"]
+      layouts: ["private"]
     },
     operations: {
       status: { supported: true, ttyRequired: false, inputSchemas: [] },
@@ -335,7 +309,7 @@ export function agentControlCapabilities(): AgentControlCapabilitiesV3 {
       answer: {
         supported: true,
         ttyRequired: false,
-        inputSchemas: [AGENT_ANSWER_SCHEMA, LEGACY_AGENT_ANSWER_SCHEMA]
+        inputSchemas: [AGENT_ANSWER_SCHEMA]
       },
       approveAdr: { supported: true, ttyRequired: false, inputSchemas: [] },
       approvePlan: { supported: true, ttyRequired: false, inputSchemas: [] },

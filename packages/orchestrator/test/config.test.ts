@@ -12,11 +12,9 @@ import {
 } from "../src/config.js";
 import { parseConfig } from "../src/validation.js";
 
-function irregularConfig(schemaVersion: 1 | 2): string {
+function irregularConfig(schemaVersion: 3): string {
   const verification =
-    schemaVersion === 1
-      ? '[ { "name":"verify", "command":"git", "args":["diff","--check"], "timeoutMs":1000 } ]'
-      : '{ "profiles" : [ { "id":"node", "projectType":"node", "commands":[ { "name":"verify", "command":"node", "args":["--check"], "timeoutMs":1000 } ] } ] }';
+    '{ "profiles" : [ { "id":"node", "projectType":"node", "commands":[ { "id":"node-verify", "name":"verify", "command":"node", "args":["--check"], "timeoutMs":1000 } ] } ] }';
   return [
     "{",
     `\t"schemaVersion" : ${schemaVersion},`,
@@ -56,7 +54,8 @@ test("init is idempotent and preserves tracked config", async () => {
     assert.match(ignore, /^coverage\/\n/);
     assert.match(ignore, /\.banzai\/runs\//);
     const config = await loadConfig(root);
-    assert.equal(config.schemaVersion, 2);
+    assert.equal(config.schemaVersion, 3);
+    assert.equal(config.verification.policy, undefined);
     assert.deepEqual(config.context, { mode: "observe", limits: [] });
     assert.deepEqual(config.verification.profiles, [
       {
@@ -64,6 +63,9 @@ test("init is idempotent and preserves tracked config", async () => {
         projectType: "repository",
         commands: [
           {
+            id: "git-diff-check",
+            evidence: "fresh",
+            ignoreExplanatory: false,
             name: "git diff check",
             command: "git",
             args: ["diff", "--check"],
@@ -173,67 +175,34 @@ test("context policy is optional strict and selector-aware", () => {
   }
 });
 
-test("loads schema version one through a stable compatibility profile", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "banzai-config-test-"));
-  const legacy = {
-    ...structuredClone(DEFAULT_CONFIG),
-    schemaVersion: 1,
-    verification: [
-      {
-        name: "legacy first",
-        command: "legacy-tool",
-        args: ["same", "same"],
-        timeoutMs: 1_000
-      },
-      {
-        name: "legacy second",
-        command: "legacy-tool",
-        args: ["second"],
-        timeoutMs: 2_000
-      }
-    ],
-    retainedUnknown: { keep: true }
-  };
+test("removed config versions reject reads and updates without changing bytes", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "banzai-config-window-"));
   try {
-    await mkdir(path.join(root, ".banzai"), { recursive: true });
+    await mkdir(path.join(root, ".banzai"));
     const configPath = path.join(root, CONFIG_FILE);
-    await writeFile(configPath, `${JSON.stringify(legacy, null, 2)}\n`, "utf8");
-
-    const loaded = await loadConfig(root);
-    assert.equal(loaded.schemaVersion, 1);
-    const legacyProfile = loaded.verification.profiles[0];
-    assert.ok(legacyProfile);
-    assert.equal(legacyProfile.id, "legacy");
-    assert.deepEqual(
-      legacyProfile.commands.map((command) => command.name),
-      ["legacy first", "legacy second"]
-    );
-    assert.deepEqual(legacyProfile.commands[0]?.args, ["same", "same"]);
-
-    await applyModelUpdates(root, [
-      { role: "planner", model: "updated-model" }
-    ]);
-    const source = JSON.parse(await readFile(configPath, "utf8")) as {
-      schemaVersion: number;
-      verification: unknown;
-      retainedUnknown: unknown;
-      models: { planner: { model: string } };
-    };
-    assert.equal(source.schemaVersion, 1);
-    assert.deepEqual(source.verification, legacy.verification);
-    assert.deepEqual(source.retainedUnknown, { keep: true });
-    assert.equal(source.models.planner.model, "updated-model");
-
-    const beforeInit = await readFile(configPath, "utf8");
-    await initializeConfig(root);
-    assert.equal(await readFile(configPath, "utf8"), beforeInit);
+    for (const schemaVersion of [1, 2, 4]) {
+      const original =
+        JSON.stringify({ ...DEFAULT_CONFIG, schemaVersion }, null, 2) + "\n";
+      await writeFile(configPath, original);
+      for (const action of [
+        () => loadConfig(root),
+        () => applyModelUpdates(root, [{ role: "planner", model: "changed" }])
+      ]) {
+        await assert.rejects(action, {
+          code: "RESOURCE_VERSION_UNSUPPORTED",
+          message:
+            /^.+ version .+ is not supported; 3\.x supports .+; last read by release-train major 2$/u
+        });
+        assert.equal(await readFile(configPath, "utf8"), original);
+      }
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("model updates preserve every unrelated config byte in both schema versions", async () => {
-  for (const schemaVersion of [1, 2] as const) {
+test("model updates preserve every unrelated config byte in schema version three", async () => {
+  for (const schemaVersion of [3] as const) {
     const root = await mkdtemp(
       path.join(tmpdir(), `banzai-lossless-config-v${schemaVersion}-`)
     );
@@ -275,7 +244,7 @@ test("model updates preserve every unrelated config byte in both schema versions
   }
 });
 
-test("validates version two profile identity type commands and uniqueness", () => {
+test("validates version three profile identity type commands and uniqueness", () => {
   function firstProfile(
     value: Record<string, unknown>
   ): Record<string, unknown> {
@@ -310,6 +279,7 @@ test("validates version two profile identity type commands and uniqueness", () =
     projectType: "node",
     commands: [
       {
+        id: "node-verify",
         name: "node verify",
         command: "npm",
         args: ["run", "verify"],

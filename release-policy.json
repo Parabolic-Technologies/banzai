@@ -54,26 +54,28 @@
       ".claude-plugin/marketplace.json",
       "plugins/banzai/hooks/hooks.json",
       "plugins/banzai/contracts/contract.json",
-      "plugins/banzai/contracts/v1/workflow-selection.schema.json",
-      "plugins/banzai/contracts/v1/phase-result.schema.json",
-      "plugins/banzai/contracts/v1/review-result.schema.json",
-      "plugins/banzai/contracts/v2/phase-result.schema.json",
-      "plugins/banzai/contracts/v2/review-result.schema.json",
-      "plugins/banzai/contracts/v3/phase-result.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/acquire-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/archive.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/create-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/export-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/initialize-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/inspect-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/inventory-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/work-binding.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/acquire-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/create-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/export-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/initialize-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/inspect-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/inventory-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/release-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/restore-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/verify-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/write-request.schema.json",
       "plugins/banzai/contracts/artifacts/v1/layout.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/release-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/restore-request.schema.json",
       "plugins/banzai/contracts/artifacts/v1/result.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/verify-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/work-binding.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/write-request.schema.json"
+      "plugins/banzai/contracts/artifacts/v1/archive.schema.json",
+      "plugins/banzai/contracts/v3/phase-result.schema.json",
+      "plugins/banzai/contracts/v2/review-result.schema.json",
+      "plugins/banzai/contracts/v1/workflow-selection.schema.json",
+      "plugins/banzai/contracts/verification/v1/decision.schema.json",
+      "plugins/banzai/contracts/verification/v1/applicability.schema.json",
+      "plugins/banzai/contracts/verification/v1/inspect-request.schema.json",
+      "plugins/banzai/contracts/verification/v1/execute-request.schema.json",
+      "plugins/banzai/contracts/verification/v1/result.schema.json"
     ],
     "requiredPaths": [
       "plugins/banzai/hooks/spec-gate.cjs",
@@ -91,12 +93,6 @@
       "plugins/banzai/skills/test-writing/SKILL.md",
       "plugins/banzai/contracts/README.md",
       "plugins/banzai/contracts/contract.json",
-      "plugins/banzai/contracts/v1/workflow-selection.schema.json",
-      "plugins/banzai/contracts/v1/phase-result.schema.json",
-      "plugins/banzai/contracts/v1/review-result.schema.json",
-      "plugins/banzai/contracts/v2/phase-result.schema.json",
-      "plugins/banzai/contracts/v2/review-result.schema.json",
-      "plugins/banzai/contracts/v3/phase-result.schema.json",
       "plugins/banzai/.claude-plugin/plugin.json",
       "plugins/banzai/.codex-plugin/plugin.json",
       "packages/orchestrator/package.json",
@@ -109,27 +105,12 @@
       "plugins/banzai/policies/security-assurance.md",
       "plugins/banzai/policies/engineering-quality.md",
       "plugins/banzai/policies/plan-task-completion.md",
-      "plugins/banzai/skills/project-manifest/references/layout-migration.md",
       "plugins/banzai/policies/artifact-storage.md",
       "plugins/banzai/lib/artifact-storage.mjs",
       "plugins/banzai/scripts/artifacts.cjs",
       "plugins/banzai/lib/artifact-archive.mjs",
       "plugins/banzai/lib/project-adoption.mjs",
       "plugins/banzai/lib/review-snapshot.mjs",
-      "plugins/banzai/contracts/artifacts/v1/acquire-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/archive.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/create-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/export-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/initialize-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/inspect-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/inventory-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/layout.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/release-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/restore-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/result.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/verify-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/work-binding.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/write-request.schema.json",
       "plugins/banzai/lib/artifact-readers.mjs",
       "plugins/banzai/phases/planning.md",
       "plugins/banzai/phases/implementation.md",
@@ -146,56 +127,54 @@
       "plugins/banzai/guidance/feature.md",
       "plugins/banzai/guidance/fix.md",
       "plugins/banzai/guidance/manifest.md",
-      "packages/orchestrator/src/phase-resources.ts"
+      "packages/orchestrator/src/phase-resources.ts",
+      "plugins/banzai/contracts/artifacts/v2/work-binding.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/acquire-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/create-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/export-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/initialize-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/inspect-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/inventory-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/release-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/restore-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/verify-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v2/write-request.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/layout.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/result.schema.json",
+      "plugins/banzai/contracts/artifacts/v1/archive.schema.json",
+      "plugins/banzai/contracts/v3/phase-result.schema.json",
+      "plugins/banzai/contracts/v2/review-result.schema.json",
+      "plugins/banzai/contracts/v1/workflow-selection.schema.json",
+      "plugins/banzai/contracts/verification/v1/decision.schema.json",
+      "plugins/banzai/contracts/verification/v1/applicability.schema.json",
+      "plugins/banzai/contracts/verification/v1/inspect-request.schema.json",
+      "plugins/banzai/contracts/verification/v1/execute-request.schema.json",
+      "plugins/banzai/contracts/verification/v1/result.schema.json"
     ]
   },
   "contracts": {
     "phaseResult": {
       "currentPath": "plugins/banzai/contracts/v3/phase-result.schema.json",
-      "currentSchemaVersion": 3,
-      "legacy": [
-        {
-          "path": "plugins/banzai/contracts/v1/phase-result.schema.json",
-          "schemaVersion": 1,
-          "sha256": "62b390d3ac0e4bb5f552fa902be0e23644b3928a482fc258f5892404bb205f77"
-        },
-        {
-          "path": "plugins/banzai/contracts/v2/phase-result.schema.json",
-          "schemaVersion": 2,
-          "sha256": "7ede6c88fca7d95b6a7693017f45e9c01339461aa5991e03efabe9598f3ea7fd"
-        }
-      ]
+      "currentSchemaVersion": 3
     },
     "reviewResult": {
       "currentPath": "plugins/banzai/contracts/v2/review-result.schema.json",
-      "currentSchemaVersion": 2,
-      "legacy": [
-        {
-          "path": "plugins/banzai/contracts/v1/review-result.schema.json",
-          "sha256": "bc8e5b8f9da3160799a6fa4d5efa1c607eda86400e94f6cdd57b666697f15d78"
-        }
-      ]
+      "currentSchemaVersion": 2
     },
     "state": {
-      "currentSchemaVersion": 4,
-      "legacySchemaVersions": [
-        1,
-        2,
-        3
-      ]
+      "currentSchemaVersion": 5
     },
     "agentControl": {
-      "contractVersion": "3.0.0",
+      "contractVersion": "4.0.0",
       "capabilities": "banzai-agent-capabilities/v3",
       "status": "banzai-agent-status/v2",
       "request": "banzai-agent-request/v1",
       "answer": "banzai-agent-answer/v2",
-      "legacyAnswer": "banzai-agent-answer/v1",
       "recovery": "banzai-agent-recovery/v1"
     },
     "evaluation": {
-      "export": "banzai-evaluation-export/v1",
-      "kpi": "banzai-evaluation-kpi/v1"
+      "export": "banzai-evaluation-export/v2",
+      "kpi": "banzai-evaluation-kpi/v2"
     }
   },
   "orchestrator": {
@@ -266,6 +245,550 @@
       {
         "path": "package-lock.json",
         "pointer": "/packages//version"
+      }
+    ]
+  },
+  "compatibility": {
+    "major": 3,
+    "families": [
+      {
+        "id": "run-state",
+        "supported": [
+          "5"
+        ],
+        "removed": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "orchestrator-config",
+        "supported": [
+          "3"
+        ],
+        "removed": [
+          "1",
+          "2"
+        ],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "work-binding",
+        "supported": [
+          "banzai-work-binding/v2"
+        ],
+        "removed": [
+          "banzai-work-binding/v1"
+        ],
+        "schemaFiles": [
+          "plugins/banzai/contracts/artifacts/v2/work-binding.schema.json"
+        ],
+        "removedTokens": [
+          "banzai-work-binding/v1"
+        ]
+      },
+      {
+        "id": "artifact-request",
+        "supported": [
+          "banzai-artifact-request/v2"
+        ],
+        "removed": [
+          "banzai-artifact-request/v1"
+        ],
+        "schemaFiles": [
+          "plugins/banzai/contracts/artifacts/v2/acquire-request.schema.json",
+          "plugins/banzai/contracts/artifacts/v2/create-request.schema.json",
+          "plugins/banzai/contracts/artifacts/v2/export-request.schema.json",
+          "plugins/banzai/contracts/artifacts/v2/initialize-request.schema.json",
+          "plugins/banzai/contracts/artifacts/v2/inspect-request.schema.json",
+          "plugins/banzai/contracts/artifacts/v2/inventory-request.schema.json",
+          "plugins/banzai/contracts/artifacts/v2/release-request.schema.json",
+          "plugins/banzai/contracts/artifacts/v2/restore-request.schema.json",
+          "plugins/banzai/contracts/artifacts/v2/verify-request.schema.json",
+          "plugins/banzai/contracts/artifacts/v2/write-request.schema.json"
+        ],
+        "removedTokens": [
+          "banzai-artifact-request/v1"
+        ]
+      },
+      {
+        "id": "artifact-layout",
+        "supported": [
+          "banzai-artifact-layout/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [
+          "plugins/banzai/contracts/artifacts/v1/layout.schema.json"
+        ],
+        "removedTokens": []
+      },
+      {
+        "id": "artifact-storage-layout",
+        "supported": [
+          "private"
+        ],
+        "removed": [
+          "legacy"
+        ],
+        "schemaFiles": [],
+        "removedTokens": [
+          "artifact-policy-migration.md",
+          "legacySelection",
+          "legacyCandidates"
+        ]
+      },
+      {
+        "id": "artifact-result",
+        "supported": [
+          "banzai-artifact-result/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [
+          "plugins/banzai/contracts/artifacts/v1/result.schema.json"
+        ],
+        "removedTokens": []
+      },
+      {
+        "id": "artifact-archive",
+        "supported": [
+          "banzai-artifact-archive/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [
+          "plugins/banzai/contracts/artifacts/v1/archive.schema.json"
+        ],
+        "removedTokens": []
+      },
+      {
+        "id": "phase-result",
+        "supported": [
+          "phase-result/v3"
+        ],
+        "removed": [
+          "phase-result/v1",
+          "phase-result/v2"
+        ],
+        "schemaFiles": [
+          "plugins/banzai/contracts/v3/phase-result.schema.json"
+        ],
+        "removedTokens": [
+          "phase-result/v1",
+          "phase-result/v2"
+        ]
+      },
+      {
+        "id": "review-result",
+        "supported": [
+          "review-result/v2"
+        ],
+        "removed": [
+          "review-result/v1"
+        ],
+        "schemaFiles": [
+          "plugins/banzai/contracts/v2/review-result.schema.json"
+        ],
+        "removedTokens": [
+          "review-result/v1"
+        ]
+      },
+      {
+        "id": "workflow-selection",
+        "supported": [
+          "workflow-selection/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [
+          "plugins/banzai/contracts/v1/workflow-selection.schema.json"
+        ],
+        "removedTokens": []
+      },
+      {
+        "id": "review-snapshot",
+        "supported": [
+          "banzai-review-snapshot/v3"
+        ],
+        "removed": [
+          "banzai-review-snapshot/v1",
+          "banzai-review-snapshot/v2"
+        ],
+        "schemaFiles": [],
+        "removedTokens": [
+          "banzai-review-snapshot/v1",
+          "banzai-review-snapshot/v2"
+        ]
+      },
+      {
+        "id": "feature-review",
+        "supported": [
+          "banzai-feature-review/v4"
+        ],
+        "removed": [
+          "banzai-feature-review/v1",
+          "banzai-feature-review/v2",
+          "banzai-feature-review/v3"
+        ],
+        "schemaFiles": [],
+        "removedTokens": [
+          "banzai-feature-review/v1",
+          "banzai-feature-review/v2",
+          "banzai-feature-review/v3"
+        ]
+      },
+      {
+        "id": "standalone-review",
+        "supported": [
+          "banzai-standalone-review/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "agent-capabilities",
+        "supported": [
+          "banzai-agent-capabilities/v3"
+        ],
+        "removed": [
+          "banzai-agent-capabilities/v1"
+        ],
+        "schemaFiles": [],
+        "removedTokens": [
+          "banzai-agent-capabilities/v1"
+        ]
+      },
+      {
+        "id": "agent-status",
+        "supported": [
+          "banzai-agent-status/v2"
+        ],
+        "removed": [
+          "banzai-agent-status/v1"
+        ],
+        "schemaFiles": [],
+        "removedTokens": [
+          "banzai-agent-status/v1"
+        ]
+      },
+      {
+        "id": "agent-answer",
+        "supported": [
+          "banzai-agent-answer/v2"
+        ],
+        "removed": [
+          "banzai-agent-answer/v1"
+        ],
+        "schemaFiles": [],
+        "removedTokens": [
+          "banzai-agent-answer/v1"
+        ]
+      },
+      {
+        "id": "agent-request",
+        "supported": [
+          "banzai-agent-request/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "agent-recovery",
+        "supported": [
+          "banzai-agent-recovery/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "evaluation-export",
+        "supported": [
+          "banzai-evaluation-export/v2"
+        ],
+        "removed": [
+          "banzai-evaluation-export/v1"
+        ],
+        "schemaFiles": [],
+        "removedTokens": [
+          "banzai-evaluation-export/v1",
+          "legacy_absent",
+          "LEGACY_FIELD_ABSENT"
+        ]
+      },
+      {
+        "id": "evaluation-kpi",
+        "supported": [
+          "banzai-evaluation-kpi/v2"
+        ],
+        "removed": [
+          "banzai-evaluation-kpi/v1"
+        ],
+        "schemaFiles": [],
+        "removedTokens": [
+          "banzai-evaluation-kpi/v1"
+        ]
+      },
+      {
+        "id": "model-attempt",
+        "supported": [
+          "2"
+        ],
+        "removed": [
+          "1"
+        ],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "verification-ledger",
+        "supported": [
+          "2"
+        ],
+        "removed": [
+          "1"
+        ],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "version-transaction",
+        "supported": [
+          "2"
+        ],
+        "removed": [
+          "1"
+        ],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "instruction-layout",
+        "supported": [
+          "target"
+        ],
+        "removed": [
+          "legacy"
+        ],
+        "schemaFiles": [],
+        "removedTokens": [
+          "layout-migration.md",
+          "Last legacy-compatible release",
+          "legacy Banzai layout"
+        ]
+      },
+      {
+        "id": "doctor",
+        "supported": [
+          "banzai-doctor/v3"
+        ],
+        "removed": [],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "live-compatibility",
+        "supported": [
+          "banzai-live-compatibility/v2"
+        ],
+        "removed": [],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "context-attempt",
+        "supported": [
+          "banzai-context-attempt/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "context-report",
+        "supported": [
+          "banzai-context-report/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "cancellation-report",
+        "supported": [
+          "banzai-cancellation-report/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "human-time",
+        "supported": [
+          "banzai-human-time/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "plan-task-completion",
+        "supported": [
+          "banzai-plan-task-completion/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [],
+        "removedTokens": [
+          "PLAN_TASK_COMPLETION_LEGACY"
+        ]
+      },
+      {
+        "id": "terminal-attempt-checkpoint",
+        "supported": [
+          "banzai-terminal-attempt-checkpoint/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "recovery-authorization",
+        "supported": [
+          "banzai-recovery-authorization/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "decision-consultation",
+        "supported": [
+          "banzai-decision-consultation/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "verification-policy",
+        "supported": [
+          "banzai-verification-policy/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "verification-obligations",
+        "supported": [
+          "banzai-verification-obligations/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "verification-origin-start",
+        "supported": [
+          "banzai-verification-origin-start/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "verification-origin-finish",
+        "supported": [
+          "banzai-verification-origin-finish/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "verification-decision",
+        "supported": [
+          "banzai-verification-decision/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [
+          "plugins/banzai/contracts/verification/v1/decision.schema.json"
+        ],
+        "removedTokens": []
+      },
+      {
+        "id": "verification-applicability",
+        "supported": [
+          "banzai-verification-applicability/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [
+          "plugins/banzai/contracts/verification/v1/applicability.schema.json"
+        ],
+        "removedTokens": []
+      },
+      {
+        "id": "verification-request",
+        "supported": [
+          "banzai-verification-request/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [
+          "plugins/banzai/contracts/verification/v1/inspect-request.schema.json",
+          "plugins/banzai/contracts/verification/v1/execute-request.schema.json"
+        ],
+        "removedTokens": []
+      },
+      {
+        "id": "verification-result",
+        "supported": [
+          "banzai-verification-result/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [
+          "plugins/banzai/contracts/verification/v1/result.schema.json"
+        ],
+        "removedTokens": []
+      },
+      {
+        "id": "cancellation-capabilities",
+        "supported": [
+          "banzai-cancellation-capabilities/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "cancellation-observation",
+        "supported": [
+          "banzai-cancellation-observation/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "live-write-probe",
+        "supported": [
+          "banzai-live-write-probe/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [],
+        "removedTokens": []
+      },
+      {
+        "id": "instruction-baseline",
+        "supported": [
+          "banzai-instruction-baseline/v1"
+        ],
+        "removed": [],
+        "schemaFiles": [],
+        "removedTokens": []
       }
     ]
   }

@@ -4,7 +4,7 @@ Detailed per-module behavior of `packages/orchestrator/src/` and
 `packages/orchestrator/scripts/`. `PROJECT_MANIFEST.md` section 5 carries the
 one-bullet-per-module summary and links here; read only the entries for the
 modules a change touches. Source, tests (`test/<module>.test.ts`), and the
-bound work artifacts (or historical `documentation/features/` reports) remain the evidence; this file
+bound private work artifacts remain the evidence; this file
 is a navigational reference and is updated with the module it describes.
 
 ## Source modules (`src/`)
@@ -12,9 +12,9 @@ is a navigational reference and is updated with the module it describes.
 - `artifact-storage.ts` — typed facade for canonical plugin ESM storage/adoption
   and archive operations. No runner configuration or CLI installation is needed
   by the standalone helper. Claims exclude overlapping standalone/runner phase
-  writers for one work; explicit legacy registration preserves original roles. Workflow grants remain
-  runner-owned. New run state v4 holds binding bytes and SHA-256; workspace v2
-  hashes the selected ignored work. Historical states/digests retain old meaning.
+  writers for one work. Binding v2 and private role paths are required. Workflow grants remain
+  runner-owned. New run state v5 holds v2 binding bytes and SHA-256; workspace v2
+  hashes the selected ignored work. Removed state versions fail without repair.
 
 - `cancellation.ts` — closed observation v1 reasons, response/provenance table,
   pre-transition context and reconciliation; separate report v1 types (ADR-0035).
@@ -67,8 +67,7 @@ is a navigational reference and is updated with the module it describes.
   mutations emit a fresh authoritative status projection.
 - `agent-control.ts` — closed current `banzai-agent-capabilities/v3`,
   `banzai-agent-status/v2`, and keyed `banzai-agent-answer/v2` contracts;
-  preserved `banzai-agent-request/v1`, ordered escalation
-  `banzai-agent-answer/v1`, and `banzai-agent-recovery/v1` inputs; bounded
+  preserved `banzai-agent-request/v1`, and `banzai-agent-recovery/v1` inputs; bounded
   privacy allow-list, semantic state/action projection, exact consultation
   identity binding, 64 KiB fail-before-mutation input decoding, and
   deterministic JSON rendering.
@@ -78,7 +77,7 @@ is a navigational reference and is updated with the module it describes.
 - `live-compatibility.ts` — protected live-only candidate cloning,
   subscription-auth-root isolation, version/auth preflight, bounded reviewer
   scenarios, exact Codex write-probe events, Claude
-  restricted host inventory, source/control snapshots, runner-rendered v2
+  restricted host inventory, source/control snapshots, runner-rendered v4
   review artifacts, closed `banzai-live-compatibility/v2` evidence, process bounds, and cleanup.
 - `project-adoption.ts` — facade over the canonical plugin prerequisite reader;
   filesystem-only, bounded regular-file inspection of
@@ -141,9 +140,9 @@ is a navigational reference and is updated with the module it describes.
   review-candidate Markdown, candidate metadata, logs,
   commands, paths, and digests remain outside the evaluation input/output
   boundary. Supported verification ledgers own complete new-run history;
-  absent markers retain legacy partial coverage. Owns opaque keys, source
+  absent markers are incomplete evidence and never infer physical origins. Owns opaque keys, source
   precedence, coverage-aware per-run metrics, and workflow/status aggregates
-  for `banzai-evaluation-export/v1`. Only known JSON sidecars are excluded;
+  for `banzai-evaluation-export/v2`. Only known JSON sidecars are excluded;
   other malformed or non-regular JSON candidates remain explicit gaps. Higher
   persisted model counters prevent incomplete leaf sets from claiming exact
   dependent metrics without reconstructing missing evidence. Counter gaps
@@ -151,27 +150,17 @@ is a navigational reference and is updated with the module it describes.
   model-wide metrics absorb their sum without degrading unrelated kinds.
 - `evaluation-render.ts` — pure canonical two-space JSON serialization and the
   deterministic compact Markdown projection of the same completed object.
-- `evaluation-kpi.ts` — pure derived-KPI projection
-  (`banzai-evaluation-kpi/v1`, ADR-0026) over complete evaluation-export
-  objects: per-source KPI sets derived from per-run evidence only (never
-  export aggregates), closed numerator/denominator/value/coverage values with
-  `null` on a zero denominator, fail-closed planner/implementer/reviewer
-  configuration signatures (`mixed`/`unknown`, an unattributable attempt voids
-  the run's roles; an incomplete model-attempt set also voids all roles),
-  model-only by-kind coverage and array parity before exact retry arithmetic,
-  and fail-closed `INVALID_EVAL_INPUT` structural decoding
-  of exported files. Imports only `types` and `errors`, so every KPI is
-  testable from a hand-built export.
-- `evaluation-kpi-render.ts` — canonical two-space JSON and the deterministic
-  Markdown comparison projection of a completed KPI report: a sources table
-  and one table per KPI measure with one column per source, union group rows,
-  and the fixed `value (numerator/denominator; exact e, incomplete i)` cell
-  grammar.
-- `evaluation-kpi-cli.ts` — `eval kpi` grammar sharing the `eval export`
-  cohort option codes plus repeatable `--input` (mutually exclusive with
-  cohort selectors); checkout mode computes the export in memory as source
-  `current`, input mode reads only the named files with ordinal-basename
-  labels and needs no repository.
+- `evaluation-kpi.ts` — pure current export-v2 decoding and KPI-v2 derivation.
+  Each ordinal source retains physical attempts, executed/reused terminal checks,
+  reuse numerator/denominator/value and exact/incomplete coverage. Only exact
+  included runs contribute. Unsupported identities fail with the common version
+  error; malformed current inputs fail with `INVALID_EVAL_INPUT`. Internal
+  per-run outcome/signature helpers remain independently tested.
+- `evaluation-kpi-render.ts` — canonical two-space JSON and deterministic Markdown
+  with one row per ordinal source, explicit coverage and unavailable zero ratios.
+- `evaluation-kpi-cli.ts` — `eval kpi` shares export cohort options and accepts
+  only schema 2. Repeated `--input` is exclusive with cohort selectors, reads
+  only named exports and needs no repository; checkout mode computes in memory.
 - `context-report.ts` — independent direct read-only collector for
   `banzai-context-report/v1`. It reads only bounded run
   identity/timestamp/route, canonical attempt identity/status/usage, and
@@ -279,7 +268,7 @@ is a navigational reference and is updated with the module it describes.
   validates and publishes the candidate with no formatting-only model repair.
   Matching v2 terminal proof can regenerate an absent candidate; canonical
   publication, JSON, events and state reconcile without repeated model calls or
-  duplicate accounting. Historical v1 recovery retains its original rules.
+  duplicate accounting. Unsupported review versions fail before recovery.
   Its narrow context-invocation wrapper resolves the exact prompt and output
   contract, atomically checkpoints pre-call runner bytes, blocks only an
   enforcing runner-payload crossing before the adapter starts, and records
@@ -308,17 +297,18 @@ is a navigational reference and is updated with the module it describes.
   begins and finishes strict mode-0600 `<attempt-id>.context.json` ledgers while
   excluding them from canonical attempt enumeration, creates the
   deterministic attempt-owned review-candidate path, creates the
-  schema-version-1 verification ledger marker, atomically owns one bounded leaf
+  schema-version-2 verification ledger marker, atomically owns one bounded leaf
   per physical verification attempt plus sequence-qualified log digests,
   enumerates canonical model-attempt leaves with path/identity validation while
   excluding checkpoint, candidate, and raw-result evidence, and enforces the
   single-active-run lock. Locks this process holds are tracked module-wide, so
   `releaseHeldRunnerLocksSync` can drop them from a signal handler, where the
   `try/finally` that normally releases never runs; a lock file whose token is
-  no longer ours belongs to another runner and is left as found. It normalizes
-  schema-version-1 run state
-  to version 2 on read, discarding unbound legacy session IDs while preserving
-  durable run position and human evidence.
+  no longer ours belongs to another runner and is left as found. State reads
+  require schema 5, binding v2 and an explicit recovery stage when present.
+  Unsupported state is rejected before acquiring a lock or writing events.
+  A missing empty verification ledger is created at first physical invocation;
+  existing leaves without a marker require recovery.
   A separate `.state-write.lock` serializes state replacements and event appends.
   The private create path is distinct from ordinary updates; ordinary writes
   cannot recreate missing state or change terminal state/anchor. Acquisition is
@@ -421,12 +411,14 @@ is a navigational reference and is updated with the module it describes.
 - `contracts.ts` — re-exports the plugin's contract JSON and
   `assertContractParity`, which fails with `CONTRACT_VERSION_MISMATCH` or
   `SCHEMA_VERSION_MISMATCH` when bundled schemas disagree with
-  `CONTRACT_VERSION`; current review-result v2 and byte-preserved v1 resolve
+  `CONTRACT_VERSION`; current review-result v2 and phase-result v3 resolve
   through distinct output-contract identities.
 - `config.ts` — `.banzai/config.json` location, `DEFAULT_CONFIG`,
   `loadConfig`, `initializeConfig`, and `applyModelUpdates`, which rewrites only
   requested `model`, `executable`, and `effort` JSON value tokens and preserves
-  every unrelated byte. The optional context policy defaults to
+  every unrelated byte. Reads and updates require config schema 3; initialization
+  writes schema 3 with stable check IDs. Verification policy remains optional.
+  The optional context policy defaults to
   `{ mode: "observe", limits: [] }`; selector-specific limits may be observed,
   while enforcement is restricted to exact pre-call runner-payload bytes and
   ships with no universal numerical maximum.
@@ -485,15 +477,15 @@ is a navigational reference and is updated with the module it describes.
   the model to reread the report table, and return JSON-identical task records
   without rewording evidence details. Repair prompts also carry the persisted
   violation and exact rejected task ID.
-- `review-snapshot.ts` — immutable `banzai-review-snapshot/v2` bound identity and historical v1 identity, exact
+- `review-snapshot.ts` — immutable `banzai-review-snapshot/v3` bound identity, exact
   approved-file hashes, full/delta lineage, recorded verification/completion and
   physically owned evidence paths. Storage is a private attempt sidecar,
   excluded from canonical model-attempt enumeration.
-- `review-artifact.ts` — shared v2 deterministic rendering, complete lossless
+- `review-artifact.ts` — v4 deterministic rendering, complete lossless
   semantic values, required scope versus reviewer assertions, and original
   runner-evidence projection. Validates exact candidate bytes and publishes only
-  the in-memory validation proof. Legacy v1 rendering, canonical fallback,
-  independent prose rules and typed content diagnostics remain readable.
+  the in-memory validation proof under the bound private review directory.
+  Unsupported formats fail closed before publication.
 - `mcp.ts` — `resolveSerenaWhitelist`, the availability-gated Serena MCP
   whitelist. Gates: `.serena/project.yml` present, a vendor-own registration
   (project `.mcp.json` then user-scope `.claude.json` for Claude;
@@ -574,13 +566,15 @@ is a navigational reference and is updated with the module it describes.
   fresh-input remainder, and an optional turn count. It reads no
   process state, so both surfaces are testable against an explicit width.
 - `types.ts` — all shared types, `CONTRACT_VERSION = "1.0.0"`, phase-result
-  schema v3 and state schema v4 with explicit v1/v2/v3 legacy readers, independent
-  agent-control schema and `3.0.0` contract identities, independent
+  schema v3 and state schema 5 with strict current-only readers, independent
+  agent-control schema and `4.0.0` contract identities, independent
   `banzai-context-attempt/v1` and `banzai-context-report/v1` identities,
   model-attempt v2,
   terminal-checkpoint/recovery contracts, and the pure role/model/effort
   session-binding matcher; no runtime imports.
-- `errors.ts` — `BanzaiError` (stable `code`, `exitCode`), `ProcessExitError`
+- `errors.ts` — `BanzaiError` (stable `code`, `exitCode`),
+  `ResourceVersionUnsupportedError` (package-derived compatibility diagnostic),
+  `ProcessExitError`
   (retains redacted stdout/stderr plus the typed `failureCause` and the usage
   the failed process had already spent, optional inventory, and turn count),
   `errorMessage`.
@@ -591,14 +585,17 @@ is a navigational reference and is updated with the module it describes.
   all plugin and marketplace JSON, canonical nine-way release-train parity
   against the sole root `package.json.version` authority,
   absence of retained `.banzai-version-set` state, hook,
-  current phase-result/state/control identities, byte-preserved legacy
-  phase-result schemas, five-gate decision-consultation and supervisor policy,
+  declared phase-result/state/control identities, supported-schema ownership,
+  release-major agreement, major-boundary cardinality, removed-documentation
+  identifiers, five-gate decision-consultation and supervisor policy,
   privacy canaries, `orchestrate`, Test Assurance, Security Assurance, and
   Engineering Quality policy references/syntax/identity, the versionless Claude
   marketplace, root version-script wiring, committed bundle mode, and required
   paths without mutating them. Instruction-layout validation pins the exact
   shim, process sections, six policy files, required/conditional consumer
-  matrix, scoped reference rules, migration approval and legacy-release literal.
+  matrix and scoped reference rules. Compatibility checks
+  derive from `release-policy.json#compatibility`; historical contract byte
+  pins and the legacy-release literal check are absent.
   The
   Engineering Quality check extracts the exact canonical H2 section and asserts
   its ordered rule IDs, accepted future-blocker boundary, selected semantic
@@ -666,7 +663,7 @@ Inventory selects `workPaths`/`runIds`; export validates fixed `inventoryFile`
 bytes. `bundlePath` verification/restore preserve explicit pins and owner policy,
 required Markdown authority closure and a private restored manifest receipt.
 Managed work/run/control destination ancestry is rejected before staging.
-Doctor's read-only active-state check supports v4/v5 and validates binding identity.
+Doctor's read-only active-state check supports v5 and validates binding identity.
 
 ## Runner instruction generation and parity
 
@@ -714,8 +711,10 @@ includes both Git index blobs and working/ignored input bytes, kinds, modes and
 path sets. Unknown, unstable, secret-dependent or unproven symlink inputs keep
 checks fresh. Strict plans may provide a complete, remainder-bound obligation
 inventory; legacy plans retain fresh execution. Release gates cannot reuse.
-Unavailable captures preserve physical attempt history but cannot authorize
-current applicability, including same-round resume after a successful process.
+With an enabled policy, unavailable captures preserve physical attempt history
+but cannot authorize current applicability, including same-round resume after a
+successful process. Without a policy, successful physical origins with intact
+logs and exact identities satisfy only their current round; they never grant reuse.
 
 The same decision/start/finish/application codecs serve workflow state 5 and the
 plugin-only verification helper. New binding v2 reserves `verificationDirectory`
@@ -727,7 +726,7 @@ and lite completion. Failure/retry/recovery retain their prior authorization.
 
 Snapshot v3 and rendered review artifact v4 freeze direct origins, physical
 leaves and executed/reused/pending applicability. Review-result v2, completion
-v1 and old snapshot/rendering identities stay unchanged. Archive v1 follows this
+v1 keep their current identities. Archive v1 follows this
 closure, including standalone evidence and logs, and validates restored bytes.
 Same-repository environment identity prevents a restored archive from becoming
 reuse authority in another checkout.

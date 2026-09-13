@@ -9,7 +9,6 @@ import {
   parseEvaluationStateSource,
   parsePersistedPhaseResult,
   parseReviewResult,
-  parseCurrentReviewResult,
 } from "./artifact-readers.mjs";
 import {
   lstat,
@@ -36,6 +35,7 @@ import {
   parseBinding,
   git,
   fail,
+  unsupportedResourceVersion,
 } from "./artifact-storage.mjs";
 
 export const ARCHIVE_SCHEMA = "banzai-artifact-archive/v1";
@@ -149,7 +149,8 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
     let value;
     try {
       value = JSON.parse(text);
-    } catch {
+    } catch (error) {
+      if (error?.code === "RESOURCE_VERSION_UNSUPPORTED") throw error;
       return { refs, supported: false };
     }
     try {
@@ -177,10 +178,9 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
       else if ("phase" in value && "outcome" in value)
         parsePersistedPhaseResult(value);
       else if ("verdict" in value && "findings" in value)
-        (value.schemaVersion === 2
-          ? parseCurrentReviewResult
-          : parseReviewResult)(value);
-    } catch {
+        parseReviewResult(value);
+    } catch (error) {
+      if (error?.code === "RESOURCE_VERSION_UNSUPPORTED") throw error;
       return { refs, supported: false };
     }
     if (relative.endsWith("/work.json")) {
@@ -189,7 +189,7 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
     }
     if (
       /\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative) &&
-      ![1, 2, 3, 4, 5].includes(value.schemaVersion)
+      value.schemaVersion !== 5
     )
       supported = false;
     if (
@@ -197,15 +197,12 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
       !new Set([
         "banzai-terminal-attempt-checkpoint/v1",
         "banzai-recovery-authorization/v1",
-        "banzai-review-snapshot/v1",
-        "banzai-review-snapshot/v2",
         "banzai-review-snapshot/v3",
         "banzai-work-binding/v2",
         "banzai-verification-decision/v1",
         "banzai-verification-applicability/v1",
         "banzai-verification-origin-start/v1",
         "banzai-verification-origin-finish/v1",
-        "banzai-work-binding/v1",
         "banzai-context-attempt/v1",
         "banzai-context-report/v1",
       ]).has(value.schema)
@@ -217,13 +214,14 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
     ) {
       try {
         parseReviewSnapshot(value);
-      } catch {
+      } catch (error) {
+        if (error?.code === "RESOURCE_VERSION_UNSUPPORTED") throw error;
         return { refs, supported: false };
       }
     }
     if (
       /\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative) &&
-      value.schemaVersion >= 4
+      value.schemaVersion === 5
     ) {
       try {
         exactObject(value.artifactBinding, ["binding", "sha256"]);
@@ -498,10 +496,7 @@ export function parseArchive(value) {
     "retention",
   ]);
   if (value.schema !== ARCHIVE_SCHEMA || value.schemaVersion !== 1)
-    fail(
-      "ARTIFACT_VERSION_UNSUPPORTED",
-      "Unsupported artifact archive version.",
-    );
+    unsupportedResourceVersion("artifact archive", `${value.schema} (schemaVersion ${value.schemaVersion})`, ARCHIVE_SCHEMA);
   bounded(value.bundleId, "bundleId");
   if (
     !Number.isFinite(Date.parse(value.createdAt)) ||

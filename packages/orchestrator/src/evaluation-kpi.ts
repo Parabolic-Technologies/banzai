@@ -1,4 +1,4 @@
-import { BanzaiError } from "./errors.js";
+import { BanzaiError, ResourceVersionUnsupportedError } from "./errors.js";
 import type {
   EvaluationExport,
   EvaluationExportV2,
@@ -12,11 +12,7 @@ import type {
   KpiUnit,
   KpiValue
 } from "./types.js";
-import {
-  EVALUATION_EXPORT_SCHEMA,
-  EVALUATION_KPI_SCHEMA,
-  EVALUATION_KPI_SCHEMA_VERSION
-} from "./types.js";
+import { EVALUATION_EXPORT_SCHEMA } from "./types.js";
 
 /**
  * Derived KPIs are a pure projection of complete evaluation-export objects
@@ -614,19 +610,13 @@ export function deriveEvaluationKpiSource(
 export function deriveEvaluationKpiReport(
   sources: readonly { label: string; report: EvaluationExport }[]
 ): EvaluationKpiReport {
-  return {
-    schema: EVALUATION_KPI_SCHEMA,
-    schemaVersion: EVALUATION_KPI_SCHEMA_VERSION,
-    sources: sources.map((source, index) =>
-      deriveEvaluationKpiSource(index + 1, source.label, source.report)
-    )
-  };
+  return deriveEvaluationKpiV2(sources.map((source) => source.report));
 }
 
 function inputError(sourceName: string, detail: string): BanzaiError {
   return new BanzaiError(
     "INVALID_EVAL_INPUT",
-    `Evaluation KPI input ${sourceName} is not a usable banzai-evaluation-export/v1 document: ${detail}`
+    `Evaluation KPI input ${sourceName} is not a usable banzai-evaluation-export/v2 document: ${detail}`
   );
 }
 
@@ -761,31 +751,10 @@ function validateRun(sourceName: string, run: unknown, index: number): void {
   }
 }
 
-export function decodeEvaluationExportInput(
-  text: string,
+function validateEvaluationExportFields(
+  parsed: Record<string, unknown>,
   sourceName: string
-): EvaluationExport {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw inputError(sourceName, "the file is not valid JSON");
-  }
-  if (!isRecord(parsed)) {
-    throw inputError(sourceName, "the document is not a JSON object");
-  }
-  if (parsed.schema !== EVALUATION_EXPORT_SCHEMA) {
-    throw inputError(
-      sourceName,
-      "the document does not carry the evaluation export schema identity"
-    );
-  }
-  if (parsed.schemaVersion !== 1) {
-    throw inputError(
-      sourceName,
-      "the document carries an unsupported evaluation export schema version"
-    );
-  }
+): void {
   const cohort = parsed.cohort;
   if (!isRecord(cohort) || typeof cohort.includedRunCount !== "number") {
     throw inputError(sourceName, "the document is missing cohort evidence");
@@ -799,10 +768,9 @@ export function decodeEvaluationExportInput(
   parsed.runs.forEach((run, index) => {
     validateRun(sourceName, run, index);
   });
-  return parsed as unknown as EvaluationExport;
 }
 
-/** v2 is opt-in; never accepts or converts an export-v1 input. */
+/** The current input is decoded directly without re-stamping its identity. */
 export function decodeEvaluationExportV2Input(
   text: string,
   sourceName: string
@@ -813,25 +781,21 @@ export function decodeEvaluationExportV2Input(
   } catch {
     throw inputError(sourceName, "invalid JSON");
   }
+  if (!isRecord(parsed))
+    throw inputError(sourceName, "the document is not a JSON object");
+  if (parsed.schema !== EVALUATION_EXPORT_SCHEMA || parsed.schemaVersion !== 2)
+    throw new ResourceVersionUnsupportedError(
+      "evaluation export",
+      `${String(parsed.schema)} (${String(parsed.schemaVersion)})`,
+      "banzai-evaluation-export/v2 (2)"
+    );
   if (
-    !isRecord(parsed) ||
-    parsed.schema !== "banzai-evaluation-export/v2" ||
-    parsed.schemaVersion !== 2 ||
     !Array.isArray(parsed.runs) ||
     Object.keys(parsed).sort().join(",") !==
       "aggregates,cohort,issues,runs,schema,schemaVersion"
   )
-    throw inputError(sourceName, "export v2 is required");
-  // Existing field validation is reused, while all new evidence is validated
-  // below. This is validation only, not a conversion of legacy evidence.
-  decodeEvaluationExportInput(
-    JSON.stringify({
-      ...parsed,
-      schema: EVALUATION_EXPORT_SCHEMA,
-      schemaVersion: 1
-    }),
-    sourceName
-  );
+    throw inputError(sourceName, "invalid export v2 shape");
+  validateEvaluationExportFields(parsed, sourceName);
   for (const run of parsed.runs as Record<string, unknown>[]) {
     const evidence = run.verificationEvidence;
     if (
@@ -950,3 +914,5 @@ export function deriveEvaluationKpiV2(
     })
   };
 }
+
+export const decodeEvaluationExportInput = decodeEvaluationExportV2Input;

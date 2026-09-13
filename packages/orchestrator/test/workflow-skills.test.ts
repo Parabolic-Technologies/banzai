@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
@@ -182,10 +181,15 @@ test("plan policy delivers the approved convention and preserves the completion 
         policy.indexOf("### Opt-in verification obligations")
       )
       .trimEnd() + "\n";
-  // ADR-0038 adds authority interpretation; it does not amend completion prose.
-  assert.equal(
-    createHash("sha256").update(completion).digest("hex"),
-    "5b0e9ef93c9a5a0f6d45e32528d32069d6b0bbe618d51039e14fa9cfe8abc87e"
+  // ADR-0045 retires completion compatibility; the approved plan convention
+  // above remains byte-exact while the live completion policy is semantic.
+  assert.match(
+    completion,
+    /`structured completion evidence`,\s+`plan checkbox`, `unknown`, or `inconsistent`/
+  );
+  assert.doesNotMatch(
+    completion,
+    /PLAN_TASK_COMPLETION_LEGACY|predates the canonical/
   );
 });
 
@@ -228,12 +232,12 @@ test("feature status keeps orchestrator lifecycle authoritative and exposes comp
   assert.match(status, /N\/N externally completed/i);
   assert.match(status, /active.*remains active/is);
   assert.match(status, /plan checkbox.*standalone/is);
-  assert.match(status, /legacy` or `unknown`/i);
+  assert.match(status, /unknown or inconsistent/i);
   assert.match(status, /artifact\/evidence audit/i);
   for (const provenance of [
     "plan checkbox",
     "structured completion evidence",
-    "legacy"
+    "unknown"
   ]) {
     assert.match(status, new RegExp(provenance.replace("+", "\\+"), "i"));
   }
@@ -365,22 +369,19 @@ test("shipped workflow and supervisor preserve the five-gate consultation contra
   });
 
   assert.match(protocol, /banzai-agent-capabilities\/v3/);
-  assert.match(protocol, /controlContractVersion: "3\.0\.0"/);
+  assert.match(protocol, /controlContractVersion: "4\.0\.0"/);
   assert.match(protocol, /banzai-agent-status\/v2/);
   assert.match(protocol, /answer_escalation/);
   assert.match(protocol, /answer_consultation/);
   const documents = [...protocol.matchAll(/```json\n([\s\S]*?)\n```/gu)].map(
     (match) => JSON.parse(match[1] ?? "") as { schema: string }
   );
-  assert.equal(documents.length, 4);
+  assert.equal(documents.length, 3);
   for (const document of documents) {
     const encoded = Buffer.from(JSON.stringify(document));
     if (document.schema === "banzai-agent-request/v1") {
       decodeAgentControlRequest(encoded);
-    } else if (
-      document.schema === "banzai-agent-answer/v1" ||
-      document.schema === "banzai-agent-answer/v2"
-    ) {
+    } else if (document.schema === "banzai-agent-answer/v2") {
       decodeAgentControlAnswer(encoded);
     } else if (document.schema === "banzai-agent-recovery/v1") {
       decodeAgentControlRecovery(encoded);
@@ -470,10 +471,10 @@ const EXPECTED_POLICY_READS = {
   }
 } as const;
 
-test("skills read the matrix policies and stop on a legacy layout", async () => {
-  for (const [skill, legacyRow] of Object.entries(EXPECTED_POLICY_READS)) {
+test("skills read the matrix policies and stop on a partial layout", async () => {
+  for (const [skill, policyRow] of Object.entries(EXPECTED_POLICY_READS)) {
     const row = {
-      ...legacyRow,
+      ...policyRow,
       "artifact-storage": skill === "orchestrate" ? "-" : "R"
     };
     const source = await productSource(
@@ -481,10 +482,7 @@ test("skills read the matrix policies and stop on a legacy layout", async () => 
     );
     if (skill === "orchestrate") {
       assert.doesNotMatch(source, /^## Sources$/m);
-      assert.match(
-        source,
-        /Relay a summary beginning with `legacy Banzai layout:` verbatim/
-      );
+      assert.match(source, /Relay partial-layout diagnostics verbatim/);
     } else {
       const sources = /^## Sources\n([\s\S]*?)(?=^## |$(?![\s\S]))/m.exec(
         source
@@ -500,13 +498,13 @@ test("skills read the matrix policies and stop on a legacy layout", async () => 
       assert.ok(
         source
           .replace(/\s+/g, " ")
-          .includes("legacy Banzai layout: run `project-manifest` to migrate"),
+          .includes("On partial report the exact ambiguity"),
         skill
       );
       assert.match(sources, /the project root `AGENTS.md`/);
       assert.match(sources, /unreadable/);
       const bootstrap = ["project-manifest", "feature-status"].includes(skill);
-      assert.equal(sources.includes("bootstrap source rule"), bootstrap, skill);
+      assert.equal(sources.includes("for the report only"), bootstrap, skill);
       if (skill === "feature-review")
         assert.match(source, /`verdict=blocked`[\s\S]*?no findings/);
       else if (!bootstrap)
@@ -554,14 +552,16 @@ test("packaged process distinguishes runner delivery from standalone entry witho
     /runner\s+alone renders and validates the attempt-owned candidate/
   );
   assert.match(text, /standalone|Standalone/);
-  assert.match(text, /banzai-feature-review\/v1/);
+  assert.match(text, /banzai-standalone-review\/v1/);
   assert.match(text, /maximum|at most two deltas/);
   assert.doesNotMatch(text, /Claude may write only|^@/m);
   const start = text.indexOf("## Policies\n");
   const end = text.indexOf("\n## ", start);
-  // Exact process policy index bytes from the approved 3c00d9f baseline.
-  assert.equal(
-    createHash("sha256").update(text.slice(start, end)).digest("hex"),
-    "2221cdf98b1cd1dcbb5700ae54690b825090a19cec455e1bae25740c77250b0e"
+  const policies = text.slice(start, end);
+  assert.match(
+    policies,
+    /Partial instruction layouts stop affected work with an exact\s+ambiguity report/
   );
+  assert.match(policies, /unsupported evidence is never normalized/);
+  assert.doesNotMatch(policies, /Legacy projects migrate/);
 });

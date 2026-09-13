@@ -543,3 +543,4 @@ Implementation and review must establish:
   for the separately authorized cancellation prerequisite and
   [test report](../features/vendor-neutral-policy-files-and-instruction-delivery/test-report.md)
   for verification and unverified host-delivery evidence.
+- [ADR-0045](./0045-major-bounded-compatibility-window.md) bounds retained versions to the release-train major that introduced them; later majors may remove those readers.

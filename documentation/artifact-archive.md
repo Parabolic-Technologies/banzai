@@ -1,8 +1,8 @@
 # Local Artifact Archives
 
 Use `banzai artifacts <operation> --json <request-file>` or the plugin's standalone
-helper. The common request fields are `schema: "banzai-artifact-request/v1"`,
-`schemaVersion: 1` and the physical absolute `repoRoot`.
+helper. The common request fields are `schema: "banzai-artifact-request/v2"`,
+`schemaVersion: 2` and the physical absolute `repoRoot`.
 
 | Operation | Additional fields | Result |
 | --- | --- | --- |
@@ -61,11 +61,9 @@ rules below, or `owner` with empty `rules` and an `ownerPolicy` object containin
 not another operation's request field or an inferred client policy.
 
 Set `retention.pins` to explicit `{sourceId: "project", workId, reason, recordedAt}`
-records for archived bound work. Register original legacy work before pinning it
-by work ID. Pins identify existing binding provenance, survive export/verification
+records for archived bound work. Pins identify existing binding provenance, survive export/verification
 and the restored receipt, and protect that work's included artifacts and required
-dependency closure. `verify.retainedPaths` projects this protection, including
-legacy role paths. Shorter log eligibility never overrides a pin. No automatic
+dependency closure. `verify.retainedPaths` projects this protection. Shorter log eligibility never overrides a pin. No automatic
 prune or deletion authorization exists; `deletionAuthorized` must stay false.
 
 Banzai retention defaults: active/pinned evidence has no expiry; supported

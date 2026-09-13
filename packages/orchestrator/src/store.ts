@@ -19,7 +19,11 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import { BanzaiError, TerminalRunStateError } from "./errors.js";
+import {
+  BanzaiError,
+  ResourceVersionUnsupportedError,
+  TerminalRunStateError
+} from "./errors.js";
 import {
   CANCELLATION_STATUSES,
   cancellationRecord,
@@ -42,16 +46,11 @@ import type {
   AttemptReference,
   ContextAttemptLedger,
   ContextInvocationEvidence,
-  EscalationDecisionRecord,
-  EscalationDecisionRequest,
   RecoveryAuthorization,
-  ReviewReference,
   ReviewSnapshot,
-  RunMetrics,
   RunState,
   TerminalCheckpointResult,
   TerminalAttemptCheckpoint,
-  TriageRecord,
   VerificationAttemptLogEvidence,
   VerificationAttemptRecord,
   VerificationCommandDescriptor
@@ -184,39 +183,6 @@ async function readJson<T>(filePath: string, label: string): Promise<T> {
       `Could not read ${label}: ${(error as Error).message}`
     );
   }
-}
-
-type LegacyEscalationDecisionRequest = Omit<EscalationDecisionRequest, "kind">;
-type LegacyEscalationDecisionRecord = Omit<EscalationDecisionRecord, "kind">;
-
-interface LegacyRunStateV2 extends Omit<
-  RunState,
-  "schemaVersion" | "pendingHumanDecision" | "humanDecisions"
-> {
-  schemaVersion: 2;
-  pendingHumanDecision?: LegacyEscalationDecisionRequest | null;
-  humanDecisions?: LegacyEscalationDecisionRecord[];
-}
-
-interface LegacyRunState extends Omit<
-  LegacyRunStateV2,
-  | "schemaVersion"
-  | "sessions"
-  | "pendingReviewRotationReason"
-  | "triageHistory"
-  | "latestReview"
-  | "metrics"
-> {
-  schemaVersion: 1;
-  sessions: {
-    planner: string | null;
-    implementer: string | null;
-  };
-  latestReview: Omit<
-    ReviewReference,
-    "sessionMode" | "mode" | "rotationReason"
-  > | null;
-  metrics: Omit<RunMetrics, "sessions" | "reviews">;
 }
 
 function decisionStateError(): never {
@@ -373,148 +339,70 @@ function validateDecisionState(state: RunState): RunState {
   }
 }
 
-function normalizeRunState(
-  state: RunState | LegacyRunStateV2 | LegacyRunState
-): RunState {
-  if (![1, 2, 3, 4, 5].includes(state.schemaVersion)) {
+function validateRunState(value: unknown): RunState {
+  if (typeof value !== "object" || value === null)
     throw new BanzaiError(
-      "ARTIFACT_VERSION_UNSUPPORTED",
-      "Unsupported persisted run state version."
+      "STATE_READ_FAILED",
+      "Persisted run state must be an object."
+    );
+  const record = value as Record<string, unknown>;
+  if (record.schemaVersion !== 5)
+    throw new ResourceVersionUnsupportedError(
+      "run state",
+      String(record.schemaVersion),
+      5
+    );
+  const bound = record.artifactBinding as
+    { binding?: unknown; sha256?: unknown } | null | undefined;
+  if (
+    typeof bound !== "object" ||
+    bound === null ||
+    typeof bound.binding !== "object" ||
+    bound.binding === null ||
+    typeof bound.sha256 !== "string" ||
+    !/^[0-9a-f]{64}$/.test(bound.sha256) ||
+    Object.keys(bound).sort().join(",") !== "binding,sha256"
+  ) {
+    throw new BanzaiError(
+      "ARTIFACT_RECOVERY_REQUIRED",
+      "Run state v5 requires its exact original workflow binding."
     );
   }
-  if (state.schemaVersion < 4 && state.artifactBinding !== undefined) {
-    throw new BanzaiError(
-      "ARTIFACT_VERSION_UNSUPPORTED",
-      "Legacy run state cannot acquire private binding semantics."
+  const binding = bound.binding as Record<string, unknown>;
+  if (binding.schemaVersion !== 2)
+    throw new ResourceVersionUnsupportedError(
+      "work binding",
+      String(binding.schemaVersion),
+      2
     );
-  }
-  if (state.schemaVersion === 4 || state.schemaVersion === 5) {
+  if (parseBinding(binding).mode !== "workflow")
+    throw new BanzaiError(
+      "ARTIFACT_RECOVERY_REQUIRED",
+      "Run state requires an immutable workflow binding."
+    );
+  if (record.recovery !== undefined && record.recovery !== null) {
+    const recovery = record.recovery as { stage?: unknown };
     if (
-      state.artifactBinding === undefined ||
-      !/^[0-9a-f]{64}$/.test(state.artifactBinding.sha256)
+      ![
+        "authorized",
+        "source_interrupted",
+        "source_preserved",
+        "attempt_started"
+      ].includes(String(recovery.stage))
     ) {
       throw new BanzaiError(
-        "ARTIFACT_RECOVERY_REQUIRED",
-        "Run state v4 requires its original artifact binding."
+        "STATE_READ_FAILED",
+        "Persisted recovery state requires an explicit valid stage."
       );
     }
-    if (
-      Object.keys(state.artifactBinding).sort().join(",") !==
-        "binding,sha256" ||
-      parseBinding(state.artifactBinding.binding).mode !== "workflow"
-    )
-      throw new BanzaiError(
-        "ARTIFACT_RECOVERY_REQUIRED",
-        "Run state requires an exact immutable workflow binding."
-      );
   }
-  if (
-    state.schemaVersion === 4 &&
-    state.artifactBinding?.binding.schemaVersion !== 1
-  )
-    throw new BanzaiError(
-      "ARTIFACT_VERSION_UNSUPPORTED",
-      "Run state v4 retains binding v1 semantics."
-    );
-  if (state.schemaVersion === 5 && state.verificationEvidence !== undefined) {
+  const state = value as RunState;
+  if (state.verificationEvidence !== undefined) {
     parseVerificationDecision(state.verificationEvidence.decision);
     if (state.verificationEvidence.applicability !== null)
       parseVerificationApplicability(state.verificationEvidence.applicability);
   }
-  if (
-    state.schemaVersion === 5 &&
-    state.artifactBinding?.binding.schemaVersion !== 2
-  )
-    throw new BanzaiError(
-      "ARTIFACT_RECOVERY_REQUIRED",
-      "Run state v5 requires its original verification-enabled binding."
-    );
-  if (state.schemaVersion !== 5 && state.verificationEvidence !== undefined)
-    throw new BanzaiError(
-      "ARTIFACT_VERSION_UNSUPPORTED",
-      "Legacy state cannot acquire verification applicability."
-    );
-  if (
-    state.schemaVersion === 3 ||
-    state.schemaVersion === 4 ||
-    state.schemaVersion === 5
-  ) {
-    const recovery = state.recovery ?? null;
-    if (recovery !== null && recovery.stage === undefined) {
-      recovery.stage =
-        recovery.recoveryAttemptId === null
-          ? state.activeAttempt?.id === recovery.sourceAttemptId
-            ? "authorized"
-            : "source_interrupted"
-          : "attempt_started";
-    }
-    return validateDecisionState(state);
-  }
-  if (state.schemaVersion === 2) {
-    const normalized: RunState = {
-      ...state,
-      schemaVersion: 3,
-      pendingHumanDecision:
-        state.pendingHumanDecision === null ||
-        state.pendingHumanDecision === undefined
-          ? null
-          : { kind: "escalation", ...state.pendingHumanDecision },
-      humanDecisions: (state.humanDecisions ?? []).map((decision) => ({
-        kind: "escalation",
-        ...decision
-      }))
-    };
-    const recovery = normalized.recovery ?? null;
-    if (recovery !== null && recovery.stage === undefined) {
-      recovery.stage =
-        recovery.recoveryAttemptId === null
-          ? normalized.activeAttempt?.id === recovery.sourceAttemptId
-            ? "authorized"
-            : "source_interrupted"
-          : "attempt_started";
-    }
-    return validateDecisionState(normalized);
-  }
-  const triageHistory: TriageRecord[] =
-    state.triage === null ? [] : [state.triage];
-  const mayReviewAgain =
-    state.status !== "done" &&
-    state.status !== "cancelled" &&
-    (state.workflowSelection?.workflow ?? "strict") === "strict";
-  return validateDecisionState({
-    ...state,
-    schemaVersion: 3,
-    pendingHumanDecision:
-      state.pendingHumanDecision === null ||
-      state.pendingHumanDecision === undefined
-        ? null
-        : { kind: "escalation", ...state.pendingHumanDecision },
-    humanDecisions: (state.humanDecisions ?? []).map((decision) => ({
-      kind: "escalation",
-      ...decision
-    })),
-    sessions: { planner: null, implementer: null, reviewer: null },
-    pendingReviewRotationReason: mayReviewAgain ? "legacy-state" : null,
-    latestReview:
-      state.latestReview === null
-        ? null
-        : {
-            ...state.latestReview,
-            sessionMode: "fresh",
-            mode: "full",
-            rotationReason: "legacy-state"
-          },
-    triageHistory,
-    metrics: {
-      ...state.metrics,
-      sessions: { fresh: 0, resumed: 0 },
-      reviews: {
-        full: state.latestReview === null ? 0 : 1,
-        delta: 0,
-        rotations: 0
-      }
-    }
-  });
+  return validateDecisionState(state);
 }
 
 function isProcessAlive(pid: number): boolean {
@@ -806,6 +694,8 @@ export class RunStore {
   async acquireLock(
     options: { reclaimStale?: boolean } = {}
   ): Promise<RunnerLock> {
+    const activeRunId = await this.readActiveRunId();
+    if (activeRunId !== null) await this.readState(activeRunId);
     if (options.reclaimStale !== false) await this.initialize();
     const token = randomUUID();
     const lock: LockFile = {
@@ -942,7 +832,7 @@ export class RunStore {
   }
 
   async createRun(state: RunState): Promise<void> {
-    await this.initialize();
+    validateRunState(state);
     const existing = await this.readActiveRunId();
     if (existing !== null) {
       const existingState = await this.readState(existing);
@@ -953,16 +843,14 @@ export class RunStore {
         );
       }
     }
+    await this.initialize();
     await mkdir(this.runDirectory(state.runId), { recursive: false });
     await mkdir(path.join(this.runDirectory(state.runId), "attempts"));
     await mkdir(this.verificationAttemptsDirectory(state.runId));
     await atomicWriteJson(this.verificationLedgerPath(state.runId), {
-      schemaVersion:
-        state.schemaVersion === 5 ? 2 : VERIFICATION_LEDGER_SCHEMA_VERSION
+      schemaVersion: 2
     });
-    await this.withStateMutation(state.runId, async () => {
-      await atomicWriteJson(this.statePath(state.runId), state, false);
-    });
+    await atomicWriteJson(this.statePath(state.runId), state, false);
     await atomicWriteJson(this.activeRunPath, {
       schemaVersion: 1,
       runId: state.runId
@@ -1001,15 +889,13 @@ export class RunStore {
   }
 
   async readState(runId: string): Promise<RunState> {
-    return normalizeRunState(
-      await readJson<RunState | LegacyRunStateV2 | LegacyRunState>(
-        this.statePath(runId),
-        `state for ${runId}`
-      )
+    return validateRunState(
+      await readJson<RunState>(this.statePath(runId), `state for ${runId}`)
     );
   }
 
   async writeState(state: RunState): Promise<void> {
+    validateRunState(state);
     await this.withStateMutation(state.runId, async () => {
       const { state: current } = await this.readMutationState(state.runId);
       if (current.status === "done" || current.status === "cancelled") {
@@ -1034,6 +920,7 @@ export class RunStore {
     runId: string,
     action: () => Promise<T>
   ): Promise<T> {
+    await this.readState(runId);
     const directory = await cancellationEvidencePath(
       this.repoRoot,
       `.banzai/runs/${runId}`,
@@ -1091,8 +978,7 @@ export class RunStore {
       raw = cancellationRecord(JSON.parse(file.text));
       if (
         raw.runId !== runId ||
-        !CANCELLATION_STATUSES.includes(raw.status as RunState["status"]) ||
-        ![1, 2, 3, 4, 5].includes(raw.schemaVersion as number)
+        !CANCELLATION_STATUSES.includes(raw.status as RunState["status"])
       )
         throw new Error();
     } catch {
@@ -1101,7 +987,7 @@ export class RunStore {
         "The exact run state could not be read safely."
       );
     }
-    return { raw, state: normalizeRunState(raw as unknown as RunState) };
+    return { raw, state: validateRunState(raw) };
   }
 
   async commitCancellation(
@@ -1592,12 +1478,37 @@ export class RunStore {
   async readVerificationAttempts(
     runId: string
   ): Promise<VerificationAttemptRecord[]> {
-    parseVerificationLedger(
-      await readJson<unknown>(
-        this.verificationLedgerPath(runId),
-        "verification ledger"
-      )
-    );
+    const marker = await readFile(
+      this.verificationLedgerPath(runId),
+      "utf8"
+    ).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    });
+    if (marker === null) {
+      const entries = await readdir(
+        this.verificationAttemptsDirectory(runId)
+      ).catch((error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+        throw error;
+      });
+      if (entries.length !== 0)
+        throw new BanzaiError(
+          "VERIFICATION_LEDGER_MALFORMED",
+          "Physical verification evidence requires its ledger marker."
+        );
+      return [];
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(marker) as unknown;
+    } catch {
+      throw new BanzaiError(
+        "VERIFICATION_LEDGER_MALFORMED",
+        "Verification ledger marker is malformed."
+      );
+    }
+    parseVerificationLedger(parsed);
     const directory = this.verificationAttemptsDirectory(runId);
     const entries = (await readdir(directory, { withFileTypes: true }))
       .filter(
@@ -1634,28 +1545,6 @@ export class RunStore {
     return records.sort((left, right) => left.sequence - right.sequence);
   }
 
-  async verificationLedgerSupported(runId: string): Promise<boolean> {
-    try {
-      parseVerificationLedger(
-        JSON.parse(
-          await readFile(this.verificationLedgerPath(runId), "utf8")
-        ) as unknown
-      );
-      return true;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        return false;
-      }
-      if (error instanceof BanzaiError) {
-        throw error;
-      }
-      throw new BanzaiError(
-        "VERIFICATION_LEDGER_MALFORMED",
-        "Verification ledger marker is malformed."
-      );
-    }
-  }
-
   async beginVerificationAttempt(
     runId: string,
     input: {
@@ -1667,6 +1556,22 @@ export class RunStore {
     }
   ): Promise<VerificationAttemptRecord> {
     const records = await this.readVerificationAttempts(runId);
+    await mkdir(this.verificationAttemptsDirectory(runId), { recursive: true });
+    try {
+      await writeFile(
+        this.verificationLedgerPath(runId),
+        JSON.stringify({ schemaVersion: 2 }) + "\n",
+        { flag: "wx", mode: 0o600 }
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      parseVerificationLedger(
+        await readJson<unknown>(
+          this.verificationLedgerPath(runId),
+          "verification ledger"
+        )
+      );
+    }
     const sequence = (records.at(-1)?.sequence ?? 0) + 1;
     const record: VerificationAttemptRecord = {
       schemaVersion: VERIFICATION_LEDGER_SCHEMA_VERSION,

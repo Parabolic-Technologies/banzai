@@ -81,13 +81,13 @@ if (command === "help") {
   process.stdout.write(variant === "malformed-capabilities" ? "{bad\\n" : JSON.stringify({
     schema: variant === "incompatible-capabilities" ? "banzai-agent-capabilities/v1" : "banzai-agent-capabilities/v3",
     schemaVersion: variant === "incompatible-capabilities" ? 1 : 3,
-    controlContractVersion: "3.0.0",
+    controlContractVersion: "4.0.0",
     orchestratorVersion: variant === "capability-version-mismatch" ? "0.0.0" : version,
     umbrellaContractVersion: "1.0.0",
     operations: {
       status: { supported: true, ttyRequired: false, inputSchemas: [] },
       start: { supported: true, ttyRequired: false, inputSchemas: ["banzai-agent-request/v1"] },
-      answer: { supported: true, ttyRequired: false, inputSchemas: ["banzai-agent-answer/v2", "banzai-agent-answer/v1"] },
+      answer: { supported: true, ttyRequired: false, inputSchemas: ["banzai-agent-answer/v2"] },
       approveAdr: { supported: true, ttyRequired: false, inputSchemas: [] },
       approvePlan: { supported: true, ttyRequired: false, inputSchemas: [] },
       triage: { supported: true, ttyRequired: false, inputSchemas: [] },
@@ -100,7 +100,7 @@ if (command === "help") {
 } else if (command === "init") {
   await mkdir(path.join(process.cwd(), ".banzai"), { recursive: true });
   await writeFile(path.join(process.cwd(), ".banzai/config.json"), JSON.stringify({
-    schemaVersion: 2,
+    schemaVersion: 3,
     contractVersion: "1.0.0",
     models: {
       planner: { executable: process.execPath },
@@ -146,13 +146,13 @@ if (command === "help") {
   process.stdout.write(JSON.stringify({ schema: "banzai-agent-status/v2", schemaVersion: 2, activeRun: await activeStatus() }) + "\\n");
 } else if (command === "eval export --json") {
   process.stderr.write("[EVAL_PARTIAL] Export includes incomplete evidence; inspect the structured issues in the report.\\n");
-  process.stdout.write(variant === "malformed-evaluation" ? "{bad\\n" : JSON.stringify({ schema: "banzai-evaluation-export/v1", schemaVersion: 1, runs: [] }) + "\\n");
+  process.stdout.write(variant === "malformed-evaluation" ? "{bad\\n" : JSON.stringify({ schema: "banzai-evaluation-export/v2", schemaVersion: 2, runs: [] }) + "\\n");
 } else if (command === "eval context --json") {
   process.stdout.write(variant === "malformed-context" ? "{bad\\n" : JSON.stringify({ schema: "banzai-context-report/v1", schemaVersion: 1, coverage: { exact: 0, incomplete: 1 } }) + "\\n");
 } else if (command === "eval kpi --json") {
-  process.stdout.write(JSON.stringify({ schema: "banzai-evaluation-kpi/v1", schemaVersion: 1, sources: [{ label: "current" }] }) + "\\n");
+  process.stdout.write(JSON.stringify({ schema: "banzai-evaluation-kpi/v2", schemaVersion: 2, sources: [{ ordinal: 1 }] }) + "\\n");
 } else if (args[0] === "eval" && args[1] === "kpi" && args[2] === "--input") {
-  process.stdout.write(JSON.stringify({ schema: "banzai-evaluation-kpi/v1", schemaVersion: 1, sources: [{ label: "1: export.json" }] }) + "\\n");
+  process.stdout.write(JSON.stringify({ schema: "banzai-evaluation-kpi/v2", schemaVersion: 2, sources: [{ ordinal: 1 }] }) + "\\n");
 } else if (command === "eval unknown") {
   process.stderr.write("[INVALID_EVAL_COMMAND] Eval target must be \`export\`, \`kpi\`, \`context\`, or \`cancellations\`.\\n");
   process.exit(1);

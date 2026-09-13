@@ -33,7 +33,7 @@ const REVIEW_RESULT = {
 const SOURCE_CANARY = "src/live-source-canary.txt";
 const CONTROL_CANARY = ".banzai/live-control-canary.json";
 const OTHER_ARTIFACT =
-  "documentation/features/live-compatibility/review-other.md";
+  ".banzai/work/00000000-0000-4000-8000-000000000001/review-other.md";
 const REVIEW_CANDIDATE =
   ".banzai/runs/live-compatibility/attempts/review-1.review-candidate.md";
 const CODEX_WRITE_PROBE = ".banzai/live-write-probe.cjs";
@@ -187,8 +187,8 @@ function reviewResponse(spec: ProcessSpec) {
       schemaVersion: 1,
       snapshotDigest: digest,
       artifacts: [
-        "documentation/features/live-compatibility/description.md",
-        "documentation/development-plans/live-compatibility/plan.md"
+        ".banzai/work/00000000-0000-4000-8000-000000000001/description.md",
+        ".banzai/work/00000000-0000-4000-8000-000000000001/plan.md"
       ].map((path) => ({ path, status: "reviewed", reason: null }))
     }
   };

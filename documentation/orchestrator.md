@@ -134,7 +134,7 @@ maintenance action with writers stopped. Timing cannot authorize or replay a
 workflow decision or invoke recovery.
 
 Existing evaluation/KPI/context/control and status JSON contracts ignore this
-private ledger; evaluation v1 `humanMinutes` remains unavailable. The separate
+private ledger; evaluation v2 `humanMinutes` remains unavailable. The separate
 cancellation report has the narrow estimate disclosure described below. Task-wide
 collection, equivalent native-workflow collection, acceptance/quality evidence
 and the effectiveness comparison remain follow-up work. See
@@ -220,11 +220,9 @@ The operation changes root `package.json.version` and eight mirrors in seven
 files: four plugin fields, the orchestrator package, and the lockfile's
 `version`, `packages[""].version`, and `packages["packages/orchestrator"].version`.
 It prepares one candidate per physical file, including all three lockfile edits.
-Normal updates require nine equal current values and a greater target. The
-bootstrap exception accepts the six-field `1.19.0` state with the three new
-fields absent and inserts them at target `1.19.0`; partial bootstrap or root-only
-editing is invalid. It accepts no path override, selects no
-version, and does not build, validate, install, publish, or perform Git work.
+Updates require nine equal current values and a greater target. Missing
+fields are rejected before mutation. The command accepts no path override,
+selects no version, and does not build, validate, install, publish or perform Git work.
 Before deleting `.banzai-version-set`, final cleanup durably writes the fixed
 `.banzai-version-set.guard` with the same exact originals and candidates. The
 guard remains validator-visible until the main journal removal is synced. If an
@@ -236,10 +234,9 @@ that same transaction. It is not an interface for selecting a release rollback
 target. Before restoring any target, explicit recovery checks every current
 metadata file against the authenticated original/candidate bytes and recorded
 mode. Later edits or mode drift cause refusal and preserve recovery evidence.
-Recovery uses the retained format's fixed targets: six-file journal/guard
-format 1 and grouped seven-file format 2 are both supported, independently of
-the current write policy. Restoring an old independent-version candidate
-requires its matching historical tooling before another migration. The
+Recovery accepts only grouped seven-file transaction and guard format 2,
+independently of the current write policy. Unsupported formats fail with
+`RESOURCE_VERSION_UNSUPPORTED` before any write. The
 standalone CLI keeps its embedded package mirror and needs no root package file
 at runtime. Rebuild the bundle after release-policy changes because
 `live-compatibility.ts` embeds that configuration.
@@ -252,13 +249,14 @@ package/lockfile policy, canonical Test Assurance, Security Assurance,
 and Engineering Quality policy wiring, committed bundle mode, CI policy, and
 documentation policy. Instruction-layout validation pins the exact shim,
 process sections, six policy owners, complete required/conditional read matrix,
-scoped reference rules, migration approval text and last legacy-compatible
-release. The Engineering Quality check protects rule/reference
+and scoped reference rules. The declared compatibility window checks one
+supported version per family at a major boundary, schema ownership and
+removed-version mentions in maintained documentation. The Engineering Quality check protects rule/reference
 and shadow-boundary text; it does not analyze target-project architecture.
 `smoke:committed` creates a disposable Git repository and runs the committed
 bundle's non-TTY help, init, agent-control capabilities/status, doctor JSON, and
 evaluation JSON paths twice. Capabilities also run outside Git. The smoke
-requires the v1 identities, clean stderr, deterministic bytes, no source,
+requires the declared current identities, clean stderr, deterministic bytes, no source,
 configuration, Git, or `.banzai` mutation, and complete cleanup. Help and
 capability versions must match the current package mirror independently of
 the pinned machine-contract versions.
@@ -405,8 +403,7 @@ in JSON and `unavailable` in Markdown.
 
 The report separates meaningful reported-reason coverage, response coverage
 (including Skip, omission and unspecified), and observation availability.
-Legacy bare cancellation events are `legacy_absent`; absent evidence is
-`missing`; interrupted/unanswered, malformed, unsupported and conflicting
+Absent evidence is `missing`; interrupted/unanswered, malformed, unsupported and conflicting
 evidence remain separate. Historical runs receive no invented reasons. Workflow
 and pre-cancellation phase/gate retain availability and provenance.
 
@@ -423,7 +420,7 @@ establish task identity; `superseded` records continuation intent and confirmed
 continuation remains unavailable without a supported exact source.
 
 Observation and optional discovery use `banzai-cancellation-observation/v1` and
-`banzai-cancellation-capabilities/v1`, independently of frozen evaluation/KPI v1,
+`banzai-cancellation-capabilities/v1`, independently of frozen evaluation/KPI v2,
 control 2.0.0 and state schema 3. The implementation candidate dated 2026-09-06
 enables new collection. Actual study collection starts with the first real v1
 observation after adoption; that start is not established by synthetic tests.
@@ -477,7 +474,7 @@ reviewer phases never invoke it.
 `banzai control capabilities` is valid outside a Git repository and performs no
 repository discovery, adapter construction, vendor/authentication call, lock,
 recovery, or write. It emits canonical `banzai-agent-capabilities/v3` JSON with
-schema version 3, control contract `3.0.0`, the package-derived Banzai
+schema version 3, control contract `4.0.0`, the package-derived Banzai
 release-train version, umbrella contract, the exact supported non-TTY operation
 set, and an ordered `inputSchemas` list per operation. Capability and doctor
 output prove neither subscription authentication nor sandbox credential
@@ -499,24 +496,16 @@ paths, raw `.banzai` paths, and completed consultation history. A current
 bounded one-to-three-card request because the supervisor needs it for the next
 action.
 
-Start, escalation answer, keyed consultation answer, and recovery accept one
-closed JSON document of at most 64 KiB through direct process stdin. Request
-and recovery stay on v1; the ordered v1 answer remains the legacy/current
-escalation input, while consultation requires the keyed v2 answer:
+Start, keyed consultation answer and recovery accept one closed JSON document
+of at most 64 KiB through direct process stdin. Request and recovery use v1;
+answer uses v2 only. For a plain `answer_escalation` gate, the supervisor pauses
+for the human interactive `banzai answer` command and then refreshes status.
 
 ```json
 {
   "schema": "banzai-agent-request/v1",
   "schemaVersion": 1,
   "request": "complete task request"
-}
-```
-
-```json
-{
-  "schema": "banzai-agent-answer/v1",
-  "schemaVersion": 1,
-  "answers": ["first ordered answer", "second ordered answer"]
 }
 ```
 
@@ -562,8 +551,7 @@ Send:
 Input is decoded completely before mutation. Invalid UTF-8/JSON, unknown or
 missing properties, unsupported versions, blank text, stale run/request/round
 identities, missing or duplicate decision IDs, unknown option IDs, oversized
-documents, and wrong answer counts fail closed. A v1 answer cannot answer a
-consultation. Request/answer whitespace, newlines, Unicode, quotes, backticks,
+documents, and wrong answer counts fail closed. Request/answer whitespace, newlines, Unicode, quotes, backticks,
 dollar syntax, and shell operators are preserved as data.
 `WorkflowRunner` still owns one-active-run enforcement, state transitions,
 decision persistence, resume, retry, recovery, and completion. Progress remains
@@ -636,8 +624,7 @@ Doctor v3 uses `schemaVersion: 3`. It retains `project.guidance` after
 instruction and hook resource union for configured roles. A confirmed mismatch
 is a failure; unverifiable or bounded-failure evidence is a warning. A mismatch
 wins mixed evidence, then bounded failure, then unverifiable. Configuration and
-structural-plugin failures remain independent. Historical v1/v2 reports retain
-their identities; consumers must recognize v3. There is no legacy-output flag.
+structural-plugin failures remain independent. Consumers recognize doctor v3.
 The check is offline, read-only and does not execute a vendor or repair files.
 
 Doctor also emits an `authentication.models` advisory: it does not invoke a
@@ -673,13 +660,13 @@ regardless of its name or profile. Doctor validates the declared coverage and
 executable paths; it does not claim that a command is a good test and never
 executes it.
 
-A schema-version-2 verification section is an ordered profile list. Profiles
+A schema-version-3 verification section is an ordered profile list. Profiles
 execute in list order and commands execute in their listed order. Each command
 is always spawned directly from `command` plus `args`, without a shell:
 
 ```json
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "verification": {
     "profiles": [
       {
@@ -687,6 +674,7 @@ is always spawned directly from `command` plus `args`, without a shell:
         "projectType": "node",
         "commands": [
           {
+            "id": "unit-tests",
             "name": "unit tests",
             "command": "npm",
             "args": ["test"],
@@ -699,6 +687,7 @@ is always spawned directly from `command` plus `args`, without a shell:
         "projectType": "repository",
         "commands": [
           {
+            "id": "git-diff-check",
             "name": "git diff check",
             "command": "git",
             "args": ["diff", "--check"],
@@ -723,6 +712,7 @@ types explicitly; repository hygiene can remain a third profile:
         "projectType": "node",
         "commands": [
           {
+            "id": "node-tests",
             "name": "node tests",
             "command": "npm",
             "args": ["test"],
@@ -735,6 +725,7 @@ types explicitly; repository hygiene can remain a third profile:
         "projectType": "php",
         "commands": [
           {
+            "id": "php-tests",
             "name": "php tests",
             "command": "composer",
             "args": ["test"],
@@ -747,19 +738,14 @@ types explicitly; repository hygiene can remain a third profile:
 }
 ```
 
-Existing schema-version-1 files remain runner-compatible and retain their flat
-command order, but doctor reports their project coverage as legacy and not
-ready. Migration is manual: change `schemaVersion` to 2 and wrap the former
-flat `verification` array in `verification.profiles[0].commands`, adding a
-unique kebab-case `id` and the correct `projectType`. Split commands into
-multiple profiles when the checkout has multiple detected types; keep
-repository-only hygiene in a `repository` profile. Neither config loading,
-`banzai init` on an existing project, `banzai model`, nor doctor performs this
-migration.
+Configuration accepts only schema 3. Verification profiles require stable
+command IDs. Policy is optional: without it, required checks execute fresh.
+Unsupported configuration fails with `RESOURCE_VERSION_UNSUPPORTED` and is
+never rewritten by init, doctor or loading.
 
 Model selection preserves this tracked representation byte-for-byte outside
 the exact requested `model`, `executable`, and `effort` JSON value tokens,
-including schema-version-1 formatting and unknown fields.
+including formatting and unknown fields in a supported schema-3 document.
 
 Doctor is offline and structurally read-only. It runs before vendor adapters or
 `WorkflowRunner`, never authenticates, invokes a model, executes verification,
@@ -836,7 +822,7 @@ banzai eval export --from 2026-07-01T00:00:00Z --to 2026-08-01T00:00:00Z
 banzai eval export --run 20260701-example --run 20260715-other
 ```
 
-The JSON identity is `banzai-evaluation-export/v1` with `schemaVersion: 1`.
+The JSON identity is `banzai-evaluation-export/v2` with `schemaVersion: 2`.
 Every field is present, arrays and enum breakdowns have stable ordering, JSON
 uses two-space indentation and one trailing newline, and repeated exports over
 unchanged evidence and arguments are byte-for-byte deterministic. Markdown is
@@ -849,7 +835,7 @@ and are never reproduced in output. Date and run selectors use intersection
 semantics. Missing selected runs and invalid, duplicate, missing, positional,
 or unknown options fail before stdout is written.
 
-The default cohort retains done, blocked, cancelled, active, legacy,
+The default cohort retains done, blocked, cancelled, active,
 incomplete, and malformed runs. Unreadable creation time remains an unresolved
 cohort member under date filters. One damaged record produces bounded issue
 codes and partial coverage rather than failing every healthy run. Root
@@ -868,7 +854,7 @@ reconciles an attempt, resumes a workflow, runs verification, creates vendor
 adapters, invokes a model, or performs a network call. Warnings are emitted to
 stderr after the complete report, keeping JSON stdout clean.
 
-Privacy is a fixed v1 allow-list. Exact run IDs, attempt IDs, feature slugs,
+Privacy is a fixed allow-list. Exact run IDs, attempt IDs, feature slugs,
 requests, repository/artifact/source/result/log paths, prompts, reasoning,
 transcripts, raw or structured model prose, findings prose, commands and their
 output, source contents, credentials, environment values, session IDs, human
@@ -885,7 +871,7 @@ The JSON contract assigns each metric to exactly one persisted evidence owner:
 | Evidence owner                                      | Authoritative evaluation fields                                                                                                                                                                                                                                    |
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Raw `state.json`                                    | State/contract schema provenance, status, route, run timestamps, cumulative verification count, cumulative triage, and fix cycles.                                                                                                                                 |
-| Unique supported `attempts/*.json` records          | Schema version 1 owns model-attempt count/outcome, phase duration, session and review mode, rotation evidence, normalized model profile, tokens, and reported cost. Missing schema is legacy-absent; unsupported or malformed schema contributes invalid coverage. |
+| Unique supported `attempts/*.json` records          | Schema version 2 owns model-attempt count/outcome, phase duration, session and review mode, rotation evidence, normalized model profile, tokens, and reported cost. Unsupported versions fail closed; malformed current evidence contributes invalid coverage. |
 | Retained `state.verification` entries               | Available command outcomes and derivable verification duration; the state counter represents cumulative command attempts.                                                                                                                                          |
 | Review files proven applied by `state.latestReview` | Review verdicts and findings by severity. Files beyond the applied iteration are bounded incomplete evidence and contribute no yield.                                                                                                                              |
 | Recognized `events.jsonl` event types               | Explicit attempt/start/review retries and bounded start/review failure categories.                                                                                                                                                                                 |
@@ -897,45 +883,34 @@ read.
 
 ## Evaluation KPIs
 
-`banzai eval kpi` derives outcome KPIs from evaluation-export data under the
-independent contract `banzai-evaluation-kpi/v1` (`schemaVersion: 1`). Without
-`--input` it computes the export for the current checkout in memory under the
-same cohort options, rules, and error codes as `eval export` — nothing new is
-read from `.banzai/runs/` and no export file is written — and renders one
-source labeled `current`:
+`banzai eval kpi` derives `banzai-evaluation-kpi/v2` (`schemaVersion: 2`)
+from current export v2. Without `--input`, it computes the current checkout's
+export in memory using the same cohort filters and reads no additional evidence:
 
 ```text
 banzai eval kpi
 banzai eval kpi --json --from 2026-07-01T00:00:00Z --to 2026-08-01T00:00:00Z
 ```
 
-With repeatable `--input` it instead derives one source per previously
-exported JSON file, labeled `<ordinal>: <basename>` in argument order, and
-renders one comparison table per KPI whose columns are the sources. `--input`
-cannot be combined with `--from`, `--to`, or `--run`, needs no Git checkout,
-and reads only the named files:
+Repeatable `--input` derives independent ordinal sources in argument order.
+It needs no Git checkout and cannot combine with `--from`, `--to` or `--run`:
 
 ```text
 banzai eval kpi --input a.json --input b.json
 ```
 
-Each input is validated before use: a file that is unreadable, not JSON, not
-schema `banzai-evaluation-export/v1`, not `schemaVersion` 1, or structurally
-missing the fields the derivation reads fails closed with the stable code
-`INVALID_EVAL_INPUT`, names the file on stderr, and writes nothing to stdout.
+Each source reports physical attempts, executed and reused terminal checks,
+reuse ratio, and exact/incomplete run coverage. Only exact included runs enter
+counts and arithmetic. Sources are never pooled. The ratio is reused checks /
+(executed + reused checks), with numerator, denominator and a null value for zero
+denominators. These counts do not measure saved time or model calls.
 
-The KPI set — completion rate, first-review pass rate and mean findings,
-first-review acceptance rate, reviewer precision with separately reported
-deferred triage, zero-accepted review rate, fix cycles per
-completed run, attempt retry ratios by kind, and per-completed-run usage with
-independent token and cost coverage — plus the fail-closed
-planner/implementer/reviewer configuration-signature grouping is documented
-with exact derivations in
-[`documentation/evaluation/README.md`](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/evaluation/README.md).
-Every KPI value carries its numerator, denominator, value (`null` on a zero
-denominator), and exact-versus-incomplete run coverage; only exact-evidence
-runs contribute. KPIs derive from per-run evidence only, never from export
-`aggregates`, and identical inputs produce byte-identical Markdown and JSON.
+Markdown has one row per ordinal source; JSON is a deterministic two-space
+serialization. Optional `--schema-version` accepts only `2`. Unsupported versions
+fail with `RESOURCE_VERSION_UNSUPPORTED`; unreadable, malformed or structurally
+invalid current inputs fail with `INVALID_EVAL_INPUT`. Failures write no report.
+See [evaluation documentation](evaluation/README.md) for evidence boundaries and
+separate analytical procedures.
 
 ## Interactive Mode
 
@@ -1041,8 +1016,7 @@ Markdown artifact:
 <bound reviewDirectory>/review-<iteration>.md
 ```
 
-Private bindings use `.banzai/work/<work-id>/` as `reviewDirectory`. Legacy
-bindings and runs without a binding retain `documentation/features/<slug>/`.
+Private bindings use `.banzai/work/<work-id>/` as `reviewDirectory`.
 
 Each physical attempt owns
 `.banzai/runs/<run-id>/attempts/<attempt-id>.review-candidate.md` and a private,
@@ -1060,7 +1034,7 @@ reason and `blocked`; it cannot pass. The assertion is not independent proof
 that a file was read or substantively assessed. Layout and authority blockers
 can produce a truthful blocked artifact with zero findings or coverage.
 
-The self-contained `banzai-feature-review/v3` document for bound runs (v2 for historical snapshots) distinguishes required
+The self-contained `banzai-feature-review/v4` document distinguishes required
 scope from acknowledged coverage. Fenced JSON values retain every semantic
 string, including multiline summary, evidence details, reproduction, fix
 acceptance, reviewed finding IDs, `reviewNotes` and opaque deferred content.
@@ -1074,20 +1048,16 @@ and leave earlier canonical reviews intact. No model call repairs formatting
 or JSON/Markdown parity. Human triage still owns finding dispositions; only
 accepted IDs authorize fixing.
 
-Historical v1 records, Markdown prose, repair usage and terminal checkpoints
-keep their original meanings and validation. They are never given synthetic
-scope acknowledgment. New attempts enforce v2; absent/v1 reviewer session
-identities rotate fresh/full with `output-contract-not-reusable`. Frozen
-evaluation v1 treats that unsupported present rotation cause as invalid
-evidence, leaving affected rotation statistics incomplete without changing its
-enum or KPI semantics.
+Only review-result v2, snapshot v3 and runner Markdown v4 are supported.
+Unsupported versions fail before mutation, without synthetic scope assertions.
 
 Recovery uses the original snapshot and matching immutable terminal proof. An
 absent candidate can be rendered without a model call; conflicting or explicitly
 failed evidence cannot be promoted. Interrupted publication/application reconciles
 canonical JSON, event, counters and state once. Missing proof requires the
 existing explicit retry flow. Standalone `$banzai:feature-review` remains usable
-without the runner and writes its own next `review-N.md` in v1 format.
+without the runner and writes its next `review-N.md` as
+`banzai-standalone-review/v1` under the bound review directory.
 
 ## Choosing Models
 
@@ -1318,7 +1288,7 @@ notice, while SIGINT/SIGTERM return 130/143. Non-TTY init remains configuration
 only; non-TTY setup returns `TTY_REQUIRED` and manual guidance.
 
 Guidance labels are `Project guidance ready`, `Project setup required`,
-`Project migration required`, and `Project guidance needs attention`. Readiness
+and `Project guidance needs attention`. Readiness
 requires ten populated manifest sections and the supported AGENTS/optional
 CLAUDE layout. The complete raw line `<!-- banzai-scaffold: unfilled -->` before
 the first heading marks an unfilled scaffold. Words such as `Open` and `None`
@@ -1359,17 +1329,10 @@ measured project the turn-1 prefix fell from 42,201 to 19,799 tokens under
 scoping.
 
 Process instructions live in project `AGENTS.md`; policies stay in the installed
-plugin and consuming skills read them explicitly. A legacy project stops before
-affected work with **legacy Banzai layout: run `project-manifest` to migrate**.
-Only an explicit `project-manifest` invocation proposes a migration diff for
-approval. Cancellation, a new run, retry, recovery and answering a gate grant
-no migration authority. The CLI refuses insufficient guidance before a new model attempt. If an
-affected skill discovers a further policy or migration problem, writing phases
-still use their existing escalation route and review uses its blocked-result route.
-See [layout migration](https://github.com/Parabolic-Technologies/banzai/blob/main/plugins/banzai/skills/project-manifest/references/layout-migration.md).
-Client versions, fixture tests and environment scoping do not prove effective
-instruction delivery; automatic ingress, tool reads and application require
-separate host evidence.
+plugin and consuming skills read them explicitly. A partial instruction layout
+stops affected work with an exact ambiguity report. Only an explicit project
+setup invocation can propose approved merges. The CLI refuses insufficient
+guidance before a new model attempt; skills do not reconstruct missing authority.
 
 The optional `claudeEnvironment` section of `.banzai/config.json` controls
 this:
@@ -1589,7 +1552,7 @@ timeout, transport, result-format, or plan-validation failure, the new attempt
 resumes that session only when the planner settings, planning instructions,
 tool scope, and stopped workspace still match. Its prompt names the failure and
 existing planning artifacts and asks it to finish the remaining work. Missing
-or legacy context, changed inputs, and unclassified or integrity failures use a
+or unavailable context, changed inputs, and unclassified or integrity failures use a
 fresh session with an artifact-first continuation prompt. The failed attempt
 stays intact; the new attempt records `planningContext.retryOf` and its actual
 fresh/resumed mode. No private vendor transcript is imported or treated as
@@ -1648,9 +1611,8 @@ contain a raw unescaped `|` when exactly one rejoin boundary decodes both cells
 to their required shapes, and otherwise fails closed with the offending task
 named in the diagnostic. Implementation and fix-refresh prompts and skills show
 the canonical raw-JSON row and prohibit authoring code-spanned cells. Persisted
-state separately owns lifecycle and `nextAction`; legacy runs without the
-ledger retain that lifecycle but report completion as legacy/unknown rather
-than fabricated `N/N`.
+state separately owns lifecycle and `nextAction`; missing canonical completion
+evidence reports unknown completion rather than fabricated `N/N`.
 Evidence paths must name files created or modified relative to the run baseline,
 or the exact required implementation/test reports. A carried-in unchanged source
 or test file is not direct completion evidence even when the task confirms it
@@ -1783,21 +1745,16 @@ remain local under the ignored run directory. Evaluation counts supported
 failed attempt records but does not treat candidate Markdown, raw result files,
 terminal checkpoints, recovery authorizations, or failed structured results as
 review verdicts or completion evidence.
-New model attempts use schema version 2 so an interrupted source and its linked
-recovery attempt remain distinct. New run state uses schema version 4 to add an
-immutable artifact binding. It retains v3's tagged pending consultation, exact
-keyed decision history and additive `source_preserved` stage; legacy state v1–v3
-remains readable under its original storage semantics, without fabricated
-consultation or binding evidence. The `source_preserved` stage keeps a completed
-blocked source immutable while one linked attempt is prepared. Checkpoints and recovery
-authorizations are immutable atomic mode-`0600` evidence; users and supervisors
-must never edit them manually.
+Model attempts use schema version 2. Run state uses schema version 5 with an
+immutable binding v2, tagged pending consultation, exact keyed decision history
+and explicit recovery stage. Unsupported state and attempt versions fail closed.
+The `source_preserved` stage keeps a completed blocked source immutable while
+one linked attempt is prepared. Checkpoints and recovery authorizations are
+immutable atomic mode-`0600` evidence; never edit them manually.
 
 The model hand-off uses phase-result v3. It adds the planning-only
 `decision_consultation` gate and required nullable `decisionConsultation`
-payload; phase-result v1 and v2 remain read-only legacy inputs and cannot be
-returned by a new attempt. Evaluation export and KPI stay on their independent
-privacy-minimized v1 contracts. Consultation events retain only card counts,
+payload. Evaluation export and KPI use independent privacy-minimized v2 contracts. Consultation events retain only card counts,
 answer-mode counts, timing, and completion state, never request/card/option IDs,
 questions, recommendations, answers, evidence detail, decision-maker labels,
 or raw paths.
@@ -1826,16 +1783,7 @@ persisted before failed-turn capture did not record every failed turn, so
 historical and new-run totals are comparable only with their evidence coverage
 in mind. New reviews make no formatting-only model calls. Deterministic
 rendering, validation or publication failure is explicit and retains available
-result, candidate, diagnostics, immutable terminal proof and usage. Historical
-formatting-repair records and combined usage remain readable without being
-replayed or double-counted.
-
-Schema-version-1 run state remains readable. Its unbound string session IDs are
-not reused; Banzai preserves artifacts and human decisions, normalizes the state
-to version 2 on the next write, and safely starts the next eligible model phase
-fresh.
-
-If a completed model attempt was persisted before its state transition, then
+result, candidate, diagnostics, immutable terminal proof and usage. If a completed model attempt was persisted before its state transition, then
 `resume` reconciles it without repeating the model phase. An interrupted attempt
 is never silently retried; eligible interrupted selection and review attempts
 require an explicit `banzai retry`.
@@ -1854,18 +1802,18 @@ are absent.
 
 ## Proportionate verification and focused closure
 
-Projects can explicitly opt into config 3 as described in
+Projects use config 3 and can explicitly enable equivalent evidence as described in
 [verification examples](verification-examples.md#explicit-equivalent-evidence-config-3).
-Only new enabled runs use state 5, binding v2 and verification ledger 2; existing
-runs retain their versions. Decisions and applicability records are separate from
+All new runs use state 5, binding v2 and verification ledger 2, including
+configurations without a verification policy. Decisions and applicability are separate from
 v1 physical leaves. The runner decides under work ownership after approval and
 completion checks, and revalidates source, authority and origins before review,
 pass application, zero-accepted triage and lite completion. Failures and interrupted
 attempts retain existing explicit retry/recovery boundaries.
 
 Review snapshot v3 and runner-rendered `banzai-feature-review/v4` freeze current
-executed/reused/pending evidence and direct physical origins. Historical formats
-keep their decoders/rendering. Review-result v2 and task-completion v1 remain
+executed/reused/pending evidence and direct physical origins. Review-result v2
+and task-completion v1 remain
 unchanged. Offline archive v1 retains the binding, decisions, applicability,
 physical origins and logs through required dependency closure. A restored copy
 retains historical proof; it does not gain same-repository reuse authority.

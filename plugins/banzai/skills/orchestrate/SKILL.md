@@ -71,11 +71,15 @@ stderr progress at useful intervals, wait for return, then refresh with
 `banzai control status` before choosing another action. Never infer state from
 progress or human terminal prose.
 
+Require `controlContractVersion: "4.0.0"`,
+`answer.inputSchemas: ["banzai-agent-answer/v2"]`,
+`artifactStorage.bindingSchemas: ["banzai-work-binding/v2"]`, and
+`artifactStorage.layouts: ["private"]` exactly before supervision.
+
 ## Preserve human authority
 
-Relay a summary beginning with `legacy Banzai layout:` verbatim as the
-escalation question or blocked/retry state; never run `project-manifest` or
-edit files for it.
+Relay partial-layout diagnostics verbatim as the escalation question or
+blocked/retry state; never run `project-manifest` or edit files for it.
 
 At `approve_adr`, `approve_plan`, `answer_escalation`,
 `answer_consultation`, or `triage`, present the exact
@@ -87,8 +91,9 @@ The initial task request, permission to use Banzai, silence, an earlier
 decision, or an agent recommendation is not approval or triage. Never invent,
 rewrite, complete, or infer a decision.
 
-- Relay an escalation only through `banzai control answer`, with exact ordered
-  answers in a `banzai-agent-answer/v1` stdin document.
+- At a plain `answer_escalation` gate, show the exact questions and have the
+  human run interactive `banzai answer`. Resume supervision after status records
+  the decision. The control answer operation accepts consultation v2 only.
 - For `answer_consultation`, present each exact current card sequentially with
   `Decision`, `Why this matters`, `Repository evidence`, `Options`, and
   `Recommendation` when present. Include the current run, request, round,
@@ -162,7 +167,7 @@ Report lifecycle, route, task-completion state/source/counts/diagnostics,
 verification outcomes, latest review verdict, and `review_pass` versus
 `human_triage` completion separately.
 
-Do not call `done` alone complete. Keep `cancelled`, blocked, legacy, unknown,
+Do not call `done` alone complete. Keep `cancelled`, blocked, unknown,
 inconsistent, incomplete, skipped, unavailable, failed, partial, and passing
 evidence distinct. Never convert a `null` completion count to zero or render it
 as `0/N`; report that the exact completed count is unavailable. Claim complete

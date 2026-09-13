@@ -181,6 +181,7 @@ test("workspace digest can exclude the designated review artifact only", async (
 
 test("workspace changes report added modified and removed reviewed entries", () => {
   const previous: WorkspaceSnapshot = {
+    schemaVersion: 2,
     baseCommit: "a".repeat(40),
     digest: "before",
     entries: [
@@ -190,6 +191,7 @@ test("workspace changes report added modified and removed reviewed entries", () 
     ]
   };
   const current: WorkspaceSnapshot = {
+    schemaVersion: 2,
     baseCommit: previous.baseCommit,
     digest: "after",
     entries: [

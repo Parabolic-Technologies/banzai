@@ -12,8 +12,7 @@ Read-only. Write nothing.
 
 Before artifact discovery or writing, read the installed
 `../../policies/artifact-storage.md` and resolve the selected work through its
-plugin-local helper. Use the returned role paths for internal work artifacts;
-`documentation/` work paths below describe the explicit legacy layout only.
+plugin-local helper. Use the returned private role paths for internal work artifacts.
 Keep ADRs, indexes, manifests and maintained product guidance at their existing
 repository paths. Status/loading stays read-only, and orchestrated work follows
 the persisted run binding and exact phase grants.
@@ -32,18 +31,16 @@ machine directory. A missing helper or unsupported binding retains fresh checks.
   assembled it into this session. Before status reporting,
   recognize the layout: target when `AGENTS.md` carries `## Authority` and
   `## Policies` with no line beginning with `@`, and the `CLAUDE.md` shim is
-  absent or carries no policy heading; legacy layout when `CLAUDE.md` carries
-  `## Engineering Quality` and `AGENTS.md` is absent or lacks `## Authority`.
+  absent or carries no policy heading.
   Policy headings for layout recognition are `## Decision Consultation`,
   `## Test Assurance`, `## Security Assurance`, `## Engineering Quality`,
   and `## Plan Task Completion Evidence`.
-  Report the legacy diagnostic: "legacy Banzai layout: run `project-manifest` to migrate".
-  On a legacy or partial layout apply the bootstrap source rule: take process
-  text from the installed plugin's packaged `AGENTS.md` (`../../AGENTS.md`
-  from this `SKILL.md`) and policies from `../../policies/`; project files
-  are inputs to the status report only, legacy Banzai text is never an
-  applicable policy, and approved decisions recorded there keep their authority.
-  Stop if an installed source is unreadable. Report a partial layout as partial.
+  On partial report the exact ambiguity without changing source or guessing
+  precedence. Read process from the installed plugin's packaged `AGENTS.md`
+  (`../../AGENTS.md` from this skill) and policies from `../../policies/`
+  for the report only; project policy bodies are never applicable rules.
+  Approved project decisions retain their authority. Stop if an installed
+  source is unreadable. Bootstrap may apply only explicitly approved merges.
   Unadopted means neither file has `## Authority` or a policy heading; keep
   existing missing-manifest behavior. Every other combination, including an
   unreadable file, is partial. Skip this recognition rule in the plugin source
@@ -51,21 +48,21 @@ machine directory. A missing helper or unsupported binding retains fresh checks.
 - Policies, resolved as `../../policies/<name>.md` from this `SKILL.md`,
   never from the project working directory or a fixed plugin cache path.
   Stop before affected work if a required source is absent or unreadable;
-  never substitute a project copy, a legacy inline policy or memory:
+  never substitute a project copy, an inline policy or memory:
   - `plan-task-completion.md` when interpreting strict plan authority or completion evidence.
    - `artifact-storage.md` before resolving, reading or writing work artifacts.
 
 ## Scan
 
-- `documentation/features/<slug>/work.md`
-- `documentation/features/<slug>/description.md`
-- `documentation/development-plans/<slug>/plan.md`
-- `documentation/features/<slug>/implementation-report.md`
-- `documentation/features/<slug>/test-report.md`
-- `documentation/features/<slug>/review-*.md`
+- `<work role>`
+- `<description role>`
+- `<plan role>`
+- `<implementationReport role>`
+- `<testReport role>`
+- `<reviewDirectory>/review-*.md`
 - `documentation/decisions/README.md`
 - `documentation/decisions/NNNN-*.md`
-- `documentation/changes/*.md`
+- `<changeReport role>`
 - `git status`
 - `.banzai/active-run.json`, if present
 
@@ -77,6 +74,12 @@ for that slug. Report the run status and the next action `banzai status` reports
 and mark artifact-derived next actions as secondary. This includes terminal
 orchestrated runs: never replace persisted `nextAction: null` with
 `code-writing` solely because immutable approved plan boxes remain unchecked.
+
+## Review Formats
+
+Recognize runner-produced `banzai-feature-review/v4` and standalone
+`banzai-standalone-review/v1`. Report any other marker as unsupported without
+interpreting its contents as current review evidence.
 
 ## Task Completion Evidence
 
@@ -92,8 +95,8 @@ Report task completion separately from lifecycle, and name its source:
    and persisted validated summary agree;
 2. `plan checkbox` for standalone or non-approved mutable work without
    orchestrator evidence;
-3. `legacy` or `unknown` for an orchestrated run whose source attempt predates
-   the structured ledger, even when report prose appears to map every task;
+3. `unknown` when an orchestrated run has not persisted canonical completion
+   evidence; report prose cannot establish exact completion;
 4. `inconsistent` when supported evidence is malformed, incomplete, or
    contradictory.
 
@@ -105,10 +108,10 @@ and may show only proven partial task evidence. A terminal inconsistency keeps
 the persisted lifecycle and next action visible and recommends an
 artifact/evidence audit, not plan-checkbox mutation.
 
-Never parse legacy report prose into a fabricated `N/N`. The report table is a
+Never parse report prose into a fabricated `N/N`. The report table is a
 projection and cannot independently establish completion. Persisted state
 continues to determine lifecycle and `nextAction` even when task completion is
-legacy, unknown, or inconsistent.
+unknown or inconsistent.
 
 ## Position
 

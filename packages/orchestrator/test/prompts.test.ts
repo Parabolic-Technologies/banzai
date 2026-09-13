@@ -65,7 +65,7 @@ function golden(text: string): { bytes: number; sha256: string } {
   };
 }
 
-test("frozen output contracts and legacy repair bytes survive direct phase delivery", () => {
+test("current output contracts and frozen repair bytes survive direct phase delivery", () => {
   const selection = workflowSelectionPrompt("Змінити café.");
   const planning = planningPrompt("context-budget", "Змінити café.", [], []);
   const implementation = implementationPrompt(
@@ -154,10 +154,10 @@ test("frozen output contracts and legacy repair bytes survive direct phase deliv
       resolveOutputContract("codex", "phase-result/v3").serialized
     ),
     claudeReviewContract: golden(
-      resolveOutputContract("claude", "review-result/v1").serialized
+      resolveOutputContract("claude", "review-result/v2").serialized
     ),
     codexReviewContract: golden(
-      resolveOutputContract("codex", "review-result/v1").serialized
+      resolveOutputContract("codex", "review-result/v2").serialized
     )
   };
 
@@ -252,14 +252,14 @@ test("frozen output contracts and legacy repair bytes survive direct phase deliv
           "538fd24f386f0aafb5b44d5e52951d4ceaaf11b0a220559f36b6d51f0f5fd8dc"
       },
       claudeReviewContract: {
-        bytes: 1624,
+        bytes: 2260,
         sha256:
-          "3a0b2c368c7976b5e842ab28a0d6b9d5d65d510e1f90c203f8a0eaad2e4b9def"
+          "ea02d2b995ff54d98b9e0eb17ffdbbc7a3fffd81da8a2cfce611d17714b1fd0f"
       },
       codexReviewContract: {
-        bytes: 3206,
+        bytes: 4542,
         sha256:
-          "bc8e5b8f9da3160799a6fa4d5efa1c607eda86400e94f6cdd57b666697f15d78"
+          "70404a18978821bdac1a6cf695d44a8aaefb0e938b6507f84b4c52f65531248e"
       }
     })
   );

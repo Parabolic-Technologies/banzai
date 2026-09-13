@@ -16,7 +16,11 @@ export function parseReviewSnapshot(value: unknown): ReviewSnapshot {
   try {
     return readSharedReviewSnapshot(value) as ReviewSnapshot;
   } catch (error) {
-    if (error instanceof ArtifactStorageError) invalid(error.message);
+    if (error instanceof ArtifactStorageError) {
+      if (error.code === "RESOURCE_VERSION_UNSUPPORTED")
+        throw new BanzaiError(error.code, error.message);
+      invalid(error.message);
+    }
     throw error;
   }
 }
@@ -26,7 +30,11 @@ export function sealReviewSnapshot(
   try {
     return sealSharedReviewSnapshot(value) as ReviewSnapshot;
   } catch (error) {
-    if (error instanceof ArtifactStorageError) invalid(error.message);
+    if (error instanceof ArtifactStorageError) {
+      if (error.code === "RESOURCE_VERSION_UNSUPPORTED")
+        throw new BanzaiError(error.code, error.message);
+      invalid(error.message);
+    }
     throw error;
   }
 }

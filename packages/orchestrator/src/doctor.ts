@@ -38,6 +38,7 @@ import type {
 import { inspectBoundWork } from "./artifact-storage.js";
 import type { ArtifactBoundWork } from "./artifact-storage.js";
 import { parseConfig } from "./validation.js";
+import { ResourceVersionUnsupportedError } from "./errors.js";
 import {
   assessVerificationProfiles,
   detectProjectTypes,
@@ -258,6 +259,18 @@ function configVersionCheck(document: unknown): DoctorCheck {
       "Configuration version cannot be checked until JSON is readable."
     );
   }
+  if (document.schemaVersion !== 3) {
+    return check(
+      "config.version",
+      "config",
+      "fail",
+      new ResourceVersionUnsupportedError(
+        "orchestrator config",
+        String(document.schemaVersion),
+        3
+      ).message
+    );
+  }
   if (document.contractVersion !== CONTRACT_VERSION) {
     return check(
       "config.version",
@@ -266,27 +279,12 @@ function configVersionCheck(document: unknown): DoctorCheck {
       "Configuration uses an unsupported contract version."
     );
   }
-  if (document.schemaVersion === 1) {
-    return check(
-      "config.version",
-      "config",
-      "fail",
-      "Configuration schema version 1 is legacy and requires manual migration."
-    );
-  }
-  if (document.schemaVersion !== 2 && document.schemaVersion !== 3) {
-    return check(
-      "config.version",
-      "config",
-      "fail",
-      "Configuration uses an unsupported schema version."
-    );
-  }
+
   return check(
     "config.version",
     "config",
     "pass",
-    "Configuration uses schema version 2 and the supported contract version."
+    "Configuration uses schema version 3 and the supported contract version."
   );
 }
 
@@ -583,7 +581,6 @@ async function activeRunCheck(repoRoot: string): Promise<DoctorCheck> {
   }
   if (
     !isRecord(state) ||
-    ![1, 2, 3, 4, 5].includes(state.schemaVersion as number) ||
     typeof state.runId !== "string" ||
     typeof state.repoRoot !== "string" ||
     typeof state.status !== "string" ||
@@ -596,18 +593,40 @@ async function activeRunCheck(repoRoot: string): Promise<DoctorCheck> {
       "The referenced run state uses an unsupported structure."
     );
   }
-  if (state.schemaVersion === 4 || state.schemaVersion === 5) {
+  if (state.schemaVersion !== 5) {
+    return check(
+      "run.active",
+      "run-state",
+      "fail",
+      new ResourceVersionUnsupportedError(
+        "run state",
+        String(state.schemaVersion),
+        5
+      ).message
+    );
+  }
+  {
     try {
-      await inspectBoundWork(
-        repoRoot,
-        state.artifactBinding as ArtifactBoundWork
-      );
-    } catch {
+      const bound = state.artifactBinding;
+      const bindingVersion =
+        isRecord(bound) && isRecord(bound.binding)
+          ? bound.binding.schemaVersion
+          : undefined;
+      if (bindingVersion !== 2)
+        throw new ResourceVersionUnsupportedError(
+          "work binding",
+          String(bindingVersion),
+          2
+        );
+      await inspectBoundWork(repoRoot, bound as ArtifactBoundWork);
+    } catch (error) {
       return check(
         "run.active",
         "run-state",
         "fail",
-        "The referenced run has missing, malformed or conflicting artifact binding evidence."
+        error instanceof ResourceVersionUnsupportedError
+          ? error.message
+          : "The referenced run has missing, malformed or conflicting artifact binding evidence."
       );
     }
   }
@@ -913,83 +932,66 @@ export async function inspectDoctor(
     );
   } else {
     const assessment = assessVerificationProfiles(config, projectTypes);
-    if (!assessment.explicit) {
+    const coveredTypes = projectTypes.filter(
+      (projectType) =>
+        !assessment.missingProjectTypes.includes(projectType) &&
+        !assessment.hygieneOnlyProjectTypes.includes(projectType)
+    );
+    if (
+      assessment.missingProjectTypes.length > 0 ||
+      assessment.hygieneOnlyProjectTypes.length > 0
+    ) {
       checks.push(
         check(
           "verification.profiles",
           "verification",
           "fail",
-          "Legacy configuration has no explicit project-type profiles."
-        ),
+          `Missing profiles for: ${assessment.missingProjectTypes.join(", ") || "none"}; hygiene-only detected types: ${assessment.hygieneOnlyProjectTypes.join(", ") || "none"}; covered: ${coveredTypes.join(", ") || "none"}; unused profiles: ${assessment.extraProfileIds.join(", ") || "none"}.`
+        )
+      );
+    } else if (assessment.extraProfileIds.length > 0) {
+      checks.push(
         check(
-          "verification.substantive",
+          "verification.profiles",
           "verification",
-          "skipped",
-          "Legacy commands cannot prove substantive project-type coverage."
+          "warning",
+          `All detected types are covered; unused profiles: ${assessment.extraProfileIds.join(", ")}.`
         )
       );
     } else {
-      const coveredTypes = projectTypes.filter(
-        (projectType) =>
-          !assessment.missingProjectTypes.includes(projectType) &&
-          !assessment.hygieneOnlyProjectTypes.includes(projectType)
+      checks.push(
+        check(
+          "verification.profiles",
+          "verification",
+          "pass",
+          projectTypes.length === 1
+            ? "The detected project type has explicit profile coverage."
+            : `All ${projectTypes.length} detected project types have explicit profile coverage.`
+        )
       );
-      if (
-        assessment.missingProjectTypes.length > 0 ||
-        assessment.hygieneOnlyProjectTypes.length > 0
-      ) {
-        checks.push(
-          check(
-            "verification.profiles",
-            "verification",
-            "fail",
-            `Missing profiles for: ${assessment.missingProjectTypes.join(", ") || "none"}; hygiene-only detected types: ${assessment.hygieneOnlyProjectTypes.join(", ") || "none"}; covered: ${coveredTypes.join(", ") || "none"}; unused profiles: ${assessment.extraProfileIds.join(", ") || "none"}.`
-          )
-        );
-      } else if (assessment.extraProfileIds.length > 0) {
-        checks.push(
-          check(
-            "verification.profiles",
-            "verification",
-            "warning",
-            `All detected types are covered; unused profiles: ${assessment.extraProfileIds.join(", ")}.`
-          )
-        );
-      } else {
-        checks.push(
-          check(
-            "verification.profiles",
+    }
+    checks.push(
+      assessment.substantiveCommandCount > 0
+        ? check(
+            "verification.substantive",
             "verification",
             "pass",
-            projectTypes.length === 1
-              ? "The detected project type has explicit profile coverage."
-              : `All ${projectTypes.length} detected project types have explicit profile coverage.`
+            `${assessment.substantiveCommandCount} substantive verification ${assessment.substantiveCommandCount === 1 ? "command is" : "commands are"} configured for detected project types.`
           )
-        );
-      }
-      checks.push(
-        assessment.substantiveCommandCount > 0
+        : assessment.totalSubstantiveCommandCount > 0
           ? check(
               "verification.substantive",
               "verification",
-              "pass",
-              `${assessment.substantiveCommandCount} substantive verification ${assessment.substantiveCommandCount === 1 ? "command is" : "commands are"} configured for detected project types.`
+              "fail",
+              `No substantive verification command is configured for detected project types; ${assessment.totalSubstantiveCommandCount} substantive ${assessment.totalSubstantiveCommandCount === 1 ? "command is" : "commands are"} configured for unused project profiles.`
             )
-          : assessment.totalSubstantiveCommandCount > 0
-            ? check(
-                "verification.substantive",
-                "verification",
-                "fail",
-                `No substantive verification command is configured for detected project types; ${assessment.totalSubstantiveCommandCount} substantive ${assessment.totalSubstantiveCommandCount === 1 ? "command is" : "commands are"} configured for unused project profiles.`
-              )
-            : check(
-                "verification.substantive",
-                "verification",
-                "fail",
-                "No substantive verification command is configured for detected project types or unused project profiles."
-              )
-      );
-    }
+          : check(
+              "verification.substantive",
+              "verification",
+              "fail",
+              "No substantive verification command is configured for detected project types or unused project profiles."
+            )
+    );
   }
 
   checks.push(

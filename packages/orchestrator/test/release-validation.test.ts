@@ -125,6 +125,7 @@ const FIXTURE_PATHS = [
   "packages/orchestrator/scripts/instruction-baseline.mjs",
   "documentation/decisions/0043-proportionate-verification-evidence.md",
   "documentation/decisions/0044-instruction-baseline-evolution.md",
+  "documentation/decisions/0045-major-bounded-compatibility-window.md",
   "packages/orchestrator/scripts/check-dist.mjs",
   "packages/orchestrator/scripts/release-version.mjs",
   "packages/orchestrator/scripts/smoke-committed.mjs",
@@ -148,25 +149,6 @@ function replacePolicyFragment(
   return contents.replace(pattern, replacement);
 }
 
-async function setLegacyLayoutRelease(
-  root: string,
-  version: string
-): Promise<void> {
-  const target = path.join(
-    root,
-    "plugins/banzai/skills/project-manifest/references/layout-migration.md"
-  );
-  const contents = await readFile(target, "utf8");
-  await writeFile(
-    target,
-    contents.replace(
-      /^- Last legacy-compatible release: `[^`]+`$/m,
-      `- Last legacy-compatible release: \`${version}\``
-    ),
-    "utf8"
-  );
-}
-
 async function releaseFixture(): Promise<string> {
   const parent = await mkdtemp(path.join(tmpdir(), "banzai-release-fixture-"));
   const root = path.join(parent, "repository");
@@ -177,6 +159,11 @@ async function releaseFixture(): Promise<string> {
       { recursive: true }
     );
   }
+  const initialized = spawnSync("git", ["init", "--quiet"], {
+    cwd: root,
+    encoding: "utf8"
+  });
+  assert.equal(initialized.status, 0, initialized.stderr);
   // cp preserves checkout modes; the fixture needs safe version metadata.
   for (const relativePath of new Set(
     VERSION_SURFACES.map((surface) => surface.relativePath)
@@ -185,8 +172,7 @@ async function releaseFixture(): Promise<string> {
   }
   // Build a valid current candidate independently of the writer under test.
   for (const surface of VERSION_SURFACES)
-    await setSurfaceVersion(root, surface, "1.19.0");
-  await setLegacyLayoutRelease(root, "1.18.0");
+    await setSurfaceVersion(root, surface, "3.0.0");
   // The copied dist embeds the checkout version. Rebuild for the fixture's
   // pinned version so later releases still exercise the intended diagnostics.
   await symlink(
@@ -477,7 +463,7 @@ const fileSystem = {
     await base.remove(target, options);
   }
 };
-await setProjectVersion({ root, targetVersion: "1.20.0", ownerPid: process.pid, fileSystem });
+await setProjectVersion({ root, targetVersion: "3.1.0", ownerPid: process.pid, fileSystem });
 `;
   await writeFile(helper, source, "utf8");
   const killed = spawnSync(process.execPath, [helper], {
@@ -497,7 +483,7 @@ test("release validation accepts the all-equal nine-field release train", async 
       await Promise.all(
         VERSION_SURFACES.map((surface) => readSurfaceVersion(root, surface))
       ),
-      Array<string>(9).fill("1.19.0")
+      Array<string>(9).fill("3.0.0")
     );
     const result = validate(root);
     assert.equal(result.status, 0, result.stderr);
@@ -785,7 +771,7 @@ for (const [relativePath, fragment] of [
     "stop before authoring a Proposed ADR or plan that selects an option"
   ],
   ["README.md", "There are five decision gates"],
-  ["documentation/orchestrator.md", "A v1 answer cannot answer a"],
+  ["documentation/orchestrator.md", "answer uses v2 only."],
   [
     "packages/orchestrator/src/cli.ts",
     "Five human decision gates remain distinct"
@@ -849,40 +835,25 @@ test("release validation pins the phase-result v3 manifest and schema identity",
     );
     result = validate(root);
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /^CONTRACT_VERSION_MISMATCH /);
+    assert.match(result.stderr, /^CONTRACT_POLICY_DRIFT /);
   });
 });
 
-for (const relativePath of [
-  "plugins/banzai/contracts/v1/phase-result.schema.json",
-  "plugins/banzai/contracts/v2/phase-result.schema.json"
-] as const) {
-  test(`release validation byte-protects legacy contract ${relativePath}`, async () => {
-    await withFixture(async (root) => {
-      const target = path.join(root, relativePath);
-      await writeFile(target, `${await readFile(target, "utf8")}\n`, "utf8");
-      const result = validate(root);
-      assert.equal(result.status, 1);
-      assert.match(result.stderr, /^LEGACY_CONTRACT_DRIFT /);
-    });
-  });
-}
-
-test("release validation protects run-state v3/v4/v5 and agent-control 3.0 identities", async () => {
+test("release validation protects declared run-state and agent-control identities", async () => {
   await withFixture(async (root) => {
     const typesPath = path.join(root, "packages/orchestrator/src/types.ts");
     const accepted = await readFile(typesPath, "utf8");
     await writeFile(
       typesPath,
       accepted.replace(
-        "export interface RunState {\n  schemaVersion: 3 | 4 | 5;",
+        /export interface RunState \{\n {2}schemaVersion: [^;]+;/,
         "export interface RunState {\n  schemaVersion: 2;"
       ),
       "utf8"
     );
     let result = validate(root);
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /^STATE_CONTRACT_DRIFT /);
+    assert.match(result.stderr, /^CONTRACT_POLICY_DRIFT /);
 
     await writeFile(
       typesPath,
@@ -947,7 +918,7 @@ for (const [relativePath, fragment] of [
   ],
   [
     "plugins/banzai/skills/orchestrate/references/control-protocol.md",
-    'controlContractVersion: "3.0.0"'
+    'controlContractVersion: "4.0.0"'
   ],
   [
     "plugins/banzai/skills/orchestrate/references/control-protocol.md",
@@ -976,11 +947,7 @@ for (const [relativePath, fragment] of [
       const target = path.join(root, relativePath);
       const contents = await readFile(target, "utf8");
       assert.ok(contents.includes(fragment));
-      await writeFile(
-        target,
-        replacePolicyFragment(contents, fragment, "REMOVED"),
-        "utf8"
-      );
+      await writeFile(target, contents.replaceAll(fragment, "REMOVED"), "utf8");
       const result = validate(root);
       assert.equal(result.status, 1);
       assert.match(result.stderr, /^ORCHESTRATE_SKILL_POLICY_DRIFT /);
@@ -1064,7 +1031,7 @@ test("release validation rejects a missing CI Git preflight", async () => {
 for (const surface of VERSION_SURFACES) {
   test(`release validation rejects version drift in ${surface.relativePath} ${surface.keys.join("/")}`, async () => {
     await withFixture(async (root) => {
-      await setSurfaceVersion(root, surface, "1.19.1");
+      await setSurfaceVersion(root, surface, "3.0.1");
       const before = await snapshotVersionSurfaces(root);
       const expectedPath =
         surface.relativePath === "package.json"
@@ -1085,7 +1052,7 @@ for (const surface of VERSION_SURFACES) {
 
   test(`release validation rejects a non-canonical version in ${surface.relativePath} ${surface.keys.join("/")}`, async () => {
     await withFixture(async (root) => {
-      await setSurfaceVersion(root, surface, "01.19.0");
+      await setSurfaceVersion(root, surface, "03.0.0");
       const result = validate(root);
       assert.equal(result.status, 1);
       assert.match(
@@ -1185,7 +1152,7 @@ test("cleanup sync failure and failed restoration retain validator-visible recov
     await assert.rejects(
       setProjectVersion({
         root,
-        targetVersion: "1.20.0",
+        targetVersion: "3.1.0",
         ownerPid: process.pid,
         fileSystem
       }),
@@ -1201,7 +1168,7 @@ test("cleanup sync failure and failed restoration retain validator-visible recov
       await Promise.all(
         VERSION_SURFACES.map((surface) => readSurfaceVersion(root, surface))
       ),
-      Array<string>(9).fill("1.20.0")
+      Array<string>(9).fill("3.1.0")
     );
     const blocked = validate(root);
     assert.equal(blocked.status, 1);
@@ -1245,7 +1212,7 @@ const fileSystem = {
     }
   }
 };
-await setProjectVersion({ root, targetVersion: "1.20.0", ownerPid: process.pid, fileSystem });
+await setProjectVersion({ root, targetVersion: "3.1.0", ownerPid: process.pid, fileSystem });
 `;
     await writeFile(helper, source, "utf8");
 
@@ -1540,7 +1507,7 @@ test("release validation keeps the Claude marketplace versionless", async () => 
     await mutateJson(root, ".claude-plugin/marketplace.json", (value) => {
       const plugin = (value.plugins as Record<string, unknown>[])[0];
       assert.ok(plugin);
-      plugin.version = "1.19.0";
+      plugin.version = "3.0.0";
     });
     const result = validate(root);
     assert.equal(result.status, 1);
@@ -1591,16 +1558,12 @@ for (const [relativePath, code] of [
   ["plugins/banzai/skills/code-writing/SKILL.md", "MISSING_RELEASE_FILE"],
   ["plugins/banzai/skills/orchestrate/SKILL.md", "MISSING_RELEASE_FILE"],
   [
-    "plugins/banzai/contracts/v1/review-result.schema.json",
-    "MISSING_RELEASE_FILE"
-  ],
-  [
-    "plugins/banzai/contracts/v2/phase-result.schema.json",
-    "MISSING_RELEASE_FILE"
+    "plugins/banzai/contracts/v2/review-result.schema.json",
+    "SUPPORTED_VERSION_UNDECLARED"
   ],
   [
     "plugins/banzai/contracts/v3/phase-result.schema.json",
-    "MISSING_RELEASE_FILE"
+    "SUPPORTED_VERSION_UNDECLARED"
   ]
 ] as const) {
   test(`release validation rejects missing ${relativePath}`, async () => {
@@ -1636,7 +1599,7 @@ test("release validation rejects Node and GitHub Actions policy drift", async ()
       path.join(REPOSITORY_ROOT, "package.json"),
       path.join(root, "package.json")
     );
-    await setSurfaceVersion(root, VERSION_SURFACES[0], "1.19.0");
+    await setSurfaceVersion(root, VERSION_SURFACES[0], "3.0.0");
     const ciPath = path.join(root, ".github/workflows/ci.yml");
     const ci = await readFile(ciPath, "utf8");
     await writeFile(
@@ -2094,10 +2057,13 @@ for (const scenario of [
       `${text}\nFor this layout read the policy from \`CLAUDE.md\`.\n`
   },
   {
-    name: "missing migration approval",
-    file: "skills/project-manifest/references/layout-migration.md",
+    name: "missing partial layout diagnostic",
+    file: "skills/quick-fix/SKILL.md",
     mutate: (text: string) =>
-      text.replace("Apply only after approval", "Apply immediately")
+      text.replace(
+        "On partial report the exact ambiguity",
+        "Ignore the layout ambiguity"
+      )
   }
 ]) {
   test(`instruction layout rejects ${scenario.name}`, async () => {
@@ -2117,25 +2083,6 @@ for (const scenario of [
     });
   });
 }
-
-for (const version of ["1.19.1", "01.18.0", "not-a-version"]) {
-  test(`instruction layout rejects legacy release ${version}`, async () => {
-    await withFixture(async (root) => {
-      await setLegacyLayoutRelease(root, version);
-      const result = validate(root);
-      assert.equal(result.status, 1);
-      assert.match(result.stderr, /^INSTRUCTION_LAYOUT_DRIFT /);
-    });
-  });
-}
-
-test("instruction layout permits the unreleased source version and unchanged hook free paths", async () => {
-  await withFixture(async (root) => {
-    await setLegacyLayoutRelease(root, "1.19.0");
-    const result = validate(root);
-    assert.equal(result.status, 0, result.stderr);
-  });
-});
 
 test("instruction layout inventory cannot drop a required policy", async () => {
   await withFixture(async (root) => {
@@ -2273,6 +2220,28 @@ test("instruction baseline evolves only an exact authorized scope and retains it
     await assert.rejects(validateGuidanceExtraction(root), /predecessor/);
     await writeFile(currentPath, next);
     await writeFile(pinPath, nextPin);
+    const authorityFile = path.join(root, authorityPath);
+    const authorityBytes = await readFile(authorityFile, "utf8");
+    await writeFile(
+      authorityFile,
+      authorityBytes +
+        "- Later lifecycle metadata preserves this exact accepted authority.\n"
+    );
+    await validateGuidanceExtraction(root);
+    await writeFile(
+      authorityFile,
+      authorityBytes.replace(
+        "## Context and Decision Drivers",
+        "## Changed body"
+      ) + "- Later lifecycle metadata.\n"
+    );
+    await assert.rejects(validateGuidanceExtraction(root), /authority changed/);
+    await writeFile(
+      authorityFile,
+      authorityBytes + "## Unrelated section\nChanged authority.\n"
+    );
+    await assert.rejects(validateGuidanceExtraction(root), /authority changed/);
+    await writeFile(authorityFile, authorityBytes);
     const retained = path.join(
       root,
       "plugins/banzai/skills/quick-fix/SKILL.md"
@@ -2285,6 +2254,75 @@ test("instruction baseline evolves only an exact authorized scope and retains it
       )
     );
     await assert.rejects(describeGuidanceTransition(root), /Orchestrated Mode/);
+  });
+});
+
+test("the protected orchestrate resource requires the explicit ADR-0045 transition authority", async () => {
+  await withFixture(async (root) => {
+    const originalPath = path.join(
+      root,
+      "packages/orchestrator/phase-guidance-baseline.json"
+    );
+    const currentPath = path.join(
+      root,
+      "packages/orchestrator/phase-guidance-current.json"
+    );
+    const pinPath = path.join(
+      root,
+      "packages/orchestrator/phase-guidance-current.sha256"
+    );
+    const original = await readFile(originalPath);
+    const initial = await readFile(currentPath);
+    const initialPin = await readFile(pinPath);
+    const skillPath = path.join(
+      root,
+      "plugins/banzai/skills/orchestrate/SKILL.md"
+    );
+    await writeFile(
+      skillPath,
+      (await readFile(skillPath, "utf8")) +
+        "\nFixture compatibility transition.\n"
+    );
+    const proposal = await describeGuidanceTransition(root);
+    const authorityPath =
+      "documentation/decisions/0044-instruction-baseline-evolution.md";
+    const authorization = {
+      schema: "banzai-instruction-authorization/v1",
+      schemaVersion: 1,
+      predecessorSha256: proposal.predecessorSha256,
+      authorities: [
+        {
+          path: authorityPath,
+          sha256: resourceDigest(
+            await readFile(path.join(root, authorityPath))
+          ),
+          scope: "Fixture protected resource transition"
+        }
+      ],
+      scope: proposal.changes.map((change) => change.key)
+    };
+    await assert.rejects(
+      evolveGuidanceBaseline(root, authorization),
+      /protected/iu
+    );
+    assert.deepEqual(await readFile(currentPath), initial);
+    assert.deepEqual(await readFile(pinPath), initialPin);
+    const compatibilityAuthority =
+      "documentation/decisions/0045-major-bounded-compatibility-window.md";
+    await evolveGuidanceBaseline(root, {
+      ...authorization,
+      authorities: [
+        {
+          path: compatibilityAuthority,
+          sha256: resourceDigest(
+            await readFile(path.join(root, compatibilityAuthority))
+          ),
+          scope: "ADR-0045 current control protocol"
+        }
+      ]
+    });
+    await validateGuidanceExtraction(root);
+    assert.deepEqual(await readFile(originalPath), original);
   });
 });
 
@@ -2393,4 +2431,228 @@ test("artifact reader generation resolves runtime reader edges to canonical sour
       "invalid previous generated output must never be consumed"
     );
   });
+});
+
+for (const scenario of [
+  {
+    name: "an undeclared shipped schema",
+    mutation: "undeclared",
+    code: "SUPPORTED_VERSION_UNDECLARED"
+  },
+  {
+    name: "a missing declared schema",
+    mutation: "missing",
+    code: "SUPPORTED_VERSION_UNDECLARED"
+  },
+  {
+    name: "duplicate schema ownership",
+    mutation: "duplicate",
+    code: "SUPPORTED_VERSION_UNDECLARED"
+  },
+  {
+    name: "multiple versions at a major boundary",
+    mutation: "major",
+    code: "MAJOR_TARGET_MULTIPLE_VERSIONS"
+  },
+  {
+    name: "removed compatibility in maintained docs",
+    mutation: "docs",
+    code: "REMOVED_VERSION_DOCUMENTED"
+  },
+  {
+    name: "schema identity drift",
+    mutation: "identity",
+    code: "CONTRACT_POLICY_DRIFT"
+  },
+  {
+    name: "a release major mismatch",
+    mutation: "release-major",
+    code: "CONTRACT_POLICY_DRIFT"
+  },
+  {
+    name: "additive versions in a minor release",
+    mutation: "minor",
+    code: null
+  },
+  {
+    name: "removed versions in historical ADRs and release notes",
+    mutation: "history",
+    code: null
+  }
+]) {
+  test(`compatibility declaration checks ${scenario.name} without mutation`, async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "banzai-compatibility-"));
+    const schemaPath = "plugins/banzai/contracts/v3/phase-result.schema.json";
+    const schema = {
+      $id: "https://banzai.local/contracts/v3/phase-result.schema.json",
+      properties: {
+        schemaVersion: { const: scenario.mutation === "identity" ? 2 : 3 }
+      }
+    };
+    const family = {
+      id: "phase-result",
+      supported: ["phase-result/v3"],
+      removed: ["phase-result/v1"],
+      schemaFiles: [schemaPath],
+      removedTokens: ["phase-result/v1"]
+    };
+    const policy = { compatibility: { major: 3, families: [family] } };
+    try {
+      await mkdir(path.join(root, "plugins/banzai/contracts/v3"), {
+        recursive: true
+      });
+      await mkdir(path.join(root, "documentation/decisions"), {
+        recursive: true
+      });
+      await mkdir(path.join(root, "documentation/releases"), {
+        recursive: true
+      });
+      if (scenario.mutation !== "missing")
+        await writeFile(path.join(root, schemaPath), JSON.stringify(schema));
+      if (scenario.mutation === "undeclared")
+        await writeFile(
+          path.join(root, "plugins/banzai/contracts/v3/extra.schema.json"),
+          "{}"
+        );
+      if (["major", "minor"].includes(scenario.mutation))
+        family.supported.push("phase-result/v4");
+      if (scenario.mutation === "duplicate")
+        policy.compatibility.families.push({ ...family, id: "another-family" });
+      await writeFile(
+        path.join(root, "release-policy.json"),
+        JSON.stringify(policy)
+      );
+      await writeFile(
+        path.join(root, "documentation/current.md"),
+        scenario.mutation === "docs" ? "phase-result/v1" : "phase-result/v3"
+      );
+      await writeFile(
+        path.join(root, "documentation/decisions/0001.md"),
+        "phase-result/v1"
+      );
+      await writeFile(
+        path.join(root, "documentation/releases/2.0.0.md"),
+        "phase-result/v1"
+      );
+      const init = spawnSync("git", ["init", "--quiet", root], {
+        encoding: "utf8"
+      });
+      assert.equal(init.status, 0, init.stderr);
+      const before = new Map<string, Buffer>();
+      for (const entry of await readdir(root, { recursive: true })) {
+        const file = path.join(root, entry);
+        if ((await lstat(file)).isFile())
+          before.set(entry, await readFile(file));
+      }
+      const version =
+        scenario.mutation === "minor"
+          ? "3.1.0"
+          : scenario.mutation === "release-major"
+            ? "2.5.0"
+            : "3.0.0";
+      const result = spawnSync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "--eval",
+          `
+        import { readFile } from 'node:fs/promises';
+        const { validateCompatibility, validateCompatibilityShape } = await import(process.argv[1]);
+        const root = process.argv[2];
+        const policy = JSON.parse(await readFile(root + '/release-policy.json', 'utf8'));
+        try {
+          validateCompatibilityShape(policy.compatibility);
+          await validateCompatibility(root, policy, process.argv[3]);
+        } catch (error) { process.stderr.write(error.message); process.exitCode = 1; }
+      `,
+          pathToFileURL(VALIDATOR).href,
+          root,
+          version
+        ],
+        { encoding: "utf8" }
+      );
+      assert.equal(
+        result.status,
+        scenario.code === null ? 0 : 1,
+        result.stderr
+      );
+      if (scenario.code !== null)
+        assert.ok(result.stderr.startsWith(scenario.code), result.stderr);
+      if (scenario.mutation === "docs")
+        assert.match(result.stderr, /documentation\/current\.md/);
+      const after = new Map<string, Buffer>();
+      for (const entry of await readdir(root, { recursive: true })) {
+        const file = path.join(root, entry);
+        if ((await lstat(file)).isFile())
+          after.set(entry, await readFile(file));
+      }
+      assert.deepEqual(after, before);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("compatibility declaration covers the approved target and permits empty removed sets", async () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `
+    import { readFile } from 'node:fs/promises';
+    const { validateCompatibilityShape } = await import(process.argv[1]);
+    const policy = JSON.parse(await readFile(process.argv[2], 'utf8'));
+    validateCompatibilityShape(policy.compatibility);
+    process.stdout.write(JSON.stringify(policy));
+  `,
+      pathToFileURL(VALIDATOR).href,
+      path.join(REPOSITORY_ROOT, "release-policy.json")
+    ],
+    { encoding: "utf8" }
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const policy = JSON.parse(result.stdout) as {
+    compatibility: {
+      major: number;
+      families: {
+        id: string;
+        supported: string[];
+        removed: string[];
+        schemaFiles: string[];
+        removedTokens: string[];
+      }[];
+    };
+    contracts: {
+      state: { currentSchemaVersion: number };
+      agentControl: { contractVersion: string };
+    };
+  };
+  assert.equal(policy.compatibility.major, 3);
+  const families = new Map(
+    policy.compatibility.families.map((family) => [family.id, family])
+  );
+  for (const [id, supported] of [
+    ["run-state", "5"],
+    ["orchestrator-config", "3"],
+    ["work-binding", "banzai-work-binding/v2"],
+    ["artifact-request", "banzai-artifact-request/v2"],
+    ["evaluation-export", "banzai-evaluation-export/v2"],
+    ["evaluation-kpi", "banzai-evaluation-kpi/v2"],
+    ["standalone-review", "banzai-standalone-review/v1"]
+  ] as const)
+    assert.deepEqual(families.get(id)?.supported, [supported]);
+  assert.equal(policy.contracts.state.currentSchemaVersion, 5);
+  assert.equal(policy.contracts.agentControl.contractVersion, "4.0.0");
+  assert.ok(
+    policy.compatibility.families.every(
+      (family) => family.supported.length === 1
+    )
+  );
+  assert.deepEqual(families.get("run-state")?.removed, ["1", "2", "3", "4"]);
+  assert.ok(
+    families
+      .get("artifact-request")
+      ?.schemaFiles.every((file) => file.includes("/artifacts/v2/"))
+  );
 });

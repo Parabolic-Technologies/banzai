@@ -254,45 +254,6 @@ test("requires a substantive custom profile for an unrecognized project", () => 
   });
 });
 
-test("legacy commands flatten in source order but never prove readiness", () => {
-  const legacy = parseConfig({
-    ...structuredClone(DEFAULT_CONFIG),
-    schemaVersion: 1,
-    verification: [
-      {
-        name: "first",
-        command: "tool",
-        args: ["same", "same"],
-        timeoutMs: 1_000
-      },
-      {
-        name: "second",
-        command: "tool",
-        args: ["second"],
-        timeoutMs: 1_000
-      }
-    ]
-  });
-
-  assert.deepEqual(
-    flattenVerificationCommands(legacy).map((command) => command.name),
-    ["first", "second"]
-  );
-  assert.deepEqual(flattenVerificationCommands(legacy)[0]?.args, [
-    "same",
-    "same"
-  ]);
-  assert.deepEqual(assessVerificationProfiles(legacy, ["node"]), {
-    explicit: false,
-    profileCount: 1,
-    substantiveCommandCount: 0,
-    totalSubstantiveCommandCount: 0,
-    missingProjectTypes: ["node"],
-    hygieneOnlyProjectTypes: [],
-    extraProfileIds: []
-  });
-});
-
 test("flattens commands in profile-major and command-minor order", () => {
   const first = profile("node", "node");
   first.commands.push({

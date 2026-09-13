@@ -22,7 +22,6 @@ export const CANCELLATION_SCHEMA = "banzai-cancellation-observation/v1";
 export const CANCELLATION_REPORT_SCHEMA = "banzai-cancellation-report/v1";
 export const CANCELLATION_AVAILABILITIES = [
   "available",
-  "legacy_absent",
   "missing",
   "malformed",
   "unsupported",
@@ -37,7 +36,6 @@ export type ContextAvailability =
   | "available"
   | "not_applicable"
   | "missing"
-  | "legacy_absent"
   | "malformed"
   | "conflicting"
   | "unsupported"
@@ -441,7 +439,7 @@ export function captureCancellationContext(raw: unknown): CancellationContext {
           );
   const selection = cancellationRecord(r.workflowSelection);
   context.workflow = !Object.hasOwn(r, "workflowSelection")
-    ? cancellationValue(null, "state.workflowSelection", "legacy_absent")
+    ? cancellationValue(null, "state.workflowSelection", "missing")
     : r.workflowSelection === null
       ? cancellationValue("unselected", "state.workflowSelection")
       : member(selection.workflow, ["strict", "feature", "quick-fix"] as const)
@@ -645,7 +643,6 @@ function decodeContext(value: unknown): CancellationContext {
         "available",
         "not_applicable",
         "missing",
-        "legacy_absent",
         "malformed",
         "conflicting",
         "unsupported",
@@ -849,27 +846,12 @@ export function resolveCancellation(
           : "malformed";
       return result;
     }
-    const legacy = cancelled.filter(
-      (e) =>
-        e.runId === runId &&
-        cancellationInstant(e.at) &&
-        Object.keys(e.details).length === 0
-    );
-    if (
-      evidenceAvailability === "available" &&
-      cancelled.length === 1 &&
-      legacy.length === 1 &&
-      responses.length === 0
-    ) {
-      result.availability = "legacy_absent";
-      result.cancelledAt = legacy[0]?.at ?? null;
-    } else
-      result.availability =
-        evidenceAvailability === "available"
-          ? cancelled.length || responses.length
-            ? "conflicting"
-            : "missing"
-          : evidenceAvailability;
+    result.availability =
+      evidenceAvailability === "available"
+        ? cancelled.length || responses.length
+          ? "conflicting"
+          : "missing"
+        : evidenceAvailability;
     return result;
   }
   if (state.status !== "cancelled") {

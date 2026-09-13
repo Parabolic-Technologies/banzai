@@ -2,6 +2,7 @@ import { parseReviewVerificationEvidence } from "./verification-store.mjs";
 import { createHash } from "node:crypto";
 import {
   parseBinding,
+  unsupportedResourceVersion,
   canonicalJson,
   ArtifactStorageError as BanzaiError,
 } from "./artifact-storage.mjs";
@@ -42,7 +43,7 @@ function parseReviewSnapshot(value) {
   } catch (error) {
     if (
       error instanceof BanzaiError &&
-      error.code === "INVALID_REVIEW_SNAPSHOT"
+      ["INVALID_REVIEW_SNAPSHOT", "RESOURCE_VERSION_UNSUPPORTED"].includes(error.code)
     )
       throw error;
     invalid("Review snapshot contains invalid nested evidence.");
@@ -57,6 +58,8 @@ function equal(value, expected) {
 function parseSnapshot(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     invalid("Review snapshot must be an object.");
+  if (value.schema !== "banzai-review-snapshot/v3" || value.schemaVersion !== 3)
+    unsupportedResourceVersion("review snapshot", `${value.schema} (${value.schemaVersion})`, "banzai-review-snapshot/v3 (3)");
   const snapshot = value;
   const { digest, ...body } = snapshot;
   const keys = [
@@ -79,17 +82,10 @@ function parseSnapshot(value) {
     "artifact",
     "digest",
   ];
-  if (snapshot.schemaVersion >= 2) keys.push("artifactBinding");
+  keys.push("artifactBinding");
   if (
     Object.keys(snapshot).length !== keys.length ||
     Object.keys(snapshot).some((key) => !keys.includes(key)) ||
-    !(
-      (snapshot.schemaVersion === 1 &&
-        snapshot.schema === "banzai-review-snapshot/v1") ||
-      (snapshot.schemaVersion === 2 &&
-        snapshot.schema === "banzai-review-snapshot/v2") ||
-      (snapshot.schemaVersion === 3 && snapshot.schema === "banzai-review-snapshot/v3")
-    ) ||
     !equal(snapshot.outputContract, "review-result/v2") ||
     !/^[a-f0-9]{64}$/u.test(digest) ||
     digest !== digestCanonicalJson(body)
@@ -98,7 +94,7 @@ function parseSnapshot(value) {
   for (const id of [snapshot.runId, snapshot.attemptId])
     if (typeof id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(id))
       invalid("Review snapshot identity is invalid.");
-  if (snapshot.schemaVersion >= 2) {
+  {
     const bound = snapshot.artifactBinding;
     if (
       !bound ||
@@ -107,7 +103,6 @@ function parseSnapshot(value) {
     )
       invalid("Review snapshot binding is missing or malformed.");
     parseBinding(bound.binding);
-    if (snapshot.schemaVersion === 2 && bound.binding.schemaVersion !== 1) invalid("Snapshot v2 retains binding v1 semantics.");
     const workspace = snapshot.workspace;
     if (
       workspace.schemaVersion !== 2 ||
@@ -154,18 +149,10 @@ function parseSnapshot(value) {
           snapshot.completionSource.testReport.path !== roles.testReport))
     )
       invalid("Review snapshot evidence is outside its exact bound roles.");
-  } else if (
-    snapshot.workspace.schemaVersion !== void 0 ||
-    snapshot.artifactBinding !== void 0
-  ) {
-    invalid("Legacy review snapshots cannot carry private storage authority.");
   }
   const artifact = snapshot.artifact;
-  if (snapshot.schemaVersion === 3) {
-    if (snapshot.artifactBinding.binding.schemaVersion !== 2) invalid("Verification snapshot requires binding v2.");
-    const evidence = parseReviewVerificationEvidence(artifact.verificationEvidence);
-    if (evidence.decision.workId !== snapshot.artifactBinding.binding.workId) invalid("Cross-work review verification evidence.");
-  } else if (artifact?.verificationEvidence !== undefined) invalid("Legacy snapshots cannot carry new verification evidence.");
+  const evidence = parseReviewVerificationEvidence(artifact.verificationEvidence);
+  if (evidence.decision.workId !== snapshot.artifactBinding.binding.workId) invalid("Cross-work review verification evidence.");
   if (
     !object(artifact) ||
     !object(snapshot.approval) ||

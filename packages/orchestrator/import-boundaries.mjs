@@ -13,6 +13,7 @@ const ADR_0040 = "ADR-0040";
 const ADR_0041 = "ADR-0041";
 const ADR_0042 = "ADR-0042";
 const ADR_0043 = "ADR-0043";
+const ADR_0045 = "ADR-0045";
 const POLICY_ADR_AUTHORITIES = new Set([
   ADR_0026,
   ADR_0028,
@@ -22,7 +23,8 @@ const POLICY_ADR_AUTHORITIES = new Set([
   ADR_0040,
   ADR_0041,
   ADR_0042,
-  ADR_0043
+  ADR_0043,
+  ADR_0045
 ]);
 const POLICY_ERROR_CODE = "IMPORT_BOUNDARY_POLICY_INVALID";
 const IMPORTER_PATTERN =
@@ -372,8 +374,16 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/doctor.ts",
     "doctor-diagnostics",
-    [MANIFEST_ARCHITECTURE, MANIFEST_MODULES, ADR_0040, ADR_0041, ADR_0042],
     [
+      MANIFEST_ARCHITECTURE,
+      MANIFEST_MODULES,
+      ADR_0040,
+      ADR_0041,
+      ADR_0042,
+      ADR_0045
+    ],
+    [
+      permission("./errors.js", ADR_0045),
       permission("./phase-instructions.js", ADR_0042),
       permission("./artifact-storage.js", ADR_0041),
       permission("./project-adoption.js", ADR_0040),
@@ -389,8 +399,8 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/errors.ts",
     "foundational-errors",
-    [MANIFEST_ARCHITECTURE],
-    [],
+    [MANIFEST_ARCHITECTURE, ADR_0045],
+    [permission("../package.json", ADR_0045)],
     [permission("./types.js", MANIFEST_ARCHITECTURE)]
   ),
   boundary(
@@ -519,8 +529,10 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/live-compatibility.ts",
     "live-compatibility",
-    [MANIFEST_MODULES, MANIFEST_ARCHITECTURE],
+    [MANIFEST_MODULES, MANIFEST_ARCHITECTURE, ADR_0045],
     [
+      permission("./artifact-storage.js", ADR_0045),
+      permission("./verification-evidence.js", ADR_0045),
       permission("./validation.js", MANIFEST_MODULES),
       permission("./review-snapshot.js", MANIFEST_MODULES),
       permission("../../../release-policy.json", MANIFEST_MODULES),
@@ -563,8 +575,11 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/output-contract.ts",
     "output-contract",
-    [ADR_0028],
-    [permission("./contracts.js", ADR_0028)],
+    [ADR_0028, ADR_0045],
+    [
+      permission("./contracts.js", ADR_0028),
+      permission("./errors.js", ADR_0045)
+    ],
     [permission("./types.js", ADR_0028)]
   ),
   boundary(

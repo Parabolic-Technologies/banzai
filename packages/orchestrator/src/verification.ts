@@ -162,11 +162,10 @@ export function assessVerificationProfiles(
   projectTypes: readonly VerificationProjectType[]
 ): VerificationProfileAssessment {
   const profiles = config.verification.profiles;
-  const explicit = config.schemaVersion >= 2;
   const requestedTypes = new Set(projectTypes);
-  const matchingProfiles = explicit
-    ? profiles.filter((profile) => requestedTypes.has(profile.projectType))
-    : [];
+  const matchingProfiles = profiles.filter((profile) =>
+    requestedTypes.has(profile.projectType)
+  );
   const matchingProfileTypes = new Set(
     matchingProfiles.map((profile) => profile.projectType)
   );
@@ -186,30 +185,24 @@ export function assessVerificationProfiles(
       matchingProfileTypes.has(projectType) &&
       !substantiveProfileTypes.has(projectType)
   );
-  const extraProfileIds = explicit
-    ? profiles
-        .filter(
-          (profile) =>
-            profile.projectType !== "repository" &&
-            !requestedTypes.has(profile.projectType)
-        )
-        .map((profile) => profile.id)
-        .sort()
-    : [];
-  const substantiveCommandCount = explicit
-    ? matchingProfiles
-        .flatMap((profile) => profile.commands)
-        .filter((command) => !isRepositoryHygieneCommand(command)).length
-    : 0;
-  const totalSubstantiveCommandCount = explicit
-    ? profiles
-        .filter((profile) => profile.projectType !== "repository")
-        .flatMap((profile) => profile.commands)
-        .filter((command) => !isRepositoryHygieneCommand(command)).length
-    : 0;
+  const extraProfileIds = profiles
+    .filter(
+      (profile) =>
+        profile.projectType !== "repository" &&
+        !requestedTypes.has(profile.projectType)
+    )
+    .map((profile) => profile.id)
+    .sort();
+  const substantiveCommandCount = matchingProfiles
+    .flatMap((profile) => profile.commands)
+    .filter((command) => !isRepositoryHygieneCommand(command)).length;
+  const totalSubstantiveCommandCount = profiles
+    .filter((profile) => profile.projectType !== "repository")
+    .flatMap((profile) => profile.commands)
+    .filter((command) => !isRepositoryHygieneCommand(command)).length;
 
   return {
-    explicit,
+    explicit: true,
     profileCount: profiles.length,
     substantiveCommandCount,
     totalSubstantiveCommandCount,

@@ -449,3 +449,4 @@ Implementation and independent review must confirm:
   refresh remain binding. Implementation of this amendment is Planned.
 - Supersedes: ADR-0016
 - Superseded by: None
+- [ADR-0045](./0045-major-bounded-compatibility-window.md) bounds retained versions to the release-train major that introduced them; later majors may remove those readers.

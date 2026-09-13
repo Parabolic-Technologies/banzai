@@ -179,11 +179,8 @@ For your first completed task, check that:
 - any strict-workflow decisions and review results match the actions you
   approved.
 
-New feature artifacts live under `.banzai/work/<uuid>/`; existing legacy work
-retains its documentation paths. See [artifact storage](artifact-storage.md). Local run
-state and retained verification evidence live under `.banzai/runs/<run-id>/`.
-Follow the paths reported by your run; not every route creates the same files.
-Use your project's normal review and commit process for the resulting change.
+New feature artifacts live under `.banzai/work/<uuid>/` with binding v2.
+Use the exact work identity and helper-returned roles for continuation.
 
 ## Setup troubleshooting
 
@@ -195,7 +192,7 @@ Use your project's normal review and commit process for the resulting change.
 | `GIT_REPOSITORY_REQUIRED` | Run `git init` in the intended project directory and create an initial commit, then start Banzai again. |
 | `GIT_INITIAL_COMMIT_REQUIRED` | Create the first commit on the current branch. For an empty baseline that leaves staged files uncommitted, run `git commit --allow-empty --only -m "Initial commit"`, then start Banzai again. |
 | Missing project coverage or hygiene-only verification           | Add substantive commands for every root-detected project type using the [profile examples](verification-examples.md). Renaming `git diff --check` does not make it a test.                                             |
-| Legacy configuration is not ready                               | Follow the manual [schema-version-1 migration](orchestrator.md#project-verification-readiness). Rerunning `init` does not migrate an existing configuration.                                                           |
+| Unsupported configuration | Finish or cancel work using the previous major, regenerate schema-3 configuration, then run `banzai doctor`. See the [3.0.0 release note](releases/3.0.0.md). |
 | Doctor cannot find a verification executable                    | Check the command path and dependencies in the same terminal environment. For Python, use the interpreter from the project's environment.                                                                              |
 | Doctor is ready, but startup rejects authentication or capacity | Resolve the reported client sign-in, subscription, or provider issue. Check `banzai status`; retry start checks only when the run offers that action.                                                                  |
 | Claude environment or tool permissions fail                     | Follow the specific finding and [Claude environment guidance](orchestrator.md#spawned-claude-environment). Review proposed project settings rather than granting blanket permissions.                                  |

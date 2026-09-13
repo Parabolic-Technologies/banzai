@@ -9,7 +9,6 @@ import {
   deriveEvaluationKpiSource,
   deriveRunSignature
 } from "../src/evaluation-kpi.js";
-import { BanzaiError } from "../src/errors.js";
 import type {
   AttemptReference,
   EvaluationAggregates,
@@ -259,8 +258,8 @@ function exportFixture(runs: EvaluationRun[]): EvaluationExport {
     (item) => item.cohortMembership === "included"
   ).length;
   return {
-    schema: "banzai-evaluation-export/v1",
-    schemaVersion: 1,
+    schema: "banzai-evaluation-export/v2",
+    schemaVersion: 2,
     cohort: {
       from: null,
       to: null,
@@ -271,7 +270,14 @@ function exportFixture(runs: EvaluationRun[]): EvaluationExport {
       excludedRunCount: 0,
       unresolvedRunCount: runs.length - included
     },
-    runs,
+    runs: runs.map((item) => ({
+      ...item,
+      verificationEvidence: {
+        coverage: "incomplete",
+        physicalAttempts: [],
+        dispositions: []
+      }
+    })),
     // KPI derivation must never read aggregates (FR4 / ADR-0026): any access
     // through this proxy fails the test that used the fixture.
     aggregates: new Proxy(
@@ -298,44 +304,22 @@ function entry(
   return found;
 }
 
-test("kpi report embeds the versioned identity and one source per input in order", () => {
+test("kpi report emits v2 with stable input ordinals and explicit incomplete coverage", () => {
   const report = deriveEvaluationKpiReport([
     { label: "1: a.json", report: exportFixture([run()]) },
     { label: "2: b.json", report: exportFixture([]) }
   ]);
-  assert.equal(report.schema, "banzai-evaluation-kpi/v1");
-  assert.equal(report.schemaVersion, 1);
+  assert.equal(report.schema, "banzai-evaluation-kpi/v2");
+  assert.equal(report.schemaVersion, 2);
   assert.deepEqual(
-    report.sources.map((source) => [source.ordinal, source.label]),
+    report.sources.map((source) => [
+      source.ordinal,
+      source.runs,
+      source.coverage
+    ]),
     [
-      [1, "1: a.json"],
-      [2, "2: b.json"]
-    ]
-  );
-  const [firstSource] = report.sources;
-  assert.ok(firstSource);
-  assert.equal(firstSource.includedRunCount, 1);
-  assert.deepEqual(
-    firstSource.kpis.map((item) => `${item.kpi}/${item.measure}`),
-    [
-      "completion_rate/rate",
-      "first_review_pass_rate/rate",
-      "first_review_mean_findings/mean",
-      "first_review_acceptance_rate/rate",
-      "reviewer_precision/rate",
-      "zero_accepted_review_rate/rate",
-      "triage_deferred/count",
-      "fix_cycles_per_completed_run/mean",
-      "fix_cycles_per_completed_run/max",
-      "attempt_retry_ratio/plan",
-      "attempt_retry_ratio/implementation",
-      "attempt_retry_ratio/fix",
-      "attempt_retry_ratio/review",
-      "usage_per_completed_run/mean_input_tokens",
-      "usage_per_completed_run/mean_cached_input_tokens",
-      "usage_per_completed_run/mean_output_tokens",
-      "usage_per_completed_run/cache_ratio",
-      "usage_per_completed_run/mean_cost_usd"
+      [1, 1, { exact: 0, incomplete: 1 }],
+      [2, 0, { exact: 0, incomplete: 0 }]
     ]
   );
 });
@@ -843,10 +827,17 @@ test("kpi derivation is deterministic over identical inputs", () => {
 });
 
 function validInputDocument(): Record<string, unknown> {
-  const running = run();
+  const running = {
+    ...run(),
+    verificationEvidence: {
+      coverage: "incomplete",
+      physicalAttempts: [],
+      dispositions: []
+    }
+  };
   return {
-    schema: "banzai-evaluation-export/v1",
-    schemaVersion: 1,
+    schema: "banzai-evaluation-export/v2",
+    schemaVersion: 2,
     cohort: { includedRunCount: 1 },
     runs: [JSON.parse(JSON.stringify(running))],
     aggregates: {},
@@ -863,50 +854,28 @@ test("input decoding accepts a structurally valid export document", () => {
   assert.equal(source.includedRunCount, 1);
 });
 
-test("input decoding fails closed with INVALID_EVAL_INPUT on malformed or foreign documents", () => {
-  const reject = (text: string, fragment: RegExp) => {
-    assert.throws(
-      () => decodeEvaluationExportInput(text, "bad.json"),
-      (error: unknown) => {
-        assert.ok(error instanceof BanzaiError);
-        assert.equal(error.code, "INVALID_EVAL_INPUT");
-        assert.match(error.message, /bad\.json/);
-        assert.match(error.message, fragment);
-        return true;
-      }
-    );
-  };
-  reject("not json", /not valid JSON/);
-  reject("[]", /not a JSON object/);
-  reject(JSON.stringify({ schemaVersion: 1 }), /schema identity/);
-  reject(
-    JSON.stringify({ ...validInputDocument(), schema: "banzai-doctor/v1" }),
-    /schema identity/
-  );
-  reject(
-    JSON.stringify({ ...validInputDocument(), schemaVersion: 2 }),
-    /unsupported evaluation export schema version/
-  );
-  reject(
+test("input decoding separates malformed documents from unsupported versions without changing input", () => {
+  for (const input of [
+    "not json",
+    "[]",
     JSON.stringify({ ...validInputDocument(), runs: undefined }),
-    /missing runs/
-  );
-  reject(
-    JSON.stringify({ ...validInputDocument(), issues: undefined }),
-    /structured issues/
-  );
-  const missingTriage = validInputDocument();
-  const [firstRun] = missingTriage.runs as {
-    metrics: Record<string, unknown>;
-  }[];
-  assert.ok(firstRun);
-  delete firstRun.metrics.triage;
-  reject(JSON.stringify(missingTriage), /triage/);
-  const badAttempt = validInputDocument();
-  (
-    (badAttempt.runs as Record<string, unknown>[])[0] as { attempts: unknown[] }
-  ).attempts = [{ kind: { value: "plan", evidence: "observed" } }];
-  reject(JSON.stringify(badAttempt), /kind or status/);
+    JSON.stringify({ ...validInputDocument(), issues: undefined })
+  ])
+    assert.throws(() => decodeEvaluationExportInput(input, "bad.json"), {
+      code: "INVALID_EVAL_INPUT"
+    });
+  for (const version of [1, 3, undefined]) {
+    const input = JSON.stringify({
+      ...validInputDocument(),
+      schema: `banzai-evaluation-export/v${String(version)}`,
+      schemaVersion: version
+    });
+    assert.throws(() => decodeEvaluationExportInput(input, "old.json"), {
+      code: "RESOURCE_VERSION_UNSUPPORTED",
+      message:
+        /^.+ version .+ is not supported; 3\.x supports .+; last read by release-train major 2$/u
+    });
+  }
 });
 
 test("verification KPI v2 counts terminal dispositions once and keeps retries and incomplete coverage separate", () => {
@@ -959,14 +928,27 @@ test("verification KPI v2 counts terminal dispositions once and keeps retries an
       coverage: { exact: 0, incomplete: 1 }
     }
   );
-  assert.throws(() =>
-    decodeEvaluationExportV2Input(
-      JSON.stringify(exportFixture([run()])),
-      "legacy"
-    )
+  assert.throws(
+    () =>
+      decodeEvaluationExportV2Input(
+        JSON.stringify({
+          ...make(),
+          aggregates: {},
+          schema: "banzai-evaluation-export/v1",
+          schemaVersion: 1
+        }),
+        "old"
+      ),
+    {
+      code: "RESOURCE_VERSION_UNSUPPORTED",
+      message:
+        /^.+ version .+ is not supported; 3\.x supports .+; last read by release-train major 2$/u
+    }
   );
-  assert.throws(() =>
-    decodeEvaluationExportInput(JSON.stringify(make()), "new")
+  const serializable = { ...make(), aggregates: {} };
+  assert.deepEqual(
+    decodeEvaluationExportInput(JSON.stringify(serializable), "current"),
+    serializable
   );
   for (const mutate of [
     (value: EvaluationExportV2) => {

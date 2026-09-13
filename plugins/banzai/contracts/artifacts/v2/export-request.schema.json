@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "title": "Banzai artifact export request v1",
+  "properties": {
+    "schema": {
+      "const": "banzai-artifact-request/v2"
+    },
+    "schemaVersion": {
+      "const": 2
+    },
+    "repoRoot": {
+      "type": "string",
+      "minLength": 1
+    },
+    "inventoryFile": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "destination": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    }
+  },
+  "required": [
+    "schema",
+    "schemaVersion",
+    "repoRoot",
+    "inventoryFile",
+    "destination"
+  ]
+}

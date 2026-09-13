@@ -42,7 +42,7 @@
             "code": {
               "enum": [
                 "ARTIFACT_INPUT_INVALID",
-                "ARTIFACT_VERSION_UNSUPPORTED",
+                "RESOURCE_VERSION_UNSUPPORTED",
                 "ARTIFACT_WORK_AMBIGUOUS",
                 "ARTIFACT_RECOVERY_REQUIRED",
                 "ARTIFACT_IGNORE_CONFLICT",

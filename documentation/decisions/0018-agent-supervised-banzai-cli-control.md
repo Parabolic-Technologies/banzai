@@ -379,3 +379,4 @@ Implementation and review must confirm:
 
 - Supersedes: None
 - Superseded by: None
+- [ADR-0045](./0045-major-bounded-compatibility-window.md) bounds retained versions to the release-train major that introduced them; later majors may remove those readers.

@@ -13,7 +13,7 @@ export const CONFIG_DIRECTORY = ".banzai";
 export const CONFIG_FILE = path.join(CONFIG_DIRECTORY, "config.json");
 
 export const DEFAULT_CONFIG: OrchestratorConfig = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   contractVersion: CONTRACT_VERSION,
   models: {
     planner: {
@@ -50,6 +50,7 @@ export const DEFAULT_CONFIG: OrchestratorConfig = {
         projectType: "repository",
         commands: [
           {
+            id: "git-diff-check",
             name: "git diff check",
             command: "git",
             args: ["diff", "--check"],

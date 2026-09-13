@@ -12,6 +12,7 @@ import {
   inspectArtifacts
 } from "../src/artifact-storage.js";
 import { reviewResultSchema } from "../src/contracts.js";
+import { parseCurrentReviewResult } from "../src/validation.js";
 import {
   collectEvaluationExport,
   collectEvaluationExportV2
@@ -22,7 +23,9 @@ import {
 } from "../src/evaluation-kpi.js";
 import {
   evidenceDigest,
-  persistVerificationApplicability
+  persistVerificationApplicability,
+  readVerificationOrigins,
+  verificationApplicability
 } from "../src/verification-evidence.js";
 import { collectContextReport } from "../src/context-report.js";
 import { projectAgentControlStatus } from "../src/agent-control.js";
@@ -52,7 +55,7 @@ import {
 import path from "node:path";
 import test from "node:test";
 import { BanzaiError, ProcessExitError } from "../src/errors.js";
-import { digestArtifactBundle, workspaceSnapshot } from "../src/git.js";
+import { digestArtifactBundle } from "../src/git.js";
 import { renderReviewArtifact } from "../src/review-artifact.js";
 import {
   parsePlanTaskCompletionProjection,
@@ -102,8 +105,23 @@ import {
   writeIdentity
 } from "./adoption-fixtures.js";
 
-const descriptionPath = "documentation/features/example/description.md";
-const planPath = "documentation/development-plans/example/plan.md";
+const descriptionPath = "fixture/description.md";
+const planPath = "fixture/plan.md";
+
+async function fixtureRole(
+  root: string,
+  role:
+    | "description"
+    | "plan"
+    | "implementationReport"
+    | "testReport"
+    | "reviewDirectory"
+): Promise<string> {
+  const state = await new RunStore(root).requireActiveState();
+  const value = state.artifactBinding.binding.artifacts[role];
+  assert.ok(value);
+  return value;
+}
 
 for (const outcome of ["completed", "cancelled"] as const) {
   test(`artifact storage archives and restores a ${outcome} strict run with dependency closure`, async () => {
@@ -140,8 +158,8 @@ for (const outcome of ["completed", "cancelled"] as const) {
         await writeFile(
           request,
           JSON.stringify({
-            schema: "banzai-artifact-request/v1",
-            schemaVersion: 1,
+            schema: "banzai-artifact-request/v2",
+            schemaVersion: 2,
             repoRoot: repository.root,
             ...fields
           })
@@ -155,7 +173,7 @@ for (const outcome of ["completed", "cancelled"] as const) {
         "archive"
       );
       const inventoried = await invoke("inventory", {
-        workPaths: [`.banzai/work/${state.artifactBinding?.binding.workId}`],
+        workPaths: [`.banzai/work/${state.artifactBinding.binding.workId}`],
         runIds: [state.runId]
       });
       const inventoryFile = path.join(
@@ -168,7 +186,7 @@ for (const outcome of ["completed", "cancelled"] as const) {
       reviewed.retention.pins = [
         {
           sourceId: "project",
-          workId: state.artifactBinding?.binding.workId,
+          workId: state.artifactBinding.binding.workId,
           reason: "Closed run audit",
           recordedAt: "2026-09-11T00:00:00.000Z"
         }
@@ -214,7 +232,7 @@ for (const outcome of ["completed", "cancelled"] as const) {
         { code: "ENOENT" }
       );
       if (outcome === "cancelled") {
-        const plan = state.artifactBinding?.binding.artifacts.plan;
+        const plan = state.artifactBinding.binding.artifacts.plan;
         assert.ok(plan);
         await rm(path.join(repository.root, plan));
         const incomplete = await invoke("inventory", {
@@ -248,13 +266,8 @@ function phaseResult(
       plan: planPath,
       adrs: [],
       implementationReport:
-        phase === "plan"
-          ? null
-          : "documentation/features/example/implementation-report.md",
-      testReport:
-        phase === "plan"
-          ? null
-          : "documentation/features/example/test-report.md"
+        phase === "plan" ? null : "fixture/implementation-report.md",
+      testReport: phase === "plan" ? null : "fixture/test-report.md"
     },
     taskCompletion:
       phase === "implementation"
@@ -515,24 +528,18 @@ class FakeAdapters implements VendorAdapters {
     const state = JSON.parse(
       await readFile(path.join(request.runDirectory, "state.json"), "utf8")
     ) as RunState;
-    const roles = state.artifactBinding?.binding.artifacts;
-    const descriptionPath =
-      roles?.description ?? "documentation/features/example/description.md";
-    const planPath =
-      roles?.plan ?? "documentation/development-plans/example/plan.md";
+    const roles = state.artifactBinding.binding.artifacts;
+    const { description: descriptionPath, plan: planPath } = roles;
+    assert.ok(descriptionPath && planPath);
     const bind = (result: PhaseResult): PhaseResult => {
-      if (!roles) return result;
       const mapping = new Map<string, string | null>([
-        ["documentation/features/example/description.md", descriptionPath],
-        ["documentation/development-plans/example/plan.md", planPath],
+        ["fixture/description.md", descriptionPath],
+        ["fixture/plan.md", planPath],
         [
-          "documentation/features/example/implementation-report.md",
+          "fixture/implementation-report.md",
           roles.implementationReport ?? null
         ],
-        [
-          "documentation/features/example/test-report.md",
-          roles.testReport ?? null
-        ]
+        ["fixture/test-report.md", roles.testReport ?? null]
       ]);
       for (const key of [
         "description",
@@ -588,12 +595,18 @@ class FakeAdapters implements VendorAdapters {
         recursive: true
       });
       await writeFile(
-        path.join(request.repoRoot, descriptionPath),
+        path.join(
+          request.repoRoot,
+          await fixtureRole(request.repoRoot, "description")
+        ),
         "# Description\n\nFR1.\n",
         "utf8"
       );
       await writeFile(
-        path.join(request.repoRoot, planPath),
+        path.join(
+          request.repoRoot,
+          await fixtureRole(request.repoRoot, "plan")
+        ),
         `# Plan\n\n## Implementation Tasks\n\n${this.planTaskIds
           .map((taskId) => `- [ ] **${taskId} - Implement the fixture**`)
           .join("\n")}\n`,
@@ -628,10 +641,10 @@ class FakeAdapters implements VendorAdapters {
         const workPath = path.join(
           request.repoRoot,
           ((state.workflowSelection?.workflow ?? "strict") === "strict"
-            ? roles?.implementationReport
+            ? roles.implementationReport
             : state.workflowSelection?.workflow === "quick-fix"
-              ? roles?.changeReport
-              : roles?.work) ?? "documentation/features/example/work.md"
+              ? roles.changeReport
+              : roles.work) ?? requiredFixture(roles.implementationReport)
         );
         await mkdir(path.dirname(workPath), { recursive: true });
         await writeFile(workPath, "# Work\n\nEscalation found.\n", "utf8");
@@ -723,8 +736,8 @@ class FakeAdapters implements VendorAdapters {
       throw error;
     }
     const queued = this.reviewResults.shift();
-    const result =
-      queued === undefined || queued.schemaVersion !== undefined
+    const rawResult =
+      queued === undefined || queued.scopeAcknowledgment !== undefined
         ? queued
         : {
             ...queued,
@@ -740,9 +753,11 @@ class FakeAdapters implements VendorAdapters {
               )
             }
           };
-    if (result === undefined) {
+    if (rawResult === undefined) {
       throw new Error("No fake review result queued.");
     }
+    // Real vendor adapters validate and normalize before terminal callbacks.
+    const result = parseCurrentReviewResult(rawResult);
 
     if (this.emitReviewTerminalCheckpoint) {
       await request.onTerminalSuccess?.({
@@ -783,6 +798,7 @@ class FakeAdapters implements VendorAdapters {
 
 function passingReview(reviewedFindingIds: string[] = []): ReviewResult {
   return {
+    schemaVersion: 2,
     contractVersion: CONTRACT_VERSION,
     verdict: "pass",
     summary: "Implementation matches the plan.",
@@ -792,124 +808,38 @@ function passingReview(reviewedFindingIds: string[] = []): ReviewResult {
   };
 }
 
-async function completedReviewReconciliationFixture(legacyPolicy: boolean) {
+async function completedReviewReconciliationFixture() {
   const repository = await createTestRepository();
   const adapters = new FakeAdapters();
   adapters.reviewResults.push({
-    contractVersion: CONTRACT_VERSION,
+    ...passingReview(),
     verdict: "changes_requested",
-    summary: "One finding.",
-    findings: [finding("R1-F1", "Defect.")],
-    reviewedFindingIds: [],
-    deferredCoverage: []
+    findings: [finding("R1-F1", "Defect.")]
   });
   const runner = new WorkflowRunner(repository.root, adapters);
   await runner.start({ slug: "example", request: "Implement it." });
-  await runner.approvePlan("human");
-  const reviewing = await runner.triage(
-    {
+  const first = await runner.approvePlan("human");
+  const reviewer = structuredClone(first.sessions.reviewer);
+  assert.ok(reviewer);
+  adapters.reviewResults.push(passingReview(["R1-F1"]));
+  const writeState = runner.store.writeState.bind(runner.store);
+  // Retain the real current snapshot, candidate and completed attempt at the
+  // crash window before the terminal state write reaches durable storage.
+  runner.store.writeState = async (state) => {
+    if (state.status !== "done") await writeState(state);
+  };
+  try {
+    const done = await runner.triage({
       accepted: ["R1-F1"],
       rejected: [],
       deferred: [],
       note: null,
       decidedBy: "human"
-    },
-    false
-  );
-  await writeFile(
-    path.join(repository.root, "src/example.txt"),
-    "fixed\n",
-    "utf8"
-  );
-  transitionState(reviewing, "verifying");
-  transitionState(reviewing, "reviewing");
-  // This fixture deliberately characterizes historical review evidence.
-  reviewing.schemaVersion = 3;
-  delete reviewing.artifactBinding;
-  reviewing.reviewIteration = 2;
-  const artifactPath = "documentation/features/example/review-2.md";
-  const snapshot = await workspaceSnapshot(repository.root, {
-    excludedPaths: [artifactPath],
-    baseline: reviewing.baseline
-  });
-  reviewing.workspaceDigest = snapshot.digest;
-  const attempt = {
-    id: legacyPolicy
-      ? "legacy-review-crash-window"
-      : "delta-review-crash-window",
-    kind: "review" as const,
-    mutable: false
-  };
-  reviewing.activeAttempt = attempt;
-  const result = passingReview(["R1-F1"]);
-  const completion = reviewing.planTaskCompletion;
-  assert.ok(completion?.status === "valid");
-  const completionAttempt = await runner.store.readRunAttempt(reviewing.runId, {
-    id: completion.sourceAttemptId,
-    kind: "implementation",
-    mutable: true
-  });
-  const completionResult = completionAttempt.result as PhaseResult;
-  assert.ok(completionResult.taskCompletion);
-  const artifact = {
-    path: artifactPath,
-    candidatePath: artifactPath,
-    slug: reviewing.slug,
-    iteration: reviewing.reviewIteration,
-    approvedArtifactPaths: reviewing.planApproval?.paths ?? [],
-    workspaceDigest: snapshot.digest,
-    verification: reviewing.verification,
-    taskCompletion: {
-      approvalDigest: completion.approvalDigest,
-      ledgerDigest: completion.ledgerDigest,
-      planTaskDigest: completion.planTaskDigest,
-      completed: completion.counts.completed,
-      total: completion.counts.total,
-      implementationReport: completion.implementationReport.path,
-      testReport: completion.testReport.path,
-      tasks: completionResult.taskCompletion.tasks
-    }
-  };
-  await mkdir(path.join(repository.root, path.dirname(artifactPath)), {
-    recursive: true
-  });
-  await writeFile(
-    path.join(repository.root, artifactPath),
-    renderReviewArtifact(result, artifact),
-    "utf8"
-  );
-  await runner.store.writeState(reviewing);
-  const reviewer = reviewing.sessions.reviewer;
-  assert.ok(reviewer);
-  const record: AttemptRecord = {
-    schemaVersion: 1,
-    attempt,
-    status: "completed",
-    startedAt: "2026-01-01T00:00:00.000Z",
-    completedAt: "2026-01-01T00:01:00.000Z",
-    result,
-    sessionId: reviewer.id,
-    rawStdoutPath: null,
-    rawStderrPath: null,
-    durationMs: 60_000,
-    usage: null,
-    error: null,
-    ...(legacyPolicy
-      ? {}
-      : {
-          sessionMode: "resumed" as const,
-          reviewMode: "delta" as const,
-          rotationReason: null,
-          resumeSessionId: reviewer.id,
-          sessionContext: {
-            role: "reviewer" as const,
-            executable: reviewer.executable,
-            model: reviewer.model,
-            effort: reviewer.effort
-          }
-        })
-  };
-  await runner.store.writeRunAttempt(reviewing.runId, record);
+    });
+    assert.equal(done.status, "done", done.blockReason ?? "");
+  } finally {
+    runner.store.writeState = writeState;
+  }
   return { repository, adapters, runner, reviewer };
 }
 
@@ -1521,51 +1451,30 @@ test("interrupted read-only selection is retryable with a fresh attempt", async 
   }
 });
 
-test("a legacy run without workflow selection remains on the strict path", async () => {
-  const repository = await createTestRepository();
+test("unsupported run state cannot resume or approve and preserves all evidence", async () => {
+  const repository = await createTestRepository({ artifactLayout: "private" });
   try {
-    const adapters = new FakeAdapters();
-    adapters.reviewResults.push(passingReview());
-    const runner = new WorkflowRunner(repository.root, adapters);
-    const planned = await runner.start({
+    const runner = new WorkflowRunner(repository.root, new FakeAdapters());
+    const state = await runner.start({
       slug: "example",
-      request: "Plan the existing legacy request."
+      request: "Plan the request."
     });
-    assert.equal(planned.status, "needs_plan_approval");
-    const approvedPlanBytes = await readFile(
-      path.join(repository.root, planPath),
-      "utf8"
+    await writeFile(
+      runner.store.statePath(state.runId),
+      JSON.stringify({ ...state, schemaVersion: 4 })
     );
-
-    planned.schemaVersion = 3;
-    delete planned.artifactBinding;
-    delete planned.workflowSelection;
-    delete planned.metrics.attempts.selection;
-    await runner.store.writeState(planned);
-
-    const done = await runner.approvePlan("human");
-    assert.equal(
-      done.status,
-      "done",
-      JSON.stringify({
-        blockReason: done.blockReason,
-        blockedFrom: done.blockedFrom,
-        activeAttempt: done.activeAttempt
-      })
-    );
-    assert.equal(
-      await readFile(path.join(repository.root, planPath), "utf8"),
-      approvedPlanBytes
-    );
-    assert.ok(done.planApproval);
-    assert.equal(
-      (await digestArtifactBundle(repository.root, done.planApproval.paths))
-        .digest,
-      done.planApproval.digest
-    );
-    assert.equal(done.workflowSelection, undefined);
-    assert.equal(done.reviewIteration, 1);
-    assert.equal(done.metrics.attempts.review, 1);
+    const before = await snapshotTree(path.join(repository.root, ".banzai"));
+    for (const action of [
+      () => runner.resume(),
+      () => runner.approvePlan("human"),
+      () => runner.retry()
+    ]) {
+      await assert.rejects(action, { code: "RESOURCE_VERSION_UNSUPPORTED" });
+      assert.deepEqual(
+        await snapshotTree(path.join(repository.root, ".banzai")),
+        before
+      );
+    }
   } finally {
     await repository.dispose();
   }
@@ -1717,7 +1626,7 @@ test("a fix that edits the frozen completion projection blocks with a repairable
           // led the fixer to edit the frozen projection row directly.
           const reportPath = path.join(
             request.repoRoot,
-            "documentation/features/example/implementation-report.md"
+            await fixtureRole(request.repoRoot, "implementationReport")
           );
           const contents = await readFile(reportPath, "utf8");
           await writeFile(
@@ -1731,6 +1640,7 @@ test("a fix that edits the frozen completion projection blocks with a repairable
     }
     const adapters = new ProjectionEditingAdapters();
     adapters.reviewResults.push({
+      schemaVersion: 2,
       contractVersion: CONTRACT_VERSION,
       verdict: "changes_requested",
       summary: "Completion overstated.",
@@ -1827,7 +1737,10 @@ test("a plan with a malformed task heading fails before the approval gate", asyn
         const result = await super.runPhase(request);
         if (request.prompt.includes("Phase: plan") && corruptNextPlan) {
           corruptNextPlan = false;
-          const planFile = path.join(request.repoRoot, planPath);
+          const planFile = path.join(
+            request.repoRoot,
+            await fixtureRole(request.repoRoot, "plan")
+          );
           const contents = await readFile(planFile, "utf8");
           await writeFile(
             planFile,
@@ -1871,7 +1784,10 @@ test("plan approval refuses a bundle whose task grammar broke after the gate", a
       request: "Implement it."
     });
     assert.equal(planned.status, "needs_plan_approval");
-    const planFile = path.join(repository.root, planPath);
+    const planFile = path.join(
+      repository.root,
+      await fixtureRole(repository.root, "plan")
+    );
     const contents = await readFile(planFile, "utf8");
     await writeFile(
       planFile,
@@ -1909,7 +1825,10 @@ test("an approved plan with malformed headings retries into planning, never an e
     // Emulate a bundle that was approved malformed — the pre-guard state this
     // repair path exists for: corrupt the heading and re-bind the recorded
     // approval digest to the corrupted bytes.
-    const planFile = path.join(repository.root, planPath);
+    const planFile = path.join(
+      repository.root,
+      await fixtureRole(repository.root, "plan")
+    );
     const contents = await readFile(planFile, "utf8");
     await writeFile(
       planFile,
@@ -1971,7 +1890,7 @@ test("an accepted-finding fix refreshes the canonical ledger in one attempt", as
           await writeFile(
             path.join(
               request.repoRoot,
-              "documentation/features/example/implementation-report.md"
+              await fixtureRole(request.repoRoot, "implementationReport")
             ),
             `# Implementation Report\n\n${renderPlanTaskCompletionProjection(applied.result.taskCompletion)}\n`,
             "utf8"
@@ -1982,6 +1901,7 @@ test("an accepted-finding fix refreshes the canonical ledger in one attempt", as
     }
     const adapters = new RefreshingAdapters();
     adapters.reviewResults.push({
+      schemaVersion: 2,
       contractVersion: CONTRACT_VERSION,
       verdict: "changes_requested",
       summary: "Stale completion evidence.",
@@ -2036,7 +1956,7 @@ test("a rejected fix ledger refresh is repairable by rerunning the fix", async (
             await writeFile(
               path.join(
                 request.repoRoot,
-                "documentation/features/example/implementation-report.md"
+                await fixtureRole(request.repoRoot, "implementationReport")
               ),
               `# Implementation Report\n\n${renderPlanTaskCompletionProjection(applied.result.taskCompletion)}\n`,
               "utf8"
@@ -2048,6 +1968,7 @@ test("a rejected fix ledger refresh is repairable by rerunning the fix", async (
     }
     const adapters = new SecondTryRefreshAdapters();
     adapters.reviewResults.push({
+      schemaVersion: 2,
       contractVersion: CONTRACT_VERSION,
       verdict: "changes_requested",
       summary: "Stale completion evidence.",
@@ -2117,7 +2038,10 @@ test("an externally mutated approved bundle restores from the snapshot and retri
     const approved = await runner.approvePlan("human", false);
     assert.equal(approved.status, "plan_approved");
 
-    const planFile = path.join(repository.root, planPath);
+    const planFile = path.join(
+      repository.root,
+      await fixtureRole(repository.root, "plan")
+    );
     const approvedBytes = await readFile(planFile, "utf8");
     await writeFile(
       planFile,
@@ -2137,7 +2061,7 @@ test("an externally mutated approved bundle restores from the snapshot and retri
     const eligibility = await runner.restoreEligibility();
     assert.equal(eligibility.eligible, true, eligibility.reason);
     const restored = await runner.restoreApproval();
-    assert.ok(restored.includes(planPath));
+    assert.ok(restored.includes(await fixtureRole(repository.root, "plan")));
     assert.equal(await readFile(planFile, "utf8"), approvedBytes);
 
     const done = await runner.retry();
@@ -2152,6 +2076,7 @@ test("a fix-checks approval failure restores and retries from the fixing block",
   try {
     const adapters = new FakeAdapters();
     adapters.reviewResults.push({
+      schemaVersion: 2,
       contractVersion: CONTRACT_VERSION,
       verdict: "changes_requested",
       summary: "One finding.",
@@ -2176,7 +2101,10 @@ test("a fix-checks approval failure restores and retries from the fixing block",
     );
     assert.equal(fixing.status, "fixing");
 
-    const planFile = path.join(repository.root, planPath);
+    const planFile = path.join(
+      repository.root,
+      await fixtureRole(repository.root, "plan")
+    );
     const approvedBytes = await readFile(planFile, "utf8");
     await writeFile(
       planFile,
@@ -2254,10 +2182,11 @@ test("a Codex reviewer gets its artifact rendered by the runner", async () => {
 
     const artifact = path.join(
       repository.root,
-      "documentation/features/codex-review/review-1.md"
+      await fixtureRole(repository.root, "reviewDirectory"),
+      "review-1.md"
     );
     const rendered = await readFile(artifact, "utf8");
-    assert.match(rendered, /banzai-feature-review\/v3/);
+    assert.match(rendered, /banzai-feature-review\/v4/);
     assert.match(rendered, /pass/);
   } finally {
     await repository.dispose();
@@ -2344,8 +2273,6 @@ test("workflow reports preflight and model phase progress", async () => {
 });
 
 for (const [artifactLayout, writeChangeReport] of [
-  ["legacy", false],
-  ["legacy", true],
   ["private", false],
   ["private", true]
 ] as const)
@@ -2364,8 +2291,7 @@ for (const [artifactLayout, writeChangeReport] of [
                 "utf8"
               )
             ) as RunState;
-            const report =
-              state.artifactBinding?.binding.artifacts.changeReport;
+            const report = state.artifactBinding.binding.artifacts.changeReport;
             assert.ok(report);
             await mkdir(path.dirname(path.join(request.repoRoot, report)), {
               recursive: true
@@ -2381,6 +2307,7 @@ for (const [artifactLayout, writeChangeReport] of [
       const adapters = new ReportAdapters();
       adapters.reviewResults.push(
         {
+          schemaVersion: 2,
           contractVersion: CONTRACT_VERSION,
           verdict: "changes_requested",
           summary: "Two findings.",
@@ -2412,7 +2339,7 @@ for (const [artifactLayout, writeChangeReport] of [
       assert.equal(reviewed.reviewIteration, 1);
       assert.equal(
         reviewed.latestReview?.artifactPath,
-        `${reviewed.artifactBinding?.binding.artifacts.reviewDirectory}/review-1.md`
+        `${reviewed.artifactBinding.binding.artifacts.reviewDirectory}/review-1.md`
       );
 
       const done = await runner.triage({
@@ -2427,7 +2354,7 @@ for (const [artifactLayout, writeChangeReport] of [
       assert.equal(done.reviewIteration, 2);
       assert.equal(
         done.latestReview?.artifactPath,
-        `${done.artifactBinding?.binding.artifacts.reviewDirectory}/review-2.md`
+        `${done.artifactBinding.binding.artifacts.reviewDirectory}/review-2.md`
       );
       assert.equal(done.metrics.attempts.plan, 1);
       assert.equal(done.metrics.attempts.implementation, 1);
@@ -2470,8 +2397,8 @@ for (const [artifactLayout, writeChangeReport] of [
       assert.match(implementationPrompt, /"id": "custom"/);
       assert.ok(fixPrompt?.includes("R1-F1"));
       assert.ok(fixPrompt);
-      const roles = done.artifactBinding?.binding.artifacts;
-      assert.ok(roles?.changeReport);
+      const roles = done.artifactBinding.binding.artifacts;
+      assert.ok(roles.changeReport);
       const grants = (prompt: string) =>
         JSON.parse(
           /Artifact writes allowed in this phase: (\[[^\n]*\])\./u.exec(
@@ -2588,7 +2515,7 @@ for (const [artifactLayout, writeChangeReport] of [
       const firstReviewArtifact = await readFile(
         path.join(
           repository.root,
-          `${reviewed.artifactBinding?.binding.artifacts.reviewDirectory}/review-1.md`
+          `${reviewed.artifactBinding.binding.artifacts.reviewDirectory}/review-1.md`
         ),
         "utf8"
       );
@@ -2604,7 +2531,7 @@ for (const [artifactLayout, writeChangeReport] of [
       const secondReviewArtifact = await readFile(
         path.join(
           repository.root,
-          `${done.artifactBinding?.binding.artifacts.reviewDirectory}/review-2.md`
+          `${done.artifactBinding.binding.artifacts.reviewDirectory}/review-2.md`
         ),
         "utf8"
       );
@@ -2650,6 +2577,7 @@ test("zero-accepted triage closes without fixer, verification, or re-review", as
         adapters.reviewSessionIds.push(null);
       }
       adapters.reviewResults.push({
+        schemaVersion: 2,
         contractVersion: CONTRACT_VERSION,
         verdict: "changes_requested",
         summary: "Two findings need human triage.",
@@ -2727,6 +2655,7 @@ test("review policy chooses delta continuity and every fresh rotation trigger", 
   try {
     const adapters = new FakeAdapters();
     adapters.reviewResults.push({
+      schemaVersion: 2,
       contractVersion: CONTRACT_VERSION,
       verdict: "changes_requested",
       summary: "One finding.",
@@ -2824,7 +2753,6 @@ test("review policy chooses delta continuity and every fresh rotation trigger", 
     );
 
     for (const reason of [
-      "legacy-state",
       "previous-review-failed",
       "previous-review-interrupted",
       "accepted-high-risk-finding",
@@ -2878,6 +2806,7 @@ test("accepted security findings rotate the reviewer before re-review", async ()
     const adapters = new FakeAdapters();
     adapters.reviewResults.push(
       {
+        schemaVersion: 2,
         contractVersion: CONTRACT_VERSION,
         verdict: "changes_requested",
         summary: "Security finding.",
@@ -2934,6 +2863,7 @@ test("accepted blocker findings rotate the reviewer before re-review", async () 
     const adapters = new FakeAdapters();
     adapters.reviewResults.push(
       {
+        schemaVersion: 2,
         contractVersion: CONTRACT_VERSION,
         verdict: "changes_requested",
         summary: "Blocker finding.",
@@ -2972,6 +2902,7 @@ test("two delta reviews force the following review to start fresh and full", asy
       iteration: number,
       reviewedFindingIds: string[]
     ): ReviewResult => ({
+      schemaVersion: 2,
       contractVersion: CONTRACT_VERSION,
       verdict: "changes_requested",
       summary: `Finding in review ${iteration}.`,
@@ -3032,6 +2963,7 @@ test("a reviewer result without a session id falls back to a fresh full re-revie
     adapters.reviewSessionIds.push(null);
     adapters.reviewResults.push(
       {
+        schemaVersion: 2,
         contractVersion: CONTRACT_VERSION,
         verdict: "changes_requested",
         summary: "One finding.",
@@ -3098,7 +3030,10 @@ test("six approved tasks require six canonical records before verification and s
     });
     assert.equal(approvalGate.status, "needs_plan_approval");
     const approvalDigest = (
-      await digestArtifactBundle(repository.root, [descriptionPath, planPath])
+      await digestArtifactBundle(repository.root, [
+        await fixtureRole(repository.root, "description"),
+        await fixtureRole(repository.root, "plan")
+      ])
     ).digest;
 
     const done = await runner.approvePlan("human");
@@ -3420,7 +3355,7 @@ test("a reviewer pass cannot reach done after completion evidence becomes invali
   }
 });
 
-test("legacy terminal status keeps lifecycle and next action while completion stays unknown", async () => {
+test("terminal status without canonical completion evidence remains unknown", async () => {
   const repository = await createTestRepository();
   try {
     const adapters = new FakeAdapters();
@@ -3429,13 +3364,10 @@ test("legacy terminal status keeps lifecycle and next action while completion st
     const legacy = await runner.approvePlan("human", false);
     legacy.status = "done";
     delete legacy.planTaskCompletion;
-    await mkdir(path.join(repository.root, "documentation/features/example"), {
-      recursive: true
-    });
     await writeFile(
       path.join(
         repository.root,
-        "documentation/features/example/implementation-report.md"
+        await fixtureRole(repository.root, "implementationReport")
       ),
       "# Legacy report\n\nNo task table.\n",
       "utf8"
@@ -3445,11 +3377,11 @@ test("legacy terminal status keeps lifecycle and next action while completion st
     const status = await runner.status();
     assert.equal(status.state.status, "done");
     assert.equal(status.nextAction, null);
-    assert.equal(status.taskCompletion.state, "legacy");
+    assert.equal(status.taskCompletion.state, "unknown");
     assert.equal(status.taskCompletion.completed, null);
     assert.match(
       status.taskCompletion.diagnostics[0]?.message ?? "",
-      /missing ## Plan Task Completion/
+      /has not persisted canonical task-completion evidence/
     );
   } finally {
     await repository.dispose();
@@ -3462,6 +3394,7 @@ test("a blocked review verdict rotates before an explicit retry", async () => {
     const adapters = new FakeAdapters();
     adapters.reviewResults.push(
       {
+        schemaVersion: 2,
         contractVersion: CONTRACT_VERSION,
         verdict: "blocked",
         summary: "Required evidence is unavailable.",
@@ -3499,7 +3432,7 @@ test("approval digest drift blocks implementation before another model call", as
     await runner.start({ slug: "example", request: "Plan it." });
     await runner.approvePlan("human", false);
     await writeFile(
-      path.join(repository.root, planPath),
+      path.join(repository.root, await fixtureRole(repository.root, "plan")),
       "# Plan\n\nChanged after approval.\n",
       "utf8"
     );
@@ -3529,7 +3462,10 @@ for (const editGuidance of [false, true]) {
       adapters.reviewResults.push(passingReview());
       const runner = new WorkflowRunner(repository.root, adapters);
       await runner.start({ slug: "example", request: "Plan it." });
-      const target = path.join(repository.root, planPath);
+      const target = path.join(
+        repository.root,
+        await fixtureRole(repository.root, "plan")
+      );
       await writeFile(target, plan);
       const approved = await runner.approvePlan("human", false);
       assert.ok(approved.planApproval);
@@ -3538,7 +3474,10 @@ for (const editGuidance of [false, true]) {
       assert.equal(snapshot.digest, approved.planApproval.digest);
       assert.equal(
         snapshot.entries
-          .find((entry) => entry.path === planPath)
+          .find(
+            (entry) =>
+              entry.path === approved.artifactBinding.binding.artifacts.plan
+          )
           ?.contents.toString("utf8"),
         plan
       );
@@ -3561,7 +3500,7 @@ for (const editGuidance of [false, true]) {
         const report = await readFile(
           path.join(
             repository.root,
-            "documentation/features/example/implementation-report.md"
+            await fixtureRole(repository.root, "implementationReport")
           ),
           "utf8"
         );
@@ -3857,9 +3796,25 @@ test("resume reconciles a completed mutable attempt without repeating it", async
     approved.activeAttempt = attempt;
     await runner.store.writeState(approved);
     const completedResult = phaseResult("implementation");
+    completedResult.artifacts.description = await fixtureRole(
+      repository.root,
+      "description"
+    );
+    completedResult.artifacts.plan = await fixtureRole(repository.root, "plan");
+    completedResult.artifacts.implementationReport = await fixtureRole(
+      repository.root,
+      "implementationReport"
+    );
+    completedResult.artifacts.testReport = await fixtureRole(
+      repository.root,
+      "testReport"
+    );
     await writeImplementationArtifacts(repository.root, completedResult);
     const record: AttemptRecord = {
-      schemaVersion: 1,
+      interruptedAt: null,
+      recoveryOf: null,
+      recoveryAuthorizationId: null,
+      schemaVersion: 2,
       attempt,
       status: "completed",
       startedAt: "2026-01-01T00:00:00.000Z",
@@ -3882,7 +3837,7 @@ test("resume reconciles a completed mutable attempt without repeating it", async
   }
 });
 
-for (const artifactLayout of ["legacy", "private"] as const)
+for (const artifactLayout of ["private"] as const)
   test(`resume promotes a durable terminal checkpoint after parent interruption without another model call (${artifactLayout})`, async () => {
     const repository = await createTestRepository({ artifactLayout });
     try {
@@ -4010,6 +3965,7 @@ test("resume rejects a fix checkpoint whose refreshed ledger contradicts the rep
   try {
     const adapters = new FakeAdapters();
     adapters.reviewResults.push({
+      schemaVersion: 2,
       contractVersion: CONTRACT_VERSION,
       verdict: "changes_requested",
       summary: "One finding.",
@@ -4097,7 +4053,7 @@ test("resume does not complete a review checkpoint before candidate validation",
 });
 
 test("resume reconciles completed delta review policy without another model call", async () => {
-  const fixture = await completedReviewReconciliationFixture(false);
+  const fixture = await completedReviewReconciliationFixture();
   try {
     const promptsBeforeResume = fixture.adapters.reviewPrompts.length;
     const done = await fixture.runner.resume();
@@ -4122,7 +4078,7 @@ test("resume reconciles completed delta review policy without another model call
 });
 
 test("resume completes a captured started review only from persisted passed candidate evidence", async () => {
-  const fixture = await completedReviewReconciliationFixture(false);
+  const fixture = await completedReviewReconciliationFixture();
   try {
     const state = await fixture.runner.store.requireActiveState();
     const attempt = state.activeAttempt;
@@ -4132,7 +4088,7 @@ test("resume completes a captured started review only from persisted passed cand
       state.runId,
       attempt
     );
-    const artifactPath = `documentation/features/${state.slug}/review-${state.reviewIteration}.md`;
+    const artifactPath = `${state.artifactBinding.binding.artifacts.reviewDirectory}/review-${state.reviewIteration}.md`;
     const canonicalAbsolute = path.join(fixture.repository.root, artifactPath);
     const contents = await readFile(canonicalAbsolute, "utf8");
     const candidateAbsolute = fixture.runner.store.reviewCandidatePath(
@@ -4145,7 +4101,7 @@ test("resume completes a captured started review only from persisted passed cand
     record.status = "started";
     record.completedAt = null;
     record.reviewCandidate = {
-      source: "reviewer-write",
+      source: "runner-rendered",
       evidencePath: path.relative(
         fixture.runner.store.runDirectory(state.runId),
         candidateAbsolute
@@ -4180,7 +4136,7 @@ test("resume completes a captured started review only from persisted passed cand
 });
 
 test("resume rejects malformed candidate identity without applying completed review output", async () => {
-  const fixture = await completedReviewReconciliationFixture(false);
+  const fixture = await completedReviewReconciliationFixture();
   try {
     const state = await fixture.runner.store.requireActiveState();
     const attempt = state.activeAttempt;
@@ -4190,7 +4146,7 @@ test("resume rejects malformed candidate identity without applying completed rev
       attempt
     );
     record.reviewCandidate = {
-      source: "reviewer-write",
+      source: "runner-rendered",
       evidencePath: "reviews/review-2.json",
       intendedArtifactPath: "documentation/features/example/review-2.md",
       sha256: "a".repeat(64),
@@ -4204,33 +4160,11 @@ test("resume rejects malformed candidate identity without applying completed rev
     const blocked = await fixture.runner.resume();
     assert.equal(blocked.status, "blocked");
     assert.equal(blocked.latestReview?.iteration, 1);
-    assert.equal(blocked.pendingReviewRotationReason, "unreliable-review");
+    assert.equal(blocked.pendingReviewRotationReason, "previous-review-failed");
     assert.match(
       blocked.blockReason ?? "",
       /malformed candidate evidence identity/
     );
-  } finally {
-    await fixture.repository.dispose();
-  }
-});
-
-test("completed legacy review attempt reconciles with fresh full fallback", async () => {
-  const fixture = await completedReviewReconciliationFixture(true);
-  try {
-    const promptsBeforeResume = fixture.adapters.reviewPrompts.length;
-    const done = await fixture.runner.resume();
-
-    assert.equal(done.status, "done", done.blockReason ?? "");
-    assert.equal(fixture.adapters.reviewPrompts.length, promptsBeforeResume);
-    const latestReview = done.latestReview;
-    const reviewer = done.sessions.reviewer;
-    assert.ok(latestReview);
-    assert.ok(reviewer);
-    assert.equal(latestReview.sessionMode, "fresh");
-    assert.equal(latestReview.mode, "full");
-    assert.equal(latestReview.rotationReason, "legacy-state");
-    assert.equal(reviewer.consecutiveDeltaReviews, 0);
-    assert.equal(reviewer.lastFullIteration, 2);
   } finally {
     await fixture.repository.dispose();
   }
@@ -4319,7 +4253,11 @@ test("planning retry resumes the early saved session and preserves failed eviden
     );
     assert.equal(source.sessionId, "planner-session");
     assert.ok(source.planningContext?.workspaceDigest);
-    assert.ok(source.planningContext.artifactPaths.includes(planPath));
+    assert.ok(
+      source.planningContext.artifactPaths.includes(
+        await fixtureRole(repository.root, "plan")
+      )
+    );
     assert.deepEqual(blocked.metrics.usage, adapters.planningUsage);
     assert.ok(!blocked.metrics.completedAttemptIds.includes(source.attempt.id));
     assert.ok(source.rawStdoutPath);
@@ -4630,6 +4568,7 @@ async function failedRereviewFixture(error: Error) {
   await useClaudeReviewer(repository.root);
   const adapters = new FakeAdapters();
   adapters.reviewResults.push({
+    schemaVersion: 2,
     contractVersion: CONTRACT_VERSION,
     verdict: "changes_requested",
     summary: "One finding.",
@@ -4743,6 +4682,7 @@ test("a changed invocation scope rotates the reviewer before any process starts"
     await useClaudeReviewer(repository.root);
     const adapters = new FakeAdapters();
     adapters.reviewResults.push({
+      schemaVersion: 2,
       contractVersion: CONTRACT_VERSION,
       verdict: "changes_requested",
       summary: "One finding.",
@@ -4865,17 +4805,18 @@ test("both reviewers publish one runner artifact with one primary context invoca
       const policyState = structuredClone(done);
       policyState.status = "needs_triage";
       assert.ok(policyState.sessions.reviewer);
+      const reviewerSettings = {
+        ...policyState.sessions.reviewer,
+        timeoutMs: 1000
+      };
       for (const outputContract of [undefined, "review-result/v1"] as const) {
         if (outputContract === undefined)
           delete policyState.sessions.reviewer.outputContract;
-        else policyState.sessions.reviewer.outputContract = outputContract;
-        const policy = reviewExecutionPolicy(policyState, {
-          ...policyState.sessions.reviewer,
-          timeoutMs: 1000
-        });
-        assert.equal(policy.rotationReason, "output-contract-not-reusable");
-        assert.equal(policy.reviewMode, "full");
-        assert.equal(policy.resumeSessionId, null);
+        else Object.assign(policyState.sessions.reviewer, { outputContract });
+        assert.throws(
+          () => reviewExecutionPolicy(policyState, reviewerSettings),
+          { code: "RESOURCE_VERSION_UNSUPPORTED" }
+        );
       }
     } finally {
       await repository.dispose();
@@ -4964,7 +4905,8 @@ test("review rendering failures retain primary evidence and make zero formatting
           readFile(
             path.join(
               repository.root,
-              "documentation/features/example/review-1.md"
+              await fixtureRole(repository.root, "reviewDirectory"),
+              "review-1.md"
             )
           ),
           /ENOENT/
@@ -4997,7 +4939,7 @@ test("retry reruns a failed review in a fresh attempt", async () => {
     assert.equal(done.latestReview?.iteration, 1);
     assert.equal(
       done.latestReview.artifactPath,
-      "documentation/features/example/review-1.md"
+      `${done.artifactBinding.binding.artifacts.reviewDirectory}/review-1.md`
     );
     assert.equal(done.metrics.attempts.review, 2);
     assert.equal(adapters.reviewPrompts.length, 2);
@@ -5014,6 +4956,7 @@ test("invalid review candidate retains diagnostic evidence and retry publishes w
     const adapters = new FakeAdapters();
     adapters.reviewResults.push(
       {
+        schemaVersion: 2,
         contractVersion: CONTRACT_VERSION,
         verdict: "changes_requested",
         summary: "One finding.",
@@ -5081,7 +5024,7 @@ test("invalid review candidate retains diagnostic evidence and retry publishes w
     assert.deepEqual(failedRecord.reviewCandidate, {
       source: "runner-rendered",
       evidencePath: `attempts/${failedAttempt.id}.review-candidate.md`,
-      intendedArtifactPath: "documentation/features/example/review-2.md",
+      intendedArtifactPath: `${blocked.artifactBinding.binding.artifacts.reviewDirectory}/review-2.md`,
       sha256: failedRecord.reviewCandidate.sha256,
       validation: "failed",
       validationCode: "INVALID_REVIEW_ARTIFACT",
@@ -5116,15 +5059,18 @@ test("invalid review candidate retains diagnostic evidence and retry publishes w
       ).mode & 0o777,
       0o600
     );
-    assert.doesNotMatch(
-      failedCandidate,
-      /"documentation\/features\/example\/description\.md"/
+    assert.equal(
+      failedCandidate.includes(
+        JSON.stringify(blocked.artifactBinding.binding.artifacts.description)
+      ),
+      false
     );
     await assert.rejects(
       readFile(
         path.join(
           repository.root,
-          "documentation/features/example/review-2.md"
+          await fixtureRole(repository.root, "reviewDirectory"),
+          "review-2.md"
         ),
         "utf8"
       ),
@@ -5159,9 +5105,10 @@ test("invalid review candidate retains diagnostic evidence and retry publishes w
       path.join(repository.root, retryArtifactPath),
       "utf8"
     );
-    assert.match(
-      canonicalRetry,
-      /"documentation\/features\/example\/description\.md"/
+    assert.ok(
+      canonicalRetry.includes(
+        JSON.stringify(done.artifactBinding.binding.artifacts.description)
+      )
     );
     const attemptFiles = (
       await readdir(path.join(runDirectory, "attempts"))
@@ -5464,14 +5411,13 @@ test("explicit recovery preserves the interrupted attempt and creates one linked
       sourceAttempt
     );
     sourceRecord.status = "started";
-    sourceRecord.schemaVersion = 1;
     sourceRecord.completedAt = null;
     sourceRecord.durationMs = null;
     sourceRecord.error = null;
     sourceRecord.failureCode = null;
-    delete sourceRecord.interruptedAt;
-    delete sourceRecord.recoveryOf;
-    delete sourceRecord.recoveryAuthorizationId;
+    sourceRecord.interruptedAt = null;
+    sourceRecord.recoveryOf = null;
+    sourceRecord.recoveryAuthorizationId = null;
     await runner.store.writeRunAttempt(blocked.runId, sourceRecord);
 
     const status = await runner.status();
@@ -5878,6 +5824,7 @@ async function prerequisiteBlockedFixFixture(
   const accepted = ["R1-F2", "R1-F3", "R1-F5", "R1-F6"];
   adapters.reviewResults.push(
     {
+      schemaVersion: 2,
       contractVersion: CONTRACT_VERSION,
       verdict: "changes_requested",
       summary: "Migration and link-delivery fixes are required.",
@@ -6399,6 +6346,7 @@ test("fix recovery retains accepted-finding scope and never creates a second tas
     adapters.fixErrors.push(new Error("fix interrupted"));
     adapters.reviewResults.push(
       {
+        schemaVersion: 2,
         contractVersion: CONTRACT_VERSION,
         verdict: "changes_requested",
         summary: "One accepted fix is required.",
@@ -6636,7 +6584,16 @@ test("another active run is rejected even after the checkout is cleaned", async 
     const firstAdapters = new FakeAdapters();
     const first = new WorkflowRunner(repository.root, firstAdapters);
     await first.start({ slug: "example", request: "First run." });
-    await commitAll(repository.root, "planning artifacts");
+    const tree = spawnSync("git", ["status", "--porcelain"], {
+      cwd: repository.root,
+      encoding: "utf8"
+    });
+    assert.equal(tree.status, 0, tree.stderr);
+    assert.equal(
+      tree.stdout,
+      "",
+      "private planning artifacts keep the checkout clean"
+    );
 
     const secondAdapters = new FakeAdapters();
     const second = new WorkflowRunner(repository.root, secondAdapters);
@@ -6694,6 +6651,7 @@ test("verification executes profiles in declared order and stops on failure", as
       };
     };
     const command = (name: string) => ({
+      id: name,
       name,
       command: process.execPath,
       args: ["-e", name],
@@ -6753,64 +6711,30 @@ test("verification executes profiles in declared order and stops on failure", as
   }
 });
 
-test("legacy schema verification commands remain executable in order", async () => {
+test("unsupported configuration stops workflow before model or verification execution", async () => {
   const repository = await createTestRepository();
   try {
-    const configPath = path.join(repository.root, ".banzai", "config.json");
+    const configPath = path.join(repository.root, ".banzai/config.json");
     const config = JSON.parse(await readFile(configPath, "utf8")) as Record<
       string,
       unknown
     >;
     config.schemaVersion = 1;
-    config.verification = [
-      {
-        name: "legacy-first",
-        command: process.execPath,
-        args: ["-e", "legacy-first"],
-        timeoutMs: 1_000
-      },
-      {
-        name: "legacy-second",
-        command: process.execPath,
-        args: ["-e", "legacy-second"],
-        timeoutMs: 1_000
-      }
-    ];
-    await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
-    await commitAll(repository.root, "legacy verification config");
-
-    const observed: string[] = [];
-    const processRunner: ProcessRunner = async (spec) => {
-      observed.push(spec.args[1] ?? "");
-      return {
-        exitCode: 0,
-        signal: null,
-        stdout: "",
-        stderr: "",
-        startedAt: "2026-01-01T00:00:00.000Z",
-        completedAt: "2026-01-01T00:00:01.000Z"
-      };
-    };
+    await writeFile(configPath, JSON.stringify(config));
+    const before = await snapshotTree(repository.root);
     const adapters = new FakeAdapters();
-    adapters.selectionResults.push(
-      selectionResult({
-        recommendedWorkflow: "feature",
-        reason: "Exercise legacy verification compatibility."
-      })
-    );
-    const runner = new WorkflowRunner(repository.root, adapters, processRunner);
-
-    const done = await runner.start({
-      slug: "legacy-verification",
-      request: "Exercise legacy verification."
+    let executions = 0;
+    const runner = new WorkflowRunner(repository.root, adapters, async () => {
+      executions += 1;
+      throw new Error("unexpected command");
     });
-
-    assert.equal(done.status, "done", done.blockReason ?? "");
-    assert.deepEqual(observed, ["legacy-first", "legacy-second"]);
-    assert.deepEqual(
-      done.verification.map((result) => result.name),
-      ["legacy-first", "legacy-second"]
+    await assert.rejects(
+      runner.start({ slug: "unsupported", request: "Refuse this config." }),
+      { code: "RESOURCE_VERSION_UNSUPPORTED" }
     );
+    assert.equal(executions, 0);
+    assert.equal(adapters.phasePrompts.length, 0);
+    assert.deepEqual(await snapshotTree(repository.root), before);
   } finally {
     await repository.dispose();
   }
@@ -6855,7 +6779,7 @@ test("resume reconciles a durable completed verification leaf without executing 
           "utf8"
         )
       ),
-      { schemaVersion: 1 }
+      { schemaVersion: 2 }
     );
     const statePath = path.join(runDirectory, "state.json");
     const persisted = JSON.parse(await readFile(statePath, "utf8")) as Record<
@@ -6887,7 +6811,7 @@ test("resume reconciles a durable completed verification leaf without executing 
   }
 });
 
-test("resume preserves legacy verification behavior when the ledger marker is absent", async () => {
+test("first verification creates the current ledger when its empty marker is absent", async () => {
   const repository = await createTestRepository();
   try {
     const adapters = new FakeAdapters();
@@ -6911,8 +6835,8 @@ test("resume preserves legacy verification behavior when the ledger marker is ab
       adapters,
       processRunner
     ).start({
-      slug: "legacy-verification-resume",
-      request: "Exercise legacy verification resume compatibility."
+      slug: "verification-marker-resume",
+      request: "Exercise initial verification marker creation."
     });
     assert.equal(done.status, "done", done.blockReason ?? "");
     const runDirectory = path.join(
@@ -6946,14 +6870,16 @@ test("resume preserves legacy verification behavior when the ledger marker is ab
     ).resume();
     assert.equal(resumed.status, "done");
     assert.equal(executions, 1);
-    assert.equal(resumed.metrics.attempts.verification, 2);
+    assert.equal(resumed.metrics.attempts.verification, 1);
     assert.equal(resumed.verification.length, 1);
-    await assert.rejects(
-      readFile(
-        path.join(runDirectory, "verification-attempts", "ledger.json"),
-        "utf8"
+    assert.deepEqual(
+      JSON.parse(
+        await readFile(
+          path.join(runDirectory, "verification-attempts", "ledger.json"),
+          "utf8"
+        )
       ),
-      { code: "ENOENT" }
+      { schemaVersion: 2 }
     );
   } finally {
     await repository.dispose();
@@ -7083,6 +7009,14 @@ test("resume closes an interrupted durable verification leaf and links one resta
       `${JSON.stringify(started, null, 2)}\n`,
       "utf8"
     );
+    // The finish receipt cannot exist at this simulated interruption boundary.
+    await rm(
+      path.join(
+        runDirectory,
+        "verification/origins",
+        `${original.id}.finish.json`
+      )
+    );
     const statePath = path.join(runDirectory, "state.json");
     const persisted = JSON.parse(await readFile(statePath, "utf8")) as Record<
       string,
@@ -7103,7 +7037,7 @@ test("resume closes an interrupted durable verification leaf and links one resta
       adapters,
       processRunner
     ).resume();
-    assert.equal(resumed.status, "done");
+    assert.equal(resumed.status, "done", resumed.blockReason ?? "");
     assert.equal(executions, 1);
     const files = (await readdir(attemptsDirectory))
       .filter((name) => name !== "ledger.json")
@@ -7257,6 +7191,7 @@ test("human time: runner records plan and triage boundaries before continuation 
   try {
     const adapters = new FakeAdapters();
     adapters.reviewResults.push({
+      schemaVersion: 2,
       contractVersion: CONTRACT_VERSION,
       verdict: "changes_requested",
       summary: "PRIVATE_REVIEW",
@@ -7654,7 +7589,7 @@ test("cancellation: late verification registration leaves interrupted evidence a
 });
 
 const LAYOUT_DIAGNOSTIC =
-  "legacy Banzai layout: run `project-manifest` to migrate";
+  "Partial Banzai instruction layout: AGENTS.md lacks required Policies.";
 
 class LayoutStopAdapters extends FakeAdapters {
   stopPhase: PhaseResult["phase"] | null = null;
@@ -7667,8 +7602,10 @@ class LayoutStopAdapters extends FakeAdapters {
     ) {
       this.phasePrompts.push(request.prompt);
       this.phaseResumeSessionIds.push(request.resumeSessionId);
-      const reportPath =
-        "documentation/features/example/implementation-report.md";
+      const reportPath = await fixtureRole(
+        request.repoRoot,
+        "implementationReport"
+      );
       const strictImplementation =
         this.stopPhase === "implementation" &&
         !request.prompt.includes("Selected workflow:");
@@ -7688,7 +7625,7 @@ class LayoutStopAdapters extends FakeAdapters {
           gate: "escalation",
           summary: LAYOUT_DIAGNOSTIC,
           questions: [
-            "Run project-manifest, approve the migration diff, then answer to replan."
+            "Run project-manifest, approve the repair diff, then answer to replan."
           ],
           artifacts: {
             description: null,
@@ -7708,7 +7645,8 @@ class LayoutStopAdapters extends FakeAdapters {
                     gap: {
                       reportPath,
                       section: "Layout stop",
-                      detail: "Migration is required before implementation."
+                      detail:
+                        "Instruction repair is required before implementation."
                     }
                   }
                 ]
@@ -7723,7 +7661,11 @@ class LayoutStopAdapters extends FakeAdapters {
 }
 
 function layoutBlockedReview(): ReviewResult {
-  return { ...passingReview(), verdict: "blocked", summary: LAYOUT_DIAGNOSTIC };
+  return {
+    ...passingReview(),
+    verdict: "blocked",
+    summary: LAYOUT_DIAGNOSTIC
+  };
 }
 
 async function layoutProjectBytes(root: string) {
@@ -7734,24 +7676,9 @@ async function layoutProjectBytes(root: string) {
   };
 }
 
-async function installLayoutFixture(
-  root: string,
-  fixture: string,
-  side: "before" | "after"
-): Promise<void> {
-  for (const name of ["AGENTS.md", "CLAUDE.md"]) {
-    const contents = await readFile(
-      path.join(
-        process.cwd(),
-        "test/fixtures/instruction-layouts",
-        fixture,
-        side,
-        name
-      ),
-      "utf8"
-    );
-    await writeFile(path.join(root, name), contents, "utf8");
-  }
+async function installAdoptedLayout(root: string): Promise<void> {
+  await writeFile(path.join(root, "AGENTS.md"), ADOPTED_AGENTS);
+  await writeFile(path.join(root, "CLAUDE.md"), "@AGENTS.md\n");
 }
 
 for (const stopPoint of [
@@ -7767,11 +7694,7 @@ for (const stopPoint of [
     try {
       // The runtime starts from adopted files. The fake then reports a
       // skill-level stop observed after preflight; it still grants no repair authority.
-      await installLayoutFixture(
-        repository.root,
-        "approved-migration",
-        "after"
-      );
+      await installAdoptedLayout(repository.root);
       await commitAll(repository.root, "adopted instruction fixture");
       const adapters = new LayoutStopAdapters();
       const runner = new WorkflowRunner(repository.root, adapters);
@@ -7881,11 +7804,7 @@ for (const stopPoint of [
         assert.deepEqual(repeated.planApproval, approval);
         assert.deepEqual(repeated.triage, triage);
         assert.deepEqual(await layoutProjectBytes(repository.root), before);
-        await installLayoutFixture(
-          repository.root,
-          "approved-migration",
-          "after"
-        );
+        await installAdoptedLayout(repository.root);
         adapters.reviewResults.push(passingReview());
         const done = await runner.retry();
         assert.equal(done.status, "done", done.blockReason ?? "");
@@ -7911,19 +7830,15 @@ for (const stopPoint of [
           stopPoint === "lite" ? "selecting" : "planning"
         );
         assert.deepEqual(await layoutProjectBytes(repository.root), before);
-        // An answer is not a migration: the next affected phase stops again.
+        // An answer is not a repair: the next affected phase stops again.
         adapters.stopPhase = "plan";
         const repeated = await runner.resume();
         assert.equal(repeated.pendingHumanDecision?.summary, LAYOUT_DIAGNOSTIC);
         assert.deepEqual(await layoutProjectBytes(repository.root), before);
-        await installLayoutFixture(
-          repository.root,
-          "approved-migration",
-          "after"
-        );
+        await installAdoptedLayout(repository.root);
         adapters.stopPhase = null;
         const replanned = await runner.answerHumanDecision({
-          answers: ["The explicit fixture migration is complete; replan."],
+          answers: ["The explicit fixture repair is complete; replan."],
           decidedBy: "human"
         });
         assert.equal(replanned.status, "needs_plan_approval");
@@ -7935,10 +7850,10 @@ for (const stopPoint of [
   });
 }
 
-test("layout stop after authorized recovery grants no migration authority", async () => {
+test("layout stop after authorized recovery grants no repair authority", async () => {
   const repository = await createTestRepository();
   try {
-    await installLayoutFixture(repository.root, "approved-migration", "after");
+    await installAdoptedLayout(repository.root);
     await commitAll(repository.root, "adopted instruction fixture");
     const adapters = new LayoutStopAdapters();
     adapters.implementationErrors.push(
@@ -7981,7 +7896,7 @@ test("layout stop after authorized recovery grants no migration authority", asyn
   }
 });
 
-test("layout review stop stays within the closed review-result v1 schema", () => {
+test("layout review stop stays within the closed review-result v2 schema", () => {
   const blocked = layoutBlockedReview();
   assert.equal(reviewResultSchema.additionalProperties, false);
   const acceptedKeys = Object.keys(reviewResultSchema.properties);
@@ -8005,7 +7920,9 @@ for (const gate of ["escalation", "decision_consultation"] as const) {
       const escalation = phaseResult("plan", {
         gate: "escalation",
         summary: LAYOUT_DIAGNOSTIC,
-        questions: ["Run project-manifest to migrate before continuing."]
+        questions: [
+          "Run project-manifest to resolve the partial layout before continuing."
+        ]
       });
       const stop =
         gate === "escalation" ? escalation : decisionConsultationResult();
@@ -8079,7 +7996,7 @@ for (const gate of ["escalation", "decision_consultation"] as const) {
       );
       const restarted = await runner.start({
         slug: "example-again",
-        request: "Try again without migration."
+        request: "Try again with the partial layout unresolved."
       });
       assert.notEqual(restarted.runId, waiting.runId);
       assert.equal(restarted.pendingHumanDecision?.summary, LAYOUT_DIAGNOSTIC);
@@ -8126,11 +8043,12 @@ test("review v2 publication and application interruptions reconcile exactly once
       const adapters = new FakeAdapters();
       adapters.reviewResults.push(passingReview());
       const runner = new WorkflowRunner(repository.root, adapters);
+      await runner.start({ slug: "example", request: "Implement it." });
       const artifact = path.join(
         repository.root,
-        "documentation/features/example/review-1.md"
+        await fixtureRole(repository.root, "reviewDirectory"),
+        "review-1.md"
       );
-      await runner.start({ slug: "example", request: "Implement it." });
       let injected = false;
       const write = runner.store.writeText.bind(runner.store);
       runner.store.writeText = async (id, relative, text) => {
@@ -8269,7 +8187,7 @@ test("review v2 truthful layout blockers publish incomplete coverage without com
         schemaVersion: 2,
         reviewNotes: ["Authority is unavailable."],
         verdict: "blocked",
-        summary: "legacy Banzai layout: run project-manifest to migrate",
+        summary: LAYOUT_DIAGNOSTIC,
         scopeAcknowledgment: {
           schemaVersion: 1,
           snapshotDigest: frozen.digest,
@@ -8290,7 +8208,11 @@ test("review v2 truthful layout blockers publish incomplete coverage without com
     assert.equal(adapters.reviewPrompts.length, 1);
     assert.equal(blocked.triage, null);
     const contents = await readFile(
-      path.join(repository.root, "documentation/features/example/review-1.md"),
+      path.join(
+        repository.root,
+        await fixtureRole(repository.root, "reviewDirectory"),
+        "review-1.md"
+      ),
       "utf8"
     );
     assert.match(contents, /not_reviewed/);
@@ -8347,7 +8269,11 @@ test("review v2 retains schema-valid rejected scope and terminal proof before co
     assert.equal(adapters.reviewPrompts.length, 1);
     await assert.rejects(
       readFile(
-        path.join(repository.root, "documentation/features/example/review-1.md")
+        path.join(
+          repository.root,
+          await fixtureRole(repository.root, "reviewDirectory"),
+          "review-1.md"
+        )
       ),
       /ENOENT/
     );
@@ -8733,7 +8659,7 @@ test("adoption mid-chain drift retains completed selection and the last durable 
     assert.ok(checkpoint.value);
     const after = await snapshotTree(path.join(repository.root, ".banzai"));
     const status = await runner.status();
-    const ownedClaim = `work/${status.state.artifactBinding?.binding.workId}/.writer-claim.json`;
+    const ownedClaim = `work/${status.state.artifactBinding.binding.workId}/.writer-claim.json`;
     assert.ok(checkpoint.value.some((entry) => entry.path === ownedClaim));
     assert.ok(!after.some((entry) => entry.path === ownedClaim));
     // Only this command's runner/work claims are released; durable evidence stays exact.
@@ -8848,9 +8774,11 @@ test("setup eligibility refuses unfinished and corrupt runs while preserving all
         else
           await assert.rejects(operation, {
             code:
-              status === "corrupt" || status === "unsupported"
-                ? "PROJECT_SETUP_STATE_INVALID"
-                : "PROJECT_SETUP_RUN_UNFINISHED"
+              status === "corrupt"
+                ? "RESOURCE_VERSION_UNSUPPORTED"
+                : status === "unsupported"
+                  ? "PROJECT_SETUP_STATE_INVALID"
+                  : "PROJECT_SETUP_RUN_UNFINISHED"
           });
         assert.equal(launched, status === "done" || status === "cancelled");
         assert.deepEqual(
@@ -8964,7 +8892,7 @@ test("adoption first-selection refusal preserves the already-published created c
   }
 });
 
-for (const artifactLayout of ["legacy", "private"] as const) {
+for (const artifactLayout of ["private"] as const) {
   for (const workflow of ["strict", "feature", "quick-fix"] as const) {
     test(`artifact storage A1 ${artifactLayout} selection-to-${workflow} preserves binding and completes`, async () => {
       const repository = await createTestRepository({ artifactLayout });
@@ -8980,9 +8908,9 @@ for (const artifactLayout of ["legacy", "private"] as const) {
                 "utf8"
               )
             ) as RunState;
-            assert.equal(state.schemaVersion, 4);
+            assert.equal(state.schemaVersion, 5);
             assert.equal(state.workflowSelection, null);
-            assert.equal(state.artifactBinding?.binding.mode, "workflow");
+            assert.equal(state.artifactBinding.binding.mode, "workflow");
             originalBinding = await readFile(
               path.join(
                 repository.root,
@@ -9032,7 +8960,7 @@ for (const artifactLayout of ["legacy", "private"] as const) {
               path.join(repository.root, state.latestReview.artifactPath),
               "utf8"
             ),
-            /banzai-feature-review\/v3/u
+            /banzai-feature-review\/v4/u
           );
           assert.equal(state.planTaskCompletion?.status, "valid");
         }
@@ -9043,7 +8971,7 @@ for (const artifactLayout of ["legacy", "private"] as const) {
   }
 }
 
-for (const artifactLayout of ["legacy", "private"] as const) {
+for (const artifactLayout of ["private"] as const) {
   for (const workflow of ["strict", "feature", "quick-fix"] as const)
     test(`artifact storage ${artifactLayout} ${workflow} implementation rejects another workflow's report`, async () => {
       const repository = await createTestRepository({ artifactLayout });
@@ -9060,11 +8988,11 @@ for (const artifactLayout of ["legacy", "private"] as const) {
                 "utf8"
               )
             ) as RunState;
-            const roles = state.artifactBinding?.binding.artifacts;
+            const roles = state.artifactBinding.binding.artifacts;
             const wrongRole =
               workflow === "quick-fix"
-                ? roles?.implementationReport
-                : roles?.changeReport;
+                ? roles.implementationReport
+                : roles.changeReport;
             assert.ok(wrongRole);
             await mkdir(path.dirname(path.join(request.repoRoot, wrongRole)), {
               recursive: true
@@ -9094,7 +9022,7 @@ for (const artifactLayout of ["legacy", "private"] as const) {
     });
 }
 
-for (const artifactLayout of ["legacy", "private"] as const) {
+for (const artifactLayout of ["private"] as const) {
   test(`artifact storage ${artifactLayout} quick-fix without a report trigger completes without a report`, async () => {
     const repository = await createTestRepository({ artifactLayout });
     try {
@@ -9123,7 +9051,7 @@ for (const artifactLayout of ["legacy", "private"] as const) {
         request: "Make a routine internal cleanup with no report trigger."
       });
       assert.equal(state.status, "done", state.blockReason ?? "");
-      const report = state.artifactBinding?.binding.artifacts.changeReport;
+      const report = state.artifactBinding.binding.artifacts.changeReport;
       assert.ok(report);
       await assert.rejects(readFile(path.join(repository.root, report)), {
         code: "ENOENT"
@@ -9163,8 +9091,8 @@ for (const context of [
         request: "Implement the fixture."
       });
       assert.equal(state.status, "done", state.blockReason ?? "");
-      assert.equal(state.artifactBinding?.binding.layout, "private");
-      assert.equal(state.schemaVersion, 4);
+      assert.equal(state.artifactBinding.binding.layout, "private");
+      assert.equal(state.schemaVersion, 5);
       assert.ok(
         (await readFile(runner.store.statePath(state.runId), "utf8")).includes(
           state.runId
@@ -9288,7 +9216,7 @@ test("accepted F2 runner claims exclude standalone writes throughout a phase and
   }
 });
 
-test("accepted F10 public doctor recognizes actual v4 runs and rejects binding drift read-only", async () => {
+test("accepted F10 public doctor recognizes actual v5 runs and rejects binding drift read-only", async () => {
   const repository = await createTestRepository({ artifactLayout: "private" });
   try {
     const runner = new WorkflowRunner(repository.root, new FakeAdapters());
@@ -9296,7 +9224,7 @@ test("accepted F10 public doctor recognizes actual v4 runs and rejects binding d
       slug: "doctor",
       request: "Inspect a current run."
     });
-    assert.equal(state.schemaVersion, 4);
+    assert.equal(state.schemaVersion, 5);
     assert.ok(state.artifactBinding);
     const report = await inspectDoctor(repository.root);
     assert.notEqual(
@@ -9419,8 +9347,8 @@ test("instruction preflight refuses resource skew before any model or attempt an
     );
 });
 
-test("instruction per-call refusal retains saved approval and triage, exact bindings and usage in private and legacy work", async (t) => {
-  for (const layout of ["private", "legacy"] as const)
+test("instruction per-call refusal retains saved approval and triage, exact bindings and usage in private work", async (t) => {
+  for (const layout of ["private"] as const)
     for (const gate of ["approval", "triage"] as const)
       await t.test(`${layout} ${gate}`, async () => {
         const repository = await createTestRepository({
@@ -9736,7 +9664,7 @@ for (const [workflow, unavailable] of [
       if (workflow === "strict")
         state = await runner.approvePlan("human", true);
       assert.equal(state.schemaVersion, 5);
-      assert.equal(state.artifactBinding?.binding.schemaVersion, 2);
+      assert.equal(state.artifactBinding.binding.schemaVersion, 2);
       if (unavailable) {
         assert.equal(state.status, "blocked");
         assert.equal(state.metrics.attempts.verification, 1);
@@ -9798,7 +9726,10 @@ for (const [workflow, unavailable] of [
           deriveEvaluationKpiV2([before]).sources[0]?.reuseRatio.denominator,
           1
         );
-        const legacy = await collectEvaluationExport(repository.root, options);
+        assert.deepEqual(
+          await collectEvaluationExport(repository.root, options),
+          before
+        );
         const finishPath = path.join(
           runDirectory,
           "verification/origins",
@@ -9829,7 +9760,7 @@ for (const [workflow, unavailable] of [
         );
         assert.deepEqual(
           await collectEvaluationExport(repository.root, options),
-          legacy
+          missing
         );
         await writeFile(finishPath, finish);
         await writeFile(
@@ -9891,16 +9822,14 @@ for (const [workflow, unavailable] of [
         exported.runs[0].verificationEvidence.dispositions[0]?.kind,
         "executed"
       );
-      const legacyExport = await collectEvaluationExport(repository.root, {
-        format: "json",
-        from: null,
-        to: null,
-        runIds: [state.runId]
-      });
-      assert.ok(
-        legacyExport.issues.some(
-          (issue) => issue.code === "VERIFICATION_HISTORY_INCOMPLETE"
-        )
+      assert.deepEqual(
+        await collectEvaluationExport(repository.root, {
+          format: "json",
+          from: null,
+          to: null,
+          runIds: [state.runId]
+        }),
+        exported
       );
       const context = await collectContextReport(repository.root, {
         runIds: [state.runId],
@@ -10008,6 +9937,7 @@ test("strict explanatory closure reuses its original physical check through inde
     }
     const adapters = new ExplanatoryAdapters();
     adapters.reviewResults.push({
+      schemaVersion: 2,
       contractVersion: CONTRACT_VERSION,
       verdict: "changes_requested",
       summary: "Explanatory correction.",
@@ -10029,7 +9959,7 @@ test("strict explanatory closure reuses its original physical check through inde
     });
     const selectedPlan = path.join(
       repository.root,
-      requiredFixture(planned.artifactBinding?.binding.artifacts.plan)
+      requiredFixture(planned.artifactBinding.binding.artifacts.plan)
     );
     const remainder = (await readFile(selectedPlan, "utf8")).trimEnd() + "\n\n";
     const inventory = {
@@ -10109,3 +10039,107 @@ test("strict explanatory closure reuses its original physical check through inde
     await repository.dispose();
   }
 });
+
+for (const workflow of ["feature", "strict"] as const) {
+  test(`state 5 runs ${workflow} checks without an opt-in verification policy`, async () => {
+    const repository = await createTestRepository({
+      artifactLayout: "private"
+    });
+    try {
+      const adapters = new FakeAdapters();
+      adapters.selectionResults.push(
+        selectionResult({ recommendedWorkflow: workflow })
+      );
+      adapters.reviewResults.push(passingReview());
+      const runner = new WorkflowRunner(repository.root, adapters);
+      let state = await runner.start({
+        slug: "example",
+        request: "Verify without reuse."
+      });
+      if (workflow === "strict")
+        state = await runner.approvePlan("human", true);
+      assert.equal(state.schemaVersion, 5);
+      assert.equal(state.artifactBinding.binding.schemaVersion, 2);
+      assert.equal(state.status, "done", state.blockReason ?? "");
+      assert.equal(state.verification.length, 1);
+      assert.equal(state.verification[0]?.exitCode, 0);
+      assert.equal(
+        state.verificationEvidence?.decision.actions[0]?.reason,
+        "policy_disabled"
+      );
+      assert.equal(
+        state.verificationEvidence.applicability?.dispositions[0]?.kind,
+        "executed"
+      );
+      const attempts = await runner.store.readVerificationAttempts(state.runId);
+      assert.equal(attempts.length, 1);
+      assert.equal(attempts[0]?.status, "completed");
+      const decision = requiredFixture(state.verificationEvidence).decision;
+      const origins = await readVerificationOrigins(
+        {
+          repoRoot: repository.root,
+          workId: state.artifactBinding.binding.workId,
+          directory: `.banzai/runs/${state.runId}/verification`
+        },
+        attempts
+      );
+      const current = {
+        complete: false,
+        reason: "policy_disabled" as const,
+        candidateDigest: null,
+        checks: []
+      };
+      assert.equal(
+        verificationApplicability(decision, origins, current).complete,
+        true
+      );
+      assert.equal(
+        verificationApplicability(decision, [], current).complete,
+        false
+      );
+      assert.equal(
+        verificationApplicability(decision, origins, {
+          ...current,
+          reason: "inputs_unavailable"
+        }).complete,
+        false
+      );
+      for (const mutate of [
+        (origin: (typeof origins)[number]) => {
+          origin.roundId = "other-round";
+        },
+        (origin: (typeof origins)[number]) => {
+          origin.logsIntact = false;
+        },
+        (origin: (typeof origins)[number]) => {
+          origin.exitCode = 1;
+        },
+        (origin: (typeof origins)[number]) => {
+          origin.after.reason = "inputs_unavailable";
+        }
+      ]) {
+        const invalid = structuredClone(origins);
+        mutate(requiredFixture(invalid[0]));
+        assert.equal(
+          verificationApplicability(decision, invalid, current).complete,
+          false
+        );
+      }
+      if (workflow === "strict") {
+        const review = state.latestReview;
+        assert.ok(review);
+        const attempt = (await runner.store.readRunAttempts(state.runId)).find(
+          (item) => item.attempt.kind === "review"
+        );
+        assert.ok(attempt);
+        const snapshot = await runner.store.readReviewSnapshot(
+          state.runId,
+          attempt.attempt
+        );
+        assert.equal(snapshot.schemaVersion, 3);
+      }
+    } finally {
+      await repository.dispose();
+    }
+  });
+}

@@ -1,3 +1,5 @@
+import { createWork } from "../../../plugins/banzai/lib/artifact-storage.mjs";
+import { randomUUID } from "node:crypto";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import {
@@ -318,10 +320,10 @@ async function setupRepository(root, bundle, expectedVersion) {
 
   const configPath = path.join(root, ".banzai", "config.json");
   const config = parseJson(await readFile(configPath, "utf8"), "init config");
-  if (config.schemaVersion !== 2 || config.contractVersion !== "1.0.0") {
+  if (config.schemaVersion !== 3 || config.contractVersion !== "1.0.0") {
     fail(
       "SMOKE_CONFIG_MISMATCH",
-      "init did not create schema-version-2 config"
+      "init did not create schema-version-3 config"
     );
   }
   for (const role of ["planner", "implementer", "reviewer"]) {
@@ -334,6 +336,7 @@ async function setupRepository(root, bundle, expectedVersion) {
         projectType: "repository",
         commands: [
           {
+            id: "git-diff",
             name: "git diff check",
             command: "git",
             args: ["diff", "--check"],
@@ -346,6 +349,7 @@ async function setupRepository(root, bundle, expectedVersion) {
         projectType: "node",
         commands: [
           {
+            id: "node-syntax",
             name: "node syntax check",
             command: "node",
             args: ["--check", "smoke.js"],
@@ -388,8 +392,8 @@ async function setupConsultationRun(root) {
             optionId: "run-state",
             title: "Run state",
             benefits: ["Survives a fresh session."],
-            costs: ["Requires state schema v3."],
-            risks: ["Legacy readers need explicit handling."],
+            costs: ["Requires state schema 5."],
+            risks: ["Unsupported versions fail closed."],
             consequences: ["The runner retains provenance."]
           },
           {
@@ -408,8 +412,15 @@ async function setupConsultationRun(root) {
       }
     ]
   };
+  const bound = await createWork({
+    repoRoot: root,
+    slug: "smoke-consultation",
+    mode: "workflow",
+    creationId: randomUUID()
+  });
   const state = {
-    schemaVersion: 3,
+    schemaVersion: 5,
+    artifactBinding: bound,
     contractVersion: "1.0.0",
     runId,
     slug: "smoke-consultation",
@@ -506,15 +517,16 @@ async function setupConsultationRun(root) {
   return { runId, request, runRoot };
 }
 
-async function setupLegacyContextRun(root) {
-  const legacyRun = path.join(root, ".banzai", "runs", "legacy-context-run");
-  const legacyAttempts = path.join(legacyRun, "attempts");
-  await mkdir(legacyAttempts, { recursive: true });
+async function setupMissingContextRun(root) {
+  const contextRun = path.join(root, ".banzai", "runs", "missing-context-run");
+  const contextAttempts = path.join(contextRun, "attempts");
+  await mkdir(contextAttempts, { recursive: true });
   await writeFile(
-    path.join(legacyRun, "state.json"),
+    path.join(contextRun, "state.json"),
     `${JSON.stringify(
       {
-        runId: "legacy-context-run",
+        schemaVersion: 5,
+        runId: "missing-context-run",
         createdAt: "2026-08-01T00:00:00.000Z",
         workflowSelection: { workflow: "strict" }
       },
@@ -524,10 +536,11 @@ async function setupLegacyContextRun(root) {
     "utf8"
   );
   await writeFile(
-    path.join(legacyAttempts, "legacy-plan-1-plan.json"),
+    path.join(contextAttempts, "missing-context-plan-1-plan.json"),
     `${JSON.stringify(
       {
-        attempt: { id: "legacy-plan-1", kind: "plan", mutable: false },
+        schemaVersion: 2,
+        attempt: { id: "missing-context-plan-1", kind: "plan", mutable: false },
         status: "completed",
         usage: null
       },
@@ -587,12 +600,12 @@ async function runSmoke(options) {
       );
     }
     if (
-      capabilities.controlContractVersion !== "3.0.0" ||
+      capabilities.controlContractVersion !== "4.0.0" ||
       capabilities.operations?.status?.supported !== true ||
       JSON.stringify(capabilities.operations?.start?.inputSchemas) !==
         JSON.stringify(["banzai-agent-request/v1"]) ||
       JSON.stringify(capabilities.operations?.answer?.inputSchemas) !==
-        JSON.stringify(["banzai-agent-answer/v2", "banzai-agent-answer/v1"]) ||
+        JSON.stringify(["banzai-agent-answer/v2"]) ||
       JSON.stringify(capabilities.operations?.recover?.inputSchemas) !==
         JSON.stringify(["banzai-agent-recovery/v1"])
     ) {
@@ -831,8 +844,8 @@ async function runSmoke(options) {
     );
     requireIdentity(
       parseJson(evaluationFirst, "evaluation"),
-      "banzai-evaluation-export/v1",
-      1,
+      "banzai-evaluation-export/v2",
+      2,
       "evaluation"
     );
     for (const forbidden of [
@@ -888,8 +901,8 @@ async function runSmoke(options) {
     );
     requireIdentity(
       parseJson(kpiFirst, "evaluation kpi"),
-      "banzai-evaluation-kpi/v1",
-      1,
+      "banzai-evaluation-kpi/v2",
+      2,
       "evaluation kpi"
     );
     if (kpiFirst !== kpiSecond) {
@@ -921,14 +934,14 @@ async function runSmoke(options) {
     const kpiInput = parseJson(kpiInputFirst, "evaluation kpi input");
     requireIdentity(
       kpiInput,
-      "banzai-evaluation-kpi/v1",
-      1,
+      "banzai-evaluation-kpi/v2",
+      2,
       "evaluation kpi input"
     );
-    if (kpiInput.sources?.[0]?.label !== "1: export.json") {
+    if (kpiInput.sources?.[0]?.ordinal !== 1 || kpiInput.sources.length !== 1) {
       fail(
         "SMOKE_CONTRACT_MISMATCH",
-        "evaluation kpi input label is not the ordinal basename"
+        "evaluation kpi input must contain exactly one ordinal source"
       );
     }
     if (kpiInputFirst !== kpiInputSecond) {
@@ -938,7 +951,7 @@ async function runSmoke(options) {
       );
     }
 
-    await setupLegacyContextRun(smokeRoot);
+    await setupMissingContextRun(smokeRoot);
     before = await snapshotTree(smokeRoot);
     const contextFirst = await runCli(
       options.bundle,

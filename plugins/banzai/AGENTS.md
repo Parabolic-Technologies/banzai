@@ -46,10 +46,10 @@ Banzai supports orchestrated runner phases and standalone skill sessions:
   policies, verification logs and completion evidence and return review-result
   v2. The hook denies every mutation during review, including stale inherited
   write grants. The runner renders and validates an attempt-owned candidate
-  before publishing canonical `banzai-feature-review/v3` Markdown for bound work (historical v2 remains readable).
+  before publishing canonical `banzai-feature-review/v4` Markdown for bound work.
 - Standalone: one agent session runs the skills directly. Decisions are answered
   in chat instead of the CLI. The reviewer owns the durable
-  `banzai-feature-review/v1` Markdown artifact.
+  `banzai-standalone-review/v1` Markdown artifact.
 
 Gate rules are identical in both modes. Only the channel that answers a
 decision changes.
@@ -179,8 +179,9 @@ engineer must answer, and let the CLI collect the answers.
 Resolve each as `../../policies/<name>.md` relative to the installed `SKILL.md`,
 never relative to the project working directory or a fixed plugin cache path.
 Policy files are not copied into projects; policy updates arrive through the
-installed plugin. Legacy projects migrate through explicitly invoked
-`project-manifest` before affected work continues.
+installed plugin. Partial instruction layouts stop affected work with an exact
+ambiguity report. Project setup requires explicit invocation and existing human
+merge approvals; unsupported evidence is never normalized.
 
 `plan-task-completion.md` owns both Plan Authority and Plan Task Completion
 Evidence. Its authority convention applies only when the approved plan explicitly
@@ -226,7 +227,7 @@ acceptance always requires an explicit human decision gate.
   evidence. Rerun only a focused reproduction or a command whose evidence is
   missing, stale, inconsistent, or directly material to a finding; record the
   reason. Never run formatter fixes in review.
-- New project configuration uses schema version 2 explicit profiles. Each
+- New project configuration uses schema version 3 explicit profiles and stable check IDs. Each
   detected root project type needs a matching profile with at least one
   substantive command; the `repository` profile and exact `git diff --check`
   are hygiene and do not prove project-type readiness.

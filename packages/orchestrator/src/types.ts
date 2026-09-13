@@ -18,10 +18,10 @@ export const DECISION_CONSULTATION_SCHEMA =
   "banzai-decision-consultation/v1" as const;
 export const DECISION_CONSULTATION_SCHEMA_VERSION = 1 as const;
 export const PLAN_TASK_COMPLETION_SCHEMA_VERSION = 1 as const;
-export const EVALUATION_EXPORT_SCHEMA = "banzai-evaluation-export/v1" as const;
-export const EVALUATION_EXPORT_SCHEMA_VERSION = 1 as const;
-export const EVALUATION_KPI_SCHEMA = "banzai-evaluation-kpi/v1" as const;
-export const EVALUATION_KPI_SCHEMA_VERSION = 1 as const;
+export const EVALUATION_EXPORT_SCHEMA = "banzai-evaluation-export/v2" as const;
+export const EVALUATION_EXPORT_SCHEMA_VERSION = 2 as const;
+export const EVALUATION_KPI_SCHEMA = "banzai-evaluation-kpi/v2" as const;
+export const EVALUATION_KPI_SCHEMA_VERSION = 2 as const;
 export const CONTEXT_ATTEMPT_SCHEMA = "banzai-context-attempt/v1" as const;
 export const CONTEXT_ATTEMPT_SCHEMA_VERSION = 1 as const;
 export const CONTEXT_REPORT_SCHEMA = "banzai-context-report/v1" as const;
@@ -47,23 +47,18 @@ export const TERMINAL_CHECKPOINT_SCHEMA_VERSION = 1 as const;
 export const RECOVERY_AUTHORIZATION_SCHEMA =
   "banzai-recovery-authorization/v1" as const;
 export const RECOVERY_AUTHORIZATION_SCHEMA_VERSION = 1 as const;
-export const AGENT_CONTROL_CONTRACT_VERSION = "3.0.0" as const;
+export const AGENT_CONTROL_CONTRACT_VERSION = "4.0.0" as const;
 export const AGENT_CAPABILITIES_SCHEMA_VERSION = 3 as const;
 export const AGENT_STATUS_SCHEMA_VERSION = 2 as const;
 export const AGENT_ANSWER_SCHEMA_VERSION = 2 as const;
 export const AGENT_REQUEST_SCHEMA_VERSION = 1 as const;
 export const AGENT_RECOVERY_SCHEMA_VERSION = 1 as const;
-export const LEGACY_AGENT_CONTROL_SCHEMA_VERSION = 1 as const;
 export const AGENT_CAPABILITIES_SCHEMA =
   "banzai-agent-capabilities/v3" as const;
 export const AGENT_STATUS_SCHEMA = "banzai-agent-status/v2" as const;
 export const AGENT_REQUEST_SCHEMA = "banzai-agent-request/v1" as const;
 export const AGENT_ANSWER_SCHEMA = "banzai-agent-answer/v2" as const;
 export const AGENT_RECOVERY_SCHEMA = "banzai-agent-recovery/v1" as const;
-export const LEGACY_AGENT_CAPABILITIES_SCHEMA =
-  "banzai-agent-capabilities/v1" as const;
-export const LEGACY_AGENT_STATUS_SCHEMA = "banzai-agent-status/v1" as const;
-export const LEGACY_AGENT_ANSWER_SCHEMA = "banzai-agent-answer/v1" as const;
 
 export type AgentControlOperationName =
   | "status"
@@ -83,7 +78,6 @@ export interface AgentControlOperationV2 {
   inputSchemas: (
     | typeof AGENT_REQUEST_SCHEMA
     | typeof AGENT_ANSWER_SCHEMA
-    | typeof LEGACY_AGENT_ANSWER_SCHEMA
     | typeof AGENT_RECOVERY_SCHEMA
   )[];
 }
@@ -96,9 +90,9 @@ export interface AgentControlCapabilitiesV3 {
   umbrellaContractVersion: typeof CONTRACT_VERSION;
   artifactStorage: {
     declarationSchemas: ["banzai-artifact-layout/v1"];
-    bindingSchemas: ["banzai-work-binding/v1"];
+    bindingSchemas: ["banzai-work-binding/v2"];
     privateWorkspaceSnapshotVersion: 2;
-    layouts: readonly ["legacy", "private"];
+    layouts: readonly ["private"];
   };
   operations: Record<AgentControlOperationName, AgentControlOperationV2>;
 }
@@ -107,12 +101,6 @@ export interface AgentControlRequestV1 {
   schema: typeof AGENT_REQUEST_SCHEMA;
   schemaVersion: typeof AGENT_REQUEST_SCHEMA_VERSION;
   request: string;
-}
-
-export interface AgentControlAnswerV1 {
-  schema: typeof LEGACY_AGENT_ANSWER_SCHEMA;
-  schemaVersion: typeof LEGACY_AGENT_CONTROL_SCHEMA_VERSION;
-  answers: string[];
 }
 
 export interface AgentControlAnswerV2 {
@@ -132,10 +120,11 @@ export interface AgentControlRecoveryV1 {
   unknownSideEffectsAccepted: true;
 }
 
-export type AgentControlNextActionV1 =
+export type AgentControlNextAction =
   | "approve_adr"
   | "approve_plan"
-  | "answer"
+  | "answer_escalation"
+  | "answer_consultation"
   | "triage"
   | "resume"
   | "retry"
@@ -143,12 +132,7 @@ export type AgentControlNextActionV1 =
   | "cancel"
   | null;
 
-export type AgentControlNextAction =
-  | Exclude<AgentControlNextActionV1, "answer">
-  | "answer_escalation"
-  | "answer_consultation";
-
-export type AgentControlPendingGateV1 =
+export type AgentControlPendingGateBase =
   | {
       kind: "adr_approval";
       artifactPaths: string[];
@@ -178,7 +162,7 @@ export type AgentControlPendingGateV1 =
     };
 
 export type AgentControlPendingGateV2 =
-  | AgentControlPendingGateV1
+  | AgentControlPendingGateBase
   | {
       kind: "decision_consultation";
       phase: "plan";
@@ -187,7 +171,7 @@ export type AgentControlPendingGateV2 =
       request: DecisionConsultationRequest;
     };
 
-export interface AgentControlRunV1 {
+export interface AgentControlRunV2 {
   runId: string;
   slug: string;
   state: RunStatus;
@@ -195,7 +179,7 @@ export interface AgentControlRunV1 {
     workflow: WorkflowRoute;
     reason: string;
   } | null;
-  nextAction: AgentControlNextActionV1;
+  nextAction: AgentControlNextAction;
   blocked: {
     from: Exclude<RunStatus, "blocked"> | null;
     reason: string;
@@ -220,21 +204,15 @@ export interface AgentControlRunV1 {
       total: number;
     } | null;
   };
-  pendingGate: AgentControlPendingGateV1 | null;
+  pendingGate: AgentControlPendingGateV2 | null;
   approval: {
     planValid: boolean | null;
     reviewSnapshotValid: boolean | null;
   };
   taskCompletion: {
     state:
-      | "complete"
-      | "incomplete"
-      | "inconsistent"
-      | "legacy"
-      | "unknown"
-      | "not_applicable";
-    source:
-      "structured completion evidence" | "plan checkbox" | "legacy" | "unknown";
+      "complete" | "incomplete" | "inconsistent" | "unknown" | "not_applicable";
+    source: "structured completion evidence" | "plan checkbox" | "unknown";
     completed: number | null;
     total: number | null;
     diagnostics: {
@@ -274,20 +252,6 @@ export interface AgentControlRunV1 {
   } | null;
 }
 
-export interface AgentControlRunV2 extends Omit<
-  AgentControlRunV1,
-  "nextAction" | "pendingGate"
-> {
-  nextAction: AgentControlNextAction;
-  pendingGate: AgentControlPendingGateV2 | null;
-}
-
-export interface AgentControlStatusV1 {
-  schema: typeof LEGACY_AGENT_STATUS_SCHEMA;
-  schemaVersion: typeof LEGACY_AGENT_CONTROL_SCHEMA_VERSION;
-  activeRun: AgentControlRunV1 | null;
-}
-
 export interface AgentControlStatusV2 {
   schema: typeof AGENT_STATUS_SCHEMA;
   schemaVersion: typeof AGENT_STATUS_SCHEMA_VERSION;
@@ -312,7 +276,6 @@ export type ReviewMode = "full" | "delta";
 export type EvaluationRotationReason =
   | "primary-review"
   | "missing-session"
-  | "legacy-state"
   | "settings-changed"
   | "approval-changed"
   | "previous-review-failed"
@@ -441,14 +404,7 @@ export interface PhaseResult {
   requestedVerification: string[];
 }
 
-export interface LegacyPhaseResult extends Omit<
-  PhaseResult,
-  "schemaVersion" | "decisionConsultation"
-> {
-  schemaVersion: 1 | 2;
-}
-
-export type PersistedPhaseResult = PhaseResult | LegacyPhaseResult;
+export type PersistedPhaseResult = PhaseResult;
 
 export interface ReviewEvidence {
   path: string;
@@ -477,8 +433,7 @@ export interface ReviewFinding {
 }
 
 export interface ReviewResult {
-  /** Absent on historical v1 evidence only. Current ingress requires v2. */
-  schemaVersion?: 2;
+  schemaVersion: 2;
   contractVersion: typeof CONTRACT_VERSION;
   verdict: ReviewVerdict;
   summary: string;
@@ -543,12 +498,9 @@ export interface ReviewArtifactContext {
 }
 
 export interface ReviewSnapshot {
-  schema:
-    | "banzai-review-snapshot/v1"
-    | "banzai-review-snapshot/v2"
-    | "banzai-review-snapshot/v3";
-  schemaVersion: 1 | 2 | 3;
-  artifactBinding?: ArtifactBoundWork;
+  schema: "banzai-review-snapshot/v3";
+  schemaVersion: 3;
+  artifactBinding: ArtifactBoundWork;
   runId: string;
   attemptId: string;
   outputContract: "review-result/v2";
@@ -680,10 +632,7 @@ export interface PromptEnvelope {
 }
 
 export type OutputContractIdentity =
-  | "workflow-selection/v1"
-  | "phase-result/v3"
-  | "review-result/v1"
-  | "review-result/v2";
+  "workflow-selection/v1" | "phase-result/v3" | "review-result/v2";
 
 export interface OutputContractEnvelope {
   vendor: "codex" | "claude";
@@ -884,7 +833,7 @@ export interface ModelSessionBinding {
 export type SessionContext = Omit<ModelSessionBinding, "id">;
 
 export interface ReviewerSessionBinding extends ModelSessionBinding {
-  outputContract?: "review-result/v1" | "review-result/v2";
+  outputContract?: "review-result/v2";
   role: "reviewer";
   approvalDigest: string;
   lastSnapshot: WorkspaceSnapshot;
@@ -935,7 +884,7 @@ export interface VerificationProfile {
 }
 
 export interface OrchestratorConfig {
-  schemaVersion: 1 | 2 | 3;
+  schemaVersion: 3;
   contractVersion: typeof CONTRACT_VERSION;
   models: {
     planner: ModelSettings;
@@ -1036,7 +985,7 @@ export interface ActiveProcess {
 }
 
 export interface ReviewReference {
-  outputContract?: "review-result/v1" | "review-result/v2";
+  outputContract?: "review-result/v2";
   iteration: number;
   resultPath: string;
   artifactPath?: string;
@@ -1082,7 +1031,7 @@ export interface VerificationCommandDescriptor {
 }
 
 export interface VerificationLedger {
-  schemaVersion: 1 | 2;
+  schemaVersion: 2;
 }
 
 export type VerificationAttemptStatus =
@@ -1221,8 +1170,8 @@ export interface CancellationAnchor {
 }
 
 export interface RunState {
-  schemaVersion: 3 | 4 | 5;
-  artifactBinding?: ArtifactBoundWork;
+  schemaVersion: 5;
+  artifactBinding: ArtifactBoundWork;
   contractVersion: typeof CONTRACT_VERSION;
   runId: string;
   slug: string;
@@ -1240,7 +1189,7 @@ export interface RunState {
   baseline?: WorkspaceEntry[];
   /**
    * Missing only on states written before automatic workflow selection.
-   * Already-started legacy runs are treated as strict.
+   * A missing selection uses the strict workflow default.
    */
   workflowSelection?: WorkflowSelectionRecord | null;
   planArtifacts: PhaseArtifacts | null;
@@ -1275,8 +1224,7 @@ export interface RunState {
     authorizationId: string;
     sourceAttemptId: string;
     recoveryAttemptId: string | null;
-    /** Missing only on recovery state written before staged reconciliation. */
-    stage?:
+    stage:
       | "authorized"
       | "source_interrupted"
       | "source_preserved"
@@ -1291,7 +1239,7 @@ export interface RunState {
 export interface AttemptRecord<
   T = WorkflowSelectionResult | PersistedPhaseResult | ReviewResult
 > {
-  schemaVersion: 1 | typeof MODEL_ATTEMPT_SCHEMA_VERSION;
+  schemaVersion: typeof MODEL_ATTEMPT_SCHEMA_VERSION;
   attempt: AttemptReference;
   status: "started" | "completed" | "failed" | "interrupted";
   startedAt: string;
@@ -1342,11 +1290,7 @@ export type TerminalSuccessClassification =
   "claude_result" | "codex_turn_completed";
 
 export type TerminalResultContract =
-  | "workflow-selection/v1"
-  | "phase-result/v2"
-  | "phase-result/v3"
-  | "review-result/v1"
-  | "review-result/v2";
+  "workflow-selection/v1" | "phase-result/v3" | "review-result/v2";
 
 export interface TerminalAttemptCheckpoint<
   T extends TerminalCheckpointResult = TerminalCheckpointResult
@@ -1409,13 +1353,7 @@ export interface AdapterTerminalSuccess<
 }
 
 export type EvidenceState =
-  | "observed"
-  | "derived"
-  | "inferred_legacy"
-  | "unknown"
-  | "legacy_absent"
-  | "invalid"
-  | "not_applicable";
+  "observed" | "derived" | "unknown" | "invalid" | "not_applicable";
 
 export interface EvidenceValue<T> {
   value: T | null;
@@ -1461,7 +1399,6 @@ export type EvaluationIssueCode =
   | "STATE_SCHEMA_UNSUPPORTED"
   | "STATE_FIELD_MISSING"
   | "STATE_FIELD_INVALID"
-  | "LEGACY_FIELD_ABSENT"
   | "ATTEMPT_DIRECTORY_MISSING"
   | "ATTEMPT_MALFORMED"
   | "ATTEMPT_DUPLICATE"
@@ -1479,7 +1416,6 @@ export type EvaluationIssueCode =
   | "VERIFICATION_ATTEMPT_CONFLICT"
   | "VERIFICATION_SEQUENCE_CONFLICT"
   | "VERIFICATION_SEQUENCE_MISSING"
-  | "VERIFICATION_HISTORY_INCOMPLETE"
   | "PLAN_TASK_COMPLETION_INVALID"
   | "ACTIVE_ATTEMPT_INCOMPLETE";
 
@@ -1523,7 +1459,7 @@ export interface EvaluationStateMetricSource {
 }
 
 export interface EvaluationStateSource {
-  schemaVersion: 1 | 2 | 3 | 4 | 5;
+  schemaVersion: 5;
   contractVersion: EvidenceValue<string>;
   status: EvidenceValue<RunStatus>;
   createdAt: EvidenceValue<string>;
@@ -1588,7 +1524,7 @@ export interface EvaluationEventSource {
 }
 
 export interface EvaluationExportOptions {
-  schemaVersion?: 1 | 2;
+  schemaVersion?: 2;
   format: "markdown" | "json";
   from: string | null;
   to: string | null;
@@ -1739,7 +1675,7 @@ export interface EvaluationExport {
   schema: typeof EVALUATION_EXPORT_SCHEMA;
   schemaVersion: typeof EVALUATION_EXPORT_SCHEMA_VERSION;
   cohort: EvaluationCohort;
-  runs: EvaluationRun[];
+  runs: (EvaluationRun & { verificationEvidence: EvaluationVerificationV2 })[];
   aggregates: EvaluationAggregates;
   issues: EvaluationIssue[];
 }
@@ -1794,14 +1730,10 @@ export interface EvaluationKpiSource {
   kpis: EvaluationKpiEntry[];
 }
 
-export interface EvaluationKpiReport {
-  schema: typeof EVALUATION_KPI_SCHEMA;
-  schemaVersion: typeof EVALUATION_KPI_SCHEMA_VERSION;
-  sources: EvaluationKpiSource[];
-}
+export type EvaluationKpiReport = EvaluationKpiV2;
 
 export interface EvaluationKpiOptions {
-  schemaVersion?: 1 | 2;
+  schemaVersion?: 2;
   format: "markdown" | "json";
   from: string | null;
   to: string | null;

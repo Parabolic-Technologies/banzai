@@ -94,14 +94,11 @@ an orchestrated approval, unlike choosing a compliant implementation under it.
   `PLAN_TASK_COMPLETION_INVALID`; verification and review do not start, and a
   normally returned invalid implementation result may be retried after the
   evidence is corrected without editing the approved plan.
-- A legacy orchestrated run without the structured ledger keeps its persisted
-  lifecycle and next action, but task completion is `legacy`, `unknown`, or
-  `inconsistent`; report prose is never retrofitted into canonical `N/N`.
 - Active orchestrated runs remain active even when partial report evidence is
   present. For standalone work without external completion evidence, checked
   and unchecked plan boxes retain their normal completed/incomplete meaning.
 - Status and review name the evidence source: `structured completion evidence`,
-  `plan checkbox`, `legacy`, `unknown`, or `inconsistent`. Contradictory state,
+  `plan checkbox`, `unknown`, or `inconsistent`. Contradictory state,
   approval, reports, source, tests, or review evidence requires an
   artifact/evidence audit and is never silently repaired by editing an approved
   plan.

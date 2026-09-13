@@ -4,7 +4,6 @@ import path from "node:path";
 const ADOPTION_LABELS = {
   ready: "Project guidance ready",
   setup_required: "Project setup required",
-  migration_required: "Project migration required",
   needs_attention: "Project guidance needs attention",
 };
 const SCAFFOLD_MARKER = "<!-- banzai-scaffold: unfilled -->";
@@ -337,8 +336,8 @@ async function inspectProjectAdoption(repoRoot, options = {}) {
     ) {
       issues.push({
         file: "AGENTS.md / CLAUDE.md",
-        reason: "legacy Banzai layout: run `project-manifest` to migrate",
-        classification: "migration_required",
+        reason: "CLAUDE.md contains Engineering Quality while AGENTS.md lacks Authority; instruction layout is partial.",
+        classification: "needs_attention",
       });
     } else if (
       ![agentHeadings, claudeHeadings].some(
@@ -372,7 +371,7 @@ async function inspectProjectAdoption(repoRoot, options = {}) {
     }
   }
   const classification =
-    ["needs_attention", "migration_required", "setup_required"].find((value) =>
+    ["needs_attention", "setup_required"].find((value) =>
       issues.some((issue) => issue.classification === value),
     ) ?? "ready";
   return {

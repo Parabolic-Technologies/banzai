@@ -9,8 +9,8 @@ import type { EvaluationExport, EvaluationKpiReport } from "../src/types.js";
 
 function minimalExport(runs: unknown[]): EvaluationExport {
   return {
-    schema: "banzai-evaluation-export/v1",
-    schemaVersion: 1,
+    schema: "banzai-evaluation-export/v2",
+    schemaVersion: 2,
     cohort: {
       from: null,
       to: null,
@@ -44,7 +44,7 @@ function doneRun(runKey: string, model: string): unknown {
     runKey,
     cohortMembership: "included",
     completeness: "complete",
-    source: { stateSchemaVersion: 2, contractVersion: ev("1.0.0") },
+    source: { stateSchemaVersion: 5, contractVersion: ev("1.0.0") },
     workflow: ev("strict"),
     status: ev("done"),
     createdAt: ev("2026-08-01T00:00:00Z"),
@@ -73,6 +73,14 @@ function doneRun(runKey: string, model: string): unknown {
       }
     ],
     verification: [],
+    verificationEvidence: {
+      coverage: "exact",
+      physicalAttempts: [{ ordinal: 1, status: "completed", durationMs: 10 }],
+      dispositions: [
+        { round: 1, check: 1, kind: "executed", origin: 1 },
+        { round: 2, check: 1, kind: "reused", origin: 1 }
+      ]
+    },
     reviews: [
       {
         ordinal: 1,
@@ -116,100 +124,57 @@ function doneRun(runKey: string, model: string): unknown {
 function report(): EvaluationKpiReport {
   return deriveEvaluationKpiReport([
     {
-      label: "1: a.json",
-      report: minimalExport([doneRun("a", "gpt-5.6-sol")])
+      label: "private-source",
+      report: minimalExport([doneRun("a", "model-a")])
     },
-    { label: "2: b.json", report: minimalExport([doneRun("b", "gpt-5.6")]) }
+    {
+      label: "another-source",
+      report: minimalExport([
+        {
+          ...(doneRun("b", "model-b") as Record<string, unknown>),
+          verificationEvidence: {
+            coverage: "incomplete",
+            physicalAttempts: [],
+            dispositions: []
+          }
+        }
+      ])
+    }
   ]);
 }
 
-test("json rendering is canonical two-space serialization with a trailing newline", () => {
+test("JSON renders current KPI identity canonically without source labels", () => {
   const document = report();
   const first = renderEvaluationKpiJson(document);
   assert.equal(first, `${JSON.stringify(document, null, 2)}\n`);
-  assert.match(
-    first,
-    /^\{\n {2}"schema": "banzai-evaluation-kpi\/v1",\n {2}"schemaVersion": 1,/
-  );
-  assert.ok(first.endsWith("}\n"));
+  assert.equal(document.schema, "banzai-evaluation-kpi/v2");
+  assert.equal(document.schemaVersion, 2);
   assert.equal(renderEvaluationKpiJson(document), first);
+  assert.doesNotMatch(first, /private-source|another-source/);
 });
 
-test("markdown renders sources and one comparison table per kpi with labeled columns", () => {
-  const first = renderEvaluationKpiMarkdown(report());
-  assert.equal(renderEvaluationKpiMarkdown(report()), first);
-  assert.match(first, /# Banzai Evaluation KPIs/);
-  assert.match(first, /Schema: `banzai-evaluation-kpi\/v1` \(version 1\)/);
-  assert.match(first, /## Sources/);
-  assert.match(first, /\| 1 \| 1: a\.json \| 1 \| 0 \|/);
-  const sections = [
-    "## completion_rate (rate)",
-    "## first_review_pass_rate (rate)",
-    "## first_review_mean_findings (mean)",
-    "## first_review_acceptance_rate (rate)",
-    "## reviewer_precision (rate)",
-    "## zero_accepted_review_rate (rate)",
-    "## triage_deferred (count)",
-    "## fix_cycles_per_completed_run (mean)",
-    "## fix_cycles_per_completed_run (max)",
-    "## attempt_retry_ratio (plan)",
-    "## attempt_retry_ratio (implementation)",
-    "## attempt_retry_ratio (fix)",
-    "## attempt_retry_ratio (review)",
-    "## usage_per_completed_run (mean_input_tokens)",
-    "## usage_per_completed_run (mean_cached_input_tokens)",
-    "## usage_per_completed_run (mean_output_tokens)",
-    "## usage_per_completed_run (cache_ratio)",
-    "## usage_per_completed_run (mean_cost_usd)"
-  ];
-  let previous = -1;
-  for (const section of sections) {
-    const current = first.indexOf(section);
-    assert.ok(
-      current > previous,
-      `${section} must follow the previous section`
-    );
-    previous = current;
-  }
-  assert.match(first, /\| Row \| 1: a\.json \| 2: b\.json \|/);
+test("Markdown reports physical attempts, exact reuse denominators and incomplete coverage", () => {
+  const document = report();
+  const first = renderEvaluationKpiMarkdown(document);
+  assert.equal(renderEvaluationKpiMarkdown(document), first);
+  assert.match(first, /Schema: `banzai-evaluation-kpi\/v2` \(version 2\)/);
   assert.match(
     first,
-    /\| overall \| 100\.0% \(1\/1; exact 1, incomplete 0\) \| 100\.0% \(1\/1; exact 1, incomplete 0\) \|/
+    /\| Source \| Physical attempts \| Executed checks \| Reused checks \| Reuse ratio \| Exact \/ incomplete runs \|/
   );
+  assert.match(first, /\| 1 \| 1 \| 1 \| 1 \| 0.5 \(1\/2\) \| 1 \/ 0 \|/);
   assert.match(
     first,
-    /\| quick-fix \| unavailable \(0\/0; exact 0, incomplete 0\)/
+    /\| 2 \| 0 \| 0 \| 0 \| unavailable \(0\/0\) \| 0 \/ 1 \|/
   );
-  assert.match(first, /unavailable \(0\/0; exact 0, incomplete 1\)/);
+  assert.doesNotMatch(first, /private-source|another-source/);
   assert.ok(first.endsWith("\n"));
 });
 
-test("markdown renders a dash for a signature group absent from a source", () => {
-  const first = renderEvaluationKpiMarkdown(report());
-  const line = first
-    .split("\n")
-    .find((item) =>
-      item.startsWith(
-        "| planner=unknown implementer=codex/gpt-5.6-sol/xhigh reviewer=unknown |"
-      )
-    );
-  assert.ok(line, "signature row for the first source must exist");
-  const cells = line.split("|").map((item) => item.trim());
-  assert.equal(cells[3], "-");
-});
-
-test("markdown renders ratio percentages and mean decimals per the cell grammar", () => {
-  const first = renderEvaluationKpiMarkdown(report());
-  assert.match(
-    first,
-    /## usage_per_completed_run \(cache_ratio\)[\s\S]*?\| overall \| 40\.0% \(400\/1000; exact 1, incomplete 0\)/
-  );
-  assert.match(
-    first,
-    /## usage_per_completed_run \(mean_input_tokens\)[\s\S]*?\| overall \| 1000\.00 \(1000\/1; exact 1, incomplete 0\)/
-  );
-  assert.match(
-    first,
-    /## usage_per_completed_run \(mean_cost_usd\)[\s\S]*?\| overall \| unavailable \(0\/0; exact 0, incomplete 1\)/
-  );
+test("empty current KPI report keeps headers without inventing counts", () => {
+  const document = deriveEvaluationKpiReport([]);
+  assert.deepEqual(document.sources, []);
+  const markdown = renderEvaluationKpiMarkdown(document);
+  assert.match(markdown, /Counts and ratios use exact runs only/);
+  assert.doesNotMatch(markdown, /\| 1 \|/);
 });

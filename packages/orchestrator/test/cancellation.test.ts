@@ -43,7 +43,7 @@ async function fixture(status: RunState["status"] = "planning") {
     }
   );
   const state = evaluationStateFixture({
-    schemaVersion: 3,
+    schemaVersion: 5,
     status,
     extra: {
       contractVersion: CONTRACT_VERSION,
@@ -178,7 +178,7 @@ test("cancellation: pre-state and selected workflow survive transition without i
     delete legacy.workflowSelection;
     assert.equal(
       captureCancellationContext(legacy).workflow.availability,
-      "legacy_absent"
+      "missing"
     );
     assert.equal(
       captureCancellationContext({ ...legacy, workflowSelection: null })

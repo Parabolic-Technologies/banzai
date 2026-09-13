@@ -1,3 +1,4 @@
+import packageMetadata from "../package.json" with { type: "json" };
 import type {
   ModelFailureCause,
   RunState,
@@ -15,6 +16,21 @@ export class BanzaiError extends Error {
     this.name = "BanzaiError";
     this.code = code;
     this.exitCode = exitCode;
+  }
+}
+
+export class ResourceVersionUnsupportedError extends BanzaiError {
+  constructor(
+    resource: string,
+    found: string | number,
+    supported: string | number
+  ) {
+    const major = Number(packageMetadata.version.split(".")[0]);
+    super(
+      "RESOURCE_VERSION_UNSUPPORTED",
+      `${resource} version ${found} is not supported; ${major}.x supports ${supported}; last read by release-train major ${major - 1}`
+    );
+    this.name = "ResourceVersionUnsupportedError";
   }
 }
 

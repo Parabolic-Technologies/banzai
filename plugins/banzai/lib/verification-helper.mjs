@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { rename, readdir } from "node:fs/promises";
 import path from "node:path";
-import { acquireWork, releaseWork, inspectArtifacts, readJson, readBytes, safePath, makeDirectories, publishNew, exactObject } from "./artifact-storage.mjs";
-import { parseVerificationAttemptRecord } from "./artifact-readers.mjs";
+import { acquireWork, releaseWork, inspectArtifacts, readJson, readBytes, safePath, makeDirectories, publishNew, exactObject, unsupportedResourceVersion } from "./artifact-storage.mjs";
+import { parseVerificationAttemptRecord, parseVerificationLedger } from "./artifact-readers.mjs";
 import { captureVerificationInputs, decideVerification, evidenceDigest, parseVerificationConfiguration, parseVerificationObligations, sameVerificationCapture, VerificationEvidenceError } from "./verification-evidence.mjs";
 import { persistVerificationDecision, persistVerificationOriginStart, persistVerificationOriginFinish, readVerificationOrigins, verificationApplicability, persistVerificationApplicability } from "./verification-store.mjs";
 
@@ -68,10 +68,13 @@ export async function verificationOperation(operation, request) {
   const binding = inspection.work?.binding;
   const root = inspection.projectRoot;
   const rawConfig = await readJson(root, ".banzai/config.json", true);
-  if (!binding || binding.schemaVersion !== 2 || rawConfig?.schemaVersion !== 3 || !rawConfig.verification?.policy)
-    return { supported: false, reason: "Use the existing fresh verification workflow; explicit binding v2 and config 3 policy are required." };
+  if (!binding) fail("Select a current work binding before verification.");
+  if (rawConfig?.schemaVersion !== 3) unsupportedResourceVersion("configuration", String(rawConfig?.schemaVersion), 3);
   const configuration = parseVerificationConfiguration(rawConfig.verification);
   const storage = { repoRoot: root, directory: binding.artifacts.verificationDirectory, workId: binding.workId };
+  const marker = `${storage.directory}/ledger.json`;
+  const existingLedger = await readJson(root, marker, true);
+  if (existingLedger !== null) parseVerificationLedger(existingLedger);
   const planBytes = binding.artifacts.plan ? await readBytes(root, binding.artifacts.plan, { optional: true, limit: 16 * 1024 * 1024 }) : null;
   const authorityArtifacts = [];
   for (const role of ["description", "plan", "work", "changeReport"]) {
@@ -112,11 +115,10 @@ export async function verificationOperation(operation, request) {
   const claim = await acquireWork({ repoRoot: root, workPath: request.workPath, ownerId: "verification-helper" });
   try {
     await assertAuthority();
-    await makeDirectories(root, `${storage.directory}/attempts`);
-    const marker = `${storage.directory}/ledger.json`;
     const ledger = await readJson(root, marker, true);
+    if (ledger !== null) parseVerificationLedger(ledger);
+    await makeDirectories(root, `${storage.directory}/attempts`);
     if (ledger === null) await publishNew(root, marker, '{"schemaVersion":2}\n');
-    else if (JSON.stringify(ledger) !== '{"schemaVersion":2}') fail("Unsupported verification ledger.");
     let { attempts, origins, current, decision } = await inspect();
     const action = decision.actions.find((item) => item.checkId === request.checkId);
     if (!action) fail("Unknown configured verification check.");
@@ -142,7 +144,7 @@ export async function verificationOperation(operation, request) {
       const relative = `${storage.directory}/attempts/verification-${String(record.sequence).padStart(6, "0")}-${record.id}.json`;
       await publishNew(root, relative, JSON.stringify(record, null, 2) + "\n");
       await persistVerificationOriginStart(storage, record, decision, current);
-      const result = await invoke(command, root, configuration.policy.dependencies.environment);
+      const result = await invoke(command, root, configuration.policy?.dependencies.environment ?? Object.fromEntries(["PATH", "LANG", "LC_ALL", "TZ"].filter((key) => process.env[key] !== undefined).map((key) => [key, process.env[key]])));
       const logs = {};
       for (const stream of ["stdout", "stderr"]) {
         const log = `verification/${record.id}.${stream}.log`;

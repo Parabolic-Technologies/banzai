@@ -9,7 +9,7 @@ frozen.
 
 The procedure is a sampled maintainer evaluation, not a workflow phase, runtime
 contract, gate, or mandatory human-triage queue. It reuses
-`banzai-evaluation-export/v1`, `banzai-evaluation-kpi/v1`, and canonical review
+`banzai-evaluation-export/v2`, `banzai-evaluation-kpi/v2`, and canonical review
 artifacts. Do not add fields to those contracts or parse `EQ-SHADOW:` strings in
 runtime code for this rollout.
 

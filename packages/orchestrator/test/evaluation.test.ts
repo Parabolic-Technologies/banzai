@@ -16,7 +16,7 @@ import {
   renderEvaluationJson,
   renderEvaluationMarkdown
 } from "../src/evaluation-render.js";
-import type { EvaluationExportOptions, NumericMetric } from "../src/types.js";
+import type { EvaluationExportOptions } from "../src/types.js";
 import {
   createEvaluationRoot,
   evaluationAttemptFixture,
@@ -43,8 +43,8 @@ test("exports a deterministic exact-zero dataset when the run set is empty or ab
     const first = await collectEvaluationExport(root, DEFAULT_OPTIONS);
     const second = await collectEvaluationExport(root, DEFAULT_OPTIONS);
     assert.deepEqual(first, second);
-    assert.equal(first.schema, "banzai-evaluation-export/v1");
-    assert.equal(first.schemaVersion, 1);
+    assert.equal(first.schema, "banzai-evaluation-export/v2");
+    assert.equal(first.schemaVersion, 2);
     assert.equal(first.aggregates.overall.runCount, 0);
     assert.equal(first.aggregates.overall.metrics.attempts.total.value, 0);
     assert.equal(first.aggregates.overall.metrics.usage.inputTokens.value, 0);
@@ -196,6 +196,13 @@ test("exports a complete strict run with phase, verification, usage, review, tri
         }
       ]
     });
+    await writeVerificationLedger(root, "strict-secret-slug", [
+      {
+        ...verificationAttemptFixture({ sequence: 1 }),
+        durationMs: 5_000,
+        completedAt: "2026-07-01T00:01:05.000Z"
+      }
+    ]);
     const report = await collectEvaluationExport(root, DEFAULT_OPTIONS);
     const run = report.runs[0];
     assert.ok(run);
@@ -203,7 +210,7 @@ test("exports a complete strict run with phase, verification, usage, review, tri
     assert.equal(run.workflow.value, "strict");
     assert.equal(run.status.value, "done");
     assert.deepEqual(run.attempts[0]?.source.schemaVersion, {
-      value: 1,
+      value: 2,
       evidence: "observed"
     });
     assert.equal(run.metrics.attempts.total.value, 6);
@@ -357,96 +364,44 @@ test("includes lite, blocked, cancelled, and incomplete runs in route and status
   }
 });
 
-test("preserves legacy absence and exposes schema-one triage only as partial evidence", async () => {
+test("exports refuse removed state versions without changing the selected run tree", async () => {
   const root = await createEvaluationRoot();
   try {
-    const state = evaluationStateFixture({
-      schemaVersion: 1,
-      status: "needs_triage"
-    });
-    state.triage = {
-      items: [{ disposition: "rejected", findingId: "FORBIDDEN" }]
-    };
-    await writeEvaluationRun(root, "legacy-run", { state });
-    const report = await collectEvaluationExport(root, DEFAULT_OPTIONS);
-    const run = report.runs[0];
-    assert.ok(run);
-    assert.equal(run.source.stateSchemaVersion, 1);
-    assert.deepEqual(run.workflow, {
-      value: "strict",
-      evidence: "inferred_legacy"
-    });
-    assert.equal(run.completeness, "partial");
-    assert.equal(run.metrics.triage.rejected.value, null);
-    assert.equal(run.metrics.triage.rejected.observedSubtotal, 1);
-    assert.equal(run.metrics.triage.rejected.unknownCount, 1);
-    assert.equal(run.metrics.sessions.unknown.value, 0);
-    assert.ok(run.issueCodes.includes("LEGACY_FIELD_ABSENT"));
+    for (const schemaVersion of [1, 2, 3, 4, 6]) {
+      await writeEvaluationRun(root, "old-run", {
+        state: evaluationStateFixture({ schemaVersion })
+      });
+      const before = await snapshotTree(root);
+      await assert.rejects(collectEvaluationExport(root, DEFAULT_OPTIONS), {
+        code: "RESOURCE_VERSION_UNSUPPORTED"
+      });
+      assert.deepEqual(await snapshotTree(root), before);
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
 
-test("attempt schema provenance gates numeric evidence without dropping per-run records", async () => {
+test("export refuses removed attempt versions before exposing numeric evidence", async () => {
   const root = await createEvaluationRoot();
-  const state = (): Record<string, unknown> =>
-    evaluationStateFixture({
-      attempts: { implementation: 1 },
-      usage: {
-        inputTokens: 10,
-        cachedInputTokens: 2,
-        outputTokens: 3,
-        costUsd: 0.25
-      },
-      sessions: { fresh: 1, resumed: 0 }
-    });
-  const attempt = (id: string): Record<string, unknown> =>
-    evaluationAttemptFixture({ id, kind: "implementation" });
   try {
-    const current = attempt("current");
-    const legacy = attempt("legacy");
-    delete legacy.schemaVersion;
-    const unsupported = attempt("unsupported");
-    unsupported.schemaVersion = 999;
-    const malformed = attempt("malformed");
-    malformed.schemaVersion = "1";
-    await writeEvaluationRun(root, "a-current", {
-      state: state(),
-      attempts: [current]
-    });
-    await writeEvaluationRun(root, "b-legacy", {
-      state: state(),
-      attempts: [legacy]
-    });
-    await writeEvaluationRun(root, "c-unsupported", {
-      state: state(),
-      attempts: [unsupported]
-    });
-    await writeEvaluationRun(root, "d-malformed", {
-      state: state(),
-      attempts: [malformed]
-    });
-
-    const report = await collectEvaluationExport(root, DEFAULT_OPTIONS);
-    const [currentRun, legacyRun, unsupportedRun, malformedRun] = report.runs;
-    assert.ok(currentRun);
-    assert.ok(legacyRun);
-    assert.ok(unsupportedRun);
-    assert.ok(malformedRun);
-    assert.equal(currentRun.metrics.attempts.total.value, 1);
-    assert.deepEqual(legacyRun.attempts[0]?.source.schemaVersion, {
-      value: null,
-      evidence: "legacy_absent"
-    });
-    assert.equal(legacyRun.metrics.attempts.total.observedSubtotal, 0);
-    assert.equal(legacyRun.metrics.attempts.total.unknownCount, 1);
-    for (const run of [unsupportedRun, malformedRun]) {
-      assert.deepEqual(run.attempts[0]?.source.schemaVersion, {
-        value: null,
-        evidence: "invalid"
+    for (const schemaVersion of [undefined, 1, 3, 999, "2"]) {
+      const attempt = {
+        ...evaluationAttemptFixture({
+          id: "old-attempt",
+          kind: "implementation"
+        }),
+        schemaVersion
+      };
+      await writeEvaluationRun(root, "old-attempt-run", {
+        state: evaluationStateFixture(),
+        attempts: [attempt]
       });
-      assert.equal(run.metrics.attempts.total.observedSubtotal, 0);
-      assert.equal(run.metrics.attempts.total.invalidCount, 1);
+      const before = await snapshotTree(root);
+      await assert.rejects(collectEvaluationExport(root, DEFAULT_OPTIONS), {
+        code: "RESOURCE_VERSION_UNSUPPORTED"
+      });
+      assert.deepEqual(await snapshotTree(root), before);
     }
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -460,7 +415,7 @@ test("review snapshot sidecars leave frozen export and KPI bytes unchanged", asy
   try {
     await writeEvaluationRun(root, snapshot.runId, {
       state: evaluationStateFixture({
-        schemaVersion: 3,
+        schemaVersion: 5,
         reviewIteration: 1,
         attempts: { review: 1 },
         sessions: { fresh: 1, resumed: 0 },
@@ -474,7 +429,7 @@ test("review snapshot sidecars leave frozen export and KPI bytes unchanged", asy
     const withoutSidecar = await collectEvaluationExport(root, DEFAULT_OPTIONS);
     const run = withoutSidecar.runs[0];
     assert.ok(run);
-    assert.equal(withoutSidecar.schema, "banzai-evaluation-export/v1");
+    assert.equal(withoutSidecar.schema, "banzai-evaluation-export/v2");
     assert.equal(run.metrics.attempts.total.value, 1);
     assert.equal(run.metrics.attempts.total.availability, "complete");
     assert.deepEqual(
@@ -506,7 +461,7 @@ test("review snapshot sidecars leave frozen export and KPI bytes unchanged", asy
     const kpiWith = deriveEvaluationKpiReport([
       { label: "current", report: withSidecar }
     ]);
-    assert.equal(kpiWith.schema, "banzai-evaluation-kpi/v1");
+    assert.equal(kpiWith.schema, "banzai-evaluation-kpi/v2");
     assert.equal(
       renderEvaluationKpiJson(kpiWith),
       renderEvaluationKpiJson(kpiWithout)
@@ -521,7 +476,7 @@ test("review snapshot sidecars leave frozen export and KPI bytes unchanged", asy
   }
 });
 
-test("schema-two interrupted attempts preserve the v1 export shape and checkpoint privacy", async () => {
+test("schema-two interrupted attempts preserve the v2 export shape and checkpoint privacy", async () => {
   const root = await createEvaluationRoot();
   const runId = "interrupted-schema-two";
   const secret = "sk-ant-terminal-checkpoint-secret";
@@ -584,7 +539,7 @@ test("schema-two interrupted attempts preserve the v1 export shape and checkpoin
   }
 });
 
-test("completed blocked recovery evidence preserves evaluation v1 shape and privacy", async () => {
+test("completed blocked recovery evidence preserves evaluation v2 shape and privacy", async () => {
   const root = await createEvaluationRoot();
   const runId = "prerequisite-blocked-schema-two";
   const prerequisiteSecret =
@@ -642,8 +597,8 @@ test("completed blocked recovery evidence preserves evaluation v1 shape and priv
     const report = await collectEvaluationExport(root, DEFAULT_OPTIONS);
     const run = report.runs[0];
     assert.ok(run);
-    assert.equal(report.schema, "banzai-evaluation-export/v1");
-    assert.equal(report.schemaVersion, 1);
+    assert.equal(report.schema, "banzai-evaluation-export/v2");
+    assert.equal(report.schemaVersion, 2);
     assert.deepEqual(run.attempts[0]?.source.schemaVersion, {
       value: 2,
       evidence: "observed"
@@ -1244,46 +1199,33 @@ test("counts only review results proven applied by latestReview evidence", async
   }
 });
 
-test("keeps active, retained, and historical verification attempts internally consistent", async () => {
+test("state counters and retained results cannot fabricate physical verification evidence", async () => {
   const root = await createEvaluationRoot();
   try {
-    await writeEvaluationRun(root, "verification-coverage", {
+    await writeEvaluationRun(root, "state-only", {
       state: evaluationStateFixture({
-        status: "verifying",
         attempts: { verification: 3 },
         verification: [
           {
             exitCode: 0,
             signal: null,
-            startedAt: "2026-07-01T00:02:00.000Z",
-            completedAt: "2026-07-01T00:02:01.000Z"
+            startedAt: "2026-07-01T00:00:00Z",
+            completedAt: "2026-07-01T00:00:01Z"
           }
-        ],
-        extra: {
-          activeProcess: {
-            pid: 123,
-            kind: "verification",
-            startedAt: "2026-07-01T00:03:00.000Z"
-          }
-        }
+        ]
       })
     });
-    const report = await collectEvaluationExport(root, DEFAULT_OPTIONS);
-    const metrics = report.runs[0]?.metrics;
-    assert.ok(metrics);
-    assert.equal(metrics.attempts.total.value, 3);
-    assert.equal(metrics.attempts.byKind.verification.value, 3);
-    assert.equal(metrics.attempts.byOutcome.completed.observedSubtotal, 1);
-    assert.equal(metrics.attempts.byOutcome.started.observedSubtotal, 1);
-    assert.equal(metrics.attempts.byOutcome.completed.unknownCount, 1);
-    assert.equal(metrics.attempts.byOutcome.failed.unknownCount, 1);
-    assert.equal(metrics.attempts.byOutcome.started.value, null);
-    assert.equal(metrics.attempts.byOutcome.started.observedSubtotal, 1);
-    assert.equal(metrics.attempts.byOutcome.started.unknownCount, 1);
-    assert.equal(metrics.attempts.byOutcome.started.invalidCount, 0);
-    assert.equal(metrics.verification.retained.value, 1);
-    assert.equal(metrics.verification.completed.observedSubtotal, 1);
-    assert.equal(metrics.verification.completed.unknownCount, 1);
+    const before = await snapshotTree(root);
+    const run = (await collectEvaluationExport(root, DEFAULT_OPTIONS)).runs[0];
+    assert.ok(run);
+    assert.deepEqual(run.verification, []);
+    assert.deepEqual(run.verificationEvidence, {
+      coverage: "incomplete",
+      physicalAttempts: [],
+      dispositions: []
+    });
+    assert.equal(run.metrics.verification.completed.observedSubtotal, 0);
+    assert.deepEqual(await snapshotTree(root), before);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -1370,7 +1312,7 @@ test("exports every durable verification round beyond the retained state window 
     assert.equal(run.metrics.verification.failed.value, 0);
     assert.equal(run.metrics.durationsMs.verification.value, 4_000);
     assert.equal(
-      run.issueCodes.includes("VERIFICATION_HISTORY_INCOMPLETE"),
+      run.issueCodes.includes("VERIFICATION_LEDGER_MALFORMED"),
       false
     );
     assert.equal(renderEvaluationJson(first), renderEvaluationJson(second));
@@ -1399,7 +1341,7 @@ test("treats an explicit empty durable verification ledger as exact complete zer
     assert.equal(run.metrics.verification.failed.value, 0);
     assert.deepEqual(run.verification, []);
     assert.equal(
-      run.issueCodes.includes("VERIFICATION_HISTORY_INCOMPLETE"),
+      run.issueCodes.includes("VERIFICATION_LEDGER_MALFORMED"),
       false
     );
   } finally {
@@ -1448,7 +1390,7 @@ test("keeps interrupted and restarted durable verification attempts distinct wit
     assert.equal(run.metrics.verification.failed.value, 1);
     assert.equal(run.metrics.failures.interrupted_attempt.value, 1);
     assert.equal(
-      run.issueCodes.includes("VERIFICATION_HISTORY_INCOMPLETE"),
+      run.issueCodes.includes("VERIFICATION_LEDGER_MALFORMED"),
       false
     );
   } finally {
@@ -1476,7 +1418,7 @@ test("diagnoses malformed durable verification evidence without exporting its ra
     assert.equal(run.completeness, "partial");
     assert.ok(run.issueCodes.includes("VERIFICATION_LEDGER_MALFORMED"));
     assert.ok(run.issueCodes.includes("VERIFICATION_ATTEMPT_MALFORMED"));
-    assert.ok(run.issueCodes.includes("VERIFICATION_HISTORY_INCOMPLETE"));
+    assert.ok(run.issueCodes.includes("VERIFICATION_LEDGER_MALFORMED"));
     assert.equal(run.metrics.attempts.byKind.verification.value, null);
     assert.doesNotMatch(
       renderEvaluationJson(report),
@@ -1491,40 +1433,25 @@ test("diagnoses malformed durable verification evidence without exporting its ra
   }
 });
 
-test("keeps an interrupted verification gap eligible for started outcome coverage", async () => {
+test("interrupted verification is counted only from its physical ledger leaf", async () => {
   const root = await createEvaluationRoot();
   try {
     await writeEvaluationRun(root, "interrupted-verification", {
       state: evaluationStateFixture({
         status: "blocked",
-        attempts: { verification: 1 },
-        verification: [],
-        extra: {
-          blockedFrom: "verifying",
-          activeProcess: null
-        }
+        attempts: { verification: 1 }
       })
     });
-
+    await writeVerificationLedger(root, "interrupted-verification", [
+      verificationAttemptFixture({ sequence: 1, status: "interrupted" })
+    ]);
     const report = await collectEvaluationExport(root, DEFAULT_OPTIONS);
     const run = report.runs[0];
     assert.ok(run);
     assert.equal(run.metrics.attempts.total.value, 1);
-    assert.equal(run.metrics.attempts.byKind.verification.value, 1);
-    for (const outcome of ["completed", "failed", "started"] as const) {
-      const metric: NumericMetric = run.metrics.attempts.byOutcome[outcome];
-      assert.equal(metric.value, null);
-      assert.equal(metric.observedSubtotal, 0);
-      assert.equal(metric.unknownCount, 1);
-      assert.equal(metric.invalidCount, 0);
-      assert.deepEqual(
-        report.aggregates.overall.metrics.attempts.byOutcome[outcome],
-        metric
-      );
-    }
-    assert.equal(run.metrics.verification.completed.unknownCount, 1);
-    assert.equal(run.metrics.verification.failed.unknownCount, 1);
-    assert.ok(run.issueCodes.includes("VERIFICATION_HISTORY_INCOMPLETE"));
+    assert.equal(run.metrics.attempts.byOutcome.failed.value, 1);
+    assert.equal(run.metrics.verification.completed.value, 0);
+    assert.equal(run.verification[0]?.status, "interrupted");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -1560,10 +1487,10 @@ test("marks stale cumulative verification and unknown or invalid attempt outcome
     const report = await collectEvaluationExport(root, DEFAULT_OPTIONS);
     const metrics = report.runs[0]?.metrics;
     assert.ok(metrics);
-    assert.equal(metrics.attempts.total.value, null);
+    assert.equal(metrics.attempts.total.value, 2);
     assert.equal(metrics.attempts.total.observedSubtotal, 2);
     assert.equal(metrics.attempts.byKind.verification.observedSubtotal, 0);
-    assert.equal(metrics.attempts.byKind.verification.invalidCount, 1);
+    assert.equal(metrics.attempts.byKind.verification.invalidCount, 0);
     for (const outcome of ["completed", "failed"] as const) {
       assert.equal(metrics.attempts.byOutcome[outcome].value, null);
       assert.equal(metrics.attempts.byOutcome[outcome].unknownCount, 1);
@@ -1572,8 +1499,8 @@ test("marks stale cumulative verification and unknown or invalid attempt outcome
     assert.equal(metrics.attempts.byOutcome.started.value, null);
     assert.equal(metrics.attempts.byOutcome.started.observedSubtotal, 0);
     assert.equal(metrics.attempts.byOutcome.started.unknownCount, 1);
-    assert.equal(metrics.attempts.byOutcome.started.invalidCount, 2);
-    assert.ok(report.runs[0]?.issueCodes.includes("METRIC_MISMATCH"));
+    assert.equal(metrics.attempts.byOutcome.started.invalidCount, 1);
+    assert.ok(report.runs[0]?.issueCodes.includes("STATE_FIELD_INVALID"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -1716,6 +1643,12 @@ test("treats impossible persisted state, attempt, and verification timestamps as
       }),
       attempts: [attempt]
     });
+    await writeVerificationLedger(root, "invalid-dates", [
+      {
+        ...verificationAttemptFixture({ sequence: 1 }),
+        startedAt: "2026-02-30T00:00:00Z"
+      }
+    ]);
     const report = await collectEvaluationExport(root, {
       ...DEFAULT_OPTIONS,
       from: "2026-03-01T00:00:00.000Z"
@@ -1728,10 +1661,10 @@ test("treats impossible persisted state, attempt, and verification timestamps as
     const exportedAttempt = run.attempts[0];
     const verification = run.verification[0];
     assert.ok(exportedAttempt);
-    assert.ok(verification);
+    assert.equal(verification, undefined);
     assert.equal(exportedAttempt.startedAt.evidence, "invalid");
     assert.equal(exportedAttempt.completedAt.evidence, "invalid");
-    assert.equal(verification.durationMs.evidence, "invalid");
+    assert.ok(run.issueCodes.includes("VERIFICATION_ATTEMPT_MALFORMED"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -1782,21 +1715,25 @@ test("counts invalid contributors once and keeps unrelated verification, categor
       ]
     });
 
+    await writeVerificationLedger(root, "isolated-invalid-fields", [
+      verificationAttemptFixture({ sequence: 1 }),
+      verificationAttemptFixture({ sequence: 2, status: "failed" })
+    ]);
     const run = (await collectEvaluationExport(root, DEFAULT_OPTIONS)).runs[0];
     assert.ok(run);
     assert.equal(run.metrics.verification.retained.value, 2);
     assert.equal(run.metrics.verification.completed.observedSubtotal, 1);
-    assert.equal(run.metrics.verification.completed.invalidCount, 1);
-    assert.equal(run.metrics.verification.failed.invalidCount, 1);
+    assert.equal(run.metrics.verification.completed.invalidCount, 0);
+    assert.equal(run.metrics.verification.failed.invalidCount, 0);
     assert.equal(run.metrics.attempts.byOutcome.completed.observedSubtotal, 3);
-    assert.equal(run.metrics.attempts.byOutcome.completed.invalidCount, 1);
-    assert.equal(run.metrics.attempts.byOutcome.failed.observedSubtotal, 0);
-    assert.equal(run.metrics.attempts.byOutcome.failed.invalidCount, 1);
+    assert.equal(run.metrics.attempts.byOutcome.completed.invalidCount, 0);
+    assert.equal(run.metrics.attempts.byOutcome.failed.observedSubtotal, 1);
+    assert.equal(run.metrics.attempts.byOutcome.failed.invalidCount, 0);
     assert.equal(run.metrics.attempts.byOutcome.started.value, 0);
     assert.equal(run.metrics.attempts.byOutcome.started.unknownCount, 0);
     assert.equal(run.metrics.attempts.byOutcome.started.invalidCount, 0);
-    assert.equal(run.metrics.durationsMs.verification.observedSubtotal, 1_000);
-    assert.equal(run.metrics.durationsMs.verification.invalidCount, 1);
+    assert.equal(run.metrics.durationsMs.verification.observedSubtotal, 2_000);
+    assert.equal(run.metrics.durationsMs.verification.invalidCount, 0);
     assert.equal(run.metrics.sessions.unknown.observedSubtotal, 0);
     assert.equal(run.metrics.sessions.unknown.invalidCount, 1);
     assert.equal(run.metrics.reviews.attempts.unknown.observedSubtotal, 0);
@@ -1821,10 +1758,10 @@ test("retains healthy and malformed or incomplete run evidence without survivors
       "{FORBIDDEN",
       "utf8"
     );
-    await mkdir(path.join(runsRoot, "c-unsupported"), { recursive: true });
+    await mkdir(path.join(runsRoot, "c-invalid-shape"), { recursive: true });
     await writeFile(
-      path.join(runsRoot, "c-unsupported", "state.json"),
-      JSON.stringify({ schemaVersion: 99 }),
+      path.join(runsRoot, "c-invalid-shape", "state.json"),
+      JSON.stringify([]),
       "utf8"
     );
     await mkdir(path.join(runsRoot, "d-missing-state"), { recursive: true });
@@ -1857,9 +1794,7 @@ test("retains healthy and malformed or incomplete run evidence without survivors
     assert.equal(report.runs[0]?.completeness, "complete");
     assert.equal(report.runs[1]?.completeness, "unreadable");
     assert.ok(report.issues.some((issue) => issue.code === "STATE_MALFORMED"));
-    assert.ok(
-      report.issues.some((issue) => issue.code === "STATE_SCHEMA_UNSUPPORTED")
-    );
+    assert.ok(report.issues.some((issue) => issue.code === "STATE_MALFORMED"));
     assert.ok(report.issues.some((issue) => issue.code === "STATE_MISSING"));
     assert.ok(
       report.issues.some((issue) => issue.code === "ATTEMPT_MALFORMED")
@@ -2174,37 +2109,26 @@ test("exports malformed workflow selection as invalid while preserving explicit 
   }
 });
 
-test("infers strict only when schema-one workflow selection is absent", async () => {
+test("missing workflow in state 5 stays unknown without strict inference", async () => {
   const root = await createEvaluationRoot();
   try {
-    await writeEvaluationRun(root, "a-absent-selection", {
-      state: evaluationStateFixture({ schemaVersion: 1 })
-    });
-    const explicitNull = evaluationStateFixture({ schemaVersion: 1 });
-    explicitNull.workflowSelection = null;
-    await writeEvaluationRun(root, "b-null-selection", {
-      state: explicitNull
-    });
-    const malformed = evaluationStateFixture({ schemaVersion: 1 });
-    malformed.workflowSelection = 42;
-    await writeEvaluationRun(root, "c-malformed-selection", {
-      state: malformed
-    });
-
+    const state = evaluationStateFixture();
+    delete state.workflowSelection;
+    await writeEvaluationRun(root, "missing-workflow", { state });
+    const before = await snapshotTree(root);
     const report = await collectEvaluationExport(root, DEFAULT_OPTIONS);
-
     assert.deepEqual(report.runs[0]?.workflow, {
-      value: "strict",
-      evidence: "inferred_legacy"
-    });
-    assert.deepEqual(report.runs[1]?.workflow, {
       value: null,
       evidence: "unknown"
     });
-    assert.deepEqual(report.runs[2]?.workflow, {
-      value: null,
-      evidence: "invalid"
-    });
+    assert.ok(
+      report.issues.some(
+        (item) =>
+          item.code === "STATE_FIELD_MISSING" &&
+          item.field === "workflowSelection"
+      )
+    );
+    assert.deepEqual(await snapshotTree(root), before);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -2300,7 +2224,7 @@ test("never exports forbidden persisted prose and leaves the run tree byte-for-b
   );
   try {
     const state = evaluationStateFixture({
-      schemaVersion: 3,
+      schemaVersion: 5,
       reviewIteration: 1,
       extra: {
         prompt: "FORBIDDEN-PROMPT",
@@ -2390,14 +2314,11 @@ test("never exports forbidden persisted prose and leaves the run tree byte-for-b
     const kpi = deriveEvaluationKpiReport([{ label: "current", report }]);
     const kpiJson = renderEvaluationKpiJson(kpi);
     const kpiMarkdown = renderEvaluationKpiMarkdown(kpi);
-    assert.equal(report.schema, "banzai-evaluation-export/v1");
-    assert.equal(report.schemaVersion, 1);
-    assert.equal(kpi.schema, "banzai-evaluation-kpi/v1");
-    assert.equal(kpi.schemaVersion, 1);
-    assert.equal(
-      kpi.sources[0]?.kpis.some((entry) => entry.kpi.includes("consultation")),
-      false
-    );
+    assert.equal(report.schema, "banzai-evaluation-export/v2");
+    assert.equal(report.schemaVersion, 2);
+    assert.equal(kpi.schema, "banzai-evaluation-kpi/v2");
+    assert.equal(kpi.schemaVersion, 2);
+    assert.equal(JSON.stringify(kpi).includes("consultation"), false);
     const cliOutput: string[] = [];
     const cliDiagnostics: string[] = [];
     await executeEvaluationExport(root, ["--json"], {

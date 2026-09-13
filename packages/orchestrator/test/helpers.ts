@@ -1,3 +1,10 @@
+import {
+  artifactRoles,
+  canonicalJson,
+  digestBytes,
+  type ArtifactBoundWork,
+  type ArtifactWorkBinding
+} from "../src/artifact-storage.js";
 import { execFile } from "node:child_process";
 import {
   mkdtemp,
@@ -29,7 +36,7 @@ export interface TreeSnapshotEntry {
 export const EVALUATION_CREATED_AT = "2026-07-01T00:00:00.000Z";
 
 export interface EvaluationStateFixtureOptions {
-  schemaVersion?: 1 | 2 | 3;
+  schemaVersion?: number;
   status?: string;
   workflow?: "quick-fix" | "feature" | "strict";
   createdAt?: string;
@@ -65,7 +72,7 @@ export interface EvaluationStateFixtureOptions {
 export function evaluationStateFixture(
   options: EvaluationStateFixtureOptions = {}
 ): Record<string, unknown> {
-  const schemaVersion = options.schemaVersion ?? 2;
+  const schemaVersion = options.schemaVersion ?? 5;
   const reviewIteration = options.reviewIteration ?? 0;
   const appliedReviewIteration =
     options.appliedReviewIteration ?? reviewIteration;
@@ -93,14 +100,11 @@ export function evaluationStateFixture(
       deferred: 0
     }
   };
-  if (schemaVersion >= 2) {
-    metrics.sessions = options.sessions ?? { fresh: 0, resumed: 0 };
-    metrics.reviews = options.reviews ?? { full: 0, delta: 0, rotations: 0 };
-  } else {
-    delete attempts.selection;
-  }
+  metrics.sessions = options.sessions ?? { fresh: 0, resumed: 0 };
+  metrics.reviews = options.reviews ?? { full: 0, delta: 0, rotations: 0 };
   const state: Record<string, unknown> = {
     schemaVersion,
+    artifactBinding: boundWorkFixture(),
     contractVersion: "1.0.0",
     runId: "FORBIDDEN-RUN-ID",
     slug: "FORBIDDEN-FEATURE-SLUG",
@@ -138,10 +142,6 @@ export function evaluationStateFixture(
     triageHistory: options.triageHistory ?? [],
     ...options.extra
   };
-  if (schemaVersion === 1) {
-    delete state.workflowSelection;
-    delete state.triageHistory;
-  }
   return state;
 }
 
@@ -160,7 +160,6 @@ export interface EvaluationAttemptFixtureOptions {
     outputTokens: number;
     costUsd: number | null;
   } | null;
-  legacy?: boolean;
 }
 
 export function evaluationAttemptFixture(
@@ -175,12 +174,15 @@ export function evaluationAttemptFixture(
       ? null
       : new Date(Date.parse(startedAt) + durationMs).toISOString();
   const attempt: Record<string, unknown> = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     attempt: {
       id: options.id,
       kind: options.kind,
       mutable: options.kind !== "selection" && options.kind !== "review"
     },
+    interruptedAt: null,
+    recoveryOf: null,
+    recoveryAuthorizationId: null,
     status,
     startedAt,
     completedAt,
@@ -200,7 +202,7 @@ export function evaluationAttemptFixture(
           }
         : options.usage
   };
-  if (options.legacy !== true) {
+  {
     attempt.sessionMode = options.sessionMode ?? "fresh";
     attempt.reviewMode =
       options.kind === "review" ? (options.reviewMode ?? "full") : null;
@@ -239,6 +241,7 @@ export async function writeEvaluationRun(
   const directory = path.join(root, ".banzai", "runs", runId);
   await mkdir(path.join(directory, "attempts"), { recursive: true });
   await mkdir(path.join(directory, "reviews"), { recursive: true });
+  await writeVerificationLedger(root, runId, []);
   await writeFile(
     path.join(directory, "state.json"),
     JSON.stringify(fixture.state),
@@ -264,7 +267,7 @@ export async function writeEvaluationRun(
   for (const review of fixture.reviews ?? []) {
     await writeFile(
       path.join(directory, "reviews", `review-${review.ordinal}.json`),
-      JSON.stringify(review.value),
+      JSON.stringify(Object.assign({ schemaVersion: 2 }, review.value)),
       "utf8"
     );
   }
@@ -331,7 +334,7 @@ export async function writeVerificationLedger(
   root: string,
   runId: string,
   records: readonly unknown[],
-  marker: unknown = { schemaVersion: 1 }
+  marker: unknown = { schemaVersion: 2 }
 ): Promise<void> {
   const directory = path.join(
     root,
@@ -415,7 +418,7 @@ export async function commitAll(root: string, message: string): Promise<void> {
 }
 
 export async function createTestRepository(
-  options: { artifactLayout?: "legacy" | "private" | null } = {}
+  options: { artifactLayout?: "private" | null } = {}
 ): Promise<{
   root: string;
   dispose(): Promise<void>;
@@ -442,6 +445,7 @@ export async function createTestRepository(
       projectType: "custom",
       commands: [
         {
+          id: "deterministic-check",
           name: "deterministic check",
           command: process.execPath,
           args: ["-e", "process.exit(0)"],
@@ -462,15 +466,14 @@ export async function createTestRepository(
     ".banzai/runs/\n.banzai/active-run.json\n.banzai/runner.lock\n.banzai/work/\n.banzai/.artifact-init.lock\n",
     "utf8"
   );
-  // Existing suites characterize the established documentation layout. New-storage
-  // fixtures opt into first-use discovery or private storage explicitly.
+  // Current runs use private storage; explicit options exercise boundary inputs.
   if (options.artifactLayout !== null)
     await writeFile(
       path.join(root, ".banzai/artifacts.json"),
       JSON.stringify({
         schema: "banzai-artifact-layout/v1",
         schemaVersion: 1,
-        layout: options.artifactLayout ?? "legacy"
+        layout: options.artifactLayout ?? "private"
       }) + "\n"
     );
   await writeAdoptedGuidance(root);
@@ -490,4 +493,24 @@ export function requiredFixture<T>(value: T | null | undefined): T {
   if (value === undefined || value === null)
     throw new Error("Required fixture value is missing.");
   return value;
+}
+
+/** Immutable current-format data for pure projection tests; no filesystem ownership. */
+export function boundWorkFixture(): ArtifactBoundWork {
+  const workId = "12345678-1234-4234-8234-123456789abc";
+  const binding: ArtifactWorkBinding = {
+    schema: "banzai-work-binding/v2",
+    schemaVersion: 2,
+    workId,
+    slug: "fixture",
+    mode: "workflow",
+    layout: "private",
+    createdAt: "2026-09-13T00:00:00.000Z",
+    sourceCommit: null,
+    artifacts: {
+      ...artifactRoles(workId, "fixture", "workflow", "private"),
+      verificationDirectory: `.banzai/work/${workId}/verification`
+    }
+  };
+  return { binding, sha256: digestBytes(canonicalJson(binding)) };
 }

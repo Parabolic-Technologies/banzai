@@ -55,6 +55,7 @@ const CREATED_DATE = "2026-07-01T00:00:00Z";
 
 test("parses the exact evaluation kpi option contract including repeatable inputs", () => {
   assert.deepEqual(parseEvaluationKpiArgs([]), {
+    schemaVersion: 2,
     format: "markdown",
     from: null,
     to: null,
@@ -72,6 +73,7 @@ test("parses the exact evaluation kpi option contract including repeatable input
       "--json"
     ]),
     {
+      schemaVersion: 2,
       format: "json",
       from: null,
       to: null,
@@ -91,6 +93,7 @@ test("parses the exact evaluation kpi option contract including repeatable input
       "a-run"
     ]),
     {
+      schemaVersion: 2,
       format: "markdown",
       from: "2026-07-01T00:00:00.000Z",
       to: "2026-07-02T00:00:00.000Z",
@@ -172,9 +175,8 @@ test("derives kpis from input files with ordinal basename labels outside any rep
     assert.equal(markdown.stdout.length, 1);
     const rendered = markdown.stdout.join("");
     assert.match(rendered, /^# Banzai Evaluation KPIs/);
-    assert.match(rendered, /\| 1 \| 1: a\.json \|/);
-    assert.match(rendered, /\| 2 \| 2: b\.json \|/);
-    assert.match(rendered, /\| Row \| 1: a\.json \| 2: b\.json \|/);
+    assert.match(rendered, /\| 1 \| 0 \| 0 \| 0 \|/);
+    assert.match(rendered, /\| 2 \| 0 \| 0 \| 0 \|/);
     assert.deepEqual(markdown.stderr, []);
 
     const repeat = collectIo();
@@ -191,12 +193,12 @@ test("derives kpis from input files with ordinal basename labels outside any rep
     );
     const document = JSON.parse(json.stdout.join("")) as {
       schema: string;
-      sources: { label: string }[];
+      sources: { ordinal: number }[];
     };
-    assert.equal(document.schema, "banzai-evaluation-kpi/v1");
+    assert.equal(document.schema, "banzai-evaluation-kpi/v2");
     assert.deepEqual(
-      document.sources.map((source) => source.label),
-      ["1: a.json"]
+      document.sources.map((source) => source.ordinal),
+      [1]
     );
   } finally {
     await rm(evaluationRoot, { recursive: true, force: true });
@@ -204,7 +206,7 @@ test("derives kpis from input files with ordinal basename labels outside any rep
   }
 });
 
-test("fails closed with INVALID_EVAL_INPUT and no output on unreadable, malformed, or foreign inputs", async () => {
+test("fails closed without output or writes on unreadable, malformed, foreign, or removed-version inputs", async () => {
   const inputRoot = await mkdtemp(path.join(tmpdir(), "banzai-kpi-inputs-"));
   try {
     const malformed = path.join(inputRoot, "malformed.json");
@@ -215,10 +217,20 @@ test("fails closed with INVALID_EVAL_INPUT and no output on unreadable, malforme
       JSON.stringify({ schema: "banzai-doctor/v1", schemaVersion: 1 }),
       "utf8"
     );
+    const removed = path.join(inputRoot, "removed.json");
+    await writeFile(
+      removed,
+      JSON.stringify({
+        schema: "banzai-evaluation-export/v1",
+        schemaVersion: 1
+      })
+    );
+    const before = await snapshotTree(inputRoot);
     for (const file of [
       path.join(inputRoot, "missing.json"),
       malformed,
-      foreign
+      foreign,
+      removed
     ]) {
       const { stdout, stderr, io } = collectIo();
       await assert.rejects(
@@ -228,13 +240,23 @@ test("fails closed with INVALID_EVAL_INPUT and no output on unreadable, malforme
         ),
         (error: unknown) => {
           assert.ok(error instanceof BanzaiError);
-          assert.equal(error.code, "INVALID_EVAL_INPUT");
-          assert.match(error.message, new RegExp(path.basename(file)));
+          assert.equal(
+            error.code,
+            file === foreign || file === removed
+              ? "RESOURCE_VERSION_UNSUPPORTED"
+              : "INVALID_EVAL_INPUT"
+          );
+          if (file === removed)
+            assert.match(
+              error.message,
+              /^.+ version .+ is not supported; 3\.x supports .+; last read by release-train major 2$/u
+            );
           return true;
         }
       );
       assert.deepEqual(stdout, []);
       assert.deepEqual(stderr, []);
+      assert.deepEqual(await snapshotTree(inputRoot), before);
     }
   } finally {
     await rm(inputRoot, { recursive: true, force: true });
@@ -270,9 +292,8 @@ test("checkout kpis derive in memory under the current label without mutating ru
     );
     assert.equal(markdown.stdout.length, 1);
     const rendered = markdown.stdout.join("");
-    assert.match(rendered, /\| 1 \| current \| 1 \|/);
-    assert.match(rendered, /\| Row \| current \|/);
-    assert.match(rendered, /## completion_rate \(rate\)/);
+    assert.match(rendered, /\| 1 \| 0 \| 0 \| 0 \|/);
+    assert.match(rendered, /Exact \/ incomplete runs/);
     assert.deepEqual(markdown.stderr, []);
 
     const repeat = collectIo();
@@ -291,12 +312,12 @@ test("checkout kpis derive in memory under the current label without mutating ru
     );
     const document = JSON.parse(json.stdout.join("")) as {
       schema: string;
-      sources: { label: string; includedRunCount: number }[];
+      sources: { ordinal: number; runs: number }[];
     };
-    assert.equal(document.schema, "banzai-evaluation-kpi/v1");
+    assert.equal(document.schema, "banzai-evaluation-kpi/v2");
     assert.deepEqual(
-      document.sources.map((source) => source.label),
-      ["current"]
+      document.sources.map((source) => source.ordinal),
+      [1]
     );
 
     assert.deepEqual(await snapshotTree(runsRoot), before);
@@ -342,13 +363,15 @@ test("explicit KPI v2 reads only matching export files and preserves source cove
     assert.equal(projected.schema, "banzai-evaluation-kpi/v2");
     assert.equal(projected.sources[0]?.reuseRatio.value, null);
     assert.deepEqual(await snapshotTree(root), before);
-    await assert.rejects(
-      executeEvaluationKpiFromInputs(
-        parseEvaluationKpiArgs(["--input", input]),
-        collectIo().io
-      ),
-      errorCode("INVALID_EVAL_INPUT")
+    const defaultOutput = collectIo();
+    await executeEvaluationKpiFromInputs(
+      parseEvaluationKpiArgs(["--input", input, "--json"]),
+      defaultOutput.io
     );
+    assert.equal(defaultOutput.stdout.join(""), io.stdout.join(""));
+    assert.throws(() => parseEvaluationKpiArgs(["--schema-version", "1"]), {
+      code: "RESOURCE_VERSION_UNSUPPORTED"
+    });
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -294,3 +294,4 @@ disposable candidate, followed by independent review and human triage.
   before this lifecycle update. This record supersedes proposal-stage
   pending-acceptance wording; the decision body is preserved. Implementation
   state: Planned. Separate approval of the resulting plan bundle is required.
+- [ADR-0045](./0045-major-bounded-compatibility-window.md) bounds retained versions to the release-train major that introduced them; later majors may remove those readers.

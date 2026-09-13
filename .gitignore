@@ -39,6 +39,3 @@ packages/orchestrator/.dist-check-*/
 *.swp
 
 # Private documentation
-/documentation/features/
-/documentation/development-plans/
-/documentation/changes/

@@ -1,5 +1,0 @@
-{
-  "layout": "legacy",
-  "behavior": "stop",
-  "diagnostic": "legacy Banzai layout: run `project-manifest` to migrate"
-}

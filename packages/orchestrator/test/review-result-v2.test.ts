@@ -1,3 +1,5 @@
+import { canonicalJson } from "../src/artifact-storage.js";
+import { createTestRepository, boundWorkFixture } from "./helpers.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
@@ -117,7 +119,7 @@ test("review v2 permits truthful blocked coverage without findings or invented a
       artifacts: scope.approvedArtifactPaths.map((path) => ({
         path,
         status: "not_reviewed",
-        reason: "legacy Banzai layout: run project-manifest to migrate"
+        reason: "Required source evidence is unavailable"
       }))
     }
   };
@@ -161,7 +163,15 @@ test("review v2 rejects unsafe path identities and never falls back to legacy", 
     "reviewNotes",
     "scopeAcknowledgment"
   ]);
-  assert.deepEqual(parseReviewResult(legacy), legacy);
+  const before = JSON.stringify(legacy);
+  for (const schemaVersion of [undefined, 1, 3]) {
+    assert.throws(() => parseReviewResult({ ...legacy, schemaVersion }), {
+      code: "RESOURCE_VERSION_UNSUPPORTED",
+      message:
+        /^.+ version .+ is not supported; 3\.x supports .+; last read by release-train major 2$/u
+    });
+  }
+  assert.equal(JSON.stringify(legacy), before);
   assert.throws(() => parseCurrentReviewResult(legacy));
   assert.throws(() =>
     parseReviewResult({
@@ -173,7 +183,17 @@ test("review v2 rejects unsafe path identities and never falls back to legacy", 
 });
 
 test("review v2 losslessly renders semantics and frozen runner evidence and rejects tampering", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "banzai-review-v2-"));
+  const repository = await createTestRepository();
+  const root = repository.root;
+  const bound = boundWorkFixture();
+  await mkdir(path.join(root, `.banzai/work/${bound.binding.workId}`), {
+    recursive: true
+  });
+  await writeFile(
+    path.join(root, `.banzai/work/${bound.binding.workId}/work.json`),
+    canonicalJson(bound.binding),
+    { mode: 0o600 }
+  );
   try {
     const snapshot = reviewSnapshotFixture();
     const text =
@@ -236,13 +256,9 @@ test("review v2 losslessly renders semantics and frozen runner evidence and reje
     assert.deepEqual(
       values.find(
         (value) =>
-          Array.isArray(value) &&
-          value.some(
-            (entry: unknown) =>
-              typeof entry === "object" && entry !== null && "command" in entry
-          )
+          typeof value === "object" && value !== null && "decision" in value
       ),
-      snapshot.artifact.verification
+      snapshot.artifact.verificationEvidence
     );
     await mkdir(path.dirname(path.join(root, context.candidatePath)), {
       recursive: true
@@ -340,10 +356,15 @@ test("review v2 leaves frozen evaluation review semantics identical for equivale
     "scopeAcknowledgment",
     "reviewNotes"
   ]);
-  assert.deepEqual(
-    parseEvaluationReviewSource(current),
-    parseEvaluationReviewSource(legacy)
+  assert.equal(
+    parseEvaluationReviewSource(current).value.verdict.value,
+    "pass"
   );
+  assert.throws(() => parseEvaluationReviewSource(legacy), {
+    code: "RESOURCE_VERSION_UNSUPPORTED",
+    message:
+      /^.+ version .+ is not supported; 3\.x supports .+; last read by release-train major 2$/u
+  });
 });
 
 test("review snapshot rejects file hashes inconsistent with the approved bundle digest", () => {

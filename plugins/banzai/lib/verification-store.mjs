@@ -152,7 +152,12 @@ export function verificationApplicability(decision, origins, current) {
   parseVerificationDecision(decision); capture(current);
   // Missing captures preserve physical history, but cannot establish current
   // applicability: equal null digests are not evidence of unchanged inputs.
-  const drift = !current.complete || decision.candidateDigest !== current.candidateDigest;
+  // Opting out of reuse retains physical checks in this round. This does not
+  // treat unavailable policy-backed captures as unchanged input evidence.
+  const physicalOnly = !current.complete && current.reason === "policy_disabled" &&
+    decision.candidateDigest === null && decision.actions.every((action) =>
+      action.action === "execute" && action.reason === "policy_disabled" && action.identity.policyDigest === null);
+  const drift = !physicalOnly && (!current.complete || decision.candidateDigest !== current.candidateDigest);
   const dispositions = decision.actions.map((action) => {
     const origin = action.action === "reuse"
       ? origins.find((item) => item.attemptId === action.origin.attemptId && item.recordDigest === action.origin.recordDigest)
@@ -161,6 +166,11 @@ export function verificationApplicability(decision, origins, current) {
     let valid = !drift && origin && origin.complete && origin === latest && origin.workId === decision.workId &&
       origin.status === "completed" && origin.exitCode === 0 && origin.signal === null && origin.failureCategory === null && origin.logsIntact &&
       JSON.stringify(origin.identity) === JSON.stringify(action.identity);
+    if (physicalOnly) {
+      valid = valid && origin.roundId === decision.roundId &&
+        !origin.before.complete && origin.before.reason === "policy_disabled" &&
+        !origin.after.complete && origin.after.reason === "policy_disabled";
+    }
     if (action.action === "reuse") {
       const input = current.checks.find((item) => item.checkId === action.checkId);
       const prior = origin?.before.checks.find((item) => item.checkId === action.checkId);

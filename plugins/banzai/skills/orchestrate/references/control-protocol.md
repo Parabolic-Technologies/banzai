@@ -15,15 +15,14 @@ Require one clean JSON document with:
 
 - `schema: "banzai-agent-capabilities/v3"`
 - `schemaVersion: 3`
-- `controlContractVersion: "3.0.0"`
+- `controlContractVersion: "4.0.0"`
 - non-empty `orchestratorVersion`
 - `umbrellaContractVersion: "1.0.0"`
 - exactly these supported, non-TTY operations: `status`, `start`, `answer`,
   `approveAdr`, `approvePlan`, `triage`, `resume`, `retry`, `recover`, and
   `cancel`
 - `start.inputSchemas: ["banzai-agent-request/v1"]`
-- `answer.inputSchemas: ["banzai-agent-answer/v2",
-"banzai-agent-answer/v1"]` in that order
+- `answer.inputSchemas: ["banzai-agent-answer/v2"]`
 - `recover.inputSchemas: ["banzai-agent-recovery/v1"]`
 - `inputSchemas: []` for the other operations
 
@@ -90,20 +89,10 @@ Escalation answer uses fixed argv:
 banzai control answer [--by <current-user-label>] [--no-resume]
 ```
 
-Send this document through direct process stdin:
-
-```json
-{
-  "schema": "banzai-agent-answer/v1",
-  "schemaVersion": 1,
-  "answers": ["answer to question 1", "answer to question 2"]
-}
-```
-
-Preserve strings and order exactly. Use `--by` only for an honest current-user
-label; otherwise omit it and keep the CLI default. Never identify the agent as
-the human decision maker. Use `--no-resume` only when the user explicitly wants
-the decision persisted without continuing.
+Only decision consultations use the control answer operation. A plain
+`answer_escalation` gate requires the human to run the interactive `banzai answer`
+command in the project. Pause supervision until that decision is recorded, then
+refresh status. Do not synthesize consultation identities for a plain escalation.
 
 Decision consultation uses the same fixed argv only when the latest v2 status
 reports `nextAction: "answer_consultation"`. Present each exact bounded card
@@ -141,7 +130,7 @@ keyed document shaped like:
 For an exact free preference use `kind: "preference"`, `optionId: null`, and
 the unchanged user-authored text. Every pending decision appears exactly once;
 do not add, drop, reorder by prose, or reuse a document after status changes. A
-v1 answer remains valid only for `answer_escalation` and must never be sent for
+Removed answer documents are rejected and must never be sent for
 consultation. Consultation is provenance, not ADR/plan approval or any other
 authorization.
 
@@ -242,7 +231,7 @@ requires an absent or terminal run; cancellation remains an explicit user choice
 | --- | --- |
 | `approve_adr` | Show every `pendingGate.artifactPaths` and `adrIds`; wait for an explicit current decision for the relevant ADR; run `banzai approve adr --id <ADR-ID> --decision <accept\|reject\|rework>` and refresh status. Do not pass an arbitrary note through shell argv. |
 | `approve_plan` | Show the exact approval bundle; wait for explicit approval/rework/rejection of the current plan; only approval runs `banzai approve plan`; refresh status. |
-| `answer_escalation` | Show summary and ordered questions; wait for exact ordered answers; send a v1 answer through `banzai control answer`; refresh status. |
+| `answer_escalation` | Show the exact summary and questions; let the human answer through interactive `banzai answer`; refresh status. |
 | `answer_consultation` | Show the exact current run/request/round and every bounded card with `Decision`, `Why this matters`, `Repository evidence`, `Options`, and `Recommendation` when present. Wait for one exact current-user answer per decision or pause without mutation. Send one keyed v2 answer through direct stdin; refresh status. Never choose, infer, rewrite, or treat the response as approval. |
 | `triage` | Show artifact, iteration, and every latest finding; require exactly one disposition per ID; run `banzai triage --accept <comma-list> --reject <comma-list> --defer <comma-list>` with empty strings for empty lists; refresh status. |
 | `resume` | Run `banzai resume`, remain attached, then refresh status. |
@@ -274,4 +263,10 @@ human stdout. Ignore that prose as state and query versioned control status.
 
 ## Artifact storage capability
 
-Current capabilities v3/control 3.0.0 advertise the declarationSchemas and bindingSchemas arrays, layouts and privateWorkspaceSnapshotVersion: 2 in `artifactStorage`. Require this capability before supervising private work. A v2/control 2.0.0 consumer is legacy-only and must not infer private storage support. The request, status, answer and recovery schemas remain unchanged. Never create or edit run work bindings through supervisor tools; the runner persists their authority.
+Current capabilities v3/control 4.0.0 must advertise exactly
+`artifactStorage.declarationSchemas: ["banzai-artifact-layout/v1"]`,
+`artifactStorage.bindingSchemas: ["banzai-work-binding/v2"]`,
+`artifactStorage.layouts: ["private"]`, and
+`artifactStorage.privateWorkspaceSnapshotVersion: 2`. Require all these values
+before supervision. Never create or edit run work bindings through supervisor
+tools; the runner persists their authority.

@@ -1,3 +1,4 @@
+import { unsupportedResourceVersion } from "../../../plugins/banzai/lib/artifact-storage.mjs";
 import { createHash } from "node:crypto";
 import {
   chmod,
@@ -17,7 +18,8 @@ export const RECOVERY_DIRECTORY = ".banzai-version-set";
 export const RECOVERY_GUARD = `${RECOVERY_DIRECTORY}.guard`;
 const RECOVERY_GUARD_TEMPORARY = `${RECOVERY_GUARD}.tmp`;
 
-const LEGACY_VERSION_SURFACES = Object.freeze([
+export const VERSION_SURFACES = Object.freeze([
+  Object.freeze({ path: "package.json", pointer: "/version" }),
   Object.freeze({
     path: "plugins/banzai/.claude-plugin/plugin.json",
     pointer: "/version"
@@ -35,18 +37,12 @@ const LEGACY_VERSION_SURFACES = Object.freeze([
     path: "packages/orchestrator/package.json",
     pointer: "/version"
   }),
+  Object.freeze({ path: "package-lock.json", pointer: "/version" }),
+  Object.freeze({ path: "package-lock.json", pointer: "/packages//version" }),
   Object.freeze({
     path: "package-lock.json",
     pointer: "/packages/packages~1orchestrator/version"
   })
-]);
-
-export const VERSION_SURFACES = Object.freeze([
-  Object.freeze({ path: "package.json", pointer: "/version" }),
-  ...LEGACY_VERSION_SURFACES.slice(0, 5),
-  Object.freeze({ path: "package-lock.json", pointer: "/version" }),
-  Object.freeze({ path: "package-lock.json", pointer: "/packages//version" }),
-  LEGACY_VERSION_SURFACES[5]
 ]);
 
 function groupTargets(surfaces) {
@@ -63,16 +59,16 @@ function groupTargets(surfaces) {
 }
 
 const VERSION_TARGETS = groupTargets(VERSION_SURFACES);
-const LEGACY_VERSION_TARGETS = groupTargets(LEGACY_VERSION_SURFACES);
 
 function targetsForFormat(format, relativePath = RECOVERY_DIRECTORY) {
-  if (format === 1) return LEGACY_VERSION_TARGETS;
   if (format === 2) return VERSION_TARGETS;
-  throw failure(
-    "INVALID_VERSION_TRANSACTION",
-    relativePath,
-    "unsupported transaction format"
-  );
+  try {
+    unsupportedResourceVersion("version transaction", format, 2);
+  } catch (error) {
+    const rejected = failure(error.code, relativePath, error.message);
+    rejected.message = error.message;
+    throw rejected;
+  }
 }
 
 const CANONICAL_SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
@@ -482,14 +478,13 @@ function pointerSegments(pointer) {
     });
 }
 
-function pointerNode(document, pointer, relativePath, allowAbsent = false) {
+function pointerNode(document, pointer, relativePath) {
   let current = document.root;
   const segments = pointerSegments(pointer);
-  for (const [index, segment] of segments.entries()) {
+  for (const segment of segments) {
     if (current.type === "object") {
       const next = current.properties.get(segment);
       if (next === undefined) {
-        if (allowAbsent && index === segments.length - 1) return null;
         throw failure(
           "MISSING_VERSION_FIELD",
           relativePath,
@@ -564,97 +559,26 @@ function compareVersions(left, right) {
   return 0;
 }
 
-function replaceVersion(contents, descriptor, targetVersion) {
+function targetVersions(contents, descriptor) {
   const document = parseJsonDocument(contents, descriptor.path);
-  const node = pointerNode(document, descriptor.pointer, descriptor.path);
-  const originalVersion = canonicalVersion(
-    node.value,
-    descriptor.path,
-    "current version",
-    "INVALID_VERSION_VALUE"
-  );
-  const start = Buffer.byteLength(document.source.slice(0, node.start), "utf8");
-  const end = Buffer.byteLength(document.source.slice(0, node.end), "utf8");
-  const replacement = Buffer.from(JSON.stringify(targetVersion), "utf8");
-  const candidate = Buffer.concat([
-    contents.subarray(0, start),
-    replacement,
-    contents.subarray(end)
-  ]);
-  const candidateDocument = parseJsonDocument(candidate, descriptor.path);
-  const candidateNode = pointerNode(
-    candidateDocument,
-    descriptor.pointer,
-    descriptor.path
-  );
-  if (candidateNode.value !== targetVersion) {
-    throw failure(
-      "INVALID_VERSION_CANDIDATE",
+  return descriptor.pointers.map((pointer) =>
+    canonicalVersion(
+      pointerNode(document, pointer, descriptor.path).value,
       descriptor.path,
-      "candidate version did not survive JSON parsing"
-    );
-  }
-  return { candidate, originalVersion };
-}
-
-function bootstrapField(relativePath, pointer) {
-  return (
-    (relativePath === "package.json" && pointer === "/version") ||
-    (relativePath === "package-lock.json" &&
-      (pointer === "/version" || pointer === "/packages//version"))
+      `current version at ${pointer}`,
+      "INVALID_VERSION_VALUE"
+    )
   );
 }
 
-function targetVersions(contents, descriptor, allowAbsent) {
-  const document = parseJsonDocument(contents, descriptor.path);
-  return descriptor.pointers.map((pointer) => {
-    const node = pointerNode(
-      document,
-      pointer,
-      descriptor.path,
-      allowAbsent && bootstrapField(descriptor.path, pointer)
-    );
-    return node === null
-      ? null
-      : canonicalVersion(
-          node.value,
-          descriptor.path,
-          `current version at ${pointer}`,
-          "INVALID_VERSION_VALUE"
-        );
-  });
-}
-
-function replaceVersions(contents, descriptor, targetVersion, transition) {
+function replaceVersions(contents, descriptor, targetVersion) {
   const document = parseJsonDocument(contents, descriptor.path);
   const edits = descriptor.pointers.map((pointer) => {
-    const node = pointerNode(
-      document,
-      pointer,
-      descriptor.path,
-      transition === "bootstrap" && bootstrapField(descriptor.path, pointer)
-    );
-    if (node !== null) {
-      return {
-        start: node.start,
-        end: node.end,
-        text: JSON.stringify(targetVersion)
-      };
-    }
-    // Only the three fixed bootstrap fields may be inserted. Their parents
-    // already exist, as proved by pointer resolution and the full pre-state.
-    const parent =
-      pointer === "/packages//version"
-        ? document.root.properties.get("packages").properties.get("")
-        : document.root;
-    const start = parent.start + 1;
-    const whitespace = document.source.slice(start).match(/^[\t\r\n ]*/)[0];
-    const position = start + whitespace.length;
-    const suffix = parent.properties.size === 0 ? "" : `,${whitespace}`;
+    const node = pointerNode(document, pointer, descriptor.path);
     return {
-      start: position,
-      end: position,
-      text: `"version": ${JSON.stringify(targetVersion)}${suffix}`
+      start: node.start,
+      end: node.end,
+      text: JSON.stringify(targetVersion)
     };
   });
   let candidate = contents;
@@ -842,13 +766,7 @@ async function assertNoTransaction(root, fileSystem) {
   }
 }
 
-async function prepareTargets(
-  root,
-  descriptors,
-  targetVersion,
-  fileSystem,
-  format = 2
-) {
+async function prepareTargets(root, descriptors, targetVersion, fileSystem) {
   const prepared = [];
   for (const [index, descriptor] of descriptors.entries()) {
     const snapshot = await readFixedFile(
@@ -877,11 +795,7 @@ async function prepareTargets(
       absolutePath: snapshot.absolutePath,
       mode: snapshot.mode,
       original: snapshot.contents,
-      originalVersions: targetVersions(
-        snapshot.contents,
-        descriptor,
-        format === 2
-      ),
+      originalVersions: targetVersions(snapshot.contents, descriptor),
       originalDigest: sha256(snapshot.contents)
     });
   }
@@ -891,45 +805,21 @@ async function prepareTargets(
     "target version",
     "INVALID_VERSION_ARGUMENT"
   );
-  const transition = validateCurrentState(prepared, target, format);
+  validateCurrentState(prepared, target);
   for (const entry of prepared) {
-    entry.candidate =
-      format === 1
-        ? replaceVersion(
-            entry.original,
-            { path: entry.path, pointer: entry.pointers[0] },
-            targetVersion
-          ).candidate
-        : replaceVersions(entry.original, entry, targetVersion, transition);
+    entry.candidate = replaceVersions(entry.original, entry, targetVersion);
     entry.candidateDigest = sha256(entry.candidate);
   }
   return prepared;
 }
 
-function validateCurrentState(prepared, target, format = 2) {
+function validateCurrentState(prepared, target) {
   const versions = prepared.flatMap((entry) => entry.originalVersions);
-  const values = versions.map((version) => version?.value ?? null);
-  if (format === 1) {
-    const initial =
-      values.slice(0, 4).every((value) => value === "1.18.1") &&
-      values.slice(4).every((value) => value === "0.8.2");
-    if (initial && target.value === "1.19.0") return "initial";
-  } else {
-    const bootstrap = values.every((value, index) =>
-      [0, 6, 7].includes(index) ? value === null : value === "1.19.0"
-    );
-    if (bootstrap && target.value === "1.19.0") return "bootstrap";
-  }
-  if (
-    versions.some((version) => version === null) ||
-    !values.every((value) => value === values[0])
-  ) {
+  if (!versions.every((version) => version.value === versions[0].value)) {
     throw failure(
       "INVALID_VERSION_TRANSITION",
       "release-policy.json",
-      format === 1
-        ? "legacy state is neither the initial migration nor six-way equal"
-        : "current fields are neither the exact 1.19.0 bootstrap nor nine-way equal"
+      "all nine current version fields must agree"
     );
   }
   if (compareVersions(target, versions[0]) <= 0) {
@@ -1423,19 +1313,19 @@ function transactionFileRecord(
   recordPath = `${RECOVERY_DIRECTORY}/transaction.json`
 ) {
   const descriptors = targetsForFormat(value?.format, recordPath);
-  const modern = value.format === 2;
   if (
-    !exactKeys(
-      value,
-      modern
-        ? ["format", "ownerPid", "targetVersion", "transition", "files"]
-        : ["format", "ownerPid", "targetVersion", "files"]
-    ) ||
+    !exactKeys(value, [
+      "format",
+      "ownerPid",
+      "targetVersion",
+      "transition",
+      "files"
+    ]) ||
     !Number.isSafeInteger(value.ownerPid) ||
     value.ownerPid <= 0 ||
     !Array.isArray(value.files) ||
     value.files.length !== descriptors.length ||
-    (modern && !["bootstrap", "forward"].includes(value.transition))
+    value.transition !== "forward"
   ) {
     throw failure(
       "INVALID_VERSION_TRANSACTION",
@@ -1455,20 +1345,18 @@ function transactionFileRecord(
       !exactKeys(file, [
         "index",
         "path",
-        modern ? "pointers" : "pointer",
+        "pointers",
         "mode",
         "originalDigest",
         "candidateDigest"
       ]) ||
       file.index !== index ||
       file.path !== descriptor.path ||
-      (modern
-        ? !Array.isArray(file.pointers) ||
-          file.pointers.length !== descriptor.pointers.length ||
-          file.pointers.some(
-            (pointer, at) => pointer !== descriptor.pointers[at]
-          )
-        : file.pointer !== descriptor.pointers[0]) ||
+      !Array.isArray(file.pointers) ||
+      file.pointers.length !== descriptor.pointers.length ||
+      file.pointers.some(
+        (pointer, at) => pointer !== descriptor.pointers[at]
+      ) ||
       !Number.isSafeInteger(file.mode) ||
       typeof file.originalDigest !== "string" ||
       !SHA256.test(file.originalDigest) ||
@@ -1498,7 +1386,6 @@ function transactionRecordsEqual(left, right) {
       return (
         file.index === other.index &&
         file.path === other.path &&
-        file.pointer === other.pointer &&
         JSON.stringify(file.pointers) === JSON.stringify(other.pointers) &&
         file.mode === other.mode &&
         file.originalDigest === other.originalDigest &&
@@ -1609,24 +1496,12 @@ function retainedPreparedTarget(root, record, index, original, candidate) {
   let originalVersions;
   let expectedCandidate;
   try {
-    originalVersions = targetVersions(
+    originalVersions = targetVersions(original, descriptor);
+    expectedCandidate = replaceVersions(
       original,
       descriptor,
-      record.format === 2 && record.transition === "bootstrap"
+      record.targetVersion
     );
-    expectedCandidate =
-      record.format === 1
-        ? replaceVersion(
-            original,
-            { path: descriptor.path, pointer: descriptor.pointers[0] },
-            record.targetVersion
-          ).candidate
-        : replaceVersions(
-            original,
-            descriptor,
-            record.targetVersion,
-            record.transition
-          );
   } catch (error) {
     throw failure(
       "INVALID_VERSION_TRANSACTION",
@@ -1664,8 +1539,8 @@ function validateRetainedState(prepared, record) {
       "retained target",
       "INVALID_VERSION_TRANSACTION"
     );
-    const transition = validateCurrentState(prepared, target, record.format);
-    if (record.format === 2 && transition !== record.transition) {
+    const transition = validateCurrentState(prepared, target);
+    if (transition !== record.transition) {
       throw new Error("retained transition does not match the originals");
     }
   } catch (error) {
@@ -1692,9 +1567,9 @@ async function loadCleanupGuard(root, fileSystem) {
       error
     );
   }
+  targetsForFormat(value?.format, RECOVERY_GUARD);
   if (
     !exactKeys(value, ["format", "transaction", "originals", "candidates"]) ||
-    ![1, 2].includes(value.format) ||
     value.transaction?.format !== value.format ||
     !Array.isArray(value.originals) ||
     !Array.isArray(value.candidates)
@@ -2201,8 +2076,7 @@ async function preReadyPreparedTargets(root, descriptors, record, fileSystem) {
     root,
     descriptors,
     record.targetVersion,
-    fileSystem,
-    record.format
+    fileSystem
   );
   validateRetainedState(prepared, record);
   const mismatches = prepared

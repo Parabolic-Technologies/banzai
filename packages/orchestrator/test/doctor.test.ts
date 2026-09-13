@@ -1,3 +1,5 @@
+import { createWork, readBinding } from "../src/artifact-storage.js";
+import { ResourceVersionUnsupportedError } from "../src/errors.js";
 import { instructionPluginFixture } from "./phase-instruction-fixtures.js";
 import assert from "node:assert/strict";
 import {
@@ -25,7 +27,7 @@ import type {
   OrchestratorConfig,
   VerificationProjectType
 } from "../src/types.js";
-import { snapshotTree } from "./helpers.js";
+import { snapshotTree, createTestRepository } from "./helpers.js";
 import { writeAdoptedGuidance } from "./adoption-fixtures.js";
 import { ADOPTED_AGENTS } from "./adoption-fixtures.js";
 
@@ -154,6 +156,7 @@ function substantiveConfig(
     projectType,
     commands: [
       {
+        id: `${projectType}-verification`,
         name: `${projectType} verification`,
         command: "project-check",
         args: ["verify"],
@@ -281,6 +284,7 @@ test("requires substantive coverage for every detected project type", async () =
       projectType: "php",
       commands: [
         {
+          id: "php-verification",
           name: "php verification",
           command: "project-check",
           args: ["verify"],
@@ -355,6 +359,7 @@ test("supports custom projects and keeps unused profiles as warnings", async () 
       projectType: "node",
       commands: [
         {
+          id: "unused-check",
           name: "unused",
           command: "unused-check",
           args: [],
@@ -372,7 +377,7 @@ test("supports custom projects and keeps unused profiles as warnings", async () 
   }
 });
 
-test("distinguishes missing malformed unsupported invalid and legacy config", async () => {
+test("distinguishes missing malformed unsupported invalid and current config", async () => {
   const repository = await temporaryRoot();
   try {
     const missing = await inspectDoctor(repository.root, dependencies());
@@ -421,27 +426,25 @@ test("distinguishes missing malformed unsupported invalid and legacy config", as
       "skipped"
     );
 
-    const legacy = {
-      ...structuredClone(DEFAULT_CONFIG),
-      schemaVersion: 1,
-      verification: [
-        {
-          name: "legacy project check",
-          command: "project-check",
-          args: ["verify"],
-          timeoutMs: 1_000
-        }
-      ]
-    };
-    await writeConfig(repository.root, legacy);
-    const legacyReport = await inspectDoctor(repository.root, dependencies());
-    assert.equal(checkStatus(legacyReport, "config.valid"), "pass");
-    assert.equal(checkStatus(legacyReport, "config.version"), "fail");
-    assert.equal(checkStatus(legacyReport, "verification.profiles"), "fail");
     assert.equal(
-      checkStatus(legacyReport, "verification.substantive"),
-      "skipped"
+      supported.checks.find((item) => item.id === "config.version")?.message,
+      "Configuration uses schema version 3 and the supported contract version."
     );
+    for (const schemaVersion of [1, 2]) {
+      await writeConfig(repository.root, { ...DEFAULT_CONFIG, schemaVersion });
+      const report = await inspectDoctor(repository.root, dependencies());
+      assert.equal(checkStatus(report, "config.valid"), "fail");
+      assert.equal(checkStatus(report, "config.version"), "fail");
+      assert.equal(checkStatus(report, "verification.profiles"), "skipped");
+      assert.equal(
+        report.checks.find((item) => item.id === "config.version")?.message,
+        new ResourceVersionUnsupportedError(
+          "orchestrator config",
+          schemaVersion,
+          3
+        ).message
+      );
+    }
   } finally {
     await repository.dispose();
   }
@@ -691,7 +694,7 @@ test("rejects symlinked Banzai and runs boundaries without reading external evid
     await writeFile(
       path.join(externalRun, "state.json"),
       JSON.stringify({
-        schemaVersion: 2,
+        schemaVersion: 5,
         runId: "safe-run",
         repoRoot: repository.root,
         status: "done"
@@ -758,7 +761,7 @@ test("rejects final config pointer state and lock symlinks outside their boundar
     await writeFile(
       externalState,
       JSON.stringify({
-        schemaVersion: 2,
+        schemaVersion: 5,
         runId: "safe-run",
         repoRoot: repository.root,
         status: "done"
@@ -800,6 +803,23 @@ async function writeRunState(
     runId?: string;
   } = {}
 ): Promise<void> {
+  const workPath = ".banzai/work/12345678-1234-4234-8234-123456789abc";
+  const existing = await readFile(path.join(root, workPath, "work.json")).catch(
+    (error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  );
+  const artifactBinding =
+    existing === null
+      ? await createWork({
+          repoRoot: root,
+          slug: "doctor-fixture",
+          mode: "workflow",
+          schemaVersion: 2,
+          creationId: "12345678-1234-4234-8234-123456789abc"
+        })
+      : await readBinding(root, workPath);
   const runId = options.runId ?? "safe-run";
   const runDirectory = path.join(root, ".banzai", "runs", runId);
   await mkdir(runDirectory, { recursive: true });
@@ -812,11 +832,14 @@ async function writeRunState(
     await writeFile(
       path.join(runDirectory, "state.json"),
       JSON.stringify(
-        options.state ?? {
-          schemaVersion: 2,
-          runId,
-          repoRoot: root,
-          status: "done"
+        {
+          artifactBinding,
+          ...(options.state ?? {
+            schemaVersion: 5,
+            runId,
+            repoRoot: root,
+            status: "done"
+          })
         },
         null,
         2
@@ -827,7 +850,7 @@ async function writeRunState(
 }
 
 test("distinguishes terminal active malformed unsafe missing and mismatched run state", async () => {
-  const repository = await temporaryRoot();
+  const repository = await createTestRepository();
   try {
     await writeConfig(repository.root, substantiveConfig("custom"));
     await writeRunState(repository.root);
@@ -841,7 +864,7 @@ test("distinguishes terminal active malformed unsafe missing and mismatched run 
 
     await writeRunState(repository.root, {
       state: {
-        schemaVersion: 2,
+        schemaVersion: 5,
         runId: "safe-run",
         repoRoot: repository.root,
         status: "implementing"
@@ -918,7 +941,7 @@ test("distinguishes terminal active malformed unsafe missing and mismatched run 
 
     await writeRunState(repository.root, {
       state: {
-        schemaVersion: 2,
+        schemaVersion: 5,
         runId: "different-run",
         repoRoot: repository.root,
         status: "done"
@@ -933,7 +956,7 @@ test("distinguishes terminal active malformed unsafe missing and mismatched run 
 
     await writeRunState(repository.root, {
       state: {
-        schemaVersion: 2,
+        schemaVersion: 5,
         runId: "safe-run",
         repoRoot: path.join(repository.root, "other-checkout"),
         status: "done"
@@ -971,7 +994,7 @@ test("distinguishes terminal active malformed unsafe missing and mismatched run 
       (await inspectDoctor(repository.root, dependencies())).checks.find(
         (item) => item.id === "run.active"
       )?.message ?? "",
-      /unsupported structure/
+      /run state version 99 is not supported/
     );
   } finally {
     await repository.dispose();
@@ -1064,7 +1087,7 @@ test("distinguishes absent live stale malformed and unsupported runner locks", a
 });
 
 test("never exports private persisted config state environment or source canaries", async () => {
-  const repository = await temporaryRoot();
+  const repository = await createTestRepository();
   try {
     await writeConfig(repository.root, substantiveConfig("custom"));
     await writeFile(
@@ -1074,7 +1097,7 @@ test("never exports private persisted config state environment or source canarie
     );
     await writeRunState(repository.root, {
       state: {
-        schemaVersion: 2,
+        schemaVersion: 5,
         runId: "safe-run",
         repoRoot: repository.root,
         status: "done",

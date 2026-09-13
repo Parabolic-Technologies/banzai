@@ -280,6 +280,8 @@ if (runnerMode) {
         'utf8'
       )
     );
+    const storage = await import('../lib/artifact-storage.mjs');
+    if (state.schemaVersion !== 5) storage.unsupportedResourceVersion('run state', state.schemaVersion, 5);
     if (pointer.runId !== runnerRunId || state.runId !== runnerRunId) {
       throw new Error('active runner state does not match this process');
     }
@@ -288,10 +290,8 @@ if (runnerMode) {
     }
     const controlRoot = path.join(projectRoot, '.banzai');
     let privateWrites = new Set();
-    if (state.schemaVersion === 4 || state.schemaVersion === 5) {
-      const storage = await import('../lib/artifact-storage.mjs');
+    {
       const bound = await storage.inspectBoundWork(projectRoot, state.artifactBinding);
-      if (state.schemaVersion === 5 && bound.binding.schemaVersion !== 2) throw new Error('verification-enabled state requires its original v2 binding');
       const roles = bound.binding.artifacts;
       const phase = state.activeAttempt?.kind;
       if (phase === 'selection' || state.status === 'selecting') throw new Error('workflow selection is read-only');
@@ -301,14 +301,11 @@ if (runnerMode) {
       for (const target of targets) {
         const relative = path.relative(projectRoot, path.resolve(projectRoot, target));
         await storage.safePath(projectRoot, relative, {missing: true});
-        if (bound.binding.layout === 'private' && /^documentation\/(?:features|development-plans|changes)\//.test(relative)) throw new Error('work artifacts must use the persisted private binding');
       }
       if (phase === 'plan' && state.status === 'planning' && targets.every(target => {
         const relative = path.relative(projectRoot, path.resolve(projectRoot, target));
         return privateWrites.has(relative) || !relative.startsWith('.banzai/') && isDocArtifact(relative);
       })) runnerDecision('allow', 'banzai spec-gate: exact planning artifacts are writable during planning.');
-    } else if (state.artifactBinding !== undefined) {
-      throw new Error('legacy run cannot carry private artifact authority');
     }
     if (state.status === 'reviewing' || state.activeAttempt?.kind === 'review') {
       throw new Error('orchestrated reviewers are read-only; the runner owns review artifacts');

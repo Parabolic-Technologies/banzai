@@ -18,8 +18,7 @@ only discovery-specific responsibilities and does not copy its rule set.
 
 Before artifact discovery or writing, read the installed
 `../../policies/artifact-storage.md` and resolve the selected work through its
-plugin-local helper. Use the returned role paths for internal work artifacts;
-`documentation/` work paths below describe the explicit legacy layout only.
+plugin-local helper. Use the returned private role paths for internal work artifacts.
 Keep ADRs, indexes, manifests and maintained product guidance at their existing
 repository paths. Status/loading stays read-only, and orchestrated work follows
 the persisted run binding and exact phase grants.
@@ -27,21 +26,19 @@ the persisted run binding and exact phase grants.
 ## Sources
 
 - Process: the project root `AGENTS.md`. Read it unless the host already
-  assembled it into this session. Before bootstrap or migration discovery,
+  assembled it into this session. Before bootstrap discovery,
   recognize the layout: target when `AGENTS.md` carries `## Authority` and
   `## Policies` with no line beginning with `@`, and the `CLAUDE.md` shim is
-  absent or carries no policy heading; legacy layout when `CLAUDE.md` carries
-  `## Engineering Quality` and `AGENTS.md` is absent or lacks `## Authority`.
+  absent or carries no policy heading.
   Policy headings for layout recognition are `## Decision Consultation`,
   `## Test Assurance`, `## Security Assurance`, `## Engineering Quality`,
   and `## Plan Task Completion Evidence`.
-  Report the legacy diagnostic: "legacy Banzai layout: run `project-manifest` to migrate".
-  On a legacy or partial layout apply the bootstrap source rule: take process
-  text from the installed plugin's packaged `AGENTS.md` (`../../AGENTS.md`
-  from this `SKILL.md`) and policies from `../../policies/`; project files
-  are inputs to the migration diff only, legacy Banzai text is never an
-  applicable policy, and approved decisions recorded there keep their authority.
-  Stop if an installed source is unreadable. Report a partial layout as partial.
+  On partial report the exact ambiguity without changing source or guessing
+  precedence. Read process from the installed plugin's packaged `AGENTS.md`
+  (`../../AGENTS.md` from this skill) and policies from `../../policies/`
+  for the report only; project policy bodies are never applicable rules.
+  Approved project decisions retain their authority. Stop if an installed
+  source is unreadable. Bootstrap may apply only explicitly approved merges.
   Unadopted means neither file has `## Authority` or a policy heading; keep
   existing missing-manifest behavior. Every other combination, including an
   unreadable file, is partial. Skip this recognition rule in the plugin source
@@ -50,7 +47,7 @@ the persisted run binding and exact phase grants.
 - Policies, resolved as `../../policies/<name>.md` from this `SKILL.md`,
   never from the project working directory or a fixed plugin cache path.
   Stop before affected work if a required source is absent or unreadable;
-  never substitute a project copy, a legacy inline policy or memory:
+  never substitute a project copy, an inline policy or memory:
   - `test-assurance.md` when recording test-assurance facts or selecting a bootstrap test runner or command.
   - `security-assurance.md` when proposing an applicable bootstrap or configuration boundary change; reading never authorizes that change.
   - `engineering-quality.md` before discovery, design, implementation, fix or review judgment within this skill.
@@ -100,23 +97,6 @@ name alone never grants it. Packaged templates remain product source; runtime
 readiness still requires a populated root `PROJECT_MANIFEST.md` and readable
 root `AGENTS.md`. The exception also applies to layout-only continuation checks.
 
-## Layout Migration
-
-Recognize target, legacy, unadopted and partial layouts as described in Sources
-and [the migration procedure](references/layout-migration.md). On legacy or
-partial layouts, propose one concrete migration diff before writing: preserve
-shared rules under `## Project Rules` in `AGENTS.md`, and keep only confirmed
-host-specific content below `@AGENTS.md` in the `CLAUDE.md` shim. Classify every
-non-Banzai line with the user and resolve conflicts and unclassified lines by
-approval before applying. Apply only approved edits; silently dropping or
-duplicating content is forbidden.
-
-A declined migration leaves project files byte-identical and the updated plugin
-installed; affected work remains stopped. An interrupted or partially applied
-migration remains partial; explicitly invoked migration may complete or revert
-it under one approved diff. The reference names the last legacy-compatible
-release as information only, never authorization to install or downgrade it.
-
 ## Bootstrap
 
 Before first feature, record decisions required to run the next implementation:
@@ -159,8 +139,8 @@ rereads structural guidance and starts no task automatically.
 The CLI checks root guidance before a new run, and instruction layout before
 new model-bearing continuations. A structural pass does not certify freshness,
 load-bearing choices, installed policy access or host delivery. Keep this
-skill's ordinary evidence checks and migration stops. During an unfinished run,
-CLI setup refuses launch: manual explicit migration or repair follows existing
+skill's ordinary evidence checks and partial-layout stops. During an unfinished run,
+CLI setup refuses launch: manual explicit repair follows existing
 approval/digest checks, or the user explicitly cancels before setup.
 
 ## Adoption

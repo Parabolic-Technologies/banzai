@@ -1,3 +1,9 @@
+import { createWork } from "../src/artifact-storage.js";
+import { randomUUID } from "node:crypto";
+import {
+  currentReviewFixture,
+  reviewSnapshotFixture
+} from "./review-fixtures.js";
 import { RunStore } from "../src/store.js";
 import assert from "node:assert/strict";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
@@ -24,14 +30,149 @@ import {
 } from "../src/types.js";
 import {
   createTestRepository,
+  evaluationAttemptFixture,
   evaluationStateFixture,
   monochromeEnv,
-  snapshotTree
+  snapshotTree,
+  writeEvaluationRun
 } from "./helpers.js";
 
 import { writeAdoptedGuidance } from "./adoption-fixtures.js";
 
 const COMMITTED_CLI = path.join(process.cwd(), "dist", "banzai.mjs");
+
+test("read-only CLI consumers reject unsupported state and sidecars without output or mutation", async () => {
+  const repository = await createTestRepository();
+  try {
+    const runId = "compatibility-consumers";
+    const bound = await createWork({
+      repoRoot: repository.root,
+      slug: runId,
+      mode: "workflow",
+      creationId: randomUUID()
+    });
+    const current = evaluationStateFixture({
+      status: "cancelled",
+      extra: {
+        runId,
+        repoRoot: repository.root,
+        artifactBinding: bound,
+        planApproval: null,
+        planTaskCompletion: null,
+        planArtifacts: null,
+        adrDecisions: [],
+        pendingHumanDecision: null,
+        humanDecisions: []
+      }
+    });
+    const runDirectory = path.join(repository.root, ".banzai/runs", runId);
+    const attempt = evaluationAttemptFixture({
+      id: "implementation-1",
+      kind: "implementation"
+    });
+    const cases = [
+      {
+        resource: "run state",
+        supported: 5,
+        file: "state.json",
+        value: { ...current, schemaVersion: 4 },
+        commands: [
+          ["eval", "context"],
+          ["eval", "cancellations"]
+        ]
+      },
+      {
+        resource: "model attempt",
+        supported: 2,
+        file: "attempts/implementation-1-implementation.json",
+        value: { ...attempt, schemaVersion: 1 },
+        commands: [
+          ["eval", "context"],
+          ["eval", "cancellations"]
+        ]
+      },
+      {
+        resource: "verification ledger",
+        supported: 2,
+        file: "verification-attempts/ledger.json",
+        value: { schemaVersion: 1 },
+        commands: [["eval", "cancellations"]]
+      },
+      {
+        resource: "verification ledger",
+        supported: 2,
+        file: "verification-attempts/ledger.json",
+        value: { schemaVersion: 1 },
+        commands: [["status"], ["control", "status"]],
+        blocked: true
+      }
+    ];
+    for (const fixture of cases) {
+      const state = fixture.blocked
+        ? { ...current, status: "blocked", blockedFrom: "verifying" }
+        : current;
+      await writeEvaluationRun(repository.root, runId, {
+        state,
+        attempts: [attempt]
+      });
+      await writeFile(
+        path.join(repository.root, ".banzai/active-run.json"),
+        JSON.stringify({ schemaVersion: 1, runId })
+      );
+      await writeFile(
+        path.join(runDirectory, fixture.file),
+        JSON.stringify(fixture.value)
+      );
+      const before = await snapshotTree(path.join(repository.root, ".banzai"));
+      for (const command of fixture.commands) {
+        for (const format of command[0] === "control"
+          ? [[]]
+          : [[], ["--json"]]) {
+          const result = spawnSync(
+            process.execPath,
+            [COMMITTED_CLI, ...command, ...format],
+            { cwd: repository.root, encoding: "utf8" }
+          );
+          assert.equal(
+            result.status,
+            1,
+            `${command.join(" ")}: ${result.stderr}`
+          );
+          assert.equal(result.stdout, "");
+          assert.equal(
+            result.stderr,
+            `[RESOURCE_VERSION_UNSUPPORTED] ${fixture.resource} version ${fixture.resource === "run state" ? 4 : 1} is not supported; 3.x supports ${fixture.supported}; last read by release-train major 2\n`
+          );
+          assert.deepEqual(
+            await snapshotTree(path.join(repository.root, ".banzai")),
+            before
+          );
+        }
+      }
+    }
+    // A current ledger with malformed contents remains an ordinary evidence issue.
+    await writeEvaluationRun(repository.root, runId, {
+      state: { ...current, status: "blocked", blockedFrom: "verifying" }
+    });
+    await writeFile(
+      path.join(runDirectory, "verification-attempts/ledger.json"),
+      '{"schemaVersion":2,"unexpected":true}'
+    );
+    const before = await snapshotTree(path.join(repository.root, ".banzai"));
+    const status = runCommittedStatus(repository.root, ["--json"]);
+    assert.equal(status.status, 0, status.stderr);
+    assert.match(
+      status.stdout,
+      /Verification evidence is malformed or conflicting/
+    );
+    assert.deepEqual(
+      await snapshotTree(path.join(repository.root, ".banzai")),
+      before
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
 
 test("committed interactive CLI explains Git and first-task HEAD prerequisites before task input", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "banzai-git-prerequisites-"));
@@ -136,7 +277,15 @@ function verificationProfile(
   return {
     id,
     projectType,
-    commands: [{ name: `${id} check`, command, args, timeoutMs: 1_000 }]
+    commands: [
+      {
+        id: `${id}-check`,
+        name: `${id} check`,
+        command,
+        args,
+        timeoutMs: 1_000
+      }
+    ]
   };
 }
 
@@ -158,6 +307,12 @@ async function writeTerminalRunState(
   root: string,
   repoRoot: string
 ): Promise<void> {
+  const bound = await createWork({
+    repoRoot: root,
+    slug: "safe-run",
+    mode: "workflow",
+    creationId: randomUUID()
+  });
   const runRoot = path.join(root, ".banzai", "runs", "safe-run");
   await mkdir(runRoot, { recursive: true });
   await writeFile(
@@ -169,7 +324,8 @@ async function writeTerminalRunState(
     path.join(runRoot, "state.json"),
     `${JSON.stringify(
       {
-        schemaVersion: 2,
+        schemaVersion: 5,
+        artifactBinding: bound,
         runId: "safe-run",
         repoRoot,
         status: "done"
@@ -185,11 +341,19 @@ async function writeTriagedCompletionState(
   root: string,
   status: RunState["status"] = "done"
 ): Promise<void> {
+  const bound = await createWork({
+    repoRoot: root,
+    slug: "triaged-example",
+    mode: "workflow",
+    creationId: randomUUID()
+  });
   const runId = "triaged-run";
   const runRoot = path.join(root, ".banzai", "runs", runId);
   const reviewRoot = path.join(runRoot, "reviews");
   const timestamp = "2026-08-12T12:00:00.000Z";
   const review: ReviewResult = {
+    ...currentReviewFixture(reviewSnapshotFixture({ artifactBinding: bound })),
+    schemaVersion: 2,
     contractVersion: CONTRACT_VERSION,
     verdict: "changes_requested",
     summary: "Two findings were triaged.",
@@ -229,9 +393,13 @@ async function writeTriagedCompletionState(
       { findingId: "R1-F2", disposition: "deferred" as const, note: null }
     ]
   };
-  const digest = await workspaceDigest(root, { baseline: [] });
+  const digest = await workspaceDigest(root, {
+    baseline: [],
+    artifactBinding: bound
+  });
   const state: RunState = {
-    schemaVersion: 3,
+    schemaVersion: 5,
+    artifactBinding: bound,
     contractVersion: CONTRACT_VERSION,
     runId,
     slug: "triaged-example",
@@ -245,8 +413,8 @@ async function writeTriagedCompletionState(
     planArtifacts:
       status === "needs_plan_approval"
         ? {
-            description: "documentation/features/example/description.md",
-            plan: "documentation/development-plans/example/plan.md",
+            description: bound.binding.artifacts.description ?? null,
+            plan: bound.binding.artifacts.plan ?? null,
             adrs: [],
             implementationReport: null,
             testReport: null
@@ -259,6 +427,7 @@ async function writeTriagedCompletionState(
     reviewIteration: 1,
     latestReview: {
       iteration: 1,
+      outputContract: "review-result/v2",
       resultPath: "reviews/review-1.json",
       workspaceDigest: digest,
       verdict: "changes_requested",
@@ -430,7 +599,7 @@ test("committed status renders human-triaged completion without changing JSON", 
     assert.equal(human.status, 0, human.stderr);
     assert.equal(human.stderr, "");
     assert.match(human.stdout, /Status: done/);
-    assert.match(human.stdout, /Plan tasks: legacy \(legacy\)/);
+    assert.match(human.stdout, /Plan tasks: unknown \(unknown\)/);
     assert.match(human.stdout, /Review: changes_requested \(iteration 1\)/);
     assert.match(
       human.stdout,
@@ -461,16 +630,15 @@ test("committed status renders human-triaged completion without changing JSON", 
     });
     assert.equal(status.nextAction, null);
     assert.deepEqual(status.taskCompletion, {
-      state: "legacy",
-      source: "legacy",
+      state: "unknown",
+      source: "unknown",
       completed: null,
       total: null,
       diagnostics: [
         {
-          code: "PLAN_TASK_COMPLETION_LEGACY",
+          code: "PLAN_TASK_COMPLETION_MISSING",
           taskId: null,
-          message:
-            "Run predates the canonical task-completion ledger; exact completion is unknown."
+          message: "Run has not persisted canonical task-completion evidence."
         }
       ]
     });
@@ -844,11 +1012,17 @@ test("cancellation: committed CLI supports no-TTY omission, exact validation, op
   try {
     const store = new RunStore(repository.root);
     const state = evaluationStateFixture({
-      schemaVersion: 3,
+      schemaVersion: 5,
       status: "planning",
       extra: {
         runId: "cancel-cli",
         repoRoot: repository.root,
+        artifactBinding: await createWork({
+          repoRoot: repository.root,
+          slug: "cancel-cli",
+          mode: "workflow",
+          creationId: randomUUID()
+        }),
         adrDecisions: [],
         pendingHumanDecision: null,
         humanDecisions: [],
