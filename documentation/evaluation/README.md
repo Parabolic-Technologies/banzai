@@ -181,3 +181,26 @@ A change that alters planner, implementer, reviewer, verification, fix, or
 prompt behavior names the KPI it intends to move in its change record (see
 `CONTRIBUTING.md`). A later `eval kpi` comparison against the previous baseline
 then shows whether the change moved it.
+
+## Verification applicability in export/KPI v2
+
+Explicitly use `banzai eval export --schema-version 2 --json` and
+`banzai eval kpi --schema-version 2 --json` for ADR-0043 evidence. Omission and
+`--schema-version 1` preserve the v1 contracts. Export v1 marks unsupported new
+verification meaning as incomplete instead of guessing reusable passes.
+
+Export v2 retains the existing run/cohort evidence and adds per-run
+`verificationEvidence`: physical attempt ordinals/status/duration, terminal
+round/check ordinals, executed/reused/pending dispositions and original physical
+ordinals, with exact/incomplete coverage. It includes no raw commands, paths,
+work/check/attempt IDs, digests, environment, report or approval prose. Original
+physical leaves, capture records and redacted logs must be present and consistent.
+
+KPI v2 accepts only export v2. File inputs and checkout filters remain mutually
+exclusive; sources are reported independently and never pooled. Only exact
+included runs contribute to counts and arithmetic. Physical retries count as
+attempts. Each terminal round/check contributes once to executed or reused checks.
+Reuse ratio is reused / (executed + reused), with numerator, denominator, null on
+zero and exact/incomplete coverage. Pending, invalid and unsupported evidence
+add incomplete coverage. These are disposition counts, not saved time, physical
+passes or model calls. The context-attempt/report v1 byte accounting is unchanged.

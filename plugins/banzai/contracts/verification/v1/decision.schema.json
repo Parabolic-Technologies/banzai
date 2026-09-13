@@ -1,0 +1,310 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/decision",
+  "$defs": {
+    "origin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attemptId",
+        "recordDigest",
+        "roundId"
+      ],
+      "properties": {
+        "attemptId": {
+          "type": "string",
+          "pattern": "^verification-[a-f0-9-]{36}$"
+        },
+        "recordDigest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "roundId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checkId",
+        "profileOrdinal",
+        "commandOrdinal",
+        "configurationDigest",
+        "policyDigest",
+        "authorityDigest",
+        "commandDigest"
+      ],
+      "properties": {
+        "checkId": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "maxLength": 80
+        },
+        "profileOrdinal": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "commandOrdinal": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "configurationDigest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "policyDigest": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "authorityDigest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "commandDigest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checkId",
+        "action",
+        "reason",
+        "identity",
+        "inputDigest",
+        "environmentDigest",
+        "origin"
+      ],
+      "properties": {
+        "checkId": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "maxLength": 80
+        },
+        "action": {
+          "enum": [
+            "execute",
+            "reuse"
+          ]
+        },
+        "reason": {
+          "enum": [
+            "policy_disabled",
+            "mandatory_fresh",
+            "obligations_unavailable",
+            "inputs_unavailable",
+            "no_origin",
+            "origin_invalid",
+            "later_attempt",
+            "identity_changed",
+            "inputs_changed",
+            "existing_execution",
+            "equivalent_evidence"
+          ]
+        },
+        "identity": {
+          "$ref": "#/$defs/identity"
+        },
+        "inputDigest": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "environmentDigest": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/origin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "schemaVersion",
+        "workId",
+        "roundId",
+        "candidateDigest",
+        "authorityDigest",
+        "configurationDigest",
+        "actions",
+        "sha256"
+      ],
+      "properties": {
+        "schema": {
+          "const": "banzai-verification-decision/v1"
+        },
+        "schemaVersion": {
+          "const": 1
+        },
+        "workId": {
+          "type": "string",
+          "pattern": "^[a-f0-9-]{36}$"
+        },
+        "roundId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "candidateDigest": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "authorityDigest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "configurationDigest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "actions": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": {
+            "$ref": "#/$defs/action"
+          }
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "applicability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "schemaVersion",
+        "workId",
+        "roundId",
+        "decisionSha256",
+        "candidateDigest",
+        "complete",
+        "dispositions",
+        "sha256"
+      ],
+      "properties": {
+        "schema": {
+          "const": "banzai-verification-applicability/v1"
+        },
+        "schemaVersion": {
+          "const": 1
+        },
+        "workId": {
+          "type": "string",
+          "pattern": "^[a-f0-9-]{36}$"
+        },
+        "roundId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "decisionSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "candidateDigest": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "dispositions": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "checkId",
+              "kind",
+              "origin"
+            ],
+            "properties": {
+              "checkId": {
+                "type": "string",
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                "maxLength": 80
+              },
+              "kind": {
+                "enum": [
+                  "executed",
+                  "reused",
+                  "pending"
+                ]
+              },
+              "origin": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/origin"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    }
+  }
+}

@@ -1,3 +1,5 @@
+import { parseVerificationDecision, evidenceDigest } from "./verification-evidence.mjs";
+import { parseVerificationApplicability, parseVerificationOriginStart, parseVerificationOriginFinish } from "./verification-store.mjs";
 import { parseReviewSnapshot } from "./review-snapshot.mjs";
 import {
   parseTerminalAttemptCheckpoint,
@@ -105,6 +107,8 @@ function sourcePath(parent, reference, sourceRoot = null) {
     else return `external/${digestBytes(clean)}`;
   }
   const run = parent.match(/^(\.banzai\/runs\/[^/]+)\//u)?.[1];
+  const work = parent.match(/^(\.banzai\/work\/[^/]+)\/verification\//u)?.[1];
+  if (work && clean.startsWith("verification/")) clean = `${work}/${clean}`;
   if (
     run &&
     /^(?:attempts|reviews|verification|approval|recovery)\//u.test(clean)
@@ -149,7 +153,11 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
       return { refs, supported: false };
     }
     try {
-      if (value.schema === "banzai-terminal-attempt-checkpoint/v1")
+      if (value.schema === "banzai-verification-decision/v1") parseVerificationDecision(value);
+      else if (value.schema === "banzai-verification-applicability/v1") parseVerificationApplicability(value);
+      else if (value.schema === "banzai-verification-origin-start/v1") parseVerificationOriginStart(value);
+      else if (value.schema === "banzai-verification-origin-finish/v1") parseVerificationOriginFinish(value);
+      else if (value.schema === "banzai-terminal-attempt-checkpoint/v1")
         parseTerminalAttemptCheckpoint(value);
       else if (value.schema === "banzai-recovery-authorization/v1")
         parseRecoveryAuthorization(value);
@@ -162,7 +170,7 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
       )
         parseModelAttemptRecord(value);
       else if (
-        /^\.banzai\/runs\/[^/]+\/verification\//u.test(relative) &&
+        /^\.banzai\/(?:runs\/[^/]+\/verification-attempts|work\/[^/]+\/verification\/attempts)\//u.test(relative) &&
         "command" in value
       )
         parseVerificationAttemptRecord(value);
@@ -181,7 +189,7 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
     }
     if (
       /\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative) &&
-      ![1, 2, 3, 4].includes(value.schemaVersion)
+      ![1, 2, 3, 4, 5].includes(value.schemaVersion)
     )
       supported = false;
     if (
@@ -191,6 +199,12 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
         "banzai-recovery-authorization/v1",
         "banzai-review-snapshot/v1",
         "banzai-review-snapshot/v2",
+        "banzai-review-snapshot/v3",
+        "banzai-work-binding/v2",
+        "banzai-verification-decision/v1",
+        "banzai-verification-applicability/v1",
+        "banzai-verification-origin-start/v1",
+        "banzai-verification-origin-finish/v1",
         "banzai-work-binding/v1",
         "banzai-context-attempt/v1",
         "banzai-context-report/v1",
@@ -209,7 +223,7 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
     }
     if (
       /\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative) &&
-      value.schemaVersion === 4
+      value.schemaVersion >= 4
     ) {
       try {
         exactObject(value.artifactBinding, ["binding", "sha256"]);
@@ -220,16 +234,26 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
       }
     }
     const workflowEvidence =
-      relative.startsWith(".banzai/runs/") ||
+      relative.startsWith(".banzai/runs/") || relative.includes("/verification/") ||
       (typeof value.schema === "string" &&
         /^banzai-(?:review-snapshot|work-binding)\/v/u.test(value.schema));
     if (!workflowEvidence) return { refs, supported };
     const run = relative.match(/^(\.banzai\/runs\/[^/]+)\//u)?.[1];
     if (run && relative !== `${run}/state.json`) refs.set(`${run}/state.json`, true);
+    const evidenceRoot = relative.match(/^(\.banzai\/(?:runs\/[^/]+|work\/[^/]+)\/verification)(?:\/|$)/u)?.[1] ?? (run ? `${run}/verification` : null);
+    if (evidenceRoot && value.workId) refs.set(`.banzai/work/${value.workId}/work.json`, true);
+    if (value.schema === "banzai-verification-origin-finish/v1") refs.set(`${evidenceRoot}/origins/${value.attemptId}.start.json`, true);
+    if (value.schema === "banzai-verification-applicability/v1") refs.set(`${evidenceRoot}/decisions/${value.decisionSha256}.json`, true);
     const visit = (item, key = "") => {
       if (Array.isArray(item)) {
         for (const child of item) visit(child, key);
       } else if (item && typeof item === "object") {
+        if (evidenceRoot && item.schema === "banzai-verification-decision/v1") refs.set(`${evidenceRoot}/decisions/${item.sha256}.json`, true);
+        if (evidenceRoot && item.schema === "banzai-verification-applicability/v1") refs.set(`${evidenceRoot}/applications/${item.sha256}.json`, true);
+        if (key === "origin" && evidenceRoot && /^verification-[a-f0-9-]{36}$/u.test(item.attemptId)) {
+          refs.set(`${evidenceRoot}/origins/${item.attemptId}.start.json`, true);
+          refs.set(`${evidenceRoot}/origins/${item.attemptId}.finish.json`, true);
+        }
         if (key === "artifactBinding") {
           parseBinding(item.binding);
           refs.set(`.banzai/work/${item.binding.workId}/work.json`, true);
@@ -674,6 +698,33 @@ export async function verifyArchive(input) {
         value = JSON.parse(bytes.toString("utf8"));
       } catch {
         /* Reported by the versioned reader. */
+      }
+      if (typeof value?.schema === "string" && /^banzai-verification-(?:decision|applicability|origin-start|origin-finish)\/v1$/u.test(value.schema)) {
+        const workOwner = /^\.banzai\/work\/([^/]+)\/verification\//u.exec(entry.path)?.[1];
+        const runOwner = /^(\.banzai\/runs\/[^/]+)\/verification\//u.exec(entry.path)?.[1];
+        const stateBytes = runOwner ? objects.get(`${runOwner}/state.json`) : null;
+        const ownerId = workOwner ?? (stateBytes ? JSON.parse(stateBytes).artifactBinding?.binding?.workId : null);
+        if (!ownerId || ownerId !== value.workId)
+          fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Archived verification evidence conflicts with its bound owner.");
+        if (value.sha256 && !entry.path.endsWith(`/${value.sha256}.json`))
+          fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Archived verification decision identity changed.");
+      }
+      if (value?.schema === "banzai-verification-origin-finish/v1") {
+        const startPath = entry.path.replace(/\.finish\.json$/u, ".start.json");
+        const startBytes = objects.get(startPath);
+        const start = startBytes ? parseVerificationOriginStart(JSON.parse(startBytes)) : null;
+        const physicalBytes = start ? objects.get(start.physicalPath) : null;
+        if (!start || !physicalBytes || digestBytes(startBytes) !== value.startSha256 ||
+            evidenceDigest(parseVerificationAttemptRecord(JSON.parse(physicalBytes))) !== value.physicalSha256 || start.workId !== value.workId || start.attemptId !== value.attemptId)
+          fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Archived verification origin closure is missing or changed.");
+        const physical = parseVerificationAttemptRecord(JSON.parse(physicalBytes));
+        for (const log of [physical.stdout, physical.stderr]) {
+          if (log === null) continue;
+          const logPath = sourcePath(start.physicalPath, log.relativePath);
+          const logBytes = objects.get(logPath);
+          if (!logBytes || digestBytes(logBytes) !== log.sha256)
+            fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Archived verification origin log changed or is missing.");
+        }
       }
       if (value?.artifactBinding?.binding?.workId) {
         const bindingPath = `.banzai/work/${value.artifactBinding.binding.workId}/work.json`;

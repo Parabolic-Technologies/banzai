@@ -1,3 +1,4 @@
+import type { EvaluationExportV2 } from "./types.js";
 import {
   EVALUATION_FAILURE_ORDER,
   EVALUATION_ISSUE_CODE_ORDER,
@@ -106,11 +107,36 @@ function issueCounts(
   });
 }
 
-export function renderEvaluationJson(report: EvaluationExport): string {
+export function renderEvaluationJson(
+  report: EvaluationExport | EvaluationExportV2
+): string {
   return `${JSON.stringify(report, null, 2)}\n`;
 }
 
-export function renderEvaluationMarkdown(report: EvaluationExport): string {
+export function renderEvaluationMarkdown(
+  report: EvaluationExport | EvaluationExportV2
+): string {
+  if (report.schemaVersion === 2) {
+    const base = renderEvaluationMarkdown({
+      ...report,
+      schema: "banzai-evaluation-export/v1",
+      schemaVersion: 1
+    });
+    return (
+      base.replace(
+        "banzai-evaluation-export/v1` (version 1)",
+        "banzai-evaluation-export/v2` (version 2)"
+      ) +
+      "\n## Verification applicability\n\n" +
+      report.runs
+        .map(
+          (run) =>
+            `- ${run.runKey}: coverage=${run.verificationEvidence.coverage}, physical attempts=${run.verificationEvidence.physicalAttempts.length}, reused checks=${run.verificationEvidence.dispositions.filter((item) => item.kind === "reused").length}`
+        )
+        .join("\n") +
+      "\n"
+    );
+  }
   const lines: string[] = [
     "# Banzai Evaluation Export",
     "",

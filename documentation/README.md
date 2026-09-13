@@ -29,7 +29,7 @@ Start with the [product overview and installation](../README.md) and the
 - [Project manifest](../PROJECT_MANIFEST.md): current implemented facts.
 - [Architecture decisions](decisions/README.md): decision status and authority.
 - [Orchestrator modules](../packages/orchestrator/MODULES.md): module contracts.
-- [Release checklist](release-checklist.md) and [2.4.0 notes](releases/2.4.0.md).
+- [Release checklist](release-checklist.md) and [2.5.0 notes](releases/2.5.0.md).
 - [Security assurance](security-assurance.md) and
   [engineering quality](engineering-quality.md): maintained policies.
 - [Evaluation KPIs](evaluation/README.md) and [context reporting](context/README.md).

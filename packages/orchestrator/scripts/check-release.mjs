@@ -867,14 +867,14 @@ async function validateContracts(root, policy) {
     );
   }
   if (
-    !/export interface RunState\s*{\s*schemaVersion:\s*3\s*\|\s*4;/.test(
+    !/export interface RunState\s*{\s*schemaVersion:\s*3\s*\|\s*4\s*\|\s*5;/.test(
       typesSource
     )
   ) {
     fail(
       "STATE_CONTRACT_DRIFT",
       typesPath,
-      "current run state must retain v3 and support v4"
+      "current run state must retain v3/v4 and support opt-in v5"
     );
   }
   if (!/schemaVersion:\s*1\s*\|\s*2;/.test(typesSource)) {
@@ -931,7 +931,6 @@ async function validateContracts(root, policy) {
   const storePath = "packages/orchestrator/src/store.ts";
   const store = flatText(await readText(root, storePath));
   for (const fragment of [
-    "if (state.schemaVersion === 3 || state.schemaVersion === 4)",
     "if (state.schemaVersion === 2)",
     "schemaVersion: 3",
     "humanDecisions"
@@ -944,12 +943,24 @@ async function validateContracts(root, policy) {
       );
     }
   }
+  if (
+    !/if\s*\(\s*state\.schemaVersion === 3\s*\|\|\s*state\.schemaVersion === 4\s*\|\|\s*state\.schemaVersion === 5\s*\)/u.test(
+      store
+    )
+  )
+    fail(
+      "STATE_CONTRACT_DRIFT",
+      storePath,
+      "current state reads must retain v3/v4 and support v5"
+    );
   const validationPath = "packages/orchestrator/src/validation.ts";
   const validation = flatText(await readText(root, validationPath));
   for (const fragment of [
     "value.schemaVersion !== 1",
     "value.schemaVersion !== 2",
     "value.schemaVersion !== 3",
+    "value.schemaVersion !== 4",
+    "value.schemaVersion !== 5",
     "schemaVersion >= 2"
   ]) {
     if (!validation.includes(fragment)) {

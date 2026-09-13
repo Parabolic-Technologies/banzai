@@ -1,11 +1,15 @@
+import { requiredFixture } from "./helpers.js";
+import { verificationOperation } from "../../../plugins/banzai/lib/verification-helper.mjs";
 import { createRequire } from "node:module";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { execFile, spawnSync } from "node:child_process";
 import {
+  appendFile,
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   realpath,
   rm,
   stat,
@@ -1348,6 +1352,758 @@ test("accepted F11 standalone and bundled CLI outputs validate against the shipp
           );
       }
     }
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("standalone verification owns binding v2 evidence and reuses direct physical origins without CLI models", async () => {
+  const repository = await createTestRepository({ artifactLayout: "private" });
+  try {
+    const root = await realpath(repository.root);
+    const executable = await realpath(process.execPath);
+    const created = await createWork({
+      repoRoot: root,
+      slug: "evidence",
+      mode: "lite",
+      creationId: randomUUID(),
+      schemaVersion: 2
+    });
+    assert.equal(created.binding.schemaVersion, 2);
+    const workPath = `.banzai/work/${created.binding.workId}/work.json`;
+    const notes = path.join(root, "notes.md");
+    await writeFile(
+      notes,
+      "First explanatory sentence. Second explanatory sentence.\n"
+    );
+    await writeFile(
+      path.join(root, ".banzai/config.json"),
+      JSON.stringify({
+        schemaVersion: 3,
+        verification: {
+          profiles: [
+            {
+              id: "project",
+              projectType: "custom",
+              commands: [
+                {
+                  id: "unit",
+                  name: "Unit",
+                  command: executable,
+                  args: ["-e", 'console.log("physical fixture check")'],
+                  timeoutMs: 2000,
+                  evidence: "equivalent_evidence",
+                  ignoreExplanatory: true
+                }
+              ]
+            }
+          ],
+          policy: {
+            schema: "banzai-verification-policy/v1",
+            schemaVersion: 1,
+            explanatory: [{ path: "notes.md", regions: [] }],
+            dependencies: {
+              complete: true,
+              exclude: [],
+              toolchain: [executable],
+              environment: { LANG: "C" },
+              volatile: []
+            }
+          }
+        }
+      })
+    );
+    const request = {
+      schema: "banzai-verification-request/v1",
+      schemaVersion: 1,
+      repoRoot: root,
+      workPath,
+      roundId: randomUUID()
+    };
+    const first = await verificationOperation("execute", {
+      ...request,
+      checkId: "unit"
+    });
+    assert.equal(first.supported, true);
+    assert.equal(first.physicalAttempts, 1);
+    assert.equal(first.applicability?.complete, true);
+    assert.equal(first.applicability.dispositions[0]?.kind, "executed");
+    await writeFile(
+      notes,
+      "Revised explanatory sentence. Another explanatory sentence.\n"
+    );
+    const second = await verificationOperation("execute", {
+      ...request,
+      roundId: randomUUID(),
+      checkId: "unit"
+    });
+    assert.equal(second.physicalAttempts, 1);
+    assert.equal(second.applicability?.complete, true);
+    assert.equal(second.applicability.dispositions[0]?.kind, "reused");
+    assert.deepEqual(
+      second.applicability.dispositions[0].origin,
+      first.applicability.dispositions[0].origin
+    );
+    const ingress = await mkdtemp(
+      path.join(tmpdir(), "banzai-verification-ingress-")
+    );
+    try {
+      const requestFile = path.join(ingress, "request.json");
+      await writeFile(
+        requestFile,
+        JSON.stringify({ ...request, roundId: randomUUID() }),
+        { mode: 0o600 }
+      );
+      const response = await execute(
+        process.execPath,
+        [
+          path.resolve("../../plugins/banzai/scripts/verification.cjs"),
+          "inspect",
+          "--json",
+          requestFile
+        ],
+        { cwd: root }
+      );
+      const envelope: unknown = JSON.parse(response.stdout);
+      const require = createRequire(import.meta.url);
+      const toolRequire = createRequire(require.resolve("eslint/package.json"));
+      const Ajv = toolRequire("ajv") as new (
+        options: Record<string, unknown>
+      ) => {
+        compile(
+          schema: unknown
+        ): ((value: unknown) => boolean) & { errors?: unknown };
+      };
+      const schema = JSON.parse(
+        await readFile(
+          path.resolve(
+            "../../plugins/banzai/contracts/verification/v1/result.schema.json"
+          ),
+          "utf8"
+        )
+      ) as Record<string, unknown>;
+      delete schema.$schema;
+      const validate = new Ajv({ allErrors: true }).compile(schema);
+      assert.equal(validate(envelope), true, JSON.stringify(validate.errors));
+      assert.equal(
+        validate({
+          ...(envelope as Record<string, unknown>),
+          modelGranted: true
+        }),
+        false
+      );
+      assert.equal((envelope as { ok: boolean }).ok, true);
+    } finally {
+      await rm(ingress, { recursive: true, force: true });
+    }
+    const archiveRequest = path.join(root, "archive-request.json");
+    const archiveCall = async (
+      operation: string,
+      fields: Record<string, unknown>
+    ) => {
+      await writeFile(
+        archiveRequest,
+        JSON.stringify({
+          schema: "banzai-artifact-request/v1",
+          schemaVersion: 1,
+          repoRoot: root,
+          ...fields
+        })
+      );
+      const response = await artifactCommand([
+        operation,
+        "--json",
+        archiveRequest
+      ]);
+      assert.equal(response.ok, true, JSON.stringify(response));
+      return response.result as Record<string, unknown>;
+    };
+    const inventory = await archiveCall("inventory", { workPaths: [workPath] });
+    (inventory.inventory as { retention: { pins: unknown[] } }).retention.pins =
+      [
+        {
+          sourceId: "project",
+          workId: created.binding.workId,
+          reason: "Fixture verification origin retention",
+          recordedAt: "2026-09-12T00:00:00.000Z"
+        }
+      ];
+    const inventoryFile = path.join(
+      root,
+      "reviewed-verification-inventory.json"
+    );
+    await writeFile(inventoryFile, JSON.stringify(inventory.inventory));
+    const bundlePath = path.join(root, "verification-archive");
+    await archiveCall("export", { inventoryFile, destination: bundlePath });
+    const archived = await archiveCall("verify", { bundlePath });
+    assert.equal(archived.complete, true, JSON.stringify(archived));
+    const restored = path.join(root, "verification-restored");
+    await archiveCall("restore", { bundlePath, destination: restored });
+    assert.ok(
+      (archived.retainedPaths as string[]).some((entry) =>
+        entry.endsWith(".finish.json")
+      )
+    );
+    const claim = await acquireWork({
+      repoRoot: root,
+      workPath,
+      ownerId: "fixture"
+    });
+    try {
+      await assert.rejects(
+        verificationOperation("execute", { ...request, checkId: "unit" }),
+        code("ARTIFACT_OWNERSHIP_CONFLICT")
+      );
+      const input = path.join(root, "untrusted.txt");
+      await writeFile(input, "{}\n");
+      await assert.rejects(
+        writeArtifact({
+          repoRoot: root,
+          workPath,
+          token: claim.token,
+          artifactPath: `${created.binding.artifacts.verificationDirectory}/forged.json`,
+          inputFile: input,
+          expectedSha256: null
+        })
+      );
+      await rm(input);
+    } finally {
+      await releaseWork({ repoRoot: root, workPath, token: claim.token });
+    }
+    await assert.rejects(
+      verificationOperation("execute", {
+        ...request,
+        checkId: "unit",
+        command: "arbitrary"
+      })
+    );
+    const legacy = await createWork({
+      repoRoot: root,
+      slug: "legacy-evidence",
+      mode: "lite",
+      creationId: randomUUID()
+    });
+    assert.equal(legacy.binding.schemaVersion, 1);
+    assert.equal(
+      (
+        await verificationOperation("decide", {
+          ...request,
+          workPath: `.banzai/work/${legacy.binding.workId}/work.json`
+        })
+      ).supported,
+      false
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("matched explanatory and added-test closures retain fresh obligations with bounded physical counts", async () => {
+  const measurements = [];
+  for (const scenario of ["two-sentences", "added-unit-test"] as const) {
+    const observations = [];
+    const timings = [];
+    for (const equivalent of [false, true]) {
+      const repository = await createTestRepository({
+        artifactLayout: "private"
+      });
+      try {
+        const root = await realpath(repository.root);
+        const executable = await realpath(process.execPath);
+        const bound = await createWork({
+          repoRoot: root,
+          slug: "measurement",
+          mode: "lite",
+          creationId: randomUUID(),
+          schemaVersion: 2
+        });
+        const region = {
+          start: "<!-- explanation:start -->",
+          end: "<!-- explanation:end -->"
+        };
+        const explanatory = ["PROJECT_MANIFEST.md", "MODULES.md"].map(
+          (file) => ({ path: file, regions: [region] })
+        );
+        for (const item of explanatory)
+          await appendFile(
+            path.join(root, item.path),
+            `\n${region.start}\nOriginal explanatory sentence.\n${region.end}\n`
+          );
+        await writeFile(path.join(root, "contract.txt"), "verified\n");
+        await writeFile(
+          path.join(root, "unit.test.cjs"),
+          "require('node:test')('base contract', () => require('node:assert/strict').equal(require('node:fs').readFileSync('contract.txt','utf8'),'verified\\n'));\n"
+        );
+        const commands = ["unit", "fresh-gate"].map((id) => ({
+          id,
+          name: id,
+          command: executable,
+          args:
+            id === "unit"
+              ? ["--test"]
+              : [
+                  "-e",
+                  "require('node:assert/strict').equal(require('node:fs').readFileSync('contract.txt','utf8'),'verified\\n')"
+                ],
+          timeoutMs: 2000,
+          evidence:
+            id === "unit" && equivalent ? "equivalent_evidence" : "fresh",
+          ignoreExplanatory: true
+        }));
+        await writeFile(
+          path.join(root, ".banzai/config.json"),
+          JSON.stringify({
+            schemaVersion: 3,
+            verification: {
+              profiles: [{ id: "fixture", projectType: "custom", commands }],
+              policy: {
+                schema: "banzai-verification-policy/v1",
+                schemaVersion: 1,
+                explanatory,
+                dependencies: {
+                  complete: true,
+                  exclude: [],
+                  toolchain: [executable],
+                  environment: { LANG: "C" },
+                  volatile: []
+                }
+              }
+            }
+          })
+        );
+        const request = {
+          schema: "banzai-verification-request/v1",
+          schemaVersion: 1,
+          repoRoot: root,
+          workPath: `.banzai/work/${bound.binding.workId}/work.json`,
+          roundId: randomUUID()
+        };
+        await execute("git", [
+          "-C",
+          root,
+          "add",
+          "PROJECT_MANIFEST.md",
+          "MODULES.md"
+        ]);
+        for (const checkId of ["unit", "fresh-gate"])
+          await verificationOperation("execute", { ...request, checkId });
+        if (scenario === "two-sentences") {
+          for (const item of explanatory) {
+            const filename = path.join(root, item.path);
+            await writeFile(
+              filename,
+              (await readFile(filename, "utf8")).replace(
+                "Original explanatory sentence.",
+                "Revised explanatory sentence."
+              )
+            );
+          }
+        } else
+          await writeFile(
+            path.join(root, "additional.test.cjs"),
+            "require('node:test')('added fixture', () => {});\n"
+          );
+        request.roundId = randomUUID();
+        const startedAt = performance.now();
+        const selected = await verificationOperation("decide", request);
+        let completed = selected;
+        for (const action of requiredFixture(selected.decision).actions)
+          completed = await verificationOperation("execute", {
+            ...request,
+            checkId: action.checkId
+          });
+        assert.equal(completed.applicability?.complete, true);
+        const invoked = requiredFixture(selected.decision)
+          .actions.filter((action) => action.action === "execute")
+          .map((action) => action.checkId);
+        assert.ok(invoked.includes("fresh-gate"));
+        const physical = requiredFixture(completed.physicalAttempts) - 2;
+        assert.equal(physical, invoked.length);
+        observations.push({
+          policy: equivalent ? "equivalent-enabled" : "fresh",
+          physical,
+          invoked
+        });
+        const attemptDirectory = path.join(
+          root,
+          requiredFixture(bound.binding.artifacts.verificationDirectory),
+          "attempts"
+        );
+        const physicalRecords = await Promise.all(
+          (await readdir(attemptDirectory))
+            .sort()
+            .map(
+              async (file) =>
+                JSON.parse(
+                  await readFile(path.join(attemptDirectory, file), "utf8")
+                ) as { durationMs: number; status: string }
+            )
+        );
+        assert.ok(
+          physicalRecords.every((record) => record.status === "completed")
+        );
+        timings.push({
+          policy: equivalent ? "equivalent-enabled" : "fresh",
+          seedPhysical: 2,
+          seedCommandMs: physicalRecords
+            .slice(0, 2)
+            .reduce((sum, item) => sum + item.durationMs, 0),
+          currentCommandMs: physicalRecords
+            .slice(2)
+            .reduce((sum, item) => sum + item.durationMs, 0),
+          currentHelperWallMs: Math.round(performance.now() - startedAt)
+        });
+      } finally {
+        await repository.dispose();
+      }
+    }
+    assert.equal(requiredFixture(observations[0]).physical, 2);
+    assert.equal(
+      requiredFixture(observations[1]).physical,
+      scenario === "two-sentences" ? 1 : 2
+    );
+    const authority = "Approved fixture authority and accepted finding ID.\n";
+    const report =
+      Array.from(
+        { length: 60 },
+        (_, i) => `Unaffected report evidence ${i + 1}.`
+      ).join("\n") + "\n";
+    const closure = `Accepted finding: ${scenario}.\nScope: bounded fixture delta.\nDecision: see direct physical origins and current applicability.\nEvidence: ${JSON.stringify(observations[1])}.\nLimitations: command fixture; no model or full-repository timing claim.\n`;
+    measurements.push({
+      scenario,
+      observations,
+      timings,
+      reportAddedLines: closure.trimEnd().split("\n").length,
+      reportRemovedLines: 0,
+      reviewerFullBytes: Buffer.byteLength(authority + report + closure),
+      reviewerClosureBytes: Buffer.byteLength(authority + closure)
+    });
+  }
+  // Deterministic scheduling and payload measurements, not saved wall time.
+  process.stdout.write(
+    `Closure measurements: ${JSON.stringify(measurements)}\n`
+  );
+});
+
+test("binding schemas accept helper outputs for every mode and retain closed roles", async () => {
+  const repository = await createTestRepository({ artifactLayout: "private" });
+  try {
+    const require = createRequire(path.resolve("package.json"));
+    const toolRequire = createRequire(require.resolve("eslint/package.json"));
+    const Ajv = toolRequire("ajv") as new (
+      options: Record<string, unknown>
+    ) => {
+      compile(
+        schema: unknown
+      ): ((value: unknown) => boolean) & { errors?: unknown };
+    };
+    const root = await realpath(repository.root);
+    for (const schemaVersion of [1, 2] as const) {
+      const schema = JSON.parse(
+        await readFile(
+          path.resolve(
+            `../../plugins/banzai/contracts/artifacts/v${schemaVersion}/work-binding.schema.json`
+          ),
+          "utf8"
+        )
+      ) as Record<string, unknown>;
+      delete schema.$schema;
+      const validate = new Ajv({ allErrors: true }).compile(schema);
+      for (const mode of ["strict", "lite", "fix", "workflow"] as const) {
+        const work = await createWork({
+          repoRoot: root,
+          creationId: randomUUID(),
+          slug: `binding-${schemaVersion}-${mode}`,
+          mode,
+          schemaVersion
+        });
+        assert.equal(
+          validate(work.binding),
+          true,
+          JSON.stringify(validate.errors)
+        );
+        const directory = `.banzai/work/${work.binding.workId}`;
+        const original = await readFile(
+          path.join(root, directory, "work.json")
+        );
+        assert.deepEqual(
+          (await readBinding(root, directory)).binding,
+          work.binding
+        );
+        const roles = Object.keys(work.binding.artifacts);
+        for (const mutate of [
+          (artifacts: Record<string, unknown>) => {
+            Reflect.deleteProperty(artifacts, requiredFixture(roles.at(-1)));
+          },
+          (artifacts: Record<string, unknown>) => {
+            artifacts.unknownRole = "extra.md";
+          },
+          (artifacts: Record<string, unknown>) => {
+            artifacts.reviewDirectory = "../escape";
+          }
+        ]) {
+          const invalid = structuredClone(work.binding);
+          mutate(invalid.artifacts);
+          assert.equal(validate(invalid), false);
+          await writeFile(
+            path.join(root, directory, "work.json"),
+            JSON.stringify(invalid)
+          );
+          await assert.rejects(readBinding(root, directory));
+          await writeFile(path.join(root, directory, "work.json"), original);
+        }
+      }
+    }
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("unavailable capture cannot reconcile a stale same-round fresh success", async () => {
+  const repository = await createTestRepository({ artifactLayout: "private" });
+  try {
+    const root = await realpath(repository.root);
+    const executable = await realpath(process.execPath);
+    const work = await createWork({
+      repoRoot: root,
+      creationId: randomUUID(),
+      slug: "unavailable-fresh",
+      mode: "lite",
+      schemaVersion: 2
+    });
+    const config = {
+      schemaVersion: 3,
+      verification: {
+        profiles: [
+          {
+            id: "project",
+            projectType: "custom",
+            commands: [
+              {
+                id: "unit",
+                name: "Unit",
+                command: executable,
+                args: [
+                  "-e",
+                  "process.exit(Number(require('node:fs').readFileSync('exit.txt','utf8')))"
+                ],
+                timeoutMs: 2000,
+                evidence: "fresh",
+                ignoreExplanatory: false
+              }
+            ]
+          }
+        ],
+        policy: {
+          schema: "banzai-verification-policy/v1",
+          schemaVersion: 1,
+          explanatory: [],
+          dependencies: {
+            complete: true,
+            exclude: [],
+            toolchain: [executable],
+            environment: { LANG: "C" },
+            volatile: [] as string[]
+          }
+        }
+      }
+    };
+    const configPath = path.join(root, ".banzai/config.json");
+    await writeFile(configPath, JSON.stringify(config));
+    await writeFile(path.join(root, "exit.txt"), "0");
+    const request = {
+      schema: "banzai-verification-request/v1",
+      schemaVersion: 1,
+      repoRoot: root,
+      workPath: `.banzai/work/${work.binding.workId}/work.json`,
+      roundId: randomUUID()
+    };
+    const executeCheck = () =>
+      verificationOperation("execute", { ...request, checkId: "unit" });
+    const initial = await executeCheck();
+    const reconciled = await executeCheck();
+    assert.equal(initial.applicability?.complete, true);
+    assert.equal(reconciled.physicalAttempts, 1);
+    assert.deepEqual(reconciled.applicability, initial.applicability);
+    config.verification.policy.dependencies.volatile = ["external"];
+    await writeFile(configPath, JSON.stringify(config));
+    request.roundId = randomUUID();
+    const fresh = await executeCheck();
+    assert.equal(fresh.physicalAttempts, 2);
+    assert.equal(fresh.applicability?.complete, false);
+    await writeFile(path.join(root, "exit.txt"), "17");
+    const current = await verificationOperation("inspect", request);
+    assert.equal(current.applicability?.complete, false);
+    assert.equal(current.applicability.dispositions[0]?.kind, "pending");
+    await assert.rejects(
+      executeCheck(),
+      /explicit failure retry or owner recovery/
+    );
+    request.roundId = randomUUID();
+    const failed = await executeCheck();
+    assert.equal(failed.physicalAttempts, 3);
+    assert.equal(failed.applicability?.complete, false);
+    const directory = path.join(
+      root,
+      requiredFixture(work.binding.artifacts.verificationDirectory),
+      "attempts"
+    );
+    const records = await Promise.all(
+      (await readdir(directory)).sort().map(
+        async (name) =>
+          JSON.parse(await readFile(path.join(directory, name), "utf8")) as {
+            exitCode: number;
+            status: string;
+          }
+      )
+    );
+    assert.deepEqual(
+      records.map((record) => record.exitCode),
+      [0, 0, 17]
+    );
+    assert.deepEqual(
+      records.map((record) => record.status),
+      ["completed", "completed", "failed"]
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("standalone physical failures, retries and missing origin proof never become reused success", async () => {
+  const repository = await createTestRepository({ artifactLayout: "private" });
+  try {
+    const root = await realpath(repository.root);
+    const executable = await realpath(process.execPath);
+    const created = await createWork({
+      repoRoot: root,
+      slug: "failure-proof",
+      mode: "lite",
+      creationId: randomUUID(),
+      schemaVersion: 2
+    });
+    const directory = requiredFixture(
+      created.binding.artifacts.verificationDirectory
+    );
+    const configPath = path.join(root, ".banzai/config.json");
+    const config = {
+      schemaVersion: 3,
+      verification: {
+        profiles: [
+          {
+            id: "project",
+            projectType: "custom",
+            commands: [
+              {
+                id: "unit",
+                name: "Unit",
+                command: executable,
+                args: [
+                  "-e",
+                  "process.exit(Number(require('node:fs').readFileSync('exit.txt','utf8')))"
+                ],
+                timeoutMs: 2000,
+                evidence: "equivalent_evidence",
+                ignoreExplanatory: true
+              }
+            ]
+          }
+        ],
+        policy: {
+          schema: "banzai-verification-policy/v1",
+          schemaVersion: 1,
+          explanatory: [],
+          dependencies: {
+            complete: true,
+            exclude: [],
+            toolchain: [executable],
+            environment: { LANG: "C" },
+            volatile: []
+          }
+        }
+      }
+    };
+    await writeFile(configPath, JSON.stringify(config));
+    await writeFile(path.join(root, "exit.txt"), "0");
+    const request = {
+      schema: "banzai-verification-request/v1",
+      schemaVersion: 1,
+      repoRoot: root,
+      workPath: `.banzai/work/${created.binding.workId}/work.json`,
+      roundId: randomUUID(),
+      checkId: "unit"
+    };
+    const initial = await verificationOperation("execute", request);
+    assert.equal(initial.applicability?.complete, true);
+    await writeFile(path.join(root, "exit.txt"), "1");
+    request.roundId = randomUUID();
+    const failed = await verificationOperation("execute", request);
+    assert.equal(failed.applicability?.complete, false);
+    await assert.rejects(
+      verificationOperation("execute", request),
+      /explicit failure retry/
+    );
+    await writeFile(path.join(root, "exit.txt"), "0");
+    const records = await readdir(path.join(root, directory, "attempts"));
+    const physical = JSON.parse(
+      await readFile(
+        path.join(
+          root,
+          directory,
+          "attempts",
+          requiredFixture(records.sort().at(-1))
+        ),
+        "utf8"
+      )
+    ) as { id: string };
+    const inspection = {
+      schema: request.schema,
+      schemaVersion: request.schemaVersion,
+      repoRoot: root,
+      workPath: request.workPath,
+      roundId: request.roundId
+    };
+    const pending = await verificationOperation("decide", {
+      ...inspection,
+      roundId: randomUUID()
+    });
+    assert.equal(pending.decision?.actions[0]?.reason, "later_attempt");
+    const retried = await verificationOperation("execute", {
+      ...request,
+      retryOf: physical.id
+    });
+    assert.equal(retried.physicalAttempts, 3);
+    assert.equal(retried.applicability?.complete, true);
+    const origin = requiredFixture(
+      requiredFixture(retried.applicability).dispositions[0]?.origin
+    );
+    const finishPath = path.join(
+      root,
+      directory,
+      "origins",
+      `${origin.attemptId}.finish.json`
+    );
+    const finish = await readFile(finishPath);
+    await rm(finishPath);
+    const missing = await verificationOperation("decide", inspection);
+    assert.equal(missing.applicability?.complete, false);
+    assert.equal(missing.decision?.actions[0]?.reason, "origin_invalid");
+    await writeFile(finishPath, finish);
+    const logPath = path.join(
+      root,
+      directory,
+      `${origin.attemptId}.stdout.log`
+    );
+    await writeFile(logPath, "tampered physical output");
+    assert.equal(
+      (
+        await verificationOperation("decide", {
+          ...inspection,
+          roundId: randomUUID()
+        })
+      ).decision?.actions[0]?.action,
+      "execute"
+    );
   } finally {
     await repository.dispose();
   }

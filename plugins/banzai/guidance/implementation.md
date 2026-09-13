@@ -69,7 +69,8 @@ Before the report:
    runner verification block. If the manifest's applicable final suite is absent
    from that block, run it once and record the configuration gap.
 8. In standalone mode, run the applicable typecheck, lint, and final test suite
-   once.
+   once unless the shared deterministic owner establishes a permitted equivalent
+   disposition for that check under Test Assurance. Keep unsupported checks fresh.
 9. If formatting changed files, rerun affected checks.
 10. Set verified ADR entries in the manifest index to `Implemented`; leave
     unimplemented accepted decisions as `Planned`.
@@ -94,3 +95,9 @@ Write the resolved `implementationReport` artifact:
    evidence owner, or `None`;
 9. notes for assurance.
 
+
+For a bounded accepted-finding closure, retain unaffected report text. Add one
+record with accepted finding ID, changed scope, deterministic decision, executed/
+reused/historical/pending evidence references and limitations. Inspect all current
+claims for consistency and correct only affected claims; never predict a pending
+runner result or manufacture a new attempt for reused evidence.

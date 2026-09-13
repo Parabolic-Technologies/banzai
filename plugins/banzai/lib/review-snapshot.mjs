@@ -1,3 +1,4 @@
+import { parseReviewVerificationEvidence } from "./verification-store.mjs";
 import { createHash } from "node:crypto";
 import {
   parseBinding,
@@ -78,7 +79,7 @@ function parseSnapshot(value) {
     "artifact",
     "digest",
   ];
-  if (snapshot.schemaVersion === 2) keys.push("artifactBinding");
+  if (snapshot.schemaVersion >= 2) keys.push("artifactBinding");
   if (
     Object.keys(snapshot).length !== keys.length ||
     Object.keys(snapshot).some((key) => !keys.includes(key)) ||
@@ -86,7 +87,8 @@ function parseSnapshot(value) {
       (snapshot.schemaVersion === 1 &&
         snapshot.schema === "banzai-review-snapshot/v1") ||
       (snapshot.schemaVersion === 2 &&
-        snapshot.schema === "banzai-review-snapshot/v2")
+        snapshot.schema === "banzai-review-snapshot/v2") ||
+      (snapshot.schemaVersion === 3 && snapshot.schema === "banzai-review-snapshot/v3")
     ) ||
     !equal(snapshot.outputContract, "review-result/v2") ||
     !/^[a-f0-9]{64}$/u.test(digest) ||
@@ -96,7 +98,7 @@ function parseSnapshot(value) {
   for (const id of [snapshot.runId, snapshot.attemptId])
     if (typeof id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(id))
       invalid("Review snapshot identity is invalid.");
-  if (snapshot.schemaVersion === 2) {
+  if (snapshot.schemaVersion >= 2) {
     const bound = snapshot.artifactBinding;
     if (
       !bound ||
@@ -105,6 +107,7 @@ function parseSnapshot(value) {
     )
       invalid("Review snapshot binding is missing or malformed.");
     parseBinding(bound.binding);
+    if (snapshot.schemaVersion === 2 && bound.binding.schemaVersion !== 1) invalid("Snapshot v2 retains binding v1 semantics.");
     const workspace = snapshot.workspace;
     if (
       workspace.schemaVersion !== 2 ||
@@ -158,6 +161,11 @@ function parseSnapshot(value) {
     invalid("Legacy review snapshots cannot carry private storage authority.");
   }
   const artifact = snapshot.artifact;
+  if (snapshot.schemaVersion === 3) {
+    if (snapshot.artifactBinding.binding.schemaVersion !== 2) invalid("Verification snapshot requires binding v2.");
+    const evidence = parseReviewVerificationEvidence(artifact.verificationEvidence);
+    if (evidence.decision.workId !== snapshot.artifactBinding.binding.workId) invalid("Cross-work review verification evidence.");
+  } else if (artifact?.verificationEvidence !== undefined) invalid("Legacy snapshots cannot carry new verification evidence.");
   if (
     !object(artifact) ||
     !object(snapshot.approval) ||

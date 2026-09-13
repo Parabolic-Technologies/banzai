@@ -308,12 +308,12 @@ function currentHumanTimeEffort(revisions) {
 }
 function decodeHumanTime(value, expectedRunId) {
   try {
-    const object3 = humanTimeRecord(value);
-    if (object3.schema !== "banzai-human-time/v1" || object3.schemaVersion !== 1)
+    const object4 = humanTimeRecord(value);
+    if (object4.schema !== "banzai-human-time/v1" || object4.schemaVersion !== 1)
       return { status: "unsupported", issue: "UNSUPPORTED_VERSION" };
     if (Buffer.byteLength(JSON.stringify(value)) > HUMAN_TIME_LIMITS.bytes)
       throw new HumanTimeFailure("LIMIT_EXCEEDED");
-    const r = keys(object3, [
+    const r = keys(object4, [
       "schema",
       "schemaVersion",
       "runId",
@@ -348,11 +348,11 @@ function decodeHumanTime(value, expectedRunId) {
     uniqueIds(ledger.effortRevisions);
     const attached = /* @__PURE__ */ new Set();
     const detached = /* @__PURE__ */ new Set();
-    for (const capture of ledger.captures) {
-      if (capture.kind === "attach") attached.add(capture.id);
-      else if (capture.startId === null || !attached.has(capture.startId) || detached.has(capture.startId))
+    for (const capture2 of ledger.captures) {
+      if (capture2.kind === "attach") attached.add(capture2.id);
+      else if (capture2.startId === null || !attached.has(capture2.startId) || detached.has(capture2.startId))
         throw new HumanTimeFailure("INVALID_EVIDENCE");
-      else detached.add(capture.startId);
+      else detached.add(capture2.startId);
     }
     return {
       status: "valid",
@@ -429,21 +429,21 @@ function deriveHumanTime(read, evidence2, displayAt) {
       ).values()
     ];
     const opened = observations.filter((o) => o.endpoint === "opened");
-    const closed2 = observations.filter((o) => o.endpoint !== "opened");
+    const closed3 = observations.filter((o) => o.endpoint !== "opened");
     const first = stored[0];
     if (first === void 0) continue;
     const kind = first.kind;
-    const conflicting = new Set(opened.map((o) => o.at)).size > 1 || new Set(closed2.map((o) => `${o.endpoint}:${o.at}`)).size > 1;
+    const conflicting = new Set(opened.map((o) => o.at)).size > 1 || new Set(closed3.map((o) => `${o.endpoint}:${o.at}`)).size > 1;
     const corroborated = stored.every((o) => canonical.has(o.id));
     const discontinuous = observations.some((o) => o.clock.continuity === "discontinuity") || issues.some(
       (i) => i.episodeKey === key && i.code === "CLOCK_DISCONTINUITY"
     );
-    const open10 = opened[0];
-    const close = closed2[0];
+    const open11 = opened[0];
+    const close = closed3[0];
     const pending = evidence2.pendingKeys.includes(key);
-    const available2 = !conflicting && corroborated && !discontinuous && open10 !== void 0 && (close !== void 0 || pending);
+    const available2 = !conflicting && corroborated && !discontinuous && open11 !== void 0 && (close !== void 0 || pending);
     const end = close?.at ?? displayAt;
-    let durationMs = available2 ? Date.parse(end) - Date.parse(open10.at) : null;
+    let durationMs = available2 ? Date.parse(end) - Date.parse(open11.at) : null;
     if (durationMs !== null && (!Number.isSafeInteger(durationMs) || durationMs < 0)) {
       durationMs = null;
       issues.push(humanTimeIssue("CLOCK_DISCONTINUITY", key));
@@ -525,11 +525,11 @@ var HumanTimeStore = class {
       path.join(root, ".banzai", "runs", runId2)
     ];
     const result = [];
-    for (const directory2 of paths) {
-      const stat5 = await lstat(directory2);
+    for (const directory3 of paths) {
+      const stat5 = await lstat(directory3);
       if (!stat5.isDirectory() || stat5.isSymbolicLink())
         throw new HumanTimeFailure("UNSAFE_PATH");
-      result.push({ path: directory2, dev: stat5.dev, ino: stat5.ino });
+      result.push({ path: directory3, dev: stat5.dev, ino: stat5.ino });
     }
     return result;
   }
@@ -540,10 +540,10 @@ var HumanTimeStore = class {
         throw new HumanTimeFailure("UNSAFE_PATH");
     }
   }
-  async file(directory2, name, bound, privateFile = false) {
+  async file(directory3, name, bound, privateFile = false) {
     if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(name))
       throw new HumanTimeFailure("UNSAFE_PATH");
-    const filename = path.join(directory2, name);
+    const filename = path.join(directory3, name);
     const before = await lstat(filename);
     if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || privateFile && (before.mode & 511) !== 384)
       throw new HumanTimeFailure("UNSAFE_PATH");
@@ -578,20 +578,20 @@ var HumanTimeStore = class {
       await handle.close();
     }
   }
-  async runState(directory2, runId2) {
+  async runState(directory3, runId2) {
     const state = humanTimeRecord(
-      json(await this.file(directory2, "state.json", HUMAN_TIME_LIMITS.bytes))
+      json(await this.file(directory3, "state.json", HUMAN_TIME_LIMITS.bytes))
     );
-    if (humanTimeId(state.runId) !== runId2 || ![1, 2, 3, 4].includes(state.schemaVersion))
+    if (humanTimeId(state.runId) !== runId2 || ![1, 2, 3, 4, 5].includes(state.schemaVersion))
       throw new HumanTimeFailure("INVALID_EVIDENCE");
     return state;
   }
-  async readAt(directory2, runId2) {
+  async readAt(directory3, runId2) {
     try {
       return decodeHumanTime(
         json(
           await this.file(
-            directory2,
+            directory3,
             "human-time.json",
             HUMAN_TIME_LIMITS.bytes,
             true
@@ -606,9 +606,9 @@ var HumanTimeStore = class {
   async read(runId2) {
     try {
       const directories2 = await this.directories(runId2);
-      const directory2 = directoryAt(directories2, -1);
-      await this.runState(directory2, runId2);
-      const read = await this.readAt(directory2, runId2);
+      const directory3 = directoryAt(directories2, -1);
+      await this.runState(directory3, runId2);
+      const read = await this.readAt(directory3, runId2);
       await this.recheck(directories2);
       return read;
     } catch (error) {
@@ -650,9 +650,9 @@ var HumanTimeStore = class {
     try {
       humanTimeInteger(expectedRevision);
       directories2 = await this.directories(runId2);
-      const directory2 = directoryAt(directories2, -1);
-      await this.runState(directory2, runId2);
-      const guardPath = path.join(directory2, "human-time.lock");
+      const directory3 = directoryAt(directories2, -1);
+      await this.runState(directory3, runId2);
+      const guardPath = path.join(directory3, "human-time.lock");
       try {
         guard = await open(
           guardPath,
@@ -676,7 +676,7 @@ var HumanTimeStore = class {
         ino: guardStat.ino
       };
       await guard.writeFile(randomUUID());
-      const current = await this.readAt(directory2, runId2);
+      const current = await this.readAt(directory3, runId2);
       if (current.status !== "valid" && current.status !== "absent")
         return { status: "unavailable", issue: current.issue };
       const ledger = current.status === "valid" ? current.ledger : emptyHumanTime(runId2);
@@ -718,7 +718,7 @@ var HumanTimeStore = class {
 `);
       if (bytes.length > HUMAN_TIME_LIMITS.bytes)
         return { status: "unavailable", issue: "LIMIT_EXCEEDED" };
-      const tempPath = path.join(directory2, `human-time.${randomUUID()}.tmp`);
+      const tempPath = path.join(directory3, `human-time.${randomUUID()}.tmp`);
       const handle = await open(
         tempPath,
         constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
@@ -734,10 +734,10 @@ var HumanTimeStore = class {
       }
       await this.recheck(directories2);
       if (change.effort !== null) await this.activeRun(directories2, runId2);
-      const latest = await this.readAt(directory2, runId2);
+      const latest = await this.readAt(directory3, runId2);
       if (latest.status !== current.status || latest.status === "valid" && current.status === "valid" && JSON.stringify(latest.ledger) !== JSON.stringify(current.ledger))
         throw new HumanTimeFailure("STALE_REVISION");
-      await this.replaceFile(tempPath, path.join(directory2, "human-time.json"));
+      await this.replaceFile(tempPath, path.join(directory3, "human-time.json"));
       temporary = void 0;
       return { status: "saved", revision: next.revision };
     } catch (error) {
@@ -757,17 +757,17 @@ var HumanTimeStore = class {
   async readEvidence(runId2) {
     try {
       const directories2 = await this.directories(runId2);
-      const directory2 = directoryAt(directories2, -1);
+      const directory3 = directoryAt(directories2, -1);
       const stateBytes = await this.file(
-        directory2,
+        directory3,
         "state.json",
         HUMAN_TIME_LIMITS.bytes
       );
       const state = humanTimeRecord(json(stateBytes));
-      if (humanTimeId(state.runId) !== runId2 || ![1, 2, 3, 4].includes(state.schemaVersion))
+      if (humanTimeId(state.runId) !== runId2 || ![1, 2, 3, 4, 5].includes(state.schemaVersion))
         throw new HumanTimeFailure("INVALID_EVIDENCE");
       const bytes = await this.file(
-        directory2,
+        directory3,
         "events.jsonl",
         HUMAN_TIME_LIMITS.eventBytes
       );
@@ -791,7 +791,7 @@ var HumanTimeStore = class {
         const key = `${id}-${kind}.json`;
         const cached = attempts.get(key);
         if (cached !== void 0) return cached;
-        const attemptsPath = path.join(directory2, "attempts");
+        const attemptsPath = path.join(directory3, "attempts");
         const stat5 = await lstat(attemptsPath);
         if (!stat5.isDirectory() || stat5.isSymbolicLink())
           throw new HumanTimeFailure("UNSAFE_PATH");
@@ -1007,7 +1007,7 @@ var HumanTimeStore = class {
       if (evidence2.observations.length > HUMAN_TIME_LIMITS.observations)
         throw new HumanTimeFailure("LIMIT_EXCEEDED");
       const after = await this.file(
-        directory2,
+        directory3,
         "state.json",
         HUMAN_TIME_LIMITS.bytes
       );
@@ -1080,14 +1080,14 @@ var InteractiveHumanTime = class {
     const capturedAt = this.clock.utc();
     if (newCapture) {
       this.captureId = randomUUID2();
-      const capture = {
+      const capture2 = {
         id: this.captureId,
         kind: "attach",
         at: capturedAt,
         startId: null,
         sourcePosition: evidence2.issues.length === 0 ? evidence2.eventCount : null
       };
-      change.captures.push(capture);
+      change.captures.push(capture2);
       if (boundary?.kind !== "run_created")
         change.issues.push(humanTimeIssue("CAPTURE_GAP"));
       if (read.status === "valid" && read.ledger.captures.some(
@@ -1718,74 +1718,82 @@ function resolveCancellation(rawState, runId2, events, evidenceAvailability = "a
   return result;
 }
 
-// src/evaluation.ts
-import { readdir, readFile } from "node:fs/promises";
+// ../../plugins/banzai/lib/artifact-storage.mjs
+var artifact_storage_exports = {};
+__export(artifact_storage_exports, {
+  ADOPTION_LABELS: () => ADOPTION_LABELS,
+  ArtifactStorageError: () => ArtifactStorageError,
+  BINDING_SCHEMA: () => BINDING_SCHEMA,
+  DECLARATION_PATH: () => DECLARATION_PATH,
+  DECLARATION_SCHEMA: () => DECLARATION_SCHEMA,
+  DISCOVERY_LIMIT: () => DISCOVERY_LIMIT,
+  GUIDANCE_MAX_BYTES: () => GUIDANCE_MAX_BYTES2,
+  METADATA_LIMIT: () => METADATA_LIMIT2,
+  REQUEST_SCHEMA: () => REQUEST_SCHEMA,
+  RESULT_SCHEMA: () => RESULT_SCHEMA,
+  SCAFFOLD_MARKER: () => SCAFFOLD_MARKER,
+  WORK_ROOT: () => WORK_ROOT,
+  acquireWork: () => acquireWork,
+  adoptionDiagnostic: () => adoptionDiagnostic,
+  artifactCommand: () => artifactCommand,
+  artifactRoles: () => artifactRoles,
+  canonicalJson: () => canonicalJson,
+  createWork: () => createWork,
+  digestBytes: () => digestBytes,
+  exactObject: () => exactObject,
+  fail: () => fail,
+  git: () => git2,
+  hasRunnerWorkOwnership: () => hasRunnerWorkOwnership,
+  initializeArtifacts: () => initializeArtifacts,
+  inspectArtifacts: () => inspectArtifacts,
+  inspectBoundWork: () => inspectBoundWork,
+  inspectProjectAdoption: () => inspectProjectAdoption,
+  makeDirectories: () => makeDirectories,
+  ownsArtifact: () => ownsArtifact,
+  parseBinding: () => parseBinding,
+  parseDeclaration: () => parseDeclaration,
+  privateArtifactInventory: () => privateArtifactInventory,
+  projectRoot: () => projectRoot,
+  publishNew: () => publishNew,
+  readAdoptionFile: () => readAdoptionFile,
+  readBinding: () => readBinding,
+  readBytes: () => readBytes,
+  readInvocationBytes: () => readInvocationBytes,
+  readJson: () => readJson,
+  readSharedReviewSnapshot: () => parseReviewSnapshot,
+  relativePath: () => relativePath,
+  releaseWork: () => releaseWork,
+  runArtifactOperation: () => runArtifactOperation,
+  safePath: () => safePath,
+  sealSharedReviewSnapshot: () => sealReviewSnapshot,
+  verifyIgnores: () => verifyIgnores,
+  withRunnerWorkOwnership: () => withRunnerWorkOwnership,
+  writeArtifact: () => writeArtifact
+});
+
+// ../../plugins/banzai/lib/verification-store.mjs
 import path3 from "node:path";
 
-// src/types.ts
-var CONTRACT_VERSION = "1.0.0";
-var PHASE_RESULT_SCHEMA_VERSION = 3;
-var DECISION_CONSULTATION_SCHEMA = "banzai-decision-consultation/v1";
-var DECISION_CONSULTATION_SCHEMA_VERSION = 1;
-var PLAN_TASK_COMPLETION_SCHEMA_VERSION = 1;
-var EVALUATION_EXPORT_SCHEMA = "banzai-evaluation-export/v1";
-var EVALUATION_EXPORT_SCHEMA_VERSION = 1;
-var EVALUATION_KPI_SCHEMA = "banzai-evaluation-kpi/v1";
-var EVALUATION_KPI_SCHEMA_VERSION = 1;
-var CONTEXT_ATTEMPT_SCHEMA = "banzai-context-attempt/v1";
-var CONTEXT_ATTEMPT_SCHEMA_VERSION = 1;
-var CONTEXT_REPORT_SCHEMA = "banzai-context-report/v1";
-var CONTEXT_REPORT_SCHEMA_VERSION = 1;
-var PROMPT_COMPONENT_CATEGORY_ORDER = [
-  "common_instructions",
-  "phase_instructions",
-  "user_request_scope",
-  "human_decisions",
-  "approved_requirements_architecture",
-  "verification_evidence",
-  "workspace_evidence",
-  "completion_evidence",
-  "review_triage_evidence",
-  "recovery_instructions",
-  "output_contract"
-];
-var VERIFICATION_LEDGER_SCHEMA_VERSION = 1;
-var MODEL_ATTEMPT_SCHEMA_VERSION = 2;
-var TERMINAL_CHECKPOINT_SCHEMA = "banzai-terminal-attempt-checkpoint/v1";
-var TERMINAL_CHECKPOINT_SCHEMA_VERSION = 1;
-var RECOVERY_AUTHORIZATION_SCHEMA = "banzai-recovery-authorization/v1";
-var RECOVERY_AUTHORIZATION_SCHEMA_VERSION = 1;
-var AGENT_CONTROL_CONTRACT_VERSION = "3.0.0";
-var AGENT_CAPABILITIES_SCHEMA_VERSION = 3;
-var AGENT_STATUS_SCHEMA_VERSION = 2;
-var AGENT_ANSWER_SCHEMA_VERSION = 2;
-var AGENT_REQUEST_SCHEMA_VERSION = 1;
-var AGENT_RECOVERY_SCHEMA_VERSION = 1;
-var LEGACY_AGENT_CONTROL_SCHEMA_VERSION = 1;
-var AGENT_CAPABILITIES_SCHEMA = "banzai-agent-capabilities/v3";
-var AGENT_STATUS_SCHEMA = "banzai-agent-status/v2";
-var AGENT_REQUEST_SCHEMA = "banzai-agent-request/v1";
-var AGENT_ANSWER_SCHEMA = "banzai-agent-answer/v2";
-var AGENT_RECOVERY_SCHEMA = "banzai-agent-recovery/v1";
-var LEGACY_AGENT_ANSWER_SCHEMA = "banzai-agent-answer/v1";
-function sessionBindingMatches(binding, settings, role) {
-  return binding !== null && binding.role === role && binding.executable === settings.executable && binding.model === settings.model && binding.effort === settings.effort;
-}
-
-// src/validation.ts
+// ../../plugins/banzai/lib/artifact-readers.mjs
+import { AsyncLocalStorage } from "node:async_hooks";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { createHash as createHash2 } from "node:crypto";
-
-// src/models.ts
-import path2 from "node:path";
-var MODEL_ROLES = [
-  "planner",
-  "implementer",
-  "reviewer"
-];
-var ROLE_LABELS = {
-  planner: "Planning",
-  implementer: "Implementation",
-  reviewer: "Review"
+var MAX_BYTES = 512 * 1024 * 1024;
+var GUIDANCE_MAX_BYTES = 256 * 1024;
+var METADATA_MAX_BYTES = 64 * 1024;
+var execute = promisify(execFile);
+var METADATA_LIMIT = 64 * 1024;
+var runnerOwnership = new AsyncLocalStorage();
+var BanzaiError2 = class extends Error {
+  code;
+  exitCode;
+  constructor(code2, message, exitCode = 1) {
+    super(message);
+    this.name = "BanzaiError";
+    this.code = code2;
+    this.exitCode = exitCode;
+  }
 };
 function superseded(replacement) {
   return { replacement, standing: "superseded", date: null };
@@ -1849,10 +1857,6 @@ var CODEX_CATALOG = {
   ]),
   replacements: /* @__PURE__ */ new Map([["gpt-5", superseded("gpt-5.5")]])
 };
-var CATALOGS = /* @__PURE__ */ new Map([
-  ["claude", CLAUDE_CATALOG],
-  ["codex", CODEX_CATALOG]
-]);
 var FULL_EFFORTS = [
   "low",
   "medium",
@@ -1861,196 +1865,17 @@ var FULL_EFFORTS = [
   "max"
 ];
 var CODEX_EFFORTS = [...FULL_EFFORTS, "ultra"];
-var GPT_5_5_EFFORTS = ["low", "medium", "high", "xhigh"];
-var SELECTABLE_MODELS = [
-  {
-    id: "claude-opus-5",
-    label: "Claude Opus 5",
-    vendor: "claude",
-    executable: "claude",
-    description: "Complex agentic coding and long-horizon work.",
-    efforts: FULL_EFFORTS
-  },
-  {
-    id: "claude-fable-5-1",
-    label: "Claude Fable 5.1",
-    vendor: "claude",
-    executable: "claude",
-    description: "Most capable model for demanding long-horizon agentic work.",
-    efforts: FULL_EFFORTS
-  },
-  {
-    id: "claude-fable-5",
-    label: "Claude Fable 5",
-    vendor: "claude",
-    executable: "claude",
-    description: "Previous-generation Fable for demanding agentic work.",
-    efforts: FULL_EFFORTS
-  },
-  {
-    id: "claude-sonnet-5",
-    label: "Claude Sonnet 5",
-    vendor: "claude",
-    executable: "claude",
-    description: "Near-Opus coding quality at lower cost and latency.",
-    efforts: FULL_EFFORTS
-  },
-  {
-    id: "claude-opus-4-8",
-    label: "Claude Opus 4.8",
-    vendor: "claude",
-    executable: "claude",
-    description: "Previous-generation Opus for complex agentic work.",
-    efforts: FULL_EFFORTS
-  },
-  {
-    id: "claude-sonnet-4-6",
-    label: "Claude Sonnet 4.6",
-    vendor: "claude",
-    executable: "claude",
-    description: "Previous-generation Sonnet balancing intelligence and speed.",
-    efforts: FULL_EFFORTS
-  },
-  {
-    id: "gpt-6-astra",
-    label: "GPT-6-Astra",
-    vendor: "codex",
-    executable: "codex",
-    description: "Most capable model for complex, demanding work.",
-    efforts: CODEX_EFFORTS
-  },
-  {
-    id: "gpt-5.6-sol",
-    label: "GPT-5.6-Sol",
-    vendor: "codex",
-    executable: "codex",
-    description: "Reliable agentic workhorse for everyday tasks.",
-    efforts: CODEX_EFFORTS
-  },
-  {
-    id: "gpt-5.6-terra",
-    label: "GPT-5.6-Terra",
-    vendor: "codex",
-    executable: "codex",
-    description: "Balanced agentic coding model for everyday work.",
-    efforts: CODEX_EFFORTS
-  },
-  {
-    id: "gpt-5.6-luna",
-    label: "GPT-5.6-Luna",
-    vendor: "codex",
-    executable: "codex",
-    description: "Fast and affordable agentic coding model.",
-    efforts: FULL_EFFORTS
-  },
-  {
-    id: "gpt-5.5",
-    label: "GPT-5.5",
-    vendor: "codex",
-    executable: "codex",
-    description: "Previous-generation frontier model for complex coding and research.",
-    efforts: GPT_5_5_EFFORTS
-  }
-];
-function selectableModel(id) {
-  return SELECTABLE_MODELS.find((model) => model.id === id) ?? null;
-}
-function isCatalogSupportedModel(vendor, id) {
-  return CATALOGS.get(vendor)?.supported.has(id) ?? false;
-}
-var FALLBACK_VENDOR = {
-  planner: "codex",
-  implementer: "codex",
-  reviewer: "claude"
-};
-function roleLabel(role) {
-  return ROLE_LABELS[role];
-}
-function vendorKey(executable) {
-  return path2.basename(executable).toLowerCase();
-}
-function advisoryDetail(model, entry) {
-  if (entry.standing === "superseded") {
-    return `${model} is superseded by ${entry.replacement}.`;
-  }
-  if (entry.standing === "deprecated") {
-    return `${model} is deprecated and retires ${entry.date}; ${entry.replacement} replaces it.`;
-  }
-  return `${model} was retired ${entry.date}; ${entry.replacement} replaces it.`;
-}
-function advisoryFor(role, settings) {
-  const catalog = CATALOGS.get(vendorKey(settings.executable));
-  if (catalog === void 0 || catalog.supported.has(settings.model)) {
-    return null;
-  }
-  const entry = catalog.replacements.get(settings.model);
-  if (entry === void 0) {
-    return null;
-  }
-  return {
-    role,
-    label: ROLE_LABELS[role],
-    executable: settings.executable,
-    model: settings.model,
-    replacement: entry.replacement,
-    standing: entry.standing,
-    detail: advisoryDetail(settings.model, entry)
-  };
-}
-function modelAdvisories(config) {
-  const advisories = [];
-  for (const role of MODEL_ROLES) {
-    const advisory = advisoryFor(role, config.models[role]);
-    if (advisory !== null) {
-      advisories.push(advisory);
-    }
-  }
-  return advisories;
-}
-function vendorFor(executable) {
-  const key = vendorKey(executable);
-  return key === "claude" || key === "codex" ? key : null;
-}
-function vendorUsage(config) {
-  const usage = /* @__PURE__ */ new Map();
-  for (const role of MODEL_ROLES) {
-    const settings = config.models[role];
-    const existing = usage.get(settings.executable);
-    if (existing === void 0) {
-      usage.set(settings.executable, {
-        executable: settings.executable,
-        vendor: vendorFor(settings.executable),
-        roles: [role],
-        settings
-      });
-      continue;
-    }
-    existing.roles.push(role);
-  }
-  return [...usage.values()];
-}
-function describeRoles(roles) {
-  return roles.map((role) => ROLE_LABELS[role]).join(", ");
-}
-function formatTimeout(timeoutMs) {
-  const minutes = Math.ceil(timeoutMs / 6e4);
-  return `${minutes}m`;
-}
-function configuredModels(config) {
-  return MODEL_ROLES.map((role) => {
-    const settings = config.models[role];
-    return {
-      role,
-      label: ROLE_LABELS[role],
-      executable: settings.executable,
-      model: settings.model,
-      effort: settings.effort,
-      timeout: formatTimeout(settings.timeoutMs)
-    };
-  });
-}
-
-// src/validation.ts
+var CONTRACT_VERSION = "1.0.0";
+var PHASE_RESULT_SCHEMA_VERSION = 3;
+var DECISION_CONSULTATION_SCHEMA = "banzai-decision-consultation/v1";
+var DECISION_CONSULTATION_SCHEMA_VERSION = 1;
+var PLAN_TASK_COMPLETION_SCHEMA_VERSION = 1;
+var VERIFICATION_LEDGER_SCHEMA_VERSION = 1;
+var MODEL_ATTEMPT_SCHEMA_VERSION = 2;
+var TERMINAL_CHECKPOINT_SCHEMA = "banzai-terminal-attempt-checkpoint/v1";
+var TERMINAL_CHECKPOINT_SCHEMA_VERSION = 1;
+var RECOVERY_AUTHORIZATION_SCHEMA = "banzai-recovery-authorization/v1";
+var RECOVERY_AUTHORIZATION_SCHEMA_VERSION = 1;
 var VERIFICATION_ATTEMPT_STATUSES = [
   "started",
   "completed",
@@ -2069,13 +1894,13 @@ function isRecord(value) {
 }
 function requireRecord(value, label) {
   if (!isRecord(value)) {
-    throw new BanzaiError("INVALID_RESULT", `${label} must be an object.`);
+    throw new BanzaiError2("INVALID_RESULT", `${label} must be an object.`);
   }
   return value;
 }
 function requireString(value, label, allowEmpty = false) {
   if (typeof value !== "string" || !allowEmpty && value.length === 0) {
-    throw new BanzaiError(
+    throw new BanzaiError2(
       "INVALID_RESULT",
       `${label} must be a non-empty string.`
     );
@@ -2090,7 +1915,7 @@ function requireNullableString(value, label) {
 }
 function requireStringArray(value, label) {
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
-    throw new BanzaiError(
+    throw new BanzaiError2(
       "INVALID_RESULT",
       `${label} must be an array of strings.`
     );
@@ -2099,7 +1924,7 @@ function requireStringArray(value, label) {
 }
 function requireEnum(value, label, allowed) {
   if (typeof value !== "string" || !allowed.includes(value)) {
-    throw new BanzaiError(
+    throw new BanzaiError2(
       "INVALID_RESULT",
       `${label} must be one of: ${allowed.join(", ")}.`
     );
@@ -2108,7 +1933,7 @@ function requireEnum(value, label, allowed) {
 }
 function requirePositiveInteger(value, label) {
   if (!Number.isInteger(value) || value <= 0) {
-    throw new BanzaiError(
+    throw new BanzaiError2(
       "INVALID_CONFIG",
       `${label} must be a positive integer.`
     );
@@ -2134,7 +1959,7 @@ function parseArtifacts(value) {
 var CONSULTATION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u;
 var UNSAFE_CONSULTATION_CONTROL = /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u;
 function consultationError(message) {
-  throw new BanzaiError("INVALID_RESULT", message);
+  throw new BanzaiError2("INVALID_RESULT", message);
 }
 function consultationRecord(value, label, keys3) {
   const record6 = requireRecord(value, label);
@@ -2150,11 +1975,11 @@ function consultationString(value, label, maximum) {
   return value;
 }
 function consultationIdentifier(value, label) {
-  const identifier2 = consultationString(value, label, 128);
-  if (identifier2 === "." || identifier2 === ".." || !CONSULTATION_ID_PATTERN.test(identifier2)) {
+  const identifier3 = consultationString(value, label, 128);
+  if (identifier3 === "." || identifier3 === ".." || !CONSULTATION_ID_PATTERN.test(identifier3)) {
     return consultationError(`${label} must be a canonical identifier.`);
   }
-  return identifier2;
+  return identifier3;
 }
 function consultationStrings(value, label, maximumItems, maximumLength) {
   if (!Array.isArray(value) || value.length > maximumItems) {
@@ -2372,94 +2197,8 @@ function parseDecisionConsultation(value) {
     decisions
   };
 }
-function parseDecisionConsultationRequest(value) {
-  const request = parseDecisionConsultation(value);
-  if (request === null) {
-    return consultationError("Decision consultation request cannot be null.");
-  }
-  return request;
-}
-function consultationAnswerString(value, label, maximum) {
-  if (typeof value !== "string" || value.length === 0 || value.length > maximum || value.trim().length === 0 || /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(
-    value
-  )) {
-    return consultationError(`${label} must be bounded non-empty inert text.`);
-  }
-  return value;
-}
-function parseDecisionConsultationAnswers(value, request) {
-  if (!Array.isArray(value) || value.length !== request.decisions.length || Buffer.byteLength(JSON.stringify(value), "utf8") > 64 * 1024) {
-    return consultationError(
-      "Every consultation card requires exactly one bounded answer."
-    );
-  }
-  const cards = new Map(
-    request.decisions.map((decision) => [decision.decisionId, decision])
-  );
-  const seen = /* @__PURE__ */ new Set();
-  return value.map((item, index) => {
-    const label = `answers[${index}]`;
-    const answer = consultationRecord(item, label, [
-      "decisionId",
-      "response",
-      "note"
-    ]);
-    const decisionId = consultationIdentifier(
-      answer.decisionId,
-      `${label}.decisionId`
-    );
-    const card = cards.get(decisionId);
-    if (card === void 0 || seen.has(decisionId)) {
-      return consultationError(`${label}.decisionId is unknown or duplicated.`);
-    }
-    seen.add(decisionId);
-    const response = consultationRecord(answer.response, `${label}.response`, [
-      "kind",
-      "optionId",
-      "text"
-    ]);
-    const kind = requireEnum(response.kind, `${label}.response.kind`, [
-      "option",
-      "preference"
-    ]);
-    let optionId = null;
-    let text = null;
-    if (kind === "option") {
-      if (card.responseMode !== "single_choice" || response.text !== null) {
-        return consultationError(
-          `${label}.response cannot select an option for this card.`
-        );
-      }
-      optionId = consultationIdentifier(
-        response.optionId,
-        `${label}.response.optionId`
-      );
-      if (!card.options.some((option2) => option2.optionId === optionId)) {
-        return consultationError(
-          `${label}.response.optionId is not a listed option.`
-        );
-      }
-    } else {
-      if (response.optionId !== null) {
-        return consultationError(
-          `${label}.preference cannot include an option id.`
-        );
-      }
-      text = consultationAnswerString(
-        response.text,
-        `${label}.response.text`,
-        8e3
-      );
-    }
-    return {
-      decisionId,
-      response: { kind, optionId, text },
-      note: answer.note === null ? null : consultationAnswerString(answer.note, `${label}.note`, 2e3)
-    };
-  });
-}
 function completionError(message) {
-  throw new BanzaiError("PLAN_TASK_COMPLETION_INVALID", message);
+  throw new BanzaiError2("PLAN_TASK_COMPLETION_INVALID", message);
 }
 function completionString(value, label) {
   if (typeof value !== "string" || value.length === 0 || value.length > 500 || /[\0\r\n]/u.test(value)) {
@@ -2541,7 +2280,7 @@ function parseTaskCompletion(value) {
 function parseWorkflowSelectionResult(value) {
   const record6 = requireRecord(value, "workflow selection");
   if (record6.contractVersion !== CONTRACT_VERSION) {
-    throw new BanzaiError(
+    throw new BanzaiError2(
       "CONTRACT_VERSION_MISMATCH",
       `Workflow selection must use contract ${CONTRACT_VERSION}.`
     );
@@ -2588,13 +2327,13 @@ function parsePhaseResult(value) {
     "Phase result"
   );
   if (record6.schemaVersion !== PHASE_RESULT_SCHEMA_VERSION) {
-    throw new BanzaiError(
+    throw new BanzaiError2(
       "PHASE_RESULT_SCHEMA_MISMATCH",
       `Phase result must use schema ${PHASE_RESULT_SCHEMA_VERSION}.`
     );
   }
   if (record6.contractVersion !== CONTRACT_VERSION) {
-    throw new BanzaiError(
+    throw new BanzaiError2(
       "CONTRACT_VERSION_MISMATCH",
       `Phase result must use contract ${CONTRACT_VERSION}.`
     );
@@ -2611,7 +2350,7 @@ function parsePhaseResult(value) {
     "blocked"
   ]);
   if (outcome === "needs_human_decision" && gate === null || outcome !== "needs_human_decision" && gate !== null) {
-    throw new BanzaiError(
+    throw new BanzaiError2(
       "INVALID_RESULT",
       "A non-null gate and needs_human_decision outcome must appear together."
     );
@@ -2627,7 +2366,7 @@ function parsePhaseResult(value) {
   );
   const summary2 = gate === "decision_consultation" ? consultationString(record6.summary, "summary", 1e3) : requireString(record6.summary, "summary");
   if (gate === "decision_consultation" ? phase !== "plan" || outcome !== "needs_human_decision" || decisionConsultation === null || questions.length !== 0 : decisionConsultation !== null) {
-    throw new BanzaiError(
+    throw new BanzaiError2(
       "INVALID_RESULT",
       "decisionConsultation is allowed only for the planning decision_consultation gate with no escalation questions."
     );
@@ -2661,7 +2400,7 @@ function parsePersistedPhaseResult(value) {
   }
   const schemaVersion = record6.schemaVersion === 2 ? 2 : record6.schemaVersion === void 0 || record6.schemaVersion === 1 ? 1 : null;
   if (schemaVersion === null) {
-    throw new BanzaiError(
+    throw new BanzaiError2(
       "PHASE_RESULT_SCHEMA_MISMATCH",
       "Persisted phase result schema is unsupported."
     );
@@ -2698,7 +2437,7 @@ function parsePersistedPhaseResult(value) {
     "Persisted phase result"
   );
   if (record6.contractVersion !== CONTRACT_VERSION) {
-    throw new BanzaiError(
+    throw new BanzaiError2(
       "CONTRACT_VERSION_MISMATCH",
       `Phase result must use contract ${CONTRACT_VERSION}.`
     );
@@ -2720,7 +2459,7 @@ function parsePersistedPhaseResult(value) {
   ]);
   const outcome = reportedOutcome === "completed" && gate !== null ? "needs_human_decision" : reportedOutcome;
   if (outcome === "needs_human_decision" && gate === null) {
-    throw new BanzaiError(
+    throw new BanzaiError2(
       "INVALID_RESULT",
       "needs_human_decision requires a non-null gate."
     );
@@ -2783,13 +2522,13 @@ function parseFinding(value) {
   const record6 = requireRecord(value, "finding");
   const id = requireString(record6.id, "finding.id");
   if (!/^R[1-9][0-9]*-F[1-9][0-9]*$/.test(id)) {
-    throw new BanzaiError(
+    throw new BanzaiError2(
       "INVALID_RESULT",
       `Finding id ${id} must match R<iteration>-F<number>.`
     );
   }
   if (!Array.isArray(record6.evidence) || record6.evidence.length === 0) {
-    throw new BanzaiError(
+    throw new BanzaiError2(
       "INVALID_RESULT",
       `${id}.evidence must contain at least one item.`
     );
@@ -2829,18 +2568,18 @@ function parseFinding(value) {
 function parseReviewFields(value) {
   const record6 = requireRecord(value, "review result");
   if (record6.contractVersion !== CONTRACT_VERSION) {
-    throw new BanzaiError(
+    throw new BanzaiError2(
       "CONTRACT_VERSION_MISMATCH",
       `Review result must use contract ${CONTRACT_VERSION}.`
     );
   }
   if (!Array.isArray(record6.findings)) {
-    throw new BanzaiError("INVALID_RESULT", "findings must be an array.");
+    throw new BanzaiError2("INVALID_RESULT", "findings must be an array.");
   }
   const findings = record6.findings.map(parseFinding);
   const ids = new Set(findings.map((finding) => finding.id));
   if (ids.size !== findings.length) {
-    throw new BanzaiError("INVALID_RESULT", "Finding ids must be unique.");
+    throw new BanzaiError2("INVALID_RESULT", "Finding ids must be unique.");
   }
   const verdict = requireEnum(record6.verdict, "verdict", [
     "pass",
@@ -2849,13 +2588,13 @@ function parseReviewFields(value) {
     "blocked"
   ]);
   if (verdict === "pass" && findings.length > 0) {
-    throw new BanzaiError(
+    throw new BanzaiError2(
       "INVALID_RESULT",
       "A passing review cannot contain findings."
     );
   }
   if (verdict === "changes_requested" && findings.length === 0) {
-    throw new BanzaiError(
+    throw new BanzaiError2(
       "INVALID_RESULT",
       "changes_requested must contain at least one finding."
     );
@@ -2885,7 +2624,7 @@ function parseReviewResult(value) {
 function reviewScopePath(value) {
   const name = requireString(value, "scope path");
   if (/^[A-Za-z]:/u.test(name) || /[\\\0\r\n]/u.test(name) || name.startsWith("/") || name.split("/").some((part) => part === "" || part === "." || part === "..")) {
-    throw new BanzaiError(
+    throw new BanzaiError2(
       "INVALID_REVIEW_SCOPE",
       "Scope paths must be exact normalized repository-relative paths."
     );
@@ -2895,7 +2634,7 @@ function reviewScopePath(value) {
 function parseCurrentReviewResult(value) {
   const record6 = requireRecord(value, "review result");
   if (record6.schemaVersion !== 2)
-    throw new BanzaiError(
+    throw new BanzaiError2(
       "REVIEW_RESULT_SCHEMA_MISMATCH",
       "New reviews require review-result/v2."
     );
@@ -2932,7 +2671,7 @@ function parseCurrentReviewResult(value) {
     const finding = requireRecord(item, "finding");
     const parsedFinding = result.findings[index];
     if (parsedFinding === void 0)
-      throw new BanzaiError("INVALID_RESULT", "Finding is missing.");
+      throw new BanzaiError2("INVALID_RESULT", "Finding is missing.");
     parsedFinding.violates = strings(finding.violates, "violates");
     exactKeys(
       finding,
@@ -2969,11 +2708,11 @@ function parseCurrentReviewResult(value) {
     "Scope acknowledgment"
   );
   if (acknowledgment.schemaVersion !== 1 || !Array.isArray(acknowledgment.artifacts))
-    throw new BanzaiError(
+    throw new BanzaiError2(
       "INVALID_REVIEW_SCOPE",
       "Scope acknowledgment requires version 1 and explicit artifacts."
     );
-  const snapshotDigest = evidenceDigest(
+  const snapshotDigest = evidenceDigest2(
     acknowledgment.snapshotDigest,
     "INVALID_REVIEW_SCOPE",
     "snapshotDigest"
@@ -2986,25 +2725,25 @@ function parseCurrentReviewResult(value) {
       "INVALID_REVIEW_SCOPE",
       "Scope entry"
     );
-    const path28 = reviewScopePath(entry.path);
+    const path30 = reviewScopePath(entry.path);
     const status = requireEnum(entry.status, "scope status", [
       "reviewed",
       "not_reviewed"
     ]);
     if (status === "reviewed" ? entry.reason !== null : typeof entry.reason !== "string" || entry.reason.trim().length === 0)
-      throw new BanzaiError(
+      throw new BanzaiError2(
         "INVALID_REVIEW_SCOPE",
         "Reviewed scope requires a null reason; unreviewed scope requires a nonblank reason."
       );
-    return { path: path28, status, reason: entry.reason };
+    return { path: path30, status, reason: entry.reason };
   });
   if (new Set(artifacts.map((entry) => entry.path)).size !== artifacts.length || new Set(result.reviewedFindingIds).size !== result.reviewedFindingIds.length)
-    throw new BanzaiError(
+    throw new BanzaiError2(
       "INVALID_REVIEW_SCOPE",
       "Scope and reviewed finding IDs must be unique."
     );
   if (result.verdict !== "blocked" && artifacts.some((entry) => entry.status === "not_reviewed"))
-    throw new BanzaiError(
+    throw new BanzaiError2(
       "INVALID_REVIEW_SCOPE",
       "Incomplete required review scope must have a blocked verdict."
     );
@@ -3015,26 +2754,8 @@ function parseCurrentReviewResult(value) {
     scopeAcknowledgment: { schemaVersion: 1, snapshotDigest, artifacts }
   };
 }
-function validateReviewScope(result, scope) {
-  const actual = result.scopeAcknowledgment;
-  const paths = new Set(scope.approvedArtifactPaths);
-  if (paths.size !== scope.approvedArtifactPaths.length || actual.snapshotDigest !== scope.snapshotDigest || actual.artifacts.length !== paths.size || actual.artifacts.some((entry) => !paths.has(entry.path)))
-    throw new BanzaiError(
-      "INVALID_REVIEW_SCOPE",
-      "Review acknowledgment does not match the exact approved snapshot scope."
-    );
-  if (result.reviewedFindingIds.some(
-    (id) => !scope.requiredFindingIds.includes(id)
-  ) || result.verdict !== "blocked" && scope.requiredFindingIds.some(
-    (id) => !result.reviewedFindingIds.includes(id)
-  ))
-    throw new BanzaiError(
-      "INVALID_REVIEW_SCOPE",
-      "Reviewed finding IDs do not truthfully account for the required accepted findings."
-    );
-}
 function recoveryEvidenceError(code2, message) {
-  throw new BanzaiError(code2, message);
+  throw new BanzaiError2(code2, message);
 }
 function exactKeys(record6, allowed, code2, label) {
   const allowedKeys = new Set(allowed);
@@ -3059,21 +2780,21 @@ function evidenceNullableString(value, code2, label, maximum = 500) {
   return value === null ? null : evidenceString(value, code2, label, maximum);
 }
 function evidenceIdentifier(value, code2, label, maximum = 200) {
-  const identifier2 = evidenceString(value, code2, label, maximum);
-  if (identifier2 === "." || identifier2 === ".." || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(identifier2)) {
+  const identifier3 = evidenceString(value, code2, label, maximum);
+  if (identifier3 === "." || identifier3 === ".." || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(identifier3)) {
     return recoveryEvidenceError(
       code2,
       `${label} must be a canonical safe identifier.`
     );
   }
-  return identifier2;
+  return identifier3;
 }
-function evidenceDigest(value, code2, label) {
-  const digest3 = evidenceString(value, code2, label, 64);
-  if (!/^[a-f0-9]{64}$/u.test(digest3)) {
+function evidenceDigest2(value, code2, label) {
+  const digest4 = evidenceString(value, code2, label, 64);
+  if (!/^[a-f0-9]{64}$/u.test(digest4)) {
     return recoveryEvidenceError(code2, `${label} must be a SHA-256 digest.`);
   }
-  return digest3;
+  return digest4;
 }
 function evidenceTimestamp(value, code2, label) {
   const timestamp = evidenceString(value, code2, label, 64);
@@ -3291,7 +3012,7 @@ function parseTerminalAttemptCheckpoint(value) {
     phase: attempt.kind,
     configuration: {
       vendor,
-      executableDigest: evidenceDigest(
+      executableDigest: evidenceDigest2(
         value.configuration.executableDigest,
         code2,
         "configuration.executableDigest"
@@ -3303,7 +3024,7 @@ function parseTerminalAttemptCheckpoint(value) {
       ),
       effort,
       sessionMode,
-      sessionContextDigest: evidenceDigest(
+      sessionContextDigest: evidenceDigest2(
         value.configuration.sessionContextDigest,
         code2,
         "configuration.sessionContextDigest"
@@ -3341,16 +3062,16 @@ function parseTerminalAttemptCheckpoint(value) {
       64
     )
   };
-  for (const [label, digest3] of [
+  for (const [label, digest4] of [
     ["approvalDigest", checkpointWithoutIntegrity.approvalDigest],
     ["workflowDigest", checkpointWithoutIntegrity.workflowDigest],
     ["scopeDigest", checkpointWithoutIntegrity.scopeDigest]
   ]) {
-    if (digest3 !== null && !/^[a-f0-9]{64}$/u.test(digest3)) {
+    if (digest4 !== null && !/^[a-f0-9]{64}$/u.test(digest4)) {
       return recoveryEvidenceError(code2, `${label} must be a SHA-256 digest.`);
     }
   }
-  const integrityDigest = evidenceDigest(
+  const integrityDigest = evidenceDigest2(
     value.integrityDigest,
     code2,
     "integrityDigest"
@@ -3424,7 +3145,7 @@ function parseRecoveryAuthorization(value) {
     if (item === null) {
       return null;
     }
-    return evidenceDigest(item, code2, label);
+    return evidenceDigest2(item, code2, label);
   };
   return {
     schema: RECOVERY_AUTHORIZATION_SCHEMA,
@@ -3438,12 +3159,12 @@ function parseRecoveryAuthorization(value) {
     runId: evidenceIdentifier(value.runId, code2, "runId", 300),
     attempt,
     phase: attempt.kind,
-    recoveryIdentity: evidenceDigest(
+    recoveryIdentity: evidenceDigest2(
       value.recoveryIdentity,
       code2,
       "recoveryIdentity"
     ),
-    workspaceDigest: evidenceDigest(
+    workspaceDigest: evidenceDigest2(
       value.workspaceDigest,
       code2,
       "workspaceDigest"
@@ -3452,7 +3173,7 @@ function parseRecoveryAuthorization(value) {
     approvalDigest: nullableDigest(value.approvalDigest, "approvalDigest"),
     workflowDigest: nullableDigest(value.workflowDigest, "workflowDigest"),
     scopeDigest: nullableDigest(value.scopeDigest, "scopeDigest"),
-    configurationDigest: evidenceDigest(
+    configurationDigest: evidenceDigest2(
       value.configurationDigest,
       code2,
       "configurationDigest"
@@ -3553,7 +3274,7 @@ function parseModelAttemptRecord(value) {
       code2,
       "Review context"
     );
-    evidenceDigest(
+    evidenceDigest2(
       context.snapshotDigest,
       code2,
       "reviewContext.snapshotDigest"
@@ -3573,13 +3294,13 @@ function parseModelAttemptRecord(value) {
       code2,
       "Planning context"
     );
-    evidenceDigest(
+    evidenceDigest2(
       context.invocationDigest,
       code2,
       "planningContext.invocationDigest"
     );
     if (context.workspaceDigest !== null)
-      evidenceDigest(
+      evidenceDigest2(
         context.workspaceDigest,
         code2,
         "planningContext.workspaceDigest"
@@ -3663,37 +3384,6 @@ function parseModelAttemptRecord(value) {
   }
   return value;
 }
-function parseModelSettings(value, label) {
-  const record6 = requireRecord(value, label);
-  return {
-    executable: requireString(record6.executable, `${label}.executable`),
-    model: requireString(record6.model, `${label}.model`),
-    effort: requireEnum(record6.effort, `${label}.effort`, [
-      "low",
-      "medium",
-      "high",
-      "xhigh",
-      "max",
-      "ultra"
-    ]),
-    timeoutMs: requirePositiveInteger(record6.timeoutMs, `${label}.timeoutMs`)
-  };
-}
-function parseVerificationCommand(value, label) {
-  const record6 = requireRecord(value, label);
-  if (!Array.isArray(record6.args) || record6.args.some((item) => typeof item !== "string")) {
-    throw new BanzaiError(
-      "INVALID_CONFIG",
-      `${label}.args must be an array of strings.`
-    );
-  }
-  return {
-    name: requireString(record6.name, `${label}.name`),
-    command: requireString(record6.command, `${label}.command`),
-    args: [...record6.args],
-    timeoutMs: requirePositiveInteger(record6.timeoutMs, `${label}.timeoutMs`)
-  };
-}
 var VERIFICATION_PROJECT_TYPES = [
   "repository",
   "node",
@@ -3706,226 +3396,8 @@ var VERIFICATION_PROJECT_TYPES = [
   "dotnet",
   "custom"
 ];
-function parseVerificationProfile(value, index) {
-  const label = `verification.profiles[${index}]`;
-  const record6 = requireRecord(value, label);
-  const id = requireString(record6.id, `${label}.id`);
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)) {
-    throw new BanzaiError(
-      "INVALID_CONFIG",
-      `${label}.id must be a kebab-case identifier.`
-    );
-  }
-  if (!Array.isArray(record6.commands) || record6.commands.length === 0) {
-    throw new BanzaiError(
-      "INVALID_CONFIG",
-      `${label}.commands must contain at least one deterministic verification command.`
-    );
-  }
-  return {
-    id,
-    projectType: requireEnum(
-      record6.projectType,
-      `${label}.projectType`,
-      VERIFICATION_PROJECT_TYPES
-    ),
-    commands: record6.commands.map(
-      (command, commandIndex) => parseVerificationCommand(command, `${label}.commands[${commandIndex}]`)
-    )
-  };
-}
-function parseConfig(value) {
-  const record6 = requireRecord(value, "config");
-  if (record6.contractVersion !== CONTRACT_VERSION) {
-    throw new BanzaiError(
-      "INVALID_CONFIG",
-      `Config must use contractVersion ${CONTRACT_VERSION}.`
-    );
-  }
-  const models = requireRecord(record6.models, "models");
-  let verification;
-  if (record6.schemaVersion === 1) {
-    if (!Array.isArray(record6.verification) || record6.verification.length === 0) {
-      throw new BanzaiError(
-        "INVALID_CONFIG",
-        "Config must declare at least one deterministic verification command."
-      );
-    }
-    verification = {
-      profiles: [
-        {
-          id: "legacy",
-          projectType: "custom",
-          commands: record6.verification.map(
-            (command, index) => parseVerificationCommand(command, `verification[${index}]`)
-          )
-        }
-      ]
-    };
-  } else if (record6.schemaVersion === 2) {
-    const verificationRecord3 = requireRecord(
-      record6.verification,
-      "verification"
-    );
-    if (!Array.isArray(verificationRecord3.profiles) || verificationRecord3.profiles.length === 0) {
-      throw new BanzaiError(
-        "INVALID_CONFIG",
-        "verification.profiles must contain at least one profile."
-      );
-    }
-    const profiles = verificationRecord3.profiles.map(parseVerificationProfile);
-    if (new Set(profiles.map((profile) => profile.id)).size !== profiles.length) {
-      throw new BanzaiError(
-        "INVALID_CONFIG",
-        "Verification profile ids must be unique."
-      );
-    }
-    verification = { profiles };
-  } else {
-    throw new BanzaiError(
-      "INVALID_CONFIG",
-      "Config must use schemaVersion 1 or 2."
-    );
-  }
-  return {
-    schemaVersion: record6.schemaVersion,
-    contractVersion: CONTRACT_VERSION,
-    models: {
-      planner: parseModelSettings(models.planner, "models.planner"),
-      implementer: parseModelSettings(models.implementer, "models.implementer"),
-      reviewer: parseModelSettings(models.reviewer, "models.reviewer")
-    },
-    verification,
-    claudeEnvironment: parseClaudeEnvironment(record6.claudeEnvironment),
-    context: parseContextPolicy(record6.context),
-    maxFixCycles: requirePositiveInteger(record6.maxFixCycles, "maxFixCycles")
-  };
-}
-var CONTEXT_METRICS = [
-  "runner_payload_bytes",
-  "vendor_input_tokens",
-  "vendor_cached_input_tokens",
-  "vendor_output_tokens",
-  "vendor_cost_usd",
-  "vendor_turns",
-  "session_tools",
-  "session_mcp_servers",
-  "session_skills",
-  "session_commands"
-];
-function parseContextPolicy(value) {
-  if (value === void 0 || value === null) {
-    return { mode: "observe", limits: [] };
-  }
-  if (!isRecord(value)) {
-    throw new BanzaiError("INVALID_CONFIG", "context must be an object.");
-  }
-  if (Object.keys(value).some((key) => !["mode", "limits"].includes(key))) {
-    throw new BanzaiError(
-      "INVALID_CONFIG",
-      "context contains unsupported fields."
-    );
-  }
-  const mode = value.mode;
-  if (mode !== "observe" && mode !== "enforce") {
-    throw new BanzaiError(
-      "INVALID_CONFIG",
-      'context.mode must be "observe" or "enforce".'
-    );
-  }
-  const sourceLimits = value.limits ?? [];
-  if (!Array.isArray(sourceLimits)) {
-    throw new BanzaiError("INVALID_CONFIG", "context.limits must be an array.");
-  }
-  const seen = /* @__PURE__ */ new Set();
-  const limits = sourceLimits.map((item, index) => {
-    const label = `context.limits[${index}]`;
-    if (!isRecord(item)) {
-      throw new BanzaiError("INVALID_CONFIG", `${label} must be an object.`);
-    }
-    if (Object.keys(item).some(
-      (key) => !["metric", "phase", "role", "maximum"].includes(key)
-    )) {
-      throw new BanzaiError(
-        "INVALID_CONFIG",
-        `${label} contains unsupported fields.`
-      );
-    }
-    const metric3 = item.metric;
-    if (typeof metric3 !== "string" || !CONTEXT_METRICS.includes(metric3)) {
-      throw new BanzaiError(
-        "INVALID_CONFIG",
-        `${label}.metric is unsupported.`
-      );
-    }
-    const phase = item.phase ?? null;
-    if (phase !== null && (typeof phase !== "string" || !["selection", "plan", "implementation", "fix", "review"].includes(
-      phase
-    ))) {
-      throw new BanzaiError("INVALID_CONFIG", `${label}.phase is unsupported.`);
-    }
-    const role = item.role ?? null;
-    if (role !== null && (typeof role !== "string" || !["planner", "implementer", "reviewer"].includes(role))) {
-      throw new BanzaiError("INVALID_CONFIG", `${label}.role is unsupported.`);
-    }
-    const maximum = item.maximum;
-    const integerMetric = metric3 !== "vendor_cost_usd";
-    if (typeof maximum !== "number" || !Number.isFinite(maximum) || maximum <= 0 || integerMetric && !Number.isInteger(maximum)) {
-      throw new BanzaiError(
-        "INVALID_CONFIG",
-        `${label}.maximum must be a positive${integerMetric ? " integer" : " finite number"}.`
-      );
-    }
-    const duplicateKey = `${metric3}\0${phase ?? ""}\0${role ?? ""}`;
-    if (seen.has(duplicateKey)) {
-      throw new BanzaiError(
-        "INVALID_CONFIG",
-        `${label} duplicates an existing context selector.`
-      );
-    }
-    seen.add(duplicateKey);
-    return {
-      metric: metric3,
-      phase,
-      role,
-      maximum
-    };
-  });
-  return { mode, limits };
-}
-var CLAUDE_ENVIRONMENT_MODES = /* @__PURE__ */ new Set([
-  "scoped",
-  "ambient"
-]);
-function parseClaudeEnvironment(value) {
-  if (value === void 0 || value === null) {
-    return { mode: "scoped", pluginDirectory: null };
-  }
-  const record6 = requireRecord(value, "claudeEnvironment");
-  const mode = record6.mode;
-  if (typeof mode !== "string" || !CLAUDE_ENVIRONMENT_MODES.has(mode)) {
-    throw new BanzaiError(
-      "INVALID_CONFIG",
-      'claudeEnvironment.mode must be "scoped" or "ambient".'
-    );
-  }
-  const pluginDirectory = record6.pluginDirectory;
-  if (pluginDirectory === void 0 || pluginDirectory === null) {
-    return { mode, pluginDirectory: null };
-  }
-  if (typeof pluginDirectory !== "string" || pluginDirectory.trim().length === 0) {
-    throw new BanzaiError(
-      "INVALID_CONFIG",
-      "claudeEnvironment.pluginDirectory must be a non-empty string or null."
-    );
-  }
-  return {
-    mode,
-    pluginDirectory: pluginDirectory.trim()
-  };
-}
 function verificationEvidenceError(code2, field) {
-  return new BanzaiError(
+  return new BanzaiError2(
     code2,
     `Invalid verification evidence field: ${field}.`
   );
@@ -3997,15 +3469,6 @@ function parseVerificationLogEvidence(value, code2, field) {
       /^[a-f0-9]{64}$/
     )
   };
-}
-function parseVerificationLedger(value) {
-  const code2 = "VERIFICATION_LEDGER_MALFORMED";
-  const record6 = verificationRecord(value, code2, "ledger");
-  verificationKeys(record6, ["schemaVersion"], code2, "ledger");
-  if (record6.schemaVersion !== VERIFICATION_LEDGER_SCHEMA_VERSION) {
-    throw verificationEvidenceError(code2, "schemaVersion");
-  }
-  return { schemaVersion: VERIFICATION_LEDGER_SCHEMA_VERSION };
 }
 function parseVerificationAttemptRecord(value) {
   const code2 = "VERIFICATION_ATTEMPT_MALFORMED";
@@ -4214,28 +3677,8 @@ var WORKFLOW_ROUTES = [
   "feature",
   "strict"
 ];
-var REVIEW_VERDICTS = [
-  "pass",
-  "changes_requested",
-  "replan_required",
-  "blocked"
-];
-var ROTATION_REASONS = [
-  "primary-review",
-  "missing-session",
-  "legacy-state",
-  "settings-changed",
-  "approval-changed",
-  "previous-review-failed",
-  "session-inventory-changed",
-  "previous-review-interrupted",
-  "previous-review-blocked",
-  "accepted-high-risk-finding",
-  "delta-limit-reached",
-  "unreliable-review"
-];
 function evaluationError(message) {
-  return new BanzaiError("INVALID_EVALUATION_SOURCE", message);
+  return new BanzaiError2("INVALID_EVALUATION_SOURCE", message);
 }
 function observed(value) {
   return { value, evidence: "observed" };
@@ -4283,18 +3726,12 @@ function stringValue(value) {
 function contractVersionValue(value) {
   return typeof value === "string" && value.length <= 64 && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(value) ? value : void 0;
 }
-function modelIdValue(value) {
-  return typeof value === "string" && value.length <= 128 && /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(value) ? value : void 0;
-}
 function nonNegativeNumber(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : void 0;
 }
 function nonNegativeInteger(value) {
   const parsed = nonNegativeNumber(value);
   return parsed !== void 0 && Number.isInteger(parsed) ? parsed : void 0;
-}
-function booleanValue(value) {
-  return typeof value === "boolean" ? value : void 0;
 }
 function enumValue(value, values) {
   return typeof value === "string" && values.includes(value) ? value : void 0;
@@ -4608,8 +4045,8 @@ function parseEvaluationStateSource(value) {
   if (!isRecord(value)) {
     throw evaluationError("Persisted state is not a supported object.");
   }
-  if (value.schemaVersion !== 1 && value.schemaVersion !== 2 && value.schemaVersion !== 3 && value.schemaVersion !== 4) {
-    throw new BanzaiError(
+  if (value.schemaVersion !== 1 && value.schemaVersion !== 2 && value.schemaVersion !== 3 && value.schemaVersion !== 4 && value.schemaVersion !== 5) {
+    throw new BanzaiError2(
       "EVALUATION_STATE_SCHEMA_UNSUPPORTED",
       "Persisted state uses an unsupported schema."
     );
@@ -4805,56 +4242,6307 @@ function parseEvaluationStateSource(value) {
     issues
   };
 }
+
+// ../../plugins/banzai/lib/verification-evidence.mjs
+import { createHash as createHash3 } from "node:crypto";
+import { constants as constants2 } from "node:fs";
+import { lstat as lstat2, open as open2, readdir, realpath as realpath2 } from "node:fs/promises";
+import { execFile as execFile2 } from "node:child_process";
+import path2 from "node:path";
+var HASH = /^[a-f0-9]{64}$/u;
+var ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+var MAX_FILES = 5e4;
+var SECRET_PATH = /(?:^|\/)(?:\.env(?:\.[^/]*)?|credentials(?:\.[^/]*)?|secrets?(?:\.[^/]*)?|id_(?:rsa|ed25519)|[^/]*\.(?:pem|p12|pfx))$/iu;
+var MAX_BYTES2 = 512 * 1024 * 1024;
+var PROJECT_TYPES = ["repository", "node", "php", "python", "go", "rust", "ruby", "jvm", "dotnet", "custom"];
+var VERIFICATION_REASONS = ["policy_disabled", "mandatory_fresh", "obligations_unavailable", "inputs_unavailable", "no_origin", "origin_invalid", "later_attempt", "identity_changed", "inputs_changed", "existing_execution", "equivalent_evidence"];
+var VerificationEvidenceError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "VerificationEvidenceError";
+    this.code = "VERIFICATION_EVIDENCE_INVALID";
+  }
+};
+var invalid2 = (message) => {
+  throw new VerificationEvidenceError(message);
+};
+function evidenceDigest(value) {
+  return createHash3("sha256").update(typeof value === "string" || Buffer.isBuffer(value) ? value : JSON.stringify(value)).digest("hex");
+}
+function object(value, required, optional = []) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || required.some((key) => !(key in value)) || Object.keys(value).some((key) => !required.includes(key) && !optional.includes(key))) invalid2("Invalid verification object fields.");
+  return value;
+}
+function text(value, limit = 200) {
+  if (typeof value !== "string" || value.length === 0 || value.length > limit || /[\x00-\x1f]/u.test(value)) invalid2("Invalid verification text.");
+  return value;
+}
+function identifier(value) {
+  if (!ID.test(text(value, 80))) invalid2("Invalid verification identifier.");
+  return value;
+}
+function digest2(value) {
+  if (typeof value !== "string" || !HASH.test(value)) invalid2("Invalid verification digest.");
+  return value;
+}
+function list(value, max = 200) {
+  if (!Array.isArray(value) || value.length > max) invalid2("Invalid verification inventory.");
+  return value;
+}
+function relative(value) {
+  text(value, 500);
+  if (path2.posix.isAbsolute(value) || value.includes("\\") || value.split("/").some((part) => !part || part === "." || part === "..")) invalid2("Invalid verification relative path.");
+  return value;
+}
+function unique(values) {
+  if (new Set(values).size !== values.length) invalid2("Duplicate verification identity.");
+  return values;
+}
+function mode(value) {
+  if (!["fresh", "equivalent_evidence"].includes(value)) invalid2("Invalid verification evidence mode.");
+  return value;
+}
+function parseVerificationPolicy(value) {
+  const p = object(value, ["schema", "schemaVersion", "explanatory", "dependencies"]);
+  if (p.schema !== "banzai-verification-policy/v1" || p.schemaVersion !== 1) invalid2("Unsupported verification policy.");
+  const explanatory = list(p.explanatory).map((item) => {
+    object(item, ["path", "regions"]);
+    relative(item.path);
+    if (!item.path.endsWith(".md") || /(?:^|\/)(?:AGENTS|CLAUDE|SKILL)\.md$/u.test(item.path) || /(?:^|\/)(?:policies|phases|guidance|contracts|decisions|test|tests|\.banzai|\.github)\//u.test(item.path)) invalid2("Authoritative or executable paths cannot be explanatory.");
+    const regions = list(item.regions, 30).map((region) => {
+      object(region, ["start", "end"]);
+      text(region.start);
+      text(region.end);
+      if (region.start === region.end || !/^<!-- .+ -->$/u.test(region.start) || !/^<!-- .+ -->$/u.test(region.end)) invalid2("Explanatory regions require distinct whole-line comment boundaries.");
+      return { start: region.start, end: region.end };
+    });
+    if (/(?:^|\/)(?:PROJECT_MANIFEST|MODULES)\.md$/u.test(item.path) && regions.length === 0) invalid2("Mixed project guidance requires explicit explanatory regions.");
+    unique(regions.flatMap((region) => [region.start, region.end]));
+    return { path: item.path, regions };
+  });
+  unique(explanatory.map((item) => item.path));
+  const d = object(p.dependencies, ["complete", "exclude", "toolchain", "environment", "volatile"]);
+  if (typeof d.complete !== "boolean") invalid2("Dependency completeness must be explicit.");
+  const exclude = unique(list(d.exclude).map(relative));
+  if (exclude.some((item) => /(?:^|\/)\.git(?:\/|$)|^\.banzai(?:$|\/(?:config\.json|artifacts\.json)$)|(?:^|\/)(?:tests?|contracts|policies|guidance|phases)(?:\/|$)|(?:\.test\.[^/]+|lock[^/]*)$/u.test(item) || explanatory.some((rule) => rule.path === item))) invalid2("Invalid dependency exclusion.");
+  const toolchain = unique(list(d.toolchain, 100).map((item) => {
+    text(item, 500);
+    if (!path2.isAbsolute(item)) invalid2("Toolchain paths must be absolute.");
+    return item;
+  }));
+  object(d.environment, [], ["PATH", "LANG", "LC_ALL", "TZ"]);
+  const environment = Object.fromEntries(Object.keys(d.environment).sort().map((key) => [key, text(d.environment[key], 4096)]));
+  if (environment.PATH !== void 0 && environment.PATH.split(path2.delimiter).some((entry) => !path2.isAbsolute(entry))) invalid2("Verification PATH must contain absolute entries only.");
+  const volatile = unique(list(d.volatile, 10).map((item) => {
+    if (!["network", "clock", "service", "secret", "external"].includes(item)) invalid2("Invalid volatile dependency category.");
+    return item;
+  }));
+  return { schema: p.schema, schemaVersion: 1, explanatory, dependencies: { complete: d.complete, exclude, toolchain, environment, volatile } };
+}
+function parseVerificationConfiguration(value) {
+  const v = object(value, ["profiles"], ["policy"]);
+  const ids = [];
+  const profiles = list(v.profiles, 50).map((profile) => {
+    object(profile, ["id", "projectType", "commands"]);
+    identifier(profile.id);
+    if (!PROJECT_TYPES.includes(profile.projectType)) invalid2("Invalid verification project type.");
+    const commands = list(profile.commands).map((command) => {
+      object(command, ["id", "name", "command", "args", "timeoutMs"], ["evidence", "ignoreExplanatory"]);
+      ids.push(identifier(command.id));
+      text(command.name);
+      text(command.command, 500);
+      const args = list(command.args).map((arg) => {
+        if (typeof arg !== "string" || arg.length > 4096 || arg.includes("\0")) invalid2("Invalid verification argument.");
+        return arg;
+      });
+      if (!Number.isSafeInteger(command.timeoutMs) || command.timeoutMs <= 0 || command.timeoutMs > 864e5 || command.ignoreExplanatory !== void 0 && typeof command.ignoreExplanatory !== "boolean") invalid2("Invalid verification command options.");
+      return {
+        id: command.id,
+        name: command.name,
+        command: command.command,
+        args,
+        timeoutMs: command.timeoutMs,
+        evidence: mode(command.evidence ?? "fresh"),
+        ignoreExplanatory: command.ignoreExplanatory ?? false
+      };
+    });
+    if (commands.length === 0) invalid2("Verification profile must contain checks.");
+    return { id: profile.id, projectType: profile.projectType, commands };
+  });
+  if (profiles.length === 0) invalid2("Verification requires profiles.");
+  unique(ids);
+  unique(profiles.map((profile) => profile.id));
+  return { profiles, ...v.policy === void 0 ? {} : { policy: parseVerificationPolicy(v.policy) } };
+}
+function parseVerificationObligations(plan, configuration) {
+  if (typeof plan !== "string") return null;
+  const blocks = [...plan.matchAll(/^```banzai-verification-obligations\/v1\r?\n([\s\S]*?)^```\s*$/gm)];
+  if (blocks.length !== 1) return null;
+  try {
+    const value = object(JSON.parse(blocks[0][1]), ["schema", "schemaVersion", "complete", "planRemainderSha256", "checks"]);
+    if (value.schema !== "banzai-verification-obligations/v1" || value.schemaVersion !== 1 || value.complete !== true) return null;
+    const remainder = plan.slice(0, blocks[0].index) + plan.slice(blocks[0].index + blocks[0][0].length);
+    if (digest2(value.planRemainderSha256) !== evidenceDigest(remainder)) return null;
+    const checks = list(value.checks).map((item) => {
+      object(item, ["id", "evidence"]);
+      return { id: identifier(item.id), evidence: mode(item.evidence) };
+    });
+    unique(checks.map((item) => item.id));
+    if (/\b(?:fresh|rerun|re-run)\b|\brelease:check\b/iu.test(remainder) && checks.some((check2) => check2.evidence === "equivalent_evidence")) return null;
+    const expected = configuration.profiles.flatMap((profile) => profile.commands.map((command) => command.id));
+    if (JSON.stringify(checks.map((item) => item.id)) !== JSON.stringify(expected)) return null;
+    return { schema: value.schema, schemaVersion: 1, complete: true, planRemainderSha256: value.planRemainderSha256, checks };
+  } catch {
+    return null;
+  }
+}
+function verificationIdentities(configuration, authority) {
+  const config = parseVerificationConfiguration(configuration);
+  digest2(authority);
+  return config.profiles.flatMap((profile, profileIndex) => profile.commands.map((command, commandIndex) => ({
+    checkId: command.id,
+    profileOrdinal: profileIndex + 1,
+    commandOrdinal: commandIndex + 1,
+    configurationDigest: evidenceDigest({ schema: 3, verification: config }),
+    policyDigest: config.policy ? evidenceDigest(config.policy) : null,
+    authorityDigest: authority,
+    commandDigest: evidenceDigest(command)
+  })));
+}
+function commandIsFresh(command) {
+  return command.evidence !== "equivalent_evidence" || /(?:^|[\s/\\])release:check(?:$|[\s])/u.test([command.command, ...command.args].join(" "));
+}
+function projectBytes(bytes, rule) {
+  if (!rule) return bytes;
+  const text2 = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  const executable = (body) => /(^\s*(?:```|~~~)|^---\s*$|<(?:script|iframe|object)\b|^\s*\$\s)/imu.test(body);
+  if (rule.regions.length === 0) {
+    if (executable(text2)) invalid2("Executable explanatory content.");
+    return Buffer.from("<declared explanatory file>\n");
+  }
+  const spans = rule.regions.map((region) => {
+    const lines = text2.match(/[^\n]*\n|[^\n]+$/gu) ?? [];
+    let position = 0;
+    const starts = [];
+    const ends = [];
+    for (const line of lines) {
+      if (line.replace(/\r?\n$/u, "") === region.start) starts.push([position, position + line.length]);
+      if (line.replace(/\r?\n$/u, "") === region.end) ends.push(position);
+      position += line.length;
+    }
+    if (starts.length !== 1 || ends.length !== 1 || starts[0][1] > ends[0]) invalid2("Invalid explanatory boundary.");
+    if (executable(text2.slice(starts[0][1], ends[0]))) invalid2("Executable explanatory region.");
+    return { start: starts[0][1], end: ends[0] };
+  }).sort((a, b) => a.start - b.start);
+  if (spans.some((span, index) => index > 0 && spans[index - 1].end >= span.start)) invalid2("Overlapping explanatory regions.");
+  let projected = text2;
+  for (const span of spans.reverse()) projected = projected.slice(0, span.start) + "<declared explanatory region>\n" + projected.slice(span.end);
+  return Buffer.from(projected);
+}
+async function readRegular(file, budget) {
+  const before = await lstat2(file);
+  if (!before.isFile() || before.isSymbolicLink() || before.size > MAX_BYTES2 || (budget.bytes += before.size) > MAX_BYTES2 || ++budget.files > MAX_FILES) invalid2("Unsafe or incomplete verification input.");
+  const handle = await open2(file, constants2.O_RDONLY | constants2.O_NOFOLLOW);
+  try {
+    const bytes = await handle.readFile();
+    const after = await handle.stat();
+    const latest = await lstat2(file);
+    if (before.ino !== after.ino || before.dev !== after.dev || before.size !== after.size || before.mtimeMs !== after.mtimeMs || latest.ino !== before.ino || latest.mtimeMs !== before.mtimeMs || latest.mode !== before.mode || bytes.length !== before.size) invalid2("Verification input changed during capture.");
+    return { bytes, mode: before.mode & 511 };
+  } finally {
+    await handle.close();
+  }
+}
+function git(root, args) {
+  return new Promise((resolve, reject) => execFile2(
+    "git",
+    ["-C", root, ...args],
+    {
+      encoding: "buffer",
+      maxBuffer: MAX_BYTES2,
+      timeout: 3e4,
+      env: { PATH: process.env.PATH, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_OPTIONAL_LOCKS: "0" }
+    },
+    (error, stdout) => error ? reject(new VerificationEvidenceError("Git input inventory unavailable.")) : resolve(stdout)
+  ));
+}
+async function captureVerificationInputs({ repoRoot, configuration, workId, evidenceDirectories = [] }) {
+  const config = parseVerificationConfiguration(configuration);
+  const policy = config.policy;
+  const unavailable2 = (reason) => ({ complete: false, reason, candidateDigest: null, checks: [] });
+  if (!policy) return unavailable2("policy_disabled");
+  if (!policy.dependencies.complete || policy.dependencies.volatile.length || !policy.dependencies.toolchain.length) return unavailable2("inputs_unavailable");
+  if (!/^[a-f0-9-]{36}$/u.test(workId)) invalid2("Invalid verification work identity.");
+  if (evidenceDirectories.some((directory3) => directory3 !== ".banzai/runner.lock" && !/^\.banzai\/(?:work\/[a-f0-9-]{36}|runs\/[a-z0-9][a-z0-9.-]{0,199})(?:\/verification)?$/u.test(directory3))) invalid2("Invalid verification evidence boundary.");
+  try {
+    const root = await realpath2(repoRoot);
+    const repository = await lstat2(root);
+    const repositoryIdentity = { root, device: repository.dev, inode: repository.ino };
+    const excludes = [...policy.dependencies.exclude, ...evidenceDirectories];
+    const excluded = (file) => excludes.some((exclude) => file === exclude || file.startsWith(exclude + "/"));
+    const budget = { files: 0, bytes: 0 };
+    const entries = [];
+    async function walk(directory3, prefix = "") {
+      const before = await readdir(directory3, { withFileTypes: true });
+      for (const entry of before.sort((a, b) => a.name < b.name ? -1 : 1)) {
+        const relativePath2 = prefix + entry.name;
+        if (relativePath2 === ".git" || excluded(relativePath2)) continue;
+        if (/^\.banzai\/work\/[a-f0-9-]{36}\/\.writer-claim\.json$/u.test(relativePath2)) continue;
+        relative(relativePath2);
+        if (SECRET_PATH.test(relativePath2)) invalid2("Secret-dependent input cannot establish reusable evidence.");
+        if (entry.isSymbolicLink()) invalid2("Unproven verification symlink.");
+        const absolute = path2.join(directory3, entry.name);
+        if (entry.isDirectory()) {
+          const info = await lstat2(absolute);
+          if (!info.isDirectory() || info.isSymbolicLink()) invalid2("Unstable verification directory.");
+          entries.push({ path: relativePath2, kind: "directory", mode: info.mode & 511, digest: null, bytes: null, layer: "working" });
+          await walk(absolute, relativePath2 + "/");
+        } else {
+          const input = await readRegular(absolute, budget);
+          entries.push({ path: relativePath2, kind: "file", mode: input.mode, digest: evidenceDigest(input.bytes), bytes: input.bytes, layer: "working" });
+        }
+      }
+      const after = await readdir(directory3);
+      if (JSON.stringify(before.map((entry) => entry.name).sort()) !== JSON.stringify(after.sort())) invalid2("Verification path inventory changed.");
+    }
+    const beforeIndex = await git(root, ["ls-files", "--stage", "-z"]);
+    await walk(root);
+    for (const record6 of beforeIndex.toString("utf8").split("\0").filter(Boolean)) {
+      const match = /^(\d+) ([a-f0-9]+) (\d)\t(.+)$/u.exec(record6);
+      if (!match || match[3] !== "0" || !["100644", "100755"].includes(match[1])) invalid2("Unsafe or unresolved Git input.");
+      const relativePath2 = relative(match[4]);
+      if (SECRET_PATH.test(relativePath2) && !excluded(relativePath2)) invalid2("Secret-dependent Git input cannot establish reusable evidence.");
+      if (excluded(relativePath2)) continue;
+      const bytes = await git(root, ["cat-file", "blob", match[2]]);
+      if ((budget.bytes += bytes.length) > MAX_BYTES2 || ++budget.files > MAX_FILES) invalid2("Incomplete Git input capture.");
+      entries.push({ path: relativePath2, kind: "file", mode: match[1] === "100755" ? 493 : 420, digest: evidenceDigest(bytes), bytes, layer: "index" });
+    }
+    if (!beforeIndex.equals(await git(root, ["ls-files", "--stage", "-z"]))) invalid2("Git inventory changed during capture.");
+    const tools = [];
+    for (const tool of [...policy.dependencies.toolchain].sort()) {
+      if (await realpath2(tool) !== tool) invalid2("Toolchain symlinks require a proven closure.");
+      const input = await readRegular(tool, budget);
+      tools.push({ path: tool, mode: input.mode, sha256: evidenceDigest(input.bytes) });
+    }
+    const commands = config.profiles.flatMap((profile) => profile.commands);
+    const executables = [];
+    for (const command of commands) {
+      const candidates = path2.isAbsolute(command.command) ? [command.command] : command.command.includes("/") ? [path2.resolve(root, command.command)] : (policy.dependencies.environment.PATH ?? "").split(path2.delimiter).filter(Boolean).map((entry) => path2.join(entry, command.command));
+      let executable = null;
+      for (const candidate of candidates) {
+        try {
+          const info = await lstat2(candidate);
+          if (info.isFile() && info.mode & 73) {
+            executable = candidate;
+            break;
+          }
+        } catch (error) {
+          if (error.code !== "ENOENT") throw error;
+        }
+      }
+      if (!executable || !tools.some((tool) => tool.path === executable)) invalid2("Unproven verification executable.");
+      executables.push(executable);
+    }
+    const raw = entries.map(({ bytes: _bytes, ...entry }) => entry);
+    const environmentDigest = evidenceDigest({ repository: repositoryIdentity, tools, environment: policy.dependencies.environment, platform: process.platform, arch: process.arch });
+    const checks = commands.map((command, index) => ({
+      checkId: command.id,
+      executable: executables[index],
+      environmentDigest,
+      inputDigest: evidenceDigest(entries.map(({ bytes, ...entry }) => ({
+        ...entry,
+        digest: bytes === null ? null : evidenceDigest(projectBytes(bytes, command.ignoreExplanatory ? policy.explanatory.find((rule) => rule.path === entry.path) : null))
+      })))
+    }));
+    return { complete: true, reason: null, candidateDigest: evidenceDigest(raw), checks };
+  } catch {
+    return unavailable2("inputs_unavailable");
+  }
+}
+function sameVerificationCapture(left, right) {
+  return left.complete && right.complete && JSON.stringify(left) === JSON.stringify(right);
+}
+function decideVerification({ workId, roundId, configuration, authorityDigest, strict, obligations, capture: capture2, origins }) {
+  const config = parseVerificationConfiguration(configuration);
+  const identities = verificationIdentities(config, authorityDigest);
+  text(workId);
+  text(roundId);
+  const commands = config.profiles.flatMap((profile) => profile.commands);
+  const actions = identities.map((identity, index) => {
+    const input = capture2.checks.find((check2) => check2.checkId === identity.checkId);
+    const action = {
+      checkId: identity.checkId,
+      action: "execute",
+      reason: "no_origin",
+      identity,
+      inputDigest: input?.inputDigest ?? null,
+      environmentDigest: input?.environmentDigest ?? null,
+      origin: null
+    };
+    if (!config.policy) action.reason = "policy_disabled";
+    else if (commandIsFresh(commands[index]) || obligations?.checks.find((check2) => check2.id === identity.checkId)?.evidence === "fresh") action.reason = "mandatory_fresh";
+    else if (strict && !obligations) action.reason = "obligations_unavailable";
+    else if (!capture2.complete || !input) action.reason = "inputs_unavailable";
+    else {
+      const matching = origins.filter((origin2) => origin2.workId === workId && origin2.checkId === identity.checkId);
+      const origin = matching.at(-1);
+      if (origin) {
+        if (origin.status !== "completed" || origin.exitCode !== 0 || origin.signal !== null || origin.failureCategory !== null) action.reason = "later_attempt";
+        else if (!origin.complete || !origin.logsIntact || !origin.attemptId || !origin.recordDigest || !origin.before || !sameVerificationCapture(origin.before, origin.after)) action.reason = "origin_invalid";
+        else if (JSON.stringify(origin.identity) !== JSON.stringify(identity)) action.reason = "identity_changed";
+        else {
+          const prior = origin.before.checks.find((check2) => check2.checkId === identity.checkId);
+          if (!prior || prior.inputDigest !== input.inputDigest || prior.environmentDigest !== input.environmentDigest) action.reason = "inputs_changed";
+          else if (origin.roundId === roundId) action.reason = "existing_execution";
+          else {
+            action.action = "reuse";
+            action.reason = "equivalent_evidence";
+            action.origin = { attemptId: origin.attemptId, recordDigest: origin.recordDigest, roundId: origin.roundId };
+          }
+        }
+      }
+    }
+    return action;
+  });
+  const decision = {
+    schema: "banzai-verification-decision/v1",
+    schemaVersion: 1,
+    workId,
+    roundId,
+    candidateDigest: capture2.candidateDigest,
+    authorityDigest,
+    configurationDigest: evidenceDigest({ schema: 3, verification: config }),
+    actions
+  };
+  return { ...decision, sha256: evidenceDigest(decision) };
+}
+function parseVerificationDecision(value) {
+  const record6 = object(value, ["schema", "schemaVersion", "workId", "roundId", "candidateDigest", "authorityDigest", "configurationDigest", "actions", "sha256"]);
+  if (record6.schema !== "banzai-verification-decision/v1" || record6.schemaVersion !== 1) invalid2("Unsupported verification decision.");
+  text(record6.workId);
+  text(record6.roundId);
+  digest2(record6.authorityDigest);
+  digest2(record6.configurationDigest);
+  if (record6.candidateDigest !== null) digest2(record6.candidateDigest);
+  const checks = [];
+  for (const action of list(record6.actions)) {
+    object(action, ["checkId", "action", "reason", "identity", "inputDigest", "environmentDigest", "origin"]);
+    checks.push(identifier(action.checkId));
+    object(action.identity, ["checkId", "profileOrdinal", "commandOrdinal", "configurationDigest", "policyDigest", "authorityDigest", "commandDigest"]);
+    if (action.identity.checkId !== action.checkId || action.identity.configurationDigest !== record6.configurationDigest || action.identity.authorityDigest !== record6.authorityDigest || ![action.identity.profileOrdinal, action.identity.commandOrdinal].every((n) => Number.isSafeInteger(n) && n > 0)) invalid2("Inconsistent verification decision identity.");
+    digest2(action.identity.commandDigest);
+    for (const hash2 of [action.identity.policyDigest, action.inputDigest, action.environmentDigest]) if (hash2 !== null) digest2(hash2);
+    if (!["execute", "reuse"].includes(action.action) || !VERIFICATION_REASONS.includes(action.reason)) invalid2("Invalid verification disposition.");
+    if (action.action === "reuse") {
+      object(action.origin, ["attemptId", "recordDigest", "roundId"]);
+      text(action.origin.attemptId);
+      text(action.origin.roundId);
+      digest2(action.origin.recordDigest);
+      if (action.reason !== "equivalent_evidence" || !record6.candidateDigest || !action.inputDigest || !action.environmentDigest || !action.identity.policyDigest) invalid2("Incomplete reuse decision.");
+    } else if (action.origin !== null || action.reason === "equivalent_evidence") invalid2("Execution cannot carry reuse evidence.");
+  }
+  unique(checks);
+  const { sha256, ...body } = record6;
+  if (digest2(sha256) !== evidenceDigest(body)) invalid2("Verification decision digest mismatch.");
+  return record6;
+}
+
+// ../../plugins/banzai/lib/verification-store.mjs
+var invalid3 = (message) => {
+  throw new VerificationEvidenceError(message);
+};
+var HASH2 = /^[a-f0-9]{64}$/u;
+function directory(input) {
+  if (!/^\.banzai\/(?:work\/[a-f0-9-]{36}|runs\/[a-z0-9][a-z0-9.-]{0,199})\/verification$/u.test(input.directory) || !/^[a-f0-9-]{36}$/u.test(input.workId)) invalid3("Invalid verification storage identity.");
+  return input.directory;
+}
+function closed2(value, fields) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...fields].sort())) invalid3("Invalid persisted verification fields.");
+}
+function capture(value) {
+  closed2(value, ["complete", "reason", "candidateDigest", "checks"]);
+  if (typeof value.complete !== "boolean" || !Array.isArray(value.checks) || value.checks.length > 1e4 || (value.complete ? !HASH2.test(value.candidateDigest) || value.reason !== null : value.candidateDigest !== null || value.checks.length !== 0 || !["inputs_unavailable", "policy_disabled"].includes(value.reason))) invalid3("Invalid persisted verification capture.");
+  const seen = /* @__PURE__ */ new Set();
+  for (const check2 of value.checks) {
+    closed2(check2, ["checkId", "executable", "environmentDigest", "inputDigest"]);
+    if (typeof check2.checkId !== "string" || seen.has(check2.checkId) || typeof check2.executable !== "string" || !path3.isAbsolute(check2.executable) || !HASH2.test(check2.environmentDigest) || !HASH2.test(check2.inputDigest)) invalid3("Invalid captured check.");
+    seen.add(check2.checkId);
+  }
+  return value;
+}
+function parseVerificationOriginStart(value) {
+  closed2(value, ["schema", "schemaVersion", "workId", "attemptId", "checkId", "decision", "before", "physicalPath"]);
+  if (value.schema !== "banzai-verification-origin-start/v1" || value.schemaVersion !== 1 || !/^verification-[a-f0-9-]{36}$/u.test(value.attemptId)) invalid3("Invalid verification origin start.");
+  if (typeof value.physicalPath !== "string" || !/^\.banzai\/(?:runs\/[a-z0-9][a-z0-9.-]{0,199}\/verification-attempts|work\/[a-f0-9-]{36}\/verification\/attempts)\/verification-\d{6}-verification-[a-f0-9-]{36}\.json$/u.test(value.physicalPath)) invalid3("Invalid physical origin path.");
+  const decision = parseVerificationDecision(value.decision);
+  if (decision.workId !== value.workId || !decision.actions.some((action) => action.checkId === value.checkId && action.action === "execute")) invalid3("Origin must reference an executed decision.");
+  capture(value.before);
+  if (value.before.candidateDigest !== decision.candidateDigest) invalid3("Origin capture differs from its decision.");
+  return value;
+}
+function parseVerificationOriginFinish(value) {
+  closed2(value, ["schema", "schemaVersion", "workId", "attemptId", "startSha256", "physicalSha256", "after"]);
+  if (value.schema !== "banzai-verification-origin-finish/v1" || value.schemaVersion !== 1 || !/^verification-[a-f0-9-]{36}$/u.test(value.attemptId) || !HASH2.test(value.startSha256) || !HASH2.test(value.physicalSha256)) invalid3("Invalid verification origin finish.");
+  capture(value.after);
+  return value;
+}
+async function publishVerificationEvidence(input, relative2, value) {
+  const base = directory(input);
+  if (!/^(?:decisions\/[a-f0-9]{64}|origins\/verification-[a-f0-9-]{36}\.(?:start|finish)|applications\/[a-f0-9]{64})\.json$/u.test(relative2)) invalid3("Invalid verification evidence path.");
+  const bytes = JSON.stringify(value, null, 2) + "\n";
+  const target = `${base}/${relative2}`;
+  await makeDirectories(input.repoRoot, path3.posix.dirname(target));
+  const existing = await readBytes(input.repoRoot, target, { optional: true, limit: 16 * 1024 * 1024 });
+  if (existing !== null) {
+    if (existing.toString("utf8") !== bytes) invalid3("Immutable verification evidence conflicts.");
+    return { relativePath: target, sha256: evidenceDigest(bytes) };
+  }
+  await publishNew(input.repoRoot, target, bytes);
+  return { relativePath: target, sha256: evidenceDigest(bytes) };
+}
+async function persistVerificationDecision(input, decision) {
+  const value = parseVerificationDecision(decision);
+  if (value.workId !== input.workId) invalid3("Cross-work verification decision.");
+  return publishVerificationEvidence(input, `decisions/${value.sha256}.json`, value);
+}
+async function persistVerificationOriginStart(input, attempt, decision, before) {
+  parseVerificationAttemptRecord(attempt);
+  if (attempt.status !== "started") invalid3("Origin capture must precede invocation.");
+  const action = decision.actions.find((item) => item.identity.profileOrdinal === attempt.command.profileOrdinal && item.identity.commandOrdinal === attempt.command.commandOrdinal);
+  if (!action || action.action !== "execute" || attempt.round.id !== decision.roundId) invalid3("Physical start is outside its decision.");
+  const value = parseVerificationOriginStart({
+    schema: "banzai-verification-origin-start/v1",
+    schemaVersion: 1,
+    workId: input.workId,
+    attemptId: attempt.id,
+    checkId: action.checkId,
+    decision,
+    before,
+    physicalPath: `${input.directory.startsWith(".banzai/runs/") ? path3.posix.dirname(input.directory) + "/verification-attempts" : input.directory + "/attempts"}/verification-${String(attempt.sequence).padStart(6, "0")}-${attempt.id}.json`
+  });
+  return publishVerificationEvidence(input, `origins/${attempt.id}.start.json`, value);
+}
+async function persistVerificationOriginFinish(input, attempt, after) {
+  parseVerificationAttemptRecord(attempt);
+  if (attempt.status === "started") invalid3("Physical origin is not terminal.");
+  const bytes = await readBytes(input.repoRoot, `${directory(input)}/origins/${attempt.id}.start.json`, { limit: 16 * 1024 * 1024 });
+  const start = parseVerificationOriginStart(JSON.parse(bytes));
+  if (start.workId !== input.workId) invalid3("Cross-work origin finish.");
+  const value = parseVerificationOriginFinish({
+    schema: "banzai-verification-origin-finish/v1",
+    schemaVersion: 1,
+    workId: input.workId,
+    attemptId: attempt.id,
+    startSha256: evidenceDigest(bytes),
+    physicalSha256: evidenceDigest(attempt),
+    after
+  });
+  return publishVerificationEvidence(input, `origins/${attempt.id}.finish.json`, value);
+}
+async function readVerificationOrigins(input, attempts) {
+  directory(input);
+  const origins = [];
+  let sequence = 0;
+  const ids = /* @__PURE__ */ new Set();
+  for (const attempt of attempts) {
+    parseVerificationAttemptRecord(attempt);
+    if (attempt.sequence <= sequence || ids.has(attempt.id)) invalid3("Physical verification sequence conflict.");
+    sequence = attempt.sequence;
+    ids.add(attempt.id);
+    const startBytes = await readBytes(input.repoRoot, `${input.directory}/origins/${attempt.id}.start.json`, { optional: true, limit: 16 * 1024 * 1024 });
+    if (startBytes === null) {
+      for (const previous of origins.filter((origin) => origin.identity.profileOrdinal === attempt.command.profileOrdinal && origin.identity.commandOrdinal === attempt.command.commandOrdinal))
+        previous.complete = false;
+      continue;
+    }
+    const start = parseVerificationOriginStart(JSON.parse(startBytes));
+    const expectedPhysical = `${input.directory.startsWith(".banzai/runs/") ? path3.posix.dirname(input.directory) + "/verification-attempts" : input.directory + "/attempts"}/verification-${String(attempt.sequence).padStart(6, "0")}-${attempt.id}.json`;
+    if (start.physicalPath !== expectedPhysical) invalid3("Physical origin escaped its evidence owner.");
+    if (start.workId !== input.workId || start.attemptId !== attempt.id || start.decision.roundId !== attempt.round.id) invalid3("Cross-work verification origin.");
+    const identity = start.decision.actions.find((action) => action.checkId === start.checkId).identity;
+    if (identity.profileOrdinal !== attempt.command.profileOrdinal || identity.commandOrdinal !== attempt.command.commandOrdinal) invalid3("Origin command identity mismatch.");
+    const finishBytes = await readBytes(input.repoRoot, `${input.directory}/origins/${attempt.id}.finish.json`, { optional: true, limit: 16 * 1024 * 1024 });
+    const finish = finishBytes === null ? null : parseVerificationOriginFinish(JSON.parse(finishBytes));
+    if (finish && (finish.workId !== input.workId || finish.attemptId !== attempt.id || finish.startSha256 !== evidenceDigest(startBytes) || finish.physicalSha256 !== evidenceDigest(attempt))) invalid3("Changed physical verification origin.");
+    let logsIntact = true;
+    for (const log of [attempt.stdout, attempt.stderr]) {
+      if (log === null) {
+        logsIntact = false;
+        continue;
+      }
+      const bytes = await readBytes(input.repoRoot, `${path3.posix.dirname(input.directory)}/${log.relativePath}`, { optional: true, limit: 16 * 1024 * 1024 });
+      if (bytes === null || evidenceDigest(bytes) !== log.sha256) logsIntact = false;
+    }
+    const after = finish?.after ?? { complete: false, reason: "inputs_unavailable", candidateDigest: null, checks: [] };
+    origins.push({
+      workId: input.workId,
+      checkId: start.checkId,
+      attemptId: attempt.id,
+      roundId: attempt.round.id,
+      recordDigest: evidenceDigest(attempt),
+      status: attempt.status,
+      exitCode: attempt.exitCode,
+      signal: attempt.signal,
+      failureCategory: attempt.failureCategory,
+      complete: finish !== null && (sameVerificationCapture(start.before, after) || !start.before.complete && !after.complete),
+      logsIntact,
+      identity,
+      before: start.before,
+      after
+    });
+  }
+  return origins;
+}
+function verificationApplicability(decision, origins, current) {
+  parseVerificationDecision(decision);
+  capture(current);
+  const drift = !current.complete || decision.candidateDigest !== current.candidateDigest;
+  const dispositions = decision.actions.map((action) => {
+    const origin = action.action === "reuse" ? origins.find((item) => item.attemptId === action.origin.attemptId && item.recordDigest === action.origin.recordDigest) : origins.filter((item) => item.roundId === decision.roundId && item.checkId === action.checkId).at(-1);
+    const latest = origins.filter((item) => item.checkId === action.checkId).at(-1);
+    let valid = !drift && origin && origin.complete && origin === latest && origin.workId === decision.workId && origin.status === "completed" && origin.exitCode === 0 && origin.signal === null && origin.failureCategory === null && origin.logsIntact && JSON.stringify(origin.identity) === JSON.stringify(action.identity);
+    if (action.action === "reuse") {
+      const input = current.checks.find((item) => item.checkId === action.checkId);
+      const prior = origin?.before.checks.find((item) => item.checkId === action.checkId);
+      valid = valid && origin.complete && current.complete && prior && input && prior.inputDigest === input.inputDigest && prior.environmentDigest === input.environmentDigest;
+    } else if (origin?.before.complete || origin?.after.complete) {
+      valid = valid && origin.complete && origin.before.candidateDigest === current.candidateDigest;
+    }
+    return {
+      checkId: action.checkId,
+      kind: valid ? action.action === "reuse" ? "reused" : "executed" : "pending",
+      origin: valid ? { attemptId: origin.attemptId, recordDigest: origin.recordDigest, roundId: origin.roundId } : null
+    };
+  });
+  const body = {
+    schema: "banzai-verification-applicability/v1",
+    schemaVersion: 1,
+    workId: decision.workId,
+    roundId: decision.roundId,
+    decisionSha256: decision.sha256,
+    candidateDigest: current.candidateDigest,
+    complete: dispositions.length > 0 && dispositions.every((item) => item.kind !== "pending"),
+    dispositions
+  };
+  return { ...body, sha256: evidenceDigest(body) };
+}
+function parseVerificationApplicability(value) {
+  closed2(value, ["schema", "schemaVersion", "workId", "roundId", "decisionSha256", "candidateDigest", "complete", "dispositions", "sha256"]);
+  if (value.schema !== "banzai-verification-applicability/v1" || value.schemaVersion !== 1 || !HASH2.test(value.decisionSha256) || !Array.isArray(value.dispositions) || value.dispositions.length > 1e4 || value.candidateDigest !== null && !HASH2.test(value.candidateDigest)) invalid3("Invalid verification applicability.");
+  const seen = /* @__PURE__ */ new Set();
+  for (const item of value.dispositions) {
+    closed2(item, ["checkId", "kind", "origin"]);
+    if (typeof item.checkId !== "string" || seen.has(item.checkId) || !["executed", "reused", "pending"].includes(item.kind)) invalid3("Invalid verification applicability disposition.");
+    seen.add(item.checkId);
+    if (item.kind === "pending") {
+      if (item.origin !== null) invalid3("Pending checks cannot claim origin evidence.");
+    } else {
+      closed2(item.origin, ["attemptId", "recordDigest", "roundId"]);
+      if (!/^verification-[a-f0-9-]{36}$/u.test(item.origin.attemptId) || !HASH2.test(item.origin.recordDigest) || typeof item.origin.roundId !== "string") invalid3("Invalid applicability origin.");
+    }
+  }
+  if (value.complete !== (value.dispositions.length > 0 && value.dispositions.every((item) => item.kind !== "pending"))) invalid3("Invalid applicability completion.");
+  const { sha256, ...body } = value;
+  if (sha256 !== evidenceDigest(body)) invalid3("Verification applicability digest mismatch.");
+  return value;
+}
+async function persistVerificationApplicability(input, applicability) {
+  const value = parseVerificationApplicability(applicability);
+  if (value.workId !== input.workId) invalid3("Cross-work verification applicability.");
+  return publishVerificationEvidence(input, `applications/${value.sha256}.json`, value);
+}
+function parseReviewVerificationEvidence(value) {
+  closed2(value, ["decision", "applicability", "origins", "attempts"]);
+  const decision = parseVerificationDecision(value.decision);
+  const applicability = parseVerificationApplicability(value.applicability);
+  if (applicability.decisionSha256 !== decision.sha256 || applicability.workId !== decision.workId || applicability.roundId !== decision.roundId || !Array.isArray(value.origins) || !Array.isArray(value.attempts) || value.origins.length > 1e4 || value.attempts.length !== value.origins.length) invalid3("Invalid frozen verification closure.");
+  const ids = /* @__PURE__ */ new Set();
+  for (const [index, origin] of value.origins.entries()) {
+    closed2(origin, ["workId", "checkId", "attemptId", "roundId", "recordDigest", "status", "exitCode", "signal", "failureCategory", "complete", "logsIntact", "identity", "before", "after"]);
+    const attempt = parseVerificationAttemptRecord(value.attempts[index]);
+    capture(origin.before);
+    capture(origin.after);
+    if (ids.has(origin.attemptId) || origin.workId !== decision.workId || origin.attemptId !== attempt.id || origin.roundId !== attempt.round.id || origin.recordDigest !== evidenceDigest(attempt) || origin.status !== attempt.status || origin.exitCode !== attempt.exitCode || origin.signal !== attempt.signal || origin.failureCategory !== attempt.failureCategory || typeof origin.complete !== "boolean" || typeof origin.logsIntact !== "boolean" || origin.complete && (origin.before.complete || origin.after.complete) && !sameVerificationCapture(origin.before, origin.after)) invalid3("Frozen physical verification origin mismatch.");
+    ids.add(origin.attemptId);
+  }
+  for (const [index, disposition] of applicability.dispositions.entries()) {
+    const action = decision.actions[index];
+    if (!action || disposition.checkId !== action.checkId) invalid3("Frozen check order mismatch.");
+    if (disposition.kind === "pending") continue;
+    const origin = value.origins.find((item) => item.attemptId === disposition.origin.attemptId);
+    if (!origin || origin.recordDigest !== disposition.origin.recordDigest || origin.checkId !== disposition.checkId || origin.status !== "completed" || origin.exitCode !== 0 || origin.signal !== null || origin.failureCategory !== null || !origin.logsIntact || JSON.stringify(origin.identity) !== JSON.stringify(action.identity) || disposition.kind === "reused" && (action.action !== "reuse" || !origin.complete || JSON.stringify(disposition.origin) !== JSON.stringify(action.origin)) || disposition.kind === "executed" && (action.action !== "execute" || origin.roundId !== decision.roundId)) invalid3("Frozen applicability lacks its direct successful origin.");
+  }
+  if (applicability.dispositions.length !== decision.actions.length) invalid3("Incomplete frozen check inventory.");
+  return value;
+}
+
+// ../../plugins/banzai/lib/review-snapshot.mjs
+import { createHash as createHash4 } from "node:crypto";
+var digestCanonicalJson2 = (value) => createHash4("sha256").update(canonicalJson(value)).digest("hex");
+var digestArtifactEntries = (entries) => createHash4("sha256").update(JSON.stringify({ version: 1, entries })).digest("hex");
+function reviewScopePath2(name) {
+  if (typeof name !== "string" || name.trim().length === 0 || /^[A-Za-z]:/u.test(name) || /[\\\0\r\n]/u.test(name) || name.startsWith("/") || name.split("/").some((part) => part === "" || part === "." || part === ".."))
+    throw new ArtifactStorageError(
+      "INVALID_REVIEW_SCOPE",
+      "Scope paths must be exact normalized repository-relative paths."
+    );
+  return name;
+}
+function invalid4(message) {
+  throw new ArtifactStorageError("INVALID_REVIEW_SNAPSHOT", message);
+}
+function sealReviewSnapshot(value) {
+  const snapshot = JSON.parse(JSON.stringify(value));
+  return parseReviewSnapshot({
+    ...snapshot,
+    digest: digestCanonicalJson2(snapshot)
+  });
+}
+function parseReviewSnapshot(value) {
+  try {
+    return parseSnapshot(value);
+  } catch (error) {
+    if (error instanceof ArtifactStorageError && error.code === "INVALID_REVIEW_SNAPSHOT")
+      throw error;
+    invalid4("Review snapshot contains invalid nested evidence.");
+  }
+}
+function object2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function equal(value, expected) {
+  return value === expected;
+}
+function parseSnapshot(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    invalid4("Review snapshot must be an object.");
+  const snapshot = value;
+  const { digest: digest4, ...body } = snapshot;
+  const keys3 = [
+    "schema",
+    "schemaVersion",
+    "runId",
+    "attemptId",
+    "outputContract",
+    "baseCommit",
+    "approval",
+    "approvedArtifacts",
+    "workspace",
+    "reviewMode",
+    "changes",
+    "anchor",
+    "fullReviewAnchor",
+    "triage",
+    "requiredFindingIds",
+    "completionSource",
+    "artifact",
+    "digest"
+  ];
+  if (snapshot.schemaVersion >= 2) keys3.push("artifactBinding");
+  if (Object.keys(snapshot).length !== keys3.length || Object.keys(snapshot).some((key) => !keys3.includes(key)) || !(snapshot.schemaVersion === 1 && snapshot.schema === "banzai-review-snapshot/v1" || snapshot.schemaVersion === 2 && snapshot.schema === "banzai-review-snapshot/v2" || snapshot.schemaVersion === 3 && snapshot.schema === "banzai-review-snapshot/v3") || !equal(snapshot.outputContract, "review-result/v2") || !/^[a-f0-9]{64}$/u.test(digest4) || digest4 !== digestCanonicalJson2(body))
+    invalid4("Review snapshot version, shape or digest is invalid.");
+  for (const id of [snapshot.runId, snapshot.attemptId])
+    if (typeof id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(id))
+      invalid4("Review snapshot identity is invalid.");
+  if (snapshot.schemaVersion >= 2) {
+    const bound = snapshot.artifactBinding;
+    if (!bound || Object.keys(bound).sort().join(",") !== "binding,sha256" || !/^[a-f0-9]{64}$/u.test(bound.sha256))
+      invalid4("Review snapshot binding is missing or malformed.");
+    parseBinding(bound.binding);
+    if (snapshot.schemaVersion === 2 && bound.binding.schemaVersion !== 1) invalid4("Snapshot v2 retains binding v1 semantics.");
+    const workspace = snapshot.workspace;
+    if (workspace.schemaVersion !== 2 || workspace.artifactBindingDigest !== bound.sha256 || Object.keys(workspace).sort().join(",") !== "artifactBindingDigest,baseCommit,digest,entries,schemaVersion")
+      invalid4("Review snapshot workspace does not match its binding.");
+    const expectedDigest = createHash4("sha256").update(
+      JSON.stringify({
+        version: 2,
+        baseCommit: workspace.baseCommit,
+        artifactBindingDigest: bound.sha256,
+        entries: workspace.entries
+      })
+    ).digest("hex");
+    if (workspace.digest !== expectedDigest || new Set(workspace.entries.map((entry) => entry.path)).size !== workspace.entries.length || canonicalJson(workspace.entries) !== canonicalJson(
+      [...workspace.entries].sort(
+        (a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0
+      )
+    ))
+      invalid4("Review snapshot workspace entries or digest are invalid.");
+    const roles = bound.binding.artifacts;
+    if (snapshot.artifact.path !== `${roles.reviewDirectory}/review-${snapshot.artifact.iteration}.md` || snapshot.approval.paths.some(
+      (p) => p !== roles.description && p !== roles.plan && !/^documentation\/decisions\/[0-9]{4}-[a-z0-9-]+\.md$/u.test(p)
+    ) || snapshot.completionSource !== null && (snapshot.completionSource.implementationReport.path !== roles.implementationReport || snapshot.completionSource.testReport.path !== roles.testReport))
+      invalid4("Review snapshot evidence is outside its exact bound roles.");
+  } else if (snapshot.workspace.schemaVersion !== void 0 || snapshot.artifactBinding !== void 0) {
+    invalid4("Legacy review snapshots cannot carry private storage authority.");
+  }
+  const artifact = snapshot.artifact;
+  if (snapshot.schemaVersion === 3) {
+    if (snapshot.artifactBinding.binding.schemaVersion !== 2) invalid4("Verification snapshot requires binding v2.");
+    const evidence2 = parseReviewVerificationEvidence(artifact.verificationEvidence);
+    if (evidence2.decision.workId !== snapshot.artifactBinding.binding.workId) invalid4("Cross-work review verification evidence.");
+  } else if (artifact?.verificationEvidence !== void 0) invalid4("Legacy snapshots cannot carry new verification evidence.");
+  if (!object2(artifact) || !object2(snapshot.approval) || !object2(snapshot.workspace) || !Array.isArray(snapshot.approval.paths) || !Array.isArray(snapshot.approvedArtifacts) || !Array.isArray(snapshot.workspace.entries) || !Array.isArray(snapshot.changes) || !Array.isArray(snapshot.triage) || !Array.isArray(snapshot.requiredFindingIds) || !Array.isArray(artifact.verification) || !["full", "delta"].includes(snapshot.reviewMode) || !Number.isInteger(artifact.iteration) || artifact.iteration < 1)
+    invalid4("Review snapshot evidence is malformed.");
+  if ("snapshot" in artifact || JSON.stringify(artifact.approvedArtifactPaths) !== JSON.stringify(snapshot.approval.paths) || artifact.workspaceDigest !== snapshot.workspace.digest || snapshot.baseCommit !== snapshot.workspace.baseCommit || new Set(snapshot.approval.paths).size !== snapshot.approval.paths.length || snapshot.approvedArtifacts.length !== snapshot.approval.paths.length)
+    invalid4("Review snapshot scope and workspace identities disagree.");
+  if (snapshot.approvedArtifacts.some(
+    (entry, index) => entry.path !== snapshot.approval.paths[index] || !/^[a-f0-9]{64}$/u.test(entry.sha256)
+  ))
+    invalid4("Approved artifact identities disagree with snapshot scope.");
+  if (digestArtifactEntries(snapshot.approvedArtifacts) !== snapshot.approval.digest)
+    invalid4(
+      "Review snapshot file identities do not match the approved bundle digest."
+    );
+  snapshot.approval.paths.forEach(reviewScopePath2);
+  reviewScopePath2(artifact.path);
+  reviewScopePath2(artifact.candidatePath);
+  if (new Set(snapshot.requiredFindingIds).size !== snapshot.requiredFindingIds.length || snapshot.requiredFindingIds.some(
+    (id) => typeof id !== "string" || !/^R[1-9][0-9]*-F[1-9][0-9]*$/u.test(id)
+  ))
+    invalid4("Snapshot accepted finding IDs are invalid.");
+  const hash2 = (value2) => typeof value2 === "string" && /^[a-f0-9]{64}$/u.test(value2);
+  const string = (value2) => typeof value2 === "string" && value2.length > 0;
+  if (!string(snapshot.baseCommit) || !equal(snapshot.approval.kind, "plan") || !hash2(snapshot.approval.digest) || !string(snapshot.approval.approvedBy) || !string(snapshot.approval.approvedAt) || !hash2(snapshot.workspace.digest) || !string(artifact.slug))
+    invalid4("Snapshot authority identity is malformed.");
+  const anchor = snapshot.fullReviewAnchor;
+  if (anchor !== null && (!Number.isInteger(anchor.iteration) || anchor.iteration < 1 || !string(anchor.sessionId) || !hash2(anchor.approvalDigest) || !equal(anchor.outputContract, "review-result/v2")))
+    invalid4("Full review anchor is malformed.");
+  if (snapshot.reviewMode === "delta" && (snapshot.anchor === null || anchor?.approvalDigest !== snapshot.approval.digest || anchor.iteration > snapshot.anchor.iteration || snapshot.anchor.iteration >= artifact.iteration || !["full", "delta"].includes(snapshot.anchor.mode)))
+    invalid4(
+      "Delta snapshot needs a compatible full review and canonical anchor."
+    );
+  for (const entry of snapshot.workspace.entries) {
+    reviewScopePath2(entry.path);
+    if (!string(entry.kind) || entry.sha256 !== null && !hash2(entry.sha256))
+      invalid4("Snapshot workspace entry is malformed.");
+  }
+  for (const change of snapshot.changes) {
+    reviewScopePath2(change.path);
+    if (!["added", "modified", "deleted"].includes(change.change))
+      invalid4("Snapshot change is malformed.");
+  }
+  for (const verification of artifact.verification) {
+    if (!string(verification.name) || !string(verification.command) || !Array.isArray(verification.args) || verification.args.some((arg) => typeof arg !== "string") || !Number.isInteger(verification.exitCode) || verification.signal !== null && !string(verification.signal) || !string(verification.startedAt) || !string(verification.completedAt))
+      invalid4("Snapshot verification is malformed.");
+    reviewScopePath2(verification.stdoutPath);
+    reviewScopePath2(verification.stderrPath);
+  }
+  if (snapshot.completionSource !== null) {
+    const source = snapshot.completionSource;
+    const projection = artifact.taskCompletion;
+    if (!equal(source.schemaVersion, 1) || !equal(source.status, "valid") || !string(source.sourceAttemptId) || !["implementation", "fix"].includes(source.sourceAttemptKind ?? "") || source.approvalDigest !== snapshot.approval.digest || !hash2(source.ledgerDigest) || !hash2(source.planTaskDigest) || source.ledgerDigest !== projection?.ledgerDigest || source.planTaskDigest !== projection.planTaskDigest || source.approvalDigest !== projection.approvalDigest || source.counts.total !== projection.total || source.counts.completed !== projection.completed || source.implementationReport.path !== projection.implementationReport || source.testReport.path !== projection.testReport)
+      invalid4("Snapshot completion identities disagree.");
+    for (const report of [source.implementationReport, source.testReport]) {
+      reviewScopePath2(report.path);
+      if (!hash2(report.sha256))
+        invalid4("Snapshot report identity is malformed.");
+    }
+  } else if (artifact.taskCompletion != null)
+    invalid4("Snapshot completion projection lacks original source evidence.");
+  return snapshot;
+}
+
+// ../../plugins/banzai/lib/project-adoption.mjs
+import { constants as constants3 } from "node:fs";
+import { lstat as lstat3, open as open3, realpath as realpath3, stat } from "node:fs/promises";
+import path4 from "node:path";
+var ADOPTION_LABELS = {
+  ready: "Project guidance ready",
+  setup_required: "Project setup required",
+  migration_required: "Project migration required",
+  needs_attention: "Project guidance needs attention"
+};
+var SCAFFOLD_MARKER = "<!-- banzai-scaffold: unfilled -->";
+var GUIDANCE_MAX_BYTES2 = 256 * 1024;
+var METADATA_MAX_BYTES2 = 64 * 1024;
+var MANIFEST_SECTIONS = [
+  "Project Overview",
+  "Platform & Tooling",
+  "Architecture",
+  "Project Structure",
+  "Key Modules & Components",
+  "State & Data Flow",
+  "Dependencies",
+  "Testing",
+  "Conventions",
+  "Technical Constraints & Decision Index"
+];
+var POLICY_HEADINGS = [
+  "Decision Consultation",
+  "Test Assurance",
+  "Security Assurance",
+  "Engineering Quality",
+  "Plan Task Completion Evidence"
+];
+var SOURCE_FILES = [
+  ".claude-plugin/plugin.json",
+  ".codex-plugin/plugin.json",
+  "package.json",
+  ".claude-plugin/marketplace.json",
+  "plugins/banzai/.claude-plugin/plugin.json",
+  "plugins/banzai/.codex-plugin/plugin.json"
+];
+function contained(root, target) {
+  const relative2 = path4.relative(root, target);
+  return relative2 !== ".." && !relative2.startsWith(`..${path4.sep}`) && !path4.isAbsolute(relative2);
+}
+async function readAdoptionFile(root, file, limit) {
+  const missing3 = { text: null, problem: null };
+  const unsafe = { text: null, problem: "unsafe or unreadable file" };
+  try {
+    let candidate = root;
+    for (const part of file.split("/")) {
+      candidate = path4.join(candidate, part);
+      try {
+        await lstat3(candidate);
+      } catch (error) {
+        if (error.code === "ENOENT") return missing3;
+        return unsafe;
+      }
+      if (!contained(root, await realpath3(candidate))) return unsafe;
+    }
+    const resolved = await realpath3(candidate);
+    const before = await stat(resolved);
+    if (!before.isFile() || (before.mode & 292) === 0) return unsafe;
+    if (before.size > limit)
+      return { text: null, problem: "file exceeds size limit" };
+    const handle = await open3(
+      resolved,
+      constants3.O_RDONLY | constants3.O_NONBLOCK | constants3.O_NOFOLLOW
+    );
+    try {
+      const opened = await handle.stat();
+      if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino)
+        return unsafe;
+      const buffer = Buffer.alloc(limit + 1);
+      let length = 0;
+      while (length < buffer.length) {
+        const { bytesRead } = await handle.read(
+          buffer,
+          length,
+          buffer.length - length,
+          length
+        );
+        if (bytesRead === 0) break;
+        length += bytesRead;
+      }
+      if (length > limit)
+        return { text: null, problem: "file exceeds size limit" };
+      const after = await handle.stat();
+      const current = await stat(candidate);
+      if ([opened, after, current].some(
+        (value) => value.dev !== before.dev || value.ino !== before.ino || value.size !== before.size || value.mtimeMs !== before.mtimeMs || value.ctimeMs !== before.ctimeMs
+      ) || await realpath3(candidate) !== resolved || length !== after.size) {
+        return { text: null, problem: "file changed during inspection" };
+      }
+      return {
+        text: new TextDecoder("utf-8", { fatal: true }).decode(
+          buffer.subarray(0, length)
+        ),
+        problem: null
+      };
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return unsafe;
+  }
+}
+function visibleMarkdown(text2) {
+  let comment = false;
+  let fence = null;
+  const lines = [];
+  for (const raw of text2.split(/\r?\n/)) {
+    if (fence !== null) {
+      const close = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(raw);
+      if (close?.[1]?.[0] === fence.marker && close[1].length >= fence.length)
+        fence = null;
+      continue;
+    }
+    let line = "";
+    let offset = 0;
+    while (offset < raw.length) {
+      const index = raw.indexOf(comment ? "-->" : "<!--", offset);
+      if (index < 0) {
+        if (!comment) line += raw.slice(offset);
+        break;
+      }
+      if (!comment) line += raw.slice(offset, index);
+      offset = index + (comment ? 3 : 4);
+      comment = !comment;
+    }
+    const start = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (start?.[1]) {
+      fence = { marker: start[1].charAt(0), length: start[1].length };
+      continue;
+    }
+    lines.push(line);
+  }
+  return lines;
+}
+function headings(text2) {
+  return new Set(
+    visibleMarkdown(text2).flatMap((line) => {
+      const match = /^ {0,3}##[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(line);
+      return match?.[1] ? [match[1]] : [];
+    })
+  );
+}
+function object3(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+async function sourceIdentity(root, issues) {
+  const metadata = await Promise.all(
+    SOURCE_FILES.map(
+      (file) => readAdoptionFile(root, file, METADATA_MAX_BYTES2)
+    )
+  );
+  const values = metadata.map((entry, index) => {
+    let problem = entry.problem;
+    if (entry.text !== null) {
+      try {
+        const value = JSON.parse(entry.text);
+        if (object3(value)) return value;
+      } catch {
+      }
+      problem = "invalid identity metadata";
+    }
+    if (problem)
+      issues.push({
+        file: SOURCE_FILES[index] ?? "plugin metadata",
+        reason: problem,
+        classification: "needs_attention"
+      });
+    return null;
+  });
+  const [claude, codex, pkg, marketplace, nestedClaude, nestedCodex] = values;
+  const roots = [claude, codex].filter((value) => value !== null);
+  const rootCandidate = roots.some((value) => value?.name === "banzai");
+  const pluginRoot = rootCandidate && roots.every((value) => value?.name === "banzai") && metadata.slice(0, 2).every((entry, index) => entry.text === null || values[index] !== null);
+  if (rootCandidate && !pluginRoot) {
+    issues.push({
+      file: ".claude-plugin/plugin.json / .codex-plugin/plugin.json",
+      reason: "conflicting source identity",
+      classification: "needs_attention"
+    });
+  }
+  const entries = Array.isArray(marketplace?.plugins) ? marketplace.plugins.filter(
+    (value) => object3(value) && value.name === "banzai"
+  ) : [];
+  const sourceWorkspace = pkg?.name === "banzai-spec-driven-dev" && pkg.private === true && Array.isArray(pkg.workspaces) && pkg.workspaces.includes("packages/*") && entries.length === 1 && object3(entries[0]) && entries[0].source === "./plugins/banzai" && nestedClaude?.name === "banzai" && nestedCodex?.name === "banzai";
+  if (pkg?.name === "banzai-spec-driven-dev" && (entries.length > 1 || [nestedClaude, nestedCodex].some(
+    (value) => value && value.name !== "banzai"
+  ))) {
+    issues.push({
+      file: "package.json / plugin metadata",
+      reason: "conflicting source identity",
+      classification: "needs_attention"
+    });
+  }
+  return !issues.some((issue3) => issue3.classification === "needs_attention") && (pluginRoot || sourceWorkspace);
+}
+function inspectManifest(text2, issues) {
+  for (const line of text2.split(/\r?\n/)) {
+    if (/^ {0,3}#{1,6}(?:[ \t]|$)/.test(line)) break;
+    if (line === SCAFFOLD_MARKER) {
+      issues.push({
+        file: "PROJECT_MANIFEST.md",
+        reason: "scaffold marker present",
+        classification: "setup_required"
+      });
+      return;
+    }
+  }
+  const sections = [];
+  for (const line of visibleMarkdown(text2)) {
+    const match = /^ {0,3}##[ \t]+(?:\d+\.[ \t]+)?(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(line);
+    if (match?.[1]) sections.push({ name: match[1], content: false });
+    else if (line.trim() && !/^ {0,3}#{1,6}(?:[ \t]|$)/.test(line) && sections.length > 0) {
+      const section = sections.at(-1);
+      if (section) section.content = true;
+    }
+  }
+  if (sections.length !== MANIFEST_SECTIONS.length || sections.some(
+    (section, index) => section.name !== MANIFEST_SECTIONS[index] || !section.content
+  )) {
+    issues.push({
+      file: "PROJECT_MANIFEST.md",
+      reason: "required sections missing, empty or out of order",
+      classification: "setup_required"
+    });
+  }
+}
+async function inspectProjectAdoption(repoRoot, options = {}) {
+  const issues = [];
+  let root;
+  try {
+    root = await realpath3(repoRoot);
+  } catch {
+    return {
+      classification: "needs_attention",
+      label: ADOPTION_LABELS.needs_attention,
+      sourceRepository: false,
+      files: [],
+      issues: [
+        {
+          file: "AGENTS.md",
+          reason: "repository unreadable",
+          classification: "needs_attention"
+        }
+      ]
+    };
+  }
+  const sourceRepository = await sourceIdentity(root, issues);
+  const files = options.layoutOnly ? ["AGENTS.md", "CLAUDE.md"] : ["AGENTS.md", "CLAUDE.md", "PROJECT_MANIFEST.md"];
+  const entries = await Promise.all(
+    files.map((file) => readAdoptionFile(root, file, GUIDANCE_MAX_BYTES2))
+  );
+  entries.forEach((entry, index) => {
+    if (entry.problem)
+      issues.push({
+        file: files[index] ?? "guidance",
+        reason: entry.problem,
+        classification: "needs_attention"
+      });
+  });
+  const agents = entries[0]?.text ?? null;
+  const claude = entries[1]?.text ?? null;
+  const agentHeadings = headings(agents ?? "");
+  const claudeHeadings = headings(claude ?? "");
+  const hasPolicy = (set) => POLICY_HEADINGS.some((heading) => set.has(heading));
+  if (!entries[0]?.problem && !entries[1]?.problem) {
+    if (sourceRepository) {
+      if (agents === null)
+        issues.push({
+          file: "AGENTS.md",
+          reason: "missing",
+          classification: "setup_required"
+        });
+    } else if (agents !== null && agentHeadings.has("Authority") && agentHeadings.has("Policies") && !/^@/m.test(agents) && !hasPolicy(claudeHeadings)) {
+    } else if (claudeHeadings.has("Engineering Quality") && !agentHeadings.has("Authority")) {
+      issues.push({
+        file: "AGENTS.md / CLAUDE.md",
+        reason: "legacy Banzai layout: run `project-manifest` to migrate",
+        classification: "migration_required"
+      });
+    } else if (![agentHeadings, claudeHeadings].some(
+      (set) => set.has("Authority") || hasPolicy(set)
+    )) {
+      issues.push({
+        file: "AGENTS.md",
+        reason: agents === null ? "missing" : "Banzai instruction layout absent",
+        classification: "setup_required"
+      });
+    } else {
+      issues.push({
+        file: "AGENTS.md / CLAUDE.md",
+        reason: "partial or conflicting instruction layout",
+        classification: "needs_attention"
+      });
+    }
+  }
+  if (!options.layoutOnly) {
+    const manifest = entries[2];
+    if (manifest && !manifest.problem) {
+      if (manifest.text === null)
+        issues.push({
+          file: "PROJECT_MANIFEST.md",
+          reason: "missing",
+          classification: "setup_required"
+        });
+      else inspectManifest(manifest.text, issues);
+    }
+  }
+  const classification = ["needs_attention", "migration_required", "setup_required"].find(
+    (value) => issues.some((issue3) => issue3.classification === value)
+  ) ?? "ready";
+  return {
+    classification,
+    label: ADOPTION_LABELS[classification],
+    sourceRepository,
+    files: entries.map((entry, index) => ({
+      file: files[index] ?? "guidance",
+      status: entry.problem ? "unreadable" : entry.text === null ? "missing" : "present"
+    })),
+    issues
+  };
+}
+function adoptionDiagnostic(result) {
+  return [
+    result.label,
+    ...result.issues.map((issue3) => `${issue3.file}: ${issue3.reason}`)
+  ].join(". ");
+}
+
+// ../../plugins/banzai/lib/artifact-archive.mjs
+import {
+  lstat as lstat4,
+  mkdir,
+  readdir as readdir2,
+  rename as rename2,
+  chmod,
+  open as open4,
+  unlink as unlink2
+} from "node:fs/promises";
+import path5 from "node:path";
+import { randomUUID as randomUUID3 } from "node:crypto";
+var ARCHIVE_SCHEMA = "banzai-artifact-archive/v1";
+var LIMIT = 25e3;
+var SHA = /^[0-9a-f]{64}$/u;
+var secretPath = /(?:^|\/)(?:\.ssh|\.aws|\.gnupg|\.codex|\.claude|node_modules|auth\.json|credentials(?:\.json)?|\.env(?:\.[^/]+)?)(?:\/|$)|\.(?:pem|key|p12|pfx)$/iu;
+var control = /(?:^|\/)(?:active-run\.json|runner\.lock|\.writer-claim\.json|\.artifact-init\.lock)$/u;
+function bounded(value, name) {
+  if (typeof value !== "string" || !value.length || value.length > 200 || /[\x00-\x1f\x7f]/u.test(value))
+    fail(
+      "ARTIFACT_INPUT_INVALID",
+      `${name} must be a bounded explicit identity.`
+    );
+  return value;
+}
+function archivePath(value) {
+  relativePath(value);
+  if (secretPath.test(value) || value === ".banzai/archive-manifest.json")
+    fail(
+      "ARTIFACT_UNSAFE_PATH",
+      "Authentication, credential and key locations cannot enter an artifact archive."
+    );
+  return value;
+}
+async function directory2(input) {
+  if (typeof input !== "string" || !path5.isAbsolute(input))
+    fail(
+      "ARTIFACT_INPUT_INVALID",
+      "Archive directories must be absolute local paths."
+    );
+  const root = path5.parse(input).root;
+  await safePath(root, path5.relative(root, input), { directory: true });
+  return input;
+}
+async function missingDestination(input) {
+  if (typeof input !== "string" || !path5.isAbsolute(input))
+    fail(
+      "ARTIFACT_INPUT_INVALID",
+      "Destination must be an absolute local directory."
+    );
+  if (input !== path5.resolve(input))
+    fail("ARTIFACT_UNSAFE_PATH", "Destination must be canonical, without dot segments or path aliases.");
+  await directory2(path5.dirname(input));
+  await safePath(path5.dirname(input), path5.basename(input), {
+    missing: true,
+    directory: true
+  });
+  return input;
+}
+function sourcePath(parent, reference, sourceRoot = null) {
+  if (typeof reference !== "string" || !reference.length || /^(?:https?:|mailto:|#|app:)/u.test(reference))
+    return null;
+  let clean = reference.split("#")[0];
+  if (path5.posix.isAbsolute(clean)) {
+    if (sourceRoot && clean.startsWith(`${sourceRoot}/`))
+      clean = clean.slice(sourceRoot.length + 1);
+    else return `external/${digestBytes(clean)}`;
+  }
+  const run = parent.match(/^(\.banzai\/runs\/[^/]+)\//u)?.[1];
+  const work = parent.match(/^(\.banzai\/work\/[^/]+)\/verification\//u)?.[1];
+  if (work && clean.startsWith("verification/")) clean = `${work}/${clean}`;
+  if (run && /^(?:attempts|reviews|verification|approval|recovery)\//u.test(clean))
+    clean = `${run}/${clean}`;
+  const candidate = clean.startsWith("./") || clean.startsWith("../") ? path5.posix.normalize(path5.posix.join(path5.posix.dirname(parent), clean)) : clean;
+  if (candidate.startsWith("../") || path5.posix.isAbsolute(candidate) || /[\x00-\x20<>`{}]/u.test(candidate))
+    return null;
+  if (!candidate.includes("/") && !/\.(?:md|json|jsonl|log)$/u.test(candidate))
+    return null;
+  return candidate.replace(/\/$/u, "");
+}
+function markdownProse(text2) {
+  let fence = null;
+  return text2.split("\n").map((line) => {
+    const marker = /^ {0,3}(`{3,}|~{3,})/u.exec(line)?.[1];
+    if (fence !== null) {
+      if (marker && marker[0] === fence[0] && marker.length >= fence.length) fence = null;
+      return "";
+    }
+    if (marker) {
+      fence = marker;
+      return "";
+    }
+    return line.replace(/(`+).*?\1/gu, "");
+  }).join("\n");
+}
+function dependenciesFor(relative2, bytes, sourceRoot = null) {
+  const refs = /* @__PURE__ */ new Map();
+  let supported = true;
+  const text2 = bytes.toString("utf8");
+  if (relative2.endsWith(".json")) {
+    let value;
+    try {
+      value = JSON.parse(text2);
+    } catch {
+      return { refs, supported: false };
+    }
+    try {
+      if (value.schema === "banzai-verification-decision/v1") parseVerificationDecision(value);
+      else if (value.schema === "banzai-verification-applicability/v1") parseVerificationApplicability(value);
+      else if (value.schema === "banzai-verification-origin-start/v1") parseVerificationOriginStart(value);
+      else if (value.schema === "banzai-verification-origin-finish/v1") parseVerificationOriginFinish(value);
+      else if (value.schema === "banzai-terminal-attempt-checkpoint/v1")
+        parseTerminalAttemptCheckpoint(value);
+      else if (value.schema === "banzai-recovery-authorization/v1")
+        parseRecoveryAuthorization(value);
+      else if (/^\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative2))
+        parseEvaluationStateSource(value);
+      else if (/^\.banzai\/runs\/[^/]+\/attempts\/[^/]+\.json$/u.test(relative2) && value.attempt && "startedAt" in value)
+        parseModelAttemptRecord(value);
+      else if (/^\.banzai\/(?:runs\/[^/]+\/verification-attempts|work\/[^/]+\/verification\/attempts)\//u.test(relative2) && "command" in value)
+        parseVerificationAttemptRecord(value);
+      else if ("phase" in value && "outcome" in value)
+        parsePersistedPhaseResult(value);
+      else if ("verdict" in value && "findings" in value)
+        (value.schemaVersion === 2 ? parseCurrentReviewResult : parseReviewResult)(value);
+    } catch {
+      return { refs, supported: false };
+    }
+    if (relative2.endsWith("/work.json")) {
+      parseBinding(value);
+      return { refs, supported };
+    }
+    if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative2) && ![1, 2, 3, 4, 5].includes(value.schemaVersion))
+      supported = false;
+    if (typeof value.schema === "string" && !(/* @__PURE__ */ new Set([
+      "banzai-terminal-attempt-checkpoint/v1",
+      "banzai-recovery-authorization/v1",
+      "banzai-review-snapshot/v1",
+      "banzai-review-snapshot/v2",
+      "banzai-review-snapshot/v3",
+      "banzai-work-binding/v2",
+      "banzai-verification-decision/v1",
+      "banzai-verification-applicability/v1",
+      "banzai-verification-origin-start/v1",
+      "banzai-verification-origin-finish/v1",
+      "banzai-work-binding/v1",
+      "banzai-context-attempt/v1",
+      "banzai-context-report/v1"
+    ])).has(value.schema))
+      supported = false;
+    if (typeof value.schema === "string" && value.schema.startsWith("banzai-review-snapshot/")) {
+      try {
+        parseReviewSnapshot(value);
+      } catch {
+        return { refs, supported: false };
+      }
+    }
+    if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative2) && value.schemaVersion >= 4) {
+      try {
+        exactObject(value.artifactBinding, ["binding", "sha256"]);
+        parseBinding(value.artifactBinding.binding);
+        if (!SHA.test(value.artifactBinding.sha256)) supported = false;
+      } catch {
+        supported = false;
+      }
+    }
+    const workflowEvidence = relative2.startsWith(".banzai/runs/") || relative2.includes("/verification/") || typeof value.schema === "string" && /^banzai-(?:review-snapshot|work-binding)\/v/u.test(value.schema);
+    if (!workflowEvidence) return { refs, supported };
+    const run = relative2.match(/^(\.banzai\/runs\/[^/]+)\//u)?.[1];
+    if (run && relative2 !== `${run}/state.json`) refs.set(`${run}/state.json`, true);
+    const evidenceRoot = relative2.match(/^(\.banzai\/(?:runs\/[^/]+|work\/[^/]+)\/verification)(?:\/|$)/u)?.[1] ?? (run ? `${run}/verification` : null);
+    if (evidenceRoot && value.workId) refs.set(`.banzai/work/${value.workId}/work.json`, true);
+    if (value.schema === "banzai-verification-origin-finish/v1") refs.set(`${evidenceRoot}/origins/${value.attemptId}.start.json`, true);
+    if (value.schema === "banzai-verification-applicability/v1") refs.set(`${evidenceRoot}/decisions/${value.decisionSha256}.json`, true);
+    const visit = (item, key = "") => {
+      if (Array.isArray(item)) {
+        for (const child of item) visit(child, key);
+      } else if (item && typeof item === "object") {
+        if (evidenceRoot && item.schema === "banzai-verification-decision/v1") refs.set(`${evidenceRoot}/decisions/${item.sha256}.json`, true);
+        if (evidenceRoot && item.schema === "banzai-verification-applicability/v1") refs.set(`${evidenceRoot}/applications/${item.sha256}.json`, true);
+        if (key === "origin" && evidenceRoot && /^verification-[a-f0-9-]{36}$/u.test(item.attemptId)) {
+          refs.set(`${evidenceRoot}/origins/${item.attemptId}.start.json`, true);
+          refs.set(`${evidenceRoot}/origins/${item.attemptId}.finish.json`, true);
+        }
+        if (key === "artifactBinding") {
+          parseBinding(item.binding);
+          refs.set(`.banzai/work/${item.binding.workId}/work.json`, true);
+          return;
+        }
+        for (const [name, child] of Object.entries(item)) visit(child, name);
+      } else if (typeof item === "string" && /(?:path|paths|description|plan|implementationReport|testReport|work|changeReport)$/iu.test(
+        key
+      )) {
+        const ref = sourcePath(relative2, item, sourceRoot);
+        if (ref && !control.test(ref)) refs.set(ref, true);
+      }
+    };
+    visit(value);
+  } else if (relative2.endsWith(".md")) {
+    for (const match of markdownProse(text2).matchAll(/\[([^\]\n]*)\]\(([^)\s]+)\)/gu)) {
+      const raw = match[2].split("#")[0];
+      if (/^(?:https?:|mailto:|#)/u.test(match[2])) continue;
+      const ref = sourcePath(relative2, raw.startsWith(".") ? raw : `./${raw}`);
+      if (ref) {
+        const authority = /(?:^|\/)(?:description|plan|work)\.md$/u.test(ref) || /^documentation\/decisions\/(?!README\.md$)[^/]+\.md$/u.test(ref) || /(?:Accepted ADR|Required (?:ADR|description|plan))/iu.test(match[1]);
+        const optional = /^Historical \(optional\): /u.test(match[1]);
+        refs.set(ref, (refs.get(ref) ?? false) || authority && !optional);
+      }
+    }
+  }
+  return { refs, supported };
+}
+function localProjectIdentity(root) {
+  return `local-sha256:${digestBytes(root)}`;
+}
+function retainedPaths(manifest, objects) {
+  const protectedPaths = /* @__PURE__ */ new Set();
+  for (const pin of manifest.retention.pins) {
+    const bindingPath = `.banzai/work/${pin.workId}/work.json`;
+    const bindingEntry = manifest.entries.find((entry) => entry.path === bindingPath);
+    if (!bindingEntry) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Pinned work has no archived binding provenance.");
+    protectedPaths.add(bindingPath);
+    for (const entry of manifest.entries) {
+      const run = entry.path.match(/^(\.banzai\/runs\/[^/]+)\/state\.json$/u)?.[1];
+      if (!run) continue;
+      let state;
+      try {
+        state = JSON.parse(objects.get(entry.path).toString("utf8"));
+      } catch {
+        continue;
+      }
+      if (state?.artifactBinding?.binding?.workId === pin.workId) {
+        for (const item of manifest.entries) if (item.path.startsWith(`${run}/`)) protectedPaths.add(item.path);
+      }
+    }
+    for (const entry of manifest.entries)
+      if (entry.path.startsWith(`.banzai/work/${pin.workId}/`)) protectedPaths.add(entry.path);
+  }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const edge of manifest.dependencies) {
+      if (protectedPaths.has(edge.from) && edge.required && edge.status === "included" && !protectedPaths.has(edge.to)) {
+        protectedPaths.add(edge.to);
+        changed = true;
+      }
+    }
+  }
+  return [...protectedPaths].sort();
+}
+async function inventoryArtifacts(input) {
+  const root = await projectRoot(input.repoRoot);
+  const workPaths = input.workPaths ?? [];
+  const selectedRunIds = input.runIds ?? [];
+  if (!Array.isArray(workPaths) || !Array.isArray(selectedRunIds) || workPaths.length + selectedRunIds.length < 1 || workPaths.length + selectedRunIds.length > LIMIT || selectedRunIds.some((id) => typeof id !== "string" || !/^[a-zA-Z0-9_-]+$/u.test(id)))
+    fail("ARTIFACT_INPUT_INVALID", "Select a bounded nonempty list of workPaths and/or selectedRunIds.");
+  const selectedPaths = [...workPaths.map(relativePath), ...selectedRunIds.map((id) => `.banzai/runs/${id}`)];
+  const files = /* @__PURE__ */ new Map();
+  const excluded = [];
+  const walk = async (relative2) => {
+    archivePath(relative2);
+    const target = path5.join(root, relative2);
+    const stat5 = await lstat4(target).catch(
+      () => fail(
+        "ARTIFACT_EVIDENCE_INCOMPLETE",
+        "Selected archive evidence is unavailable."
+      )
+    );
+    await safePath(root, relative2, { directory: stat5.isDirectory() });
+    if (control.test(relative2)) {
+      excluded.push(relative2);
+      return;
+    }
+    if (stat5.isDirectory()) {
+      for (const name of (await readdir2(target)).sort())
+        await walk(`${relative2}/${name}`);
+    } else {
+      const bytes = await readBytes(root, relative2);
+      files.set(relative2, { bytes, mode: stat5.mode & 511 });
+      if (files.size > LIMIT)
+        fail(
+          "ARTIFACT_DISCOVERY_LIMIT",
+          "Archive selection exceeds the bounded inventory."
+        );
+    }
+  };
+  for (const relative2 of selectedPaths) await walk(relative2);
+  const dependencies = [];
+  const uninterpreted = [];
+  for (const [relative2, value] of files) {
+    if (/^\.banzai\/work\/[^/]+\/work\.json$/u.test(relative2)) {
+      const binding = parseBinding(JSON.parse(value.bytes.toString("utf8")));
+      for (const target of Object.values(binding.artifacts)) {
+        try {
+          await walk(target);
+        } catch (error) {
+          if (error.code !== "ARTIFACT_EVIDENCE_INCOMPLETE") throw error;
+        }
+      }
+    }
+    const run = relative2.match(/^(\.banzai\/runs\/[^/]+)\//u)?.[1];
+    if (run && !files.has(`${run}/state.json`)) {
+      try {
+        await walk(`${run}/state.json`);
+      } catch {
+      }
+    }
+    let sourceRoot = null;
+    try {
+      sourceRoot = JSON.parse(
+        files.get(`${run}/state.json`)?.bytes.toString("utf8") ?? "null"
+      )?.repoRoot ?? null;
+    } catch {
+    }
+    const decoded = dependenciesFor(relative2, value.bytes, sourceRoot);
+    if (!decoded.supported) uninterpreted.push(relative2);
+    for (const [reference, required] of decoded.refs) {
+      let status = "included";
+      if (reference.startsWith("external/")) status = "external";
+      else if (!files.has(reference)) {
+        try {
+          await walk(reference);
+        } catch (error) {
+          if (!["ARTIFACT_EVIDENCE_INCOMPLETE", "ARTIFACT_UNSAFE_PATH"].includes(
+            error.code
+          ))
+            throw error;
+          status = "missing";
+        }
+      }
+      if (status === "included" && !files.has(reference)) status = "external";
+      dependencies.push({
+        sourceId: "project",
+        from: relative2,
+        to: reference,
+        required,
+        status
+      });
+    }
+  }
+  for (const [relative2, value] of files) {
+    if (!/^\.banzai\/work\/[^/]+\/work\.json$/u.test(relative2)) continue;
+    const binding = parseBinding(JSON.parse(value.bytes.toString("utf8")));
+    for (const [role, target] of Object.entries(binding.artifacts)) {
+      for (const filename of files.keys()) {
+        if (filename === target || role === "reviewDirectory" && filename.startsWith(`${target}/`))
+          dependencies.push({ sourceId: "project", from: relative2, to: filename, required: true, status: "included" });
+      }
+    }
+  }
+  let sourceCommit = null;
+  try {
+    sourceCommit = (await git2(root, ["rev-parse", "--verify", "HEAD^{commit}"])).stdout.trim();
+  } catch {
+  }
+  const workIds = [], runIds = [];
+  for (const relative2 of files.keys()) {
+    const work = relative2.match(/^\.banzai\/work\/([^/]+)\/work\.json$/u);
+    if (work) workIds.push(work[1]);
+    const run = relative2.match(/^\.banzai\/runs\/([^/]+)\/state\.json$/u);
+    if (run) runIds.push(run[1]);
+  }
+  const entries = [...files].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([relative2, value]) => {
+    const sha256 = digestBytes(value.bytes);
+    return {
+      sourceId: "project",
+      path: relative2,
+      size: value.bytes.length,
+      mode: value.mode,
+      sha256,
+      object: `objects/${sha256}`
+    };
+  });
+  const retention = { policy: "unspecified", rules: {}, ownerPolicy: null, pins: [], deletionAuthorized: false };
+  const inventory = {
+    schema: ARCHIVE_SCHEMA,
+    schemaVersion: 1,
+    bundleId: randomUUID3(),
+    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+    sources: [
+      {
+        id: "project",
+        projectIdentity: localProjectIdentity(root),
+        sourceCommit,
+        workIds,
+        runIds
+      }
+    ],
+    entries,
+    dependencies,
+    retention
+  };
+  return {
+    inventory,
+    complete: dependencies.every(
+      (edge) => !edge.required || edge.status === "included"
+    ) && uninterpreted.length === 0,
+    uninterpreted,
+    excluded
+  };
+}
+function parseArchive(value) {
+  exactObject(value, [
+    "schema",
+    "schemaVersion",
+    "bundleId",
+    "createdAt",
+    "sources",
+    "entries",
+    "dependencies",
+    "retention"
+  ]);
+  if (value.schema !== ARCHIVE_SCHEMA || value.schemaVersion !== 1)
+    fail(
+      "ARTIFACT_VERSION_UNSUPPORTED",
+      "Unsupported artifact archive version."
+    );
+  bounded(value.bundleId, "bundleId");
+  if (!Number.isFinite(Date.parse(value.createdAt)) || !Array.isArray(value.sources) || value.sources.length !== 1 || !Array.isArray(value.entries) || value.entries.length > LIMIT || !Array.isArray(value.dependencies) || value.dependencies.length > LIMIT * 10)
+    fail(
+      "ARTIFACT_INPUT_INVALID",
+      "Archive inventory is malformed or exceeds its bound."
+    );
+  const source = exactObject(value.sources[0], [
+    "id",
+    "projectIdentity",
+    "sourceCommit",
+    "workIds",
+    "runIds"
+  ]);
+  if (source.id !== "project")
+    fail("ARTIFACT_INPUT_INVALID", "Archive source identity is unsupported.");
+  bounded(source.projectIdentity, "projectIdentity");
+  if (!(source.sourceCommit === null || /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(source.sourceCommit)) || !Array.isArray(source.workIds) || !Array.isArray(source.runIds) || [...source.workIds, ...source.runIds].some(
+    (id) => typeof id !== "string" || !/^[a-zA-Z0-9_-]+$/u.test(id)
+  ))
+    fail("ARTIFACT_INPUT_INVALID", "Archive provenance is malformed.");
+  const paths = /* @__PURE__ */ new Set();
+  for (const entry of value.entries) {
+    exactObject(entry, [
+      "sourceId",
+      "path",
+      "size",
+      "mode",
+      "sha256",
+      "object"
+    ]);
+    archivePath(entry.path);
+    if (control.test(entry.path) || paths.has(entry.path) || entry.sourceId !== source.id || !Number.isSafeInteger(entry.size) || entry.size < 0 || !Number.isInteger(entry.mode) || entry.mode < 0 || entry.mode > 511 || !SHA.test(entry.sha256) || entry.object !== `objects/${entry.sha256}`)
+      fail(
+        "ARTIFACT_INPUT_INVALID",
+        "Archive entry identity is malformed or duplicated."
+      );
+    paths.add(entry.path);
+  }
+  for (const edge of value.dependencies) {
+    exactObject(edge, ["sourceId", "from", "to", "required", "status"]);
+    archivePath(edge.from);
+    relativePath(edge.to);
+    if (edge.sourceId !== source.id || !paths.has(edge.from) || typeof edge.required !== "boolean" || !["included", "missing", "external"].includes(edge.status) || edge.status === "included" && !paths.has(edge.to))
+      fail(
+        "ARTIFACT_EVIDENCE_INCOMPLETE",
+        "Archive dependency identity is unresolved."
+      );
+  }
+  const retention = exactObject(value.retention, [
+    "policy",
+    "rules",
+    "deletionAuthorized",
+    "ownerPolicy",
+    "pins"
+  ]);
+  if (!["banzai", "owner", "unspecified"].includes(retention.policy) || retention.deletionAuthorized !== false)
+    fail(
+      "ARTIFACT_INPUT_INVALID",
+      "Archive retention policy cannot authorize deletion."
+    );
+  if (retention.policy === "owner") {
+    exactObject(retention.ownerPolicy, ["ownerId", "recordedAt", "terms"]);
+    bounded(retention.ownerPolicy.ownerId, "retention ownerId");
+    if (!Number.isFinite(Date.parse(retention.ownerPolicy.recordedAt)) || typeof retention.ownerPolicy.terms !== "string" || !retention.ownerPolicy.terms.trim() || retention.ownerPolicy.terms.length > 1e4)
+      fail("ARTIFACT_INPUT_INVALID", "Explicit owner retention terms and provenance are required.");
+  } else if (retention.ownerPolicy !== null)
+    fail("ARTIFACT_INPUT_INVALID", "Owner policy must be null unless explicitly selected.");
+  if (!Array.isArray(retention.pins) || retention.pins.length > LIMIT)
+    fail("ARTIFACT_INPUT_INVALID", "Retention pins exceed the inventory bound.");
+  const pinned = /* @__PURE__ */ new Set();
+  for (const pin of retention.pins) {
+    exactObject(pin, ["sourceId", "workId", "reason", "recordedAt"]);
+    bounded(pin.reason, "pin reason");
+    if (pin.sourceId !== source.id || !source.workIds.includes(pin.workId) || !paths.has(`.banzai/work/${pin.workId}/work.json`) || !Number.isFinite(Date.parse(pin.recordedAt)) || pinned.has(pin.workId))
+      fail("ARTIFACT_INPUT_INVALID", "Pin must identify unique archived work and its source provenance.");
+    pinned.add(pin.workId);
+  }
+  const keys3 = retention.policy === "banzai" ? [
+    "activeOrPinned",
+    "supportedAuthority",
+    "closedWork",
+    "releaseAndMigration",
+    "unreferencedLogs",
+    "invalidCandidates",
+    "dependencies"
+  ] : [];
+  exactObject(retention.rules, keys3);
+  const expected = [
+    "no-expiry",
+    "support-plus-24-months",
+    "at-least-24-months",
+    "project-lifetime",
+    "30-days-after-closure",
+    "90-days-after-closure",
+    "override-expiry"
+  ];
+  if (keys3.some((key, index) => retention.rules[key] !== expected[index]))
+    fail(
+      "ARTIFACT_INPUT_INVALID",
+      "Archive retention rules differ from their declared policy."
+    );
+  return value;
+}
+async function verifyArchive(input) {
+  const root = await directory2(input.bundlePath);
+  const manifestBytes = await readBytes(root, "manifest.json", {
+    limit: 32 * 1024 * 1024
+  });
+  let manifest;
+  try {
+    manifest = parseArchive(JSON.parse(manifestBytes.toString("utf8")));
+  } catch (error) {
+    if (error.code) throw error;
+    fail("ARTIFACT_INPUT_INVALID", "Archive manifest is not valid JSON.");
+  }
+  const uninterpreted = [];
+  const recordedEdges = new Map(
+    manifest.dependencies.map((edge) => [`${edge.from}\0${edge.to}`, edge])
+  );
+  const objects = /* @__PURE__ */ new Map();
+  for (const entry of manifest.entries) {
+    const bytes = await readBytes(root, entry.object);
+    if (bytes.length !== entry.size || digestBytes(bytes) !== entry.sha256)
+      fail(
+        "ARTIFACT_EVIDENCE_INCOMPLETE",
+        "Archive object size or SHA-256 verification failed."
+      );
+    objects.set(entry.path, bytes);
+  }
+  for (const entry of manifest.entries) {
+    const bytes = objects.get(entry.path);
+    const run = entry.path.match(/^(\.banzai\/runs\/[^/]+)\//u)?.[1];
+    let sourceRoot = null;
+    try {
+      sourceRoot = JSON.parse(objects.get(`${run}/state.json`)?.toString("utf8") ?? "null")?.repoRoot ?? null;
+    } catch {
+    }
+    const decoded = dependenciesFor(entry.path, bytes, sourceRoot);
+    if (/^\.banzai\/work\/[^/]+\/work\.json$/u.test(entry.path)) {
+      const binding = parseBinding(JSON.parse(bytes.toString("utf8")));
+      if (!manifest.sources[0].workIds.includes(binding.workId)) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Archived work is absent from source provenance.");
+      for (const [role, relative2] of Object.entries(binding.artifacts)) {
+        for (const item of manifest.entries) {
+          if (item.path === relative2 || role === "reviewDirectory" && item.path.startsWith(`${relative2}/`)) decoded.refs.set(item.path, true);
+        }
+      }
+    }
+    if (entry.path.endsWith(".json")) {
+      let value;
+      try {
+        value = JSON.parse(bytes.toString("utf8"));
+      } catch {
+      }
+      if (typeof value?.schema === "string" && /^banzai-verification-(?:decision|applicability|origin-start|origin-finish)\/v1$/u.test(value.schema)) {
+        const workOwner = /^\.banzai\/work\/([^/]+)\/verification\//u.exec(entry.path)?.[1];
+        const runOwner = /^(\.banzai\/runs\/[^/]+)\/verification\//u.exec(entry.path)?.[1];
+        const stateBytes = runOwner ? objects.get(`${runOwner}/state.json`) : null;
+        const ownerId = workOwner ?? (stateBytes ? JSON.parse(stateBytes).artifactBinding?.binding?.workId : null);
+        if (!ownerId || ownerId !== value.workId)
+          fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Archived verification evidence conflicts with its bound owner.");
+        if (value.sha256 && !entry.path.endsWith(`/${value.sha256}.json`))
+          fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Archived verification decision identity changed.");
+      }
+      if (value?.schema === "banzai-verification-origin-finish/v1") {
+        const startPath = entry.path.replace(/\.finish\.json$/u, ".start.json");
+        const startBytes = objects.get(startPath);
+        const start = startBytes ? parseVerificationOriginStart(JSON.parse(startBytes)) : null;
+        const physicalBytes = start ? objects.get(start.physicalPath) : null;
+        if (!start || !physicalBytes || digestBytes(startBytes) !== value.startSha256 || evidenceDigest(parseVerificationAttemptRecord(JSON.parse(physicalBytes))) !== value.physicalSha256 || start.workId !== value.workId || start.attemptId !== value.attemptId)
+          fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Archived verification origin closure is missing or changed.");
+        const physical = parseVerificationAttemptRecord(JSON.parse(physicalBytes));
+        for (const log of [physical.stdout, physical.stderr]) {
+          if (log === null) continue;
+          const logPath = sourcePath(start.physicalPath, log.relativePath);
+          const logBytes = objects.get(logPath);
+          if (!logBytes || digestBytes(logBytes) !== log.sha256)
+            fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Archived verification origin log changed or is missing.");
+        }
+      }
+      if (value?.artifactBinding?.binding?.workId) {
+        const bindingPath = `.banzai/work/${value.artifactBinding.binding.workId}/work.json`;
+        const archivedBinding = manifest.entries.find(
+          (item) => item.path === bindingPath
+        );
+        if (archivedBinding && archivedBinding.sha256 !== value.artifactBinding.sha256)
+          fail(
+            "ARTIFACT_EVIDENCE_INCOMPLETE",
+            "Archived run or snapshot binding bytes conflict with their recorded identity."
+          );
+      }
+    }
+    if (!decoded.supported) uninterpreted.push(entry.path);
+    for (const [ref, required] of decoded.refs)
+      if (!recordedEdges.has(`${entry.path}\0${ref}`) || required && recordedEdges.get(`${entry.path}\0${ref}`).required !== true)
+        fail(
+          "ARTIFACT_EVIDENCE_INCOMPLETE",
+          "Archive manifest omits a recognized dependency."
+        );
+  }
+  return {
+    manifest,
+    manifestSha256: digestBytes(manifestBytes),
+    retainedPaths: retainedPaths(manifest, objects),
+    complete: !uninterpreted.length && manifest.dependencies.every(
+      (edge) => !edge.required || edge.status === "included"
+    ),
+    uninterpreted
+  };
+}
+async function exportArtifacts(input) {
+  const destination = await missingDestination(input.destination);
+  try {
+    await lstat4(destination);
+    fail(
+      "ARTIFACT_DESTINATION_CONFLICT",
+      "Archive destination already exists; verify it explicitly."
+    );
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  const inventoryBytes = await readInvocationBytes(input.inventoryFile, "inventoryFile", { limit: 32 * 1024 * 1024 });
+  let inventory;
+  try {
+    inventory = parseArchive(JSON.parse(inventoryBytes.toString("utf8")));
+  } catch (error) {
+    if (error.code) throw error;
+    fail("ARTIFACT_INPUT_INVALID", "Reviewed inventory is not valid JSON.");
+  }
+  const result = { inventory, excluded: [] };
+  const root = await projectRoot(input.repoRoot);
+  if (inventory.sources[0].projectIdentity !== localProjectIdentity(root))
+    fail("ARTIFACT_OWNERSHIP_CONFLICT", "Reviewed inventory belongs to another source checkout.");
+  for (const entry of inventory.entries) {
+    const bytes = await readBytes(root, entry.path);
+    const mode2 = (await lstat4(path5.join(root, entry.path))).mode & 511;
+    if (bytes.length !== entry.size || digestBytes(bytes) !== entry.sha256 || mode2 !== entry.mode)
+      fail("ARTIFACT_OWNERSHIP_CONFLICT", "Source bytes or modes no longer match the reviewed inventory. Inspect and inventory again.");
+  }
+  const temporary = path5.join(
+    path5.dirname(destination),
+    `.banzai-archive-${result.inventory.bundleId}`
+  );
+  await mkdir(temporary, { mode: 448 });
+  await makeDirectories(temporary, "objects");
+  const written = /* @__PURE__ */ new Set();
+  for (const entry of result.inventory.entries) {
+    const bytes = await readBytes(root, entry.path);
+    if (digestBytes(bytes) !== entry.sha256)
+      fail(
+        "ARTIFACT_OWNERSHIP_CONFLICT",
+        "Source changed while archiving; incomplete staging evidence was retained."
+      );
+    if (!written.has(entry.sha256)) {
+      await publishNew(temporary, entry.object, bytes);
+      written.add(entry.sha256);
+    }
+  }
+  await publishNew(
+    temporary,
+    "manifest.json",
+    inventoryBytes
+  );
+  const verified = await verifyArchive({ bundlePath: temporary });
+  const guard = `${destination}.banzai-archive.lock`;
+  let handle;
+  try {
+    handle = await open4(guard, "wx", 384);
+  } catch {
+    fail(
+      "ARTIFACT_OWNERSHIP_CONFLICT",
+      "Archive destination is owned by another operation."
+    );
+  }
+  const owned = await handle.stat();
+  try {
+    try {
+      await lstat4(destination);
+      fail(
+        "ARTIFACT_DESTINATION_CONFLICT",
+        "Archive destination appeared during verification."
+      );
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    await rename2(temporary, destination);
+  } finally {
+    await handle.close();
+    const current = await lstat4(guard);
+    if (current.dev === owned.dev && current.ino === owned.ino)
+      await unlink2(guard);
+  }
+  return {
+    archiveDirectory: destination,
+    bundleId: result.inventory.bundleId,
+    manifestSha256: verified.manifestSha256,
+    complete: verified.complete,
+    uninterpreted: verified.uninterpreted,
+    excluded: result.excluded
+  };
+}
+async function withRestoreOwnership(root, action) {
+  await makeDirectories(root, ".banzai");
+  const relative2 = ".banzai/runner.lock";
+  await safePath(root, relative2, { missing: true });
+  const token = randomUUID3();
+  let handle;
+  try {
+    handle = await open4(path5.join(root, relative2), "wx", 384);
+  } catch {
+    fail(
+      "ARTIFACT_OWNERSHIP_CONFLICT",
+      "Existing runner ownership prevents archive verification; no lock was reclaimed."
+    );
+  }
+  const owned = await handle.stat();
+  try {
+    await handle.writeFile(
+      JSON.stringify({
+        schemaVersion: 1,
+        pid: process.pid,
+        token,
+        createdAt: (/* @__PURE__ */ new Date()).toISOString()
+      }) + "\n"
+    );
+    await handle.sync();
+    return await action();
+  } finally {
+    await handle.close();
+    const current = await lstat4(path5.join(root, relative2));
+    if (current.dev === owned.dev && current.ino === owned.ino)
+      await unlink2(path5.join(root, relative2));
+  }
+}
+async function restoreArtifacts(input) {
+  const verified = await verifyArchive(input);
+  if (!verified.complete)
+    fail(
+      "ARTIFACT_EVIDENCE_INCOMPLETE",
+      "Restore requires complete dependency interpretation and closure."
+    );
+  const destination = await missingDestination(input.destination);
+  const source = verified.manifest.sources[0];
+  const receiptPath = ".banzai/archive-manifest.json";
+  const receiptBytes = await readBytes(input.bundlePath, "manifest.json", { limit: 32 * 1024 * 1024 });
+  if (/(?:^|\/)\.banzai\/(?:work|runs|control)(?:\/|$)/u.test(destination))
+    fail("ARTIFACT_UNSAFE_PATH", "Restore requires a separate inactive inspection directory outside managed work, run and control ancestry.");
+  const historicalOnly = source.projectIdentity !== localProjectIdentity(destination);
+  let exists = false;
+  try {
+    await lstat4(destination);
+    exists = true;
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  if (exists)
+    return withRestoreOwnership(destination, async () => {
+      const active = await readJson(
+        destination,
+        ".banzai/active-run.json",
+        true
+      );
+      if (active !== null)
+        fail(
+          "ARTIFACT_OWNERSHIP_CONFLICT",
+          "Restore destination has runner authority; use an inactive fresh directory."
+        );
+      for (const entry of verified.manifest.entries) {
+        const bytes = await readBytes(destination, entry.path, {
+          optional: true
+        });
+        if (bytes === null || digestBytes(bytes) !== entry.sha256 || ((await lstat4(path5.join(destination, entry.path))).mode & 511) !== entry.mode)
+          fail(
+            "ARTIFACT_DESTINATION_CONFLICT",
+            "Restore destination has missing or conflicting evidence. Use a fresh directory."
+          );
+      }
+      const receipt = await readBytes(destination, receiptPath, { optional: true, limit: 32 * 1024 * 1024 });
+      if (receipt === null || !receipt.equals(receiptBytes))
+        fail("ARTIFACT_DESTINATION_CONFLICT", "Restore provenance or retention receipt is missing or conflicts.");
+      return {
+        destination,
+        bundleId: verified.manifest.bundleId,
+        historicalOnly,
+        activeRunChanged: false,
+        restored: false,
+        retentionReceipt: receiptPath,
+        retention: verified.manifest.retention,
+        retainedPaths: verified.retainedPaths
+      };
+    });
+  const temporary = path5.join(
+    path5.dirname(destination),
+    `.banzai-restore-${randomUUID3()}`
+  );
+  await mkdir(temporary, { mode: 448 });
+  for (const entry of verified.manifest.entries) {
+    if (path5.posix.dirname(entry.path) !== ".")
+      await makeDirectories(temporary, path5.posix.dirname(entry.path));
+    await publishNew(
+      temporary,
+      entry.path,
+      await readBytes(input.bundlePath, entry.object)
+    );
+    await chmod(path5.join(temporary, entry.path), entry.mode);
+    if (digestBytes(await readBytes(temporary, entry.path)) !== entry.sha256)
+      fail(
+        "ARTIFACT_EVIDENCE_INCOMPLETE",
+        "Restored bytes failed verification; staging evidence was retained."
+      );
+  }
+  await makeDirectories(temporary, ".banzai");
+  await publishNew(temporary, receiptPath, receiptBytes);
+  const guard = `${destination}.banzai-restore.lock`;
+  let handle;
+  try {
+    handle = await open4(guard, "wx", 384);
+  } catch {
+    fail(
+      "ARTIFACT_OWNERSHIP_CONFLICT",
+      "Restore destination is owned by another operation."
+    );
+  }
+  try {
+    try {
+      await lstat4(destination);
+      fail(
+        "ARTIFACT_DESTINATION_CONFLICT",
+        "Restore destination appeared during verification."
+      );
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    await rename2(temporary, destination);
+  } finally {
+    await handle.close();
+    await unlink2(guard);
+  }
+  return {
+    destination,
+    bundleId: verified.manifest.bundleId,
+    historicalOnly,
+    activeRunChanged: false,
+    restored: true,
+    retentionReceipt: receiptPath,
+    retention: verified.manifest.retention,
+    retainedPaths: verified.retainedPaths
+  };
+}
+
+// ../../plugins/banzai/lib/artifact-storage.mjs
+import { constants as constants4 } from "node:fs";
+import { AsyncLocalStorage as AsyncLocalStorage2 } from "node:async_hooks";
+import {
+  lstat as lstat5,
+  realpath as realpath4,
+  open as open5,
+  readdir as readdir3,
+  mkdir as mkdir2,
+  link,
+  unlink as unlink3,
+  rename as rename3
+} from "node:fs/promises";
+import path6 from "node:path";
+import { execFile as execFile3 } from "node:child_process";
+import { promisify as promisify2 } from "node:util";
+import { createHash as createHash5, randomUUID as randomUUID4 } from "node:crypto";
+var execute2 = promisify2(execFile3);
+var DECLARATION_SCHEMA = "banzai-artifact-layout/v1";
+var BINDING_SCHEMA = "banzai-work-binding/v1";
+var REQUEST_SCHEMA = "banzai-artifact-request/v1";
+var RESULT_SCHEMA = "banzai-artifact-result/v1";
+var METADATA_LIMIT2 = 64 * 1024;
+var DISCOVERY_LIMIT = 1e3;
+var DECLARATION_PATH = ".banzai/artifacts.json";
+var WORK_ROOT = ".banzai/work";
+var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+var SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+var SHA256 = /^[0-9a-f]{64}$/u;
+var MODES = ["strict", "lite", "fix", "workflow"];
+var LAYOUTS = ["private", "legacy"];
+var CLAIM = ".writer-claim.json";
+var INIT_LOCK = ".banzai/.artifact-init.lock";
+var runnerOwnership2 = new AsyncLocalStorage2();
+var ArtifactStorageError = class extends Error {
+  constructor(code2, message) {
+    super(message);
+    this.name = "ArtifactStorageError";
+    this.code = code2;
+  }
+};
+function fail(code2, message) {
+  throw new ArtifactStorageError(code2, message);
+}
+function digestBytes(value) {
+  return createHash5("sha256").update(value).digest("hex");
+}
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+function exactObject(value, required, optional = []) {
+  if (value === null || typeof value !== "object" || Array.isArray(value) || required.some((key) => !Object.hasOwn(value, key)) || Object.keys(value).some(
+    (key) => !required.includes(key) && !optional.includes(key)
+  )) {
+    fail(
+      "ARTIFACT_INPUT_INVALID",
+      "Artifact metadata has an invalid object shape."
+    );
+  }
+  return value;
+}
+function relativePath(value) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 500 || /[\\\x00-\x1f\x7f]/u.test(value) || path6.posix.isAbsolute(value) || value.split("/").some(
+    (segment) => segment === "" || segment === "." || segment === ".." || segment === ".git"
+  )) {
+    fail(
+      "ARTIFACT_UNSAFE_PATH",
+      "A bounded, contained project-relative artifact path is required."
+    );
+  }
+  return value;
+}
+async function safePath(root, relative2, { missing: missing3 = false, directory: directory3 = false } = {}) {
+  relativePath(relative2);
+  let current = root;
+  const parts = relative2.split("/");
+  for (const [index, part] of parts.entries()) {
+    current = path6.join(current, part);
+    let stat5;
+    try {
+      stat5 = await lstat5(current);
+    } catch (error) {
+      if (error.code === "ENOENT" && missing3) return path6.join(root, relative2);
+      if (error.code === "ENOENT")
+        fail(
+          "ARTIFACT_EVIDENCE_INCOMPLETE",
+          "Required artifact evidence is missing."
+        );
+      fail(
+        "ARTIFACT_IO_ERROR",
+        "Artifact storage could not be inspected. Check local permissions."
+      );
+    }
+    const needsDirectory = index < parts.length - 1 || directory3;
+    if (stat5.isSymbolicLink() || (needsDirectory ? !stat5.isDirectory() : !stat5.isFile())) {
+      fail(
+        "ARTIFACT_UNSAFE_PATH",
+        "Artifact storage requires owned directories and regular files without symlinks."
+      );
+    }
+  }
+  return current;
+}
+async function readBytes(root, relative2, { optional = false, limit = Infinity } = {}) {
+  const target = await safePath(root, relative2, { missing: optional });
+  let handle;
+  try {
+    handle = await open5(target, constants4.O_RDONLY | constants4.O_NOFOLLOW);
+    const stat5 = await handle.stat();
+    if (!stat5.isFile())
+      fail("ARTIFACT_UNSAFE_PATH", "Artifact input must be a regular file.");
+    if (stat5.size > limit)
+      fail(
+        "ARTIFACT_INPUT_INVALID",
+        "Artifact metadata exceeds its size bound."
+      );
+    const bytes = await handle.readFile();
+    if (bytes.length > limit)
+      fail(
+        "ARTIFACT_INPUT_INVALID",
+        "Artifact metadata exceeds its size bound."
+      );
+    await safePath(root, relative2);
+    return bytes;
+  } catch (error) {
+    if (error instanceof ArtifactStorageError) throw error;
+    if (error.code === "ENOENT" && optional) return null;
+    fail(
+      "ARTIFACT_IO_ERROR",
+      "Artifact input could not be read. Check its path and local permissions."
+    );
+  } finally {
+    await handle?.close();
+  }
+}
+async function readJson(root, relative2, optional = false) {
+  const bytes = await readBytes(root, relative2, {
+    optional,
+    limit: METADATA_LIMIT2
+  });
+  if (bytes === null) return null;
+  try {
+    return JSON.parse(bytes.toString("utf8"));
+  } catch {
+    fail("ARTIFACT_INPUT_INVALID", "Artifact metadata is not valid JSON.");
+  }
+}
+async function readInvocationBytes(input, label, options = {}) {
+  if (typeof input !== "string" || !path6.isAbsolute(input))
+    fail("ARTIFACT_INPUT_INVALID", `${label} must name an absolute local regular file.`);
+  try {
+    const parent = await realpath4(path6.dirname(input));
+    return await readBytes(parent, path6.basename(input), options);
+  } catch (error) {
+    fail(
+      error instanceof ArtifactStorageError ? error.code : "ARTIFACT_IO_ERROR",
+      `${label} (${input}): ${error instanceof ArtifactStorageError ? error.message : "Input parent could not be resolved. Check its path and local permissions."}`
+    );
+  }
+}
+async function makeDirectories(root, relative2) {
+  relativePath(relative2);
+  let current = "";
+  for (const part of relative2.split("/")) {
+    current = current ? `${current}/${part}` : part;
+    await safePath(root, current, { missing: true, directory: true });
+    try {
+      await mkdir2(path6.join(root, current), { mode: 448 });
+    } catch (error) {
+      if (error.code !== "EEXIST")
+        fail(
+          "ARTIFACT_IO_ERROR",
+          "Private artifact directory could not be created."
+        );
+    }
+    await safePath(root, current, { directory: true });
+  }
+}
+async function publishNew(root, relative2, bytes) {
+  await safePath(root, relative2, { missing: true });
+  const parent = path6.posix.dirname(relative2);
+  const temporary = `${parent}/.artifact-tmp-${randomUUID4()}`;
+  const handle = await open5(path6.join(root, temporary), "wx", 384);
+  try {
+    await handle.writeFile(bytes);
+    await handle.sync();
+    await safePath(root, relative2, { missing: true });
+    await link(path6.join(root, temporary), path6.join(root, relative2));
+  } finally {
+    await handle.close();
+    await unlink3(path6.join(root, temporary)).catch(() => {
+    });
+  }
+}
+async function git2(root, args) {
+  return execute2("git", ["-C", root, ...args], {
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024
+  });
+}
+async function projectRoot(input) {
+  if (typeof input !== "string" || !path6.isAbsolute(input) || /[\x00-\x1f]/u.test(input)) {
+    fail(
+      "ARTIFACT_INPUT_INVALID",
+      "repoRoot must be an absolute local directory."
+    );
+  }
+  let resolved;
+  try {
+    resolved = await realpath4(input);
+  } catch {
+    fail("ARTIFACT_UNSAFE_PATH", "The project directory is unavailable.");
+  }
+  if (!(await lstat5(resolved)).isDirectory())
+    fail("ARTIFACT_UNSAFE_PATH", "The project root must be a directory.");
+  try {
+    const result = await git2(resolved, ["rev-parse", "--show-toplevel"]);
+    return await realpath4(result.stdout.trim());
+  } catch (error) {
+    if (!error.stderr?.startsWith("fatal: not a git repository (or any"))
+      fail(
+        "ARTIFACT_IO_ERROR",
+        "Git project discovery failed. Inspect repository ownership or Git metadata."
+      );
+    let candidate = resolved;
+    while (true) {
+      if (await readBytes(candidate, "PROJECT_MANIFEST.md", {
+        optional: true,
+        limit: 256 * 1024
+      }) !== null)
+        return candidate;
+      const parent = path6.dirname(candidate);
+      if (candidate === parent) break;
+      candidate = parent;
+    }
+    fail(
+      "ARTIFACT_INPUT_INVALID",
+      "No Git project or project manifest root was found."
+    );
+  }
+}
+function parseDeclaration(value) {
+  exactObject(value, ["schema", "schemaVersion", "layout"]);
+  if (value.schema !== DECLARATION_SCHEMA || value.schemaVersion !== 1)
+    fail(
+      "ARTIFACT_VERSION_UNSUPPORTED",
+      "Unsupported artifact declaration version."
+    );
+  if (!LAYOUTS.includes(value.layout))
+    fail(
+      "ARTIFACT_INPUT_INVALID",
+      "Artifact layout must be private or legacy."
+    );
+  return value;
+}
+function artifactRoles(workId, slug, mode2, layout) {
+  const directory3 = layout === "private" ? `${WORK_ROOT}/${workId}` : `documentation/features/${slug}`;
+  const roles = { reviewDirectory: directory3 };
+  if (mode2 === "strict" || mode2 === "workflow")
+    Object.assign(roles, {
+      description: `${directory3}/description.md`,
+      plan: layout === "private" ? `${directory3}/plan.md` : `documentation/development-plans/${slug}/plan.md`,
+      implementationReport: `${directory3}/implementation-report.md`,
+      testReport: `${directory3}/test-report.md`
+    });
+  if (mode2 === "lite" || mode2 === "workflow")
+    roles.work = `${directory3}/work.md`;
+  if (mode2 === "fix" || mode2 === "workflow")
+    roles.changeReport = layout === "private" ? `${directory3}/change-report.md` : `documentation/changes/${slug}.md`;
+  return roles;
+}
+function parseBinding(value) {
+  exactObject(value, [
+    "schema",
+    "schemaVersion",
+    "workId",
+    "slug",
+    "mode",
+    "layout",
+    "createdAt",
+    "sourceCommit",
+    "artifacts"
+  ]);
+  if (!(value.schema === BINDING_SCHEMA && value.schemaVersion === 1 || value.schema === "banzai-work-binding/v2" && value.schemaVersion === 2 && value.layout === "private"))
+    fail(
+      "ARTIFACT_VERSION_UNSUPPORTED",
+      "Unsupported artifact work binding version."
+    );
+  if (!UUID.test(value.workId) || typeof value.slug !== "string" || value.slug.length > 100 || !SLUG.test(value.slug) || !MODES.includes(value.mode) || !LAYOUTS.includes(value.layout) || typeof value.createdAt !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(
+    value.createdAt
+  ) || !Number.isFinite(Date.parse(value.createdAt)) || !(value.sourceCommit === null || typeof value.sourceCommit === "string" && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(value.sourceCommit))) {
+    fail("ARTIFACT_INPUT_INVALID", "Artifact work identity is malformed.");
+  }
+  const expected = artifactRoles(
+    value.workId,
+    value.slug,
+    value.mode,
+    value.layout
+  );
+  if (value.schemaVersion === 2) expected.verificationDirectory = `${WORK_ROOT}/${value.workId}/verification`;
+  exactObject(value.artifacts, Object.keys(expected));
+  for (const key of Object.keys(expected)) {
+    relativePath(value.artifacts[key]);
+    if (value.artifacts[key] !== expected[key])
+      fail(
+        "ARTIFACT_UNSAFE_PATH",
+        "Artifact role is outside its work binding."
+      );
+  }
+  return value;
+}
+async function directories(root, relative2, optional = true) {
+  const target = await safePath(root, relative2, {
+    missing: optional,
+    directory: true
+  });
+  try {
+    const entries = await readdir3(target, { withFileTypes: true });
+    if (entries.length > DISCOVERY_LIMIT)
+      fail(
+        "ARTIFACT_DISCOVERY_LIMIT",
+        "Artifact discovery exceeded its bound. Select explicit work or recover the inventory."
+      );
+    return entries.sort((a, b) => a.name.localeCompare(b.name));
+  } catch (error) {
+    if (error.code === "ENOENT" && optional) return [];
+    if (error instanceof ArtifactStorageError) throw error;
+    fail("ARTIFACT_IO_ERROR", "Artifact directories could not be inspected.");
+  }
+}
+async function readHeader(root, relative2) {
+  const target = await safePath(root, relative2, { missing: true });
+  let handle;
+  try {
+    handle = await open5(target, constants4.O_RDONLY | constants4.O_NOFOLLOW);
+    const buffer = Buffer.alloc(METADATA_LIMIT2);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, bytesRead).toString("utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    fail(
+      "ARTIFACT_IO_ERROR",
+      "Legacy artifact evidence could not be inspected."
+    );
+  } finally {
+    await handle?.close();
+  }
+}
+async function legacyEvidence(root, declared = false) {
+  const evidence2 = [];
+  let count = 0;
+  for (const folder of [
+    "documentation/features",
+    "documentation/development-plans"
+  ]) {
+    for (const entry of await directories(root, folder)) {
+      if (++count > DISCOVERY_LIMIT)
+        fail(
+          "ARTIFACT_DISCOVERY_LIMIT",
+          "Legacy artifact discovery exceeded its bound."
+        );
+      if (entry.isSymbolicLink())
+        fail(
+          "ARTIFACT_UNSAFE_PATH",
+          "Legacy artifact discovery encountered a symlink."
+        );
+      if (!entry.isDirectory()) continue;
+      const files = folder.endsWith("features") ? ["description.md", "work.md"] : ["plan.md"];
+      for (const name of files) {
+        const relative2 = `${folder}/${entry.name}/${name}`;
+        const header = await readHeader(root, relative2);
+        if (header === null) continue;
+        if (/^# Feature: /mu.test(header) && header.includes(`Slug: \`${entry.name}\``) || /^# Development Plan: /mu.test(header) && header.includes(`/features/${entry.name}/description.md`))
+          evidence2.push(relative2);
+      }
+    }
+  }
+  for (const entry of await directories(root, "documentation/changes")) {
+    if (++count > DISCOVERY_LIMIT) fail("ARTIFACT_DISCOVERY_LIMIT", "Legacy change discovery exceeded its bound.");
+    if (!entry.isFile() || !/^[a-z0-9]+(?:-[a-z0-9]+)*\.md$/u.test(entry.name)) continue;
+    const relative2 = `documentation/changes/${entry.name}`;
+    if (/^# Change Report:/mu.test(await readHeader(root, relative2) ?? "")) evidence2.push(relative2);
+  }
+  const manifest = await readHeader(root, "PROJECT_MANIFEST.md");
+  const refs = manifest?.match(
+    /documentation\/(?:features|changes|development-plans)\/[a-z0-9/.-]+\.md/gu
+  ) ?? [];
+  for (const relative2 of [...new Set(refs)]) {
+    if (++count > DISCOVERY_LIMIT)
+      fail(
+        "ARTIFACT_DISCOVERY_LIMIT",
+        "Legacy reference discovery exceeded its bound."
+      );
+    if (await readHeader(root, relative2) !== null) evidence2.push(relative2);
+  }
+  for (const entry of await directories(root, ".banzai/runs")) {
+    if (++count > DISCOVERY_LIMIT)
+      fail("ARTIFACT_DISCOVERY_LIMIT", "Run discovery exceeded its bound.");
+    if (!entry.isDirectory())
+      fail(
+        "ARTIFACT_RECOVERY_REQUIRED",
+        "Runner evidence requires explicit inspection."
+      );
+    const state = await readJson(
+      root,
+      `.banzai/runs/${entry.name}/state.json`,
+      true
+    );
+    if (state === null || ![1, 2, 3, 4, 5].includes(state.schemaVersion) || state.runId !== entry.name)
+      fail(
+        "ARTIFACT_RECOVERY_REQUIRED",
+        "Unrecognized runner evidence requires recovery."
+      );
+    if (state.schemaVersion >= 4 && !declared)
+      fail(
+        "ARTIFACT_RECOVERY_REQUIRED",
+        "A bound run without its artifact declaration requires recovery."
+      );
+    if (state.schemaVersion < 4) evidence2.push(`.banzai/runs/${entry.name}/state.json`);
+  }
+  return [...new Set(evidence2)].sort();
+}
+async function legacyCandidates(root, evidence2, boundWorks) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const relative2 of evidence2) {
+    const match = /^documentation\/(features|development-plans|changes)\/([a-z0-9-]+)(?:\.md|\/)/u.exec(relative2);
+    if (!match || boundWorks.some((work) => work.binding.layout === "legacy" && work.binding.slug === match[2])) continue;
+    const slug = match[2];
+    const mode2 = match[1] === "changes" ? "fix" : relative2.endsWith("/work.md") ? "lite" : "strict";
+    groups.set(`${slug}:${mode2}`, { slug, mode: mode2 });
+  }
+  const candidates = [];
+  for (const { slug, mode: mode2 } of groups.values()) {
+    const artifacts = artifactRoles("00000000-0000-4000-8000-000000000000", slug, mode2, "legacy");
+    const originals = [];
+    for (const [role, relative2] of Object.entries(artifacts)) {
+      if (role === "reviewDirectory") {
+        for (const entry of await directories(root, relative2)) {
+          if (!/^review-[1-9][0-9]*\.md$/u.test(entry.name)) continue;
+          const bytes = await readBytes(root, `${relative2}/${entry.name}`);
+          originals.push({ path: `${relative2}/${entry.name}`, sha256: digestBytes(bytes) });
+        }
+      } else {
+        const bytes = await readBytes(root, relative2, { optional: true });
+        if (bytes !== null) originals.push({ path: relative2, sha256: digestBytes(bytes) });
+      }
+    }
+    let sourceCommit = null;
+    try {
+      sourceCommit = (await git2(root, ["log", "-1", "--format=%H", "--", ...originals.map((item) => item.path)])).stdout.trim() || null;
+    } catch {
+    }
+    const identity = digestBytes(canonicalJson({ slug, mode: mode2, originals, sourceCommit }));
+    const creationId = `${identity.slice(0, 8)}-${identity.slice(8, 12)}-4${identity.slice(13, 16)}-8${identity.slice(17, 20)}-${identity.slice(20, 32)}`;
+    candidates.push({ slug, mode: mode2, creationId, workPath: mode2 === "fix" ? artifacts.changeReport : artifacts.reviewDirectory, artifacts, originals, sourceCommit });
+  }
+  return candidates;
+}
+async function readBinding(root, workPath) {
+  relativePath(workPath);
+  const match = /^\.banzai\/work\/([^/]+)(?:\/work\.json)?$/u.exec(workPath);
+  if (match === null || !UUID.test(match[1]))
+    fail(
+      "ARTIFACT_UNSAFE_PATH",
+      "Select a work ID or its project-relative work.json path."
+    );
+  const relative2 = `${WORK_ROOT}/${match[1]}/work.json`;
+  const bytes = await readBytes(root, relative2, { limit: METADATA_LIMIT2 });
+  let parsed;
+  try {
+    parsed = JSON.parse(bytes.toString("utf8"));
+  } catch {
+    fail("ARTIFACT_INPUT_INVALID", "Work binding is not valid JSON.");
+  }
+  const binding = parseBinding(parsed);
+  if (binding.workId !== match[1])
+    fail(
+      "ARTIFACT_RECOVERY_REQUIRED",
+      "Work directory and binding identities disagree."
+    );
+  return { binding, sha256: digestBytes(bytes) };
+}
+async function inspectArtifacts(input) {
+  const root = await projectRoot(input.repoRoot);
+  if (input.workId !== void 0 && input.workPath !== void 0)
+    fail("ARTIFACT_INPUT_INVALID", "Select either workId or workPath.");
+  if (input.workId !== void 0 && !UUID.test(input.workId))
+    fail("ARTIFACT_INPUT_INVALID", "Invalid work ID.");
+  const declarationValue = await readJson(root, DECLARATION_PATH, true);
+  const declaration = declarationValue === null ? null : parseDeclaration(declarationValue);
+  const selector = input.workPath ?? (input.workId === void 0 ? null : `${WORK_ROOT}/${input.workId}`);
+  if (selector !== null && !selector.startsWith(`${WORK_ROOT}/`)) {
+    relativePath(selector);
+    const current = await inspectArtifacts({ repoRoot: root });
+    const matches = current.legacyCandidates.filter((item) => item.workPath === selector || Object.values(item.artifacts).includes(selector));
+    const bound = [];
+    for (const candidate of current.candidates) {
+      const selected = await readBinding(root, candidate.workPath);
+      if (selected.binding.layout === "legacy" && Object.values(selected.binding.artifacts).includes(selector)) bound.push(candidate);
+    }
+    if (matches.length === 0 && bound.length === 1) return inspectArtifacts({ repoRoot: root, workId: bound[0].workId });
+    if (matches.length !== 1 || bound.length)
+      fail("ARTIFACT_WORK_AMBIGUOUS", "Select one recognized original legacy bundle or its registered work ID.");
+    return { ...current, legacyCandidates: matches, legacySelection: matches[0] };
+  }
+  if (selector !== null) {
+    const selected = await readBinding(root, selector);
+    if (declaration === null)
+      fail(
+        "ARTIFACT_RECOVERY_REQUIRED",
+        "Selected work has no declaration. Recover its verified layout before continuation."
+      );
+    return {
+      projectRoot: root,
+      classification: "declared",
+      layout: selected.binding.layout,
+      declaration,
+      work: selected,
+      candidates: [
+        {
+          workId: selected.binding.workId,
+          slug: selected.binding.slug,
+          mode: selected.binding.mode,
+          workPath: `${WORK_ROOT}/${selected.binding.workId}/work.json`
+        }
+      ],
+      legacyEvidence: [],
+      legacyCandidates: [],
+      legacySelection: null
+    };
+  }
+  const entries = await directories(root, WORK_ROOT);
+  const works = [];
+  for (const entry of entries) {
+    if (/^\.create-[0-9a-f-]{36}$/u.test(entry.name) && entry.isDirectory())
+      continue;
+    if (!entry.isDirectory() || !UUID.test(entry.name))
+      fail(
+        "ARTIFACT_RECOVERY_REQUIRED",
+        "Private work inventory contains unrecognized evidence."
+      );
+    works.push(await readBinding(root, `${WORK_ROOT}/${entry.name}`));
+  }
+  if (declaration === null && entries.length > 0)
+    fail(
+      "ARTIFACT_RECOVERY_REQUIRED",
+      "Private work exists without its declaration. Recover the declaration from verified bindings."
+    );
+  const legacy = await legacyEvidence(root, declaration !== null);
+  const continuations = await legacyCandidates(root, legacy, works);
+  return {
+    projectRoot: root,
+    classification: declaration !== null ? "declared" : legacy.length > 0 ? "legacy" : "fresh",
+    layout: declaration?.layout ?? (legacy.length > 0 ? "legacy" : "private"),
+    declaration,
+    work: null,
+    candidates: works.map((item) => ({
+      workId: item.binding.workId,
+      slug: item.binding.slug,
+      mode: item.binding.mode,
+      workPath: `${WORK_ROOT}/${item.binding.workId}/work.json`
+    })),
+    legacyEvidence: legacy,
+    legacyCandidates: continuations,
+    legacySelection: null
+  };
+}
+async function ignored(root, relative2) {
+  try {
+    await git2(root, ["check-ignore", "--no-index", "--quiet", "--", relative2]);
+    return true;
+  } catch (error) {
+    if (error.code === 1) return false;
+    fail(
+      "ARTIFACT_IGNORE_CONFLICT",
+      "Private evidence requires verifiable Git exclusions. Initialize Git explicitly first."
+    );
+  }
+}
+async function verifyIgnores(root, binding = null, destinations = []) {
+  if (await ignored(root, DECLARATION_PATH))
+    fail(
+      "ARTIFACT_IGNORE_CONFLICT",
+      "The artifact declaration is ignored. Narrow the rule hiding .banzai/artifacts.json explicitly."
+    );
+  const selected = binding === null ? [] : [
+    `${WORK_ROOT}/${binding.workId}/work.json`,
+    `${WORK_ROOT}/${binding.workId}/${CLAIM}`,
+    ...binding.layout === "private" ? Object.entries(binding.artifacts).map(
+      ([role, value]) => role === "reviewDirectory" ? `${value}/review-1.md` : value
+    ) : []
+  ];
+  for (const relative2 of [
+    `${WORK_ROOT}/00000000-0000-4000-8000-000000000000/probe.md`,
+    ...selected,
+    ...destinations
+  ]) {
+    relativePath(relative2);
+    if (!await ignored(root, relative2))
+      fail(
+        "ARTIFACT_IGNORE_CONFLICT",
+        "Selected private evidence is not effectively ignored. Repair its Git exclusions before writing."
+      );
+  }
+}
+async function withInitializationLock(root, action) {
+  await makeDirectories(root, ".banzai");
+  let handle;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    await safePath(root, INIT_LOCK, { missing: true });
+    try {
+      handle = await open5(path6.join(root, INIT_LOCK), "wx", 384);
+      break;
+    } catch (error) {
+      if (error.code !== "EEXIST")
+        fail(
+          "ARTIFACT_IO_ERROR",
+          "Artifact initialization ownership could not be acquired."
+        );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+  if (handle === void 0)
+    fail(
+      "ARTIFACT_OWNERSHIP_CONFLICT",
+      "Artifact initialization is already owned. Retry or inspect an abandoned initialization lock."
+    );
+  const ownership = await handle.stat();
+  try {
+    return await action();
+  } finally {
+    await handle.close();
+    const current = await lstat5(path6.join(root, INIT_LOCK));
+    if (current.dev !== ownership.dev || current.ino !== ownership.ino)
+      fail(
+        "ARTIFACT_OWNERSHIP_CONFLICT",
+        "Initialization lock ownership changed; evidence was retained."
+      );
+    await unlink3(path6.join(root, INIT_LOCK));
+  }
+}
+async function initializeArtifacts(input) {
+  const before = await inspectArtifacts({ repoRoot: input.repoRoot });
+  if (input.layout !== void 0 && !LAYOUTS.includes(input.layout))
+    fail(
+      "ARTIFACT_INPUT_INVALID",
+      "Artifact layout must be private or legacy."
+    );
+  if (input.layout !== void 0 && input.layout !== before.layout && (before.declaration !== null || before.classification === "legacy"))
+    fail(
+      "ARTIFACT_RECOVERY_REQUIRED",
+      "Changing an existing layout requires an explicit storage migration."
+    );
+  const root = before.projectRoot;
+  const adoption = await inspectProjectAdoption(root);
+  if (adoption.classification !== "ready")
+    fail(
+      "ARTIFACT_SETUP_REQUIRED",
+      "Complete normal project guidance setup or migration before initializing artifact storage."
+    );
+  await git2(root, ["rev-parse", "--show-toplevel"]).catch(
+    () => fail(
+      "ARTIFACT_IGNORE_CONFLICT",
+      "Initialize Git explicitly before creating private evidence."
+    )
+  );
+  if (await ignored(root, DECLARATION_PATH))
+    fail(
+      "ARTIFACT_IGNORE_CONFLICT",
+      "Narrow the existing ignore rule hiding the artifact declaration before setup."
+    );
+  return withInitializationLock(root, async () => {
+    const current = await inspectArtifacts({ repoRoot: root });
+    const original = await readBytes(root, ".gitignore", {
+      optional: true,
+      limit: METADATA_LIMIT2
+    });
+    if (!await ignored(root, `${WORK_ROOT}/probe.md`)) {
+      const suffix = "\n# Banzai private artifact storage\n/.banzai/work/\n/.banzai/.artifact-init.lock\n";
+      const contents = Buffer.from((original?.toString("utf8") ?? "") + suffix);
+      if (original === null) await publishNew(root, ".gitignore", contents);
+      else {
+        const handle = await open5(
+          path6.join(root, ".gitignore"),
+          constants4.O_WRONLY | constants4.O_APPEND | constants4.O_NOFOLLOW
+        );
+        try {
+          const latest = await readBytes(root, ".gitignore", {
+            limit: METADATA_LIMIT2
+          });
+          if (!latest.equals(original))
+            fail(
+              "ARTIFACT_OWNERSHIP_CONFLICT",
+              "Ignore rules changed during initialization; retry after inspection."
+            );
+          await handle.writeFile(suffix);
+          await handle.sync();
+        } finally {
+          await handle.close();
+        }
+      }
+    }
+    await verifyIgnores(root);
+    if (current.declaration === null) {
+      const declaration = {
+        schema: DECLARATION_SCHEMA,
+        schemaVersion: 1,
+        layout: input.layout ?? current.layout
+      };
+      await publishNew(
+        root,
+        DECLARATION_PATH,
+        JSON.stringify(declaration, null, 2) + "\n"
+      );
+    }
+    return inspectArtifacts({ repoRoot: root });
+  });
+}
+async function createWork(input) {
+  if (input.schemaVersion !== void 0 && ![1, 2].includes(input.schemaVersion))
+    fail("ARTIFACT_VERSION_UNSUPPORTED", "Unsupported new work binding version.");
+  if (!UUID.test(input.creationId) || typeof input.slug !== "string" || input.slug.length > 100 || !SLUG.test(input.slug) || !MODES.includes(input.mode))
+    fail(
+      "ARTIFACT_INPUT_INVALID",
+      "Create requires a UUID creationId, bounded slug and supported mode."
+    );
+  const state = await initializeArtifacts({ repoRoot: input.repoRoot });
+  const root = state.projectRoot;
+  const directory3 = `${WORK_ROOT}/${input.creationId}`;
+  return withInitializationLock(root, async () => {
+    const state2 = await inspectArtifacts({ repoRoot: root });
+    const existing = await readJson(root, `${directory3}/work.json`, true);
+    if (existing !== null) {
+      const bound = parseBinding(existing);
+      if (bound.workId !== input.creationId || bound.slug !== input.slug || bound.mode !== input.mode || bound.schemaVersion !== (input.schemaVersion === 2 ? 2 : 1))
+        fail(
+          "ARTIFACT_OWNERSHIP_CONFLICT",
+          "creationId already identifies different work."
+        );
+      await verifyIgnores(root, bound);
+      return readBinding(root, directory3);
+    }
+    await verifyIgnores(root);
+    const continuation = state2.legacyCandidates.find((item) => item.slug === input.slug && item.mode === input.mode && item.creationId === input.creationId);
+    if (!continuation) {
+      const legacyRoles = artifactRoles(input.creationId, input.slug, "workflow", "legacy");
+      for (const [role, relative2] of Object.entries(legacyRoles))
+        if (role !== "reviewDirectory" && await readBytes(root, relative2, { optional: true }) !== null)
+          fail("ARTIFACT_WORK_AMBIGUOUS", "Original legacy evidence occupies this slug. Inspect its current continuation identity; stale selections cannot create replacement private work.");
+    }
+    const layout = continuation ? "legacy" : state2.layout;
+    const roles = artifactRoles(
+      input.creationId,
+      input.slug,
+      input.mode,
+      layout
+    );
+    if (input.schemaVersion === 2) {
+      if (layout !== "private") fail("ARTIFACT_INPUT_INVALID", "Verification-enabled work requires a new private binding.");
+      roles.verificationDirectory = `${directory3}/verification`;
+    }
+    if (layout === "legacy") {
+      for (const [role, relative2] of Object.entries(roles)) {
+        if (!continuation && role !== "reviewDirectory" && await readBytes(root, relative2, { optional: true }) !== null)
+          fail(
+            "ARTIFACT_WORK_AMBIGUOUS",
+            "Legacy artifacts already occupy this slug. Inspect their original workPath and register using its exact continuation creationId, slug and mode."
+          );
+      }
+      if (state2.candidates.some((work) => work.slug === input.slug))
+        fail(
+          "ARTIFACT_WORK_AMBIGUOUS",
+          "Legacy work with this slug is already bound. Select its work ID."
+        );
+    }
+    const staging = `${WORK_ROOT}/.create-${input.creationId}`;
+    await verifyIgnores(root, { workId: input.creationId, layout, artifacts: roles }, [`${staging}/work.json`]);
+    await makeDirectories(root, staging);
+    let sourceCommit = null;
+    try {
+      sourceCommit = (await git2(root, ["rev-parse", "--verify", "HEAD"])).stdout.trim();
+    } catch {
+    }
+    if (continuation) sourceCommit = continuation.sourceCommit;
+    const staged = await readJson(root, `${staging}/work.json`, true);
+    const binding = staged === null ? parseBinding({
+      schema: input.schemaVersion === 2 ? "banzai-work-binding/v2" : BINDING_SCHEMA,
+      schemaVersion: input.schemaVersion === 2 ? 2 : 1,
+      workId: input.creationId,
+      slug: input.slug,
+      mode: input.mode,
+      layout,
+      createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+      sourceCommit,
+      artifacts: roles
+    }) : parseBinding(staged);
+    if (binding.workId !== input.creationId || binding.slug !== input.slug || binding.mode !== input.mode)
+      fail(
+        "ARTIFACT_RECOVERY_REQUIRED",
+        "Interrupted work creation has conflicting identity evidence."
+      );
+    if (staged === null)
+      await publishNew(
+        root,
+        `${staging}/work.json`,
+        JSON.stringify(binding, null, 2) + "\n"
+      );
+    await safePath(root, directory3, { missing: true, directory: true });
+    try {
+      await lstat5(path6.join(root, directory3));
+      fail(
+        "ARTIFACT_RECOVERY_REQUIRED",
+        "The work destination already exists without a valid binding."
+      );
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    await verifyIgnores(root, binding, [`${staging}/work.json`]);
+    await rename3(path6.join(root, staging), path6.join(root, directory3));
+    return readBinding(root, directory3);
+  });
+}
+function ownsArtifact(binding, relative2) {
+  relativePath(relative2);
+  return Object.entries(binding.artifacts).some(
+    ([role, value]) => role !== "reviewDirectory" && role !== "verificationDirectory" && value === relative2
+  ) || relative2.startsWith(`${binding.artifacts.reviewDirectory}/`) && /^review-[1-9][0-9]*\.md$/u.test(
+    relative2.slice(binding.artifacts.reviewDirectory.length + 1)
+  );
+}
+async function inspectBoundWork(root, bound) {
+  exactObject(bound, ["binding", "sha256"]);
+  const binding = parseBinding(bound.binding);
+  if (!SHA256.test(bound.sha256))
+    fail("ARTIFACT_INPUT_INVALID", "Invalid persisted work binding digest.");
+  const current = await inspectArtifacts({
+    repoRoot: root,
+    workId: binding.workId
+  });
+  if (current.work.sha256 !== bound.sha256 || canonicalJson(current.work.binding) !== canonicalJson(binding))
+    fail(
+      "ARTIFACT_RECOVERY_REQUIRED",
+      "The persisted work binding no longer matches its original bytes."
+    );
+  await verifyIgnores(current.projectRoot, binding);
+  return current.work;
+}
+async function privateArtifactInventory(root, bound) {
+  await inspectBoundWork(root, bound);
+  const directory3 = `${WORK_ROOT}/${bound.binding.workId}`;
+  const entries = [];
+  const walk = async (relative2) => {
+    for (const item of await directories(root, relative2, false)) {
+      const filename = `${relative2}/${item.name}`;
+      if (filename === `${directory3}/work.json`) continue;
+      if (filename === `${directory3}/${CLAIM}`) {
+        if (await hasRunnerWorkOwnership(root, bound)) continue;
+        fail(
+          "ARTIFACT_OWNERSHIP_CONFLICT",
+          "A standalone writer owns this work. Release its claim before runner continuation."
+        );
+      }
+      if (item.isDirectory()) {
+        await walk(filename);
+        continue;
+      }
+      const bytes = await readBytes(root, filename);
+      entries.push({
+        path: filename,
+        kind: "file",
+        sha256: digestBytes(Buffer.concat([Buffer.from("file\0"), bytes]))
+      });
+      if (entries.length > DISCOVERY_LIMIT)
+        fail(
+          "ARTIFACT_DISCOVERY_LIMIT",
+          "Selected work inventory exceeds its bound."
+        );
+    }
+  };
+  await walk(directory3);
+  return entries.sort(
+    (a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0
+  );
+}
+async function selectedWork(input) {
+  const state = await inspectArtifacts({
+    repoRoot: input.repoRoot,
+    workPath: input.workPath
+  });
+  if (state.work === null)
+    fail(
+      "ARTIFACT_WORK_AMBIGUOUS",
+      "Select an explicit work identity before writing."
+    );
+  await verifyIgnores(state.projectRoot, state.work.binding);
+  return {
+    root: state.projectRoot,
+    ...state.work,
+    directory: `${WORK_ROOT}/${state.work.binding.workId}`
+  };
+}
+async function acquireWork(input) {
+  if (typeof input.ownerId !== "string" || input.ownerId.length === 0 || input.ownerId.length > 100 || /[\x00-\x1f]/u.test(input.ownerId))
+    fail("ARTIFACT_INPUT_INVALID", "A bounded local ownerId is required.");
+  const work = await selectedWork(input);
+  const token = randomUUID4();
+  try {
+    await publishNew(
+      work.root,
+      `${work.directory}/${CLAIM}`,
+      JSON.stringify({
+        token,
+        ownerId: input.ownerId,
+        bindingDigest: work.sha256,
+        createdAt: (/* @__PURE__ */ new Date()).toISOString()
+      }) + "\n"
+    );
+  } catch (error) {
+    if (error.code === "EEXIST")
+      fail(
+        "ARTIFACT_OWNERSHIP_CONFLICT",
+        "This work already has a writer. Use another work item or resolve the existing owner."
+      );
+    throw error;
+  }
+  return { token, workId: work.binding.workId };
+}
+async function hasRunnerWorkOwnership(root, bound) {
+  if (bound === void 0) return true;
+  const owner = runnerOwnership2.getStore();
+  if (!owner || owner.root !== root || owner.workId !== bound.binding.workId || owner.bindingDigest !== bound.sha256) return false;
+  const claim = await readJson(root, `${WORK_ROOT}/${owner.workId}/${CLAIM}`, true);
+  if (claim?.token !== owner.token || claim?.bindingDigest !== bound.sha256)
+    fail("ARTIFACT_OWNERSHIP_CONFLICT", "Runner work ownership changed; inspect the retained evidence.");
+  return true;
+}
+async function withRunnerWorkOwnership(root, bound, action) {
+  if (bound === void 0 || await hasRunnerWorkOwnership(root, bound)) return action();
+  await inspectBoundWork(root, bound);
+  const workPath = `${WORK_ROOT}/${bound.binding.workId}/work.json`;
+  const claim = await acquireWork({ repoRoot: root, workPath, ownerId: "runner" });
+  const owner = { root, workId: claim.workId, token: claim.token, bindingDigest: bound.sha256 };
+  return runnerOwnership2.run(owner, async () => {
+    try {
+      return await action();
+    } finally {
+      const relative2 = `${WORK_ROOT}/${owner.workId}/${CLAIM}`;
+      const current = await readJson(root, relative2, true);
+      if (current?.token !== owner.token || current?.bindingDigest !== owner.bindingDigest)
+        fail("ARTIFACT_OWNERSHIP_CONFLICT", "Runner claim changed; evidence was retained for owner recovery.");
+      await safePath(root, relative2);
+      await unlink3(path6.join(root, relative2));
+    }
+  });
+}
+async function requireClaim(input) {
+  const work = await selectedWork(input);
+  const claim = await readJson(work.root, `${work.directory}/${CLAIM}`, true);
+  if (claim === null || claim.token !== input.token || claim.bindingDigest !== work.sha256 || !UUID.test(input.token))
+    fail(
+      "ARTIFACT_OWNERSHIP_CONFLICT",
+      "The caller does not own the current work binding."
+    );
+  return work;
+}
+async function writeArtifact(input) {
+  const root = await projectRoot(input.repoRoot);
+  return withInitializationLock(root, () => writeClaimedArtifact(input));
+}
+async function writeClaimedArtifact(input) {
+  const work = await requireClaim(input);
+  if (!ownsArtifact(work.binding, input.artifactPath))
+    fail(
+      "ARTIFACT_UNSAFE_PATH",
+      "Write is outside the selected work's artifact roles."
+    );
+  if (!(input.expectedSha256 === null || typeof input.expectedSha256 === "string" && SHA256.test(input.expectedSha256)))
+    fail(
+      "ARTIFACT_INPUT_INVALID",
+      "expectedSha256 must be a SHA-256 identity or null for creation."
+    );
+  const bytes = await readInvocationBytes(input.inputFile, "inputFile");
+  const existing = await readBytes(work.root, input.artifactPath, {
+    optional: true
+  });
+  if ((existing === null ? null : digestBytes(existing)) !== input.expectedSha256)
+    fail(
+      "ARTIFACT_OWNERSHIP_CONFLICT",
+      "Artifact bytes changed. Inspect the current evidence before writing."
+    );
+  await makeDirectories(work.root, path6.posix.dirname(input.artifactPath));
+  if (work.binding.layout === "private") await verifyIgnores(work.root, work.binding, [input.artifactPath]);
+  if (existing === null) {
+    try {
+      await publishNew(work.root, input.artifactPath, bytes);
+    } catch (error) {
+      if (error.code === "EEXIST")
+        fail(
+          "ARTIFACT_OWNERSHIP_CONFLICT",
+          "Artifact was created by another writer."
+        );
+      throw error;
+    }
+  } else {
+    const temporary = `${path6.posix.dirname(input.artifactPath)}/.artifact-tmp-${randomUUID4()}`;
+    try {
+      if (work.binding.layout === "private") await verifyIgnores(work.root, work.binding, [temporary, input.artifactPath]);
+      await publishNew(work.root, temporary, bytes);
+      await requireClaim(input);
+      const latest = await readBytes(work.root, input.artifactPath);
+      if (digestBytes(latest) !== input.expectedSha256)
+        fail(
+          "ARTIFACT_OWNERSHIP_CONFLICT",
+          "Artifact bytes changed during writing."
+        );
+      if (work.binding.layout === "private") await verifyIgnores(work.root, work.binding, [input.artifactPath]);
+      await safePath(work.root, input.artifactPath);
+      await rename3(
+        path6.join(work.root, temporary),
+        path6.join(work.root, input.artifactPath)
+      );
+    } finally {
+      await unlink3(path6.join(work.root, temporary)).catch(() => {
+      });
+    }
+  }
+  return { path: input.artifactPath, sha256: digestBytes(bytes) };
+}
+async function releaseWork(input) {
+  const root = await projectRoot(input.repoRoot);
+  return withInitializationLock(root, async () => {
+    const work = await requireClaim(input);
+    await unlink3(path6.join(work.root, work.directory, CLAIM));
+    return { workId: work.binding.workId, released: true };
+  });
+}
+var operationFields = {
+  inventory: [[], ["workPaths", "runIds"]],
+  export: [["inventoryFile", "destination"], []],
+  verify: [["bundlePath"], []],
+  restore: [["bundlePath", "destination"], []],
+  inspect: [[], ["workId", "workPath"]],
+  initialize: [[], ["layout"]],
+  create: [["slug", "mode", "creationId"], []],
+  acquire: [["workPath", "ownerId"], []],
+  write: [
+    ["workPath", "token", "artifactPath", "inputFile", "expectedSha256"],
+    []
+  ],
+  release: [["workPath", "token"], []]
+};
+async function runArtifactOperation(operation, input) {
+  const fields = operationFields[operation];
+  if (fields === void 0)
+    fail("ARTIFACT_INPUT_INVALID", "Unsupported artifact operation.");
+  exactObject(
+    input,
+    ["schema", "schemaVersion", "repoRoot", ...fields[0]],
+    fields[1]
+  );
+  if (!(input.schema === REQUEST_SCHEMA && input.schemaVersion === 1 || operation === "create" && input.schema === "banzai-artifact-request/v2" && input.schemaVersion === 2))
+    fail(
+      "ARTIFACT_VERSION_UNSUPPORTED",
+      "Unsupported artifact request version."
+    );
+  const operations = {
+    inventory: inventoryArtifacts,
+    export: exportArtifacts,
+    verify: verifyArchive,
+    restore: restoreArtifacts,
+    inspect: inspectArtifacts,
+    initialize: initializeArtifacts,
+    create: createWork,
+    acquire: acquireWork,
+    write: writeArtifact,
+    release: releaseWork
+  };
+  return operations[operation](input);
+}
+async function artifactCommand(args) {
+  const operation = args[0] ?? "";
+  try {
+    if (args.length !== 3 || args[1] !== "--json" || !Object.hasOwn(operationFields, operation))
+      fail(
+        "ARTIFACT_INPUT_INVALID",
+        "Usage: artifacts <operation> --json <request-file>"
+      );
+    const filename = path6.resolve(args[2]);
+    const bytes = await readInvocationBytes(filename, "requestFile", { limit: METADATA_LIMIT2 });
+    let input;
+    try {
+      input = JSON.parse(bytes.toString("utf8"));
+    } catch {
+      fail("ARTIFACT_INPUT_INVALID", `requestFile (${filename}) must contain valid JSON.`);
+    }
+    const result = await runArtifactOperation(operation, input);
+    return {
+      schema: RESULT_SCHEMA,
+      schemaVersion: 1,
+      operation,
+      ok: true,
+      result,
+      error: null
+    };
+  } catch (error) {
+    return {
+      schema: RESULT_SCHEMA,
+      schemaVersion: 1,
+      operation: Object.hasOwn(operationFields, operation) ? operation : "",
+      ok: false,
+      result: null,
+      error: error instanceof ArtifactStorageError ? { code: error.code, message: error.message } : {
+        code: "ARTIFACT_IO_ERROR",
+        message: "The artifact operation failed. Inspect local storage and permissions; no fallback destination was selected."
+      }
+    };
+  }
+}
+
+// src/artifact-storage.ts
+var {
+  inspectProjectAdoption: inspectProjectAdoption2,
+  readAdoptionFile: readAdoptionFile2,
+  ADOPTION_LABELS: ADOPTION_LABELS2,
+  SCAFFOLD_MARKER: SCAFFOLD_MARKER2,
+  GUIDANCE_MAX_BYTES: GUIDANCE_MAX_BYTES3,
+  adoptionDiagnostic: adoptionDiagnostic2,
+  readSharedReviewSnapshot,
+  sealSharedReviewSnapshot,
+  artifactCommand: artifactCommand2,
+  artifactRoles: artifactRoles2,
+  inspectArtifacts: inspectArtifacts2,
+  initializeArtifacts: initializeArtifacts2,
+  createWork: createWork2,
+  readBinding: readBinding2,
+  parseBinding: parseBinding2,
+  inspectBoundWork: inspectBoundWork2,
+  privateArtifactInventory: privateArtifactInventory2,
+  ownsArtifact: ownsArtifact2,
+  verifyIgnores: verifyIgnores2,
+  safePath: safePath2,
+  readBytes: readBytes2,
+  digestBytes: digestBytes2,
+  canonicalJson: canonicalJson2,
+  hasRunnerWorkOwnership: hasRunnerWorkOwnership2,
+  withRunnerWorkOwnership: withRunnerWorkOwnership2,
+  acquireWork: acquireWork2,
+  writeArtifact: writeArtifact2,
+  releaseWork: releaseWork2,
+  ArtifactStorageError: ArtifactStorageError2
+} = artifact_storage_exports;
+
+// src/evaluation.ts
+import { createHash as createHash7 } from "node:crypto";
+import { readdir as readdir4, readFile } from "node:fs/promises";
+import path8 from "node:path";
+
+// src/types.ts
+var CONTRACT_VERSION2 = "1.0.0";
+var PHASE_RESULT_SCHEMA_VERSION2 = 3;
+var DECISION_CONSULTATION_SCHEMA2 = "banzai-decision-consultation/v1";
+var DECISION_CONSULTATION_SCHEMA_VERSION2 = 1;
+var PLAN_TASK_COMPLETION_SCHEMA_VERSION2 = 1;
+var EVALUATION_EXPORT_SCHEMA = "banzai-evaluation-export/v1";
+var EVALUATION_EXPORT_SCHEMA_VERSION = 1;
+var EVALUATION_KPI_SCHEMA = "banzai-evaluation-kpi/v1";
+var EVALUATION_KPI_SCHEMA_VERSION = 1;
+var CONTEXT_ATTEMPT_SCHEMA = "banzai-context-attempt/v1";
+var CONTEXT_ATTEMPT_SCHEMA_VERSION = 1;
+var CONTEXT_REPORT_SCHEMA = "banzai-context-report/v1";
+var CONTEXT_REPORT_SCHEMA_VERSION = 1;
+var PROMPT_COMPONENT_CATEGORY_ORDER = [
+  "common_instructions",
+  "phase_instructions",
+  "user_request_scope",
+  "human_decisions",
+  "approved_requirements_architecture",
+  "verification_evidence",
+  "workspace_evidence",
+  "completion_evidence",
+  "review_triage_evidence",
+  "recovery_instructions",
+  "output_contract"
+];
+var VERIFICATION_LEDGER_SCHEMA_VERSION2 = 1;
+var MODEL_ATTEMPT_SCHEMA_VERSION2 = 2;
+var TERMINAL_CHECKPOINT_SCHEMA2 = "banzai-terminal-attempt-checkpoint/v1";
+var TERMINAL_CHECKPOINT_SCHEMA_VERSION2 = 1;
+var RECOVERY_AUTHORIZATION_SCHEMA2 = "banzai-recovery-authorization/v1";
+var RECOVERY_AUTHORIZATION_SCHEMA_VERSION2 = 1;
+var AGENT_CONTROL_CONTRACT_VERSION = "3.0.0";
+var AGENT_CAPABILITIES_SCHEMA_VERSION = 3;
+var AGENT_STATUS_SCHEMA_VERSION = 2;
+var AGENT_ANSWER_SCHEMA_VERSION = 2;
+var AGENT_REQUEST_SCHEMA_VERSION = 1;
+var AGENT_RECOVERY_SCHEMA_VERSION = 1;
+var LEGACY_AGENT_CONTROL_SCHEMA_VERSION = 1;
+var AGENT_CAPABILITIES_SCHEMA = "banzai-agent-capabilities/v3";
+var AGENT_STATUS_SCHEMA = "banzai-agent-status/v2";
+var AGENT_REQUEST_SCHEMA = "banzai-agent-request/v1";
+var AGENT_ANSWER_SCHEMA = "banzai-agent-answer/v2";
+var AGENT_RECOVERY_SCHEMA = "banzai-agent-recovery/v1";
+var LEGACY_AGENT_ANSWER_SCHEMA = "banzai-agent-answer/v1";
+function sessionBindingMatches(binding, settings, role) {
+  return binding !== null && binding.role === role && binding.executable === settings.executable && binding.model === settings.model && binding.effort === settings.effort;
+}
+
+// src/validation.ts
+import { createHash as createHash6 } from "node:crypto";
+
+// src/models.ts
+import path7 from "node:path";
+var MODEL_ROLES = [
+  "planner",
+  "implementer",
+  "reviewer"
+];
+var ROLE_LABELS = {
+  planner: "Planning",
+  implementer: "Implementation",
+  reviewer: "Review"
+};
+function superseded2(replacement) {
+  return { replacement, standing: "superseded", date: null };
+}
+function deprecated2(replacement, date) {
+  return { replacement, standing: "deprecated", date };
+}
+function retired2(replacement, date) {
+  return { replacement, standing: "retired", date };
+}
+var OPUS2 = "claude-opus-5";
+var SONNET2 = "claude-sonnet-5";
+var HAIKU2 = "claude-haiku-4-5";
+var CLAUDE_CATALOG2 = {
+  supported: /* @__PURE__ */ new Set([
+    "claude-fable-5-1",
+    "claude-fable-5",
+    "claude-mythos-5",
+    OPUS2,
+    SONNET2,
+    "claude-opus-4-8",
+    "claude-sonnet-4-6",
+    HAIKU2,
+    "claude-haiku-4-5-20251001",
+    // Claude Code aliases always resolve to the current model of their tier.
+    "opus",
+    "sonnet",
+    "haiku",
+    "default"
+  ]),
+  replacements: /* @__PURE__ */ new Map([
+    ["claude-opus-4-7", superseded2(OPUS2)],
+    ["claude-opus-4-6", superseded2(OPUS2)],
+    ["claude-opus-4-5", superseded2(OPUS2)],
+    ["claude-opus-4-5-20251101", superseded2(OPUS2)],
+    ["claude-opus-4-1", deprecated2(OPUS2, "2026-08-05")],
+    ["claude-opus-4-1-20250805", deprecated2(OPUS2, "2026-08-05")],
+    ["claude-opus-4-0", deprecated2(OPUS2, "2026-06-15")],
+    ["claude-opus-4-20250514", deprecated2(OPUS2, "2026-06-15")],
+    ["claude-3-opus-20240229", retired2(OPUS2, "2026-01-05")],
+    ["claude-mythos-preview", superseded2("claude-fable-5")],
+    ["claude-sonnet-4-5", superseded2(SONNET2)],
+    ["claude-sonnet-4-5-20250929", superseded2(SONNET2)],
+    ["claude-sonnet-4-0", deprecated2(SONNET2, "2026-06-15")],
+    ["claude-sonnet-4-20250514", deprecated2(SONNET2, "2026-06-15")],
+    ["claude-3-7-sonnet-20250219", retired2(SONNET2, "2026-02-19")],
+    ["claude-3-5-sonnet-20241022", retired2(SONNET2, "2025-10-28")],
+    ["claude-3-5-sonnet-20240620", retired2(SONNET2, "2025-10-28")],
+    ["claude-3-sonnet-20240229", retired2(SONNET2, "2025-07-21")],
+    ["claude-3-5-haiku-20241022", retired2(HAIKU2, "2026-02-19")],
+    ["claude-3-haiku-20240307", deprecated2(HAIKU2, "2026-04-19")]
+  ])
+};
+var CODEX_CATALOG2 = {
+  supported: /* @__PURE__ */ new Set([
+    "gpt-6-astra",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.5"
+  ]),
+  replacements: /* @__PURE__ */ new Map([["gpt-5", superseded2("gpt-5.5")]])
+};
+var CATALOGS = /* @__PURE__ */ new Map([
+  ["claude", CLAUDE_CATALOG2],
+  ["codex", CODEX_CATALOG2]
+]);
+var FULL_EFFORTS2 = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max"
+];
+var CODEX_EFFORTS2 = [...FULL_EFFORTS2, "ultra"];
+var GPT_5_5_EFFORTS = ["low", "medium", "high", "xhigh"];
+var SELECTABLE_MODELS = [
+  {
+    id: "claude-opus-5",
+    label: "Claude Opus 5",
+    vendor: "claude",
+    executable: "claude",
+    description: "Complex agentic coding and long-horizon work.",
+    efforts: FULL_EFFORTS2
+  },
+  {
+    id: "claude-fable-5-1",
+    label: "Claude Fable 5.1",
+    vendor: "claude",
+    executable: "claude",
+    description: "Most capable model for demanding long-horizon agentic work.",
+    efforts: FULL_EFFORTS2
+  },
+  {
+    id: "claude-fable-5",
+    label: "Claude Fable 5",
+    vendor: "claude",
+    executable: "claude",
+    description: "Previous-generation Fable for demanding agentic work.",
+    efforts: FULL_EFFORTS2
+  },
+  {
+    id: "claude-sonnet-5",
+    label: "Claude Sonnet 5",
+    vendor: "claude",
+    executable: "claude",
+    description: "Near-Opus coding quality at lower cost and latency.",
+    efforts: FULL_EFFORTS2
+  },
+  {
+    id: "claude-opus-4-8",
+    label: "Claude Opus 4.8",
+    vendor: "claude",
+    executable: "claude",
+    description: "Previous-generation Opus for complex agentic work.",
+    efforts: FULL_EFFORTS2
+  },
+  {
+    id: "claude-sonnet-4-6",
+    label: "Claude Sonnet 4.6",
+    vendor: "claude",
+    executable: "claude",
+    description: "Previous-generation Sonnet balancing intelligence and speed.",
+    efforts: FULL_EFFORTS2
+  },
+  {
+    id: "gpt-6-astra",
+    label: "GPT-6-Astra",
+    vendor: "codex",
+    executable: "codex",
+    description: "Most capable model for complex, demanding work.",
+    efforts: CODEX_EFFORTS2
+  },
+  {
+    id: "gpt-5.6-sol",
+    label: "GPT-5.6-Sol",
+    vendor: "codex",
+    executable: "codex",
+    description: "Reliable agentic workhorse for everyday tasks.",
+    efforts: CODEX_EFFORTS2
+  },
+  {
+    id: "gpt-5.6-terra",
+    label: "GPT-5.6-Terra",
+    vendor: "codex",
+    executable: "codex",
+    description: "Balanced agentic coding model for everyday work.",
+    efforts: CODEX_EFFORTS2
+  },
+  {
+    id: "gpt-5.6-luna",
+    label: "GPT-5.6-Luna",
+    vendor: "codex",
+    executable: "codex",
+    description: "Fast and affordable agentic coding model.",
+    efforts: FULL_EFFORTS2
+  },
+  {
+    id: "gpt-5.5",
+    label: "GPT-5.5",
+    vendor: "codex",
+    executable: "codex",
+    description: "Previous-generation frontier model for complex coding and research.",
+    efforts: GPT_5_5_EFFORTS
+  }
+];
+function selectableModel(id) {
+  return SELECTABLE_MODELS.find((model) => model.id === id) ?? null;
+}
+function isCatalogSupportedModel(vendor, id) {
+  return CATALOGS.get(vendor)?.supported.has(id) ?? false;
+}
+var FALLBACK_VENDOR = {
+  planner: "codex",
+  implementer: "codex",
+  reviewer: "claude"
+};
+function roleLabel(role) {
+  return ROLE_LABELS[role];
+}
+function vendorKey(executable) {
+  return path7.basename(executable).toLowerCase();
+}
+function advisoryDetail(model, entry) {
+  if (entry.standing === "superseded") {
+    return `${model} is superseded by ${entry.replacement}.`;
+  }
+  if (entry.standing === "deprecated") {
+    return `${model} is deprecated and retires ${entry.date}; ${entry.replacement} replaces it.`;
+  }
+  return `${model} was retired ${entry.date}; ${entry.replacement} replaces it.`;
+}
+function advisoryFor(role, settings) {
+  const catalog = CATALOGS.get(vendorKey(settings.executable));
+  if (catalog === void 0 || catalog.supported.has(settings.model)) {
+    return null;
+  }
+  const entry = catalog.replacements.get(settings.model);
+  if (entry === void 0) {
+    return null;
+  }
+  return {
+    role,
+    label: ROLE_LABELS[role],
+    executable: settings.executable,
+    model: settings.model,
+    replacement: entry.replacement,
+    standing: entry.standing,
+    detail: advisoryDetail(settings.model, entry)
+  };
+}
+function modelAdvisories(config) {
+  const advisories = [];
+  for (const role of MODEL_ROLES) {
+    const advisory = advisoryFor(role, config.models[role]);
+    if (advisory !== null) {
+      advisories.push(advisory);
+    }
+  }
+  return advisories;
+}
+function vendorFor(executable) {
+  const key = vendorKey(executable);
+  return key === "claude" || key === "codex" ? key : null;
+}
+function vendorUsage(config) {
+  const usage = /* @__PURE__ */ new Map();
+  for (const role of MODEL_ROLES) {
+    const settings = config.models[role];
+    const existing = usage.get(settings.executable);
+    if (existing === void 0) {
+      usage.set(settings.executable, {
+        executable: settings.executable,
+        vendor: vendorFor(settings.executable),
+        roles: [role],
+        settings
+      });
+      continue;
+    }
+    existing.roles.push(role);
+  }
+  return [...usage.values()];
+}
+function describeRoles(roles) {
+  return roles.map((role) => ROLE_LABELS[role]).join(", ");
+}
+function formatTimeout(timeoutMs) {
+  const minutes = Math.ceil(timeoutMs / 6e4);
+  return `${minutes}m`;
+}
+function configuredModels(config) {
+  return MODEL_ROLES.map((role) => {
+    const settings = config.models[role];
+    return {
+      role,
+      label: ROLE_LABELS[role],
+      executable: settings.executable,
+      model: settings.model,
+      effort: settings.effort,
+      timeout: formatTimeout(settings.timeoutMs)
+    };
+  });
+}
+
+// src/validation.ts
+var VERIFICATION_ATTEMPT_STATUSES2 = [
+  "started",
+  "completed",
+  "failed",
+  "interrupted"
+];
+var VERIFICATION_FAILURE_CATEGORIES2 = [
+  "command_exit",
+  "process_start",
+  "timeout",
+  "output_limit",
+  "runner_failure"
+];
+function isRecord2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function requireRecord2(value, label) {
+  if (!isRecord2(value)) {
+    throw new BanzaiError("INVALID_RESULT", `${label} must be an object.`);
+  }
+  return value;
+}
+function requireString2(value, label, allowEmpty = false) {
+  if (typeof value !== "string" || !allowEmpty && value.length === 0) {
+    throw new BanzaiError(
+      "INVALID_RESULT",
+      `${label} must be a non-empty string.`
+    );
+  }
+  return value;
+}
+function requireNullableString2(value, label) {
+  if (value === null) {
+    return null;
+  }
+  return requireString2(value, label, true);
+}
+function requireStringArray2(value, label) {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    throw new BanzaiError(
+      "INVALID_RESULT",
+      `${label} must be an array of strings.`
+    );
+  }
+  return [...new Set(value)];
+}
+function requireEnum2(value, label, allowed) {
+  if (typeof value !== "string" || !allowed.includes(value)) {
+    throw new BanzaiError(
+      "INVALID_RESULT",
+      `${label} must be one of: ${allowed.join(", ")}.`
+    );
+  }
+  return value;
+}
+function requirePositiveInteger2(value, label) {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new BanzaiError(
+      "INVALID_CONFIG",
+      `${label} must be a positive integer.`
+    );
+  }
+  return value;
+}
+function parseArtifacts2(value) {
+  const record6 = requireRecord2(value, "artifacts");
+  return {
+    description: requireNullableString2(
+      record6.description,
+      "artifacts.description"
+    ),
+    plan: requireNullableString2(record6.plan, "artifacts.plan"),
+    adrs: requireStringArray2(record6.adrs, "artifacts.adrs"),
+    implementationReport: requireNullableString2(
+      record6.implementationReport,
+      "artifacts.implementationReport"
+    ),
+    testReport: requireNullableString2(record6.testReport, "artifacts.testReport")
+  };
+}
+var CONSULTATION_ID_PATTERN2 = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u;
+var UNSAFE_CONSULTATION_CONTROL2 = /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u;
+function consultationError2(message) {
+  throw new BanzaiError("INVALID_RESULT", message);
+}
+function consultationRecord2(value, label, keys3) {
+  const record6 = requireRecord2(value, label);
+  exactKeys2(record6, keys3, "INVALID_RESULT", label);
+  return record6;
+}
+function consultationString2(value, label, maximum) {
+  if (typeof value !== "string" || value.length === 0 || value.length > maximum || UNSAFE_CONSULTATION_CONTROL2.test(value)) {
+    return consultationError2(
+      `${label} must be a bounded safe single-line string.`
+    );
+  }
+  return value;
+}
+function consultationIdentifier2(value, label) {
+  const identifier3 = consultationString2(value, label, 128);
+  if (identifier3 === "." || identifier3 === ".." || !CONSULTATION_ID_PATTERN2.test(identifier3)) {
+    return consultationError2(`${label} must be a canonical identifier.`);
+  }
+  return identifier3;
+}
+function consultationStrings2(value, label, maximumItems, maximumLength) {
+  if (!Array.isArray(value) || value.length > maximumItems) {
+    return consultationError2(`${label} must be a bounded string array.`);
+  }
+  const strings = value.map(
+    (item, index) => consultationString2(item, `${label}[${index}]`, maximumLength)
+  );
+  if (new Set(strings).size !== strings.length) {
+    return consultationError2(`${label} must not contain duplicates.`);
+  }
+  return strings;
+}
+function consultationPath2(value, label) {
+  const candidate = consultationString2(value, label, 300);
+  const segments = candidate.split("/");
+  if (candidate.startsWith("/") || candidate.includes("\\") || /^[A-Za-z]:\//u.test(candidate) || segments.some(
+    (segment) => segment === "" || segment === "." || segment === ".."
+  )) {
+    return consultationError2(
+      `${label} must be a repository-relative canonical path.`
+    );
+  }
+  return candidate;
+}
+function parseConsultationOption2(value, label) {
+  const record6 = consultationRecord2(value, label, [
+    "optionId",
+    "title",
+    "benefits",
+    "costs",
+    "risks",
+    "consequences"
+  ]);
+  return {
+    optionId: consultationIdentifier2(record6.optionId, `${label}.optionId`),
+    title: consultationString2(record6.title, `${label}.title`, 160),
+    benefits: consultationStrings2(record6.benefits, `${label}.benefits`, 8, 500),
+    costs: consultationStrings2(record6.costs, `${label}.costs`, 8, 500),
+    risks: consultationStrings2(record6.risks, `${label}.risks`, 8, 500),
+    consequences: consultationStrings2(
+      record6.consequences,
+      `${label}.consequences`,
+      8,
+      500
+    )
+  };
+}
+function parseConsultationCard2(value, index) {
+  const label = `decisionConsultation.decisions[${index}]`;
+  const record6 = consultationRecord2(value, label, [
+    "decisionId",
+    "title",
+    "question",
+    "why",
+    "affectedRequirements",
+    "evidence",
+    "decisionOwner",
+    "responseMode",
+    "options",
+    "recommendation"
+  ]);
+  if (record6.decisionOwner !== "human") {
+    return consultationError2(`${label}.decisionOwner must be human.`);
+  }
+  const responseMode = requireEnum2(
+    record6.responseMode,
+    `${label}.responseMode`,
+    ["single_choice", "free_text"]
+  );
+  if (!Array.isArray(record6.evidence) || record6.evidence.length < 1 || record6.evidence.length > 12) {
+    return consultationError2(
+      `${label}.evidence must contain one to twelve entries.`
+    );
+  }
+  const evidence2 = record6.evidence.map((item, evidenceIndex) => {
+    const evidenceLabel = `${label}.evidence[${evidenceIndex}]`;
+    const evidenceRecord = consultationRecord2(item, evidenceLabel, [
+      "path",
+      "line",
+      "detail"
+    ]);
+    const line = evidenceRecord.line === null ? null : Number.isSafeInteger(evidenceRecord.line) && evidenceRecord.line > 0 ? evidenceRecord.line : consultationError2(
+      `${evidenceLabel}.line must be a positive integer or null.`
+    );
+    return {
+      path: consultationPath2(evidenceRecord.path, `${evidenceLabel}.path`),
+      line,
+      detail: consultationString2(
+        evidenceRecord.detail,
+        `${evidenceLabel}.detail`,
+        500
+      )
+    };
+  });
+  if (!Array.isArray(record6.options) || record6.options.length > 6) {
+    return consultationError2(`${label}.options must be a bounded array.`);
+  }
+  const options = record6.options.map(
+    (option2, optionIndex) => parseConsultationOption2(option2, `${label}.options[${optionIndex}]`)
+  );
+  if (new Set(options.map((option2) => option2.optionId)).size !== options.length) {
+    return consultationError2(`${label}.option ids must be unique.`);
+  }
+  if (responseMode === "single_choice" && options.length < 2) {
+    return consultationError2(
+      `${label}.single_choice requires at least two material options.`
+    );
+  }
+  if (responseMode === "free_text" && options.length !== 0) {
+    return consultationError2(
+      `${label}.free_text cannot list selectable options.`
+    );
+  }
+  let recommendation = null;
+  if (record6.recommendation !== null) {
+    const recommendationRecord = consultationRecord2(
+      record6.recommendation,
+      `${label}.recommendation`,
+      ["optionId", "rationale"]
+    );
+    const optionId = consultationIdentifier2(
+      recommendationRecord.optionId,
+      `${label}.recommendation.optionId`
+    );
+    if (!options.some((option2) => option2.optionId === optionId)) {
+      return consultationError2(
+        `${label}.recommendation must reference a listed option.`
+      );
+    }
+    recommendation = {
+      optionId,
+      rationale: consultationString2(
+        recommendationRecord.rationale,
+        `${label}.recommendation.rationale`,
+        1e3
+      )
+    };
+  }
+  if (responseMode === "free_text" && recommendation !== null) {
+    return consultationError2(
+      `${label}.free_text cannot include a recommendation.`
+    );
+  }
+  const affectedRequirements = consultationStrings2(
+    record6.affectedRequirements,
+    `${label}.affectedRequirements`,
+    16,
+    120
+  );
+  if (affectedRequirements.length === 0) {
+    return consultationError2(
+      `${label}.affectedRequirements must identify at least one material concern.`
+    );
+  }
+  return {
+    decisionId: consultationIdentifier2(
+      record6.decisionId,
+      `${label}.decisionId`
+    ),
+    title: consultationString2(record6.title, `${label}.title`, 160),
+    question: consultationString2(record6.question, `${label}.question`, 1e3),
+    why: consultationString2(record6.why, `${label}.why`, 1200),
+    affectedRequirements,
+    evidence: evidence2,
+    decisionOwner: "human",
+    responseMode,
+    options,
+    recommendation
+  };
+}
+function parseDecisionConsultation2(value) {
+  if (value === null) {
+    return null;
+  }
+  if (Buffer.byteLength(JSON.stringify(value), "utf8") > 32 * 1024) {
+    return consultationError2(
+      "decisionConsultation must not exceed 32 KiB when serialized."
+    );
+  }
+  const record6 = consultationRecord2(value, "decisionConsultation", [
+    "schema",
+    "schemaVersion",
+    "requestId",
+    "roundId",
+    "decisions"
+  ]);
+  if (record6.schema !== DECISION_CONSULTATION_SCHEMA2 || record6.schemaVersion !== DECISION_CONSULTATION_SCHEMA_VERSION2) {
+    return consultationError2(
+      `decisionConsultation must use ${DECISION_CONSULTATION_SCHEMA2}.`
+    );
+  }
+  if (!Array.isArray(record6.decisions) || record6.decisions.length < 1 || record6.decisions.length > 3) {
+    return consultationError2(
+      "decisionConsultation.decisions must contain one to three cards."
+    );
+  }
+  const decisions = record6.decisions.map(parseConsultationCard2);
+  if (new Set(decisions.map((decision) => decision.decisionId)).size !== decisions.length) {
+    return consultationError2(
+      "decisionConsultation decision ids must be unique."
+    );
+  }
+  return {
+    schema: DECISION_CONSULTATION_SCHEMA2,
+    schemaVersion: DECISION_CONSULTATION_SCHEMA_VERSION2,
+    requestId: consultationIdentifier2(
+      record6.requestId,
+      "decisionConsultation.requestId"
+    ),
+    roundId: consultationIdentifier2(
+      record6.roundId,
+      "decisionConsultation.roundId"
+    ),
+    decisions
+  };
+}
+function parseDecisionConsultationRequest(value) {
+  const request = parseDecisionConsultation2(value);
+  if (request === null) {
+    return consultationError2("Decision consultation request cannot be null.");
+  }
+  return request;
+}
+function consultationAnswerString(value, label, maximum) {
+  if (typeof value !== "string" || value.length === 0 || value.length > maximum || value.trim().length === 0 || /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(
+    value
+  )) {
+    return consultationError2(`${label} must be bounded non-empty inert text.`);
+  }
+  return value;
+}
+function parseDecisionConsultationAnswers(value, request) {
+  if (!Array.isArray(value) || value.length !== request.decisions.length || Buffer.byteLength(JSON.stringify(value), "utf8") > 64 * 1024) {
+    return consultationError2(
+      "Every consultation card requires exactly one bounded answer."
+    );
+  }
+  const cards = new Map(
+    request.decisions.map((decision) => [decision.decisionId, decision])
+  );
+  const seen = /* @__PURE__ */ new Set();
+  return value.map((item, index) => {
+    const label = `answers[${index}]`;
+    const answer = consultationRecord2(item, label, [
+      "decisionId",
+      "response",
+      "note"
+    ]);
+    const decisionId = consultationIdentifier2(
+      answer.decisionId,
+      `${label}.decisionId`
+    );
+    const card = cards.get(decisionId);
+    if (card === void 0 || seen.has(decisionId)) {
+      return consultationError2(`${label}.decisionId is unknown or duplicated.`);
+    }
+    seen.add(decisionId);
+    const response = consultationRecord2(answer.response, `${label}.response`, [
+      "kind",
+      "optionId",
+      "text"
+    ]);
+    const kind = requireEnum2(response.kind, `${label}.response.kind`, [
+      "option",
+      "preference"
+    ]);
+    let optionId = null;
+    let text2 = null;
+    if (kind === "option") {
+      if (card.responseMode !== "single_choice" || response.text !== null) {
+        return consultationError2(
+          `${label}.response cannot select an option for this card.`
+        );
+      }
+      optionId = consultationIdentifier2(
+        response.optionId,
+        `${label}.response.optionId`
+      );
+      if (!card.options.some((option2) => option2.optionId === optionId)) {
+        return consultationError2(
+          `${label}.response.optionId is not a listed option.`
+        );
+      }
+    } else {
+      if (response.optionId !== null) {
+        return consultationError2(
+          `${label}.preference cannot include an option id.`
+        );
+      }
+      text2 = consultationAnswerString(
+        response.text,
+        `${label}.response.text`,
+        8e3
+      );
+    }
+    return {
+      decisionId,
+      response: { kind, optionId, text: text2 },
+      note: answer.note === null ? null : consultationAnswerString(answer.note, `${label}.note`, 2e3)
+    };
+  });
+}
+function completionError2(message) {
+  throw new BanzaiError("PLAN_TASK_COMPLETION_INVALID", message);
+}
+function completionString2(value, label) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 500 || /[\0\r\n]/u.test(value)) {
+    return completionError2(`${label} must be a bounded single-line string.`);
+  }
+  return value;
+}
+function parseTaskCompletion2(value) {
+  if (value === null) {
+    return null;
+  }
+  if (!isRecord2(value)) {
+    return completionError2("taskCompletion must be an object or null.");
+  }
+  if (value.schemaVersion !== PLAN_TASK_COMPLETION_SCHEMA_VERSION2) {
+    return completionError2(
+      `taskCompletion must use schema ${PLAN_TASK_COMPLETION_SCHEMA_VERSION2}.`
+    );
+  }
+  if (!Array.isArray(value.tasks) || value.tasks.length > 999) {
+    return completionError2("taskCompletion.tasks must be a bounded array.");
+  }
+  const tasks = value.tasks.map((item, index) => {
+    if (!isRecord2(item)) {
+      return completionError2(
+        `taskCompletion.tasks[${index}] must be an object.`
+      );
+    }
+    const taskId = completionString2(
+      item.taskId,
+      `taskCompletion.tasks[${index}].taskId`
+    );
+    if (!/^T[0-9]{3}$/u.test(taskId)) {
+      return completionError2(`${taskId} is not a canonical TNNN task id.`);
+    }
+    if (typeof item.status !== "string" || !["completed", "incomplete", "blocked"].includes(item.status)) {
+      return completionError2(`${taskId} has an invalid completion status.`);
+    }
+    if (!Array.isArray(item.evidence) || item.evidence.length > 16) {
+      return completionError2(`${taskId} evidence must be a bounded array.`);
+    }
+    const evidence2 = item.evidence.map((entry, evidenceIndex) => {
+      if (!isRecord2(entry)) {
+        return completionError2(
+          `${taskId} evidence[${evidenceIndex}] must be an object.`
+        );
+      }
+      return {
+        path: completionString2(
+          entry.path,
+          `${taskId} evidence[${evidenceIndex}].path`
+        ),
+        detail: completionString2(
+          entry.detail,
+          `${taskId} evidence[${evidenceIndex}].detail`
+        )
+      };
+    });
+    let gap = null;
+    if (item.gap !== null) {
+      if (!isRecord2(item.gap)) {
+        return completionError2(`${taskId} gap must be an object or null.`);
+      }
+      gap = {
+        reportPath: completionString2(item.gap.reportPath, `${taskId} gap path`),
+        section: completionString2(item.gap.section, `${taskId} gap section`),
+        detail: completionString2(item.gap.detail, `${taskId} gap detail`)
+      };
+    }
+    return {
+      taskId,
+      status: item.status,
+      evidence: evidence2,
+      gap
+    };
+  });
+  return { schemaVersion: PLAN_TASK_COMPLETION_SCHEMA_VERSION2, tasks };
+}
+function parseWorkflowSelectionResult2(value) {
+  const record6 = requireRecord2(value, "workflow selection");
+  if (record6.contractVersion !== CONTRACT_VERSION2) {
+    throw new BanzaiError(
+      "CONTRACT_VERSION_MISMATCH",
+      `Workflow selection must use contract ${CONTRACT_VERSION2}.`
+    );
+  }
+  return {
+    contractVersion: CONTRACT_VERSION2,
+    recommendedWorkflow: requireEnum2(
+      record6.recommendedWorkflow,
+      "recommendedWorkflow",
+      ["quick-fix", "feature", "strict"]
+    ),
+    confidence: requireEnum2(record6.confidence, "confidence", [
+      "high",
+      "medium",
+      "low"
+    ]),
+    reason: requireString2(record6.reason, "reason"),
+    escalationTriggers: requireStringArray2(
+      record6.escalationTriggers,
+      "escalationTriggers"
+    )
+  };
+}
+function parsePhaseResult2(value) {
+  const record6 = requireRecord2(value, "phase result");
+  exactKeys2(
+    record6,
+    [
+      "schemaVersion",
+      "contractVersion",
+      "phase",
+      "outcome",
+      "gate",
+      "summary",
+      "artifacts",
+      "taskCompletion",
+      "touchedPaths",
+      "questions",
+      "decisionConsultation",
+      "resolvedFindingIds",
+      "requestedVerification"
+    ],
+    "INVALID_RESULT",
+    "Phase result"
+  );
+  if (record6.schemaVersion !== PHASE_RESULT_SCHEMA_VERSION2) {
+    throw new BanzaiError(
+      "PHASE_RESULT_SCHEMA_MISMATCH",
+      `Phase result must use schema ${PHASE_RESULT_SCHEMA_VERSION2}.`
+    );
+  }
+  if (record6.contractVersion !== CONTRACT_VERSION2) {
+    throw new BanzaiError(
+      "CONTRACT_VERSION_MISMATCH",
+      `Phase result must use contract ${CONTRACT_VERSION2}.`
+    );
+  }
+  const gate = record6.gate === null ? null : requireEnum2(record6.gate, "gate", [
+    "adr_approval",
+    "plan_approval",
+    "escalation",
+    "decision_consultation"
+  ]);
+  const outcome = requireEnum2(record6.outcome, "outcome", [
+    "completed",
+    "needs_human_decision",
+    "blocked"
+  ]);
+  if (outcome === "needs_human_decision" && gate === null || outcome !== "needs_human_decision" && gate !== null) {
+    throw new BanzaiError(
+      "INVALID_RESULT",
+      "A non-null gate and needs_human_decision outcome must appear together."
+    );
+  }
+  const phase = requireEnum2(record6.phase, "phase", [
+    "plan",
+    "implementation",
+    "fix"
+  ]);
+  const questions = requireStringArray2(record6.questions, "questions");
+  const decisionConsultation = parseDecisionConsultation2(
+    record6.decisionConsultation
+  );
+  const summary2 = gate === "decision_consultation" ? consultationString2(record6.summary, "summary", 1e3) : requireString2(record6.summary, "summary");
+  if (gate === "decision_consultation" ? phase !== "plan" || outcome !== "needs_human_decision" || decisionConsultation === null || questions.length !== 0 : decisionConsultation !== null) {
+    throw new BanzaiError(
+      "INVALID_RESULT",
+      "decisionConsultation is allowed only for the planning decision_consultation gate with no escalation questions."
+    );
+  }
+  return {
+    schemaVersion: PHASE_RESULT_SCHEMA_VERSION2,
+    contractVersion: CONTRACT_VERSION2,
+    phase,
+    outcome,
+    gate,
+    summary: summary2,
+    artifacts: parseArtifacts2(record6.artifacts),
+    taskCompletion: parseTaskCompletion2(record6.taskCompletion),
+    touchedPaths: requireStringArray2(record6.touchedPaths, "touchedPaths"),
+    questions,
+    decisionConsultation,
+    resolvedFindingIds: requireStringArray2(
+      record6.resolvedFindingIds,
+      "resolvedFindingIds"
+    ),
+    requestedVerification: requireStringArray2(
+      record6.requestedVerification,
+      "requestedVerification"
+    )
+  };
+}
+function parsePersistedPhaseResult2(value) {
+  const record6 = requireRecord2(value, "persisted phase result");
+  if (record6.schemaVersion === PHASE_RESULT_SCHEMA_VERSION2) {
+    return parsePhaseResult2(record6);
+  }
+  const schemaVersion = record6.schemaVersion === 2 ? 2 : record6.schemaVersion === void 0 || record6.schemaVersion === 1 ? 1 : null;
+  if (schemaVersion === null) {
+    throw new BanzaiError(
+      "PHASE_RESULT_SCHEMA_MISMATCH",
+      "Persisted phase result schema is unsupported."
+    );
+  }
+  exactKeys2(
+    record6,
+    schemaVersion === 1 ? [
+      ...Object.hasOwn(record6, "schemaVersion") ? ["schemaVersion"] : [],
+      "contractVersion",
+      "phase",
+      "outcome",
+      "gate",
+      "summary",
+      "artifacts",
+      "touchedPaths",
+      "questions",
+      "resolvedFindingIds",
+      "requestedVerification"
+    ] : [
+      "schemaVersion",
+      "contractVersion",
+      "phase",
+      "outcome",
+      "gate",
+      "summary",
+      "artifacts",
+      "taskCompletion",
+      "touchedPaths",
+      "questions",
+      "resolvedFindingIds",
+      "requestedVerification"
+    ],
+    "INVALID_RESULT",
+    "Persisted phase result"
+  );
+  if (record6.contractVersion !== CONTRACT_VERSION2) {
+    throw new BanzaiError(
+      "CONTRACT_VERSION_MISMATCH",
+      `Phase result must use contract ${CONTRACT_VERSION2}.`
+    );
+  }
+  const phase = requireEnum2(record6.phase, "phase", [
+    "plan",
+    "implementation",
+    "fix"
+  ]);
+  const gate = record6.gate === null ? null : requireEnum2(record6.gate, "gate", [
+    "adr_approval",
+    "plan_approval",
+    "escalation"
+  ]);
+  const reportedOutcome = requireEnum2(record6.outcome, "outcome", [
+    "completed",
+    "needs_human_decision",
+    "blocked"
+  ]);
+  const outcome = reportedOutcome === "completed" && gate !== null ? "needs_human_decision" : reportedOutcome;
+  if (outcome === "needs_human_decision" && gate === null) {
+    throw new BanzaiError(
+      "INVALID_RESULT",
+      "needs_human_decision requires a non-null gate."
+    );
+  }
+  let artifacts;
+  if (schemaVersion === 1) {
+    const legacyArtifacts = consultationRecord2(record6.artifacts, "artifacts", [
+      "description",
+      "plan",
+      "adrs",
+      "implementationReport"
+    ]);
+    artifacts = {
+      description: requireNullableString2(
+        legacyArtifacts.description,
+        "artifacts.description"
+      ),
+      plan: requireNullableString2(legacyArtifacts.plan, "artifacts.plan"),
+      adrs: requireStringArray2(legacyArtifacts.adrs, "artifacts.adrs"),
+      implementationReport: requireNullableString2(
+        legacyArtifacts.implementationReport,
+        "artifacts.implementationReport"
+      ),
+      testReport: null
+    };
+  } else {
+    artifacts = parseArtifacts2(record6.artifacts);
+  }
+  return {
+    schemaVersion,
+    contractVersion: CONTRACT_VERSION2,
+    phase,
+    outcome,
+    gate,
+    summary: requireString2(record6.summary, "summary"),
+    artifacts,
+    taskCompletion: schemaVersion === 1 ? null : parseTaskCompletion2(record6.taskCompletion),
+    touchedPaths: requireStringArray2(record6.touchedPaths, "touchedPaths"),
+    questions: requireStringArray2(record6.questions, "questions"),
+    resolvedFindingIds: requireStringArray2(
+      record6.resolvedFindingIds,
+      "resolvedFindingIds"
+    ),
+    requestedVerification: requireStringArray2(
+      record6.requestedVerification,
+      "requestedVerification"
+    )
+  };
+}
+function parseEvidence2(value, findingId) {
+  const record6 = requireRecord2(value, `${findingId}.evidence`);
+  const line = record6.line === null ? null : requirePositiveInteger2(record6.line, `${findingId}.evidence.line`);
+  return {
+    path: requireString2(record6.path, `${findingId}.evidence.path`),
+    line,
+    detail: requireString2(record6.detail, `${findingId}.evidence.detail`)
+  };
+}
+function parseFinding2(value) {
+  const record6 = requireRecord2(value, "finding");
+  const id = requireString2(record6.id, "finding.id");
+  if (!/^R[1-9][0-9]*-F[1-9][0-9]*$/.test(id)) {
+    throw new BanzaiError(
+      "INVALID_RESULT",
+      `Finding id ${id} must match R<iteration>-F<number>.`
+    );
+  }
+  if (!Array.isArray(record6.evidence) || record6.evidence.length === 0) {
+    throw new BanzaiError(
+      "INVALID_RESULT",
+      `${id}.evidence must contain at least one item.`
+    );
+  }
+  return {
+    id,
+    severity: requireEnum2(record6.severity, `${id}.severity`, [
+      "blocker",
+      "should_fix",
+      "nit"
+    ]),
+    category: requireEnum2(record6.category, `${id}.category`, [
+      "spec",
+      "plan",
+      "adr",
+      "correctness",
+      "test",
+      "security",
+      "maintainability",
+      "documentation"
+    ]),
+    summary: requireString2(record6.summary, `${id}.summary`),
+    evidence: record6.evidence.map((item) => parseEvidence2(item, id)),
+    violates: requireStringArray2(record6.violates, `${id}.violates`),
+    reproduction: requireNullableString2(
+      record6.reproduction,
+      `${id}.reproduction`
+    ),
+    fixAcceptance: requireString2(record6.fixAcceptance, `${id}.fixAcceptance`),
+    confidence: requireEnum2(record6.confidence, `${id}.confidence`, [
+      "high",
+      "medium",
+      "low"
+    ])
+  };
+}
+function parseReviewFields2(value) {
+  const record6 = requireRecord2(value, "review result");
+  if (record6.contractVersion !== CONTRACT_VERSION2) {
+    throw new BanzaiError(
+      "CONTRACT_VERSION_MISMATCH",
+      `Review result must use contract ${CONTRACT_VERSION2}.`
+    );
+  }
+  if (!Array.isArray(record6.findings)) {
+    throw new BanzaiError("INVALID_RESULT", "findings must be an array.");
+  }
+  const findings = record6.findings.map(parseFinding2);
+  const ids = new Set(findings.map((finding) => finding.id));
+  if (ids.size !== findings.length) {
+    throw new BanzaiError("INVALID_RESULT", "Finding ids must be unique.");
+  }
+  const verdict = requireEnum2(record6.verdict, "verdict", [
+    "pass",
+    "changes_requested",
+    "replan_required",
+    "blocked"
+  ]);
+  if (verdict === "pass" && findings.length > 0) {
+    throw new BanzaiError(
+      "INVALID_RESULT",
+      "A passing review cannot contain findings."
+    );
+  }
+  if (verdict === "changes_requested" && findings.length === 0) {
+    throw new BanzaiError(
+      "INVALID_RESULT",
+      "changes_requested must contain at least one finding."
+    );
+  }
+  return {
+    contractVersion: CONTRACT_VERSION2,
+    verdict,
+    summary: requireString2(record6.summary, "summary"),
+    findings,
+    reviewedFindingIds: requireStringArray2(
+      record6.reviewedFindingIds,
+      "reviewedFindingIds"
+    ),
+    deferredCoverage: requireStringArray2(
+      record6.deferredCoverage,
+      "deferredCoverage"
+    )
+  };
+}
+function parseReviewResult2(value) {
+  const record6 = requireRecord2(value, "review result");
+  if (record6.schemaVersion !== void 0 || record6.scopeAcknowledgment !== void 0 || record6.reviewNotes !== void 0) {
+    return parseCurrentReviewResult2(value);
+  }
+  return parseReviewFields2(value);
+}
+function reviewScopePath3(value) {
+  const name = requireString2(value, "scope path");
+  if (/^[A-Za-z]:/u.test(name) || /[\\\0\r\n]/u.test(name) || name.startsWith("/") || name.split("/").some((part) => part === "" || part === "." || part === "..")) {
+    throw new BanzaiError(
+      "INVALID_REVIEW_SCOPE",
+      "Scope paths must be exact normalized repository-relative paths."
+    );
+  }
+  return name;
+}
+function parseCurrentReviewResult2(value) {
+  const record6 = requireRecord2(value, "review result");
+  if (record6.schemaVersion !== 2)
+    throw new BanzaiError(
+      "REVIEW_RESULT_SCHEMA_MISMATCH",
+      "New reviews require review-result/v2."
+    );
+  exactKeys2(
+    record6,
+    [
+      "contractVersion",
+      "schemaVersion",
+      "verdict",
+      "summary",
+      "findings",
+      "reviewedFindingIds",
+      "deferredCoverage",
+      "reviewNotes",
+      "scopeAcknowledgment"
+    ],
+    "INVALID_RESULT",
+    "Review result"
+  );
+  const result = parseReviewFields2(value);
+  const strings = (value2, label) => {
+    requireStringArray2(value2, label);
+    return [...value2];
+  };
+  result.reviewedFindingIds = strings(
+    record6.reviewedFindingIds,
+    "reviewedFindingIds"
+  );
+  result.deferredCoverage = strings(
+    record6.deferredCoverage,
+    "deferredCoverage"
+  );
+  for (const [index, item] of record6.findings.entries()) {
+    const finding = requireRecord2(item, "finding");
+    const parsedFinding = result.findings[index];
+    if (parsedFinding === void 0)
+      throw new BanzaiError("INVALID_RESULT", "Finding is missing.");
+    parsedFinding.violates = strings(finding.violates, "violates");
+    exactKeys2(
+      finding,
+      [
+        "id",
+        "severity",
+        "category",
+        "confidence",
+        "summary",
+        "evidence",
+        "violates",
+        "reproduction",
+        "fixAcceptance"
+      ],
+      "INVALID_RESULT",
+      "Finding"
+    );
+    for (const evidence2 of finding.evidence)
+      exactKeys2(
+        requireRecord2(evidence2, "evidence"),
+        ["path", "line", "detail"],
+        "INVALID_RESULT",
+        "Finding evidence"
+      );
+  }
+  const acknowledgment = requireRecord2(
+    record6.scopeAcknowledgment,
+    "scopeAcknowledgment"
+  );
+  exactKeys2(
+    acknowledgment,
+    ["schemaVersion", "snapshotDigest", "artifacts"],
+    "INVALID_REVIEW_SCOPE",
+    "Scope acknowledgment"
+  );
+  if (acknowledgment.schemaVersion !== 1 || !Array.isArray(acknowledgment.artifacts))
+    throw new BanzaiError(
+      "INVALID_REVIEW_SCOPE",
+      "Scope acknowledgment requires version 1 and explicit artifacts."
+    );
+  const snapshotDigest = evidenceDigest3(
+    acknowledgment.snapshotDigest,
+    "INVALID_REVIEW_SCOPE",
+    "snapshotDigest"
+  );
+  const artifacts = acknowledgment.artifacts.map((value2) => {
+    const entry = requireRecord2(value2, "scope entry");
+    exactKeys2(
+      entry,
+      ["path", "status", "reason"],
+      "INVALID_REVIEW_SCOPE",
+      "Scope entry"
+    );
+    const path30 = reviewScopePath3(entry.path);
+    const status = requireEnum2(entry.status, "scope status", [
+      "reviewed",
+      "not_reviewed"
+    ]);
+    if (status === "reviewed" ? entry.reason !== null : typeof entry.reason !== "string" || entry.reason.trim().length === 0)
+      throw new BanzaiError(
+        "INVALID_REVIEW_SCOPE",
+        "Reviewed scope requires a null reason; unreviewed scope requires a nonblank reason."
+      );
+    return { path: path30, status, reason: entry.reason };
+  });
+  if (new Set(artifacts.map((entry) => entry.path)).size !== artifacts.length || new Set(result.reviewedFindingIds).size !== result.reviewedFindingIds.length)
+    throw new BanzaiError(
+      "INVALID_REVIEW_SCOPE",
+      "Scope and reviewed finding IDs must be unique."
+    );
+  if (result.verdict !== "blocked" && artifacts.some((entry) => entry.status === "not_reviewed"))
+    throw new BanzaiError(
+      "INVALID_REVIEW_SCOPE",
+      "Incomplete required review scope must have a blocked verdict."
+    );
+  return {
+    ...result,
+    schemaVersion: 2,
+    reviewNotes: strings(record6.reviewNotes, "reviewNotes"),
+    scopeAcknowledgment: { schemaVersion: 1, snapshotDigest, artifacts }
+  };
+}
+function validateReviewScope(result, scope) {
+  const actual = result.scopeAcknowledgment;
+  const paths = new Set(scope.approvedArtifactPaths);
+  if (paths.size !== scope.approvedArtifactPaths.length || actual.snapshotDigest !== scope.snapshotDigest || actual.artifacts.length !== paths.size || actual.artifacts.some((entry) => !paths.has(entry.path)))
+    throw new BanzaiError(
+      "INVALID_REVIEW_SCOPE",
+      "Review acknowledgment does not match the exact approved snapshot scope."
+    );
+  if (result.reviewedFindingIds.some(
+    (id) => !scope.requiredFindingIds.includes(id)
+  ) || result.verdict !== "blocked" && scope.requiredFindingIds.some(
+    (id) => !result.reviewedFindingIds.includes(id)
+  ))
+    throw new BanzaiError(
+      "INVALID_REVIEW_SCOPE",
+      "Reviewed finding IDs do not truthfully account for the required accepted findings."
+    );
+}
+function recoveryEvidenceError2(code2, message) {
+  throw new BanzaiError(code2, message);
+}
+function exactKeys2(record6, allowed, code2, label) {
+  const allowedKeys = new Set(allowed);
+  const unknown = Object.keys(record6).filter((key) => !allowedKeys.has(key));
+  if (unknown.length > 0) {
+    recoveryEvidenceError2(
+      code2,
+      `${label} contains unknown fields: ${unknown.sort().join(", ")}.`
+    );
+  }
+}
+function evidenceString2(value, code2, label, maximum = 500) {
+  if (typeof value !== "string" || value.length === 0 || value.length > maximum || /[\0\r\n]/u.test(value)) {
+    return recoveryEvidenceError2(
+      code2,
+      `${label} must be a bounded single-line string.`
+    );
+  }
+  return value;
+}
+function evidenceNullableString2(value, code2, label, maximum = 500) {
+  return value === null ? null : evidenceString2(value, code2, label, maximum);
+}
+function evidenceIdentifier2(value, code2, label, maximum = 200) {
+  const identifier3 = evidenceString2(value, code2, label, maximum);
+  if (identifier3 === "." || identifier3 === ".." || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(identifier3)) {
+    return recoveryEvidenceError2(
+      code2,
+      `${label} must be a canonical safe identifier.`
+    );
+  }
+  return identifier3;
+}
+function evidenceDigest3(value, code2, label) {
+  const digest4 = evidenceString2(value, code2, label, 64);
+  if (!/^[a-f0-9]{64}$/u.test(digest4)) {
+    return recoveryEvidenceError2(code2, `${label} must be a SHA-256 digest.`);
+  }
+  return digest4;
+}
+function evidenceTimestamp2(value, code2, label) {
+  const timestamp = evidenceString2(value, code2, label, 64);
+  const normalized = normalizeRfc3339Instant2(timestamp);
+  if (normalized === void 0) {
+    return recoveryEvidenceError2(code2, `${label} must be an RFC 3339 time.`);
+  }
+  return normalized;
+}
+function stableJson2(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableJson2(item)).join(",")}]`;
+  }
+  if (isRecord2(value)) {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson2(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+function digestCanonicalJson3(value) {
+  return createHash6("sha256").update(stableJson2(value)).digest("hex");
+}
+function parseEvidenceAttempt2(value, code2, label) {
+  if (!isRecord2(value)) {
+    return recoveryEvidenceError2(code2, `${label} must be an object.`);
+  }
+  exactKeys2(value, ["id", "kind", "mutable"], code2, label);
+  const id = evidenceIdentifier2(value.id, code2, `${label}.id`, 200);
+  const kind = value.kind;
+  if (typeof kind !== "string" || !["selection", "plan", "implementation", "fix", "review"].includes(kind)) {
+    return recoveryEvidenceError2(code2, `${label}.kind is unsupported.`);
+  }
+  if (typeof value.mutable !== "boolean") {
+    return recoveryEvidenceError2(code2, `${label}.mutable must be boolean.`);
+  }
+  return {
+    id,
+    kind,
+    mutable: value.mutable
+  };
+}
+function parseEvidenceUsage2(value, code2, label) {
+  if (value === null) {
+    return null;
+  }
+  if (!isRecord2(value)) {
+    return recoveryEvidenceError2(code2, `${label} must be an object or null.`);
+  }
+  exactKeys2(
+    value,
+    ["inputTokens", "cachedInputTokens", "outputTokens", "costUsd"],
+    code2,
+    label
+  );
+  const numeric = (item, field, nullable = false) => {
+    if (nullable && item === null) {
+      return null;
+    }
+    if (typeof item !== "number" || !Number.isFinite(item) || item < 0) {
+      return recoveryEvidenceError2(
+        code2,
+        `${label}.${field} must be a non-negative number${nullable ? " or null" : ""}.`
+      );
+    }
+    return item;
+  };
+  const requiredNumeric = (item, field) => {
+    const parsed = numeric(item, field);
+    return parsed ?? recoveryEvidenceError2(code2, `${label}.${field} cannot be null.`);
+  };
+  return {
+    inputTokens: requiredNumeric(value.inputTokens, "inputTokens"),
+    cachedInputTokens: requiredNumeric(
+      value.cachedInputTokens,
+      "cachedInputTokens"
+    ),
+    outputTokens: requiredNumeric(value.outputTokens, "outputTokens"),
+    costUsd: numeric(value.costUsd, "costUsd", true)
+  };
+}
+function parseCheckpointResult2(kind, value, resultContract) {
+  if (kind === "selection") {
+    return parseWorkflowSelectionResult2(value);
+  }
+  if (kind === "review") {
+    if (resultContract === "review-result/v2")
+      return parseCurrentReviewResult2(value);
+    const legacy = requireRecord2(value, "legacy review");
+    if (legacy.schemaVersion !== void 0 || legacy.scopeAcknowledgment !== void 0 || legacy.reviewNotes !== void 0)
+      return recoveryEvidenceError2(
+        "INVALID_TERMINAL_CHECKPOINT",
+        "Legacy checkpoint cannot carry a new review result."
+      );
+    return parseReviewFields2(value);
+  }
+  if (resultContract === "phase-result/v3") {
+    return parsePhaseResult2(value);
+  }
+  const result = parsePersistedPhaseResult2(value);
+  if (result.schemaVersion !== 2) {
+    return recoveryEvidenceError2(
+      "INVALID_TERMINAL_CHECKPOINT",
+      "Legacy phase-result/v2 checkpoint must contain a v2 result."
+    );
+  }
+  return result;
+}
+function terminalCheckpointIntegrity2(checkpoint) {
+  return digestCanonicalJson3(checkpoint);
+}
+function parseTerminalAttemptCheckpoint2(value) {
+  const code2 = "INVALID_TERMINAL_CHECKPOINT";
+  if (!isRecord2(value)) {
+    return recoveryEvidenceError2(
+      code2,
+      "Terminal checkpoint must be an object."
+    );
+  }
+  exactKeys2(
+    value,
+    [
+      "schema",
+      "schemaVersion",
+      "runId",
+      "attempt",
+      "phase",
+      "configuration",
+      "resultContract",
+      "terminal",
+      "result",
+      "sessionId",
+      "usage",
+      "baseCommit",
+      "approvalDigest",
+      "workflowDigest",
+      "scopeDigest",
+      "integrityDigest"
+    ],
+    code2,
+    "Terminal checkpoint"
+  );
+  if (value.schema !== TERMINAL_CHECKPOINT_SCHEMA2 || value.schemaVersion !== TERMINAL_CHECKPOINT_SCHEMA_VERSION2) {
+    return recoveryEvidenceError2(
+      code2,
+      `Terminal checkpoint must use ${TERMINAL_CHECKPOINT_SCHEMA2}.`
+    );
+  }
+  const attempt = parseEvidenceAttempt2(value.attempt, code2, "attempt");
+  if (value.phase !== attempt.kind) {
+    return recoveryEvidenceError2(
+      code2,
+      "Checkpoint phase must match attempt kind."
+    );
+  }
+  if (!isRecord2(value.configuration)) {
+    return recoveryEvidenceError2(code2, "configuration must be an object.");
+  }
+  exactKeys2(
+    value.configuration,
+    [
+      "vendor",
+      "executableDigest",
+      "model",
+      "effort",
+      "sessionMode",
+      "sessionContextDigest"
+    ],
+    code2,
+    "configuration"
+  );
+  const vendor = value.configuration.vendor;
+  if (vendor !== "codex" && vendor !== "claude") {
+    return recoveryEvidenceError2(code2, "configuration.vendor is unsupported.");
+  }
+  const effort = value.configuration.effort;
+  if (typeof effort !== "string" || !["low", "medium", "high", "xhigh", "max", "ultra"].includes(effort)) {
+    return recoveryEvidenceError2(code2, "configuration.effort is unsupported.");
+  }
+  const sessionMode = value.configuration.sessionMode;
+  if (sessionMode !== "fresh" && sessionMode !== "resumed") {
+    return recoveryEvidenceError2(
+      code2,
+      "configuration.sessionMode is unsupported."
+    );
+  }
+  const resultContract = value.resultContract;
+  const expectedContract = attempt.kind === "selection" ? "workflow-selection/v1" : attempt.kind === "review" ? resultContract === "review-result/v2" ? "review-result/v2" : "review-result/v1" : resultContract === "phase-result/v2" ? "phase-result/v2" : "phase-result/v3";
+  if (resultContract !== expectedContract || attempt.kind !== "selection" && attempt.kind !== "review" && resultContract !== "phase-result/v2" && resultContract !== "phase-result/v3") {
+    return recoveryEvidenceError2(
+      code2,
+      `Checkpoint result contract must be ${expectedContract}.`
+    );
+  }
+  if (!isRecord2(value.terminal)) {
+    return recoveryEvidenceError2(code2, "terminal must be an object.");
+  }
+  exactKeys2(value.terminal, ["classification", "observedAt"], code2, "terminal");
+  const classification = value.terminal.classification;
+  if (classification !== "claude_result" && classification !== "codex_turn_completed") {
+    return recoveryEvidenceError2(
+      code2,
+      "terminal.classification is unsupported."
+    );
+  }
+  if (vendor === "claude" && classification !== "claude_result" || vendor === "codex" && classification !== "codex_turn_completed") {
+    return recoveryEvidenceError2(
+      code2,
+      "Terminal classification does not match the configured vendor."
+    );
+  }
+  const checkpointWithoutIntegrity = {
+    schema: TERMINAL_CHECKPOINT_SCHEMA2,
+    schemaVersion: TERMINAL_CHECKPOINT_SCHEMA_VERSION2,
+    runId: evidenceString2(value.runId, code2, "runId", 300),
+    attempt,
+    phase: attempt.kind,
+    configuration: {
+      vendor,
+      executableDigest: evidenceDigest3(
+        value.configuration.executableDigest,
+        code2,
+        "configuration.executableDigest"
+      ),
+      model: evidenceString2(
+        value.configuration.model,
+        code2,
+        "configuration.model"
+      ),
+      effort,
+      sessionMode,
+      sessionContextDigest: evidenceDigest3(
+        value.configuration.sessionContextDigest,
+        code2,
+        "configuration.sessionContextDigest"
+      )
+    },
+    resultContract: expectedContract,
+    terminal: {
+      classification,
+      observedAt: evidenceTimestamp2(
+        value.terminal.observedAt,
+        code2,
+        "terminal.observedAt"
+      )
+    },
+    result: parseCheckpointResult2(attempt.kind, value.result, expectedContract),
+    sessionId: evidenceNullableString2(value.sessionId, code2, "sessionId", 300),
+    usage: parseEvidenceUsage2(value.usage, code2, "usage"),
+    baseCommit: evidenceString2(value.baseCommit, code2, "baseCommit", 100),
+    approvalDigest: evidenceNullableString2(
+      value.approvalDigest,
+      code2,
+      "approvalDigest",
+      64
+    ),
+    workflowDigest: evidenceNullableString2(
+      value.workflowDigest,
+      code2,
+      "workflowDigest",
+      64
+    ),
+    scopeDigest: evidenceNullableString2(
+      value.scopeDigest,
+      code2,
+      "scopeDigest",
+      64
+    )
+  };
+  for (const [label, digest4] of [
+    ["approvalDigest", checkpointWithoutIntegrity.approvalDigest],
+    ["workflowDigest", checkpointWithoutIntegrity.workflowDigest],
+    ["scopeDigest", checkpointWithoutIntegrity.scopeDigest]
+  ]) {
+    if (digest4 !== null && !/^[a-f0-9]{64}$/u.test(digest4)) {
+      return recoveryEvidenceError2(code2, `${label} must be a SHA-256 digest.`);
+    }
+  }
+  const integrityDigest = evidenceDigest3(
+    value.integrityDigest,
+    code2,
+    "integrityDigest"
+  );
+  if (integrityDigest !== terminalCheckpointIntegrity2(checkpointWithoutIntegrity)) {
+    return recoveryEvidenceError2(
+      code2,
+      "Terminal checkpoint integrity mismatch."
+    );
+  }
+  return { ...checkpointWithoutIntegrity, integrityDigest };
+}
+function parseRecoveryAuthorization2(value) {
+  const code2 = "INVALID_RECOVERY_AUTHORIZATION";
+  if (!isRecord2(value)) {
+    return recoveryEvidenceError2(
+      code2,
+      "Recovery authorization must be an object."
+    );
+  }
+  exactKeys2(
+    value,
+    [
+      "schema",
+      "schemaVersion",
+      "authorizationId",
+      "runId",
+      "attempt",
+      "phase",
+      "recoveryIdentity",
+      "workspaceDigest",
+      "baseCommit",
+      "approvalDigest",
+      "workflowDigest",
+      "scopeDigest",
+      "configurationDigest",
+      "decidedBy",
+      "decidedAt",
+      "unknownSideEffectsAccepted"
+    ],
+    code2,
+    "Recovery authorization"
+  );
+  if (value.schema !== RECOVERY_AUTHORIZATION_SCHEMA2 || value.schemaVersion !== RECOVERY_AUTHORIZATION_SCHEMA_VERSION2) {
+    return recoveryEvidenceError2(
+      code2,
+      `Recovery authorization must use ${RECOVERY_AUTHORIZATION_SCHEMA2}.`
+    );
+  }
+  const attempt = parseEvidenceAttempt2(value.attempt, code2, "attempt");
+  if (attempt.kind !== "implementation" && attempt.kind !== "fix" || !attempt.mutable) {
+    return recoveryEvidenceError2(
+      code2,
+      "Recovery authorization requires a mutable implementation or fix attempt."
+    );
+  }
+  const phase = value.phase;
+  if (phase !== attempt.kind) {
+    return recoveryEvidenceError2(
+      code2,
+      "Recovery phase must match attempt kind."
+    );
+  }
+  if (value.unknownSideEffectsAccepted !== true) {
+    return recoveryEvidenceError2(
+      code2,
+      "Recovery requires unknownSideEffectsAccepted=true."
+    );
+  }
+  const nullableDigest = (item, label) => {
+    if (item === null) {
+      return null;
+    }
+    return evidenceDigest3(item, code2, label);
+  };
+  return {
+    schema: RECOVERY_AUTHORIZATION_SCHEMA2,
+    schemaVersion: RECOVERY_AUTHORIZATION_SCHEMA_VERSION2,
+    authorizationId: evidenceIdentifier2(
+      value.authorizationId,
+      code2,
+      "authorizationId",
+      200
+    ),
+    runId: evidenceIdentifier2(value.runId, code2, "runId", 300),
+    attempt,
+    phase: attempt.kind,
+    recoveryIdentity: evidenceDigest3(
+      value.recoveryIdentity,
+      code2,
+      "recoveryIdentity"
+    ),
+    workspaceDigest: evidenceDigest3(
+      value.workspaceDigest,
+      code2,
+      "workspaceDigest"
+    ),
+    baseCommit: evidenceString2(value.baseCommit, code2, "baseCommit", 100),
+    approvalDigest: nullableDigest(value.approvalDigest, "approvalDigest"),
+    workflowDigest: nullableDigest(value.workflowDigest, "workflowDigest"),
+    scopeDigest: nullableDigest(value.scopeDigest, "scopeDigest"),
+    configurationDigest: evidenceDigest3(
+      value.configurationDigest,
+      code2,
+      "configurationDigest"
+    ),
+    decidedBy: evidenceString2(value.decidedBy, code2, "decidedBy", 200),
+    decidedAt: evidenceTimestamp2(value.decidedAt, code2, "decidedAt"),
+    unknownSideEffectsAccepted: true
+  };
+}
+function parseModelAttemptRecord2(value) {
+  const code2 = "ATTEMPT_MALFORMED";
+  if (!isRecord2(value)) {
+    return recoveryEvidenceError2(code2, "Attempt record must be an object.");
+  }
+  exactKeys2(
+    value,
+    [
+      "schemaVersion",
+      "attempt",
+      "status",
+      "startedAt",
+      "completedAt",
+      "interruptedAt",
+      "recoveryOf",
+      "recoveryAuthorizationId",
+      "result",
+      "sessionId",
+      "rawStdoutPath",
+      "rawStderrPath",
+      "durationMs",
+      "usage",
+      "error",
+      "failureCode",
+      "failureCause",
+      "reviewCandidate",
+      "sessionMode",
+      "reviewMode",
+      "rotationReason",
+      "resumeSessionId",
+      "sessionContext",
+      "planningContext",
+      "reviewContext",
+      "reviewDiagnostics"
+    ],
+    code2,
+    "Attempt record"
+  );
+  if (value.schemaVersion !== 1 && value.schemaVersion !== MODEL_ATTEMPT_SCHEMA_VERSION2) {
+    return recoveryEvidenceError2(
+      code2,
+      "Attempt schema version is unsupported."
+    );
+  }
+  const attempt = parseEvidenceAttempt2(value.attempt, code2, "attempt");
+  if (value.rotationReason != null && (typeof value.rotationReason !== "string" || ![
+    "primary-review",
+    "missing-session",
+    "legacy-state",
+    "settings-changed",
+    "approval-changed",
+    "previous-review-failed",
+    "previous-review-interrupted",
+    "previous-review-blocked",
+    "accepted-high-risk-finding",
+    "delta-limit-reached",
+    "session-inventory-changed",
+    "unreliable-review",
+    "output-contract-not-reusable"
+  ].includes(value.rotationReason)))
+    return recoveryEvidenceError2(
+      code2,
+      "Unsupported runtime review rotation reason."
+    );
+  if (value.reviewDiagnostics !== void 0) {
+    if (attempt.kind !== "review" || !Array.isArray(value.reviewDiagnostics))
+      return recoveryEvidenceError2(
+        code2,
+        "Review diagnostics must belong to a review attempt."
+      );
+    for (const item of value.reviewDiagnostics) {
+      if (!isRecord2(item) || typeof item.stage !== "string" || !["render_validation", "publication_application", "recovery"].includes(
+        item.stage
+      ) || typeof item.code !== "string" || item.code.length === 0 || typeof item.message !== "string")
+        return recoveryEvidenceError2(code2, "Review diagnostic is malformed.");
+      exactKeys2(item, ["stage", "code", "message"], code2, "Review diagnostic");
+    }
+  }
+  if (value.reviewContext !== void 0) {
+    const context = value.reviewContext;
+    if (attempt.kind !== "review" || attempt.mutable || !isRecord2(context) || context.outputContract !== "review-result/v2")
+      return recoveryEvidenceError2(
+        code2,
+        "Review context requires a current immutable review attempt."
+      );
+    exactKeys2(
+      context,
+      ["outputContract", "snapshotDigest"],
+      code2,
+      "Review context"
+    );
+    evidenceDigest3(
+      context.snapshotDigest,
+      code2,
+      "reviewContext.snapshotDigest"
+    );
+  }
+  if (value.planningContext !== void 0) {
+    const context = value.planningContext;
+    if (attempt.kind !== "plan" || attempt.mutable || !isRecord2(context)) {
+      return recoveryEvidenceError2(
+        code2,
+        "Planning context requires a non-mutable plan attempt."
+      );
+    }
+    exactKeys2(
+      context,
+      ["invocationDigest", "workspaceDigest", "artifactPaths", "retryOf"],
+      code2,
+      "Planning context"
+    );
+    evidenceDigest3(
+      context.invocationDigest,
+      code2,
+      "planningContext.invocationDigest"
+    );
+    if (context.workspaceDigest !== null)
+      evidenceDigest3(
+        context.workspaceDigest,
+        code2,
+        "planningContext.workspaceDigest"
+      );
+    if (context.retryOf !== null) {
+      evidenceIdentifier2(context.retryOf, code2, "planningContext.retryOf");
+      if (context.retryOf === attempt.id)
+        return recoveryEvidenceError2(
+          code2,
+          "A planning retry cannot reference itself."
+        );
+    }
+    if (value.sessionId !== null)
+      evidenceIdentifier2(value.sessionId, code2, "sessionId", 300);
+    if (!Array.isArray(context.artifactPaths) || context.artifactPaths.length > 128) {
+      return recoveryEvidenceError2(
+        code2,
+        "Planning artifact paths must be a bounded array."
+      );
+    }
+    for (const item of context.artifactPaths) {
+      const candidate = evidenceString2(
+        item,
+        code2,
+        "planning artifact path",
+        300
+      );
+      if (candidate !== "PROJECT_MANIFEST.md" && !candidate.startsWith("documentation/") && !/^\.banzai\/work\/[0-9a-f-]{36}\/(?:description|plan)\.md$/.test(
+        candidate
+      ) || candidate.includes("\\") || candidate.split("/").some((part) => part === "" || part === "." || part === "..")) {
+        return recoveryEvidenceError2(
+          code2,
+          "Planning artifact paths must stay within the planning scope."
+        );
+      }
+    }
+  }
+  const status = value.status;
+  if (typeof status !== "string" || !["started", "completed", "failed", "interrupted"].includes(status) || value.schemaVersion === 1 && status === "interrupted") {
+    return recoveryEvidenceError2(code2, "Attempt status is unsupported.");
+  }
+  evidenceTimestamp2(value.startedAt, code2, "startedAt");
+  if (value.schemaVersion === MODEL_ATTEMPT_SCHEMA_VERSION2) {
+    if (!Object.hasOwn(value, "interruptedAt") || !Object.hasOwn(value, "recoveryOf") || !Object.hasOwn(value, "recoveryAuthorizationId")) {
+      return recoveryEvidenceError2(
+        code2,
+        "Attempt schema v2 requires interruption and recovery linkage fields."
+      );
+    }
+    if (status === "interrupted") {
+      evidenceTimestamp2(value.interruptedAt, code2, "interruptedAt");
+      if (value.completedAt !== null || value.durationMs !== null) {
+        return recoveryEvidenceError2(
+          code2,
+          "Interrupted attempts cannot claim completion time or duration."
+        );
+      }
+    } else if (value.interruptedAt !== null) {
+      return recoveryEvidenceError2(
+        code2,
+        "Only interrupted attempts may have interruptedAt."
+      );
+    }
+    if (value.recoveryOf !== null) {
+      evidenceIdentifier2(value.recoveryOf, code2, "recoveryOf", 200);
+    }
+    if (value.recoveryAuthorizationId !== null) {
+      evidenceIdentifier2(
+        value.recoveryAuthorizationId,
+        code2,
+        "recoveryAuthorizationId",
+        200
+      );
+    }
+    if (value.recoveryOf === null !== (value.recoveryAuthorizationId === null)) {
+      return recoveryEvidenceError2(
+        code2,
+        "Recovery linkage fields must both be present or both be null."
+      );
+    }
+  }
+  return value;
+}
+function parseModelSettings(value, label) {
+  const record6 = requireRecord2(value, label);
+  return {
+    executable: requireString2(record6.executable, `${label}.executable`),
+    model: requireString2(record6.model, `${label}.model`),
+    effort: requireEnum2(record6.effort, `${label}.effort`, [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ]),
+    timeoutMs: requirePositiveInteger2(record6.timeoutMs, `${label}.timeoutMs`)
+  };
+}
+function parseVerificationCommand(value, label) {
+  const record6 = requireRecord2(value, label);
+  if (!Array.isArray(record6.args) || record6.args.some((item) => typeof item !== "string")) {
+    throw new BanzaiError(
+      "INVALID_CONFIG",
+      `${label}.args must be an array of strings.`
+    );
+  }
+  return {
+    name: requireString2(record6.name, `${label}.name`),
+    command: requireString2(record6.command, `${label}.command`),
+    args: [...record6.args],
+    timeoutMs: requirePositiveInteger2(record6.timeoutMs, `${label}.timeoutMs`)
+  };
+}
+var VERIFICATION_PROJECT_TYPES2 = [
+  "repository",
+  "node",
+  "php",
+  "python",
+  "go",
+  "rust",
+  "ruby",
+  "jvm",
+  "dotnet",
+  "custom"
+];
+function parseVerificationProfile(value, index) {
+  const label = `verification.profiles[${index}]`;
+  const record6 = requireRecord2(value, label);
+  const id = requireString2(record6.id, `${label}.id`);
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)) {
+    throw new BanzaiError(
+      "INVALID_CONFIG",
+      `${label}.id must be a kebab-case identifier.`
+    );
+  }
+  if (!Array.isArray(record6.commands) || record6.commands.length === 0) {
+    throw new BanzaiError(
+      "INVALID_CONFIG",
+      `${label}.commands must contain at least one deterministic verification command.`
+    );
+  }
+  return {
+    id,
+    projectType: requireEnum2(
+      record6.projectType,
+      `${label}.projectType`,
+      VERIFICATION_PROJECT_TYPES2
+    ),
+    commands: record6.commands.map(
+      (command, commandIndex) => parseVerificationCommand(command, `${label}.commands[${commandIndex}]`)
+    )
+  };
+}
+function parseConfig(value) {
+  const record6 = requireRecord2(value, "config");
+  if (record6.contractVersion !== CONTRACT_VERSION2) {
+    throw new BanzaiError(
+      "INVALID_CONFIG",
+      `Config must use contractVersion ${CONTRACT_VERSION2}.`
+    );
+  }
+  const models = requireRecord2(record6.models, "models");
+  let verification;
+  if (record6.schemaVersion === 1) {
+    if (!Array.isArray(record6.verification) || record6.verification.length === 0) {
+      throw new BanzaiError(
+        "INVALID_CONFIG",
+        "Config must declare at least one deterministic verification command."
+      );
+    }
+    verification = {
+      profiles: [
+        {
+          id: "legacy",
+          projectType: "custom",
+          commands: record6.verification.map(
+            (command, index) => parseVerificationCommand(command, `verification[${index}]`)
+          )
+        }
+      ]
+    };
+  } else if (record6.schemaVersion === 3) {
+    try {
+      verification = parseVerificationConfiguration(record6.verification);
+    } catch {
+      throw new BanzaiError(
+        "INVALID_CONFIG",
+        "Invalid schema 3 verification configuration."
+      );
+    }
+  } else if (record6.schemaVersion === 2) {
+    const verificationRecord3 = requireRecord2(
+      record6.verification,
+      "verification"
+    );
+    if (!Array.isArray(verificationRecord3.profiles) || verificationRecord3.profiles.length === 0) {
+      throw new BanzaiError(
+        "INVALID_CONFIG",
+        "verification.profiles must contain at least one profile."
+      );
+    }
+    const profiles = verificationRecord3.profiles.map(parseVerificationProfile);
+    if (new Set(profiles.map((profile) => profile.id)).size !== profiles.length) {
+      throw new BanzaiError(
+        "INVALID_CONFIG",
+        "Verification profile ids must be unique."
+      );
+    }
+    verification = { profiles };
+  } else {
+    throw new BanzaiError(
+      "INVALID_CONFIG",
+      "Config must use schemaVersion 1, 2 or 3."
+    );
+  }
+  return {
+    schemaVersion: record6.schemaVersion,
+    contractVersion: CONTRACT_VERSION2,
+    models: {
+      planner: parseModelSettings(models.planner, "models.planner"),
+      implementer: parseModelSettings(models.implementer, "models.implementer"),
+      reviewer: parseModelSettings(models.reviewer, "models.reviewer")
+    },
+    verification,
+    claudeEnvironment: parseClaudeEnvironment(record6.claudeEnvironment),
+    context: parseContextPolicy(record6.context),
+    maxFixCycles: requirePositiveInteger2(record6.maxFixCycles, "maxFixCycles")
+  };
+}
+var CONTEXT_METRICS = [
+  "runner_payload_bytes",
+  "vendor_input_tokens",
+  "vendor_cached_input_tokens",
+  "vendor_output_tokens",
+  "vendor_cost_usd",
+  "vendor_turns",
+  "session_tools",
+  "session_mcp_servers",
+  "session_skills",
+  "session_commands"
+];
+function parseContextPolicy(value) {
+  if (value === void 0 || value === null) {
+    return { mode: "observe", limits: [] };
+  }
+  if (!isRecord2(value)) {
+    throw new BanzaiError("INVALID_CONFIG", "context must be an object.");
+  }
+  if (Object.keys(value).some((key) => !["mode", "limits"].includes(key))) {
+    throw new BanzaiError(
+      "INVALID_CONFIG",
+      "context contains unsupported fields."
+    );
+  }
+  const mode2 = value.mode;
+  if (mode2 !== "observe" && mode2 !== "enforce") {
+    throw new BanzaiError(
+      "INVALID_CONFIG",
+      'context.mode must be "observe" or "enforce".'
+    );
+  }
+  const sourceLimits = value.limits ?? [];
+  if (!Array.isArray(sourceLimits)) {
+    throw new BanzaiError("INVALID_CONFIG", "context.limits must be an array.");
+  }
+  const seen = /* @__PURE__ */ new Set();
+  const limits = sourceLimits.map((item, index) => {
+    const label = `context.limits[${index}]`;
+    if (!isRecord2(item)) {
+      throw new BanzaiError("INVALID_CONFIG", `${label} must be an object.`);
+    }
+    if (Object.keys(item).some(
+      (key) => !["metric", "phase", "role", "maximum"].includes(key)
+    )) {
+      throw new BanzaiError(
+        "INVALID_CONFIG",
+        `${label} contains unsupported fields.`
+      );
+    }
+    const metric3 = item.metric;
+    if (typeof metric3 !== "string" || !CONTEXT_METRICS.includes(metric3)) {
+      throw new BanzaiError(
+        "INVALID_CONFIG",
+        `${label}.metric is unsupported.`
+      );
+    }
+    const phase = item.phase ?? null;
+    if (phase !== null && (typeof phase !== "string" || !["selection", "plan", "implementation", "fix", "review"].includes(
+      phase
+    ))) {
+      throw new BanzaiError("INVALID_CONFIG", `${label}.phase is unsupported.`);
+    }
+    const role = item.role ?? null;
+    if (role !== null && (typeof role !== "string" || !["planner", "implementer", "reviewer"].includes(role))) {
+      throw new BanzaiError("INVALID_CONFIG", `${label}.role is unsupported.`);
+    }
+    const maximum = item.maximum;
+    const integerMetric = metric3 !== "vendor_cost_usd";
+    if (typeof maximum !== "number" || !Number.isFinite(maximum) || maximum <= 0 || integerMetric && !Number.isInteger(maximum)) {
+      throw new BanzaiError(
+        "INVALID_CONFIG",
+        `${label}.maximum must be a positive${integerMetric ? " integer" : " finite number"}.`
+      );
+    }
+    const duplicateKey = `${metric3}\0${phase ?? ""}\0${role ?? ""}`;
+    if (seen.has(duplicateKey)) {
+      throw new BanzaiError(
+        "INVALID_CONFIG",
+        `${label} duplicates an existing context selector.`
+      );
+    }
+    seen.add(duplicateKey);
+    return {
+      metric: metric3,
+      phase,
+      role,
+      maximum
+    };
+  });
+  return { mode: mode2, limits };
+}
+var CLAUDE_ENVIRONMENT_MODES = /* @__PURE__ */ new Set([
+  "scoped",
+  "ambient"
+]);
+function parseClaudeEnvironment(value) {
+  if (value === void 0 || value === null) {
+    return { mode: "scoped", pluginDirectory: null };
+  }
+  const record6 = requireRecord2(value, "claudeEnvironment");
+  const mode2 = record6.mode;
+  if (typeof mode2 !== "string" || !CLAUDE_ENVIRONMENT_MODES.has(mode2)) {
+    throw new BanzaiError(
+      "INVALID_CONFIG",
+      'claudeEnvironment.mode must be "scoped" or "ambient".'
+    );
+  }
+  const pluginDirectory = record6.pluginDirectory;
+  if (pluginDirectory === void 0 || pluginDirectory === null) {
+    return { mode: mode2, pluginDirectory: null };
+  }
+  if (typeof pluginDirectory !== "string" || pluginDirectory.trim().length === 0) {
+    throw new BanzaiError(
+      "INVALID_CONFIG",
+      "claudeEnvironment.pluginDirectory must be a non-empty string or null."
+    );
+  }
+  return {
+    mode: mode2,
+    pluginDirectory: pluginDirectory.trim()
+  };
+}
+function verificationEvidenceError2(code2, field) {
+  return new BanzaiError(
+    code2,
+    `Invalid verification evidence field: ${field}.`
+  );
+}
+function verificationRecord2(value, code2, field) {
+  if (!isRecord2(value)) {
+    throw verificationEvidenceError2(code2, field);
+  }
+  return value;
+}
+function verificationKeys2(value, allowed, code2, field) {
+  if (Object.keys(value).some((key) => !allowed.includes(key))) {
+    throw verificationEvidenceError2(code2, field);
+  }
+}
+function verificationString2(value, code2, field, pattern) {
+  if (typeof value !== "string" || value.length === 0 || pattern !== void 0 && !pattern.test(value)) {
+    throw verificationEvidenceError2(code2, field);
+  }
+  return value;
+}
+function verificationNullableString2(value, code2, field) {
+  if (value === null) {
+    return null;
+  }
+  return verificationString2(value, code2, field);
+}
+function verificationPositiveInteger2(value, code2, field) {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw verificationEvidenceError2(code2, field);
+  }
+  return value;
+}
+function verificationNullableNonNegativeInteger2(value, code2, field) {
+  if (value === null) {
+    return null;
+  }
+  if (!Number.isInteger(value) || value < 0) {
+    throw verificationEvidenceError2(code2, field);
+  }
+  return value;
+}
+function verificationInstant2(value, code2, field) {
+  if (normalizeRfc3339Instant2(value) === void 0) {
+    throw verificationEvidenceError2(code2, field);
+  }
+  return value;
+}
+function parseVerificationLogEvidence2(value, code2, field) {
+  if (value === null) {
+    return null;
+  }
+  const record6 = verificationRecord2(value, code2, field);
+  verificationKeys2(record6, ["relativePath", "sha256"], code2, field);
+  const relativePath2 = verificationString2(
+    record6.relativePath,
+    code2,
+    `${field}.relativePath`
+  );
+  if (!relativePath2.startsWith("verification/") || relativePath2.includes("\\") || relativePath2.split("/").some((part) => part === "" || part === "." || part === "..")) {
+    throw verificationEvidenceError2(code2, `${field}.relativePath`);
+  }
+  return {
+    relativePath: relativePath2,
+    sha256: verificationString2(
+      record6.sha256,
+      code2,
+      `${field}.sha256`,
+      /^[a-f0-9]{64}$/
+    )
+  };
+}
+function parseVerificationLedger(value) {
+  const code2 = "VERIFICATION_LEDGER_MALFORMED";
+  const record6 = verificationRecord2(value, code2, "ledger");
+  verificationKeys2(record6, ["schemaVersion"], code2, "ledger");
+  if (record6.schemaVersion !== 1 && record6.schemaVersion !== 2) {
+    throw verificationEvidenceError2(code2, "schemaVersion");
+  }
+  return { schemaVersion: record6.schemaVersion };
+}
+function parseVerificationAttemptRecord2(value) {
+  const code2 = "VERIFICATION_ATTEMPT_MALFORMED";
+  const record6 = verificationRecord2(value, code2, "attempt");
+  verificationKeys2(
+    record6,
+    [
+      "schemaVersion",
+      "id",
+      "sequence",
+      "round",
+      "command",
+      "status",
+      "startedAt",
+      "completedAt",
+      "durationMs",
+      "exitCode",
+      "signal",
+      "failureCategory",
+      "retryOf",
+      "restartOf",
+      "stdout",
+      "stderr"
+    ],
+    code2,
+    "attempt"
+  );
+  if (record6.schemaVersion !== VERIFICATION_LEDGER_SCHEMA_VERSION2) {
+    throw verificationEvidenceError2(code2, "schemaVersion");
+  }
+  const idPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
+  const id = verificationString2(record6.id, code2, "id", idPattern);
+  const sequence = verificationPositiveInteger2(
+    record6.sequence,
+    code2,
+    "sequence"
+  );
+  const roundRecord = verificationRecord2(record6.round, code2, "round");
+  verificationKeys2(
+    roundRecord,
+    ["id", "ordinal", "sourcePhase", "sourceAttemptId", "sourceAttemptKind"],
+    code2,
+    "round"
+  );
+  const sourceAttemptKind = requireEnum2(
+    roundRecord.sourceAttemptKind,
+    "round.sourceAttemptKind",
+    ["implementation", "fix"]
+  );
+  const sourcePhase = requireEnum2(
+    roundRecord.sourcePhase,
+    "round.sourcePhase",
+    ["implementation", "fix"]
+  );
+  if (sourcePhase !== sourceAttemptKind) {
+    throw verificationEvidenceError2(code2, "round.sourcePhase");
+  }
+  const round = {
+    id: verificationString2(roundRecord.id, code2, "round.id", idPattern),
+    ordinal: verificationPositiveInteger2(
+      roundRecord.ordinal,
+      code2,
+      "round.ordinal"
+    ),
+    sourcePhase,
+    sourceAttemptId: verificationString2(
+      roundRecord.sourceAttemptId,
+      code2,
+      "round.sourceAttemptId",
+      idPattern
+    ),
+    sourceAttemptKind
+  };
+  const commandRecord = verificationRecord2(record6.command, code2, "command");
+  verificationKeys2(
+    commandRecord,
+    [
+      "profileId",
+      "projectType",
+      "profileOrdinal",
+      "commandOrdinal",
+      "configurationDigest"
+    ],
+    code2,
+    "command"
+  );
+  const command = {
+    profileId: verificationString2(
+      commandRecord.profileId,
+      code2,
+      "command.profileId"
+    ),
+    projectType: requireEnum2(
+      commandRecord.projectType,
+      "command.projectType",
+      VERIFICATION_PROJECT_TYPES2
+    ),
+    profileOrdinal: verificationPositiveInteger2(
+      commandRecord.profileOrdinal,
+      code2,
+      "command.profileOrdinal"
+    ),
+    commandOrdinal: verificationPositiveInteger2(
+      commandRecord.commandOrdinal,
+      code2,
+      "command.commandOrdinal"
+    ),
+    configurationDigest: verificationString2(
+      commandRecord.configurationDigest,
+      code2,
+      "command.configurationDigest",
+      /^[a-f0-9]{64}$/
+    )
+  };
+  const status = requireEnum2(
+    record6.status,
+    "status",
+    VERIFICATION_ATTEMPT_STATUSES2
+  );
+  const startedAt = verificationInstant2(record6.startedAt, code2, "startedAt");
+  const completedAt = record6.completedAt === null ? null : verificationInstant2(record6.completedAt, code2, "completedAt");
+  const durationMs = verificationNullableNonNegativeInteger2(
+    record6.durationMs,
+    code2,
+    "durationMs"
+  );
+  const exitCode = verificationNullableNonNegativeInteger2(
+    record6.exitCode,
+    code2,
+    "exitCode"
+  );
+  const signal = verificationNullableString2(record6.signal, code2, "signal");
+  const failureCategory = record6.failureCategory === null ? null : requireEnum2(
+    record6.failureCategory,
+    "failureCategory",
+    VERIFICATION_FAILURE_CATEGORIES2
+  );
+  const retryOf = record6.retryOf === null ? null : verificationString2(record6.retryOf, code2, "retryOf", idPattern);
+  const restartOf = record6.restartOf === null ? null : verificationString2(record6.restartOf, code2, "restartOf", idPattern);
+  if (retryOf !== null && restartOf !== null) {
+    throw verificationEvidenceError2(code2, "retryOf");
+  }
+  const stdout = parseVerificationLogEvidence2(record6.stdout, code2, "stdout");
+  const stderr = parseVerificationLogEvidence2(record6.stderr, code2, "stderr");
+  const durationFromInstants = completedAt === null ? null : Date.parse(completedAt) - Date.parse(startedAt);
+  if (completedAt !== null && durationFromInstants !== durationMs || completedAt === null && durationMs !== null) {
+    throw verificationEvidenceError2(code2, "durationMs");
+  }
+  if (status === "started" && (completedAt !== null || exitCode !== null || signal !== null || failureCategory !== null || stdout !== null || stderr !== null)) {
+    throw verificationEvidenceError2(code2, "status");
+  }
+  if (status === "completed" && (completedAt === null || exitCode !== 0 || failureCategory !== null)) {
+    throw verificationEvidenceError2(code2, "status");
+  }
+  if (status === "failed" && (completedAt === null || failureCategory === null || failureCategory === "command_exit" && (exitCode === null || exitCode === 0))) {
+    throw verificationEvidenceError2(code2, "status");
+  }
+  if (status === "interrupted" && (completedAt === null || exitCode !== null || signal !== null || stdout !== null || stderr !== null)) {
+    throw verificationEvidenceError2(code2, "status");
+  }
+  return {
+    schemaVersion: VERIFICATION_LEDGER_SCHEMA_VERSION2,
+    id,
+    sequence,
+    round,
+    command,
+    status,
+    startedAt,
+    completedAt,
+    durationMs,
+    exitCode,
+    signal,
+    failureCategory,
+    retryOf,
+    restartOf,
+    stdout,
+    stderr
+  };
+}
+var RUN_STATUSES2 = [
+  "created",
+  "selecting",
+  "planning",
+  "needs_adr_approval",
+  "needs_plan_approval",
+  "needs_human_decision",
+  "plan_approved",
+  "implementing",
+  "verifying",
+  "reviewing",
+  "needs_triage",
+  "fixing",
+  "done",
+  "blocked",
+  "cancelled"
+];
+var ATTEMPT_KINDS2 = [
+  "selection",
+  "plan",
+  "implementation",
+  "fix",
+  "review"
+];
+var WORKFLOW_ROUTES2 = [
+  "quick-fix",
+  "feature",
+  "strict"
+];
+var REVIEW_VERDICTS = [
+  "pass",
+  "changes_requested",
+  "replan_required",
+  "blocked"
+];
+var ROTATION_REASONS = [
+  "primary-review",
+  "missing-session",
+  "legacy-state",
+  "settings-changed",
+  "approval-changed",
+  "previous-review-failed",
+  "session-inventory-changed",
+  "previous-review-interrupted",
+  "previous-review-blocked",
+  "accepted-high-risk-finding",
+  "delta-limit-reached",
+  "unreliable-review"
+];
+function evaluationError2(message) {
+  return new BanzaiError("INVALID_EVALUATION_SOURCE", message);
+}
+function observed2(value) {
+  return { value, evidence: "observed" };
+}
+function absent2(legacy = false) {
+  return { value: null, evidence: legacy ? "legacy_absent" : "unknown" };
+}
+function invalid5() {
+  return { value: null, evidence: "invalid" };
+}
+function notApplicable2() {
+  return { value: null, evidence: "not_applicable" };
+}
+function issue2(issues, code2, field) {
+  issues.push({ code: code2, field });
+}
+function sourceValue2(record6, key, field, issues, parse, options = {}) {
+  if (!Object.hasOwn(record6, key)) {
+    if (options.required ?? true) {
+      issue2(
+        issues,
+        options.legacyAbsent === true ? "LEGACY_FIELD_ABSENT" : "STATE_FIELD_MISSING",
+        field
+      );
+    }
+    return absent2(options.legacyAbsent);
+  }
+  const value = record6[key];
+  if (value === null && options.nullable === true) {
+    return notApplicable2();
+  }
+  if (value === null) {
+    return absent2(options.legacyAbsent);
+  }
+  const parsed = parse(value);
+  if (parsed === void 0) {
+    issue2(issues, "STATE_FIELD_INVALID", field);
+    return invalid5();
+  }
+  return observed2(parsed);
+}
+function stringValue2(value) {
+  return typeof value === "string" && value.length > 0 ? value : void 0;
+}
+function contractVersionValue2(value) {
+  return typeof value === "string" && value.length <= 64 && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(value) ? value : void 0;
+}
+function modelIdValue(value) {
+  return typeof value === "string" && value.length <= 128 && /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(value) ? value : void 0;
+}
+function nonNegativeNumber2(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : void 0;
+}
+function nonNegativeInteger2(value) {
+  const parsed = nonNegativeNumber2(value);
+  return parsed !== void 0 && Number.isInteger(parsed) ? parsed : void 0;
+}
+function booleanValue(value) {
+  return typeof value === "boolean" ? value : void 0;
+}
+function enumValue2(value, values) {
+  return typeof value === "string" && values.includes(value) ? value : void 0;
+}
+var RFC3339_INSTANT2 = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|([+-])(\d{2}):(\d{2}))$/;
+function daysInMonth2(year, month) {
+  if (month === 2) {
+    const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    return leap ? 29 : 28;
+  }
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
+}
+function normalizeRfc3339Instant2(value) {
+  if (typeof value !== "string") {
+    return void 0;
+  }
+  const match = RFC3339_INSTANT2.exec(value);
+  if (match === null) {
+    return void 0;
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  const offsetHour = Number(match[9] ?? 0);
+  const offsetMinute = Number(match[10] ?? 0);
+  if (month < 1 || month > 12 || day < 1 || day > daysInMonth2(year, month) || hour > 23 || minute > 59 || second > 59 || offsetHour > 23 || offsetMinute > 59) {
+    return void 0;
+  }
+  const instant3 = new Date(value);
+  return Number.isFinite(instant3.getTime()) ? instant3.toISOString() : void 0;
+}
+function rfc3339Value2(value) {
+  return normalizeRfc3339Instant2(value) === void 0 ? void 0 : value;
+}
+function metricValue2(record6, key, field, issues, legacyAbsent = false, nullable = false) {
+  if (record6 === null) {
+    return absent2(legacyAbsent);
+  }
+  return sourceValue2(record6, key, field, issues, nonNegativeNumber2, {
+    legacyAbsent,
+    nullable
+  });
+}
+function childRecord2(value, field, issues, legacyAbsent = false) {
+  if (isRecord2(value)) {
+    return value;
+  }
+  issue2(
+    issues,
+    legacyAbsent ? "LEGACY_FIELD_ABSENT" : "STATE_FIELD_INVALID",
+    field
+  );
+  return null;
+}
+function emptyStateMetrics2(legacy, issues) {
+  const missing3 = () => absent2(legacy);
+  issue2(
+    issues,
+    legacy ? "LEGACY_FIELD_ABSENT" : "STATE_FIELD_MISSING",
+    "metrics"
+  );
+  return {
+    attempts: {
+      selection: missing3(),
+      plan: missing3(),
+      implementation: missing3(),
+      fix: missing3(),
+      review: missing3(),
+      verification: missing3()
+    },
+    usage: {
+      inputTokens: missing3(),
+      cachedInputTokens: missing3(),
+      outputTokens: missing3(),
+      costUsd: missing3()
+    },
+    reviewFindingCount: missing3(),
+    sessions: { fresh: missing3(), resumed: missing3() },
+    reviews: { full: missing3(), delta: missing3(), rotations: missing3() },
+    triage: { accepted: missing3(), rejected: missing3(), deferred: missing3() }
+  };
+}
+function parseStateMetrics2(value, schemaVersion, issues) {
+  if (!isRecord2(value)) {
+    return emptyStateMetrics2(schemaVersion === 1, issues);
+  }
+  const attempts = childRecord2(value.attempts, "metrics.attempts", issues);
+  const usage = childRecord2(value.usage, "metrics.usage", issues);
+  const sessions = childRecord2(
+    value.sessions,
+    "metrics.sessions",
+    issues,
+    schemaVersion === 1
+  );
+  const reviews = childRecord2(
+    value.reviews,
+    "metrics.reviews",
+    issues,
+    schemaVersion === 1
+  );
+  const triage = childRecord2(value.triage, "metrics.triage", issues);
+  return {
+    attempts: {
+      selection: metricValue2(
+        attempts,
+        "selection",
+        "metrics.attempts.selection",
+        issues,
+        schemaVersion === 1
+      ),
+      plan: metricValue2(attempts, "plan", "metrics.attempts.plan", issues),
+      implementation: metricValue2(
+        attempts,
+        "implementation",
+        "metrics.attempts.implementation",
+        issues
+      ),
+      fix: metricValue2(attempts, "fix", "metrics.attempts.fix", issues),
+      review: metricValue2(
+        attempts,
+        "review",
+        "metrics.attempts.review",
+        issues
+      ),
+      verification: metricValue2(
+        attempts,
+        "verification",
+        "metrics.attempts.verification",
+        issues
+      )
+    },
+    usage: {
+      inputTokens: metricValue2(
+        usage,
+        "inputTokens",
+        "metrics.usage.inputTokens",
+        issues
+      ),
+      cachedInputTokens: metricValue2(
+        usage,
+        "cachedInputTokens",
+        "metrics.usage.cachedInputTokens",
+        issues
+      ),
+      outputTokens: metricValue2(
+        usage,
+        "outputTokens",
+        "metrics.usage.outputTokens",
+        issues
+      ),
+      costUsd: metricValue2(
+        usage,
+        "costUsd",
+        "metrics.usage.costUsd",
+        issues,
+        false,
+        true
+      )
+    },
+    reviewFindingCount: metricValue2(
+      value,
+      "reviewFindingCount",
+      "metrics.reviewFindingCount",
+      issues
+    ),
+    sessions: {
+      fresh: metricValue2(
+        sessions,
+        "fresh",
+        "metrics.sessions.fresh",
+        issues,
+        schemaVersion === 1
+      ),
+      resumed: metricValue2(
+        sessions,
+        "resumed",
+        "metrics.sessions.resumed",
+        issues,
+        schemaVersion === 1
+      )
+    },
+    reviews: {
+      full: metricValue2(
+        reviews,
+        "full",
+        "metrics.reviews.full",
+        issues,
+        schemaVersion === 1
+      ),
+      delta: metricValue2(
+        reviews,
+        "delta",
+        "metrics.reviews.delta",
+        issues,
+        schemaVersion === 1
+      ),
+      rotations: metricValue2(
+        reviews,
+        "rotations",
+        "metrics.reviews.rotations",
+        issues,
+        schemaVersion === 1
+      )
+    },
+    triage: {
+      accepted: metricValue2(
+        triage,
+        "accepted",
+        "metrics.triage.accepted",
+        issues
+      ),
+      rejected: metricValue2(
+        triage,
+        "rejected",
+        "metrics.triage.rejected",
+        issues
+      ),
+      deferred: metricValue2(
+        triage,
+        "deferred",
+        "metrics.triage.deferred",
+        issues
+      )
+    }
+  };
+}
+function parseVerificationSource2(value, index, issues) {
+  if (!isRecord2(value)) {
+    issue2(issues, "STATE_FIELD_INVALID", `verification[${index}]`);
+    return {
+      validStructure: false,
+      exitCode: invalid5(),
+      signalPresent: invalid5(),
+      startedAt: invalid5(),
+      completedAt: invalid5()
+    };
+  }
+  let signalPresent;
+  if (value.signal === null) {
+    signalPresent = observed2(false);
+  } else if (typeof value.signal === "string") {
+    signalPresent = observed2(true);
+  } else {
+    issue2(issues, "STATE_FIELD_INVALID", `verification[${index}].signal`);
+    signalPresent = invalid5();
+  }
+  return {
+    validStructure: true,
+    exitCode: sourceValue2(
+      value,
+      "exitCode",
+      `verification[${index}].exitCode`,
+      issues,
+      nonNegativeInteger2
+    ),
+    signalPresent,
+    startedAt: sourceValue2(
+      value,
+      "startedAt",
+      `verification[${index}].startedAt`,
+      issues,
+      rfc3339Value2
+    ),
+    completedAt: sourceValue2(
+      value,
+      "completedAt",
+      `verification[${index}].completedAt`,
+      issues,
+      rfc3339Value2
+    )
+  };
+}
+function triageCounts2(records, issues, field) {
+  const counts = { accepted: 0, rejected: 0, deferred: 0 };
+  for (const [recordIndex, value] of records.entries()) {
+    if (!isRecord2(value) || !Array.isArray(value.items)) {
+      issue2(issues, "STATE_FIELD_INVALID", `${field}[${recordIndex}]`);
+      continue;
+    }
+    for (const [itemIndex, item] of value.items.entries()) {
+      if (!isRecord2(item)) {
+        issue2(
+          issues,
+          "STATE_FIELD_INVALID",
+          `${field}[${recordIndex}].items[${itemIndex}]`
+        );
+        continue;
+      }
+      const disposition = enumValue2(item.disposition, [
+        "accepted",
+        "rejected",
+        "deferred"
+      ]);
+      if (disposition === void 0) {
+        issue2(
+          issues,
+          "STATE_FIELD_INVALID",
+          `${field}[${recordIndex}].items[${itemIndex}].disposition`
+        );
+        continue;
+      }
+      counts[disposition] += 1;
+    }
+  }
+  return counts;
+}
+function parseEvaluationStateSource2(value) {
+  if (!isRecord2(value)) {
+    throw evaluationError2("Persisted state is not a supported object.");
+  }
+  if (value.schemaVersion !== 1 && value.schemaVersion !== 2 && value.schemaVersion !== 3 && value.schemaVersion !== 4 && value.schemaVersion !== 5) {
+    throw new BanzaiError(
+      "EVALUATION_STATE_SCHEMA_UNSUPPORTED",
+      "Persisted state uses an unsupported schema."
+    );
+  }
+  const schemaVersion = value.schemaVersion;
+  const issues = [];
+  let workflow;
+  if (isRecord2(value.workflowSelection)) {
+    workflow = sourceValue2(
+      value.workflowSelection,
+      "workflow",
+      "workflowSelection.workflow",
+      issues,
+      (item) => enumValue2(item, WORKFLOW_ROUTES2)
+    );
+  } else if (!Object.hasOwn(value, "workflowSelection")) {
+    workflow = absent2(schemaVersion === 1);
+    issue2(
+      issues,
+      schemaVersion === 1 ? "LEGACY_FIELD_ABSENT" : "STATE_FIELD_MISSING",
+      "workflowSelection"
+    );
+  } else if (value.workflowSelection === null) {
+    workflow = absent2();
+  } else {
+    issue2(issues, "STATE_FIELD_INVALID", "workflowSelection");
+    workflow = invalid5();
+  }
+  const verification = [];
+  let verificationList;
+  if (Array.isArray(value.verification)) {
+    verificationList = observed2(true);
+    for (const [index, item] of value.verification.entries()) {
+      const parsed = parseVerificationSource2(item, index, issues);
+      verification.push(parsed);
+    }
+  } else if (!Object.hasOwn(value, "verification")) {
+    issue2(issues, "STATE_FIELD_MISSING", "verification");
+    verificationList = absent2();
+  } else {
+    issue2(issues, "STATE_FIELD_INVALID", "verification");
+    verificationList = invalid5();
+  }
+  let triage;
+  let triageIsCumulative;
+  if (schemaVersion >= 2) {
+    if (Array.isArray(value.triageHistory)) {
+      triage = triageCounts2(value.triageHistory, issues, "triageHistory");
+      triageIsCumulative = true;
+    } else {
+      issue2(issues, "STATE_FIELD_INVALID", "triageHistory");
+      triage = { accepted: 0, rejected: 0, deferred: 0 };
+      triageIsCumulative = false;
+    }
+  } else {
+    issue2(issues, "LEGACY_FIELD_ABSENT", "triageHistory");
+    triage = value.triage === null || value.triage === void 0 ? { accepted: 0, rejected: 0, deferred: 0 } : triageCounts2([value.triage], issues, "triage");
+    triageIsCumulative = false;
+  }
+  let activeAttemptIdentity;
+  let activeAttemptKind;
+  if (value.activeAttempt === null) {
+    activeAttemptIdentity = notApplicable2();
+    activeAttemptKind = notApplicable2();
+  } else if (isRecord2(value.activeAttempt)) {
+    activeAttemptIdentity = sourceValue2(
+      value.activeAttempt,
+      "id",
+      "activeAttempt.id",
+      issues,
+      stringValue2
+    );
+    activeAttemptKind = sourceValue2(
+      value.activeAttempt,
+      "kind",
+      "activeAttempt.kind",
+      issues,
+      (item) => enumValue2(item, ATTEMPT_KINDS2)
+    );
+  } else if (!Object.hasOwn(value, "activeAttempt")) {
+    issue2(issues, "STATE_FIELD_MISSING", "activeAttempt");
+    activeAttemptIdentity = absent2();
+    activeAttemptKind = absent2();
+  } else {
+    issue2(issues, "STATE_FIELD_INVALID", "activeAttempt");
+    activeAttemptIdentity = invalid5();
+    activeAttemptKind = invalid5();
+  }
+  let activeVerification;
+  if (value.activeProcess === null) {
+    activeVerification = observed2(false);
+  } else if (isRecord2(value.activeProcess)) {
+    const kind = enumValue2(value.activeProcess.kind, [
+      ...ATTEMPT_KINDS2,
+      "verification"
+    ]);
+    if (kind === void 0) {
+      issue2(issues, "STATE_FIELD_INVALID", "activeProcess.kind");
+      activeVerification = invalid5();
+    } else {
+      activeVerification = observed2(kind === "verification");
+    }
+  } else if (!Object.hasOwn(value, "activeProcess")) {
+    issue2(issues, "STATE_FIELD_MISSING", "activeProcess");
+    activeVerification = absent2();
+  } else {
+    issue2(issues, "STATE_FIELD_INVALID", "activeProcess");
+    activeVerification = invalid5();
+  }
+  let appliedReviewIteration;
+  if (value.latestReview === null) {
+    appliedReviewIteration = observed2(0);
+  } else if (isRecord2(value.latestReview)) {
+    const iteration = nonNegativeInteger2(value.latestReview.iteration);
+    const resultPath = stringValue2(value.latestReview.resultPath);
+    if (iteration === void 0 || iteration < 1 || resultPath !== `reviews/review-${iteration}.json`) {
+      issue2(issues, "STATE_FIELD_INVALID", "latestReview");
+      appliedReviewIteration = invalid5();
+    } else {
+      appliedReviewIteration = observed2(iteration);
+    }
+  } else if (!Object.hasOwn(value, "latestReview")) {
+    issue2(issues, "STATE_FIELD_MISSING", "latestReview");
+    appliedReviewIteration = absent2();
+  } else {
+    issue2(issues, "STATE_FIELD_INVALID", "latestReview");
+    appliedReviewIteration = invalid5();
+  }
+  return {
+    value: {
+      schemaVersion,
+      contractVersion: sourceValue2(
+        value,
+        "contractVersion",
+        "contractVersion",
+        issues,
+        contractVersionValue2
+      ),
+      status: sourceValue2(
+        value,
+        "status",
+        "status",
+        issues,
+        (item) => enumValue2(item, RUN_STATUSES2)
+      ),
+      createdAt: sourceValue2(
+        value,
+        "createdAt",
+        "createdAt",
+        issues,
+        rfc3339Value2
+      ),
+      updatedAt: sourceValue2(
+        value,
+        "updatedAt",
+        "updatedAt",
+        issues,
+        rfc3339Value2
+      ),
+      workflow,
+      reviewIteration: sourceValue2(
+        value,
+        "reviewIteration",
+        "reviewIteration",
+        issues,
+        nonNegativeInteger2
+      ),
+      appliedReviewIteration,
+      fixCycle: sourceValue2(
+        value,
+        "fixCycle",
+        "fixCycle",
+        issues,
+        nonNegativeInteger2
+      ),
+      blockedFrom: sourceValue2(
+        value,
+        "blockedFrom",
+        "blockedFrom",
+        issues,
+        (item) => enumValue2(item, RUN_STATUSES2),
+        { nullable: true }
+      ),
+      activeAttemptIdentity,
+      activeAttemptKind,
+      activeVerification,
+      triage,
+      triageIsCumulative,
+      verificationList,
+      verification,
+      metrics: parseStateMetrics2(value.metrics, schemaVersion, issues)
+    },
+    issues
+  };
+}
 function attemptEvidence(record6, key, field, issues, parse, nullable = false, legacyAbsent = false) {
   if (!Object.hasOwn(record6, key)) {
-    issue(
+    issue2(
       issues,
       legacyAbsent ? "LEGACY_FIELD_ABSENT" : "STATE_FIELD_MISSING",
       field
     );
-    return absent(legacyAbsent);
+    return absent2(legacyAbsent);
   }
   const value = record6[key];
   if (value === null) {
-    return nullable ? notApplicable() : absent(legacyAbsent);
+    return nullable ? notApplicable2() : absent2(legacyAbsent);
   }
   const parsed = parse(value);
   if (parsed === void 0) {
-    issue(issues, "STATE_FIELD_INVALID", field);
-    return invalid();
+    issue2(issues, "STATE_FIELD_INVALID", field);
+    return invalid5();
   }
-  return observed(parsed);
+  return observed2(parsed);
 }
 function unknownUsage() {
   return {
-    inputTokens: absent(),
-    cachedInputTokens: absent(),
-    outputTokens: absent(),
-    costUsd: absent()
+    inputTokens: absent2(),
+    cachedInputTokens: absent2(),
+    outputTokens: absent2(),
+    costUsd: absent2()
   };
 }
 function parseEvaluationAttemptSource(value) {
-  if (!isRecord(value) || !isRecord(value.attempt)) {
-    throw evaluationError("Persisted attempt is not a supported object.");
+  if (!isRecord2(value) || !isRecord2(value.attempt)) {
+    throw evaluationError2("Persisted attempt is not a supported object.");
   }
   const issues = [];
-  const identity = stringValue(value.attempt.id);
+  const identity = stringValue2(value.attempt.id);
   if (identity === void 0) {
-    throw evaluationError("Persisted attempt has no usable identity.");
+    throw evaluationError2("Persisted attempt has no usable identity.");
   }
   const kind = attemptEvidence(
     value.attempt,
     "kind",
     "attempt.kind",
     issues,
-    (item) => enumValue(item, ATTEMPT_KINDS)
+    (item) => enumValue2(item, ATTEMPT_KINDS2)
   );
   const persistedStatus = attemptEvidence(
     value,
     "status",
     "status",
     issues,
-    (item) => enumValue(item, [
+    (item) => enumValue2(item, [
       "started",
       "completed",
       "failed",
@@ -4864,29 +10552,29 @@ function parseEvaluationAttemptSource(value) {
   const status = persistedStatus.value === "interrupted" ? { value: "started", evidence: "derived" } : persistedStatus;
   let sessionMode;
   if (!Object.hasOwn(value, "sessionMode")) {
-    issue(issues, "LEGACY_FIELD_ABSENT", "sessionMode");
-    sessionMode = absent(true);
+    issue2(issues, "LEGACY_FIELD_ABSENT", "sessionMode");
+    sessionMode = absent2(true);
   } else {
     sessionMode = attemptEvidence(
       value,
       "sessionMode",
       "sessionMode",
       issues,
-      (item) => enumValue(item, ["fresh", "resumed"])
+      (item) => enumValue2(item, ["fresh", "resumed"])
     );
   }
   let reviewMode;
   let rotationReason;
   if (kind.value !== "review") {
-    reviewMode = notApplicable();
-    rotationReason = notApplicable();
+    reviewMode = notApplicable2();
+    rotationReason = notApplicable2();
   } else {
     reviewMode = attemptEvidence(
       value,
       "reviewMode",
       "reviewMode",
       issues,
-      (item) => enumValue(item, ["full", "delta"]),
+      (item) => enumValue2(item, ["full", "delta"]),
       false,
       !Object.hasOwn(value, "reviewMode")
     );
@@ -4895,17 +10583,17 @@ function parseEvaluationAttemptSource(value) {
       "rotationReason",
       "rotationReason",
       issues,
-      (item) => enumValue(item, ROTATION_REASONS),
+      (item) => enumValue2(item, ROTATION_REASONS),
       true,
       !Object.hasOwn(value, "rotationReason")
     );
   }
   let model;
-  if (isRecord(value.sessionContext)) {
-    const executable = stringValue(value.sessionContext.executable);
+  if (isRecord2(value.sessionContext)) {
+    const executable = stringValue2(value.sessionContext.executable);
     const normalizedVendor = executable === void 0 ? null : vendorFor(executable);
     model = {
-      vendor: executable === void 0 ? invalid() : observed(normalizedVendor ?? "unknown"),
+      vendor: executable === void 0 ? invalid5() : observed2(normalizedVendor ?? "unknown"),
       model: attemptEvidence(
         value.sessionContext,
         "model",
@@ -4918,7 +10606,7 @@ function parseEvaluationAttemptSource(value) {
         "effort",
         "sessionContext.effort",
         issues,
-        (item) => enumValue(item, [
+        (item) => enumValue2(item, [
           "low",
           "medium",
           "high",
@@ -4929,58 +10617,58 @@ function parseEvaluationAttemptSource(value) {
       )
     };
     if (executable === void 0) {
-      issue(issues, "STATE_FIELD_INVALID", "sessionContext.executable");
+      issue2(issues, "STATE_FIELD_INVALID", "sessionContext.executable");
     }
   } else {
-    issue(issues, "LEGACY_FIELD_ABSENT", "sessionContext");
+    issue2(issues, "LEGACY_FIELD_ABSENT", "sessionContext");
     model = {
-      vendor: absent(true),
-      model: absent(true),
-      effort: absent(true)
+      vendor: absent2(true),
+      model: absent2(true),
+      effort: absent2(true)
     };
   }
   let usage;
   if (value.usage === null || value.usage === void 0) {
     usage = unknownUsage();
-  } else if (isRecord(value.usage)) {
+  } else if (isRecord2(value.usage)) {
     usage = {
       inputTokens: attemptEvidence(
         value.usage,
         "inputTokens",
         "usage.inputTokens",
         issues,
-        nonNegativeNumber
+        nonNegativeNumber2
       ),
       cachedInputTokens: attemptEvidence(
         value.usage,
         "cachedInputTokens",
         "usage.cachedInputTokens",
         issues,
-        nonNegativeNumber
+        nonNegativeNumber2
       ),
       outputTokens: attemptEvidence(
         value.usage,
         "outputTokens",
         "usage.outputTokens",
         issues,
-        nonNegativeNumber
+        nonNegativeNumber2
       ),
       costUsd: attemptEvidence(
         value.usage,
         "costUsd",
         "usage.costUsd",
         issues,
-        nonNegativeNumber,
+        nonNegativeNumber2,
         true
       )
     };
   } else {
-    issue(issues, "STATE_FIELD_INVALID", "usage");
+    issue2(issues, "STATE_FIELD_INVALID", "usage");
     usage = {
-      inputTokens: invalid(),
-      cachedInputTokens: invalid(),
-      outputTokens: invalid(),
-      costUsd: invalid()
+      inputTokens: invalid5(),
+      cachedInputTokens: invalid5(),
+      outputTokens: invalid5(),
+      costUsd: invalid5()
     };
   }
   return {
@@ -5009,14 +10697,14 @@ function parseEvaluationAttemptSource(value) {
         "startedAt",
         "startedAt",
         issues,
-        rfc3339Value
+        rfc3339Value2
       ),
       completedAt: attemptEvidence(
         value,
         "completedAt",
         "completedAt",
         issues,
-        rfc3339Value,
+        rfc3339Value2,
         status.value === "started"
       ),
       durationMs: attemptEvidence(
@@ -5024,7 +10712,7 @@ function parseEvaluationAttemptSource(value) {
         "durationMs",
         "durationMs",
         issues,
-        nonNegativeNumber,
+        nonNegativeNumber2,
         status.value === "started"
       ),
       sessionMode,
@@ -5037,40 +10725,40 @@ function parseEvaluationAttemptSource(value) {
   };
 }
 function parseEvaluationReviewSource(value) {
-  if (!isRecord(value) || !Array.isArray(value.findings)) {
-    throw evaluationError("Persisted review is not a supported object.");
+  if (!isRecord2(value) || !Array.isArray(value.findings)) {
+    throw evaluationError2("Persisted review is not a supported object.");
   }
   const issues = [];
-  const verdict = sourceValue(
+  const verdict = sourceValue2(
     value,
     "verdict",
     "verdict",
     issues,
-    (item) => enumValue(item, REVIEW_VERDICTS)
+    (item) => enumValue2(item, REVIEW_VERDICTS)
   );
   const findings = { blocker: 0, should_fix: 0, nit: 0 };
   for (const [index, finding] of value.findings.entries()) {
-    if (!isRecord(finding)) {
-      throw evaluationError("Persisted review contains an invalid finding.");
+    if (!isRecord2(finding)) {
+      throw evaluationError2("Persisted review contains an invalid finding.");
     }
-    const severity = enumValue(finding.severity, [
+    const severity = enumValue2(finding.severity, [
       "blocker",
       "should_fix",
       "nit"
     ]);
     if (severity === void 0) {
-      throw evaluationError("Persisted review contains an invalid severity.");
+      throw evaluationError2("Persisted review contains an invalid severity.");
     }
     findings[severity] += 1;
     if (!Object.hasOwn(finding, "severity")) {
-      issue(issues, "STATE_FIELD_MISSING", `findings[${index}].severity`);
+      issue2(issues, "STATE_FIELD_MISSING", `findings[${index}].severity`);
     }
   }
   return { value: { verdict, findings }, issues };
 }
 function parseEvaluationEventSource(value) {
-  if (!isRecord(value) || typeof value.type !== "string") {
-    throw evaluationError("Persisted event is not a supported object.");
+  if (!isRecord2(value) || typeof value.type !== "string") {
+    throw evaluationError2("Persisted event is not a supported object.");
   }
   const recognized = [
     "attempt.retry_requested",
@@ -5408,16 +11096,16 @@ async function readJsonUnknown(filePath) {
     return { kind: "unreadable" };
   }
 }
-async function childDirectoryEntries(directory2) {
+async function childDirectoryEntries(directory3) {
   try {
-    return await readdir(directory2, { withFileTypes: true });
+    return await readdir4(directory3, { withFileTypes: true });
   } catch (error) {
     return isMissingFile(error) ? null : void 0;
   }
 }
-async function directoryEntries(directory2) {
+async function directoryEntries(directory3) {
   try {
-    return await readdir(directory2, { withFileTypes: true });
+    return await readdir4(directory3, { withFileTypes: true });
   } catch (error) {
     if (isMissingFile(error)) {
       return null;
@@ -5479,7 +11167,7 @@ function publicAttempt(source, attemptKey) {
   };
 }
 async function collectAttempts(runDirectory, runKey) {
-  const attemptsDirectory = path3.join(runDirectory, "attempts");
+  const attemptsDirectory = path8.join(runDirectory, "attempts");
   const entries = await childDirectoryEntries(attemptsDirectory);
   if (entries === null) {
     return {
@@ -5517,7 +11205,7 @@ async function collectAttempts(runDirectory, runKey) {
       continue;
     }
     const result = await readJsonUnknown(
-      path3.join(attemptsDirectory, file.name)
+      path8.join(attemptsDirectory, file.name)
     );
     if (result.kind !== "ok") {
       issues.push(directIssue(runKey, "attempt", "ATTEMPT_MALFORMED"));
@@ -5538,19 +11226,19 @@ async function collectAttempts(runDirectory, runKey) {
     group.push(attempt);
     groups.set(attempt.source.identity, group);
   }
-  const unique = [];
+  const unique2 = [];
   for (const group of groups.values()) {
     const first = group[0];
     if (first === void 0) {
       continue;
     }
     if (group.length === 1) {
-      unique.push(first);
+      unique2.push(first);
       continue;
     }
     const canonical = JSON.stringify(first.source);
     if (group.every((item) => JSON.stringify(item.source) === canonical)) {
-      unique.push(first);
+      unique2.push(first);
       issues.push(directIssue(runKey, "attempt", "ATTEMPT_DUPLICATE"));
     } else {
       issues.push(directIssue(runKey, "attempt", "ATTEMPT_CONFLICT"));
@@ -5558,10 +11246,10 @@ async function collectAttempts(runDirectory, runKey) {
       conflictedIdentities.add(first.source.identity);
     }
   }
-  unique.sort((left, right) => attemptSort(left.source, right.source));
+  unique2.sort((left, right) => attemptSort(left.source, right.source));
   const attempts = [];
   const sources = [];
-  for (const [index, item] of unique.entries()) {
+  for (const [index, item] of unique2.entries()) {
     const attemptKey = opaqueKey("attempt", index);
     attempts.push(publicAttempt(item.source, attemptKey));
     sources.push(item.source);
@@ -5652,8 +11340,8 @@ function ledgerVerificationSource(record6) {
   };
 }
 async function collectVerification(runDirectory, runKey, state) {
-  const directory2 = path3.join(runDirectory, "verification-attempts");
-  const entries = await childDirectoryEntries(directory2);
+  const directory3 = path8.join(runDirectory, "verification-attempts");
+  const entries = await childDirectoryEntries(directory3);
   if (entries === null) {
     return { collection: collectLegacyVerification(state), issues: [] };
   }
@@ -5688,7 +11376,7 @@ async function collectVerification(runDirectory, runKey, state) {
       issues
     };
   }
-  const marker = await readJsonUnknown(path3.join(directory2, "ledger.json"));
+  const marker = await readJsonUnknown(path8.join(directory3, "ledger.json"));
   if (marker.kind !== "ok") {
     issues.push(
       directIssue(
@@ -5718,7 +11406,7 @@ async function collectVerification(runDirectory, runKey, state) {
   const parsed = [];
   let invalidCount = marker.kind === "ok" && issues.length === 0 ? 0 : 1;
   for (const file of files) {
-    const result = await readJsonUnknown(path3.join(directory2, file));
+    const result = await readJsonUnknown(path8.join(directory3, file));
     if (result.kind !== "ok") {
       invalidCount += 1;
       issues.push(
@@ -5734,7 +11422,7 @@ async function collectVerification(runDirectory, runKey, state) {
     try {
       parsed.push({
         file,
-        record: parseVerificationAttemptRecord(result.value)
+        record: parseVerificationAttemptRecord2(result.value)
       });
     } catch {
       invalidCount += 1;
@@ -5793,10 +11481,10 @@ async function collectVerification(runDirectory, runKey, state) {
     group.push(item);
     sequences.set(item.record.sequence, group);
   }
-  const unique = [];
+  const unique2 = [];
   for (const group of sequences.values()) {
     if (group.length === 1 && group[0] !== void 0) {
-      unique.push(group[0]);
+      unique2.push(group[0]);
     } else {
       invalidCount += 1;
       issues.push(
@@ -5809,10 +11497,10 @@ async function collectVerification(runDirectory, runKey, state) {
       );
     }
   }
-  unique.sort(
+  unique2.sort(
     (left, right) => left.record.sequence - right.record.sequence || left.file.localeCompare(right.file)
   );
-  const missingSequence = unique.some(
+  const missingSequence = unique2.some(
     (item, index) => item.record.sequence !== index + 1
   );
   if (missingSequence) {
@@ -5826,7 +11514,7 @@ async function collectVerification(runDirectory, runKey, state) {
       )
     );
   }
-  const records = unique.map((item) => item.record);
+  const records = unique2.map((item) => item.record);
   const sources = records.map(ledgerVerificationSource);
   const cumulative = state.metrics.attempts.verification.value;
   const countMismatch = cumulative !== null && cumulative !== records.length;
@@ -5869,7 +11557,7 @@ async function collectVerification(runDirectory, runKey, state) {
   };
 }
 async function collectReviews(runDirectory, runKey, expectedReviews) {
-  const reviewsDirectory = path3.join(runDirectory, "reviews");
+  const reviewsDirectory = path8.join(runDirectory, "reviews");
   const entries = await childDirectoryEntries(reviewsDirectory);
   const issues = [];
   if (entries === null) {
@@ -5910,7 +11598,7 @@ async function collectReviews(runDirectory, runKey, expectedReviews) {
       continue;
     }
     const result = await readJsonUnknown(
-      path3.join(reviewsDirectory, file.name)
+      path8.join(reviewsDirectory, file.name)
     );
     if (result.kind !== "ok") {
       issues.push(directIssue(runKey, "review", "REVIEW_MALFORMED"));
@@ -5961,7 +11649,7 @@ async function collectReviews(runDirectory, runKey, expectedReviews) {
 async function collectEvents(runDirectory, runKey) {
   let contents;
   try {
-    contents = await readFile(path3.join(runDirectory, "events.jsonl"), "utf8");
+    contents = await readFile(path8.join(runDirectory, "events.jsonl"), "utf8");
   } catch (error) {
     if (isMissingFile(error)) {
       return {
@@ -6249,9 +11937,9 @@ function buildMetricSet(state, attempts, verification, reviews, events, allIssue
   const unknownSessionCount = modelSources.filter(
     (item) => item.sessionMode.value === null && item.sessionMode.evidence !== "invalid"
   ).length;
-  for (const mode of SESSION_ORDER) {
-    metrics.sessions[mode] = countedMetric(
-      sessionCounts[mode],
+  for (const mode2 of SESSION_ORDER) {
+    metrics.sessions[mode2] = countedMetric(
+      sessionCounts[mode2],
       attemptCoverage.genericInvalidCount + attemptCoverage.activeInvalidCount + invalidSessionCount,
       attemptCoverage.genericUnknownCount + counterGapCount + attemptCoverage.activeUnknownCount + unknownSessionCount
     );
@@ -6268,9 +11956,9 @@ function buildMetricSet(state, attempts, verification, reviews, events, allIssue
     (item) => item.reviewMode.value === null && item.reviewMode.evidence !== "invalid" && item.reviewMode.evidence !== "not_applicable"
   ).length;
   const activeMayBeReview = attemptCoverage.activeKind === "review" || attemptCoverage.activeKind === null;
-  for (const mode of REVIEW_MODE_ORDER) {
-    metrics.reviews.attempts[mode] = countedMetric(
-      reviewModeCounts[mode],
+  for (const mode2 of REVIEW_MODE_ORDER) {
+    metrics.reviews.attempts[mode2] = countedMetric(
+      reviewModeCounts[mode2],
       attemptCoverage.genericInvalidCount + invalidKindCount + invalidReviewModeCount + (activeMayBeReview ? attemptCoverage.activeInvalidCount : 0),
       attemptCoverage.genericUnknownCount + counterGapsByKind.review + unknownKindCount + unknownReviewModeCount + (activeMayBeReview ? attemptCoverage.activeUnknownCount : 0)
     );
@@ -6584,14 +12272,14 @@ function combineMetricSets(metricSets) {
       metricSets.map((item) => item.durationsMs[phase])
     );
   }
-  for (const mode of SESSION_ORDER) {
-    combined.sessions[mode] = combineMetrics(
-      metricSets.map((item) => item.sessions[mode])
+  for (const mode2 of SESSION_ORDER) {
+    combined.sessions[mode2] = combineMetrics(
+      metricSets.map((item) => item.sessions[mode2])
     );
   }
-  for (const mode of REVIEW_MODE_ORDER) {
-    combined.reviews.attempts[mode] = combineMetrics(
-      metricSets.map((item) => item.reviews.attempts[mode])
+  for (const mode2 of REVIEW_MODE_ORDER) {
+    combined.reviews.attempts[mode2] = combineMetrics(
+      metricSets.map((item) => item.reviews.attempts[mode2])
     );
   }
   combined.reviews.rotations.total = combineMetrics(
@@ -6730,7 +12418,7 @@ function dateMembership(createdAt, options) {
 }
 async function collectCandidate(runDirectory, runKey, options) {
   const stateRead = await readJsonUnknown(
-    path3.join(runDirectory, "state.json")
+    path8.join(runDirectory, "state.json")
   );
   if (stateRead.kind !== "ok") {
     const code2 = stateRead.kind === "missing" ? "STATE_MISSING" : "STATE_MALFORMED";
@@ -6744,11 +12432,20 @@ async function collectCandidate(runDirectory, runKey, options) {
   let state;
   let stateIssues;
   try {
-    const parsed = parseEvaluationStateSource(stateRead.value);
+    const parsed = parseEvaluationStateSource2(stateRead.value);
     state = parsed.value;
     stateIssues = parsed.issues.map(
       (item) => evaluationIssue(runKey, null, "state", item)
     );
+    if (state.schemaVersion === 5 && options.schemaVersion !== 2)
+      stateIssues.push(
+        directIssue(
+          runKey,
+          "verification",
+          "VERIFICATION_HISTORY_INCOMPLETE",
+          "verificationEvidence"
+        )
+      );
   } catch (error) {
     const code2 = error instanceof BanzaiError && error.code === "EVALUATION_STATE_SCHEMA_UNSUPPORTED" ? "STATE_SCHEMA_UNSUPPORTED" : "STATE_MALFORMED";
     const issues2 = [directIssue(runKey, "state", code2)];
@@ -6841,8 +12538,12 @@ async function candidateDirectories(runsDirectory) {
   return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort((left, right) => left.localeCompare(right));
 }
 async function collectEvaluationExport(repoRoot, options) {
-  const runsDirectory = path3.join(repoRoot, ".banzai", "runs");
+  const runsDirectory = path8.join(repoRoot, ".banzai", "runs");
   const candidates = await candidateDirectories(runsDirectory);
+  return collectEvaluationCandidates(repoRoot, options, candidates);
+}
+async function collectEvaluationCandidates(repoRoot, options, candidates) {
+  const runsDirectory = path8.join(repoRoot, ".banzai", "runs");
   const candidateSet = new Set(candidates);
   for (const runId2 of options.runIds) {
     if (!candidateSet.has(runId2)) {
@@ -6867,7 +12568,7 @@ async function collectEvaluationExport(repoRoot, options) {
       continue;
     }
     const result = await collectCandidate(
-      path3.join(runsDirectory, candidate),
+      path8.join(runsDirectory, candidate),
       runKey,
       options
     );
@@ -6904,6 +12605,173 @@ async function collectEvaluationExport(repoRoot, options) {
       runs.filter((run) => run.cohortMembership === "included")
     ),
     issues: sortedIssues
+  };
+}
+async function collectVerificationV2(repoRoot, runId2) {
+  const result = {
+    coverage: "incomplete",
+    physicalAttempts: [],
+    dispositions: []
+  };
+  if (!/^[a-z0-9][a-z0-9.-]{0,199}$/u.test(runId2)) return result;
+  const base = `.banzai/runs/${runId2}`;
+  const hash2 = (value) => createHash7("sha256").update(value).digest("hex");
+  const observed3 = /* @__PURE__ */ new Map();
+  const read = async (relative2) => {
+    const bytes = await readBytes2(repoRoot, `${base}/${relative2}`, {
+      limit: 16 * 1024 * 1024
+    });
+    if (bytes === null || bytes.length > 16 * 1024 * 1024)
+      throw new Error("Invalid verification evidence file.");
+    observed3.set(relative2, hash2(bytes));
+    return bytes;
+  };
+  const inventory = async (relative2) => {
+    const target = await safePath2(repoRoot, `${base}/${relative2}`, {
+      directory: true
+    });
+    const entries = await readdir4(target);
+    if (entries.length > 1e4)
+      throw new Error("Verification evidence inventory exceeded its bound.");
+    return entries.sort();
+  };
+  const json2 = async (relative2) => JSON.parse((await read(relative2)).toString("utf8"));
+  try {
+    if (parseVerificationLedger(await json2("verification-attempts/ledger.json")).schemaVersion !== 2)
+      return result;
+    const state = await json2("state.json");
+    if (state.schemaVersion !== 5 || !state.artifactBinding?.binding?.workId)
+      return result;
+    const binding = parseBinding2(state.artifactBinding.binding);
+    if (binding.schemaVersion !== 2) return result;
+    const attempts = [];
+    for (const entry of await inventory("verification-attempts")) {
+      if (entry === "ledger.json") continue;
+      const attempt = parseVerificationAttemptRecord2(
+        await json2(`verification-attempts/${entry}`)
+      );
+      if (entry !== `verification-${String(attempt.sequence).padStart(6, "0")}-${attempt.id}.json`)
+        throw new Error("Attempt identity mismatch.");
+      attempts.push(attempt);
+    }
+    if (new Set(attempts.map((item) => item.id)).size !== attempts.length || attempts.some((item, index) => item.sequence !== index + 1))
+      throw new Error("Incomplete attempt sequence.");
+    result.physicalAttempts = attempts.map((attempt, index) => ({
+      ordinal: index + 1,
+      status: attempt.status,
+      durationMs: attempt.durationMs
+    }));
+    const decisions = [];
+    for (const entry of await inventory("verification/decisions")) {
+      const decision = parseVerificationDecision(
+        await json2(`verification/decisions/${entry}`)
+      );
+      if (entry !== `${decision.sha256}.json` || decision.workId !== state.artifactBinding.binding.workId)
+        throw new Error("Decision identity mismatch.");
+      decisions.push(decision);
+    }
+    const applications = [];
+    for (const entry of await inventory("verification/applications")) {
+      const application = parseVerificationApplicability(
+        await json2(`verification/applications/${entry}`)
+      );
+      if (entry !== `${application.sha256}.json` || application.workId !== state.artifactBinding.binding.workId)
+        throw new Error("Application identity mismatch.");
+      applications.push(application);
+    }
+    const origins = await readVerificationOrigins(
+      { repoRoot, directory: `${base}/verification`, workId: binding.workId },
+      attempts
+    );
+    const rounds = [...new Set(decisions.map((item) => item.roundId))].sort();
+    let complete = rounds.length > 0 && origins.length === attempts.length && attempts.every((item) => item.status !== "started");
+    for (const [roundIndex, roundId] of rounds.entries()) {
+      const candidates = applications.filter(
+        (item) => item.roundId === roundId && item.complete
+      );
+      const current = state.verificationEvidence?.decision.roundId === roundId ? state.verificationEvidence.applicability : null;
+      const application = current ?? (candidates.length === 1 ? candidates[0] : null);
+      const decision = decisions.find((item) => item.sha256 === application?.decisionSha256) ?? decisions.find((item) => item.roundId === roundId);
+      if (!decision) throw new Error("Missing decision round.");
+      if (!application?.complete || !applications.some(
+        (item) => JSON.stringify(item) === JSON.stringify(application)
+      ))
+        complete = false;
+      if (application && (application.roundId !== decision.roundId || application.workId !== decision.workId || application.candidateDigest !== decision.candidateDigest || application.dispositions.length !== decision.actions.length || application.dispositions.some(
+        (item, index) => item.checkId !== decision.actions[index]?.checkId
+      )))
+        throw new Error("Application decision mismatch.");
+      for (const [checkIndex, action] of decision.actions.entries()) {
+        const disposition = application?.dispositions.find(
+          (item) => item.checkId === action.checkId
+        );
+        let origin = null;
+        let kind = "pending";
+        if (disposition?.origin) {
+          const index = attempts.findIndex(
+            (item) => item.id === disposition.origin?.attemptId
+          );
+          const physical = attempts[index];
+          if (!physical || hash2(JSON.stringify(physical)) !== disposition.origin.recordDigest || physical.status !== "completed" || physical.exitCode !== 0 || physical.signal !== null || physical.failureCategory !== null)
+            throw new Error("Missing successful physical origin.");
+          const source = origins.find((item) => item.attemptId === physical.id);
+          if (!source || !source.logsIntact || source.workId !== decision.workId || source.checkId !== action.checkId || source.roundId !== disposition.origin.roundId || JSON.stringify(source.identity) !== JSON.stringify(action.identity))
+            throw new Error("Invalid physical provenance.");
+          const input = source.before.checks.find(
+            (item) => item.checkId === action.checkId
+          );
+          if (disposition.kind === "reused" && (action.action !== "reuse" || JSON.stringify(action.origin) !== JSON.stringify(disposition.origin) || !source.complete || source.roundId === roundId || input?.inputDigest !== action.inputDigest || input.environmentDigest !== action.environmentDigest))
+            throw new Error("Invalid reuse provenance.");
+          if (disposition.kind === "executed" && (action.action !== "execute" || physical.round.id !== roundId || source.before.candidateDigest !== decision.candidateDigest || !source.complete))
+            throw new Error("Invalid executed disposition.");
+          origin = index + 1;
+          kind = disposition.kind;
+        } else complete = false;
+        result.dispositions.push({
+          round: roundIndex + 1,
+          check: checkIndex + 1,
+          kind,
+          origin
+        });
+      }
+    }
+    for (const [relative2, sha256] of observed3)
+      if (hash2(await read(relative2)) !== sha256)
+        throw new Error("Verification evidence changed during export.");
+    result.coverage = complete ? "exact" : "incomplete";
+  } catch {
+    result.coverage = "incomplete";
+  }
+  return result;
+}
+async function collectEvaluationExportV2(repoRoot, options) {
+  const candidates = await candidateDirectories(
+    path8.join(repoRoot, ".banzai/runs")
+  );
+  const base = await collectEvaluationCandidates(
+    repoRoot,
+    {
+      ...options,
+      schemaVersion: 2
+    },
+    candidates
+  );
+  const ids = new Map(
+    candidates.map((id, index) => [opaqueKey("run", index), id])
+  );
+  return {
+    ...base,
+    schema: "banzai-evaluation-export/v2",
+    schemaVersion: 2,
+    runs: await Promise.all(
+      base.runs.map(async (run) => ({
+        ...run,
+        verificationEvidence: await collectVerificationV2(
+          repoRoot,
+          ids.get(run.runKey) ?? ""
+        )
+      }))
+    )
   };
 }
 
@@ -6992,6 +12860,19 @@ function renderEvaluationJson(report) {
 `;
 }
 function renderEvaluationMarkdown(report) {
+  if (report.schemaVersion === 2) {
+    const base = renderEvaluationMarkdown({
+      ...report,
+      schema: "banzai-evaluation-export/v1",
+      schemaVersion: 1
+    });
+    return base.replace(
+      "banzai-evaluation-export/v1` (version 1)",
+      "banzai-evaluation-export/v2` (version 2)"
+    ) + "\n## Verification applicability\n\n" + report.runs.map(
+      (run) => `- ${run.runKey}: coverage=${run.verificationEvidence.coverage}, physical attempts=${run.verificationEvidence.physicalAttempts.length}, reused checks=${run.verificationEvidence.dispositions.filter((item) => item.kind === "reused").length}`
+    ).join("\n") + "\n";
+  }
   const lines = [
     "# Banzai Evaluation Export",
     "",
@@ -7154,7 +13035,7 @@ function renderEvaluationMarkdown(report) {
 // src/evaluation-cli.ts
 var SAFE_RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 function normalizedInstant(value) {
-  const normalized = normalizeRfc3339Instant(value);
+  const normalized = normalizeRfc3339Instant2(value);
   if (normalized === void 0) {
     throw new BanzaiError(
       "INVALID_EVAL_DATE",
@@ -7177,12 +13058,24 @@ function parseEvaluationExportArgs(args) {
   let format = "markdown";
   let from = null;
   let to = null;
+  let schemaVersion;
   let jsonSeen = false;
   let fromSeen = false;
   let toSeen = false;
   const runIds = /* @__PURE__ */ new Set();
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
+    if (argument === "--schema-version") {
+      const value = optionValue(args, index);
+      if (schemaVersion !== void 0 || !["1", "2"].includes(value))
+        throw new BanzaiError(
+          "INVALID_EVAL_OPTION",
+          "Evaluation schema version must be 1 or 2 and specified once."
+        );
+      schemaVersion = value === "1" ? 1 : 2;
+      index += 1;
+      continue;
+    }
     if (argument === "--json") {
       if (jsonSeen) {
         throw new BanzaiError(
@@ -7237,6 +13130,7 @@ function parseEvaluationExportArgs(args) {
     );
   }
   return {
+    ...schemaVersion === void 0 ? {} : { schemaVersion },
     format,
     from,
     to,
@@ -7245,11 +13139,13 @@ function parseEvaluationExportArgs(args) {
 }
 async function executeEvaluationExport(repoRoot, args, io) {
   const options = parseEvaluationExportArgs(args);
-  const report = await collectEvaluationExport(repoRoot, options);
+  const report = options.schemaVersion === 2 ? await collectEvaluationExportV2(repoRoot, options) : await collectEvaluationExport(repoRoot, options);
   io.stdout(
     options.format === "json" ? renderEvaluationJson(report) : renderEvaluationMarkdown(report)
   );
-  if (report.issues.length > 0 || report.cohort.unresolvedRunCount > 0) {
+  if (report.issues.length > 0 || report.cohort.unresolvedRunCount > 0 || report.schemaVersion === 2 && report.runs.some(
+    (run) => run.verificationEvidence.coverage === "incomplete"
+  )) {
     io.stderr(
       "[EVAL_PARTIAL] Export includes incomplete evidence; inspect the structured issues in the report.\n"
     );
@@ -7257,10 +13153,10 @@ async function executeEvaluationExport(repoRoot, args, io) {
 }
 
 // src/cancellation-evidence.ts
-import { createHash as createHash3 } from "node:crypto";
-import { constants as constants2 } from "node:fs";
-import { lstat as lstat2, open as open2, readdir as readdir2, realpath as realpath2 } from "node:fs/promises";
-import path4 from "node:path";
+import { createHash as createHash8 } from "node:crypto";
+import { constants as constants5 } from "node:fs";
+import { lstat as lstat6, open as open6, readdir as readdir5, realpath as realpath5 } from "node:fs/promises";
+import path9 from "node:path";
 async function enrichCancellationContext(root, runId2, at, context, links, eventFile) {
   const result = structuredClone(context);
   if (links.adr !== null && result.decision.value === null && decodeCancellationEvents(eventFile).availability === "available") {
@@ -7280,14 +13176,14 @@ async function enrichCancellationContext(root, runId2, at, context, links, event
       );
   }
   if (links.activeVerification) {
-    const directory2 = await readCancellationDirectory(
+    const directory3 = await readCancellationDirectory(
       root,
       `.banzai/runs/${runId2}/verification-attempts`
     );
-    const candidates = directory2.entries.filter(
+    const candidates = directory3.entries.filter(
       (e) => e.name !== "ledger.json" && e.name.endsWith(".json")
     );
-    if (directory2.availability !== "available" || candidates.length > CANCELLATION_LIMITS.leaves)
+    if (directory3.availability !== "available" || candidates.length > CANCELLATION_LIMITS.leaves)
       return result;
     let bytes = 0;
     const matches = [];
@@ -7301,7 +13197,7 @@ async function enrichCancellationContext(root, runId2, at, context, links, event
       if (file.text === null || file.availability !== "available")
         return result;
       bytes += file.fingerprint?.size ?? 0;
-      const record6 = parseVerificationAttemptRecord(JSON.parse(file.text));
+      const record6 = parseVerificationAttemptRecord2(JSON.parse(file.text));
       if (entry.name !== `verification-${String(record6.sequence).padStart(6, "0")}-${record6.id}.json`)
         return result;
       if (record6.startedAt <= at && (record6.completedAt === null || record6.completedAt >= at))
@@ -7339,22 +13235,22 @@ function failure(error) {
     issue: code2 === "ENOENT" ? "EVIDENCE_MISSING" : code2 === "UNSAFE_EVIDENCE" || code2 === "ELOOP" ? "UNSAFE_EVIDENCE" : "EVIDENCE_UNAVAILABLE"
   };
 }
-async function cancellationEvidencePath(root, relative, directory2 = false) {
-  const parts = relative.split("/");
+async function cancellationEvidencePath(root, relative2, directory3 = false) {
+  const parts = relative2.split("/");
   if (parts.length === 0 || parts.some(
     (p) => !p || p === "." || p === ".." || p.includes("\\") || p.includes("\0")
-  ) || path4.isAbsolute(relative)) {
+  ) || path9.isAbsolute(relative2)) {
     throw Object.assign(new Error("Unsafe evidence."), {
       code: "UNSAFE_EVIDENCE"
     });
   }
-  let current = await realpath2(root);
+  let current = await realpath5(root);
   for (let i = 0; i < parts.length; i++) {
     const segment = parts[i];
     if (segment === void 0) throw new Error("Invalid evidence path.");
-    current = path4.join(current, segment);
-    const stat5 = await lstat2(current);
-    if (stat5.isSymbolicLink() || (i < parts.length - 1 || directory2 ? !stat5.isDirectory() : !stat5.isFile())) {
+    current = path9.join(current, segment);
+    const stat5 = await lstat6(current);
+    if (stat5.isSymbolicLink() || (i < parts.length - 1 || directory3 ? !stat5.isDirectory() : !stat5.isFile())) {
       throw Object.assign(new Error("Unsafe evidence."), {
         code: "UNSAFE_EVIDENCE"
       });
@@ -7362,12 +13258,12 @@ async function cancellationEvidencePath(root, relative, directory2 = false) {
   }
   return current;
 }
-async function readCancellationFile(root, relative, maximum) {
+async function readCancellationFile(root, relative2, maximum) {
   try {
-    const file = await cancellationEvidencePath(root, relative);
-    const handle = await open2(
+    const file = await cancellationEvidencePath(root, relative2);
+    const handle = await open6(
       file,
-      constants2.O_RDONLY | constants2.O_NOFOLLOW | constants2.O_NONBLOCK
+      constants5.O_RDONLY | constants5.O_NOFOLLOW | constants5.O_NONBLOCK
     );
     try {
       const before = await handle.stat();
@@ -7398,7 +13294,7 @@ async function readCancellationFile(root, relative, maximum) {
         length += read.bytesRead;
       }
       const after = await handle.stat();
-      const named = await lstat2(file);
+      const named = await lstat6(file);
       if (length !== before.size || before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs || named.isSymbolicLink() || named.ino !== after.ino || named.dev !== after.dev) {
         return {
           availability: "unavailable",
@@ -7408,9 +13304,9 @@ async function readCancellationFile(root, relative, maximum) {
         };
       }
       const content = bytes.subarray(0, length);
-      let text;
+      let text2;
       try {
-        text = new TextDecoder("utf-8", { fatal: true }).decode(content);
+        text2 = new TextDecoder("utf-8", { fatal: true }).decode(content);
       } catch {
         return {
           availability: "malformed",
@@ -7421,14 +13317,14 @@ async function readCancellationFile(root, relative, maximum) {
       }
       return {
         availability: "available",
-        text,
+        text: text2,
         fingerprint: {
           dev: after.dev,
           ino: after.ino,
           size: after.size,
           mtimeMs: after.mtimeMs,
           ctimeMs: after.ctimeMs,
-          digest: createHash3("sha256").update(content).digest("hex")
+          digest: createHash8("sha256").update(content).digest("hex")
         },
         issue: null
       };
@@ -7439,24 +13335,24 @@ async function readCancellationFile(root, relative, maximum) {
     return failure(error);
   }
 }
-async function cancellationFileIdentityMatches(root, relative, fingerprint) {
+async function cancellationFileIdentityMatches(root, relative2, fingerprint) {
   try {
-    const file = await cancellationEvidencePath(root, relative);
-    const stat5 = await lstat2(file);
+    const file = await cancellationEvidencePath(root, relative2);
+    const stat5 = await lstat6(file);
     return fingerprint !== null && stat5.dev === fingerprint.dev && stat5.ino === fingerprint.ino && stat5.size === fingerprint.size && stat5.mtimeMs === fingerprint.mtimeMs && stat5.ctimeMs === fingerprint.ctimeMs;
   } catch (error) {
     return fingerprint === null && cancellationRecord(error).code === "ENOENT";
   }
 }
-async function readCancellationDirectory(root, relative) {
+async function readCancellationDirectory(root, relative2) {
   try {
-    const directory2 = await cancellationEvidencePath(root, relative, true);
-    const before = await lstat2(directory2);
-    const entries = (await readdir2(directory2, { withFileTypes: true })).map((e) => ({
+    const directory3 = await cancellationEvidencePath(root, relative2, true);
+    const before = await lstat6(directory3);
+    const entries = (await readdir5(directory3, { withFileTypes: true })).map((e) => ({
       name: e.name,
       kind: e.isSymbolicLink() ? "unsafe" : e.isDirectory() ? "directory" : e.isFile() ? "file" : "unsafe"
     })).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-    const after = await lstat2(directory2);
+    const after = await lstat6(directory3);
     if (before.ino !== after.ino || before.dev !== after.dev || before.mtimeMs !== after.mtimeMs || after.isSymbolicLink()) {
       return { availability: "unavailable", entries, issue: "SOURCE_CHANGED" };
     }
@@ -7543,7 +13439,7 @@ var ratio = (numerator, denominator) => ({
   value: denominator === 0 ? null : numerator / denominator
 });
 function instant(value) {
-  return normalizeRfc3339Instant(value) ?? null;
+  return normalizeRfc3339Instant2(value) ?? null;
 }
 function publicContext(context) {
   return {
@@ -7616,17 +13512,17 @@ function emptyRun(runKey) {
     issueCodes: []
   };
 }
-function metric2(values, inventory, invalid7 = 0, missing3 = 0, cost = false) {
+function metric2(values, inventory, invalid9 = 0, missing3 = 0, cost = false) {
   const observed3 = values.filter((n) => typeof n === "number");
   const subtotal = observed3.reduce((a, b) => a + b, 0);
   const unknown = values.filter((n) => n === null).length + missing3;
-  invalid7 += values.filter((n) => n === "invalid").length;
+  invalid9 += values.filter((n) => n === "invalid").length;
   if (!Number.isFinite(subtotal))
-    return partialMetric(0, 0, unknown, invalid7 + observed3.length);
-  if (inventory === "complete" && unknown === 0 && invalid7 === 0 && (!cost || observed3.length > 0))
+    return partialMetric(0, 0, unknown, invalid9 + observed3.length);
+  if (inventory === "complete" && unknown === 0 && invalid9 === 0 && (!cost || observed3.length > 0))
     return exactMetric(subtotal, observed3.length);
-  if (observed3.length > 0 || invalid7 > 0 || unknown > 0)
-    return partialMetric(subtotal, observed3.length, unknown, invalid7);
+  if (observed3.length > 0 || invalid9 > 0 || unknown > 0)
+    return partialMetric(subtotal, observed3.length, unknown, invalid9);
   return unavailableMetric();
 }
 function closedBefore(start, end, cutoff) {
@@ -7847,18 +13743,18 @@ async function collectCancellationReport(repoRoot, options, readers = { file: re
     const files = [];
     const directories2 = [];
     const read = async (suffix, maximum, source, field) => {
-      const relative = `${base}/${suffix}`;
-      const file = await readers.file(repoRoot, relative, maximum);
-      files.push({ relative, maximum, file });
+      const relative2 = `${base}/${suffix}`;
+      const file = await readers.file(repoRoot, relative2, maximum);
+      files.push({ relative: relative2, maximum, file });
       if (file.issue !== null) issue3(source, field, file.issue);
       return file;
     };
-    const directory2 = async (suffix, source) => {
-      const relative = `${base}/${suffix}`;
-      const directory3 = await readers.directory(repoRoot, relative);
-      directories2.push({ relative, directory: directory3 });
-      if (directory3.issue !== null) issue3(source, "inventory", directory3.issue);
-      return directory3;
+    const directory3 = async (suffix, source) => {
+      const relative2 = `${base}/${suffix}`;
+      const directory4 = await readers.directory(repoRoot, relative2);
+      directories2.push({ relative: relative2, directory: directory4 });
+      if (directory4.issue !== null) issue3(source, "inventory", directory4.issue);
+      return directory4;
     };
     const parse = (file) => {
       if (file.text === null) return {};
@@ -7877,7 +13773,7 @@ async function collectCancellationReport(repoRoot, options, readers = { file: re
     const state = parse(stateFile);
     try {
       if (state.runId !== runId2) throw new Error();
-      const decoded = parseEvaluationStateSource(state).value;
+      const decoded = parseEvaluationStateSource2(state).value;
       row.lifecycle = {
         value: decoded.status.value,
         availability: decoded.status.value === null ? "malformed" : "available"
@@ -7952,8 +13848,8 @@ async function collectCancellationReport(repoRoot, options, readers = { file: re
         modelMissing: 0,
         verificationMissing: 0
       };
-      const modelDirectory = await directory2("attempts", "model");
-      const verificationDirectory = await directory2(
+      const modelDirectory = await directory3("attempts", "model");
+      const verificationDirectory = await directory3(
         "verification-attempts",
         "verification"
       );
@@ -8011,7 +13907,7 @@ async function collectCancellationReport(repoRoot, options, readers = { file: re
               identities.add(decoded.identity);
               sources.model.push({ source: decoded, raw });
             } else {
-              const record6 = parseVerificationAttemptRecord(raw);
+              const record6 = parseVerificationAttemptRecord2(raw);
               if (entry.name !== `verification-${String(record6.sequence).padStart(6, "0")}-${record6.id}.json`)
                 throw new Error();
               if (identities.has(record6.id) || identities.has(`sequence:${record6.sequence}`)) {
@@ -8501,7 +14397,7 @@ import process7 from "node:process";
 // package.json
 var package_default = {
   name: "@parabolic-technologies/banzai",
-  version: "2.4.0",
+  version: "2.5.0",
   private: false,
   description: "Spec-driven AI development CLI for Codex and Claude Code, with human approvals and independent review for complex changes.",
   keywords: [
@@ -8580,11 +14476,11 @@ var package_default = {
 };
 
 // src/adapters.ts
-import { createHash as createHash4 } from "node:crypto";
-import { constants as constants4 } from "node:fs";
-import { access as access2, mkdir, readFile as readFile3, writeFile } from "node:fs/promises";
+import { createHash as createHash9 } from "node:crypto";
+import { constants as constants7 } from "node:fs";
+import { access as access2, mkdir as mkdir3, readFile as readFile3, writeFile } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
-import path6 from "node:path";
+import path11 from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/format.ts
@@ -8597,8 +14493,8 @@ function resolveWidth(columns) {
   }
   return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.floor(columns)));
 }
-function wrapText(text, width, indent = "") {
-  const words = text.trim().split(/\s+/).filter(Boolean);
+function wrapText(text2, width, indent = "") {
+  const words = text2.trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) {
     return [];
   }
@@ -9971,13 +15867,13 @@ var phase_result_schema_default3 = {
 
 // src/contracts.ts
 function assertContractParity() {
-  if (contract_default.contractVersion !== CONTRACT_VERSION) {
+  if (contract_default.contractVersion !== CONTRACT_VERSION2) {
     throw new BanzaiError(
       "CONTRACT_VERSION_MISMATCH",
-      `Plugin contract ${contract_default.contractVersion} does not match orchestrator contract ${CONTRACT_VERSION}.`
+      `Plugin contract ${contract_default.contractVersion} does not match orchestrator contract ${CONTRACT_VERSION2}.`
     );
   }
-  if (contract_default.schemas.phaseResult !== "./v3/phase-result.schema.json" || workflow_selection_schema_default.properties.contractVersion.const !== CONTRACT_VERSION || phase_result_schema_default3.properties.contractVersion.const !== CONTRACT_VERSION || phase_result_schema_default3.properties.schemaVersion.const !== PHASE_RESULT_SCHEMA_VERSION || phase_result_schema_default2.properties.contractVersion.const !== CONTRACT_VERSION || phase_result_schema_default2.properties.schemaVersion.const !== 2 || phase_result_schema_default.properties.contractVersion.const !== CONTRACT_VERSION || contract_default.schemas.reviewResult !== "./v2/review-result.schema.json" || review_result_schema_default2.properties.schemaVersion.const !== 2 || review_result_schema_default.properties.contractVersion.const !== CONTRACT_VERSION || review_result_schema_default2.properties.contractVersion.const !== CONTRACT_VERSION) {
+  if (contract_default.schemas.phaseResult !== "./v3/phase-result.schema.json" || workflow_selection_schema_default.properties.contractVersion.const !== CONTRACT_VERSION2 || phase_result_schema_default3.properties.contractVersion.const !== CONTRACT_VERSION2 || phase_result_schema_default3.properties.schemaVersion.const !== PHASE_RESULT_SCHEMA_VERSION2 || phase_result_schema_default2.properties.contractVersion.const !== CONTRACT_VERSION2 || phase_result_schema_default2.properties.schemaVersion.const !== 2 || phase_result_schema_default.properties.contractVersion.const !== CONTRACT_VERSION2 || contract_default.schemas.reviewResult !== "./v2/review-result.schema.json" || review_result_schema_default2.properties.schemaVersion.const !== 2 || review_result_schema_default.properties.contractVersion.const !== CONTRACT_VERSION2 || review_result_schema_default2.properties.contractVersion.const !== CONTRACT_VERSION2) {
     throw new BanzaiError(
       "SCHEMA_VERSION_MISMATCH",
       "Bundled schema contract versions do not match the orchestrator."
@@ -10008,10 +15904,10 @@ function resolveOutputContract(vendor, identity) {
 }
 
 // src/mcp.ts
-import { constants as constants3 } from "node:fs";
+import { constants as constants6 } from "node:fs";
 import { access, readFile as readFile2 } from "node:fs/promises";
 import { homedir } from "node:os";
-import path5 from "node:path";
+import path10 from "node:path";
 var SERENA = "serena";
 var CODEX_PROBE_TIMEOUT_MS = 1e4;
 var SERENA_READ_ONLY_TOOLS = [
@@ -10032,7 +15928,7 @@ function serenaAllowedTools() {
 }
 async function readable(filePath) {
   try {
-    await access(filePath, constants3.R_OK);
+    await access(filePath, constants6.R_OK);
     return true;
   } catch {
     return false;
@@ -10042,16 +15938,16 @@ async function commandResolves(command, env) {
   if (command.length === 0) {
     return false;
   }
-  if (command.includes(path5.sep)) {
+  if (command.includes(path10.sep)) {
     return await readable(command);
   }
   const searchPath = env.PATH ?? "";
-  for (const directory2 of searchPath.split(path5.delimiter)) {
-    if (directory2.length === 0) {
+  for (const directory3 of searchPath.split(path10.delimiter)) {
+    if (directory3.length === 0) {
       continue;
     }
     try {
-      await access(path5.join(directory2, command), constants3.X_OK);
+      await access(path10.join(directory3, command), constants6.X_OK);
       return true;
     } catch {
     }
@@ -10092,9 +15988,9 @@ function parseClaudeServer(value) {
 function claudeUserConfigPath(env) {
   const configDir = env.CLAUDE_CONFIG_DIR;
   if (configDir !== void 0 && configDir.length > 0) {
-    return path5.join(configDir, ".claude.json");
+    return path10.join(configDir, ".claude.json");
   }
-  return path5.join(env.HOME ?? homedir(), ".claude.json");
+  return path10.join(env.HOME ?? homedir(), ".claude.json");
 }
 async function serversFrom(filePath) {
   try {
@@ -10106,7 +16002,7 @@ async function serversFrom(filePath) {
   }
 }
 async function claudeSerena(repoRoot, env, notes) {
-  const sources = [path5.join(repoRoot, ".mcp.json"), claudeUserConfigPath(env)];
+  const sources = [path10.join(repoRoot, ".mcp.json"), claudeUserConfigPath(env)];
   for (const source of sources) {
     const servers = await serversFrom(source);
     const server = parseClaudeServer(servers?.[SERENA]);
@@ -10181,7 +16077,7 @@ async function codexSerena(input, notes) {
 }
 async function resolveSerenaWhitelist(input) {
   const notes = [];
-  const projectMarker = path5.join(input.repoRoot, ".serena", "project.yml");
+  const projectMarker = path10.join(input.repoRoot, ".serena", "project.yml");
   if (!await readable(projectMarker)) {
     return {
       claude: null,
@@ -10248,7 +16144,7 @@ function shellPayloadTokens(tokens) {
   if (executable === void 0) {
     return [];
   }
-  if (SHELL_EXECUTABLES.has(path6.basename(executable)) && flag !== void 0 && SHELL_COMMAND_FLAG.test(flag)) {
+  if (SHELL_EXECUTABLES.has(path11.basename(executable)) && flag !== void 0 && SHELL_COMMAND_FLAG.test(flag)) {
     return payload.length === 0 ? [] : tokenizeCommand(payload.join(" "));
   }
   return [...tokens];
@@ -10324,12 +16220,12 @@ function jsonLine(line) {
   }
 }
 function usageCounts(usage) {
-  const cacheRead = nonNegativeNumber2(usage.cache_read_input_tokens);
-  const cacheCreation = nonNegativeNumber2(usage.cache_creation_input_tokens);
+  const cacheRead = nonNegativeNumber3(usage.cache_read_input_tokens);
+  const cacheCreation = nonNegativeNumber3(usage.cache_creation_input_tokens);
   return {
-    inputTokens: nonNegativeNumber2(usage.input_tokens ?? usage.inputTokens) + cacheRead + cacheCreation,
-    cachedInputTokens: nonNegativeNumber2(usage.cached_input_tokens ?? usage.cachedInputTokens) + cacheRead,
-    outputTokens: nonNegativeNumber2(usage.output_tokens ?? usage.outputTokens)
+    inputTokens: nonNegativeNumber3(usage.input_tokens ?? usage.inputTokens) + cacheRead + cacheCreation,
+    cachedInputTokens: nonNegativeNumber3(usage.cached_input_tokens ?? usage.cachedInputTokens) + cacheRead,
+    outputTokens: nonNegativeNumber3(usage.output_tokens ?? usage.outputTokens)
   };
 }
 function usageDetail(value, turns) {
@@ -10531,12 +16427,12 @@ function observeSessionStart(vendor, sink, terminal) {
   };
 }
 function codexAgentMessage(item) {
-  const text = typeof item.text === "string" ? item.text : typeof item.content === "string" ? item.content : null;
-  if (text === null) {
+  const text2 = typeof item.text === "string" ? item.text : typeof item.content === "string" ? item.content : null;
+  if (text2 === null) {
     return null;
   }
   try {
-    return JSON.parse(text);
+    return JSON.parse(text2);
   } catch {
     return null;
   }
@@ -10791,7 +16687,7 @@ function claudeSessionInventory(stdout) {
     const tools = event.tools.map((tool) => typeof tool === "string" ? tool : "").filter((tool) => tool.length > 0).sort();
     return {
       toolCount: tools.length,
-      digest: createHash4("sha256").update(tools.join("\n")).digest("hex")
+      digest: createHash9("sha256").update(tools.join("\n")).digest("hex")
     };
   }
   return null;
@@ -10903,9 +16799,9 @@ function isCodexSandboxEnvironment(environment) {
 }
 async function requireCodexStateWriteAccess(sourceEnvironment) {
   const configuredHome = sourceEnvironment.CODEX_HOME?.trim();
-  const codexHome = configuredHome === void 0 || configuredHome.length === 0 ? path6.join(homedir2(), ".codex") : path6.resolve(configuredHome);
+  const codexHome = configuredHome === void 0 || configuredHome.length === 0 ? path11.join(homedir2(), ".codex") : path11.resolve(configuredHome);
   try {
-    await access2(codexHome, constants4.W_OK);
+    await access2(codexHome, constants7.W_OK);
   } catch {
     if (isCodexSandboxEnvironment(sourceEnvironment)) {
       throw new BanzaiError(
@@ -11042,8 +16938,8 @@ var AMBIENT_CLAUDE_SCOPE = {
   pluginDirectory: null
 };
 var SCOPED_SETTING_SOURCES = "project";
-var PLUGIN_MANIFEST = path6.join(".claude-plugin", "plugin.json");
-var PACKAGED_PLUGIN_RELATIVE_PATH = path6.join("plugins", "banzai");
+var PLUGIN_MANIFEST = path11.join(".claude-plugin", "plugin.json");
+var PACKAGED_PLUGIN_RELATIVE_PATH = path11.join("plugins", "banzai");
 var REQUIRED_BANZAI_SKILLS = [
   "architecture-decision",
   "code-writing",
@@ -11081,23 +16977,23 @@ function invokesBanzaiSpecGate(value) {
     });
   });
 }
-async function verifiedPluginDirectory(directory2) {
-  const resolved = path6.resolve(directory2);
+async function verifiedPluginDirectory(directory3) {
+  const resolved = path11.resolve(directory3);
   try {
     const manifest = jsonRecord(
       JSON.parse(
-        await readFile3(path6.join(resolved, PLUGIN_MANIFEST), "utf8")
+        await readFile3(path11.join(resolved, PLUGIN_MANIFEST), "utf8")
       )
     );
     if (manifest?.name !== "banzai" || manifest.skills !== "./skills/") {
       return null;
     }
     const [hookConfig, hookScript, ...skills] = await Promise.all([
-      readFile3(path6.join(resolved, "hooks", "hooks.json"), "utf8"),
-      readFile3(path6.join(resolved, "hooks", "spec-gate.cjs"), "utf8"),
+      readFile3(path11.join(resolved, "hooks", "hooks.json"), "utf8"),
+      readFile3(path11.join(resolved, "hooks", "spec-gate.cjs"), "utf8"),
       ...REQUIRED_BANZAI_SKILLS.map(
         async (skill) => await readFile3(
-          path6.join(resolved, "skills", skill, "SKILL.md"),
+          path11.join(resolved, "skills", skill, "SKILL.md"),
           "utf8"
         )
       )
@@ -11114,19 +17010,19 @@ async function verifiedPluginDirectory(directory2) {
   }
 }
 async function packagedPluginDirectory() {
-  let directory2 = path6.dirname(fileURLToPath(import.meta.url));
+  let directory3 = path11.dirname(fileURLToPath(import.meta.url));
   for (let depth = 0; depth <= PLUGIN_SEARCH_DEPTH; depth += 1) {
     const candidate = await verifiedPluginDirectory(
-      path6.join(directory2, PACKAGED_PLUGIN_RELATIVE_PATH)
+      path11.join(directory3, PACKAGED_PLUGIN_RELATIVE_PATH)
     );
     if (candidate !== null) {
       return candidate;
     }
-    const parent = path6.dirname(directory2);
-    if (parent === directory2) {
+    const parent = path11.dirname(directory3);
+    if (parent === directory3) {
       return null;
     }
-    directory2 = parent;
+    directory3 = parent;
   }
   return null;
 }
@@ -11298,7 +17194,7 @@ function codexSessionId(stdout) {
   }
   return null;
 }
-function nonNegativeNumber2(value) {
+function nonNegativeNumber3(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
 }
 function normalizedUsage(value, costUsd = null) {
@@ -11344,13 +17240,13 @@ function requireVendor(executable) {
   return vendor;
 }
 async function writeCodexContract(runDirectory, attemptId, schemaName, serialized) {
-  const contractDirectory = path6.join(runDirectory, "contracts");
-  await mkdir(contractDirectory, { recursive: true });
-  const schemaPath = path6.join(contractDirectory, schemaName);
+  const contractDirectory = path11.join(runDirectory, "contracts");
+  await mkdir3(contractDirectory, { recursive: true });
+  const schemaPath = path11.join(contractDirectory, schemaName);
   await writeFile(schemaPath, serialized, "utf8");
   return {
     schemaPath,
-    outputPath: path6.join(runDirectory, "attempts", `${attemptId}-result.json`)
+    outputPath: path11.join(runDirectory, "attempts", `${attemptId}-result.json`)
   };
 }
 async function readCodexResult(outputPath) {
@@ -11490,7 +17386,7 @@ function createVendorAdapters(runner = runProcess) {
             request.repoRoot
           );
           const terminal2 = createClaudeTerminalObserver(
-            parseWorkflowSelectionResult,
+            parseWorkflowSelectionResult2,
             request.onTerminalSuccess
           );
           const processResult2 = await run({
@@ -11512,7 +17408,7 @@ function createVendorAdapters(runner = runProcess) {
           }
           const parsed = claudeStructuredResult(
             decodeClaudeStdout(processResult2.stdout),
-            parseWorkflowSelectionResult
+            parseWorkflowSelectionResult2
           );
           requireCheckpointResultParity(terminal2.result(), parsed.result);
           return {
@@ -11536,7 +17432,7 @@ function createVendorAdapters(runner = runProcess) {
           request.repoRoot
         );
         const terminal = createCodexTerminalObserver(
-          parseWorkflowSelectionResult,
+          parseWorkflowSelectionResult2,
           request.onTerminalSuccess
         );
         const processResult = await run({
@@ -11561,7 +17457,7 @@ function createVendorAdapters(runner = runProcess) {
             processResult
           );
         }
-        const result = parseWorkflowSelectionResult(
+        const result = parseWorkflowSelectionResult2(
           await readCodexResult(outputPath)
         );
         requireCheckpointResultParity(terminal.result(), result);
@@ -11584,7 +17480,7 @@ function createVendorAdapters(runner = runProcess) {
             request.repoRoot
           );
           const terminal2 = createClaudeTerminalObserver(
-            parsePhaseResult,
+            parsePhaseResult2,
             request.onTerminalSuccess
           );
           const processResult2 = await run({
@@ -11610,7 +17506,7 @@ function createVendorAdapters(runner = runProcess) {
           }
           const parsed = claudeStructuredResult(
             decodeClaudeStdout(processResult2.stdout),
-            parsePhaseResult
+            parsePhaseResult2
           );
           requireCheckpointResultParity(terminal2.result(), parsed.result);
           return {
@@ -11634,7 +17530,7 @@ function createVendorAdapters(runner = runProcess) {
           request.repoRoot
         );
         const terminal = createCodexTerminalObserver(
-          parsePhaseResult,
+          parsePhaseResult2,
           request.onTerminalSuccess
         );
         const processResult = await run({
@@ -11654,7 +17550,7 @@ function createVendorAdapters(runner = runProcess) {
         if (processResult.exitCode !== 0) {
           throw processExitError("CODEX_PHASE_FAILED", "Codex", processResult);
         }
-        const result = parsePhaseResult(await readCodexResult(outputPath));
+        const result = parsePhaseResult2(await readCodexResult(outputPath));
         requireCheckpointResultParity(terminal.result(), result);
         return {
           result,
@@ -11688,7 +17584,7 @@ function createVendorAdapters(runner = runProcess) {
             request.repoRoot
           );
           const terminal2 = createCodexTerminalObserver(
-            parseCurrentReviewResult,
+            parseCurrentReviewResult2,
             request.onTerminalSuccess
           );
           const processResult2 = await run({
@@ -11715,7 +17611,7 @@ function createVendorAdapters(runner = runProcess) {
               processResult2
             );
           }
-          const result = parseCurrentReviewResult(
+          const result = parseCurrentReviewResult2(
             await readCodexResult(outputPath)
           );
           requireCheckpointResultParity(terminal2.result(), result);
@@ -11732,7 +17628,7 @@ function createVendorAdapters(runner = runProcess) {
           request.repoRoot
         );
         const terminal = createClaudeTerminalObserver(
-          parseCurrentReviewResult,
+          parseCurrentReviewResult2,
           request.onTerminalSuccess
         );
         const processResult = await run({
@@ -11754,7 +17650,7 @@ function createVendorAdapters(runner = runProcess) {
         }
         const parsed = claudeStructuredResult(
           decodeClaudeStdout(processResult.stdout),
-          parseCurrentReviewResult
+          parseCurrentReviewResult2
         );
         requireCheckpointResultParity(terminal.result(), parsed.result);
         return {
@@ -11772,4996 +17668,24 @@ function createVendorAdapters(runner = runProcess) {
 }
 
 // src/agent-control.ts
-import path20 from "node:path";
-
-// ../../plugins/banzai/lib/artifact-storage.mjs
-var artifact_storage_exports = {};
-__export(artifact_storage_exports, {
-  ADOPTION_LABELS: () => ADOPTION_LABELS,
-  ArtifactStorageError: () => ArtifactStorageError,
-  BINDING_SCHEMA: () => BINDING_SCHEMA,
-  DECLARATION_PATH: () => DECLARATION_PATH,
-  DECLARATION_SCHEMA: () => DECLARATION_SCHEMA,
-  DISCOVERY_LIMIT: () => DISCOVERY_LIMIT,
-  GUIDANCE_MAX_BYTES: () => GUIDANCE_MAX_BYTES,
-  METADATA_LIMIT: () => METADATA_LIMIT,
-  REQUEST_SCHEMA: () => REQUEST_SCHEMA,
-  RESULT_SCHEMA: () => RESULT_SCHEMA,
-  SCAFFOLD_MARKER: () => SCAFFOLD_MARKER,
-  WORK_ROOT: () => WORK_ROOT,
-  acquireWork: () => acquireWork,
-  adoptionDiagnostic: () => adoptionDiagnostic,
-  artifactCommand: () => artifactCommand,
-  artifactRoles: () => artifactRoles,
-  canonicalJson: () => canonicalJson,
-  createWork: () => createWork,
-  digestBytes: () => digestBytes,
-  exactObject: () => exactObject,
-  fail: () => fail,
-  git: () => git,
-  hasRunnerWorkOwnership: () => hasRunnerWorkOwnership,
-  initializeArtifacts: () => initializeArtifacts,
-  inspectArtifacts: () => inspectArtifacts,
-  inspectBoundWork: () => inspectBoundWork,
-  inspectProjectAdoption: () => inspectProjectAdoption,
-  makeDirectories: () => makeDirectories,
-  ownsArtifact: () => ownsArtifact,
-  parseBinding: () => parseBinding,
-  parseDeclaration: () => parseDeclaration,
-  privateArtifactInventory: () => privateArtifactInventory,
-  projectRoot: () => projectRoot,
-  publishNew: () => publishNew,
-  readAdoptionFile: () => readAdoptionFile,
-  readBinding: () => readBinding,
-  readBytes: () => readBytes,
-  readInvocationBytes: () => readInvocationBytes,
-  readJson: () => readJson,
-  readSharedReviewSnapshot: () => parseReviewSnapshot,
-  relativePath: () => relativePath,
-  releaseWork: () => releaseWork,
-  runArtifactOperation: () => runArtifactOperation,
-  safePath: () => safePath,
-  sealSharedReviewSnapshot: () => sealReviewSnapshot,
-  verifyIgnores: () => verifyIgnores,
-  withRunnerWorkOwnership: () => withRunnerWorkOwnership,
-  writeArtifact: () => writeArtifact
-});
-
-// ../../plugins/banzai/lib/review-snapshot.mjs
-import { createHash as createHash5 } from "node:crypto";
-var digestCanonicalJson2 = (value) => createHash5("sha256").update(canonicalJson(value)).digest("hex");
-var digestArtifactEntries = (entries) => createHash5("sha256").update(JSON.stringify({ version: 1, entries })).digest("hex");
-function reviewScopePath2(name) {
-  if (typeof name !== "string" || name.trim().length === 0 || /^[A-Za-z]:/u.test(name) || /[\\\0\r\n]/u.test(name) || name.startsWith("/") || name.split("/").some((part) => part === "" || part === "." || part === ".."))
-    throw new ArtifactStorageError(
-      "INVALID_REVIEW_SCOPE",
-      "Scope paths must be exact normalized repository-relative paths."
-    );
-  return name;
-}
-function invalid2(message) {
-  throw new ArtifactStorageError("INVALID_REVIEW_SNAPSHOT", message);
-}
-function sealReviewSnapshot(value) {
-  const snapshot = JSON.parse(JSON.stringify(value));
-  return parseReviewSnapshot({
-    ...snapshot,
-    digest: digestCanonicalJson2(snapshot)
-  });
-}
-function parseReviewSnapshot(value) {
-  try {
-    return parseSnapshot(value);
-  } catch (error) {
-    if (error instanceof ArtifactStorageError && error.code === "INVALID_REVIEW_SNAPSHOT")
-      throw error;
-    invalid2("Review snapshot contains invalid nested evidence.");
-  }
-}
-function object(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function equal(value, expected) {
-  return value === expected;
-}
-function parseSnapshot(value) {
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    invalid2("Review snapshot must be an object.");
-  const snapshot = value;
-  const { digest: digest3, ...body } = snapshot;
-  const keys3 = [
-    "schema",
-    "schemaVersion",
-    "runId",
-    "attemptId",
-    "outputContract",
-    "baseCommit",
-    "approval",
-    "approvedArtifacts",
-    "workspace",
-    "reviewMode",
-    "changes",
-    "anchor",
-    "fullReviewAnchor",
-    "triage",
-    "requiredFindingIds",
-    "completionSource",
-    "artifact",
-    "digest"
-  ];
-  if (snapshot.schemaVersion === 2) keys3.push("artifactBinding");
-  if (Object.keys(snapshot).length !== keys3.length || Object.keys(snapshot).some((key) => !keys3.includes(key)) || !(snapshot.schemaVersion === 1 && snapshot.schema === "banzai-review-snapshot/v1" || snapshot.schemaVersion === 2 && snapshot.schema === "banzai-review-snapshot/v2") || !equal(snapshot.outputContract, "review-result/v2") || !/^[a-f0-9]{64}$/u.test(digest3) || digest3 !== digestCanonicalJson2(body))
-    invalid2("Review snapshot version, shape or digest is invalid.");
-  for (const id of [snapshot.runId, snapshot.attemptId])
-    if (typeof id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(id))
-      invalid2("Review snapshot identity is invalid.");
-  if (snapshot.schemaVersion === 2) {
-    const bound = snapshot.artifactBinding;
-    if (!bound || Object.keys(bound).sort().join(",") !== "binding,sha256" || !/^[a-f0-9]{64}$/u.test(bound.sha256))
-      invalid2("Review snapshot binding is missing or malformed.");
-    parseBinding(bound.binding);
-    const workspace = snapshot.workspace;
-    if (workspace.schemaVersion !== 2 || workspace.artifactBindingDigest !== bound.sha256 || Object.keys(workspace).sort().join(",") !== "artifactBindingDigest,baseCommit,digest,entries,schemaVersion")
-      invalid2("Review snapshot workspace does not match its binding.");
-    const expectedDigest = createHash5("sha256").update(
-      JSON.stringify({
-        version: 2,
-        baseCommit: workspace.baseCommit,
-        artifactBindingDigest: bound.sha256,
-        entries: workspace.entries
-      })
-    ).digest("hex");
-    if (workspace.digest !== expectedDigest || new Set(workspace.entries.map((entry) => entry.path)).size !== workspace.entries.length || canonicalJson(workspace.entries) !== canonicalJson(
-      [...workspace.entries].sort(
-        (a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0
-      )
-    ))
-      invalid2("Review snapshot workspace entries or digest are invalid.");
-    const roles = bound.binding.artifacts;
-    if (snapshot.artifact.path !== `${roles.reviewDirectory}/review-${snapshot.artifact.iteration}.md` || snapshot.approval.paths.some(
-      (p) => p !== roles.description && p !== roles.plan && !/^documentation\/decisions\/[0-9]{4}-[a-z0-9-]+\.md$/u.test(p)
-    ) || snapshot.completionSource !== null && (snapshot.completionSource.implementationReport.path !== roles.implementationReport || snapshot.completionSource.testReport.path !== roles.testReport))
-      invalid2("Review snapshot evidence is outside its exact bound roles.");
-  } else if (snapshot.workspace.schemaVersion !== void 0 || snapshot.artifactBinding !== void 0) {
-    invalid2("Legacy review snapshots cannot carry private storage authority.");
-  }
-  const artifact = snapshot.artifact;
-  if (!object(artifact) || !object(snapshot.approval) || !object(snapshot.workspace) || !Array.isArray(snapshot.approval.paths) || !Array.isArray(snapshot.approvedArtifacts) || !Array.isArray(snapshot.workspace.entries) || !Array.isArray(snapshot.changes) || !Array.isArray(snapshot.triage) || !Array.isArray(snapshot.requiredFindingIds) || !Array.isArray(artifact.verification) || !["full", "delta"].includes(snapshot.reviewMode) || !Number.isInteger(artifact.iteration) || artifact.iteration < 1)
-    invalid2("Review snapshot evidence is malformed.");
-  if ("snapshot" in artifact || JSON.stringify(artifact.approvedArtifactPaths) !== JSON.stringify(snapshot.approval.paths) || artifact.workspaceDigest !== snapshot.workspace.digest || snapshot.baseCommit !== snapshot.workspace.baseCommit || new Set(snapshot.approval.paths).size !== snapshot.approval.paths.length || snapshot.approvedArtifacts.length !== snapshot.approval.paths.length)
-    invalid2("Review snapshot scope and workspace identities disagree.");
-  if (snapshot.approvedArtifacts.some(
-    (entry, index) => entry.path !== snapshot.approval.paths[index] || !/^[a-f0-9]{64}$/u.test(entry.sha256)
-  ))
-    invalid2("Approved artifact identities disagree with snapshot scope.");
-  if (digestArtifactEntries(snapshot.approvedArtifacts) !== snapshot.approval.digest)
-    invalid2(
-      "Review snapshot file identities do not match the approved bundle digest."
-    );
-  snapshot.approval.paths.forEach(reviewScopePath2);
-  reviewScopePath2(artifact.path);
-  reviewScopePath2(artifact.candidatePath);
-  if (new Set(snapshot.requiredFindingIds).size !== snapshot.requiredFindingIds.length || snapshot.requiredFindingIds.some(
-    (id) => typeof id !== "string" || !/^R[1-9][0-9]*-F[1-9][0-9]*$/u.test(id)
-  ))
-    invalid2("Snapshot accepted finding IDs are invalid.");
-  const hash2 = (value2) => typeof value2 === "string" && /^[a-f0-9]{64}$/u.test(value2);
-  const string = (value2) => typeof value2 === "string" && value2.length > 0;
-  if (!string(snapshot.baseCommit) || !equal(snapshot.approval.kind, "plan") || !hash2(snapshot.approval.digest) || !string(snapshot.approval.approvedBy) || !string(snapshot.approval.approvedAt) || !hash2(snapshot.workspace.digest) || !string(artifact.slug))
-    invalid2("Snapshot authority identity is malformed.");
-  const anchor = snapshot.fullReviewAnchor;
-  if (anchor !== null && (!Number.isInteger(anchor.iteration) || anchor.iteration < 1 || !string(anchor.sessionId) || !hash2(anchor.approvalDigest) || !equal(anchor.outputContract, "review-result/v2")))
-    invalid2("Full review anchor is malformed.");
-  if (snapshot.reviewMode === "delta" && (snapshot.anchor === null || anchor?.approvalDigest !== snapshot.approval.digest || anchor.iteration > snapshot.anchor.iteration || snapshot.anchor.iteration >= artifact.iteration || !["full", "delta"].includes(snapshot.anchor.mode)))
-    invalid2(
-      "Delta snapshot needs a compatible full review and canonical anchor."
-    );
-  for (const entry of snapshot.workspace.entries) {
-    reviewScopePath2(entry.path);
-    if (!string(entry.kind) || entry.sha256 !== null && !hash2(entry.sha256))
-      invalid2("Snapshot workspace entry is malformed.");
-  }
-  for (const change of snapshot.changes) {
-    reviewScopePath2(change.path);
-    if (!["added", "modified", "deleted"].includes(change.change))
-      invalid2("Snapshot change is malformed.");
-  }
-  for (const verification of artifact.verification) {
-    if (!string(verification.name) || !string(verification.command) || !Array.isArray(verification.args) || verification.args.some((arg) => typeof arg !== "string") || !Number.isInteger(verification.exitCode) || verification.signal !== null && !string(verification.signal) || !string(verification.startedAt) || !string(verification.completedAt))
-      invalid2("Snapshot verification is malformed.");
-    reviewScopePath2(verification.stdoutPath);
-    reviewScopePath2(verification.stderrPath);
-  }
-  if (snapshot.completionSource !== null) {
-    const source = snapshot.completionSource;
-    const projection = artifact.taskCompletion;
-    if (!equal(source.schemaVersion, 1) || !equal(source.status, "valid") || !string(source.sourceAttemptId) || !["implementation", "fix"].includes(source.sourceAttemptKind ?? "") || source.approvalDigest !== snapshot.approval.digest || !hash2(source.ledgerDigest) || !hash2(source.planTaskDigest) || source.ledgerDigest !== projection?.ledgerDigest || source.planTaskDigest !== projection.planTaskDigest || source.approvalDigest !== projection.approvalDigest || source.counts.total !== projection.total || source.counts.completed !== projection.completed || source.implementationReport.path !== projection.implementationReport || source.testReport.path !== projection.testReport)
-      invalid2("Snapshot completion identities disagree.");
-    for (const report of [source.implementationReport, source.testReport]) {
-      reviewScopePath2(report.path);
-      if (!hash2(report.sha256))
-        invalid2("Snapshot report identity is malformed.");
-    }
-  } else if (artifact.taskCompletion != null)
-    invalid2("Snapshot completion projection lacks original source evidence.");
-  return snapshot;
-}
-
-// ../../plugins/banzai/lib/project-adoption.mjs
-import { constants as constants5 } from "node:fs";
-import { lstat as lstat3, open as open3, realpath as realpath3, stat } from "node:fs/promises";
-import path7 from "node:path";
-var ADOPTION_LABELS = {
-  ready: "Project guidance ready",
-  setup_required: "Project setup required",
-  migration_required: "Project migration required",
-  needs_attention: "Project guidance needs attention"
-};
-var SCAFFOLD_MARKER = "<!-- banzai-scaffold: unfilled -->";
-var GUIDANCE_MAX_BYTES = 256 * 1024;
-var METADATA_MAX_BYTES = 64 * 1024;
-var MANIFEST_SECTIONS = [
-  "Project Overview",
-  "Platform & Tooling",
-  "Architecture",
-  "Project Structure",
-  "Key Modules & Components",
-  "State & Data Flow",
-  "Dependencies",
-  "Testing",
-  "Conventions",
-  "Technical Constraints & Decision Index"
-];
-var POLICY_HEADINGS = [
-  "Decision Consultation",
-  "Test Assurance",
-  "Security Assurance",
-  "Engineering Quality",
-  "Plan Task Completion Evidence"
-];
-var SOURCE_FILES = [
-  ".claude-plugin/plugin.json",
-  ".codex-plugin/plugin.json",
-  "package.json",
-  ".claude-plugin/marketplace.json",
-  "plugins/banzai/.claude-plugin/plugin.json",
-  "plugins/banzai/.codex-plugin/plugin.json"
-];
-function contained(root, target) {
-  const relative = path7.relative(root, target);
-  return relative !== ".." && !relative.startsWith(`..${path7.sep}`) && !path7.isAbsolute(relative);
-}
-async function readAdoptionFile(root, file, limit) {
-  const missing3 = { text: null, problem: null };
-  const unsafe = { text: null, problem: "unsafe or unreadable file" };
-  try {
-    let candidate = root;
-    for (const part of file.split("/")) {
-      candidate = path7.join(candidate, part);
-      try {
-        await lstat3(candidate);
-      } catch (error) {
-        if (error.code === "ENOENT") return missing3;
-        return unsafe;
-      }
-      if (!contained(root, await realpath3(candidate))) return unsafe;
-    }
-    const resolved = await realpath3(candidate);
-    const before = await stat(resolved);
-    if (!before.isFile() || (before.mode & 292) === 0) return unsafe;
-    if (before.size > limit)
-      return { text: null, problem: "file exceeds size limit" };
-    const handle = await open3(
-      resolved,
-      constants5.O_RDONLY | constants5.O_NONBLOCK | constants5.O_NOFOLLOW
-    );
-    try {
-      const opened = await handle.stat();
-      if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino)
-        return unsafe;
-      const buffer = Buffer.alloc(limit + 1);
-      let length = 0;
-      while (length < buffer.length) {
-        const { bytesRead } = await handle.read(
-          buffer,
-          length,
-          buffer.length - length,
-          length
-        );
-        if (bytesRead === 0) break;
-        length += bytesRead;
-      }
-      if (length > limit)
-        return { text: null, problem: "file exceeds size limit" };
-      const after = await handle.stat();
-      const current = await stat(candidate);
-      if ([opened, after, current].some(
-        (value) => value.dev !== before.dev || value.ino !== before.ino || value.size !== before.size || value.mtimeMs !== before.mtimeMs || value.ctimeMs !== before.ctimeMs
-      ) || await realpath3(candidate) !== resolved || length !== after.size) {
-        return { text: null, problem: "file changed during inspection" };
-      }
-      return {
-        text: new TextDecoder("utf-8", { fatal: true }).decode(
-          buffer.subarray(0, length)
-        ),
-        problem: null
-      };
-    } finally {
-      await handle.close();
-    }
-  } catch {
-    return unsafe;
-  }
-}
-function visibleMarkdown(text) {
-  let comment = false;
-  let fence = null;
-  const lines = [];
-  for (const raw of text.split(/\r?\n/)) {
-    if (fence !== null) {
-      const close = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(raw);
-      if (close?.[1]?.[0] === fence.marker && close[1].length >= fence.length)
-        fence = null;
-      continue;
-    }
-    let line = "";
-    let offset = 0;
-    while (offset < raw.length) {
-      const index = raw.indexOf(comment ? "-->" : "<!--", offset);
-      if (index < 0) {
-        if (!comment) line += raw.slice(offset);
-        break;
-      }
-      if (!comment) line += raw.slice(offset, index);
-      offset = index + (comment ? 3 : 4);
-      comment = !comment;
-    }
-    const start = /^ {0,3}(`{3,}|~{3,})/.exec(line);
-    if (start?.[1]) {
-      fence = { marker: start[1].charAt(0), length: start[1].length };
-      continue;
-    }
-    lines.push(line);
-  }
-  return lines;
-}
-function headings(text) {
-  return new Set(
-    visibleMarkdown(text).flatMap((line) => {
-      const match = /^ {0,3}##[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(line);
-      return match?.[1] ? [match[1]] : [];
-    })
-  );
-}
-function object2(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-async function sourceIdentity(root, issues) {
-  const metadata = await Promise.all(
-    SOURCE_FILES.map(
-      (file) => readAdoptionFile(root, file, METADATA_MAX_BYTES)
-    )
-  );
-  const values = metadata.map((entry, index) => {
-    let problem = entry.problem;
-    if (entry.text !== null) {
-      try {
-        const value = JSON.parse(entry.text);
-        if (object2(value)) return value;
-      } catch {
-      }
-      problem = "invalid identity metadata";
-    }
-    if (problem)
-      issues.push({
-        file: SOURCE_FILES[index] ?? "plugin metadata",
-        reason: problem,
-        classification: "needs_attention"
-      });
-    return null;
-  });
-  const [claude, codex, pkg, marketplace, nestedClaude, nestedCodex] = values;
-  const roots = [claude, codex].filter((value) => value !== null);
-  const rootCandidate = roots.some((value) => value?.name === "banzai");
-  const pluginRoot = rootCandidate && roots.every((value) => value?.name === "banzai") && metadata.slice(0, 2).every((entry, index) => entry.text === null || values[index] !== null);
-  if (rootCandidate && !pluginRoot) {
-    issues.push({
-      file: ".claude-plugin/plugin.json / .codex-plugin/plugin.json",
-      reason: "conflicting source identity",
-      classification: "needs_attention"
-    });
-  }
-  const entries = Array.isArray(marketplace?.plugins) ? marketplace.plugins.filter(
-    (value) => object2(value) && value.name === "banzai"
-  ) : [];
-  const sourceWorkspace = pkg?.name === "banzai-spec-driven-dev" && pkg.private === true && Array.isArray(pkg.workspaces) && pkg.workspaces.includes("packages/*") && entries.length === 1 && object2(entries[0]) && entries[0].source === "./plugins/banzai" && nestedClaude?.name === "banzai" && nestedCodex?.name === "banzai";
-  if (pkg?.name === "banzai-spec-driven-dev" && (entries.length > 1 || [nestedClaude, nestedCodex].some(
-    (value) => value && value.name !== "banzai"
-  ))) {
-    issues.push({
-      file: "package.json / plugin metadata",
-      reason: "conflicting source identity",
-      classification: "needs_attention"
-    });
-  }
-  return !issues.some((issue3) => issue3.classification === "needs_attention") && (pluginRoot || sourceWorkspace);
-}
-function inspectManifest(text, issues) {
-  for (const line of text.split(/\r?\n/)) {
-    if (/^ {0,3}#{1,6}(?:[ \t]|$)/.test(line)) break;
-    if (line === SCAFFOLD_MARKER) {
-      issues.push({
-        file: "PROJECT_MANIFEST.md",
-        reason: "scaffold marker present",
-        classification: "setup_required"
-      });
-      return;
-    }
-  }
-  const sections = [];
-  for (const line of visibleMarkdown(text)) {
-    const match = /^ {0,3}##[ \t]+(?:\d+\.[ \t]+)?(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(line);
-    if (match?.[1]) sections.push({ name: match[1], content: false });
-    else if (line.trim() && !/^ {0,3}#{1,6}(?:[ \t]|$)/.test(line) && sections.length > 0) {
-      const section = sections.at(-1);
-      if (section) section.content = true;
-    }
-  }
-  if (sections.length !== MANIFEST_SECTIONS.length || sections.some(
-    (section, index) => section.name !== MANIFEST_SECTIONS[index] || !section.content
-  )) {
-    issues.push({
-      file: "PROJECT_MANIFEST.md",
-      reason: "required sections missing, empty or out of order",
-      classification: "setup_required"
-    });
-  }
-}
-async function inspectProjectAdoption(repoRoot, options = {}) {
-  const issues = [];
-  let root;
-  try {
-    root = await realpath3(repoRoot);
-  } catch {
-    return {
-      classification: "needs_attention",
-      label: ADOPTION_LABELS.needs_attention,
-      sourceRepository: false,
-      files: [],
-      issues: [
-        {
-          file: "AGENTS.md",
-          reason: "repository unreadable",
-          classification: "needs_attention"
-        }
-      ]
-    };
-  }
-  const sourceRepository = await sourceIdentity(root, issues);
-  const files = options.layoutOnly ? ["AGENTS.md", "CLAUDE.md"] : ["AGENTS.md", "CLAUDE.md", "PROJECT_MANIFEST.md"];
-  const entries = await Promise.all(
-    files.map((file) => readAdoptionFile(root, file, GUIDANCE_MAX_BYTES))
-  );
-  entries.forEach((entry, index) => {
-    if (entry.problem)
-      issues.push({
-        file: files[index] ?? "guidance",
-        reason: entry.problem,
-        classification: "needs_attention"
-      });
-  });
-  const agents = entries[0]?.text ?? null;
-  const claude = entries[1]?.text ?? null;
-  const agentHeadings = headings(agents ?? "");
-  const claudeHeadings = headings(claude ?? "");
-  const hasPolicy = (set) => POLICY_HEADINGS.some((heading) => set.has(heading));
-  if (!entries[0]?.problem && !entries[1]?.problem) {
-    if (sourceRepository) {
-      if (agents === null)
-        issues.push({
-          file: "AGENTS.md",
-          reason: "missing",
-          classification: "setup_required"
-        });
-    } else if (agents !== null && agentHeadings.has("Authority") && agentHeadings.has("Policies") && !/^@/m.test(agents) && !hasPolicy(claudeHeadings)) {
-    } else if (claudeHeadings.has("Engineering Quality") && !agentHeadings.has("Authority")) {
-      issues.push({
-        file: "AGENTS.md / CLAUDE.md",
-        reason: "legacy Banzai layout: run `project-manifest` to migrate",
-        classification: "migration_required"
-      });
-    } else if (![agentHeadings, claudeHeadings].some(
-      (set) => set.has("Authority") || hasPolicy(set)
-    )) {
-      issues.push({
-        file: "AGENTS.md",
-        reason: agents === null ? "missing" : "Banzai instruction layout absent",
-        classification: "setup_required"
-      });
-    } else {
-      issues.push({
-        file: "AGENTS.md / CLAUDE.md",
-        reason: "partial or conflicting instruction layout",
-        classification: "needs_attention"
-      });
-    }
-  }
-  if (!options.layoutOnly) {
-    const manifest = entries[2];
-    if (manifest && !manifest.problem) {
-      if (manifest.text === null)
-        issues.push({
-          file: "PROJECT_MANIFEST.md",
-          reason: "missing",
-          classification: "setup_required"
-        });
-      else inspectManifest(manifest.text, issues);
-    }
-  }
-  const classification = ["needs_attention", "migration_required", "setup_required"].find(
-    (value) => issues.some((issue3) => issue3.classification === value)
-  ) ?? "ready";
-  return {
-    classification,
-    label: ADOPTION_LABELS[classification],
-    sourceRepository,
-    files: entries.map((entry, index) => ({
-      file: files[index] ?? "guidance",
-      status: entry.problem ? "unreadable" : entry.text === null ? "missing" : "present"
-    })),
-    issues
-  };
-}
-function adoptionDiagnostic(result) {
-  return [
-    result.label,
-    ...result.issues.map((issue3) => `${issue3.file}: ${issue3.reason}`)
-  ].join(". ");
-}
-
-// ../../plugins/banzai/lib/artifact-readers.mjs
-import { createHash as createHash6 } from "node:crypto";
-var BanzaiError2 = class extends Error {
-  code;
-  exitCode;
-  constructor(code2, message, exitCode = 1) {
-    super(message);
-    this.name = "BanzaiError";
-    this.code = code2;
-    this.exitCode = exitCode;
-  }
-};
-function superseded2(replacement) {
-  return { replacement, standing: "superseded", date: null };
-}
-function deprecated2(replacement, date) {
-  return { replacement, standing: "deprecated", date };
-}
-function retired2(replacement, date) {
-  return { replacement, standing: "retired", date };
-}
-var OPUS2 = "claude-opus-5";
-var SONNET2 = "claude-sonnet-5";
-var HAIKU2 = "claude-haiku-4-5";
-var CLAUDE_CATALOG2 = {
-  supported: /* @__PURE__ */ new Set([
-    "claude-fable-5-1",
-    "claude-fable-5",
-    "claude-mythos-5",
-    OPUS2,
-    SONNET2,
-    "claude-opus-4-8",
-    "claude-sonnet-4-6",
-    HAIKU2,
-    "claude-haiku-4-5-20251001",
-    // Claude Code aliases always resolve to the current model of their tier.
-    "opus",
-    "sonnet",
-    "haiku",
-    "default"
-  ]),
-  replacements: /* @__PURE__ */ new Map([
-    ["claude-opus-4-7", superseded2(OPUS2)],
-    ["claude-opus-4-6", superseded2(OPUS2)],
-    ["claude-opus-4-5", superseded2(OPUS2)],
-    ["claude-opus-4-5-20251101", superseded2(OPUS2)],
-    ["claude-opus-4-1", deprecated2(OPUS2, "2026-08-05")],
-    ["claude-opus-4-1-20250805", deprecated2(OPUS2, "2026-08-05")],
-    ["claude-opus-4-0", deprecated2(OPUS2, "2026-06-15")],
-    ["claude-opus-4-20250514", deprecated2(OPUS2, "2026-06-15")],
-    ["claude-3-opus-20240229", retired2(OPUS2, "2026-01-05")],
-    ["claude-mythos-preview", superseded2("claude-fable-5")],
-    ["claude-sonnet-4-5", superseded2(SONNET2)],
-    ["claude-sonnet-4-5-20250929", superseded2(SONNET2)],
-    ["claude-sonnet-4-0", deprecated2(SONNET2, "2026-06-15")],
-    ["claude-sonnet-4-20250514", deprecated2(SONNET2, "2026-06-15")],
-    ["claude-3-7-sonnet-20250219", retired2(SONNET2, "2026-02-19")],
-    ["claude-3-5-sonnet-20241022", retired2(SONNET2, "2025-10-28")],
-    ["claude-3-5-sonnet-20240620", retired2(SONNET2, "2025-10-28")],
-    ["claude-3-sonnet-20240229", retired2(SONNET2, "2025-07-21")],
-    ["claude-3-5-haiku-20241022", retired2(HAIKU2, "2026-02-19")],
-    ["claude-3-haiku-20240307", deprecated2(HAIKU2, "2026-04-19")]
-  ])
-};
-var CODEX_CATALOG2 = {
-  supported: /* @__PURE__ */ new Set([
-    "gpt-6-astra",
-    "gpt-5.6-sol",
-    "gpt-5.6-terra",
-    "gpt-5.6-luna",
-    "gpt-5.5"
-  ]),
-  replacements: /* @__PURE__ */ new Map([["gpt-5", superseded2("gpt-5.5")]])
-};
-var FULL_EFFORTS2 = [
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max"
-];
-var CODEX_EFFORTS2 = [...FULL_EFFORTS2, "ultra"];
-var CONTRACT_VERSION2 = "1.0.0";
-var PHASE_RESULT_SCHEMA_VERSION2 = 3;
-var DECISION_CONSULTATION_SCHEMA2 = "banzai-decision-consultation/v1";
-var DECISION_CONSULTATION_SCHEMA_VERSION2 = 1;
-var PLAN_TASK_COMPLETION_SCHEMA_VERSION2 = 1;
-var VERIFICATION_LEDGER_SCHEMA_VERSION2 = 1;
-var MODEL_ATTEMPT_SCHEMA_VERSION2 = 2;
-var TERMINAL_CHECKPOINT_SCHEMA2 = "banzai-terminal-attempt-checkpoint/v1";
-var TERMINAL_CHECKPOINT_SCHEMA_VERSION2 = 1;
-var RECOVERY_AUTHORIZATION_SCHEMA2 = "banzai-recovery-authorization/v1";
-var RECOVERY_AUTHORIZATION_SCHEMA_VERSION2 = 1;
-var VERIFICATION_ATTEMPT_STATUSES2 = [
-  "started",
-  "completed",
-  "failed",
-  "interrupted"
-];
-var VERIFICATION_FAILURE_CATEGORIES2 = [
-  "command_exit",
-  "process_start",
-  "timeout",
-  "output_limit",
-  "runner_failure"
-];
-function isRecord2(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function requireRecord2(value, label) {
-  if (!isRecord2(value)) {
-    throw new BanzaiError2("INVALID_RESULT", `${label} must be an object.`);
-  }
-  return value;
-}
-function requireString2(value, label, allowEmpty = false) {
-  if (typeof value !== "string" || !allowEmpty && value.length === 0) {
-    throw new BanzaiError2(
-      "INVALID_RESULT",
-      `${label} must be a non-empty string.`
-    );
-  }
-  return value;
-}
-function requireNullableString2(value, label) {
-  if (value === null) {
-    return null;
-  }
-  return requireString2(value, label, true);
-}
-function requireStringArray2(value, label) {
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
-    throw new BanzaiError2(
-      "INVALID_RESULT",
-      `${label} must be an array of strings.`
-    );
-  }
-  return [...new Set(value)];
-}
-function requireEnum2(value, label, allowed) {
-  if (typeof value !== "string" || !allowed.includes(value)) {
-    throw new BanzaiError2(
-      "INVALID_RESULT",
-      `${label} must be one of: ${allowed.join(", ")}.`
-    );
-  }
-  return value;
-}
-function requirePositiveInteger2(value, label) {
-  if (!Number.isInteger(value) || value <= 0) {
-    throw new BanzaiError2(
-      "INVALID_CONFIG",
-      `${label} must be a positive integer.`
-    );
-  }
-  return value;
-}
-function parseArtifacts2(value) {
-  const record6 = requireRecord2(value, "artifacts");
-  return {
-    description: requireNullableString2(
-      record6.description,
-      "artifacts.description"
-    ),
-    plan: requireNullableString2(record6.plan, "artifacts.plan"),
-    adrs: requireStringArray2(record6.adrs, "artifacts.adrs"),
-    implementationReport: requireNullableString2(
-      record6.implementationReport,
-      "artifacts.implementationReport"
-    ),
-    testReport: requireNullableString2(record6.testReport, "artifacts.testReport")
-  };
-}
-var CONSULTATION_ID_PATTERN2 = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u;
-var UNSAFE_CONSULTATION_CONTROL2 = /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u;
-function consultationError2(message) {
-  throw new BanzaiError2("INVALID_RESULT", message);
-}
-function consultationRecord2(value, label, keys3) {
-  const record6 = requireRecord2(value, label);
-  exactKeys2(record6, keys3, "INVALID_RESULT", label);
-  return record6;
-}
-function consultationString2(value, label, maximum) {
-  if (typeof value !== "string" || value.length === 0 || value.length > maximum || UNSAFE_CONSULTATION_CONTROL2.test(value)) {
-    return consultationError2(
-      `${label} must be a bounded safe single-line string.`
-    );
-  }
-  return value;
-}
-function consultationIdentifier2(value, label) {
-  const identifier2 = consultationString2(value, label, 128);
-  if (identifier2 === "." || identifier2 === ".." || !CONSULTATION_ID_PATTERN2.test(identifier2)) {
-    return consultationError2(`${label} must be a canonical identifier.`);
-  }
-  return identifier2;
-}
-function consultationStrings2(value, label, maximumItems, maximumLength) {
-  if (!Array.isArray(value) || value.length > maximumItems) {
-    return consultationError2(`${label} must be a bounded string array.`);
-  }
-  const strings = value.map(
-    (item, index) => consultationString2(item, `${label}[${index}]`, maximumLength)
-  );
-  if (new Set(strings).size !== strings.length) {
-    return consultationError2(`${label} must not contain duplicates.`);
-  }
-  return strings;
-}
-function consultationPath2(value, label) {
-  const candidate = consultationString2(value, label, 300);
-  const segments = candidate.split("/");
-  if (candidate.startsWith("/") || candidate.includes("\\") || /^[A-Za-z]:\//u.test(candidate) || segments.some(
-    (segment) => segment === "" || segment === "." || segment === ".."
-  )) {
-    return consultationError2(
-      `${label} must be a repository-relative canonical path.`
-    );
-  }
-  return candidate;
-}
-function parseConsultationOption2(value, label) {
-  const record6 = consultationRecord2(value, label, [
-    "optionId",
-    "title",
-    "benefits",
-    "costs",
-    "risks",
-    "consequences"
-  ]);
-  return {
-    optionId: consultationIdentifier2(record6.optionId, `${label}.optionId`),
-    title: consultationString2(record6.title, `${label}.title`, 160),
-    benefits: consultationStrings2(record6.benefits, `${label}.benefits`, 8, 500),
-    costs: consultationStrings2(record6.costs, `${label}.costs`, 8, 500),
-    risks: consultationStrings2(record6.risks, `${label}.risks`, 8, 500),
-    consequences: consultationStrings2(
-      record6.consequences,
-      `${label}.consequences`,
-      8,
-      500
-    )
-  };
-}
-function parseConsultationCard2(value, index) {
-  const label = `decisionConsultation.decisions[${index}]`;
-  const record6 = consultationRecord2(value, label, [
-    "decisionId",
-    "title",
-    "question",
-    "why",
-    "affectedRequirements",
-    "evidence",
-    "decisionOwner",
-    "responseMode",
-    "options",
-    "recommendation"
-  ]);
-  if (record6.decisionOwner !== "human") {
-    return consultationError2(`${label}.decisionOwner must be human.`);
-  }
-  const responseMode = requireEnum2(
-    record6.responseMode,
-    `${label}.responseMode`,
-    ["single_choice", "free_text"]
-  );
-  if (!Array.isArray(record6.evidence) || record6.evidence.length < 1 || record6.evidence.length > 12) {
-    return consultationError2(
-      `${label}.evidence must contain one to twelve entries.`
-    );
-  }
-  const evidence2 = record6.evidence.map((item, evidenceIndex) => {
-    const evidenceLabel = `${label}.evidence[${evidenceIndex}]`;
-    const evidenceRecord = consultationRecord2(item, evidenceLabel, [
-      "path",
-      "line",
-      "detail"
-    ]);
-    const line = evidenceRecord.line === null ? null : Number.isSafeInteger(evidenceRecord.line) && evidenceRecord.line > 0 ? evidenceRecord.line : consultationError2(
-      `${evidenceLabel}.line must be a positive integer or null.`
-    );
-    return {
-      path: consultationPath2(evidenceRecord.path, `${evidenceLabel}.path`),
-      line,
-      detail: consultationString2(
-        evidenceRecord.detail,
-        `${evidenceLabel}.detail`,
-        500
-      )
-    };
-  });
-  if (!Array.isArray(record6.options) || record6.options.length > 6) {
-    return consultationError2(`${label}.options must be a bounded array.`);
-  }
-  const options = record6.options.map(
-    (option2, optionIndex) => parseConsultationOption2(option2, `${label}.options[${optionIndex}]`)
-  );
-  if (new Set(options.map((option2) => option2.optionId)).size !== options.length) {
-    return consultationError2(`${label}.option ids must be unique.`);
-  }
-  if (responseMode === "single_choice" && options.length < 2) {
-    return consultationError2(
-      `${label}.single_choice requires at least two material options.`
-    );
-  }
-  if (responseMode === "free_text" && options.length !== 0) {
-    return consultationError2(
-      `${label}.free_text cannot list selectable options.`
-    );
-  }
-  let recommendation = null;
-  if (record6.recommendation !== null) {
-    const recommendationRecord = consultationRecord2(
-      record6.recommendation,
-      `${label}.recommendation`,
-      ["optionId", "rationale"]
-    );
-    const optionId = consultationIdentifier2(
-      recommendationRecord.optionId,
-      `${label}.recommendation.optionId`
-    );
-    if (!options.some((option2) => option2.optionId === optionId)) {
-      return consultationError2(
-        `${label}.recommendation must reference a listed option.`
-      );
-    }
-    recommendation = {
-      optionId,
-      rationale: consultationString2(
-        recommendationRecord.rationale,
-        `${label}.recommendation.rationale`,
-        1e3
-      )
-    };
-  }
-  if (responseMode === "free_text" && recommendation !== null) {
-    return consultationError2(
-      `${label}.free_text cannot include a recommendation.`
-    );
-  }
-  const affectedRequirements = consultationStrings2(
-    record6.affectedRequirements,
-    `${label}.affectedRequirements`,
-    16,
-    120
-  );
-  if (affectedRequirements.length === 0) {
-    return consultationError2(
-      `${label}.affectedRequirements must identify at least one material concern.`
-    );
-  }
-  return {
-    decisionId: consultationIdentifier2(
-      record6.decisionId,
-      `${label}.decisionId`
-    ),
-    title: consultationString2(record6.title, `${label}.title`, 160),
-    question: consultationString2(record6.question, `${label}.question`, 1e3),
-    why: consultationString2(record6.why, `${label}.why`, 1200),
-    affectedRequirements,
-    evidence: evidence2,
-    decisionOwner: "human",
-    responseMode,
-    options,
-    recommendation
-  };
-}
-function parseDecisionConsultation2(value) {
-  if (value === null) {
-    return null;
-  }
-  if (Buffer.byteLength(JSON.stringify(value), "utf8") > 32 * 1024) {
-    return consultationError2(
-      "decisionConsultation must not exceed 32 KiB when serialized."
-    );
-  }
-  const record6 = consultationRecord2(value, "decisionConsultation", [
-    "schema",
-    "schemaVersion",
-    "requestId",
-    "roundId",
-    "decisions"
-  ]);
-  if (record6.schema !== DECISION_CONSULTATION_SCHEMA2 || record6.schemaVersion !== DECISION_CONSULTATION_SCHEMA_VERSION2) {
-    return consultationError2(
-      `decisionConsultation must use ${DECISION_CONSULTATION_SCHEMA2}.`
-    );
-  }
-  if (!Array.isArray(record6.decisions) || record6.decisions.length < 1 || record6.decisions.length > 3) {
-    return consultationError2(
-      "decisionConsultation.decisions must contain one to three cards."
-    );
-  }
-  const decisions = record6.decisions.map(parseConsultationCard2);
-  if (new Set(decisions.map((decision) => decision.decisionId)).size !== decisions.length) {
-    return consultationError2(
-      "decisionConsultation decision ids must be unique."
-    );
-  }
-  return {
-    schema: DECISION_CONSULTATION_SCHEMA2,
-    schemaVersion: DECISION_CONSULTATION_SCHEMA_VERSION2,
-    requestId: consultationIdentifier2(
-      record6.requestId,
-      "decisionConsultation.requestId"
-    ),
-    roundId: consultationIdentifier2(
-      record6.roundId,
-      "decisionConsultation.roundId"
-    ),
-    decisions
-  };
-}
-function completionError2(message) {
-  throw new BanzaiError2("PLAN_TASK_COMPLETION_INVALID", message);
-}
-function completionString2(value, label) {
-  if (typeof value !== "string" || value.length === 0 || value.length > 500 || /[\0\r\n]/u.test(value)) {
-    return completionError2(`${label} must be a bounded single-line string.`);
-  }
-  return value;
-}
-function parseTaskCompletion2(value) {
-  if (value === null) {
-    return null;
-  }
-  if (!isRecord2(value)) {
-    return completionError2("taskCompletion must be an object or null.");
-  }
-  if (value.schemaVersion !== PLAN_TASK_COMPLETION_SCHEMA_VERSION2) {
-    return completionError2(
-      `taskCompletion must use schema ${PLAN_TASK_COMPLETION_SCHEMA_VERSION2}.`
-    );
-  }
-  if (!Array.isArray(value.tasks) || value.tasks.length > 999) {
-    return completionError2("taskCompletion.tasks must be a bounded array.");
-  }
-  const tasks = value.tasks.map((item, index) => {
-    if (!isRecord2(item)) {
-      return completionError2(
-        `taskCompletion.tasks[${index}] must be an object.`
-      );
-    }
-    const taskId = completionString2(
-      item.taskId,
-      `taskCompletion.tasks[${index}].taskId`
-    );
-    if (!/^T[0-9]{3}$/u.test(taskId)) {
-      return completionError2(`${taskId} is not a canonical TNNN task id.`);
-    }
-    if (typeof item.status !== "string" || !["completed", "incomplete", "blocked"].includes(item.status)) {
-      return completionError2(`${taskId} has an invalid completion status.`);
-    }
-    if (!Array.isArray(item.evidence) || item.evidence.length > 16) {
-      return completionError2(`${taskId} evidence must be a bounded array.`);
-    }
-    const evidence2 = item.evidence.map((entry, evidenceIndex) => {
-      if (!isRecord2(entry)) {
-        return completionError2(
-          `${taskId} evidence[${evidenceIndex}] must be an object.`
-        );
-      }
-      return {
-        path: completionString2(
-          entry.path,
-          `${taskId} evidence[${evidenceIndex}].path`
-        ),
-        detail: completionString2(
-          entry.detail,
-          `${taskId} evidence[${evidenceIndex}].detail`
-        )
-      };
-    });
-    let gap = null;
-    if (item.gap !== null) {
-      if (!isRecord2(item.gap)) {
-        return completionError2(`${taskId} gap must be an object or null.`);
-      }
-      gap = {
-        reportPath: completionString2(item.gap.reportPath, `${taskId} gap path`),
-        section: completionString2(item.gap.section, `${taskId} gap section`),
-        detail: completionString2(item.gap.detail, `${taskId} gap detail`)
-      };
-    }
-    return {
-      taskId,
-      status: item.status,
-      evidence: evidence2,
-      gap
-    };
-  });
-  return { schemaVersion: PLAN_TASK_COMPLETION_SCHEMA_VERSION2, tasks };
-}
-function parseWorkflowSelectionResult2(value) {
-  const record6 = requireRecord2(value, "workflow selection");
-  if (record6.contractVersion !== CONTRACT_VERSION2) {
-    throw new BanzaiError2(
-      "CONTRACT_VERSION_MISMATCH",
-      `Workflow selection must use contract ${CONTRACT_VERSION2}.`
-    );
-  }
-  return {
-    contractVersion: CONTRACT_VERSION2,
-    recommendedWorkflow: requireEnum2(
-      record6.recommendedWorkflow,
-      "recommendedWorkflow",
-      ["quick-fix", "feature", "strict"]
-    ),
-    confidence: requireEnum2(record6.confidence, "confidence", [
-      "high",
-      "medium",
-      "low"
-    ]),
-    reason: requireString2(record6.reason, "reason"),
-    escalationTriggers: requireStringArray2(
-      record6.escalationTriggers,
-      "escalationTriggers"
-    )
-  };
-}
-function parsePhaseResult2(value) {
-  const record6 = requireRecord2(value, "phase result");
-  exactKeys2(
-    record6,
-    [
-      "schemaVersion",
-      "contractVersion",
-      "phase",
-      "outcome",
-      "gate",
-      "summary",
-      "artifacts",
-      "taskCompletion",
-      "touchedPaths",
-      "questions",
-      "decisionConsultation",
-      "resolvedFindingIds",
-      "requestedVerification"
-    ],
-    "INVALID_RESULT",
-    "Phase result"
-  );
-  if (record6.schemaVersion !== PHASE_RESULT_SCHEMA_VERSION2) {
-    throw new BanzaiError2(
-      "PHASE_RESULT_SCHEMA_MISMATCH",
-      `Phase result must use schema ${PHASE_RESULT_SCHEMA_VERSION2}.`
-    );
-  }
-  if (record6.contractVersion !== CONTRACT_VERSION2) {
-    throw new BanzaiError2(
-      "CONTRACT_VERSION_MISMATCH",
-      `Phase result must use contract ${CONTRACT_VERSION2}.`
-    );
-  }
-  const gate = record6.gate === null ? null : requireEnum2(record6.gate, "gate", [
-    "adr_approval",
-    "plan_approval",
-    "escalation",
-    "decision_consultation"
-  ]);
-  const outcome = requireEnum2(record6.outcome, "outcome", [
-    "completed",
-    "needs_human_decision",
-    "blocked"
-  ]);
-  if (outcome === "needs_human_decision" && gate === null || outcome !== "needs_human_decision" && gate !== null) {
-    throw new BanzaiError2(
-      "INVALID_RESULT",
-      "A non-null gate and needs_human_decision outcome must appear together."
-    );
-  }
-  const phase = requireEnum2(record6.phase, "phase", [
-    "plan",
-    "implementation",
-    "fix"
-  ]);
-  const questions = requireStringArray2(record6.questions, "questions");
-  const decisionConsultation = parseDecisionConsultation2(
-    record6.decisionConsultation
-  );
-  const summary2 = gate === "decision_consultation" ? consultationString2(record6.summary, "summary", 1e3) : requireString2(record6.summary, "summary");
-  if (gate === "decision_consultation" ? phase !== "plan" || outcome !== "needs_human_decision" || decisionConsultation === null || questions.length !== 0 : decisionConsultation !== null) {
-    throw new BanzaiError2(
-      "INVALID_RESULT",
-      "decisionConsultation is allowed only for the planning decision_consultation gate with no escalation questions."
-    );
-  }
-  return {
-    schemaVersion: PHASE_RESULT_SCHEMA_VERSION2,
-    contractVersion: CONTRACT_VERSION2,
-    phase,
-    outcome,
-    gate,
-    summary: summary2,
-    artifacts: parseArtifacts2(record6.artifacts),
-    taskCompletion: parseTaskCompletion2(record6.taskCompletion),
-    touchedPaths: requireStringArray2(record6.touchedPaths, "touchedPaths"),
-    questions,
-    decisionConsultation,
-    resolvedFindingIds: requireStringArray2(
-      record6.resolvedFindingIds,
-      "resolvedFindingIds"
-    ),
-    requestedVerification: requireStringArray2(
-      record6.requestedVerification,
-      "requestedVerification"
-    )
-  };
-}
-function parsePersistedPhaseResult2(value) {
-  const record6 = requireRecord2(value, "persisted phase result");
-  if (record6.schemaVersion === PHASE_RESULT_SCHEMA_VERSION2) {
-    return parsePhaseResult2(record6);
-  }
-  const schemaVersion = record6.schemaVersion === 2 ? 2 : record6.schemaVersion === void 0 || record6.schemaVersion === 1 ? 1 : null;
-  if (schemaVersion === null) {
-    throw new BanzaiError2(
-      "PHASE_RESULT_SCHEMA_MISMATCH",
-      "Persisted phase result schema is unsupported."
-    );
-  }
-  exactKeys2(
-    record6,
-    schemaVersion === 1 ? [
-      ...Object.hasOwn(record6, "schemaVersion") ? ["schemaVersion"] : [],
-      "contractVersion",
-      "phase",
-      "outcome",
-      "gate",
-      "summary",
-      "artifacts",
-      "touchedPaths",
-      "questions",
-      "resolvedFindingIds",
-      "requestedVerification"
-    ] : [
-      "schemaVersion",
-      "contractVersion",
-      "phase",
-      "outcome",
-      "gate",
-      "summary",
-      "artifacts",
-      "taskCompletion",
-      "touchedPaths",
-      "questions",
-      "resolvedFindingIds",
-      "requestedVerification"
-    ],
-    "INVALID_RESULT",
-    "Persisted phase result"
-  );
-  if (record6.contractVersion !== CONTRACT_VERSION2) {
-    throw new BanzaiError2(
-      "CONTRACT_VERSION_MISMATCH",
-      `Phase result must use contract ${CONTRACT_VERSION2}.`
-    );
-  }
-  const phase = requireEnum2(record6.phase, "phase", [
-    "plan",
-    "implementation",
-    "fix"
-  ]);
-  const gate = record6.gate === null ? null : requireEnum2(record6.gate, "gate", [
-    "adr_approval",
-    "plan_approval",
-    "escalation"
-  ]);
-  const reportedOutcome = requireEnum2(record6.outcome, "outcome", [
-    "completed",
-    "needs_human_decision",
-    "blocked"
-  ]);
-  const outcome = reportedOutcome === "completed" && gate !== null ? "needs_human_decision" : reportedOutcome;
-  if (outcome === "needs_human_decision" && gate === null) {
-    throw new BanzaiError2(
-      "INVALID_RESULT",
-      "needs_human_decision requires a non-null gate."
-    );
-  }
-  let artifacts;
-  if (schemaVersion === 1) {
-    const legacyArtifacts = consultationRecord2(record6.artifacts, "artifacts", [
-      "description",
-      "plan",
-      "adrs",
-      "implementationReport"
-    ]);
-    artifacts = {
-      description: requireNullableString2(
-        legacyArtifacts.description,
-        "artifacts.description"
-      ),
-      plan: requireNullableString2(legacyArtifacts.plan, "artifacts.plan"),
-      adrs: requireStringArray2(legacyArtifacts.adrs, "artifacts.adrs"),
-      implementationReport: requireNullableString2(
-        legacyArtifacts.implementationReport,
-        "artifacts.implementationReport"
-      ),
-      testReport: null
-    };
-  } else {
-    artifacts = parseArtifacts2(record6.artifacts);
-  }
-  return {
-    schemaVersion,
-    contractVersion: CONTRACT_VERSION2,
-    phase,
-    outcome,
-    gate,
-    summary: requireString2(record6.summary, "summary"),
-    artifacts,
-    taskCompletion: schemaVersion === 1 ? null : parseTaskCompletion2(record6.taskCompletion),
-    touchedPaths: requireStringArray2(record6.touchedPaths, "touchedPaths"),
-    questions: requireStringArray2(record6.questions, "questions"),
-    resolvedFindingIds: requireStringArray2(
-      record6.resolvedFindingIds,
-      "resolvedFindingIds"
-    ),
-    requestedVerification: requireStringArray2(
-      record6.requestedVerification,
-      "requestedVerification"
-    )
-  };
-}
-function parseEvidence2(value, findingId) {
-  const record6 = requireRecord2(value, `${findingId}.evidence`);
-  const line = record6.line === null ? null : requirePositiveInteger2(record6.line, `${findingId}.evidence.line`);
-  return {
-    path: requireString2(record6.path, `${findingId}.evidence.path`),
-    line,
-    detail: requireString2(record6.detail, `${findingId}.evidence.detail`)
-  };
-}
-function parseFinding2(value) {
-  const record6 = requireRecord2(value, "finding");
-  const id = requireString2(record6.id, "finding.id");
-  if (!/^R[1-9][0-9]*-F[1-9][0-9]*$/.test(id)) {
-    throw new BanzaiError2(
-      "INVALID_RESULT",
-      `Finding id ${id} must match R<iteration>-F<number>.`
-    );
-  }
-  if (!Array.isArray(record6.evidence) || record6.evidence.length === 0) {
-    throw new BanzaiError2(
-      "INVALID_RESULT",
-      `${id}.evidence must contain at least one item.`
-    );
-  }
-  return {
-    id,
-    severity: requireEnum2(record6.severity, `${id}.severity`, [
-      "blocker",
-      "should_fix",
-      "nit"
-    ]),
-    category: requireEnum2(record6.category, `${id}.category`, [
-      "spec",
-      "plan",
-      "adr",
-      "correctness",
-      "test",
-      "security",
-      "maintainability",
-      "documentation"
-    ]),
-    summary: requireString2(record6.summary, `${id}.summary`),
-    evidence: record6.evidence.map((item) => parseEvidence2(item, id)),
-    violates: requireStringArray2(record6.violates, `${id}.violates`),
-    reproduction: requireNullableString2(
-      record6.reproduction,
-      `${id}.reproduction`
-    ),
-    fixAcceptance: requireString2(record6.fixAcceptance, `${id}.fixAcceptance`),
-    confidence: requireEnum2(record6.confidence, `${id}.confidence`, [
-      "high",
-      "medium",
-      "low"
-    ])
-  };
-}
-function parseReviewFields2(value) {
-  const record6 = requireRecord2(value, "review result");
-  if (record6.contractVersion !== CONTRACT_VERSION2) {
-    throw new BanzaiError2(
-      "CONTRACT_VERSION_MISMATCH",
-      `Review result must use contract ${CONTRACT_VERSION2}.`
-    );
-  }
-  if (!Array.isArray(record6.findings)) {
-    throw new BanzaiError2("INVALID_RESULT", "findings must be an array.");
-  }
-  const findings = record6.findings.map(parseFinding2);
-  const ids = new Set(findings.map((finding) => finding.id));
-  if (ids.size !== findings.length) {
-    throw new BanzaiError2("INVALID_RESULT", "Finding ids must be unique.");
-  }
-  const verdict = requireEnum2(record6.verdict, "verdict", [
-    "pass",
-    "changes_requested",
-    "replan_required",
-    "blocked"
-  ]);
-  if (verdict === "pass" && findings.length > 0) {
-    throw new BanzaiError2(
-      "INVALID_RESULT",
-      "A passing review cannot contain findings."
-    );
-  }
-  if (verdict === "changes_requested" && findings.length === 0) {
-    throw new BanzaiError2(
-      "INVALID_RESULT",
-      "changes_requested must contain at least one finding."
-    );
-  }
-  return {
-    contractVersion: CONTRACT_VERSION2,
-    verdict,
-    summary: requireString2(record6.summary, "summary"),
-    findings,
-    reviewedFindingIds: requireStringArray2(
-      record6.reviewedFindingIds,
-      "reviewedFindingIds"
-    ),
-    deferredCoverage: requireStringArray2(
-      record6.deferredCoverage,
-      "deferredCoverage"
-    )
-  };
-}
-function parseReviewResult2(value) {
-  const record6 = requireRecord2(value, "review result");
-  if (record6.schemaVersion !== void 0 || record6.scopeAcknowledgment !== void 0 || record6.reviewNotes !== void 0) {
-    return parseCurrentReviewResult2(value);
-  }
-  return parseReviewFields2(value);
-}
-function reviewScopePath3(value) {
-  const name = requireString2(value, "scope path");
-  if (/^[A-Za-z]:/u.test(name) || /[\\\0\r\n]/u.test(name) || name.startsWith("/") || name.split("/").some((part) => part === "" || part === "." || part === "..")) {
-    throw new BanzaiError2(
-      "INVALID_REVIEW_SCOPE",
-      "Scope paths must be exact normalized repository-relative paths."
-    );
-  }
-  return name;
-}
-function parseCurrentReviewResult2(value) {
-  const record6 = requireRecord2(value, "review result");
-  if (record6.schemaVersion !== 2)
-    throw new BanzaiError2(
-      "REVIEW_RESULT_SCHEMA_MISMATCH",
-      "New reviews require review-result/v2."
-    );
-  exactKeys2(
-    record6,
-    [
-      "contractVersion",
-      "schemaVersion",
-      "verdict",
-      "summary",
-      "findings",
-      "reviewedFindingIds",
-      "deferredCoverage",
-      "reviewNotes",
-      "scopeAcknowledgment"
-    ],
-    "INVALID_RESULT",
-    "Review result"
-  );
-  const result = parseReviewFields2(value);
-  const strings = (value2, label) => {
-    requireStringArray2(value2, label);
-    return [...value2];
-  };
-  result.reviewedFindingIds = strings(
-    record6.reviewedFindingIds,
-    "reviewedFindingIds"
-  );
-  result.deferredCoverage = strings(
-    record6.deferredCoverage,
-    "deferredCoverage"
-  );
-  for (const [index, item] of record6.findings.entries()) {
-    const finding = requireRecord2(item, "finding");
-    const parsedFinding = result.findings[index];
-    if (parsedFinding === void 0)
-      throw new BanzaiError2("INVALID_RESULT", "Finding is missing.");
-    parsedFinding.violates = strings(finding.violates, "violates");
-    exactKeys2(
-      finding,
-      [
-        "id",
-        "severity",
-        "category",
-        "confidence",
-        "summary",
-        "evidence",
-        "violates",
-        "reproduction",
-        "fixAcceptance"
-      ],
-      "INVALID_RESULT",
-      "Finding"
-    );
-    for (const evidence2 of finding.evidence)
-      exactKeys2(
-        requireRecord2(evidence2, "evidence"),
-        ["path", "line", "detail"],
-        "INVALID_RESULT",
-        "Finding evidence"
-      );
-  }
-  const acknowledgment = requireRecord2(
-    record6.scopeAcknowledgment,
-    "scopeAcknowledgment"
-  );
-  exactKeys2(
-    acknowledgment,
-    ["schemaVersion", "snapshotDigest", "artifacts"],
-    "INVALID_REVIEW_SCOPE",
-    "Scope acknowledgment"
-  );
-  if (acknowledgment.schemaVersion !== 1 || !Array.isArray(acknowledgment.artifacts))
-    throw new BanzaiError2(
-      "INVALID_REVIEW_SCOPE",
-      "Scope acknowledgment requires version 1 and explicit artifacts."
-    );
-  const snapshotDigest = evidenceDigest2(
-    acknowledgment.snapshotDigest,
-    "INVALID_REVIEW_SCOPE",
-    "snapshotDigest"
-  );
-  const artifacts = acknowledgment.artifacts.map((value2) => {
-    const entry = requireRecord2(value2, "scope entry");
-    exactKeys2(
-      entry,
-      ["path", "status", "reason"],
-      "INVALID_REVIEW_SCOPE",
-      "Scope entry"
-    );
-    const path28 = reviewScopePath3(entry.path);
-    const status = requireEnum2(entry.status, "scope status", [
-      "reviewed",
-      "not_reviewed"
-    ]);
-    if (status === "reviewed" ? entry.reason !== null : typeof entry.reason !== "string" || entry.reason.trim().length === 0)
-      throw new BanzaiError2(
-        "INVALID_REVIEW_SCOPE",
-        "Reviewed scope requires a null reason; unreviewed scope requires a nonblank reason."
-      );
-    return { path: path28, status, reason: entry.reason };
-  });
-  if (new Set(artifacts.map((entry) => entry.path)).size !== artifacts.length || new Set(result.reviewedFindingIds).size !== result.reviewedFindingIds.length)
-    throw new BanzaiError2(
-      "INVALID_REVIEW_SCOPE",
-      "Scope and reviewed finding IDs must be unique."
-    );
-  if (result.verdict !== "blocked" && artifacts.some((entry) => entry.status === "not_reviewed"))
-    throw new BanzaiError2(
-      "INVALID_REVIEW_SCOPE",
-      "Incomplete required review scope must have a blocked verdict."
-    );
-  return {
-    ...result,
-    schemaVersion: 2,
-    reviewNotes: strings(record6.reviewNotes, "reviewNotes"),
-    scopeAcknowledgment: { schemaVersion: 1, snapshotDigest, artifacts }
-  };
-}
-function recoveryEvidenceError2(code2, message) {
-  throw new BanzaiError2(code2, message);
-}
-function exactKeys2(record6, allowed, code2, label) {
-  const allowedKeys = new Set(allowed);
-  const unknown = Object.keys(record6).filter((key) => !allowedKeys.has(key));
-  if (unknown.length > 0) {
-    recoveryEvidenceError2(
-      code2,
-      `${label} contains unknown fields: ${unknown.sort().join(", ")}.`
-    );
-  }
-}
-function evidenceString2(value, code2, label, maximum = 500) {
-  if (typeof value !== "string" || value.length === 0 || value.length > maximum || /[\0\r\n]/u.test(value)) {
-    return recoveryEvidenceError2(
-      code2,
-      `${label} must be a bounded single-line string.`
-    );
-  }
-  return value;
-}
-function evidenceNullableString2(value, code2, label, maximum = 500) {
-  return value === null ? null : evidenceString2(value, code2, label, maximum);
-}
-function evidenceIdentifier2(value, code2, label, maximum = 200) {
-  const identifier2 = evidenceString2(value, code2, label, maximum);
-  if (identifier2 === "." || identifier2 === ".." || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(identifier2)) {
-    return recoveryEvidenceError2(
-      code2,
-      `${label} must be a canonical safe identifier.`
-    );
-  }
-  return identifier2;
-}
-function evidenceDigest2(value, code2, label) {
-  const digest3 = evidenceString2(value, code2, label, 64);
-  if (!/^[a-f0-9]{64}$/u.test(digest3)) {
-    return recoveryEvidenceError2(code2, `${label} must be a SHA-256 digest.`);
-  }
-  return digest3;
-}
-function evidenceTimestamp2(value, code2, label) {
-  const timestamp = evidenceString2(value, code2, label, 64);
-  const normalized = normalizeRfc3339Instant2(timestamp);
-  if (normalized === void 0) {
-    return recoveryEvidenceError2(code2, `${label} must be an RFC 3339 time.`);
-  }
-  return normalized;
-}
-function stableJson2(value) {
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableJson2(item)).join(",")}]`;
-  }
-  if (isRecord2(value)) {
-    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson2(value[key])}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-function digestCanonicalJson3(value) {
-  return createHash6("sha256").update(stableJson2(value)).digest("hex");
-}
-function parseEvidenceAttempt2(value, code2, label) {
-  if (!isRecord2(value)) {
-    return recoveryEvidenceError2(code2, `${label} must be an object.`);
-  }
-  exactKeys2(value, ["id", "kind", "mutable"], code2, label);
-  const id = evidenceIdentifier2(value.id, code2, `${label}.id`, 200);
-  const kind = value.kind;
-  if (typeof kind !== "string" || !["selection", "plan", "implementation", "fix", "review"].includes(kind)) {
-    return recoveryEvidenceError2(code2, `${label}.kind is unsupported.`);
-  }
-  if (typeof value.mutable !== "boolean") {
-    return recoveryEvidenceError2(code2, `${label}.mutable must be boolean.`);
-  }
-  return {
-    id,
-    kind,
-    mutable: value.mutable
-  };
-}
-function parseEvidenceUsage2(value, code2, label) {
-  if (value === null) {
-    return null;
-  }
-  if (!isRecord2(value)) {
-    return recoveryEvidenceError2(code2, `${label} must be an object or null.`);
-  }
-  exactKeys2(
-    value,
-    ["inputTokens", "cachedInputTokens", "outputTokens", "costUsd"],
-    code2,
-    label
-  );
-  const numeric = (item, field, nullable = false) => {
-    if (nullable && item === null) {
-      return null;
-    }
-    if (typeof item !== "number" || !Number.isFinite(item) || item < 0) {
-      return recoveryEvidenceError2(
-        code2,
-        `${label}.${field} must be a non-negative number${nullable ? " or null" : ""}.`
-      );
-    }
-    return item;
-  };
-  const requiredNumeric = (item, field) => {
-    const parsed = numeric(item, field);
-    return parsed ?? recoveryEvidenceError2(code2, `${label}.${field} cannot be null.`);
-  };
-  return {
-    inputTokens: requiredNumeric(value.inputTokens, "inputTokens"),
-    cachedInputTokens: requiredNumeric(
-      value.cachedInputTokens,
-      "cachedInputTokens"
-    ),
-    outputTokens: requiredNumeric(value.outputTokens, "outputTokens"),
-    costUsd: numeric(value.costUsd, "costUsd", true)
-  };
-}
-function parseCheckpointResult2(kind, value, resultContract) {
-  if (kind === "selection") {
-    return parseWorkflowSelectionResult2(value);
-  }
-  if (kind === "review") {
-    if (resultContract === "review-result/v2")
-      return parseCurrentReviewResult2(value);
-    const legacy = requireRecord2(value, "legacy review");
-    if (legacy.schemaVersion !== void 0 || legacy.scopeAcknowledgment !== void 0 || legacy.reviewNotes !== void 0)
-      return recoveryEvidenceError2(
-        "INVALID_TERMINAL_CHECKPOINT",
-        "Legacy checkpoint cannot carry a new review result."
-      );
-    return parseReviewFields2(value);
-  }
-  if (resultContract === "phase-result/v3") {
-    return parsePhaseResult2(value);
-  }
-  const result = parsePersistedPhaseResult2(value);
-  if (result.schemaVersion !== 2) {
-    return recoveryEvidenceError2(
-      "INVALID_TERMINAL_CHECKPOINT",
-      "Legacy phase-result/v2 checkpoint must contain a v2 result."
-    );
-  }
-  return result;
-}
-function terminalCheckpointIntegrity2(checkpoint) {
-  return digestCanonicalJson3(checkpoint);
-}
-function parseTerminalAttemptCheckpoint2(value) {
-  const code2 = "INVALID_TERMINAL_CHECKPOINT";
-  if (!isRecord2(value)) {
-    return recoveryEvidenceError2(
-      code2,
-      "Terminal checkpoint must be an object."
-    );
-  }
-  exactKeys2(
-    value,
-    [
-      "schema",
-      "schemaVersion",
-      "runId",
-      "attempt",
-      "phase",
-      "configuration",
-      "resultContract",
-      "terminal",
-      "result",
-      "sessionId",
-      "usage",
-      "baseCommit",
-      "approvalDigest",
-      "workflowDigest",
-      "scopeDigest",
-      "integrityDigest"
-    ],
-    code2,
-    "Terminal checkpoint"
-  );
-  if (value.schema !== TERMINAL_CHECKPOINT_SCHEMA2 || value.schemaVersion !== TERMINAL_CHECKPOINT_SCHEMA_VERSION2) {
-    return recoveryEvidenceError2(
-      code2,
-      `Terminal checkpoint must use ${TERMINAL_CHECKPOINT_SCHEMA2}.`
-    );
-  }
-  const attempt = parseEvidenceAttempt2(value.attempt, code2, "attempt");
-  if (value.phase !== attempt.kind) {
-    return recoveryEvidenceError2(
-      code2,
-      "Checkpoint phase must match attempt kind."
-    );
-  }
-  if (!isRecord2(value.configuration)) {
-    return recoveryEvidenceError2(code2, "configuration must be an object.");
-  }
-  exactKeys2(
-    value.configuration,
-    [
-      "vendor",
-      "executableDigest",
-      "model",
-      "effort",
-      "sessionMode",
-      "sessionContextDigest"
-    ],
-    code2,
-    "configuration"
-  );
-  const vendor = value.configuration.vendor;
-  if (vendor !== "codex" && vendor !== "claude") {
-    return recoveryEvidenceError2(code2, "configuration.vendor is unsupported.");
-  }
-  const effort = value.configuration.effort;
-  if (typeof effort !== "string" || !["low", "medium", "high", "xhigh", "max", "ultra"].includes(effort)) {
-    return recoveryEvidenceError2(code2, "configuration.effort is unsupported.");
-  }
-  const sessionMode = value.configuration.sessionMode;
-  if (sessionMode !== "fresh" && sessionMode !== "resumed") {
-    return recoveryEvidenceError2(
-      code2,
-      "configuration.sessionMode is unsupported."
-    );
-  }
-  const resultContract = value.resultContract;
-  const expectedContract = attempt.kind === "selection" ? "workflow-selection/v1" : attempt.kind === "review" ? resultContract === "review-result/v2" ? "review-result/v2" : "review-result/v1" : resultContract === "phase-result/v2" ? "phase-result/v2" : "phase-result/v3";
-  if (resultContract !== expectedContract || attempt.kind !== "selection" && attempt.kind !== "review" && resultContract !== "phase-result/v2" && resultContract !== "phase-result/v3") {
-    return recoveryEvidenceError2(
-      code2,
-      `Checkpoint result contract must be ${expectedContract}.`
-    );
-  }
-  if (!isRecord2(value.terminal)) {
-    return recoveryEvidenceError2(code2, "terminal must be an object.");
-  }
-  exactKeys2(value.terminal, ["classification", "observedAt"], code2, "terminal");
-  const classification = value.terminal.classification;
-  if (classification !== "claude_result" && classification !== "codex_turn_completed") {
-    return recoveryEvidenceError2(
-      code2,
-      "terminal.classification is unsupported."
-    );
-  }
-  if (vendor === "claude" && classification !== "claude_result" || vendor === "codex" && classification !== "codex_turn_completed") {
-    return recoveryEvidenceError2(
-      code2,
-      "Terminal classification does not match the configured vendor."
-    );
-  }
-  const checkpointWithoutIntegrity = {
-    schema: TERMINAL_CHECKPOINT_SCHEMA2,
-    schemaVersion: TERMINAL_CHECKPOINT_SCHEMA_VERSION2,
-    runId: evidenceString2(value.runId, code2, "runId", 300),
-    attempt,
-    phase: attempt.kind,
-    configuration: {
-      vendor,
-      executableDigest: evidenceDigest2(
-        value.configuration.executableDigest,
-        code2,
-        "configuration.executableDigest"
-      ),
-      model: evidenceString2(
-        value.configuration.model,
-        code2,
-        "configuration.model"
-      ),
-      effort,
-      sessionMode,
-      sessionContextDigest: evidenceDigest2(
-        value.configuration.sessionContextDigest,
-        code2,
-        "configuration.sessionContextDigest"
-      )
-    },
-    resultContract: expectedContract,
-    terminal: {
-      classification,
-      observedAt: evidenceTimestamp2(
-        value.terminal.observedAt,
-        code2,
-        "terminal.observedAt"
-      )
-    },
-    result: parseCheckpointResult2(attempt.kind, value.result, expectedContract),
-    sessionId: evidenceNullableString2(value.sessionId, code2, "sessionId", 300),
-    usage: parseEvidenceUsage2(value.usage, code2, "usage"),
-    baseCommit: evidenceString2(value.baseCommit, code2, "baseCommit", 100),
-    approvalDigest: evidenceNullableString2(
-      value.approvalDigest,
-      code2,
-      "approvalDigest",
-      64
-    ),
-    workflowDigest: evidenceNullableString2(
-      value.workflowDigest,
-      code2,
-      "workflowDigest",
-      64
-    ),
-    scopeDigest: evidenceNullableString2(
-      value.scopeDigest,
-      code2,
-      "scopeDigest",
-      64
-    )
-  };
-  for (const [label, digest3] of [
-    ["approvalDigest", checkpointWithoutIntegrity.approvalDigest],
-    ["workflowDigest", checkpointWithoutIntegrity.workflowDigest],
-    ["scopeDigest", checkpointWithoutIntegrity.scopeDigest]
-  ]) {
-    if (digest3 !== null && !/^[a-f0-9]{64}$/u.test(digest3)) {
-      return recoveryEvidenceError2(code2, `${label} must be a SHA-256 digest.`);
-    }
-  }
-  const integrityDigest = evidenceDigest2(
-    value.integrityDigest,
-    code2,
-    "integrityDigest"
-  );
-  if (integrityDigest !== terminalCheckpointIntegrity2(checkpointWithoutIntegrity)) {
-    return recoveryEvidenceError2(
-      code2,
-      "Terminal checkpoint integrity mismatch."
-    );
-  }
-  return { ...checkpointWithoutIntegrity, integrityDigest };
-}
-function parseRecoveryAuthorization2(value) {
-  const code2 = "INVALID_RECOVERY_AUTHORIZATION";
-  if (!isRecord2(value)) {
-    return recoveryEvidenceError2(
-      code2,
-      "Recovery authorization must be an object."
-    );
-  }
-  exactKeys2(
-    value,
-    [
-      "schema",
-      "schemaVersion",
-      "authorizationId",
-      "runId",
-      "attempt",
-      "phase",
-      "recoveryIdentity",
-      "workspaceDigest",
-      "baseCommit",
-      "approvalDigest",
-      "workflowDigest",
-      "scopeDigest",
-      "configurationDigest",
-      "decidedBy",
-      "decidedAt",
-      "unknownSideEffectsAccepted"
-    ],
-    code2,
-    "Recovery authorization"
-  );
-  if (value.schema !== RECOVERY_AUTHORIZATION_SCHEMA2 || value.schemaVersion !== RECOVERY_AUTHORIZATION_SCHEMA_VERSION2) {
-    return recoveryEvidenceError2(
-      code2,
-      `Recovery authorization must use ${RECOVERY_AUTHORIZATION_SCHEMA2}.`
-    );
-  }
-  const attempt = parseEvidenceAttempt2(value.attempt, code2, "attempt");
-  if (attempt.kind !== "implementation" && attempt.kind !== "fix" || !attempt.mutable) {
-    return recoveryEvidenceError2(
-      code2,
-      "Recovery authorization requires a mutable implementation or fix attempt."
-    );
-  }
-  const phase = value.phase;
-  if (phase !== attempt.kind) {
-    return recoveryEvidenceError2(
-      code2,
-      "Recovery phase must match attempt kind."
-    );
-  }
-  if (value.unknownSideEffectsAccepted !== true) {
-    return recoveryEvidenceError2(
-      code2,
-      "Recovery requires unknownSideEffectsAccepted=true."
-    );
-  }
-  const nullableDigest = (item, label) => {
-    if (item === null) {
-      return null;
-    }
-    return evidenceDigest2(item, code2, label);
-  };
-  return {
-    schema: RECOVERY_AUTHORIZATION_SCHEMA2,
-    schemaVersion: RECOVERY_AUTHORIZATION_SCHEMA_VERSION2,
-    authorizationId: evidenceIdentifier2(
-      value.authorizationId,
-      code2,
-      "authorizationId",
-      200
-    ),
-    runId: evidenceIdentifier2(value.runId, code2, "runId", 300),
-    attempt,
-    phase: attempt.kind,
-    recoveryIdentity: evidenceDigest2(
-      value.recoveryIdentity,
-      code2,
-      "recoveryIdentity"
-    ),
-    workspaceDigest: evidenceDigest2(
-      value.workspaceDigest,
-      code2,
-      "workspaceDigest"
-    ),
-    baseCommit: evidenceString2(value.baseCommit, code2, "baseCommit", 100),
-    approvalDigest: nullableDigest(value.approvalDigest, "approvalDigest"),
-    workflowDigest: nullableDigest(value.workflowDigest, "workflowDigest"),
-    scopeDigest: nullableDigest(value.scopeDigest, "scopeDigest"),
-    configurationDigest: evidenceDigest2(
-      value.configurationDigest,
-      code2,
-      "configurationDigest"
-    ),
-    decidedBy: evidenceString2(value.decidedBy, code2, "decidedBy", 200),
-    decidedAt: evidenceTimestamp2(value.decidedAt, code2, "decidedAt"),
-    unknownSideEffectsAccepted: true
-  };
-}
-function parseModelAttemptRecord2(value) {
-  const code2 = "ATTEMPT_MALFORMED";
-  if (!isRecord2(value)) {
-    return recoveryEvidenceError2(code2, "Attempt record must be an object.");
-  }
-  exactKeys2(
-    value,
-    [
-      "schemaVersion",
-      "attempt",
-      "status",
-      "startedAt",
-      "completedAt",
-      "interruptedAt",
-      "recoveryOf",
-      "recoveryAuthorizationId",
-      "result",
-      "sessionId",
-      "rawStdoutPath",
-      "rawStderrPath",
-      "durationMs",
-      "usage",
-      "error",
-      "failureCode",
-      "failureCause",
-      "reviewCandidate",
-      "sessionMode",
-      "reviewMode",
-      "rotationReason",
-      "resumeSessionId",
-      "sessionContext",
-      "planningContext",
-      "reviewContext",
-      "reviewDiagnostics"
-    ],
-    code2,
-    "Attempt record"
-  );
-  if (value.schemaVersion !== 1 && value.schemaVersion !== MODEL_ATTEMPT_SCHEMA_VERSION2) {
-    return recoveryEvidenceError2(
-      code2,
-      "Attempt schema version is unsupported."
-    );
-  }
-  const attempt = parseEvidenceAttempt2(value.attempt, code2, "attempt");
-  if (value.rotationReason != null && (typeof value.rotationReason !== "string" || ![
-    "primary-review",
-    "missing-session",
-    "legacy-state",
-    "settings-changed",
-    "approval-changed",
-    "previous-review-failed",
-    "previous-review-interrupted",
-    "previous-review-blocked",
-    "accepted-high-risk-finding",
-    "delta-limit-reached",
-    "session-inventory-changed",
-    "unreliable-review",
-    "output-contract-not-reusable"
-  ].includes(value.rotationReason)))
-    return recoveryEvidenceError2(
-      code2,
-      "Unsupported runtime review rotation reason."
-    );
-  if (value.reviewDiagnostics !== void 0) {
-    if (attempt.kind !== "review" || !Array.isArray(value.reviewDiagnostics))
-      return recoveryEvidenceError2(
-        code2,
-        "Review diagnostics must belong to a review attempt."
-      );
-    for (const item of value.reviewDiagnostics) {
-      if (!isRecord2(item) || typeof item.stage !== "string" || !["render_validation", "publication_application", "recovery"].includes(
-        item.stage
-      ) || typeof item.code !== "string" || item.code.length === 0 || typeof item.message !== "string")
-        return recoveryEvidenceError2(code2, "Review diagnostic is malformed.");
-      exactKeys2(item, ["stage", "code", "message"], code2, "Review diagnostic");
-    }
-  }
-  if (value.reviewContext !== void 0) {
-    const context = value.reviewContext;
-    if (attempt.kind !== "review" || attempt.mutable || !isRecord2(context) || context.outputContract !== "review-result/v2")
-      return recoveryEvidenceError2(
-        code2,
-        "Review context requires a current immutable review attempt."
-      );
-    exactKeys2(
-      context,
-      ["outputContract", "snapshotDigest"],
-      code2,
-      "Review context"
-    );
-    evidenceDigest2(
-      context.snapshotDigest,
-      code2,
-      "reviewContext.snapshotDigest"
-    );
-  }
-  if (value.planningContext !== void 0) {
-    const context = value.planningContext;
-    if (attempt.kind !== "plan" || attempt.mutable || !isRecord2(context)) {
-      return recoveryEvidenceError2(
-        code2,
-        "Planning context requires a non-mutable plan attempt."
-      );
-    }
-    exactKeys2(
-      context,
-      ["invocationDigest", "workspaceDigest", "artifactPaths", "retryOf"],
-      code2,
-      "Planning context"
-    );
-    evidenceDigest2(
-      context.invocationDigest,
-      code2,
-      "planningContext.invocationDigest"
-    );
-    if (context.workspaceDigest !== null)
-      evidenceDigest2(
-        context.workspaceDigest,
-        code2,
-        "planningContext.workspaceDigest"
-      );
-    if (context.retryOf !== null) {
-      evidenceIdentifier2(context.retryOf, code2, "planningContext.retryOf");
-      if (context.retryOf === attempt.id)
-        return recoveryEvidenceError2(
-          code2,
-          "A planning retry cannot reference itself."
-        );
-    }
-    if (value.sessionId !== null)
-      evidenceIdentifier2(value.sessionId, code2, "sessionId", 300);
-    if (!Array.isArray(context.artifactPaths) || context.artifactPaths.length > 128) {
-      return recoveryEvidenceError2(
-        code2,
-        "Planning artifact paths must be a bounded array."
-      );
-    }
-    for (const item of context.artifactPaths) {
-      const candidate = evidenceString2(
-        item,
-        code2,
-        "planning artifact path",
-        300
-      );
-      if (candidate !== "PROJECT_MANIFEST.md" && !candidate.startsWith("documentation/") && !/^\.banzai\/work\/[0-9a-f-]{36}\/(?:description|plan)\.md$/.test(
-        candidate
-      ) || candidate.includes("\\") || candidate.split("/").some((part) => part === "" || part === "." || part === "..")) {
-        return recoveryEvidenceError2(
-          code2,
-          "Planning artifact paths must stay within the planning scope."
-        );
-      }
-    }
-  }
-  const status = value.status;
-  if (typeof status !== "string" || !["started", "completed", "failed", "interrupted"].includes(status) || value.schemaVersion === 1 && status === "interrupted") {
-    return recoveryEvidenceError2(code2, "Attempt status is unsupported.");
-  }
-  evidenceTimestamp2(value.startedAt, code2, "startedAt");
-  if (value.schemaVersion === MODEL_ATTEMPT_SCHEMA_VERSION2) {
-    if (!Object.hasOwn(value, "interruptedAt") || !Object.hasOwn(value, "recoveryOf") || !Object.hasOwn(value, "recoveryAuthorizationId")) {
-      return recoveryEvidenceError2(
-        code2,
-        "Attempt schema v2 requires interruption and recovery linkage fields."
-      );
-    }
-    if (status === "interrupted") {
-      evidenceTimestamp2(value.interruptedAt, code2, "interruptedAt");
-      if (value.completedAt !== null || value.durationMs !== null) {
-        return recoveryEvidenceError2(
-          code2,
-          "Interrupted attempts cannot claim completion time or duration."
-        );
-      }
-    } else if (value.interruptedAt !== null) {
-      return recoveryEvidenceError2(
-        code2,
-        "Only interrupted attempts may have interruptedAt."
-      );
-    }
-    if (value.recoveryOf !== null) {
-      evidenceIdentifier2(value.recoveryOf, code2, "recoveryOf", 200);
-    }
-    if (value.recoveryAuthorizationId !== null) {
-      evidenceIdentifier2(
-        value.recoveryAuthorizationId,
-        code2,
-        "recoveryAuthorizationId",
-        200
-      );
-    }
-    if (value.recoveryOf === null !== (value.recoveryAuthorizationId === null)) {
-      return recoveryEvidenceError2(
-        code2,
-        "Recovery linkage fields must both be present or both be null."
-      );
-    }
-  }
-  return value;
-}
-var VERIFICATION_PROJECT_TYPES2 = [
-  "repository",
-  "node",
-  "php",
-  "python",
-  "go",
-  "rust",
-  "ruby",
-  "jvm",
-  "dotnet",
-  "custom"
-];
-function verificationEvidenceError2(code2, field) {
-  return new BanzaiError2(
-    code2,
-    `Invalid verification evidence field: ${field}.`
-  );
-}
-function verificationRecord2(value, code2, field) {
-  if (!isRecord2(value)) {
-    throw verificationEvidenceError2(code2, field);
-  }
-  return value;
-}
-function verificationKeys2(value, allowed, code2, field) {
-  if (Object.keys(value).some((key) => !allowed.includes(key))) {
-    throw verificationEvidenceError2(code2, field);
-  }
-}
-function verificationString2(value, code2, field, pattern) {
-  if (typeof value !== "string" || value.length === 0 || pattern !== void 0 && !pattern.test(value)) {
-    throw verificationEvidenceError2(code2, field);
-  }
-  return value;
-}
-function verificationNullableString2(value, code2, field) {
-  if (value === null) {
-    return null;
-  }
-  return verificationString2(value, code2, field);
-}
-function verificationPositiveInteger2(value, code2, field) {
-  if (!Number.isInteger(value) || value <= 0) {
-    throw verificationEvidenceError2(code2, field);
-  }
-  return value;
-}
-function verificationNullableNonNegativeInteger2(value, code2, field) {
-  if (value === null) {
-    return null;
-  }
-  if (!Number.isInteger(value) || value < 0) {
-    throw verificationEvidenceError2(code2, field);
-  }
-  return value;
-}
-function verificationInstant2(value, code2, field) {
-  if (normalizeRfc3339Instant2(value) === void 0) {
-    throw verificationEvidenceError2(code2, field);
-  }
-  return value;
-}
-function parseVerificationLogEvidence2(value, code2, field) {
-  if (value === null) {
-    return null;
-  }
-  const record6 = verificationRecord2(value, code2, field);
-  verificationKeys2(record6, ["relativePath", "sha256"], code2, field);
-  const relativePath2 = verificationString2(
-    record6.relativePath,
-    code2,
-    `${field}.relativePath`
-  );
-  if (!relativePath2.startsWith("verification/") || relativePath2.includes("\\") || relativePath2.split("/").some((part) => part === "" || part === "." || part === "..")) {
-    throw verificationEvidenceError2(code2, `${field}.relativePath`);
-  }
-  return {
-    relativePath: relativePath2,
-    sha256: verificationString2(
-      record6.sha256,
-      code2,
-      `${field}.sha256`,
-      /^[a-f0-9]{64}$/
-    )
-  };
-}
-function parseVerificationAttemptRecord2(value) {
-  const code2 = "VERIFICATION_ATTEMPT_MALFORMED";
-  const record6 = verificationRecord2(value, code2, "attempt");
-  verificationKeys2(
-    record6,
-    [
-      "schemaVersion",
-      "id",
-      "sequence",
-      "round",
-      "command",
-      "status",
-      "startedAt",
-      "completedAt",
-      "durationMs",
-      "exitCode",
-      "signal",
-      "failureCategory",
-      "retryOf",
-      "restartOf",
-      "stdout",
-      "stderr"
-    ],
-    code2,
-    "attempt"
-  );
-  if (record6.schemaVersion !== VERIFICATION_LEDGER_SCHEMA_VERSION2) {
-    throw verificationEvidenceError2(code2, "schemaVersion");
-  }
-  const idPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
-  const id = verificationString2(record6.id, code2, "id", idPattern);
-  const sequence = verificationPositiveInteger2(
-    record6.sequence,
-    code2,
-    "sequence"
-  );
-  const roundRecord = verificationRecord2(record6.round, code2, "round");
-  verificationKeys2(
-    roundRecord,
-    ["id", "ordinal", "sourcePhase", "sourceAttemptId", "sourceAttemptKind"],
-    code2,
-    "round"
-  );
-  const sourceAttemptKind = requireEnum2(
-    roundRecord.sourceAttemptKind,
-    "round.sourceAttemptKind",
-    ["implementation", "fix"]
-  );
-  const sourcePhase = requireEnum2(
-    roundRecord.sourcePhase,
-    "round.sourcePhase",
-    ["implementation", "fix"]
-  );
-  if (sourcePhase !== sourceAttemptKind) {
-    throw verificationEvidenceError2(code2, "round.sourcePhase");
-  }
-  const round = {
-    id: verificationString2(roundRecord.id, code2, "round.id", idPattern),
-    ordinal: verificationPositiveInteger2(
-      roundRecord.ordinal,
-      code2,
-      "round.ordinal"
-    ),
-    sourcePhase,
-    sourceAttemptId: verificationString2(
-      roundRecord.sourceAttemptId,
-      code2,
-      "round.sourceAttemptId",
-      idPattern
-    ),
-    sourceAttemptKind
-  };
-  const commandRecord = verificationRecord2(record6.command, code2, "command");
-  verificationKeys2(
-    commandRecord,
-    [
-      "profileId",
-      "projectType",
-      "profileOrdinal",
-      "commandOrdinal",
-      "configurationDigest"
-    ],
-    code2,
-    "command"
-  );
-  const command = {
-    profileId: verificationString2(
-      commandRecord.profileId,
-      code2,
-      "command.profileId"
-    ),
-    projectType: requireEnum2(
-      commandRecord.projectType,
-      "command.projectType",
-      VERIFICATION_PROJECT_TYPES2
-    ),
-    profileOrdinal: verificationPositiveInteger2(
-      commandRecord.profileOrdinal,
-      code2,
-      "command.profileOrdinal"
-    ),
-    commandOrdinal: verificationPositiveInteger2(
-      commandRecord.commandOrdinal,
-      code2,
-      "command.commandOrdinal"
-    ),
-    configurationDigest: verificationString2(
-      commandRecord.configurationDigest,
-      code2,
-      "command.configurationDigest",
-      /^[a-f0-9]{64}$/
-    )
-  };
-  const status = requireEnum2(
-    record6.status,
-    "status",
-    VERIFICATION_ATTEMPT_STATUSES2
-  );
-  const startedAt = verificationInstant2(record6.startedAt, code2, "startedAt");
-  const completedAt = record6.completedAt === null ? null : verificationInstant2(record6.completedAt, code2, "completedAt");
-  const durationMs = verificationNullableNonNegativeInteger2(
-    record6.durationMs,
-    code2,
-    "durationMs"
-  );
-  const exitCode = verificationNullableNonNegativeInteger2(
-    record6.exitCode,
-    code2,
-    "exitCode"
-  );
-  const signal = verificationNullableString2(record6.signal, code2, "signal");
-  const failureCategory = record6.failureCategory === null ? null : requireEnum2(
-    record6.failureCategory,
-    "failureCategory",
-    VERIFICATION_FAILURE_CATEGORIES2
-  );
-  const retryOf = record6.retryOf === null ? null : verificationString2(record6.retryOf, code2, "retryOf", idPattern);
-  const restartOf = record6.restartOf === null ? null : verificationString2(record6.restartOf, code2, "restartOf", idPattern);
-  if (retryOf !== null && restartOf !== null) {
-    throw verificationEvidenceError2(code2, "retryOf");
-  }
-  const stdout = parseVerificationLogEvidence2(record6.stdout, code2, "stdout");
-  const stderr = parseVerificationLogEvidence2(record6.stderr, code2, "stderr");
-  const durationFromInstants = completedAt === null ? null : Date.parse(completedAt) - Date.parse(startedAt);
-  if (completedAt !== null && durationFromInstants !== durationMs || completedAt === null && durationMs !== null) {
-    throw verificationEvidenceError2(code2, "durationMs");
-  }
-  if (status === "started" && (completedAt !== null || exitCode !== null || signal !== null || failureCategory !== null || stdout !== null || stderr !== null)) {
-    throw verificationEvidenceError2(code2, "status");
-  }
-  if (status === "completed" && (completedAt === null || exitCode !== 0 || failureCategory !== null)) {
-    throw verificationEvidenceError2(code2, "status");
-  }
-  if (status === "failed" && (completedAt === null || failureCategory === null || failureCategory === "command_exit" && (exitCode === null || exitCode === 0))) {
-    throw verificationEvidenceError2(code2, "status");
-  }
-  if (status === "interrupted" && (completedAt === null || exitCode !== null || signal !== null || stdout !== null || stderr !== null)) {
-    throw verificationEvidenceError2(code2, "status");
-  }
-  return {
-    schemaVersion: VERIFICATION_LEDGER_SCHEMA_VERSION2,
-    id,
-    sequence,
-    round,
-    command,
-    status,
-    startedAt,
-    completedAt,
-    durationMs,
-    exitCode,
-    signal,
-    failureCategory,
-    retryOf,
-    restartOf,
-    stdout,
-    stderr
-  };
-}
-var RUN_STATUSES2 = [
-  "created",
-  "selecting",
-  "planning",
-  "needs_adr_approval",
-  "needs_plan_approval",
-  "needs_human_decision",
-  "plan_approved",
-  "implementing",
-  "verifying",
-  "reviewing",
-  "needs_triage",
-  "fixing",
-  "done",
-  "blocked",
-  "cancelled"
-];
-var ATTEMPT_KINDS2 = [
-  "selection",
-  "plan",
-  "implementation",
-  "fix",
-  "review"
-];
-var WORKFLOW_ROUTES2 = [
-  "quick-fix",
-  "feature",
-  "strict"
-];
-function evaluationError2(message) {
-  return new BanzaiError2("INVALID_EVALUATION_SOURCE", message);
-}
-function observed2(value) {
-  return { value, evidence: "observed" };
-}
-function absent2(legacy = false) {
-  return { value: null, evidence: legacy ? "legacy_absent" : "unknown" };
-}
-function invalid3() {
-  return { value: null, evidence: "invalid" };
-}
-function notApplicable2() {
-  return { value: null, evidence: "not_applicable" };
-}
-function issue2(issues, code2, field) {
-  issues.push({ code: code2, field });
-}
-function sourceValue2(record6, key, field, issues, parse, options = {}) {
-  if (!Object.hasOwn(record6, key)) {
-    if (options.required ?? true) {
-      issue2(
-        issues,
-        options.legacyAbsent === true ? "LEGACY_FIELD_ABSENT" : "STATE_FIELD_MISSING",
-        field
-      );
-    }
-    return absent2(options.legacyAbsent);
-  }
-  const value = record6[key];
-  if (value === null && options.nullable === true) {
-    return notApplicable2();
-  }
-  if (value === null) {
-    return absent2(options.legacyAbsent);
-  }
-  const parsed = parse(value);
-  if (parsed === void 0) {
-    issue2(issues, "STATE_FIELD_INVALID", field);
-    return invalid3();
-  }
-  return observed2(parsed);
-}
-function stringValue2(value) {
-  return typeof value === "string" && value.length > 0 ? value : void 0;
-}
-function contractVersionValue2(value) {
-  return typeof value === "string" && value.length <= 64 && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(value) ? value : void 0;
-}
-function nonNegativeNumber3(value) {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : void 0;
-}
-function nonNegativeInteger2(value) {
-  const parsed = nonNegativeNumber3(value);
-  return parsed !== void 0 && Number.isInteger(parsed) ? parsed : void 0;
-}
-function enumValue2(value, values) {
-  return typeof value === "string" && values.includes(value) ? value : void 0;
-}
-var RFC3339_INSTANT2 = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|([+-])(\d{2}):(\d{2}))$/;
-function daysInMonth2(year, month) {
-  if (month === 2) {
-    const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-    return leap ? 29 : 28;
-  }
-  return [4, 6, 9, 11].includes(month) ? 30 : 31;
-}
-function normalizeRfc3339Instant2(value) {
-  if (typeof value !== "string") {
-    return void 0;
-  }
-  const match = RFC3339_INSTANT2.exec(value);
-  if (match === null) {
-    return void 0;
-  }
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const hour = Number(match[4]);
-  const minute = Number(match[5]);
-  const second = Number(match[6]);
-  const offsetHour = Number(match[9] ?? 0);
-  const offsetMinute = Number(match[10] ?? 0);
-  if (month < 1 || month > 12 || day < 1 || day > daysInMonth2(year, month) || hour > 23 || minute > 59 || second > 59 || offsetHour > 23 || offsetMinute > 59) {
-    return void 0;
-  }
-  const instant3 = new Date(value);
-  return Number.isFinite(instant3.getTime()) ? instant3.toISOString() : void 0;
-}
-function rfc3339Value2(value) {
-  return normalizeRfc3339Instant2(value) === void 0 ? void 0 : value;
-}
-function metricValue2(record6, key, field, issues, legacyAbsent = false, nullable = false) {
-  if (record6 === null) {
-    return absent2(legacyAbsent);
-  }
-  return sourceValue2(record6, key, field, issues, nonNegativeNumber3, {
-    legacyAbsent,
-    nullable
-  });
-}
-function childRecord2(value, field, issues, legacyAbsent = false) {
-  if (isRecord2(value)) {
-    return value;
-  }
-  issue2(
-    issues,
-    legacyAbsent ? "LEGACY_FIELD_ABSENT" : "STATE_FIELD_INVALID",
-    field
-  );
-  return null;
-}
-function emptyStateMetrics2(legacy, issues) {
-  const missing3 = () => absent2(legacy);
-  issue2(
-    issues,
-    legacy ? "LEGACY_FIELD_ABSENT" : "STATE_FIELD_MISSING",
-    "metrics"
-  );
-  return {
-    attempts: {
-      selection: missing3(),
-      plan: missing3(),
-      implementation: missing3(),
-      fix: missing3(),
-      review: missing3(),
-      verification: missing3()
-    },
-    usage: {
-      inputTokens: missing3(),
-      cachedInputTokens: missing3(),
-      outputTokens: missing3(),
-      costUsd: missing3()
-    },
-    reviewFindingCount: missing3(),
-    sessions: { fresh: missing3(), resumed: missing3() },
-    reviews: { full: missing3(), delta: missing3(), rotations: missing3() },
-    triage: { accepted: missing3(), rejected: missing3(), deferred: missing3() }
-  };
-}
-function parseStateMetrics2(value, schemaVersion, issues) {
-  if (!isRecord2(value)) {
-    return emptyStateMetrics2(schemaVersion === 1, issues);
-  }
-  const attempts = childRecord2(value.attempts, "metrics.attempts", issues);
-  const usage = childRecord2(value.usage, "metrics.usage", issues);
-  const sessions = childRecord2(
-    value.sessions,
-    "metrics.sessions",
-    issues,
-    schemaVersion === 1
-  );
-  const reviews = childRecord2(
-    value.reviews,
-    "metrics.reviews",
-    issues,
-    schemaVersion === 1
-  );
-  const triage = childRecord2(value.triage, "metrics.triage", issues);
-  return {
-    attempts: {
-      selection: metricValue2(
-        attempts,
-        "selection",
-        "metrics.attempts.selection",
-        issues,
-        schemaVersion === 1
-      ),
-      plan: metricValue2(attempts, "plan", "metrics.attempts.plan", issues),
-      implementation: metricValue2(
-        attempts,
-        "implementation",
-        "metrics.attempts.implementation",
-        issues
-      ),
-      fix: metricValue2(attempts, "fix", "metrics.attempts.fix", issues),
-      review: metricValue2(
-        attempts,
-        "review",
-        "metrics.attempts.review",
-        issues
-      ),
-      verification: metricValue2(
-        attempts,
-        "verification",
-        "metrics.attempts.verification",
-        issues
-      )
-    },
-    usage: {
-      inputTokens: metricValue2(
-        usage,
-        "inputTokens",
-        "metrics.usage.inputTokens",
-        issues
-      ),
-      cachedInputTokens: metricValue2(
-        usage,
-        "cachedInputTokens",
-        "metrics.usage.cachedInputTokens",
-        issues
-      ),
-      outputTokens: metricValue2(
-        usage,
-        "outputTokens",
-        "metrics.usage.outputTokens",
-        issues
-      ),
-      costUsd: metricValue2(
-        usage,
-        "costUsd",
-        "metrics.usage.costUsd",
-        issues,
-        false,
-        true
-      )
-    },
-    reviewFindingCount: metricValue2(
-      value,
-      "reviewFindingCount",
-      "metrics.reviewFindingCount",
-      issues
-    ),
-    sessions: {
-      fresh: metricValue2(
-        sessions,
-        "fresh",
-        "metrics.sessions.fresh",
-        issues,
-        schemaVersion === 1
-      ),
-      resumed: metricValue2(
-        sessions,
-        "resumed",
-        "metrics.sessions.resumed",
-        issues,
-        schemaVersion === 1
-      )
-    },
-    reviews: {
-      full: metricValue2(
-        reviews,
-        "full",
-        "metrics.reviews.full",
-        issues,
-        schemaVersion === 1
-      ),
-      delta: metricValue2(
-        reviews,
-        "delta",
-        "metrics.reviews.delta",
-        issues,
-        schemaVersion === 1
-      ),
-      rotations: metricValue2(
-        reviews,
-        "rotations",
-        "metrics.reviews.rotations",
-        issues,
-        schemaVersion === 1
-      )
-    },
-    triage: {
-      accepted: metricValue2(
-        triage,
-        "accepted",
-        "metrics.triage.accepted",
-        issues
-      ),
-      rejected: metricValue2(
-        triage,
-        "rejected",
-        "metrics.triage.rejected",
-        issues
-      ),
-      deferred: metricValue2(
-        triage,
-        "deferred",
-        "metrics.triage.deferred",
-        issues
-      )
-    }
-  };
-}
-function parseVerificationSource2(value, index, issues) {
-  if (!isRecord2(value)) {
-    issue2(issues, "STATE_FIELD_INVALID", `verification[${index}]`);
-    return {
-      validStructure: false,
-      exitCode: invalid3(),
-      signalPresent: invalid3(),
-      startedAt: invalid3(),
-      completedAt: invalid3()
-    };
-  }
-  let signalPresent;
-  if (value.signal === null) {
-    signalPresent = observed2(false);
-  } else if (typeof value.signal === "string") {
-    signalPresent = observed2(true);
-  } else {
-    issue2(issues, "STATE_FIELD_INVALID", `verification[${index}].signal`);
-    signalPresent = invalid3();
-  }
-  return {
-    validStructure: true,
-    exitCode: sourceValue2(
-      value,
-      "exitCode",
-      `verification[${index}].exitCode`,
-      issues,
-      nonNegativeInteger2
-    ),
-    signalPresent,
-    startedAt: sourceValue2(
-      value,
-      "startedAt",
-      `verification[${index}].startedAt`,
-      issues,
-      rfc3339Value2
-    ),
-    completedAt: sourceValue2(
-      value,
-      "completedAt",
-      `verification[${index}].completedAt`,
-      issues,
-      rfc3339Value2
-    )
-  };
-}
-function triageCounts2(records, issues, field) {
-  const counts = { accepted: 0, rejected: 0, deferred: 0 };
-  for (const [recordIndex, value] of records.entries()) {
-    if (!isRecord2(value) || !Array.isArray(value.items)) {
-      issue2(issues, "STATE_FIELD_INVALID", `${field}[${recordIndex}]`);
-      continue;
-    }
-    for (const [itemIndex, item] of value.items.entries()) {
-      if (!isRecord2(item)) {
-        issue2(
-          issues,
-          "STATE_FIELD_INVALID",
-          `${field}[${recordIndex}].items[${itemIndex}]`
-        );
-        continue;
-      }
-      const disposition = enumValue2(item.disposition, [
-        "accepted",
-        "rejected",
-        "deferred"
-      ]);
-      if (disposition === void 0) {
-        issue2(
-          issues,
-          "STATE_FIELD_INVALID",
-          `${field}[${recordIndex}].items[${itemIndex}].disposition`
-        );
-        continue;
-      }
-      counts[disposition] += 1;
-    }
-  }
-  return counts;
-}
-function parseEvaluationStateSource2(value) {
-  if (!isRecord2(value)) {
-    throw evaluationError2("Persisted state is not a supported object.");
-  }
-  if (value.schemaVersion !== 1 && value.schemaVersion !== 2 && value.schemaVersion !== 3 && value.schemaVersion !== 4) {
-    throw new BanzaiError2(
-      "EVALUATION_STATE_SCHEMA_UNSUPPORTED",
-      "Persisted state uses an unsupported schema."
-    );
-  }
-  const schemaVersion = value.schemaVersion;
-  const issues = [];
-  let workflow;
-  if (isRecord2(value.workflowSelection)) {
-    workflow = sourceValue2(
-      value.workflowSelection,
-      "workflow",
-      "workflowSelection.workflow",
-      issues,
-      (item) => enumValue2(item, WORKFLOW_ROUTES2)
-    );
-  } else if (!Object.hasOwn(value, "workflowSelection")) {
-    workflow = absent2(schemaVersion === 1);
-    issue2(
-      issues,
-      schemaVersion === 1 ? "LEGACY_FIELD_ABSENT" : "STATE_FIELD_MISSING",
-      "workflowSelection"
-    );
-  } else if (value.workflowSelection === null) {
-    workflow = absent2();
-  } else {
-    issue2(issues, "STATE_FIELD_INVALID", "workflowSelection");
-    workflow = invalid3();
-  }
-  const verification = [];
-  let verificationList;
-  if (Array.isArray(value.verification)) {
-    verificationList = observed2(true);
-    for (const [index, item] of value.verification.entries()) {
-      const parsed = parseVerificationSource2(item, index, issues);
-      verification.push(parsed);
-    }
-  } else if (!Object.hasOwn(value, "verification")) {
-    issue2(issues, "STATE_FIELD_MISSING", "verification");
-    verificationList = absent2();
-  } else {
-    issue2(issues, "STATE_FIELD_INVALID", "verification");
-    verificationList = invalid3();
-  }
-  let triage;
-  let triageIsCumulative;
-  if (schemaVersion >= 2) {
-    if (Array.isArray(value.triageHistory)) {
-      triage = triageCounts2(value.triageHistory, issues, "triageHistory");
-      triageIsCumulative = true;
-    } else {
-      issue2(issues, "STATE_FIELD_INVALID", "triageHistory");
-      triage = { accepted: 0, rejected: 0, deferred: 0 };
-      triageIsCumulative = false;
-    }
-  } else {
-    issue2(issues, "LEGACY_FIELD_ABSENT", "triageHistory");
-    triage = value.triage === null || value.triage === void 0 ? { accepted: 0, rejected: 0, deferred: 0 } : triageCounts2([value.triage], issues, "triage");
-    triageIsCumulative = false;
-  }
-  let activeAttemptIdentity;
-  let activeAttemptKind;
-  if (value.activeAttempt === null) {
-    activeAttemptIdentity = notApplicable2();
-    activeAttemptKind = notApplicable2();
-  } else if (isRecord2(value.activeAttempt)) {
-    activeAttemptIdentity = sourceValue2(
-      value.activeAttempt,
-      "id",
-      "activeAttempt.id",
-      issues,
-      stringValue2
-    );
-    activeAttemptKind = sourceValue2(
-      value.activeAttempt,
-      "kind",
-      "activeAttempt.kind",
-      issues,
-      (item) => enumValue2(item, ATTEMPT_KINDS2)
-    );
-  } else if (!Object.hasOwn(value, "activeAttempt")) {
-    issue2(issues, "STATE_FIELD_MISSING", "activeAttempt");
-    activeAttemptIdentity = absent2();
-    activeAttemptKind = absent2();
-  } else {
-    issue2(issues, "STATE_FIELD_INVALID", "activeAttempt");
-    activeAttemptIdentity = invalid3();
-    activeAttemptKind = invalid3();
-  }
-  let activeVerification;
-  if (value.activeProcess === null) {
-    activeVerification = observed2(false);
-  } else if (isRecord2(value.activeProcess)) {
-    const kind = enumValue2(value.activeProcess.kind, [
-      ...ATTEMPT_KINDS2,
-      "verification"
-    ]);
-    if (kind === void 0) {
-      issue2(issues, "STATE_FIELD_INVALID", "activeProcess.kind");
-      activeVerification = invalid3();
-    } else {
-      activeVerification = observed2(kind === "verification");
-    }
-  } else if (!Object.hasOwn(value, "activeProcess")) {
-    issue2(issues, "STATE_FIELD_MISSING", "activeProcess");
-    activeVerification = absent2();
-  } else {
-    issue2(issues, "STATE_FIELD_INVALID", "activeProcess");
-    activeVerification = invalid3();
-  }
-  let appliedReviewIteration;
-  if (value.latestReview === null) {
-    appliedReviewIteration = observed2(0);
-  } else if (isRecord2(value.latestReview)) {
-    const iteration = nonNegativeInteger2(value.latestReview.iteration);
-    const resultPath = stringValue2(value.latestReview.resultPath);
-    if (iteration === void 0 || iteration < 1 || resultPath !== `reviews/review-${iteration}.json`) {
-      issue2(issues, "STATE_FIELD_INVALID", "latestReview");
-      appliedReviewIteration = invalid3();
-    } else {
-      appliedReviewIteration = observed2(iteration);
-    }
-  } else if (!Object.hasOwn(value, "latestReview")) {
-    issue2(issues, "STATE_FIELD_MISSING", "latestReview");
-    appliedReviewIteration = absent2();
-  } else {
-    issue2(issues, "STATE_FIELD_INVALID", "latestReview");
-    appliedReviewIteration = invalid3();
-  }
-  return {
-    value: {
-      schemaVersion,
-      contractVersion: sourceValue2(
-        value,
-        "contractVersion",
-        "contractVersion",
-        issues,
-        contractVersionValue2
-      ),
-      status: sourceValue2(
-        value,
-        "status",
-        "status",
-        issues,
-        (item) => enumValue2(item, RUN_STATUSES2)
-      ),
-      createdAt: sourceValue2(
-        value,
-        "createdAt",
-        "createdAt",
-        issues,
-        rfc3339Value2
-      ),
-      updatedAt: sourceValue2(
-        value,
-        "updatedAt",
-        "updatedAt",
-        issues,
-        rfc3339Value2
-      ),
-      workflow,
-      reviewIteration: sourceValue2(
-        value,
-        "reviewIteration",
-        "reviewIteration",
-        issues,
-        nonNegativeInteger2
-      ),
-      appliedReviewIteration,
-      fixCycle: sourceValue2(
-        value,
-        "fixCycle",
-        "fixCycle",
-        issues,
-        nonNegativeInteger2
-      ),
-      blockedFrom: sourceValue2(
-        value,
-        "blockedFrom",
-        "blockedFrom",
-        issues,
-        (item) => enumValue2(item, RUN_STATUSES2),
-        { nullable: true }
-      ),
-      activeAttemptIdentity,
-      activeAttemptKind,
-      activeVerification,
-      triage,
-      triageIsCumulative,
-      verificationList,
-      verification,
-      metrics: parseStateMetrics2(value.metrics, schemaVersion, issues)
-    },
-    issues
-  };
-}
-
-// ../../plugins/banzai/lib/artifact-archive.mjs
-import {
-  lstat as lstat4,
-  mkdir as mkdir2,
-  readdir as readdir3,
-  rename as rename2,
-  chmod,
-  open as open4,
-  unlink as unlink2
-} from "node:fs/promises";
-import path8 from "node:path";
-import { randomUUID as randomUUID3 } from "node:crypto";
-var ARCHIVE_SCHEMA = "banzai-artifact-archive/v1";
-var LIMIT = 25e3;
-var SHA = /^[0-9a-f]{64}$/u;
-var secretPath = /(?:^|\/)(?:\.ssh|\.aws|\.gnupg|\.codex|\.claude|node_modules|auth\.json|credentials(?:\.json)?|\.env(?:\.[^/]+)?)(?:\/|$)|\.(?:pem|key|p12|pfx)$/iu;
-var control = /(?:^|\/)(?:active-run\.json|runner\.lock|\.writer-claim\.json|\.artifact-init\.lock)$/u;
-function bounded(value, name) {
-  if (typeof value !== "string" || !value.length || value.length > 200 || /[\x00-\x1f\x7f]/u.test(value))
-    fail(
-      "ARTIFACT_INPUT_INVALID",
-      `${name} must be a bounded explicit identity.`
-    );
-  return value;
-}
-function archivePath(value) {
-  relativePath(value);
-  if (secretPath.test(value) || value === ".banzai/archive-manifest.json")
-    fail(
-      "ARTIFACT_UNSAFE_PATH",
-      "Authentication, credential and key locations cannot enter an artifact archive."
-    );
-  return value;
-}
-async function directory(input) {
-  if (typeof input !== "string" || !path8.isAbsolute(input))
-    fail(
-      "ARTIFACT_INPUT_INVALID",
-      "Archive directories must be absolute local paths."
-    );
-  const root = path8.parse(input).root;
-  await safePath(root, path8.relative(root, input), { directory: true });
-  return input;
-}
-async function missingDestination(input) {
-  if (typeof input !== "string" || !path8.isAbsolute(input))
-    fail(
-      "ARTIFACT_INPUT_INVALID",
-      "Destination must be an absolute local directory."
-    );
-  if (input !== path8.resolve(input))
-    fail("ARTIFACT_UNSAFE_PATH", "Destination must be canonical, without dot segments or path aliases.");
-  await directory(path8.dirname(input));
-  await safePath(path8.dirname(input), path8.basename(input), {
-    missing: true,
-    directory: true
-  });
-  return input;
-}
-function sourcePath(parent, reference, sourceRoot = null) {
-  if (typeof reference !== "string" || !reference.length || /^(?:https?:|mailto:|#|app:)/u.test(reference))
-    return null;
-  let clean = reference.split("#")[0];
-  if (path8.posix.isAbsolute(clean)) {
-    if (sourceRoot && clean.startsWith(`${sourceRoot}/`))
-      clean = clean.slice(sourceRoot.length + 1);
-    else return `external/${digestBytes(clean)}`;
-  }
-  const run = parent.match(/^(\.banzai\/runs\/[^/]+)\//u)?.[1];
-  if (run && /^(?:attempts|reviews|verification|approval|recovery)\//u.test(clean))
-    clean = `${run}/${clean}`;
-  const candidate = clean.startsWith("./") || clean.startsWith("../") ? path8.posix.normalize(path8.posix.join(path8.posix.dirname(parent), clean)) : clean;
-  if (candidate.startsWith("../") || path8.posix.isAbsolute(candidate) || /[\x00-\x20<>`{}]/u.test(candidate))
-    return null;
-  if (!candidate.includes("/") && !/\.(?:md|json|jsonl|log)$/u.test(candidate))
-    return null;
-  return candidate.replace(/\/$/u, "");
-}
-function markdownProse(text) {
-  let fence = null;
-  return text.split("\n").map((line) => {
-    const marker = /^ {0,3}(`{3,}|~{3,})/u.exec(line)?.[1];
-    if (fence !== null) {
-      if (marker && marker[0] === fence[0] && marker.length >= fence.length) fence = null;
-      return "";
-    }
-    if (marker) {
-      fence = marker;
-      return "";
-    }
-    return line.replace(/(`+).*?\1/gu, "");
-  }).join("\n");
-}
-function dependenciesFor(relative, bytes, sourceRoot = null) {
-  const refs = /* @__PURE__ */ new Map();
-  let supported = true;
-  const text = bytes.toString("utf8");
-  if (relative.endsWith(".json")) {
-    let value;
-    try {
-      value = JSON.parse(text);
-    } catch {
-      return { refs, supported: false };
-    }
-    try {
-      if (value.schema === "banzai-terminal-attempt-checkpoint/v1")
-        parseTerminalAttemptCheckpoint2(value);
-      else if (value.schema === "banzai-recovery-authorization/v1")
-        parseRecoveryAuthorization2(value);
-      else if (/^\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative))
-        parseEvaluationStateSource2(value);
-      else if (/^\.banzai\/runs\/[^/]+\/attempts\/[^/]+\.json$/u.test(relative) && value.attempt && "startedAt" in value)
-        parseModelAttemptRecord2(value);
-      else if (/^\.banzai\/runs\/[^/]+\/verification\//u.test(relative) && "command" in value)
-        parseVerificationAttemptRecord2(value);
-      else if ("phase" in value && "outcome" in value)
-        parsePersistedPhaseResult2(value);
-      else if ("verdict" in value && "findings" in value)
-        (value.schemaVersion === 2 ? parseCurrentReviewResult2 : parseReviewResult2)(value);
-    } catch {
-      return { refs, supported: false };
-    }
-    if (relative.endsWith("/work.json")) {
-      parseBinding(value);
-      return { refs, supported };
-    }
-    if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative) && ![1, 2, 3, 4].includes(value.schemaVersion))
-      supported = false;
-    if (typeof value.schema === "string" && !(/* @__PURE__ */ new Set([
-      "banzai-terminal-attempt-checkpoint/v1",
-      "banzai-recovery-authorization/v1",
-      "banzai-review-snapshot/v1",
-      "banzai-review-snapshot/v2",
-      "banzai-work-binding/v1",
-      "banzai-context-attempt/v1",
-      "banzai-context-report/v1"
-    ])).has(value.schema))
-      supported = false;
-    if (typeof value.schema === "string" && value.schema.startsWith("banzai-review-snapshot/")) {
-      try {
-        parseReviewSnapshot(value);
-      } catch {
-        return { refs, supported: false };
-      }
-    }
-    if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative) && value.schemaVersion === 4) {
-      try {
-        exactObject(value.artifactBinding, ["binding", "sha256"]);
-        parseBinding(value.artifactBinding.binding);
-        if (!SHA.test(value.artifactBinding.sha256)) supported = false;
-      } catch {
-        supported = false;
-      }
-    }
-    const workflowEvidence = relative.startsWith(".banzai/runs/") || typeof value.schema === "string" && /^banzai-(?:review-snapshot|work-binding)\/v/u.test(value.schema);
-    if (!workflowEvidence) return { refs, supported };
-    const run = relative.match(/^(\.banzai\/runs\/[^/]+)\//u)?.[1];
-    if (run && relative !== `${run}/state.json`) refs.set(`${run}/state.json`, true);
-    const visit = (item, key = "") => {
-      if (Array.isArray(item)) {
-        for (const child of item) visit(child, key);
-      } else if (item && typeof item === "object") {
-        if (key === "artifactBinding") {
-          parseBinding(item.binding);
-          refs.set(`.banzai/work/${item.binding.workId}/work.json`, true);
-          return;
-        }
-        for (const [name, child] of Object.entries(item)) visit(child, name);
-      } else if (typeof item === "string" && /(?:path|paths|description|plan|implementationReport|testReport|work|changeReport)$/iu.test(
-        key
-      )) {
-        const ref = sourcePath(relative, item, sourceRoot);
-        if (ref && !control.test(ref)) refs.set(ref, true);
-      }
-    };
-    visit(value);
-  } else if (relative.endsWith(".md")) {
-    for (const match of markdownProse(text).matchAll(/\[([^\]\n]*)\]\(([^)\s]+)\)/gu)) {
-      const raw = match[2].split("#")[0];
-      if (/^(?:https?:|mailto:|#)/u.test(match[2])) continue;
-      const ref = sourcePath(relative, raw.startsWith(".") ? raw : `./${raw}`);
-      if (ref) {
-        const authority = /(?:^|\/)(?:description|plan|work)\.md$/u.test(ref) || /^documentation\/decisions\/(?!README\.md$)[^/]+\.md$/u.test(ref) || /(?:Accepted ADR|Required (?:ADR|description|plan))/iu.test(match[1]);
-        const optional = /^Historical \(optional\): /u.test(match[1]);
-        refs.set(ref, (refs.get(ref) ?? false) || authority && !optional);
-      }
-    }
-  }
-  return { refs, supported };
-}
-function localProjectIdentity(root) {
-  return `local-sha256:${digestBytes(root)}`;
-}
-function retainedPaths(manifest, objects) {
-  const protectedPaths = /* @__PURE__ */ new Set();
-  for (const pin of manifest.retention.pins) {
-    const bindingPath = `.banzai/work/${pin.workId}/work.json`;
-    const bindingEntry = manifest.entries.find((entry) => entry.path === bindingPath);
-    if (!bindingEntry) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Pinned work has no archived binding provenance.");
-    protectedPaths.add(bindingPath);
-    for (const entry of manifest.entries) {
-      const run = entry.path.match(/^(\.banzai\/runs\/[^/]+)\/state\.json$/u)?.[1];
-      if (!run) continue;
-      let state;
-      try {
-        state = JSON.parse(objects.get(entry.path).toString("utf8"));
-      } catch {
-        continue;
-      }
-      if (state?.artifactBinding?.binding?.workId === pin.workId) {
-        for (const item of manifest.entries) if (item.path.startsWith(`${run}/`)) protectedPaths.add(item.path);
-      }
-    }
-    for (const entry of manifest.entries)
-      if (entry.path.startsWith(`.banzai/work/${pin.workId}/`)) protectedPaths.add(entry.path);
-  }
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const edge of manifest.dependencies) {
-      if (protectedPaths.has(edge.from) && edge.required && edge.status === "included" && !protectedPaths.has(edge.to)) {
-        protectedPaths.add(edge.to);
-        changed = true;
-      }
-    }
-  }
-  return [...protectedPaths].sort();
-}
-async function inventoryArtifacts(input) {
-  const root = await projectRoot(input.repoRoot);
-  const workPaths = input.workPaths ?? [];
-  const selectedRunIds = input.runIds ?? [];
-  if (!Array.isArray(workPaths) || !Array.isArray(selectedRunIds) || workPaths.length + selectedRunIds.length < 1 || workPaths.length + selectedRunIds.length > LIMIT || selectedRunIds.some((id) => typeof id !== "string" || !/^[a-zA-Z0-9_-]+$/u.test(id)))
-    fail("ARTIFACT_INPUT_INVALID", "Select a bounded nonempty list of workPaths and/or selectedRunIds.");
-  const selectedPaths = [...workPaths.map(relativePath), ...selectedRunIds.map((id) => `.banzai/runs/${id}`)];
-  const files = /* @__PURE__ */ new Map();
-  const excluded = [];
-  const walk = async (relative) => {
-    archivePath(relative);
-    const target = path8.join(root, relative);
-    const stat5 = await lstat4(target).catch(
-      () => fail(
-        "ARTIFACT_EVIDENCE_INCOMPLETE",
-        "Selected archive evidence is unavailable."
-      )
-    );
-    await safePath(root, relative, { directory: stat5.isDirectory() });
-    if (control.test(relative)) {
-      excluded.push(relative);
-      return;
-    }
-    if (stat5.isDirectory()) {
-      for (const name of (await readdir3(target)).sort())
-        await walk(`${relative}/${name}`);
-    } else {
-      const bytes = await readBytes(root, relative);
-      files.set(relative, { bytes, mode: stat5.mode & 511 });
-      if (files.size > LIMIT)
-        fail(
-          "ARTIFACT_DISCOVERY_LIMIT",
-          "Archive selection exceeds the bounded inventory."
-        );
-    }
-  };
-  for (const relative of selectedPaths) await walk(relative);
-  const dependencies = [];
-  const uninterpreted = [];
-  for (const [relative, value] of files) {
-    if (/^\.banzai\/work\/[^/]+\/work\.json$/u.test(relative)) {
-      const binding = parseBinding(JSON.parse(value.bytes.toString("utf8")));
-      for (const target of Object.values(binding.artifacts)) {
-        try {
-          await walk(target);
-        } catch (error) {
-          if (error.code !== "ARTIFACT_EVIDENCE_INCOMPLETE") throw error;
-        }
-      }
-    }
-    const run = relative.match(/^(\.banzai\/runs\/[^/]+)\//u)?.[1];
-    if (run && !files.has(`${run}/state.json`)) {
-      try {
-        await walk(`${run}/state.json`);
-      } catch {
-      }
-    }
-    let sourceRoot = null;
-    try {
-      sourceRoot = JSON.parse(
-        files.get(`${run}/state.json`)?.bytes.toString("utf8") ?? "null"
-      )?.repoRoot ?? null;
-    } catch {
-    }
-    const decoded = dependenciesFor(relative, value.bytes, sourceRoot);
-    if (!decoded.supported) uninterpreted.push(relative);
-    for (const [reference, required] of decoded.refs) {
-      let status = "included";
-      if (reference.startsWith("external/")) status = "external";
-      else if (!files.has(reference)) {
-        try {
-          await walk(reference);
-        } catch (error) {
-          if (!["ARTIFACT_EVIDENCE_INCOMPLETE", "ARTIFACT_UNSAFE_PATH"].includes(
-            error.code
-          ))
-            throw error;
-          status = "missing";
-        }
-      }
-      if (status === "included" && !files.has(reference)) status = "external";
-      dependencies.push({
-        sourceId: "project",
-        from: relative,
-        to: reference,
-        required,
-        status
-      });
-    }
-  }
-  for (const [relative, value] of files) {
-    if (!/^\.banzai\/work\/[^/]+\/work\.json$/u.test(relative)) continue;
-    const binding = parseBinding(JSON.parse(value.bytes.toString("utf8")));
-    for (const [role, target] of Object.entries(binding.artifacts)) {
-      for (const filename of files.keys()) {
-        if (filename === target || role === "reviewDirectory" && filename.startsWith(`${target}/`))
-          dependencies.push({ sourceId: "project", from: relative, to: filename, required: true, status: "included" });
-      }
-    }
-  }
-  let sourceCommit = null;
-  try {
-    sourceCommit = (await git(root, ["rev-parse", "--verify", "HEAD^{commit}"])).stdout.trim();
-  } catch {
-  }
-  const workIds = [], runIds = [];
-  for (const relative of files.keys()) {
-    const work = relative.match(/^\.banzai\/work\/([^/]+)\/work\.json$/u);
-    if (work) workIds.push(work[1]);
-    const run = relative.match(/^\.banzai\/runs\/([^/]+)\/state\.json$/u);
-    if (run) runIds.push(run[1]);
-  }
-  const entries = [...files].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([relative, value]) => {
-    const sha256 = digestBytes(value.bytes);
-    return {
-      sourceId: "project",
-      path: relative,
-      size: value.bytes.length,
-      mode: value.mode,
-      sha256,
-      object: `objects/${sha256}`
-    };
-  });
-  const retention = { policy: "unspecified", rules: {}, ownerPolicy: null, pins: [], deletionAuthorized: false };
-  const inventory = {
-    schema: ARCHIVE_SCHEMA,
-    schemaVersion: 1,
-    bundleId: randomUUID3(),
-    createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-    sources: [
-      {
-        id: "project",
-        projectIdentity: localProjectIdentity(root),
-        sourceCommit,
-        workIds,
-        runIds
-      }
-    ],
-    entries,
-    dependencies,
-    retention
-  };
-  return {
-    inventory,
-    complete: dependencies.every(
-      (edge) => !edge.required || edge.status === "included"
-    ) && uninterpreted.length === 0,
-    uninterpreted,
-    excluded
-  };
-}
-function parseArchive(value) {
-  exactObject(value, [
-    "schema",
-    "schemaVersion",
-    "bundleId",
-    "createdAt",
-    "sources",
-    "entries",
-    "dependencies",
-    "retention"
-  ]);
-  if (value.schema !== ARCHIVE_SCHEMA || value.schemaVersion !== 1)
-    fail(
-      "ARTIFACT_VERSION_UNSUPPORTED",
-      "Unsupported artifact archive version."
-    );
-  bounded(value.bundleId, "bundleId");
-  if (!Number.isFinite(Date.parse(value.createdAt)) || !Array.isArray(value.sources) || value.sources.length !== 1 || !Array.isArray(value.entries) || value.entries.length > LIMIT || !Array.isArray(value.dependencies) || value.dependencies.length > LIMIT * 10)
-    fail(
-      "ARTIFACT_INPUT_INVALID",
-      "Archive inventory is malformed or exceeds its bound."
-    );
-  const source = exactObject(value.sources[0], [
-    "id",
-    "projectIdentity",
-    "sourceCommit",
-    "workIds",
-    "runIds"
-  ]);
-  if (source.id !== "project")
-    fail("ARTIFACT_INPUT_INVALID", "Archive source identity is unsupported.");
-  bounded(source.projectIdentity, "projectIdentity");
-  if (!(source.sourceCommit === null || /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(source.sourceCommit)) || !Array.isArray(source.workIds) || !Array.isArray(source.runIds) || [...source.workIds, ...source.runIds].some(
-    (id) => typeof id !== "string" || !/^[a-zA-Z0-9_-]+$/u.test(id)
-  ))
-    fail("ARTIFACT_INPUT_INVALID", "Archive provenance is malformed.");
-  const paths = /* @__PURE__ */ new Set();
-  for (const entry of value.entries) {
-    exactObject(entry, [
-      "sourceId",
-      "path",
-      "size",
-      "mode",
-      "sha256",
-      "object"
-    ]);
-    archivePath(entry.path);
-    if (control.test(entry.path) || paths.has(entry.path) || entry.sourceId !== source.id || !Number.isSafeInteger(entry.size) || entry.size < 0 || !Number.isInteger(entry.mode) || entry.mode < 0 || entry.mode > 511 || !SHA.test(entry.sha256) || entry.object !== `objects/${entry.sha256}`)
-      fail(
-        "ARTIFACT_INPUT_INVALID",
-        "Archive entry identity is malformed or duplicated."
-      );
-    paths.add(entry.path);
-  }
-  for (const edge of value.dependencies) {
-    exactObject(edge, ["sourceId", "from", "to", "required", "status"]);
-    archivePath(edge.from);
-    relativePath(edge.to);
-    if (edge.sourceId !== source.id || !paths.has(edge.from) || typeof edge.required !== "boolean" || !["included", "missing", "external"].includes(edge.status) || edge.status === "included" && !paths.has(edge.to))
-      fail(
-        "ARTIFACT_EVIDENCE_INCOMPLETE",
-        "Archive dependency identity is unresolved."
-      );
-  }
-  const retention = exactObject(value.retention, [
-    "policy",
-    "rules",
-    "deletionAuthorized",
-    "ownerPolicy",
-    "pins"
-  ]);
-  if (!["banzai", "owner", "unspecified"].includes(retention.policy) || retention.deletionAuthorized !== false)
-    fail(
-      "ARTIFACT_INPUT_INVALID",
-      "Archive retention policy cannot authorize deletion."
-    );
-  if (retention.policy === "owner") {
-    exactObject(retention.ownerPolicy, ["ownerId", "recordedAt", "terms"]);
-    bounded(retention.ownerPolicy.ownerId, "retention ownerId");
-    if (!Number.isFinite(Date.parse(retention.ownerPolicy.recordedAt)) || typeof retention.ownerPolicy.terms !== "string" || !retention.ownerPolicy.terms.trim() || retention.ownerPolicy.terms.length > 1e4)
-      fail("ARTIFACT_INPUT_INVALID", "Explicit owner retention terms and provenance are required.");
-  } else if (retention.ownerPolicy !== null)
-    fail("ARTIFACT_INPUT_INVALID", "Owner policy must be null unless explicitly selected.");
-  if (!Array.isArray(retention.pins) || retention.pins.length > LIMIT)
-    fail("ARTIFACT_INPUT_INVALID", "Retention pins exceed the inventory bound.");
-  const pinned = /* @__PURE__ */ new Set();
-  for (const pin of retention.pins) {
-    exactObject(pin, ["sourceId", "workId", "reason", "recordedAt"]);
-    bounded(pin.reason, "pin reason");
-    if (pin.sourceId !== source.id || !source.workIds.includes(pin.workId) || !paths.has(`.banzai/work/${pin.workId}/work.json`) || !Number.isFinite(Date.parse(pin.recordedAt)) || pinned.has(pin.workId))
-      fail("ARTIFACT_INPUT_INVALID", "Pin must identify unique archived work and its source provenance.");
-    pinned.add(pin.workId);
-  }
-  const keys3 = retention.policy === "banzai" ? [
-    "activeOrPinned",
-    "supportedAuthority",
-    "closedWork",
-    "releaseAndMigration",
-    "unreferencedLogs",
-    "invalidCandidates",
-    "dependencies"
-  ] : [];
-  exactObject(retention.rules, keys3);
-  const expected = [
-    "no-expiry",
-    "support-plus-24-months",
-    "at-least-24-months",
-    "project-lifetime",
-    "30-days-after-closure",
-    "90-days-after-closure",
-    "override-expiry"
-  ];
-  if (keys3.some((key, index) => retention.rules[key] !== expected[index]))
-    fail(
-      "ARTIFACT_INPUT_INVALID",
-      "Archive retention rules differ from their declared policy."
-    );
-  return value;
-}
-async function verifyArchive(input) {
-  const root = await directory(input.bundlePath);
-  const manifestBytes = await readBytes(root, "manifest.json", {
-    limit: 32 * 1024 * 1024
-  });
-  let manifest;
-  try {
-    manifest = parseArchive(JSON.parse(manifestBytes.toString("utf8")));
-  } catch (error) {
-    if (error.code) throw error;
-    fail("ARTIFACT_INPUT_INVALID", "Archive manifest is not valid JSON.");
-  }
-  const uninterpreted = [];
-  const recordedEdges = new Map(
-    manifest.dependencies.map((edge) => [`${edge.from}\0${edge.to}`, edge])
-  );
-  const objects = /* @__PURE__ */ new Map();
-  for (const entry of manifest.entries) {
-    const bytes = await readBytes(root, entry.object);
-    if (bytes.length !== entry.size || digestBytes(bytes) !== entry.sha256)
-      fail(
-        "ARTIFACT_EVIDENCE_INCOMPLETE",
-        "Archive object size or SHA-256 verification failed."
-      );
-    objects.set(entry.path, bytes);
-  }
-  for (const entry of manifest.entries) {
-    const bytes = objects.get(entry.path);
-    const run = entry.path.match(/^(\.banzai\/runs\/[^/]+)\//u)?.[1];
-    let sourceRoot = null;
-    try {
-      sourceRoot = JSON.parse(objects.get(`${run}/state.json`)?.toString("utf8") ?? "null")?.repoRoot ?? null;
-    } catch {
-    }
-    const decoded = dependenciesFor(entry.path, bytes, sourceRoot);
-    if (/^\.banzai\/work\/[^/]+\/work\.json$/u.test(entry.path)) {
-      const binding = parseBinding(JSON.parse(bytes.toString("utf8")));
-      if (!manifest.sources[0].workIds.includes(binding.workId)) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Archived work is absent from source provenance.");
-      for (const [role, relative] of Object.entries(binding.artifacts)) {
-        for (const item of manifest.entries) {
-          if (item.path === relative || role === "reviewDirectory" && item.path.startsWith(`${relative}/`)) decoded.refs.set(item.path, true);
-        }
-      }
-    }
-    if (entry.path.endsWith(".json")) {
-      let value;
-      try {
-        value = JSON.parse(bytes.toString("utf8"));
-      } catch {
-      }
-      if (value?.artifactBinding?.binding?.workId) {
-        const bindingPath = `.banzai/work/${value.artifactBinding.binding.workId}/work.json`;
-        const archivedBinding = manifest.entries.find(
-          (item) => item.path === bindingPath
-        );
-        if (archivedBinding && archivedBinding.sha256 !== value.artifactBinding.sha256)
-          fail(
-            "ARTIFACT_EVIDENCE_INCOMPLETE",
-            "Archived run or snapshot binding bytes conflict with their recorded identity."
-          );
-      }
-    }
-    if (!decoded.supported) uninterpreted.push(entry.path);
-    for (const [ref, required] of decoded.refs)
-      if (!recordedEdges.has(`${entry.path}\0${ref}`) || required && recordedEdges.get(`${entry.path}\0${ref}`).required !== true)
-        fail(
-          "ARTIFACT_EVIDENCE_INCOMPLETE",
-          "Archive manifest omits a recognized dependency."
-        );
-  }
-  return {
-    manifest,
-    manifestSha256: digestBytes(manifestBytes),
-    retainedPaths: retainedPaths(manifest, objects),
-    complete: !uninterpreted.length && manifest.dependencies.every(
-      (edge) => !edge.required || edge.status === "included"
-    ),
-    uninterpreted
-  };
-}
-async function exportArtifacts(input) {
-  const destination = await missingDestination(input.destination);
-  try {
-    await lstat4(destination);
-    fail(
-      "ARTIFACT_DESTINATION_CONFLICT",
-      "Archive destination already exists; verify it explicitly."
-    );
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
-  const inventoryBytes = await readInvocationBytes(input.inventoryFile, "inventoryFile", { limit: 32 * 1024 * 1024 });
-  let inventory;
-  try {
-    inventory = parseArchive(JSON.parse(inventoryBytes.toString("utf8")));
-  } catch (error) {
-    if (error.code) throw error;
-    fail("ARTIFACT_INPUT_INVALID", "Reviewed inventory is not valid JSON.");
-  }
-  const result = { inventory, excluded: [] };
-  const root = await projectRoot(input.repoRoot);
-  if (inventory.sources[0].projectIdentity !== localProjectIdentity(root))
-    fail("ARTIFACT_OWNERSHIP_CONFLICT", "Reviewed inventory belongs to another source checkout.");
-  for (const entry of inventory.entries) {
-    const bytes = await readBytes(root, entry.path);
-    const mode = (await lstat4(path8.join(root, entry.path))).mode & 511;
-    if (bytes.length !== entry.size || digestBytes(bytes) !== entry.sha256 || mode !== entry.mode)
-      fail("ARTIFACT_OWNERSHIP_CONFLICT", "Source bytes or modes no longer match the reviewed inventory. Inspect and inventory again.");
-  }
-  const temporary = path8.join(
-    path8.dirname(destination),
-    `.banzai-archive-${result.inventory.bundleId}`
-  );
-  await mkdir2(temporary, { mode: 448 });
-  await makeDirectories(temporary, "objects");
-  const written = /* @__PURE__ */ new Set();
-  for (const entry of result.inventory.entries) {
-    const bytes = await readBytes(root, entry.path);
-    if (digestBytes(bytes) !== entry.sha256)
-      fail(
-        "ARTIFACT_OWNERSHIP_CONFLICT",
-        "Source changed while archiving; incomplete staging evidence was retained."
-      );
-    if (!written.has(entry.sha256)) {
-      await publishNew(temporary, entry.object, bytes);
-      written.add(entry.sha256);
-    }
-  }
-  await publishNew(
-    temporary,
-    "manifest.json",
-    inventoryBytes
-  );
-  const verified = await verifyArchive({ bundlePath: temporary });
-  const guard = `${destination}.banzai-archive.lock`;
-  let handle;
-  try {
-    handle = await open4(guard, "wx", 384);
-  } catch {
-    fail(
-      "ARTIFACT_OWNERSHIP_CONFLICT",
-      "Archive destination is owned by another operation."
-    );
-  }
-  const owned = await handle.stat();
-  try {
-    try {
-      await lstat4(destination);
-      fail(
-        "ARTIFACT_DESTINATION_CONFLICT",
-        "Archive destination appeared during verification."
-      );
-    } catch (error) {
-      if (error.code !== "ENOENT") throw error;
-    }
-    await rename2(temporary, destination);
-  } finally {
-    await handle.close();
-    const current = await lstat4(guard);
-    if (current.dev === owned.dev && current.ino === owned.ino)
-      await unlink2(guard);
-  }
-  return {
-    archiveDirectory: destination,
-    bundleId: result.inventory.bundleId,
-    manifestSha256: verified.manifestSha256,
-    complete: verified.complete,
-    uninterpreted: verified.uninterpreted,
-    excluded: result.excluded
-  };
-}
-async function withRestoreOwnership(root, action) {
-  await makeDirectories(root, ".banzai");
-  const relative = ".banzai/runner.lock";
-  await safePath(root, relative, { missing: true });
-  const token = randomUUID3();
-  let handle;
-  try {
-    handle = await open4(path8.join(root, relative), "wx", 384);
-  } catch {
-    fail(
-      "ARTIFACT_OWNERSHIP_CONFLICT",
-      "Existing runner ownership prevents archive verification; no lock was reclaimed."
-    );
-  }
-  const owned = await handle.stat();
-  try {
-    await handle.writeFile(
-      JSON.stringify({
-        schemaVersion: 1,
-        pid: process.pid,
-        token,
-        createdAt: (/* @__PURE__ */ new Date()).toISOString()
-      }) + "\n"
-    );
-    await handle.sync();
-    return await action();
-  } finally {
-    await handle.close();
-    const current = await lstat4(path8.join(root, relative));
-    if (current.dev === owned.dev && current.ino === owned.ino)
-      await unlink2(path8.join(root, relative));
-  }
-}
-async function restoreArtifacts(input) {
-  const verified = await verifyArchive(input);
-  if (!verified.complete)
-    fail(
-      "ARTIFACT_EVIDENCE_INCOMPLETE",
-      "Restore requires complete dependency interpretation and closure."
-    );
-  const destination = await missingDestination(input.destination);
-  const source = verified.manifest.sources[0];
-  const receiptPath = ".banzai/archive-manifest.json";
-  const receiptBytes = await readBytes(input.bundlePath, "manifest.json", { limit: 32 * 1024 * 1024 });
-  if (/(?:^|\/)\.banzai\/(?:work|runs|control)(?:\/|$)/u.test(destination))
-    fail("ARTIFACT_UNSAFE_PATH", "Restore requires a separate inactive inspection directory outside managed work, run and control ancestry.");
-  const historicalOnly = source.projectIdentity !== localProjectIdentity(destination);
-  let exists = false;
-  try {
-    await lstat4(destination);
-    exists = true;
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
-  if (exists)
-    return withRestoreOwnership(destination, async () => {
-      const active = await readJson(
-        destination,
-        ".banzai/active-run.json",
-        true
-      );
-      if (active !== null)
-        fail(
-          "ARTIFACT_OWNERSHIP_CONFLICT",
-          "Restore destination has runner authority; use an inactive fresh directory."
-        );
-      for (const entry of verified.manifest.entries) {
-        const bytes = await readBytes(destination, entry.path, {
-          optional: true
-        });
-        if (bytes === null || digestBytes(bytes) !== entry.sha256 || ((await lstat4(path8.join(destination, entry.path))).mode & 511) !== entry.mode)
-          fail(
-            "ARTIFACT_DESTINATION_CONFLICT",
-            "Restore destination has missing or conflicting evidence. Use a fresh directory."
-          );
-      }
-      const receipt = await readBytes(destination, receiptPath, { optional: true, limit: 32 * 1024 * 1024 });
-      if (receipt === null || !receipt.equals(receiptBytes))
-        fail("ARTIFACT_DESTINATION_CONFLICT", "Restore provenance or retention receipt is missing or conflicts.");
-      return {
-        destination,
-        bundleId: verified.manifest.bundleId,
-        historicalOnly,
-        activeRunChanged: false,
-        restored: false,
-        retentionReceipt: receiptPath,
-        retention: verified.manifest.retention,
-        retainedPaths: verified.retainedPaths
-      };
-    });
-  const temporary = path8.join(
-    path8.dirname(destination),
-    `.banzai-restore-${randomUUID3()}`
-  );
-  await mkdir2(temporary, { mode: 448 });
-  for (const entry of verified.manifest.entries) {
-    if (path8.posix.dirname(entry.path) !== ".")
-      await makeDirectories(temporary, path8.posix.dirname(entry.path));
-    await publishNew(
-      temporary,
-      entry.path,
-      await readBytes(input.bundlePath, entry.object)
-    );
-    await chmod(path8.join(temporary, entry.path), entry.mode);
-    if (digestBytes(await readBytes(temporary, entry.path)) !== entry.sha256)
-      fail(
-        "ARTIFACT_EVIDENCE_INCOMPLETE",
-        "Restored bytes failed verification; staging evidence was retained."
-      );
-  }
-  await makeDirectories(temporary, ".banzai");
-  await publishNew(temporary, receiptPath, receiptBytes);
-  const guard = `${destination}.banzai-restore.lock`;
-  let handle;
-  try {
-    handle = await open4(guard, "wx", 384);
-  } catch {
-    fail(
-      "ARTIFACT_OWNERSHIP_CONFLICT",
-      "Restore destination is owned by another operation."
-    );
-  }
-  try {
-    try {
-      await lstat4(destination);
-      fail(
-        "ARTIFACT_DESTINATION_CONFLICT",
-        "Restore destination appeared during verification."
-      );
-    } catch (error) {
-      if (error.code !== "ENOENT") throw error;
-    }
-    await rename2(temporary, destination);
-  } finally {
-    await handle.close();
-    await unlink2(guard);
-  }
-  return {
-    destination,
-    bundleId: verified.manifest.bundleId,
-    historicalOnly,
-    activeRunChanged: false,
-    restored: true,
-    retentionReceipt: receiptPath,
-    retention: verified.manifest.retention,
-    retainedPaths: verified.retainedPaths
-  };
-}
-
-// ../../plugins/banzai/lib/artifact-storage.mjs
-import { constants as constants6 } from "node:fs";
-import { AsyncLocalStorage } from "node:async_hooks";
-import {
-  lstat as lstat5,
-  realpath as realpath4,
-  open as open5,
-  readdir as readdir4,
-  mkdir as mkdir3,
-  link,
-  unlink as unlink3,
-  rename as rename3
-} from "node:fs/promises";
-import path9 from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { createHash as createHash7, randomUUID as randomUUID4 } from "node:crypto";
-var execute = promisify(execFile);
-var DECLARATION_SCHEMA = "banzai-artifact-layout/v1";
-var BINDING_SCHEMA = "banzai-work-binding/v1";
-var REQUEST_SCHEMA = "banzai-artifact-request/v1";
-var RESULT_SCHEMA = "banzai-artifact-result/v1";
-var METADATA_LIMIT = 64 * 1024;
-var DISCOVERY_LIMIT = 1e3;
-var DECLARATION_PATH = ".banzai/artifacts.json";
-var WORK_ROOT = ".banzai/work";
-var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-var SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
-var SHA256 = /^[0-9a-f]{64}$/u;
-var MODES = ["strict", "lite", "fix", "workflow"];
-var LAYOUTS = ["private", "legacy"];
-var CLAIM = ".writer-claim.json";
-var INIT_LOCK = ".banzai/.artifact-init.lock";
-var runnerOwnership = new AsyncLocalStorage();
-var ArtifactStorageError = class extends Error {
-  constructor(code2, message) {
-    super(message);
-    this.name = "ArtifactStorageError";
-    this.code = code2;
-  }
-};
-function fail(code2, message) {
-  throw new ArtifactStorageError(code2, message);
-}
-function digestBytes(value) {
-  return createHash7("sha256").update(value).digest("hex");
-}
-function canonicalJson(value) {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-function exactObject(value, required, optional = []) {
-  if (value === null || typeof value !== "object" || Array.isArray(value) || required.some((key) => !Object.hasOwn(value, key)) || Object.keys(value).some(
-    (key) => !required.includes(key) && !optional.includes(key)
-  )) {
-    fail(
-      "ARTIFACT_INPUT_INVALID",
-      "Artifact metadata has an invalid object shape."
-    );
-  }
-  return value;
-}
-function relativePath(value) {
-  if (typeof value !== "string" || value.length === 0 || value.length > 500 || /[\\\x00-\x1f\x7f]/u.test(value) || path9.posix.isAbsolute(value) || value.split("/").some(
-    (segment) => segment === "" || segment === "." || segment === ".." || segment === ".git"
-  )) {
-    fail(
-      "ARTIFACT_UNSAFE_PATH",
-      "A bounded, contained project-relative artifact path is required."
-    );
-  }
-  return value;
-}
-async function safePath(root, relative, { missing: missing3 = false, directory: directory2 = false } = {}) {
-  relativePath(relative);
-  let current = root;
-  const parts = relative.split("/");
-  for (const [index, part] of parts.entries()) {
-    current = path9.join(current, part);
-    let stat5;
-    try {
-      stat5 = await lstat5(current);
-    } catch (error) {
-      if (error.code === "ENOENT" && missing3) return path9.join(root, relative);
-      if (error.code === "ENOENT")
-        fail(
-          "ARTIFACT_EVIDENCE_INCOMPLETE",
-          "Required artifact evidence is missing."
-        );
-      fail(
-        "ARTIFACT_IO_ERROR",
-        "Artifact storage could not be inspected. Check local permissions."
-      );
-    }
-    const needsDirectory = index < parts.length - 1 || directory2;
-    if (stat5.isSymbolicLink() || (needsDirectory ? !stat5.isDirectory() : !stat5.isFile())) {
-      fail(
-        "ARTIFACT_UNSAFE_PATH",
-        "Artifact storage requires owned directories and regular files without symlinks."
-      );
-    }
-  }
-  return current;
-}
-async function readBytes(root, relative, { optional = false, limit = Infinity } = {}) {
-  const target = await safePath(root, relative, { missing: optional });
-  let handle;
-  try {
-    handle = await open5(target, constants6.O_RDONLY | constants6.O_NOFOLLOW);
-    const stat5 = await handle.stat();
-    if (!stat5.isFile())
-      fail("ARTIFACT_UNSAFE_PATH", "Artifact input must be a regular file.");
-    if (stat5.size > limit)
-      fail(
-        "ARTIFACT_INPUT_INVALID",
-        "Artifact metadata exceeds its size bound."
-      );
-    const bytes = await handle.readFile();
-    if (bytes.length > limit)
-      fail(
-        "ARTIFACT_INPUT_INVALID",
-        "Artifact metadata exceeds its size bound."
-      );
-    await safePath(root, relative);
-    return bytes;
-  } catch (error) {
-    if (error instanceof ArtifactStorageError) throw error;
-    if (error.code === "ENOENT" && optional) return null;
-    fail(
-      "ARTIFACT_IO_ERROR",
-      "Artifact input could not be read. Check its path and local permissions."
-    );
-  } finally {
-    await handle?.close();
-  }
-}
-async function readJson(root, relative, optional = false) {
-  const bytes = await readBytes(root, relative, {
-    optional,
-    limit: METADATA_LIMIT
-  });
-  if (bytes === null) return null;
-  try {
-    return JSON.parse(bytes.toString("utf8"));
-  } catch {
-    fail("ARTIFACT_INPUT_INVALID", "Artifact metadata is not valid JSON.");
-  }
-}
-async function readInvocationBytes(input, label, options = {}) {
-  if (typeof input !== "string" || !path9.isAbsolute(input))
-    fail("ARTIFACT_INPUT_INVALID", `${label} must name an absolute local regular file.`);
-  try {
-    const parent = await realpath4(path9.dirname(input));
-    return await readBytes(parent, path9.basename(input), options);
-  } catch (error) {
-    fail(
-      error instanceof ArtifactStorageError ? error.code : "ARTIFACT_IO_ERROR",
-      `${label} (${input}): ${error instanceof ArtifactStorageError ? error.message : "Input parent could not be resolved. Check its path and local permissions."}`
-    );
-  }
-}
-async function makeDirectories(root, relative) {
-  relativePath(relative);
-  let current = "";
-  for (const part of relative.split("/")) {
-    current = current ? `${current}/${part}` : part;
-    await safePath(root, current, { missing: true, directory: true });
-    try {
-      await mkdir3(path9.join(root, current), { mode: 448 });
-    } catch (error) {
-      if (error.code !== "EEXIST")
-        fail(
-          "ARTIFACT_IO_ERROR",
-          "Private artifact directory could not be created."
-        );
-    }
-    await safePath(root, current, { directory: true });
-  }
-}
-async function publishNew(root, relative, bytes) {
-  await safePath(root, relative, { missing: true });
-  const parent = path9.posix.dirname(relative);
-  const temporary = `${parent}/.artifact-tmp-${randomUUID4()}`;
-  const handle = await open5(path9.join(root, temporary), "wx", 384);
-  try {
-    await handle.writeFile(bytes);
-    await handle.sync();
-    await safePath(root, relative, { missing: true });
-    await link(path9.join(root, temporary), path9.join(root, relative));
-  } finally {
-    await handle.close();
-    await unlink3(path9.join(root, temporary)).catch(() => {
-    });
-  }
-}
-async function git(root, args) {
-  return execute("git", ["-C", root, ...args], {
-    encoding: "utf8",
-    maxBuffer: 1024 * 1024
-  });
-}
-async function projectRoot(input) {
-  if (typeof input !== "string" || !path9.isAbsolute(input) || /[\x00-\x1f]/u.test(input)) {
-    fail(
-      "ARTIFACT_INPUT_INVALID",
-      "repoRoot must be an absolute local directory."
-    );
-  }
-  let resolved;
-  try {
-    resolved = await realpath4(input);
-  } catch {
-    fail("ARTIFACT_UNSAFE_PATH", "The project directory is unavailable.");
-  }
-  if (!(await lstat5(resolved)).isDirectory())
-    fail("ARTIFACT_UNSAFE_PATH", "The project root must be a directory.");
-  try {
-    const result = await git(resolved, ["rev-parse", "--show-toplevel"]);
-    return await realpath4(result.stdout.trim());
-  } catch (error) {
-    if (!error.stderr?.startsWith("fatal: not a git repository (or any"))
-      fail(
-        "ARTIFACT_IO_ERROR",
-        "Git project discovery failed. Inspect repository ownership or Git metadata."
-      );
-    let candidate = resolved;
-    while (true) {
-      if (await readBytes(candidate, "PROJECT_MANIFEST.md", {
-        optional: true,
-        limit: 256 * 1024
-      }) !== null)
-        return candidate;
-      const parent = path9.dirname(candidate);
-      if (candidate === parent) break;
-      candidate = parent;
-    }
-    fail(
-      "ARTIFACT_INPUT_INVALID",
-      "No Git project or project manifest root was found."
-    );
-  }
-}
-function parseDeclaration(value) {
-  exactObject(value, ["schema", "schemaVersion", "layout"]);
-  if (value.schema !== DECLARATION_SCHEMA || value.schemaVersion !== 1)
-    fail(
-      "ARTIFACT_VERSION_UNSUPPORTED",
-      "Unsupported artifact declaration version."
-    );
-  if (!LAYOUTS.includes(value.layout))
-    fail(
-      "ARTIFACT_INPUT_INVALID",
-      "Artifact layout must be private or legacy."
-    );
-  return value;
-}
-function artifactRoles(workId, slug, mode, layout) {
-  const directory2 = layout === "private" ? `${WORK_ROOT}/${workId}` : `documentation/features/${slug}`;
-  const roles = { reviewDirectory: directory2 };
-  if (mode === "strict" || mode === "workflow")
-    Object.assign(roles, {
-      description: `${directory2}/description.md`,
-      plan: layout === "private" ? `${directory2}/plan.md` : `documentation/development-plans/${slug}/plan.md`,
-      implementationReport: `${directory2}/implementation-report.md`,
-      testReport: `${directory2}/test-report.md`
-    });
-  if (mode === "lite" || mode === "workflow")
-    roles.work = `${directory2}/work.md`;
-  if (mode === "fix" || mode === "workflow")
-    roles.changeReport = layout === "private" ? `${directory2}/change-report.md` : `documentation/changes/${slug}.md`;
-  return roles;
-}
-function parseBinding(value) {
-  exactObject(value, [
-    "schema",
-    "schemaVersion",
-    "workId",
-    "slug",
-    "mode",
-    "layout",
-    "createdAt",
-    "sourceCommit",
-    "artifacts"
-  ]);
-  if (value.schema !== BINDING_SCHEMA || value.schemaVersion !== 1)
-    fail(
-      "ARTIFACT_VERSION_UNSUPPORTED",
-      "Unsupported artifact work binding version."
-    );
-  if (!UUID.test(value.workId) || typeof value.slug !== "string" || value.slug.length > 100 || !SLUG.test(value.slug) || !MODES.includes(value.mode) || !LAYOUTS.includes(value.layout) || typeof value.createdAt !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(
-    value.createdAt
-  ) || !Number.isFinite(Date.parse(value.createdAt)) || !(value.sourceCommit === null || typeof value.sourceCommit === "string" && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(value.sourceCommit))) {
-    fail("ARTIFACT_INPUT_INVALID", "Artifact work identity is malformed.");
-  }
-  const expected = artifactRoles(
-    value.workId,
-    value.slug,
-    value.mode,
-    value.layout
-  );
-  exactObject(value.artifacts, Object.keys(expected));
-  for (const key of Object.keys(expected)) {
-    relativePath(value.artifacts[key]);
-    if (value.artifacts[key] !== expected[key])
-      fail(
-        "ARTIFACT_UNSAFE_PATH",
-        "Artifact role is outside its work binding."
-      );
-  }
-  return value;
-}
-async function directories(root, relative, optional = true) {
-  const target = await safePath(root, relative, {
-    missing: optional,
-    directory: true
-  });
-  try {
-    const entries = await readdir4(target, { withFileTypes: true });
-    if (entries.length > DISCOVERY_LIMIT)
-      fail(
-        "ARTIFACT_DISCOVERY_LIMIT",
-        "Artifact discovery exceeded its bound. Select explicit work or recover the inventory."
-      );
-    return entries.sort((a, b) => a.name.localeCompare(b.name));
-  } catch (error) {
-    if (error.code === "ENOENT" && optional) return [];
-    if (error instanceof ArtifactStorageError) throw error;
-    fail("ARTIFACT_IO_ERROR", "Artifact directories could not be inspected.");
-  }
-}
-async function readHeader(root, relative) {
-  const target = await safePath(root, relative, { missing: true });
-  let handle;
-  try {
-    handle = await open5(target, constants6.O_RDONLY | constants6.O_NOFOLLOW);
-    const buffer = Buffer.alloc(METADATA_LIMIT);
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-    return buffer.subarray(0, bytesRead).toString("utf8");
-  } catch (error) {
-    if (error.code === "ENOENT") return null;
-    fail(
-      "ARTIFACT_IO_ERROR",
-      "Legacy artifact evidence could not be inspected."
-    );
-  } finally {
-    await handle?.close();
-  }
-}
-async function legacyEvidence(root, declared = false) {
-  const evidence2 = [];
-  let count = 0;
-  for (const folder of [
-    "documentation/features",
-    "documentation/development-plans"
-  ]) {
-    for (const entry of await directories(root, folder)) {
-      if (++count > DISCOVERY_LIMIT)
-        fail(
-          "ARTIFACT_DISCOVERY_LIMIT",
-          "Legacy artifact discovery exceeded its bound."
-        );
-      if (entry.isSymbolicLink())
-        fail(
-          "ARTIFACT_UNSAFE_PATH",
-          "Legacy artifact discovery encountered a symlink."
-        );
-      if (!entry.isDirectory()) continue;
-      const files = folder.endsWith("features") ? ["description.md", "work.md"] : ["plan.md"];
-      for (const name of files) {
-        const relative = `${folder}/${entry.name}/${name}`;
-        const header = await readHeader(root, relative);
-        if (header === null) continue;
-        if (/^# Feature: /mu.test(header) && header.includes(`Slug: \`${entry.name}\``) || /^# Development Plan: /mu.test(header) && header.includes(`/features/${entry.name}/description.md`))
-          evidence2.push(relative);
-      }
-    }
-  }
-  for (const entry of await directories(root, "documentation/changes")) {
-    if (++count > DISCOVERY_LIMIT) fail("ARTIFACT_DISCOVERY_LIMIT", "Legacy change discovery exceeded its bound.");
-    if (!entry.isFile() || !/^[a-z0-9]+(?:-[a-z0-9]+)*\.md$/u.test(entry.name)) continue;
-    const relative = `documentation/changes/${entry.name}`;
-    if (/^# Change Report:/mu.test(await readHeader(root, relative) ?? "")) evidence2.push(relative);
-  }
-  const manifest = await readHeader(root, "PROJECT_MANIFEST.md");
-  const refs = manifest?.match(
-    /documentation\/(?:features|changes|development-plans)\/[a-z0-9/.-]+\.md/gu
-  ) ?? [];
-  for (const relative of [...new Set(refs)]) {
-    if (++count > DISCOVERY_LIMIT)
-      fail(
-        "ARTIFACT_DISCOVERY_LIMIT",
-        "Legacy reference discovery exceeded its bound."
-      );
-    if (await readHeader(root, relative) !== null) evidence2.push(relative);
-  }
-  for (const entry of await directories(root, ".banzai/runs")) {
-    if (++count > DISCOVERY_LIMIT)
-      fail("ARTIFACT_DISCOVERY_LIMIT", "Run discovery exceeded its bound.");
-    if (!entry.isDirectory())
-      fail(
-        "ARTIFACT_RECOVERY_REQUIRED",
-        "Runner evidence requires explicit inspection."
-      );
-    const state = await readJson(
-      root,
-      `.banzai/runs/${entry.name}/state.json`,
-      true
-    );
-    if (state === null || ![1, 2, 3, 4].includes(state.schemaVersion) || state.runId !== entry.name)
-      fail(
-        "ARTIFACT_RECOVERY_REQUIRED",
-        "Unrecognized runner evidence requires recovery."
-      );
-    if (state.schemaVersion === 4 && !declared)
-      fail(
-        "ARTIFACT_RECOVERY_REQUIRED",
-        "A bound run without its artifact declaration requires recovery."
-      );
-    if (state.schemaVersion !== 4) evidence2.push(`.banzai/runs/${entry.name}/state.json`);
-  }
-  return [...new Set(evidence2)].sort();
-}
-async function legacyCandidates(root, evidence2, boundWorks) {
-  const groups = /* @__PURE__ */ new Map();
-  for (const relative of evidence2) {
-    const match = /^documentation\/(features|development-plans|changes)\/([a-z0-9-]+)(?:\.md|\/)/u.exec(relative);
-    if (!match || boundWorks.some((work) => work.binding.layout === "legacy" && work.binding.slug === match[2])) continue;
-    const slug = match[2];
-    const mode = match[1] === "changes" ? "fix" : relative.endsWith("/work.md") ? "lite" : "strict";
-    groups.set(`${slug}:${mode}`, { slug, mode });
-  }
-  const candidates = [];
-  for (const { slug, mode } of groups.values()) {
-    const artifacts = artifactRoles("00000000-0000-4000-8000-000000000000", slug, mode, "legacy");
-    const originals = [];
-    for (const [role, relative] of Object.entries(artifacts)) {
-      if (role === "reviewDirectory") {
-        for (const entry of await directories(root, relative)) {
-          if (!/^review-[1-9][0-9]*\.md$/u.test(entry.name)) continue;
-          const bytes = await readBytes(root, `${relative}/${entry.name}`);
-          originals.push({ path: `${relative}/${entry.name}`, sha256: digestBytes(bytes) });
-        }
-      } else {
-        const bytes = await readBytes(root, relative, { optional: true });
-        if (bytes !== null) originals.push({ path: relative, sha256: digestBytes(bytes) });
-      }
-    }
-    let sourceCommit = null;
-    try {
-      sourceCommit = (await git(root, ["log", "-1", "--format=%H", "--", ...originals.map((item) => item.path)])).stdout.trim() || null;
-    } catch {
-    }
-    const identity = digestBytes(canonicalJson({ slug, mode, originals, sourceCommit }));
-    const creationId = `${identity.slice(0, 8)}-${identity.slice(8, 12)}-4${identity.slice(13, 16)}-8${identity.slice(17, 20)}-${identity.slice(20, 32)}`;
-    candidates.push({ slug, mode, creationId, workPath: mode === "fix" ? artifacts.changeReport : artifacts.reviewDirectory, artifacts, originals, sourceCommit });
-  }
-  return candidates;
-}
-async function readBinding(root, workPath) {
-  relativePath(workPath);
-  const match = /^\.banzai\/work\/([^/]+)(?:\/work\.json)?$/u.exec(workPath);
-  if (match === null || !UUID.test(match[1]))
-    fail(
-      "ARTIFACT_UNSAFE_PATH",
-      "Select a work ID or its project-relative work.json path."
-    );
-  const relative = `${WORK_ROOT}/${match[1]}/work.json`;
-  const bytes = await readBytes(root, relative, { limit: METADATA_LIMIT });
-  let parsed;
-  try {
-    parsed = JSON.parse(bytes.toString("utf8"));
-  } catch {
-    fail("ARTIFACT_INPUT_INVALID", "Work binding is not valid JSON.");
-  }
-  const binding = parseBinding(parsed);
-  if (binding.workId !== match[1])
-    fail(
-      "ARTIFACT_RECOVERY_REQUIRED",
-      "Work directory and binding identities disagree."
-    );
-  return { binding, sha256: digestBytes(bytes) };
-}
-async function inspectArtifacts(input) {
-  const root = await projectRoot(input.repoRoot);
-  if (input.workId !== void 0 && input.workPath !== void 0)
-    fail("ARTIFACT_INPUT_INVALID", "Select either workId or workPath.");
-  if (input.workId !== void 0 && !UUID.test(input.workId))
-    fail("ARTIFACT_INPUT_INVALID", "Invalid work ID.");
-  const declarationValue = await readJson(root, DECLARATION_PATH, true);
-  const declaration = declarationValue === null ? null : parseDeclaration(declarationValue);
-  const selector = input.workPath ?? (input.workId === void 0 ? null : `${WORK_ROOT}/${input.workId}`);
-  if (selector !== null && !selector.startsWith(`${WORK_ROOT}/`)) {
-    relativePath(selector);
-    const current = await inspectArtifacts({ repoRoot: root });
-    const matches = current.legacyCandidates.filter((item) => item.workPath === selector || Object.values(item.artifacts).includes(selector));
-    const bound = [];
-    for (const candidate of current.candidates) {
-      const selected = await readBinding(root, candidate.workPath);
-      if (selected.binding.layout === "legacy" && Object.values(selected.binding.artifacts).includes(selector)) bound.push(candidate);
-    }
-    if (matches.length === 0 && bound.length === 1) return inspectArtifacts({ repoRoot: root, workId: bound[0].workId });
-    if (matches.length !== 1 || bound.length)
-      fail("ARTIFACT_WORK_AMBIGUOUS", "Select one recognized original legacy bundle or its registered work ID.");
-    return { ...current, legacyCandidates: matches, legacySelection: matches[0] };
-  }
-  if (selector !== null) {
-    const selected = await readBinding(root, selector);
-    if (declaration === null)
-      fail(
-        "ARTIFACT_RECOVERY_REQUIRED",
-        "Selected work has no declaration. Recover its verified layout before continuation."
-      );
-    return {
-      projectRoot: root,
-      classification: "declared",
-      layout: selected.binding.layout,
-      declaration,
-      work: selected,
-      candidates: [
-        {
-          workId: selected.binding.workId,
-          slug: selected.binding.slug,
-          mode: selected.binding.mode,
-          workPath: `${WORK_ROOT}/${selected.binding.workId}/work.json`
-        }
-      ],
-      legacyEvidence: [],
-      legacyCandidates: [],
-      legacySelection: null
-    };
-  }
-  const entries = await directories(root, WORK_ROOT);
-  const works = [];
-  for (const entry of entries) {
-    if (/^\.create-[0-9a-f-]{36}$/u.test(entry.name) && entry.isDirectory())
-      continue;
-    if (!entry.isDirectory() || !UUID.test(entry.name))
-      fail(
-        "ARTIFACT_RECOVERY_REQUIRED",
-        "Private work inventory contains unrecognized evidence."
-      );
-    works.push(await readBinding(root, `${WORK_ROOT}/${entry.name}`));
-  }
-  if (declaration === null && entries.length > 0)
-    fail(
-      "ARTIFACT_RECOVERY_REQUIRED",
-      "Private work exists without its declaration. Recover the declaration from verified bindings."
-    );
-  const legacy = await legacyEvidence(root, declaration !== null);
-  const continuations = await legacyCandidates(root, legacy, works);
-  return {
-    projectRoot: root,
-    classification: declaration !== null ? "declared" : legacy.length > 0 ? "legacy" : "fresh",
-    layout: declaration?.layout ?? (legacy.length > 0 ? "legacy" : "private"),
-    declaration,
-    work: null,
-    candidates: works.map((item) => ({
-      workId: item.binding.workId,
-      slug: item.binding.slug,
-      mode: item.binding.mode,
-      workPath: `${WORK_ROOT}/${item.binding.workId}/work.json`
-    })),
-    legacyEvidence: legacy,
-    legacyCandidates: continuations,
-    legacySelection: null
-  };
-}
-async function ignored(root, relative) {
-  try {
-    await git(root, ["check-ignore", "--no-index", "--quiet", "--", relative]);
-    return true;
-  } catch (error) {
-    if (error.code === 1) return false;
-    fail(
-      "ARTIFACT_IGNORE_CONFLICT",
-      "Private evidence requires verifiable Git exclusions. Initialize Git explicitly first."
-    );
-  }
-}
-async function verifyIgnores(root, binding = null, destinations = []) {
-  if (await ignored(root, DECLARATION_PATH))
-    fail(
-      "ARTIFACT_IGNORE_CONFLICT",
-      "The artifact declaration is ignored. Narrow the rule hiding .banzai/artifacts.json explicitly."
-    );
-  const selected = binding === null ? [] : [
-    `${WORK_ROOT}/${binding.workId}/work.json`,
-    `${WORK_ROOT}/${binding.workId}/${CLAIM}`,
-    ...binding.layout === "private" ? Object.entries(binding.artifacts).map(
-      ([role, value]) => role === "reviewDirectory" ? `${value}/review-1.md` : value
-    ) : []
-  ];
-  for (const relative of [
-    `${WORK_ROOT}/00000000-0000-4000-8000-000000000000/probe.md`,
-    ...selected,
-    ...destinations
-  ]) {
-    relativePath(relative);
-    if (!await ignored(root, relative))
-      fail(
-        "ARTIFACT_IGNORE_CONFLICT",
-        "Selected private evidence is not effectively ignored. Repair its Git exclusions before writing."
-      );
-  }
-}
-async function withInitializationLock(root, action) {
-  await makeDirectories(root, ".banzai");
-  let handle;
-  for (let attempt = 0; attempt < 100; attempt++) {
-    await safePath(root, INIT_LOCK, { missing: true });
-    try {
-      handle = await open5(path9.join(root, INIT_LOCK), "wx", 384);
-      break;
-    } catch (error) {
-      if (error.code !== "EEXIST")
-        fail(
-          "ARTIFACT_IO_ERROR",
-          "Artifact initialization ownership could not be acquired."
-        );
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-  }
-  if (handle === void 0)
-    fail(
-      "ARTIFACT_OWNERSHIP_CONFLICT",
-      "Artifact initialization is already owned. Retry or inspect an abandoned initialization lock."
-    );
-  const ownership = await handle.stat();
-  try {
-    return await action();
-  } finally {
-    await handle.close();
-    const current = await lstat5(path9.join(root, INIT_LOCK));
-    if (current.dev !== ownership.dev || current.ino !== ownership.ino)
-      fail(
-        "ARTIFACT_OWNERSHIP_CONFLICT",
-        "Initialization lock ownership changed; evidence was retained."
-      );
-    await unlink3(path9.join(root, INIT_LOCK));
-  }
-}
-async function initializeArtifacts(input) {
-  const before = await inspectArtifacts({ repoRoot: input.repoRoot });
-  if (input.layout !== void 0 && !LAYOUTS.includes(input.layout))
-    fail(
-      "ARTIFACT_INPUT_INVALID",
-      "Artifact layout must be private or legacy."
-    );
-  if (input.layout !== void 0 && input.layout !== before.layout && (before.declaration !== null || before.classification === "legacy"))
-    fail(
-      "ARTIFACT_RECOVERY_REQUIRED",
-      "Changing an existing layout requires an explicit storage migration."
-    );
-  const root = before.projectRoot;
-  const adoption = await inspectProjectAdoption(root);
-  if (adoption.classification !== "ready")
-    fail(
-      "ARTIFACT_SETUP_REQUIRED",
-      "Complete normal project guidance setup or migration before initializing artifact storage."
-    );
-  await git(root, ["rev-parse", "--show-toplevel"]).catch(
-    () => fail(
-      "ARTIFACT_IGNORE_CONFLICT",
-      "Initialize Git explicitly before creating private evidence."
-    )
-  );
-  if (await ignored(root, DECLARATION_PATH))
-    fail(
-      "ARTIFACT_IGNORE_CONFLICT",
-      "Narrow the existing ignore rule hiding the artifact declaration before setup."
-    );
-  return withInitializationLock(root, async () => {
-    const current = await inspectArtifacts({ repoRoot: root });
-    const original = await readBytes(root, ".gitignore", {
-      optional: true,
-      limit: METADATA_LIMIT
-    });
-    if (!await ignored(root, `${WORK_ROOT}/probe.md`)) {
-      const suffix = "\n# Banzai private artifact storage\n/.banzai/work/\n/.banzai/.artifact-init.lock\n";
-      const contents = Buffer.from((original?.toString("utf8") ?? "") + suffix);
-      if (original === null) await publishNew(root, ".gitignore", contents);
-      else {
-        const handle = await open5(
-          path9.join(root, ".gitignore"),
-          constants6.O_WRONLY | constants6.O_APPEND | constants6.O_NOFOLLOW
-        );
-        try {
-          const latest = await readBytes(root, ".gitignore", {
-            limit: METADATA_LIMIT
-          });
-          if (!latest.equals(original))
-            fail(
-              "ARTIFACT_OWNERSHIP_CONFLICT",
-              "Ignore rules changed during initialization; retry after inspection."
-            );
-          await handle.writeFile(suffix);
-          await handle.sync();
-        } finally {
-          await handle.close();
-        }
-      }
-    }
-    await verifyIgnores(root);
-    if (current.declaration === null) {
-      const declaration = {
-        schema: DECLARATION_SCHEMA,
-        schemaVersion: 1,
-        layout: input.layout ?? current.layout
-      };
-      await publishNew(
-        root,
-        DECLARATION_PATH,
-        JSON.stringify(declaration, null, 2) + "\n"
-      );
-    }
-    return inspectArtifacts({ repoRoot: root });
-  });
-}
-async function createWork(input) {
-  if (!UUID.test(input.creationId) || typeof input.slug !== "string" || input.slug.length > 100 || !SLUG.test(input.slug) || !MODES.includes(input.mode))
-    fail(
-      "ARTIFACT_INPUT_INVALID",
-      "Create requires a UUID creationId, bounded slug and supported mode."
-    );
-  const state = await initializeArtifacts({ repoRoot: input.repoRoot });
-  const root = state.projectRoot;
-  const directory2 = `${WORK_ROOT}/${input.creationId}`;
-  return withInitializationLock(root, async () => {
-    const state2 = await inspectArtifacts({ repoRoot: root });
-    const existing = await readJson(root, `${directory2}/work.json`, true);
-    if (existing !== null) {
-      const bound = parseBinding(existing);
-      if (bound.workId !== input.creationId || bound.slug !== input.slug || bound.mode !== input.mode)
-        fail(
-          "ARTIFACT_OWNERSHIP_CONFLICT",
-          "creationId already identifies different work."
-        );
-      await verifyIgnores(root, bound);
-      return readBinding(root, directory2);
-    }
-    await verifyIgnores(root);
-    const continuation = state2.legacyCandidates.find((item) => item.slug === input.slug && item.mode === input.mode && item.creationId === input.creationId);
-    if (!continuation) {
-      const legacyRoles = artifactRoles(input.creationId, input.slug, "workflow", "legacy");
-      for (const [role, relative] of Object.entries(legacyRoles))
-        if (role !== "reviewDirectory" && await readBytes(root, relative, { optional: true }) !== null)
-          fail("ARTIFACT_WORK_AMBIGUOUS", "Original legacy evidence occupies this slug. Inspect its current continuation identity; stale selections cannot create replacement private work.");
-    }
-    const layout = continuation ? "legacy" : state2.layout;
-    const roles = artifactRoles(
-      input.creationId,
-      input.slug,
-      input.mode,
-      layout
-    );
-    if (layout === "legacy") {
-      for (const [role, relative] of Object.entries(roles)) {
-        if (!continuation && role !== "reviewDirectory" && await readBytes(root, relative, { optional: true }) !== null)
-          fail(
-            "ARTIFACT_WORK_AMBIGUOUS",
-            "Legacy artifacts already occupy this slug. Inspect their original workPath and register using its exact continuation creationId, slug and mode."
-          );
-      }
-      if (state2.candidates.some((work) => work.slug === input.slug))
-        fail(
-          "ARTIFACT_WORK_AMBIGUOUS",
-          "Legacy work with this slug is already bound. Select its work ID."
-        );
-    }
-    const staging = `${WORK_ROOT}/.create-${input.creationId}`;
-    await verifyIgnores(root, { workId: input.creationId, layout, artifacts: roles }, [`${staging}/work.json`]);
-    await makeDirectories(root, staging);
-    let sourceCommit = null;
-    try {
-      sourceCommit = (await git(root, ["rev-parse", "--verify", "HEAD"])).stdout.trim();
-    } catch {
-    }
-    if (continuation) sourceCommit = continuation.sourceCommit;
-    const staged = await readJson(root, `${staging}/work.json`, true);
-    const binding = staged === null ? parseBinding({
-      schema: BINDING_SCHEMA,
-      schemaVersion: 1,
-      workId: input.creationId,
-      slug: input.slug,
-      mode: input.mode,
-      layout,
-      createdAt: (/* @__PURE__ */ new Date()).toISOString(),
-      sourceCommit,
-      artifacts: roles
-    }) : parseBinding(staged);
-    if (binding.workId !== input.creationId || binding.slug !== input.slug || binding.mode !== input.mode)
-      fail(
-        "ARTIFACT_RECOVERY_REQUIRED",
-        "Interrupted work creation has conflicting identity evidence."
-      );
-    if (staged === null)
-      await publishNew(
-        root,
-        `${staging}/work.json`,
-        JSON.stringify(binding, null, 2) + "\n"
-      );
-    await safePath(root, directory2, { missing: true, directory: true });
-    try {
-      await lstat5(path9.join(root, directory2));
-      fail(
-        "ARTIFACT_RECOVERY_REQUIRED",
-        "The work destination already exists without a valid binding."
-      );
-    } catch (error) {
-      if (error.code !== "ENOENT") throw error;
-    }
-    await verifyIgnores(root, binding, [`${staging}/work.json`]);
-    await rename3(path9.join(root, staging), path9.join(root, directory2));
-    return readBinding(root, directory2);
-  });
-}
-function ownsArtifact(binding, relative) {
-  relativePath(relative);
-  return Object.entries(binding.artifacts).some(
-    ([role, value]) => role !== "reviewDirectory" && value === relative
-  ) || relative.startsWith(`${binding.artifacts.reviewDirectory}/`) && /^review-[1-9][0-9]*\.md$/u.test(
-    relative.slice(binding.artifacts.reviewDirectory.length + 1)
-  );
-}
-async function inspectBoundWork(root, bound) {
-  exactObject(bound, ["binding", "sha256"]);
-  const binding = parseBinding(bound.binding);
-  if (!SHA256.test(bound.sha256))
-    fail("ARTIFACT_INPUT_INVALID", "Invalid persisted work binding digest.");
-  const current = await inspectArtifacts({
-    repoRoot: root,
-    workId: binding.workId
-  });
-  if (current.work.sha256 !== bound.sha256 || canonicalJson(current.work.binding) !== canonicalJson(binding))
-    fail(
-      "ARTIFACT_RECOVERY_REQUIRED",
-      "The persisted work binding no longer matches its original bytes."
-    );
-  await verifyIgnores(current.projectRoot, binding);
-  return current.work;
-}
-async function privateArtifactInventory(root, bound) {
-  await inspectBoundWork(root, bound);
-  const directory2 = `${WORK_ROOT}/${bound.binding.workId}`;
-  const entries = [];
-  const walk = async (relative) => {
-    for (const item of await directories(root, relative, false)) {
-      const filename = `${relative}/${item.name}`;
-      if (filename === `${directory2}/work.json`) continue;
-      if (filename === `${directory2}/${CLAIM}`) {
-        if (await hasRunnerWorkOwnership(root, bound)) continue;
-        fail(
-          "ARTIFACT_OWNERSHIP_CONFLICT",
-          "A standalone writer owns this work. Release its claim before runner continuation."
-        );
-      }
-      if (item.isDirectory()) {
-        await walk(filename);
-        continue;
-      }
-      const bytes = await readBytes(root, filename);
-      entries.push({
-        path: filename,
-        kind: "file",
-        sha256: digestBytes(Buffer.concat([Buffer.from("file\0"), bytes]))
-      });
-      if (entries.length > DISCOVERY_LIMIT)
-        fail(
-          "ARTIFACT_DISCOVERY_LIMIT",
-          "Selected work inventory exceeds its bound."
-        );
-    }
-  };
-  await walk(directory2);
-  return entries.sort(
-    (a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0
-  );
-}
-async function selectedWork(input) {
-  const state = await inspectArtifacts({
-    repoRoot: input.repoRoot,
-    workPath: input.workPath
-  });
-  if (state.work === null)
-    fail(
-      "ARTIFACT_WORK_AMBIGUOUS",
-      "Select an explicit work identity before writing."
-    );
-  await verifyIgnores(state.projectRoot, state.work.binding);
-  return {
-    root: state.projectRoot,
-    ...state.work,
-    directory: `${WORK_ROOT}/${state.work.binding.workId}`
-  };
-}
-async function acquireWork(input) {
-  if (typeof input.ownerId !== "string" || input.ownerId.length === 0 || input.ownerId.length > 100 || /[\x00-\x1f]/u.test(input.ownerId))
-    fail("ARTIFACT_INPUT_INVALID", "A bounded local ownerId is required.");
-  const work = await selectedWork(input);
-  const token = randomUUID4();
-  try {
-    await publishNew(
-      work.root,
-      `${work.directory}/${CLAIM}`,
-      JSON.stringify({
-        token,
-        ownerId: input.ownerId,
-        bindingDigest: work.sha256,
-        createdAt: (/* @__PURE__ */ new Date()).toISOString()
-      }) + "\n"
-    );
-  } catch (error) {
-    if (error.code === "EEXIST")
-      fail(
-        "ARTIFACT_OWNERSHIP_CONFLICT",
-        "This work already has a writer. Use another work item or resolve the existing owner."
-      );
-    throw error;
-  }
-  return { token, workId: work.binding.workId };
-}
-async function hasRunnerWorkOwnership(root, bound) {
-  if (bound === void 0) return true;
-  const owner = runnerOwnership.getStore();
-  if (!owner || owner.root !== root || owner.workId !== bound.binding.workId || owner.bindingDigest !== bound.sha256) return false;
-  const claim = await readJson(root, `${WORK_ROOT}/${owner.workId}/${CLAIM}`, true);
-  if (claim?.token !== owner.token || claim?.bindingDigest !== bound.sha256)
-    fail("ARTIFACT_OWNERSHIP_CONFLICT", "Runner work ownership changed; inspect the retained evidence.");
-  return true;
-}
-async function withRunnerWorkOwnership(root, bound, action) {
-  if (bound === void 0 || await hasRunnerWorkOwnership(root, bound)) return action();
-  await inspectBoundWork(root, bound);
-  const workPath = `${WORK_ROOT}/${bound.binding.workId}/work.json`;
-  const claim = await acquireWork({ repoRoot: root, workPath, ownerId: "runner" });
-  const owner = { root, workId: claim.workId, token: claim.token, bindingDigest: bound.sha256 };
-  return runnerOwnership.run(owner, async () => {
-    try {
-      return await action();
-    } finally {
-      const relative = `${WORK_ROOT}/${owner.workId}/${CLAIM}`;
-      const current = await readJson(root, relative, true);
-      if (current?.token !== owner.token || current?.bindingDigest !== owner.bindingDigest)
-        fail("ARTIFACT_OWNERSHIP_CONFLICT", "Runner claim changed; evidence was retained for owner recovery.");
-      await safePath(root, relative);
-      await unlink3(path9.join(root, relative));
-    }
-  });
-}
-async function requireClaim(input) {
-  const work = await selectedWork(input);
-  const claim = await readJson(work.root, `${work.directory}/${CLAIM}`, true);
-  if (claim === null || claim.token !== input.token || claim.bindingDigest !== work.sha256 || !UUID.test(input.token))
-    fail(
-      "ARTIFACT_OWNERSHIP_CONFLICT",
-      "The caller does not own the current work binding."
-    );
-  return work;
-}
-async function writeArtifact(input) {
-  const root = await projectRoot(input.repoRoot);
-  return withInitializationLock(root, () => writeClaimedArtifact(input));
-}
-async function writeClaimedArtifact(input) {
-  const work = await requireClaim(input);
-  if (!ownsArtifact(work.binding, input.artifactPath))
-    fail(
-      "ARTIFACT_UNSAFE_PATH",
-      "Write is outside the selected work's artifact roles."
-    );
-  if (!(input.expectedSha256 === null || typeof input.expectedSha256 === "string" && SHA256.test(input.expectedSha256)))
-    fail(
-      "ARTIFACT_INPUT_INVALID",
-      "expectedSha256 must be a SHA-256 identity or null for creation."
-    );
-  const bytes = await readInvocationBytes(input.inputFile, "inputFile");
-  const existing = await readBytes(work.root, input.artifactPath, {
-    optional: true
-  });
-  if ((existing === null ? null : digestBytes(existing)) !== input.expectedSha256)
-    fail(
-      "ARTIFACT_OWNERSHIP_CONFLICT",
-      "Artifact bytes changed. Inspect the current evidence before writing."
-    );
-  await makeDirectories(work.root, path9.posix.dirname(input.artifactPath));
-  if (work.binding.layout === "private") await verifyIgnores(work.root, work.binding, [input.artifactPath]);
-  if (existing === null) {
-    try {
-      await publishNew(work.root, input.artifactPath, bytes);
-    } catch (error) {
-      if (error.code === "EEXIST")
-        fail(
-          "ARTIFACT_OWNERSHIP_CONFLICT",
-          "Artifact was created by another writer."
-        );
-      throw error;
-    }
-  } else {
-    const temporary = `${path9.posix.dirname(input.artifactPath)}/.artifact-tmp-${randomUUID4()}`;
-    try {
-      if (work.binding.layout === "private") await verifyIgnores(work.root, work.binding, [temporary, input.artifactPath]);
-      await publishNew(work.root, temporary, bytes);
-      await requireClaim(input);
-      const latest = await readBytes(work.root, input.artifactPath);
-      if (digestBytes(latest) !== input.expectedSha256)
-        fail(
-          "ARTIFACT_OWNERSHIP_CONFLICT",
-          "Artifact bytes changed during writing."
-        );
-      if (work.binding.layout === "private") await verifyIgnores(work.root, work.binding, [input.artifactPath]);
-      await safePath(work.root, input.artifactPath);
-      await rename3(
-        path9.join(work.root, temporary),
-        path9.join(work.root, input.artifactPath)
-      );
-    } finally {
-      await unlink3(path9.join(work.root, temporary)).catch(() => {
-      });
-    }
-  }
-  return { path: input.artifactPath, sha256: digestBytes(bytes) };
-}
-async function releaseWork(input) {
-  const root = await projectRoot(input.repoRoot);
-  return withInitializationLock(root, async () => {
-    const work = await requireClaim(input);
-    await unlink3(path9.join(work.root, work.directory, CLAIM));
-    return { workId: work.binding.workId, released: true };
-  });
-}
-var operationFields = {
-  inventory: [[], ["workPaths", "runIds"]],
-  export: [["inventoryFile", "destination"], []],
-  verify: [["bundlePath"], []],
-  restore: [["bundlePath", "destination"], []],
-  inspect: [[], ["workId", "workPath"]],
-  initialize: [[], ["layout"]],
-  create: [["slug", "mode", "creationId"], []],
-  acquire: [["workPath", "ownerId"], []],
-  write: [
-    ["workPath", "token", "artifactPath", "inputFile", "expectedSha256"],
-    []
-  ],
-  release: [["workPath", "token"], []]
-};
-async function runArtifactOperation(operation, input) {
-  const fields = operationFields[operation];
-  if (fields === void 0)
-    fail("ARTIFACT_INPUT_INVALID", "Unsupported artifact operation.");
-  exactObject(
-    input,
-    ["schema", "schemaVersion", "repoRoot", ...fields[0]],
-    fields[1]
-  );
-  if (input.schema !== REQUEST_SCHEMA || input.schemaVersion !== 1)
-    fail(
-      "ARTIFACT_VERSION_UNSUPPORTED",
-      "Unsupported artifact request version."
-    );
-  const operations = {
-    inventory: inventoryArtifacts,
-    export: exportArtifacts,
-    verify: verifyArchive,
-    restore: restoreArtifacts,
-    inspect: inspectArtifacts,
-    initialize: initializeArtifacts,
-    create: createWork,
-    acquire: acquireWork,
-    write: writeArtifact,
-    release: releaseWork
-  };
-  return operations[operation](input);
-}
-async function artifactCommand(args) {
-  const operation = args[0] ?? "";
-  try {
-    if (args.length !== 3 || args[1] !== "--json" || !Object.hasOwn(operationFields, operation))
-      fail(
-        "ARTIFACT_INPUT_INVALID",
-        "Usage: artifacts <operation> --json <request-file>"
-      );
-    const filename = path9.resolve(args[2]);
-    const bytes = await readInvocationBytes(filename, "requestFile", { limit: METADATA_LIMIT });
-    let input;
-    try {
-      input = JSON.parse(bytes.toString("utf8"));
-    } catch {
-      fail("ARTIFACT_INPUT_INVALID", `requestFile (${filename}) must contain valid JSON.`);
-    }
-    const result = await runArtifactOperation(operation, input);
-    return {
-      schema: RESULT_SCHEMA,
-      schemaVersion: 1,
-      operation,
-      ok: true,
-      result,
-      error: null
-    };
-  } catch (error) {
-    return {
-      schema: RESULT_SCHEMA,
-      schemaVersion: 1,
-      operation: Object.hasOwn(operationFields, operation) ? operation : "",
-      ok: false,
-      result: null,
-      error: error instanceof ArtifactStorageError ? { code: error.code, message: error.message } : {
-        code: "ARTIFACT_IO_ERROR",
-        message: "The artifact operation failed. Inspect local storage and permissions; no fallback destination was selected."
-      }
-    };
-  }
-}
-
-// src/artifact-storage.ts
-var {
-  inspectProjectAdoption: inspectProjectAdoption2,
-  readAdoptionFile: readAdoptionFile2,
-  ADOPTION_LABELS: ADOPTION_LABELS2,
-  SCAFFOLD_MARKER: SCAFFOLD_MARKER2,
-  GUIDANCE_MAX_BYTES: GUIDANCE_MAX_BYTES2,
-  adoptionDiagnostic: adoptionDiagnostic2,
-  readSharedReviewSnapshot,
-  sealSharedReviewSnapshot,
-  artifactCommand: artifactCommand2,
-  artifactRoles: artifactRoles2,
-  inspectArtifacts: inspectArtifacts2,
-  initializeArtifacts: initializeArtifacts2,
-  createWork: createWork2,
-  readBinding: readBinding2,
-  parseBinding: parseBinding2,
-  inspectBoundWork: inspectBoundWork2,
-  privateArtifactInventory: privateArtifactInventory2,
-  ownsArtifact: ownsArtifact2,
-  verifyIgnores: verifyIgnores2,
-  safePath: safePath2,
-  readBytes: readBytes2,
-  digestBytes: digestBytes2,
-  canonicalJson: canonicalJson2,
-  hasRunnerWorkOwnership: hasRunnerWorkOwnership2,
-  withRunnerWorkOwnership: withRunnerWorkOwnership2,
-  acquireWork: acquireWork2,
-  writeArtifact: writeArtifact2,
-  releaseWork: releaseWork2,
-  ArtifactStorageError: ArtifactStorageError2
-} = artifact_storage_exports;
+import path22 from "node:path";
 
 // src/workflow.ts
-import { createHash as createHash14, randomUUID as randomUUID7 } from "node:crypto";
-import { constants as constants9 } from "node:fs";
+import { createHash as createHash16, randomUUID as randomUUID7 } from "node:crypto";
+import { constants as constants10 } from "node:fs";
 import { access as access4, chmod as chmod2, mkdir as mkdir7, readFile as readFile11, writeFile as writeFile4 } from "node:fs/promises";
 import os from "node:os";
-import path19 from "node:path";
+import path21 from "node:path";
 import process4 from "node:process";
 
 // src/review-snapshot.ts
-import { lstat as lstat7, readFile as readFile5 } from "node:fs/promises";
-import path11 from "node:path";
+import { lstat as lstat8, readFile as readFile5 } from "node:fs/promises";
+import path13 from "node:path";
 
 // src/git.ts
-import { createHash as createHash8 } from "node:crypto";
-import { lstat as lstat6, readFile as readFile4 } from "node:fs/promises";
-import path10 from "node:path";
+import { createHash as createHash10 } from "node:crypto";
+import { lstat as lstat7, readFile as readFile4 } from "node:fs/promises";
+import path12 from "node:path";
 var GIT_TIMEOUT_MS = 2 * 60 * 1e3;
 async function runGit(repoRoot, args) {
   return await runProcess({
@@ -16772,7 +17696,7 @@ async function runGit(repoRoot, args) {
     timeoutMs: GIT_TIMEOUT_MS
   });
 }
-async function git2(repoRoot, args) {
+async function git3(repoRoot, args) {
   const result = await runGit(repoRoot, args);
   if (result.exitCode !== 0) {
     if (result.stderr.startsWith("fatal: not a git repository (or any")) {
@@ -16789,12 +17713,12 @@ async function git2(repoRoot, args) {
   return result;
 }
 async function discoverRepositoryRoot(cwd) {
-  const result = await git2(cwd, ["rev-parse", "--show-toplevel"]);
+  const result = await git3(cwd, ["rev-parse", "--show-toplevel"]);
   return result.stdout.trim();
 }
 async function currentCommit(repoRoot) {
   try {
-    const result = await git2(repoRoot, [
+    const result = await git3(repoRoot, [
       "rev-parse",
       "--verify",
       "HEAD^{commit}"
@@ -16828,20 +17752,20 @@ async function currentCommit(repoRoot) {
   }
 }
 async function currentBranch(repoRoot) {
-  const result = await git2(repoRoot, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  const result = await git3(repoRoot, ["rev-parse", "--abbrev-ref", "HEAD"]);
   const branch = result.stdout.trim();
   return branch.length === 0 || branch === "HEAD" ? null : branch;
 }
 function resolveRepositoryPath(repoRoot, relativePath2) {
-  if (relativePath2.length === 0 || path10.isAbsolute(relativePath2)) {
+  if (relativePath2.length === 0 || path12.isAbsolute(relativePath2)) {
     throw new BanzaiError(
       "INVALID_ARTIFACT_PATH",
       `Artifact path must be repository-relative: ${relativePath2}`
     );
   }
-  const normalizedRoot = path10.resolve(repoRoot);
-  const candidate = path10.resolve(normalizedRoot, relativePath2);
-  if (!candidate.startsWith(`${normalizedRoot}${path10.sep}`)) {
+  const normalizedRoot = path12.resolve(repoRoot);
+  const candidate = path12.resolve(normalizedRoot, relativePath2);
+  if (!candidate.startsWith(`${normalizedRoot}${path12.sep}`)) {
     throw new BanzaiError(
       "INVALID_ARTIFACT_PATH",
       `Artifact path escapes the repository: ${relativePath2}`
@@ -16851,7 +17775,7 @@ function resolveRepositoryPath(repoRoot, relativePath2) {
 }
 async function hashFile(repoRoot, relativePath2) {
   const absolutePath = resolveRepositoryPath(repoRoot, relativePath2);
-  const metadata = await lstat6(absolutePath).catch(() => null);
+  const metadata = await lstat7(absolutePath).catch(() => null);
   if (metadata === null || !metadata.isFile() && !metadata.isSymbolicLink()) {
     throw new BanzaiError(
       "ARTIFACT_NOT_FOUND",
@@ -16860,15 +17784,15 @@ async function hashFile(repoRoot, relativePath2) {
   }
   const contents = await readFile4(absolutePath);
   if (metadata.isSymbolicLink()) {
-    return createHash8("sha256").update("symlink").update("\0").update(contents).digest("hex");
+    return createHash10("sha256").update("symlink").update("\0").update(contents).digest("hex");
   }
   return hashArtifactBytes(contents);
 }
 function hashArtifactBytes(contents) {
-  return createHash8("sha256").update("file").update("\0").update(contents).digest("hex");
+  return createHash10("sha256").update("file").update("\0").update(contents).digest("hex");
 }
 function digestArtifactEntries2(entries) {
-  return createHash8("sha256").update(JSON.stringify({ version: 1, entries })).digest("hex");
+  return createHash10("sha256").update(JSON.stringify({ version: 1, entries })).digest("hex");
 }
 async function digestArtifactBundle(repoRoot, artifactPaths2) {
   const paths = [...new Set(artifactPaths2)].sort();
@@ -16889,9 +17813,9 @@ async function digestArtifactBundle(repoRoot, artifactPaths2) {
 }
 async function changedRepositoryPaths(repoRoot) {
   const [worktree, index, untracked] = await Promise.all([
-    git2(repoRoot, ["diff", "--name-only", "--no-renames", "-z"]),
-    git2(repoRoot, ["diff", "--cached", "--name-only", "--no-renames", "-z"]),
-    git2(repoRoot, ["ls-files", "--others", "--exclude-standard", "-z"])
+    git3(repoRoot, ["diff", "--name-only", "--no-renames", "-z"]),
+    git3(repoRoot, ["diff", "--cached", "--name-only", "--no-renames", "-z"]),
+    git3(repoRoot, ["ls-files", "--others", "--exclude-standard", "-z"])
   ]);
   return [
     ...new Set(
@@ -16902,7 +17826,7 @@ async function changedRepositoryPaths(repoRoot) {
   ].sort();
 }
 async function workspaceChangeCounts(repoRoot, snapshot) {
-  const trackedResult = await git2(repoRoot, [
+  const trackedResult = await git3(repoRoot, [
     "ls-tree",
     "-r",
     "--name-only",
@@ -16948,7 +17872,7 @@ function workspaceChanges(previous, current) {
 }
 async function describePath(repoRoot, relativePath2) {
   const absolutePath = resolveRepositoryPath(repoRoot, relativePath2);
-  const metadata = await lstat6(absolutePath).catch(() => null);
+  const metadata = await lstat7(absolutePath).catch(() => null);
   if (metadata === null) {
     return { path: relativePath2, kind: "deleted", sha256: null };
   }
@@ -16999,31 +17923,31 @@ async function workspaceSnapshot(repoRoot, options = {}) {
       artifactBindingDigest: options.artifactBinding.sha256,
       entries
     };
-    const digest4 = createHash8("sha256").update(JSON.stringify(identity)).digest("hex");
+    const digest5 = createHash10("sha256").update(JSON.stringify(identity)).digest("hex");
     return {
       schemaVersion: 2,
       baseCommit,
       artifactBindingDigest: identity.artifactBindingDigest,
-      digest: digest4,
+      digest: digest5,
       entries
     };
   }
-  const digest3 = createHash8("sha256").update(JSON.stringify({ version: 1, baseCommit, entries })).digest("hex");
-  return { baseCommit, digest: digest3, entries };
+  const digest4 = createHash10("sha256").update(JSON.stringify({ version: 1, baseCommit, entries })).digest("hex");
+  return { baseCommit, digest: digest4, entries };
 }
 async function workspaceDigest(repoRoot, options = {}) {
   return (await workspaceSnapshot(repoRoot, options)).digest;
 }
 
 // src/review-snapshot.ts
-function invalid4(message) {
+function invalid6(message) {
   throw new BanzaiError("INVALID_REVIEW_SNAPSHOT", message);
 }
 function parseReviewSnapshot2(value) {
   try {
     return readSharedReviewSnapshot(value);
   } catch (error) {
-    if (error instanceof ArtifactStorageError2) invalid4(error.message);
+    if (error instanceof ArtifactStorageError2) invalid6(error.message);
     throw error;
   }
 }
@@ -17031,45 +17955,45 @@ function sealReviewSnapshot2(value) {
   try {
     return sealSharedReviewSnapshot(value);
   } catch (error) {
-    if (error instanceof ArtifactStorageError2) invalid4(error.message);
+    if (error instanceof ArtifactStorageError2) invalid6(error.message);
     throw error;
   }
 }
 async function assertReviewPathOwned(repoRoot, relativePath2, allowMissing = false) {
-  reviewScopePath(relativePath2);
-  let current = path11.resolve(repoRoot);
+  reviewScopePath3(relativePath2);
+  let current = path13.resolve(repoRoot);
   const segments = relativePath2.split("/");
   for (const [index, part] of segments.entries()) {
-    current = path11.join(current, part);
+    current = path13.join(current, part);
     let stat5;
     try {
-      stat5 = await lstat7(current);
+      stat5 = await lstat8(current);
     } catch (error) {
       if (allowMissing && error.code === "ENOENT")
         return;
       throw error;
     }
     if (stat5.isSymbolicLink() || (index < segments.length - 1 ? !stat5.isDirectory() : !stat5.isFile()))
-      invalid4("Review evidence path is not a physically owned regular file.");
+      invalid6("Review evidence path is not a physically owned regular file.");
   }
 }
 async function reviewApprovedArtifacts(repoRoot, paths) {
   return await Promise.all(
-    paths.map(async (relative) => {
-      await assertReviewPathOwned(repoRoot, relative);
+    paths.map(async (relative2) => {
+      await assertReviewPathOwned(repoRoot, relative2);
       return {
-        path: relative,
-        sha256: hashArtifactBytes(await readFile5(path11.join(repoRoot, relative)))
+        path: relative2,
+        sha256: hashArtifactBytes(await readFile5(path13.join(repoRoot, relative2)))
       };
     })
   );
 }
 
 // src/phase-instructions.ts
-import { createHash as createHash9 } from "node:crypto";
-import { constants as constants7 } from "node:fs";
-import { lstat as lstat8, open as open6, realpath as realpath5 } from "node:fs/promises";
-import path12 from "node:path";
+import { createHash as createHash11 } from "node:crypto";
+import { constants as constants8 } from "node:fs";
+import { lstat as lstat9, open as open7, realpath as realpath6 } from "node:fs/promises";
+import path14 from "node:path";
 
 // src/phase-resources.ts
 var PHASE_RESOURCE_DEFINITIONS = {
@@ -17203,40 +18127,40 @@ var EMBEDDED_PHASE_RESOURCES = {
     "text": "# Architecture Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Proposal\n\n1. State one decision question and its owner. Split independent decisions.\n2. Search the decision log for duplicates, conflicts, and decisions this one\n   would deprecate or supersede.\n3. Choose the next unused four-digit ID and recheck for collisions before write.\n4. Evaluate viable options against requirements, quality attributes, security,\n   current facts, accepted ADRs, cost, risk, reversibility, and operational\n   impact. A new or changed trust boundary, authorization model, or\n   secret-handling approach is ADR-eligible; apply the Security Assurance\n   policy (`security-assurance.md`) supplied by the active execution context when weighing options. Use materially applicable\n   Engineering Quality properties as decision drivers, not as a preselected\n   architecture pattern or methodology.\n5. Write the ADR with status `Proposed`.\n6. Update `documentation/decisions/README.md` with the proposed record.\n7. Present the proposal and wait for an explicit human lifecycle decision.\n\n## ADR Document\n\nWrite these sections:\n\n1. `# ADR NNNN: <Title>`.\n2. **Status / Date / Owner / Decision Makers**.\n3. **Related Artifacts**: feature, plan, manifest sections, and related ADRs.\n4. **Context and Decision Drivers**: current/target distinction, requirements,\n   constraints, and quality attributes.\n5. **Options Considered**: material benefits, costs, risks, and rejection reason\n   for each non-selected viable option.\n6. **Decision**: direct, imperative outcome. Keep implementation steps out.\n7. **Consequences**: positive, negative, risks, and required follow-ups.\n8. **Compliance and Confirmation**: observable checks for implementation and\n   review.\n9. **Lifecycle Links**: `Supersedes`, `Superseded by`, or `None`.\n\n## Lifecycle\n\n- `Proposed`: revise, accept, or reject after review. Planning cannot rely on it.\n- `Accepted`: record approval date and decision makers. The body becomes\n  immutable and can guide planning before implementation exists.\n- `Rejected`: preserve the proposal and add the rejection reason.\n- `Superseded`: allowed only when a linked replacement ADR is accepted.\n- `Deprecated`: use when the decision no longer applies without replacement.\n\n## Apply The Decision\n\n- Rework: keep `Proposed`, revise the proposal, and request another review.\n- Accept: set `Accepted`, record approval date and decision makers, update the\n  decision index, and add a `Planned` row to the manifest's active ADR index.\n  The row carries only ID, title, path, and state; rationale, options, and\n  consequences stay in the ADR body. The manifest stays current state and the\n  ADR is approved target intent: `code-writing` moves the row to `Implemented`\n  only after verification, and any current/target difference must be explicit\n  in `plan.md`.\n- Reject: set `Rejected`, record the reason, and update the decision index.\n- Supersede: accept the replacement first, then change only status and lifecycle\n  links on the older ADR, keep both in the decision log, and update both\n  indexes.\n- Deprecate: require explicit approval, record why it no longer applies, and\n  remove it from the manifest's active index.\n\nUpdate the decision-log row after every lifecycle change. Change an accepted\ndecision only with a new Proposed ADR; never rewrite its context, options,\ndecision, or consequences.\n\nEngineering Quality does not expand ADR eligibility. Keep a local, reversible\nimplementation choice in the calling plan even when one policy property informs\nit; create an ADR only when the existing eligibility threshold is met.\n\n"
   },
   "guidance/planning.md": {
-    "sha256": "ecd5eb1ba3e3bf35199d93da13f2dc4a7f3fb51816f07d3c2f73cce7eb431fce",
-    "text": '# Planning Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Document\n\n1. `# Development Plan: <Name>`, slug, link to description, accepted ADRs, and\n   manifest facts used.\n2. **Plan Authority**: copy the document convention (heading and three paragraphs)\n   from the installed `policies/plan-task-completion.md`, before Technical\n   Breakdown and Implementation Tasks. Make obligations explicit; add labeled\n   optional guidance only when useful. Required behavior and safety constraints\n   belong in binding text. Do not add a classification template to every task.\n3. **Technical Breakdown** in dependency order, only for materially affected\n   areas. Establish behavior, invariants, scope and relevant boundaries; retain\n   necessary contract, dependency, failure/lifecycle and compatibility constraints.\n   Name enforcement points for recorded security exposures and specific manifest\n   facts that will become stale. Omit unaffected layers and empty sections.\n4. **Implementation Tasks**: one canonical heading per task in the exact form\n   `- [ ] **T001 - Title**`, `- [ ] **T002 - Title**`, in dependency order.\n   The heading line ends at the closing `**`: no trailing annotation,\n   emphasis, or continuation after it, and the box stays unchecked even in a\n   revised plan whose earlier tasks were already implemented \u2014 put provenance\n   notes such as "added from review finding" in the task body below the\n   heading. A heading outside this grammar fails deterministic validation\n   before the plan can be approved. Each task establishes behavior and binding\n   invariants, affected files/units and boundaries, necessary implementation\n   constraints, dependencies, FR/acceptance/ADR mapping, proportionate assurance\n   and completion evidence, and review\n   batch. For every material claim introduced by the change, name an existing\n   proportionate evidence owner such as Test Assurance, Security Assurance,\n   contract verification, a configured check, or justified inspection; do not\n   create another test by default. Mark tasks that need separate approval. After\n   strict orchestrated approval these checkboxes become an immutable approved\n   work set; execution status is recorded in the structured completion ledger\n   and its report projection, never by marking them `[x]`.\n5. **Consistency Check**: map every FR and acceptance criterion to tasks, map\n   every accepted ADR constraint or confirmation method, confirm there are no\n   unresolved Proposed ADRs, name required manifest transitions, and state the\n   plan\'s own security exposure or that none applies. Name only materially\n   applicable Engineering Quality constraints and their task/evidence owner; do\n   not add a ten-row checklist or per-rule `N/A` list.\n\n## Rules\n\n- Specify exact contracts, signatures, state shapes, identifiers, config keys,\n  locations or techniques when applicable authority or a concrete constraint\n  requires them, including internal details. Link existing authoritative\n  definitions instead of copying them; do not authorize future contract changes\n  through a link. Leave routine private mechanics open where no such constraint\n  applies, under the installed plan policy.\n- Omit speculative layers, exhaustive file trees, function inventories and\n  pseudocode bodies. Do not write function bodies.\n- Map every FR and acceptance criterion to the plan.\n- Do not repeat ADR option analysis or rationale; link the accepted ADR.\n- If planning discovers a material human-owned choice or conflicts with an\n  accepted ADR, stop dependent work. Resolve the choice through Decision\n  Consultation when applicable; an ADR-eligible result requires an architecture\n  decision before a dependent plan. Never infer or repeat an answered choice\n  against unchanged evidence.\n- State thread/actor/context boundaries when relevant.\n- Do not introduce an unapproved dependency. If one is required, stop for\n  explicit approval and ADR evaluation; after approval, include install,\n  lockfile, verification, and manifest tasks.\n- Follow the Engineering Quality authority order. Use the smallest compatible\n  design that satisfies the description and accepted decisions; do not mandate\n  a generic architecture, abstraction, directory, or dependency-injection\n  technique.\n- Apply the Security Assurance policy (`security-assurance.md`) supplied by the active execution context. For each exposure the\n  description recorded, name the enforcement point \u2014 the module or boundary\n  applying the control \u2014 and map its requirement to a task like any other.\n- Apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Plan evidence for material\n  guarantees and plausible regressions; do not require one test per requirement,\n  branch, helper, edge case, or traceability row.\n\n'
+    "sha256": "b316975cd139cb54d7b059a0e16f287de30b73bbedfaee41ac27591fc10aefb1",
+    "text": '# Planning Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Document\n\n1. `# Development Plan: <Name>`, slug, link to description, accepted ADRs, and\n   manifest facts used.\n2. **Plan Authority**: copy the document convention (heading and three paragraphs)\n   from the installed `policies/plan-task-completion.md`, before Technical\n   Breakdown and Implementation Tasks. Make obligations explicit; add labeled\n   optional guidance only when useful. Required behavior and safety constraints\n   belong in binding text. Do not add a classification template to every task.\n3. **Technical Breakdown** in dependency order, only for materially affected\n   areas. Establish behavior, invariants, scope and relevant boundaries; retain\n   necessary contract, dependency, failure/lifecycle and compatibility constraints.\n   Name enforcement points for recorded security exposures and specific manifest\n   facts that will become stale. Omit unaffected layers and empty sections.\n4. **Implementation Tasks**: one canonical heading per task in the exact form\n   `- [ ] **T001 - Title**`, `- [ ] **T002 - Title**`, in dependency order.\n   The heading line ends at the closing `**`: no trailing annotation,\n   emphasis, or continuation after it, and the box stays unchecked even in a\n   revised plan whose earlier tasks were already implemented \u2014 put provenance\n   notes such as "added from review finding" in the task body below the\n   heading. A heading outside this grammar fails deterministic validation\n   before the plan can be approved. Each task establishes behavior and binding\n   invariants, affected files/units and boundaries, necessary implementation\n   constraints, dependencies, FR/acceptance/ADR mapping, proportionate assurance\n   and completion evidence, and review\n   batch. For every material claim introduced by the change, name an existing\n   proportionate evidence owner such as Test Assurance, Security Assurance,\n   contract verification, a configured check, or justified inspection; do not\n   create another test by default. Mark tasks that need separate approval. After\n   strict orchestrated approval these checkboxes become an immutable approved\n   work set; execution status is recorded in the structured completion ledger\n   and its report projection, never by marking them `[x]`.\n5. **Consistency Check**: map every FR and acceptance criterion to tasks, map\n   every accepted ADR constraint or confirmation method, confirm there are no\n   unresolved Proposed ADRs, name required manifest transitions, and state the\n   plan\'s own security exposure or that none applies. Name only materially\n   applicable Engineering Quality constraints and their task/evidence owner; do\n   not add a ten-row checklist or per-rule `N/A` list.\n\nWhen a new plan explicitly relies on equivalent verification, include the\nversioned obligation inventory described by Plan Authority and Task Completion.\nList every configured check in order, retain mandatory fresh requirements, bind\nthe complete surrounding prose and obtain normal bundle approval. Missing or\nambiguous commitments preserve fresh execution.\n\n## Rules\n\n- Specify exact contracts, signatures, state shapes, identifiers, config keys,\n  locations or techniques when applicable authority or a concrete constraint\n  requires them, including internal details. Link existing authoritative\n  definitions instead of copying them; do not authorize future contract changes\n  through a link. Leave routine private mechanics open where no such constraint\n  applies, under the installed plan policy.\n- Omit speculative layers, exhaustive file trees, function inventories and\n  pseudocode bodies. Do not write function bodies.\n- Map every FR and acceptance criterion to the plan.\n- Do not repeat ADR option analysis or rationale; link the accepted ADR.\n- If planning discovers a material human-owned choice or conflicts with an\n  accepted ADR, stop dependent work. Resolve the choice through Decision\n  Consultation when applicable; an ADR-eligible result requires an architecture\n  decision before a dependent plan. Never infer or repeat an answered choice\n  against unchanged evidence.\n- State thread/actor/context boundaries when relevant.\n- Do not introduce an unapproved dependency. If one is required, stop for\n  explicit approval and ADR evaluation; after approval, include install,\n  lockfile, verification, and manifest tasks.\n- Follow the Engineering Quality authority order. Use the smallest compatible\n  design that satisfies the description and accepted decisions; do not mandate\n  a generic architecture, abstraction, directory, or dependency-injection\n  technique.\n- Apply the Security Assurance policy (`security-assurance.md`) supplied by the active execution context. For each exposure the\n  description recorded, name the enforcement point \u2014 the module or boundary\n  applying the control \u2014 and map its requirement to a task like any other.\n- Apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Plan evidence for material\n  guarantees and plausible regressions; do not require one test per requirement,\n  branch, helper, edge case, or traceability row.\n\n'
   },
   "guidance/implementation.md": {
-    "sha256": "50b91df23f9e115d2bfc6f870e4c296bdc7de0aacf1662056e5fa2f42dd1304f",
-    "text": "# Implementation Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Implementation Rules\n\n1. Follow the approved task order and preserve approved task meaning.\n2. Group adjacent steps with no escalation trigger into batches. Report a batch\n   and continue; a batch boundary is not a gate.\n3. Stop before any planned or discovered escalation trigger; name it and wait\n   for explicit approval.\n4. After each batch, run focused affected checks that give useful feedback.\n5. Do not run formatter in batch loops. Run it only during final verification.\n6. Apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Preserve tests that protect\n   material guarantees. Add, consolidate, or remove tests only when the resulting\n   evidence remains proportionate and non-redundant.\n7. Do not add unapproved dependencies. Add only dependencies explicitly\n   authorized by the approved plan, then update the lockfile and manifest.\n8. Apply the Engineering Quality authority order and materially applicable\n   constraints. Keep work within approved scope, use the smallest compatible\n   implementation, and reuse repository mechanisms and evidence owners rather\n   than creating an EQ checklist, methodology, or test quota.\n9. Apply each linked ADR's compliance and confirmation constraints.\n10. Make important implementation dependencies, boundary behavior, failure and\n    lifecycle consequences, and compatibility changes explicit when the plan\n    identifies them; do not invent those concerns for an unaffected surface.\n11. Comment sparingly and with high signal. Write a comment only to explain\n    why: a constraint, trade-off, invariant, side effect, or non-obvious\n    behavior. Do not narrate what the code visibly does.\n12. When Serena MCP tools are listed, prefer `find_symbol`,\n    `find_referencing_symbols`, and `get_symbols_overview` over pattern search\n    or line-window reads for code.\n\n## Deviations\n\nApply Plan Authority (`plan-task-completion.md`) supplied by the active execution context.\nSatisfy binding requirements within approved scope; a different compliant choice\nunder explicitly optional guidance is not a deviation and needs no reapproval or\nreport entry merely for differing. Preserve legacy approved meanings and exact\ndirectives; private appearance alone does not make a constraint optional.\n\nRecord material decisions and real deviations proportionately, with rationale\nand confirmation that `description.md` still holds. A missing/deprecated API,\nframework behavior or correctness gap may require a deviation, but documenting\nit does not authorize a changed commitment. Use existing escalation/reapproval\nfor conflicts. Record material Engineering Quality deviations in the existing\nimplementation report, not a separate artifact or mandatory per-rule checklist.\n\nIf a deviation conflicts with or invalidates an accepted ADR, stop before the\nconflicting change. Require a superseding architecture proposal, then revise and reapprove\nthe plan. Never edit the accepted ADR body.\n\n## Final Verification\n\nBefore the report:\n\n1. Trace every FR and acceptance criterion to implementation and proportionate\n   assurance evidence.\n2. Confirm every resolved assumption is honored.\n3. Trace every accepted ADR compliance/confirmation item to code, tests, or an\n   explicitly owned non-automated check.\n4. Confirm every plan task is complete or reported as a gap.\n5. Confirm each material claim has the proportionate evidence owner assigned by\n   the plan and that applicable Engineering Quality constraints and deviations\n   match the current implementation.\n6. Run formatter check/fix if configured.\n7. In orchestrated mode, do not repeat a full-scope command supplied in the\n   runner verification block. If the manifest's applicable final suite is absent\n   from that block, run it once and record the configuration gap.\n8. In standalone mode, run the applicable typecheck, lint, and final test suite\n   once.\n9. If formatting changed files, rerun affected checks.\n10. Set verified ADR entries in the manifest index to `Implemented`; leave\n    unimplemented accepted decisions as `Planned`.\n11. Update only the manifest facts the change made stale, following the\n    `project-manifest` writing rules: rewrite the affected bullet, add or remove\n    module entries, and record no delivery narrative, verification history, or\n    test counts. Those belong in the implementation and test reports.\n\n## Implementation Report\n\nWrite the resolved `implementationReport` artifact:\n\n1. title, slug, links to description and plan;\n2. files created/modified/deleted and new folders/modules;\n3. FR/story trace plus final verification commands and outcomes;\n4. ADR conformance and confirmation evidence;\n5. statement: no functional gap and no scope expansion, or list gaps;\n6. deviations from plan;\n7. assurance evidence added, reused, consolidated, or intentionally deferred,\n   and the material guarantee each automated test can fail to protect;\n8. material Engineering Quality deviations and their authority, impact, and\n   evidence owner, or `None`;\n9. notes for assurance.\n\n"
+    "sha256": "f493397d24a8467b9021bb79ddc78cbb783881b14aa98947b912f91d4c8e2b61",
+    "text": "# Implementation Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Implementation Rules\n\n1. Follow the approved task order and preserve approved task meaning.\n2. Group adjacent steps with no escalation trigger into batches. Report a batch\n   and continue; a batch boundary is not a gate.\n3. Stop before any planned or discovered escalation trigger; name it and wait\n   for explicit approval.\n4. After each batch, run focused affected checks that give useful feedback.\n5. Do not run formatter in batch loops. Run it only during final verification.\n6. Apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Preserve tests that protect\n   material guarantees. Add, consolidate, or remove tests only when the resulting\n   evidence remains proportionate and non-redundant.\n7. Do not add unapproved dependencies. Add only dependencies explicitly\n   authorized by the approved plan, then update the lockfile and manifest.\n8. Apply the Engineering Quality authority order and materially applicable\n   constraints. Keep work within approved scope, use the smallest compatible\n   implementation, and reuse repository mechanisms and evidence owners rather\n   than creating an EQ checklist, methodology, or test quota.\n9. Apply each linked ADR's compliance and confirmation constraints.\n10. Make important implementation dependencies, boundary behavior, failure and\n    lifecycle consequences, and compatibility changes explicit when the plan\n    identifies them; do not invent those concerns for an unaffected surface.\n11. Comment sparingly and with high signal. Write a comment only to explain\n    why: a constraint, trade-off, invariant, side effect, or non-obvious\n    behavior. Do not narrate what the code visibly does.\n12. When Serena MCP tools are listed, prefer `find_symbol`,\n    `find_referencing_symbols`, and `get_symbols_overview` over pattern search\n    or line-window reads for code.\n\n## Deviations\n\nApply Plan Authority (`plan-task-completion.md`) supplied by the active execution context.\nSatisfy binding requirements within approved scope; a different compliant choice\nunder explicitly optional guidance is not a deviation and needs no reapproval or\nreport entry merely for differing. Preserve legacy approved meanings and exact\ndirectives; private appearance alone does not make a constraint optional.\n\nRecord material decisions and real deviations proportionately, with rationale\nand confirmation that `description.md` still holds. A missing/deprecated API,\nframework behavior or correctness gap may require a deviation, but documenting\nit does not authorize a changed commitment. Use existing escalation/reapproval\nfor conflicts. Record material Engineering Quality deviations in the existing\nimplementation report, not a separate artifact or mandatory per-rule checklist.\n\nIf a deviation conflicts with or invalidates an accepted ADR, stop before the\nconflicting change. Require a superseding architecture proposal, then revise and reapprove\nthe plan. Never edit the accepted ADR body.\n\n## Final Verification\n\nBefore the report:\n\n1. Trace every FR and acceptance criterion to implementation and proportionate\n   assurance evidence.\n2. Confirm every resolved assumption is honored.\n3. Trace every accepted ADR compliance/confirmation item to code, tests, or an\n   explicitly owned non-automated check.\n4. Confirm every plan task is complete or reported as a gap.\n5. Confirm each material claim has the proportionate evidence owner assigned by\n   the plan and that applicable Engineering Quality constraints and deviations\n   match the current implementation.\n6. Run formatter check/fix if configured.\n7. In orchestrated mode, do not repeat a full-scope command supplied in the\n   runner verification block. If the manifest's applicable final suite is absent\n   from that block, run it once and record the configuration gap.\n8. In standalone mode, run the applicable typecheck, lint, and final test suite\n   once unless the shared deterministic owner establishes a permitted equivalent\n   disposition for that check under Test Assurance. Keep unsupported checks fresh.\n9. If formatting changed files, rerun affected checks.\n10. Set verified ADR entries in the manifest index to `Implemented`; leave\n    unimplemented accepted decisions as `Planned`.\n11. Update only the manifest facts the change made stale, following the\n    `project-manifest` writing rules: rewrite the affected bullet, add or remove\n    module entries, and record no delivery narrative, verification history, or\n    test counts. Those belong in the implementation and test reports.\n\n## Implementation Report\n\nWrite the resolved `implementationReport` artifact:\n\n1. title, slug, links to description and plan;\n2. files created/modified/deleted and new folders/modules;\n3. FR/story trace plus final verification commands and outcomes;\n4. ADR conformance and confirmation evidence;\n5. statement: no functional gap and no scope expansion, or list gaps;\n6. deviations from plan;\n7. assurance evidence added, reused, consolidated, or intentionally deferred,\n   and the material guarantee each automated test can fail to protect;\n8. material Engineering Quality deviations and their authority, impact, and\n   evidence owner, or `None`;\n9. notes for assurance.\n\n\nFor a bounded accepted-finding closure, retain unaffected report text. Add one\nrecord with accepted finding ID, changed scope, deterministic decision, executed/\nreused/historical/pending evidence references and limitations. Inspect all current\nclaims for consistency and correct only affected claims; never predict a pending\nrunner result or manufacture a new attempt for reused evidence.\n"
   },
   "guidance/assurance.md": {
-    "sha256": "3da316eeb09de70849c77e8a1ec86ac1987d5b8dac85be4bd0e8ca819facc032",
-    "text": "# Assurance Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Rules\n\n- Use the manifest's test framework, layout, and import pattern.\n- Read linked accepted ADRs and test their compliance/confirmation criteria when\n  automation is appropriate.\n- Stop and report if the implementation relies on a non-Accepted ADR.\n- No new test dependency, framework, or runner without explicit approval and\n  manifest update. Test counts, case inventories, and run results go in\n  `test-report.md`, never in the manifest.\n- Mirror production layout in test paths.\n- Keep test doubles together; fakes record calls/arguments and use the same\n  event/callback/state mechanism as production.\n- Match the code's async/concurrency context.\n- Name tests `<unit>_<condition>_<expectedResult>` unless the manifest says\n  otherwise.\n- Preserve existing tests that assert behavior; delete generated stubs.\n- Delete hollow tests.\n- Comment sparingly and with high signal. Write a comment only to explain why:\n  a constraint, trade-off, invariant, side effect, or non-obvious behavior. Do\n  not narrate what the test visibly does.\n- Apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Test count, coverage\n  percentage, syntactic reach, and private implementation structure are not\n  completion criteria unless the manifest records an explicit approved policy.\n- A valid result may add no test, reuse existing evidence, use a non-unit owner,\n  consolidate redundant tests, or narrow an overstated report claim.\n  Claim narrowing cannot discharge a required check or missing material evidence.\n- For strict plans, apply Plan Authority (`plan-task-completion.md`) supplied by the active execution context: protect binding obligations, including\n  legacy directives, without turning an optional private choice into a test target.\n\n## What To Test\n\n- First protect material business rules, public or persisted contracts,\n  authorization/security/privacy boundaries, state transitions, recovery,\n  decision tables, and confirmed regressions.\n- Choose the smallest realistic test level that observes the guarantee. One test\n  may protect several requirements.\n- A security requirement recorded under the Security Assurance policy (`security-assurance.md`) supplied by the active execution context is a material guarantee: give it evidence at the proportionate\n  level, with no separate security-test quota.\n- Test a pure helper directly only when its behavior is itself a material\n  contract or the direct test is the clearest non-redundant evidence.\n- Environment-sensitive values: assert round trips, not local literal strings.\n\nNot unit-testable behavior goes in the report with owner:\nUI/snapshot, integration/smoke, e2e, or platform behavior.\nApply the same rule to ADR confirmation that requires operational, security,\nperformance, or architecture review rather than a unit test.\n\n## Suite Runs\n\n- Run focused affected tests while developing or critiquing evidence.\n- In orchestrated mode, do not repeat a full-scope command listed in the runner\n  verification block. If the manifest's applicable final suite is absent, run\n  it once and record the configuration gap.\n- In standalone mode, run the applicable final suite once after tests stabilize.\n- Fix failures before proceeding.\n- Never claim tests pass without a run.\n\n## Critique Loop\n\nCheck for:\n\n- unasserted error paths;\n- unprotected material guarantees;\n- tangled assertions;\n- hollow tests;\n- implementation-coupled or redundant tests;\n- disproportionate doubles and suite cost;\n- unused helper parameters.\n\nRun one focused pass. Run a second pass only if the first changed the assurance\nportfolio or found a material gap.\n\n## Test Report\n\nWrite the resolved `testReport` artifact:\n\n1. title, slug, related artifacts;\n2. framework/layout/doubles note;\n3. focused feedback commands and outcomes plus the runner-owned final commands,\n   standalone final suite, or recorded runner-profile gap as applicable;\n4. files added/removed/changed;\n5. **Risk and Contract Assurance Map** with material guarantee, impact or\n   regression risk, best evidence level, existing/new evidence, and deferred\n   evidence owner;\n6. shared evidence, no-new-test, test-consolidation, claim-narrowing, non-unit,\n   and non-automated ADR decisions with reasons and owners;\n7. critique loop result.\n\n"
+    "sha256": "6b3b829995c30f65152a4849e2aa600c99195090702f3769ec9f410623036203",
+    "text": "# Assurance Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Rules\n\n- Use the manifest's test framework, layout, and import pattern.\n- Read linked accepted ADRs and test their compliance/confirmation criteria when\n  automation is appropriate.\n- Stop and report if the implementation relies on a non-Accepted ADR.\n- No new test dependency, framework, or runner without explicit approval and\n  manifest update. Test counts, case inventories, and run results go in\n  `test-report.md`, never in the manifest.\n- Mirror production layout in test paths.\n- Keep test doubles together; fakes record calls/arguments and use the same\n  event/callback/state mechanism as production.\n- Match the code's async/concurrency context.\n- Name tests `<unit>_<condition>_<expectedResult>` unless the manifest says\n  otherwise.\n- Preserve existing tests that assert behavior; delete generated stubs.\n- Delete hollow tests.\n- Comment sparingly and with high signal. Write a comment only to explain why:\n  a constraint, trade-off, invariant, side effect, or non-obvious behavior. Do\n  not narrate what the test visibly does.\n- Apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Test count, coverage\n  percentage, syntactic reach, and private implementation structure are not\n  completion criteria unless the manifest records an explicit approved policy.\n- A valid result may add no test, reuse existing evidence, use a non-unit owner,\n  consolidate redundant tests, or narrow an overstated report claim.\n  Claim narrowing cannot discharge a required check or missing material evidence.\n- For strict plans, apply Plan Authority (`plan-task-completion.md`) supplied by the active execution context: protect binding obligations, including\n  legacy directives, without turning an optional private choice into a test target.\n\n## What To Test\n\n- First protect material business rules, public or persisted contracts,\n  authorization/security/privacy boundaries, state transitions, recovery,\n  decision tables, and confirmed regressions.\n- Choose the smallest realistic test level that observes the guarantee. One test\n  may protect several requirements.\n- A security requirement recorded under the Security Assurance policy (`security-assurance.md`) supplied by the active execution context is a material guarantee: give it evidence at the proportionate\n  level, with no separate security-test quota.\n- Test a pure helper directly only when its behavior is itself a material\n  contract or the direct test is the clearest non-redundant evidence.\n- Environment-sensitive values: assert round trips, not local literal strings.\n\nNot unit-testable behavior goes in the report with owner:\nUI/snapshot, integration/smoke, e2e, or platform behavior.\nApply the same rule to ADR confirmation that requires operational, security,\nperformance, or architecture review rather than a unit test.\n\n## Suite Runs\n\n- Run focused affected tests while developing or critiquing evidence.\n- In orchestrated mode, do not repeat a full-scope command listed in the runner\n  verification block. If the manifest's applicable final suite is absent, run\n  it once and record the configuration gap.\n- In standalone mode, run the applicable final suite once after tests stabilize,\n  except for a permitted current equivalent disposition established by the\n  shared deterministic owner under Test Assurance; keep all other checks fresh.\n- Fix failures before proceeding.\n- Never claim a physical test pass without its actual run. Label reuse separately\n  with the exact original physical evidence and current applicability.\n\n## Critique Loop\n\nCheck for:\n\n- unasserted error paths;\n- unprotected material guarantees;\n- tangled assertions;\n- hollow tests;\n- implementation-coupled or redundant tests;\n- disproportionate doubles and suite cost;\n- unused helper parameters.\n\nRun one focused pass. Run a second pass only if the first changed the assurance\nportfolio or found a material gap.\n\n## Test Report\n\nWrite the resolved `testReport` artifact:\n\n1. title, slug, related artifacts;\n2. framework/layout/doubles note;\n3. focused feedback commands and outcomes plus the runner-owned final commands,\n   standalone final suite, or recorded runner-profile gap as applicable;\n4. files added/removed/changed;\n5. **Risk and Contract Assurance Map** with material guarantee, impact or\n   regression risk, best evidence level, existing/new evidence, and deferred\n   evidence owner;\n6. shared evidence, no-new-test, test-consolidation, claim-narrowing, non-unit,\n   and non-automated ADR decisions with reasons and owners;\n7. critique loop result.\n\n\nFor a focused closure, append the accepted finding ID, changed scope, decision,\ncurrent executed/reused evidence, historical references and pending limitations.\nRetain unrelated report text and inspect current claims for contradictions. A\nconsistency sweep does not rerun commands and cannot discharge required assurance.\n"
   },
   "guidance/manifest.md": {
     "sha256": "55cec3804b4b2aa099354fb0818c770e9bb52ea69c1e4559d336db8cb99ac65b",
     "text": "# Manifest Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Maintenance\n\nRun after changes to:\n\n- architecture;\n- modules/components;\n- build/config settings;\n- environment keys;\n- dependencies;\n- conventions;\n- implementation or supersession of an accepted ADR.\n\n## Required Sections\n\nKeep these headings in order:\n\n1. **Project Overview**\n2. **Platform & Tooling**\n3. **Architecture**\n4. **Project Structure**\n5. **Key Modules & Components**\n6. **State & Data Flow**\n7. **Dependencies**\n8. **Testing**\n9. **Conventions**\n10. **Technical Constraints & Decision Index**\n\nWrite `None` with a reason when a section is empty.\n\n## Writing Rules\n\n- Record facts, not preferences.\n- Quote config keys, target names, and versions exactly.\n- State the operational effect of load-bearing current constraints; keep their\n  trade-offs in ADRs.\n- Use concise present-tense bullets: one current fact per bullet. When a fact\n  changes, rewrite its bullet; do not append the new state after the old one.\n- Do not include code in the manifest.\n- Keep ADR rationale, alternatives, consequences, and history out of the\n  manifest; link the active accepted ADR instead.\n- Keep the manifest current-state only. Implementation history, release\n  narrative, per-change delivery summaries, and past verification results\n  belong in ADRs, feature reports, and change records; link them, do not\n  restate them.\n- Keep the whole manifest readable in one pass; every skill loads it before\n  work. When a section outgrows a few screens, move detail to a linked\n  maintainer reference instead of growing the manifest.\n- In **Key Modules & Components**, give each unit one bullet: path, role,\n  public interface or contract, and the load-bearing invariant. Keep\n  step-by-step behavior, edge-case narratives, and rendering detail in source,\n  tests, or a linked maintainer reference.\n- In **Decision Index**, keep one row per active accepted ADR with ID, title,\n  path, and `Planned`/`Implemented` state. Link the decision log for rejected\n  and superseded records; add no per-ADR delivery prose.\n- Keep section 9 limited to repository-specific conventions supported by\n  configuration, approved guidance, or dominant evidence. Do not insert generic\n  function-size, decomposition, abstraction, control-flow, comment, naming,\n  directory, or pattern preferences.\n- In **Testing**, record the current assurance priorities, allowed test-double\n  boundaries, final-suite owner, and explicit coverage threshold or `None` as\n  project facts rather than universal preferences. Record the required suite\n  and at most the latest recorded result; per-change test counts and covered\n  guarantees stay in feature test reports.\n\n## Checklist\n\n- Replace `Recommended (not yet present)` once code exists.\n- Update modules for added/renamed/removed units.\n- Add approved dependencies.\n- Add new build/config/env/resource facts.\n- Keep active ADR links and `Planned`/`Implemented` states current.\n- Report, rather than hide, a difference between current manifest facts and\n  accepted ADR intent.\n- Re-read every section and remove stale claims.\n\n"
   },
   "guidance/review.md": {
-    "sha256": "e881366ad065ad28838e19d0116b8323b466ef9f2712fba785d08a43e3ea658b",
-    "text": "# Review Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Read\n\n- the resolved `work` artifact, if present.\n- the resolved `description` artifact, if present.\n- the resolved `plan` artifact, if present.\n- the resolved `implementationReport` artifact, if present.\n- the resolved `testReport` artifact, if present.\n- `documentation/decisions/README.md` and ADRs linked by feature artifacts,\n  source boundaries, or the manifest.\n- `PROJECT_MANIFEST.md`.\n- Source and tests.\n\nWhen Serena MCP tools are listed, prefer `find_symbol`,\n`find_referencing_symbols`, and `get_symbols_overview` over pattern search or\nline-window reads for code.\n\nStop if neither lite nor strict artifacts exist. Flag partial strict artifact\nsets.\n\n## Audit\n\nFor each finding, cite `file:line`.\n\n1. Spec compliance: every FR/acceptance criterion implemented; no scope\n   expansion.\n2. Resolved assumptions: states, gates, errors, interruptions honored.\n3. Plan conformance: apply Plan Authority (`plan-task-completion.md`) supplied by the active execution context; task statuses match code/reports and real\n   deviations are recorded proportionately. Optional-guidance differences alone\n   are not findings, but independently supported defects still are. Preserve\n   legacy meaning and explicit approved directives even when another approach\n   seems equivalent; keep existing severity rules. In\n   an approved orchestrated run, unchecked immutable boxes define the work set\n   and are not a finding by themselves. Apply the same evidence hierarchy as\n   `feature-status`: inspect the runner-supplied validated completion summary\n   and task records, then check material consistency with the implementation\n   report, required assurance, approval digest, state, and source. The runner's\n   deterministic checks remain the primary enforcement boundary; a reviewer\n   must not return `pass` when required evidence is absent, a task is incomplete\n   or blocked, or a material contradiction is visible. Report a finding only for a\n   material contradiction or gap, never merely to request checkbox mutation.\n4. ADR lifecycle: required decisions exist, relied-on ADRs are `Accepted`,\n   supersession links are reciprocal, and accepted bodies were not rewritten.\n5. ADR conformance: implementation and tests satisfy decision, consequences,\n   and confirmation criteria; no architecturally significant choice is hidden\n   only in a plan or manifest.\n6. Report accuracy: file lists and verification claims match reality.\n7. Verification: inspect current runner evidence. Rerun only a focused\n   reproduction or missing, stale, inconsistent, or directly material command;\n   record why. Run the formatter check only when that evidence is specifically\n   required. Never run formatter fixes in review.\n8. Manifest conformance: current facts, active ADR index, naming, errors,\n   organization, async model, localization, dependency policy.\n9. Maintainability: report dead generality, needless indirection, unclear\n   responsibility, or comment/documentation behavior as an ordinary finding\n   only when exact evidence shows current material impact or a violated approved\n   authority. A preferred pattern, decomposition, control-flow style, or generic\n   cleanliness opinion is not a finding.\n10. Repository conventions: apply only manifest facts, configured rules,\n    approved guidance, and dominant local conventions relevant to the changed\n    surface. Do not invent generic naming, comment, size, or directory rules.\n11. Tests: apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Reject hollow, redundant,\n    implementation-mirroring, or disproportionate tests. Confirm the Risk and\n    Contract Assurance Map does not overstate its evidence.\n12. Docs: no stale artifact, ADR, decision-index, or manifest statements.\n13. Security: apply the Security Assurance policy (`security-assurance.md`) supplied by the active execution context against the diff as built.\n    Each recorded exposure has a named enforcement point and proportionate\n    evidence; a recorded no-exposure claim still holds for the code that\n    exists. Use the `security` category.\n14. Engineering Quality: after the ordinary audit and verdict are frozen, apply\n    the shadow procedure below. Do not use an EQ-only concern to retroactively\n    create or re-severity an ordinary finding.\n\nFor a missing-test finding, the existing finding fields must together identify:\n\n- the material observable guarantee;\n- the plausible regression mechanism;\n- why current evidence cannot detect it;\n- the proportionate evidence level and observable fix acceptance.\n\nCoverage percentage, syntactic reach, a private helper, or a traceability row\nalone is not a finding. A false report claim remains a finding, but its fix may\neither add proportionate evidence or narrow the claim truthfully. Missing\nmaterial contract or safety evidence and failed required checks remain actionable;\nclaim narrowing cannot discharge an actual mandatory requirement.\n\nA security finding obeys the same rule: it must name the exposure class, the\nmechanism reachable in this codebase, why current evidence does not cover it,\nand the observable fix acceptance. An exposure-class label, a generic threat\nname, or a framework default alone is not a finding.\n\n## Engineering Quality Shadow Procedure\n\n1. Complete audit items 1\u201313 under their existing authorities. Freeze the\n   ordinary findings, severities, and verdict before classifying Engineering\n   Quality overlap or looking for an incremental EQ-only candidate.\n2. An already-valid ordinary finding may add exactly one primary `EQ-NN` to its\n   existing `violates` array. The finding must qualify without that mapping, and\n   the mapping changes neither severity nor verdict.\n3. Record a genuinely incremental EQ-only candidate only as one `EQ-SHADOW:`\n   string in existing free-form `deferredCoverage`. It must include a\n   review-local candidate ID, primary rule ID, suggested severity, confidence,\n   exact evidence and stable location, concrete impact, smallest reasonable\n   remediation, relevant authority references, verification method, semantic\n   dedupe key, and `waiver=not_applicable (shadow-only)`.\n4. Use the dedupe identity defined by the canonical policy. Merge wording-only\n   duplicates and line-number drift into one record. Ordinary deferred-coverage\n   prose remains valid.\n5. A shadow record is not a finding: it cannot affect ordinary findings,\n   severity, verdict, mandatory human triage, accepted scope, fixing,\n   completion, or a gate. Do not put it in `findings`, and do not promote it even\n   when its suggested severity is `blocker`.\n\nRecommended human-readable form, as a semantic evaluation convention only:\n\n```text\nEQ-SHADOW: candidateId=EQ-S1; ruleId=EQ-04; severity=should_fix; confidence=high; evidence=src/config.ts:84 ConfigLoader.parseConfig; impact=malformed persisted values reach process invocation; remediation=validate with the existing config decoder; references=FR3 and manifest section 6; verification=focused malformed-value rejection plus legacy-valid acceptance; dedupeKey=EQ-04|ConfigLoader.parseConfig|FR3|invalid-config; waiver=not_applicable (shadow-only)\n```\n\nNo EQ-specific field is mandatory in the review-result contract. Do not change the\nstructured schema, parser, or runtime validation to interpret the string.\n\n"
+    "sha256": "84de11d4e95ac9701a314b48c783012e8d8d96d21629a45db3b0081115ca06a1",
+    "text": "# Review Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Read\n\n- the resolved `work` artifact, if present.\n- the resolved `description` artifact, if present.\n- the resolved `plan` artifact, if present.\n- the resolved `implementationReport` artifact, if present.\n- the resolved `testReport` artifact, if present.\n- `documentation/decisions/README.md` and ADRs linked by feature artifacts,\n  source boundaries, or the manifest.\n- `PROJECT_MANIFEST.md`.\n- Source and tests.\n\nWhen Serena MCP tools are listed, prefer `find_symbol`,\n`find_referencing_symbols`, and `get_symbols_overview` over pattern search or\nline-window reads for code.\n\nStop if neither lite nor strict artifacts exist. Flag partial strict artifact\nsets.\n\n## Audit\n\nFor each finding, cite `file:line`.\n\n1. Spec compliance: every FR/acceptance criterion implemented; no scope\n   expansion.\n2. Resolved assumptions: states, gates, errors, interruptions honored.\n3. Plan conformance: apply Plan Authority (`plan-task-completion.md`) supplied by the active execution context; task statuses match code/reports and real\n   deviations are recorded proportionately. Optional-guidance differences alone\n   are not findings, but independently supported defects still are. Preserve\n   legacy meaning and explicit approved directives even when another approach\n   seems equivalent; keep existing severity rules. In\n   an approved orchestrated run, unchecked immutable boxes define the work set\n   and are not a finding by themselves. Apply the same evidence hierarchy as\n   `feature-status`: inspect the runner-supplied validated completion summary\n   and task records, then check material consistency with the implementation\n   report, required assurance, approval digest, state, and source. The runner's\n   deterministic checks remain the primary enforcement boundary; a reviewer\n   must not return `pass` when required evidence is absent, a task is incomplete\n   or blocked, or a material contradiction is visible. Report a finding only for a\n   material contradiction or gap, never merely to request checkbox mutation.\n4. ADR lifecycle: required decisions exist, relied-on ADRs are `Accepted`,\n   supersession links are reciprocal, and accepted bodies were not rewritten.\n5. ADR conformance: implementation and tests satisfy decision, consequences,\n   and confirmation criteria; no architecturally significant choice is hidden\n   only in a plan or manifest.\n6. Report accuracy: file lists and verification claims match reality.\n7. Verification: inspect current runner evidence. Rerun only a focused\n   reproduction or missing, stale, inconsistent, or directly material command;\n   record why. Run the formatter check only when that evidence is specifically\n   required. Never run formatter fixes in review.\n8. Manifest conformance: current facts, active ADR index, naming, errors,\n   organization, async model, localization, dependency policy.\n9. Maintainability: report dead generality, needless indirection, unclear\n   responsibility, or comment/documentation behavior as an ordinary finding\n   only when exact evidence shows current material impact or a violated approved\n   authority. A preferred pattern, decomposition, control-flow style, or generic\n   cleanliness opinion is not a finding.\n10. Repository conventions: apply only manifest facts, configured rules,\n    approved guidance, and dominant local conventions relevant to the changed\n    surface. Do not invent generic naming, comment, size, or directory rules.\n11. Tests: apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Reject hollow, redundant,\n    implementation-mirroring, or disproportionate tests. Confirm the Risk and\n    Contract Assurance Map does not overstate its evidence.\n12. Docs: no stale artifact, ADR, decision-index, or manifest statements.\n13. Security: apply the Security Assurance policy (`security-assurance.md`) supplied by the active execution context against the diff as built.\n    Each recorded exposure has a named enforcement point and proportionate\n    evidence; a recorded no-exposure claim still holds for the code that\n    exists. Use the `security` category.\n14. Engineering Quality: after the ordinary audit and verdict are frozen, apply\n    the shadow procedure below. Do not use an EQ-only concern to retroactively\n    create or re-severity an ordinary finding.\n\nFor a missing-test finding, the existing finding fields must together identify:\n\n- the material observable guarantee;\n- the plausible regression mechanism;\n- why current evidence cannot detect it;\n- the proportionate evidence level and observable fix acceptance.\n\nCoverage percentage, syntactic reach, a private helper, or a traceability row\nalone is not a finding. A false report claim remains a finding, but its fix may\neither add proportionate evidence or narrow the claim truthfully. Missing\nmaterial contract or safety evidence and failed required checks remain actionable;\nclaim narrowing cannot discharge an actual mandatory requirement.\n\nA security finding obeys the same rule: it must name the exposure class, the\nmechanism reachable in this codebase, why current evidence does not cover it,\nand the observable fix acceptance. An exposure-class label, a generic threat\nname, or a framework default alone is not a finding.\n\nFor an accepted-finding resolution, inspect the accepted IDs, changed scope,\ncurrent binding/approved authority, direct physical origins and current\napplicability. Keep review independent of the builder transcript. Executed,\nreused, historical, failed and pending evidence have different meanings; do not\nturn reuse into a fresh pass or infer missing assurance from a report count.\nInspect surrounding claims for contradictions while keeping the review focused\non the authorized delta. The existing human triage and scope acknowledgment remain.\n\n## Engineering Quality Shadow Procedure\n\n1. Complete audit items 1\u201313 under their existing authorities. Freeze the\n   ordinary findings, severities, and verdict before classifying Engineering\n   Quality overlap or looking for an incremental EQ-only candidate.\n2. An already-valid ordinary finding may add exactly one primary `EQ-NN` to its\n   existing `violates` array. The finding must qualify without that mapping, and\n   the mapping changes neither severity nor verdict.\n3. Record a genuinely incremental EQ-only candidate only as one `EQ-SHADOW:`\n   string in existing free-form `deferredCoverage`. It must include a\n   review-local candidate ID, primary rule ID, suggested severity, confidence,\n   exact evidence and stable location, concrete impact, smallest reasonable\n   remediation, relevant authority references, verification method, semantic\n   dedupe key, and `waiver=not_applicable (shadow-only)`.\n4. Use the dedupe identity defined by the canonical policy. Merge wording-only\n   duplicates and line-number drift into one record. Ordinary deferred-coverage\n   prose remains valid.\n5. A shadow record is not a finding: it cannot affect ordinary findings,\n   severity, verdict, mandatory human triage, accepted scope, fixing,\n   completion, or a gate. Do not put it in `findings`, and do not promote it even\n   when its suggested severity is `blocker`.\n\nRecommended human-readable form, as a semantic evaluation convention only:\n\n```text\nEQ-SHADOW: candidateId=EQ-S1; ruleId=EQ-04; severity=should_fix; confidence=high; evidence=src/config.ts:84 ConfigLoader.parseConfig; impact=malformed persisted values reach process invocation; remediation=validate with the existing config decoder; references=FR3 and manifest section 6; verification=focused malformed-value rejection plus legacy-valid acceptance; dedupeKey=EQ-04|ConfigLoader.parseConfig|FR3|invalid-config; waiver=not_applicable (shadow-only)\n```\n\nNo EQ-specific field is mandatory in the review-result contract. Do not change the\nstructured schema, parser, or runtime validation to interpret the string.\n\n"
   },
   "guidance/fix.md": {
-    "sha256": "0dcccc947849448bb295f54bb765b2b34b90cb3c15360381bd3c0217e74617a1",
-    "text": "# Fix Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Report Rule\n\nWrite the resolved `changeReport` artifact when the fix:\n\n- changes user-visible behavior or a public contract;\n- fixes a documented bug;\n- applies or skips review findings;\n- changes `description.md`, `work.md`, `plan.md`, `test-report.md`,\n  `review-<iteration>.md`, or `PROJECT_MANIFEST.md`;\n- creates, supersedes, deprecates, or changes lifecycle metadata on an ADR;\n- touches an escalation trigger;\n- records a material Engineering Quality deviation;\n- is requested to have an audit trail.\n\nOtherwise verification and a final summary suffice; no change report is required.\n\n## Workflow\n\n1. Read relevant active accepted ADRs and the triaged review artifact when\n   review findings initiated the fix. Require explicit accepted finding IDs;\n   never infer acceptance from the review file alone. For defects, write a\n   failing regression test first only when it protects a material observable\n   regression not already covered and can be done without production changes.\n3. Follow the Engineering Quality authority order and make the smallest\n   compatible code/test/doc change that satisfies the request or accepted\n   finding. Do not turn a shadow candidate, rejected concern, or alternative\n   design opinion into extra scope. For approved strict plans, apply Plan Authority\n   (`plan-task-completion.md`) supplied by the active execution context: preserve binding directives\n   and legacy meaning; a suggested remedy remains optional unless an applicable\n   explicit human decision makes it mandatory. Correcting a report cannot replace\n   satisfying a required check or missing material evidence.\n   Comment sparingly and with high signal:\n   write a comment only to explain why, a constraint, trade-off, invariant,\n   side effect, or non-obvious behavior, and do not narrate what the code\n   visibly does.\n4. Keep feature artifacts and manifest in sync when behavior, design,\n   architecture, build settings, or conventions change. Rewrite only the\n   stale manifest facts under the `project-manifest` writing rules; fix\n   narrative and verification results belong in the change report.\n5. After changing tests or verification commands, including their expected or\n   observed results, search the complete current `test-report.md`,\n   `implementation-report.md`, and the fix's change report when it exists or is\n   required for every test-count and command-result claim. Update every current\n   claim from a command actually run in this fix, or label earlier evidence\n   explicitly `historical/pre-fix` with its scope. Keep all three artifacts\n   mutually consistent, and never leave an old unqualified count or command\n   outcome describing the current tree. In orchestrated mode, when runner-owned\n   final verification has not run yet, record only\n   `pending at fix handoff; durable runner evidence owns the eventual result`\n   instead of predicting it or copying an earlier total as current.\n6. Never rewrite an accepted ADR body. Route a changed accepted decision to a\n   superseding ADR and reapproved strict plan.\n7. If no upstream feature artifact exists, state that instead of inventing one.\n8. Run focused affected checks. In orchestrated mode, do not repeat supplied\n   full-scope runner commands; if the manifest final suite is absent, run it once\n   and report the gap. In standalone mode, run one final applicable suite.\n9. Run formatter check/fix only as final review, if configured. If it rewrites\n   files, rerun affected checks.\n10. Self-review for ADR and applicable Engineering Quality conformance, side\n    effects, missing material negative evidence, disproportionate tests, and doc\n    drift. Fix in-scope findings and rerun affected checks.\n11. Write/update the change report when required.\n\n## Change Report\n\nUse the resolved `changeReport` artifact:\n\n1. title, date, affected feature and ADR links;\n2. what changed;\n3. why;\n4. security exposure: one line per applicable class with the control applied,\n   or one line stating that none applies;\n5. files changed: production/tests/docs;\n6. skipped review findings, if any;\n7. documentation sync;\n8. ADR conformance or lifecycle result;\n9. material Engineering Quality deviations, or `None`;\n10. verification commands and outcomes;\n11. assurance critique result.\n\n"
+    "sha256": "3a33889ed68a8be307424da087314b2ff3ae8ea9d92c57639ab04f2eca147579",
+    "text": "# Fix Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Report Rule\n\nWrite the resolved `changeReport` artifact when the fix:\n\n- changes user-visible behavior or a public contract;\n- fixes a documented bug;\n- applies or skips review findings;\n- changes `description.md`, `work.md`, `plan.md`, `test-report.md`,\n  `review-<iteration>.md`, or `PROJECT_MANIFEST.md`;\n- creates, supersedes, deprecates, or changes lifecycle metadata on an ADR;\n- touches an escalation trigger;\n- records a material Engineering Quality deviation;\n- is requested to have an audit trail.\n\nOtherwise verification and a final summary suffice; no change report is required.\n\n## Workflow\n\n1. Read relevant active accepted ADRs and the triaged review artifact when\n   review findings initiated the fix. Require explicit accepted finding IDs;\n   never infer acceptance from the review file alone. For defects, write a\n   failing regression test first only when it protects a material observable\n   regression not already covered and can be done without production changes.\n3. Follow the Engineering Quality authority order and make the smallest\n   compatible code/test/doc change that satisfies the request or accepted\n   finding. Do not turn a shadow candidate, rejected concern, or alternative\n   design opinion into extra scope. For approved strict plans, apply Plan Authority\n   (`plan-task-completion.md`) supplied by the active execution context: preserve binding directives\n   and legacy meaning; a suggested remedy remains optional unless an applicable\n   explicit human decision makes it mandatory. Correcting a report cannot replace\n   satisfying a required check or missing material evidence.\n   Comment sparingly and with high signal:\n   write a comment only to explain why, a constraint, trade-off, invariant,\n   side effect, or non-obvious behavior, and do not narrate what the code\n   visibly does.\n4. Keep feature artifacts and manifest in sync when behavior, design,\n   architecture, build settings, or conventions change. Rewrite only the\n   stale manifest facts under the `project-manifest` writing rules; fix\n   narrative and verification results belong in the change report.\n5. After changing tests or verification commands, including their expected or\n   observed results, search the complete current `test-report.md`,\n   `implementation-report.md`, and the fix's change report when it exists or is\n   required for every test-count and command-result claim. Update every current\n   claim from a command actually run in this fix or a validated equivalent\n   disposition with its exact physical origin, or label earlier evidence\n   explicitly `historical/pre-fix` with its scope. Keep all three artifacts\n   mutually consistent, and never leave an old unqualified count or command\n   outcome describing the current tree. In orchestrated mode, when runner-owned\n   final verification has not run yet, record only\n   `pending at fix handoff; durable runner evidence owns the eventual result`\n   instead of predicting it or copying an earlier total as current.\n6. Never rewrite an accepted ADR body. Route a changed accepted decision to a\n   superseding ADR and reapproved strict plan.\n7. If no upstream feature artifact exists, state that instead of inventing one.\n8. Run focused affected checks. In orchestrated mode, do not repeat supplied\n   full-scope runner commands; if the manifest final suite is absent, run it once\n   and report the gap. In standalone mode, run one final applicable suite unless\n   the shared deterministic owner establishes a permitted equivalent disposition\n   under Test Assurance. Keep every unsupported or mandatory fresh check.\n9. Run formatter check/fix only as final review, if configured. If it rewrites\n   files, rerun affected checks.\n10. Self-review for ADR and applicable Engineering Quality conformance, side\n    effects, missing material negative evidence, disproportionate tests, and doc\n    drift. Fix in-scope findings and rerun affected checks.\n11. Write/update the change report when required.\n\n## Change Report\n\nUse the resolved `changeReport` artifact:\n\n1. title, date, affected feature and ADR links;\n2. what changed;\n3. why;\n4. security exposure: one line per applicable class with the control applied,\n   or one line stating that none applies;\n5. files changed: production/tests/docs;\n6. skipped review findings, if any;\n7. documentation sync;\n8. ADR conformance or lifecycle result;\n9. material Engineering Quality deviations, or `None`;\n10. verification commands and outcomes;\n11. assurance critique result.\n\n\nUse one compact closure record per accepted finding: ID, changed scope, decision,\nexecuted/reused/historical/pending references and limitations. Preserve unaffected\nreport text while correcting every affected current claim. Do not rewrite reports\nor rerun a suite merely to update narrative. The resolution reviewer receives the\naccepted IDs, bounded delta, current authority and exact evidence/origins, with\nexisting independent review and human triage; omit builder transcripts.\n"
   },
   "guidance/feature.md": {
-    "sha256": "d6ea97c20587be8f300bbdc7996b26cca8df9059e3244cb98288de18eec6f7e5",
-    "text": "# Feature Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Workflow\n\n1. Read relevant code, tests, docs, existing artifacts, and manifest sections.\n3. Ask only blocking questions. Record local default decisions with reason and\n   provenance.\n4. Identify relevant active ADRs and apply the ADR eligibility check.\n5. Create/update the resolved `work` artifact.\n7. Apply the Engineering Quality authority order and only constraints material\n   to the changed surface. Keep the change bounded and use the smallest\n   compatible repository mechanism; do not add a checklist or methodology.\n8. Implement code and proportionate assurance evidence together under the Test\n   Assurance policy (`test-assurance.md`) supplied by the active execution context. Every material claim needs an identifiable\n   existing evidence owner, but Engineering Quality does not select tests.\n9. Run focused affected checks. In orchestrated mode, do not repeat supplied\n   full-scope runner commands; run the manifest's applicable final suite once\n   only when it is absent from that block and record the gap. In standalone mode,\n   run one final applicable suite after the work stabilizes.\n10. Self-review for correctness, applicable Engineering Quality constraints,\n    missing material evidence, ADR conformance, async/concurrency, doc drift,\n    and scope creep.\n11. After code stabilizes, run formatter check/fix if configured. If it\n    rewrites files, rerun affected checks.\n12. Update `work.md` and manifest if stale. Change only the manifest facts this\n    work made stale, under the `project-manifest` writing rules; verification\n    results and delivery narrative stay in `work.md`. Record only material\n    Engineering Quality deviations in the existing **Deviations & Follow-ups**\n    section.\n\n## `work.md`\n\nWrite these sections:\n\n1. `# Feature: <Name>` and `Slug: <slug>`.\n2. **Related artifacts**: include relevant accepted ADRs or `None`.\n3. **Goal**: capability, value, explicit non-goals.\n4. **Requirements**: numbered `FR1`, `FR2`; each concrete and verifiable.\n5. **Assumptions & Decisions**: numbered, tagged `User-confirmed`,\n   `Sensible default`, or `Manifest convention`; exclude ADR-eligible choices.\n   Include one line per applicable security exposure class naming its mechanism\n   and the requirement covering it, or one line stating that none applies.\n6. **Implementation Plan**: ordered bullets naming units, materially changed\n   boundaries or dependency/lifecycle/compatibility constraints when present,\n   assurance evidence owners, and manifest follow-up. Do not add a per-rule\n   checklist.\n7. **Files Changed**: production, tests, docs/config; one-line reason each.\n8. **Verification**: commands, outcomes, and FR-to-implementation/assurance\n   mapping.\n9. **Deviations & Follow-ups**: deviations, limits, or `None`.\n\n## Rules\n\n- Keep `work.md` compact. Escalate if requirements or plan outgrow it.\n- Do not duplicate ADR context or rationale in `work.md`; link the decision.\n- Tests must be able to fail for real behavior.\n- No hollow tests.\n- Do not add a test solely for count, coverage percentage, a private branch, or\n  a helper. Existing evidence or no new test is valid when proportionate and\n  recorded accurately.\n- No new dependency without approval and manifest update.\n- Comment sparingly and with high signal. Write a comment only to explain why:\n  a constraint, trade-off, invariant, side effect, or non-obvious behavior. Do\n  not narrate what the code visibly does.\n"
+    "sha256": "3591b0cfb7e285f51aa942ba2f818ac03072512f5ee111650b915ca3ec621937",
+    "text": "# Feature Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Workflow\n\n1. Read relevant code, tests, docs, existing artifacts, and manifest sections.\n3. Ask only blocking questions. Record local default decisions with reason and\n   provenance.\n4. Identify relevant active ADRs and apply the ADR eligibility check.\n5. Create/update the resolved `work` artifact.\n7. Apply the Engineering Quality authority order and only constraints material\n   to the changed surface. Keep the change bounded and use the smallest\n   compatible repository mechanism; do not add a checklist or methodology.\n8. Implement code and proportionate assurance evidence together under the Test\n   Assurance policy (`test-assurance.md`) supplied by the active execution context. Every material claim needs an identifiable\n   existing evidence owner, but Engineering Quality does not select tests.\n9. Run focused affected checks. In orchestrated mode, do not repeat supplied\n   full-scope runner commands; run the manifest's applicable final suite once\n   only when it is absent from that block and record the gap. In standalone mode,\n   run one final applicable suite after the work stabilizes unless the shared\n   deterministic owner establishes a permitted equivalent disposition under Test\n   Assurance. Unsupported evidence retains fresh execution.\n10. Self-review for correctness, applicable Engineering Quality constraints,\n    missing material evidence, ADR conformance, async/concurrency, doc drift,\n    and scope creep.\n11. After code stabilizes, run formatter check/fix if configured. If it\n    rewrites files, rerun affected checks.\n12. Update `work.md` and manifest if stale. Change only the manifest facts this\n    work made stale, under the `project-manifest` writing rules; verification\n    results and delivery narrative stay in `work.md`. Record only material\n    Engineering Quality deviations in the existing **Deviations & Follow-ups**\n    section.\n\n## `work.md`\n\nWrite these sections:\n\n1. `# Feature: <Name>` and `Slug: <slug>`.\n2. **Related artifacts**: include relevant accepted ADRs or `None`.\n3. **Goal**: capability, value, explicit non-goals.\n4. **Requirements**: numbered `FR1`, `FR2`; each concrete and verifiable.\n5. **Assumptions & Decisions**: numbered, tagged `User-confirmed`,\n   `Sensible default`, or `Manifest convention`; exclude ADR-eligible choices.\n   Include one line per applicable security exposure class naming its mechanism\n   and the requirement covering it, or one line stating that none applies.\n6. **Implementation Plan**: ordered bullets naming units, materially changed\n   boundaries or dependency/lifecycle/compatibility constraints when present,\n   assurance evidence owners, and manifest follow-up. Do not add a per-rule\n   checklist.\n7. **Files Changed**: production, tests, docs/config; one-line reason each.\n8. **Verification**: commands, outcomes, and FR-to-implementation/assurance\n   mapping.\n9. **Deviations & Follow-ups**: deviations, limits, or `None`.\n\n## Rules\n\n- Keep `work.md` compact. Escalate if requirements or plan outgrow it.\n- Do not duplicate ADR context or rationale in `work.md`; link the decision.\n- Tests must be able to fail for real behavior.\n- No hollow tests.\n- Do not add a test solely for count, coverage percentage, a private branch, or\n  a helper. Existing evidence or no new test is valid when proportionate and\n  recorded accurately.\n- No new dependency without approval and manifest update.\n- Comment sparingly and with high signal. Write a comment only to explain why:\n  a constraint, trade-off, invariant, side effect, or non-obvious behavior. Do\n  not narrate what the code visibly does.\n"
   },
   "policies/decision-consultation.md": {
     "sha256": "82a869ef55849063b96742f5a60474bcf54492b737ca2703380d4a53f46f26d5",
     "text": "# Decision Consultation\n\n- Owner decision: ADR-0031\n- Consumers: None; conditional: `feature-description`, `architecture-decision`, `development-plan`\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning (conditional).\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Decision Consultation\n\nAn unresolved material choice in strict planning is raised as\n`gate=decision_consultation` only after repository analysis. Present one to three\nbounded cards with independent stable IDs, the exact question, why it matters,\naffected requirements, repository-relative evidence, viable options and their\nmaterial consequences, response mode, human owner, and an advisory\nrecommendation only when evidence supports one.\n\nDo not write a Proposed ADR or plan that selects an option while its prerequisite\nconsultation is unanswered. Record exact keyed human answers as decision\nprovenance, analyze them again, and do not repeat an answered decision against\nunchanged evidence. A new round requires a newly justified independent choice\nand new identities.\n\nConsultation is not approval or permission. An answer, including `Use\nrecommendation`, never accepts an ADR, approves a plan, authorizes code, fixes,\ntriage, recovery, release, or an external side effect. The later ADR and plan\ngates remain separate. In standalone mode present the same cards in chat; in\norchestrated mode return the typed request with `questions=[]` and let the CLI or\ncompatible supervisor relay only the current user's exact answer.\n"
   },
   "policies/test-assurance.md": {
-    "sha256": "b424e894274e32d4051f80324f855bb58ff6645634eb4856cd48b6f6bef28d82",
-    "text": "# Test Assurance\n\n- Owner decision: ADR-0013/0014\n- Consumers: `development-plan`, `code-writing`, `test-writing`, `feature-review`, `feature`, `quick-fix`; conditional: `project-manifest`\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning, implementation, review, fix, feature, quick-fix.\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Test Assurance\n\n- Add or retain a test only when it protects a material observable guarantee or\n  plausible regression that equivalent existing evidence does not already\n  protect.\n- Prioritize business rules, public and persisted contracts, authorization,\n  security, privacy, state transitions, recovery, decision tables, and confirmed\n  defects.\n- Test count, coverage percentage, a syntactic branch, a private helper, or the\n  ability to add another assertion is not enough by itself. An explicit approved\n  project threshold recorded in `PROJECT_MANIFEST.md` remains authoritative.\n- Boundary fakes, stubs, and injected runners are appropriate when they preserve\n  the production command, event, callback, or state contract and make unstable\n  dependencies deterministic. Reject tests that mock the unit under test,\n  reproduce private call order, mirror implementation structure, or duplicate\n  an already protected guarantee.\n- One behavioral test may protect several requirements. Existing evidence, a\n  non-unit evidence owner, or no new automated test is valid when proportionate\n  and recorded accurately. Consolidate or remove redundant, hollow, obsolete,\n  or implementation-coupled tests only when their guarantees remain protected.\n- Reports must claim only behavior demonstrated by assertions or other recorded\n  evidence. Narrowing an overstated claim is a valid correction; do not add a\n  low-value test merely to preserve broader prose.\n- Missing material contract or safety evidence, failed verification, hollow\n  tests, and false evidence claims remain actionable. Lower test volume is not a\n  goal independent of assurance.\n"
+    "sha256": "64d3a3a8103b5a872a7fc1f162c2a218352c73f9899055b9d650a3725dd8123c",
+    "text": "# Test Assurance\n\n- Owner decision: ADR-0013/0014\n- Consumers: `development-plan`, `code-writing`, `test-writing`, `feature-review`, `feature`, `quick-fix`; conditional: `project-manifest`\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning, implementation, review, fix, feature, quick-fix.\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Test Assurance\n\n- Add or retain a test only when it protects a material observable guarantee or\n  plausible regression that equivalent existing evidence does not already\n  protect.\n- Prioritize business rules, public and persisted contracts, authorization,\n  security, privacy, state transitions, recovery, decision tables, and confirmed\n  defects.\n- Test count, coverage percentage, a syntactic branch, a private helper, or the\n  ability to add another assertion is not enough by itself. An explicit approved\n  project threshold recorded in `PROJECT_MANIFEST.md` remains authoritative.\n- Boundary fakes, stubs, and injected runners are appropriate when they preserve\n  the production command, event, callback, or state contract and make unstable\n  dependencies deterministic. Reject tests that mock the unit under test,\n  reproduce private call order, mirror implementation structure, or duplicate\n  an already protected guarantee.\n- One behavioral test may protect several requirements. Existing evidence, a\n  non-unit evidence owner, or no new automated test is valid when proportionate\n  and recorded accurately. Consolidate or remove redundant, hollow, obsolete,\n  or implementation-coupled tests only when their guarantees remain protected.\n- Reports must claim only behavior demonstrated by assertions or other recorded\n  evidence. Narrowing an overstated claim is a valid correction; do not add a\n  low-value test merely to preserve broader prose.\n- Missing material contract or safety evidence, failed verification, hollow\n  tests, and false evidence claims remain actionable. Lower test volume is not a\n  goal independent of assurance.\n\n### Deterministic equivalent evidence\n\nADR-0043 permits an explicitly configured check to use equivalent evidence only\nwhen the shared verification owner returns a valid current decision and direct\nphysical origin. Config schema 3, project-owned dependency/explanatory rules and\ncomplete non-secret input/environment evidence are required. A model's docs-only\nlabel, a report claim or an earlier green command is never a waiver. Missing or\nunsafe evidence, unknown/mixed changes, authoritative Markdown, tests, generated\ninputs, config or toolchain changes retain required checks. Plan/project commands\nmarked fresh and every release:check execute afresh.\n\nThe runner owns decisions, physical starts/finishes and application under its\nwork claim; phase models do not invoke the standalone helper or write machine\nevidence. Standalone callers use the installed `../scripts/verification.cjs`\nthrough an explicitly selected v2 work binding. Helper absence, v1 bindings,\nunapproved/missing policy and unsupported plans preserve the existing applicable\nfinal-suite owner. A check without a supported reusable disposition still runs.\n\nDistinguish executed, reused, historical/pre-fix, failed, unavailable and pending\nevidence. Reuse references the exact original attempt, round and evidence digest;\nit has no new process, exit code, log, duration or saved-time claim. Revalidate\nsource and origin applicability before completion. Never reclassify a failed or\nincomplete physical attempt as reuse.\n"
   },
   "policies/security-assurance.md": {
     "sha256": "b42cef3a0ccec8e4ba5e23057a4c788fc32227e9a3bca454d9d82d43589d4b74",
@@ -17247,18 +18171,18 @@ var EMBEDDED_PHASE_RESOURCES = {
     "text": "# Engineering Quality\n\n- Owner decision: ADR-0030\n- Consumers: `feature-description`, `architecture-decision`, `development-plan`, `code-writing`, `feature-review`, `feature`, `quick-fix`, `project-manifest`; conditional: None\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning, implementation, review, fix, feature, quick-fix.\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Engineering Quality\n\nThis policy is vendor-neutral. The installed `policies/engineering-quality.md` is only its current storage and\ndelivery surface; the policy does not depend on Claude-specific tools,\npermissions, hooks, commands, sessions, or behavior. Skills and prompts\nreference this section instead of copying the complete rule set. Future Codex\nor other-vendor delivery must preserve these semantics without interpreting the\nfilename as policy authority.\n\nApply the authority order in the project `AGENTS.md` before any generic quality preference. When two\nremedies satisfy the same higher authority, use the smallest compatible\nremediation rather than requiring a preferred pattern.\n\n### EQ-01 \u2014 Local authority and context\n\nFollow approved requirements, accepted ADRs, executable and public contracts,\nmanifest facts, established invariants, and dominant repository conventions.\nDeviate only when the task, an approved decision, or a concrete correctness,\nsecurity, lifecycle, or compatibility need requires it. Generic preference does\nnot override repository authority.\n\nAlways active. An objective conflict with approved authority may be actionable;\na merely different local style is not.\n\n### EQ-02 \u2014 Cohesive responsibilities and explicit boundaries\n\nKeep changed responsibilities together when they share purpose, dependencies,\nlifecycle, and verification needs. Separate them when those concerns materially\ndiffer. Make important boundaries recognizable without arbitrary\nfragmentation.\n\nContextual and advisory unless a concrete consequence independently violates a\nstronger rule. It requires no function or file size, layer, service class, or\ndirectory pattern and never creates a blocker by itself.\n\n### EQ-03 \u2014 Dependency direction and visibility\n\nDo not introduce dependency edges that violate the repository's intended\ndependency direction or unnecessarily couple stable logic to volatile\nimplementation details. Make important runtime dependencies and mutable\ncollaborators visible at an appropriate existing composition or usage boundary.\n\nContextual. It assumes no domain-centric architecture and requires neither\ninterfaces nor a dependency-injection container. A mechanically forbidden edge\nor unapproved dependency may remain actionable under existing repository rules.\n\n### EQ-04 \u2014 Boundary contracts and ingress validation\n\nAt important public, process, network, persistence, filesystem, user-input, or\ninter-module boundaries, make input, output, failure, and compatibility\nsemantics clear using repository-appropriate mechanisms. Validate external or\nuntrusted data at the first boundary where the system assumes it is trustworthy;\nstatic types alone do not validate external bytes.\n\nContextual. A demonstrable contract, correctness, or security consequence may\nbe actionable under existing rules.\n\n### EQ-05 \u2014 Failure semantics and resource lifecycle\n\nPreserve useful failure meaning, original causes, and diagnostic context. Do not\nsilently turn failure into success. For resources with lifecycle semantics,\nidentify ownership and proportionate cleanup behavior for success, failure,\ncancellation, timeout, shutdown, and partial initialization where applicable.\n\nContextual. It requires no universal error hierarchy or resource-management\npattern. Reproducible data loss, leaks, hangs, swallowed failure, or violated\nlifecycle contracts may remain actionable under existing rules.\n\n### EQ-06 \u2014 Proportional design\n\nPrefer existing language, runtime, framework, platform, and project mechanisms\nwhen adequate. Prefer straightforward control and data flow. Add an abstraction\nor dependency only when it provides a concrete benefit such as isolating\nvolatility, enforcing a useful contract, removing meaningful duplication,\nsimplifying usage, or enabling necessary verification.\n\nAlways considered and advisory by default. It is not a ban on abstraction and\nnever creates a blocker by itself.\n\n### EQ-07 \u2014 Bounded change scope\n\nKeep the change within the approved task, plan, or accepted-finding scope. Do\nnot bundle unrelated cleanup, migration, abstraction work, dependency changes,\nor architecture refactoring unless required for correctness or explicitly\napproved.\n\nAlways active. Objective scope expansion remains actionable through existing\napproval, plan, baseline, and accepted-finding enforcement.\n\n### EQ-08 \u2014 Assurance ownership\n\nMaterial claims introduced by a change must have an identifiable,\nproportionate evidence owner. Reuse existing assurance mechanisms rather than\nduplicating them. Test Assurance, Security Assurance, contract verification,\nconfigured checks, or justified inspection may own evidence that compatibility\nis preserved, malformed input is rejected, cancellation cleans up resources,\npersisted data survives migration, or a failure remains observable.\n\nContextual. Engineering Quality detects missing assurance ownership; it does\nnot select tests, create a test quota, or require another test when equivalent\nevidence already exists.\n\n### EQ-09 \u2014 Compatibility\n\nPreserve public APIs, persisted formats, events, protocols, CLI behavior, and\nother externally depended-on semantics unless an approved specification or ADR\nintentionally changes them and defines the relevant migration consequences.\n\nContextual. A high-confidence unapproved breaking change may remain actionable\nunder existing contract, specification, or ADR authority.\n\n### EQ-10 \u2014 Incremental legacy evolution\n\nWhen changing legacy code, prefer a bounded seam, adapter, characterization\nevidence, staged migration, or similarly incremental path when it materially\nreduces risk. Do not demand an incremental technique when a direct local change\nis safer and simpler.\n\nContextual and advisory. It never creates a blocker by itself; a concrete scope\nor compatibility consequence may be reported under the existing authority it\nviolates.\n\n### Finding and shadow semantics\n\nAn actionable Engineering Quality concern must identify a primary rule ID,\nseverity, confidence, exact evidence and location, concrete impact, the smallest\nreasonable remediation, relevant specification, ADR, contract, manifest, or\naccepted-finding authority, a verification method, a stable deduplication\nidentity, and waiver state when applicable. Its identity is the primary rule,\nstable code or contract locus, violated authority, and impact class; wording or\nline-number drift does not create a new concern. Generic design preference\nwithout exact evidence and material impact is not actionable.\n\nIn initial shadow mode, complete the ordinary review first and freeze its\nfindings, severities, and verdict. An ordinary finding that already qualifies\nwithout Engineering Quality may add exactly one primary `EQ-NN` mapping to its\nexisting `violates` list; the mapping cannot create the finding or change its\nseverity or verdict. A genuinely incremental EQ-only candidate may be recorded\nonly as an `EQ-SHADOW:` string in existing free-form `deferredCoverage`. It is\nnot a finding, receives no mandatory human triage, cannot be accepted, never\nenters fixer scope, and cannot affect severity, verdict, completion, or any\ngate. Its suggested severity remains non-authoritative, and its waiver state is\n`not_applicable` because triage does not apply. Ordinary deferred-coverage prose\nremains valid. In reviewer-write mode, copy every structured `EQ-SHADOW:` record\nbyte-for-byte into the canonical Markdown Deferred Coverage section;\nrunner-rendered mode already projects the structured value. This retention rule\ndoes not parse or validate the record. The human-readable shape is an evaluation\nconvention, not a runtime parser or versioned contract.\n\nResolution review is closure-oriented, not discovery-oriented. It first\nverifies every immediately preceding accepted finding ID. A new finding or\nshadow candidate is permitted only when introduced by the fix, newly observable\nbecause the changed evidence surface exposes it, a direct regression of another\napproved contract or established invariant, or a previously unobservable\ncritical correctness, security, or lifecycle issue. Name the new evidence and a\ndistinct deduplication identity. A stylistic opinion, preferred decomposition,\nor alternative design is insufficient. Rejected or deferred findings must not\nreopen against unchanged evidence and authority, including after reviewer\nrotation.\n\n### Enforcement boundaries\n\nThe initial release adds no EQ-native runtime blocker. Existing objective\napproval, contract, scope, dependency, verification, correctness, security,\ntest, lifecycle, compatibility, review, and triage mechanisms retain their\ncurrent enforcement and severity. `EQ-02`, `EQ-06`, and `EQ-10` never create\nblockers by themselves.\n\nAny later blocker-eligibility proposal must require high confidence, exact\ncurrent evidence, current material impact, a violated approved authority,\ncorrectness, security, data-integrity, lifecycle-safety, required-assurance,\nscope, or compatibility invariant, and observable closure. Meeting this\nthreshold does not authorize hard enforcement; a separate approved decision is\nstill required.\n\nEngineering Quality adds no phase, skill, hook, gate, test quota, architecture\nmethodology, static analyzer, or runtime contract.\n"
   },
   "policies/plan-task-completion.md": {
-    "sha256": "b8b6119d0b394fd046edcf7b8e218dca464846d2ca962e46c20edc27d940f6a3",
-    "text": "# Plan Authority and Task Completion Evidence\n\n- Owner decision: ADR-0038 (Plan Authority); ADR-0017/0025 (Plan Task Completion Evidence)\n- Consumers: `development-plan`, `code-writing`; conditional: `test-writing`, `feature-review`, `feature-status`, `quick-fix`\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning, implementation, review (conditional), fix (conditional), quick-fix (conditional).\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Plan Authority\n\nApplicable approved requirements, accepted ADR constraints, public and persisted\ncontracts, security and authorization boundaries, transaction and lifecycle\nguarantees, compatibility, scope, and required verification evidence are binding.\nExact internal details remain binding when required by applicable authority or\nconcrete constraints; unlabelled explicit directives remain binding.\n\nOnly paragraphs or list items prefixed `Optional implementation guidance:` are\nnon-binding suggestions. A label covers that paragraph or list item, including\nits nested content, and ends before the next sibling block. A different compliant\nimplementation within approved scope needs no reapproval, finding or deviation\nreport merely for differing from this guidance.\n\nGuidance never overrides binding authority or expands scope. Resolve conflicts\nand ambiguous commitments before dependent work; missing or ambiguous optionality\ndoes not waive an explicit commitment.\n\n### Applying the convention\n\nNew plans copy the `Plan Authority` heading and its three paragraphs above,\nbefore Technical Breakdown and Implementation Tasks. This document convention\ntravels with the approved bytes; neither plugin version nor conversation supplies\nit. Optional guidance is useful only when it helps implement the task. Put required\nbehavior and safety constraints in binding text, never solely in guidance.\n\nApply the new convention only where the approved plan explicitly establishes it.\nLegacy plans keep their approved meaning, including their own explicit optionality;\ndo not retrofit this section or infer new discretion from a label alone. An exact\ninternal directive remains binding even when another approach seems equivalent.\nLinks to authoritative definitions preserve their applicable approved meaning;\nthey do not authorize later contract changes. Never rewrite historical plans,\nsnapshots, findings or triage to fit this convention.\n\nUse the project's existing authority order and conflict/escalation handling.\nChanging an approved commitment requires the applicable ADR and plan reapproval\npath; a deviation report records a deviation and cannot authorize it. Approval\nbinds the whole bundle, including guidance: editing optional text still invalidates\nan orchestrated approval, unlike choosing a compliant implementation under it.\n\n- Planner/approver: make behavior, invariants, scope/boundaries, dependencies,\n  requirement/acceptance/ADR links, necessary constraints and proportionate\n  evidence explicit. Review obligations and marked discretion at the existing gate.\n- Implementer/assurance: satisfy binding requirements within approved scope.\n  Record material decisions and real deviations proportionately in existing\n  reports; a merely different permitted helper, constant or decomposition needs\n  no entry and grants no extra scope.\n- Reviewer: report concrete binding-authority violations and independently\n  supported correctness, security, compatibility, evidence or maintainability\n  defects, including defects in code that follows all guidance. A difference from\n  optional guidance alone is not a finding. Keep existing severity, EQ shadow,\n  independent review, closure and unchanged-evidence rediscovery rules.\n- Fixer: fix only accepted findings under existing authority. A suggested remedy\n  stays optional unless an applicable explicit human decision makes it mandatory;\n  do not waive an accepted directive or turn a recommendation into additional work.\n- Completion/status: structural validity does not prove substantive fulfillment.\n  Failed required checks, missing material evidence and false success claims\n  remain actionable. Correcting a report cannot discharge a mandatory requirement;\n  pending or unavailable evidence does not become a pass.\n\n## Plan Task Completion Evidence\n\n- In strict orchestrated work, the approved description, plan, and accepted ADR\n  bodies are immutable. Unchecked plan boxes define the approved work set; they\n  are not mutable execution status and must not be marked `[x]` after approval.\n- Persisted orchestrator state owns lifecycle status and `nextAction`. A\n  terminal `done` run with `nextAction: null` is never routed back to\n  `code-writing` solely because its immutable plan boxes remain unchecked.\n- New strict implementation results use the versioned structured\n  `taskCompletion` ledger as the sole source of truth. It has exactly one\n  ordered record for every approved `TNNN`, with status `completed`,\n  `incomplete`, or `blocked`, bounded repository-relative evidence, and a\n  report gap/deviation reference when the status is not completed. An\n  accepted-finding fix whose changes made that evidence stale may return a\n  complete refreshed ledger (ADR 0025) \u2014 same task set and order, statuses\n  unchanged, evidence describing the current tree \u2014 validated by the same\n  fail-closed pipeline; there is still exactly one canonical ledger at a time.\n- The implementation report contains the deterministic\n  `banzai-plan-task-completion/v1` Markdown projection of that ledger. Persisted\n  state contains a validated summary, never a separately authored ledger. The\n  runner checks approval digest, task coverage/order, path scope, required\n  reports, and structured/report/state parity before verification, review, and\n  terminal success.\n- `outcome=completed` is invalid when any task is missing, malformed,\n  incomplete, or blocked. Validation fails closed as\n  `PLAN_TASK_COMPLETION_INVALID`; verification and review do not start, and a\n  normally returned invalid implementation result may be retried after the\n  evidence is corrected without editing the approved plan.\n- A legacy orchestrated run without the structured ledger keeps its persisted\n  lifecycle and next action, but task completion is `legacy`, `unknown`, or\n  `inconsistent`; report prose is never retrofitted into canonical `N/N`.\n- Active orchestrated runs remain active even when partial report evidence is\n  present. For standalone work without external completion evidence, checked\n  and unchecked plan boxes retain their normal completed/incomplete meaning.\n- Status and review name the evidence source: `structured completion evidence`,\n  `plan checkbox`, `legacy`, `unknown`, or `inconsistent`. Contradictory state,\n  approval, reports, source, tests, or review evidence requires an\n  artifact/evidence audit and is never silently repaired by editing an approved\n  plan.\n"
+    "sha256": "a9846215b79db286db07f72103e44b1f4909e0eef8788dedc15180ff70783e7b",
+    "text": "# Plan Authority and Task Completion Evidence\n\n- Owner decision: ADR-0038 (Plan Authority); ADR-0017/0025 (Plan Task Completion Evidence)\n- Consumers: `development-plan`, `code-writing`; conditional: `test-writing`, `feature-review`, `feature-status`, `quick-fix`\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning, implementation, review (conditional), fix (conditional), quick-fix (conditional).\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Plan Authority\n\nApplicable approved requirements, accepted ADR constraints, public and persisted\ncontracts, security and authorization boundaries, transaction and lifecycle\nguarantees, compatibility, scope, and required verification evidence are binding.\nExact internal details remain binding when required by applicable authority or\nconcrete constraints; unlabelled explicit directives remain binding.\n\nOnly paragraphs or list items prefixed `Optional implementation guidance:` are\nnon-binding suggestions. A label covers that paragraph or list item, including\nits nested content, and ends before the next sibling block. A different compliant\nimplementation within approved scope needs no reapproval, finding or deviation\nreport merely for differing from this guidance.\n\nGuidance never overrides binding authority or expands scope. Resolve conflicts\nand ambiguous commitments before dependent work; missing or ambiguous optionality\ndoes not waive an explicit commitment.\n\n### Applying the convention\n\nNew plans copy the `Plan Authority` heading and its three paragraphs above,\nbefore Technical Breakdown and Implementation Tasks. This document convention\ntravels with the approved bytes; neither plugin version nor conversation supplies\nit. Optional guidance is useful only when it helps implement the task. Put required\nbehavior and safety constraints in binding text, never solely in guidance.\n\nApply the new convention only where the approved plan explicitly establishes it.\nLegacy plans keep their approved meaning, including their own explicit optionality;\ndo not retrofit this section or infer new discretion from a label alone. An exact\ninternal directive remains binding even when another approach seems equivalent.\nLinks to authoritative definitions preserve their applicable approved meaning;\nthey do not authorize later contract changes. Never rewrite historical plans,\nsnapshots, findings or triage to fit this convention.\n\nUse the project's existing authority order and conflict/escalation handling.\nChanging an approved commitment requires the applicable ADR and plan reapproval\npath; a deviation report records a deviation and cannot authorize it. Approval\nbinds the whole bundle, including guidance: editing optional text still invalidates\nan orchestrated approval, unlike choosing a compliant implementation under it.\n\n- Planner/approver: make behavior, invariants, scope/boundaries, dependencies,\n  requirement/acceptance/ADR links, necessary constraints and proportionate\n  evidence explicit. Review obligations and marked discretion at the existing gate.\n- Implementer/assurance: satisfy binding requirements within approved scope.\n  Record material decisions and real deviations proportionately in existing\n  reports; a merely different permitted helper, constant or decomposition needs\n  no entry and grants no extra scope.\n- Reviewer: report concrete binding-authority violations and independently\n  supported correctness, security, compatibility, evidence or maintainability\n  defects, including defects in code that follows all guidance. A difference from\n  optional guidance alone is not a finding. Keep existing severity, EQ shadow,\n  independent review, closure and unchanged-evidence rediscovery rules.\n- Fixer: fix only accepted findings under existing authority. A suggested remedy\n  stays optional unless an applicable explicit human decision makes it mandatory;\n  do not waive an accepted directive or turn a recommendation into additional work.\n- Completion/status: structural validity does not prove substantive fulfillment.\n  Failed required checks, missing material evidence and false success claims\n  remain actionable. Correcting a report cannot discharge a mandatory requirement;\n  pending or unavailable evidence does not become a pass.\n\n## Plan Task Completion Evidence\n\n- In strict orchestrated work, the approved description, plan, and accepted ADR\n  bodies are immutable. Unchecked plan boxes define the approved work set; they\n  are not mutable execution status and must not be marked `[x]` after approval.\n- Persisted orchestrator state owns lifecycle status and `nextAction`. A\n  terminal `done` run with `nextAction: null` is never routed back to\n  `code-writing` solely because its immutable plan boxes remain unchecked.\n- New strict implementation results use the versioned structured\n  `taskCompletion` ledger as the sole source of truth. It has exactly one\n  ordered record for every approved `TNNN`, with status `completed`,\n  `incomplete`, or `blocked`, bounded repository-relative evidence, and a\n  report gap/deviation reference when the status is not completed. An\n  accepted-finding fix whose changes made that evidence stale may return a\n  complete refreshed ledger (ADR 0025) \u2014 same task set and order, statuses\n  unchanged, evidence describing the current tree \u2014 validated by the same\n  fail-closed pipeline; there is still exactly one canonical ledger at a time.\n- The implementation report contains the deterministic\n  `banzai-plan-task-completion/v1` Markdown projection of that ledger. Persisted\n  state contains a validated summary, never a separately authored ledger. The\n  runner checks approval digest, task coverage/order, path scope, required\n  reports, and structured/report/state parity before verification, review, and\n  terminal success.\n- `outcome=completed` is invalid when any task is missing, malformed,\n  incomplete, or blocked. Validation fails closed as\n  `PLAN_TASK_COMPLETION_INVALID`; verification and review do not start, and a\n  normally returned invalid implementation result may be retried after the\n  evidence is corrected without editing the approved plan.\n- A legacy orchestrated run without the structured ledger keeps its persisted\n  lifecycle and next action, but task completion is `legacy`, `unknown`, or\n  `inconsistent`; report prose is never retrofitted into canonical `N/N`.\n- Active orchestrated runs remain active even when partial report evidence is\n  present. For standalone work without external completion evidence, checked\n  and unchecked plan boxes retain their normal completed/incomplete meaning.\n- Status and review name the evidence source: `structured completion evidence`,\n  `plan checkbox`, `legacy`, `unknown`, or `inconsistent`. Contradictory state,\n  approval, reports, source, tests, or review evidence requires an\n  artifact/evidence audit and is never silently repaired by editing an approved\n  plan.\n\n\n### Opt-in verification obligations\n\nA new strict plan relying on ADR-0043 contains exactly one fenced\n`banzai-verification-obligations/v1` JSON inventory inside its approved bytes.\nIt carries schema/schemaVersion, complete=true, planRemainderSha256 and an ordered\nchecks array of configured check IDs and fresh/equivalent_evidence modes. The\nremainder digest covers every byte outside that complete fence. The owner reviews\ncompleteness and consistency with all prose commitments before bundle approval.\nMissing, duplicated, stale, ambiguous or contradictory inventories deny reuse;\nlegacy plans retain their original obligations. Release checks are always fresh.\nChanging the inventory requires normal plan approval; no prose claim upgrades it.\n\nEquivalent verification does not replace task-completion validation. Preserve the\ncanonical task records and exact report projection, immutable approved artifacts,\nand existing report-digest versus complete fix-ledger refresh boundaries. Inspect\ncurrent claims for contradictions, update only affected claims and attach one\nbounded closure record; a claim sweep is a consistency check, not a command run.\n"
   },
   "policies/artifact-storage.md": {
-    "sha256": "4907011de4522ccb55245e507083c15193935f38cc17e2cf6b172b0bbbfe0683",
-    "text": "# Artifact Storage\n\n- Owner decision: ADR-0041\n- Consumers: `feature-description`, `architecture-decision`, `development-plan`, `code-writing`, `test-writing`, `feature-review`, `feature-status`, `feature`, `quick-fix`, `project-manifest`; conditional: None\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning, implementation, review, fix, feature, quick-fix.\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Artifact Storage\n\nStandalone callers resolve this policy relative to the installed skill as\n`../../policies/artifact-storage.md`. Use the helper shipped in that same plugin:\n`../../scripts/artifacts.cjs` from the skill directory. Do not substitute a\nproject policy copy, plugin-cache destination or npm CLI prerequisite.\n\nStorage does not grant authority. Existing requirements, accepted ADRs, approved\nbytes, task order, human gates and reviewer independence retain their meaning.\nStandalone use retains skill/human authority; it does not create runner-owned\napprovals, completion ledgers or recovery checkpoints.\n\nThe shared declaration is `.banzai/artifacts.json`. New eligible projects use\nignored `.banzai/work/<work-id>/` for internal work. `.banzai/runs/<run-id>/`\nremains runner-owned. Product guidance, public contracts, ADRs/indexes and the\nproject manifest remain repository documentation. Repository visibility and\narchive custody belong to that project; client evidence never belongs in the\nBanzai source checkout or installed plugin directories.\n\n## Resolve Before Reading or Writing\n\nThe procedure in this section is for standalone callers. Runner phases use the\nsupplied binding, role paths and exact phase grants; the runner alone resolves\nwork, creates bindings and acquires/releases claims. A runner phase does not\ninvoke this helper or acquire a standalone claim. Missing supplied authority\nstops dependent work instead of selecting or creating another work item.\n\nFor standalone callers, after normal project guidance prerequisites, invoke the local helper with\n`node <installed-plugin>/scripts/artifacts.cjs <operation> --json <request-file>`.\nRequests follow `contracts/artifacts/v1/*-request.schema.json`; every request has\n`schema: \"banzai-artifact-request/v1\"`, `schemaVersion: 1` and an absolute local\n`repoRoot`. Store temporary request/input files privately with mode `0600` and\nremove only your own temporary files when finished. The helper outputs one\nversioned JSON result and exits nonzero on failure. Never infer success from\npartial output or print token/input contents in reports.\n\nRequest files, `inputFile` and `inventoryFile` accept OS temporary directories\nwith symlinked ancestors; their leaf must be a regular non-symlink file. Artifact\npaths and private work roots retain full ancestor-symlink checks. Use physical\nabsolute paths without symlink ancestors for archive bundles and export/restore\ndestinations.\n\n1. Use `inspect` with an explicit `workPath`/`workId` when continuing work.\n   Otherwise inspect available identities. Multiple candidates require an\n   explicit selection; a matching slug or newest timestamp is not authority to\n   choose one. Read resolved ignored files directly, not only through Git-aware\n   search. Missing required evidence blocks the dependent step.\n2. Loading the plugin, status, review-only discovery and questions do not run\n   `initialize` or `create`. For authorized setup or first artifact writing,\n   after existing prerequisites pass, `initialize` safely establishes the layout\n   and effective ignores. It neither initializes Git nor stages files.\n3. For genuinely new work, retain a caller-generated UUID `creationId`, then\n   `create` with that ID, bounded slug and `strict`, `lite` or `fix` mode. Retry\n   using the same ID after an interrupted response. Persisted `work.json`\n   supplies exact role paths; use them instead of a hard-coded legacy path.\n   For unbound recognized legacy work, `inspect` its conventional file/directory\n   `workPath`. Explicitly select `legacySelection` (or one `legacyCandidates`\n   entry), then register it with `create` using the returned exact `creationId`,\n   slug and mode. This content-bound continuation identity preserves original\n   roles, bytes and recorded Git provenance, even after a private default is\n   declared. A stale identity requires inspection again. Registration never\n   grants a new approval; hand off the resulting immutable `work.json`.\n4. Before a standalone artifact write, `acquire` the selected work using a\n   bounded local `ownerId`. `write` takes its token, an exact artifact role path,\n   a private `inputFile` and `expectedSha256` (`null` means create-only).\n   Conditional-write conflicts require reading current evidence, not retrying\n   with a guessed hash. `release` only your token in success/error cleanup.\n   Runner phases hold the same exclusive work claim through mutable processing.\n   Another work item is independent; do not remove its claim.\n5. Handoff includes the project and exact work path/identity plus actual decision\n   and evidence references. Release the writer claim before a normal handoff.\n   After a crashed writer, inspect the claim, verify that its original process\n   has stopped and obtain the owner's explicit recovery decision before removing\n   that exact stale claim. Never steal a claim based on elapsed time alone.\n\nRead-only inspections never repair declarations. Missing declarations alongside\nprivate evidence, unsupported schemas, unsafe ancestors, unreadable files or\nbroad ignores produce bounded repair diagnostics. Do not fall back to public\nworkflow paths. Recognized legacy work keeps its recorded paths; ordinary\ndocumentation is not a legacy marker. An existing legacy project stays legacy\nuntil explicit migration. A declaration change cannot move an existing binding.\n\nPublic ADR/manifest/product-guide edits use their established repository paths\nand existing approval rules; the private helper is not a blanket write grant\nfor them. In orchestrated mode, use the run's supplied binding and exact phase\ngrants. The runner owns its state, approvals, candidate publication and recovery;\nstandalone claims never replace those checks. Existing hooks have host-specific\nlimits and do not sandbox unrestricted shell tools.\n\n## Required Evidence and Publication\n\nStrict work retains description, plan, implementation/test reports and each\nindependent review iteration. Lite work needs one `work.md`; quick-fix retains\nits existing report trigger. Read-only work, initialization and individual\nattempts do not require additional prose reports. Keep the completion projection\nand required report sections. Refer to canonical runner verification identities\nor deterministic projections instead of model-authoring duplicate totals;\nstandalone reports preserve actual command/result evidence when no runner ledger\nexists.\n\nPrivate files are durable evidence, not disposable scratch. Ignore rules prevent\nordinary staging, not force-add, third-party synchronization or model processing\nauthorized by the workflow. Do not stage internal artifacts for convenience.\nExplicit public promotion requires maintained, sanitized product information and\nnormal review; it cannot replace private approval or completion evidence.\n\nRetain active/pinned work and dependency closure. Archive operations are local,\nexplicit and backend-neutral; no automatic upload or prune is implied. Verify\nhashes and restoration, including owner-confirmed off-machine custody, before\nremoving a last copy. Restoring historical bytes does not approve resuming a run\nagainst a different source baseline. Credential material must not be deliberately\narchived and rejected private contents must not appear in diagnostics.\n"
+    "sha256": "5beb421da67d753b9b1b6a26f55a23d7b6675fef97fb7360f21ea5e758357995",
+    "text": "# Artifact Storage\n\n- Owner decision: ADR-0041\n- Consumers: `feature-description`, `architecture-decision`, `development-plan`, `code-writing`, `test-writing`, `feature-review`, `feature-status`, `feature`, `quick-fix`, `project-manifest`; conditional: None\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning, implementation, review, fix, feature, quick-fix.\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Artifact Storage\n\nStandalone callers resolve this policy relative to the installed skill as\n`../../policies/artifact-storage.md`. Use the helper shipped in that same plugin:\n`../../scripts/artifacts.cjs` from the skill directory. Do not substitute a\nproject policy copy, plugin-cache destination or npm CLI prerequisite.\n\nStorage does not grant authority. Existing requirements, accepted ADRs, approved\nbytes, task order, human gates and reviewer independence retain their meaning.\nStandalone use retains skill/human authority; it does not create runner-owned\napprovals, completion ledgers or recovery checkpoints.\n\nThe shared declaration is `.banzai/artifacts.json`. New eligible projects use\nignored `.banzai/work/<work-id>/` for internal work. `.banzai/runs/<run-id>/`\nremains runner-owned. Product guidance, public contracts, ADRs/indexes and the\nproject manifest remain repository documentation. Repository visibility and\narchive custody belong to that project; client evidence never belongs in the\nBanzai source checkout or installed plugin directories.\n\n## Resolve Before Reading or Writing\n\nThe procedure in this section is for standalone callers. Runner phases use the\nsupplied binding, role paths and exact phase grants; the runner alone resolves\nwork, creates bindings and acquires/releases claims. A runner phase does not\ninvoke this helper or acquire a standalone claim. Missing supplied authority\nstops dependent work instead of selecting or creating another work item.\n\nFor standalone callers, after normal project guidance prerequisites, invoke the local helper with\n`node <installed-plugin>/scripts/artifacts.cjs <operation> --json <request-file>`.\nRequests follow `contracts/artifacts/v1/*-request.schema.json`; every request has\n`schema: \"banzai-artifact-request/v1\"`, `schemaVersion: 1` and an absolute local\n`repoRoot`. Store temporary request/input files privately with mode `0600` and\nremove only your own temporary files when finished. The helper outputs one\nversioned JSON result and exits nonzero on failure. Never infer success from\npartial output or print token/input contents in reports.\n\nRequest files, `inputFile` and `inventoryFile` accept OS temporary directories\nwith symlinked ancestors; their leaf must be a regular non-symlink file. Artifact\npaths and private work roots retain full ancestor-symlink checks. Use physical\nabsolute paths without symlink ancestors for archive bundles and export/restore\ndestinations.\n\n1. Use `inspect` with an explicit `workPath`/`workId` when continuing work.\n   Otherwise inspect available identities. Multiple candidates require an\n   explicit selection; a matching slug or newest timestamp is not authority to\n   choose one. Read resolved ignored files directly, not only through Git-aware\n   search. Missing required evidence blocks the dependent step.\n2. Loading the plugin, status, review-only discovery and questions do not run\n   `initialize` or `create`. For authorized setup or first artifact writing,\n   after existing prerequisites pass, `initialize` safely establishes the layout\n   and effective ignores. It neither initializes Git nor stages files.\n3. For genuinely new work, retain a caller-generated UUID `creationId`, then\n   `create` with that ID, bounded slug and `strict`, `lite` or `fix` mode. Retry\n   using the same ID after an interrupted response. Persisted `work.json`\n   supplies exact role paths; use them instead of a hard-coded legacy path.\n   For unbound recognized legacy work, `inspect` its conventional file/directory\n   `workPath`. Explicitly select `legacySelection` (or one `legacyCandidates`\n   entry), then register it with `create` using the returned exact `creationId`,\n   slug and mode. This content-bound continuation identity preserves original\n   roles, bytes and recorded Git provenance, even after a private default is\n   declared. A stale identity requires inspection again. Registration never\n   grants a new approval; hand off the resulting immutable `work.json`.\n4. Before a standalone artifact write, `acquire` the selected work using a\n   bounded local `ownerId`. `write` takes its token, an exact artifact role path,\n   a private `inputFile` and `expectedSha256` (`null` means create-only).\n   Conditional-write conflicts require reading current evidence, not retrying\n   with a guessed hash. `release` only your token in success/error cleanup.\n   Runner phases hold the same exclusive work claim through mutable processing.\n   Another work item is independent; do not remove its claim.\n5. Handoff includes the project and exact work path/identity plus actual decision\n   and evidence references. Release the writer claim before a normal handoff.\n   After a crashed writer, inspect the claim, verify that its original process\n   has stopped and obtain the owner's explicit recovery decision before removing\n   that exact stale claim. Never steal a claim based on elapsed time alone.\n\nRead-only inspections never repair declarations. Missing declarations alongside\nprivate evidence, unsupported schemas, unsafe ancestors, unreadable files or\nbroad ignores produce bounded repair diagnostics. Do not fall back to public\nworkflow paths. Recognized legacy work keeps its recorded paths; ordinary\ndocumentation is not a legacy marker. An existing legacy project stays legacy\nuntil explicit migration. A declaration change cannot move an existing binding.\n\nPublic ADR/manifest/product-guide edits use their established repository paths\nand existing approval rules; the private helper is not a blanket write grant\nfor them. In orchestrated mode, use the run's supplied binding and exact phase\ngrants. The runner owns its state, approvals, candidate publication and recovery;\nstandalone claims never replace those checks. Existing hooks have host-specific\nlimits and do not sandbox unrestricted shell tools.\n\n## Required Evidence and Publication\n\nStrict work retains description, plan, implementation/test reports and each\nindependent review iteration. Lite work needs one `work.md`; quick-fix retains\nits existing report trigger. Read-only work, initialization and individual\nattempts do not require additional prose reports. Keep the completion projection\nand required report sections. Refer to canonical runner verification identities\nor deterministic projections instead of model-authoring duplicate totals;\nstandalone reports preserve actual command/result evidence when no runner ledger\nexists.\n\nPrivate files are durable evidence, not disposable scratch. Ignore rules prevent\nordinary staging, not force-add, third-party synchronization or model processing\nauthorized by the workflow. Do not stage internal artifacts for convenience.\nExplicit public promotion requires maintained, sanitized product information and\nnormal review; it cannot replace private approval or completion evidence.\n\nRetain active/pinned work and dependency closure. Archive operations are local,\nexplicit and backend-neutral; no automatic upload or prune is implied. Verify\nhashes and restoration, including owner-confirmed off-machine custody, before\nremoving a last copy. Restoring historical bytes does not approve resuming a run\nagainst a different source baseline. Credential material must not be deliberately\narchived and rejected private contents must not appear in diagnostics.\n\n\n## Explicit verification-enabled work\n\nADR-0043 adds `banzai-work-binding/v2` only for new private work created with a\n`banzai-artifact-request/v2` create request. Existing v1 requests/bindings keep\ntheir exact meaning and are never migrated in place. V2 adds the exact\n`.banzai/work/<work-id>/verification` role as `verificationDirectory`. The shared\nverification helper owns that directory under the exclusive work claim; it is\nnot a model-writable report role. Runner evidence remains in its own run storage.\nInspect/acquire/write/release envelopes and existing report triggers stay v1.\n\nStandalone callers invoke `../scripts/verification.cjs <inspect|decide|execute>\n--json <request-file>` relative to this policy. Requests use\nbanzai-verification-request/v1 with schemaVersion=1, repoRoot, exact workPath and\na caller-selected roundId UUID. Execute selects one configured checkId, with an\nexact retryOf only for a failed attempt in the same round. The helper reads the\nproject verification section and bound authority; requests cannot supply a\ncommand or output path. Keep request files private. Inspect/decide are read-only;\nexecute persists decisions, actual physical leaves/logs and applicability. A\nreused disposition creates no physical attempt. Do not reclaim unresolved claims\nor incomplete attempts; use the existing owner recovery boundary.\n"
   },
   "hooks/hooks.json": {
     "sha256": "eb5bce1be31c2dde64a55ae9af27fe0c176cedc911a76209aa5110493238f3a9"
   },
   "hooks/spec-gate.cjs": {
-    "sha256": "7c6869e8fc72b9d3304b2c42cd37ee95178f0e82e9cc29027de96c853ca92206"
+    "sha256": "445672ea5b5be1ef8daef48b1277cd21428c52a1243a4328f1baeb0f8e296d80"
   }
 };
 
@@ -17303,23 +18227,23 @@ function instructionResourceIds(phases) {
     ])
   ];
 }
-async function installedDigest(directory2, id) {
-  const root = await realpath5(directory2);
+async function installedDigest(directory3, id) {
+  const root = await realpath6(directory3);
   let target = root;
   for (const part of id.split("/")) {
-    target = path12.join(target, part);
-    const entry = await lstat8(target);
+    target = path14.join(target, part);
+    const entry = await lstat9(target);
     if (entry.isSymbolicLink()) throw new Error("Unsafe instruction resource");
   }
-  const handle = await open6(
+  const handle = await open7(
     target,
-    constants7.O_RDONLY | constants7.O_NOFOLLOW | constants7.O_NONBLOCK
+    constants8.O_RDONLY | constants8.O_NOFOLLOW | constants8.O_NONBLOCK
   );
   try {
     const before = await handle.stat();
     if (!before.isFile() || before.size > MAX_RESOURCE_BYTES)
       throw new Error("Unbounded instruction resource");
-    if (await realpath5(target) !== target)
+    if (await realpath6(target) !== target)
       throw new Error("Unsafe instruction resource");
     const bytes = Buffer.alloc(MAX_RESOURCE_BYTES + 1);
     let length = 0;
@@ -17336,14 +18260,14 @@ async function installedDigest(directory2, id) {
     const after = await handle.stat();
     if (length > MAX_RESOURCE_BYTES || before.size !== length || before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs)
       throw new Error("Changing instruction resource");
-    return createHash9("sha256").update(bytes.subarray(0, length)).digest("hex");
+    return createHash11("sha256").update(bytes.subarray(0, length)).digest("hex");
   } finally {
     await handle.close();
   }
 }
-async function inspectInstructionParity(directory2, phases) {
+async function inspectInstructionParity(directory3, phases) {
   const resourceIds = instructionResourceIds(phases);
-  if (directory2 === null)
+  if (directory3 === null)
     return {
       state: "unverifiable",
       resourceIds,
@@ -17354,7 +18278,7 @@ async function inspectInstructionParity(directory2, phases) {
   const unavailable2 = [];
   for (const id of resourceIds) {
     try {
-      if (await installedDigest(directory2, id) !== EMBEDDED_PHASE_RESOURCES[id].sha256)
+      if (await installedDigest(directory3, id) !== EMBEDDED_PHASE_RESOURCES[id].sha256)
         mismatched.push(id);
     } catch {
       unavailable2.push(id);
@@ -17389,7 +18313,7 @@ function instructionParityDiagnostic(result) {
 }
 function resourceText(id) {
   const resource = Reflect.get(EMBEDDED_PHASE_RESOURCES, id);
-  if (typeof resource !== "object" || resource === null || !("text" in resource) || typeof resource.text !== "string" || !resource.text.trim() || !("sha256" in resource) || createHash9("sha256").update(resource.text, "utf8").digest("hex") !== resource.sha256) {
+  if (typeof resource !== "object" || resource === null || !("text" in resource) || typeof resource.text !== "string" || !resource.text.trim() || !("sha256" in resource) || createHash11("sha256").update(resource.text, "utf8").digest("hex") !== resource.sha256) {
     throw new BanzaiError(
       "INSTRUCTION_RESOURCE_INVALID",
       "Embedded instruction resources are invalid. Run `npm run build`."
@@ -17410,7 +18334,7 @@ function phaseInstructionParts(phase) {
 // src/claude-permissions.ts
 import { readFile as readFile6 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
-import path13 from "node:path";
+import path15 from "node:path";
 var ALL_SOURCES = [
   "user",
   "project",
@@ -17428,8 +18352,8 @@ function stringArray2(value) {
   return Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : [];
 }
 function ruleTool(rule) {
-  const open10 = rule.indexOf("(");
-  return (open10 === -1 ? rule : rule.slice(0, open10)).trim();
+  const open11 = rule.indexOf("(");
+  return (open11 === -1 ? rule : rule.slice(0, open11)).trim();
 }
 function namesTool(rule, tool) {
   return ruleTool(rule) === tool;
@@ -17447,16 +18371,16 @@ function configDirectory(env) {
 }
 function trustFile(env) {
   const configured = configDirectory(env);
-  return configured === null ? path13.join(homeDirectory(env), ".claude.json") : path13.join(configured, ".claude.json");
+  return configured === null ? path15.join(homeDirectory(env), ".claude.json") : path15.join(configured, ".claude.json");
 }
 function settingsFile(source, repoRoot, env) {
   if (source === "user") {
-    return path13.join(
-      configDirectory(env) ?? path13.join(homeDirectory(env), ".claude"),
+    return path15.join(
+      configDirectory(env) ?? path15.join(homeDirectory(env), ".claude"),
       "settings.json"
     );
   }
-  return path13.join(
+  return path15.join(
     repoRoot,
     ".claude",
     source === "project" ? "settings.json" : "settings.local.json"
@@ -17556,7 +18480,7 @@ function claudePermissionDemanded(demand) {
 }
 async function inspectClaudePermissions(input) {
   const env = input.env ?? process.env;
-  const repoRoot = path13.resolve(input.repoRoot);
+  const repoRoot = path15.resolve(input.repoRoot);
   const demand = input.demand;
   const sources = parseSources(input.settingSources);
   const [managed, trust, loaded, unloadedLocal] = await Promise.all([
@@ -17664,12 +18588,12 @@ function claudePermissionRemediation(audit) {
 
 // src/config.ts
 import { access as access3, mkdir as mkdir4, readFile as readFile7, writeFile as writeFile2 } from "node:fs/promises";
-import path14 from "node:path";
+import path16 from "node:path";
 var CONFIG_DIRECTORY = ".banzai";
-var CONFIG_FILE = path14.join(CONFIG_DIRECTORY, "config.json");
+var CONFIG_FILE = path16.join(CONFIG_DIRECTORY, "config.json");
 var DEFAULT_CONFIG = {
   schemaVersion: 2,
-  contractVersion: CONTRACT_VERSION,
+  contractVersion: CONTRACT_VERSION2,
   models: {
     planner: {
       executable: "codex",
@@ -17725,7 +18649,7 @@ async function pathExists(filePath) {
   }
 }
 async function loadConfig(repoRoot) {
-  const configPath = path14.join(repoRoot, CONFIG_FILE);
+  const configPath = path16.join(repoRoot, CONFIG_FILE);
   let raw;
   try {
     raw = await readFile7(configPath, "utf8");
@@ -17875,7 +18799,7 @@ async function applyModelUpdates(repoRoot, updates) {
   if (updates.length === 0) {
     return;
   }
-  const configPath = path14.join(repoRoot, CONFIG_FILE);
+  const configPath = path16.join(repoRoot, CONFIG_FILE);
   let raw;
   try {
     raw = await readFile7(configPath, "utf8");
@@ -17940,8 +18864,8 @@ async function applyModelUpdates(repoRoot, updates) {
   await writeFile2(configPath, updatedRaw, "utf8");
 }
 async function initializeConfig(repoRoot) {
-  const banzaiDirectory = path14.join(repoRoot, CONFIG_DIRECTORY);
-  const configPath = path14.join(repoRoot, CONFIG_FILE);
+  const banzaiDirectory = path16.join(repoRoot, CONFIG_DIRECTORY);
+  const configPath = path16.join(repoRoot, CONFIG_FILE);
   await mkdir4(banzaiDirectory, { recursive: true });
   let configCreated = false;
   if (!await pathExists(configPath)) {
@@ -17956,7 +18880,7 @@ async function initializeConfig(repoRoot) {
     );
     configCreated = true;
   }
-  const ignorePath = path14.join(repoRoot, ".gitignore");
+  const ignorePath = path16.join(repoRoot, ".gitignore");
   const requiredEntries = [
     ".banzai/runs/",
     ".banzai/active-run.json",
@@ -18133,7 +19057,7 @@ function evaluateContextBudgets(policy, phase, role, values) {
   }
   return evaluations;
 }
-function invalid5(runId2, attemptId, detail) {
+function invalid7(runId2, attemptId, detail) {
   throw new BanzaiError(
     "INVALID_CONTEXT_EVIDENCE",
     `Invalid context evidence for run ${runId2}, attempt ${attemptId}: ${detail}`
@@ -18141,7 +19065,7 @@ function invalid5(runId2, attemptId, detail) {
 }
 function record(value, runId2, attemptId, label) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return invalid5(runId2, attemptId, `${label} must be an object.`);
+    return invalid7(runId2, attemptId, `${label} must be an object.`);
   }
   return value;
 }
@@ -18149,31 +19073,31 @@ function keys2(value, allowed, runId2, attemptId, label) {
   const actual = Object.keys(value).sort();
   const expected = [...allowed].sort();
   if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
-    invalid5(runId2, attemptId, `${label} has unsupported fields.`);
+    invalid7(runId2, attemptId, `${label} has unsupported fields.`);
   }
 }
-function identifier(value, runId2, attemptId, label) {
+function identifier2(value, runId2, attemptId, label) {
   if (typeof value !== "string" || value.length === 0 || value.length > 300 || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value)) {
-    return invalid5(runId2, attemptId, `${label} is invalid.`);
+    return invalid7(runId2, attemptId, `${label} is invalid.`);
   }
   return value;
 }
 function enumValue3(value, allowed, runId2, attemptId, label) {
   if (typeof value !== "string" || !allowed.includes(value)) {
-    return invalid5(runId2, attemptId, `${label} is unsupported.`);
+    return invalid7(runId2, attemptId, `${label} is unsupported.`);
   }
   return value;
 }
 function nonNegative(value, runId2, attemptId, label, integer = true) {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || integer && !Number.isInteger(value)) {
-    return invalid5(runId2, attemptId, `${label} is invalid.`);
+    return invalid7(runId2, attemptId, `${label} is invalid.`);
   }
   return value;
 }
 function instant2(value, runId2, attemptId, label, nullable = false) {
   if (nullable && value === null) return null;
   if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) {
-    return invalid5(runId2, attemptId, `${label} is invalid.`);
+    return invalid7(runId2, attemptId, `${label} is invalid.`);
   }
   return value;
 }
@@ -18184,7 +19108,7 @@ function observedNumber(value, runId2, attemptId, label, integer = true) {
     return unavailable();
   }
   if (item.availability !== "available") {
-    return invalid5(runId2, attemptId, `${label}.availability is invalid.`);
+    return invalid7(runId2, attemptId, `${label}.availability is invalid.`);
   }
   return available(
     nonNegative(item.value, runId2, attemptId, `${label}.value`, integer)
@@ -18196,7 +19120,7 @@ function observedDigest(value, runId2, attemptId, label) {
   if (item.availability === "unavailable" && item.value === null)
     return unavailable();
   if (item.availability !== "available" || typeof item.value !== "string" || !/^[a-f0-9]{64}$/u.test(item.value)) {
-    return invalid5(runId2, attemptId, `${label} is invalid.`);
+    return invalid7(runId2, attemptId, `${label} is invalid.`);
   }
   return available(item.value);
 }
@@ -18226,7 +19150,7 @@ function parseInvocation(value, ordinal, runId2, attemptId) {
     "invocation"
   );
   if (item.ordinal !== ordinal)
-    invalid5(runId2, attemptId, "Invocation ordinals are not contiguous.");
+    invalid7(runId2, attemptId, "Invocation ordinals are not contiguous.");
   const payload = record(item.runnerPayload, runId2, attemptId, "runnerPayload");
   keys2(
     payload,
@@ -18254,7 +19178,7 @@ function parseInvocation(value, ordinal, runId2, attemptId) {
     "runnerPayload.totalBytes"
   );
   if (!Array.isArray(payload.components) || payload.components.length === 0)
-    invalid5(runId2, attemptId, "runnerPayload.components is invalid.");
+    invalid7(runId2, attemptId, "runnerPayload.components is invalid.");
   const seenCategories = /* @__PURE__ */ new Set();
   let previousCategoryIndex = -1;
   const components = payload.components.map(
@@ -18282,7 +19206,7 @@ function parseInvocation(value, ordinal, runId2, attemptId) {
       );
       const categoryIndex = PROMPT_COMPONENT_CATEGORY_ORDER.indexOf(category);
       if (bytes === 0 || seenCategories.has(category) || previousCategoryIndex >= categoryIndex) {
-        invalid5(
+        invalid7(
           runId2,
           attemptId,
           "Runner components must be non-zero, unique, and ordered."
@@ -18294,10 +19218,10 @@ function parseInvocation(value, ordinal, runId2, attemptId) {
     }
   );
   if (outputSchemaBytes === 0 || promptBytes + outputSchemaBytes !== totalBytes || components.reduce((sum, component) => sum + component.bytes, 0) !== totalBytes || components.find((component) => component.category === "output_contract")?.bytes !== outputSchemaBytes) {
-    invalid5(runId2, attemptId, "Runner payload totals disagree.");
+    invalid7(runId2, attemptId, "Runner payload totals disagree.");
   }
   if (!Array.isArray(item.authority))
-    invalid5(runId2, attemptId, "authority must be an array.");
+    invalid7(runId2, attemptId, "authority must be an array.");
   const authoritySeen = /* @__PURE__ */ new Set();
   const authority = item.authority.map((entryValue, index) => {
     const entry = record(entryValue, runId2, attemptId, `authority[${index}]`);
@@ -18316,7 +19240,7 @@ function parseInvocation(value, ordinal, runId2, attemptId) {
       `authority[${index}].count`
     );
     if (count === 0 || authoritySeen.has(authorityClass))
-      invalid5(
+      invalid7(
         runId2,
         attemptId,
         "Authority entries must be positive and unique."
@@ -18346,7 +19270,7 @@ function parseInvocation(value, ordinal, runId2, attemptId) {
     "vendorUsage"
   );
   if (!Array.isArray(item.budgets))
-    invalid5(runId2, attemptId, "budgets must be an array.");
+    invalid7(runId2, attemptId, "budgets must be an array.");
   const budgetSeen = /* @__PURE__ */ new Set();
   let previousBudgetMetricIndex = -1;
   const budgets = item.budgets.map((budgetValue, index) => {
@@ -18387,9 +19311,9 @@ function parseInvocation(value, ordinal, runId2, attemptId) {
       metric3 === "vendor_cost_usd" ? false : true
     );
     if (maximum <= 0)
-      invalid5(runId2, attemptId, "Budget maximum must be positive.");
+      invalid7(runId2, attemptId, "Budget maximum must be positive.");
     if (budgetSeen.has(metric3) || metricIndex <= previousBudgetMetricIndex)
-      invalid5(
+      invalid7(
         runId2,
         attemptId,
         "Budget metrics must be unique and deterministically ordered per invocation."
@@ -18416,13 +19340,13 @@ function parseInvocation(value, ordinal, runId2, attemptId) {
       `budgets[${index}].result`
     );
     if (result === "unavailable" !== (observed3.availability === "unavailable")) {
-      invalid5(runId2, attemptId, "Budget result and availability disagree.");
+      invalid7(runId2, attemptId, "Budget result and availability disagree.");
     }
     if (observed3.availability === "available" && (result === "within_limit" && observed3.value > maximum || (result === "observed_exceeded" || result === "enforced_exceeded") && observed3.value <= maximum)) {
-      invalid5(runId2, attemptId, "Budget result and observed value disagree.");
+      invalid7(runId2, attemptId, "Budget result and observed value disagree.");
     }
     if (result === "enforced_exceeded" && metric3 !== "runner_payload_bytes") {
-      invalid5(runId2, attemptId, "Only runner payload bytes can be enforced.");
+      invalid7(runId2, attemptId, "Only runner payload bytes can be enforced.");
     }
     return {
       metric: metric3,
@@ -18462,15 +19386,15 @@ function parseInvocation(value, ordinal, runId2, attemptId) {
     true
   );
   if (outcome === "pending" !== (completedAt === null))
-    invalid5(runId2, attemptId, "Outcome and completion time disagree.");
+    invalid7(runId2, attemptId, "Outcome and completion time disagree.");
   const enforced = budgets.some(
     (budget) => budget.result === "enforced_exceeded"
   );
   if (outcome === "budget_exceeded" !== enforced) {
-    invalid5(runId2, attemptId, "Budget outcome and evaluation disagree.");
+    invalid7(runId2, attemptId, "Budget outcome and evaluation disagree.");
   }
   const measuredAt = instant2(item.measuredAt, runId2, attemptId, "measuredAt");
-  if (measuredAt === null) invalid5(runId2, attemptId, "measuredAt is invalid.");
+  if (measuredAt === null) invalid7(runId2, attemptId, "measuredAt is invalid.");
   const parsed = {
     ordinal,
     kind: enumValue3(item.kind, INVOCATION_KINDS, runId2, attemptId, "kind"),
@@ -18559,11 +19483,11 @@ function parseInvocation(value, ordinal, runId2, attemptId) {
     budgets
   };
   if (ordinal === 1 && parsed.kind !== "primary" || parsed.kind === "review_artifact_repair" && ordinal !== 2) {
-    invalid5(runId2, attemptId, "Invocation kind and ordinal disagree.");
+    invalid7(runId2, attemptId, "Invocation kind and ordinal disagree.");
   }
   for (const budget of parsed.budgets) {
     if (budget.selector.phase !== null && budget.selector.phase !== parsed.phase || budget.selector.role !== null && budget.selector.role !== parsed.role) {
-      invalid5(
+      invalid7(
         runId2,
         attemptId,
         "Budget selector conflicts with invocation identity."
@@ -18594,7 +19518,7 @@ function parseInvocation(value, ordinal, runId2, attemptId) {
       }
     })();
     if (budget.observed.availability !== measured.availability || budget.observed.availability === "available" && measured.availability === "available" && budget.observed.value !== measured.value) {
-      invalid5(
+      invalid7(
         runId2,
         attemptId,
         "Budget observation conflicts with measured evidence."
@@ -18613,13 +19537,13 @@ function decodeContextAttemptLedger(value, expectedRunId, expectedAttemptId) {
     "ledger"
   );
   if (root.schema !== CONTEXT_ATTEMPT_SCHEMA || root.schemaVersion !== CONTEXT_ATTEMPT_SCHEMA_VERSION) {
-    invalid5(
+    invalid7(
       expectedRunId,
       expectedAttemptId,
       "Schema identity is unsupported."
     );
   }
-  const runId2 = identifier(
+  const runId2 = identifier2(
     root.runId,
     expectedRunId,
     expectedAttemptId,
@@ -18638,23 +19562,23 @@ function decodeContextAttemptLedger(value, expectedRunId, expectedAttemptId) {
     expectedAttemptId,
     "attempt"
   );
-  const attemptId = identifier(
+  const attemptId = identifier2(
     attempt.id,
     expectedRunId,
     expectedAttemptId,
     "attempt.id"
   );
   if (runId2 !== expectedRunId || attemptId !== expectedAttemptId) {
-    invalid5(
+    invalid7(
       expectedRunId,
       expectedAttemptId,
       "Ledger identity does not match its owner."
     );
   }
   if (typeof attempt.mutable !== "boolean")
-    invalid5(expectedRunId, expectedAttemptId, "attempt.mutable is invalid.");
+    invalid7(expectedRunId, expectedAttemptId, "attempt.mutable is invalid.");
   if (!Array.isArray(root.invocations) || root.invocations.length === 0)
-    invalid5(expectedRunId, expectedAttemptId, "invocations must be non-empty.");
+    invalid7(expectedRunId, expectedAttemptId, "invocations must be non-empty.");
   const parsedAttempt = {
     id: attemptId,
     kind: enumValue3(
@@ -18671,7 +19595,7 @@ function decodeContextAttemptLedger(value, expectedRunId, expectedAttemptId) {
   );
   const expectedMutable = parsedAttempt.kind === "implementation" || parsedAttempt.kind === "fix";
   if (parsedAttempt.mutable !== expectedMutable) {
-    invalid5(
+    invalid7(
       expectedRunId,
       expectedAttemptId,
       "Attempt mutability conflicts with its phase."
@@ -18680,7 +19604,7 @@ function decodeContextAttemptLedger(value, expectedRunId, expectedAttemptId) {
   const expectedRole = parsedAttempt.kind === "selection" || parsedAttempt.kind === "plan" ? "planner" : parsedAttempt.kind === "review" ? "reviewer" : "implementer";
   for (const invocation of invocations) {
     if (invocation.phase !== parsedAttempt.kind || invocation.role !== expectedRole || parsedAttempt.kind === "selection" && invocation.workflow !== "unselected" || invocation.kind === "review_artifact_repair" && parsedAttempt.kind !== "review") {
-      invalid5(
+      invalid7(
         expectedRunId,
         expectedAttemptId,
         "Invocation identity conflicts with its attempt."
@@ -18688,7 +19612,7 @@ function decodeContextAttemptLedger(value, expectedRunId, expectedAttemptId) {
     }
   }
   if (invocations.length > 2) {
-    invalid5(
+    invalid7(
       expectedRunId,
       expectedAttemptId,
       "Invocation count exceeds the bounded ledger contract."
@@ -18754,14 +19678,14 @@ function runStatusText(status) {
   return RUN_STATUS_TEXT[status];
 }
 function runStatusGloss(status) {
-  const text = RUN_STATUS_TEXT[status];
-  return text.toLowerCase() === status.replaceAll("_", " ") ? null : text;
+  const text2 = RUN_STATUS_TEXT[status];
+  return text2.toLowerCase() === status.replaceAll("_", " ") ? null : text2;
 }
 function reviewVerdictText(verdict) {
   return REVIEW_VERDICT_TEXT[verdict];
 }
-function reviewExecutionText(mode, sessionMode, rotationReason) {
-  const scope = mode === "full" ? "Reviewed the whole change" : "Reviewed only what changed since the last review";
+function reviewExecutionText(mode2, sessionMode, rotationReason) {
+  const scope = mode2 === "full" ? "Reviewed the whole change" : "Reviewed only what changed since the last review";
   const session = sessionMode === "fresh" ? "from a clean session" : "continuing the reviewer's session";
   const because = rotationReason === null ? "" : `, because ${ROTATION_TEXT[rotationReason]}`;
   return `${scope} ${session}${because}.`;
@@ -18771,9 +19695,9 @@ function pendingRotationText(reason) {
 }
 
 // src/plan-task-completion.ts
-import { createHash as createHash10 } from "node:crypto";
-import { lstat as lstat9, readFile as readFile8, realpath as realpath6 } from "node:fs/promises";
-import path15 from "node:path";
+import { createHash as createHash12 } from "node:crypto";
+import { lstat as lstat10, readFile as readFile8, realpath as realpath7 } from "node:fs/promises";
+import path17 from "node:path";
 var PROJECTION_FORMAT = "banzai-plan-task-completion/v1";
 var SECTION_HEADING = "## Plan Task Completion";
 var TASK_HEADING = /^- \[ \] \*\*(T[0-9]{3}) - (.+)\*\*\s*$/u;
@@ -18799,8 +19723,8 @@ var PlanTaskCompletionError = class extends BanzaiError {
 function completionFailure(violation, message, taskId = null) {
   throw new PlanTaskCompletionError(violation, message, taskId);
 }
-function digest2(value) {
-  return createHash10("sha256").update(JSON.stringify(value)).digest("hex");
+function digest3(value) {
+  return createHash12("sha256").update(JSON.stringify(value)).digest("hex");
 }
 function parseApprovedPlanTaskIds(markdown) {
   const headings2 = [...markdown.matchAll(/^## Implementation Tasks\s*$/gmu)];
@@ -19001,12 +19925,12 @@ function parsePlanTaskCompletionProjection(markdown) {
     );
   }
   return {
-    schemaVersion: PLAN_TASK_COMPLETION_SCHEMA_VERSION,
+    schemaVersion: PLAN_TASK_COMPLETION_SCHEMA_VERSION2,
     tasks: tableLines.slice(2).map(parseProjectionRecord)
   };
 }
 function normalizedRepositoryPath(relativePath2, requiredReports = /* @__PURE__ */ new Set()) {
-  if (relativePath2.length === 0 || relativePath2.includes("\\") || /[\u0000-\u001f\u007f-\u009f]/u.test(relativePath2) || relativePath2.length > 500 || path15.posix.isAbsolute(relativePath2) || path15.posix.normalize(relativePath2) !== relativePath2 || relativePath2 === ".." || relativePath2.startsWith("../")) {
+  if (relativePath2.length === 0 || relativePath2.includes("\\") || /[\u0000-\u001f\u007f-\u009f]/u.test(relativePath2) || relativePath2.length > 500 || path17.posix.isAbsolute(relativePath2) || path17.posix.normalize(relativePath2) !== relativePath2 || relativePath2 === ".." || relativePath2.startsWith("../")) {
     return completionFailure(
       "invalid_evidence_path",
       "Completion evidence path must be normalized and repository-relative."
@@ -19032,13 +19956,13 @@ async function validateEvidenceFile(repoRoot, relativePath2, allowedPaths, appro
       taskId
     );
   }
-  const repositoryRoot = await realpath6(repoRoot);
-  const absolutePath = path15.resolve(repositoryRoot, normalized);
+  const repositoryRoot = await realpath7(repoRoot);
+  const absolutePath = path17.resolve(repositoryRoot, normalized);
   let resolvedPath;
   let metadata;
   try {
-    metadata = await lstat9(absolutePath);
-    resolvedPath = await realpath6(absolutePath);
+    metadata = await lstat10(absolutePath);
+    resolvedPath = await realpath7(absolutePath);
   } catch {
     return completionFailure(
       "missing_evidence_path",
@@ -19046,7 +19970,7 @@ async function validateEvidenceFile(repoRoot, relativePath2, allowedPaths, appro
       taskId
     );
   }
-  if (!metadata.isFile() || metadata.isSymbolicLink() || !resolvedPath.startsWith(`${repositoryRoot}${path15.sep}`)) {
+  if (!metadata.isFile() || metadata.isSymbolicLink() || !resolvedPath.startsWith(`${repositoryRoot}${path17.sep}`)) {
     return completionFailure(
       "invalid_evidence_path",
       `${taskId} evidence must be a regular file inside the repository.`,
@@ -19069,7 +19993,7 @@ function validatePlanTaskCompletionLedgerShape(taskIds, ledger, outcome) {
     );
   }
   const runtimeSchemaVersion = ledger.schemaVersion;
-  if (runtimeSchemaVersion !== PLAN_TASK_COMPLETION_SCHEMA_VERSION) {
+  if (runtimeSchemaVersion !== PLAN_TASK_COMPLETION_SCHEMA_VERSION2) {
     return completionFailure(
       "missing_ledger",
       "Implementation completion ledger has an unsupported schema."
@@ -19148,16 +20072,16 @@ async function readRequiredReport(repoRoot, relativePath2, violation, requiredRe
   const normalized = normalizedRepositoryPath(relativePath2, requiredReports);
   if (relativePath2.startsWith(".banzai/"))
     await safePath2(repoRoot, relativePath2);
-  const absolute = path15.resolve(repoRoot, normalized);
+  const absolute = path17.resolve(repoRoot, normalized);
   let contents;
   try {
-    const metadata = await lstat9(absolute);
+    const metadata = await lstat10(absolute);
     if (!metadata.isFile() || metadata.isSymbolicLink()) {
       throw new Error("not a regular file");
     }
-    const root = await realpath6(repoRoot);
-    const resolved = await realpath6(absolute);
-    if (!resolved.startsWith(`${root}${path15.sep}`)) {
+    const root = await realpath7(repoRoot);
+    const resolved = await realpath7(absolute);
+    if (!resolved.startsWith(`${root}${path17.sep}`)) {
       throw new Error("outside repository");
     }
     contents = await readFile8(absolute, "utf8");
@@ -19170,7 +20094,7 @@ async function readRequiredReport(repoRoot, relativePath2, violation, requiredRe
   return {
     path: normalized,
     contents,
-    sha256: createHash10("sha256").update(contents).digest("hex")
+    sha256: createHash12("sha256").update(contents).digest("hex")
   };
 }
 async function validatePlanTaskCompletion(input) {
@@ -19203,7 +20127,7 @@ async function validatePlanTaskCompletion(input) {
     );
   }
   const plan = await readFile8(
-    path15.resolve(input.repoRoot, input.planPath),
+    path17.resolve(input.repoRoot, input.planPath),
     "utf8"
   ).catch(
     () => completionFailure(
@@ -19295,12 +20219,12 @@ async function validatePlanTaskCompletion(input) {
   };
   return {
     summary: {
-      schemaVersion: PLAN_TASK_COMPLETION_SCHEMA_VERSION,
+      schemaVersion: PLAN_TASK_COMPLETION_SCHEMA_VERSION2,
       status: "valid",
       sourceAttemptId: input.sourceAttemptId,
       approvalDigest: input.approval.digest,
-      planTaskDigest: digest2(taskIds),
-      ledgerDigest: digest2(ledger),
+      planTaskDigest: digest3(taskIds),
+      ledgerDigest: digest3(ledger),
       implementationReport: {
         path: implementationReport.path,
         sha256: implementationReport.sha256
@@ -19319,6 +20243,21 @@ function summariesMatch(expected, actual) {
     sourceAttemptKind: null
   });
   return JSON.stringify(normalize(expected)) === JSON.stringify(normalize(actual));
+}
+function validatePlanVerificationObligations(plan, verification) {
+  if (!plan.includes("banzai-verification-obligations/")) return;
+  try {
+    if (parseVerificationObligations(
+      plan,
+      parseVerificationConfiguration(verification)
+    ) !== null)
+      return;
+  } catch {
+  }
+  throw new PlanTaskCompletionError(
+    "approved_plan_invalid",
+    "The plan verification obligation inventory is missing, ambiguous, contradictory or stale."
+  );
 }
 
 // src/prompt-envelope.ts
@@ -19342,9 +20281,9 @@ function insertPhaseInstructions(prompt, instructions) {
     (component) => component.category !== "common_instructions" && component.category !== "phase_instructions"
   );
   const position = firstEvidence < 0 ? prompt.components.length : firstEvidence;
-  const added = instructions.filter((text) => text.length > 0).map((text) => ({
+  const added = instructions.filter((text2) => text2.length > 0).map((text2) => ({
     category: "phase_instructions",
-    text: "\n\n" + text
+    text: "\n\n" + text2
   }));
   return createPromptEnvelope([
     ...prompt.components.slice(0, position),
@@ -19355,9 +20294,9 @@ function insertPhaseInstructions(prompt, instructions) {
 function promptEnvelope(prompt) {
   return typeof prompt === "string" ? createPromptEnvelope([{ category: "phase_instructions", text: prompt }]) : prompt;
 }
-function appendPromptComponent(prompt, category, text) {
+function appendPromptComponent(prompt, category, text2) {
   const base = promptEnvelope(prompt);
-  return createPromptEnvelope([...base.components, { category, text }]);
+  return createPromptEnvelope([...base.components, { category, text: text2 }]);
 }
 
 // src/prompts.ts
@@ -19801,7 +20740,7 @@ Review snapshot digest: ${input.reviewSnapshot?.digest ?? "unavailable"}`
       text: `Runner evidence root (read-only):
 ${input.evidenceRoot}
 Deterministic verification evidence:
-${JSON.stringify(input.verification, null, 2)}`
+${JSON.stringify(input.reviewSnapshot?.artifact.verificationEvidence ?? input.verification, null, 2)}`
     },
     {
       category: "workspace_evidence",
@@ -19828,9 +20767,9 @@ ${JSON.stringify(input.triageHistory, null, 2)}`
 }
 
 // src/review-artifact.ts
-import { createHash as createHash11, randomUUID as randomUUID5 } from "node:crypto";
-import { link as link2, mkdir as mkdir5, open as open7, readFile as readFile9, rename as rename4, unlink as unlink4 } from "node:fs/promises";
-import path16 from "node:path";
+import { createHash as createHash13, randomUUID as randomUUID5 } from "node:crypto";
+import { link as link2, mkdir as mkdir5, open as open8, readFile as readFile9, rename as rename4, unlink as unlink4 } from "node:fs/promises";
+import path18 from "node:path";
 var REQUIRED_SECTIONS = [
   "## Review Scope",
   "## Summary",
@@ -19853,7 +20792,7 @@ var ReviewArtifactValidationError = class extends BanzaiError {
 function reviewArtifactPath(slug, iteration, bound) {
   if (bound !== void 0)
     return `${bound.binding.artifacts.reviewDirectory}/review-${iteration}.md`;
-  return path16.posix.join(
+  return path18.posix.join(
     "documentation",
     "features",
     slug,
@@ -19965,19 +20904,19 @@ function reviewValue(value) {
       );
     return value2;
   };
-  const text = JSON.stringify(ordered(value), null, 2);
+  const text2 = JSON.stringify(ordered(value), null, 2);
   const fence = "`".repeat(
     Math.max(
       3,
-      ...[...text.matchAll(/`+/gu)].map((match) => match[0].length + 1)
+      ...[...text2.matchAll(/`+/gu)].map((match) => match[0].length + 1)
     )
   );
   return `${fence}json
-${text}
+${text2}
 ${fence}`;
 }
 function renderCurrentReviewArtifact(value, context) {
-  const result = parseCurrentReviewResult(value);
+  const result = parseCurrentReviewResult2(value);
   const snapshot = parseReviewSnapshot2(context.snapshot);
   validateReviewScope(result, {
     snapshotDigest: snapshot.digest,
@@ -19992,7 +20931,7 @@ function renderCurrentReviewArtifact(value, context) {
       );
   }
   const coverage = snapshot.approval.paths.map(
-    (path28) => result.scopeAcknowledgment.artifacts.find((entry) => entry.path === path28)
+    (path30) => result.scopeAcknowledgment.artifacts.find((entry) => entry.path === path30)
   );
   const handoff = {
     pass: "The review passed. No finding triage is required.",
@@ -20002,7 +20941,7 @@ function renderCurrentReviewArtifact(value, context) {
   }[result.verdict];
   return [
     "# Implementation Review",
-    snapshot.schemaVersion === 2 ? "- Format: `banzai-feature-review/v3`" : "- Format: `banzai-feature-review/v2`",
+    snapshot.schemaVersion === 3 ? "- Format: `banzai-feature-review/v4`" : snapshot.schemaVersion === 2 ? "- Format: `banzai-feature-review/v3`" : "- Format: `banzai-feature-review/v2`",
     reviewValue({
       slug: context.slug,
       iteration: context.iteration,
@@ -20010,7 +20949,7 @@ function renderCurrentReviewArtifact(value, context) {
       artifactPath: context.path,
       workspaceDigest: context.workspaceDigest,
       snapshotDigest: snapshot.digest,
-      ...snapshot.schemaVersion === 2 ? {
+      ...snapshot.schemaVersion >= 2 ? {
         workId: snapshot.artifactBinding?.binding.workId,
         snapshotSchema: snapshot.schema
       } : {},
@@ -20028,7 +20967,9 @@ function renderCurrentReviewArtifact(value, context) {
       artifacts: coverage
     }),
     "### Recorded verification (runner evidence)",
-    reviewValue(snapshot.artifact.verification),
+    reviewValue(
+      snapshot.artifact.verificationEvidence ?? snapshot.artifact.verification
+    ),
     "### Validated plan task completion (runner evidence)",
     reviewValue({
       source: snapshot.completionSource,
@@ -20095,9 +21036,9 @@ function approvedArtifactScope(contents, diagnostics) {
   return paths;
 }
 function repositoryPath(repoRoot, relativePath2) {
-  const repositoryRoot = path16.resolve(repoRoot);
-  const absolutePath = path16.resolve(repositoryRoot, relativePath2);
-  if (!absolutePath.startsWith(`${repositoryRoot}${path16.sep}`)) {
+  const repositoryRoot = path18.resolve(repoRoot);
+  const absolutePath = path18.resolve(repositoryRoot, relativePath2);
+  if (!absolutePath.startsWith(`${repositoryRoot}${path18.sep}`)) {
     throw new BanzaiError(
       "INVALID_REVIEW_ARTIFACT_PATH",
       "Review artifact path escapes the repository."
@@ -20145,7 +21086,7 @@ async function validateReviewArtifactSource(repoRoot, result, context, sourcePat
       ]);
     return {
       contents,
-      sha256: createHash11("sha256").update(contents).digest("hex")
+      sha256: createHash13("sha256").update(contents).digest("hex")
     };
   }
   const diagnostics = [];
@@ -20316,7 +21257,7 @@ async function validateReviewArtifactSource(repoRoot, result, context, sourcePat
   }
   return {
     contents,
-    sha256: createHash11("sha256").update(contents).digest("hex")
+    sha256: createHash13("sha256").update(contents).digest("hex")
   };
 }
 async function validateReviewArtifact(repoRoot, result, context) {
@@ -20338,7 +21279,7 @@ async function validateHistoricalReviewArtifact(repoRoot, result, context) {
   );
 }
 async function publishReviewArtifact(repoRoot, context, candidate) {
-  if (createHash11("sha256").update(candidate.contents).digest("hex") !== candidate.sha256) {
+  if (createHash13("sha256").update(candidate.contents).digest("hex") !== candidate.sha256) {
     throw new BanzaiError(
       "INVALID_REVIEW_CANDIDATE_EVIDENCE",
       "Review candidate publication proof does not match its contents."
@@ -20382,15 +21323,15 @@ async function publishReviewArtifact(repoRoot, context, candidate) {
     if (privateWork)
       await verifyIgnores2(repoRoot, binding, [
         context.path,
-        path16.relative(repoRoot, temporaryPath)
+        path18.relative(repoRoot, temporaryPath)
       ]);
   };
   await verifyDestinations();
-  await mkdir5(path16.dirname(absolutePath), {
+  await mkdir5(path18.dirname(absolutePath), {
     recursive: true,
     mode: privateWork ? 448 : 493
   });
-  const handle = await open7(temporaryPath, "wx", privateWork ? 384 : 420);
+  const handle = await open8(temporaryPath, "wx", privateWork ? 384 : 420);
   try {
     try {
       await handle.writeFile(candidate.contents, "utf8");
@@ -20481,21 +21422,21 @@ function requireState(state, allowed, operation) {
 }
 
 // src/store.ts
-import { createHash as createHash12, randomUUID as randomUUID6 } from "node:crypto";
-import { constants as constants8, readFileSync, unlinkSync } from "node:fs";
+import { createHash as createHash14, randomUUID as randomUUID6 } from "node:crypto";
+import { constants as constants9, readFileSync, unlinkSync } from "node:fs";
 import {
-  lstat as lstat10,
+  lstat as lstat11,
   link as link3,
   mkdir as mkdir6,
-  open as open8,
-  readdir as readdir5,
+  open as open9,
+  readdir as readdir6,
   readFile as readFile10,
-  realpath as realpath7,
+  realpath as realpath8,
   rename as rename5,
   unlink as unlink5,
   writeFile as writeFile3
 } from "node:fs/promises";
-import path17 from "node:path";
+import path19 from "node:path";
 import process3 from "node:process";
 function safeEvidenceSegment(value, label, maximum = 300) {
   if (value.length === 0 || value.length > maximum || value === "." || value === ".." || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value)) {
@@ -20507,9 +21448,9 @@ function safeEvidenceSegment(value, label, maximum = 300) {
   return value;
 }
 function containedEvidencePath(base, ...segments) {
-  const resolvedBase = path17.resolve(base);
-  const resolved = path17.resolve(resolvedBase, ...segments);
-  if (!resolved.startsWith(`${resolvedBase}${path17.sep}`)) {
+  const resolvedBase = path19.resolve(base);
+  const resolved = path19.resolve(resolvedBase, ...segments);
+  if (!resolved.startsWith(`${resolvedBase}${path19.sep}`)) {
     throw new BanzaiError(
       "UNSAFE_EVIDENCE_PATH",
       "Evidence path escaped its owned directory."
@@ -20534,9 +21475,9 @@ function releaseHeldRunnerLocksSync() {
   }
 }
 async function atomicWriteJson(filePath, value, initialize = true) {
-  if (initialize) await mkdir6(path17.dirname(filePath), { recursive: true });
+  if (initialize) await mkdir6(path19.dirname(filePath), { recursive: true });
   const temporaryPath = `${filePath}.${process3.pid}.${randomUUID6()}.tmp`;
-  const handle = await open8(temporaryPath, "wx", 384);
+  const handle = await open9(temporaryPath, "wx", 384);
   try {
     try {
       await handle.writeFile(`${JSON.stringify(value, null, 2)}
@@ -20682,19 +21623,19 @@ function validateDecisionState(state) {
   }
 }
 function normalizeRunState(state) {
-  if (![1, 2, 3, 4].includes(state.schemaVersion)) {
+  if (![1, 2, 3, 4, 5].includes(state.schemaVersion)) {
     throw new BanzaiError(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Unsupported persisted run state version."
     );
   }
-  if (state.schemaVersion !== 4 && state.artifactBinding !== void 0) {
+  if (state.schemaVersion < 4 && state.artifactBinding !== void 0) {
     throw new BanzaiError(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Legacy run state cannot acquire private binding semantics."
     );
   }
-  if (state.schemaVersion === 4) {
+  if (state.schemaVersion === 4 || state.schemaVersion === 5) {
     if (state.artifactBinding === void 0 || !/^[0-9a-f]{64}$/.test(state.artifactBinding.sha256)) {
       throw new BanzaiError(
         "ARTIFACT_RECOVERY_REQUIRED",
@@ -20707,7 +21648,27 @@ function normalizeRunState(state) {
         "Run state requires an exact immutable workflow binding."
       );
   }
-  if (state.schemaVersion === 3 || state.schemaVersion === 4) {
+  if (state.schemaVersion === 4 && state.artifactBinding?.binding.schemaVersion !== 1)
+    throw new BanzaiError(
+      "ARTIFACT_VERSION_UNSUPPORTED",
+      "Run state v4 retains binding v1 semantics."
+    );
+  if (state.schemaVersion === 5 && state.verificationEvidence !== void 0) {
+    parseVerificationDecision(state.verificationEvidence.decision);
+    if (state.verificationEvidence.applicability !== null)
+      parseVerificationApplicability(state.verificationEvidence.applicability);
+  }
+  if (state.schemaVersion === 5 && state.artifactBinding?.binding.schemaVersion !== 2)
+    throw new BanzaiError(
+      "ARTIFACT_RECOVERY_REQUIRED",
+      "Run state v5 requires its original verification-enabled binding."
+    );
+  if (state.schemaVersion !== 5 && state.verificationEvidence !== void 0)
+    throw new BanzaiError(
+      "ARTIFACT_VERSION_UNSUPPORTED",
+      "Legacy state cannot acquire verification applicability."
+    );
+  if (state.schemaVersion === 3 || state.schemaVersion === 4 || state.schemaVersion === 5) {
     const recovery = state.recovery ?? null;
     if (recovery !== null && recovery.stage === void 0) {
       recovery.stage = recovery.recoveryAttemptId === null ? state.activeAttempt?.id === recovery.sourceAttemptId ? "authorized" : "source_interrupted" : "attempt_started";
@@ -20771,10 +21732,10 @@ function isProcessAlive(pid) {
 var RunStore = class {
   constructor(repoRoot) {
     this.repoRoot = repoRoot;
-    this.banzaiDirectory = path17.join(repoRoot, ".banzai");
-    this.runsDirectory = path17.join(this.banzaiDirectory, "runs");
-    this.activeRunPath = path17.join(this.banzaiDirectory, "active-run.json");
-    this.lockPath = path17.join(this.banzaiDirectory, "runner.lock");
+    this.banzaiDirectory = path19.join(repoRoot, ".banzai");
+    this.runsDirectory = path19.join(this.banzaiDirectory, "runs");
+    this.activeRunPath = path19.join(this.banzaiDirectory, "active-run.json");
+    this.lockPath = path19.join(this.banzaiDirectory, "runner.lock");
   }
   banzaiDirectory;
   runsDirectory;
@@ -20787,7 +21748,7 @@ var RunStore = class {
     );
   }
   statePath(runId2) {
-    return path17.join(this.runDirectory(runId2), "state.json");
+    return path19.join(this.runDirectory(runId2), "state.json");
   }
   attemptPath(runId2, attempt) {
     return containedEvidencePath(
@@ -20819,15 +21780,15 @@ var RunStore = class {
    * uncommitted, so without this snapshot an externally mutated bundle has no
    * recoverable approved form.
    */
-  async writeApprovalSnapshot(runId2, digest3, entries) {
-    await mkdir6(path17.join(this.runDirectory(runId2), "approval"), {
+  async writeApprovalSnapshot(runId2, digest4, entries) {
+    await mkdir6(path19.join(this.runDirectory(runId2), "approval"), {
       recursive: true,
       mode: 448
     });
     const manifest = [];
     for (const [index, entry] of entries.entries()) {
       const file = `${String(index).padStart(3, "0")}-${safeEvidenceSegment(
-        path17.posix.basename(entry.path),
+        path19.posix.basename(entry.path),
         "approval artifact name",
         150
       )}`;
@@ -20840,7 +21801,7 @@ var RunStore = class {
     }
     await atomicWriteJson(this.approvalSnapshotManifestPath(runId2), {
       schemaVersion: 1,
-      digest: digest3,
+      digest: digest4,
       entries: manifest
     });
   }
@@ -20904,11 +21865,11 @@ var RunStore = class {
         "Review snapshot identity does not match its attempt."
       );
     const destination = this.reviewSnapshotPath(runId2, attempt);
-    const relative = path17.relative(this.repoRoot, destination).split(path17.sep).join("/");
-    await assertReviewPathOwned(this.repoRoot, relative, true);
-    await mkdir6(path17.dirname(destination), { recursive: true });
+    const relative2 = path19.relative(this.repoRoot, destination).split(path19.sep).join("/");
+    await assertReviewPathOwned(this.repoRoot, relative2, true);
+    await mkdir6(path19.dirname(destination), { recursive: true });
     const temporary = `${destination}.${randomUUID6()}.tmp`;
-    const handle = await open8(temporary, "wx", 384);
+    const handle = await open9(temporary, "wx", 384);
     try {
       try {
         await handle.writeFile(`${JSON.stringify(snapshot, null, 2)}
@@ -20936,9 +21897,9 @@ var RunStore = class {
     const file = this.reviewSnapshotPath(runId2, attempt);
     await assertReviewPathOwned(
       this.repoRoot,
-      path17.relative(this.repoRoot, file).split(path17.sep).join("/")
+      path19.relative(this.repoRoot, file).split(path19.sep).join("/")
     );
-    const handle = await open8(file, constants8.O_RDONLY | constants8.O_NOFOLLOW);
+    const handle = await open9(file, constants9.O_RDONLY | constants9.O_NOFOLLOW);
     try {
       const stat5 = await handle.stat();
       if (!stat5.isFile() || (stat5.mode & 63) !== 0)
@@ -20974,13 +21935,13 @@ var RunStore = class {
     );
   }
   verificationAttemptsDirectory(runId2) {
-    return path17.join(this.runDirectory(runId2), "verification-attempts");
+    return path19.join(this.runDirectory(runId2), "verification-attempts");
   }
   verificationLedgerPath(runId2) {
-    return path17.join(this.verificationAttemptsDirectory(runId2), "ledger.json");
+    return path19.join(this.verificationAttemptsDirectory(runId2), "ledger.json");
   }
   verificationAttemptPath(runId2, sequence, id) {
-    return path17.join(
+    return path19.join(
       this.verificationAttemptsDirectory(runId2),
       `verification-${String(sequence).padStart(6, "0")}-${id}.json`
     );
@@ -20999,7 +21960,7 @@ var RunStore = class {
     };
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        const handle = await open8(this.lockPath, "wx", 384);
+        const handle = await open9(this.lockPath, "wx", 384);
         const owned = await handle.stat();
         try {
           await handle.writeFile(`${JSON.stringify(lock)}
@@ -21015,7 +21976,7 @@ var RunStore = class {
             if (heldLocks.get(this.lockPath) === token) {
               heldLocks.delete(this.lockPath);
             }
-            const named = await lstat10(this.lockPath).catch(() => null);
+            const named = await lstat11(this.lockPath).catch(() => null);
             if (named === null || !named.isFile() || named.isSymbolicLink() || named.ino !== owned.ino || named.dev !== owned.dev)
               return;
             const current = await readJson2(
@@ -21057,7 +22018,7 @@ var RunStore = class {
   }
   /** Called only while setup owns the ordinary runner lock; never repairs state. */
   async assertSetupEligible() {
-    const invalid7 = () => new BanzaiError(
+    const invalid9 = () => new BanzaiError(
       "PROJECT_SETUP_STATE_INVALID",
       "Project setup cannot verify the latest run state. Inspect banzai doctor and banzai status; resolve the existing run evidence before setup."
     );
@@ -21070,23 +22031,23 @@ var RunStore = class {
     let runId2;
     try {
       if (file.availability !== "available" || file.text === null)
-        throw invalid7();
+        throw invalid9();
       const pointer = cancellationRecord(JSON.parse(file.text));
       if (pointer.schemaVersion !== 1 || typeof pointer.runId !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,199}$/.test(pointer.runId))
-        throw invalid7();
+        throw invalid9();
       runId2 = pointer.runId;
     } catch {
-      throw invalid7();
+      throw invalid9();
     }
     let state;
     try {
       const result = await this.readMutationState(runId2);
       state = result.state;
       const raw = cancellationRecord(state);
-      if (typeof state.repoRoot !== "string" || await realpath7(state.repoRoot) !== await realpath7(this.repoRoot) || raw.contractVersion !== CONTRACT_VERSION || typeof state.slug !== "string" || typeof state.request !== "string" || !Number.isFinite(Date.parse(state.createdAt)) || !Number.isFinite(Date.parse(state.updatedAt)) || typeof state.baseCommit !== "string" || !/^[a-f0-9]{40,64}$/.test(state.baseCommit) || !Array.isArray(state.baseline) || !Array.isArray(state.verification) || raw.metrics === null || typeof raw.metrics !== "object" || raw.sessions === null || typeof raw.sessions !== "object")
-        throw invalid7();
+      if (typeof state.repoRoot !== "string" || await realpath8(state.repoRoot) !== await realpath8(this.repoRoot) || raw.contractVersion !== CONTRACT_VERSION2 || typeof state.slug !== "string" || typeof state.request !== "string" || !Number.isFinite(Date.parse(state.createdAt)) || !Number.isFinite(Date.parse(state.updatedAt)) || typeof state.baseCommit !== "string" || !/^[a-f0-9]{40,64}$/.test(state.baseCommit) || !Array.isArray(state.baseline) || !Array.isArray(state.verification) || raw.metrics === null || typeof raw.metrics !== "object" || raw.sessions === null || typeof raw.sessions !== "object")
+        throw invalid9();
     } catch {
-      throw invalid7();
+      throw invalid9();
     }
     if (state.status !== "done" && state.status !== "cancelled") {
       throw new BanzaiError(
@@ -21108,10 +22069,10 @@ var RunStore = class {
       }
     }
     await mkdir6(this.runDirectory(state.runId), { recursive: false });
-    await mkdir6(path17.join(this.runDirectory(state.runId), "attempts"));
+    await mkdir6(path19.join(this.runDirectory(state.runId), "attempts"));
     await mkdir6(this.verificationAttemptsDirectory(state.runId));
     await atomicWriteJson(this.verificationLedgerPath(state.runId), {
-      schemaVersion: VERIFICATION_LEDGER_SCHEMA_VERSION
+      schemaVersion: state.schemaVersion === 5 ? 2 : VERIFICATION_LEDGER_SCHEMA_VERSION2
     });
     await this.withStateMutation(state.runId, async () => {
       await atomicWriteJson(this.statePath(state.runId), state, false);
@@ -21172,18 +22133,18 @@ var RunStore = class {
     });
   }
   async withStateMutation(runId2, action) {
-    const directory2 = await cancellationEvidencePath(
+    const directory3 = await cancellationEvidencePath(
       this.repoRoot,
       `.banzai/runs/${runId2}`,
       true
     );
-    const guardPath = path17.join(directory2, ".state-write.lock");
+    const guardPath = path19.join(directory3, ".state-write.lock");
     const deadline = performance.now() + 1e3;
     const token = randomUUID6();
     let handle;
     for (; ; ) {
       try {
-        handle = await open8(guardPath, "wx", 384);
+        handle = await open9(guardPath, "wx", 384);
         break;
       } catch (error) {
         if (cancellationRecord(error).code !== "EEXIST") throw error;
@@ -21202,7 +22163,7 @@ var RunStore = class {
       return await action();
     } finally {
       await handle.close();
-      const named = await lstat10(guardPath).catch(() => null);
+      const named = await lstat11(guardPath).catch(() => null);
       if (named !== null && !named.isSymbolicLink() && named.ino === owned.ino && named.dev === owned.dev) {
         await unlink5(guardPath);
       }
@@ -21219,7 +22180,7 @@ var RunStore = class {
       if (file.availability !== "available" || file.text === null)
         throw new Error();
       raw = cancellationRecord(JSON.parse(file.text));
-      if (raw.runId !== runId2 || !CANCELLATION_STATUSES.includes(raw.status) || ![1, 2, 3, 4].includes(raw.schemaVersion))
+      if (raw.runId !== runId2 || !CANCELLATION_STATUSES.includes(raw.status) || ![1, 2, 3, 4, 5].includes(raw.schemaVersion))
         throw new Error();
     } catch {
       throw new BanzaiError(
@@ -21259,7 +22220,7 @@ var RunStore = class {
             "Idempotent review events require an attempt identity."
           );
         const prior = await readFile10(
-          path17.join(this.runDirectory(runId2), "events.jsonl"),
+          path19.join(this.runDirectory(runId2), "events.jsonl"),
           "utf8"
         ).catch((error) => {
           if (error.code === "ENOENT") return "";
@@ -21289,10 +22250,10 @@ var RunStore = class {
           );
         }
       }
-      const relative = `.banzai/runs/${runId2}/events.jsonl`;
+      const relative2 = `.banzai/runs/${runId2}/events.jsonl`;
       if (expectedFingerprint !== void 0 && !await cancellationFileIdentityMatches(
         this.repoRoot,
-        relative,
+        relative2,
         expectedFingerprint
       )) {
         throw new BanzaiError(
@@ -21306,16 +22267,16 @@ var RunStore = class {
         runId: runId2,
         details
       };
-      const file = path17.join(this.runDirectory(runId2), "events.jsonl");
-      const named = await lstat10(file).catch((error) => {
+      const file = path19.join(this.runDirectory(runId2), "events.jsonl");
+      const named = await lstat11(file).catch((error) => {
         if (cancellationRecord(error).code === "ENOENT") return null;
         throw error;
       });
       if (named !== null && (!named.isFile() || named.isSymbolicLink()))
         throw new BanzaiError("UNSAFE_EVIDENCE_PATH", "Unsafe event storage.");
-      const handle = await open8(
+      const handle = await open9(
         file,
-        constants8.O_WRONLY | constants8.O_APPEND | constants8.O_CREAT | constants8.O_NOFOLLOW | constants8.O_NONBLOCK,
+        constants9.O_WRONLY | constants9.O_APPEND | constants9.O_CREAT | constants9.O_NOFOLLOW | constants9.O_NONBLOCK,
         384
       );
       try {
@@ -21329,11 +22290,11 @@ var RunStore = class {
     });
   }
   async writeRunAttempt(runId2, record6) {
-    parseModelAttemptRecord(record6);
+    parseModelAttemptRecord2(record6);
     await atomicWriteJson(this.attemptPath(runId2, record6.attempt), record6);
   }
   async readRunAttempt(runId2, attempt) {
-    return parseModelAttemptRecord(
+    return parseModelAttemptRecord2(
       await readJson2(
         this.attemptPath(runId2, attempt),
         `attempt ${attempt.id}`
@@ -21341,19 +22302,19 @@ var RunStore = class {
     );
   }
   async readRunAttempts(runId2) {
-    const directory2 = path17.join(this.runDirectory(runId2), "attempts");
-    const entries = (await readdir5(directory2, { withFileTypes: true })).filter(
+    const directory3 = path19.join(this.runDirectory(runId2), "attempts");
+    const entries = (await readdir6(directory3, { withFileTypes: true })).filter(
       (entry) => entry.isFile() && /-(selection|plan|implementation|fix|review)\.json$/u.test(entry.name)
     ).map((entry) => entry.name).sort();
     const records = [];
     for (const entry of entries) {
-      const record6 = parseModelAttemptRecord(
+      const record6 = parseModelAttemptRecord2(
         await readJson2(
-          path17.join(directory2, entry),
+          path19.join(directory3, entry),
           `attempt record ${entry}`
         )
       );
-      if (path17.basename(this.attemptPath(runId2, record6.attempt)) !== entry) {
+      if (path19.basename(this.attemptPath(runId2, record6.attempt)) !== entry) {
         throw new BanzaiError(
           "ATTEMPT_PATH_MISMATCH",
           `Attempt record ${entry} does not match its canonical identity.`
@@ -21365,14 +22326,14 @@ var RunStore = class {
   }
   async readContextLedgerIfPresent(runId2, attempt) {
     const ledgerPath = this.contextLedgerPath(runId2, attempt);
-    for (const directory2 of [
+    for (const directory3 of [
       this.banzaiDirectory,
       this.runsDirectory,
       this.runDirectory(runId2),
-      path17.dirname(ledgerPath)
+      path19.dirname(ledgerPath)
     ]) {
       try {
-        if ((await lstat10(directory2)).isDirectory()) continue;
+        if ((await lstat11(directory3)).isDirectory()) continue;
         throw new BanzaiError(
           "INVALID_CONTEXT_EVIDENCE",
           `Invalid context evidence for run ${runId2}, attempt ${attempt.id}: evidence directory is not physically owned.`
@@ -21388,9 +22349,9 @@ var RunStore = class {
     }
     let handle;
     try {
-      handle = await open8(
+      handle = await open9(
         ledgerPath,
-        constants8.O_RDONLY | constants8.O_NOFOLLOW
+        constants9.O_RDONLY | constants9.O_NOFOLLOW
       );
     } catch (error) {
       if (error.code === "ENOENT") return null;
@@ -21467,7 +22428,7 @@ var RunStore = class {
     return finished;
   }
   async writeTerminalCheckpoint(runId2, checkpoint) {
-    const parsed = parseTerminalAttemptCheckpoint(checkpoint);
+    const parsed = parseTerminalAttemptCheckpoint2(checkpoint);
     if (parsed.runId !== runId2) {
       throw new BanzaiError(
         "INVALID_TERMINAL_CHECKPOINT",
@@ -21476,7 +22437,7 @@ var RunStore = class {
     }
     const checkpointPath = this.terminalCheckpointPath(runId2, parsed.attempt);
     try {
-      const existing = parseTerminalAttemptCheckpoint(
+      const existing = parseTerminalAttemptCheckpoint2(
         await readJson2(
           checkpointPath,
           `terminal checkpoint ${parsed.attempt.id}`
@@ -21498,7 +22459,7 @@ var RunStore = class {
   }
   async readTerminalCheckpointIfExists(runId2, attempt) {
     try {
-      const parsed = parseTerminalAttemptCheckpoint(
+      const parsed = parseTerminalAttemptCheckpoint2(
         await readJson2(
           this.terminalCheckpointPath(runId2, attempt),
           `terminal checkpoint ${attempt.id}`
@@ -21519,7 +22480,7 @@ var RunStore = class {
     }
   }
   async writeRecoveryAuthorization(runId2, authorization) {
-    const parsed = parseRecoveryAuthorization(authorization);
+    const parsed = parseRecoveryAuthorization2(authorization);
     if (parsed.runId !== runId2) {
       throw new BanzaiError(
         "INVALID_RECOVERY_AUTHORIZATION",
@@ -21531,7 +22492,7 @@ var RunStore = class {
       parsed.authorizationId
     );
     try {
-      const existing = parseRecoveryAuthorization(
+      const existing = parseRecoveryAuthorization2(
         await readJson2(
           authorizationPath,
           `recovery authorization ${parsed.authorizationId}`
@@ -21552,7 +22513,7 @@ var RunStore = class {
     await atomicWriteJson(authorizationPath, parsed);
   }
   async readRecoveryAuthorization(runId2, authorizationId) {
-    const parsed = parseRecoveryAuthorization(
+    const parsed = parseRecoveryAuthorization2(
       await readJson2(
         this.recoveryAuthorizationPath(runId2, authorizationId),
         `recovery authorization ${authorizationId}`
@@ -21593,16 +22554,16 @@ var RunStore = class {
         "verification ledger"
       )
     );
-    const directory2 = this.verificationAttemptsDirectory(runId2);
-    const entries = (await readdir5(directory2, { withFileTypes: true })).filter(
+    const directory3 = this.verificationAttemptsDirectory(runId2);
+    const entries = (await readdir6(directory3, { withFileTypes: true })).filter(
       (entry) => entry.isFile() && entry.name !== "ledger.json" && entry.name.endsWith(".json")
     ).map((entry) => entry.name).sort();
     const records = [];
     for (const entry of entries) {
       records.push(
-        parseVerificationAttemptRecord(
+        parseVerificationAttemptRecord2(
           await readJson2(
-            path17.join(directory2, entry),
+            path19.join(directory3, entry),
             "verification attempt"
           )
         )
@@ -21647,7 +22608,7 @@ var RunStore = class {
     const records = await this.readVerificationAttempts(runId2);
     const sequence = (records.at(-1)?.sequence ?? 0) + 1;
     const record6 = {
-      schemaVersion: VERIFICATION_LEDGER_SCHEMA_VERSION,
+      schemaVersion: VERIFICATION_LEDGER_SCHEMA_VERSION2,
       id: `verification-${randomUUID6()}`,
       sequence,
       round: input.round,
@@ -21670,7 +22631,7 @@ var RunStore = class {
       stdout: null,
       stderr: null
     };
-    parseVerificationAttemptRecord(record6);
+    parseVerificationAttemptRecord2(record6);
     await atomicWriteJson(
       this.verificationAttemptPath(runId2, record6.sequence, record6.id),
       record6
@@ -21678,13 +22639,13 @@ var RunStore = class {
     return record6;
   }
   async finishVerificationAttempt(runId2, record6) {
-    const parsed = parseVerificationAttemptRecord(record6);
+    const parsed = parseVerificationAttemptRecord2(record6);
     const filePath = this.verificationAttemptPath(
       runId2,
       parsed.sequence,
       parsed.id
     );
-    const existing = parseVerificationAttemptRecord(
+    const existing = parseVerificationAttemptRecord2(
       await readJson2(filePath, "verification attempt")
     );
     if (existing.status !== "started") {
@@ -21708,7 +22669,7 @@ var RunStore = class {
     await this.writeText(runId2, relativePath2, value);
     return {
       relativePath: relativePath2,
-      sha256: createHash12("sha256").update(value).digest("hex")
+      sha256: createHash14("sha256").update(value).digest("hex")
     };
   }
   processAlive(pid) {
@@ -21720,14 +22681,14 @@ var RunStore = class {
         "INVALID_REVIEW_ARTIFACT_PATH",
         "Review iteration must be positive."
       );
-    const relative = `reviews/review-${iteration}.json`;
-    const target = path17.join(this.runDirectory(runId2), relative);
+    const relative2 = `reviews/review-${iteration}.json`;
+    const target = path19.join(this.runDirectory(runId2), relative2);
     await assertReviewPathOwned(
       this.repoRoot,
-      path17.relative(this.repoRoot, target).split(path17.sep).join("/"),
+      path19.relative(this.repoRoot, target).split(path19.sep).join("/"),
       true
     );
-    const result = parseCurrentReviewResult(value);
+    const result = parseCurrentReviewResult2(value);
     const expected = `${JSON.stringify(result, null, 2)}
 `;
     const existing = await readFile10(target, "utf8").catch((error) => {
@@ -21742,17 +22703,17 @@ var RunStore = class {
     if (existing === null) await atomicWriteJson(target, result);
   }
   async writeText(runId2, relativePath2, value) {
-    const target = path17.join(this.runDirectory(runId2), relativePath2);
-    await mkdir6(path17.dirname(target), { recursive: true });
+    const target = path19.join(this.runDirectory(runId2), relativePath2);
+    await mkdir6(path19.dirname(target), { recursive: true });
     await writeFile3(target, value, { encoding: "utf8", mode: 384 });
     return target;
   }
 };
 
 // src/verification.ts
-import { createHash as createHash13 } from "node:crypto";
-import { readdir as readdir6, stat as stat2 } from "node:fs/promises";
-import path18 from "node:path";
+import { createHash as createHash15 } from "node:crypto";
+import { readdir as readdir7, stat as stat2 } from "node:fs/promises";
+import path20 from "node:path";
 var PROJECT_MARKERS = [
   { projectType: "go", files: ["go.mod"] },
   {
@@ -21778,12 +22739,12 @@ async function isFile(filePath) {
     throw error;
   }
 }
-var readProjectRoot = (repoRoot) => readdir6(repoRoot, { withFileTypes: true });
+var readProjectRoot = (repoRoot) => readdir7(repoRoot, { withFileTypes: true });
 async function detectProjectTypes(repoRoot, readRoot = readProjectRoot) {
   const detected = /* @__PURE__ */ new Set();
   for (const marker of PROJECT_MARKERS) {
     for (const file of marker.files) {
-      if (await isFile(path18.join(repoRoot, file))) {
+      if (await isFile(path20.join(repoRoot, file))) {
         detected.add(marker.projectType);
         break;
       }
@@ -21801,7 +22762,7 @@ function flattenVerificationCommands(config) {
   return describeVerificationCommands(config).map((item) => item.command);
 }
 function commandConfigurationDigest(input) {
-  return createHash13("sha256").update(
+  return createHash15("sha256").update(
     JSON.stringify({
       profileId: input.profileId,
       projectType: input.projectType,
@@ -21836,7 +22797,7 @@ function isRepositoryHygieneCommand(command) {
 }
 function assessVerificationProfiles(config, projectTypes) {
   const profiles = config.verification.profiles;
-  const explicit = config.schemaVersion === 2;
+  const explicit = config.schemaVersion >= 2;
   const requestedTypes = new Set(projectTypes);
   const matchingProfiles = explicit ? profiles.filter((profile) => requestedTypes.has(profile.projectType)) : [];
   const matchingProfileTypes = new Set(
@@ -21892,7 +22853,7 @@ function sessionBinding(id, context) {
   return id === null ? null : { id, ...context };
 }
 function invocationScopeDigest(scope) {
-  return createHash14("sha256").update(
+  return createHash16("sha256").update(
     JSON.stringify([
       scope.strictMcpConfig,
       scope.settingSources,
@@ -22022,7 +22983,7 @@ function terminalVerificationRecord(record6, input) {
   };
 }
 function workflowAuthorizationDigest(input) {
-  return createHash14("sha256").update(
+  return createHash16("sha256").update(
     JSON.stringify({
       version: 1,
       runId: input.runId,
@@ -22059,14 +23020,14 @@ function decisionText(value, label, maximum, allowNewlines = false) {
   return value;
 }
 function decisionIdentifier(value, label, maximum = 128) {
-  const identifier2 = decisionText(value, label, maximum);
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(identifier2)) {
+  const identifier3 = decisionText(value, label, maximum);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(identifier3)) {
     throw new BanzaiError(
       "INVALID_DECISION",
       `${label} must be a canonical identifier.`
     );
   }
-  return identifier2;
+  return identifier3;
 }
 function reviewCompletion(status) {
   const { state, latestReview } = status;
@@ -22204,15 +23165,15 @@ function isDocumentationPath(relativePath2) {
   return normalized === "documentation" || normalized.startsWith("documentation/");
 }
 function executableCandidates(command, cwd, env) {
-  if (command.includes(path19.sep)) {
-    return [path19.resolve(cwd, command)];
+  if (command.includes(path21.sep)) {
+    return [path21.resolve(cwd, command)];
   }
-  return (env.PATH ?? "").split(path19.delimiter).filter(Boolean).map((entry) => path19.join(entry, command));
+  return (env.PATH ?? "").split(path21.delimiter).filter(Boolean).map((entry) => path21.join(entry, command));
 }
 async function assertExecutable(command, cwd, env) {
   for (const candidate of executableCandidates(command, cwd, env)) {
     try {
-      await access4(candidate, constants9.X_OK);
+      await access4(candidate, constants10.X_OK);
       return;
     } catch {
     }
@@ -22483,8 +23444,8 @@ var WorkflowRunner = class {
         const baseCommit = await currentCommit(this.repoRoot);
         const createdAt = now();
         const state = {
-          schemaVersion: 4,
-          contractVersion: CONTRACT_VERSION,
+          schemaVersion: config.schemaVersion === 3 && config.verification.policy ? 5 : 4,
+          contractVersion: CONTRACT_VERSION2,
           runId: runId(input.slug),
           slug: input.slug,
           request: input.request,
@@ -22553,7 +23514,8 @@ var WorkflowRunner = class {
           repoRoot: this.repoRoot,
           slug: state.slug,
           mode: "workflow",
-          creationId: randomUUID7()
+          creationId: randomUUID7(),
+          schemaVersion: state.schemaVersion === 5 ? 2 : 1
         });
         await this.store.createRun(state);
         await this.observeHumanTime(state, "run_created");
@@ -23119,8 +24081,8 @@ var WorkflowRunner = class {
       }
       const restored = [];
       for (const entry of snapshot.entries) {
-        const absolute = path19.resolve(this.repoRoot, entry.path);
-        await mkdir7(path19.dirname(absolute), { recursive: true });
+        const absolute = path21.resolve(this.repoRoot, entry.path);
+        await mkdir7(path21.dirname(absolute), { recursive: true });
         await writeFile4(absolute, entry.contents);
         restored.push(entry.path);
       }
@@ -23217,8 +24179,8 @@ var WorkflowRunner = class {
         } else {
           const authorizationId = `recovery-${eligibility.recoveryIdentity.slice(0, 24)}`;
           const proposed = {
-            schema: RECOVERY_AUTHORIZATION_SCHEMA,
-            schemaVersion: RECOVERY_AUTHORIZATION_SCHEMA_VERSION,
+            schema: RECOVERY_AUTHORIZATION_SCHEMA2,
+            schemaVersion: RECOVERY_AUTHORIZATION_SCHEMA_VERSION2,
             authorizationId,
             runId: state.runId,
             attempt,
@@ -23291,6 +24253,15 @@ var WorkflowRunner = class {
         const state = await this.store.requireActiveState();
         requireState(state, ["needs_plan_approval"], "Plan approval");
         await this.approvedTaskIds(state);
+        const approvalConfig = await loadConfig(this.repoRoot);
+        if (approvalConfig.schemaVersion === 3)
+          validatePlanVerificationObligations(
+            await readFile11(
+              path21.join(this.repoRoot, this.completionPlanPath(state)),
+              "utf8"
+            ),
+            approvalConfig.verification
+          );
         const bundle = await digestArtifactBundle(
           this.repoRoot,
           artifactPaths(state)
@@ -23298,7 +24269,7 @@ var WorkflowRunner = class {
         const snapshotEntries = [];
         for (const entry of bundle.entries) {
           const contents = await readFile11(
-            path19.resolve(this.repoRoot, entry.path)
+            path21.resolve(this.repoRoot, entry.path)
           );
           if (hashArtifactBytes(contents) !== entry.sha256) {
             throw new BanzaiError(
@@ -23635,6 +24606,8 @@ var WorkflowRunner = class {
               error
             );
           }
+          if (!await this.requireVerificationApplicability(state))
+            return state;
           state.pendingReviewRotationReason = null;
           transitionState(state, "done");
           await this.store.writeState(state);
@@ -23742,10 +24715,10 @@ var WorkflowRunner = class {
     result.observation = "unsaved";
     try {
       const anchor = decodeCancellationAnchor(state.cancellation);
-      const relative = `.banzai/runs/${runId2}/events.jsonl`;
+      const relative2 = `.banzai/runs/${runId2}/events.jsonl`;
       const before = await readCancellationFile(
         this.repoRoot,
-        relative,
+        relative2,
         CANCELLATION_LIMITS.events
       );
       try {
@@ -23789,7 +24762,7 @@ var WorkflowRunner = class {
       const after = decodeCancellationEvents(
         await readCancellationFile(
           this.repoRoot,
-          relative,
+          relative2,
           CANCELLATION_LIMITS.events
         )
       );
@@ -23832,12 +24805,12 @@ var WorkflowRunner = class {
       return { outcome: "unavailable", response: null };
     }
     const { runId: runId2, cancellationId: id } = observation2;
-    const relative = `.banzai/runs/${runId2}/events.jsonl`;
+    const relative2 = `.banzai/runs/${runId2}/events.jsonl`;
     const read = async () => {
       const state = await this.store.readState(runId2);
       const file = await readCancellationFile(
         this.repoRoot,
-        relative,
+        relative2,
         CANCELLATION_LIMITS.events
       );
       const events = decodeCancellationEvents(file);
@@ -23944,7 +24917,7 @@ var WorkflowRunner = class {
     }
     const checkpoint = state.planTaskCompletion;
     if (checkpoint === void 0) {
-      const implementationReport = path19.posix.join(
+      const implementationReport = path21.posix.join(
         "documentation",
         "features",
         state.slug,
@@ -23953,7 +24926,7 @@ var WorkflowRunner = class {
       let diagnostic = "Run predates the canonical task-completion ledger; exact completion is unknown.";
       try {
         const contents = await readFile11(
-          path19.join(this.repoRoot, implementationReport),
+          path21.join(this.repoRoot, implementationReport),
           "utf8"
         );
         parsePlanTaskCompletionProjection(contents);
@@ -24192,7 +25165,7 @@ var WorkflowRunner = class {
         "Prerequisite recovery requires an unrecovered completed fix attempt."
       );
     }
-    const result = parsePersistedPhaseResult(record6.result);
+    const result = parsePersistedPhaseResult2(record6.result);
     if (result.phase !== "fix" || result.outcome !== "blocked" || result.gate !== null || result.taskCompletion !== null || requirePersistedBlock && result.summary !== state.blockReason) {
       throw new BanzaiError(
         "RECOVERY_SOURCE_INVALID",
@@ -24252,15 +25225,15 @@ var WorkflowRunner = class {
       mutable: true
     };
     const typedRecord = record6;
-    const reviewDigest = digestCanonicalJson(review);
-    const scopeDigest = digestCanonicalJson({
+    const reviewDigest = digestCanonicalJson3(review);
+    const scopeDigest = digestCanonicalJson3({
       version: 2,
       sourceKind: "prerequisite_blocked_fix",
       reviewIteration: state.latestReview.iteration,
       reviewDigest,
       acceptedFindingIds,
       sourceAttempt,
-      sourceResultDigest: digestCanonicalJson(result),
+      sourceResultDigest: digestCanonicalJson3(result),
       resolvedFindingIds,
       remainingFindingIds
     });
@@ -24324,7 +25297,7 @@ var WorkflowRunner = class {
       state.runId,
       source.attempt
     );
-    if (checkpoint !== null && (checkpoint.baseCommit !== state.baseCommit || checkpoint.approvalDigest !== state.planApproval?.digest || checkpoint.scopeDigest !== this.attemptScopeDigest(state, source.attempt) || digestCanonicalJson(checkpoint.result) !== digestCanonicalJson(source.result))) {
+    if (checkpoint !== null && (checkpoint.baseCommit !== state.baseCommit || checkpoint.approvalDigest !== state.planApproval?.digest || checkpoint.scopeDigest !== this.attemptScopeDigest(state, source.attempt) || digestCanonicalJson3(checkpoint.result) !== digestCanonicalJson3(source.result))) {
       throw new BanzaiError(
         "INVALID_TERMINAL_CHECKPOINT",
         "The completed blocked source conflicts with its terminal checkpoint."
@@ -24355,10 +25328,10 @@ var WorkflowRunner = class {
       assertContractParity();
       const settings = config.models.implementer;
       const vendor = vendorFor(settings.executable) ?? FALLBACK_VENDOR.implementer;
-      const configurationDigest = digestCanonicalJson({
+      const configurationDigest = digestCanonicalJson3({
         version: 1,
         vendor,
-        executableDigest: digestCanonicalJson(settings.executable),
+        executableDigest: digestCanonicalJson3(settings.executable),
         model: settings.model,
         effort: settings.effort
       });
@@ -24374,7 +25347,7 @@ var WorkflowRunner = class {
         );
       }
       const counts = await workspaceChangeCounts(this.repoRoot, snapshot);
-      const recoveryIdentity = digestCanonicalJson({
+      const recoveryIdentity = digestCanonicalJson3({
         version: 2,
         sourceKind: "prerequisite_blocked_fix",
         runId: state.runId,
@@ -24539,10 +25512,10 @@ var WorkflowRunner = class {
         }
       }
       const scopeDigest = this.attemptScopeDigest(state, attempt);
-      const configurationDigest = digestCanonicalJson({
+      const configurationDigest = digestCanonicalJson3({
         version: 1,
         vendor,
-        executableDigest: digestCanonicalJson(settings.executable),
+        executableDigest: digestCanonicalJson3(settings.executable),
         model: settings.model,
         effort: settings.effort
       });
@@ -24558,7 +25531,7 @@ var WorkflowRunner = class {
         );
       }
       const counts = await workspaceChangeCounts(this.repoRoot, snapshot);
-      const recoveryIdentity = digestCanonicalJson({
+      const recoveryIdentity = digestCanonicalJson3({
         version: 1,
         runId: state.runId,
         attempt,
@@ -24676,7 +25649,7 @@ var WorkflowRunner = class {
     };
     if (!sourceAlreadyInterrupted && !sourceAlreadyPreserved) {
       if (prerequisiteSource === null) {
-        persistedSourceRecord.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION;
+        persistedSourceRecord.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION2;
         persistedSourceRecord.status = "interrupted";
         persistedSourceRecord.completedAt = null;
         persistedSourceRecord.interruptedAt ??= now();
@@ -24926,7 +25899,7 @@ var WorkflowRunner = class {
   async approvedTaskIds(state) {
     return parseApprovedPlanTaskIds(
       await readFile11(
-        path19.join(this.repoRoot, this.completionPlanPath(state)),
+        path21.join(this.repoRoot, this.completionPlanPath(state)),
         "utf8"
       )
     );
@@ -25064,7 +26037,7 @@ var WorkflowRunner = class {
     }
     let result;
     try {
-      result = parsePersistedPhaseResult(record6.result);
+      result = parsePersistedPhaseResult2(record6.result);
     } catch {
       throw new PlanTaskCompletionError(
         "source_attempt_invalid",
@@ -25178,7 +26151,7 @@ var WorkflowRunner = class {
   }
   async beginAttempt(state, attempt, policy) {
     const record6 = {
-      schemaVersion: MODEL_ATTEMPT_SCHEMA_VERSION,
+      schemaVersion: MODEL_ATTEMPT_SCHEMA_VERSION2,
       attempt,
       status: "started",
       startedAt: now(),
@@ -25249,7 +26222,7 @@ var WorkflowRunner = class {
     let record6 = await this.store.readRunAttemptIfExists(state.runId, attempt);
     if (record6 === null) {
       record6 = {
-        schemaVersion: MODEL_ATTEMPT_SCHEMA_VERSION,
+        schemaVersion: MODEL_ATTEMPT_SCHEMA_VERSION2,
         attempt,
         status: "started",
         startedAt: now(),
@@ -25327,7 +26300,7 @@ var WorkflowRunner = class {
       return null;
     }
     const acceptedFindingIds = state.triage?.items.filter((item) => item.disposition === "accepted").map((item) => item.findingId).sort() ?? [];
-    return digestCanonicalJson(
+    return digestCanonicalJson3(
       state.artifactBinding ? {
         version: 2,
         artifactBindingDigest: state.artifactBinding.sha256,
@@ -25353,18 +26326,18 @@ var WorkflowRunner = class {
         );
       const vendor = vendorFor(settings.executable) ?? FALLBACK_VENDOR[policy.sessionContext.role];
       const checkpoint = {
-        schema: TERMINAL_CHECKPOINT_SCHEMA,
-        schemaVersion: TERMINAL_CHECKPOINT_SCHEMA_VERSION,
+        schema: TERMINAL_CHECKPOINT_SCHEMA2,
+        schemaVersion: TERMINAL_CHECKPOINT_SCHEMA_VERSION2,
         runId: current.runId,
         attempt,
         phase: attempt.kind,
         configuration: {
           vendor,
-          executableDigest: digestCanonicalJson(settings.executable),
+          executableDigest: digestCanonicalJson3(settings.executable),
           model: settings.model,
           effort: settings.effort,
           sessionMode: policy.sessionMode,
-          sessionContextDigest: digestCanonicalJson(policy.sessionContext)
+          sessionContextDigest: digestCanonicalJson3(policy.sessionContext)
         },
         resultContract: terminalResultContract(attempt.kind),
         terminal: {
@@ -25381,7 +26354,7 @@ var WorkflowRunner = class {
       };
       const persisted = {
         ...checkpoint,
-        integrityDigest: terminalCheckpointIntegrity(checkpoint)
+        integrityDigest: terminalCheckpointIntegrity2(checkpoint)
       };
       await this.store.writeTerminalCheckpoint(current.runId, persisted);
       await this.store.appendEvent(
@@ -25432,7 +26405,7 @@ var WorkflowRunner = class {
     await this.store.writeRunAttempt(state.runId, record6);
   }
   async writeAttemptOutput(state, record6, stdout, stderr) {
-    const stdoutPath = path19.relative(
+    const stdoutPath = path21.relative(
       this.store.runDirectory(state.runId),
       await this.store.writeText(
         state.runId,
@@ -25440,7 +26413,7 @@ var WorkflowRunner = class {
         redactSensitiveText(stdout)
       )
     );
-    const stderrPath = path19.relative(
+    const stderrPath = path21.relative(
       this.store.runDirectory(state.runId),
       await this.store.writeText(
         state.runId,
@@ -25646,7 +26619,7 @@ var WorkflowRunner = class {
     const before = JSON.parse(
       bytes?.toString("utf8") ?? "null"
     );
-    if (before?.schemaVersion !== 2 || before.baseCommit !== state.baseCommit || before.artifactBindingDigest !== state.artifactBinding.sha256 || !Array.isArray(before.entries) || before.digest !== createHash14("sha256").update(
+    if (before?.schemaVersion !== 2 || before.baseCommit !== state.baseCommit || before.artifactBindingDigest !== state.artifactBinding.sha256 || !Array.isArray(before.entries) || before.digest !== createHash16("sha256").update(
       JSON.stringify({
         version: 2,
         baseCommit: before.baseCommit,
@@ -25813,7 +26786,7 @@ var WorkflowRunner = class {
       });
       if (before !== null)
         await writeFile4(
-          path19.join(
+          path21.join(
             this.store.runDirectory(input.state.runId),
             "attempts",
             `${input.attempt.id}.artifact-workspace.json`
@@ -26052,7 +27025,7 @@ var WorkflowRunner = class {
         this.serenaGuidanceFor(environment, config.models.planner.executable)
       ]
     );
-    const invocationDigest = digestCanonicalJson({
+    const invocationDigest = digestCanonicalJson3({
       environment,
       prompt: prompt.rendered,
       outputContract: resolveOutputContract(
@@ -26996,6 +27969,123 @@ var WorkflowRunner = class {
     state.metrics.attempts.verification = records.length;
     state.verification = retained;
   }
+  verificationStorage(state) {
+    if (state.schemaVersion !== 5 || !state.artifactBinding)
+      throw new BanzaiError(
+        "VERIFICATION_EVIDENCE_INVALID",
+        "Verification applicability requires its original work binding."
+      );
+    return {
+      repoRoot: this.repoRoot,
+      workId: state.artifactBinding.binding.workId,
+      directory: `.banzai/runs/${state.runId}/verification`
+    };
+  }
+  verificationAuthority(state) {
+    return evidenceDigest({
+      binding: state.artifactBinding?.sha256,
+      approval: state.planApproval?.digest ?? null,
+      workflow: state.workflowSelection
+    });
+  }
+  async captureVerification(state, config) {
+    if (config.schemaVersion !== 3 || !config.verification.policy)
+      throw new BanzaiError(
+        "VERIFICATION_CONFIGURATION_CHANGED",
+        "Verification-enabled runs require their explicit project policy."
+      );
+    const configuration = parseVerificationConfiguration(config.verification);
+    const input = {
+      repoRoot: this.repoRoot,
+      configuration,
+      workId: this.verificationStorage(state).workId,
+      evidenceDirectories: [
+        `.banzai/runs/${state.runId}`,
+        ".banzai/runner.lock"
+      ]
+    };
+    const before = await captureVerificationInputs(input);
+    const after = await captureVerificationInputs(input);
+    return sameVerificationCapture(before, after) || !before.complete && !after.complete ? after : {
+      complete: false,
+      reason: "inputs_unavailable",
+      candidateDigest: null,
+      checks: []
+    };
+  }
+  async prepareVerificationDecision(state, config, round, records) {
+    const storage = this.verificationStorage(state);
+    const configuration = parseVerificationConfiguration(config.verification);
+    const strict = (state.workflowSelection?.workflow ?? "strict") === "strict";
+    const plan = strict ? await readFile11(
+      path21.join(this.repoRoot, this.completionPlanPath(state)),
+      "utf8"
+    ) : null;
+    const current = await this.captureVerification(state, config);
+    const origins = await readVerificationOrigins(storage, records);
+    const decision = decideVerification({
+      workId: storage.workId,
+      roundId: round.id,
+      configuration,
+      authorityDigest: this.verificationAuthority(state),
+      strict,
+      obligations: parseVerificationObligations(plan, configuration),
+      capture: current,
+      origins
+    });
+    await persistVerificationDecision(storage, decision);
+    state.verificationEvidence = { decision, applicability: null };
+    return current;
+  }
+  async requireVerificationApplicability(state, config) {
+    if (state.schemaVersion !== 5) return true;
+    if (!await hasRunnerWorkOwnership2(this.repoRoot, state.artifactBinding))
+      return withRunnerWorkOwnership2(
+        this.repoRoot,
+        state.artifactBinding,
+        () => this.requireVerificationApplicability(state, config)
+      );
+    try {
+      const currentConfig = await loadConfig(this.repoRoot);
+      if (config && JSON.stringify(currentConfig.verification) !== JSON.stringify(config.verification))
+        throw new BanzaiError(
+          "VERIFICATION_CONFIGURATION_CHANGED",
+          "Project verification policy changed during execution."
+        );
+      const evidence2 = state.verificationEvidence;
+      const configuration = parseVerificationConfiguration(
+        currentConfig.verification
+      );
+      if (evidence2?.decision.authorityDigest !== this.verificationAuthority(state) || evidence2.decision.configurationDigest !== evidenceDigest({ schema: 3, verification: configuration }))
+        throw new BanzaiError(
+          "VERIFICATION_EVIDENCE_INVALID",
+          "Verification authority changed or evidence is missing."
+        );
+      const storage = this.verificationStorage(state);
+      const origins = await readVerificationOrigins(
+        storage,
+        await this.store.readVerificationAttempts(state.runId)
+      );
+      const current = await this.captureVerification(state, currentConfig);
+      const applicability = verificationApplicability(
+        evidence2.decision,
+        origins,
+        current
+      );
+      await persistVerificationApplicability(storage, applicability);
+      evidence2.applicability = applicability;
+      if (!applicability.complete)
+        throw new BanzaiError(
+          "VERIFICATION_EVIDENCE_INVALID",
+          "Current verification evidence is incomplete or its inputs changed. Required verification must be re-established."
+        );
+      return true;
+    } catch (error) {
+      blockState(state, errorMessage(error));
+      await this.store.writeState(state);
+      return false;
+    }
+  }
   async executeVerification(state, config, sourceAttempt, retryOf, commitTransition) {
     if (!await hasRunnerWorkOwnership2(this.repoRoot, state.artifactBinding))
       return withRunnerWorkOwnership2(
@@ -27038,6 +28128,21 @@ var WorkflowRunner = class {
     );
     const round = this.verificationRound(records, source);
     const descriptors = describeVerificationCommands(config);
+    let evidenceBefore = null;
+    if (state.schemaVersion === 5) {
+      try {
+        evidenceBefore = await this.prepareVerificationDecision(
+          state,
+          config,
+          round,
+          records
+        );
+      } catch (error) {
+        blockState(state, errorMessage(error));
+        await this.store.writeState(state);
+        return state;
+      }
+    }
     if (retryOf !== void 0 && !records.some(
       (record6) => record6.id === retryOf && record6.round.id === round.id && record6.status === "failed"
     )) {
@@ -27065,6 +28170,8 @@ var WorkflowRunner = class {
         continue;
       }
       const command = descriptor.command;
+      if (state.verificationEvidence?.decision.actions[index]?.action === "reuse")
+        continue;
       const commandRecords = records.filter(
         (record7) => record7.round.id === round.id && record7.command.profileOrdinal === descriptor.profileOrdinal && record7.command.commandOrdinal === descriptor.commandOrdinal
       );
@@ -27118,6 +28225,14 @@ var WorkflowRunner = class {
         this.reconcileVerificationState(state, records, round, descriptors);
         await this.store.writeState(state);
       }
+      if (state.schemaVersion === 5) {
+        const latestCapture = await this.captureVerification(state, config);
+        if (latestCapture.candidateDigest !== evidenceBefore?.candidateDigest) {
+          blockState(state, "Verification inputs changed before invocation.");
+          await this.store.writeState(state);
+          return state;
+        }
+      }
       const record6 = await this.store.beginVerificationAttempt(state.runId, {
         round,
         descriptor,
@@ -27125,6 +28240,13 @@ var WorkflowRunner = class {
         retryOf: retryingFailed ? failed.id : null,
         restartOf
       });
+      if (evidenceBefore && state.verificationEvidence)
+        await persistVerificationOriginStart(
+          this.verificationStorage(state),
+          record6,
+          state.verificationEvidence.decision,
+          evidenceBefore
+        );
       records = [...records, record6].sort(
         (left, right) => left.sequence - right.sequence
       );
@@ -27148,7 +28270,7 @@ var WorkflowRunner = class {
             command: command.command,
             args: command.args,
             cwd: this.repoRoot,
-            env: subscriptionOnlyEnvironment(),
+            env: state.schemaVersion === 5 ? parseVerificationConfiguration(config.verification).policy?.dependencies.environment ?? {} : subscriptionOnlyEnvironment(),
             timeoutMs: command.timeoutMs,
             onStart: async (pid) => {
               await this.processStarted(state, { kind: "verification" }, pid);
@@ -27169,6 +28291,12 @@ var WorkflowRunner = class {
           stderr: null
         });
         await this.store.finishVerificationAttempt(state.runId, terminal2);
+        if (evidenceBefore)
+          await persistVerificationOriginFinish(
+            this.verificationStorage(state),
+            terminal2,
+            await this.captureVerification(state, config)
+          );
         if (current2.status === "cancelled") {
           return current2;
         }
@@ -27203,6 +28331,12 @@ var WorkflowRunner = class {
         stderr: stderrEvidence
       });
       await this.store.finishVerificationAttempt(state.runId, terminal);
+      if (evidenceBefore)
+        await persistVerificationOriginFinish(
+          this.verificationStorage(state),
+          terminal,
+          await this.captureVerification(state, config)
+        );
       const current = await this.store.readState(state.runId);
       if (current.status === "cancelled") {
         return current;
@@ -27228,6 +28362,8 @@ var WorkflowRunner = class {
         return state;
       }
     }
+    if (!await this.requireVerificationApplicability(state, config))
+      return state;
     const workflow = state.workflowSelection?.workflow ?? "strict";
     if (workflow !== "strict") {
       transitionState(state, "done");
@@ -27348,6 +28484,8 @@ var WorkflowRunner = class {
         () => this.executeReview(state, config, commitTransition)
       );
     requireState(state, ["reviewing"], "Review");
+    if (!await this.requireVerificationApplicability(state, config))
+      return state;
     await this.assertProjectGuidance();
     let validatedCompletion;
     try {
@@ -27418,8 +28556,8 @@ var WorkflowRunner = class {
       state.runId,
       attempt
     );
-    const candidatePath = path19.relative(this.repoRoot, candidateAbsolutePath).split(path19.sep).join(path19.posix.sep);
-    const candidateEvidencePath = path19.relative(this.store.runDirectory(state.runId), candidateAbsolutePath).split(path19.sep).join(path19.posix.sep);
+    const candidatePath = path21.relative(this.repoRoot, candidateAbsolutePath).split(path21.sep).join(path21.posix.sep);
+    const candidateEvidencePath = path21.relative(this.store.runDirectory(state.runId), candidateAbsolutePath).split(path21.sep).join(path21.posix.sep);
     const artifactMode = "runner-rendered";
     const artifact = {
       path: artifactPath,
@@ -27440,6 +28578,27 @@ var WorkflowRunner = class {
         tasks: validatedCompletion.tasks
       }
     };
+    if (state.schemaVersion === 5 && state.verificationEvidence?.applicability) {
+      const attempts = await this.store.readVerificationAttempts(state.runId);
+      const origins = await readVerificationOrigins(
+        this.verificationStorage(state),
+        attempts
+      );
+      artifact.verificationEvidence = {
+        ...state.verificationEvidence,
+        applicability: state.verificationEvidence.applicability,
+        origins,
+        attempts: origins.map((origin) => {
+          const attempt2 = attempts.find((item) => item.id === origin.attemptId);
+          if (!attempt2)
+            throw new BanzaiError(
+              "VERIFICATION_EVIDENCE_INVALID",
+              "Physical origin is missing."
+            );
+          return attempt2;
+        })
+      };
+    }
     const record6 = await this.beginAttempt(state, attempt, policy);
     const candidateEvidence = {
       source: artifactMode,
@@ -27460,8 +28619,8 @@ var WorkflowRunner = class {
           "Review requires an exact approved scope."
         );
       const frozen = sealReviewSnapshot2({
-        schema: state.artifactBinding ? "banzai-review-snapshot/v2" : "banzai-review-snapshot/v1",
-        schemaVersion: state.artifactBinding ? 2 : 1,
+        schema: state.schemaVersion === 5 ? "banzai-review-snapshot/v3" : state.artifactBinding ? "banzai-review-snapshot/v2" : "banzai-review-snapshot/v1",
+        schemaVersion: state.schemaVersion === 5 ? 3 : state.artifactBinding ? 2 : 1,
         ...state.artifactBinding ? { artifactBinding: state.artifactBinding } : {},
         runId: state.runId,
         attemptId: attempt.id,
@@ -27553,7 +28712,7 @@ var WorkflowRunner = class {
         return;
       }
       await chmod2(candidateAbsolutePath, 384);
-      candidateEvidence.sha256 = createHash14("sha256").update(contents).digest("hex");
+      candidateEvidence.sha256 = createHash16("sha256").update(contents).digest("hex");
       await this.store.writeRunAttempt(state.runId, record6);
     };
     try {
@@ -27603,9 +28762,9 @@ var WorkflowRunner = class {
       );
       inventoryChanged = await this.recordInventoryDrift(state, policy, result);
       await this.persistAdapterResult(state, record6, result);
-      result.result = parseCurrentReviewResult(result.result);
+      result.result = parseCurrentReviewResult2(result.result);
       const frozen = artifact.snapshot;
-      validateReviewScope(parseCurrentReviewResult(result.result), {
+      validateReviewScope(parseCurrentReviewResult2(result.result), {
         snapshotDigest: frozen.digest,
         approvedArtifactPaths: frozen.approval.paths,
         requiredFindingIds: frozen.requiredFindingIds
@@ -27812,6 +28971,7 @@ var WorkflowRunner = class {
     state.activeAttempt = null;
     state.pendingReviewRotationReason = result.verdict === "blocked" ? "previous-review-blocked" : result.verdict === "replan_required" ? "unreliable-review" : result.verdict === "changes_requested" && reviewer === null ? "missing-session" : session.inventoryChanged ? "session-inventory-changed" : null;
     if (result.verdict === "pass") {
+      if (!await this.requireVerificationApplicability(state)) return state;
       try {
         await this.revalidateTaskCompletion(state);
       } catch (error) {
@@ -27862,7 +29022,7 @@ var WorkflowRunner = class {
       throw new BanzaiError("REVIEW_NOT_FOUND", "No review is available.");
     }
     const raw = await readFile11(
-      path19.join(
+      path21.join(
         this.store.runDirectory(state.runId),
         state.latestReview.resultPath
       ),
@@ -27875,7 +29035,7 @@ var WorkflowRunner = class {
         "REVIEW_RESULT_SCHEMA_MISMATCH",
         "Canonical review output identity is unsupported."
       );
-    return identity === "review-result/v2" ? parseCurrentReviewResult(value) : parseReviewResult(value);
+    return identity === "review-result/v2" ? parseCurrentReviewResult2(value) : parseReviewResult2(value);
   }
   validateTriage(findings, input) {
     const findingIds = new Set(findings.map((finding) => finding.id));
@@ -27950,7 +29110,7 @@ var WorkflowRunner = class {
       return;
     try {
       parseApprovedPlanTaskIds(
-        await readFile11(path19.join(this.repoRoot, result.artifacts.plan), "utf8")
+        await readFile11(path21.join(this.repoRoot, result.artifacts.plan), "utf8")
       );
     } catch (error) {
       if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
@@ -27980,7 +29140,7 @@ var WorkflowRunner = class {
             "INVALID_REVIEW_SNAPSHOT",
             "Checkpoint snapshot binding is missing or conflicting."
           );
-        validateReviewScope(parseCurrentReviewResult(result), {
+        validateReviewScope(parseCurrentReviewResult2(result), {
           snapshotDigest: frozen.digest,
           approvedArtifactPaths: frozen.approval.paths,
           requiredFindingIds: frozen.requiredFindingIds
@@ -27988,7 +29148,7 @@ var WorkflowRunner = class {
       }
       return;
     }
-    const phaseResult = parsePersistedPhaseResult(result);
+    const phaseResult = parsePersistedPhaseResult2(result);
     this.validateArtifactRoleReferences(state, phaseResult);
     if (phaseResult.phase !== attempt.kind) {
       throw new BanzaiError(
@@ -28062,7 +29222,7 @@ var WorkflowRunner = class {
     const expectedWorkflowDigest = state.planApproval === null ? state.workflowSelection?.digest ?? null : null;
     const expectedResultContract = attempt.kind === "review" && record6.reviewContext === void 0 ? "review-result/v1" : terminalResultContract(attempt.kind);
     const resultContractMatches = checkpoint.resultContract === expectedResultContract || expectedResultContract === "phase-result/v3" && checkpoint.resultContract === "phase-result/v2";
-    if (checkpoint.runId !== state.runId || checkpoint.attempt.id !== attempt.id || checkpoint.attempt.kind !== attempt.kind || checkpoint.attempt.mutable !== attempt.mutable || checkpoint.phase !== attempt.kind || !resultContractMatches || checkpoint.baseCommit !== state.baseCommit || checkpoint.approvalDigest !== expectedApprovalDigest || checkpoint.workflowDigest !== expectedWorkflowDigest || checkpoint.scopeDigest !== this.attemptScopeDigest(state, attempt) || checkpoint.configuration.vendor !== (vendorFor(settings.executable) ?? FALLBACK_VENDOR[role]) || checkpoint.configuration.executableDigest !== digestCanonicalJson(settings.executable) || checkpoint.configuration.model !== settings.model || checkpoint.configuration.effort !== settings.effort || checkpoint.configuration.sessionMode !== (record6.sessionMode ?? "fresh") || checkpoint.configuration.sessionContextDigest !== digestCanonicalJson(expectedContext) || state.recovery?.sourceAttemptId === attempt.id) {
+    if (checkpoint.runId !== state.runId || checkpoint.attempt.id !== attempt.id || checkpoint.attempt.kind !== attempt.kind || checkpoint.attempt.mutable !== attempt.mutable || checkpoint.phase !== attempt.kind || !resultContractMatches || checkpoint.baseCommit !== state.baseCommit || checkpoint.approvalDigest !== expectedApprovalDigest || checkpoint.workflowDigest !== expectedWorkflowDigest || checkpoint.scopeDigest !== this.attemptScopeDigest(state, attempt) || checkpoint.configuration.vendor !== (vendorFor(settings.executable) ?? FALLBACK_VENDOR[role]) || checkpoint.configuration.executableDigest !== digestCanonicalJson3(settings.executable) || checkpoint.configuration.model !== settings.model || checkpoint.configuration.effort !== settings.effort || checkpoint.configuration.sessionMode !== (record6.sessionMode ?? "fresh") || checkpoint.configuration.sessionContextDigest !== digestCanonicalJson3(expectedContext) || state.recovery?.sourceAttemptId === attempt.id) {
       throw new BanzaiError(
         "TERMINAL_CHECKPOINT_MISMATCH",
         "Terminal checkpoint does not match the active run, attempt, authorization, or model context."
@@ -28114,7 +29274,7 @@ var WorkflowRunner = class {
         record6.attempt.id
       ];
     }
-    record6.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION;
+    record6.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION2;
     record6.result = checkpoint.result;
     record6.sessionId = checkpoint.sessionId;
     record6.usage = checkpoint.usage;
@@ -28124,7 +29284,7 @@ var WorkflowRunner = class {
     if (terminalObservedAt === null) {
       return;
     }
-    record6.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION;
+    record6.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION2;
     record6.status = "completed";
     record6.completedAt = terminalObservedAt;
     record6.interruptedAt = null;
@@ -28247,10 +29407,10 @@ var WorkflowRunner = class {
         let candidateValidated = false;
         try {
           const candidateEvidence = record6.reviewCandidate;
-          const expectedCandidateEvidencePath = path19.relative(
+          const expectedCandidateEvidencePath = path21.relative(
             this.store.runDirectory(state.runId),
             this.store.reviewCandidatePath(state.runId, attempt)
-          ).split(path19.sep).join(path19.posix.sep);
+          ).split(path21.sep).join(path21.posix.sep);
           if (candidateEvidence !== null && candidateEvidence !== void 0 && (candidateEvidence.evidencePath !== expectedCandidateEvidencePath || !(/* @__PURE__ */ new Set(["reviewer-write", "runner-rendered"])).has(
             candidateEvidence.source
           ) || candidateEvidence.canonical !== false)) {
@@ -28259,13 +29419,13 @@ var WorkflowRunner = class {
               "Review attempt has malformed candidate evidence identity."
             );
           }
-          const candidatePath = candidateEvidence === null || candidateEvidence === void 0 ? artifactPath : path19.relative(
+          const candidatePath = candidateEvidence === null || candidateEvidence === void 0 ? artifactPath : path21.relative(
             this.repoRoot,
-            path19.join(
+            path21.join(
               this.store.runDirectory(state.runId),
               candidateEvidence.evidencePath
             )
-          ).split(path19.sep).join(path19.posix.sep);
+          ).split(path21.sep).join(path21.posix.sep);
           let artifact = {
             path: artifactPath,
             candidatePath,
@@ -28305,7 +29465,7 @@ var WorkflowRunner = class {
               );
             await this.validateBaseCommit(state);
             await this.validateApproval(state);
-            validateReviewScope(parseCurrentReviewResult(result), {
+            validateReviewScope(parseCurrentReviewResult2(result), {
               snapshotDigest: frozen.digest,
               approvedArtifactPaths: frozen.approval.paths,
               requiredFindingIds: frozen.requiredFindingIds
@@ -28427,7 +29587,7 @@ var WorkflowRunner = class {
           state.planTaskCompletion = (await this.validateImplementationCompletion(
             state,
             attempt,
-            parsePersistedPhaseResult(record6.result)
+            parsePersistedPhaseResult2(record6.result)
           )).summary;
         } catch (error) {
           if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
@@ -28573,7 +29733,7 @@ function decodeAgentControlAnswer(input) {
     "answers"
   ]);
   requireSchema(value, AGENT_ANSWER_SCHEMA, AGENT_ANSWER_SCHEMA_VERSION);
-  const identifier2 = (candidate, label) => {
+  const identifier3 = (candidate, label) => {
     if (typeof candidate !== "string" || candidate.length === 0 || candidate.length > MAX_IDENTIFIER_LENGTH || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(candidate)) {
       throw controlInputError(
         `${label} must be a bounded canonical identifier.`
@@ -28598,7 +29758,7 @@ function decodeAgentControlAnswer(input) {
   const answers = value.answers.map((item, index) => {
     const answer = record2(item);
     exactKeys3(answer, ["decisionId", "response", "note"]);
-    const decisionId = identifier2(
+    const decisionId = identifier3(
       answer.decisionId,
       `answers[${index}].decisionId`
     );
@@ -28616,8 +29776,8 @@ function decodeAgentControlAnswer(input) {
       );
     }
     const kind = response.kind;
-    const optionId = kind === "option" ? identifier2(response.optionId, `answers[${index}].response.optionId`) : null;
-    const text = kind === "preference" ? inertText(response.text, `answers[${index}].response.text`, 8e3) : null;
+    const optionId = kind === "option" ? identifier3(response.optionId, `answers[${index}].response.optionId`) : null;
+    const text2 = kind === "preference" ? inertText(response.text, `answers[${index}].response.text`, 8e3) : null;
     if (kind === "option" && response.text !== null || kind === "preference" && response.optionId !== null) {
       throw controlInputError(
         `answers[${index}].response fields do not match its kind.`
@@ -28625,16 +29785,16 @@ function decodeAgentControlAnswer(input) {
     }
     return {
       decisionId,
-      response: { kind, optionId, text },
+      response: { kind, optionId, text: text2 },
       note: answer.note === null ? null : inertText(answer.note, `answers[${index}].note`, 2e3)
     };
   });
   return {
     schema: AGENT_ANSWER_SCHEMA,
     schemaVersion: AGENT_ANSWER_SCHEMA_VERSION,
-    runId: identifier2(value.runId, "runId"),
-    requestId: identifier2(value.requestId, "requestId"),
-    roundId: identifier2(value.roundId, "roundId"),
+    runId: identifier3(value.runId, "runId"),
+    requestId: identifier3(value.requestId, "requestId"),
+    roundId: identifier3(value.roundId, "roundId"),
     answers
   };
 }
@@ -28670,7 +29830,7 @@ function agentControlCapabilities() {
     schemaVersion: AGENT_CAPABILITIES_SCHEMA_VERSION,
     controlContractVersion: AGENT_CONTROL_CONTRACT_VERSION,
     orchestratorVersion: package_default.version,
-    umbrellaContractVersion: CONTRACT_VERSION,
+    umbrellaContractVersion: CONTRACT_VERSION2,
     artifactStorage: {
       declarationSchemas: ["banzai-artifact-layout/v1"],
       bindingSchemas: ["banzai-work-binding/v1"],
@@ -28714,7 +29874,7 @@ function boundedNullableString(value, label, maximum = MAX_REASON_LENGTH) {
 }
 function boundedPath(value, label) {
   boundedString(value, label, MAX_PATH_LENGTH);
-  if (path20.posix.isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value) || value.includes("\\") || path20.posix.normalize(value) !== value || value.split("/").some((segment) => segment === "." || segment === "..")) {
+  if (path22.posix.isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value) || value.includes("\\") || path22.posix.normalize(value) !== value || value.split("/").some((segment) => segment === "." || segment === "..")) {
     throw statusError(
       `${label} must be a normalized repository-relative path.`
     );
@@ -28740,11 +29900,11 @@ function consultationStatusString(value, label, maximum) {
   return value;
 }
 function consultationStatusIdentifier(value, label) {
-  const identifier2 = consultationStatusString(value, label, 128);
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(identifier2)) {
+  const identifier3 = consultationStatusString(value, label, 128);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(identifier3)) {
     throw statusError(`${label} is not a canonical identifier.`);
   }
-  return identifier2;
+  return identifier3;
 }
 function projectConsultationCard(card, index) {
   const label = `consultation decision ${index + 1}`;
@@ -28860,8 +30020,8 @@ function projectConsultationRequest(request) {
     throw statusError("The consultation request repeats a decision identity.");
   }
   const projected = {
-    schema: DECISION_CONSULTATION_SCHEMA,
-    schemaVersion: DECISION_CONSULTATION_SCHEMA_VERSION,
+    schema: DECISION_CONSULTATION_SCHEMA2,
+    schemaVersion: DECISION_CONSULTATION_SCHEMA_VERSION2,
     requestId: consultationStatusIdentifier(request.requestId, "request id"),
     roundId: consultationStatusIdentifier(request.roundId, "round id"),
     decisions
@@ -28931,7 +30091,7 @@ function pendingGate(status) {
       kind: "adr_approval",
       artifactPaths: artifactPaths2,
       adrIds: artifactPaths2.map((value) => {
-        const match = /^(\d{4})-/.exec(path20.posix.basename(value));
+        const match = /^(\d{4})-/.exec(path22.posix.basename(value));
         if (match?.[1] === void 0) {
           throw statusError("An ADR artifact path has no stable numeric ID.");
         }
@@ -29322,8 +30482,8 @@ async function executeAgentControlCommand(command, createRunner, io, defaultDeci
 // src/ansi.ts
 var ESC = "\x1B[";
 var RESET = `${ESC}0m`;
-function code(open10) {
-  const prefix = `${ESC}${open10}m`;
+function code(open11) {
+  const prefix = `${ESC}${open11}m`;
   return (value) => `${prefix}${value}${RESET}`;
 }
 var BRAND = {
@@ -29423,9 +30583,9 @@ function resolveCliMode(args, inputIsTty, outputIsTty) {
 }
 
 // src/context-report.ts
-import { constants as constants10 } from "node:fs";
-import { lstat as lstat11, open as open9, readdir as readdir7 } from "node:fs/promises";
-import path21 from "node:path";
+import { constants as constants11 } from "node:fs";
+import { lstat as lstat12, open as open10, readdir as readdir8 } from "node:fs/promises";
+import path23 from "node:path";
 var WORKFLOWS2 = [
   "unselected",
   "quick-fix",
@@ -29457,7 +30617,7 @@ var METRICS2 = [
   "session_skills",
   "session_commands"
 ];
-function invalid6(runId2, attemptId, detail) {
+function invalid8(runId2, attemptId, detail) {
   throw new BanzaiError(
     "INVALID_CONTEXT_EVIDENCE",
     `Invalid context evidence for run ${runId2}, attempt ${attemptId}: ${detail}`
@@ -29479,19 +30639,19 @@ function decodeUsage(value, runId2, attemptId) {
   if (value === null) return null;
   const item = record3(value);
   if (item === null)
-    return invalid6(runId2, attemptId, "Canonical usage is invalid.");
+    return invalid8(runId2, attemptId, "Canonical usage is invalid.");
   const number2 = (key, nullable = false) => {
     const observed3 = item[key];
     if (nullable && observed3 === null) return null;
     if (typeof observed3 !== "number" || !Number.isFinite(observed3) || observed3 < 0 || key !== "costUsd" && !Number.isInteger(observed3)) {
-      return invalid6(runId2, attemptId, `Canonical usage ${key} is invalid.`);
+      return invalid8(runId2, attemptId, `Canonical usage ${key} is invalid.`);
     }
     return observed3;
   };
   const requiredNumber = (key) => {
     const value2 = number2(key);
     if (value2 === null) {
-      return invalid6(runId2, attemptId, `Canonical usage ${key} is invalid.`);
+      return invalid8(runId2, attemptId, `Canonical usage ${key} is invalid.`);
     }
     return value2;
   };
@@ -29507,13 +30667,13 @@ function decodeCanonicalAttempt(value, file, runId2) {
   const identity = record3(item?.attempt);
   const safeAttemptId = safeIdentifier(identity?.id) ? identity.id : "unknown";
   if (item === null || identity === null) {
-    return invalid6(runId2, safeAttemptId, "Canonical attempt is invalid.");
+    return invalid8(runId2, safeAttemptId, "Canonical attempt is invalid.");
   }
   if (!safeIdentifier(identity.id)) {
-    return invalid6(runId2, "unknown", "Canonical attempt identity is invalid.");
+    return invalid8(runId2, "unknown", "Canonical attempt identity is invalid.");
   }
   if (typeof identity.kind !== "string" || !PHASES2.includes(identity.kind)) {
-    return invalid6(runId2, identity.id, "Canonical attempt phase is invalid.");
+    return invalid8(runId2, identity.id, "Canonical attempt phase is invalid.");
   }
   const kind = identity.kind;
   const attempt = {
@@ -29522,14 +30682,14 @@ function decodeCanonicalAttempt(value, file, runId2) {
     mutable: mutableForPhase(kind)
   };
   if (identity.mutable !== attempt.mutable || file !== `${attempt.id}-${attempt.kind}.json`) {
-    return invalid6(
+    return invalid8(
       runId2,
       attempt.id,
       "Canonical attempt identity conflicts with its owner."
     );
   }
   if (item.status !== "started" && item.status !== "completed" && item.status !== "failed" && item.status !== "interrupted") {
-    return invalid6(runId2, attempt.id, "Canonical attempt status is invalid.");
+    return invalid8(runId2, attempt.id, "Canonical attempt status is invalid.");
   }
   return { attempt, usage: decodeUsage(item.usage, runId2, attempt.id) };
 }
@@ -29632,7 +30792,7 @@ function compareUsage(attempt) {
       0
     );
     if (Math.abs(total - canonical) > Number.EPSILON) {
-      invalid6(
+      invalid8(
         attempt.runId,
         attempt.attempt.id,
         `Per-invocation ${metric3} conflicts with canonical attempt usage.`
@@ -29748,9 +30908,9 @@ function aggregateContextEvidence(attempts) {
 function missing2(error) {
   return error.code === "ENOENT";
 }
-async function ownedDirectoryStatus(directory2) {
+async function ownedDirectoryStatus(directory3) {
   try {
-    return (await lstat11(directory2)).isDirectory() ? "owned" : "invalid";
+    return (await lstat12(directory3)).isDirectory() ? "owned" : "invalid";
   } catch (error) {
     return missing2(error) ? "missing" : "invalid";
   }
@@ -29765,7 +30925,7 @@ async function runDirectories(runsDirectory) {
     );
   }
   try {
-    const directories2 = (await readdir7(runsDirectory, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
+    const directories2 = (await readdir8(runsDirectory, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
     if (directories2.some((runId2) => !safeIdentifier(runId2))) {
       throw new BanzaiError(
         "EVAL_READ_FAILED",
@@ -29785,7 +30945,7 @@ async function runDirectories(runsDirectory) {
 async function readOwnedText(file) {
   let handle;
   try {
-    handle = await open9(file, constants10.O_RDONLY | constants10.O_NOFOLLOW);
+    handle = await open10(file, constants11.O_RDONLY | constants11.O_NOFOLLOW);
   } catch (error) {
     return missing2(error) ? { status: "missing" } : { status: "invalid" };
   }
@@ -29808,7 +30968,7 @@ async function readJson3(file) {
   }
 }
 async function readRunMetadata(runDirectory, runId2) {
-  const value = await readJson3(path21.join(runDirectory, "state.json"));
+  const value = await readJson3(path23.join(runDirectory, "state.json"));
   const state = record3(value);
   const selection = record3(state?.workflowSelection);
   if (state?.runId !== runId2 || typeof state.createdAt !== "string" || !Number.isFinite(Date.parse(state.createdAt))) {
@@ -29821,7 +30981,7 @@ async function readRunMetadata(runDirectory, runId2) {
   };
 }
 async function collectRunAttempts(runDirectory, runId2, workflow) {
-  const attemptsDirectory = path21.join(runDirectory, "attempts");
+  const attemptsDirectory = path23.join(runDirectory, "attempts");
   const directoryStatus = await ownedDirectoryStatus(attemptsDirectory);
   if (directoryStatus === "missing") return [];
   if (directoryStatus === "invalid") {
@@ -29832,7 +30992,7 @@ async function collectRunAttempts(runDirectory, runId2, workflow) {
   }
   let files;
   try {
-    files = (await readdir7(attemptsDirectory, { withFileTypes: true })).filter(
+    files = (await readdir8(attemptsDirectory, { withFileTypes: true })).filter(
       (entry) => entry.isFile() && /-(selection|plan|implementation|fix|review)\.json$/u.test(entry.name)
     ).map((entry) => entry.name).sort();
   } catch (error) {
@@ -29845,17 +31005,17 @@ async function collectRunAttempts(runDirectory, runId2, workflow) {
   const attempts = [];
   const seen = /* @__PURE__ */ new Set();
   for (const file of files) {
-    const raw = await readJson3(path21.join(attemptsDirectory, file));
+    const raw = await readJson3(path23.join(attemptsDirectory, file));
     const canonical = decodeCanonicalAttempt(raw, file, runId2);
     if (seen.has(canonical.attempt.id)) {
-      invalid6(
+      invalid8(
         runId2,
         canonical.attempt.id,
         "Canonical attempt identity is duplicated."
       );
     }
     seen.add(canonical.attempt.id);
-    const contextFile = path21.join(
+    const contextFile = path23.join(
       attemptsDirectory,
       `${canonical.attempt.id}.context.json`
     );
@@ -29864,7 +31024,7 @@ async function collectRunAttempts(runDirectory, runId2, workflow) {
     if (ownedContext.status === "missing") {
       contextRaw = null;
     } else if (ownedContext.status === "invalid") {
-      invalid6(
+      invalid8(
         runId2,
         canonical.attempt.id,
         "Context ledger is not a regular owned file."
@@ -29873,7 +31033,7 @@ async function collectRunAttempts(runDirectory, runId2, workflow) {
       try {
         contextRaw = JSON.parse(ownedContext.text);
       } catch {
-        invalid6(
+        invalid8(
           runId2,
           canonical.attempt.id,
           "Context ledger JSON is malformed."
@@ -29882,7 +31042,7 @@ async function collectRunAttempts(runDirectory, runId2, workflow) {
     }
     const ledger = contextRaw === null ? null : decodeContextAttemptLedger(contextRaw, runId2, canonical.attempt.id);
     if (ledger !== null && (ledger.attempt.kind !== canonical.attempt.kind || ledger.attempt.mutable !== canonical.attempt.mutable)) {
-      invalid6(
+      invalid8(
         runId2,
         canonical.attempt.id,
         "Context ledger owner conflicts with its canonical attempt."
@@ -29897,7 +31057,7 @@ function inCohort(createdAt, options) {
   return (options.from === null || timestamp >= Date.parse(options.from)) && (options.to === null || timestamp < Date.parse(options.to));
 }
 async function collectContextReport(repoRoot, options) {
-  const banzaiDirectory = path21.join(repoRoot, ".banzai");
+  const banzaiDirectory = path23.join(repoRoot, ".banzai");
   const banzaiStatus = await ownedDirectoryStatus(banzaiDirectory);
   if (banzaiStatus === "invalid") {
     throw new BanzaiError(
@@ -29905,7 +31065,7 @@ async function collectContextReport(repoRoot, options) {
       "Context evaluation evidence could not be read safely."
     );
   }
-  const runsDirectory = path21.join(banzaiDirectory, "runs");
+  const runsDirectory = path23.join(banzaiDirectory, "runs");
   const candidates = banzaiStatus === "missing" ? [] : await runDirectories(runsDirectory);
   const candidateSet = new Set(candidates);
   for (const runId2 of options.runIds) {
@@ -29921,7 +31081,7 @@ async function collectContextReport(repoRoot, options) {
   const evidence2 = [];
   let includedRunCount = 0;
   for (const runId2 of selected) {
-    const runDirectory = path21.join(runsDirectory, runId2);
+    const runDirectory = path23.join(runsDirectory, runId2);
     if (await ownedDirectoryStatus(runDirectory) !== "owned") {
       throw new BanzaiError(
         "EVAL_READ_FAILED",
@@ -30101,9 +31261,9 @@ async function executeContextReportWithOptions(repoRoot, options, io) {
 }
 
 // src/doctor.ts
-import { constants as constants11 } from "node:fs";
-import { access as access5, lstat as lstat12, readFile as readFile12, realpath as realpath8, stat as stat3 } from "node:fs/promises";
-import path22 from "node:path";
+import { constants as constants12 } from "node:fs";
+import { access as access5, lstat as lstat13, readFile as readFile12, realpath as realpath9, stat as stat3 } from "node:fs/promises";
+import path24 from "node:path";
 import process5 from "node:process";
 var RUN_STATUSES3 = /* @__PURE__ */ new Set([
   "created",
@@ -30126,15 +31286,15 @@ function isRecord4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function executableCandidates2(command, cwd, env) {
-  if (command.includes(path22.sep)) {
-    return [path22.resolve(cwd, command)];
+  if (command.includes(path24.sep)) {
+    return [path24.resolve(cwd, command)];
   }
   if (env.PATH === void 0) {
     return [];
   }
-  return env.PATH.split(path22.delimiter).map(
-    (entry) => path22.join(
-      entry.length === 0 || !path22.isAbsolute(entry) ? path22.resolve(cwd, entry) : entry,
+  return env.PATH.split(path24.delimiter).map(
+    (entry) => path24.join(
+      entry.length === 0 || !path24.isAbsolute(entry) ? path24.resolve(cwd, entry) : entry,
       command
     )
   );
@@ -30142,7 +31302,7 @@ function executableCandidates2(command, cwd, env) {
 async function executableAvailable(command, cwd, env) {
   for (const candidate of executableCandidates2(command, cwd, env)) {
     try {
-      await access5(candidate, constants11.X_OK);
+      await access5(candidate, constants12.X_OK);
       if ((await stat3(candidate)).isFile()) {
         return true;
       }
@@ -30180,35 +31340,35 @@ function isMissingFile2(error) {
 async function readBoundedFile(filePath, boundaryPath, repoRoot) {
   let resolvedRoot;
   try {
-    resolvedRoot = await realpath8(repoRoot);
+    resolvedRoot = await realpath9(repoRoot);
   } catch {
     throw new Error("repository root cannot be resolved");
   }
-  const lexicalRoot = path22.resolve(repoRoot);
-  const lexicalBoundary = path22.resolve(boundaryPath);
-  const relativeBoundary = path22.relative(lexicalRoot, lexicalBoundary);
-  if (relativeBoundary.length === 0 || relativeBoundary === ".." || relativeBoundary.startsWith(`..${path22.sep}`) || path22.isAbsolute(relativeBoundary)) {
+  const lexicalRoot = path24.resolve(repoRoot);
+  const lexicalBoundary = path24.resolve(boundaryPath);
+  const relativeBoundary = path24.relative(lexicalRoot, lexicalBoundary);
+  if (relativeBoundary.length === 0 || relativeBoundary === ".." || relativeBoundary.startsWith(`..${path24.sep}`) || path24.isAbsolute(relativeBoundary)) {
     throw new Error("control boundary is outside the repository");
   }
-  await lstat12(boundaryPath);
+  await lstat13(boundaryPath);
   let resolvedBoundary;
   try {
-    resolvedBoundary = await realpath8(boundaryPath);
+    resolvedBoundary = await realpath9(boundaryPath);
     const boundaryStat = await stat3(resolvedBoundary);
-    if (resolvedBoundary !== path22.resolve(resolvedRoot, relativeBoundary) || !boundaryStat.isDirectory()) {
+    if (resolvedBoundary !== path24.resolve(resolvedRoot, relativeBoundary) || !boundaryStat.isDirectory()) {
       throw new Error("control boundary escapes the repository");
     }
   } catch {
     throw new Error("control boundary cannot be resolved safely");
   }
-  await lstat12(filePath);
+  await lstat13(filePath);
   let resolvedFile;
   try {
-    resolvedFile = await realpath8(filePath);
+    resolvedFile = await realpath9(filePath);
   } catch {
     throw new Error("control file cannot be resolved");
   }
-  if (resolvedFile !== resolvedBoundary && !resolvedFile.startsWith(`${resolvedBoundary}${path22.sep}`)) {
+  if (resolvedFile !== resolvedBoundary && !resolvedFile.startsWith(`${resolvedBoundary}${path24.sep}`)) {
     throw new Error("control file escapes its boundary");
   }
   return await readFile12(resolvedFile, "utf8");
@@ -30222,7 +31382,7 @@ function configVersionCheck(document) {
       "Configuration version cannot be checked until JSON is readable."
     );
   }
-  if (document.contractVersion !== CONTRACT_VERSION) {
+  if (document.contractVersion !== CONTRACT_VERSION2) {
     return check(
       "config.version",
       "config",
@@ -30238,7 +31398,7 @@ function configVersionCheck(document) {
       "Configuration schema version 1 is legacy and requires manual migration."
     );
   }
-  if (document.schemaVersion !== 2) {
+  if (document.schemaVersion !== 2 && document.schemaVersion !== 3) {
     return check(
       "config.version",
       "config",
@@ -30300,10 +31460,10 @@ async function claudeInstructionsCheck(config, dependencies) {
       "warning",
       "Instruction resource parity is unverifiable without a valid configuration."
     );
-  let directory2;
+  let directory3;
   try {
     const resolved = await (dependencies.resolveClaudeInvocationScope ?? resolveClaudeInvocationScope)(config.claudeEnvironment);
-    directory2 = config.claudeEnvironment.mode === "ambient" ? null : resolved.scope.pluginDirectory;
+    directory3 = config.claudeEnvironment.mode === "ambient" ? null : resolved.scope.pluginDirectory;
   } catch {
     return check(
       "claude.instructions",
@@ -30315,7 +31475,7 @@ async function claudeInstructionsCheck(config, dependencies) {
   const results = await Promise.all(
     MODEL_ROLES.map(
       (role) => inspectInstructionParity(
-        (vendorFor(config.models[role].executable) ?? FALLBACK_VENDOR[role]) === "claude" ? directory2 : null,
+        (vendorFor(config.models[role].executable) ?? FALLBACK_VENDOR[role]) === "claude" ? directory3 : null,
         instructionPhasesForRole(role, null) ?? []
       )
     )
@@ -30417,8 +31577,8 @@ async function configuredExecutableCheck(id, commands, repoRoot, dependencies) {
   );
 }
 async function activeRunCheck(repoRoot) {
-  const banzaiRoot = path22.join(repoRoot, ".banzai");
-  const pointerPath = path22.join(banzaiRoot, "active-run.json");
+  const banzaiRoot = path24.join(repoRoot, ".banzai");
+  const pointerPath = path24.join(banzaiRoot, "active-run.json");
   let pointerRaw;
   try {
     pointerRaw = await readBoundedFile(pointerPath, banzaiRoot, repoRoot);
@@ -30462,8 +31622,8 @@ async function activeRunCheck(repoRoot) {
       "The active-run pointer contains an unsafe run identifier."
     );
   }
-  const runsRoot = path22.join(banzaiRoot, "runs");
-  const statePath = path22.join(runsRoot, pointer.runId, "state.json");
+  const runsRoot = path24.join(banzaiRoot, "runs");
+  const statePath = path24.join(runsRoot, pointer.runId, "state.json");
   let stateRaw;
   try {
     stateRaw = await readBoundedFile(statePath, runsRoot, repoRoot);
@@ -30486,7 +31646,7 @@ async function activeRunCheck(repoRoot) {
       "The referenced run state is malformed."
     );
   }
-  if (!isRecord4(state) || ![1, 2, 3, 4].includes(state.schemaVersion) || typeof state.runId !== "string" || typeof state.repoRoot !== "string" || typeof state.status !== "string" || !RUN_STATUSES3.has(state.status)) {
+  if (!isRecord4(state) || ![1, 2, 3, 4, 5].includes(state.schemaVersion) || typeof state.runId !== "string" || typeof state.repoRoot !== "string" || typeof state.status !== "string" || !RUN_STATUSES3.has(state.status)) {
     return check(
       "run.active",
       "run-state",
@@ -30494,7 +31654,7 @@ async function activeRunCheck(repoRoot) {
       "The referenced run state uses an unsupported structure."
     );
   }
-  if (state.schemaVersion === 4) {
+  if (state.schemaVersion === 4 || state.schemaVersion === 5) {
     try {
       await inspectBoundWork2(
         repoRoot,
@@ -30510,8 +31670,8 @@ async function activeRunCheck(repoRoot) {
     }
   }
   const [stateRepoRoot, checkoutRoot] = await Promise.all([
-    path22.isAbsolute(state.repoRoot) ? realpath8(state.repoRoot).catch(() => null) : Promise.resolve(null),
-    realpath8(repoRoot).catch(() => null)
+    path24.isAbsolute(state.repoRoot) ? realpath9(state.repoRoot).catch(() => null) : Promise.resolve(null),
+    realpath9(repoRoot).catch(() => null)
   ]);
   if (state.runId !== pointer.runId || stateRepoRoot === null || checkoutRoot === null || stateRepoRoot !== checkoutRoot) {
     return check(
@@ -30541,8 +31701,8 @@ function isRfc3339Instant(value) {
   return Number.isFinite(time) && new Date(time).toISOString() === value;
 }
 async function runnerLockCheck(repoRoot, dependencies) {
-  const banzaiRoot = path22.join(repoRoot, ".banzai");
-  const lockPath = path22.join(banzaiRoot, "runner.lock");
+  const banzaiRoot = path24.join(repoRoot, ".banzai");
+  const lockPath = path24.join(banzaiRoot, "runner.lock");
   let raw;
   try {
     raw = await readBoundedFile(lockPath, banzaiRoot, repoRoot);
@@ -30656,9 +31816,9 @@ async function inspectDoctor(repoRoot, dependencies = DEFAULT_DEPENDENCIES) {
   let configDocument = null;
   let config = null;
   try {
-    const banzaiRoot = path22.join(repoRoot, ".banzai");
+    const banzaiRoot = path24.join(repoRoot, ".banzai");
     const raw = await readBoundedFile(
-      path22.join(repoRoot, CONFIG_FILE),
+      path24.join(repoRoot, CONFIG_FILE),
       banzaiRoot,
       repoRoot
     );
@@ -30917,7 +32077,7 @@ async function executeDoctor(repoRoot, args, io, inspect = inspectDoctor) {
 
 // src/evaluation-kpi-cli.ts
 import { readFile as readFile13 } from "node:fs/promises";
-import path23 from "node:path";
+import path25 from "node:path";
 
 // src/evaluation-kpi.ts
 var KPI_WORKFLOW_ORDER = [
@@ -31469,10 +32629,10 @@ function validateRun(sourceName, run, index) {
     throw inputError(sourceName, `runs[${index}] is missing usage metrics`);
   }
 }
-function decodeEvaluationExportInput(text, sourceName) {
+function decodeEvaluationExportInput(text2, sourceName) {
   let parsed;
   try {
-    parsed = JSON.parse(text);
+    parsed = JSON.parse(text2);
   } catch {
     throw inputError(sourceName, "the file is not valid JSON");
   }
@@ -31505,6 +32665,110 @@ function decodeEvaluationExportInput(text, sourceName) {
     validateRun(sourceName, run, index);
   });
   return parsed;
+}
+function decodeEvaluationExportV2Input(text2, sourceName) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text2);
+  } catch {
+    throw inputError(sourceName, "invalid JSON");
+  }
+  if (!isRecord5(parsed) || parsed.schema !== "banzai-evaluation-export/v2" || parsed.schemaVersion !== 2 || !Array.isArray(parsed.runs) || Object.keys(parsed).sort().join(",") !== "aggregates,cohort,issues,runs,schema,schemaVersion")
+    throw inputError(sourceName, "export v2 is required");
+  decodeEvaluationExportInput(
+    JSON.stringify({
+      ...parsed,
+      schema: EVALUATION_EXPORT_SCHEMA,
+      schemaVersion: 1
+    }),
+    sourceName
+  );
+  for (const run of parsed.runs) {
+    const evidence2 = run.verificationEvidence;
+    if (!isRecord5(evidence2) || Object.keys(evidence2).sort().join(",") !== "coverage,dispositions,physicalAttempts" || !["exact", "incomplete"].includes(evidence2.coverage) || !Array.isArray(evidence2.physicalAttempts) || !Array.isArray(evidence2.dispositions))
+      throw inputError(sourceName, "invalid verification v2 evidence");
+    const successes = /* @__PURE__ */ new Set();
+    for (const [index, attempt] of evidence2.physicalAttempts.entries()) {
+      if (!isRecord5(attempt) || Object.keys(attempt).sort().join(",") !== "durationMs,ordinal,status" || attempt.ordinal !== index + 1 || !["started", "completed", "failed", "interrupted"].includes(
+        attempt.status
+      ) || !(attempt.durationMs === null || typeof attempt.durationMs === "number" && Number.isFinite(attempt.durationMs) && attempt.durationMs >= 0))
+        throw inputError(sourceName, "invalid physical ordinal evidence");
+      if (attempt.status === "completed") successes.add(attempt.ordinal);
+    }
+    const keys3 = /* @__PURE__ */ new Set();
+    for (const item of evidence2.dispositions) {
+      if (!isRecord5(item) || Object.keys(item).sort().join(",") !== "check,kind,origin,round" || ![item.round, item.check].every(
+        (n) => typeof n === "number" && Number.isSafeInteger(n) && n > 0
+      ) || !["executed", "reused", "pending"].includes(item.kind))
+        throw inputError(sourceName, "invalid disposition");
+      const key = JSON.stringify([item.round, item.check]);
+      if (keys3.has(key) || (item.kind === "pending" ? item.origin !== null || evidence2.coverage === "exact" : !successes.has(item.origin)))
+        throw inputError(sourceName, "inconsistent terminal disposition");
+      keys3.add(key);
+    }
+    if (evidence2.coverage === "exact" && evidence2.dispositions.length === 0)
+      throw inputError(
+        sourceName,
+        "exact coverage requires terminal check evidence"
+      );
+  }
+  return parsed;
+}
+function deriveEvaluationKpiV2(sources) {
+  return {
+    schema: "banzai-evaluation-kpi/v2",
+    schemaVersion: 2,
+    sources: sources.map((source, index) => {
+      const report = decodeEvaluationExportV2Input(
+        JSON.stringify({
+          schema: source.schema,
+          schemaVersion: source.schemaVersion,
+          cohort: source.cohort,
+          runs: source.runs,
+          issues: source.issues,
+          aggregates: {}
+        }),
+        `source ${index + 1}`
+      );
+      const included = report.runs.filter(
+        (run) => run.cohortMembership === "included"
+      );
+      const exact2 = included.filter(
+        (run) => run.verificationEvidence.coverage === "exact"
+      );
+      const dispositions = exact2.flatMap(
+        (run) => run.verificationEvidence.dispositions
+      );
+      const reusedChecks = dispositions.filter(
+        (item) => item.kind === "reused"
+      ).length;
+      const executedChecks = dispositions.filter(
+        (item) => item.kind === "executed"
+      ).length;
+      const denominator = reusedChecks + executedChecks;
+      const coverage = {
+        exact: exact2.length,
+        incomplete: included.length - exact2.length
+      };
+      return {
+        ordinal: index + 1,
+        runs: included.length,
+        coverage,
+        physicalAttempts: exact2.reduce(
+          (sum, run) => sum + run.verificationEvidence.physicalAttempts.length,
+          0
+        ),
+        executedChecks,
+        reusedChecks,
+        reuseRatio: {
+          numerator: reusedChecks,
+          denominator,
+          value: denominator === 0 ? null : reusedChecks / denominator,
+          coverage
+        }
+      };
+    })
+  };
 }
 
 // src/evaluation-kpi-render.ts
@@ -31607,12 +32871,18 @@ function renderEvaluationKpiMarkdown(report) {
   lines.push("");
   return lines.join("\n");
 }
+function renderEvaluationKpiV2Markdown(report) {
+  return "# Banzai Evaluation KPIs\n\nSchema: `banzai-evaluation-kpi/v2` (version 2)\n\nCounts and ratios use exact runs only; incomplete coverage remains explicit.\n\n| Source | Physical attempts | Executed checks | Reused checks | Reuse ratio | Exact / incomplete runs |\n| --- | --- | --- | --- | --- | --- |\n" + report.sources.map(
+    (source) => `| ${source.ordinal} | ${source.physicalAttempts} | ${source.executedChecks} | ${source.reusedChecks} | ${source.reuseRatio.value ?? "unavailable"} (${source.reuseRatio.numerator}/${source.reuseRatio.denominator}) | ${source.coverage.exact} / ${source.coverage.incomplete} |`
+  ).join("\n") + "\n";
+}
 
 // src/evaluation-kpi-cli.ts
 function parseEvaluationKpiArgs(args) {
   let format = "markdown";
   let from = null;
   let to = null;
+  let schemaVersion;
   let jsonSeen = false;
   let fromSeen = false;
   let toSeen = false;
@@ -31620,6 +32890,17 @@ function parseEvaluationKpiArgs(args) {
   const inputs = [];
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
+    if (argument === "--schema-version") {
+      const value = optionValue(args, index);
+      if (schemaVersion !== void 0 || !["1", "2"].includes(value))
+        throw new BanzaiError(
+          "INVALID_EVAL_OPTION",
+          "Evaluation schema version must be 1 or 2 and specified once."
+        );
+      schemaVersion = value === "1" ? 1 : 2;
+      index += 1;
+      continue;
+    }
     if (argument === "--json") {
       if (jsonSeen) {
         throw new BanzaiError(
@@ -31685,6 +32966,7 @@ function parseEvaluationKpiArgs(args) {
     );
   }
   return {
+    ...schemaVersion === void 0 ? {} : { schemaVersion },
     format,
     from,
     to,
@@ -31699,11 +32981,31 @@ function renderKpi(options, sources, io) {
   );
 }
 async function executeEvaluationKpiFromInputs(options, io) {
+  if (options.schemaVersion === 2) {
+    const inputs = [];
+    for (const file of options.inputs) {
+      let text2;
+      try {
+        text2 = await readFile13(file, "utf8");
+      } catch {
+        throw new BanzaiError(
+          "INVALID_EVAL_INPUT",
+          "Evaluation KPI input cannot be read."
+        );
+      }
+      inputs.push(decodeEvaluationExportV2Input(text2, file));
+    }
+    const report = deriveEvaluationKpiV2(inputs);
+    io.stdout(
+      options.format === "json" ? JSON.stringify(report, null, 2) + "\n" : renderEvaluationKpiV2Markdown(report)
+    );
+    return;
+  }
   const sources = [];
   for (const [index, file] of options.inputs.entries()) {
-    let text;
+    let text2;
     try {
-      text = await readFile13(file, "utf8");
+      text2 = await readFile13(file, "utf8");
     } catch {
       throw new BanzaiError(
         "INVALID_EVAL_INPUT",
@@ -31711,13 +33013,21 @@ async function executeEvaluationKpiFromInputs(options, io) {
       );
     }
     sources.push({
-      label: `${index + 1}: ${path23.basename(file)}`,
-      report: decodeEvaluationExportInput(text, file)
+      label: `${index + 1}: ${path25.basename(file)}`,
+      report: decodeEvaluationExportInput(text2, file)
     });
   }
   renderKpi(options, sources, io);
 }
 async function executeEvaluationKpiFromCheckout(repoRoot, options, io) {
+  if (options.schemaVersion === 2) {
+    const exported = await collectEvaluationExportV2(repoRoot, options);
+    const report2 = deriveEvaluationKpiV2([exported]);
+    io.stdout(
+      options.format === "json" ? JSON.stringify(report2, null, 2) + "\n" : renderEvaluationKpiV2Markdown(report2)
+    );
+    return;
+  }
   const report = await collectEvaluationExport(repoRoot, {
     format: "json",
     from: options.from,
@@ -31807,28 +33117,28 @@ function safePreview(content) {
   return `${visible.slice(0, PREVIEW_CHARACTER_LIMIT)}
 \u2026 preview truncated; full pasted text will be submitted`;
 }
-function completePaste(capture, pastes) {
-  const content = normalizedPasteContent(capture.content);
+function completePaste(capture2, pastes) {
+  const content = normalizedPasteContent(capture2.content);
   const latest = pastes.at(-1);
-  if (latest !== void 0 && !latest.expanded && latest.content === content && capture.line.slice(
-    capture.cursor - latest.marker.length,
-    capture.cursor
+  if (latest !== void 0 && !latest.expanded && latest.content === content && capture2.line.slice(
+    capture2.cursor - latest.marker.length,
+    capture2.cursor
   ) === latest.marker) {
     return {
-      line: capture.line,
-      cursor: capture.cursor,
+      line: capture2.line,
+      cursor: capture2.cursor,
       pastes: pastes.map(
         (paste) => paste.id === latest.id ? { ...paste, expanded: true } : paste
       )
     };
   }
   if (!shouldCollapsePaste(content)) {
-    const inserted2 = insertAt(capture.line, capture.cursor, content);
+    const inserted2 = insertAt(capture2.line, capture2.cursor, content);
     return { ...inserted2, pastes: [...pastes] };
   }
   const id = (latest?.id ?? 0) + 1;
   const marker = pasteMarker(id, content);
-  const inserted = insertAt(capture.line, capture.cursor, marker);
+  const inserted = insertAt(capture2.line, capture2.cursor, marker);
   return {
     ...inserted,
     pastes: [...pastes, { id, marker, content, expanded: false }]
@@ -31894,14 +33204,14 @@ var collapsedPastePrompt = createPrompt(
         replaceReadlineLine(promptReadline, lineRef.current, cursorRef.current);
         return;
       }
-      const capture = captureRef.current;
-      if (capture !== void 0 && key.name !== "paste-end") {
-        capture.content += pasteContentFromKey(key);
-        replaceReadlineLine(promptReadline, capture.line, capture.cursor);
+      const capture2 = captureRef.current;
+      if (capture2 !== void 0 && key.name !== "paste-end") {
+        capture2.content += pasteContentFromKey(key);
+        replaceReadlineLine(promptReadline, capture2.line, capture2.cursor);
         return;
       }
       if (key.name === "paste-end") {
-        if (capture === void 0 || capture.content.length === 0) {
+        if (capture2 === void 0 || capture2.content.length === 0) {
           captureRef.current = void 0;
           replaceReadlineLine(
             promptReadline,
@@ -31910,7 +33220,7 @@ var collapsedPastePrompt = createPrompt(
           );
           return;
         }
-        const completed = completePaste(capture, pastesRef.current);
+        const completed = completePaste(capture2, pastesRef.current);
         captureRef.current = void 0;
         lineRef.current = completed.line;
         pastesRef.current = completed.pastes;
@@ -32102,24 +33412,24 @@ function createInterruptHandler(dependencies) {
 }
 
 // src/live-compatibility.ts
-import { createHash as createHash15 } from "node:crypto";
+import { createHash as createHash17 } from "node:crypto";
 import {
   access as access6,
   chmod as chmod3,
   cp,
-  lstat as lstat13,
+  lstat as lstat14,
   mkdir as mkdir8,
   mkdtemp,
   readFile as readFile14,
-  readdir as readdir8,
+  readdir as readdir9,
   readlink,
-  realpath as realpath9,
+  realpath as realpath10,
   rm,
   stat as stat4,
   writeFile as writeFile5
 } from "node:fs/promises";
 import os2 from "node:os";
-import path24 from "node:path";
+import path26 from "node:path";
 
 // ../../release-policy.json
 var release_policy_default = {
@@ -32430,7 +33740,7 @@ var CHECK_IDS = [
   "cleanup.complete"
 ];
 var EXPECTED_REVIEW_RESULT = {
-  contractVersion: CONTRACT_VERSION,
+  contractVersion: CONTRACT_VERSION2,
   verdict: "pass",
   summary: "Live compatibility permission probe completed.",
   findings: [],
@@ -32665,11 +33975,11 @@ function versionAtLeast2(actual, minimum) {
 async function inspectAuthRoot(root) {
   let fileCount = 0;
   let byteCount = 0;
-  async function visit(directory2) {
-    const entries = await readdir8(directory2, { withFileTypes: true });
+  async function visit(directory3) {
+    const entries = await readdir9(directory3, { withFileTypes: true });
     for (const entry of entries) {
-      const entryPath = path24.join(directory2, entry.name);
-      const metadata2 = await lstat13(entryPath);
+      const entryPath = path26.join(directory3, entry.name);
+      const metadata2 = await lstat14(entryPath);
       if (metadata2.isSymbolicLink()) {
         throw new BanzaiError(
           "LIVE_AUTH_UNAVAILABLE",
@@ -32712,9 +34022,9 @@ async function inspectAuthRoot(root) {
 }
 async function secureCopiedTree(root) {
   await chmod3(root, 448);
-  const entries = await readdir8(root, { withFileTypes: true });
+  const entries = await readdir9(root, { withFileTypes: true });
   for (const entry of entries) {
-    const entryPath = path24.join(root, entry.name);
+    const entryPath = path26.join(root, entry.name);
     if (entry.isDirectory()) {
       await secureCopiedTree(entryPath);
     } else {
@@ -32729,8 +34039,8 @@ async function copyAuthRoot(repositoryRoot, sourceValue3, target) {
       "Live subscription auth root is unavailable."
     );
   }
-  const source = await realpath9(sourceValue3).catch(() => null);
-  if (source === null || source === repositoryRoot || source.startsWith(`${repositoryRoot}${path24.sep}`)) {
+  const source = await realpath10(sourceValue3).catch(() => null);
+  if (source === null || source === repositoryRoot || source.startsWith(`${repositoryRoot}${path26.sep}`)) {
     throw new BanzaiError(
       "LIVE_AUTH_UNAVAILABLE",
       "Live auth root is inside the repository or unavailable."
@@ -32742,8 +34052,8 @@ async function copyAuthRoot(repositoryRoot, sourceValue3, target) {
 }
 async function treeDigest(root, excludedPrefixes = []) {
   const entries = [];
-  async function visit(directory2, prefix) {
-    const children = await readdir8(directory2, { withFileTypes: true }).catch(
+  async function visit(directory3, prefix) {
+    const children = await readdir9(directory3, { withFileTypes: true }).catch(
       () => []
     );
     children.sort((left, right) => left.name.localeCompare(right.name));
@@ -32754,39 +34064,39 @@ async function treeDigest(root, excludedPrefixes = []) {
       )) {
         continue;
       }
-      const absolutePath = path24.join(directory2, child.name);
-      const metadata = await lstat13(absolutePath);
-      const mode = metadata.mode & 511;
+      const absolutePath = path26.join(directory3, child.name);
+      const metadata = await lstat14(absolutePath);
+      const mode2 = metadata.mode & 511;
       if (metadata.isDirectory()) {
-        entries.push(`${relativePath2}\0directory\0${mode}`);
+        entries.push(`${relativePath2}\0directory\0${mode2}`);
         await visit(absolutePath, relativePath2);
       } else if (metadata.isSymbolicLink()) {
         entries.push(
-          `${relativePath2}\0symlink\0${mode}\0${await readlink(absolutePath)}`
+          `${relativePath2}\0symlink\0${mode2}\0${await readlink(absolutePath)}`
         );
       } else if (metadata.isFile()) {
-        const digest3 = createHash15("sha256").update(await readFile14(absolutePath)).digest("hex");
-        entries.push(`${relativePath2}\0file\0${mode}\0${digest3}`);
+        const digest4 = createHash17("sha256").update(await readFile14(absolutePath)).digest("hex");
+        entries.push(`${relativePath2}\0file\0${mode2}\0${digest4}`);
       }
     }
   }
   await visit(root, "");
-  return createHash15("sha256").update(entries.join("\n")).digest("hex");
+  return createHash17("sha256").update(entries.join("\n")).digest("hex");
 }
 async function prepareScenario(root, rawRoot) {
-  await mkdir8(path24.join(root, path24.dirname(DESCRIPTION_ARTIFACT)), {
+  await mkdir8(path26.join(root, path26.dirname(DESCRIPTION_ARTIFACT)), {
     recursive: true
   });
-  await mkdir8(path24.join(root, path24.dirname(PLAN_ARTIFACT)), {
+  await mkdir8(path26.join(root, path26.dirname(PLAN_ARTIFACT)), {
     recursive: true
   });
   await writeFile5(
-    path24.join(root, DESCRIPTION_ARTIFACT),
+    path26.join(root, DESCRIPTION_ARTIFACT),
     "# Live Compatibility Fixture\n\nPermission isolation fixture.\n",
     "utf8"
   );
   await writeFile5(
-    path24.join(root, PLAN_ARTIFACT),
+    path26.join(root, PLAN_ARTIFACT),
     "# Live Compatibility Plan\n\nNo source mutation is authorized.\n",
     "utf8"
   );
@@ -32794,22 +34104,22 @@ async function prepareScenario(root, rawRoot) {
     DESCRIPTION_ARTIFACT,
     PLAN_ARTIFACT
   ]);
-  const stateDirectory = path24.join(root, ".banzai", "runs", RUN_ID);
+  const stateDirectory = path26.join(root, ".banzai", "runs", RUN_ID);
   await mkdir8(stateDirectory, { recursive: true });
-  await mkdir8(path24.join(stateDirectory, "attempts"), { recursive: true });
+  await mkdir8(path26.join(stateDirectory, "attempts"), { recursive: true });
   await mkdir8(rawRoot, { recursive: true });
   await writeFile5(
-    path24.join(root, ".banzai", "active-run.json"),
+    path26.join(root, ".banzai", "active-run.json"),
     `${JSON.stringify({ schemaVersion: 1, runId: RUN_ID }, null, 2)}
 `,
     "utf8"
   );
   await writeFile5(
-    path24.join(stateDirectory, "state.json"),
+    path26.join(stateDirectory, "state.json"),
     `${JSON.stringify(
       {
         schemaVersion: 2,
-        contractVersion: CONTRACT_VERSION,
+        contractVersion: CONTRACT_VERSION2,
         runId: RUN_ID,
         slug: "live-compatibility",
         repoRoot: root,
@@ -32829,7 +34139,7 @@ async function prepareScenario(root, rawRoot) {
     "utf8"
   );
   await writeFile5(
-    path24.join(root, WRITE_PROBE),
+    path26.join(root, WRITE_PROBE),
     `'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
@@ -32860,7 +34170,7 @@ try {
     ".banzai",
     REVIEW_ARTIFACT
   ]);
-  const controlBefore = await treeDigest(path24.join(root, ".banzai"), [
+  const controlBefore = await treeDigest(path26.join(root, ".banzai"), [
     "runs/live-compatibility/attempts/review-1.review-candidate.md"
   ]);
   const artifact = {
@@ -32914,7 +34224,7 @@ function livePrompt(vendor, scenario) {
   const writeInstructions = vendor === "claude" ? "Use only Read, Glob, Grep and Skill. The host must expose no write capability. Do not attempt tool writes or create artifacts." : `Use command execution to run exactly \`${expectedCodexProbeCommand(SOURCE_CANARY)}\` and then exactly \`${expectedCodexProbeCommand(CONTROL_CANARY)}\`; continue after each non-zero read-only denial. Do not simulate output or create artifacts.`;
   return `You are executing a disposable Banzai permission compatibility probe. ${writeInstructions}
 Read both approved fixture artifacts: ${JSON.stringify(scenario.artifact.approvedArtifactPaths)}.
-Return review-result/v2 with contractVersion ${CONTRACT_VERSION}, schemaVersion 2, verdict pass, summary "${EXPECTED_REVIEW_RESULT.summary}", empty findings, reviewedFindingIds, deferredCoverage and reviewNotes.
+Return review-result/v2 with contractVersion ${CONTRACT_VERSION2}, schemaVersion 2, verdict pass, summary "${EXPECTED_REVIEW_RESULT.summary}", empty findings, reviewedFindingIds, deferredCoverage and reviewNotes.
 Explicitly acknowledge each artifact you reviewed in scopeAcknowledgment {schemaVersion: 1, snapshotDigest: "${scenario.artifact.snapshot.digest}", artifacts: [{path, status: "reviewed", reason: null}]}.
 If unable to read any required artifact, return blocked with truthful not_reviewed entries and reasons. Do not include private output.`;
 }
@@ -33009,7 +34319,7 @@ async function runReviewScenario(vendor, scenario, environment, baseRunner, run,
   if (result !== null) {
     let valid = validProbeResult(result);
     try {
-      validateReviewScope(parseCurrentReviewResult(result), {
+      validateReviewScope(parseCurrentReviewResult2(result), {
         snapshotDigest: scenario.artifact.snapshot.digest,
         approvedArtifactPaths: scenario.artifact.approvedArtifactPaths,
         requiredFindingIds: []
@@ -33025,11 +34335,11 @@ async function runReviewScenario(vendor, scenario, environment, baseRunner, run,
       now2() - started
     );
     if (valid) {
-      await mkdir8(path24.join(scenario.root, path24.dirname(REVIEW_CANDIDATE)), {
+      await mkdir8(path26.join(scenario.root, path26.dirname(REVIEW_CANDIDATE)), {
         recursive: true
       });
       await writeFile5(
-        path24.join(scenario.root, REVIEW_CANDIDATE),
+        path26.join(scenario.root, REVIEW_CANDIDATE),
         renderReviewArtifact(result, scenario.artifact),
         "utf8"
       );
@@ -33073,16 +34383,16 @@ async function runReviewScenario(vendor, scenario, environment, baseRunner, run,
     ".banzai",
     REVIEW_ARTIFACT
   ]);
-  const controlAfter = await treeDigest(path24.join(scenario.root, ".banzai"), [
+  const controlAfter = await treeDigest(path26.join(scenario.root, ".banzai"), [
     "runs/live-compatibility/attempts/review-1.review-candidate.md"
   ]);
-  if (sourceAfter !== scenario.sourceBefore || controlAfter !== scenario.controlBefore || await access6(path24.join(scenario.root, SOURCE_CANARY)).then(
+  if (sourceAfter !== scenario.sourceBefore || controlAfter !== scenario.controlBefore || await access6(path26.join(scenario.root, SOURCE_CANARY)).then(
     () => true,
     () => false
-  ) || await access6(path24.join(scenario.root, CONTROL_CANARY)).then(
+  ) || await access6(path26.join(scenario.root, CONTROL_CANARY)).then(
     () => true,
     () => false
-  ) || await access6(path24.join(scenario.root, OTHER_ARTIFACT)).then(
+  ) || await access6(path26.join(scenario.root, OTHER_ARTIFACT)).then(
     () => true,
     () => false
   )) {
@@ -33169,8 +34479,8 @@ async function candidateClones(repositoryRoot, temporaryRoot, environment, baseR
       "stdout"
     )).trim();
     const clones = {
-      codex: path24.join(temporaryRoot, "codex-candidate"),
-      claude: path24.join(temporaryRoot, "claude-candidate")
+      codex: path26.join(temporaryRoot, "codex-candidate"),
+      claude: path26.join(temporaryRoot, "claude-candidate")
     };
     for (const clone of Object.values(clones)) {
       await runOwnedProcess(
@@ -33280,7 +34590,7 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
       const parent = dependencies.temporaryParent ?? os2.tmpdir();
       await mkdir8(parent, { recursive: true });
       temporaryRoot = await mkdtemp(
-        path24.join(parent, "banzai-live-compatibility-")
+        path26.join(parent, "banzai-live-compatibility-")
       );
       const safeEnvironment = subscriptionOnlyEnvironment(environment);
       const clones = await candidateClones(
@@ -33292,10 +34602,10 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
         now2
       );
       if (clones !== null) {
-        const authRoot = path24.join(temporaryRoot, "auth");
+        const authRoot = path26.join(temporaryRoot, "auth");
         await mkdir8(authRoot, { recursive: true, mode: 448 });
-        const codexAuth = path24.join(authRoot, "codex");
-        const claudeAuth = path24.join(authRoot, "claude");
+        const codexAuth = path26.join(authRoot, "codex");
+        const claudeAuth = path26.join(authRoot, "claude");
         let authReady = true;
         try {
           await copyAuthRoot(
@@ -33352,11 +34662,11 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
           if (codexReady && claudeReady) {
             const codexScenario = await prepareScenario(
               clones.codex,
-              path24.join(temporaryRoot, "raw", "codex")
+              path26.join(temporaryRoot, "raw", "codex")
             );
             const claudeScenario = await prepareScenario(
               clones.claude,
-              path24.join(temporaryRoot, "raw", "claude")
+              path26.join(temporaryRoot, "raw", "claude")
             );
             await runReviewScenario(
               "codex",
@@ -33365,7 +34675,7 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
               baseRunner,
               run,
               now2,
-              path24.join(clones.codex, "plugins", "banzai")
+              path26.join(clones.codex, "plugins", "banzai")
             );
             await runReviewScenario(
               "claude",
@@ -33374,7 +34684,7 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
               baseRunner,
               run,
               now2,
-              path24.join(clones.claude, "plugins", "banzai")
+              path26.join(clones.claude, "plugins", "banzai")
             );
             updateCheck(
               run,
@@ -33481,8 +34791,8 @@ async function executeLiveCompatibility(repoRoot, args, io, dependencies) {
 }
 
 // src/interactive.ts
-import { createHash as createHash16 } from "node:crypto";
-import path25 from "node:path";
+import { createHash as createHash18 } from "node:crypto";
+import path27 from "node:path";
 async function describeRepository(options) {
   if (options.repository === void 0) {
     return null;
@@ -33497,16 +34807,16 @@ function nonEmpty(value) {
   return value.trim().length > 0 ? true : "A value is required.";
 }
 function generateFeatureSlug(request) {
-  const digest3 = createHash16("sha256").update(request.trim().normalize("NFKC")).digest("hex").slice(0, 8);
+  const digest4 = createHash18("sha256").update(request.trim().normalize("NFKC")).digest("hex").slice(0, 8);
   const normalized = request.normalize("NFKD").replace(new RegExp("\\p{Mark}+", "gu"), "").toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   if (normalized.length > 64) {
     const prefix = normalized.slice(0, 55).replace(/-+$/g, "");
-    return `${prefix}-${digest3}`;
+    return `${prefix}-${digest4}`;
   }
   if (normalized.length > 0) {
     return normalized;
   }
-  return `feature-${digest3}`;
+  return `feature-${digest4}`;
 }
 function isPromptExit(error) {
   return error instanceof Error && (error.name === "ExitPromptError" || error.name === "AbortPromptError");
@@ -33522,7 +34832,7 @@ async function statusOrNull(runner) {
   }
 }
 function adrIdFromArtifact(artifact) {
-  const basename = path25.basename(artifact, path25.extname(artifact));
+  const basename = path27.basename(artifact, path27.extname(artifact));
   const match = /^(?:adr[-_])?([0-9]+)/i.exec(basename);
   return match?.[1] === void 0 ? basename : `ADR-${match[1]}`;
 }
@@ -33615,11 +34925,11 @@ function renderCost(io, state) {
   io.writeLine(`Cost: $${usage.costUsd.toFixed(2)}`);
 }
 function severityTone(styler, severity) {
-  const text = reviewSeverityText(severity);
+  const text2 = reviewSeverityText(severity);
   if (severity === "blocker") {
-    return styler.red(text);
+    return styler.red(text2);
   }
-  return severity === "nit" ? styler.dim(text) : styler.yellow(text);
+  return severity === "nit" ? styler.dim(text2) : styler.yellow(text2);
 }
 function renderFinding(io, styler, finding, width) {
   const severity = reviewSeverityText(finding.severity);
@@ -33917,14 +35227,14 @@ async function handleHumanDecision(runner, io, status, options) {
           return false;
         }
         if (action2.kind === "preference") {
-          const text = await io.input({
+          const text2 = await io.input({
             message: "Explain another preference",
             collapsedPaste: true,
             validate: nonEmpty
           });
           answers.push({
             decisionId: card.decisionId,
-            response: { kind: "preference", optionId: null, text },
+            response: { kind: "preference", optionId: null, text: text2 },
             note: null
           });
         } else {
@@ -34341,7 +35651,7 @@ function renderHeader(io, styler, repoRoot, identity, config, authentication) {
     `${styler.brand(MARK_TOP)}    ${styler.bold("banzai")} ${dim(`v${VERSION}`)}   ${dim("spec-driven run orchestrator")}`
   );
   const location = [
-    path25.basename(repoRoot),
+    path27.basename(repoRoot),
     identity?.branch == null ? null : styler.cyan(identity.branch),
     identity?.commit == null ? null : dim(`@ ${identity.commit.slice(0, 7)}`),
     identity === null || identity.carriedInChanges === 0 ? null : dim(
@@ -34360,7 +35670,7 @@ function renderHeader(io, styler, repoRoot, identity, config, authentication) {
     ...entries.map((entry) => SHORT_ROLE_LABELS[entry.role].length)
   );
   const vendorWidth = Math.max(
-    ...entries.map((entry) => path25.basename(entry.executable).length)
+    ...entries.map((entry) => path27.basename(entry.executable).length)
   );
   const modelWidth = Math.max(...entries.map((entry) => entry.model.length));
   io.writeLine();
@@ -34368,7 +35678,7 @@ function renderHeader(io, styler, repoRoot, identity, config, authentication) {
     const reason = readiness.get(entry.executable);
     const marker = reason === void 0 ? "" : reason === null ? styler.green("\u2713") : styler.red("\u2717");
     io.writeLine(
-      `    ${SHORT_ROLE_LABELS[entry.role].padEnd(roleWidth)}  ${path25.basename(entry.executable).padEnd(vendorWidth)} ${styler.bold(entry.model)}${" ".repeat(
+      `    ${SHORT_ROLE_LABELS[entry.role].padEnd(roleWidth)}  ${path27.basename(entry.executable).padEnd(vendorWidth)} ${styler.bold(entry.model)}${" ".repeat(
         modelWidth - entry.model.length
       )}  ${dim(`${entry.effort} \xB7 ${entry.timeout}`)}  ${marker}`.trimEnd()
     );
@@ -34866,7 +36176,7 @@ function writeBuilderSessionStatus(io, settings) {
 }
 
 // src/progress.ts
-import path26 from "node:path";
+import path28 from "node:path";
 var LEVELS = /* @__PURE__ */ new Set(["quiet", "normal", "verbose"]);
 function resolveProgressLevel(args, env) {
   if (args.includes("--verbose")) {
@@ -34893,7 +36203,7 @@ function singleLine(value) {
   return value.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").replace(/\s+/g, " ").trim();
 }
 function phaseBanner(label, descriptor, width, styler) {
-  const vendor = path26.basename(descriptor.executable);
+  const vendor = path28.basename(descriptor.executable);
   const timeout = `${Math.ceil(descriptor.timeoutMs / 6e4)}m cap`;
   const facts = [
     vendor,
@@ -35038,9 +36348,9 @@ var TerminalProgressReporter = class {
       GRAPHEMES2.segment(plain),
       (entry) => entry.segment
     );
-    const text = clusters.length <= limit ? plain : `${clusters.slice(0, limit - 1).join("")}\u2026`;
+    const text2 = clusters.length <= limit ? plain : `${clusters.slice(0, limit - 1).join("")}\u2026`;
     this.write(
-      `${ERASE_LINE}${this.styler.green(frame)}${this.styler.dim(text.slice(frame.length))}`
+      `${ERASE_LINE}${this.styler.green(frame)}${this.styler.dim(text2.slice(frame.length))}`
     );
     this.liveDrawn = true;
   }
@@ -35222,9 +36532,9 @@ var TerminalProgressReporter = class {
 };
 
 // src/foreground-client.ts
-import { execFile as execFile2, spawn as spawn2 } from "node:child_process";
-import { promisify as promisify2 } from "node:util";
-var execFileAsync = promisify2(execFile2);
+import { execFile as execFile4, spawn as spawn2 } from "node:child_process";
+import { promisify as promisify3 } from "node:util";
+var execFileAsync = promisify3(execFile4);
 var SHUTDOWN_GRACE_MS = 2e3;
 var STARTUP_TIMEOUT_MS = 5e3;
 async function descendants(pid) {
@@ -35353,8 +36663,8 @@ async function runForegroundClient(launch) {
 }
 
 // src/setup-client.ts
-import path27 from "node:path";
-import { realpath as realpath10 } from "node:fs/promises";
+import path29 from "node:path";
+import { realpath as realpath11 } from "node:fs/promises";
 var SETUP_SKILLS = {
   codex: "$banzai:project-manifest",
   claude: "/banzai:project-manifest"
@@ -35370,10 +36680,10 @@ function setupEnvironment(source = process.env) {
 function record5(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
-async function verifiedSetupPlugin(directory2, vendor) {
+async function verifiedSetupPlugin(directory3, vendor) {
   let root;
   try {
-    root = await realpath10(directory2);
+    root = await realpath11(directory3);
   } catch {
     return null;
   }
@@ -35442,8 +36752,8 @@ async function discoverPlugin(vendor, executable, repoRoot, env, runner) {
       (value) => typeof value.id === "string" && value.id.startsWith("banzai@") && value.enabled === true && typeof value.installPath === "string"
     );
     if (candidates2.length !== 1) return null;
-    const directory2 = candidates2[0]?.installPath;
-    return typeof directory2 === "string" ? await verifiedSetupPlugin(directory2, vendor) : null;
+    const directory3 = candidates2[0]?.installPath;
+    return typeof directory3 === "string" ? await verifiedSetupPlugin(directory3, vendor) : null;
   }
   const marketplaces = record5(
     await query(["plugin", "marketplace", "list", "--json"])
@@ -35452,7 +36762,7 @@ async function discoverPlugin(vendor, executable, repoRoot, env, runner) {
   const candidates = [];
   for (const value of marketplaces) {
     const marketplace = record5(value);
-    if (typeof marketplace.name !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(marketplace.name) || typeof marketplace.root !== "string" || !path27.isAbsolute(marketplace.root))
+    if (typeof marketplace.name !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(marketplace.name) || typeof marketplace.root !== "string" || !path29.isAbsolute(marketplace.root))
       continue;
     const listed = record5(
       await query([
@@ -35467,7 +36777,7 @@ async function discoverPlugin(vendor, executable, repoRoot, env, runner) {
     for (const item of listed) {
       const plugin = record5(item);
       const source = record5(plugin.source);
-      if (plugin.name !== "banzai" || plugin.marketplaceName !== marketplace.name || plugin.installed !== true || plugin.enabled !== true || source.source !== "local" || typeof source.path !== "string" || !path27.isAbsolute(source.path))
+      if (plugin.name !== "banzai" || plugin.marketplaceName !== marketplace.name || plugin.installed !== true || plugin.enabled !== true || source.source !== "local" || typeof source.path !== "string" || !path29.isAbsolute(source.path))
         continue;
       const verified = await verifiedSetupPlugin(source.path, vendor);
       if (verified !== null) candidates.push(verified);
@@ -36206,12 +37516,12 @@ async function main() {
     stdout: (value) => process7.stdout.write(value)
   };
   const interactiveTerminal = process7.stdin.isTTY && process7.stdout.isTTY;
-  const mode = resolveCliMode(args, process7.stdin.isTTY, process7.stdout.isTTY);
-  if (mode === "help") {
+  const mode2 = resolveCliMode(args, process7.stdin.isTTY, process7.stdout.isTTY);
+  if (mode2 === "help") {
     console.log(HELP);
     return;
   }
-  if (mode === "tty_required") {
+  if (mode2 === "tty_required") {
     throw new BanzaiError(
       "TTY_REQUIRED",
       "Interactive mode requires terminal input and output."
@@ -36334,7 +37644,7 @@ async function main() {
     );
     return;
   }
-  if (mode === "interactive") {
+  if (mode2 === "interactive") {
     const store = new RunStore(repoRoot);
     const active = await store.readActiveRunId();
     const state = active === null ? null : await store.readState(active);
@@ -36426,7 +37736,7 @@ async function main() {
     return;
   }
   const adapters = createVendorAdapters();
-  const interactiveIO = mode === "interactive" ? new InquirerInteractiveIO() : void 0;
+  const interactiveIO = mode2 === "interactive" ? new InquirerInteractiveIO() : void 0;
   const humanTime = interactiveIO === void 0 ? void 0 : new InteractiveHumanTime(new HumanTimeStore(repoRoot), () => {
     interactiveIO.writeLine("Time was not saved");
   });
@@ -36443,7 +37753,7 @@ async function main() {
     interactiveTerminal: interactiveTerminal && !args.includes("--json"),
     output: process7.stderr
   });
-  if (mode === "interactive") {
+  if (mode2 === "interactive") {
     await runInteractive(runner, interactiveIO ?? new InquirerInteractiveIO(), {
       ...humanTime === void 0 ? {} : { humanTime },
       decidedBy: defaultDecisionMaker(),

@@ -1,3 +1,19 @@
+import { requiredFixture } from "./helpers.js";
+import { execFileSync } from "node:child_process";
+import { chmod, readFile, realpath, rename } from "node:fs/promises";
+import {
+  captureVerificationInputs,
+  decideVerification,
+  evidenceDigest,
+  parseVerificationConfiguration,
+  parseVerificationDecision,
+  parseVerificationObligations,
+  verificationIdentities
+} from "../src/verification-evidence.js";
+import type {
+  EvidenceConfiguration,
+  VerificationOrigin
+} from "../src/verification-evidence.js";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -325,5 +341,290 @@ test("describes verification identity and configuration digest deterministically
   assert.notEqual(
     describeVerificationCommands(changed)[0]?.configurationDigest,
     firstRead[0]?.configurationDigest
+  );
+});
+
+test("equivalent evidence retains protected changes and only removes proven explanatory invocations", async () => {
+  const repository = await temporaryRoot();
+  const workId = "11111111-1111-4111-8111-111111111111";
+  const executable = await realpath(process.execPath);
+  const config = parseVerificationConfiguration({
+    profiles: [
+      {
+        id: "project",
+        projectType: "custom",
+        commands: [
+          {
+            id: "unit",
+            name: "unit",
+            command: executable,
+            args: ["--version"],
+            timeoutMs: 1000,
+            evidence: "equivalent_evidence",
+            ignoreExplanatory: true
+          }
+        ]
+      }
+    ],
+    policy: {
+      schema: "banzai-verification-policy/v1",
+      schemaVersion: 1,
+      explanatory: [
+        {
+          path: "notes.md",
+          regions: [
+            {
+              start: "<!-- explanation start -->",
+              end: "<!-- explanation end -->"
+            }
+          ]
+        }
+      ],
+      dependencies: {
+        complete: true,
+        exclude: [],
+        toolchain: [executable],
+        environment: { LANG: "C" },
+        volatile: []
+      }
+    }
+  });
+  const notes =
+    "# Notes\n<!-- explanation start -->\nFirst sentence. Second sentence.\n<!-- explanation end -->\nProtected contract.\n";
+  const capture = (configuration: EvidenceConfiguration = config) =>
+    captureVerificationInputs({
+      repoRoot: repository.root,
+      configuration,
+      workId
+    });
+  try {
+    execFileSync("git", ["init", "--quiet", repository.root]);
+    await writeFile(path.join(repository.root, "notes.md"), notes);
+    await writeFile(
+      path.join(repository.root, "source.ts"),
+      "export const value = 1;\n"
+    );
+    await writeFile(path.join(repository.root, ".gitignore"), "installed/\n");
+    await mkdir(path.join(repository.root, "installed"));
+    await writeFile(
+      path.join(repository.root, "installed/module.js"),
+      "export default 1;\n"
+    );
+    execFileSync("git", ["-C", repository.root, "add", "."]);
+    const before = await capture();
+    assert.equal(before.complete, true);
+    const authorityDigest = evidenceDigest("approved fixture authority");
+    // This unit fixture injects an origin; it does not claim physical execution.
+    const origin: VerificationOrigin = {
+      workId,
+      checkId: "unit",
+      attemptId: "physical-1",
+      roundId: "round-1",
+      recordDigest: evidenceDigest("physical record"),
+      status: "completed",
+      exitCode: 0,
+      signal: null,
+      failureCategory: null,
+      complete: true,
+      logsIntact: true,
+      identity: requiredFixture(
+        verificationIdentities(config, authorityDigest)[0]
+      ),
+      before,
+      after: before
+    };
+    const decide = async (
+      configuration = config,
+      origins = [origin],
+      strict = false
+    ) => {
+      const current = await capture(configuration);
+      return parseVerificationDecision(
+        decideVerification({
+          workId,
+          roundId: "round-2",
+          configuration,
+          authorityDigest,
+          strict,
+          obligations: null,
+          capture: current,
+          origins
+        })
+      );
+    };
+    await writeFile(
+      path.join(repository.root, "notes.md"),
+      notes.replace(
+        "First sentence. Second sentence.",
+        "Two revised sentences. Still explanatory."
+      )
+    );
+    assert.equal((await decide()).actions[0]?.action, "reuse");
+    assert.deepEqual(await decide(), await decide());
+    execFileSync("git", ["-C", repository.root, "add", "notes.md"]);
+    assert.equal((await decide()).actions[0]?.action, "reuse");
+    assert.equal(
+      (await decide(config, [origin], true)).actions[0]?.reason,
+      "obligations_unavailable"
+    );
+    for (const mutation of [
+      { file: "source.ts", bytes: "export const value = 2;\n" },
+      { file: "unit.test.ts", bytes: "export const newTest = true;\n" },
+      { file: "installed/module.js", bytes: "export default 2;\n" },
+      {
+        file: "notes.md",
+        bytes: notes.replace("Protected contract.", "Changed contract.")
+      },
+      {
+        file: "notes.md",
+        bytes: notes.replace("<!-- explanation end -->", "<!-- moved end -->")
+      },
+      {
+        file: "notes.md",
+        bytes: notes.replace("First sentence.", "```sh\necho executable\n```\n")
+      },
+      { file: "generated.js", bytes: "export default 3;\n" },
+      { file: "package-lock.json", bytes: "{}\n" }
+    ]) {
+      const target = path.join(repository.root, mutation.file);
+      const old = await readFile(target).catch(() => null);
+      await writeFile(target, mutation.bytes);
+      assert.equal(
+        (await decide()).actions[0]?.action,
+        "execute",
+        mutation.file
+      );
+      if (old === null) await rm(target);
+      else await writeFile(target, old);
+    }
+    await chmod(path.join(repository.root, "source.ts"), 0o755);
+    assert.equal((await decide()).actions[0]?.action, "execute");
+    await chmod(path.join(repository.root, "source.ts"), 0o644);
+    await rename(
+      path.join(repository.root, "source.ts"),
+      path.join(repository.root, "renamed.ts")
+    );
+    assert.equal((await decide()).actions[0]?.action, "execute");
+    await rename(
+      path.join(repository.root, "renamed.ts"),
+      path.join(repository.root, "source.ts")
+    );
+    await symlink("source.ts", path.join(repository.root, "link.ts"));
+    assert.equal((await decide()).actions[0]?.reason, "inputs_unavailable");
+    await rm(path.join(repository.root, "link.ts"));
+    for (const change of [
+      (c: EvidenceConfiguration) => {
+        requiredFixture(requiredFixture(c.profiles[0]).commands[0]).evidence =
+          "fresh";
+      },
+      (c: EvidenceConfiguration) => {
+        requiredFixture(requiredFixture(c.profiles[0]).commands[0]).args = [
+          "run",
+          "release:check"
+        ];
+      },
+      (c: EvidenceConfiguration) => {
+        requiredFixture(
+          requiredFixture(c.profiles[0]).commands[0]
+        ).ignoreExplanatory = false;
+      },
+      (c: EvidenceConfiguration) => {
+        requiredFixture(c.policy).dependencies.environment.TZ = "UTC";
+      },
+      (c: EvidenceConfiguration) => {
+        requiredFixture(c.policy).dependencies.volatile = ["network"];
+      },
+      (c: EvidenceConfiguration) => {
+        requiredFixture(c.policy).dependencies.complete = false;
+      },
+      (c: EvidenceConfiguration) => {
+        delete c.policy;
+      }
+    ]) {
+      const changed = structuredClone(config);
+      change(changed);
+      assert.equal((await decide(changed)).actions[0]?.action, "execute");
+    }
+    for (const bad of [
+      { ...origin, logsIntact: false },
+      { ...origin, complete: false },
+      { ...origin, status: "failed" as const, exitCode: 1 },
+      { ...origin, status: "started" as const, exitCode: null },
+      { ...origin, workId: "22222222-2222-4222-8222-222222222222" }
+    ])
+      assert.equal((await decide(config, [bad])).actions[0]?.action, "execute");
+    assert.equal(
+      (
+        await decide(config, [
+          origin,
+          { ...origin, status: "failed", exitCode: 1 }
+        ])
+      ).actions[0]?.reason,
+      "later_attempt"
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("verification config 3 and immutable obligation inventory require explicit complete authority", () => {
+  const verification = {
+    profiles: [
+      {
+        id: "project",
+        projectType: "custom",
+        commands: [
+          {
+            id: "unit",
+            name: "Unit",
+            command: "node",
+            args: ["--version"],
+            timeoutMs: 1000
+          }
+        ]
+      }
+    ]
+  };
+  const config = parseConfig({
+    ...DEFAULT_CONFIG,
+    schemaVersion: 3,
+    verification
+  });
+  assert.equal(config.verification.profiles[0]?.commands[0]?.evidence, "fresh");
+  assert.throws(() =>
+    parseConfig({
+      ...DEFAULT_CONFIG,
+      schemaVersion: 3,
+      verification: { ...verification, unknown: true }
+    })
+  );
+  const parsed = parseVerificationConfiguration(verification);
+  const remainder = "# Approved Plan\n\n";
+  const inventory = {
+    schema: "banzai-verification-obligations/v1",
+    schemaVersion: 1,
+    complete: true,
+    planRemainderSha256: evidenceDigest(remainder),
+    checks: [{ id: "unit", evidence: "equivalent_evidence" }]
+  };
+  const block =
+    "```banzai-verification-obligations/v1\n" +
+    JSON.stringify(inventory) +
+    "\n```";
+  assert.ok(parseVerificationObligations(remainder + block, parsed));
+  assert.equal(
+    parseVerificationObligations(
+      remainder + block + "\nChanged authority.",
+      parsed
+    ),
+    null
+  );
+  assert.equal(
+    parseVerificationObligations(remainder + block + "\n" + block, parsed),
+    null
+  );
+  assert.equal(
+    parseVerificationObligations("Run the existing suite.", parsed),
+    null
   );
 });

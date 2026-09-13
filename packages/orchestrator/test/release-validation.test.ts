@@ -1,5 +1,7 @@
+import { requiredFixture } from "./helpers.js";
 import assert from "node:assert/strict";
-import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { spawn, spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   access,
   chmod,
@@ -22,7 +24,10 @@ import test from "node:test";
 import {
   checkPhaseResourceBytes,
   phaseResourceBytes,
-  validateGuidanceExtraction
+  validateGuidanceExtraction,
+  describeGuidanceTransition,
+  evolveGuidanceBaseline,
+  resourceDigest
 } from "../scripts/phase-resources-build.mjs";
 import {
   createNodeVersionFileSystem,
@@ -115,6 +120,11 @@ const FIXTURE_PATHS = [
   "packages/orchestrator/scripts/artifact-readers-build.mjs",
   "packages/orchestrator/scripts/phase-resources-build.mjs",
   "packages/orchestrator/phase-guidance-baseline.json",
+  "packages/orchestrator/phase-guidance-current.json",
+  "packages/orchestrator/phase-guidance-current.sha256",
+  "packages/orchestrator/scripts/instruction-baseline.mjs",
+  "documentation/decisions/0043-proportionate-verification-evidence.md",
+  "documentation/decisions/0044-instruction-baseline-evolution.md",
   "packages/orchestrator/scripts/check-dist.mjs",
   "packages/orchestrator/scripts/release-version.mjs",
   "packages/orchestrator/scripts/smoke-committed.mjs",
@@ -858,14 +868,14 @@ for (const relativePath of [
   });
 }
 
-test("release validation protects run-state v4 and agent-control 3.0 identities", async () => {
+test("release validation protects run-state v3/v4/v5 and agent-control 3.0 identities", async () => {
   await withFixture(async (root) => {
     const typesPath = path.join(root, "packages/orchestrator/src/types.ts");
     const accepted = await readFile(typesPath, "utf8");
     await writeFile(
       typesPath,
       accepted.replace(
-        "export interface RunState {\n  schemaVersion: 3 | 4;",
+        "export interface RunState {\n  schemaVersion: 3 | 4 | 5;",
         "export interface RunState {\n  schemaVersion: 2;"
       ),
       "utf8"
@@ -1900,6 +1910,100 @@ test("test driver is non-TTY and removes output after success and failure", asyn
   }
 });
 
+test("test driver selects exact files before bundling and combines name filtering", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "banzai-test-selection-"));
+  const testRoot = path.join(root, "test");
+  const outputRoot = path.join(root, "output");
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  const run = (...args: string[]) =>
+    spawnSync(
+      process.execPath,
+      [
+        path.join(process.cwd(), "scripts/test.mjs"),
+        "--test-root",
+        testRoot,
+        "--output-root",
+        outputRoot,
+        ...args
+      ],
+      {
+        cwd: process.cwd(),
+        env,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"]
+      }
+    );
+  try {
+    await mkdir(path.join(testRoot, "nested"), { recursive: true });
+    await writeFile(
+      path.join(testRoot, "selected.test.ts"),
+      'import test from "node:test"; test("selected pass", () => {}); test("filtered failure", () => { throw new Error("name filter missing"); });\n'
+    );
+    await writeFile(
+      path.join(testRoot, "nested/second.test.ts"),
+      'import test from "node:test"; test("second pass", () => {});\n'
+    );
+    await writeFile(
+      path.join(testRoot, "broken.test.ts"),
+      "this is not valid TypeScript !\n"
+    );
+    let result = run(
+      "--file",
+      "selected.test.ts",
+      "--file",
+      "nested/second.test.ts",
+      "--file",
+      "selected.test.ts",
+      "--pattern",
+      "pass"
+    );
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.match(result.stdout, /selected pass/);
+    assert.match(result.stdout, /second pass/);
+    assert.match(result.stdout, /tests 2\b/);
+    await assert.rejects(access(outputRoot));
+
+    result = run("--file", "selected.test.ts");
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /name filter missing/);
+    await assert.rejects(access(outputRoot));
+    for (const args of [
+      [],
+      ["--pattern", "pass"],
+      ["--file", "broken.test.ts"]
+    ]) {
+      result = run(...args);
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /ERROR/);
+      await assert.rejects(access(outputRoot));
+    }
+    for (const file of [
+      "",
+      "../selected.test.ts",
+      "/selected.test.ts",
+      "./selected.test.ts",
+      "nested//second.test.ts",
+      "nested\\second.test.ts",
+      "missing.test.ts",
+      "selected.ts"
+    ]) {
+      result = run("--file", file);
+      assert.equal(result.status, 1, file);
+      assert.doesNotMatch(result.stderr, /Build failed|ERROR/);
+      await assert.rejects(access(outputRoot));
+    }
+    await rm(path.join(testRoot, "broken.test.ts"));
+    await rm(path.join(testRoot, "selected.test.ts"));
+    result = run();
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /second pass/);
+    await assert.rejects(access(outputRoot));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 for (const scenario of [
   {
     name: "extra shim line",
@@ -2055,5 +2159,238 @@ test("instruction layout rejects a missing packaged policy file", async () => {
     const result = validate(root);
     assert.equal(result.status, 1);
     assert.match(result.stderr, /^MISSING_RELEASE_FILE /);
+  });
+});
+
+test("instruction baseline evolves only an exact authorized scope and retains its immutable root", async () => {
+  await withFixture(async (root) => {
+    const originalPath = path.join(
+      root,
+      "packages/orchestrator/phase-guidance-baseline.json"
+    );
+    const original = await readFile(originalPath);
+    const currentPath = path.join(
+      root,
+      "packages/orchestrator/phase-guidance-current.json"
+    );
+    const pinPath = path.join(
+      root,
+      "packages/orchestrator/phase-guidance-current.sha256"
+    );
+    const initial = await readFile(currentPath, "utf8");
+    const initialPin = await readFile(pinPath, "utf8");
+    const target = path.join(root, "plugins/banzai/guidance/fix.md");
+    const source = await readFile(target, "utf8");
+    await writeFile(
+      target,
+      source.replace(
+        "Use one compact closure record",
+        "Use one bounded compact closure record"
+      )
+    );
+    await assert.rejects(
+      validateGuidanceExtraction(root),
+      /Shared guidance or consumer drift/
+    );
+    const proposal = await describeGuidanceTransition(root);
+    const authorityPath =
+      "documentation/decisions/0044-instruction-baseline-evolution.md";
+    const authorization = {
+      schema: "banzai-instruction-authorization/v1",
+      schemaVersion: 1,
+      predecessorSha256: proposal.predecessorSha256,
+      authorities: [
+        {
+          path: authorityPath,
+          sha256: resourceDigest(
+            await readFile(path.join(root, authorityPath))
+          ),
+          scope: "ADR 0044 section 2; fixture bounded closure wording"
+        }
+      ],
+      scope: proposal.changes.map((change) => change.key)
+    };
+    assert.deepEqual(authorization.scope, [
+      "plugins/banzai/guidance/fix.md#section:Change Report"
+    ]);
+    const preview = await evolveGuidanceBaseline(root, authorization, {
+      check: true
+    });
+    assert.equal(preview.changed, true);
+    assert.equal(await readFile(currentPath, "utf8"), initial);
+    await assert.rejects(
+      evolveGuidanceBaseline(root, { ...authorization, scope: [] }),
+      /exact scope/
+    );
+    await assert.rejects(
+      evolveGuidanceBaseline(root, {
+        ...authorization,
+        predecessorSha256: "0".repeat(64)
+      }),
+      /predecessor/
+    );
+    await assert.rejects(
+      evolveGuidanceBaseline(root, { ...authorization, authorities: [] }),
+      /authority/
+    );
+    await evolveGuidanceBaseline(root, authorization);
+    await validateGuidanceExtraction(root);
+    assert.equal(
+      (await evolveGuidanceBaseline(root, authorization)).changed,
+      false
+    );
+    const next = await readFile(currentPath, "utf8");
+    const nextPin = await readFile(pinPath, "utf8");
+    assert.equal(resourceDigest(next), preview.sha256);
+    assert.deepEqual(await readFile(originalPath), original);
+    // Simulate interruption after baseline replacement and before pin replacement.
+    const journal = path.join(
+      root,
+      "packages/orchestrator/.phase-guidance-transition.json"
+    );
+    await writeFile(pinPath, initialPin);
+    await writeFile(
+      journal,
+      JSON.stringify({
+        authorizationSha256: resourceDigest(JSON.stringify(authorization)),
+        previous: initial,
+        next
+      })
+    );
+    await assert.rejects(validateGuidanceExtraction(root), /pin mismatch/);
+    await evolveGuidanceBaseline(root, authorization);
+    assert.equal(await readFile(pinPath, "utf8"), nextPin);
+    await assert.rejects(access(journal));
+    const corrupt = JSON.parse(next) as {
+      transitions: { predecessorSha256: string }[];
+    };
+    requiredFixture(corrupt.transitions.at(-1)).predecessorSha256 = "0".repeat(
+      64
+    );
+    const corruptBytes = JSON.stringify(corrupt, null, 2) + "\n";
+    await writeFile(currentPath, corruptBytes);
+    await writeFile(pinPath, resourceDigest(corruptBytes) + "\n");
+    await assert.rejects(validateGuidanceExtraction(root), /predecessor/);
+    await writeFile(currentPath, next);
+    await writeFile(pinPath, nextPin);
+    const retained = path.join(
+      root,
+      "plugins/banzai/skills/quick-fix/SKILL.md"
+    );
+    await writeFile(
+      retained,
+      (await readFile(retained, "utf8")).replace(
+        "## Orchestrated Mode",
+        "## Replaced Mode"
+      )
+    );
+    await assert.rejects(describeGuidanceTransition(root), /Orchestrated Mode/);
+  });
+});
+
+test("focused test driver terminates its child group and cleans output on interrupt", async () => {
+  const environment = { ...process.env };
+  delete environment.NODE_TEST_CONTEXT;
+  const root = await mkdtemp(path.join(tmpdir(), "banzai-driver-interrupt-"));
+  const tests = path.join(root, "test");
+  const output = path.join(root, "output");
+  const marker = path.join(root, "pid.json");
+  await mkdir(tests);
+  await writeFile(
+    path.join(tests, "wait.test.ts"),
+    `import test from 'node:test'; import { writeFileSync } from 'node:fs'; test('wait', async () => { writeFileSync(${JSON.stringify(marker)}, JSON.stringify(process.pid)); await new Promise(() => { setInterval(() => {}, 1000); }); });\n`
+  );
+  const child = spawn(
+    process.execPath,
+    [
+      path.resolve("scripts/test.mjs"),
+      "--test-root",
+      tests,
+      "--output-root",
+      output,
+      "--file",
+      "wait.test.ts"
+    ],
+    { stdio: "ignore", env: environment }
+  );
+  const completion = new Promise<number | null>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", resolve);
+  });
+  let pid: number | null = null;
+  let alive = true;
+  try {
+    for (let count = 0; count < 100; count += 1) {
+      try {
+        pid = JSON.parse(await readFile(marker, "utf8")) as number;
+        break;
+      } catch {
+        await delay(25);
+      }
+    }
+    assert.ok(pid);
+    child.kill("SIGTERM");
+    assert.notEqual(await completion, 0);
+    await assert.rejects(access(output));
+    for (let count = 0; count < 100 && alive; count += 1) {
+      try {
+        process.kill(pid, 0);
+        if (process.platform === "linux") {
+          // Container PID 1 may leave terminated children as unreaped zombies.
+          const stat = await readFile(`/proc/${pid}/stat`, "utf8");
+          alive = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0] !== "Z";
+        }
+        if (alive) await delay(25);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ESRCH" && code !== "ENOENT") throw error;
+        alive = false;
+      }
+    }
+    assert.equal(
+      alive,
+      false,
+      "Selected child must be terminated with the driver."
+    );
+  } finally {
+    child.kill("SIGKILL");
+    if (pid !== null && alive) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Best-effort cleanup must not replace the original test failure.
+      }
+    }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("artifact reader generation resolves runtime reader edges to canonical source", async () => {
+  await withFixture(async (root) => {
+    const target = path.join(root, "plugins/banzai/lib/artifact-readers.mjs");
+    const expected = await readFile(target, "utf8");
+    await writeFile(
+      target,
+      "invalid previous generated output must never be consumed"
+    );
+    const generator = pathToFileURL(
+      path.join(process.cwd(), "scripts/artifact-readers-build.mjs")
+    ).href;
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `const { artifactReaderBytes } = await import(${JSON.stringify(generator)}); process.stdout.write(await artifactReaderBytes(process.argv[1]));`,
+        path.join(root, "packages/orchestrator")
+      ],
+      { encoding: "utf8", maxBuffer: 2 * 1024 * 1024, timeout: 10000 }
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, expected);
+    assert.equal(
+      await readFile(target, "utf8"),
+      "invalid previous generated output must never be consumed"
+    );
   });
 });

@@ -39,7 +39,7 @@ installed policy source. These files describe nothing here.
 ## 2. Platform & Tooling
 
 - **Language:** TypeScript `^5.9.0` for the orchestrator; CommonJS entry points for the plugin hook and artifact helper, with shared
-  builtin-only ESM storage, archive and adoption modules under `plugins/banzai/lib/`. Skills and
+  builtin-only ESM storage, archive, adoption and verification modules under `plugins/banzai/lib/`. Skills and
   artifacts are Markdown; machine contracts are JSON Schema.
 - **Runtime / target:** Node.js `>=22.20.0 <23 || >=24.11.1 <25`
   (`engines.node` in both package manifests and both lockfile mirrors);
@@ -62,10 +62,11 @@ installed policy source. These files describe nothing here.
   executable and asserts its non-TTY help output. Temporary output is removed
   on success and failure.
 - **Typecheck:** `npm run typecheck` — `tsc --project tsconfig.json --noEmit`.
-- **Test runner:** `npm run test` — esbuild bundles every `test/**/*.test.ts`
+- **Test runner:** `npm run test` — esbuild bundles selected `test/**/*.test.ts`
   into `.test-dist/`, runs `node --test`, then removes the directory.
   `node packages/orchestrator/scripts/test.mjs --pattern <regex>` provides the
-  same cleanup boundary for focused local evidence.
+  same cleanup boundary for focused local evidence. Repeatable `--file <relative.test.ts>`
+  selects exact test-root files before bundling; omission selects the complete suite.
 - **Full gate:** `npm run verify` — `typecheck`, then `lint`, then `test`, then
   `build:check`. The formatter is deliberately not part of this gate.
 - **Release-confidence gate:** `npm run release:check` — preserves `verify`
@@ -364,7 +365,7 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   implementation, verification, review, fixes). Owns preflight including
   `assertClaudePermissions`, approval-digest and base-commit validation, attempt
   reconciliation, builder-session selection, full/delta reviewer policy,
-  snapshot-bound v3 review publication without formatting-only model calls,
+  snapshot-bound v3/v4 review publication without formatting-only model calls,
   and recovery source discovery.
 - `state-machine.ts` — `transitionState`, `blockState`, `requireState`; the
   only place `RunStatus` changes, so illegal transitions fail closed.
@@ -392,6 +393,9 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   redacts secrets from retained output.
 - `mcp.ts` — `resolveSerenaWhitelist`: availability-gated and never throws; a
   missing Serena becomes a note, never a blocked run.
+- `verification-evidence.ts` — typed facade over the canonical plugin decision and
+  evidence-storage owners. Config 3 opts new work into bound physical provenance
+  and current applicability; runner and standalone helper use the same rules.
 - `verification.ts` — root project-marker detection, hygiene classification,
   explicit-profile readiness, and deterministic command descriptors shared by
   doctor and workflow.
@@ -412,10 +416,10 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   explicitly confirmed live vendor probe producing closed
   `banzai-live-compatibility/v2` evidence with unconditional cleanup.
 - `evaluation-cli.ts` / `evaluation.ts` / `evaluation-render.ts` — read-only
-  privacy-minimized `banzai-evaluation-export/v1` collector and deterministic
+  privacy-minimized default `banzai-evaluation-export/v1` and explicit v2 collector and deterministic
   JSON/Markdown projection; runner-owned sidecars stay outside the boundary.
 - `evaluation-kpi-cli.ts` / `evaluation-kpi.ts` / `evaluation-kpi-render.ts` —
-  pure `banzai-evaluation-kpi/v1` projection over complete exports (ADR-0026)
+  pure default `banzai-evaluation-kpi/v1` and explicit v2 projections over matching exports (ADR-0026/0043)
   in checkout and fail-closed `--input` modes; imports only `types` and
   `errors`.
 - `context-report-cli.ts` / `context-report.ts` / `context-report-render.ts` —
@@ -466,7 +470,7 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   bound snapshots, retaining historical v1/v2 rendering,
   exact snapshot/result validation and atomic publication of validated bytes;
   legacy v1 rendering and diagnostics remain readable.
-- `review-snapshot.ts` — `banzai-review-snapshot/v2` bound scope/content identities
+- `review-snapshot.ts` — `banzai-review-snapshot/v2` and v3 bound scope/content identities
   and a separate historical v1 parser,
   full/delta anchors, recorded evidence, digest validation and owned paths.
 - `types.ts` — all shared types, `CONTRACT_VERSION = "1.0.0"`, phase-result
@@ -496,6 +500,9 @@ Repository release scripts (`packages/orchestrator/scripts/`):
 - `phase-resources-build.mjs` — one exact resource inventory, immutable
   normalized extraction evidence, generated-source parity and actual
   source/plugin/npm/source-map comparison; rejects indexed/working skew.
+- `instruction-baseline.mjs` — explicit authoring/check interface for current
+  instruction expectations and ADR-scoped transitions; preserves the original
+  extraction root. Builds and validators never generate baseline transitions.
 - `build.mjs`, `check-dist.mjs`, `test.mjs`, `eslint-formatter.mjs` — the
   esbuild bundle, dist parity check, `.test-dist/` test runner, and
   deterministic lint output.
@@ -560,7 +567,7 @@ Plugin (`plugins/banzai/`):
   `PROJECT_MANIFEST.md` in the session directory or a parent — and the hook
   stays silent in repositories without that evidence.
 - `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` — plugin manifests,
-  currently version `2.4.0`. The Codex manifest additionally declares the hook
+  currently version `2.5.0`. The Codex manifest additionally declares the hook
   and the store interface metadata.
 - `PROJECT_MANIFEST.md`, `AGENTS.md`, `CLAUDE.md`, and the placeholder
   `documentation/` tree (`README.md`, `decisions/README.md`, `.gitkeep` files) —
@@ -617,6 +624,17 @@ attempt, approval marker or transcript.
   `effort: "xhigh"`, one `repository` hygiene profile containing
   `git diff --check`, and `maxFixCycles: 3`. Every workflow command reloads and
   revalidates config, so no phase caches model settings.
+- Opt-in verification: config schema 3 requires stable check IDs and accepts an
+  explicit verification policy. Only new policy-enabled runs use state 5,
+  private work binding v2 and ledger 2; default config 2/binding v1 and historical
+  runs retain their meanings. Physical leaves stay v1, with separate immutable
+  decisions, before/after origins and current applicability records. Strict reuse
+  requires a complete approved plan obligation inventory; unknown inputs, missing
+  proof and mandatory-fresh checks execute. Source/authority drift blocks application.
+  An unavailable capture leaves current applicability pending even after a physical
+  success; equal null digests cannot establish unchanged inputs.
+  The plugin-only `scripts/verification.cjs` selects configured checks under the
+  same exclusive work claim; models cannot write verification evidence.
 - Run state: `.banzai/runs/<run-id>/state.json` is atomically replaced;
   `events.jsonl` is an append-only summary without transcripts; `attempts/`
   holds model-attempt v1/v2 records, structured results, redacted CLI output,
@@ -781,6 +799,11 @@ attempt, approval marker or transcript.
   acceptance/quality observations remain follow-ups; implemented collection is
   not evidence of effectiveness. Reviewer calibration docs retain a generic
   comparison method without a private dataset dependency.
+- Explicit export/KPI `--schema-version 2` separates physical attempt counts from
+  executed/reused terminal round/check dispositions. Opaque ordinals retain direct
+  origins without private command/path/digest data. Only exact coverage contributes
+  to the reuse ratio; a zero denominator yields null. v1 remains the default and
+  reports new verification evidence as incomplete rather than changing its meaning.
 - Engineering Quality shadow evaluation is a sampled maintainer procedure over
   existing evaluation exports, KPIs, and applied canonical review artifacts. It
   selects completed strict runs whose first independent review used the shadow
@@ -959,7 +982,9 @@ attempts without another model call`.
   affected tests and do not repeat supplied full-scope commands; the runner
   executes configured profiles after the phase. If those profiles omit the
   manifest's applicable final suite, the builder runs it once and records the
-  readiness gap. Standalone skills own one final applicable suite. Review uses
+  readiness gap. Standalone skills own one final applicable suite unless the
+  explicitly enabled shared engine proves equivalent evidence for an eligible check.
+  Required release gates remain fresh. Review uses
   current runner results and reruns a complete command only for a concrete
   reproduction or missing/stale/inconsistent/material evidence reason.
 
@@ -1318,7 +1343,7 @@ status` reports only whether credentials are visible and stored, so a
   source, and the only root Claude settings file is the ignored
   `.claude/settings.local.json`. `plugins/banzai/.claude/settings.json` is
   packaged plugin content, not this repository's configuration.
-- Current Banzai release-train version is `2.4.0`, owned solely by root
+- Current Banzai release-train version is `2.5.0`, owned solely by root
   `package.json.version` and mirrored by four plugin/marketplace fields, the
   orchestrator package, and three `package-lock.json` fields (top-level, root
   package, and workspace package). All nine fields across seven files agree.
@@ -1376,3 +1401,5 @@ restate them here. Paths are relative to `documentation/decisions/`.
 | ADR-0040 | Project adoption preflight and interactive setup | `0040-project-adoption-preflight-and-interactive-setup.md` | Planned |
 | ADR-0041 | Artifact retention and publication boundary | `0041-artifact-retention-and-publication-boundary.md` | Planned |
 | ADR-0042 | Runner-delivered phase instructions | `0042-runner-delivered-phase-instructions.md` | Planned |
+| ADR-0043 | Proportionate verification evidence | `0043-proportionate-verification-evidence.md` | Implemented |
+| ADR-0044 | Instruction baseline evolution | `0044-instruction-baseline-evolution.md` | Implemented |

@@ -93,6 +93,14 @@ mechanism reachable in this codebase, why current evidence does not cover it,
 and the observable fix acceptance. An exposure-class label, a generic threat
 name, or a framework default alone is not a finding.
 
+For an accepted-finding resolution, inspect the accepted IDs, changed scope,
+current binding/approved authority, direct physical origins and current
+applicability. Keep review independent of the builder transcript. Executed,
+reused, historical, failed and pending evidence have different meanings; do not
+turn reuse into a fresh pass or infer missing assurance from a report count.
+Inspect surrounding claims for contradictions while keeping the review focused
+on the authorized delta. The existing human triage and scope acknowledgment remain.
+
 ## Engineering Quality Shadow Procedure
 
 1. Complete audit items 1–13 under their existing authorities. Freeze the

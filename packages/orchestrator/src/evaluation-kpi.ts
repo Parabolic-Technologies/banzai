@@ -1,6 +1,8 @@
 import { BanzaiError } from "./errors.js";
 import type {
   EvaluationExport,
+  EvaluationExportV2,
+  EvaluationKpiV2,
   EvaluationKpiEntry,
   EvaluationKpiReport,
   EvaluationKpiSignature,
@@ -798,4 +800,153 @@ export function decodeEvaluationExportInput(
     validateRun(sourceName, run, index);
   });
   return parsed as unknown as EvaluationExport;
+}
+
+/** v2 is opt-in; never accepts or converts an export-v1 input. */
+export function decodeEvaluationExportV2Input(
+  text: string,
+  sourceName: string
+): EvaluationExportV2 {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text) as unknown;
+  } catch {
+    throw inputError(sourceName, "invalid JSON");
+  }
+  if (
+    !isRecord(parsed) ||
+    parsed.schema !== "banzai-evaluation-export/v2" ||
+    parsed.schemaVersion !== 2 ||
+    !Array.isArray(parsed.runs) ||
+    Object.keys(parsed).sort().join(",") !==
+      "aggregates,cohort,issues,runs,schema,schemaVersion"
+  )
+    throw inputError(sourceName, "export v2 is required");
+  // Existing field validation is reused, while all new evidence is validated
+  // below. This is validation only, not a conversion of legacy evidence.
+  decodeEvaluationExportInput(
+    JSON.stringify({
+      ...parsed,
+      schema: EVALUATION_EXPORT_SCHEMA,
+      schemaVersion: 1
+    }),
+    sourceName
+  );
+  for (const run of parsed.runs as Record<string, unknown>[]) {
+    const evidence = run.verificationEvidence;
+    if (
+      !isRecord(evidence) ||
+      Object.keys(evidence).sort().join(",") !==
+        "coverage,dispositions,physicalAttempts" ||
+      !["exact", "incomplete"].includes(evidence.coverage as string) ||
+      !Array.isArray(evidence.physicalAttempts) ||
+      !Array.isArray(evidence.dispositions)
+    )
+      throw inputError(sourceName, "invalid verification v2 evidence");
+    const successes = new Set<number>();
+    for (const [index, attempt] of evidence.physicalAttempts.entries()) {
+      if (
+        !isRecord(attempt) ||
+        Object.keys(attempt).sort().join(",") !== "durationMs,ordinal,status" ||
+        attempt.ordinal !== index + 1 ||
+        !["started", "completed", "failed", "interrupted"].includes(
+          attempt.status as string
+        ) ||
+        !(
+          attempt.durationMs === null ||
+          (typeof attempt.durationMs === "number" &&
+            Number.isFinite(attempt.durationMs) &&
+            attempt.durationMs >= 0)
+        )
+      )
+        throw inputError(sourceName, "invalid physical ordinal evidence");
+      if (attempt.status === "completed") successes.add(attempt.ordinal);
+    }
+    const keys = new Set<string>();
+    for (const item of evidence.dispositions) {
+      if (
+        !isRecord(item) ||
+        Object.keys(item).sort().join(",") !== "check,kind,origin,round" ||
+        ![item.round, item.check].every(
+          (n) => typeof n === "number" && Number.isSafeInteger(n) && n > 0
+        ) ||
+        !["executed", "reused", "pending"].includes(item.kind as string)
+      )
+        throw inputError(sourceName, "invalid disposition");
+      const key = JSON.stringify([item.round, item.check]);
+      if (
+        keys.has(key) ||
+        (item.kind === "pending"
+          ? item.origin !== null || evidence.coverage === "exact"
+          : !successes.has(item.origin as number))
+      )
+        throw inputError(sourceName, "inconsistent terminal disposition");
+      keys.add(key);
+    }
+    if (evidence.coverage === "exact" && evidence.dispositions.length === 0)
+      throw inputError(
+        sourceName,
+        "exact coverage requires terminal check evidence"
+      );
+  }
+  return parsed as unknown as EvaluationExportV2;
+}
+
+export function deriveEvaluationKpiV2(
+  sources: readonly EvaluationExportV2[]
+): EvaluationKpiV2 {
+  return {
+    schema: "banzai-evaluation-kpi/v2",
+    schemaVersion: 2,
+    sources: sources.map((source, index) => {
+      const report = decodeEvaluationExportV2Input(
+        JSON.stringify({
+          schema: source.schema,
+          schemaVersion: source.schemaVersion,
+          cohort: source.cohort,
+          runs: source.runs,
+          issues: source.issues,
+          aggregates: {}
+        }),
+        `source ${index + 1}`
+      );
+      const included = report.runs.filter(
+        (run) => run.cohortMembership === "included"
+      );
+      const exact = included.filter(
+        (run) => run.verificationEvidence.coverage === "exact"
+      );
+      const dispositions = exact.flatMap(
+        (run) => run.verificationEvidence.dispositions
+      );
+      const reusedChecks = dispositions.filter(
+        (item) => item.kind === "reused"
+      ).length;
+      const executedChecks = dispositions.filter(
+        (item) => item.kind === "executed"
+      ).length;
+      const denominator = reusedChecks + executedChecks;
+      const coverage = {
+        exact: exact.length,
+        incomplete: included.length - exact.length
+      };
+      return {
+        ordinal: index + 1,
+        runs: included.length,
+        coverage,
+        physicalAttempts: exact.reduce(
+          (sum, run) => sum + run.verificationEvidence.physicalAttempts.length,
+          0
+        ),
+        executedChecks,
+        reusedChecks,
+        reuseRatio: {
+          numerator: reusedChecks,
+          denominator,
+          value: denominator === 0 ? null : reusedChecks / denominator,
+          coverage
+        }
+      };
+    })
+  };
 }

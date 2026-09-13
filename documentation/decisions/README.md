@@ -49,6 +49,8 @@ plugin and orchestrator source.
 | [0040](./0040-project-adoption-preflight-and-interactive-setup.md) | Project adoption preflight and interactive setup | Accepted | 2026-09-10 | [Private work history](../historical-references.md) |
 | [0041](./0041-artifact-retention-and-publication-boundary.md) | Artifact retention and publication boundary | Accepted | 2026-09-11 | [archived work history](../historical-references.md); [migration roadmap](../artifact-policy-migration.md) |
 | [0042](./0042-runner-delivered-phase-instructions.md) | Runner-delivered phase instructions | Accepted | 2026-09-11 | Private work `runner-phase-instructions`; requirements summarized in the ADR |
+| [0043](./0043-proportionate-verification-evidence.md) | Proportionate verification evidence | Accepted | 2026-09-12 | Private work `proportionate-verification-closure`; requirements summarized in the ADR |
+| [0044](./0044-instruction-baseline-evolution.md) | Instruction baseline evolution | Accepted | 2026-09-12 | Private work `proportionate-verification-closure`; independent baseline-evolution decision |
 
 ## File Names
 

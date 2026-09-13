@@ -1,4 +1,8 @@
 import {
+  parseVerificationConfiguration,
+  parseVerificationObligations
+} from "./verification-evidence.js";
+import {
   inspectBoundWork,
   safePath,
   type ArtifactBoundWork
@@ -737,5 +741,28 @@ export function summariesMatch(
   });
   return (
     JSON.stringify(normalize(expected)) === JSON.stringify(normalize(actual))
+  );
+}
+
+/** Optional inventory never weakens legacy plan meaning; present invalid input fails closed. */
+export function validatePlanVerificationObligations(
+  plan: string,
+  verification: unknown
+): void {
+  if (!plan.includes("banzai-verification-obligations/")) return;
+  try {
+    if (
+      parseVerificationObligations(
+        plan,
+        parseVerificationConfiguration(verification)
+      ) !== null
+    )
+      return;
+  } catch {
+    /* A malformed opt-in inventory cannot authorize equivalent evidence. */
+  }
+  throw new PlanTaskCompletionError(
+    "approved_plan_invalid",
+    "The plan verification obligation inventory is missing, ambiguous, contradictory or stale."
   );
 }

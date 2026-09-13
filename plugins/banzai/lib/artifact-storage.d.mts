@@ -1,6 +1,6 @@
 export interface WorkBinding {
-  schema: "banzai-work-binding/v1";
-  schemaVersion: 1;
+  schema: "banzai-work-binding/v1" | "banzai-work-binding/v2";
+  schemaVersion: 1 | 2;
   workId: string;
   slug: string;
   mode: "strict" | "lite" | "fix" | "workflow";
@@ -9,6 +9,7 @@ export interface WorkBinding {
   sourceCommit: string | null;
   artifacts: {
     reviewDirectory: string;
+    verificationDirectory?: string;
     description?: string;
     plan?: string;
     implementationReport?: string;
@@ -122,6 +123,7 @@ export function initializeArtifacts(input: {
   layout?: WorkBinding["layout"];
 }): Promise<ArtifactInspection>;
 export function createWork(input: {
+  schemaVersion?: number;
   repoRoot: string;
   slug: string;
   mode: WorkBinding["mode"];

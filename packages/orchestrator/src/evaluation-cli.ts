@@ -1,5 +1,8 @@
 import { BanzaiError } from "./errors.js";
-import { collectEvaluationExport } from "./evaluation.js";
+import {
+  collectEvaluationExport,
+  collectEvaluationExportV2
+} from "./evaluation.js";
 import {
   renderEvaluationJson,
   renderEvaluationMarkdown
@@ -42,6 +45,7 @@ export function parseEvaluationExportArgs(
   let format: EvaluationExportOptions["format"] = "markdown";
   let from: string | null = null;
   let to: string | null = null;
+  let schemaVersion: 1 | 2 | undefined;
   let jsonSeen = false;
   let fromSeen = false;
   let toSeen = false;
@@ -49,6 +53,17 @@ export function parseEvaluationExportArgs(
 
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
+    if (argument === "--schema-version") {
+      const value = optionValue(args, index);
+      if (schemaVersion !== undefined || !["1", "2"].includes(value))
+        throw new BanzaiError(
+          "INVALID_EVAL_OPTION",
+          "Evaluation schema version must be 1 or 2 and specified once."
+        );
+      schemaVersion = value === "1" ? 1 : 2;
+      index += 1;
+      continue;
+    }
     if (argument === "--json") {
       if (jsonSeen) {
         throw new BanzaiError(
@@ -104,6 +119,7 @@ export function parseEvaluationExportArgs(
     );
   }
   return {
+    ...(schemaVersion === undefined ? {} : { schemaVersion }),
     format,
     from,
     to,
@@ -117,13 +133,23 @@ export async function executeEvaluationExport(
   io: EvaluationIO
 ): Promise<void> {
   const options = parseEvaluationExportArgs(args);
-  const report = await collectEvaluationExport(repoRoot, options);
+  const report =
+    options.schemaVersion === 2
+      ? await collectEvaluationExportV2(repoRoot, options)
+      : await collectEvaluationExport(repoRoot, options);
   io.stdout(
     options.format === "json"
       ? renderEvaluationJson(report)
       : renderEvaluationMarkdown(report)
   );
-  if (report.issues.length > 0 || report.cohort.unresolvedRunCount > 0) {
+  if (
+    report.issues.length > 0 ||
+    report.cohort.unresolvedRunCount > 0 ||
+    (report.schemaVersion === 2 &&
+      report.runs.some(
+        (run) => run.verificationEvidence.coverage === "incomplete"
+      ))
+  ) {
     io.stderr(
       "[EVAL_PARTIAL] Export includes incomplete evidence; inspect the structured issues in the report.\n"
     );

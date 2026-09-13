@@ -666,15 +666,23 @@ Inventory selects `workPaths`/`runIds`; export validates fixed `inventoryFile`
 bytes. `bundlePath` verification/restore preserve explicit pins and owner policy,
 required Markdown authority closure and a private restored manifest receipt.
 Managed work/run/control destination ancestry is rejected before staging.
-Doctor's read-only active-state check supports v4 and validates binding identity.
+Doctor's read-only active-state check supports v4/v5 and validates binding identity.
 
 ## Runner instruction generation and parity
 
 `phase-resources-build.mjs` owns the six-phase/nine-guidance/six-policy inventory
-and hook reference identities. `build.mjs` explicitly regenerates the committed
+and hook reference identities. Artifact-reader generation resolves shared runtime
+reader imports to canonical validation source, so generation never consumes its
+previous output. `build.mjs` explicitly regenerates the committed
 module; typecheck/lint/test never repair it. `check-dist.mjs` compares it and the
-bundle/map. Extraction validation pins the pre-change skill inventory, portable
-clause transformations, unchanged skill skeletons and Orchestrated Mode blocks.
+bundle/map. Extraction validation preserves the immutable pre-change root and exact
+Orchestrated Mode blocks. The current baseline v1/pin contains the maintained
+expectations plus replayable, Accepted-ADR-scoped transitions. The explicit
+`instruction-baseline.mjs --describe` interface reports the exact pending scope;
+`--authorization <file> --check` validates without writes and the authoring command
+publishes the exact reviewed transition. Interrupted publication retains a journal
+and requires the identical authorization and unchanged source to recover. Normal
+build, parity and publication checks never regenerate a baseline or pin.
 Publication checks inspect actual source/plugin archives, npm bytes and source-map
 content against the same candidate; indexed/working instruction skew fails.
 
@@ -695,3 +703,45 @@ Codex/ambient/unresolved scopes are unverifiable; bounded resource failures do n
 claim match. Diagnostics offer rebuild, matching plugin update or explicit ambient
 mode without performing any of them. Tool inventories and real Skill telemetry
 remain available; progress names supplied phases rather than inferred skill loads.
+
+## Verification evidence and versioned consumers
+
+`verification-evidence.ts` is a typed facade over the builtin-only plugin decision
+engine and evidence store. Config 3 adds globally stable check IDs and an explicit
+policy with delimited explanatory inputs, dependency exclusions, declared actual
+toolchain files, sanitized environment and volatile-dependency refusal. Capture
+includes both Git index blobs and working/ignored input bytes, kinds, modes and
+path sets. Unknown, unstable, secret-dependent or unproven symlink inputs keep
+checks fresh. Strict plans may provide a complete, remainder-bound obligation
+inventory; legacy plans retain fresh execution. Release gates cannot reuse.
+Unavailable captures preserve physical attempt history but cannot authorize
+current applicability, including same-round resume after a successful process.
+
+The same decision/start/finish/application codecs serve workflow state 5 and the
+plugin-only verification helper. New binding v2 reserves `verificationDirectory`
+for that owner; ordinary artifact writes cannot address it. Physical attempt v1
+leaves and metrics count actual subprocesses only. Ledger 2 adds provenance,
+never fabricated success. Execution occurs under existing work ownership; fresh
+source and authority checks gate review, pass application, zero-accepted triage
+and lite completion. Failure/retry/recovery retain their prior authorization.
+
+Snapshot v3 and rendered review artifact v4 freeze direct origins, physical
+leaves and executed/reused/pending applicability. Review-result v2, completion
+v1 and old snapshot/rendering identities stay unchanged. Archive v1 follows this
+closure, including standalone evidence and logs, and validates restored bytes.
+Same-repository environment identity prevents a restored archive from becoming
+reuse authority in another checkout.
+
+`eval export --schema-version 2` reads the new ledger with complete provenance and
+safe read-only paths, then emits only opaque ordinals and allow-listed numeric
+fields. `eval kpi --schema-version 2` accepts only export v2 and computes each
+source independently from per-run evidence. Physical retries remain attempts;
+terminal dispositions count once per round/check. Incomplete coverage never
+contributes inferred zeroes. Default v1 and context/cancellation/human-time report
+schemas stay unchanged; their state readers recognize v5 where applicable.
+Missing origin-finish proof makes export-v2 coverage incomplete even when the
+historical execution had unavailable captures; such runs cannot enter exact KPIs.
+
+The test driver accepts repeated exact `--file` selections before esbuild;
+`--pattern` still filters Node test names. Full default execution, child process
+group termination and output cleanup retain the same owner.

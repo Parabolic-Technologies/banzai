@@ -371,7 +371,8 @@ export function parseBinding(value) {
     "sourceCommit",
     "artifacts",
   ]);
-  if (value.schema !== BINDING_SCHEMA || value.schemaVersion !== 1)
+  if (!((value.schema === BINDING_SCHEMA && value.schemaVersion === 1) ||
+    (value.schema === "banzai-work-binding/v2" && value.schemaVersion === 2 && value.layout === "private")))
     fail(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Unsupported artifact work binding version.",
@@ -402,6 +403,7 @@ export function parseBinding(value) {
     value.mode,
     value.layout,
   );
+  if (value.schemaVersion === 2) expected.verificationDirectory = `${WORK_ROOT}/${value.workId}/verification`;
   exactObject(value.artifacts, Object.keys(expected));
   for (const key of Object.keys(expected)) {
     relativePath(value.artifacts[key]);
@@ -523,19 +525,19 @@ async function legacyEvidence(root, declared = false) {
     );
     if (
       state === null ||
-      ![1, 2, 3, 4].includes(state.schemaVersion) ||
+      ![1, 2, 3, 4, 5].includes(state.schemaVersion) ||
       state.runId !== entry.name
     )
       fail(
         "ARTIFACT_RECOVERY_REQUIRED",
         "Unrecognized runner evidence requires recovery.",
       );
-    if (state.schemaVersion === 4 && !declared)
+    if (state.schemaVersion >= 4 && !declared)
       fail(
         "ARTIFACT_RECOVERY_REQUIRED",
         "A bound run without its artifact declaration requires recovery.",
       );
-    if (state.schemaVersion !== 4) evidence.push(`.banzai/runs/${entry.name}/state.json`);
+    if (state.schemaVersion < 4) evidence.push(`.banzai/runs/${entry.name}/state.json`);
   }
   return [...new Set(evidence)].sort();
 }
@@ -851,6 +853,8 @@ export async function initializeArtifacts(input) {
 }
 
 export async function createWork(input) {
+  if (input.schemaVersion !== undefined && ![1, 2].includes(input.schemaVersion))
+    fail("ARTIFACT_VERSION_UNSUPPORTED", "Unsupported new work binding version.");
   if (
     !UUID.test(input.creationId) ||
     typeof input.slug !== "string" ||
@@ -873,7 +877,8 @@ export async function createWork(input) {
       if (
         bound.workId !== input.creationId ||
         bound.slug !== input.slug ||
-        bound.mode !== input.mode
+        bound.mode !== input.mode ||
+        bound.schemaVersion !== (input.schemaVersion === 2 ? 2 : 1)
       )
         fail(
           "ARTIFACT_OWNERSHIP_CONFLICT",
@@ -897,6 +902,10 @@ export async function createWork(input) {
       input.mode,
       layout,
     );
+    if (input.schemaVersion === 2) {
+      if (layout !== "private") fail("ARTIFACT_INPUT_INVALID", "Verification-enabled work requires a new private binding.");
+      roles.verificationDirectory = `${directory}/verification`;
+    }
     if (layout === "legacy") {
       for (const [role, relative] of Object.entries(roles)) {
         if (
@@ -930,8 +939,8 @@ export async function createWork(input) {
     const binding =
       staged === null
         ? parseBinding({
-            schema: BINDING_SCHEMA,
-            schemaVersion: 1,
+            schema: input.schemaVersion === 2 ? "banzai-work-binding/v2" : BINDING_SCHEMA,
+            schemaVersion: input.schemaVersion === 2 ? 2 : 1,
             workId: input.creationId,
             slug: input.slug,
             mode: input.mode,
@@ -976,7 +985,7 @@ export function ownsArtifact(binding, relative) {
   relativePath(relative);
   return (
     Object.entries(binding.artifacts).some(
-      ([role, value]) => role !== "reviewDirectory" && value === relative,
+      ([role, value]) => role !== "reviewDirectory" && role !== "verificationDirectory" && value === relative,
     ) ||
     (relative.startsWith(`${binding.artifacts.reviewDirectory}/`) &&
       /^review-[1-9][0-9]*\.md$/u.test(
@@ -1245,7 +1254,8 @@ export async function runArtifactOperation(operation, input) {
     ["schema", "schemaVersion", "repoRoot", ...fields[0]],
     fields[1],
   );
-  if (input.schema !== REQUEST_SCHEMA || input.schemaVersion !== 1)
+  if (!((input.schema === REQUEST_SCHEMA && input.schemaVersion === 1) ||
+    (operation === "create" && input.schema === "banzai-artifact-request/v2" && input.schemaVersion === 2)))
     fail(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Unsupported artifact request version.",

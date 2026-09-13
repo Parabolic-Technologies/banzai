@@ -1,3 +1,7 @@
+import {
+  parseVerificationDecision,
+  parseVerificationApplicability
+} from "./verification-evidence.js";
 import { parseBinding } from "./artifact-storage.js";
 import { createHash, randomUUID } from "node:crypto";
 import { constants, readFileSync, unlinkSync } from "node:fs";
@@ -372,19 +376,19 @@ function validateDecisionState(state: RunState): RunState {
 function normalizeRunState(
   state: RunState | LegacyRunStateV2 | LegacyRunState
 ): RunState {
-  if (![1, 2, 3, 4].includes(state.schemaVersion)) {
+  if (![1, 2, 3, 4, 5].includes(state.schemaVersion)) {
     throw new BanzaiError(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Unsupported persisted run state version."
     );
   }
-  if (state.schemaVersion !== 4 && state.artifactBinding !== undefined) {
+  if (state.schemaVersion < 4 && state.artifactBinding !== undefined) {
     throw new BanzaiError(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Legacy run state cannot acquire private binding semantics."
     );
   }
-  if (state.schemaVersion === 4) {
+  if (state.schemaVersion === 4 || state.schemaVersion === 5) {
     if (
       state.artifactBinding === undefined ||
       !/^[0-9a-f]{64}$/.test(state.artifactBinding.sha256)
@@ -404,7 +408,37 @@ function normalizeRunState(
         "Run state requires an exact immutable workflow binding."
       );
   }
-  if (state.schemaVersion === 3 || state.schemaVersion === 4) {
+  if (
+    state.schemaVersion === 4 &&
+    state.artifactBinding?.binding.schemaVersion !== 1
+  )
+    throw new BanzaiError(
+      "ARTIFACT_VERSION_UNSUPPORTED",
+      "Run state v4 retains binding v1 semantics."
+    );
+  if (state.schemaVersion === 5 && state.verificationEvidence !== undefined) {
+    parseVerificationDecision(state.verificationEvidence.decision);
+    if (state.verificationEvidence.applicability !== null)
+      parseVerificationApplicability(state.verificationEvidence.applicability);
+  }
+  if (
+    state.schemaVersion === 5 &&
+    state.artifactBinding?.binding.schemaVersion !== 2
+  )
+    throw new BanzaiError(
+      "ARTIFACT_RECOVERY_REQUIRED",
+      "Run state v5 requires its original verification-enabled binding."
+    );
+  if (state.schemaVersion !== 5 && state.verificationEvidence !== undefined)
+    throw new BanzaiError(
+      "ARTIFACT_VERSION_UNSUPPORTED",
+      "Legacy state cannot acquire verification applicability."
+    );
+  if (
+    state.schemaVersion === 3 ||
+    state.schemaVersion === 4 ||
+    state.schemaVersion === 5
+  ) {
     const recovery = state.recovery ?? null;
     if (recovery !== null && recovery.stage === undefined) {
       recovery.stage =
@@ -923,7 +957,8 @@ export class RunStore {
     await mkdir(path.join(this.runDirectory(state.runId), "attempts"));
     await mkdir(this.verificationAttemptsDirectory(state.runId));
     await atomicWriteJson(this.verificationLedgerPath(state.runId), {
-      schemaVersion: VERIFICATION_LEDGER_SCHEMA_VERSION
+      schemaVersion:
+        state.schemaVersion === 5 ? 2 : VERIFICATION_LEDGER_SCHEMA_VERSION
     });
     await this.withStateMutation(state.runId, async () => {
       await atomicWriteJson(this.statePath(state.runId), state, false);
@@ -1057,7 +1092,7 @@ export class RunStore {
       if (
         raw.runId !== runId ||
         !CANCELLATION_STATUSES.includes(raw.status as RunState["status"]) ||
-        ![1, 2, 3, 4].includes(raw.schemaVersion as number)
+        ![1, 2, 3, 4, 5].includes(raw.schemaVersion as number)
       )
         throw new Error();
     } catch {

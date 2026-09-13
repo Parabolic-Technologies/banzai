@@ -274,7 +274,7 @@ function configVersionCheck(document: unknown): DoctorCheck {
       "Configuration schema version 1 is legacy and requires manual migration."
     );
   }
-  if (document.schemaVersion !== 2) {
+  if (document.schemaVersion !== 2 && document.schemaVersion !== 3) {
     return check(
       "config.version",
       "config",
@@ -583,7 +583,7 @@ async function activeRunCheck(repoRoot: string): Promise<DoctorCheck> {
   }
   if (
     !isRecord(state) ||
-    ![1, 2, 3, 4].includes(state.schemaVersion as number) ||
+    ![1, 2, 3, 4, 5].includes(state.schemaVersion as number) ||
     typeof state.runId !== "string" ||
     typeof state.repoRoot !== "string" ||
     typeof state.status !== "string" ||
@@ -596,7 +596,7 @@ async function activeRunCheck(repoRoot: string): Promise<DoctorCheck> {
       "The referenced run state uses an unsupported structure."
     );
   }
-  if (state.schemaVersion === 4) {
+  if (state.schemaVersion === 4 || state.schemaVersion === 5) {
     try {
       await inspectBoundWork(
         repoRoot,

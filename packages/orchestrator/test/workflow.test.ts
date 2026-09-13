@@ -1,6 +1,9 @@
+import { requiredFixture } from "./helpers.js";
+import { RunStore } from "../src/store.js";
 import { instructionPluginFixture } from "./phase-instruction-fixtures.js";
 import { inspectDoctor } from "../src/doctor.js";
 import { spawn, spawnSync } from "node:child_process";
+import { mkdirSync } from "node:fs";
 import {
   acquireWork,
   createWork,
@@ -9,8 +12,18 @@ import {
   inspectArtifacts
 } from "../src/artifact-storage.js";
 import { reviewResultSchema } from "../src/contracts.js";
-import { collectEvaluationExport } from "../src/evaluation.js";
-import { deriveEvaluationKpiReport } from "../src/evaluation-kpi.js";
+import {
+  collectEvaluationExport,
+  collectEvaluationExportV2
+} from "../src/evaluation.js";
+import {
+  deriveEvaluationKpiReport,
+  deriveEvaluationKpiV2
+} from "../src/evaluation-kpi.js";
+import {
+  evidenceDigest,
+  persistVerificationApplicability
+} from "../src/verification-evidence.js";
 import { collectContextReport } from "../src/context-report.js";
 import { projectAgentControlStatus } from "../src/agent-control.js";
 import { emptyHumanTime } from "../src/human-time.js";
@@ -3092,7 +3105,11 @@ test("six approved tasks require six canonical records before verification and s
     const status = await runner.status();
 
     assert.equal(done.status, "done", done.blockReason ?? "");
-    assert.equal(done.metrics.attempts.verification, 1);
+    assert.equal(
+      done.metrics.attempts.verification,
+      1,
+      JSON.stringify(done.verificationEvidence?.decision)
+    );
     assert.equal(status.taskCompletion.state, "complete");
     assert.equal(status.taskCompletion.completed, 6);
     assert.equal(status.taskCompletion.total, 6);
@@ -9655,4 +9672,440 @@ test("late instruction skew preserves the failed planner retry and authorized re
       await plugin.dispose();
     }
   });
+});
+
+for (const [workflow, unavailable] of [
+  ["feature", false],
+  ["strict", false],
+  ["feature", true]
+] as const) {
+  test(`verification v2 guards ${workflow} completion and retains physical provenance${unavailable ? " with unavailable capture" : ""}`, async () => {
+    const repository = await createTestRepository({
+      artifactLayout: "private"
+    });
+    try {
+      const configPath = path.join(repository.root, ".banzai/config.json");
+      const config = JSON.parse(
+        await readFile(configPath, "utf8")
+      ) as OrchestratorConfig;
+      const executable = await realpath(process.execPath);
+      config.schemaVersion = 3;
+      config.verification = {
+        profiles: [
+          {
+            id: "node",
+            projectType: "node",
+            commands: [
+              {
+                id: "unit",
+                name: "Unit",
+                command: executable,
+                args: ["-e", "console.log('real verification fixture')"],
+                timeoutMs: 2000,
+                evidence: "equivalent_evidence",
+                ignoreExplanatory: true
+              }
+            ]
+          }
+        ],
+        policy: {
+          schema: "banzai-verification-policy/v1",
+          schemaVersion: 1,
+          explanatory: [],
+          dependencies: {
+            complete: true,
+            exclude: [".banzai/work"],
+            toolchain: [executable],
+            environment: { LANG: "C" },
+            volatile: unavailable ? ["external"] : []
+          }
+        }
+      };
+      await writeFile(configPath, JSON.stringify(config));
+      await commitAll(repository.root, "verification policy fixture");
+      const adapters = new FakeAdapters();
+      adapters.selectionResults.push(
+        selectionResult({ recommendedWorkflow: workflow })
+      );
+      adapters.reviewResults.push(passingReview());
+      const runner = new WorkflowRunner(repository.root, adapters);
+      let state = await runner.start({
+        slug: "evidence",
+        request: "Verify evidence lifecycle."
+      });
+      if (workflow === "strict")
+        state = await runner.approvePlan("human", true);
+      assert.equal(state.schemaVersion, 5);
+      assert.equal(state.artifactBinding?.binding.schemaVersion, 2);
+      if (unavailable) {
+        assert.equal(state.status, "blocked");
+        assert.equal(state.metrics.attempts.verification, 1);
+        const evidence = requiredFixture(state.verificationEvidence);
+        assert.equal(evidence.applicability?.complete, false);
+        const runDirectory = path.join(
+          repository.root,
+          ".banzai/runs",
+          state.runId
+        );
+        const records = await new RunStore(
+          repository.root
+        ).readVerificationAttempts(state.runId);
+        const attempt = requiredFixture(records[0]);
+        assert.equal(attempt.exitCode, 0);
+        // Compatibility fixture for the pre-fix application shape. Its physical
+        // attempt, captures and logs come from the real runner execution above.
+        const { sha256: priorDigest, ...historical } = requiredFixture(
+          evidence.applicability
+        );
+        historical.complete = true;
+        historical.dispositions = [
+          {
+            checkId: "unit",
+            kind: "executed",
+            origin: {
+              attemptId: attempt.id,
+              recordDigest: evidenceDigest(attempt),
+              roundId: attempt.round.id
+            }
+          }
+        ];
+        evidence.applicability = {
+          ...historical,
+          sha256: evidenceDigest(historical)
+        };
+        assert.notEqual(evidence.applicability.sha256, priorDigest);
+        await persistVerificationApplicability(
+          {
+            repoRoot: repository.root,
+            directory: `.banzai/runs/${state.runId}/verification`,
+            workId: requiredFixture(state.artifactBinding).binding.workId
+          },
+          evidence.applicability
+        );
+        await new RunStore(repository.root).writeState(state);
+        const options = {
+          format: "json" as const,
+          from: null,
+          to: null,
+          runIds: [state.runId]
+        };
+        const before = await collectEvaluationExportV2(
+          repository.root,
+          options
+        );
+        assert.equal(before.runs[0]?.verificationEvidence.coverage, "exact");
+        assert.equal(
+          deriveEvaluationKpiV2([before]).sources[0]?.reuseRatio.denominator,
+          1
+        );
+        const legacy = await collectEvaluationExport(repository.root, options);
+        const finishPath = path.join(
+          runDirectory,
+          "verification/origins",
+          `${attempt.id}.finish.json`
+        );
+        const finish = await readFile(finishPath);
+        await rm(finishPath);
+        const missing = await collectEvaluationExportV2(
+          repository.root,
+          options
+        );
+        assert.equal(
+          missing.runs[0]?.verificationEvidence.coverage,
+          "incomplete"
+        );
+        assert.deepEqual(
+          missing.runs[0].verificationEvidence.physicalAttempts,
+          before.runs[0].verificationEvidence.physicalAttempts
+        );
+        assert.ok(
+          missing.runs[0].verificationEvidence.dispositions.every(
+            (item) => item.kind === "pending"
+          )
+        );
+        assert.equal(
+          deriveEvaluationKpiV2([missing]).sources[0]?.reuseRatio.denominator,
+          0
+        );
+        assert.deepEqual(
+          await collectEvaluationExport(repository.root, options),
+          legacy
+        );
+        await writeFile(finishPath, finish);
+        await writeFile(
+          path.join(repository.root, "src/example.txt"),
+          "changed after unavailable capture\n"
+        );
+        const resumed = await runner.resume();
+        assert.equal(resumed.status, "blocked");
+        assert.equal(resumed.metrics.attempts.verification, 1);
+        return;
+      }
+      assert.equal(state.status, "done", state.blockReason ?? "");
+      assert.equal(state.metrics.attempts.verification, 1);
+      assert.equal(state.verificationEvidence?.applicability?.complete, true);
+      assert.equal(
+        state.verificationEvidence.applicability.dispositions[0]?.kind,
+        "executed"
+      );
+      const runDirectory = path.join(
+        repository.root,
+        ".banzai/runs",
+        state.runId
+      );
+      assert.deepEqual(
+        JSON.parse(
+          await readFile(
+            path.join(runDirectory, "verification-attempts/ledger.json"),
+            "utf8"
+          )
+        ),
+        { schemaVersion: 2 }
+      );
+      if (workflow === "strict") {
+        assert.match(
+          adapters.reviewPrompts[0] ?? "",
+          /banzai-verification-applicability\/v1/
+        );
+        const artifact = await readFile(
+          path.join(
+            repository.root,
+            requiredFixture(requiredFixture(state.latestReview).artifactPath)
+          ),
+          "utf8"
+        );
+        assert.match(artifact, /banzai-feature-review\/v4/);
+      }
+      const exported = await collectEvaluationExportV2(repository.root, {
+        format: "json",
+        from: null,
+        to: null,
+        runIds: [state.runId]
+      });
+      assert.equal(exported.runs[0]?.verificationEvidence.coverage, "exact");
+      assert.equal(
+        exported.runs[0].verificationEvidence.physicalAttempts.length,
+        1
+      );
+      assert.equal(
+        exported.runs[0].verificationEvidence.dispositions[0]?.kind,
+        "executed"
+      );
+      const legacyExport = await collectEvaluationExport(repository.root, {
+        format: "json",
+        from: null,
+        to: null,
+        runIds: [state.runId]
+      });
+      assert.ok(
+        legacyExport.issues.some(
+          (issue) => issue.code === "VERIFICATION_HISTORY_INCOMPLETE"
+        )
+      );
+      const context = await collectContextReport(repository.root, {
+        runIds: [state.runId],
+        from: null,
+        to: null,
+        format: "json"
+      });
+      assert.ok(context);
+      // A resumed completed physical round performs no second invocation, but
+      // source drift prevents its old success from being applied again.
+      const persisted = JSON.parse(
+        await readFile(path.join(runDirectory, "state.json"), "utf8")
+      ) as RunState;
+      persisted.status = "verifying";
+      await writeFile(
+        path.join(repository.root, "src/example.txt"),
+        "changed after verification\n"
+      );
+      await writeFile(
+        path.join(runDirectory, "state.json"),
+        JSON.stringify(persisted)
+      );
+      const resumed = await runner.resume();
+      assert.notEqual(resumed.status, "done");
+      assert.equal(resumed.metrics.attempts.verification, 1);
+    } finally {
+      await repository.dispose();
+    }
+  });
+}
+
+test("strict explanatory closure reuses its original physical check through independent resolution review", async () => {
+  const repository = await createTestRepository({ artifactLayout: "private" });
+  try {
+    const executable = await realpath(process.execPath);
+    const configPath = path.join(repository.root, ".banzai/config.json");
+    const config = JSON.parse(
+      await readFile(configPath, "utf8")
+    ) as OrchestratorConfig;
+    config.schemaVersion = 3;
+    config.verification = {
+      profiles: [
+        {
+          id: "node",
+          projectType: "node",
+          commands: [
+            {
+              id: "unit",
+              name: "Unit",
+              command: executable,
+              args: [
+                "-e",
+                "require('node:assert/strict').equal(require('node:fs').readFileSync('src/example.txt','utf8'),'needs-fix\\n')"
+              ],
+              timeoutMs: 2000,
+              evidence: "equivalent_evidence",
+              ignoreExplanatory: true
+            }
+          ]
+        }
+      ],
+      policy: {
+        schema: "banzai-verification-policy/v1",
+        schemaVersion: 1,
+        explanatory: [{ path: "notes.md", regions: [] }],
+        dependencies: {
+          complete: true,
+          exclude: [".banzai/work"],
+          toolchain: [executable],
+          environment: { LANG: "C" },
+          volatile: []
+        }
+      }
+    };
+    await writeFile(configPath, JSON.stringify(config));
+    await writeFile(
+      path.join(repository.root, "notes.md"),
+      "Original explanatory sentence.\n"
+    );
+    await commitAll(repository.root, "explicit verification closure fixture");
+    class ExplanatoryAdapters extends FakeAdapters {
+      override async runPhase(
+        request: PhaseAdapterRequest
+      ): Promise<AdapterResult<PhaseResult>> {
+        const result = await super.runPhase(request);
+        if (result.result.phase === "fix") {
+          await writeFile(
+            path.join(request.repoRoot, "src/example.txt"),
+            "needs-fix\n"
+          );
+          await writeFile(
+            path.join(request.repoRoot, "notes.md"),
+            "Corrected explanatory sentence.\n"
+          );
+          const report = requiredFixture(
+            result.result.artifacts.implementationReport
+          );
+          await writeFile(
+            path.join(request.repoRoot, report),
+            `# Implementation Report\n\n${renderPlanTaskCompletionProjection(requiredFixture(result.result.taskCompletion))}\n`
+          );
+        }
+        return result;
+      }
+    }
+    const adapters = new ExplanatoryAdapters();
+    adapters.reviewResults.push({
+      contractVersion: CONTRACT_VERSION,
+      verdict: "changes_requested",
+      summary: "Explanatory correction.",
+      findings: [finding("R1-F1", "Clarify the informational sentence.")],
+      reviewedFindingIds: [],
+      deferredCoverage: []
+    });
+    adapters.reviewResults.push(passingReview(["R1-F1"]));
+    adapters.fixResults.push(
+      phaseResult("fix", {
+        taskCompletion: completionLedger(["T001"]),
+        resolvedFindingIds: ["R1-F1"]
+      })
+    );
+    const runner = new WorkflowRunner(repository.root, adapters);
+    const planned = await runner.start({
+      slug: "closure",
+      request: "Verify a bounded explanatory closure."
+    });
+    const selectedPlan = path.join(
+      repository.root,
+      requiredFixture(planned.artifactBinding?.binding.artifacts.plan)
+    );
+    const remainder = (await readFile(selectedPlan, "utf8")).trimEnd() + "\n\n";
+    const inventory = {
+      schema: "banzai-verification-obligations/v1",
+      schemaVersion: 1,
+      complete: true,
+      planRemainderSha256: createHash("sha256").update(remainder).digest("hex"),
+      checks: [{ id: "unit", evidence: "equivalent_evidence" }]
+    };
+    await writeFile(
+      selectedPlan,
+      remainder +
+        "```banzai-verification-obligations/v1\n" +
+        JSON.stringify(inventory) +
+        "\n```\n"
+    );
+    const reviewed = await runner.approvePlan("human");
+    assert.equal(reviewed.status, "needs_triage", reviewed.blockReason ?? "");
+    const origin =
+      reviewed.verificationEvidence?.applicability?.dispositions[0]?.origin;
+    assert.ok(origin);
+    const done = await runner.triage({
+      accepted: ["R1-F1"],
+      rejected: [],
+      deferred: [],
+      note: null,
+      decidedBy: "human"
+    });
+    assert.equal(done.status, "done", done.blockReason ?? "");
+    assert.equal(done.metrics.attempts.verification, 1);
+    const disposition =
+      done.verificationEvidence?.applicability?.dispositions[0];
+    assert.equal(disposition?.kind, "reused");
+    assert.deepEqual(disposition.origin, origin);
+    assert.equal(adapters.reviewPrompts.length, 2);
+    assert.match(adapters.reviewPrompts[1] ?? "", /R1-F1/);
+    assert.match(adapters.reviewPrompts[1] ?? "", /"kind": "reused"/);
+    const report = await collectEvaluationExportV2(repository.root, {
+      runIds: [done.runId],
+      from: null,
+      to: null,
+      format: "json"
+    });
+    assert.equal(report.runs[0]?.verificationEvidence.coverage, "exact");
+    const selectedRuns = [done.runId];
+    const containsRun = selectedRuns.includes.bind(selectedRuns);
+    selectedRuns.includes = (value, fromIndex) => {
+      // Insert a lexically earlier directory after the cohort inventory but
+      // during selection, without timing-dependent background processes.
+      mkdirSync(path.join(repository.root, ".banzai/runs/000-concurrent"), {
+        recursive: true
+      });
+      return containsRun(value, fromIndex);
+    };
+    const concurrent = await collectEvaluationExportV2(repository.root, {
+      runIds: selectedRuns,
+      from: null,
+      to: null,
+      format: "json"
+    });
+    assert.equal(concurrent.cohort.candidateRunCount, 1);
+    assert.equal(concurrent.runs[0]?.verificationEvidence.coverage, "exact");
+    assert.deepEqual(
+      report.runs[0].verificationEvidence.dispositions
+        .map((item) => item.kind)
+        .sort(),
+      ["executed", "reused"]
+    );
+    assert.equal(
+      await readFile(selectedPlan, "utf8"),
+      remainder +
+        "```banzai-verification-obligations/v1\n" +
+        JSON.stringify(inventory) +
+        "\n```\n"
+    );
+  } finally {
+    await repository.dispose();
+  }
 });

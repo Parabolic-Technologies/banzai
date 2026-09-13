@@ -1,3 +1,10 @@
+import type {
+  VerificationPolicy,
+  ReviewVerificationEvidence,
+  VerificationPhysicalAttempt,
+  VerificationDecision,
+  VerificationApplicability
+} from "./verification-evidence.js";
 import type { ArtifactBoundWork } from "./artifact-storage.js";
 import type {
   WorkspaceEntry,
@@ -515,6 +522,7 @@ export interface ReviewCandidateEvidence {
 
 export interface ReviewArtifactContext {
   snapshot?: ReviewSnapshot;
+  verificationEvidence?: ReviewVerificationEvidence;
   path: string;
   candidatePath: string;
   slug: string;
@@ -535,8 +543,11 @@ export interface ReviewArtifactContext {
 }
 
 export interface ReviewSnapshot {
-  schema: "banzai-review-snapshot/v1" | "banzai-review-snapshot/v2";
-  schemaVersion: 1 | 2;
+  schema:
+    | "banzai-review-snapshot/v1"
+    | "banzai-review-snapshot/v2"
+    | "banzai-review-snapshot/v3";
+  schemaVersion: 1 | 2 | 3;
   artifactBinding?: ArtifactBoundWork;
   runId: string;
   attemptId: string;
@@ -896,6 +907,9 @@ export function sessionBindingMatches(
 }
 
 export interface VerificationCommand {
+  id?: string;
+  evidence?: "fresh" | "equivalent_evidence";
+  ignoreExplanatory?: boolean;
   name: string;
   command: string;
   args: string[];
@@ -921,7 +935,7 @@ export interface VerificationProfile {
 }
 
 export interface OrchestratorConfig {
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   contractVersion: typeof CONTRACT_VERSION;
   models: {
     planner: ModelSettings;
@@ -930,6 +944,7 @@ export interface OrchestratorConfig {
   };
   verification: {
     profiles: VerificationProfile[];
+    policy?: VerificationPolicy;
   };
   claudeEnvironment: ClaudeEnvironmentSettings;
   context: ContextPolicy;
@@ -1067,7 +1082,7 @@ export interface VerificationCommandDescriptor {
 }
 
 export interface VerificationLedger {
-  schemaVersion: typeof VERIFICATION_LEDGER_SCHEMA_VERSION;
+  schemaVersion: 1 | 2;
 }
 
 export type VerificationAttemptStatus =
@@ -1085,36 +1100,7 @@ export interface VerificationAttemptLogEvidence {
   sha256: string;
 }
 
-export interface VerificationAttemptRecord {
-  schemaVersion: typeof VERIFICATION_LEDGER_SCHEMA_VERSION;
-  id: string;
-  sequence: number;
-  round: {
-    id: string;
-    ordinal: number;
-    sourcePhase: "implementation" | "fix";
-    sourceAttemptId: string;
-    sourceAttemptKind: "implementation" | "fix";
-  };
-  command: {
-    profileId: string;
-    projectType: VerificationProjectType;
-    profileOrdinal: number;
-    commandOrdinal: number;
-    configurationDigest: string;
-  };
-  status: VerificationAttemptStatus;
-  startedAt: string;
-  completedAt: string | null;
-  durationMs: number | null;
-  exitCode: number | null;
-  signal: string | null;
-  failureCategory: VerificationAttemptFailureCategory | null;
-  retryOf: string | null;
-  restartOf: string | null;
-  stdout: VerificationAttemptLogEvidence | null;
-  stderr: VerificationAttemptLogEvidence | null;
-}
+export type VerificationAttemptRecord = VerificationPhysicalAttempt;
 
 export interface ModelUsage {
   inputTokens: number;
@@ -1235,7 +1221,7 @@ export interface CancellationAnchor {
 }
 
 export interface RunState {
-  schemaVersion: 3 | 4;
+  schemaVersion: 3 | 4 | 5;
   artifactBinding?: ArtifactBoundWork;
   contractVersion: typeof CONTRACT_VERSION;
   runId: string;
@@ -1277,6 +1263,10 @@ export interface RunState {
   fixCycle: number;
   workspaceDigest: string | null;
   verification: VerificationResult[];
+  verificationEvidence?: {
+    decision: VerificationDecision;
+    applicability: VerificationApplicability | null;
+  };
   metrics: RunMetrics;
   activeAttempt: AttemptReference | null;
   activeProcess: ActiveProcess | null;
@@ -1533,7 +1523,7 @@ export interface EvaluationStateMetricSource {
 }
 
 export interface EvaluationStateSource {
-  schemaVersion: 1 | 2 | 3 | 4;
+  schemaVersion: 1 | 2 | 3 | 4 | 5;
   contractVersion: EvidenceValue<string>;
   status: EvidenceValue<RunStatus>;
   createdAt: EvidenceValue<string>;
@@ -1598,6 +1588,7 @@ export interface EvaluationEventSource {
 }
 
 export interface EvaluationExportOptions {
+  schemaVersion?: 1 | 2;
   format: "markdown" | "json";
   from: string | null;
   to: string | null;
@@ -1810,6 +1801,7 @@ export interface EvaluationKpiReport {
 }
 
 export interface EvaluationKpiOptions {
+  schemaVersion?: 1 | 2;
   format: "markdown" | "json";
   from: string | null;
   to: string | null;
@@ -2002,4 +1994,45 @@ export interface InstructionParity {
   resourceIds: string[];
   mismatched: string[];
   unavailable: string[];
+}
+
+export interface EvaluationVerificationV2 {
+  coverage: "exact" | "incomplete";
+  physicalAttempts: {
+    ordinal: number;
+    status: VerificationAttemptStatus;
+    durationMs: number | null;
+  }[];
+  dispositions: {
+    round: number;
+    check: number;
+    kind: "executed" | "reused" | "pending";
+    origin: number | null;
+  }[];
+}
+export interface EvaluationExportV2 extends Omit<
+  EvaluationExport,
+  "schema" | "schemaVersion" | "runs"
+> {
+  schema: "banzai-evaluation-export/v2";
+  schemaVersion: 2;
+  runs: (EvaluationRun & { verificationEvidence: EvaluationVerificationV2 })[];
+}
+export interface EvaluationKpiV2 {
+  schema: "banzai-evaluation-kpi/v2";
+  schemaVersion: 2;
+  sources: {
+    ordinal: number;
+    runs: number;
+    coverage: KpiCoverage;
+    physicalAttempts: number;
+    executedChecks: number;
+    reusedChecks: number;
+    reuseRatio: {
+      numerator: number;
+      denominator: number;
+      value: number | null;
+      coverage: KpiCoverage;
+    };
+  }[];
 }

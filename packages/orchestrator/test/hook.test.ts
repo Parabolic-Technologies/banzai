@@ -465,142 +465,152 @@ test("runner mode fails closed when an edit target cannot be parsed", async () =
   }
 });
 
-test("R4-F4 v4 hook enforces bound phase roles, read-only selection/review and private layout", async () => {
-  const repository = await createTestRepository({ artifactLayout: "private" });
-  try {
-    const root = await realpath(repository.root);
-    const bound = await createWork({
-      repoRoot: root,
-      slug: "hook-bound",
-      mode: "workflow",
-      creationId: randomUUID()
+for (const stateVersion of [4, 5] as const)
+  test(`v${stateVersion} hook enforces bound phase roles, read-only selection/review and private layout`, async () => {
+    const repository = await createTestRepository({
+      artifactLayout: "private"
     });
-    const other = await createWork({
-      repoRoot: root,
-      slug: "hook-other",
-      mode: "workflow",
-      creationId: randomUUID()
-    });
-    const roles = bound.binding.artifacts;
-    assert.ok(other.binding.artifacts.plan);
-    assert.ok(
-      roles.description &&
-        roles.plan &&
-        roles.implementationReport &&
-        roles.testReport &&
-        roles.changeReport &&
-        roles.work
-    );
-    const runId = "hook-v4";
-    const runDirectory = path.join(root, ".banzai/runs", runId);
-    await mkdir(runDirectory, { recursive: true });
-    await writeFile(
-      path.join(root, ".banzai/active-run.json"),
-      JSON.stringify({ schemaVersion: 1, runId })
-    );
-    for (const role of [roles.description, roles.plan])
-      await writeFile(path.join(root, role), "approved\n");
-    const bundle = await digestArtifactBundle(root, [
-      roles.description,
-      roles.plan
-    ]);
-    const statePath = path.join(runDirectory, "state.json");
-    const save = async (
-      phase: string,
-      status: string,
-      extra: Record<string, unknown> = {}
-    ) =>
-      writeFile(
-        statePath,
-        JSON.stringify(
-          evaluationStateFixture({
-            workflow: "strict",
-            extra: {
-              schemaVersion: 4,
-              runId,
-              repoRoot: root,
-              artifactBinding: bound,
-              status,
-              activeAttempt: {
-                id: `${phase}-1`,
-                kind: phase,
-                mutable: phase !== "review" && phase !== "selection"
-              },
-              planApproval: { digest: bundle.digest, paths: bundle.paths },
-              ...extra
-            }
-          })
-        )
-      );
-    const env = { BANZAI_RUN_ID: runId, BANZAI_APPROVAL_DIGEST: bundle.digest };
-    const expect = (target: string, decision: string, grant = env) => {
-      const result = runHook({ cwd: root, target, env: grant });
-      assert.equal(result.decision, decision, `${target}: ${result.reason}`);
-    };
-    const forbidden = [
-      `.banzai/runs/${runId}/state.json`,
-      ".banzai/config.json",
-      `.banzai/work/${bound.binding.workId}/work.json`,
-      other.binding.artifacts.plan
-    ];
-    await save("plan", "planning");
-    for (const target of [roles.description, roles.plan])
-      expect(target, "allow", {
-        BANZAI_RUN_ID: runId,
-        BANZAI_APPROVAL_DIGEST: ""
+    try {
+      const root = await realpath(repository.root);
+      const bound = await createWork({
+        repoRoot: root,
+        slug: "hook-bound",
+        schemaVersion: stateVersion === 5 ? 2 : 1,
+        mode: "workflow",
+        creationId: randomUUID()
       });
-    for (const target of [
-      ...forbidden,
-      roles.implementationReport,
-      roles.changeReport
-    ])
-      expect(target, "deny");
-    for (const [phase, status] of [
-      ["selection", "selecting"],
-      ["review", "reviewing"],
-      ["review", "blocked"]
-    ] as const) {
-      await save(phase, status);
-      for (const target of [
+      const other = await createWork({
+        repoRoot: root,
+        slug: "hook-other",
+        mode: "workflow",
+        creationId: randomUUID()
+      });
+      const roles = bound.binding.artifacts;
+      assert.ok(other.binding.artifacts.plan);
+      assert.ok(
+        roles.description &&
+          roles.plan &&
+          roles.implementationReport &&
+          roles.testReport &&
+          roles.changeReport &&
+          roles.work
+      );
+      const runId = `hook-v${stateVersion}`;
+      const runDirectory = path.join(root, ".banzai/runs", runId);
+      await mkdir(runDirectory, { recursive: true });
+      await writeFile(
+        path.join(root, ".banzai/active-run.json"),
+        JSON.stringify({ schemaVersion: 1, runId })
+      );
+      for (const role of [roles.description, roles.plan])
+        await writeFile(path.join(root, role), "approved\n");
+      const bundle = await digestArtifactBundle(root, [
         roles.description,
-        roles.plan,
-        roles.implementationReport,
-        roles.changeReport,
-        "src/example.ts"
-      ])
-        expect(target, "deny");
-    }
-    for (const [phase, status] of [
-      ["implementation", "implementing"],
-      ["fix", "fixing"]
-    ] as const) {
-      await save(phase, status);
-      for (const target of [
-        roles.implementationReport,
-        roles.testReport,
-        "src/example.ts"
-      ])
-        expect(target, "allow");
+        roles.plan
+      ]);
+      const statePath = path.join(runDirectory, "state.json");
+      const save = async (
+        phase: string,
+        status: string,
+        extra: Record<string, unknown> = {}
+      ) =>
+        writeFile(
+          statePath,
+          JSON.stringify(
+            evaluationStateFixture({
+              workflow: "strict",
+              extra: {
+                schemaVersion: stateVersion,
+                runId,
+                repoRoot: root,
+                artifactBinding: bound,
+                status,
+                activeAttempt: {
+                  id: `${phase}-1`,
+                  kind: phase,
+                  mutable: phase !== "review" && phase !== "selection"
+                },
+                planApproval: { digest: bundle.digest, paths: bundle.paths },
+                ...extra
+              }
+            })
+          )
+        );
+      const env = {
+        BANZAI_RUN_ID: runId,
+        BANZAI_APPROVAL_DIGEST: bundle.digest
+      };
+      const expect = (target: string, decision: string, grant = env) => {
+        const result = runHook({ cwd: root, target, env: grant });
+        assert.equal(result.decision, decision, `${target}: ${result.reason}`);
+      };
+      const forbidden = [
+        `.banzai/runs/${runId}/state.json`,
+        ".banzai/config.json",
+        `.banzai/work/${bound.binding.workId}/work.json`,
+        other.binding.artifacts.plan,
+        ...(roles.verificationDirectory
+          ? [`${roles.verificationDirectory}/forged.json`]
+          : [])
+      ];
+      await save("plan", "planning");
+      for (const target of [roles.description, roles.plan])
+        expect(target, "allow", {
+          BANZAI_RUN_ID: runId,
+          BANZAI_APPROVAL_DIGEST: ""
+        });
       for (const target of [
         ...forbidden,
-        roles.plan,
-        roles.description,
-        `documentation/features/hook-bound/implementation-report.md`
+        roles.implementationReport,
+        roles.changeReport
       ])
         expect(target, "deny");
-      expect(roles.changeReport, phase === "fix" ? "allow" : "deny");
+      for (const [phase, status] of [
+        ["selection", "selecting"],
+        ["review", "reviewing"],
+        ["review", "blocked"]
+      ] as const) {
+        await save(phase, status);
+        for (const target of [
+          roles.description,
+          roles.plan,
+          roles.implementationReport,
+          roles.changeReport,
+          "src/example.ts"
+        ])
+          expect(target, "deny");
+      }
+      for (const [phase, status] of [
+        ["implementation", "implementing"],
+        ["fix", "fixing"]
+      ] as const) {
+        await save(phase, status);
+        for (const target of [
+          roles.implementationReport,
+          roles.testReport,
+          "src/example.ts"
+        ])
+          expect(target, "allow");
+        for (const target of [
+          ...forbidden,
+          roles.plan,
+          roles.description,
+          `documentation/features/hook-bound/implementation-report.md`
+        ])
+          expect(target, "deny");
+        expect(roles.changeReport, phase === "fix" ? "allow" : "deny");
+      }
+      await save("plan", "planning", {
+        artifactBinding: { ...bound, sha256: "0".repeat(64) }
+      });
+      expect(roles.plan, "deny");
+      await save("plan", "planning");
+      await writeFile(path.join(root, ".gitignore"), ".banzai/runs/\n");
+      expect(roles.plan, "deny");
+    } finally {
+      await repository.dispose();
     }
-    await save("plan", "planning", {
-      artifactBinding: { ...bound, sha256: "0".repeat(64) }
-    });
-    expect(roles.plan, "deny");
-    await save("plan", "planning");
-    await writeFile(path.join(root, ".gitignore"), ".banzai/runs/\n");
-    expect(roles.plan, "deny");
-  } finally {
-    await repository.dispose();
-  }
-});
+  });
 
 for (const artifactLayout of ["private", "legacy"] as const)
   test(`bound artifact grants have runner and hook allow/deny parity (${artifactLayout})`, async () => {

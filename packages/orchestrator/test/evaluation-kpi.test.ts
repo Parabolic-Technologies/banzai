@@ -1,7 +1,10 @@
+import { requiredFixture } from "./helpers.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
   decodeEvaluationExportInput,
+  decodeEvaluationExportV2Input,
+  deriveEvaluationKpiV2,
   deriveEvaluationKpiReport,
   deriveEvaluationKpiSource,
   deriveRunSignature
@@ -12,6 +15,7 @@ import type {
   EvaluationAggregates,
   EvaluationAttempt,
   EvaluationExport,
+  EvaluationExportV2,
   EvaluationKpiEntry,
   EvaluationMetricSet,
   EvaluationReview,
@@ -903,4 +907,93 @@ test("input decoding fails closed with INVALID_EVAL_INPUT on malformed or foreig
     (badAttempt.runs as Record<string, unknown>[])[0] as { attempts: unknown[] }
   ).attempts = [{ kind: { value: "plan", evidence: "observed" } }];
   reject(JSON.stringify(badAttempt), /kind or status/);
+});
+
+test("verification KPI v2 counts terminal dispositions once and keeps retries and incomplete coverage separate", () => {
+  const make = (): EvaluationExportV2 => ({
+    ...exportFixture([run()]),
+    schema: "banzai-evaluation-export/v2",
+    schemaVersion: 2,
+    runs: [
+      {
+        ...run(),
+        verificationEvidence: {
+          coverage: "exact",
+          physicalAttempts: [
+            { ordinal: 1, status: "failed", durationMs: 5 },
+            { ordinal: 2, status: "completed", durationMs: 10 }
+          ],
+          dispositions: [
+            { round: 1, check: 1, kind: "executed", origin: 2 },
+            { round: 2, check: 1, kind: "reused", origin: 2 }
+          ]
+        }
+      }
+    ]
+  });
+  const source = requiredFixture(deriveEvaluationKpiV2([make()]).sources[0]);
+  assert.equal(source.physicalAttempts, 2);
+  assert.equal(source.executedChecks, 1);
+  assert.equal(source.reusedChecks, 1);
+  assert.deepEqual(source.reuseRatio, {
+    numerator: 1,
+    denominator: 2,
+    value: 0.5,
+    coverage: { exact: 1, incomplete: 0 }
+  });
+  const incomplete = make();
+  requiredFixture(incomplete.runs[0]).verificationEvidence.coverage =
+    "incomplete";
+  requiredFixture(incomplete.runs[0]).verificationEvidence.dispositions[1] = {
+    round: 2,
+    check: 1,
+    kind: "pending",
+    origin: null
+  };
+  assert.deepEqual(
+    requiredFixture(deriveEvaluationKpiV2([incomplete]).sources[0]).reuseRatio,
+    {
+      numerator: 0,
+      denominator: 0,
+      value: null,
+      coverage: { exact: 0, incomplete: 1 }
+    }
+  );
+  assert.throws(() =>
+    decodeEvaluationExportV2Input(
+      JSON.stringify(exportFixture([run()])),
+      "legacy"
+    )
+  );
+  assert.throws(() =>
+    decodeEvaluationExportInput(JSON.stringify(make()), "new")
+  );
+  for (const mutate of [
+    (value: EvaluationExportV2) => {
+      requiredFixture(value.runs[0]).verificationEvidence.dispositions.push({
+        round: 2,
+        check: 1,
+        kind: "reused",
+        origin: 2
+      });
+    },
+    (value: EvaluationExportV2) => {
+      requiredFixture(
+        requiredFixture(value.runs[0]).verificationEvidence.dispositions[1]
+      ).origin = 1;
+    },
+    (value: EvaluationExportV2) => {
+      Object.assign(requiredFixture(value.runs[0]).verificationEvidence, {
+        command: "PRIVATE_COMMAND_CANARY"
+      });
+    }
+  ]) {
+    const value = make();
+    mutate(value);
+    assert.throws(() => deriveEvaluationKpiV2([value]));
+  }
+  assert.doesNotMatch(
+    JSON.stringify(deriveEvaluationKpiV2([make()])),
+    /command|path|digest|environment|attemptId|roundId|checkId/
+  );
 });

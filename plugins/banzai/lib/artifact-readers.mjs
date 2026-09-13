@@ -1,5 +1,20 @@
 // Generated from orchestrator persisted readers by npm run build. Do not edit.
 
+// ../../plugins/banzai/lib/verification-evidence.mjs
+var MAX_BYTES = 512 * 1024 * 1024;
+
+// ../../plugins/banzai/lib/project-adoption.mjs
+var GUIDANCE_MAX_BYTES = 256 * 1024;
+var METADATA_MAX_BYTES = 64 * 1024;
+
+// ../../plugins/banzai/lib/artifact-storage.mjs
+import { AsyncLocalStorage } from "node:async_hooks";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+var execute = promisify(execFile);
+var METADATA_LIMIT = 64 * 1024;
+var runnerOwnership = new AsyncLocalStorage();
+
 // src/validation.ts
 import { createHash } from "node:crypto";
 
@@ -937,7 +952,7 @@ function parseCurrentReviewResult(value) {
       "INVALID_REVIEW_SCOPE",
       "Scope acknowledgment requires version 1 and explicit artifacts."
     );
-  const snapshotDigest = evidenceDigest(
+  const snapshotDigest = evidenceDigest2(
     acknowledgment.snapshotDigest,
     "INVALID_REVIEW_SCOPE",
     "snapshotDigest"
@@ -1014,7 +1029,7 @@ function evidenceIdentifier(value, code, label, maximum = 200) {
   }
   return identifier;
 }
-function evidenceDigest(value, code, label) {
+function evidenceDigest2(value, code, label) {
   const digest = evidenceString(value, code, label, 64);
   if (!/^[a-f0-9]{64}$/u.test(digest)) {
     return recoveryEvidenceError(code, `${label} must be a SHA-256 digest.`);
@@ -1237,7 +1252,7 @@ function parseTerminalAttemptCheckpoint(value) {
     phase: attempt.kind,
     configuration: {
       vendor,
-      executableDigest: evidenceDigest(
+      executableDigest: evidenceDigest2(
         value.configuration.executableDigest,
         code,
         "configuration.executableDigest"
@@ -1249,7 +1264,7 @@ function parseTerminalAttemptCheckpoint(value) {
       ),
       effort,
       sessionMode,
-      sessionContextDigest: evidenceDigest(
+      sessionContextDigest: evidenceDigest2(
         value.configuration.sessionContextDigest,
         code,
         "configuration.sessionContextDigest"
@@ -1296,7 +1311,7 @@ function parseTerminalAttemptCheckpoint(value) {
       return recoveryEvidenceError(code, `${label} must be a SHA-256 digest.`);
     }
   }
-  const integrityDigest = evidenceDigest(
+  const integrityDigest = evidenceDigest2(
     value.integrityDigest,
     code,
     "integrityDigest"
@@ -1370,7 +1385,7 @@ function parseRecoveryAuthorization(value) {
     if (item === null) {
       return null;
     }
-    return evidenceDigest(item, code, label);
+    return evidenceDigest2(item, code, label);
   };
   return {
     schema: RECOVERY_AUTHORIZATION_SCHEMA,
@@ -1384,12 +1399,12 @@ function parseRecoveryAuthorization(value) {
     runId: evidenceIdentifier(value.runId, code, "runId", 300),
     attempt,
     phase: attempt.kind,
-    recoveryIdentity: evidenceDigest(
+    recoveryIdentity: evidenceDigest2(
       value.recoveryIdentity,
       code,
       "recoveryIdentity"
     ),
-    workspaceDigest: evidenceDigest(
+    workspaceDigest: evidenceDigest2(
       value.workspaceDigest,
       code,
       "workspaceDigest"
@@ -1398,7 +1413,7 @@ function parseRecoveryAuthorization(value) {
     approvalDigest: nullableDigest(value.approvalDigest, "approvalDigest"),
     workflowDigest: nullableDigest(value.workflowDigest, "workflowDigest"),
     scopeDigest: nullableDigest(value.scopeDigest, "scopeDigest"),
-    configurationDigest: evidenceDigest(
+    configurationDigest: evidenceDigest2(
       value.configurationDigest,
       code,
       "configurationDigest"
@@ -1499,7 +1514,7 @@ function parseModelAttemptRecord(value) {
       code,
       "Review context"
     );
-    evidenceDigest(
+    evidenceDigest2(
       context.snapshotDigest,
       code,
       "reviewContext.snapshotDigest"
@@ -1519,13 +1534,13 @@ function parseModelAttemptRecord(value) {
       code,
       "Planning context"
     );
-    evidenceDigest(
+    evidenceDigest2(
       context.invocationDigest,
       code,
       "planningContext.invocationDigest"
     );
     if (context.workspaceDigest !== null)
-      evidenceDigest(
+      evidenceDigest2(
         context.workspaceDigest,
         code,
         "planningContext.workspaceDigest"
@@ -1677,16 +1692,16 @@ function parseVerificationLogEvidence(value, code, field) {
   }
   const record = verificationRecord(value, code, field);
   verificationKeys(record, ["relativePath", "sha256"], code, field);
-  const relativePath = verificationString(
+  const relativePath2 = verificationString(
     record.relativePath,
     code,
     `${field}.relativePath`
   );
-  if (!relativePath.startsWith("verification/") || relativePath.includes("\\") || relativePath.split("/").some((part) => part === "" || part === "." || part === "..")) {
+  if (!relativePath2.startsWith("verification/") || relativePath2.includes("\\") || relativePath2.split("/").some((part) => part === "" || part === "." || part === "..")) {
     throw verificationEvidenceError(code, `${field}.relativePath`);
   }
   return {
-    relativePath,
+    relativePath: relativePath2,
     sha256: verificationString(
       record.sha256,
       code,
@@ -2270,7 +2285,7 @@ function parseEvaluationStateSource(value) {
   if (!isRecord(value)) {
     throw evaluationError("Persisted state is not a supported object.");
   }
-  if (value.schemaVersion !== 1 && value.schemaVersion !== 2 && value.schemaVersion !== 3 && value.schemaVersion !== 4) {
+  if (value.schemaVersion !== 1 && value.schemaVersion !== 2 && value.schemaVersion !== 3 && value.schemaVersion !== 4 && value.schemaVersion !== 5) {
     throw new BanzaiError(
       "EVALUATION_STATE_SCHEMA_UNSUPPORTED",
       "Persisted state uses an unsupported schema."

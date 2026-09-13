@@ -305,3 +305,51 @@ test("checkout kpis derive in memory under the current label without mutating ru
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("explicit KPI v2 reads only matching export files and preserves source coverage", async () => {
+  const root = await createEvaluationRoot();
+  const io = collectIo();
+  try {
+    await writeEvaluationRun(root, "legacy", {
+      state: evaluationStateFixture()
+    });
+    const exported = collectIo();
+    await executeEvaluationExport(
+      root,
+      ["--schema-version", "2", "--json"],
+      exported.io
+    );
+    const input = path.join(root, "export-v2.json");
+    await writeFile(input, exported.stdout.join(""));
+    const before = await snapshotTree(root);
+    await executeEvaluationKpiFromInputs(
+      parseEvaluationKpiArgs([
+        "--schema-version",
+        "2",
+        "--input",
+        input,
+        "--json"
+      ]),
+      io.io
+    );
+    const projected = JSON.parse(io.stdout.join("")) as {
+      schema: string;
+      sources: {
+        reuseRatio: { value: number | null };
+        coverage: { incomplete: number };
+      }[];
+    };
+    assert.equal(projected.schema, "banzai-evaluation-kpi/v2");
+    assert.equal(projected.sources[0]?.reuseRatio.value, null);
+    assert.deepEqual(await snapshotTree(root), before);
+    await assert.rejects(
+      executeEvaluationKpiFromInputs(
+        parseEvaluationKpiArgs(["--input", input]),
+        collectIo().io
+      ),
+      errorCode("INVALID_EVAL_INPUT")
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

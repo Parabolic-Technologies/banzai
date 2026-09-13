@@ -288,9 +288,10 @@ if (runnerMode) {
     }
     const controlRoot = path.join(projectRoot, '.banzai');
     let privateWrites = new Set();
-    if (state.schemaVersion === 4) {
+    if (state.schemaVersion === 4 || state.schemaVersion === 5) {
       const storage = await import('../lib/artifact-storage.mjs');
       const bound = await storage.inspectBoundWork(projectRoot, state.artifactBinding);
+      if (state.schemaVersion === 5 && bound.binding.schemaVersion !== 2) throw new Error('verification-enabled state requires its original v2 binding');
       const roles = bound.binding.artifacts;
       const phase = state.activeAttempt?.kind;
       if (phase === 'selection' || state.status === 'selecting') throw new Error('workflow selection is read-only');

@@ -385,7 +385,7 @@ IDs. The sampled rollout procedure and promotion evidence are documented in
   [`documentation/release-checklist.md`](documentation/release-checklist.md)
 - Maintaining this repository — release gate, version parity, conventions:
   [`CONTRIBUTING.md`](CONTRIBUTING.md)
-- Current release notes: [2.4.0](documentation/releases/2.4.0.md).
+- Current release notes: [2.5.0](documentation/releases/2.5.0.md).
 
 ## Author and License
 

@@ -56,9 +56,12 @@ performance, or architecture review rather than a unit test.
 - In orchestrated mode, do not repeat a full-scope command listed in the runner
   verification block. If the manifest's applicable final suite is absent, run
   it once and record the configuration gap.
-- In standalone mode, run the applicable final suite once after tests stabilize.
+- In standalone mode, run the applicable final suite once after tests stabilize,
+  except for a permitted current equivalent disposition established by the
+  shared deterministic owner under Test Assurance; keep all other checks fresh.
 - Fix failures before proceeding.
-- Never claim tests pass without a run.
+- Never claim a physical test pass without its actual run. Label reuse separately
+  with the exact original physical evidence and current applicability.
 
 ## Critique Loop
 
@@ -91,3 +94,8 @@ Write the resolved `testReport` artifact:
    and non-automated ADR decisions with reasons and owners;
 7. critique loop result.
 
+
+For a focused closure, append the accepted finding ID, changed scope, decision,
+current executed/reused evidence, historical references and pending limitations.
+Retain unrelated report text and inspect current claims for contradictions. A
+consistency sweep does not rerun commands and cannot discharge required assurance.

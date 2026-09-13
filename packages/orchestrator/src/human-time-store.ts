@@ -163,7 +163,7 @@ export class HumanTimeStore {
     );
     if (
       humanTimeId(state.runId) !== runId ||
-      ![1, 2, 3, 4].includes(state.schemaVersion as number)
+      ![1, 2, 3, 4, 5].includes(state.schemaVersion as number)
     )
       throw new HumanTimeFailure("INVALID_EVIDENCE");
     return state;
@@ -391,7 +391,7 @@ export class HumanTimeStore {
       const state = humanTimeRecord(json(stateBytes));
       if (
         humanTimeId(state.runId) !== runId ||
-        ![1, 2, 3, 4].includes(state.schemaVersion as number)
+        ![1, 2, 3, 4, 5].includes(state.schemaVersion as number)
       )
         throw new HumanTimeFailure("INVALID_EVIDENCE");
       const bytes = await this.file(
