@@ -2317,8 +2317,9 @@ test("focused test driver terminates its child group and cleans output on interr
     child.once("error", reject);
     child.once("exit", resolve);
   });
+  let pid: number | null = null;
+  let alive = true;
   try {
-    let pid: number | null = null;
     for (let count = 0; count < 100; count += 1) {
       try {
         pid = JSON.parse(await readFile(marker, "utf8")) as number;
@@ -2331,12 +2332,18 @@ test("focused test driver terminates its child group and cleans output on interr
     child.kill("SIGTERM");
     assert.notEqual(await completion, 0);
     await assert.rejects(access(output));
-    let alive = true;
     for (let count = 0; count < 100 && alive; count += 1) {
       try {
         process.kill(pid, 0);
-        await delay(25);
-      } catch {
+        if (process.platform === "linux") {
+          // Container PID 1 may leave terminated children as unreaped zombies.
+          const stat = await readFile(`/proc/${pid}/stat`, "utf8");
+          alive = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0] !== "Z";
+        }
+        if (alive) await delay(25);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ESRCH" && code !== "ENOENT") throw error;
         alive = false;
       }
     }
@@ -2347,6 +2354,13 @@ test("focused test driver terminates its child group and cleans output on interr
     );
   } finally {
     child.kill("SIGKILL");
+    if (pid !== null && alive) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Best-effort cleanup must not replace the original test failure.
+      }
+    }
     await rm(root, { recursive: true, force: true });
   }
 });
