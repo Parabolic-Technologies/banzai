@@ -124,13 +124,16 @@ Apply this section when the release includes npm distribution of
       tree records a different commit.
 - [ ] Publishing the GitHub Release is the explicit publication authorization:
       `publish.yml` publishes only the CLI workspace after `release:check` on
-      the tag. Record the job summary's registry metadata, artifact integrity,
-      and a fresh registry-install smoke as separate post-publication evidence.
-- [ ] Verify the published version from the registry document itself
+      the tag. Its summary records npm acceptance or an existing-version skip;
+      it does not wait for registry processing or verify availability. Record
+      registry metadata, artifact integrity, and a fresh registry-install smoke
+      as separate delivery evidence once npm processing completes.
+- [ ] After npm processing completes, verify the published version from the registry document itself
       (`curl -s https://registry.npmjs.org/@parabolic-technologies%2Fbanzai`)
       rather than a possibly cached `npm view`: `versions`, `dist-tags.latest`,
       `time`, `dist.shasum`, `dist.integrity`, and `gitHead`. Do not infer
-      publication from pack, dry run, tests, or matching source versions.
+      availability from pack, dry run, tests, matching source versions, or
+      successful submission to npm.
 - [ ] Append the verified facts to the
       [delivery record](releases/public-publication.md#delivery-record) in a
       follow-up commit. No other document carries pending-delivery text.

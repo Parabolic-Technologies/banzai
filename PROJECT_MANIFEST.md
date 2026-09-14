@@ -127,8 +127,10 @@ installed policy source. These files describe nothing here.
   version and npm 11.5.1+, runs `npm ci` and `release:check`, skips versions
   already on the registry, publishes only the CLI workspace through npm
   trusted publishing with `id-token: write` and no stored registry token,
-  then verifies the registry document and writes the delivery facts to the
-  job summary.
+  then records npm acceptance or the existing-version skip in the job summary.
+  It does not wait for registry processing or verify availability;
+  registry metadata and install checks are separate delivery evidence in the
+  release checklist.
   The release validator checks the owned workflow layout and rejects the old
   `.gitlab-ci.yml`; unrelated GitHub metadata is permitted. Hosted runs,
   branch protection, and protected runner provisioning require separate evidence.

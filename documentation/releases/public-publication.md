@@ -46,8 +46,11 @@ corrected after both versions were published.
    requires the tag to equal `v` plus the root `package.json` version, runs
    `npm ci` and `npm run release:check`, skips a version already on the
    registry, publishes only the CLI workspace through npm trusted publishing
-   (OIDC, no stored token), verifies the registry document, and writes the
-   publish time, shasum, integrity, and `gitHead` to the job summary.
+   (OIDC, no stored token), and records npm acceptance or the existing-version
+   skip in the job summary. A failed `npm publish` fails the job. A successful
+   job does not verify registry availability or `dist-tags.latest`:
+   npm scans packages before making them available, so the job does not wait
+   for registry processing. See [npm's publish-time scanning notice](https://github.blog/changelog/2026-07-28-npm-publish-time-malware-scanning-and-dual-use-metadata/).
    Publishing the Release is the explicit publication authorization; the `npm`
    GitHub environment can carry required reviewers as a second gate. See
    [ADR-0039](../decisions/0039-npm-trusted-publishing-on-github-release.md).
@@ -78,7 +81,8 @@ corrected after both versions were published.
    authentication, organization permissions, and the 2FA challenge belong to
    the publishing operator; never put credentials in source.
 
-6. Verify from the registry document, not from a cached `npm view`:
+6. Once npm processing completes, verify delivery separately from the workflow
+   using the registry document and a fresh install:
 
    ```text
    curl -s https://registry.npmjs.org/@parabolic-technologies%2Fbanzai
@@ -87,7 +91,8 @@ corrected after both versions were published.
 
    Record `versions`, `dist-tags.latest`, `time.<version>`, `dist.shasum`,
    `dist.integrity`, and `gitHead`. `npm view --prefer-online` also bypasses
-   the local packument cache.
+   the local packument cache. Keep delivery evidence pending until these checks
+   succeed; the job summary confirms acceptance or a skip, not these results.
 
 7. Append the verified facts to the [delivery record](#delivery-record) in a
    follow-up commit on `dev`. Do not edit the release notes to announce
@@ -124,8 +129,8 @@ that it is false.
   `403 OIDC permission denied` because the trusted publisher allowed only
   `npm stage publish`; after enabling Allow `npm publish` the re-run
   published, then its own verification step failed because the registry
-  document had not yet propagated. The verification now waits for propagation;
-  see [the change report](../historical-references.md).
+  document had not yet propagated. At that time, verification was changed to
+  wait for propagation; see [the change report](../historical-references.md).
 
 ### 2.2.1
 

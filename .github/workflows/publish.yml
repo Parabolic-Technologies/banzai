@@ -60,55 +60,16 @@ jobs:
       - name: Publish the CLI workspace through npm trusted publishing
         if: steps.registry.outputs.published == 'false'
         run: npm publish --ignore-scripts --workspace "$PACKAGE" --access public --registry https://registry.npmjs.org/
-      - name: Verify the registry document and record delivery facts
+      - name: Record npm publication outcome
         env:
-          BANZAI_REGISTRY_WAIT_SECONDS: "300"
-          BANZAI_REGISTRY_POLL_SECONDS: "10"
+          ALREADY_PUBLISHED: ${{ steps.registry.outputs.published }}
         run: |
           version="$(node -p "require('./package.json').version")"
-          node --input-type=module - "$PACKAGE" "$version" <<'VERIFY' >> "$GITHUB_STEP_SUMMARY"
-          const [name, version] = process.argv.slice(2);
-          const waitSeconds = Number(process.env.BANZAI_REGISTRY_WAIT_SECONDS ?? "300");
-          const pollSeconds = Number(process.env.BANZAI_REGISTRY_POLL_SECONDS ?? "10");
-          const url = `https://registry.npmjs.org/${encodeURIComponent(name)}`;
-          const deadline = Date.now() + waitSeconds * 1000;
-          const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-          // The registry document is served through a CDN and can lag a publish
-          // by minutes, so poll until the version and its latest tag are visible.
-          let doc;
-          for (;;) {
-            let reason;
-            try {
-              const response = await fetch(url, {
-                cache: "no-store",
-                headers: { "cache-control": "no-cache" },
-              });
-              if (response.ok) {
-                doc = await response.json();
-                const entry = doc.versions?.[version];
-                const latest = doc["dist-tags"]?.latest;
-                if (entry && latest === version) break;
-                reason = entry
-                  ? `dist-tags.latest is ${latest}, expected ${version}`
-                  : `${name}@${version} is not in the registry document yet`;
-              } else {
-                reason = `registry responded ${response.status}`;
-              }
-            } catch (error) {
-              reason = `registry request failed: ${error.message}`;
-            }
-            if (Date.now() >= deadline) {
-              console.error(`${reason} after waiting ${waitSeconds}s`);
-              process.exit(1);
-            }
-            console.error(`${reason}; retrying in ${pollSeconds}s`);
-            await sleep(pollSeconds * 1000);
-          }
-          const entry = doc.versions[version];
-          console.log(`## ${doc.name}@${version}`);
-          console.log(`- published: ${doc.time[version]}`);
-          console.log(`- shasum: ${entry.dist.shasum}`);
-          console.log(`- integrity: ${entry.dist.integrity}`);
-          console.log(`- gitHead: ${entry.gitHead}`);
-          console.log(`- provenance: ${entry.dist.attestations ? "attested" : "none; npm attaches provenance only for public repositories"}`);
-          VERIFY
+          {
+            echo "## $PACKAGE@$version"
+            if [ "$ALREADY_PUBLISHED" = "true" ]; then
+              echo "Version already exists on npm; publication was skipped."
+            else
+              echo "Package accepted by npm. Availability may be delayed by registry processing."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
