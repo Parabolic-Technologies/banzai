@@ -96,11 +96,11 @@ export/restore destinations still reject symlink ancestors. Use physical absolut
 paths for those archive directories. Do not resolve an abandoned claim by deleting
 another owner's evidence.
 
-New run state v4 records the binding and byte hash. Workspace v2 includes the
+New run state v6 records the binding and byte hash. Workspace v2 includes the
 selected ignored work, without crawling other work items or runner state. Review
-snapshot v2 and Markdown v3 retain that identity; required completion reports are
-the only private exceptions to the completion evidence exclusion. Versions 1–3
-of run state retain historical storage semantics. Control capabilities v3 is the
+snapshot v4 and Markdown v5 retain that identity; required completion reports are
+the only private exceptions to the completion evidence exclusion. Versions 1–5
+of run state retain their historical semantics. Control capabilities v4 is the
 explicit support signal; restart updated installed clients before private adoption.
 
 See [archive operations](artifact-archive.md) and the

@@ -55,9 +55,16 @@ or a successful model invocation.
 banzai init
 ```
 
-This creates `.banzai/config.json` when missing, adds local run-state entries
-to `.gitignore`, and offers the model picker in an interactive terminal. An
-existing configuration is retained. Use `banzai model` later to change the
+This creates `.banzai/config.json` and `documentation/verification-examples.md`
+when missing, adds local run-state entries to `.gitignore`, and offers the model
+picker in an interactive terminal. Existing configuration and guide contents are
+retained. The local guide is saved before any prompts, including in non-TTY mode;
+rerunning `banzai init` restores a missing guide without replacing your edits.
+Next, the static verification wizard offers
+Accept / Edit / Skip. It saves confirmed changes before opening a project-manifest
+client and never runs project commands. With no root markers, it asks whether to
+enable explicit bootstrap mode; it does not assume Node or any other stack.
+Use `banzai model` later to change the
 model and effort for each role.
 
 If guidance is incomplete, init offers **Run project-manifest with Codex**,
@@ -81,29 +88,33 @@ actual stack, conventions, and checks for this project.
 
 ## 2. Configure checks that exercise your project
 
-Edit the `verification` section of `.banzai/config.json`. Keep its other
-settings, including the selected models. The generated default contains only
-`git diff --check`, which checks whitespace and does not test your application.
-
-Choose a [verification profile example](verification-examples.md) and adapt it
-to commands that already work in your repository. Each detected project type
-needs a matching profile with a substantive command. A root containing both
-`package.json` and `composer.json`, for example, needs Node and PHP coverage.
-
-Run each selected command yourself from the repository root before starting a
-task. For a Node project with the scripts in the Node example:
+Use the wizard during `banzai init`, or configure a detected type later:
 
 ```sh
-npm test
-npm run typecheck
-npm run lint
-git diff --check
+banzai verify add node
+banzai verify list
+banzai verify edit node
+banzai verify check
 ```
 
-Use the project's existing package manager and scripts. Resolve failing
-baseline checks, or explicitly scope an existing failure with the engineer
-before asking Banzai to implement the task. A watch-mode test process is not a
-finishing verification command; use the project's one-shot test command.
+Node suggestions come only from existing `test`, `lint`, `build` and `typecheck`
+scripts. Other stacks use [editable examples](verification-examples.md); confirm
+commands appropriate to your project. Each detected type needs substantive
+coverage. `git diff --check` supplies hygiene only.
+
+`add` and `edit` show a concrete preview and require confirmation. Use
+`banzai verify remove <id>` to remove a broken profile after reviewing its coverage
+impact; the final profile cannot be removed. These commands never execute checks.
+`verify check` is the explicit execution step: it reports every configured command,
+including failures, and returns nonzero if any fail. Use one-shot commands, not
+watch mode. Doctor remains read-only and does not execute them.
+
+An empty repository can be ready in confirmed bootstrap mode. The first task
+creates its stack, and the runner then proposes a profile from the resulting
+metadata. Answer Accept to apply it and continue to verification with the same
+plan approval. Edit revises the proposal; Skip permits hygiene only in this run
+while detected types and verification configuration stay unchanged. Skip does not
+waive binding plan obligations or mandatory project policy.
 
 ## 3. Check readiness and save the reviewed setup
 
@@ -114,7 +125,7 @@ banzai doctor
 Resolve every failed check and review the warnings. For structured diagnostic
 output, use `banzai doctor --json`.
 
-Doctor v3 checks structural project guidance, configuration, installed instruction
+Doctor v4 checks structural project guidance, configuration, installed instruction
 resource parity, declared project
 coverage, executable paths, and
 local state. It does not execute your verification commands or call either
@@ -244,3 +255,9 @@ Non-TTY `banzai init` saves configuration and prints the setup next step.
 `banzai setup` requires terminal input/output. Structural guidance readiness
 covers supported files, layout and manifest sections; it does not certify
 application checks, semantic accuracy, subscription availability or host delivery.
+
+If a configuration decision is pending, `banzai status` shows its current actions.
+You can instead exit the owning session, repair prerequisites with `banzai verify
+add`, `edit` or `remove`, and run `banzai resume`. Resume rechecks the evidence and
+continues from the completed implementation checkpoint. Another terminal cannot
+change config while a model, a check, or a waiting interactive owner holds it.

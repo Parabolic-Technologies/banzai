@@ -348,6 +348,11 @@ requires the subsequent approved plan.
 
 ## Lifecycle Links
 
+- Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted
+  2026-09-14: snapshot v4/rendered review v5 carry exact runner configuration
+  authorship and truthful configured/deferred/skipped coverage. Preserve
+  independent review, triage and historical renderers. Implementation is Planned.
+
 - Supersedes: None in full.
 - Amends [ADR-0019](./0019-attempt-owned-review-candidates.md)'s reviewer-write
   requirement and [ADR-0021](./0021-failure-classified-reviewer-continuity.md)'s

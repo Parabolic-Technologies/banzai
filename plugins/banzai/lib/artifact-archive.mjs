@@ -2,6 +2,8 @@ import { parseVerificationDecision, evidenceDigest } from "./verification-eviden
 import { parseVerificationApplicability, parseVerificationOriginStart, parseVerificationOriginFinish } from "./verification-store.mjs";
 import { parseReviewSnapshot } from "./review-snapshot.mjs";
 import {
+  parseVerificationConfigTransaction,
+  parseVerificationConfigConfirmation,
   parseTerminalAttemptCheckpoint,
   parseRecoveryAuthorization,
   parseModelAttemptRecord,
@@ -153,7 +155,8 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
       return { refs, supported: false };
     }
     try {
-      if (value.schema === "banzai-verification-decision/v1") parseVerificationDecision(value);
+      if (value.schema === "banzai-verification-config-transaction/v1") parseVerificationConfigTransaction(value);
+      else if (value.schema === "banzai-verification-decision/v1") parseVerificationDecision(value);
       else if (value.schema === "banzai-verification-applicability/v1") parseVerificationApplicability(value);
       else if (value.schema === "banzai-verification-origin-start/v1") parseVerificationOriginStart(value);
       else if (value.schema === "banzai-verification-origin-finish/v1") parseVerificationOriginFinish(value);
@@ -189,7 +192,7 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
     }
     if (
       /\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative) &&
-      ![1, 2, 3, 4, 5].includes(value.schemaVersion)
+      ![1, 2, 3, 4, 5, 6].includes(value.schemaVersion)
     )
       supported = false;
     if (
@@ -200,6 +203,8 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
         "banzai-review-snapshot/v1",
         "banzai-review-snapshot/v2",
         "banzai-review-snapshot/v3",
+        "banzai-review-snapshot/v4",
+        "banzai-verification-config-transaction/v1",
         "banzai-work-binding/v2",
         "banzai-verification-decision/v1",
         "banzai-verification-applicability/v1",
@@ -240,6 +245,13 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
     if (!workflowEvidence) return { refs, supported };
     const run = relative.match(/^(\.banzai\/runs\/[^/]+)\//u)?.[1];
     if (run && relative !== `${run}/state.json`) refs.set(`${run}/state.json`, true);
+    if (run && value.schema === "banzai-verification-config-transaction/v1") {
+      if (relative !== `${run}/configuration/${value.operationId}.transaction.json` || value.runId !== run.split("/").at(-1)) supported = false;
+      refs.set(`${run}/configuration/${value.operationId}.confirmation.json`, true);
+    }
+    if (run && /^.*\/configuration\/[^/]+\.confirmation\.json$/u.test(relative)) refs.set(relative.replace(/\.confirmation\.json$/u, ".transaction.json"), true);
+    if (run && value.schemaVersion === 6 && relative === `${run}/state.json`) for (const id of value.configurationSetup.transactions) refs.set(`${run}/configuration/${id}.transaction.json`, true);
+    if (value.schema === "banzai-review-snapshot/v4") for (const change of value.configurationSetup.runnerChanges) refs.set(`.banzai/runs/${value.runId}/configuration/${change.transaction.operationId}.transaction.json`, true);
     const evidenceRoot = relative.match(/^(\.banzai\/(?:runs\/[^/]+|work\/[^/]+)\/verification)(?:\/|$)/u)?.[1] ?? (run ? `${run}/verification` : null);
     if (evidenceRoot && value.workId) refs.set(`.banzai/work/${value.workId}/work.json`, true);
     if (value.schema === "banzai-verification-origin-finish/v1") refs.set(`${evidenceRoot}/origins/${value.attemptId}.start.json`, true);
@@ -259,7 +271,7 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
           refs.set(`.banzai/work/${item.binding.workId}/work.json`, true);
           return;
         }
-        for (const [name, child] of Object.entries(item)) visit(child, name);
+        for (const [name, child] of Object.entries(item)) if (name !== "configPath") visit(child, name);
       } else if (
         typeof item === "string" &&
         /(?:path|paths|description|plan|implementationReport|testReport|work|changeReport)$/iu.test(
@@ -724,6 +736,27 @@ export async function verifyArchive(input) {
           const logBytes = objects.get(logPath);
           if (!logBytes || digestBytes(logBytes) !== log.sha256)
             fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Archived verification origin log changed or is missing.");
+        }
+      }
+      if (value?.schema === "banzai-verification-config-transaction/v1") {
+        const transaction = parseVerificationConfigTransaction(value);
+        const confirmationPath = entry.path.replace(/\.transaction\.json$/u, ".confirmation.json");
+        const confirmationBytes = objects.get(confirmationPath);
+        if (!confirmationBytes) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Configuration transaction confirmation is missing.");
+        parseVerificationConfigConfirmation(JSON.parse(confirmationBytes), transaction);
+        const stateBytes = objects.get(`${run}/state.json`);
+        const state = stateBytes ? JSON.parse(stateBytes) : null;
+        if (!state || state.schemaVersion !== 6 || state.runId !== transaction.runId || (transaction.continuation && (transaction.continuation.workId !== state.artifactBinding.binding.workId || transaction.continuation.workBindingSha256 !== state.artifactBinding.sha256 || transaction.continuation.baseCommit !== state.baseCommit))) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Configuration transaction owner conflicts with its retained run.");
+      }
+      if (value?.schema === "banzai-review-snapshot/v4") {
+        for (const change of value.configurationSetup.runnerChanges) {
+          const transactionPath = `.banzai/runs/${value.runId}/configuration/${change.transaction.operationId}.transaction.json`;
+          const transactionBytes = objects.get(transactionPath);
+          const confirmationBytes = objects.get(transactionPath.replace(/\.transaction\.json$/u, ".confirmation.json"));
+          if (!transactionBytes || !confirmationBytes) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Review configuration closure is missing.");
+          const transaction = parseVerificationConfigTransaction(JSON.parse(transactionBytes));
+          const confirmation = parseVerificationConfigConfirmation(JSON.parse(confirmationBytes), transaction);
+          if (JSON.stringify(transaction) !== JSON.stringify(change.transaction) || JSON.stringify(confirmation.preview.delta) !== JSON.stringify(change.delta)) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Review configuration closure changed.");
         }
       }
       if (value?.artifactBinding?.binding?.workId) {

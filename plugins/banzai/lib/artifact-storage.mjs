@@ -525,7 +525,7 @@ async function legacyEvidence(root, declared = false) {
     );
     if (
       state === null ||
-      ![1, 2, 3, 4, 5].includes(state.schemaVersion) ||
+      ![1, 2, 3, 4, 5, 6].includes(state.schemaVersion) ||
       state.runId !== entry.name
     )
       fail(

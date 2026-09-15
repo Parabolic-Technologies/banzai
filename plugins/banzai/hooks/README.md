@@ -37,7 +37,7 @@ implementation provides `BANZAI_RUN_ID` and `BANZAI_WORKFLOW_DIGEST`. Both
 orchestrated reviewers receive only `BANZAI_RUN_ID` and
 `BANZAI_APPROVAL_DIGEST` as runner context for required reads; review and
 selection provide no artifact write authorization. The runner owns rendering,
-validation and publication of `banzai-feature-review/v2` Markdown. The hook:
+validation and publication of `banzai-feature-review/v5` Markdown. The hook:
 
 - requires the run to be the active run in `.banzai/active-run.json`;
 - denies every mutation while state is `reviewing` or an active review attempt
@@ -73,7 +73,7 @@ manual gate; they do not require an orchestrator.
   implementation/fix mode, accepted ADRs in the approved bundle are immutable.
   The hook does not parse or approve ADR status; the `architecture-decision`
   gate governs acceptance, rejection, deprecation, and supersession.
-- The hook is not one of the five decision gates in `AGENTS.md`. It guards paths;
+- The hook is not one of the decision gates in `AGENTS.md`. It guards paths;
   it does not approve plans, decisions, or findings.
 - Node must be on `PATH`; if absent, the hook no-ops.
 
@@ -83,3 +83,8 @@ manual gate; they do not require an orchestrator.
 - Free more paths: edit `isDocArtifact()` in `spec-gate.cjs`.
 - After hook edits, reload Claude Code or restart Codex and re-trust via
   `/hooks`.
+
+State 6 preserves exact bound artifact grants. The conditional
+`configuration_prerequisite` gate is runner-raised after a completed mutable
+attempt; it grants no model write to configuration or other runner controls.
+An owning runner applies a confirmed profile and preserves the plan approval.

@@ -28,7 +28,9 @@ export function resolveCliMode(
     command === "doctor" ||
     command === "cancel" ||
     command === "compatibility" ||
-    command === "control"
+    command === "control" ||
+    command === "verify" ||
+    (command === "approve" && args[1] === "verification")
   ) {
     return "command";
   }

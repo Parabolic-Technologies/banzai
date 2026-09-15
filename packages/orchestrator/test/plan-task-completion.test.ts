@@ -5,6 +5,7 @@ import test from "node:test";
 import { digestArtifactBundle } from "../src/git.js";
 import {
   parseApprovedPlanTaskIds,
+  validatePlanRunnerControlTasks,
   parsePlanTaskCompletionProjection,
   PlanTaskCompletionError,
   renderPlanTaskCompletionProjection,
@@ -607,4 +608,58 @@ test("approval and both required reports are part of completion validation", asy
   } finally {
     await current.dispose();
   }
+});
+
+test("plan control guard normalizes task paths, permits exact report roles and keeps prerequisites explanatory", () => {
+  const root = "/project";
+  const report =
+    ".banzai/work/11111111-1111-4111-8111-111111111111/implementation-report.md";
+  const plan = (body: string) =>
+    `# Plan\n\n## Human prerequisites\n\nConfigure .banzai/config.json with banzai verify add node.\n\n## Implementation Tasks\n\n- [ ] **T001 - Work**\n\n${body}\n`;
+  validatePlanRunnerControlTasks(plan(`Write ${report}.`), root, [report]);
+  for (const target of [
+    ".banzai/config.json",
+    "**.banzai/config.json**",
+    "./.banzai/config.json",
+    "src/../.banzai/config.json",
+    "/project/.banzai/config.json",
+    String.raw` .banzai\config.json`,
+    ".banzai/work/other/test-report.md",
+    ".banzai/runs/current/state.json"
+  ])
+    assert.throws(
+      () => {
+        validatePlanRunnerControlTasks(plan(`Update \`${target}\`.`), root, [
+          report
+        ]);
+      },
+      {
+        code: "PLAN_RUNNER_CONTROL_TASK",
+        message: /T001.*runner control path/u
+      }
+    );
+});
+
+test("guided plan guard resolves root aliases and denies ambiguous control-directory case", () => {
+  const plan = (target: string) =>
+    `## Implementation Tasks\n\n- [ ] **T001 - Change source**\n  Write \`${target}\`.\n`;
+  const report = ".banzai/work/work-id/implementation-report.md";
+  for (const target of [
+    ".banzai/config.json",
+    ".Banzai/config.json",
+    "../example/.banzai/config.json",
+    "/tmp/example/../example/.BANZAI/config.json",
+    "..\\example\\.banzai\\config.json",
+    ".Banzai/work/work-id/implementation-report.md"
+  ])
+    assert.throws(
+      () => {
+        validatePlanRunnerControlTasks(plan(target), "/tmp/example", [report]);
+      },
+      { code: "PLAN_RUNNER_CONTROL_TASK" }
+    );
+  for (const target of [report, `../example/${report}`, "src/app.ts"])
+    assert.doesNotThrow(() => {
+      validatePlanRunnerControlTasks(plan(target), "/tmp/example", [report]);
+    });
 });

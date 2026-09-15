@@ -461,6 +461,11 @@ ledger.
 
 ## Lifecycle Links
 
+- Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted
+  2026-09-14: save guided verification before optional client setup, permit
+  bounded verify repair of a paused pending run, and emit doctor v4. General
+  setup exclusion and existing recovery authority remain. Implementation is Planned.
+
 - Amended by [ADR-0042](./0042-runner-delivered-phase-instructions.md), accepted
   2026-09-11: newly emitted doctor v3 replaces D7's v2 default and adds the exact
   `claude.instructions` readiness check. Historical v1/v2 meaning, adoption,

@@ -93,6 +93,14 @@ if(key==='plugin marketplace list --json') { console.log(JSON.stringify({marketp
 if(key==='plugin list --marketplace local-banzai --json') { console.log(JSON.stringify({installed:[{name:'banzai',marketplaceName:'local-banzai',installed:true,enabled:true,source:{source:'local',path:plugin}}]})); process.exit(0); }
 if(key==='plugin list --json' && vendor==='claude') { console.log(JSON.stringify([{id:'banzai@local',enabled:true,installPath:plugin}])); process.exit(0); }
 if(key==='mcp get serena --json') { console.log('{}'); process.exit(0); }
+// Model the documented Claude --mcp-config <configs...> transport boundary.
+if(vendor==='claude') {
+  const start=args.indexOf('--mcp-config');
+  if(start!==-1) for(let i=start+1;i<args.length&&!args[i].startsWith('-');i++) {
+    try { JSON.parse(args[i]); }
+    catch { if(!fs.existsSync(args[i])) { console.error('Error: Invalid MCP configuration: MCP config file not found: '+args[i]); process.exit(1); } }
+  }
+}
 let descendant;
 if(process.env.BANZAI_TEST_DESCENDANT==='1') {
   descendant=spawn(process.execPath,['-e',"process.on('SIGINT',()=>{});process.on('SIGTERM',()=>{});process.stdout.write('READY');setInterval(()=>{},1000)"],{stdio:['ignore','pipe','ignore']});
@@ -168,6 +176,9 @@ if(data.toString().includes('a')||data.toString().includes('q')) process.exit(0)
 
 test("setup PTY fresh and repeated init preserve default wording and offer manual setup on unborn HEAD", async () => {
   const host = await fixture();
+  delete host.env.BANZAI_RUN_ID;
+  delete host.env.BANZAI_APPROVAL_DIGEST;
+  delete host.env.BANZAI_WORKFLOW_DIGEST;
   try {
     for (const fresh of [true, false]) {
       const result = host.run(
@@ -176,12 +187,26 @@ test("setup PTY fresh and repeated init preserve default wording and offer manua
           { wait: "Planning model", send: "\r" },
           { wait: "Implementation model", send: "\r" },
           { wait: "Review model", send: "\r" },
+          ...(fresh ? [{ wait: "Enable bootstrap mode", send: "y\r" }] : []),
           { wait: "? Project setup", send: "\u001b[B\u001b[B\r" },
           { wait: "explicitly invoke:", send: "\u001b[B\u001b[B\u001b[B\r" }
         ]
       );
       assert.equal(result.exitCode, 0, result.output);
       assert.match(result.output, fresh ? /Use default/ : /Keep /);
+      const guideNotice = `${fresh ? "Created" : "Kept existing"} documentation/verification-examples.md.`;
+      assert.ok(result.output.includes(guideNotice));
+      assert.ok(
+        result.output.indexOf(guideNotice) <
+          result.output.indexOf("Planning model")
+      );
+      assert.match(
+        await readFile(
+          path.join(host.root, "documentation/verification-examples.md"),
+          "utf8"
+        ),
+        /# Verification Profile Examples/
+      );
       assert.match(
         result.output,
         /Banzai configuration saved\.\s+Project setup required\s+PROJECT_MANIFEST\.md\s+Missing\s+AGENTS\.md\s+Missing\s+CLAUDE\.md\s+Missing \(created during setup\)\s+Run banzai:project-manifest to prepare project guidance\./
@@ -208,6 +233,19 @@ test("setup PTY independently packaged CLI transfers each explicit skill with TT
       const host = await fixture();
       try {
         await host.configure();
+        if (vendor === "claude") {
+          await mkdir(path.join(host.root, ".serena"));
+          await writeFile(
+            path.join(host.root, ".serena/project.yml"),
+            "project_name: setup-fixture\n"
+          );
+          await writeFile(
+            path.join(host.root, ".mcp.json"),
+            JSON.stringify({
+              mcpServers: { serena: { command: process.execPath, args: [] } }
+            })
+          );
+        }
         const result = host.run(
           ["setup"],
           [
@@ -235,6 +273,24 @@ test("setup PTY independently packaged CLI transfers each explicit skill with TT
             ? "$banzai:project-manifest"
             : "/banzai:project-manifest"
         );
+        if (vendor === "claude") {
+          const mcpIndex = captured.args.indexOf("--mcp-config");
+          assert.notEqual(mcpIndex, -1);
+          assert.deepEqual(JSON.parse(captured.args[mcpIndex + 1] ?? ""), {
+            mcpServers: {
+              serena: {
+                type: "stdio",
+                command: process.execPath,
+                args: [],
+                env: {}
+              }
+            }
+          });
+          assert.deepEqual(
+            captured.args.slice(captured.args.indexOf("--") + 1),
+            ["/banzai:project-manifest"]
+          );
+        }
         assert.doesNotMatch(
           JSON.stringify(captured),
           /FORBIDDEN_SECRET|FORBIDDEN_GRANT|dontAsk|bypass|--output-schema|approvals_reviewer/
@@ -298,8 +354,11 @@ test("setup PTY incomplete exit and signals restore the terminal and release own
     });
 });
 
-test("setup CLI non-TTY contracts never launch a client and retain configuration-only init", async () => {
+test("setup CLI non-TTY init creates local verification guidance without launching a client", async () => {
   const host = await fixture();
+  delete host.env.BANZAI_RUN_ID;
+  delete host.env.BANZAI_APPROVAL_DIGEST;
+  delete host.env.BANZAI_WORKFLOW_DIGEST;
   try {
     for (const args of [[], ["setup"], ["init"]]) {
       const result = spawnSync(process.execPath, [host.cli, ...args], {
@@ -315,6 +374,53 @@ test("setup CLI non-TTY contracts never launch a client and retain configuration
           /The Banzai plugin must be installed and enabled in your chosen client before invoking the skill\./
         );
       } else if (args[0] === "init") {
+        assert.match(
+          result.stdout,
+          /Created documentation\/verification-examples\.md/
+        );
+        const guidePath = path.join(
+          host.root,
+          "documentation/verification-examples.md"
+        );
+        const guide = await readFile(guidePath, "utf8");
+        const canonical = await readFile(
+          path.resolve("../../documentation/verification-examples.md"),
+          "utf8"
+        );
+        assert.equal(
+          guide,
+          canonical.replace(
+            /\]\((getting-started|orchestrator)\.md/g,
+            "](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/$1.md"
+          )
+        );
+        assert.match(guide, /banzai verify add <type>/);
+        await writeFile(
+          guidePath,
+          "# Project-specific checks\r\nKeep my edits.\r\n"
+        );
+        const rerun = spawnSync(process.execPath, [host.cli, "init"], {
+          cwd: host.root,
+          env: host.env,
+          encoding: "utf8"
+        });
+        assert.equal(rerun.status, 0, rerun.stderr);
+        assert.match(
+          rerun.stdout,
+          /Kept existing documentation\/verification-examples\.md/
+        );
+        assert.equal(
+          await readFile(guidePath, "utf8"),
+          "# Project-specific checks\r\nKeep my edits.\r\n"
+        );
+        await rm(guidePath);
+        const repair = spawnSync(process.execPath, [host.cli, "init"], {
+          cwd: host.root,
+          env: host.env,
+          encoding: "utf8"
+        });
+        assert.equal(repair.status, 0, repair.stderr);
+        assert.equal(await readFile(guidePath, "utf8"), guide);
         assert.match(result.stdout, /Run banzai setup in a terminal/);
         assert.match(
           result.stdout,
@@ -325,6 +431,54 @@ test("setup CLI non-TTY contracts never launch a client and retain configuration
     await assert.rejects(readFile(host.capture), /ENOENT/);
   } finally {
     await host.dispose();
+  }
+});
+
+test("init refuses unsafe verification guidance paths before creating configuration", async () => {
+  const host = await fixture();
+  const outside = await mkdtemp(path.join(tmpdir(), "banzai-init-outside-"));
+  delete host.env.BANZAI_RUN_ID;
+  delete host.env.BANZAI_APPROVAL_DIGEST;
+  delete host.env.BANZAI_WORKFLOW_DIGEST;
+  const directory = path.join(host.root, "documentation");
+  const guide = path.join(directory, "verification-examples.md");
+  try {
+    for (const kind of [
+      "directory-link",
+      "file-link",
+      "dangling-link",
+      "directory-file"
+    ] as const) {
+      if (kind === "directory-link") await symlink(outside, directory);
+      else {
+        await mkdir(directory);
+        if (kind === "directory-file") await mkdir(guide);
+        else {
+          const target = path.join(outside, "verification-examples.md");
+          if (kind === "file-link")
+            await writeFile(target, "Keep outside content.");
+          await symlink(target, guide);
+        }
+      }
+      const before = await snapshotTree(outside);
+      const result = spawnSync(process.execPath, [host.cli, "init"], {
+        cwd: host.root,
+        env: host.env,
+        encoding: "utf8"
+      });
+      assert.equal(result.status, 1, result.stdout);
+      assert.match(result.stderr, /regular files without symlinks/);
+      assert.deepEqual(await snapshotTree(outside), before);
+      await assert.rejects(
+        readFile(path.join(host.root, ".banzai/config.json")),
+        /ENOENT/
+      );
+      await rm(directory, { recursive: true, force: true });
+      await rm(path.join(outside, "verification-examples.md"), { force: true });
+    }
+  } finally {
+    await host.dispose();
+    await rm(outside, { recursive: true, force: true });
   }
 });
 

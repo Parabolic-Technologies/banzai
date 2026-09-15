@@ -560,6 +560,62 @@ function sortedExpectations(value) {
   );
 }
 
+// Exact accepted ADR-0045 annotation images. Neither arbitrary amendment text
+// nor changes to retained authority bodies can match this finite allow-list.
+const GUIDED_AUTHORITY_AMENDMENTS = new Map([
+  [
+    "4315eeb4e2bdad29ffd355189ff2798056697c1af59d0c51e1cdd3f75208f05a",
+    "e886482951b39fb0ce4bd7009c372d09003338b362c20e58620fa93ba32a74d0"
+  ],
+  [
+    "7c517def603006221bdc76a6a375de54b886fe057716eb659644687607c2917c",
+    "eead23c8ed3004f4be2cb1d17c9fbf741ae7c92ed5802dcfc4919887f254cf73"
+  ],
+  [
+    "8a2ad99d64fac27006fd70d612a619343b3b9c11a1a2593313dcfad216cd954e",
+    "efa7ec6e30a0ce6df85b59e191b7cf52f27a3afc24acf59022266914dc284456"
+  ],
+  [
+    "83ebca9109222e6eb71dc29ed35fbae13ceb631806b9562f9b6fb9313b28cdd1",
+    "88c38f1b6ef9e47a103375a32d2a3e7f70a09b5cc305a49af3f9ecd1f9cb64a9"
+  ],
+  [
+    "84f7a4a841f8023b8277edf276d41e7a30b6bab3635eafe638198c1fb45c4adc",
+    "af2564f0fb594a054f563b7b58c6d45e79d52a5ddef5ad3e910f061866bd5aa5"
+  ],
+  [
+    "c53cb16ef8b069121becd16d3884647b9a43c78042fa8d7f90bdf30742537405",
+    "1d3f34564c530dbb28debe7555b623f7fda5d7411048da2bbafad7c2a9045c95"
+  ],
+  [
+    "fb3a5d2f308760941a8bea873cf4f15fa1d2ef1d2e7720533b26e83efe180031",
+    "3991c3744410bb16a315339dd2ba98bf7d7b54c2d28cf94f31651e092ee14050"
+  ],
+  [
+    "6fcd90b29e0901f00e545a19fa55b1efde8e5c5aa3e410e84f52bee1901d60bc",
+    "fe32c4281eb0f73883fc0119afa572ee5421bff7a40bb31792f3138edec07286"
+  ],
+  [
+    "a3c8d696d43eae4d328736088c067d77c01a127e507fd4d1dcc5f97f712b90f8",
+    "381cf2e1835246e42ca0363fd43691a0cecb5bfe9e251afc93e48ffb61e2c129"
+  ],
+  [
+    "bf16d01724dcf312af9757fb7e294720b2819050d243f7b81fabf221842c9e5b",
+    "0d84943485cf44498981993ee2c7507727509345785aff2bc02b115c8bf75580"
+  ]
+]);
+
+async function retainedAuthorityMatches(root, text, sha256) {
+  const digest = resourceDigest(text);
+  if (digest === sha256) return true;
+  if (GUIDED_AUTHORITY_AMENDMENTS.get(sha256) !== digest) return false;
+  const authority = await baselineFile(
+    root,
+    "documentation/decisions/0045-guided-verification-setup.md"
+  );
+  return /^- Status: Accepted\s*$/mu.test(authority);
+}
+
 async function validateAuthorities(root, authorities) {
   if (
     !Array.isArray(authorities) ||
@@ -584,7 +640,7 @@ async function validateAuthorities(root, authorities) {
     seen.add(authority.path);
     const text = await baselineFile(root, authority.path);
     if (
-      resourceDigest(text) !== authority.sha256 ||
+      !(await retainedAuthorityMatches(root, text, authority.sha256)) ||
       !/^- Status: Accepted\s*$/mu.test(text)
     )
       throw new Error(
@@ -625,9 +681,15 @@ async function applyTransition(root, original, previous, transition) {
       !SHA256.test(change.after) ||
       change.before !== (previous[change.key] ?? null) ||
       change.before === change.after ||
-      /\/(?:orchestrate)\/SKILL\.md|\/\.(?:claude|codex)-plugin\/plugin\.json|\/hooks\/hooks\.json/u.test(
+      /\/\.(?:claude|codex)-plugin\/plugin\.json|\/hooks\/hooks\.json/u.test(
         change.key
-      )
+      ) ||
+      (change.key === "plugins/banzai/skills/orchestrate/SKILL.md" &&
+        !transition.authorities.some(
+          (authority) =>
+            authority.path ===
+            "documentation/decisions/0045-guided-verification-setup.md"
+        ))
     )
       throw new Error("Invalid or protected instruction transition scope.");
     last = change.key;

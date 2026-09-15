@@ -15,3 +15,9 @@ Use the runner-supplied work identity and artifact roles. Public decisions and
 their index retain the project's established paths and lifecycle authority.
 This phase writes planning artifacts and applicable decision documentation; it
 does not implement production code or tests.
+
+Runner control files are outside model scope. Never plan or write paths under
+`.banzai/` except the exact private artifact roles bound for the intended phase.
+Record missing verification configuration in a **Human prerequisites** section,
+not an implementation task. The runner owns guided configuration proposals;
+free-text consent cannot invent an external configuration-update mechanism.

@@ -8,9 +8,123 @@ import {
   CONFIG_FILE,
   DEFAULT_CONFIG,
   initializeConfig,
-  loadConfig
+  loadConfig,
+  editVerificationConfigBytes
 } from "../src/config.js";
 import { parseConfig } from "../src/validation.js";
+import { requiredFixture } from "./helpers.js";
+
+test("guided config edits preserve unselected bytes and reject ambiguous or destructive targets", () => {
+  const original = irregularConfig(2);
+  const bootstrap = editVerificationConfigBytes(original, {
+    operation: "bootstrap",
+    value: true
+  });
+  assert.equal(
+    editVerificationConfigBytes(bootstrap, {
+      operation: "bootstrap",
+      value: undefined
+    }),
+    original
+  );
+  const addedProfile = {
+    id: "go",
+    projectType: "go" as const,
+    commands: [
+      { name: "tests", command: "go", args: ["test", "./..."], timeoutMs: 1000 }
+    ]
+  };
+  const added = editVerificationConfigBytes(bootstrap, {
+    operation: "add",
+    profile: addedProfile,
+    clearBootstrap: true
+  });
+  assert.equal(
+    parseConfig(JSON.parse(added) as unknown).verification.profiles.length,
+    2
+  );
+  assert.equal(
+    parseConfig(JSON.parse(added) as unknown).verification.bootstrap,
+    undefined
+  );
+  const node = requiredFixture(
+    parseConfig(JSON.parse(original) as unknown).verification.profiles[0]
+  );
+  const unknown = original.replace(
+    '"commands":[ {',
+    '"untouched" : { "x":1 }, "commands":[ { "retained" : [ 1,2 ],'
+  );
+  const edited = editVerificationConfigBytes(unknown, {
+    operation: "edit",
+    profile: {
+      ...node,
+      commands: node.commands.map((command) => ({
+        ...command,
+        timeoutMs: 2000
+      }))
+    },
+    clearBootstrap: false
+  });
+  assert.equal(
+    edited,
+    unknown.replace('"timeoutMs":1000 } ]', '"timeoutMs":2000 } ]')
+  );
+  assert.equal(
+    editVerificationConfigBytes(original, {
+      operation: "edit",
+      profile: node,
+      clearBootstrap: false
+    }),
+    original
+  );
+  assert.throws(
+    () =>
+      editVerificationConfigBytes(original, {
+        operation: "remove",
+        profileId: "node",
+        clearBootstrap: false
+      }),
+    { code: "VERIFICATION_PROFILE_REQUIRED" }
+  );
+  assert.throws(
+    () =>
+      editVerificationConfigBytes(original, {
+        operation: "add",
+        profile: node,
+        clearBootstrap: false
+      }),
+    { code: "VERIFICATION_PROFILE_CONFLICT" }
+  );
+  assert.throws(
+    () =>
+      editVerificationConfigBytes(irregularConfig(1), {
+        operation: "bootstrap",
+        value: true
+      }),
+    { code: "VERIFICATION_LEGACY_CONFIG" }
+  );
+  for (const text of [original, added, edited]) {
+    assert.ok(
+      text.includes(
+        '"retainedUnknown" : { "spacing" : [ 1,2,3 ], "escaped" : "keep\\u0020exact" }'
+      )
+    );
+    assert.ok(
+      text.includes(
+        '"planner": { "executable":"planner-old-executable", "model" : "planner-old-model", "effort":"xhigh", "timeoutMs":1000 }'
+      )
+    );
+  }
+  const removed = editVerificationConfigBytes(added, {
+    operation: "remove",
+    profileId: "go",
+    clearBootstrap: false
+  });
+  assert.equal(
+    parseConfig(JSON.parse(removed) as unknown).verification.profiles.length,
+    1
+  );
+});
 
 function irregularConfig(schemaVersion: 1 | 2): string {
   const verification =
@@ -367,4 +481,111 @@ test("validates version two profile identity type commands and uniqueness", () =
   }
   assert.throws(() => parseConfig({ ...valid, schemaVersion: 99 }));
   assert.throws(() => parseConfig({ ...valid, contractVersion: "2.0.0" }));
+});
+
+test("lossless profile editing keeps command unknown fields with explicit origins through reorder and ID replacement", () => {
+  const base = structuredClone(DEFAULT_CONFIG);
+  const first = {
+    name: "first",
+    command: "node",
+    args: ["a"],
+    timeoutMs: 1000,
+    futureOption: "first-only"
+  };
+  const second = {
+    name: "second",
+    command: "node",
+    args: ["b"],
+    timeoutMs: 1000,
+    futureOption: "second-only"
+  };
+  const document = {
+    ...base,
+    untouched: { formatting: "kept" },
+    verification: {
+      profiles: [
+        {
+          id: "custom",
+          projectType: "custom",
+          commands: [first, second],
+          futureProfile: 42
+        }
+      ]
+    }
+  };
+  const raw = JSON.stringify(document, null, 3) + "\n";
+  const updated = editVerificationConfigBytes(raw, {
+    operation: "edit",
+    profile: {
+      id: "custom",
+      projectType: "custom",
+      commands: [
+        {
+          name: "second edited",
+          command: "node",
+          args: ["new-b"],
+          timeoutMs: 1000
+        },
+        { name: "first", command: "node", args: ["a"], timeoutMs: 1000 }
+      ]
+    },
+    commandOrigins: [1, 0],
+    clearBootstrap: false
+  });
+  const parsed = JSON.parse(updated) as typeof document;
+  assert.deepEqual(
+    parsed.verification.profiles[0]?.commands.map(
+      (command) => command.futureOption
+    ),
+    ["second-only", "first-only"]
+  );
+  assert.equal(parsed.verification.profiles[0].futureProfile, 42);
+  assert.ok(
+    updated.includes('"untouched": {\n      "formatting": "kept"\n   }')
+  );
+});
+
+test("guided structural profile edits retain irregular unselected separators", () => {
+  const profile = (id: "node" | "go" | "python") => ({
+    id,
+    projectType: id,
+    commands: [{ name: id, command: id, args: ["test"], timeoutMs: 1000 }]
+  });
+  const profiles = [
+    DEFAULT_CONFIG.verification.profiles[0],
+    profile("node"),
+    profile("go")
+  ].map((value) => JSON.stringify(value));
+  const [repository, node, go] = profiles;
+  const normal = JSON.stringify(DEFAULT_CONFIG);
+  const raw = normal.replace(
+    JSON.stringify(DEFAULT_CONFIG.verification.profiles),
+    `[\n${repository}, ${node},\n\n\t${go}\n]`
+  );
+  const python = profile("python");
+  const added = editVerificationConfigBytes(raw, {
+    operation: "add",
+    profile: python,
+    clearBootstrap: false
+  });
+  assert.equal(
+    added,
+    raw.replace(`${go}\n]`, `${go}, ${JSON.stringify(python)}\n]`)
+  );
+  for (const [id, expected] of [
+    ["repository", raw.replace(`${repository}, `, "")],
+    ["node", raw.replace(`${node},\n\n\t`, "")],
+    ["go", raw.replace(`,\n\n\t${go}`, "")]
+  ]) {
+    const actual = editVerificationConfigBytes(raw, {
+      operation: "remove",
+      profileId: requiredFixture(id),
+      clearBootstrap: false
+    });
+    assert.equal(actual, expected);
+    assert.equal(
+      parseConfig(JSON.parse(actual) as unknown).verification.profiles.length,
+      2
+    );
+  }
 });

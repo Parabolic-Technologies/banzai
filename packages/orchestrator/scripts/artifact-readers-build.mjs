@@ -9,8 +9,7 @@ export async function artifactReaderBytes(packageRoot) {
   const result = await build({
     absWorkingDir: packageRoot,
     stdin: {
-      contents:
-        'export { parseTerminalAttemptCheckpoint, parseRecoveryAuthorization, parseModelAttemptRecord, parseVerificationAttemptRecord, parseEvaluationStateSource, parsePersistedPhaseResult, parseReviewResult, parseCurrentReviewResult } from "./src/validation.ts";',
+      contents: 'export * from "./src/persisted-readers.ts";',
       resolveDir: packageRoot,
       sourcefile: "artifact-readers-entry.mjs"
     },
@@ -31,7 +30,9 @@ export async function artifactReaderBytes(packageRoot) {
               "../../plugins/banzai/lib/artifact-readers.mjs"
             );
             if (path.resolve(args.resolveDir, args.path) === generated)
-              return { path: path.join(packageRoot, "src/validation.ts") };
+              return {
+                path: path.join(packageRoot, "src/persisted-readers.ts")
+              };
             return undefined;
           });
         }

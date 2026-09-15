@@ -261,11 +261,13 @@ function renderCurrentReviewArtifact(
   }[result.verdict];
   return [
     "# Implementation Review",
-    snapshot.schemaVersion === 3
-      ? "- Format: `banzai-feature-review/v4`"
-      : snapshot.schemaVersion === 2
-        ? "- Format: `banzai-feature-review/v3`"
-        : "- Format: `banzai-feature-review/v2`",
+    snapshot.schemaVersion === 4
+      ? "- Format: `banzai-feature-review/v5`"
+      : snapshot.schemaVersion === 3
+        ? "- Format: `banzai-feature-review/v4`"
+        : snapshot.schemaVersion === 2
+          ? "- Format: `banzai-feature-review/v3`"
+          : "- Format: `banzai-feature-review/v2`",
     reviewValue({
       slug: context.slug,
       iteration: context.iteration,
@@ -296,6 +298,22 @@ function renderCurrentReviewArtifact(
     reviewValue(
       snapshot.artifact.verificationEvidence ?? snapshot.artifact.verification
     ),
+    ...(snapshot.schemaVersion === 4
+      ? [
+          "### Configuration coverage and runner-authored changes",
+          "Coverage below distinguishes configured, bootstrap-deferred and skipped substantive verification. Only the exact recorded deltas are runner-authored; they do not attribute the whole configuration file. Historical deltas may have later user changes, and carried-in changes retain separate provenance. Inspect .banzai/config.json in this candidate.",
+          ...(snapshot.configurationSetup?.coverage === "skipped" &&
+          snapshot.artifact.verification.length === 0
+            ? [
+                "No hygiene commands were configured; no verification command was executed for this skipped round."
+              ]
+            : []),
+          reviewValue({
+            verificationMode: snapshot.verificationMode,
+            ...snapshot.configurationSetup
+          })
+        ]
+      : []),
     "### Validated plan task completion (runner evidence)",
     reviewValue({
       source: snapshot.completionSource,

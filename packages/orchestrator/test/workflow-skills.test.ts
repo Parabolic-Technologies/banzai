@@ -292,7 +292,7 @@ test("quick fix reconciles verification claims after changing tests", async () =
   );
 });
 
-test("shipped workflow and supervisor preserve the five-gate consultation contract", async () => {
+test("shipped workflow and supervisor preserve existing gates and add the runner-only configuration contract", async () => {
   const [
     workflow,
     consultation,
@@ -321,8 +321,14 @@ test("shipped workflow and supervisor preserve the five-gate consultation contra
     )
   ]);
 
-  assert.match(workflow, /There are exactly five/);
+  assert.match(
+    workflow,
+    /five existing gates plus one conditional runner-owned gate/
+  );
   assert.match(workflow, /decision_consultation/);
+  assert.match(workflow, /configuration_prerequisite/);
+  assert.match(planning, /runner-raised configuration prerequisite/);
+  assert.match(protocol, /banzai-agent-answer\/v3/);
   assert.match(workflow, /conditional gate, not a\s+route or mandatory phase/i);
   assert.match(workflow, /first analyzes.*repository evidence/is);
   assert.match(consultation, /Consultation is not approval or permission/i);
@@ -345,7 +351,7 @@ test("shipped workflow and supervisor preserve the five-gate consultation contra
   assert.match(feature, /cannot use the planning-only consultation gate/);
 
   const assertSupervisorSafety = (source: string): void => {
-    assert.match(source, /exact supported v3 declaration/i);
+    assert.match(source, /exact supported v4 declaration/i);
     assert.match(source, /answer_consultation/);
     assert.match(
       source,
@@ -364,9 +370,9 @@ test("shipped workflow and supervisor preserve the five-gate consultation contra
     );
   });
 
-  assert.match(protocol, /banzai-agent-capabilities\/v3/);
-  assert.match(protocol, /controlContractVersion: "3\.0\.0"/);
-  assert.match(protocol, /banzai-agent-status\/v2/);
+  assert.match(protocol, /banzai-agent-capabilities\/v4/);
+  assert.match(protocol, /controlContractVersion: "4\.0\.0"/);
+  assert.match(protocol, /banzai-agent-status\/v3/);
   assert.match(protocol, /answer_escalation/);
   assert.match(protocol, /answer_consultation/);
   const documents = [...protocol.matchAll(/```json\n([\s\S]*?)\n```/gu)].map(

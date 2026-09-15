@@ -13,17 +13,20 @@ banzai control capabilities
 
 Require one clean JSON document with:
 
-- `schema: "banzai-agent-capabilities/v3"`
-- `schemaVersion: 3`
-- `controlContractVersion: "3.0.0"`
+- `schema: "banzai-agent-capabilities/v4"`
+- `schemaVersion: 4`
+- `controlContractVersion: "4.0.0"`
 - non-empty `orchestratorVersion`
 - `umbrellaContractVersion: "1.0.0"`
 - exactly these supported, non-TTY operations: `status`, `start`, `answer`,
-  `approveAdr`, `approvePlan`, `triage`, `resume`, `retry`, `recover`, and
+  `approveAdr`, `approveVerification`, `approvePlan`, `triage`, `resume`, `retry`, `recover`, and
   `cancel`
 - `start.inputSchemas: ["banzai-agent-request/v1"]`
-- `answer.inputSchemas: ["banzai-agent-answer/v2",
+- `answer.inputSchemas: ["banzai-agent-answer/v3", "banzai-agent-answer/v2",
 "banzai-agent-answer/v1"]` in that order
+- `approveVerification.inputSchemas: ["banzai-agent-answer/v3"]`
+- `configurationPrerequisite` declares the kind, fixed actions
+  `["accept", "edit", "skip", "cancel"]`, status v3 and answer v3 schemas
 - `recover.inputSchemas: ["banzai-agent-recovery/v1"]`
 - `inputSchemas: []` for the other operations
 
@@ -105,7 +108,7 @@ label; otherwise omit it and keep the CLI default. Never identify the agent as
 the human decision maker. Use `--no-resume` only when the user explicitly wants
 the decision persisted without continuing.
 
-Decision consultation uses the same fixed argv only when the latest v2 status
+Decision consultation uses the same fixed argv only when the latest v3 status
 reports `nextAction: "answer_consultation"`. Present each exact bounded card
 sequentially with the labels `Decision`, `Why this matters`, `Repository
 evidence`, `Options`, and `Recommendation` when present. Preserve the current
@@ -188,6 +191,37 @@ The input limit is 64 KiB. Invalid UTF-8, JSON, schema, property sets, empty
 content, unsupported versions, oversized input, and wrong answer counts fail
 before mutation.
 
+## Configuration prerequisite answer
+
+Only `answer_configuration_prerequisite` accepts answer v3. Show the exact
+current public proposal, commands, source, checkpoint and fixed options first.
+Relay the current human's explicit choice through either fixed argv:
+
+```text
+banzai control answer [--no-resume] [--by <current-user-label>]
+banzai approve verification [--no-resume] [--by <current-user-label>]
+```
+
+The alias requires v3 and never implies Accept. Its single direct-stdin document
+has exactly `schema: "banzai-agent-answer/v3"`, `schemaVersion: 3`,
+`kind: "configuration_prerequisite"`, `runId`, `decisionId`, `proposalId` from
+current status and `action: accept|edit|skip|cancel`. Only Edit additionally
+requires `profile: { id, commands }`, preserving the proposed profile ID.
+Commands contain `name`, `command`, `args`, `timeoutMs` and optional current
+command `id` for schema 3. The runner assigns new IDs; do not invent them or
+supply `evidence`/`ignoreExplanatory`. Edit returns a new proposal requiring a
+separate exact human Accept. Unknown, repeated, stale, oversized or unsafe
+fields fail before mutation. The 64-KiB limit and direct-stdin rules apply.
+
+The active proposal may expose its bounded command fields for human review;
+this exception does not disclose completed decisions, private hashes,
+continuation authority, transaction internals or raw unrelated config. Do not
+reconstruct an answer from history. Accept preserves approval and work and
+continues verification. Skip is current-run/configuration/type-scoped and never
+waives binding obligations. External repair leaves the proposal pending until
+explicit `banzai resume` revalidates it; report repair commands as an alternative
+after Accept/Edit/Skip, and never execute or authorize them by inference.
+
 ## Status contract
 
 Run:
@@ -196,7 +230,7 @@ Run:
 banzai control status
 ```
 
-Require `schema: "banzai-agent-status/v2"` and `schemaVersion: 2`.
+Require `schema: "banzai-agent-status/v3"` and `schemaVersion: 3`.
 `activeRun: null` means no persisted run is available. A non-null `done` or
 `cancelled` projection is terminal evidence, not an in-progress run. Otherwise
 use only these fields:
@@ -219,7 +253,8 @@ count-only and are not a fallback source for questions or answers.
 
 The projection intentionally excludes the original request, prompts,
 transcripts, raw model output, environment, secrets, approval digests, raw
-commands/arguments/logs, absolute repository paths, and raw `.banzai` paths.
+commands/arguments/logs outside the bounded active configuration proposal,
+absolute repository paths, and raw `.banzai` paths.
 Treat absent required fields or unexpected schema data as incompatible.
 
 Only a non-terminal `activeRun` blocks `control start`. If the current skill
@@ -244,6 +279,7 @@ requires an absent or terminal run; cancellation remains an explicit user choice
 | `approve_plan` | Show the exact approval bundle; wait for explicit approval/rework/rejection of the current plan; only approval runs `banzai approve plan`; refresh status. |
 | `answer_escalation` | Show summary and ordered questions; wait for exact ordered answers; send a v1 answer through `banzai control answer`; refresh status. |
 | `answer_consultation` | Show the exact current run/request/round and every bounded card with `Decision`, `Why this matters`, `Repository evidence`, `Options`, and `Recommendation` when present. Wait for one exact current-user answer per decision or pause without mutation. Send one keyed v2 answer through direct stdin; refresh status. Never choose, infer, rewrite, or treat the response as approval. |
+| `answer_configuration_prerequisite` | Show the exact current proposal and Accept/Edit/Skip/Cancel; wait for the current human response, send only its identity-bound v3 document, then refresh status. Never downcast, infer consent or rewrite config. |
 | `triage` | Show artifact, iteration, and every latest finding; require exactly one disposition per ID; run `banzai triage --accept <comma-list> --reject <comma-list> --defer <comma-list>` with empty strings for empty lists; refresh status. |
 | `resume` | Run `banzai resume`, remain attached, then refresh status. |
 | `retry` | Confirm `retry.eligible` and prerequisite/permission resolution; run `banzai retry`, remain attached, then refresh status. |
@@ -274,4 +310,4 @@ human stdout. Ignore that prose as state and query versioned control status.
 
 ## Artifact storage capability
 
-Current capabilities v3/control 3.0.0 advertise the declarationSchemas and bindingSchemas arrays, layouts and privateWorkspaceSnapshotVersion: 2 in `artifactStorage`. Require this capability before supervising private work. A v2/control 2.0.0 consumer is legacy-only and must not infer private storage support. The request, status, answer and recovery schemas remain unchanged. Never create or edit run work bindings through supervisor tools; the runner persists their authority.
+Current capabilities v4/control 4.0.0 advertise the declarationSchemas and bindingSchemas arrays, layouts and privateWorkspaceSnapshotVersion: 2 in `artifactStorage`. Require this capability before supervising private work. A v2/control 2.0.0 consumer is legacy-only and must not infer private storage support. Require declarationSchemas `["banzai-artifact-layout/v1"]`, bindingSchemas `["banzai-work-binding/v1", "banzai-work-binding/v2"]` and layouts `["legacy", "private"]`. Request v1, recovery v1, escalation answer v1 and consultation answer v2 retain their original meanings; status v3 and configuration answer v3 are required for the new kind. Never create or edit run work bindings through supervisor tools; the runner persists their authority.

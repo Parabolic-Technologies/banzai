@@ -50,6 +50,12 @@ ambiguous commitments preserve fresh execution.
 
 ## Rules
 
+- Runner control paths under `.banzai/` are outside model scope except exact
+  private artifact roles bound for the intended implementation/fix phase.
+  Put missing verification setup in **Human prerequisites** and show that section
+  with plan approval. The runner's configuration prerequisite gate owns its
+  proposal and write; do not plan JSON edits or invent an external updater.
+
 - Specify exact contracts, signatures, state shapes, identifiers, config keys,
   locations or techniques when applicable authority or a concrete constraint
   requires them, including internal details. Link existing authoritative

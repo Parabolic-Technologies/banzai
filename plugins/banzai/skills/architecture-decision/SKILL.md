@@ -125,8 +125,9 @@ or unreadable.
 Report ADR path, status, owner, related artifacts, current/target differences,
 and the exact lifecycle decision needed. Wait for that decision.
 
-This is one of the five decision gates in `AGENTS.md`. Consultation remains a
-separate non-authorizing prerequisite and never accepts this ADR. Never
+This is one of the five existing decision gates in `AGENTS.md`. Consultation remains a
+separate non-authorizing prerequisite and never accepts this ADR. The additional
+runner-owned configuration prerequisite gate cannot accept an ADR either. Never
 self-accept. Once
 the decision is recorded, continue to `development-plan` without asking for
 further confirmation.

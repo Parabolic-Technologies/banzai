@@ -779,7 +779,7 @@ test("committed doctor fails closed on unreadable project marker evidence", asyn
     assert.equal(checkStatus(report, "project.types"), "fail");
     assert.equal(
       checkMessage(report, "project.types"),
-      "Project marker evidence is unreadable."
+      "Project marker evidence is unreadable or invalid."
     );
     assert.equal(checkStatus(report, "verification.profiles"), "skipped");
     assert.equal(
@@ -792,7 +792,9 @@ test("committed doctor fails closed on unreadable project marker evidence", asyn
       "Substantive verification requires readable project marker evidence."
     );
     assert.equal(
-      humanResult.stdout.includes("Project marker evidence is unreadable."),
+      humanResult.stdout.includes(
+        "Project marker evidence is unreadable or invalid."
+      ),
       true
     );
     assert.equal(

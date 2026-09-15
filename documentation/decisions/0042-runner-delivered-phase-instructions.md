@@ -487,6 +487,11 @@ by preparing this decision.
 
 ## Lifecycle Links
 
+- Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted
+  2026-09-14: per-role parity with Codex not-applicable, cause-specific remedies
+  and doctor v4. Preserve complete instruction delivery, structural refusal and
+  exact grants; instruction changes follow ADR-0044. Implementation is Planned.
+
 - Accepted on 2026-09-11 by the owner's explicit decision after Rework 2.
   This lifecycle record supersedes pending-acceptance statements in the retained
   body. The decision body is immutable from acceptance.

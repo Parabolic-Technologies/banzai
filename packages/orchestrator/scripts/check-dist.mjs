@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { build } from "esbuild";
 import { artifactReaderBytes } from "./artifact-readers-build.mjs";
 import { checkPhaseResourceBytes } from "./phase-resources-build.mjs";
+import { initResourceBytes } from "./init-resources-build.mjs";
 
 const execFileAsync = promisify(execFile);
 const defaultPackageRoot = path.resolve(
@@ -31,6 +32,17 @@ function optionsFromArguments(args) {
 }
 
 async function checkDistribution(packageRoot, smokeRequired) {
+  const expectedInit = await initResourceBytes(
+    path.resolve(packageRoot, "../..")
+  );
+  const actualInit = await readFile(
+    path.join(packageRoot, "src/init-resources.ts"),
+    "utf8"
+  ).catch(() => null);
+  if (actualInit !== expectedInit)
+    throw new Error(
+      "Generated initialization resources are stale. Run `npm run build`."
+    );
   await checkPhaseResourceBytes(path.resolve(packageRoot, "../.."));
   const generatedReaders = Buffer.from(await artifactReaderBytes(packageRoot));
   const shippedReaders = await readFile(

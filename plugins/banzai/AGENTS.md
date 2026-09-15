@@ -238,7 +238,7 @@ acceptance always requires an explicit human decision gate.
 
 ## Decision Gates
 
-A gate stops work until a human decides. There are exactly five:
+A gate stops work until a human decides. There are five existing gates plus one conditional runner-owned gate:
 
 - a material planning choice after repository analysis
   (`decision_consultation`);
@@ -246,10 +246,16 @@ A gate stops work until a human decides. There are exactly five:
 - plan approval, bound to the exact description, accepted ADRs, and plan
   (`plan_approval`);
 - an escalation trigger discovered in any phase (`escalation`);
-- review triage, because only human-accepted findings reach a fix.
+- review triage, because only human-accepted findings reach a fix;
+- a runner-raised verification configuration prerequisite after a completed
+  implementation/fix checkpoint (`configuration_prerequisite`): Accept, Edit,
+  Skip or Cancel. Models cannot raise this gate or write runner control files.
 
-Orchestrated runs return the named gate and the `banzai` CLI asks the engineer.
-Standalone runs ask the same question in chat. Nothing else blocks.
+Orchestrated model phases return their existing named gates and the CLI asks
+for the human decision. The runner alone raises the configuration gate, applies
+confirmed configuration and resumes verification with the approval preserved.
+Standalone runs ask their existing gates in chat; guided configuration uses
+`banzai verify`. Nothing else blocks.
 
 ## Progress Reports
 
@@ -270,7 +276,9 @@ Default continuations:
   ADR needs, otherwise `development-plan`;
 - `development-plan` -> plan approval gate;
 - `code-writing` -> `test-writing`;
-- `test-writing` -> verification, then `feature-review`;
+- `test-writing` -> verification, then `feature-review`; the runner may first
+  raise `configuration_prerequisite` for missing verification setup without
+  discarding implemented work or plan approval;
 - `feature-review` -> review triage gate;
 - review triage with no accepted findings -> done by human triage, without
   another review and without reporting reviewer `pass`;
@@ -305,7 +313,7 @@ approved plan.
 - Claude Code: reliable after plugin reload.
 - Codex: trust via `/hooks`; `apply_patch` may bypass hook interception.
 
-The hook is a backstop, not one of the five decision gates. Skill escalation
+The hook is a backstop, not one of the decision gates. Skill escalation
 gates still apply. ADR files are documentation and remain free to draft; the
 hook does not accept decisions. The `architecture-decision` gate is
 authoritative.

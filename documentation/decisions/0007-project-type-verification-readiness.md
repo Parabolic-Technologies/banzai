@@ -205,5 +205,10 @@ Implementation and review must confirm:
 
 ## Lifecycle Links
 
+- Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted
+  2026-09-14: explicit bootstrap readiness and new-run substantive-coverage
+  preflight, with taxonomy and hygiene meaning preserved. Implementation of
+  this amendment is Planned.
+
 - Supersedes: None
 - Superseded by: None

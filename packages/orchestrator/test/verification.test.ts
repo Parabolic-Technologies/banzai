@@ -26,7 +26,11 @@ import {
   describeVerificationCommands,
   detectProjectTypes,
   flattenVerificationCommands,
-  isRepositoryHygieneCommand
+  isRepositoryHygieneCommand,
+  inspectVerificationProject,
+  assessVerificationReadiness,
+  inspectCommandPrerequisite,
+  nodeVerificationSuggestions
 } from "../src/verification.js";
 import type {
   OrchestratorConfig,
@@ -73,6 +77,193 @@ function configWithProfiles(
   config.verification.profiles = profiles;
   return config;
 }
+
+test("bootstrap parsing preserves absent identities and accepts only booleans in config 2 and 3", () => {
+  for (const schemaVersion of [2, 3] as const) {
+    const raw = structuredClone(DEFAULT_CONFIG);
+    raw.schemaVersion = schemaVersion;
+    if (schemaVersion === 3)
+      requiredFixture(
+        requiredFixture(raw.verification.profiles[0]).commands[0]
+      ).id = "hygiene";
+    const absent = parseConfig(raw);
+    assert.equal(Object.hasOwn(absent.verification, "bootstrap"), false);
+    const digest = evidenceDigest(absent.verification);
+    for (const bootstrap of [true, false]) {
+      const configured = parseConfig({
+        ...raw,
+        verification: { ...raw.verification, bootstrap }
+      });
+      assert.equal(configured.verification.bootstrap, bootstrap);
+      assert.notEqual(evidenceDigest(configured.verification), digest);
+      delete configured.verification.bootstrap;
+      assert.equal(evidenceDigest(configured.verification), digest);
+    }
+    for (const bootstrap of [null, 1, "true", [], {}]) {
+      assert.throws(
+        () =>
+          parseConfig({
+            ...raw,
+            verification: { ...raw.verification, bootstrap }
+          }),
+        /bootstrap|schema 3/
+      );
+    }
+  }
+});
+
+test("static setup distinguishes bootstrap, real scripts, ambiguous managers and removed prerequisites", async () => {
+  const repository = await temporaryRoot();
+  try {
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.verification.bootstrap = true;
+    const empty = await inspectVerificationProject(repository.root);
+    assert.deepEqual(empty.projectTypes, ["custom"]);
+    assert.equal(empty.node, null);
+    assert.equal(
+      assessVerificationReadiness(config, empty).bootstrapEffective,
+      true
+    );
+    assert.equal(
+      assessVerificationReadiness(config, empty).totalSubstantiveCommandCount,
+      0
+    );
+    const packageFile = path.join(repository.root, "package.json");
+    await writeFile(
+      packageFile,
+      JSON.stringify({
+        packageManager: "npm@11.0.0",
+        scripts: {
+          build: "touch must-not-execute",
+          test: "exit 17",
+          lint: "eslint .",
+          typecheck: 42,
+          other: "check"
+        }
+      })
+    );
+    const node = await inspectVerificationProject(repository.root);
+    assert.deepEqual(node.projectTypes, ["node"]);
+    assert.equal(node.node?.packageManager, "npm");
+    assert.deepEqual(node.node.suggestedScriptNames, ["test", "lint", "build"]);
+    assert.deepEqual(
+      nodeVerificationSuggestions(node, "npm").map((command) => command.args),
+      [
+        ["run", "test"],
+        ["run", "lint"],
+        ["run", "build"]
+      ]
+    );
+    assert.deepEqual(assessVerificationReadiness(config, node).uncoveredTypes, [
+      "node"
+    ]);
+    assert.equal(
+      assessVerificationReadiness(config, node).bootstrapEffective,
+      false
+    );
+    const command = {
+      name: "irrelevant name",
+      command: "npm",
+      args: ["run", "test"],
+      timeoutMs: 1000
+    };
+    assert.deepEqual(inspectCommandPrerequisite(command, node), {
+      state: "present",
+      scriptName: "test"
+    });
+    assert.deepEqual(
+      inspectCommandPrerequisite(
+        { ...command, args: ["run", "typecheck"] },
+        node
+      ),
+      { state: "missing_script", scriptName: "typecheck" }
+    );
+    assert.equal(
+      inspectCommandPrerequisite(
+        { ...command, args: ["--workspace", "nested", "run", "test"] },
+        node
+      ).state,
+      "unknown"
+    );
+    assert.equal(
+      inspectCommandPrerequisite(
+        { ...command, command: "sh", args: ["-c", "npm run missing"] },
+        node
+      ).state,
+      "unknown"
+    );
+    assert.equal(
+      inspectCommandPrerequisite(command, empty).state,
+      "unavailable"
+    );
+    config.verification.profiles.push({
+      id: "node",
+      projectType: "node",
+      commands: [command]
+    });
+    assert.equal(
+      assessVerificationReadiness(config, node).bootstrapStale,
+      true
+    );
+    await writeFile(
+      path.join(repository.root, "pnpm-lock.yaml"),
+      "lockfileVersion: 9\n"
+    );
+    await writeFile(path.join(repository.root, "composer.json"), "{}");
+    const mixed = await inspectVerificationProject(repository.root);
+    assert.deepEqual(mixed.projectTypes, ["node", "php"]);
+    assert.equal(mixed.node?.packageManager, null);
+    assert.deepEqual(mixed.node.packageManagerCandidates, ["npm", "pnpm"]);
+    assert.notEqual(mixed.sourceSha256, node.sourceSha256);
+    assert.deepEqual(
+      assessVerificationReadiness(config, mixed).uncoveredTypes,
+      ["php"]
+    );
+    await assert.rejects(
+      readFile(path.join(repository.root, "must-not-execute")),
+      { code: "ENOENT" }
+    );
+    await writeFile(packageFile, JSON.stringify({ scripts: {} }));
+    const removed = await inspectVerificationProject(repository.root);
+    assert.deepEqual(inspectCommandPrerequisite(command, removed), {
+      state: "missing_script",
+      scriptName: "test"
+    });
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("guided inspection never treats malformed, unsafe or oversized markers as an empty project", async () => {
+  const repository = await temporaryRoot();
+  try {
+    const packageFile = path.join(repository.root, "package.json");
+    for (const content of [
+      "{",
+      "[]",
+      '{"scripts":false}',
+      Buffer.from([0xff]),
+      " ".repeat(1024 * 1024 + 1)
+    ]) {
+      await writeFile(packageFile, content);
+      await assert.rejects(inspectVerificationProject(repository.root), {
+        code: "VERIFICATION_INSPECTION_UNAVAILABLE"
+      });
+    }
+    await rm(packageFile);
+    await symlink("missing", packageFile);
+    await assert.rejects(inspectVerificationProject(repository.root), {
+      code: "VERIFICATION_INSPECTION_UNAVAILABLE"
+    });
+    await rm(packageFile);
+    await mkdir(packageFile);
+    await assert.rejects(inspectVerificationProject(repository.root), {
+      code: "VERIFICATION_INSPECTION_UNAVAILABLE"
+    });
+  } finally {
+    await repository.dispose();
+  }
+});
 
 test("detects each supported root project marker", async () => {
   const cases: { file: string; projectType: VerificationProjectType }[] = [

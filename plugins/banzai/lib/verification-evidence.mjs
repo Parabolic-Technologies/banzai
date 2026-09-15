@@ -77,7 +77,8 @@ export function parseVerificationPolicy(value) {
 
 /** Config 3 verification ingress shared by the plugin helper and orchestrator. */
 export function parseVerificationConfiguration(value) {
-  const v = object(value, ["profiles"], ["policy"]);
+  const v = object(value, ["profiles"], ["policy", "bootstrap"]);
+  if (v.bootstrap !== undefined && typeof v.bootstrap !== "boolean") invalid("Verification bootstrap must be a boolean.");
   const ids = [];
   const profiles = list(v.profiles, 50).map((profile) => {
     object(profile, ["id", "projectType", "commands"]); identifier(profile.id);
@@ -96,7 +97,8 @@ export function parseVerificationConfiguration(value) {
   });
   if (profiles.length === 0) invalid("Verification requires profiles.");
   unique(ids); unique(profiles.map((profile) => profile.id));
-  return { profiles, ...(v.policy === undefined ? {} : { policy: parseVerificationPolicy(v.policy) }) };
+  return { profiles, ...(v.policy === undefined ? {} : { policy: parseVerificationPolicy(v.policy) }),
+    ...(v.bootstrap === undefined ? {} : { bootstrap: v.bootstrap }) };
 }
 
 /** Exactly one inventory in immutable approved plan bytes; prose cannot grant reuse. */

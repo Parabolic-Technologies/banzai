@@ -127,7 +127,12 @@ return to Banzai; it rechecks guidance and starts no task automatically. Use
 - Claude Code: `/banzai:project-manifest`
 - Codex: `$banzai:project-manifest`
 
-Review the generated project guidance and `.banzai/config.json`. Add verification
+Review the generated project guidance and `.banzai/config.json`. The static init
+wizard proposes existing scripts and saves confirmed choices before opening a
+project-manifest client. Empty repositories can explicitly enable bootstrap;
+setup never runs project commands. Use `banzai verify add <type>`, `edit <id>`,
+`remove <id>` and `list` for guided repair, and `banzai verify check` to run all
+configured checks on explicit request. Add verification
 profiles for your project's actual test, typecheck, lint, or build commands.
 The default profile contains only `git diff --check`; it does not run tests.
 See [verification profile examples](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/verification-examples.md).

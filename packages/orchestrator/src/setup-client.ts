@@ -341,6 +341,8 @@ export async function prepareSetupLaunch(
     args.push("--plugin-dir", fresh.pluginDirectory);
     if (mcp.claude !== null)
       args.push("--mcp-config", claudeMcpConfig(mcp.claude));
+    // Claude's variadic options must not consume the initial skill prompt.
+    args.push("--");
   }
   args.push(SETUP_SKILLS[client.vendor]);
   return { command: fresh.settings.executable, args, cwd: repoRoot, env };

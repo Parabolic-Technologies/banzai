@@ -1,3 +1,4 @@
+import { validateConfigurationStateEnvelope } from "./configuration-prerequisite.js";
 import { parseVerificationConfiguration } from "./verification-evidence.js";
 import { createHash } from "node:crypto";
 import { BanzaiError } from "./errors.js";
@@ -2201,7 +2202,21 @@ export function parseConfig(value: unknown): OrchestratorConfig {
         "Verification profile ids must be unique."
       );
     }
-    verification = { profiles };
+    if (
+      verificationRecord.bootstrap !== undefined &&
+      typeof verificationRecord.bootstrap !== "boolean"
+    ) {
+      throw new BanzaiError(
+        "INVALID_CONFIG",
+        "verification.bootstrap must be a boolean."
+      );
+    }
+    verification = {
+      profiles,
+      ...(verificationRecord.bootstrap === undefined
+        ? {}
+        : { bootstrap: verificationRecord.bootstrap })
+    };
   } else {
     throw new BanzaiError(
       "INVALID_CONFIG",
@@ -3022,7 +3037,7 @@ function emptyStateMetrics(
 
 function parseStateMetrics(
   value: unknown,
-  schemaVersion: 1 | 2 | 3 | 4 | 5,
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6,
   issues: EvaluationSourceIssue[]
 ): EvaluationStateMetricSource {
   if (!isRecord(value)) {
@@ -3270,13 +3285,15 @@ export function parseEvaluationStateSource(
     value.schemaVersion !== 2 &&
     value.schemaVersion !== 3 &&
     value.schemaVersion !== 4 &&
-    value.schemaVersion !== 5
+    value.schemaVersion !== 5 &&
+    value.schemaVersion !== 6
   ) {
     throw new BanzaiError(
       "EVALUATION_STATE_SCHEMA_UNSUPPORTED",
       "Persisted state uses an unsupported schema."
     );
   }
+  if (value.schemaVersion === 6) validateConfigurationStateEnvelope(value);
   const schemaVersion = value.schemaVersion;
   const issues: EvaluationSourceIssue[] = [];
   let workflow: EvidenceValue<WorkflowRoute>;
@@ -3417,6 +3434,9 @@ export function parseEvaluationStateSource(
   return {
     value: {
       schemaVersion,
+      ...(schemaVersion === 6
+        ? { verificationMode: value.verificationMode as "ordered" | "policy" }
+        : {}),
       contractVersion: sourceValue(
         value,
         "contractVersion",

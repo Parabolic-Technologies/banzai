@@ -40,9 +40,10 @@ Acknowledgment is a reviewer assertion, not independent proof of reading or
 substantive assessment. Blocked reviews may truthfully report partial or zero
 coverage and partial accepted-ID assessment without findings or a gate.
 
-The runner freezes `banzai-review-snapshot/v1` evidence before invocation,
+New schema-2/3 configuration runs use state schema 6. The runner freezes
+`banzai-review-snapshot/v4` evidence before invocation,
 retains the result and diagnostics, validates scope, renders one attempt-owned
-`banzai-feature-review/v2` candidate, validates it and current integrity, then
+`banzai-feature-review/v5` candidate, validates it and current integrity, then
 atomically publishes its exact bytes. Required scope and reviewer coverage are
 separate. Lossless fenced JSON values preserve multiline prose and opaque
 `EQ-SHADOW:` entries; recorded verification and completion come only from the
@@ -50,6 +51,21 @@ snapshot. No formatting/parity model repair occurs. Standalone skill review
 still writes its own durable v1 Markdown; historical v1 prose and validation
 rules remain intact. Neither artifact format broadens human triage or fixer
 scope. A malformed current response is never downgraded to v1.
+
+The current snapshot records configured, deferred or explicitly skipped coverage
+and exact confirmed runner configuration deltas. It never claims whole-file
+authorship or invents verification applicability for a skipped round. Historical
+state 1-5, snapshot 1-3 and rendered review 1-4 retain their original validation
+and rendering contracts; configuration schema 1 remains legacy.
+
+The runner alone raises `configuration_prerequisite` after an eligible completed
+implementation or fix checkpoint. It is not an additional model phase-result
+field. Agent control 4.0.0 declares capabilities v4, status v3 and the closed
+configuration-answer v3 input, while existing escalation/consultation answer
+v1/v2 inputs keep their meaning. `banzai approve verification` accepts the same
+exact-current v3 answer as `banzai control answer`. See the maintained
+[control protocol](../skills/orchestrate/references/control-protocol.md) for
+negotiation, human provenance, bounded proposal disclosure and no-resume rules.
 
 For new strict orchestrated implementation attempts, the v2 structured ledger
 is the sole task-completion source of truth. The implementation report contains

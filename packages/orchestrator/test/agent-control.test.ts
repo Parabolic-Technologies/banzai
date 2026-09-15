@@ -229,11 +229,11 @@ function hasCode(code: string): (error: unknown) => boolean {
   return (error) => error instanceof BanzaiError && error.code === code;
 }
 
-test("agent control capabilities declare the exact offline v2 operation set", () => {
+test("agent control capabilities declare the exact offline v4 operation set", () => {
   const capabilities = agentControlCapabilities();
-  assert.equal(capabilities.schema, "banzai-agent-capabilities/v3");
-  assert.equal(capabilities.schemaVersion, 3);
-  assert.equal(capabilities.controlContractVersion, "3.0.0");
+  assert.equal(capabilities.schema, "banzai-agent-capabilities/v4");
+  assert.equal(capabilities.schemaVersion, 4);
+  assert.equal(capabilities.controlContractVersion, "4.0.0");
   assert.equal(capabilities.orchestratorVersion, packageManifest.version);
   assert.equal(capabilities.umbrellaContractVersion, CONTRACT_VERSION);
   assert.deepEqual(Object.keys(capabilities.operations), [
@@ -241,6 +241,7 @@ test("agent control capabilities declare the exact offline v2 operation set", ()
     "start",
     "answer",
     "approveAdr",
+    "approveVerification",
     "approvePlan",
     "triage",
     "resume",
@@ -252,6 +253,7 @@ test("agent control capabilities declare the exact offline v2 operation set", ()
     AGENT_REQUEST_SCHEMA
   ]);
   assert.deepEqual(capabilities.operations.answer.inputSchemas, [
+    "banzai-agent-answer/v3",
     AGENT_ANSWER_SCHEMA,
     LEGACY_AGENT_ANSWER_SCHEMA
   ]);
@@ -264,7 +266,7 @@ test("agent control capabilities declare the exact offline v2 operation set", ()
       supported: operation.supported,
       ttyRequired: operation.ttyRequired
     })),
-    Array.from({ length: 10 }, () => ({
+    Array.from({ length: 11 }, () => ({
       supported: true,
       ttyRequired: false
     }))
@@ -739,8 +741,8 @@ test("status projection derives every semantic action from runner state", () => 
     }
   }
   assert.deepEqual(emptyAgentControlStatus(), {
-    schema: "banzai-agent-status/v2",
-    schemaVersion: 2,
+    schema: "banzai-agent-status/v3",
+    schemaVersion: 3,
     activeRun: null
   });
 });
@@ -870,5 +872,73 @@ test("consultation status accepts every runtime-valid bounded card", () => {
   assert.equal(
     projection.activeRun?.pendingGate?.kind,
     "decision_consultation"
+  );
+});
+
+test("configuration v3 answers are closed, bounded and preserve literal argv without changing legacy answers", () => {
+  const answer = {
+    schema: "banzai-agent-answer/v3",
+    schemaVersion: 3,
+    kind: "configuration_prerequisite",
+    runId: "current-run",
+    decisionId: "11111111-1111-4111-8111-111111111111",
+    proposalId: "22222222-2222-4222-8222-222222222222",
+    action: "accept"
+  };
+  const decode = (value: unknown) =>
+    decodeAgentControlAnswer(Buffer.from(JSON.stringify(value)));
+  assert.deepEqual(decode(answer), answer);
+  for (const invalid of [
+    { ...answer, schemaVersion: 2 },
+    { ...answer, kind: "escalation" },
+    { ...answer, action: "yes" },
+    { ...answer, proposalId: "stale" },
+    { ...answer, profile: { id: "node", commands: [] } },
+    { ...answer, action: "edit" },
+    { ...answer, extra: true },
+    { ...answer, runId: "bad\u202erun" }
+  ])
+    assert.throws(() => decode(invalid));
+  assert.throws(() =>
+    decodeAgentControlAnswer(
+      Buffer.from(
+        JSON.stringify(answer).replace(
+          '"action":"accept"',
+          '"action":"skip","action":"accept"'
+        )
+      )
+    )
+  );
+  assert.throws(() => decodeAgentControlAnswer(Buffer.from([0xff, 0xfe])));
+  const command = {
+    name: "tests",
+    command: "npm",
+    args: ["run", "test", "$(literal)", "one argument"],
+    timeoutMs: 1000
+  };
+  const edited = {
+    ...answer,
+    action: "edit",
+    profile: { id: "node", commands: [command] }
+  };
+  assert.deepEqual(decode(edited), edited);
+  for (const malformed of [
+    { ...command, evidence: "fresh" },
+    { ...command, ignoreExplanatory: false },
+    { ...command, timeoutMs: 86400001 },
+    { ...command, name: "x".repeat(201) },
+    { ...command, args: ["bad\narg"] }
+  ])
+    assert.throws(() =>
+      decode({ ...edited, profile: { id: "node", commands: [malformed] } })
+    );
+  assert.throws(() =>
+    decode({
+      ...edited,
+      profile: {
+        id: "node",
+        commands: Array.from({ length: 201 }, () => command)
+      }
+    })
   );
 });

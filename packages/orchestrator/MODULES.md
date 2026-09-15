@@ -13,7 +13,7 @@ is a navigational reference and is updated with the module it describes.
   and archive operations. No runner configuration or CLI installation is needed
   by the standalone helper. Claims exclude overlapping standalone/runner phase
   writers for one work; explicit legacy registration preserves original roles. Workflow grants remain
-  runner-owned. New run state v4 holds binding bytes and SHA-256; workspace v2
+  runner-owned. New config-2/3 state v6 holds binding bytes and SHA-256; workspace v2
   hashes the selected ignored work. Historical states/digests retain old meaning.
 
 - `cancellation.ts` — closed observation v1 reasons, response/provenance table,
@@ -61,13 +61,20 @@ is a navigational reference and is updated with the module it describes.
   `forceTerminateActiveProcesses`, and `releaseHeldRunnerLocksSync`, and
   restores the terminal an interrupted prompt left in raw mode with the cursor
   hidden.
+- `version-cli.ts` — early, repository-independent `--version` / `-v` and
+  `--plugin-version` / `-pv` commands, also accepting em-dash long aliases.
+  Reads the package mirror or bounded local client inventories, including
+  disabled installations and all distinct installed versions per client.
+  Unknown inventories are unavailable; empty inventories are not installed.
+  No known plugin version produces a nonzero exit; extra arguments fail before
+  any inventory query. Never reads marketplace source versions or starts models.
 - `agent-control-cli.ts` — exact non-TTY control grammar and stdin composition.
   Capability discovery runs before Git discovery or runner construction;
   status, start, answer, and recover reuse the current `WorkflowRunner`, and
   mutations emit a fresh authoritative status projection.
-- `agent-control.ts` — closed current `banzai-agent-capabilities/v3`,
-  `banzai-agent-status/v2`, and keyed `banzai-agent-answer/v2` contracts;
-  preserved `banzai-agent-request/v1`, ordered escalation
+- `agent-control.ts` — closed current `banzai-agent-capabilities/v4`,
+  `banzai-agent-status/v3`, and configuration `banzai-agent-answer/v3` contracts;
+  preserved keyed consultation `banzai-agent-answer/v2`, `banzai-agent-request/v1`, ordered escalation
   `banzai-agent-answer/v1`, and `banzai-agent-recovery/v1` inputs; bounded
   privacy allow-list, semantic state/action projection, exact consultation
   identity binding, 64 KiB fail-before-mutation input decoding, and
@@ -100,10 +107,10 @@ is a navigational reference and is updated with the module it describes.
   missing Python fails the suite.
 - `doctor-cli.ts` — exact doctor argument contract, injected stdout/stderr
   composition, canonical JSON serialization, and deterministic human
-  projection for `banzai-doctor/v3`, including explicit unavailable project
+  projection for `banzai-doctor/v4`, including explicit unavailable project
   types when marker evidence cannot be read.
 - `doctor.ts` — fixed-order Project Verification Readiness checks, with
-  `project.guidance` immediately after `repository.git` and schema version 3. `claude.instructions` follows `claude.environment`
+  `project.guidance` immediately after `repository.git` and schema version 4. `claude.instructions` follows `claude.environment`
   and precedes `claude.permissions`; it compares the configured role union and
   preserves mismatch/bounded-failure/unverifiable precedence. Uses direct
   privacy-bounded config, active-pointer/state, and lock reads plus injected
@@ -423,6 +430,12 @@ is a navigational reference and is updated with the module it describes.
   `SCHEMA_VERSION_MISMATCH` when bundled schemas disagree with
   `CONTRACT_VERSION`; current review-result v2 and byte-preserved v1 resolve
   through distinct output-contract identities.
+- `init-resources.ts` — generated local verification guide embedded in the
+  standalone CLI. `init-resources-build.mjs` reads canonical
+  `documentation/verification-examples.md` and resolves sibling product-guide
+  links to the public repository; build generates and check-dist compares.
+  CLI init creates the local guide under its initialization lock before prompts,
+  using create-only writes and rejecting symlinks or non-regular paths.
 - `config.ts` — `.banzai/config.json` location, `DEFAULT_CONFIG`,
   `loadConfig`, `initializeConfig`, and `applyModelUpdates`, which rewrites only
   requested `model`, `executable`, and `effort` JSON value tokens and preserves
@@ -574,8 +587,8 @@ is a navigational reference and is updated with the module it describes.
   fresh-input remainder, and an optional turn count. It reads no
   process state, so both surfaces are testable against an explicit width.
 - `types.ts` — all shared types, `CONTRACT_VERSION = "1.0.0"`, phase-result
-  schema v3 and state schema v4 with explicit v1/v2/v3 legacy readers, independent
-  agent-control schema and `3.0.0` contract identities, independent
+  schema v3 and state schema v6 with explicit v1-v5 historical readers, independent
+  agent-control schema and `4.0.0` contract identities, independent
   `banzai-context-attempt/v1` and `banzai-context-report/v1` identities,
   model-attempt v2,
   terminal-checkpoint/recovery contracts, and the pure role/model/effort
@@ -592,7 +605,8 @@ is a navigational reference and is updated with the module it describes.
   against the sole root `package.json.version` authority,
   absence of retained `.banzai-version-set` state, hook,
   current phase-result/state/control identities, byte-preserved legacy
-  phase-result schemas, five-gate decision-consultation and supervisor policy,
+  phase-result schemas, the five existing gates and conditional runner
+  configuration gate, decision-consultation and supervisor policy,
   privacy canaries, `orchestrate`, Test Assurance, Security Assurance, and
   Engineering Quality policy references/syntax/identity, the versionless Claude
   marketplace, root version-script wiring, committed bundle mode, and required
@@ -666,7 +680,7 @@ Inventory selects `workPaths`/`runIds`; export validates fixed `inventoryFile`
 bytes. `bundlePath` verification/restore preserve explicit pins and owner policy,
 required Markdown authority closure and a private restored manifest receipt.
 Managed work/run/control destination ancestry is rejected before staging.
-Doctor's read-only active-state check supports v4/v5 and validates binding identity.
+Doctor's read-only active-state check supports v4/v5/v6 and validates binding identity.
 
 ## Runner instruction generation and parity
 
@@ -717,7 +731,7 @@ inventory; legacy plans retain fresh execution. Release gates cannot reuse.
 Unavailable captures preserve physical attempt history but cannot authorize
 current applicability, including same-round resume after a successful process.
 
-The same decision/start/finish/application codecs serve workflow state 5 and the
+The same decision/start/finish/application codecs serve policy-mode workflow state 6, historical state 5 and the
 plugin-only verification helper. New binding v2 reserves `verificationDirectory`
 for that owner; ordinary artifact writes cannot address it. Physical attempt v1
 leaves and metrics count actual subprocesses only. Ledger 2 adds provenance,
@@ -725,7 +739,7 @@ never fabricated success. Execution occurs under existing work ownership; fresh
 source and authority checks gate review, pass application, zero-accepted triage
 and lite completion. Failure/retry/recovery retain their prior authorization.
 
-Snapshot v3 and rendered review artifact v4 freeze direct origins, physical
+Historical snapshot v3 and rendered review artifact v4 freeze direct origins, physical
 leaves and executed/reused/pending applicability. Review-result v2, completion
 v1 and old snapshot/rendering identities stay unchanged. Archive v1 follows this
 closure, including standalone evidence and logs, and validates restored bytes.
@@ -738,10 +752,60 @@ fields. `eval kpi --schema-version 2` accepts only export v2 and computes each
 source independently from per-run evidence. Physical retries remain attempts;
 terminal dispositions count once per round/check. Incomplete coverage never
 contributes inferred zeroes. Default v1 and context/cancellation/human-time report
-schemas stay unchanged; their state readers recognize v5 where applicable.
+schemas stay unchanged; their state readers recognize v5/v6 where applicable.
 Missing origin-finish proof makes export-v2 coverage incomplete even when the
 historical execution had unavailable captures; such runs cannot enter exact KPIs.
 
 The test driver accepts repeated exact `--file` selections before esbuild;
 `--pattern` still filters Node test names. Full default execution, child process
 group termination and output cleanup retain the same owner.
+
+## Guided verification setup
+
+- `verification.ts` performs bounded static root inspection, existing-script
+  suggestions, bootstrap-aware readiness and finite missing-script checks. It
+  never executes discovery commands or infers a stack in an empty folder.
+- `configuration-prerequisite.ts` owns the closed request, continuation, resolution,
+  Skip and state-6 codecs. Normalized command changes (including name/timeout)
+  replace schema-3 IDs; unchanged/reordered commands retain them.
+- `verification-config.ts` publishes concrete token-preserving previews under
+  repository and bound-work ownership. It pins config/source hashes, persists
+  private confirmation and prepared/applied/finalized transaction evidence,
+  reconciles durable before/after/drift states, and emits one applied event per
+  operation. Current config and this run's retained ID lists define collisions.
+- `verification-cli.ts` owns init's static wizard and verify add/edit/remove/list/
+  check. Structured edits cannot change policy fields; explicit check reports all
+  commands while workflow verification remains fail-fast. No configuration write
+  runs concurrently with a model, check or waiting interactive owner.
+- `verification-ui.ts` edits executable/argv fields and renders pending actions
+  before the repair/resume alternative. It performs no project execution.
+- `configuration-review.ts` freezes actual deltas, coverage and resolution/Skip
+  references for snapshot v4/render v5; historical writers/readers remain bound
+  to their original versions. Already-published changes survive source drift and
+  are distinguishable from completed acceptance or whole-file authorship.
+- `persisted-readers.ts` is the canonical generation entry for plugin-only
+  validators. Archive dependency closure includes transaction/confirmation/run/
+  work evidence; model grants still deny all runner control files.
+
+`WorkflowRunner` rechecks prerequisites at the completed implementation/fix
+checkpoint. The pending state is `needs_human_decision`; exact Accept continues
+to verification without clearing approval. Edit produces a fresh proposal, Skip
+is scoped to this run/types/config and preserves binding obligations, and Cancel
+uses existing authority. External repair remains pending until resume revalidates
+it, without inventing a human answer. Atomic config publication cannot infer any
+model/process outcome. State 6 distinguishes ordered binding-v1 and policy
+binding-v2 execution; frozen evaluation/human-time contracts retain their meanings.
+
+Doctor v4 adds ordered per-check `fixes` and `roles`. Codex parity is
+`not_applicable`; verified pinned Claude is quiet. Ambient/unresolved scope is
+`unverifiable` with only an ambient remedy. Mismatch fails readiness, and only
+mismatch/bounded failure receives rebuild/update remedies. Bootstrap changes
+coverage only for confirmed markerless custom projects. Static preflight offers
+configuration before model work; every failed verification-category check and
+`executables.verification` supplies an exact fix command/document pointer.
+
+The instruction baseline retains predecessor and original pins. ADR-0045 permits
+its exact declared hook/planning/supervisor transition, including the supervisor
+entry skeleton. For retained ADR-0043 authority, only a leading, indented ADR-0045
+lifecycle annotation may be excluded for comparison; the original accepted body
+and retained suffix must still match their recorded full-byte hash.

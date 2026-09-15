@@ -68,6 +68,63 @@ function digest(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
+/** Only executable task bodies are guarded; prerequisite prose creates no write grant. */
+export function validatePlanRunnerControlTasks(
+  markdown: string,
+  repoRoot: string,
+  allowedArtifactPaths: readonly string[]
+): void {
+  parseApprovedPlanTaskIds(markdown);
+  const section =
+    markdown.split(/^## Implementation Tasks\s*$/mu)[1]?.split(/^## /mu)[0] ??
+    "";
+  const allowed = new Set(
+    allowedArtifactPaths.map((value) =>
+      path.posix.normalize(value.replaceAll("\\", "/"))
+    )
+  );
+  const root = repoRoot.replaceAll("\\", "/").replace(/\/$/u, "");
+  let taskId = "unknown";
+  for (const line of section.split("\n")) {
+    taskId = TASK_HEADING.exec(line)?.[1] ?? taskId;
+    for (const raw of line.split(/[\s*`'"<>()[\]{},;]+/u)) {
+      const token = raw
+        .replaceAll("\\", "/")
+        .replace(/:\d+(?::\d+)?$/u, "")
+        .replace(/[.!?]+$/u, "");
+      const normalized = path.posix.normalize(
+        path.posix.isAbsolute(token) || /^[a-z]:\//iu.test(token)
+          ? token
+          : `${root}/${token}`
+      );
+      const relative = normalized
+        .toLowerCase()
+        .startsWith(`${root.toLowerCase()}/`)
+        ? normalized.slice(root.length + 1)
+        : normalized;
+      if (
+        (relative.toLowerCase() === ".banzai" ||
+          relative.toLowerCase().startsWith(".banzai/")) &&
+        !allowed.has(relative)
+      ) {
+        throw new BanzaiError(
+          "PLAN_RUNNER_CONTROL_TASK",
+          `Plan task ${taskId} names runner control path ${JSON.stringify(relative.slice(0, 240))}. Remove that task and record missing configuration in Human prerequisites; use banzai verify for runner-owned configuration.`
+        );
+      }
+    }
+  }
+}
+
+export function planHumanPrerequisites(markdown: string): string | null {
+  const text = markdown
+    .split(/^## Human prerequisites\s*$/imu)[1]
+    ?.split(/^## /mu)[0]
+    ?.trim();
+  if (text === "") return null;
+  return text ?? null;
+}
+
 export function parseApprovedPlanTaskIds(markdown: string): string[] {
   const headings = [...markdown.matchAll(/^## Implementation Tasks\s*$/gmu)];
   if (headings.length !== 1) {

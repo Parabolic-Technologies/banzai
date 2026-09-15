@@ -12,6 +12,7 @@ export interface EvidenceCommand {
 export interface EvidenceConfiguration {
   profiles: { id: string; projectType: "repository" | "node" | "php" | "python" | "go" | "rust" | "ruby" | "jvm" | "dotnet" | "custom"; commands: EvidenceCommand[] }[];
   policy?: VerificationPolicy;
+  bootstrap?: boolean;
 }
 export interface VerificationObligations {
   schema: "banzai-verification-obligations/v1"; schemaVersion: 1; complete: true;

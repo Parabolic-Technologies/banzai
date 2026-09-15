@@ -152,13 +152,66 @@ export async function inspectInstructionParity(
   };
 }
 
+export async function inspectRoleInstructionParity(
+  vendor: "codex" | "claude",
+  directory: string | null,
+  phases: readonly InstructionPhase[]
+): Promise<InstructionParity> {
+  return vendor === "codex"
+    ? {
+        state: "not_applicable",
+        resourceIds: [],
+        mismatched: [],
+        unavailable: []
+      }
+    : inspectInstructionParity(directory, phases);
+}
+
+export function instructionParityFixes(
+  result: InstructionParity,
+  ambient = false
+): { action: string; documentation: string }[] {
+  const documentation =
+    "documentation/orchestrator.md#spawned-claude-environment";
+  if (result.state === "mismatch" || result.state === "bounded_failure")
+    return [
+      {
+        action:
+          "Rebuild the orchestrator bundle from current source (npm run build).",
+        documentation
+      },
+      {
+        action: "Update the installed Banzai plugin to the matching release.",
+        documentation
+      },
+      {
+        action:
+          "Explicitly select ambient Claude mode only if accepting unverifiable instruction parity.",
+        documentation
+      }
+    ];
+  if (result.state === "unverifiable")
+    return [
+      {
+        action: ambient
+          ? "Ambient mode cannot verify installed instructions; configure a scoped matching Banzai plugin to enable comparison."
+          : "Resolve the configured Claude plugin scope, or explicitly select ambient mode accepting unverifiable parity.",
+        documentation
+      }
+    ];
+  return [];
+}
+
 export function combineInstructionParity(
   results: readonly InstructionParity[]
 ): InstructionParity {
   const state =
     (["mismatch", "bounded_failure", "unverifiable"] as const).find(
       (candidate) => results.some((result) => result.state === candidate)
-    ) ?? (results.length === 0 ? "unverifiable" : "verified");
+    ) ??
+    (results.some((result) => result.state === "verified")
+      ? "verified"
+      : "not_applicable");
   return {
     state,
     resourceIds: [...new Set(results.flatMap((result) => result.resourceIds))],
@@ -168,13 +221,15 @@ export function combineInstructionParity(
 }
 
 export function instructionParityDiagnostic(result: InstructionParity): string {
+  if (result.state === "not_applicable")
+    return "Installed-Claude instruction parity is not applicable to the configured Codex roles.";
   if (result.state === "verified")
-    return `Instruction resources verified (${result.resourceIds.join(", ")}); this does not prove full transitive plugin integrity or model compliance.`;
+    return `Applicable Claude instruction resources verified (${result.resourceIds.join(", ")}); this does not prove full transitive plugin integrity or model compliance.`;
   if (result.state === "mismatch")
     return `Instruction resource mismatch: ${result.mismatched.join(", ")}. ${INSTRUCTION_REMEDIES}`;
   if (result.state === "bounded_failure")
     return `Instruction resource comparison has bounded failures: ${result.unavailable.join(", ")}. Parity is not verified. ${INSTRUCTION_REMEDIES}`;
-  return `Instruction resource parity is unverifiable for Codex, ambient or unresolved-directory scope. ${INSTRUCTION_REMEDIES}`;
+  return "Instruction resource parity is unverifiable for ambient or unresolved Claude scope.";
 }
 
 function resourceText(id: ResourceId): string {

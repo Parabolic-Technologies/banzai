@@ -51,6 +51,125 @@ const CHECK_ORDER = [
   "run.lock"
 ];
 
+test("doctor v4 bootstrap table preserves truthful coverage, remedies and read-only output", async () => {
+  const cases = [
+    {
+      flag: true,
+      node: false,
+      covered: false,
+      php: false,
+      invalid: false,
+      profiles: "pass",
+      substantive: "pass"
+    },
+    {
+      flag: false,
+      node: false,
+      covered: false,
+      php: false,
+      invalid: false,
+      profiles: "fail",
+      substantive: "fail"
+    },
+    {
+      flag: true,
+      node: true,
+      covered: false,
+      php: false,
+      invalid: false,
+      profiles: "fail",
+      substantive: "fail"
+    },
+    {
+      flag: true,
+      node: true,
+      covered: true,
+      php: false,
+      invalid: false,
+      profiles: "pass",
+      substantive: "warning"
+    },
+    {
+      flag: true,
+      node: true,
+      covered: true,
+      php: true,
+      invalid: false,
+      profiles: "fail",
+      substantive: "warning"
+    },
+    {
+      flag: true,
+      node: true,
+      covered: false,
+      php: false,
+      invalid: true,
+      profiles: "skipped",
+      substantive: "skipped"
+    }
+  ];
+  for (const item of cases) {
+    const repository = await temporaryRoot();
+    try {
+      const config = item.covered
+        ? substantiveConfig()
+        : structuredClone(DEFAULT_CONFIG);
+      config.verification.bootstrap = item.flag;
+      await writeConfig(repository.root, config);
+      if (item.node)
+        await writeFile(
+          path.join(repository.root, "package.json"),
+          item.invalid ? "{" : "{}"
+        );
+      if (item.php)
+        await writeFile(path.join(repository.root, "composer.json"), "{}");
+      const before = await snapshotTree(repository.root);
+      const value = await inspectDoctor(repository.root, dependencies());
+      assert.equal(value.schema, "banzai-doctor/v4");
+      assert.equal(value.schemaVersion, 4);
+      assert.equal(checkStatus(value, "verification.profiles"), item.profiles);
+      assert.equal(
+        checkStatus(value, "verification.substantive"),
+        item.substantive
+      );
+      assert.equal(
+        value.ready,
+        value.checks.every((check) => check.status !== "fail")
+      );
+      assert.deepEqual(
+        value.checks.map((check) => check.id),
+        CHECK_ORDER
+      );
+      const text = renderDoctorText(value);
+      for (const check of value.checks) {
+        assert.deepEqual(Object.keys(check), [
+          "id",
+          "category",
+          "status",
+          "message",
+          "fixes",
+          "roles"
+        ]);
+        if (check.category === "verification" && check.status === "fail") {
+          assert.ok(check.fixes.length);
+          for (const fix of check.fixes)
+            assert.ok(
+              text.includes(`Fix: ${fix.action} (${fix.documentation})`)
+            );
+        }
+      }
+      if (item.invalid) assert.deepEqual(value.projectTypes, []);
+      if (item.flag && !item.node)
+        assert.match(text, /Bootstrap mode, coverage deferred\. 0 substantive/);
+      if (item.covered) assert.match(text, /Bootstrap flag is stale\./);
+      if (item.php) assert.match(text, /Fix: banzai verify add php/);
+      assert.deepEqual(await snapshotTree(repository.root), before);
+    } finally {
+      await repository.dispose();
+    }
+  }
+});
+
 test("doctor adoption classifications remain independent of verification and expose only bounded diagnostics", async (t) => {
   for (const classification of [
     "ready",
@@ -222,7 +341,7 @@ test("reports a deterministic ready Node project without mutating it", async () 
         ?.message ?? "",
       /not checked.*not authentication proof.*startup preflight/s
     );
-    assert.equal(first.summary.warnings, 2);
+    assert.equal(first.summary.warnings, 1);
     assert.equal(
       first.summary.passed +
         first.summary.warnings +
@@ -1119,7 +1238,7 @@ test("does not create local state when the Banzai directory is absent", async ()
   }
 });
 
-test("doctor v3 compares mixed role unions without hiding structural failures or mutating evidence", async () => {
+test("doctor v4 compares mixed role unions without hiding structural failures or mutating evidence", async () => {
   const repository = await temporaryRoot();
   const plugin = await instructionPluginFixture();
   try {
@@ -1133,14 +1252,32 @@ test("doctor v3 compares mixed role unions without hiding structural failures or
     await writeConfig(repository.root, config);
     const before = await snapshotTree(repository.root);
     const verified = await inspectDoctor(repository.root, dependencies());
-    assert.equal(verified.schema, "banzai-doctor/v3");
-    assert.equal(verified.schemaVersion, 3);
+    assert.equal(verified.schema, "banzai-doctor/v4");
+    assert.equal(verified.schemaVersion, 4);
     assert.equal(checkStatus(verified, "claude.instructions"), "pass");
     assert.deepEqual(
       verified.checks.map((entry) => entry.id),
       CHECK_ORDER
     );
     assert.deepEqual(await snapshotTree(repository.root), before);
+    config.models.planner.executable = "codex";
+    config.models.implementer.executable = "codex";
+    await writeConfig(repository.root, config);
+    const defaults = (
+      await inspectDoctor(repository.root, dependencies())
+    ).checks.find((item) => item.id === "claude.instructions");
+    assert.equal(defaults?.status, "pass");
+    assert.deepEqual(
+      defaults.roles.map((role) => [role.role, role.state, role.fixes]),
+      [
+        ["planner", "not_applicable", []],
+        ["implementer", "not_applicable", []],
+        ["reviewer", "verified", []]
+      ]
+    );
+    assert.deepEqual(defaults.fixes, []);
+    config.models.planner.executable = "claude";
+    config.models.implementer.executable = "claude";
     const target = path.join(plugin.directory, "phases/fix.md");
     const original = await readFile(target);
     await writeFile(target, "PRIVATE-INSTRUCTION-CANARY");
@@ -1163,7 +1300,7 @@ test("doctor v3 compares mixed role unions without hiding structural failures or
     await rm(path.join(plugin.directory, "hooks/spec-gate.cjs"));
     const invalid = await inspectDoctor(repository.root, dependencies());
     assert.equal(checkStatus(invalid, "claude.environment"), "fail");
-    assert.equal(checkStatus(invalid, "claude.instructions"), "warning");
+    assert.equal(checkStatus(invalid, "claude.instructions"), "skipped");
     assert.equal(invalid.ready, false);
   } finally {
     await plugin.dispose();

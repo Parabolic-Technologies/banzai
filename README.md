@@ -233,7 +233,7 @@ mutable work. Interrupted implementation is never silently retried. Details:
 
 To supervise a run from a chat agent, explicitly invoke `/banzai:orchestrate`
 (Claude Code) or `$banzai:orchestrate` (Codex); the skill can never select
-itself. Compatible supervisors require control contract `2.0.0`; see
+itself. Compatible supervisors require control contract `4.0.0`; see
 [agent control](documentation/orchestrator.md#agent-control) for exact schemas
 and compatibility checks.
 
@@ -248,7 +248,8 @@ for interactive Skip, evidence availability and resource coverage limits.
 
 ## Where You Decide
 
-There are five decision gates, and the CLI is where you answer all of them:
+There are five existing decision gates plus a conditional configuration prerequisite;
+the CLI presents their human actions:
 
 | Gate                  | You decide                                                                                                             |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------- |
@@ -257,6 +258,7 @@ There are five decision gates, and the CLI is where you answer all of them:
 | Plan approval         | Approve the exact bundle of description, accepted ADRs, and plan                                                       |
 | Review triage         | Accept, reject, or defer every review finding                                                                          |
 | Escalation            | Answer the questions a phase raises for dependencies, contracts, security, deployment, or unspecified product behavior |
+| Configuration prerequisite | Accept or edit the runner's profile proposal, skip within the current run's scope, or cancel |
 
 Which gates appear depends on the selected route and the decisions raised by
 the task.
@@ -336,7 +338,7 @@ documentation/
 
 Lite work normally needs only `work.md`. Accepted ADR bodies are immutable;
 changed decisions use a linked superseding ADR. Each `review-<iteration>.md` is
-self-contained: the runner renders and publishes `banzai-feature-review/v2` for
+self-contained: the runner renders and publishes `banzai-feature-review/v5` for
 read-only orchestrated reviewers; standalone reviewers own durable
 `banzai-feature-review/v1` Markdown. A human or another model can continue the
 review from either artifact without a copied transcript.
@@ -401,3 +403,10 @@ Using Banzai does not require open-sourcing your own project. Community
 participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 Work artifacts default to [local private storage](documentation/artifact-storage.md) after normal project setup. Shared ADRs and current product guides remain public; existing work retains explicit legacy paths.
+
+Guided verification setup uses `banzai verify add <type>`, `edit <id>`, `remove
+<id>`, `list`, and explicit `check`. Init saves confirmed choices without running
+project commands. Empty projects can confirm bootstrap; after the first
+implementation, the runner proposes a profile with Accept/Edit/Skip/Cancel.
+Accept preserves the plan and continues verification. Exit an owning session
+before external repair, then use `banzai resume` for the pending checkpoint.

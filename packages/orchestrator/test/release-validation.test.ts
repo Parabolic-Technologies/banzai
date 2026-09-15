@@ -113,10 +113,12 @@ const FIXTURE_PATHS = [
   "plugins/banzai",
   "packages/orchestrator/README.md",
   "documentation/orchestrator.md",
+  "documentation/verification-examples.md",
   "packages/orchestrator/package.json",
   "packages/orchestrator/src",
   "packages/orchestrator/test",
   "packages/orchestrator/scripts/build.mjs",
+  "packages/orchestrator/scripts/init-resources-build.mjs",
   "packages/orchestrator/scripts/artifact-readers-build.mjs",
   "packages/orchestrator/scripts/phase-resources-build.mjs",
   "packages/orchestrator/phase-guidance-baseline.json",
@@ -125,6 +127,7 @@ const FIXTURE_PATHS = [
   "packages/orchestrator/scripts/instruction-baseline.mjs",
   "documentation/decisions/0043-proportionate-verification-evidence.md",
   "documentation/decisions/0044-instruction-baseline-evolution.md",
+  "documentation/decisions/0045-guided-verification-setup.md",
   "packages/orchestrator/scripts/check-dist.mjs",
   "packages/orchestrator/scripts/release-version.mjs",
   "packages/orchestrator/scripts/smoke-committed.mjs",
@@ -313,6 +316,44 @@ async function withFixture(
     await rm(path.dirname(root), { recursive: true, force: true });
   }
 }
+
+test("initialization guide parity rejects stale or missing resources without repair", async () => {
+  await withFixture(async (root) => {
+    const generatedPath = path.join(
+      root,
+      "packages/orchestrator/src/init-resources.ts"
+    );
+    const original = await readFile(generatedPath);
+    const canonicalPath = path.join(
+      root,
+      "documentation/verification-examples.md"
+    );
+    const canonical = await readFile(canonicalPath);
+    await writeFile(
+      canonicalPath,
+      Buffer.concat([canonical, Buffer.from("\nUpdated example.\n")])
+    );
+    const check = () =>
+      spawnSync(
+        process.execPath,
+        [path.join(root, "packages/orchestrator/scripts/check-dist.mjs")],
+        { encoding: "utf8" }
+      );
+    const stale = check();
+    assert.equal(stale.status, 1);
+    assert.match(stale.stderr, /Generated initialization resources are stale/);
+    assert.deepEqual(await readFile(generatedPath), original);
+    await writeFile(canonicalPath, canonical);
+    await unlink(generatedPath);
+    const missing = check();
+    assert.equal(missing.status, 1);
+    assert.match(
+      missing.stderr,
+      /Generated initialization resources are stale/
+    );
+    await assert.rejects(access(generatedPath));
+  });
+});
 
 test("phase resources reject byte skew and missing generated source without repairing the candidate", async () => {
   await withFixture(async (root) => {
@@ -784,13 +825,19 @@ for (const [relativePath, fragment] of [
     "packages/orchestrator/src/prompts.ts",
     "stop before authoring a Proposed ADR or plan that selects an option"
   ],
-  ["README.md", "There are five decision gates"],
+  [
+    "README.md",
+    "There are five existing decision gates plus a conditional configuration prerequisite"
+  ],
   ["documentation/orchestrator.md", "A v1 answer cannot answer a"],
   [
     "packages/orchestrator/src/cli.ts",
-    "Five human decision gates remain distinct"
+    "Five existing human decision gates remain distinct"
   ],
-  ["PROJECT_MANIFEST.md", "five workflow gates can stop work"],
+  [
+    "PROJECT_MANIFEST.md",
+    "five existing workflow gates plus a conditional configuration prerequisite"
+  ],
   [
     "plugins/banzai/documentation/README.md",
     "v3/phase-result.schema.json # current consultation-aware phase hand-off"
@@ -875,7 +922,7 @@ test("release validation protects run-state v3/v4/v5 and agent-control 3.0 ident
     await writeFile(
       typesPath,
       accepted.replace(
-        "export interface RunState {\n  schemaVersion: 3 | 4 | 5;",
+        "export interface RunState {\n  schemaVersion: 3 | 4 | 5 | 6;",
         "export interface RunState {\n  schemaVersion: 2;"
       ),
       "utf8"
@@ -887,7 +934,7 @@ test("release validation protects run-state v3/v4/v5 and agent-control 3.0 ident
     await writeFile(
       typesPath,
       accepted.replace(
-        '"banzai-agent-status/v2" as const',
+        '"banzai-agent-status/v3" as const',
         '"banzai-agent-status/v1" as const'
       ),
       "utf8"
@@ -922,7 +969,7 @@ for (const [relativePath, fragment] of [
   ],
   [
     "plugins/banzai/skills/orchestrate/SKILL.md",
-    "exact supported v3 declaration"
+    "exact supported v4 declaration"
   ],
   ["plugins/banzai/skills/orchestrate/SKILL.md", "banzai-agent-answer/v2"],
   [
@@ -943,11 +990,11 @@ for (const [relativePath, fragment] of [
   ],
   [
     "plugins/banzai/skills/orchestrate/references/control-protocol.md",
-    "banzai-agent-capabilities/v3"
+    "banzai-agent-capabilities/v4"
   ],
   [
     "plugins/banzai/skills/orchestrate/references/control-protocol.md",
-    'controlContractVersion: "3.0.0"'
+    'controlContractVersion: "4.0.0"'
   ],
   [
     "plugins/banzai/skills/orchestrate/references/control-protocol.md",
@@ -2392,5 +2439,47 @@ test("artifact reader generation resolves runtime reader edges to canonical sour
       await readFile(target, "utf8"),
       "invalid previous generated output must never be consumed"
     );
+  });
+});
+
+test("guided baseline amendment keeps accepted authority bodies pinned and rejects hidden lifecycle headings", async () => {
+  await withFixture(async (root) => {
+    await validateGuidanceExtraction(root);
+    const authority = path.join(
+      root,
+      "documentation/decisions/0043-proportionate-verification-evidence.md"
+    );
+    const original = await readFile(authority, "utf8");
+    for (const extra of [
+      " ARBITRARY AUTHORITY",
+      "\n  ARBITRARY AUTHORITY",
+      "\n\tARBITRARY AUTHORITY"
+    ]) {
+      await writeFile(
+        authority,
+        original.replace(
+          "- Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted",
+          "- Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted" +
+            extra
+        )
+      );
+      await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    }
+    await writeFile(
+      authority,
+      original.replace(
+        "Current profiles specify ordered commands.",
+        "Current profiles may omit commands."
+      )
+    );
+    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    await writeFile(
+      authority,
+      original.replace(
+        "- Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted",
+        "- Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted\n## Hidden authority"
+      )
+    );
+    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
   });
 });

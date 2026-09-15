@@ -127,8 +127,11 @@ Present the binding obligations, scope, required evidence and explicitly marked
 discretion in those bytes. Resolve conflicting guidance or ambiguous commitments
 before asking for approval; a required constraint must not exist only in guidance.
 
-This is one of the five decision gates in `AGENTS.md`, and the only gate that
+This is one of the five existing decision gates in `AGENTS.md`, and the only gate that
 authorizes the exact bundle for code work. Consultation and ADR lifecycle
 decisions remain separate and non-substitutable. Approval covers the whole
-bundle, so there is no further confirmation between implementation, tests,
-verification, and review. Do not start `code-writing` before approval.
+bundle, so ordinary implementation, tests, verification and review continue
+without another plan confirmation. A runner-raised configuration prerequisite
+may require Accept/Edit/Skip/Cancel before verification; it retains this approval
+and implemented work. Models cannot raise that gate or write runner control
+files. Present Human prerequisites alongside this exact bundle. Do not start `code-writing` before approval.

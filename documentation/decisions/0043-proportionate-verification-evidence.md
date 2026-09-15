@@ -278,6 +278,11 @@ disposable candidate, followed by independent review and human triage.
 
 ## Lifecycle Links
 
+- Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted
+  2026-09-14: state-6 verification modes, guided command-ID replacement and
+  explicit skipped-round coverage. Preserve historical evidence, policy and
+  approved-obligation authority. Implementation of this amendment is Planned.
+
 - Supersedes: None in full.
 - Proposed amendments: ADR-0006 profiles/config; ADR-0015 ledger identities;
   ADR-0013 final-suite ownership only for explicitly eligible reuse;

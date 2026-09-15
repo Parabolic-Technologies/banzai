@@ -239,6 +239,7 @@ export function planningPromptEnvelope(
     {
       category: "phase_instructions",
       text: `Phase: plan
+Runner control files are outside model scope. Never plan tasks to edit paths under .banzai/ except the exact runner-bound implementation-report and test-report artifact roles. Record missing verification configuration in a Human prerequisites section. The runner offers guided configuration after implementation; no free-text answer grants an external config-write mechanism.
 Continue through the planning responsibilities: the description is approved as part of the plan bundle,
 not on its own.
 Use only the exact supplied planning write roles and the existing public ADR/manifest authority.
@@ -743,7 +744,8 @@ Review iteration: ${input.iteration}`
       category: "approved_requirements_architecture",
       text: `Approved artifact paths:
 ${input.artifactPaths.map((item) => `- ${item}`).join("\n")}
-Review snapshot digest: ${input.reviewSnapshot?.digest ?? "unavailable"}`
+Review snapshot digest: ${input.reviewSnapshot?.digest ?? "unavailable"}
+${input.reviewSnapshot?.schemaVersion === 4 ? `Inspect .banzai/config.json and its exact runner delta evidence separately from model work and carried-in user changes. Skipped or bootstrap-deferred coverage is not passing substantive verification. Configuration setup: ${JSON.stringify(input.reviewSnapshot.configurationSetup)}` : ""}`
     },
     {
       category: "verification_evidence",

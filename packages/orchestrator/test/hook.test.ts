@@ -465,7 +465,7 @@ test("runner mode fails closed when an edit target cannot be parsed", async () =
   }
 });
 
-for (const stateVersion of [4, 5] as const)
+for (const stateVersion of [4, 5, 6] as const)
   test(`v${stateVersion} hook enforces bound phase roles, read-only selection/review and private layout`, async () => {
     const repository = await createTestRepository({
       artifactLayout: "private"
@@ -521,6 +521,22 @@ for (const stateVersion of [4, 5] as const)
               workflow: "strict",
               extra: {
                 schemaVersion: stateVersion,
+                ...(stateVersion === 6
+                  ? {
+                      verificationMode: "ordered",
+                      configurationSetup: {
+                        configSchemaVersion: 2,
+                        configurationDigest: "a".repeat(64),
+                        coverage: "configured",
+                        projectTypes: ["custom"],
+                        uncoveredTypes: [],
+                        continuation: null,
+                        resolutions: [],
+                        skip: null,
+                        transactions: []
+                      }
+                    }
+                  : {}),
                 runId,
                 repoRoot: root,
                 artifactBinding: bound,

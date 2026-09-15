@@ -3,6 +3,14 @@ import {
   parseVerificationApplicability
 } from "./verification-evidence.js";
 import { parseBinding } from "./artifact-storage.js";
+import {
+  validateConfigurationStateEnvelope,
+  CONFIGURATION_ACTIONS,
+  configurationText,
+  parseConfigurationPrerequisite,
+  parseConfigurationSetupState
+} from "./configuration-prerequisite.js";
+import { usesVerificationPolicy } from "./verification.js";
 import { createHash, randomUUID } from "node:crypto";
 import { constants, readFileSync, unlinkSync } from "node:fs";
 import {
@@ -264,7 +272,18 @@ function validateDecisionState(state: RunState): RunState {
     ) {
       return decisionStateError();
     }
-    if (pending !== null) {
+    if (pending?.kind === "configuration_prerequisite") {
+      if (
+        state.schemaVersion !== 6 ||
+        state.configurationSetup === undefined ||
+        pending.runId !== state.runId
+      )
+        return decisionStateError();
+      state.pendingHumanDecision = parseConfigurationPrerequisite(
+        pending,
+        state.configurationSetup.configSchemaVersion
+      );
+    } else if (pending !== null) {
       const record = decisionStateRecord(
         pending,
         pending.kind === "escalation"
@@ -288,7 +307,28 @@ function validateDecisionState(state: RunState): RunState {
     const requestIds = new Set<string>();
     const roundIds = new Set<string>();
     const decisionIds = new Set<string>();
+    const configurationProposalIds = new Set<string>();
     for (const decision of state.humanDecisions ?? []) {
+      if (decision.kind === "configuration_prerequisite") {
+        if (
+          state.schemaVersion !== 6 ||
+          state.configurationSetup === undefined ||
+          decision.runId !== state.runId ||
+          configurationProposalIds.has(decision.proposalId)
+        )
+          return decisionStateError();
+        const { action, decidedAt, decidedBy, ...request } = decision;
+        if (!CONFIGURATION_ACTIONS.includes(action))
+          return decisionStateError();
+        configurationText(decidedAt, 24);
+        configurationText(decidedBy);
+        parseConfigurationPrerequisite(
+          request,
+          state.configurationSetup.configSchemaVersion
+        );
+        configurationProposalIds.add(decision.proposalId);
+        continue;
+      }
       const record = decisionStateRecord(
         decision,
         decision.kind === "escalation"
@@ -355,6 +395,11 @@ function validateDecisionState(state: RunState): RunState {
       );
     }
     if (
+      pending?.kind === "configuration_prerequisite" &&
+      configurationProposalIds.has(pending.proposalId)
+    )
+      return decisionStateError();
+    if (
       pending?.kind === "decision_consultation" &&
       (requestIds.has(pending.request.requestId) ||
         roundIds.has(pending.request.roundId) ||
@@ -376,7 +421,7 @@ function validateDecisionState(state: RunState): RunState {
 function normalizeRunState(
   state: RunState | LegacyRunStateV2 | LegacyRunState
 ): RunState {
-  if (![1, 2, 3, 4, 5].includes(state.schemaVersion)) {
+  if (![1, 2, 3, 4, 5, 6].includes(state.schemaVersion)) {
     throw new BanzaiError(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Unsupported persisted run state version."
@@ -388,7 +433,11 @@ function normalizeRunState(
       "Legacy run state cannot acquire private binding semantics."
     );
   }
-  if (state.schemaVersion === 4 || state.schemaVersion === 5) {
+  if (
+    state.schemaVersion === 4 ||
+    state.schemaVersion === 5 ||
+    state.schemaVersion === 6
+  ) {
     if (
       state.artifactBinding === undefined ||
       !/^[0-9a-f]{64}$/.test(state.artifactBinding.sha256)
@@ -416,7 +465,28 @@ function normalizeRunState(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Run state v4 retains binding v1 semantics."
     );
-  if (state.schemaVersion === 5 && state.verificationEvidence !== undefined) {
+  if (state.schemaVersion === 6) {
+    if (
+      state.verificationMode !== "ordered" &&
+      state.verificationMode !== "policy"
+    )
+      return decisionStateError();
+    state.configurationSetup = parseConfigurationSetupState(
+      state.configurationSetup
+    );
+    if (
+      state.artifactBinding?.binding.schemaVersion !==
+        (state.verificationMode === "policy" ? 2 : 1) ||
+      (state.verificationMode === "policy" &&
+        state.configurationSetup.configSchemaVersion !== 3)
+    )
+      return decisionStateError();
+  } else if ("verificationMode" in state || "configurationSetup" in state)
+    return decisionStateError();
+  const policy =
+    state.schemaVersion === 5 ||
+    (state.schemaVersion === 6 && state.verificationMode === "policy");
+  if (policy && state.verificationEvidence !== undefined) {
     parseVerificationDecision(state.verificationEvidence.decision);
     if (state.verificationEvidence.applicability !== null)
       parseVerificationApplicability(state.verificationEvidence.applicability);
@@ -429,7 +499,7 @@ function normalizeRunState(
       "ARTIFACT_RECOVERY_REQUIRED",
       "Run state v5 requires its original verification-enabled binding."
     );
-  if (state.schemaVersion !== 5 && state.verificationEvidence !== undefined)
+  if (!policy && state.verificationEvidence !== undefined)
     throw new BanzaiError(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Legacy state cannot acquire verification applicability."
@@ -437,7 +507,8 @@ function normalizeRunState(
   if (
     state.schemaVersion === 3 ||
     state.schemaVersion === 4 ||
-    state.schemaVersion === 5
+    state.schemaVersion === 5 ||
+    state.schemaVersion === 6
   ) {
     const recovery = state.recovery ?? null;
     if (recovery !== null && recovery.stage === undefined) {
@@ -448,6 +519,7 @@ function normalizeRunState(
             : "source_interrupted"
           : "attempt_started";
     }
+    validateConfigurationStateEnvelope(state);
     return validateDecisionState(state);
   }
   if (state.schemaVersion === 2) {
@@ -879,6 +951,27 @@ export class RunStore {
     );
   }
 
+  async assertLockOwned(): Promise<void> {
+    const expected = heldLocks.get(this.lockPath);
+    const named = await lstat(this.lockPath).catch(() => null);
+    const current =
+      named?.isFile() && !named.isSymbolicLink()
+        ? await readJson<LockFile>(this.lockPath, "runner lock").catch(
+            () => null
+          )
+        : null;
+    if (
+      expected === undefined ||
+      current?.token !== expected ||
+      current.pid !== process.pid
+    ) {
+      throw new BanzaiError(
+        "RUNNER_LOCKED",
+        "Configuration changes require the current Banzai session's repository ownership."
+      );
+    }
+  }
+
   /** Called only while setup owns the ordinary runner lock; never repairs state. */
   async assertSetupEligible(): Promise<void> {
     const invalid = () =>
@@ -957,8 +1050,9 @@ export class RunStore {
     await mkdir(path.join(this.runDirectory(state.runId), "attempts"));
     await mkdir(this.verificationAttemptsDirectory(state.runId));
     await atomicWriteJson(this.verificationLedgerPath(state.runId), {
-      schemaVersion:
-        state.schemaVersion === 5 ? 2 : VERIFICATION_LEDGER_SCHEMA_VERSION
+      schemaVersion: usesVerificationPolicy(state)
+        ? 2
+        : VERIFICATION_LEDGER_SCHEMA_VERSION
     });
     await this.withStateMutation(state.runId, async () => {
       await atomicWriteJson(this.statePath(state.runId), state, false);
@@ -1092,7 +1186,7 @@ export class RunStore {
       if (
         raw.runId !== runId ||
         !CANCELLATION_STATUSES.includes(raw.status as RunState["status"]) ||
-        ![1, 2, 3, 4, 5].includes(raw.schemaVersion as number)
+        ![1, 2, 3, 4, 5, 6].includes(raw.schemaVersion as number)
       )
         throw new Error();
     } catch {
@@ -1141,10 +1235,13 @@ export class RunStore {
   ): Promise<RunEvent> {
     return await this.withStateMutation(runId, async () => {
       const { state } = await this.readMutationState(runId);
-      if (oncePerReviewAttempt) {
+      if (oncePerReviewAttempt || type === "config.verification.applied") {
+        const identityKey =
+          type === "config.verification.applied" ? "operationId" : "attemptId";
         if (
-          type !== "review.completed" ||
-          typeof details.attemptId !== "string"
+          (type !== "review.completed" &&
+            type !== "config.verification.applied") ||
+          typeof details[identityKey] !== "string"
         )
           throw new BanzaiError(
             "INVALID_REVIEW_EVENT",
@@ -1164,7 +1261,7 @@ export class RunStore {
           .filter(
             (event) =>
               event.type === type &&
-              event.details.attemptId === details.attemptId
+              event.details[identityKey] === details[identityKey]
           );
         if (
           matches.length > 1 ||

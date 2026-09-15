@@ -7,12 +7,28 @@ after configuring them.
 
 ## How to use these snippets
 
-Each JSON block below contains only the `verification` section. In an existing
-**schema-version-2** configuration, replace that section or merge the selected
-profiles into its `profiles` array. Preserve the other fields, especially
-`models`, `contractVersion`, and `schemaVersion`; a snippet is not a complete
-configuration file. Existing schema-version-1 configurations need the
-[documented migration](orchestrator.md#project-verification-readiness) first.
+For an empty repository, `banzai init` can enable bootstrap only when no
+substantive profiles exist. Profiles for currently undetected stacks also prevent
+bootstrap. The wizard names these profiles and leaves configuration unchanged
+instead of offering an ineffective flag. To keep the profiles, restore their
+project files and checks, or configure substantive checks for `custom`. For a
+bootstrap-only start, use the displayed `banzai verify remove <id>` commands,
+review and confirm each removal, keep the remaining hygiene profile, then rerun
+`banzai init` and confirm bootstrap. The final profile cannot be removed.
+
+Use `banzai verify add <type>` for guided setup, `banzai verify edit <id>` for
+repair, and `banzai verify remove <id>` for a confirmed removal. The editor asks
+for an executable and individual arguments, shows a preview, and preserves
+unselected configuration. Node suggestions use existing scripts only; no wizard
+executes project commands. Run `banzai verify check` when you explicitly want to
+execute all configured checks and inspect each result.
+
+The JSON blocks below document the schema-version-2 representation and are
+reference examples, not instructions to replace your whole config. Schemas 2
+and 3 support optional `verification.bootstrap: true`; markerless bootstrap needs
+explicit confirmation during init. Schema 1 remains readable and requires the
+[documented legacy migration](orchestrator.md#project-verification-readiness)
+before guided configuration.
 
 - Keep profile IDs unique and use the documented `projectType` values.
 - Commands execute from the repository root in profile and command order.
@@ -24,7 +40,7 @@ configuration file. Existing schema-version-1 configurations need the
 - A `repository` profile with `git diff --check` supplies whitespace hygiene.
   It does not satisfy application verification, even if moved to another
   profile or given a different name.
-- Run the commands yourself, then run `banzai doctor`. Doctor checks declared
+- Explicitly run `banzai verify check`, then run `banzai doctor`. Doctor checks declared
   coverage and executable availability; it neither runs tests nor evaluates
   their quality.
 
@@ -260,3 +276,18 @@ supply arbitrary commands or output paths. Inspect/decide do not write evidence.
 A reuse disposition preserves its original attempt/round/digest; it creates no
 new process, exit code, log or duration. Unsupported policy/binding/helper paths
 retain the existing applicable final verification workflow.
+
+## Command identities and repair
+
+Schema-3 command IDs are assigned by the runner. Changes to `name`, executable,
+arguments, `timeoutMs`, or evidence options change command identity; unchanged
+commands and pure reordering preserve IDs. The preview shows replacement IDs.
+Evidence for an old ID cannot satisfy its replacement. A removed check named in
+an approved obligation still requires the existing reapproval route; editing a
+profile never rewrites that obligation or the verification policy.
+
+Automatic proposals only add profiles. If an existing command names a removed
+script, restore that script or explicitly edit/remove the old profile. Accepting
+another profile cannot bypass the broken prerequisite. Skip remains subject to
+binding obligations. All config edits require released repository ownership;
+answer in the owning session, or exit it before repair and `banzai resume`.

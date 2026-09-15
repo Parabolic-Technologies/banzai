@@ -4,18 +4,21 @@ import { BanzaiError } from "./errors.js";
 import type {
   AgentControlAnswerV1,
   AgentControlAnswerV2,
-  AgentControlCapabilitiesV3,
+  AgentControlAnswerV3,
+  AgentControlCapabilitiesV4,
   AgentControlNextAction,
-  AgentControlPendingGateV2,
+  AgentControlPendingGateV3,
   AgentControlRecoveryV1,
   AgentControlRequestV1,
-  AgentControlStatusV2,
+  AgentControlStatusV3,
   DecisionConsultationAnswer,
   DecisionConsultationCard,
   DecisionConsultationRequest,
   RunState
 } from "./types.js";
 import {
+  CONFIGURATION_ANSWER_SCHEMA,
+  CONFIGURATION_ANSWER_SCHEMA_VERSION,
   AGENT_ANSWER_SCHEMA,
   AGENT_ANSWER_SCHEMA_VERSION,
   AGENT_CAPABILITIES_SCHEMA,
@@ -33,6 +36,15 @@ import {
   LEGACY_AGENT_ANSWER_SCHEMA,
   LEGACY_AGENT_CONTROL_SCHEMA_VERSION
 } from "./types.js";
+import {
+  CONFIGURATION_ACTIONS,
+  configurationObject,
+  configurationText,
+  configurationUuid,
+  configurationId,
+  parseConfigurationCommandInput,
+  parseConfigurationPrerequisite
+} from "./configuration-prerequisite.js";
 import { parseDecisionConsultationAnswers } from "./validation.js";
 import {
   humanDecisionQuestions,
@@ -101,6 +113,31 @@ function parseDocument(input: Uint8Array): Record<string, unknown> {
   } catch {
     throw controlInputError("Agent control input must be valid JSON.");
   }
+  if (record(value).schema === CONFIGURATION_ANSWER_SCHEMA) {
+    const frames: { object: boolean; key: boolean; seen: Set<string> }[] = [];
+    const tokens =
+      source.match(/"(?:\\.|[^"\\])*"|[{}[\]:,]|[^\s{}[\]:,]+/gu) ?? [];
+    for (const token of tokens) {
+      const frame = frames.at(-1);
+      if (token === "{" || token === "[")
+        frames.push({
+          object: token === "{",
+          key: token === "{",
+          seen: new Set()
+        });
+      else if (token === "}" || token === "]") frames.pop();
+      else if (token === "," && frame?.object) frame.key = true;
+      else if (token.startsWith('"') && frame?.object && frame.key) {
+        const key = JSON.parse(token) as string;
+        if (frame.seen.has(key))
+          throw controlInputError(
+            "Configuration answers cannot repeat JSON fields."
+          );
+        frame.seen.add(key);
+        frame.key = false;
+      }
+    }
+  }
   return record(value);
 }
 
@@ -141,8 +178,48 @@ export function decodeAgentControlRequest(
 
 export function decodeAgentControlAnswer(
   input: Uint8Array
-): AgentControlAnswerV1 | AgentControlAnswerV2 {
+): AgentControlAnswerV1 | AgentControlAnswerV2 | AgentControlAnswerV3 {
   const value = parseDocument(input);
+  if (value.schema === CONFIGURATION_ANSWER_SCHEMA) {
+    const item = configurationObject(value, [
+      "schema",
+      "schemaVersion",
+      "kind",
+      "runId",
+      "decisionId",
+      "proposalId",
+      "action",
+      ...(value.action === "edit" ? ["profile"] : [])
+    ]);
+    if (
+      item.schemaVersion !== CONFIGURATION_ANSWER_SCHEMA_VERSION ||
+      item.kind !== "configuration_prerequisite" ||
+      !CONFIGURATION_ACTIONS.some((action) => action === item.action)
+    )
+      throw controlInputError("Unsupported configuration answer.");
+    let profile: AgentControlAnswerV3["profile"];
+    if (item.action === "edit") {
+      const draft = configurationObject(item.profile, ["id", "commands"]);
+      if (!Array.isArray(draft.commands) || draft.commands.length > 200)
+        throw controlInputError(
+          "An edited profile requires at most 200 commands."
+        );
+      profile = {
+        id: configurationId(draft.id),
+        commands: draft.commands.map(parseConfigurationCommandInput)
+      };
+    }
+    return {
+      schema: CONFIGURATION_ANSWER_SCHEMA,
+      schemaVersion: CONFIGURATION_ANSWER_SCHEMA_VERSION,
+      kind: "configuration_prerequisite",
+      runId: configurationText(item.runId),
+      decisionId: configurationUuid(item.decisionId),
+      proposalId: configurationUuid(item.proposalId),
+      action: item.action as AgentControlAnswerV3["action"],
+      ...(profile ? { profile } : {})
+    };
+  }
   if (
     value.schema === LEGACY_AGENT_ANSWER_SCHEMA &&
     value.schemaVersion === LEGACY_AGENT_CONTROL_SCHEMA_VERSION
@@ -312,7 +389,7 @@ export function decodeAgentControlRecovery(
   };
 }
 
-export function agentControlCapabilities(): AgentControlCapabilitiesV3 {
+export function agentControlCapabilities(): AgentControlCapabilitiesV4 {
   return {
     schema: AGENT_CAPABILITIES_SCHEMA,
     schemaVersion: AGENT_CAPABILITIES_SCHEMA_VERSION,
@@ -321,9 +398,15 @@ export function agentControlCapabilities(): AgentControlCapabilitiesV3 {
     umbrellaContractVersion: CONTRACT_VERSION,
     artifactStorage: {
       declarationSchemas: ["banzai-artifact-layout/v1"],
-      bindingSchemas: ["banzai-work-binding/v1"],
+      bindingSchemas: ["banzai-work-binding/v1", "banzai-work-binding/v2"],
       privateWorkspaceSnapshotVersion: 2,
       layouts: ["legacy", "private"]
+    },
+    configurationPrerequisite: {
+      kind: "configuration_prerequisite",
+      actions: CONFIGURATION_ACTIONS,
+      statusSchema: AGENT_STATUS_SCHEMA,
+      answerSchema: CONFIGURATION_ANSWER_SCHEMA
     },
     operations: {
       status: { supported: true, ttyRequired: false, inputSchemas: [] },
@@ -335,9 +418,18 @@ export function agentControlCapabilities(): AgentControlCapabilitiesV3 {
       answer: {
         supported: true,
         ttyRequired: false,
-        inputSchemas: [AGENT_ANSWER_SCHEMA, LEGACY_AGENT_ANSWER_SCHEMA]
+        inputSchemas: [
+          CONFIGURATION_ANSWER_SCHEMA,
+          AGENT_ANSWER_SCHEMA,
+          LEGACY_AGENT_ANSWER_SCHEMA
+        ]
       },
       approveAdr: { supported: true, ttyRequired: false, inputSchemas: [] },
+      approveVerification: {
+        supported: true,
+        ttyRequired: false,
+        inputSchemas: [CONFIGURATION_ANSWER_SCHEMA]
+      },
       approvePlan: { supported: true, ttyRequired: false, inputSchemas: [] },
       triage: { supported: true, ttyRequired: false, inputSchemas: [] },
       resume: { supported: true, ttyRequired: false, inputSchemas: [] },
@@ -598,6 +690,8 @@ function semanticNextAction(status: WorkflowStatus): AgentControlNextAction {
       if (pending === undefined || pending === null) {
         throw statusError("Human-decision state has no persisted request.");
       }
+      if (pending.kind === "configuration_prerequisite")
+        return "answer_configuration_prerequisite";
       return pending.kind === "decision_consultation"
         ? "answer_consultation"
         : "answer_escalation";
@@ -643,7 +737,7 @@ function approvalArtifacts(state: RunState): string[] {
   );
 }
 
-function pendingGate(status: WorkflowStatus): AgentControlPendingGateV2 | null {
+function pendingGate(status: WorkflowStatus): AgentControlPendingGateV3 | null {
   const { state } = status;
   if (state.status === "needs_adr_approval") {
     const artifacts = state.planArtifacts?.adrs ?? [];
@@ -674,6 +768,34 @@ function pendingGate(status: WorkflowStatus): AgentControlPendingGateV2 | null {
     const decision = state.pendingHumanDecision;
     if (decision === undefined || decision === null) {
       throw statusError("Human-decision state has no persisted request.");
+    }
+    if (decision.kind === "configuration_prerequisite") {
+      const request = parseConfigurationPrerequisite(
+        decision,
+        state.configurationSetup?.configSchemaVersion ?? 2
+      );
+      return {
+        kind: request.kind,
+        runId: request.runId,
+        decisionId: request.decisionId,
+        proposalId: request.proposalId,
+        requestedAt: request.requestedAt,
+        reason: request.reason,
+        proposal: request.proposal,
+        options: request.options,
+        checkpoint: {
+          attemptKind: request.continuation.attemptKind,
+          verificationRound: request.continuation.verificationRound.ordinal,
+          eligible: state.activeAttempt === null && state.activeProcess === null
+        },
+        repairCommands: status.configurationPrerequisite?.repairCommands ?? [
+          ...(request.reason === "missing_profile"
+            ? [`banzai verify add ${request.proposal.projectType}`]
+            : []),
+          "banzai verify list",
+          "banzai resume"
+        ]
+      };
     }
     if (decision.kind === "decision_consultation") {
       return {
@@ -746,7 +868,7 @@ function pendingGate(status: WorkflowStatus): AgentControlPendingGateV2 | null {
 
 export function projectAgentControlStatus(
   status: WorkflowStatus
-): AgentControlStatusV2 {
+): AgentControlStatusV3 {
   const { state } = status;
   const recoveryWorkspace = status.recovery.workspace;
   if (
@@ -914,7 +1036,7 @@ export function projectAgentControlStatus(
   };
 }
 
-export function emptyAgentControlStatus(): AgentControlStatusV2 {
+export function emptyAgentControlStatus(): AgentControlStatusV3 {
   return {
     schema: AGENT_STATUS_SCHEMA,
     schemaVersion: AGENT_STATUS_SCHEMA_VERSION,
@@ -923,7 +1045,7 @@ export function emptyAgentControlStatus(): AgentControlStatusV2 {
 }
 
 export function renderAgentControlJson(
-  value: AgentControlCapabilitiesV3 | AgentControlStatusV2
+  value: AgentControlCapabilitiesV4 | AgentControlStatusV3
 ): string {
   return `${JSON.stringify(value, null, 2)}\n`;
 }

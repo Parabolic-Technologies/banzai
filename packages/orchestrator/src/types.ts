@@ -1,3 +1,4 @@
+import type { ReviewConfigurationSetup } from "./configuration-review.js";
 import type {
   VerificationPolicy,
   ReviewVerificationEvidence,
@@ -6,6 +7,12 @@ import type {
   VerificationApplicability
 } from "./verification-evidence.js";
 import type { ArtifactBoundWork } from "./artifact-storage.js";
+import type {
+  ConfigurationAction,
+  ConfigurationPrerequisiteRequest,
+  ConfigurationDecisionRecord,
+  ConfigurationSetupState
+} from "./configuration-prerequisite.js";
 import type {
   WorkspaceEntry,
   WorkspaceSnapshot,
@@ -47,18 +54,20 @@ export const TERMINAL_CHECKPOINT_SCHEMA_VERSION = 1 as const;
 export const RECOVERY_AUTHORIZATION_SCHEMA =
   "banzai-recovery-authorization/v1" as const;
 export const RECOVERY_AUTHORIZATION_SCHEMA_VERSION = 1 as const;
-export const AGENT_CONTROL_CONTRACT_VERSION = "3.0.0" as const;
-export const AGENT_CAPABILITIES_SCHEMA_VERSION = 3 as const;
-export const AGENT_STATUS_SCHEMA_VERSION = 2 as const;
+export const AGENT_CONTROL_CONTRACT_VERSION = "4.0.0" as const;
+export const AGENT_CAPABILITIES_SCHEMA_VERSION = 4 as const;
+export const AGENT_STATUS_SCHEMA_VERSION = 3 as const;
 export const AGENT_ANSWER_SCHEMA_VERSION = 2 as const;
 export const AGENT_REQUEST_SCHEMA_VERSION = 1 as const;
 export const AGENT_RECOVERY_SCHEMA_VERSION = 1 as const;
 export const LEGACY_AGENT_CONTROL_SCHEMA_VERSION = 1 as const;
 export const AGENT_CAPABILITIES_SCHEMA =
-  "banzai-agent-capabilities/v3" as const;
-export const AGENT_STATUS_SCHEMA = "banzai-agent-status/v2" as const;
+  "banzai-agent-capabilities/v4" as const;
+export const AGENT_STATUS_SCHEMA = "banzai-agent-status/v3" as const;
 export const AGENT_REQUEST_SCHEMA = "banzai-agent-request/v1" as const;
 export const AGENT_ANSWER_SCHEMA = "banzai-agent-answer/v2" as const;
+export const CONFIGURATION_ANSWER_SCHEMA = "banzai-agent-answer/v3" as const;
+export const CONFIGURATION_ANSWER_SCHEMA_VERSION = 3 as const;
 export const AGENT_RECOVERY_SCHEMA = "banzai-agent-recovery/v1" as const;
 export const LEGACY_AGENT_CAPABILITIES_SCHEMA =
   "banzai-agent-capabilities/v1" as const;
@@ -71,6 +80,7 @@ export type AgentControlOperationName =
   | "answer"
   | "approveAdr"
   | "approvePlan"
+  | "approveVerification"
   | "triage"
   | "resume"
   | "retry"
@@ -83,12 +93,13 @@ export interface AgentControlOperationV2 {
   inputSchemas: (
     | typeof AGENT_REQUEST_SCHEMA
     | typeof AGENT_ANSWER_SCHEMA
+    | typeof CONFIGURATION_ANSWER_SCHEMA
     | typeof LEGACY_AGENT_ANSWER_SCHEMA
     | typeof AGENT_RECOVERY_SCHEMA
   )[];
 }
 
-export interface AgentControlCapabilitiesV3 {
+export interface AgentControlCapabilitiesV4 {
   schema: typeof AGENT_CAPABILITIES_SCHEMA;
   schemaVersion: typeof AGENT_CAPABILITIES_SCHEMA_VERSION;
   controlContractVersion: typeof AGENT_CONTROL_CONTRACT_VERSION;
@@ -96,9 +107,15 @@ export interface AgentControlCapabilitiesV3 {
   umbrellaContractVersion: typeof CONTRACT_VERSION;
   artifactStorage: {
     declarationSchemas: ["banzai-artifact-layout/v1"];
-    bindingSchemas: ["banzai-work-binding/v1"];
+    bindingSchemas: ["banzai-work-binding/v1", "banzai-work-binding/v2"];
     privateWorkspaceSnapshotVersion: 2;
     layouts: readonly ["legacy", "private"];
+  };
+  configurationPrerequisite: {
+    kind: "configuration_prerequisite";
+    actions: readonly ["accept", "edit", "skip", "cancel"];
+    statusSchema: typeof AGENT_STATUS_SCHEMA;
+    answerSchema: typeof CONFIGURATION_ANSWER_SCHEMA;
   };
   operations: Record<AgentControlOperationName, AgentControlOperationV2>;
 }
@@ -124,6 +141,17 @@ export interface AgentControlAnswerV2 {
   answers: DecisionConsultationAnswer[];
 }
 
+export interface AgentControlAnswerV3 {
+  schema: typeof CONFIGURATION_ANSWER_SCHEMA;
+  schemaVersion: typeof CONFIGURATION_ANSWER_SCHEMA_VERSION;
+  kind: "configuration_prerequisite";
+  runId: string;
+  decisionId: string;
+  proposalId: string;
+  action: ConfigurationAction;
+  profile?: { id: string; commands: VerificationCommand[] };
+}
+
 export interface AgentControlRecoveryV1 {
   schema: typeof AGENT_RECOVERY_SCHEMA;
   schemaVersion: typeof AGENT_RECOVERY_SCHEMA_VERSION;
@@ -146,7 +174,8 @@ export type AgentControlNextActionV1 =
 export type AgentControlNextAction =
   | Exclude<AgentControlNextActionV1, "answer">
   | "answer_escalation"
-  | "answer_consultation";
+  | "answer_consultation"
+  | "answer_configuration_prerequisite";
 
 export type AgentControlPendingGateV1 =
   | {
@@ -274,12 +303,31 @@ export interface AgentControlRunV1 {
   } | null;
 }
 
-export interface AgentControlRunV2 extends Omit<
+export type AgentControlPendingGateV3 =
+  | AgentControlPendingGateV2
+  | {
+      kind: "configuration_prerequisite";
+      runId: string;
+      decisionId: string;
+      proposalId: string;
+      requestedAt: string;
+      reason: ConfigurationPrerequisiteRequest["reason"];
+      proposal: ConfigurationPrerequisiteRequest["proposal"];
+      options: ConfigurationPrerequisiteRequest["options"];
+      checkpoint: {
+        attemptKind: "implementation" | "fix";
+        verificationRound: number;
+        eligible: boolean;
+      };
+      repairCommands: string[];
+    };
+
+export interface AgentControlRunV3 extends Omit<
   AgentControlRunV1,
   "nextAction" | "pendingGate"
 > {
   nextAction: AgentControlNextAction;
-  pendingGate: AgentControlPendingGateV2 | null;
+  pendingGate: AgentControlPendingGateV3 | null;
 }
 
 export interface AgentControlStatusV1 {
@@ -288,10 +336,10 @@ export interface AgentControlStatusV1 {
   activeRun: AgentControlRunV1 | null;
 }
 
-export interface AgentControlStatusV2 {
+export interface AgentControlStatusV3 {
   schema: typeof AGENT_STATUS_SCHEMA;
   schemaVersion: typeof AGENT_STATUS_SCHEMA_VERSION;
-  activeRun: AgentControlRunV2 | null;
+  activeRun: AgentControlRunV3 | null;
 }
 
 export type Phase = "plan" | "implementation" | "fix";
@@ -546,8 +594,11 @@ export interface ReviewSnapshot {
   schema:
     | "banzai-review-snapshot/v1"
     | "banzai-review-snapshot/v2"
-    | "banzai-review-snapshot/v3";
-  schemaVersion: 1 | 2 | 3;
+    | "banzai-review-snapshot/v3"
+    | "banzai-review-snapshot/v4";
+  schemaVersion: 1 | 2 | 3 | 4;
+  verificationMode?: "ordered" | "policy";
+  configurationSetup?: ReviewConfigurationSetup;
   artifactBinding?: ArtifactBoundWork;
   runId: string;
   attemptId: string;
@@ -945,6 +996,7 @@ export interface OrchestratorConfig {
   verification: {
     profiles: VerificationProfile[];
     policy?: VerificationPolicy;
+    bootstrap?: boolean;
   };
   claudeEnvironment: ClaudeEnvironmentSettings;
   context: ContextPolicy;
@@ -1018,10 +1070,14 @@ export interface ConsultationDecisionRecord extends ConsultationDecisionRequest 
 }
 
 export type HumanDecisionRequest =
-  EscalationDecisionRequest | ConsultationDecisionRequest;
+  | EscalationDecisionRequest
+  | ConsultationDecisionRequest
+  | ConfigurationPrerequisiteRequest;
 
 export type HumanDecisionRecord =
-  EscalationDecisionRecord | ConsultationDecisionRecord;
+  | EscalationDecisionRecord
+  | ConsultationDecisionRecord
+  | ConfigurationDecisionRecord;
 
 export interface AttemptReference {
   id: string;
@@ -1221,7 +1277,9 @@ export interface CancellationAnchor {
 }
 
 export interface RunState {
-  schemaVersion: 3 | 4 | 5;
+  schemaVersion: 3 | 4 | 5 | 6;
+  verificationMode?: "ordered" | "policy";
+  configurationSetup?: ConfigurationSetupState;
   artifactBinding?: ArtifactBoundWork;
   contractVersion: typeof CONTRACT_VERSION;
   runId: string;
@@ -1523,7 +1581,8 @@ export interface EvaluationStateMetricSource {
 }
 
 export interface EvaluationStateSource {
-  schemaVersion: 1 | 2 | 3 | 4 | 5;
+  verificationMode?: "ordered" | "policy";
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6;
   contractVersion: EvidenceValue<string>;
   status: EvidenceValue<RunStatus>;
   createdAt: EvidenceValue<string>;
@@ -1990,7 +2049,12 @@ export type InstructionPhase =
 
 /** Ephemeral comparison evidence; never added to persisted or exported contracts. */
 export interface InstructionParity {
-  state: "verified" | "mismatch" | "unverifiable" | "bounded_failure";
+  state:
+    | "verified"
+    | "mismatch"
+    | "unverifiable"
+    | "bounded_failure"
+    | "not_applicable";
   resourceIds: string[];
   mismatched: string[];
   unavailable: string[];

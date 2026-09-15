@@ -1,3 +1,4 @@
+import { validateConfigurationStateEnvelope } from "./configuration-prerequisite.js";
 import { constants } from "node:fs";
 import { access, lstat, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
@@ -24,7 +25,8 @@ import {
 import { assertContractParity } from "./contracts.js";
 import {
   combineInstructionParity,
-  inspectInstructionParity,
+  inspectRoleInstructionParity,
+  instructionParityFixes,
   instructionParityDiagnostic,
   instructionPhasesForRole
 } from "./phase-instructions.js";
@@ -39,9 +41,10 @@ import { inspectBoundWork } from "./artifact-storage.js";
 import type { ArtifactBoundWork } from "./artifact-storage.js";
 import { parseConfig } from "./validation.js";
 import {
-  assessVerificationProfiles,
-  detectProjectTypes,
-  flattenVerificationCommands
+  assessVerificationReadiness,
+  inspectVerificationProject,
+  flattenVerificationCommands,
+  type VerificationProjectInspection
 } from "./verification.js";
 
 export type DoctorCheckCategory =
@@ -59,6 +62,28 @@ export interface DoctorCheck {
   category: DoctorCheckCategory;
   status: DoctorCheckStatus;
   message: string;
+  fixes: DoctorFix[];
+  roles: DoctorInstructionRole[];
+}
+
+export interface DoctorFix {
+  action: string;
+  documentation: string;
+}
+
+export interface DoctorInstructionRole {
+  role: "planner" | "implementer" | "reviewer";
+  vendor: "codex" | "claude";
+  state:
+    | "not_applicable"
+    | "verified"
+    | "mismatch"
+    | "bounded_failure"
+    | "unverifiable";
+  resourceIds: string[];
+  mismatched: string[];
+  unavailable: string[];
+  fixes: DoctorFix[];
 }
 
 export interface DoctorSummary {
@@ -69,8 +94,8 @@ export interface DoctorSummary {
 }
 
 export interface DoctorReport {
-  schema: "banzai-doctor/v3";
-  schemaVersion: 3;
+  schema: "banzai-doctor/v4";
+  schemaVersion: 4;
   ready: boolean;
   projectTypes: VerificationProjectType[];
   summary: DoctorSummary;
@@ -171,9 +196,11 @@ function check(
   id: string,
   category: DoctorCheckCategory,
   status: DoctorCheckStatus,
-  message: string
+  message: string,
+  fixes: DoctorFix[] = [],
+  roles: DoctorInstructionRole[] = []
 ): DoctorCheck {
-  return { id, category, status, message };
+  return { id, category, status, message, fixes, roles };
 }
 
 function summary(checks: readonly DoctorCheck[]): DoctorSummary {
@@ -286,7 +313,7 @@ function configVersionCheck(document: unknown): DoctorCheck {
     "config.version",
     "config",
     "pass",
-    "Configuration uses schema version 2 and the supported contract version."
+    `Configuration uses schema version ${document.schemaVersion} and the supported contract version.`
   );
 }
 
@@ -345,8 +372,8 @@ async function claudeInstructionsCheck(
     return check(
       "claude.instructions",
       "config",
-      "warning",
-      "Instruction resource parity is unverifiable without a valid configuration."
+      "skipped",
+      "Instruction comparison is skipped without a valid configuration."
     );
   let directory: string | null;
   try {
@@ -362,31 +389,47 @@ async function claudeInstructionsCheck(
     return check(
       "claude.instructions",
       "config",
-      "warning",
-      "Instruction resource parity is unverifiable because the invocation environment cannot be verified."
+      "skipped",
+      "Instruction comparison is skipped because structural Claude scope validation failed."
     );
   }
-  const results = await Promise.all(
-    MODEL_ROLES.map((role) =>
-      inspectInstructionParity(
-        (vendorFor(config.models[role].executable) ?? FALLBACK_VENDOR[role]) ===
-          "claude"
-          ? directory
-          : null,
+  const roles = await Promise.all(
+    MODEL_ROLES.map(async (role): Promise<DoctorInstructionRole> => {
+      const vendor =
+        vendorFor(config.models[role].executable) ?? FALLBACK_VENDOR[role];
+      const parity = await inspectRoleInstructionParity(
+        vendor,
+        directory,
         instructionPhasesForRole(role, null) ?? []
-      )
-    )
+      );
+      return {
+        role,
+        vendor,
+        ...parity,
+        fixes: instructionParityFixes(
+          parity,
+          config.claudeEnvironment.mode === "ambient"
+        )
+      };
+    })
   );
-  const parity = combineInstructionParity(results);
+  const parity = combineInstructionParity(roles);
+  const fixes = [
+    ...new Map(
+      roles.flatMap((role) => role.fixes).map((fix) => [fix.action, fix])
+    ).values()
+  ];
   return check(
     "claude.instructions",
     "config",
-    parity.state === "verified"
+    parity.state === "verified" || parity.state === "not_applicable"
       ? "pass"
       : parity.state === "mismatch"
         ? "fail"
         : "warning",
-    instructionParityDiagnostic(parity)
+    instructionParityDiagnostic(parity),
+    fixes,
+    roles
   );
 }
 
@@ -489,7 +532,16 @@ async function configuredExecutableCheck(
       id,
       "executables",
       "fail",
-      `${missing} of ${uniqueCommands.length} configured ${subject} executables are unavailable.`
+      `${missing} of ${uniqueCommands.length} configured ${subject} executables are unavailable.`,
+      id === "executables.verification"
+        ? [
+            {
+              action:
+                "Run banzai verify list to identify the configured executables; restore their installation or PATH, or use banzai verify edit <id> to select an available executable.",
+              documentation: "documentation/verification-examples.md"
+            }
+          ]
+        : []
     );
   }
   return check(
@@ -583,7 +635,7 @@ async function activeRunCheck(repoRoot: string): Promise<DoctorCheck> {
   }
   if (
     !isRecord(state) ||
-    ![1, 2, 3, 4, 5].includes(state.schemaVersion as number) ||
+    ![1, 2, 3, 4, 5, 6].includes(state.schemaVersion as number) ||
     typeof state.runId !== "string" ||
     typeof state.repoRoot !== "string" ||
     typeof state.status !== "string" ||
@@ -596,8 +648,13 @@ async function activeRunCheck(repoRoot: string): Promise<DoctorCheck> {
       "The referenced run state uses an unsupported structure."
     );
   }
-  if (state.schemaVersion === 4 || state.schemaVersion === 5) {
+  if (
+    state.schemaVersion === 4 ||
+    state.schemaVersion === 5 ||
+    state.schemaVersion === 6
+  ) {
     try {
+      validateConfigurationStateEnvelope(state);
       await inspectBoundWork(
         repoRoot,
         state.artifactBinding as ArtifactBoundWork
@@ -858,10 +915,10 @@ export async function inspectDoctor(
   checks.push(await claudePermissionsCheck(repoRoot, config, dependencies));
 
   let projectTypes: VerificationProjectType[] = [];
-  let projectTypesReadable = false;
+  let inspection: VerificationProjectInspection | null = null;
   try {
-    projectTypes = await detectProjectTypes(repoRoot);
-    projectTypesReadable = true;
+    inspection = await inspectVerificationProject(repoRoot);
+    projectTypes = inspection.projectTypes;
     checks.push(
       check(
         "project.types",
@@ -876,12 +933,19 @@ export async function inspectDoctor(
         "project.types",
         "verification",
         "fail",
-        "Project marker evidence is unreadable."
+        "Project marker evidence is unreadable or invalid.",
+        [
+          {
+            action:
+              "Restore readable, valid root project metadata, then run banzai doctor.",
+            documentation: "documentation/verification-examples.md"
+          }
+        ]
       )
     );
   }
 
-  if (!projectTypesReadable) {
+  if (inspection === null) {
     checks.push(
       check(
         "verification.profiles",
@@ -912,14 +976,26 @@ export async function inspectDoctor(
       )
     );
   } else {
-    const assessment = assessVerificationProfiles(config, projectTypes);
+    const assessment = assessVerificationReadiness(config, inspection);
+    const coverageFixes = assessment.uncoveredTypes.map((projectType) => ({
+      action: `banzai verify add ${projectType}`,
+      documentation: "documentation/verification-examples.md"
+    }));
     if (!assessment.explicit) {
       checks.push(
         check(
           "verification.profiles",
           "verification",
           "fail",
-          "Legacy configuration has no explicit project-type profiles."
+          "Legacy configuration has no explicit project-type profiles.",
+          [
+            {
+              action:
+                "Follow the documented schema-1 profile migration, then run banzai doctor.",
+              documentation:
+                "documentation/orchestrator.md#project-verification-readiness"
+            }
+          ]
         ),
         check(
           "verification.substantive",
@@ -934,7 +1010,16 @@ export async function inspectDoctor(
           !assessment.missingProjectTypes.includes(projectType) &&
           !assessment.hygieneOnlyProjectTypes.includes(projectType)
       );
-      if (
+      if (assessment.bootstrapEffective) {
+        checks.push(
+          check(
+            "verification.profiles",
+            "verification",
+            "pass",
+            "Bootstrap mode, coverage deferred."
+          )
+        );
+      } else if (
         assessment.missingProjectTypes.length > 0 ||
         assessment.hygieneOnlyProjectTypes.length > 0
       ) {
@@ -943,7 +1028,8 @@ export async function inspectDoctor(
             "verification.profiles",
             "verification",
             "fail",
-            `Missing profiles for: ${assessment.missingProjectTypes.join(", ") || "none"}; hygiene-only detected types: ${assessment.hygieneOnlyProjectTypes.join(", ") || "none"}; covered: ${coveredTypes.join(", ") || "none"}; unused profiles: ${assessment.extraProfileIds.join(", ") || "none"}.`
+            `Missing profiles for: ${assessment.missingProjectTypes.join(", ") || "none"}; hygiene-only detected types: ${assessment.hygieneOnlyProjectTypes.join(", ") || "none"}; covered: ${coveredTypes.join(", ") || "none"}; unused profiles: ${assessment.extraProfileIds.join(", ") || "none"}.`,
+            coverageFixes
           )
         );
       } else if (assessment.extraProfileIds.length > 0) {
@@ -968,26 +1054,42 @@ export async function inspectDoctor(
         );
       }
       checks.push(
-        assessment.substantiveCommandCount > 0
+        assessment.bootstrapEffective
           ? check(
               "verification.substantive",
               "verification",
               "pass",
-              `${assessment.substantiveCommandCount} substantive verification ${assessment.substantiveCommandCount === 1 ? "command is" : "commands are"} configured for detected project types.`
+              "Bootstrap mode, coverage deferred. 0 substantive verification commands are configured."
             )
-          : assessment.totalSubstantiveCommandCount > 0
+          : assessment.bootstrapStale
             ? check(
                 "verification.substantive",
                 "verification",
-                "fail",
-                `No substantive verification command is configured for detected project types; ${assessment.totalSubstantiveCommandCount} substantive ${assessment.totalSubstantiveCommandCount === 1 ? "command is" : "commands are"} configured for unused project profiles.`
+                "warning",
+                `Bootstrap flag is stale. ${assessment.substantiveCommandCount} substantive verification commands are configured for detected project types; ${assessment.totalSubstantiveCommandCount} are configured in total.`
               )
-            : check(
-                "verification.substantive",
-                "verification",
-                "fail",
-                "No substantive verification command is configured for detected project types or unused project profiles."
-              )
+            : assessment.substantiveCommandCount > 0
+              ? check(
+                  "verification.substantive",
+                  "verification",
+                  "pass",
+                  `${assessment.substantiveCommandCount} substantive verification ${assessment.substantiveCommandCount === 1 ? "command is" : "commands are"} configured for detected project types.`
+                )
+              : assessment.totalSubstantiveCommandCount > 0
+                ? check(
+                    "verification.substantive",
+                    "verification",
+                    "fail",
+                    `No substantive verification command is configured for detected project types; ${assessment.totalSubstantiveCommandCount} substantive ${assessment.totalSubstantiveCommandCount === 1 ? "command is" : "commands are"} configured for unused project profiles.`,
+                    coverageFixes
+                  )
+                : check(
+                    "verification.substantive",
+                    "verification",
+                    "fail",
+                    "No substantive verification command is configured for detected project types or unused project profiles.",
+                    coverageFixes
+                  )
       );
     }
   }
@@ -1025,8 +1127,8 @@ export async function inspectDoctor(
 
   const reportSummary = summary(checks);
   return {
-    schema: "banzai-doctor/v3",
-    schemaVersion: 3,
+    schema: "banzai-doctor/v4",
+    schemaVersion: 4,
     ready: reportSummary.failed === 0,
     projectTypes,
     summary: reportSummary,

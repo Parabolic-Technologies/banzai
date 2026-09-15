@@ -218,5 +218,10 @@ Implementation and review must confirm:
 
 ## Lifecycle Links
 
+- Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted
+  2026-09-14: optional bootstrap in schemas 2/3, guided profile mutation and
+  explicit check-all diagnostics. Preserve schema-1 compatibility and ordinary
+  runner order/failure behavior. Implementation of this amendment is Planned.
+
 - Supersedes: None
 - Superseded by: None

@@ -121,10 +121,16 @@ test("installed parity uses bounded raw identities, with mismatch before missing
     ]) {
       const diagnostic = instructionParityDiagnostic(result);
       assert.doesNotMatch(diagnostic, new RegExp(fixture.directory));
-      assert.match(
-        diagnostic,
-        /Rebuild the orchestrator bundle.*update the installed plugin.*explicitly select ambient mode/
-      );
+      if (result.state === "unverifiable")
+        assert.doesNotMatch(
+          diagnostic,
+          /Rebuild|update the installed plugin|Codex/
+        );
+      else
+        assert.match(
+          diagnostic,
+          /Rebuild the orchestrator bundle.*update the installed plugin.*explicitly select ambient mode/
+        );
     }
   } finally {
     await fixture.dispose();

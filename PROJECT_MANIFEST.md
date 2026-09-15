@@ -52,11 +52,11 @@ installed policy source. These files describe nothing here.
   collapsed bracketed-paste request prompt.
 - **Package manager:** `npm` with `package-lock.json` (`lockfileVersion: 3`) and
   `workspaces: ["packages/*"]`.
-- **Build:** `npm run build` — explicitly regenerates committed phase-resource
+- **Build:** `npm run build` — explicitly regenerates committed initialization-guide, phase-resource
   and artifact-reader modules, then bundles `packages/orchestrator/src/cli.ts` into
   the committed `packages/orchestrator/dist/banzai.mjs` (plus `.map`) with a
   `#!/usr/bin/env node` banner and mode `0755`.
-- **Build check:** `npm run build:check` — compares generated phase-resource
+- **Build check:** `npm run build:check` — compares generated initialization-guide and phase-resource
   bytes without repair, then rebuilds into a temp directory,
   compares bytes against the committed `dist/`, then smoke-runs the committed
   executable and asserts its non-TTY help output. Temporary output is removed
@@ -338,10 +338,16 @@ Orchestrator (`packages/orchestrator/src/`):
   the package mirror (ADR-0033).
 - `cli-routing.ts` — `resolveCliMode`: argv plus TTY presence →
   `interactive | help | command | tty_required`.
+- `version-cli.ts` — `--version` / `-v` prints the running package version;
+  `--plugin-version` / `-pv` reports installed versions separately for Codex
+  and Claude Code through bounded local inventory commands. Em-dash long
+  aliases are accepted. Neither path requires Git or project configuration;
+  absent or unreadable plugin versions are explicit, never source-version guesses.
 - `agent-control-cli.ts` / `agent-control.ts` — non-TTY control grammar over
   closed direct-stdin JSON (64 KiB, validated before mutation); current
-  `banzai-agent-capabilities/v3`, `banzai-agent-status/v2`,
-  `banzai-agent-answer/v2`; preserved `banzai-agent-request/v1`, escalation
+  `banzai-agent-capabilities/v4`, `banzai-agent-status/v3`,
+  configuration `banzai-agent-answer/v3`; preserved consultation
+  `banzai-agent-answer/v2`, `banzai-agent-request/v1`, escalation
   `banzai-agent-answer/v1`, `banzai-agent-recovery/v1`. Every mutation
   delegates to `WorkflowRunner` and returns a fresh status projection.
 - `interactive.ts` — TTY state-driven decision interface behind `InteractiveIO`:
@@ -412,7 +418,7 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
 - `setup-client.ts` / `foreground-client.ts` — locally verified explicit
   project-manifest invocation, selected subscription authentication, filtered
   environment, foreground terminal ownership and bounded child cleanup.
-- `doctor-cli.ts` / `doctor.ts` — read-only fixed-order `banzai-doctor/v3`
+- `doctor-cli.ts` / `doctor.ts` — read-only fixed-order `banzai-doctor/v4`
   readiness checks; constructs no `RunStore`, adapters, or `WorkflowRunner`.
 - `live-compatibility-cli.ts` / `live-compatibility.ts` — the protected,
   explicitly confirmed live vendor probe producing closed
@@ -447,6 +453,18 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   invariants JSON Schema cannot express.
 - `contracts.ts` — re-exports the plugin contract JSON; `assertContractParity`
   fails startup on `CONTRACT_VERSION_MISMATCH` or `SCHEMA_VERSION_MISMATCH`.
+- `configuration-prerequisite.ts` — bounded closed configuration decisions,
+  state-6 envelope validation and runner-assigned command identity rules.
+- `verification-config.ts` — exclusive, byte-pinned lossless previews and atomic
+  config transactions; selected-run history supplies command collision evidence.
+- `configuration-review.ts` — freezes real runner deltas and coverage disposition
+  without attributing carried-in or later user config changes to the runner.
+- `verification-cli.ts` — static init wizard, confirmed profile CRUD/list and
+  explicit all-command check execution under repository ownership.
+- `verification-ui.ts` — structured command editor and decision-first guidance;
+  no shell parsing, model invocation or config write.
+- `persisted-readers.ts` — canonical exports for generated plugin readers;
+  the build resolves those imports to source, never stale generated output.
 - `config.ts` — `.banzai/config.json` location, `DEFAULT_CONFIG`, `loadConfig`,
   `initializeConfig`, and byte-preserving `applyModelUpdates`; context policy
   defaults to `{ mode: "observe", limits: [] }`.
@@ -457,6 +475,10 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
 - `git.ts` — repository discovery, commit/branch, `digestArtifactBundle`,
   `repositoryBaseline`, and `workspaceSnapshot`/`workspaceDigest`/
   `workspaceChanges` over staged, unstaged, and untracked evidence.
+- `init-resources.ts` — generated verification examples embedded in the CLI from
+  `documentation/verification-examples.md`, with links to other product guides
+  resolved to the public repository. Init creates the local guide only when absent,
+  under initialization ownership and regular-file/no-symlink checks.
 - `phase-resources.ts` — committed generated raw UTF-8 bodies and SHA-256
   identities for six phases, nine guidance files, six policies and two hook
   references. Explicit build generates; check-dist only compares.
@@ -468,15 +490,15 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   per route), and `serenaGuidance`. Strict planning, implementation, review and
   accepted-finding fixes inline the applicable shared guidance and policies while preserving
   approved scope, legacy directives and required evidence.
-- `review-artifact.ts` — deterministic `banzai-feature-review/v3` rendering for
-  bound snapshots, retaining historical v1/v2 rendering,
+- `review-artifact.ts` — deterministic `banzai-feature-review/v5` rendering for
+  guided snapshots, retaining historical v1-v4 rendering,
   exact snapshot/result validation and atomic publication of validated bytes;
   legacy v1 rendering and diagnostics remain readable.
-- `review-snapshot.ts` — `banzai-review-snapshot/v2` and v3 bound scope/content identities
-  and a separate historical v1 parser,
+- `review-snapshot.ts` — `banzai-review-snapshot/v4` bound scope/content and configuration identities
+  and historical v1-v3 readers,
   full/delta anchors, recorded evidence, digest validation and owned paths.
 - `types.ts` — all shared types, `CONTRACT_VERSION = "1.0.0"`, phase-result
-  schema v3 and state schema v4 with explicit v1/v2/v3 legacy readers, and the independent
+  schema v3 and state schema v6 with explicit v1-v5 historical readers, and the independent
   agent-control, context, and checkpoint/recovery contract identities; no
   runtime imports.
 - `errors.ts` — `BanzaiError` (stable `code`, `exitCode`), `ProcessExitError`
@@ -532,7 +554,7 @@ Plugin (`plugins/banzai/`):
   `.banzai/` present) or an explicit user mention of Banzai or the skill.
 - `AGENTS.md` — the installed workflow process: authority order,
   execution modes, roles, routing, explicit outer orchestration and recursion
-  guards, escalation triggers, ADR eligibility, the five decision gates, and
+  guards, escalation triggers, ADR eligibility, the five existing decision gates, and
   the hook contract, with a policy index. `CLAUDE.md` is the `@AGENTS.md` shim.
 - `policies/` — six owner files for Decision Consultation, Test Assurance,
   Security Assurance, Engineering Quality, Plan Authority/Task Completion and
@@ -584,7 +606,8 @@ Plugin (`plugins/banzai/`):
   Report duties, conditional changeReport triggers, approval immutability,
   standalone role readers and runner-only review rendering remain unchanged.
 
-New runs use state v4 with an immutable artifact binding from creation. Storage
+New config-2/3 runs use state v6 with explicit ordered/policy verification mode
+and an immutable artifact binding from creation; config-1 runs retain state v4. Storage
 mode `workflow` supplies capacity; `workflowSelection` retains phase authority.
 For work artifacts, strict implementation grants only the bound `implementationReport` and
 `testReport`; strict fix also grants the existing bound `changeReport` in the
@@ -599,7 +622,7 @@ v1 exports a fixed reviewed inventory, preserving source bytes, required Markdow
 and machine authority closure, explicit pins and custodian retention terms.
 Restore rejects managed work/run/control ancestry and preserves the original
 manifest as a private retention receipt without changing active pointers or
-resuming runs. Doctor recognizes v4 and verifies its bound identity read-only. Installed-client adoption and external cutover remain unconfirmed
+resuming runs. Doctor recognizes v4-v6 and verifies their bound identity read-only. Installed-client adoption and external cutover remain unconfirmed
 parts of ADR-0041; its decision-index status remains Planned.
 
 
@@ -626,10 +649,25 @@ attempt, approval marker or transcript.
   `effort: "xhigh"`, one `repository` hygiene profile containing
   `git diff --check`, and `maxFixCycles: 3`. Every workflow command reloads and
   revalidates config, so no phase caches model settings.
+- Guided verification: schemas 2 and 3 accept optional `verification.bootstrap`.
+  Init saves confirmed bootstrap/profile choices before the project-manifest
+  client and executes no checks. For markerless roots with uncovered `custom`
+  and existing substantive profiles, the wizard preserves configuration and
+  explains the conflict instead of offering ineffective bootstrap. It lists
+  profile removal commands only when another profile would remain, with explicit
+  confirmation through `verify remove` and a subsequent init confirmation.
+  `verify add/edit/remove` share repository
+  ownership and previewed, lossless config publication; `verify list` reads and
+  `verify check` executes all configured commands once. A configuration
+  prerequisite after a completed implementation/fix remains pending with fixed
+  Accept/Edit/Skip/Cancel actions. Accept writes through the runner; external
+  repair requires resume. Neither path clears plan approval or replays the
+  model attempt. Skip binds this run, detected types and verification config;
+  it cannot waive binding obligations. Details: [ADR-0045](documentation/decisions/0045-guided-verification-setup.md).
 - Opt-in verification: config schema 3 requires stable check IDs and accepts an
-  explicit verification policy. Only new policy-enabled runs use state 5,
-  private work binding v2 and ledger 2; default config 2/binding v1 and historical
-  runs retain their meanings. Physical leaves stay v1, with separate immutable
+  explicit verification policy. New policy-enabled runs use state 6,
+  private work binding v2 and ledger 2; ordered state 6 uses binding v1. Historical
+  state-5 policy and state-1–4 readers retain their meanings. Physical leaves stay v1, with separate immutable
   decisions, before/after origins and current applicability records. Strict reuse
   requires a complete approved plan obligation inventory; unknown inputs, missing
   proof and mandatory-fresh checks execute. Source/authority drift blocks application.
@@ -696,11 +734,12 @@ attempt, approval marker or transcript.
   meaningful prose. Markdown separates required scope from acknowledged
   coverage and projects verification/completion only from the frozen snapshot.
   Standalone review owns durable v1 Markdown; legacy records gain no assertion.
-- Human decisions: five workflow gates can stop work — conditional planning-only
+- Human decisions: five existing workflow gates plus a conditional configuration prerequisite — conditional planning-only
   decision consultation, `adr_approval`, `plan_approval`, `escalation`, and
-  review triage. No other phase boundary asks for confirmation; every other
+  review triage. Configuration is runner-raised after completed implementation/fix.
+  No other phase boundary asks for confirmation; every other
   model boundary emits a report and continues. Operator recovery is a separate
-  explicit risk authorization, not a sixth workflow gate, retry, approval, or
+  explicit risk authorization, distinct from workflow gates, retry, approval, or
   completion claim.
 - Authorization data: a plan-approval digest binds the exact description,
   accepted ADRs, and plan; a workflow digest binds a persisted lite selection; a
@@ -727,7 +766,7 @@ attempt, approval marker or transcript.
   `banzai status --json`.
 - Agent control: `banzai control capabilities` is offline and can run outside a
   Git checkout; it declares the exact independently versioned non-TTY operation
-  set under control contract `3.0.0`, including keyed consultation answers and
+  set under control contract `4.0.0`, including keyed consultation answers and
   explicit `recover` with the
   closed `banzai-agent-recovery/v1` input. `banzai control status` exposes one
   bounded public projection derived from runner state rather than human
@@ -842,7 +881,7 @@ attempt, approval marker or transcript.
   bounded readers. It also reads the Claude permission rules and workspace trust
   record a spawned session would honor, and fails readiness when the tools a
   Claude planning phase must call are ungranted or refused. Persisted repository roots must be absolute and compare
-  through canonical identity. Its `banzai-doctor/v3` JSON is authoritative and
+  through canonical identity. Its `banzai-doctor/v4` JSON is authoritative and
   the human report is a deterministic projection. It executes no configured
   command, authentication, model, recovery, or network path and writes no state,
   source, config, lock, approval marker, or report file. A fixed advisory says
@@ -916,7 +955,7 @@ attempt, approval marker or transcript.
 
 - Instruction assurance covers exact raw embedding and normalized extraction,
   phase/category byte accounting, per-call parity refusal and preserved
-  continuation authority, doctor v3, standalone binding readers, and actual
+  continuation authority, doctor v4, standalone binding readers, and actual
   archive/bundle/map identity and privacy boundaries. Deterministic fixtures do
   not establish installed-client compatibility or model compliance.
 
@@ -1114,7 +1153,10 @@ status` reports only whether credentials are visible and stored, so a
   unrecognized identifier is never reported as stale.
 - Interactive setup: `banzai setup` requires a TTY and existing config. TTY
   `init` offers setup after model selection, and new-task entry offers it before
-  task input. Non-TTY `init` creates configuration and renders manual next steps;
+  task input. Both TTY and non-TTY `init` create
+  `documentation/verification-examples.md` when missing before any wizard or
+  client launch, preserve existing guide bytes, and report Created/Kept.
+  Non-TTY `init` creates configuration and renders manual next steps;
   bare non-TTY entry prints help. A fresh foreground Codex or Claude session
   receives only the explicit project-manifest invocation, without workflow
   grants or headless phase permission settings. Client exit triggers bounded
@@ -1212,10 +1254,11 @@ status` reports only whether credentials are visible and stored, so a
   runs keep their lifecycle with legacy/unknown completion, while standalone
   work without external evidence still uses mutable plan checkboxes.
 - Agent-control schemas are independently identified as current
-  `banzai-agent-capabilities/v3`, `banzai-agent-status/v2`, and
-  `banzai-agent-answer/v2`, plus preserved `banzai-agent-request/v1`,
+  `banzai-agent-capabilities/v4`, `banzai-agent-status/v3`, and
+  `banzai-agent-answer/v3` for configuration, plus preserved consultation
+  `banzai-agent-answer/v2`, `banzai-agent-request/v1`,
   escalation `banzai-agent-answer/v1`, and `banzai-agent-recovery/v1`, with
-  control contract version `3.0.0`.
+  control contract version `4.0.0`.
   Compatibility is the exact capability declaration, not the
   package version. The optional `orchestrate` skill is invocable only by an
   explicit user invocation: Claude Code uses
@@ -1282,35 +1325,21 @@ status` reports only whether credentials are visible and stored, so a
   evaluation-export, and KPI contracts. Context-report semantic or privacy
   changes require a new context-report version; no context field may be added
   to either frozen evaluation contract.
-- Doctor contract `banzai-doctor/v3` is an independent fixed-order local
-  diagnostic (`schemaVersion: 3`) with JSON-authoritative and human-projection
-  output. `project.guidance` follows `repository.git`; all remaining fields and
-  check ordering are preserved except `claude.instructions` after
-  `claude.environment` and before `claude.permissions`, in category `config`.
-  Historical v1/v2 evidence retains its identity. Exit 0 means
-  no failed check; exit 1 means not ready, while warnings remain ready. Doctor
-  is offline and read-only, runs no configured command or vendor path, and does
-  not enforce readiness in normal workflow commands. Its
-  `claude.instructions` reports verified resource identities, mismatch (fail),
-  bounded failure or unverifiable (warning), with mismatch taking precedence.
-  Codex/ambient/unresolved scopes cannot produce verified parity. The separate
-  workflow preflight and actual-phase pre-call checks refuse confirmed mismatch
-  with `INSTRUCTION_RESOURCE_MISMATCH` before attempt creation, preserving
-  checkpoints, decisions and retry/recovery authority. Diagnostics name only
-  bounded product resource IDs and the three advisory remedies: rebuild the
-  source bundle, update the installed plugin to the matching release, or
-  explicitly select ambient mode (unverifiable). Its
-  `claude.environment` check reports verified scoping, explicit ambient mode,
-  automatic MCP-only degradation, or a fail-closed invalid explicit plugin
-  directory using fixed privacy-safe messages. Its `claude.permissions` check
-  reports, in the same fixed privacy-safe form, whether the settings sources a
-  spawned Claude session loads grant the tools its phases call; it is skipped
-  when no configured role depends on those rules. An incompatible report,
-  privacy, or readiness-semantic change requires a new doctor version and an
-  accepted decision.
+- Doctor contract `banzai-doctor/v4` is an independent fixed-order local
+  diagnostic (`schemaVersion: 4`), with JSON-authoritative checks carrying
+  `id`, `category`, `status`, `message`, `fixes`, and `roles`. Verification
+  failures include actionable remedies. Codex roles are informational
+  `not_applicable`; pinned Claude parity can verify or fail on mismatch.
+  Ambient/unresolved scopes are unverifiable; their only remedy is ambient.
+  Rebuild/update remedies apply only to mismatch/bounded failure. Doctor runs
+  no configured command, vendor path, network, or write. Exit 0 means no failed
+  check; warnings do not fail readiness. Historical v1-v3 reports retain their
+  identities. Workflow preflight independently enforces guidance, substantive
+  coverage and confirmed instruction mismatch before model attempts.
 - Verification readiness detects only root Node, PHP, Python, Go, Rust, Ruby,
   JVM, and .NET markers, or `custom` when none is recognized. Every detected
-  type requires an explicit matching substantive profile. A `repository`
+  type requires an explicit matching substantive profile, except explicit
+  markerless bootstrap. A `repository`
   profile and exact `git diff --check` are hygiene only and cannot satisfy a
   project type. Doctor reports missing and matching hygiene-only types
   separately, keeps unused profiles visible, and scopes substantive-command
@@ -1405,3 +1434,4 @@ restate them here. Paths are relative to `documentation/decisions/`.
 | ADR-0042 | Runner-delivered phase instructions | `0042-runner-delivered-phase-instructions.md` | Planned |
 | ADR-0043 | Proportionate verification evidence | `0043-proportionate-verification-evidence.md` | Implemented |
 | ADR-0044 | Instruction baseline evolution | `0044-instruction-baseline-evolution.md` | Implemented |
+| ADR-0045 | Guided verification setup and configuration prerequisite authority | `0045-guided-verification-setup.md` | Implemented |

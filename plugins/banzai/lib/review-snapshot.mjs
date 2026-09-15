@@ -1,3 +1,4 @@
+import { parseVerificationConfigTransaction } from "./artifact-readers.mjs";
 import { parseReviewVerificationEvidence } from "./verification-store.mjs";
 import { createHash } from "node:crypto";
 import {
@@ -54,6 +55,33 @@ function object(value) {
 function equal(value, expected) {
   return value === expected;
 }
+function validateConfigurationSnapshot(snapshot) {
+  const setup = snapshot.configurationSetup;
+  const hash = (value) => typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+  const uuid = (value) => typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(value);
+  const keys = (value, fields) => object(value) && Object.keys(value).sort().join(",") === [...fields].sort().join(",");
+  const ids = (value) => Array.isArray(value) && value.length <= 1000 && value.every(uuid) && new Set(value).size === value.length;
+  const types = (value) => Array.isArray(value) && value.length <= 9 && value.every((type) => ["custom", "node", "php", "python", "ruby", "rust", "go", "jvm", "dotnet"].includes(type)) && new Set(value).size === value.length && JSON.stringify(value) === JSON.stringify([...value].sort());
+  if (!keys(setup, ["coverage", "projectTypes", "uncoveredTypes", "resolutionIds", "skip", "configPath", "configSha256", "carriedInConfigSha256", "runnerChanges"]) ||
+      !["ordered", "policy"].includes(snapshot.verificationMode) || snapshot.artifactBinding.binding.schemaVersion !== (snapshot.verificationMode === "policy" ? 2 : 1) ||
+      !["configured", "bootstrap_deferred", "skipped"].includes(setup.coverage) || !types(setup.projectTypes) || !types(setup.uncoveredTypes) || !ids(setup.resolutionIds) ||
+      setup.configPath !== ".banzai/config.json" || !hash(setup.configSha256) || (setup.carriedInConfigSha256 !== null && !hash(setup.carriedInConfigSha256)) || !Array.isArray(setup.runnerChanges) || setup.runnerChanges.length > 1000) invalid("Invalid guided configuration review evidence.");
+  if (setup.skip !== null) {
+    const skip = setup.skip;
+    if (!keys(skip, ["id", "runId", "decisionId", "proposalId", "projectTypes", "configurationDigest"]) || !uuid(skip.id) || !uuid(skip.decisionId) || !uuid(skip.proposalId) || skip.runId !== snapshot.runId || !types(skip.projectTypes) || !hash(skip.configurationDigest) || JSON.stringify(skip.projectTypes) !== JSON.stringify(setup.projectTypes)) invalid("Invalid configuration skip scope.");
+  }
+  if ((setup.coverage === "skipped") !== (setup.skip !== null)) invalid("Skipped review coverage requires its exact skip reference.");
+  const operations = new Set();
+  for (const change of setup.runnerChanges) {
+    if (!keys(change, ["transaction", "delta", "relation"]) || !["matches_after", "historical_delta"].includes(change.relation) || !Array.isArray(change.delta) || change.delta.length > 2) invalid("Invalid runner configuration delta.");
+    const transaction = parseVerificationConfigTransaction(change.transaction);
+    if (transaction.stage === "prepared" || transaction.runId !== snapshot.runId || operations.has(transaction.operationId) || (change.relation === "matches_after") !== (transaction.configAfterSha256 === setup.configSha256)) invalid("Configuration delta identity is inconsistent.");
+    operations.add(transaction.operationId);
+    if (transaction.continuation && (transaction.continuation.workId !== snapshot.artifactBinding.binding.workId || transaction.continuation.workBindingSha256 !== snapshot.artifactBinding.sha256 || transaction.continuation.baseCommit !== snapshot.baseCommit || transaction.continuation.approvalDigest !== snapshot.approval.digest)) invalid("Cross-authority configuration delta.");
+    for (const delta of change.delta) if (!keys(delta, ["start", "before", "after"]) || !Number.isSafeInteger(delta.start) || delta.start < 0 || typeof delta.before !== "string" || typeof delta.after !== "string" || Buffer.byteLength(delta.before) + Buffer.byteLength(delta.after) > 2 * 1024 * 1024) invalid("Unbounded or malformed runner configuration delta.");
+  }
+}
+
 function parseSnapshot(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     invalid("Review snapshot must be an object.");
@@ -80,6 +108,7 @@ function parseSnapshot(value) {
     "digest",
   ];
   if (snapshot.schemaVersion >= 2) keys.push("artifactBinding");
+  if (snapshot.schemaVersion === 4) keys.push("verificationMode", "configurationSetup");
   if (
     Object.keys(snapshot).length !== keys.length ||
     Object.keys(snapshot).some((key) => !keys.includes(key)) ||
@@ -88,7 +117,8 @@ function parseSnapshot(value) {
         snapshot.schema === "banzai-review-snapshot/v1") ||
       (snapshot.schemaVersion === 2 &&
         snapshot.schema === "banzai-review-snapshot/v2") ||
-      (snapshot.schemaVersion === 3 && snapshot.schema === "banzai-review-snapshot/v3")
+      (snapshot.schemaVersion === 3 && snapshot.schema === "banzai-review-snapshot/v3") ||
+      (snapshot.schemaVersion === 4 && snapshot.schema === "banzai-review-snapshot/v4")
     ) ||
     !equal(snapshot.outputContract, "review-result/v2") ||
     !/^[a-f0-9]{64}$/u.test(digest) ||
@@ -161,7 +191,8 @@ function parseSnapshot(value) {
     invalid("Legacy review snapshots cannot carry private storage authority.");
   }
   const artifact = snapshot.artifact;
-  if (snapshot.schemaVersion === 3) {
+  if (snapshot.schemaVersion === 4) validateConfigurationSnapshot(snapshot);
+  if (snapshot.schemaVersion === 3 || (snapshot.schemaVersion === 4 && snapshot.verificationMode === "policy" && snapshot.configurationSetup.coverage !== "skipped")) {
     if (snapshot.artifactBinding.binding.schemaVersion !== 2) invalid("Verification snapshot requires binding v2.");
     const evidence = parseReviewVerificationEvidence(artifact.verificationEvidence);
     if (evidence.decision.workId !== snapshot.artifactBinding.binding.workId) invalid("Cross-work review verification evidence.");

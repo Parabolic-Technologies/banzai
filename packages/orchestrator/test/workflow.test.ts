@@ -825,6 +825,8 @@ async function completedReviewReconciliationFixture(legacyPolicy: boolean) {
   transitionState(reviewing, "reviewing");
   // This fixture deliberately characterizes historical review evidence.
   reviewing.schemaVersion = 3;
+  delete reviewing.verificationMode;
+  delete reviewing.configurationSetup;
   delete reviewing.artifactBinding;
   reviewing.reviewIteration = 2;
   const artifactPath = "documentation/features/example/review-2.md";
@@ -1538,6 +1540,8 @@ test("a legacy run without workflow selection remains on the strict path", async
     );
 
     planned.schemaVersion = 3;
+    delete planned.verificationMode;
+    delete planned.configurationSetup;
     delete planned.artifactBinding;
     delete planned.workflowSelection;
     delete planned.metrics.attempts.selection;
@@ -1612,7 +1616,9 @@ test("an answered lite escalation reselects before further source changes", asyn
     assert.equal(replanned.status, "needs_plan_approval");
     assert.equal(replanned.workflowSelection?.workflow, "strict");
     assert.equal(adapters.selectionPrompts.length, 2);
-    assert.deepEqual(replanned.humanDecisions?.at(-1)?.answers, [exactAnswer]);
+    const answeredDecision = replanned.humanDecisions?.at(-1);
+    assert.ok(answeredDecision?.kind === "escalation");
+    assert.deepEqual(answeredDecision.answers, [exactAnswer]);
     assert.match(
       adapters.selectionPrompts[1] ?? "",
       /Yes, use the strict workflow\. \| \$\(false\)/
@@ -2257,7 +2263,7 @@ test("a Codex reviewer gets its artifact rendered by the runner", async () => {
       "documentation/features/codex-review/review-1.md"
     );
     const rendered = await readFile(artifact, "utf8");
-    assert.match(rendered, /banzai-feature-review\/v3/);
+    assert.match(rendered, /banzai-feature-review\/v5/);
     assert.match(rendered, /pass/);
   } finally {
     await repository.dispose();
@@ -3599,7 +3605,8 @@ test("implementation escalation waits for an interactive answer and replans", as
 
     const gated = await runner.approvePlan("human");
     assert.equal(gated.status, "needs_human_decision");
-    assert.equal(gated.pendingHumanDecision?.phase, "implementation");
+    assert.ok(gated.pendingHumanDecision?.kind === "escalation");
+    assert.equal(gated.pendingHumanDecision.phase, "implementation");
     assert.deepEqual(gated.pendingHumanDecision.questions, [
       "Must the existing behavior remain backward compatible?"
     ]);
@@ -3647,7 +3654,8 @@ test("planning escalation waits for an interactive answer instead of blocking", 
       request: "Plan the product change."
     });
     assert.equal(gated.status, "needs_human_decision");
-    assert.equal(gated.pendingHumanDecision?.phase, "plan");
+    assert.ok(gated.pendingHumanDecision?.kind === "escalation");
+    assert.equal(gated.pendingHumanDecision.phase, "plan");
 
     const replanned = await runner.answerHumanDecision({
       answers: ["Yes, retain the legacy behavior."],
@@ -6712,6 +6720,7 @@ test("verification executes profiles in declared order and stops on failure", as
       }
     ];
     await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+    await writeFile(path.join(repository.root, "package.json"), "{}");
     await commitAll(repository.root, "ordered verification profiles");
 
     const observed: string[] = [];
@@ -7896,7 +7905,8 @@ for (const stopPoint of [
         );
       } else {
         assert.equal(stopped.status, "needs_human_decision");
-        assert.equal(stopped.pendingHumanDecision?.gate, "escalation");
+        assert.ok(stopped.pendingHumanDecision?.kind === "escalation");
+        assert.equal(stopped.pendingHumanDecision.gate, "escalation");
         assert.equal(stopped.pendingHumanDecision.summary, LAYOUT_DIAGNOSTIC);
         const answered = await runner.answerHumanDecision(
           {
@@ -7914,7 +7924,8 @@ for (const stopPoint of [
         // An answer is not a migration: the next affected phase stops again.
         adapters.stopPhase = "plan";
         const repeated = await runner.resume();
-        assert.equal(repeated.pendingHumanDecision?.summary, LAYOUT_DIAGNOSTIC);
+        assert.ok(repeated.pendingHumanDecision?.kind === "escalation");
+        assert.equal(repeated.pendingHumanDecision.summary, LAYOUT_DIAGNOSTIC);
         assert.deepEqual(await layoutProjectBytes(repository.root), before);
         await installLayoutFixture(
           repository.root,
@@ -7974,7 +7985,8 @@ test("layout stop after authorized recovery grants no migration authority", asyn
       decidedBy: "human"
     });
     assert.equal(stopped.status, "needs_human_decision");
-    assert.equal(stopped.pendingHumanDecision?.summary, LAYOUT_DIAGNOSTIC);
+    assert.ok(stopped.pendingHumanDecision?.kind === "escalation");
+    assert.equal(stopped.pendingHumanDecision.summary, LAYOUT_DIAGNOSTIC);
     assert.deepEqual(await layoutProjectBytes(repository.root), before);
   } finally {
     await repository.dispose();
@@ -8082,7 +8094,8 @@ for (const gate of ["escalation", "decision_consultation"] as const) {
         request: "Try again without migration."
       });
       assert.notEqual(restarted.runId, waiting.runId);
-      assert.equal(restarted.pendingHumanDecision?.summary, LAYOUT_DIAGNOSTIC);
+      assert.ok(restarted.pendingHumanDecision?.kind === "escalation");
+      assert.equal(restarted.pendingHumanDecision.summary, LAYOUT_DIAGNOSTIC);
     } finally {
       await repository.dispose();
     }
@@ -8479,10 +8492,11 @@ test("adoption saved ADR, answer and triage survive refused automatic continuati
         assert.deepEqual(saved.state.metrics.attempts, prior.metrics.attempts);
         if (decision === "adr")
           assert.equal(saved.state.adrDecisions[0]?.decision, "accept");
-        if (decision === "answer")
-          assert.deepEqual(saved.state.humanDecisions?.[0]?.answers, [
-            "Preserve compatibility."
-          ]);
+        if (decision === "answer") {
+          const answer = saved.state.humanDecisions?.[0];
+          assert.ok(answer?.kind === "escalation");
+          assert.deepEqual(answer.answers, ["Preserve compatibility."]);
+        }
         if (decision === "triage")
           assert.equal(saved.state.triage?.items[0]?.disposition, "accepted");
         const tree = await snapshotTree(path.join(repository.root, ".banzai"));
@@ -8789,6 +8803,13 @@ test("adoption continuation honors the real source-workspace topology", async ()
   const repository = await createTestRepository();
   try {
     await writeIdentity(repository.root, SOURCE_IDENTITY_FIXTURES[2].files);
+    const configPath = path.join(repository.root, ".banzai/config.json");
+    const fixtureConfig = JSON.parse(
+      await readFile(configPath, "utf8")
+    ) as OrchestratorConfig;
+    requiredFixture(fixtureConfig.verification.profiles[0]).projectType =
+      "node";
+    await writeFile(configPath, JSON.stringify(fixtureConfig));
     await writeFile(
       path.join(repository.root, "AGENTS.md"),
       "@/host/instructions\n# Banzai source rules\n"
@@ -8980,7 +9001,7 @@ for (const artifactLayout of ["legacy", "private"] as const) {
                 "utf8"
               )
             ) as RunState;
-            assert.equal(state.schemaVersion, 4);
+            assert.equal(state.schemaVersion, 6);
             assert.equal(state.workflowSelection, null);
             assert.equal(state.artifactBinding?.binding.mode, "workflow");
             originalBinding = await readFile(
@@ -9032,7 +9053,7 @@ for (const artifactLayout of ["legacy", "private"] as const) {
               path.join(repository.root, state.latestReview.artifactPath),
               "utf8"
             ),
-            /banzai-feature-review\/v3/u
+            /banzai-feature-review\/v5/u
           );
           assert.equal(state.planTaskCompletion?.status, "valid");
         }
@@ -9148,6 +9169,13 @@ for (const context of [
         );
         assert.ok(identity);
         await writeIdentity(repository.root, identity.files);
+        const configPath = path.join(repository.root, ".banzai/config.json");
+        const fixtureConfig = JSON.parse(
+          await readFile(configPath, "utf8")
+        ) as OrchestratorConfig;
+        requiredFixture(fixtureConfig.verification.profiles[0]).projectType =
+          "node";
+        await writeFile(configPath, JSON.stringify(fixtureConfig));
         await writeFile(
           path.join(repository.root, "AGENTS.md"),
           "# Source repository instructions\n"
@@ -9164,7 +9192,7 @@ for (const context of [
       });
       assert.equal(state.status, "done", state.blockReason ?? "");
       assert.equal(state.artifactBinding?.binding.layout, "private");
-      assert.equal(state.schemaVersion, 4);
+      assert.equal(state.schemaVersion, 6);
       assert.ok(
         (await readFile(runner.store.statePath(state.runId), "utf8")).includes(
           state.runId
@@ -9296,7 +9324,7 @@ test("accepted F10 public doctor recognizes actual v4 runs and rejects binding d
       slug: "doctor",
       request: "Inspect a current run."
     });
-    assert.equal(state.schemaVersion, 4);
+    assert.equal(state.schemaVersion, 6);
     assert.ok(state.artifactBinding);
     const report = await inspectDoctor(repository.root);
     assert.notEqual(
@@ -9722,6 +9750,7 @@ for (const [workflow, unavailable] of [
         }
       };
       await writeFile(configPath, JSON.stringify(config));
+      await writeFile(path.join(repository.root, "package.json"), "{}");
       await commitAll(repository.root, "verification policy fixture");
       const adapters = new FakeAdapters();
       adapters.selectionResults.push(
@@ -9735,7 +9764,7 @@ for (const [workflow, unavailable] of [
       });
       if (workflow === "strict")
         state = await runner.approvePlan("human", true);
-      assert.equal(state.schemaVersion, 5);
+      assert.equal(state.schemaVersion, 6);
       assert.equal(state.artifactBinding?.binding.schemaVersion, 2);
       if (unavailable) {
         assert.equal(state.status, "blocked");
@@ -9874,7 +9903,7 @@ for (const [workflow, unavailable] of [
           ),
           "utf8"
         );
-        assert.match(artifact, /banzai-feature-review\/v4/);
+        assert.match(artifact, /banzai-feature-review\/v5/);
       }
       const exported = await collectEvaluationExportV2(repository.root, {
         format: "json",
@@ -9980,6 +10009,7 @@ test("strict explanatory closure reuses its original physical check through inde
       path.join(repository.root, "notes.md"),
       "Original explanatory sentence.\n"
     );
+    await writeFile(path.join(repository.root, "package.json"), "{}");
     await commitAll(repository.root, "explicit verification closure fixture");
     class ExplanatoryAdapters extends FakeAdapters {
       override async runPhase(
@@ -10107,5 +10137,1348 @@ test("strict explanatory closure reuses its original physical check through inde
     );
   } finally {
     await repository.dispose();
+  }
+});
+
+test("guided bootstrap pauses after completed implementation and exact Accept retains approval through verification", async () => {
+  const repository = await createTestRepository({ artifactLayout: "private" });
+  try {
+    const configPath = path.join(repository.root, ".banzai/config.json");
+    const config = JSON.parse(
+      await readFile(configPath, "utf8")
+    ) as OrchestratorConfig;
+    config.verification.bootstrap = true;
+    config.verification.profiles = [
+      {
+        id: "repository",
+        projectType: "repository",
+        commands: [
+          {
+            name: "hygiene",
+            command: "git",
+            args: ["diff", "--check"],
+            timeoutMs: 1000
+          }
+        ]
+      }
+    ];
+    await writeFile(configPath, JSON.stringify(config, null, 2) + "\n");
+    await commitAll(repository.root, "bootstrap fixture");
+    class BootstrapAdapters extends FakeAdapters {
+      override async runPhase(
+        request: PhaseAdapterRequest
+      ): Promise<AdapterResult<PhaseResult>> {
+        const result = await super.runPhase(request);
+        if (request.prompt.includes("Phase: implementation"))
+          await writeFile(
+            path.join(request.repoRoot, "package.json"),
+            JSON.stringify({
+              packageManager: "npm@10.0.0",
+              scripts: { test: "test-command", lint: "lint-command" }
+            })
+          );
+        return result;
+      }
+    }
+    const adapters = new BootstrapAdapters();
+    adapters.reviewResults.push(passingReview());
+    const executed: string[] = [];
+    const processRunner: ProcessRunner = async (spec) => {
+      executed.push([spec.command, ...spec.args].join(" "));
+      return {
+        exitCode: 0,
+        signal: null,
+        stdout: "",
+        stderr: "",
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString()
+      };
+    };
+    const runner = new WorkflowRunner(repository.root, adapters, processRunner);
+    const planned = await runner.start({
+      slug: "guided-bootstrap",
+      request: "Initialize the application with tests and lint."
+    });
+    assert.equal(
+      planned.status,
+      "needs_plan_approval",
+      planned.blockReason ?? ""
+    );
+    const waiting = await runner.approvePlan("human");
+    assert.equal(waiting.schemaVersion, 6);
+    assert.equal(
+      waiting.status,
+      "needs_human_decision",
+      waiting.blockReason ?? ""
+    );
+    assert.equal(waiting.activeAttempt, null);
+    assert.deepEqual(executed, []);
+    const pending = waiting.pendingHumanDecision;
+    assert.ok(pending?.kind === "configuration_prerequisite");
+    assert.deepEqual(
+      pending.proposal.profile.commands.map((command) => command.args),
+      [
+        ["run", "test"],
+        ["run", "lint"]
+      ]
+    );
+    const answer = {
+      runId: waiting.runId,
+      decisionId: pending.decisionId,
+      proposalId: pending.proposalId,
+      action: "accept" as const,
+      decidedBy: "human"
+    };
+    await assert.rejects(
+      runner.answerConfigurationPrerequisite(
+        { ...answer, proposalId: randomUUID() },
+        false
+      ),
+      { code: "CONFIGURATION_PROPOSAL_STALE" }
+    );
+    const saved = await runner.answerConfigurationPrerequisite(answer, false);
+    assert.equal(saved.status, "verifying");
+    assert.equal(saved.planApproval?.digest, waiting.planApproval?.digest);
+    assert.equal(
+      saved.configurationSetup?.resolutions.at(-1)?.kind,
+      "accepted"
+    );
+    assert.equal(
+      (JSON.parse(await readFile(configPath, "utf8")) as OrchestratorConfig)
+        .verification.bootstrap,
+      undefined
+    );
+    await assert.rejects(
+      runner.answerConfigurationPrerequisite(answer, false),
+      { code: "CONFIGURATION_PROPOSAL_STALE" }
+    );
+    const completed = await runner.resume();
+    assert.equal(completed.status, "done", completed.blockReason ?? "");
+    assert.deepEqual(executed, [
+      "git diff --check",
+      "npm run test",
+      "npm run lint"
+    ]);
+    assert.equal(
+      adapters.phasePrompts.filter((prompt) =>
+        prompt.includes("Phase: implementation")
+      ).length,
+      1
+    );
+    assert.equal(
+      adapters.phasePrompts.filter((prompt) => prompt.includes("Phase: plan"))
+        .length,
+      1
+    );
+    assert.equal(completed.configurationSetup?.transactions.length, 1);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+async function guidedConfigurationFixture(policy = false) {
+  const repository = await createTestRepository({ artifactLayout: "private" });
+  const configPath = path.join(repository.root, ".banzai/config.json");
+  const config = JSON.parse(
+    await readFile(configPath, "utf8")
+  ) as OrchestratorConfig;
+  config.verification = {
+    bootstrap: true,
+    profiles: [
+      {
+        id: "repository",
+        projectType: "repository",
+        commands: [
+          {
+            name: "hygiene",
+            command: "git",
+            args: ["diff", "--check"],
+            timeoutMs: 1000
+          }
+        ]
+      }
+    ]
+  };
+  if (policy) {
+    config.schemaVersion = 3;
+    requiredFixture(config.verification.profiles[0]?.commands[0]).id =
+      "hygiene";
+    config.verification.profiles.push({
+      id: "custom",
+      projectType: "custom",
+      commands: [
+        {
+          id: "mandatory",
+          name: "mandatory",
+          command: process.execPath,
+          args: ["-e", "process.exit(0)"],
+          timeoutMs: 1000
+        }
+      ]
+    });
+    config.verification.policy = {
+      schema: "banzai-verification-policy/v1",
+      schemaVersion: 1,
+      explanatory: [],
+      dependencies: {
+        complete: true,
+        exclude: [".banzai/work"],
+        toolchain: [await realpath(process.execPath)],
+        environment: { LANG: "C" },
+        volatile: []
+      }
+    };
+  }
+  await writeFile(configPath, JSON.stringify(config));
+  await commitAll(repository.root, "guided fixture");
+  class GuidedAdapters extends FakeAdapters {
+    override async runPhase(
+      request: PhaseAdapterRequest
+    ): Promise<AdapterResult<PhaseResult>> {
+      const result = await super.runPhase(request);
+      if (request.prompt.includes("Phase: implementation"))
+        await writeFile(
+          path.join(request.repoRoot, "package.json"),
+          '{"packageManager":"npm@10.0.0","scripts":{"test":"test-stub"}}'
+        );
+      return result;
+    }
+  }
+  const adapters = new GuidedAdapters();
+  adapters.reviewResults.push(passingReview());
+  const executed: string[] = [];
+  const processRunner: ProcessRunner = async (spec) => {
+    executed.push([spec.command, ...spec.args].join(" "));
+    return {
+      exitCode: 0,
+      signal: null,
+      stdout: "physical output",
+      stderr: "",
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString()
+    };
+  };
+  const runner = new WorkflowRunner(repository.root, adapters, processRunner);
+  await runner.start({ slug: "guided", request: "Initialize an application." });
+  const state = await runner.approvePlan("human");
+  assert.equal(state.status, "needs_human_decision", state.blockReason ?? "");
+  const pending = state.pendingHumanDecision;
+  assert.ok(pending?.kind === "configuration_prerequisite");
+  return {
+    repository,
+    configPath,
+    runner,
+    state,
+    pending,
+    adapters,
+    executed,
+    answer: {
+      runId: state.runId,
+      decisionId: pending.decisionId,
+      proposalId: pending.proposalId,
+      action: "accept" as const,
+      decidedBy: "human"
+    }
+  };
+}
+
+test("guided Edit produces a new proposal, and waiting ownership excludes another terminal", async () => {
+  const f = await guidedConfigurationFixture();
+  try {
+    const bytes = await readFile(f.configPath, "utf8");
+    await f.runner.withConfigurationDecisionOwnership(async () => {
+      const other = new WorkflowRunner(f.repository.root, new FakeAdapters());
+      await assert.rejects(
+        other.withVerificationConfiguration(async () => undefined),
+        /Answer there, or pause\/exit/u
+      );
+      const edited = await f.runner.answerConfigurationPrerequisite(
+        {
+          ...f.answer,
+          action: "edit",
+          profile: {
+            id: f.pending.proposal.profile.id,
+            commands: [
+              {
+                name: "Build",
+                command: "npm",
+                args: ["run", "test"],
+                timeoutMs: 5000
+              }
+            ]
+          }
+        },
+        false
+      );
+      assert.equal(edited.status, "needs_human_decision");
+      assert.ok(
+        edited.pendingHumanDecision?.kind === "configuration_prerequisite"
+      );
+      assert.notEqual(
+        edited.pendingHumanDecision.proposalId,
+        f.pending.proposalId
+      );
+      assert.equal(edited.planApproval?.digest, f.state.planApproval?.digest);
+    });
+    assert.equal(await readFile(f.configPath, "utf8"), bytes);
+    assert.deepEqual(f.executed, []);
+    await assert.rejects(
+      f.runner.answerConfigurationPrerequisite(f.answer, false),
+      { code: "CONFIGURATION_PROPOSAL_STALE" }
+    );
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+test("guided external repair remains pending until resume without recording an invented human answer", async () => {
+  const f = await guidedConfigurationFixture();
+  try {
+    const { previewVerificationConfig, publishVerificationConfig } =
+      await import("../src/verification-config.js");
+    await f.runner.withVerificationConfiguration(async (context) => {
+      assert.ok(context);
+      const preview = await previewVerificationConfig(f.repository.root, {
+        operation: "add",
+        profile: { projectType: "node", ...f.pending.proposal.profile },
+        clearBootstrap: true
+      });
+      await publishVerificationConfig(
+        f.runner.store,
+        preview,
+        "external-human",
+        context
+      );
+    });
+    const repaired = await f.runner.store.requireActiveState();
+    assert.equal(repaired.status, "needs_human_decision");
+    assert.equal(
+      repaired.pendingHumanDecision?.kind,
+      "configuration_prerequisite"
+    );
+    assert.deepEqual(f.executed, []);
+    const done = await f.runner.resume();
+    assert.equal(done.status, "done", done.blockReason ?? "");
+    assert.equal(done.planApproval?.digest, f.state.planApproval?.digest);
+    assert.equal(
+      done.configurationSetup?.resolutions.at(-1)?.kind,
+      "satisfied_by_configuration"
+    );
+    assert.equal(
+      done.humanDecisions?.filter(
+        (record) => record.kind === "configuration_prerequisite"
+      ).length ?? 0,
+      0
+    );
+    assert.equal(done.configurationSetup.transactions.length, 1);
+    const archiveRoot = await realpath(f.repository.root);
+    const archiveRequest = path.join(archiveRoot, "archive-request.json");
+    const archiveCall = async (
+      operation: string,
+      fields: Record<string, unknown>
+    ) => {
+      await writeFile(
+        archiveRequest,
+        JSON.stringify({
+          schema: "banzai-artifact-request/v1",
+          schemaVersion: 1,
+          repoRoot: f.repository.root,
+          ...fields
+        })
+      );
+      const response = await artifactCommand([
+        operation,
+        "--json",
+        archiveRequest
+      ]);
+      assert.equal(response.ok, true, JSON.stringify(response));
+      return response.result as Record<string, unknown>;
+    };
+    const inventory = await archiveCall("inventory", { runIds: [done.runId] });
+    const inventoryFile = path.join(archiveRoot, "reviewed-inventory.json");
+    await writeFile(inventoryFile, JSON.stringify(inventory.inventory));
+    const bundlePath = path.join(archiveRoot, "archive");
+    await archiveCall("export", { inventoryFile, destination: bundlePath });
+    const archived = await archiveCall("verify", { bundlePath });
+    assert.equal(archived.complete, true, JSON.stringify(archived));
+    assert.doesNotMatch(
+      JSON.stringify(archived.retainedPaths),
+      /"\.banzai\/config\.json"/u
+    );
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+for (const interruption of ["applied_event", "resolved_state"] as const)
+  test(`guided interrupted ${interruption} reconciles exactly once without implementation replay`, async () => {
+    const f = await guidedConfigurationFixture();
+    try {
+      const append = f.runner.store.appendEvent.bind(f.runner.store);
+      const write = f.runner.store.writeState.bind(f.runner.store);
+      let interrupted = false;
+      if (interruption === "applied_event")
+        f.runner.store.appendEvent = async (...args) => {
+          if (!interrupted && args[1] === "config.verification.applied") {
+            interrupted = true;
+            throw new Error("simulated interruption");
+          }
+          return append(...args);
+        };
+      else
+        f.runner.store.writeState = async (state) => {
+          if (
+            !interrupted &&
+            state.status === "verifying" &&
+            state.configurationSetup?.resolutions.some(
+              (item) => item.kind === "accepted"
+            )
+          ) {
+            interrupted = true;
+            throw new Error("simulated interruption");
+          }
+          return write(state);
+        };
+      await assert.rejects(
+        f.runner.answerConfigurationPrerequisite(f.answer, false),
+        /simulated interruption/u
+      );
+      const done = await f.runner.resume();
+      assert.equal(done.status, "done", done.blockReason ?? "");
+      assert.equal(done.configurationSetup?.resolutions.length, 1);
+      assert.equal(
+        done.humanDecisions?.filter(
+          (record) => record.kind === "configuration_prerequisite"
+        ).length,
+        1
+      );
+      const events = await readFile(
+        path.join(f.runner.store.runDirectory(done.runId), "events.jsonl"),
+        "utf8"
+      );
+      assert.equal(
+        events
+          .split("\n")
+          .filter((line) =>
+            line.includes('"type":"config.verification.applied"')
+          ).length,
+        1
+      );
+      assert.equal(
+        f.adapters.phasePrompts.filter((prompt) =>
+          prompt.includes("Phase: implementation")
+        ).length,
+        1
+      );
+    } finally {
+      await f.repository.dispose();
+    }
+  });
+
+test("guided Skip runs only physical hygiene and exposes omitted coverage in review", async () => {
+  const f = await guidedConfigurationFixture();
+  try {
+    const done = await f.runner.answerConfigurationPrerequisite({
+      ...f.answer,
+      action: "skip"
+    });
+    assert.equal(done.status, "done", done.blockReason ?? "");
+    assert.deepEqual(f.executed, ["git diff --check"]);
+    assert.equal(done.configurationSetup?.coverage, "skipped");
+    assert.deepEqual(done.configurationSetup.uncoveredTypes, ["node"]);
+    assert.equal(done.verificationEvidence, undefined);
+    const report = await readFile(
+      path.join(
+        f.repository.root,
+        requiredFixture(
+          done.artifactBinding?.binding.artifacts.reviewDirectory
+        ),
+        "review-1.md"
+      ),
+      "utf8"
+    );
+    assert.match(report, /banzai-feature-review\/v5/u);
+    assert.match(report, /"coverage": "skipped"/u);
+    assert.match(report, /Only the exact recorded deltas are runner-authored/u);
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+test("guided Skip scope expires before resume when verification configuration changes", async () => {
+  const f = await guidedConfigurationFixture();
+  try {
+    await f.runner.answerConfigurationPrerequisite(
+      { ...f.answer, action: "skip" },
+      false
+    );
+    const changed = JSON.parse(
+      await readFile(f.configPath, "utf8")
+    ) as OrchestratorConfig;
+    requiredFixture(changed.verification.profiles[0]?.commands[0]).timeoutMs +=
+      1;
+    await writeFile(f.configPath, JSON.stringify(changed));
+    const pending = await f.runner.resume();
+    assert.equal(pending.status, "needs_human_decision");
+    assert.equal(
+      pending.pendingHumanDecision?.kind,
+      "configuration_prerequisite"
+    );
+    assert.deepEqual(f.executed, []);
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+test("guided Cancel uses existing cancellation authority without scheduling verification", async () => {
+  const f = await guidedConfigurationFixture();
+  try {
+    const cancelled = await f.runner.answerConfigurationPrerequisite(
+      { ...f.answer, action: "cancel" },
+      false
+    );
+    assert.equal(cancelled.status, "cancelled");
+    assert.equal(cancelled.pendingHumanDecision, null);
+    assert.equal(
+      cancelled.humanDecisions?.at(-1)?.kind,
+      "configuration_prerequisite"
+    );
+    assert.deepEqual(f.executed, []);
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+for (const targetRole of [
+  "config",
+  "fix_report",
+  "case_alias",
+  "sibling_alias"
+] as const)
+  test(`guided planning rejects ${targetRole} tasks before approval can be offered`, async () => {
+    const repository = await createTestRepository({
+      artifactLayout: "private"
+    });
+    try {
+      class InvalidPlanAdapters extends FakeAdapters {
+        override async runPhase(
+          request: PhaseAdapterRequest
+        ): Promise<AdapterResult<PhaseResult>> {
+          const result = await super.runPhase(request);
+          if (result.result.phase === "plan") {
+            const target = path.join(
+              request.repoRoot,
+              requiredFixture(result.result.artifacts.plan)
+            );
+            await writeFile(
+              target,
+              (await readFile(target, "utf8"))
+                .replace(
+                  "## Implementation Tasks",
+                  "## Human prerequisites\n\nConfigure verification using banzai verify.\n\n## Implementation Tasks"
+                )
+                .replace(
+                  "**T001 -",
+                  `**T001 - Update ${targetRole === "config" ? ".banzai/config.json" : targetRole === "case_alias" ? ".Banzai/config.json" : targetRole === "sibling_alias" ? `../${path.basename(request.repoRoot)}/.banzai/config.json` : path.posix.join(path.posix.dirname(requiredFixture(result.result.artifacts.plan)), "change-report.md")} and`
+                )
+            );
+          }
+          return result;
+        }
+      }
+      const adapters = new InvalidPlanAdapters();
+      const runner = new WorkflowRunner(repository.root, adapters);
+      const state = await runner.start({
+        slug: "bad-config-task",
+        request: "Initialize the application."
+      });
+      assert.equal(state.status, "blocked");
+      assert.equal(state.planApproval, null);
+      assert.match(state.blockReason ?? "", /T001.*runner control path/u);
+      await assert.rejects(runner.approvePlan("human"));
+      assert.equal(
+        adapters.phasePrompts.filter((prompt) =>
+          prompt.includes("Phase: implementation")
+        ).length,
+        0
+      );
+    } finally {
+      await repository.dispose();
+    }
+  });
+
+test("guided prepared external publication remains unapplied and exact re-confirmation reuses its operation", async () => {
+  const f = await guidedConfigurationFixture();
+  try {
+    const {
+      previewVerificationConfig,
+      publishVerificationConfig,
+      readVerificationConfigTransactions
+    } = await import("../src/verification-config.js");
+    const before = await readFile(f.configPath, "utf8");
+    const preview = await previewVerificationConfig(f.repository.root, {
+      operation: "add",
+      profile: { projectType: "node", ...f.pending.proposal.profile },
+      clearBootstrap: true
+    });
+    await assert.rejects(
+      f.runner.withVerificationConfiguration(async (context) => {
+        assert.ok(context);
+        const revalidate = context.revalidate.bind(context);
+        let calls = 0;
+        context.revalidate = async () => {
+          if (++calls === 2) throw new Error("before publication");
+          await revalidate();
+        };
+        await publishVerificationConfig(
+          f.runner.store,
+          preview,
+          "external-human",
+          context
+        );
+      }),
+      /before publication/u
+    );
+    assert.equal(await readFile(f.configPath, "utf8"), before);
+    const history = await readVerificationConfigTransactions(
+      f.repository.root,
+      f.state.runId
+    );
+    assert.equal(history.length, 1);
+    assert.equal(history[0]?.stage, "prepared");
+    assert.equal((await f.runner.resume()).status, "needs_human_decision");
+    await f.runner.withVerificationConfiguration(async (context) => {
+      assert.ok(context);
+      await publishVerificationConfig(
+        f.runner.store,
+        preview,
+        "external-human",
+        context
+      );
+    });
+    assert.equal(
+      (
+        await readVerificationConfigTransactions(
+          f.repository.root,
+          f.state.runId
+        )
+      ).length,
+      1
+    );
+    const done = await f.runner.resume();
+    assert.equal(done.status, "done", done.blockReason ?? "");
+    assert.equal(
+      done.configurationSetup?.resolutions.at(-1)?.kind,
+      "satisfied_by_configuration"
+    );
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+for (const drift of ["source", "third_image"] as const)
+  test(`guided interrupted Accept preserves publication on ${drift} drift and rechecks the checkpoint`, async () => {
+    const f = await guidedConfigurationFixture();
+    try {
+      const append = f.runner.store.appendEvent.bind(f.runner.store);
+      let interrupted = false;
+      f.runner.store.appendEvent = async (...args) => {
+        if (!interrupted && args[1] === "config.verification.applied") {
+          interrupted = true;
+          throw new Error("interrupted publication");
+        }
+        return append(...args);
+      };
+      await assert.rejects(
+        f.runner.answerConfigurationPrerequisite(f.answer, false),
+        /interrupted publication/u
+      );
+      if (drift === "source")
+        await writeFile(
+          path.join(f.repository.root, "package.json"),
+          '{"scripts":{"test":"changed-script"},"packageManager":"npm@10.0.0"}'
+        );
+      else
+        await writeFile(
+          f.configPath,
+          (await readFile(f.configPath, "utf8")) + "\n"
+        );
+      const preserved = await readFile(f.configPath, "utf8");
+      const done = await f.runner.resume();
+      assert.equal(done.status, "done", done.blockReason ?? "");
+      assert.equal(await readFile(f.configPath, "utf8"), preserved);
+      assert.equal(
+        done.configurationSetup?.resolutions.at(-1)?.kind,
+        "satisfied_by_configuration"
+      );
+      assert.equal(done.planApproval?.digest, f.state.planApproval?.digest);
+      assert.equal(
+        f.adapters.phasePrompts.filter((prompt) =>
+          prompt.includes("Phase: implementation")
+        ).length,
+        1
+      );
+    } finally {
+      await f.repository.dispose();
+    }
+  });
+
+for (const route of ["control", "approve"] as const)
+  test(`guided ${route} accepts exact v3 input without starting a process with no-resume`, async () => {
+    const f = await guidedConfigurationFixture();
+    try {
+      const { Readable } = await import("node:stream");
+      const {
+        executeAgentControlCommand,
+        parseAgentControlArgs,
+        parseVerificationApprovalArgs
+      } = await import("../src/agent-control-cli.js");
+      const before = projectAgentControlStatus(await f.runner.status());
+      const publicGate = JSON.stringify(before.activeRun?.pendingGate);
+      assert.match(publicGate, /configuration_prerequisite/u);
+      assert.doesNotMatch(
+        publicGate,
+        /configSha256|sourceSha256|workBindingSha256|approvalDigest|continuation/u
+      );
+      const command =
+        route === "control"
+          ? parseAgentControlArgs(["answer", "--by", "human", "--no-resume"])
+          : parseVerificationApprovalArgs(["--by", "human", "--no-resume"]);
+      assert.equal(command.command, "answer");
+      const output: string[] = [];
+      await executeAgentControlCommand(
+        command,
+        () => f.runner,
+        {
+          stdin: Readable.from([
+            JSON.stringify({
+              schema: "banzai-agent-answer/v3",
+              schemaVersion: 3,
+              kind: "configuration_prerequisite",
+              runId: f.answer.runId,
+              decisionId: f.answer.decisionId,
+              proposalId: f.answer.proposalId,
+              action: "accept"
+            })
+          ]),
+          stdout: (value) => {
+            output.push(value);
+          }
+        },
+        "default-human"
+      );
+      assert.deepEqual(f.executed, []);
+      const state = await f.runner.store.requireActiveState();
+      assert.equal(state.status, "verifying");
+      assert.equal(state.planApproval?.digest, f.state.planApproval?.digest);
+      assert.equal(output.length, 1);
+      assert.match(output[0] ?? "", /banzai-agent-status\/v3/u);
+    } finally {
+      await f.repository.dispose();
+    }
+  });
+
+test("guided Skip cannot waive mandatory policy verification and preserves the pending decision", async () => {
+  const f = await guidedConfigurationFixture(true);
+  try {
+    const config = await readFile(f.configPath, "utf8");
+    await assert.rejects(
+      f.runner.answerConfigurationPrerequisite(
+        { ...f.answer, action: "skip" },
+        false
+      ),
+      { code: "CONFIGURATION_SKIP_OBLIGATION" }
+    );
+    const pending = await f.runner.store.requireActiveState();
+    assert.equal(pending.status, "needs_human_decision");
+    assert.ok(
+      pending.pendingHumanDecision?.kind === "configuration_prerequisite"
+    );
+    assert.equal(pending.pendingHumanDecision.proposalId, f.pending.proposalId);
+    assert.equal(pending.planApproval?.digest, f.state.planApproval?.digest);
+    assert.equal(await readFile(f.configPath, "utf8"), config);
+    assert.deepEqual(f.executed, []);
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+for (const interruption of [
+  "applied_event",
+  "state_link",
+  "third_image",
+  "source"
+] as const) {
+  test(`accepted review F1 external repair reconciles ${interruption} once`, async () => {
+    const f = await guidedConfigurationFixture();
+    try {
+      const {
+        previewVerificationConfig,
+        publishVerificationConfig,
+        readVerificationConfigTransactions
+      } = await import("../src/verification-config.js");
+      const append = f.runner.store.appendEvent.bind(f.runner.store);
+      const write = f.runner.store.writeState.bind(f.runner.store);
+      let interrupted = false;
+      f.runner.store.appendEvent = async (...args) => {
+        if (
+          interruption !== "state_link" &&
+          !interrupted &&
+          args[1] === "config.verification.applied"
+        ) {
+          interrupted = true;
+          throw new Error("external publication interrupted");
+        }
+        return append(...args);
+      };
+      f.runner.store.writeState = async (state) => {
+        if (
+          interruption === "state_link" &&
+          !interrupted &&
+          state.configurationSetup?.transactions.length
+        ) {
+          interrupted = true;
+          throw new Error("external publication interrupted");
+        }
+        return write(state);
+      };
+      await assert.rejects(
+        f.runner.withVerificationConfiguration(async (context) => {
+          const preview = await previewVerificationConfig(f.repository.root, {
+            operation: "add",
+            profile: { projectType: "node", ...f.pending.proposal.profile },
+            clearBootstrap: true
+          });
+          await publishVerificationConfig(
+            f.runner.store,
+            preview,
+            "external-human",
+            context
+          );
+        }),
+        /external publication interrupted/u
+      );
+      if (interruption === "third_image") {
+        await writeFile(
+          f.configPath,
+          (await readFile(f.configPath, "utf8")) + "\n"
+        );
+      } else if (interruption === "source") {
+        const marker = path.join(f.repository.root, "package.json");
+        await writeFile(marker, (await readFile(marker, "utf8")) + "\n");
+      }
+      const config = await readFile(f.configPath, "utf8");
+      const done = await f.runner.resume();
+      assert.equal(done.status, "done");
+      const history = await readVerificationConfigTransactions(
+        f.repository.root,
+        done.runId
+      );
+      assert.equal(history.length, 1);
+      assert.equal(
+        history[0]?.stage,
+        ["source", "third_image"].includes(interruption)
+          ? "applied"
+          : "finalized"
+      );
+      assert.deepEqual(done.configurationSetup?.transactions, [
+        history[0].operationId
+      ]);
+      assert.equal(
+        done.configurationSetup.resolutions.at(-1)?.kind,
+        "satisfied_by_configuration"
+      );
+      assert.equal(done.planApproval?.digest, f.state.planApproval?.digest);
+      assert.equal(
+        done.humanDecisions?.some(
+          (d) => d.kind === "configuration_prerequisite"
+        ) ?? false,
+        false
+      );
+      assert.equal(await readFile(f.configPath, "utf8"), config);
+      await f.runner.resume();
+      const events = await readFile(
+        path.join(f.runner.store.runDirectory(done.runId), "events.jsonl"),
+        "utf8"
+      );
+      assert.equal(
+        events
+          .split("\n")
+          .filter((line) =>
+            line.includes('"type":"config.verification.applied"')
+          ).length,
+        1
+      );
+      const review = await readFile(
+        path.join(
+          f.repository.root,
+          requiredFixture(
+            done.artifactBinding?.binding.artifacts.reviewDirectory
+          ),
+          "review-1.md"
+        ),
+        "utf8"
+      );
+      assert.ok(review.includes(history[0].operationId));
+    } finally {
+      await f.repository.dispose();
+    }
+  });
+}
+
+test("accepted review F3 committed approval renders prerequisites as inert text", async () => {
+  const repository = await createTestRepository({ artifactLayout: "private" });
+  try {
+    const runner = new WorkflowRunner(repository.root, new FakeAdapters());
+    const state = await runner.start({
+      slug: "approval-preview",
+      request: "A harmless task"
+    });
+    assert.equal(state.status, "needs_plan_approval");
+    const planPath = path.join(
+      repository.root,
+      requiredFixture(state.planArtifacts?.plan)
+    );
+    const plan =
+      (await readFile(planPath, "utf8")) +
+      "\n## Human prerequisites\nNormal multiline\n\x1b[2J\x1b]0;canary\x07\u202eCanary\n";
+    await writeFile(planPath, plan);
+    const result = spawnSync(
+      process.execPath,
+      [
+        path.join(process.cwd(), "dist/banzai.mjs"),
+        "approve",
+        "plan",
+        "--no-resume"
+      ],
+      { cwd: repository.root, encoding: "utf8", env: monochromeEnv() }
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(result.stdout, /[\x1b\x07\u202e]/u);
+    assert.match(result.stdout, /Normal multiline\n/u);
+    assert.match(result.stdout, /\\u001b\[2J/u);
+    assert.equal(await readFile(planPath, "utf8"), plan);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("accepted review F5 approval denies a fix-only report in implementation tasks", async () => {
+  const repository = await createTestRepository({ artifactLayout: "private" });
+  try {
+    const runner = new WorkflowRunner(repository.root, new FakeAdapters());
+    const state = await runner.start({
+      slug: "phase-guard",
+      request: "A harmless task"
+    });
+    assert.equal(state.status, "needs_plan_approval");
+    const roles = requiredFixture(state.artifactBinding).binding.artifacts;
+    const planPath = path.join(
+      repository.root,
+      requiredFixture(state.planArtifacts?.plan)
+    );
+    const plan = await readFile(planPath, "utf8");
+    await writeFile(
+      planPath,
+      plan + `\nDuring implementation write \`${roles.changeReport}\`.\n`
+    );
+    await assert.rejects(runner.approvePlan("human", false), {
+      code: "PLAN_RUNNER_CONTROL_TASK"
+    });
+    await writeFile(
+      planPath,
+      plan +
+        `\nDuring implementation write \`${roles.implementationReport}\` and \`${roles.testReport}\`.\n`
+    );
+    assert.equal(
+      (await runner.approvePlan("human", false)).status,
+      "plan_approved"
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+for (const route of ["accept", "skip", "external", "no_resume"] as const)
+  test(`guided fix configuration ${route} retains the completed fix as verification source`, async () => {
+    const f = await guidedConfigurationFixture();
+    try {
+      f.adapters.reviewResults.splice(0, f.adapters.reviewResults.length, {
+        contractVersion: CONTRACT_VERSION,
+        verdict: "changes_requested",
+        summary: "Fix source.",
+        findings: [finding("R1-F1", "Fix source.")],
+        reviewedFindingIds: [],
+        deferredCoverage: []
+      });
+      assert.equal(
+        (await f.runner.answerConfigurationPrerequisite(f.answer)).status,
+        "needs_triage"
+      );
+      const run = f.adapters.runPhase.bind(f.adapters);
+      f.adapters.runPhase = async (...args) => {
+        const result = await run(...args);
+        if (args[0].prompt.includes("Phase: fix"))
+          await writeFile(
+            path.join(f.repository.root, "go.mod"),
+            "module fixture\n"
+          );
+        return result;
+      };
+      f.adapters.reviewResults.push(passingReview(["R1-F1"]));
+      const pending = await f.runner.triage({
+        accepted: ["R1-F1"],
+        rejected: [],
+        deferred: [],
+        note: null,
+        decidedBy: "human"
+      });
+      const request = pending.pendingHumanDecision;
+      assert.ok(request?.kind === "configuration_prerequisite");
+      assert.equal(request.continuation.attemptKind, "fix");
+      const completed = [...pending.metrics.completedAttemptIds];
+      let done: RunState;
+      if (route === "external") {
+        const { previewVerificationConfig, publishVerificationConfig } =
+          await import("../src/verification-config.js");
+        await f.runner.withVerificationConfiguration(async (context) => {
+          assert.ok(context);
+          const preview = await previewVerificationConfig(f.repository.root, {
+            operation: "add",
+            profile: {
+              projectType: request.proposal.projectType,
+              ...request.proposal.profile
+            },
+            clearBootstrap: true
+          });
+          await publishVerificationConfig(
+            f.runner.store,
+            preview,
+            "human",
+            context
+          );
+        });
+        done = await f.runner.resume();
+      } else {
+        done = await f.runner.answerConfigurationPrerequisite(
+          {
+            ...f.answer,
+            decisionId: request.decisionId,
+            proposalId: request.proposalId,
+            action: route === "skip" ? "skip" : "accept"
+          },
+          route !== "no_resume"
+        );
+        if (route === "no_resume") {
+          assert.equal(done.status, "verifying");
+          done = await f.runner.resume();
+        }
+      }
+      assert.equal(done.status, "done", done.blockReason ?? "");
+      const records = await f.runner.store.readVerificationAttempts(done.runId);
+      assert.equal(
+        records.at(-1)?.round.sourceAttemptId,
+        request.continuation.attemptId
+      );
+      assert.equal(records.at(-1)?.round.sourceAttemptKind, "fix");
+      assert.equal(
+        records.at(-1)?.round.ordinal,
+        request.continuation.verificationRound.ordinal
+      );
+      assert.ok(
+        completed.every((id) => done.metrics.completedAttemptIds.includes(id))
+      );
+      assert.equal(
+        f.adapters.phasePrompts.filter((prompt) =>
+          prompt.includes("Phase: fix")
+        ).length,
+        1
+      );
+      assert.equal(done.planApproval?.digest, f.state.planApproval?.digest);
+    } finally {
+      await f.repository.dispose();
+    }
+  });
+
+for (const drift of ["missing", "repaired"] as const)
+  test(`guided Skip drift at zero-accepted triage re-evaluates ${drift} prerequisites`, async () => {
+    const f = await guidedConfigurationFixture();
+    try {
+      f.adapters.reviewResults.splice(0, f.adapters.reviewResults.length, {
+        contractVersion: CONTRACT_VERSION,
+        verdict: "changes_requested",
+        summary: "One finding.",
+        findings: [finding("R1-F1", "Fix source.")],
+        reviewedFindingIds: [],
+        deferredCoverage: []
+      });
+      const state = await f.runner.answerConfigurationPrerequisite({
+        ...f.answer,
+        action: "skip"
+      });
+      assert.equal(state.status, "needs_triage");
+      const config = JSON.parse(
+        await readFile(f.configPath, "utf8")
+      ) as OrchestratorConfig;
+      requiredFixture(config.verification.profiles[0]?.commands[0]).timeoutMs +=
+        1;
+      if (drift === "repaired")
+        config.verification.profiles.push({
+          projectType: "node",
+          ...f.pending.proposal.profile
+        });
+      await writeFile(f.configPath, JSON.stringify(config));
+      f.adapters.reviewResults.push(passingReview());
+      let result = await f.runner.triage({
+        accepted: [],
+        rejected: ["R1-F1"],
+        deferred: [],
+        note: "Owner rejected",
+        decidedBy: "human"
+      });
+      assert.deepEqual(
+        result.triage?.items
+          .filter((item) => item.disposition === "rejected")
+          .map((item) => item.findingId),
+        ["R1-F1"]
+      );
+      assert.equal(result.planApproval?.digest, f.state.planApproval?.digest);
+      if (drift === "missing") {
+        assert.equal(
+          result.status,
+          "needs_human_decision",
+          result.blockReason ?? ""
+        );
+        const request = result.pendingHumanDecision;
+        assert.ok(request?.kind === "configuration_prerequisite");
+        assert.equal(
+          request.continuation.attemptId,
+          f.pending.continuation.attemptId
+        );
+        result = await f.runner.answerConfigurationPrerequisite({
+          ...f.answer,
+          decisionId: request.decisionId,
+          proposalId: request.proposalId
+        });
+      }
+      assert.equal(result.status, "done", result.blockReason ?? "");
+      assert.deepEqual(
+        result.triageHistory
+          .at(-1)
+          ?.items.filter((item) => item.disposition === "rejected")
+          .map((item) => item.findingId),
+        ["R1-F1"]
+      );
+      assert.equal(
+        f.adapters.phasePrompts.filter((prompt) =>
+          prompt.includes("Phase: implementation")
+        ).length,
+        1
+      );
+    } finally {
+      await f.repository.dispose();
+    }
+  });
+
+for (const fragment of [
+  "empty",
+  "prefix",
+  "utf8",
+  "foreign",
+  "symlink",
+  "third_image"
+] as const)
+  test(`guided prepared configuration recovery handles ${fragment} temporary safely`, async () => {
+    const f = await guidedConfigurationFixture();
+    try {
+      const {
+        previewVerificationConfig,
+        publishVerificationConfig,
+        readVerificationConfigTransactions,
+        applyVerificationConfigDelta
+      } = await import("../src/verification-config.js");
+      if (fragment === "utf8") {
+        const config = JSON.parse(
+          await readFile(f.configPath, "utf8")
+        ) as OrchestratorConfig;
+        requiredFixture(config.verification.profiles[0]?.commands[0]).name =
+          "Є";
+        await writeFile(f.configPath, JSON.stringify(config));
+      }
+      const before = await readFile(f.configPath, "utf8");
+      const preview = await previewVerificationConfig(f.repository.root, {
+        operation: "add",
+        profile: { projectType: "node", ...f.pending.proposal.profile },
+        clearBootstrap: true
+      });
+      await assert.rejects(
+        f.runner.withVerificationConfiguration(async (context) => {
+          assert.ok(context);
+          const revalidate = context.revalidate.bind(context);
+          let count = 0;
+          context.revalidate = async () => {
+            if (++count === 2) throw new Error("pause before rename");
+            await revalidate();
+          };
+          await publishVerificationConfig(
+            f.runner.store,
+            preview,
+            "human",
+            context
+          );
+        }),
+        /pause before rename/u
+      );
+      const record = requiredFixture(
+        (
+          await readVerificationConfigTransactions(
+            f.repository.root,
+            f.state.runId
+          )
+        )[0]
+      );
+      const filename = `${f.configPath}.verification-${record.operationId}.tmp`;
+      const after = applyVerificationConfigDelta(before, preview.delta);
+      if (fragment === "symlink") await symlink(f.configPath, filename);
+      else
+        await writeFile(
+          filename,
+          fragment === "empty"
+            ? ""
+            : fragment === "utf8"
+              ? Buffer.from(after).subarray(
+                  0,
+                  Buffer.from(after).indexOf(Buffer.from("Є")) + 1
+                )
+              : fragment === "prefix" || fragment === "third_image"
+                ? after.slice(0, 31)
+                : "foreign bytes",
+          { mode: 0o600 }
+        );
+      if (fragment === "third_image")
+        await writeFile(f.configPath, before + "\n");
+      if (
+        fragment === "foreign" ||
+        fragment === "symlink" ||
+        fragment === "third_image"
+      ) {
+        await assert.rejects(f.runner.resume());
+        assert.equal(
+          await readFile(f.configPath, "utf8"),
+          fragment === "third_image" ? before + "\n" : before
+        );
+        return;
+      }
+      const resumed = await f.runner.resume();
+      assert.equal(resumed.status, "needs_human_decision");
+      assert.equal(await readFile(f.configPath, "utf8"), before);
+      await assert.rejects(readFile(filename), { code: "ENOENT" });
+      await f.runner.withVerificationConfiguration(async (context) => {
+        assert.ok(context);
+        await publishVerificationConfig(
+          f.runner.store,
+          preview,
+          "human",
+          context
+        );
+      });
+      const done = await f.runner.resume();
+      assert.equal(done.status, "done", done.blockReason ?? "");
+      assert.equal(done.planApproval?.digest, f.state.planApproval?.digest);
+      assert.equal(
+        f.adapters.phasePrompts.filter((prompt) =>
+          prompt.includes("Phase: implementation")
+        ).length,
+        1
+      );
+    } finally {
+      await f.repository.dispose();
+    }
+  });
+
+test("guided missing-script status identifies existing profiles and unavailable Accept without request expansion", async () => {
+  const f = await guidedConfigurationFixture();
+  try {
+    await f.runner.answerConfigurationPrerequisite(f.answer, false);
+    await writeFile(
+      path.join(f.repository.root, "package.json"),
+      '{"scripts":{"build":"build-stub"}}'
+    );
+    const pending = await f.runner.resume();
+    assert.equal(pending.status, "needs_human_decision");
+    const request = pending.pendingHumanDecision;
+    assert.ok(request?.kind === "configuration_prerequisite");
+    assert.equal(request.reason, "missing_script");
+    const status = await f.runner.status();
+    assert.deepEqual(status.configurationPrerequisite?.repairCommands, [
+      "banzai verify edit node",
+      "banzai verify remove node",
+      "banzai verify list",
+      "banzai resume"
+    ]);
+    const projected = projectAgentControlStatus(status);
+    assert.deepEqual(
+      projected.activeRun?.pendingGate?.kind === "configuration_prerequisite"
+        ? projected.activeRun.pendingGate.repairCommands
+        : null,
+      status.configurationPrerequisite.repairCommands
+    );
+    const { configurationDecisionLines } =
+      await import("../src/verification-ui.js");
+    const lines = configurationDecisionLines(
+      request,
+      status.configurationPrerequisite
+    ).join("\n");
+    assert.match(lines, /Accept unavailable:.*node/u);
+    assert.match(lines, /banzai verify edit node/u);
+    assert.doesNotMatch(lines, /banzai verify add node/u);
+    assert.equal("repairCommands" in request, false);
+    const { runInteractive } = await import("../src/interactive.js");
+    const actionNames: string[] = [];
+    const rendered: string[] = [];
+    const io: import("../src/interactive.js").InteractiveIO = {
+      async select<T>(
+        _message: string,
+        choices: readonly import("../src/interactive.js").InteractiveChoice<T>[]
+      ): Promise<T> {
+        actionNames.push(...choices.map((choice) => choice.name));
+        assert.match(
+          String(choices.find((choice) => choice.name === "Accept")?.disabled),
+          /existing profiles: node/u
+        );
+        return requiredFixture(
+          choices.find((choice) => choice.value === "exit")
+        ).value;
+      },
+      async input() {
+        assert.fail("No text input expected");
+      },
+      async confirm() {
+        assert.fail("No confirmation expected");
+      },
+      writeLine(line = "") {
+        rendered.push(line);
+      }
+    };
+    await runInteractive(f.runner, io, { decidedBy: "human" });
+    assert.deepEqual(actionNames, [
+      "Accept",
+      "Edit",
+      "Skip",
+      "Cancel",
+      "Exit and decide later"
+    ]);
+    assert.match(rendered.join("\n"), /Accept unavailable/u);
+
+    await assert.rejects(
+      f.runner.answerConfigurationPrerequisite({
+        ...f.answer,
+        decisionId: request.decisionId,
+        proposalId: request.proposalId
+      }),
+      { code: "CONFIGURATION_PREREQUISITE_UNMET" }
+    );
+  } finally {
+    await f.repository.dispose();
   }
 });

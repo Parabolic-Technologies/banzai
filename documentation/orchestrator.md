@@ -434,6 +434,26 @@ cancellation fraction is not itself the objective. See
 
 ## Commands
 
+### Versions
+
+```bash
+banzai --version          # Running orchestrator version
+banzai -v                # Same as --version
+banzai --plugin-version   # Installed Banzai versions in Codex and Claude Code
+banzai -pv               # Same as --plugin-version
+```
+
+These commands work outside a Git repository and require no project configuration.
+The long options also accept an em dash (`—version`, `—plugin-version`). Pass
+each version option alone. `--version` prints the package version on one line.
+`--plugin-version` prints one labeled line per client, including disabled
+installations and multiple distinct versions when present. It uses local client
+inventories, preserving build metadata; marketplace source files do not determine
+the installed version. Missing installations show `not installed`; failed or
+unsupported discovery shows `unavailable`. If neither client reports a version,
+the command exits nonzero. Plugin discovery requires the clients on `PATH` and
+does not launch a model or install anything.
+
 ```text
 banzai
 banzai interactive
@@ -476,15 +496,15 @@ reviewer phases never invoke it.
 
 `banzai control capabilities` is valid outside a Git repository and performs no
 repository discovery, adapter construction, vendor/authentication call, lock,
-recovery, or write. It emits canonical `banzai-agent-capabilities/v3` JSON with
-schema version 3, control contract `3.0.0`, the package-derived Banzai
+recovery, or write. It emits canonical `banzai-agent-capabilities/v4` JSON with
+schema version 4, control contract `4.0.0`, the package-derived Banzai
 release-train version, umbrella contract, the exact supported non-TTY operation
 set, and an ordered `inputSchemas` list per operation. Capability and doctor
 output prove neither subscription authentication nor sandbox credential
 visibility. Compatibility still follows these explicit contract and operation
 identities, never the shared release-train value alone.
 
-`banzai control status` emits canonical `banzai-agent-status/v2` JSON. With no
+`banzai control status` emits canonical `banzai-agent-status/v3` JSON. With no
 persisted run, `activeRun` is `null`. Otherwise the allow-list projection
 contains run identity/lifecycle, route, semantic next action, retry and bounded
 recovery eligibility, the pending human gate, approval validity,
@@ -494,10 +514,10 @@ projection remains available for evidence but does not block an explicitly
 requested new run; only a non-terminal projection does. The status excludes the
 original request, prompts, transcripts, raw model output, environment values,
 secrets, approval digests, raw commands, arguments/logs, absolute repository
-paths, raw `.banzai` paths, and completed consultation history. A current
-`decision_consultation` gate is the only public surface that includes its
-bounded one-to-three-card request because the supervisor needs it for the next
-action.
+paths, raw `.banzai` paths, and completed consultation history. Current consultation and configuration-prerequisite gates expose only the
+bounded request fields needed for their next action. The configuration gate
+includes structured command proposals and repair commands, but no raw config,
+private hashes, continuation internals, or completed decision history.
 
 Start, escalation answer, keyed consultation answer, and recovery accept one
 closed JSON document of at most 64 KiB through direct process stdin. Request
@@ -617,7 +637,7 @@ For ready-to-adapt snippets and setup guidance, see
 
 `banzai doctor` inspects the current Git checkout and writes a deterministic
 human report to stdout. `banzai doctor --json` writes the authoritative
-`banzai-doctor/v3` object instead. It exits 0 exactly when no check failed and
+`banzai-doctor/v4` object instead. It exits 0 exactly when no check failed and
 exits 1 when the checkout is not ready. Warnings, including a live or stale
 valid runner lock, remain visible without changing readiness.
 
@@ -630,15 +650,19 @@ order, sorted project types, two-space JSON, and final newline are stable for
 automation. Expected readiness findings stay in the selected stdout report;
 unexpected CLI failures go to stderr.
 
-Doctor v3 uses `schemaVersion: 3`. It retains `project.guidance` after
-`repository.git` and inserts `claude.instructions` in category `config`, after
-`claude.environment` and before `claude.permissions`. This checks the applicable
-instruction and hook resource union for configured roles. A confirmed mismatch
-is a failure; unverifiable or bounded-failure evidence is a warning. A mismatch
-wins mixed evidence, then bounded failure, then unverifiable. Configuration and
-structural-plugin failures remain independent. Historical v1/v2 reports retain
-their identities; consumers must recognize v3. There is no legacy-output flag.
-The check is offline, read-only and does not execute a vendor or repair files.
+Doctor v4 uses `schemaVersion: 4`. Every check has ordered `id`, `category`,
+`status`, `message`, `fixes`, and `roles` fields. Failed verification-category
+checks and `executables.verification` include an exact `Fix:` next step and a
+pointer to the verification guide; this does not expand remedies to unrelated
+categories. The schema diagnostic reports the file's actual config version.
+
+`claude.instructions` reports each role: Codex is informational `not_applicable`
+with no remedies; pinned Claude can be `verified`, `mismatch`, or bounded
+`failure`. A mismatch fails readiness. Ambient or unresolved scope is
+`unverifiable` with an ambient remedy only. Rebuild/update remedies apply only
+to mismatch or bounded failure. Default Codex planner/implementer and pinned
+Claude reviewer produce no parity warning when resources match. Historical
+v1-v3 reports retain their identities; consumers must negotiate v4.
 
 Doctor also emits an `authentication.models` advisory: it does not invoke a
 vendor, so authentication readiness is not checked and executable availability
@@ -665,13 +689,35 @@ If marker metadata or root enumeration fails because of permissions or I/O,
 unavailable, and dependent profile checks are skipped. Doctor never converts
 unreadable evidence into a ready custom project.
 
-Every detected type in a polyglot root needs at least one matching explicit
+Except for explicit markerless bootstrap, every detected type in a polyglot root
+needs at least one matching explicit
 profile with a substantive command. A `repository` profile is reserved for
 checkout-wide hygiene and cannot satisfy a detected project type. The exact
 `git` command with `args: ["diff", "--check"]` never counts as substantive,
 regardless of its name or profile. Doctor validates the declared coverage and
 executable paths; it does not claim that a command is a good test and never
 executes it.
+
+`banzai init` creates `documentation/verification-examples.md` from its bundled
+guide before prompts, including in non-TTY mode. Existing files are preserved;
+rerun init to restore a missing guide. No download is required.
+
+Interactive `banzai init` offers a static verification wizard after model
+selection and saves choices before the optional project-manifest client. No
+project commands run during init. Use `banzai verify add <type>`, `edit <id>`,
+`remove <id>` and `list` for routine setup/repair without editing JSON. Mutations
+need concrete previews and human confirmation, retain schema 2/3, and preserve
+unselected bytes. Removing the final profile is refused. `banzai verify check`
+runs all configured commands and reports each outcome; the workflow runner still
+stops at the first failure. Global interruption stops scheduling and labels
+remaining commands not run.
+
+Optional `verification.bootstrap: true` is supported by config schemas 2 and 3.
+Confirmed markerless `custom` bootstrap passes coverage as deferred. A detected
+type without coverage fails with `Fix: banzai verify add <type>`. Existing
+substantive coverage makes the flag stale and produces a warning. Doctor never
+writes the flag or runs checks. Run preflight reports bootstrap once; missing
+coverage without it offers configuration before any model tokens are spent.
 
 A schema-version-2 verification section is an ordered profile list. Profiles
 execute in list order and commands execute in their listed order. Each command
@@ -973,10 +1019,11 @@ state:
 - eligible retry, including explicit plan-task completion-evidence repair;
 - resume, confirmed cancellation, or exit.
 
-These are the workflow's five decision gates: conditional planning-only decision
+These are the workflow's five existing decision gates: conditional planning-only decision
 consultation, ADR acceptance, plan approval, review triage, and escalation. The
-interface is the only place they are answered, and no other phase boundary asks
-for confirmation.
+interface presents their answers. The runner adds a conditional configuration
+prerequisite after a completed implementation/fix checkpoint; other phase
+boundaries do not ask for confirmation.
 
 When a model requests a recognized human gate, the model process returns
 control to the orchestrator but the interactive session does not exit. Banzai
@@ -1784,8 +1831,8 @@ failed attempt records but does not treat candidate Markdown, raw result files,
 terminal checkpoints, recovery authorizations, or failed structured results as
 review verdicts or completion evidence.
 New model attempts use schema version 2 so an interrupted source and its linked
-recovery attempt remain distinct. New run state uses schema version 4 to add an
-immutable artifact binding. It retains v3's tagged pending consultation, exact
+recovery attempt remain distinct. New config-2/3 run state uses schema version 6 with an immutable artifact binding
+and explicit ordered/policy verification mode. Config-1 runs retain state 4. It retains v3's tagged pending consultation, exact
 keyed decision history and additive `source_preserved` stage; legacy state v1–v3
 remains readable under its original storage semantics, without fabricated
 consultation or binding evidence. The `source_preserved` stage keeps a completed
@@ -1856,14 +1903,14 @@ are absent.
 
 Projects can explicitly opt into config 3 as described in
 [verification examples](verification-examples.md#explicit-equivalent-evidence-config-3).
-Only new enabled runs use state 5, binding v2 and verification ledger 2; existing
+New enabled runs use state 6, binding v2 and verification ledger 2; existing
 runs retain their versions. Decisions and applicability records are separate from
 v1 physical leaves. The runner decides under work ownership after approval and
 completion checks, and revalidates source, authority and origins before review,
 pass application, zero-accepted triage and lite completion. Failures and interrupted
 attempts retain existing explicit retry/recovery boundaries.
 
-Review snapshot v3 and runner-rendered `banzai-feature-review/v4` freeze current
+Historical snapshot v3 and runner-rendered `banzai-feature-review/v4` freeze current
 executed/reused/pending evidence and direct physical origins. Historical formats
 keep their decoders/rendering. Review-result v2 and task-completion v1 remain
 unchanged. Offline archive v1 retains the binding, decisions, applicability,
@@ -1877,3 +1924,51 @@ only affected claims. A consistency sweep does not execute commands. Resolution
 review receives the accepted IDs, delta, current authority and evidence, preserving
 independent review and human triage. Runner instruction and policy bodies remain
 complete on every model call.
+
+## Guided configuration checkpoints
+
+New schema-2/3 runs use state 6 with explicit `verificationMode: ordered|policy`;
+legacy config-1 runs and state readers retain historical semantics. Binding v1
+continues in ordered mode and v2 in policy mode. After a completed implementation
+or fix attempt, missing coverage or a finite known missing script raises
+`configuration_prerequisite` in `needs_human_decision`. It is a pending decision,
+not a new blocked lifecycle. Plan approval, implemented work and the completed
+attempt remain intact.
+
+Accept adds the previewed profile automatically; Edit returns a fresh proposal;
+Skip records hygiene-only scope for this run; Cancel uses existing cancellation.
+Proposals pin exact config bytes and bounded project evidence. Drift requires a
+fresh proposal, never a blind write. Existing profiles are never overwritten by
+Accept. A separately confirmed `verify edit/remove` can repair them. External
+repair leaves the decision pending until `banzai resume` revalidates it; resume
+records `satisfied_by_configuration` without inventing a human answer. Config
+transactions retain prepared/applied/finalized evidence and a single logical
+`config.verification.applied` event. A write already published before source drift
+remains a real change and cannot authorize continuation on stale evidence.
+
+`status` leads with Accept/Edit/Skip/Cancel, then the alternative “Fix
+prerequisites, then run banzai resume.” A waiting interactive session holds
+configuration ownership. Answer there, or exit it before repair in another
+terminal. No model or active verification process can use guided commands to
+write runner control files. Plans place configuration needs in **Human
+prerequisites**, displayed during plan approval; executable tasks targeting
+`.banzai/` outside exact bound artifact roles are rejected before approval.
+
+Control 4 declares this kind and `banzai-agent-answer/v3`. Both `banzai control
+answer` and `banzai approve verification` take the same closed JSON on stdin:
+`schema`, `schemaVersion: 3`, `kind: configuration_prerequisite`, exact `runId`,
+`decisionId`, `proposalId`, and `action: accept|edit|skip|cancel`. Only Edit adds
+`profile: { id, commands }`. Commands accept `name`, `command`, `args`, `timeoutMs`
+and an optional current ID; policy fields and invented IDs are forbidden.
+`--no-resume` applies a valid choice without starting a process. V1 escalation
+and v2 consultation inputs keep their existing meanings. Supervisors negotiate
+capabilities before relaying the current human's exact answer.
+
+Snapshot v4 and `banzai-feature-review/v5` expose actual coverage disposition,
+resolution/Skip references and exact runner configuration deltas. They separate
+carried-in or later user changes and never attribute the entire config file to
+the runner. Skip creates neither substantive success nor all-check applicability;
+actual hygiene leaves/logs remain required, and absence of hygiene is explicit.
+Frozen human-time/evaluation outputs keep their versioned incomplete/unknown
+semantics. See [ADR-0045](decisions/0045-guided-verification-setup.md) for the closed
+contracts and retained authority boundaries.

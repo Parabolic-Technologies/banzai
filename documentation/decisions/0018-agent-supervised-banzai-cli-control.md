@@ -377,5 +377,10 @@ Implementation and review must confirm:
 
 ## Lifecycle Links
 
+- Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted
+  2026-09-14: runner-originated configuration decisions, control v4 and bounded
+  current-proposal disclosure. Preserve other human decisions and supervisor
+  authority. Implementation of this amendment is Planned.
+
 - Supersedes: None
 - Superseded by: None
