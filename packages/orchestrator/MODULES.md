@@ -762,6 +762,13 @@ group termination and output cleanup retain the same owner.
 
 ## Guided verification setup
 
+- `plan-task-completion.ts` classifies task statements and normalized path
+  references before plan offer and approval. Explicit file-change lists and
+  write actions reject protected targets; read-only references and preservation
+  constraints grant no writes. Wrapped list items retain context, while mixed
+  clauses are checked separately. Unrecognized access fails with a clarification
+  diagnostic. This bounded planning lint is not a general natural-language or
+  shell parser; phase scope and hook write enforcement remain authoritative.
 - `verification.ts` performs bounded static root inspection, existing-script
   suggestions, bootstrap-aware readiness and finite missing-script checks. It
   never executes discovery commands or infers a stack in an empty folder.

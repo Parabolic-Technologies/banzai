@@ -10649,6 +10649,55 @@ test("guided Cancel uses existing cancellation authority without scheduling veri
   }
 });
 
+test("guided planning retains manifest tasks with control-path constraints and read-only evidence through approval", async () => {
+  const repository = await createTestRepository({ artifactLayout: "private" });
+  try {
+    class ManifestPlanAdapters extends FakeAdapters {
+      override async runPhase(
+        request: PhaseAdapterRequest
+      ): Promise<AdapterResult<PhaseResult>> {
+        const result = await super.runPhase(request);
+        if (result.result.phase === "plan") {
+          const target = path.join(
+            request.repoRoot,
+            requiredFixture(result.result.artifacts.plan)
+          );
+          await writeFile(
+            target,
+            (await readFile(target, "utf8")).replace(
+              "## Implementation Tasks",
+              "## Implementation Tasks\n\n- [ ] **T002 - Synchronize manifest facts**\n\n  - Update `PROJECT_MANIFEST.md`.\n  - Do not add scripts, dependencies, verification commands, application\n    architecture, or any `.banzai/` change.\n  - Review the updated statements against `package.json` and\n    `.banzai/config.json`.\n"
+            )
+          );
+        }
+        return result;
+      }
+    }
+    const runner = new WorkflowRunner(
+      repository.root,
+      new ManifestPlanAdapters()
+    );
+    const state = await runner.start({
+      slug: "manifest-control-references",
+      request: "Initialize the application."
+    });
+    assert.equal(state.status, "needs_plan_approval");
+    const planPath = path.join(
+      repository.root,
+      requiredFixture(state.planArtifacts?.plan)
+    );
+    const offered = await readFile(planPath, "utf8");
+    assert.match(offered, /T002 - Synchronize manifest facts/u);
+    assert.equal(
+      (await runner.approvePlan("human", false)).status,
+      "plan_approved"
+    );
+    assert.equal(await readFile(planPath, "utf8"), offered);
+  } finally {
+    await repository.dispose();
+  }
+});
+
 for (const targetRole of [
   "config",
   "fix_report",

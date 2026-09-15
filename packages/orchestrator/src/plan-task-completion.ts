@@ -68,7 +68,110 @@ function digest(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
-/** Only executable task bodies are guarded; prerequisite prose creates no write grant. */
+type PlanPathAccess = "read" | "write" | "unknown";
+
+// These are optional Markdown field labels, not natural-language exemptions.
+// A declared write set is binding even when nearby prose says not to edit it.
+function planPathField(text: string): PlanPathAccess | null {
+  const label = text.replaceAll("*", "").trim();
+  if (
+    /^(?:files(?: to (?:change|modify|create|delete))?|affected files|write targets)\s*:/iu.test(
+      label
+    )
+  )
+    return "write";
+  if (/^(?:read-only references|unchanged paths)\s*:/iu.test(label))
+    return "read";
+  return null;
+}
+
+function planTaskStatements(
+  section: string
+): { taskId: string; text: string; access: PlanPathAccess }[] {
+  const statements: { taskId: string; text: string; access: PlanPathAccess }[] =
+    [];
+  let taskId = "unknown";
+  let field: { indent: number; access: PlanPathAccess } | null = null;
+  let pending: (typeof statements)[number] | null = null;
+  for (const line of section.split(/\r?\n/u)) {
+    const heading = TASK_HEADING.exec(line);
+    if (heading) {
+      taskId = heading[1] ?? "unknown";
+      field = null;
+      pending = null;
+      statements.push({ taskId, text: heading[2] ?? "", access: "unknown" });
+      continue;
+    }
+    if (!line.trim()) {
+      pending = null;
+      continue;
+    }
+    const indent = line.length - line.trimStart().length;
+    const text = line.trim().replace(/^(?:[-+*]|\d+\.)\s+/u, "");
+    const declared = planPathField(text);
+    if (field && indent <= field.indent) field = null;
+    const access = declared ?? field?.access ?? "unknown";
+    if (declared) field = { indent, access: declared };
+    if (
+      !declared &&
+      !/^\s*(?:[-+*]|\d+\.)\s/u.test(line) &&
+      !/^[\w -]+:/u.test(text.replaceAll("*", "")) &&
+      pending &&
+      indent > 0
+    ) {
+      pending.text += ` ${text}`;
+    } else {
+      pending = { taskId, text, access };
+      statements.push(pending);
+    }
+  }
+  return statements;
+}
+
+const PLAN_WRITE_WORDS =
+  "(?:change|edit|modify|update|write|rewrite|create|add|delete|remove|overwrite|replace|patch|configure|set|touch|mkdir|rm|cp|mv|tee)";
+const PLAN_ACTION = `(?:read|inspect|review|compare|consult|check|verify|cat|${PLAN_WRITE_WORDS})`;
+const PLAN_WRITE_ACTION = new RegExp(`\\b${PLAN_WRITE_WORDS}\\b`, "iu");
+const PLAN_PROHIBITION = new RegExp(
+  `^\\W*(?:(?:do|must|should)\\s+not|never)\\s+(?=${PLAN_ACTION}\\b)`,
+  "iu"
+);
+
+function planClauseAccess(
+  clause: string,
+  declared: PlanPathAccess
+): PlanPathAccess {
+  if (declared === "write") return "write";
+  clause = clause.replace(/^\s*[\w -]+:\s*/u, "");
+  const prohibited = PLAN_PROHIBITION.test(clause);
+  if (!prohibited && PLAN_WRITE_ACTION.test(clause)) return "write";
+  // Do not let a recognized read/prohibition classify a second, unrecognized
+  // instruction. Path-only continuations are lists; other prose needs clarity.
+  if (
+    /\b(?:and|or)\s+(?!(?:any\s+)?@\d+@(?:\s|$))/iu.test(clause) ||
+    /@\d+@[^,]*,\s*(?!@\d+@|(?:and|or)\s+(?:any\s+)?@\d+@)\p{L}/u.test(clause)
+  )
+    return "unknown";
+  // Only a prohibition applying to this clause suppresses its action. Other
+  // clauses and list items are classified independently, including later writes.
+  if (prohibited) return "read";
+  if (
+    /^\s*(?:preserve|leave|keep)\b.*\bunchanged\s*$/iu.test(clause) ||
+    /^\s*@\d+@\s+(?:must\s+)?remain\s+unchanged\s*$/iu.test(clause)
+  )
+    return "read";
+  if (
+    /\b(?:read|inspect|review|compare|consult|check|verify|cat)\b/iu.test(
+      clause
+    )
+  )
+    return "read";
+  // Structured reference lists also work when explanatory prose is not English.
+  if (declared === "read" && /^[\s\d@,.:-]*$/u.test(clause)) return "read";
+  return "unknown";
+}
+
+/** Planning lint does not grant writes; the hook and phase scope remain authoritative. */
 export function validatePlanRunnerControlTasks(
   markdown: string,
   repoRoot: string,
@@ -83,33 +186,85 @@ export function validatePlanRunnerControlTasks(
       path.posix.normalize(value.replaceAll("\\", "/"))
     )
   );
-  const root = repoRoot.replaceAll("\\", "/").replace(/\/$/u, "");
-  let taskId = "unknown";
-  for (const line of section.split("\n")) {
-    taskId = TASK_HEADING.exec(line)?.[1] ?? taskId;
-    for (const raw of line.split(/[\s*`'"<>()[\]{},;]+/u)) {
-      const token = raw
-        .replaceAll("\\", "/")
-        .replace(/:\d+(?::\d+)?$/u, "")
-        .replace(/[.!?]+$/u, "");
-      const normalized = path.posix.normalize(
-        path.posix.isAbsolute(token) || /^[a-z]:\//iu.test(token)
-          ? token
-          : `${root}/${token}`
+  const root = path.posix
+    .normalize(repoRoot.replaceAll("\\", "/"))
+    .replace(/\/$/u, "");
+  let previousTaskId = "";
+  let previousPaths: string[] = [];
+  for (const { taskId, text, access } of planTaskStatements(section)) {
+    if (taskId !== previousTaskId) previousPaths = [];
+    previousTaskId = taskId;
+    const paths: string[] = [];
+    // Mask paths before clause splitting: dots, line suffixes and separators in
+    // filenames are not sentence boundaries or action words.
+    const masked = text
+      .replace(/[^\s*`'"<>()[\]{},;&|]+/gu, (raw) => {
+        const token = raw
+          .replaceAll("\\", "/")
+          .replace(/[.!?]+$/u, "")
+          .replace(/:\d+(?::\d+)?$/u, "");
+        if (
+          !token.includes("/") &&
+          !/^\.[\w-]+$/u.test(token) &&
+          !/\.[a-z0-9]+$/iu.test(token)
+        )
+          return raw;
+        const normalized = path.posix.normalize(
+          path.posix.isAbsolute(token) || /^[a-z]:\//iu.test(token)
+            ? token
+            : `${root}/${token}`
+        );
+        const relative = normalized
+          .toLowerCase()
+          .startsWith(`${root.toLowerCase()}/`)
+          ? normalized.slice(root.length + 1)
+          : normalized;
+        paths.push(relative);
+        return `@${paths.length - 1}@${/[.!?]$/u.test(raw) ? "." : ""}`;
+      })
+      .replace(/\[([^\]]*)\]\((@\d+@)\)/gu, "$2")
+      .replace(/[*`'"()]/gu, "");
+    const clauses = masked.split(
+      new RegExp(
+        `;|&&|\\|\\||[.!?](?:\\s+|$)|\\s+(?:but|however|whereas|while)\\s+|(?:,\\s*|\\s+(?:and|then|to)\\s+)(?:then\\s+)?(?=(?:(?:do|must|should)\\s+not\\s+|never\\s+)?${PLAN_ACTION}\\b)`,
+        "iu"
+      )
+    );
+    for (const clause of clauses) {
+      const references = [...clause.matchAll(/@(\d+)@/gu)].map(
+        (match) => paths[Number(match[1])] ?? ""
       );
-      const relative = normalized
-        .toLowerCase()
-        .startsWith(`${root.toLowerCase()}/`)
-        ? normalized.slice(root.length + 1)
-        : normalized;
-      if (
-        (relative.toLowerCase() === ".banzai" ||
-          relative.toLowerCase().startsWith(".banzai/")) &&
-        !allowed.has(relative)
-      ) {
+      const mode = planClauseAccess(clause, access);
+      // Shell redirection is a write independently of the command's language.
+      const redirects = [...clause.matchAll(/>{1,2}\s*@(\d+)@/gu)].map(
+        (match) => paths[Number(match[1])] ?? ""
+      );
+      const targets = references.length
+        ? references
+        : /\b(?:it|them|that file|those files)\b/iu.test(clause)
+          ? previousPaths
+          : [];
+      if (references.length) previousPaths = references;
+      for (const relative of targets) {
+        const targetMode =
+          redirects.includes(relative) && !PLAN_PROHIBITION.test(clause)
+            ? "write"
+            : mode;
+        if (
+          !(
+            relative.toLowerCase() === ".banzai" ||
+            relative.toLowerCase().startsWith(".banzai/")
+          ) ||
+          allowed.has(relative) ||
+          targetMode === "read"
+        )
+          continue;
+        const target = JSON.stringify(relative.slice(0, 240));
         throw new BanzaiError(
           "PLAN_RUNNER_CONTROL_TASK",
-          `Plan task ${taskId} names runner control path ${JSON.stringify(relative.slice(0, 240))}. Remove that task and record missing configuration in Human prerequisites; use banzai verify for runner-owned configuration.`
+          targetMode === "write"
+            ? `Plan task ${taskId} uses runner control path ${target} as a write target. Remove that write from the task; keep unrelated implementation work. If configuration is missing, record it in Human prerequisites and use banzai verify.`
+            : `Plan task ${taskId} has ambiguous access to runner control path ${target}. Clarify the action or list read-only inputs under Read-only references: and protected paths under Unchanged paths:. These declarations do not authorize writes.`
         );
       }
     }

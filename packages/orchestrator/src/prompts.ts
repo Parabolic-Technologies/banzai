@@ -240,6 +240,7 @@ export function planningPromptEnvelope(
       category: "phase_instructions",
       text: `Phase: plan
 Runner control files are outside model scope. Never plan tasks to edit paths under .banzai/ except the exact runner-bound implementation-report and test-report artifact roles. Record missing verification configuration in a Human prerequisites section. The runner offers guided configuration after implementation; no free-text answer grants an external config-write mechanism.
+Read-only references to runner control paths and explicit constraints preserving them are valid task context. Keep write targets separate from read-only inputs; clarify ambiguous references with a Read-only references: or Unchanged paths: list. These lists grant no write authority.
 Continue through the planning responsibilities: the description is approved as part of the plan bundle,
 not on its own.
 Use only the exact supplied planning write roles and the existing public ADR/manifest authority.

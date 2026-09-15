@@ -663,3 +663,194 @@ test("guided plan guard resolves root aliases and denies ambiguous control-direc
       validatePlanRunnerControlTasks(plan(target), "/tmp/example", [report]);
     });
 });
+
+const controlPlan = (body: string) =>
+  `## Implementation Tasks\n\n- [ ] **T002 - Synchronize manifest facts**\n\n${body}\n`;
+
+test("plan guard accepts wrapped manifest constraints and read-only fact checking", () => {
+  const body = `  - Update the affected current-state and verification facts in
+    \`PROJECT_MANIFEST.md\` to describe the generated root manifest.
+  - Do not add scripts, dependencies, verification commands, application
+    architecture, or any \`.banzai/\` change.
+  - Assurance and completion evidence: review the updated statements against
+    \`package.json\` and \`.banzai/config.json\`; the runner executes configured
+    \`git-diff-check\` as repository hygiene.`;
+  assert.doesNotThrow(() => {
+    validatePlanRunnerControlTasks(controlPlan(body), "/project", []);
+  });
+});
+
+test("plan guard distinguishes path roles without interpreting surrounding prose language", () => {
+  for (const body of [
+    "Read-only references: `.banzai/config.json`",
+    "Unchanged paths:\n  - `.banzai/`",
+    "Files to change: `PROJECT_MANIFEST.md`\nRead-only references:\n  - `.banzai/config.json`\nNotes: Звірити поточні факти.",
+    "**Read-only references:**\n  - [configuration](./.banzai/config.json)"
+  ])
+    assert.doesNotThrow(() => {
+      validatePlanRunnerControlTasks(controlPlan(body), "/project", []);
+    }, body);
+  for (const body of [
+    "Files to change: `.banzai/config.json`\nNotes: Актуалізувати налаштування.",
+    "**Affected files:**\n  - `.banzai/config.json`",
+    "Files:\n  - `.banzai/runs/current/state.json`"
+  ])
+    assert.throws(
+      () => {
+        validatePlanRunnerControlTasks(controlPlan(body), "/project", []);
+      },
+      { code: "PLAN_RUNNER_CONTROL_TASK", message: /T002.*write target/u },
+      body
+    );
+});
+
+test("plan guard keeps prohibitions and reads local to each instruction", () => {
+  for (const body of [
+    "Never modify `.banzai/config.json`.",
+    "  Do not change `.banzai/`.",
+    "Constraints: Do not modify `.banzai/config.json`.",
+    "Preserve `.banzai/config.json` unchanged.",
+    "Do not change `.banzai/`; update `PROJECT_MANIFEST.md`.",
+    "Read `.banzai/config.json` and update `PROJECT_MANIFEST.md`.",
+    "Inspect [configuration](.banzai/config.json) to confirm the facts.",
+    "`cat .banzai/config.json`",
+    "`cat .banzai/config.json > config-snapshot.json`",
+    "Compare `PROJECT_MANIFEST.md` with `.banzai/config.json`."
+  ])
+    assert.doesNotThrow(() => {
+      validatePlanRunnerControlTasks(controlPlan(body), "/project", []);
+    }, body);
+  for (const body of [
+    "Do not edit `package.json`; update `.banzai/config.json`.",
+    "Do not edit `package.json`;write `.banzai/config.json`.",
+    "Do not modify `package.json`, but ensure `.banzai/config.json` is updated.",
+    "Do not modify `package.json` && write `.banzai/config.json`.",
+    "Read `.banzai/config.json&&rm .banzai/config.json`.",
+    "Read `.banzai/config.json` and then update `.banzai/config.json`.",
+    "Never modify `.banzai/config.json`, but delete `.banzai/runs/current/state.json`.",
+    "Do not edit `.banzai/config.json`.\nWrite `.banzai/config.json`.",
+    "Read-only references: `.banzai/config.json`; overwrite `.banzai/config.json`.",
+    "Update `.banzai/config.json` and do not edit `package.json`.",
+    "Read `.banzai/config.json` and then overwrite it.",
+    "Read `.banzai/config.json` and make changes to it.",
+    "Read `.banzai/config.json`, which should be modified.",
+    "Do not edit `package.json` and make changes to `.banzai/config.json`.",
+    "- Read `.banzai/config.json`.\n- Then overwrite it.",
+    "**Unchanged paths:** `.banzai/config.json`\n**Files to change:** `.banzai/config.json`",
+    "`printf '{}' > .banzai/config.json`",
+    "`cp template.json .banzai/config.json`",
+    "`rm .banzai/config.json`",
+    "`rm .banzai/config.json > output.log`"
+  ])
+    assert.throws(
+      () => {
+        validatePlanRunnerControlTasks(controlPlan(body), "/project", []);
+      },
+      { code: "PLAN_RUNNER_CONTROL_TASK" },
+      body
+    );
+});
+
+test("plan guard does not carry access declarations or implicit targets into another task", () => {
+  const prefix = controlPlan(
+    "Read-only references:\n  - `.banzai/config.json`"
+  );
+  assert.throws(
+    () => {
+      validatePlanRunnerControlTasks(
+        `${prefix}\n- [ ] **T003 - Update configuration**\n\nFiles: .banzai/config.json\n`,
+        "/project",
+        []
+      );
+    },
+    { code: "PLAN_RUNNER_CONTROL_TASK", message: /T003.*write target/u }
+  );
+  assert.doesNotThrow(() => {
+    validatePlanRunnerControlTasks(
+      `${prefix}\n- [ ] **T003 - Change the manifest**\n\nInspect PROJECT_MANIFEST.md and then update it.\n`,
+      "/project",
+      []
+    );
+  });
+});
+
+test("plan guard diagnoses unresolved access without claiming a configuration write", () => {
+  assert.throws(
+    () => {
+      validatePlanRunnerControlTasks(
+        controlPlan(
+          "Update `.banzai/config.json` and invalidate cached settings."
+        ),
+        "/project",
+        []
+      );
+    },
+    { code: "PLAN_RUNNER_CONTROL_TASK", message: /T002.*write target/u }
+  );
+  assert.throws(
+    () => {
+      validatePlanRunnerControlTasks(
+        controlPlan("Consider `.banzai/config.json`."),
+        "/project",
+        []
+      );
+    },
+    {
+      code: "PLAN_RUNNER_CONTROL_TASK",
+      message: /T002.*ambiguous.*Read-only references/u
+    }
+  );
+});
+
+test("plan guard applies normalized path identity equally to reads, writes and exact reports", () => {
+  const report = ".banzai/work/current/test-report.md";
+  for (const target of [
+    "./.banzai/config.json:12:3",
+    "src/../.BANZAI/config.json",
+    "/project/./.banzai/config.json",
+    String.raw`.banzai\config.json`,
+    "../project/.banzai/config.json"
+  ]) {
+    assert.doesNotThrow(() => {
+      validatePlanRunnerControlTasks(
+        controlPlan(`Read \`${target}\`.`),
+        "/project",
+        [report]
+      );
+    }, target);
+    assert.throws(
+      () => {
+        validatePlanRunnerControlTasks(
+          controlPlan(`Write \`${target}\`.`),
+          "/project",
+          [report]
+        );
+      },
+      { code: "PLAN_RUNNER_CONTROL_TASK" },
+      target
+    );
+  }
+  for (const target of [report, `./${report}`, `/project/${report}`])
+    assert.doesNotThrow(() => {
+      validatePlanRunnerControlTasks(
+        controlPlan(`Write \`${target}\`.`),
+        "/project",
+        [report]
+      );
+    });
+  for (const target of [
+    `${report}.bak`,
+    `${report}/../state.json`,
+    ".banzai/work/other/test-report.md"
+  ])
+    assert.throws(
+      () => {
+        validatePlanRunnerControlTasks(
+          controlPlan(`Write \`${target}\`.`),
+          "/project",
+          [report]
+        );
+      },
+      { code: "PLAN_RUNNER_CONTROL_TASK" }
+    );
+});

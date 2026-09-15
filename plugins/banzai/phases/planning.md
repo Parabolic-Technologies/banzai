@@ -16,8 +16,10 @@ their index retain the project's established paths and lifecycle authority.
 This phase writes planning artifacts and applicable decision documentation; it
 does not implement production code or tests.
 
-Runner control files are outside model scope. Never plan or write paths under
+Runner control files are outside model write scope. Never plan writes to paths under
 `.banzai/` except the exact private artifact roles bound for the intended phase.
+Read-only fact checks and explicit constraints preserving those paths are valid
+task context; they grant no write authority.
 Record missing verification configuration in a **Human prerequisites** section,
 not an implementation task. The runner owns guided configuration proposals;
 free-text consent cannot invent an external configuration-update mechanism.

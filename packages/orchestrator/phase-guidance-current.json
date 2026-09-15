@@ -29,7 +29,7 @@
     "plugins/banzai/guidance/manifest.md#section:Required Sections": "22a8fe01930411a8e2fbd2dd325ac1bddd954ed8c58429bfeb6b5d299826b834",
     "plugins/banzai/guidance/manifest.md#section:Writing Rules": "fefad73ef15ea5a567391a13bd65b1b2a5b8fff8f0b9fe4ea86449750465743d",
     "plugins/banzai/guidance/planning.md#section:Document": "9302866cba0decc91b69c8b671014e26098037a5e3b66832414332b894a95ea2",
-    "plugins/banzai/guidance/planning.md#section:Rules": "9fe3c11cc6b105c935908efcbd2142acc95cd54040c25aad23bb807f32448937",
+    "plugins/banzai/guidance/planning.md#section:Rules": "abaad84a300538e0eaa60a89775ce55b547961ad20fb07d2788b3c373dcb5bdc",
     "plugins/banzai/guidance/requirements.md#section:Clarification Loop": "0c089ae1a72b5a427ce01c7a1a57b95cf2d97ea083690f418a3b83d56986d973",
     "plugins/banzai/guidance/requirements.md#section:Document": "eba0117ecb6e24ad2cc8ab882fb1cd633683b5545c9e7ff2de9d6a8bbf166e91",
     "plugins/banzai/guidance/requirements.md#section:Rules": "9cf4fbd6f8ea74486dc9be0635423c1f632defa2c6d01bc9ec81575d4a89490c",
@@ -41,7 +41,7 @@
     "plugins/banzai/phases/feature.md": "84589de883301ae8c82d7ea41d769567b2b27b475c4bbbadd9f41230345fedd9",
     "plugins/banzai/phases/fix.md": "f6cc447aebf357fbee282e52cf8b7507dd9dd224c15edace18dca2ced2aaf5a7",
     "plugins/banzai/phases/implementation.md": "5950d517d89a32ec1035a817f45d33d720a99213a19074b40bfad1cadff4c7b4",
-    "plugins/banzai/phases/planning.md": "b001d8fcee99e6d034972ec2832407da89bb2a071a4d29c1235dd522dffbd4d5",
+    "plugins/banzai/phases/planning.md": "0ce1a7dde7c41affadf15560e1375270233dd61b17c55af5e93a5a284247829e",
     "plugins/banzai/phases/quick-fix.md": "7ae48ce8ab548999a82c1c58288fe98f806b0f811caed987aad9412de6b8bf34",
     "plugins/banzai/phases/review.md": "d3872fcb85d60973ca9fac94a0b17c1923b3cd0e1510c5d4ef72e5a2b5834285",
     "plugins/banzai/policies/artifact-storage.md": "5beb421da67d753b9b1b6a26f55a23d7b6675fef97fb7360f21ea5e758357995",
@@ -297,6 +297,29 @@
           "key": "plugins/banzai/skills/orchestrate/SKILL.md",
           "before": "aee22a0d272bfa6712580a556cc6d5b2457a406ca8b2e500c1d7a283d6d2fd48",
           "after": "aa4f28106f391221a417e129f4058e0f5a5d0368502713262be5ed8cc0d67c2b"
+        }
+      ]
+    },
+    {
+      "predecessorSha256": "7565c57efe10287e2a2b805d6ff6f94c4eebcaca300b97b7d54538d9e71b02f1",
+      "successorSha256": "84de4166f954c3a2bba6d7fa418311fc25dc8715d2a14eb46bfc4f8f4ffe45be",
+      "authorities": [
+        {
+          "path": "documentation/decisions/0045-guided-verification-setup.md",
+          "sha256": "2e9eba248cb61b613220aeb1a5c92d731af2aa2414c8e3f2e9af8b6628c0c835",
+          "scope": "Compatible planning correction: distinguish read-only context from runner control writes; preserve exact phase grants and configuration authority."
+        }
+      ],
+      "changes": [
+        {
+          "key": "plugins/banzai/guidance/planning.md#section:Rules",
+          "before": "9fe3c11cc6b105c935908efcbd2142acc95cd54040c25aad23bb807f32448937",
+          "after": "abaad84a300538e0eaa60a89775ce55b547961ad20fb07d2788b3c373dcb5bdc"
+        },
+        {
+          "key": "plugins/banzai/phases/planning.md",
+          "before": "b001d8fcee99e6d034972ec2832407da89bb2a071a4d29c1235dd522dffbd4d5",
+          "after": "0ce1a7dde7c41affadf15560e1375270233dd61b17c55af5e93a5a284247829e"
         }
       ]
     }

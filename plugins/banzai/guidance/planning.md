@@ -50,11 +50,17 @@ ambiguous commitments preserve fresh execution.
 
 ## Rules
 
-- Runner control paths under `.banzai/` are outside model scope except exact
+- Runner control paths under `.banzai/` are outside model write scope except exact
   private artifact roles bound for the intended implementation/fix phase.
   Put missing verification setup in **Human prerequisites** and show that section
   with plan approval. The runner's configuration prerequisite gate owns its
   proposal and write; do not plan JSON edits or invent an external updater.
+  Reading those paths for facts and explicitly preserving them are valid task
+  context. Keep each action's targets clear, including in mixed instructions.
+  When a reference is ambiguous, use a separate `Read-only references:` or
+  `Unchanged paths:` list; `Files:`, `Affected files:` and `Files to change:`
+  declare write targets. These optional labels do not grant writes or replace
+  the task's binding constraints. Do not add them to every task by default.
 
 - Specify exact contracts, signatures, state shapes, identifiers, config keys,
   locations or techniques when applicable authority or a concrete constraint
@@ -85,4 +91,3 @@ ambiguous commitments preserve fresh execution.
 - Apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Plan evidence for material
   guarantees and plausible regressions; do not require one test per requirement,
   branch, helper, edge case, or traceability row.
-

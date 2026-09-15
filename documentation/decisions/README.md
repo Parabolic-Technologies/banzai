@@ -52,6 +52,7 @@ plugin and orchestrator source.
 | [0043](./0043-proportionate-verification-evidence.md) | Proportionate verification evidence | Accepted | 2026-09-12 | Private work `proportionate-verification-closure`; requirements summarized in the ADR |
 | [0044](./0044-instruction-baseline-evolution.md) | Instruction baseline evolution | Accepted | 2026-09-12 | Private work `proportionate-verification-closure`; independent baseline-evolution decision |
 | [0045](./0045-guided-verification-setup.md) | Guided verification setup and configuration prerequisite authority | Accepted | 2026-09-14 | Private work `guided-verification-setup`; requirements summarized in the ADR |
+| [0046](./0046-supervised-live-e2e.md) | Supervised live end-to-end first task | Accepted | 2026-09-15 | Private work `optional-live-e2e`; requirements summarized in the ADR |
 
 ## File Names
 

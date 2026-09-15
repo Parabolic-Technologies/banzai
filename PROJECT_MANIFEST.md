@@ -389,6 +389,9 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   `banzai-plan-task-completion/v1` projection renderer/decoder, ledger shape
   validation, and `validatePlanTaskCompletion` against approval, scope, and
   reports (ADR-0017/0025). Fails closed as `PLAN_TASK_COMPLETION_INVALID`.
+  Its planning guard rejects runner-control write targets and ambiguous access
+  as `PLAN_RUNNER_CONTROL_TASK`, allowing read-only references, preservation
+  constraints and exact bound report writes (ADR-0045).
 - `adapters.ts` — `createVendorAdapters` and the Codex/Claude argument
   builders; `MINIMUM_CODEX_VERSION = "0.145.0"`,
   `MINIMUM_CLAUDE_VERSION = "2.1.218"`. Decodes vendor streams into typed
@@ -1435,3 +1438,4 @@ restate them here. Paths are relative to `documentation/decisions/`.
 | ADR-0043 | Proportionate verification evidence | `0043-proportionate-verification-evidence.md` | Implemented |
 | ADR-0044 | Instruction baseline evolution | `0044-instruction-baseline-evolution.md` | Implemented |
 | ADR-0045 | Guided verification setup and configuration prerequisite authority | `0045-guided-verification-setup.md` | Implemented |
+| ADR-0046 | Supervised live end-to-end first task | `0046-supervised-live-e2e.md` | Planned |

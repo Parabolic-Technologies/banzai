@@ -24154,8 +24154,8 @@ var PHASE_RESOURCE_DEFINITIONS = {
 };
 var EMBEDDED_PHASE_RESOURCES = {
   "phases/planning.md": {
-    "sha256": "b001d8fcee99e6d034972ec2832407da89bb2a071a4d29c1235dd522dffbd4d5",
-    "text": "# Strict Planning Phase\n\nAnalyze the request against current project facts and accepted authority. Apply\nthe supplied requirements guidance to make behavior and acceptance criteria\nprecise. Record material unresolved architecture questions without choosing their\nanswers in the requirements.\n\nApply the architecture guidance when a decision is eligible. Resolve unanswered\nhuman choices and obtain explicit acceptance of every required decision before\npreparing its dependent development plan. Apply the planning guidance to produce\nordered executable tasks and a complete consistency check. Present the complete\nbundle for the owner's plan approval before implementation.\n\nUse the runner-supplied work identity and artifact roles. Public decisions and\ntheir index retain the project's established paths and lifecycle authority.\nThis phase writes planning artifacts and applicable decision documentation; it\ndoes not implement production code or tests.\n\nRunner control files are outside model scope. Never plan or write paths under\n`.banzai/` except the exact private artifact roles bound for the intended phase.\nRecord missing verification configuration in a **Human prerequisites** section,\nnot an implementation task. The runner owns guided configuration proposals;\nfree-text consent cannot invent an external configuration-update mechanism.\n"
+    "sha256": "0ce1a7dde7c41affadf15560e1375270233dd61b17c55af5e93a5a284247829e",
+    "text": "# Strict Planning Phase\n\nAnalyze the request against current project facts and accepted authority. Apply\nthe supplied requirements guidance to make behavior and acceptance criteria\nprecise. Record material unresolved architecture questions without choosing their\nanswers in the requirements.\n\nApply the architecture guidance when a decision is eligible. Resolve unanswered\nhuman choices and obtain explicit acceptance of every required decision before\npreparing its dependent development plan. Apply the planning guidance to produce\nordered executable tasks and a complete consistency check. Present the complete\nbundle for the owner's plan approval before implementation.\n\nUse the runner-supplied work identity and artifact roles. Public decisions and\ntheir index retain the project's established paths and lifecycle authority.\nThis phase writes planning artifacts and applicable decision documentation; it\ndoes not implement production code or tests.\n\nRunner control files are outside model write scope. Never plan writes to paths under\n`.banzai/` except the exact private artifact roles bound for the intended phase.\nRead-only fact checks and explicit constraints preserving those paths are valid\ntask context; they grant no write authority.\nRecord missing verification configuration in a **Human prerequisites** section,\nnot an implementation task. The runner owns guided configuration proposals;\nfree-text consent cannot invent an external configuration-update mechanism.\n"
   },
   "phases/implementation.md": {
     "sha256": "5950d517d89a32ec1035a817f45d33d720a99213a19074b40bfad1cadff4c7b4",
@@ -24186,8 +24186,8 @@ var EMBEDDED_PHASE_RESOURCES = {
     "text": "# Architecture Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Proposal\n\n1. State one decision question and its owner. Split independent decisions.\n2. Search the decision log for duplicates, conflicts, and decisions this one\n   would deprecate or supersede.\n3. Choose the next unused four-digit ID and recheck for collisions before write.\n4. Evaluate viable options against requirements, quality attributes, security,\n   current facts, accepted ADRs, cost, risk, reversibility, and operational\n   impact. A new or changed trust boundary, authorization model, or\n   secret-handling approach is ADR-eligible; apply the Security Assurance\n   policy (`security-assurance.md`) supplied by the active execution context when weighing options. Use materially applicable\n   Engineering Quality properties as decision drivers, not as a preselected\n   architecture pattern or methodology.\n5. Write the ADR with status `Proposed`.\n6. Update `documentation/decisions/README.md` with the proposed record.\n7. Present the proposal and wait for an explicit human lifecycle decision.\n\n## ADR Document\n\nWrite these sections:\n\n1. `# ADR NNNN: <Title>`.\n2. **Status / Date / Owner / Decision Makers**.\n3. **Related Artifacts**: feature, plan, manifest sections, and related ADRs.\n4. **Context and Decision Drivers**: current/target distinction, requirements,\n   constraints, and quality attributes.\n5. **Options Considered**: material benefits, costs, risks, and rejection reason\n   for each non-selected viable option.\n6. **Decision**: direct, imperative outcome. Keep implementation steps out.\n7. **Consequences**: positive, negative, risks, and required follow-ups.\n8. **Compliance and Confirmation**: observable checks for implementation and\n   review.\n9. **Lifecycle Links**: `Supersedes`, `Superseded by`, or `None`.\n\n## Lifecycle\n\n- `Proposed`: revise, accept, or reject after review. Planning cannot rely on it.\n- `Accepted`: record approval date and decision makers. The body becomes\n  immutable and can guide planning before implementation exists.\n- `Rejected`: preserve the proposal and add the rejection reason.\n- `Superseded`: allowed only when a linked replacement ADR is accepted.\n- `Deprecated`: use when the decision no longer applies without replacement.\n\n## Apply The Decision\n\n- Rework: keep `Proposed`, revise the proposal, and request another review.\n- Accept: set `Accepted`, record approval date and decision makers, update the\n  decision index, and add a `Planned` row to the manifest's active ADR index.\n  The row carries only ID, title, path, and state; rationale, options, and\n  consequences stay in the ADR body. The manifest stays current state and the\n  ADR is approved target intent: `code-writing` moves the row to `Implemented`\n  only after verification, and any current/target difference must be explicit\n  in `plan.md`.\n- Reject: set `Rejected`, record the reason, and update the decision index.\n- Supersede: accept the replacement first, then change only status and lifecycle\n  links on the older ADR, keep both in the decision log, and update both\n  indexes.\n- Deprecate: require explicit approval, record why it no longer applies, and\n  remove it from the manifest's active index.\n\nUpdate the decision-log row after every lifecycle change. Change an accepted\ndecision only with a new Proposed ADR; never rewrite its context, options,\ndecision, or consequences.\n\nEngineering Quality does not expand ADR eligibility. Keep a local, reversible\nimplementation choice in the calling plan even when one policy property informs\nit; create an ADR only when the existing eligibility threshold is met.\n\n"
   },
   "guidance/planning.md": {
-    "sha256": "fbcba177681ec9a083926235af7465c8d7fd28d26e99579415897bec526e088c",
-    "text": "# Planning Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Document\n\n1. `# Development Plan: <Name>`, slug, link to description, accepted ADRs, and\n   manifest facts used.\n2. **Plan Authority**: copy the document convention (heading and three paragraphs)\n   from the installed `policies/plan-task-completion.md`, before Technical\n   Breakdown and Implementation Tasks. Make obligations explicit; add labeled\n   optional guidance only when useful. Required behavior and safety constraints\n   belong in binding text. Do not add a classification template to every task.\n3. **Technical Breakdown** in dependency order, only for materially affected\n   areas. Establish behavior, invariants, scope and relevant boundaries; retain\n   necessary contract, dependency, failure/lifecycle and compatibility constraints.\n   Name enforcement points for recorded security exposures and specific manifest\n   facts that will become stale. Omit unaffected layers and empty sections.\n4. **Implementation Tasks**: one canonical heading per task in the exact form\n   `- [ ] **T001 - Title**`, `- [ ] **T002 - Title**`, in dependency order.\n   The heading line ends at the closing `**`: no trailing annotation,\n   emphasis, or continuation after it, and the box stays unchecked even in a\n   revised plan whose earlier tasks were already implemented \u2014 put provenance\n   notes such as \"added from review finding\" in the task body below the\n   heading. A heading outside this grammar fails deterministic validation\n   before the plan can be approved. Each task establishes behavior and binding\n   invariants, affected files/units and boundaries, necessary implementation\n   constraints, dependencies, FR/acceptance/ADR mapping, proportionate assurance\n   and completion evidence, and review\n   batch. For every material claim introduced by the change, name an existing\n   proportionate evidence owner such as Test Assurance, Security Assurance,\n   contract verification, a configured check, or justified inspection; do not\n   create another test by default. Mark tasks that need separate approval. After\n   strict orchestrated approval these checkboxes become an immutable approved\n   work set; execution status is recorded in the structured completion ledger\n   and its report projection, never by marking them `[x]`.\n5. **Consistency Check**: map every FR and acceptance criterion to tasks, map\n   every accepted ADR constraint or confirmation method, confirm there are no\n   unresolved Proposed ADRs, name required manifest transitions, and state the\n   plan's own security exposure or that none applies. Name only materially\n   applicable Engineering Quality constraints and their task/evidence owner; do\n   not add a ten-row checklist or per-rule `N/A` list.\n\nWhen a new plan explicitly relies on equivalent verification, include the\nversioned obligation inventory described by Plan Authority and Task Completion.\nList every configured check in order, retain mandatory fresh requirements, bind\nthe complete surrounding prose and obtain normal bundle approval. Missing or\nambiguous commitments preserve fresh execution.\n\n## Rules\n\n- Runner control paths under `.banzai/` are outside model scope except exact\n  private artifact roles bound for the intended implementation/fix phase.\n  Put missing verification setup in **Human prerequisites** and show that section\n  with plan approval. The runner's configuration prerequisite gate owns its\n  proposal and write; do not plan JSON edits or invent an external updater.\n\n- Specify exact contracts, signatures, state shapes, identifiers, config keys,\n  locations or techniques when applicable authority or a concrete constraint\n  requires them, including internal details. Link existing authoritative\n  definitions instead of copying them; do not authorize future contract changes\n  through a link. Leave routine private mechanics open where no such constraint\n  applies, under the installed plan policy.\n- Omit speculative layers, exhaustive file trees, function inventories and\n  pseudocode bodies. Do not write function bodies.\n- Map every FR and acceptance criterion to the plan.\n- Do not repeat ADR option analysis or rationale; link the accepted ADR.\n- If planning discovers a material human-owned choice or conflicts with an\n  accepted ADR, stop dependent work. Resolve the choice through Decision\n  Consultation when applicable; an ADR-eligible result requires an architecture\n  decision before a dependent plan. Never infer or repeat an answered choice\n  against unchanged evidence.\n- State thread/actor/context boundaries when relevant.\n- Do not introduce an unapproved dependency. If one is required, stop for\n  explicit approval and ADR evaluation; after approval, include install,\n  lockfile, verification, and manifest tasks.\n- Follow the Engineering Quality authority order. Use the smallest compatible\n  design that satisfies the description and accepted decisions; do not mandate\n  a generic architecture, abstraction, directory, or dependency-injection\n  technique.\n- Apply the Security Assurance policy (`security-assurance.md`) supplied by the active execution context. For each exposure the\n  description recorded, name the enforcement point \u2014 the module or boundary\n  applying the control \u2014 and map its requirement to a task like any other.\n- Apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Plan evidence for material\n  guarantees and plausible regressions; do not require one test per requirement,\n  branch, helper, edge case, or traceability row.\n\n"
+    "sha256": "8b32ae16427efd7d5951e845ffdf68750b6b0e7dcc83212aee8466a7d1780034",
+    "text": "# Planning Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Document\n\n1. `# Development Plan: <Name>`, slug, link to description, accepted ADRs, and\n   manifest facts used.\n2. **Plan Authority**: copy the document convention (heading and three paragraphs)\n   from the installed `policies/plan-task-completion.md`, before Technical\n   Breakdown and Implementation Tasks. Make obligations explicit; add labeled\n   optional guidance only when useful. Required behavior and safety constraints\n   belong in binding text. Do not add a classification template to every task.\n3. **Technical Breakdown** in dependency order, only for materially affected\n   areas. Establish behavior, invariants, scope and relevant boundaries; retain\n   necessary contract, dependency, failure/lifecycle and compatibility constraints.\n   Name enforcement points for recorded security exposures and specific manifest\n   facts that will become stale. Omit unaffected layers and empty sections.\n4. **Implementation Tasks**: one canonical heading per task in the exact form\n   `- [ ] **T001 - Title**`, `- [ ] **T002 - Title**`, in dependency order.\n   The heading line ends at the closing `**`: no trailing annotation,\n   emphasis, or continuation after it, and the box stays unchecked even in a\n   revised plan whose earlier tasks were already implemented \u2014 put provenance\n   notes such as \"added from review finding\" in the task body below the\n   heading. A heading outside this grammar fails deterministic validation\n   before the plan can be approved. Each task establishes behavior and binding\n   invariants, affected files/units and boundaries, necessary implementation\n   constraints, dependencies, FR/acceptance/ADR mapping, proportionate assurance\n   and completion evidence, and review\n   batch. For every material claim introduced by the change, name an existing\n   proportionate evidence owner such as Test Assurance, Security Assurance,\n   contract verification, a configured check, or justified inspection; do not\n   create another test by default. Mark tasks that need separate approval. After\n   strict orchestrated approval these checkboxes become an immutable approved\n   work set; execution status is recorded in the structured completion ledger\n   and its report projection, never by marking them `[x]`.\n5. **Consistency Check**: map every FR and acceptance criterion to tasks, map\n   every accepted ADR constraint or confirmation method, confirm there are no\n   unresolved Proposed ADRs, name required manifest transitions, and state the\n   plan's own security exposure or that none applies. Name only materially\n   applicable Engineering Quality constraints and their task/evidence owner; do\n   not add a ten-row checklist or per-rule `N/A` list.\n\nWhen a new plan explicitly relies on equivalent verification, include the\nversioned obligation inventory described by Plan Authority and Task Completion.\nList every configured check in order, retain mandatory fresh requirements, bind\nthe complete surrounding prose and obtain normal bundle approval. Missing or\nambiguous commitments preserve fresh execution.\n\n## Rules\n\n- Runner control paths under `.banzai/` are outside model write scope except exact\n  private artifact roles bound for the intended implementation/fix phase.\n  Put missing verification setup in **Human prerequisites** and show that section\n  with plan approval. The runner's configuration prerequisite gate owns its\n  proposal and write; do not plan JSON edits or invent an external updater.\n  Reading those paths for facts and explicitly preserving them are valid task\n  context. Keep each action's targets clear, including in mixed instructions.\n  When a reference is ambiguous, use a separate `Read-only references:` or\n  `Unchanged paths:` list; `Files:`, `Affected files:` and `Files to change:`\n  declare write targets. These optional labels do not grant writes or replace\n  the task's binding constraints. Do not add them to every task by default.\n\n- Specify exact contracts, signatures, state shapes, identifiers, config keys,\n  locations or techniques when applicable authority or a concrete constraint\n  requires them, including internal details. Link existing authoritative\n  definitions instead of copying them; do not authorize future contract changes\n  through a link. Leave routine private mechanics open where no such constraint\n  applies, under the installed plan policy.\n- Omit speculative layers, exhaustive file trees, function inventories and\n  pseudocode bodies. Do not write function bodies.\n- Map every FR and acceptance criterion to the plan.\n- Do not repeat ADR option analysis or rationale; link the accepted ADR.\n- If planning discovers a material human-owned choice or conflicts with an\n  accepted ADR, stop dependent work. Resolve the choice through Decision\n  Consultation when applicable; an ADR-eligible result requires an architecture\n  decision before a dependent plan. Never infer or repeat an answered choice\n  against unchanged evidence.\n- State thread/actor/context boundaries when relevant.\n- Do not introduce an unapproved dependency. If one is required, stop for\n  explicit approval and ADR evaluation; after approval, include install,\n  lockfile, verification, and manifest tasks.\n- Follow the Engineering Quality authority order. Use the smallest compatible\n  design that satisfies the description and accepted decisions; do not mandate\n  a generic architecture, abstraction, directory, or dependency-injection\n  technique.\n- Apply the Security Assurance policy (`security-assurance.md`) supplied by the active execution context. For each exposure the\n  description recorded, name the enforcement point \u2014 the module or boundary\n  applying the control \u2014 and map its requirement to a task like any other.\n- Apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Plan evidence for material\n  guarantees and plausible regressions; do not require one test per requirement,\n  branch, helper, edge case, or traceability row.\n"
   },
   "guidance/implementation.md": {
     "sha256": "f493397d24a8467b9021bb79ddc78cbb783881b14aa98947b912f91d4c8e2b61",
@@ -25501,6 +25501,73 @@ function completionFailure(violation, message, taskId = null) {
 function digest4(value) {
   return createHash15("sha256").update(JSON.stringify(value)).digest("hex");
 }
+function planPathField(text3) {
+  const label = text3.replaceAll("*", "").trim();
+  if (/^(?:files(?: to (?:change|modify|create|delete))?|affected files|write targets)\s*:/iu.test(
+    label
+  ))
+    return "write";
+  if (/^(?:read-only references|unchanged paths)\s*:/iu.test(label))
+    return "read";
+  return null;
+}
+function planTaskStatements(section) {
+  const statements = [];
+  let taskId = "unknown";
+  let field = null;
+  let pending = null;
+  for (const line of section.split(/\r?\n/u)) {
+    const heading = TASK_HEADING.exec(line);
+    if (heading) {
+      taskId = heading[1] ?? "unknown";
+      field = null;
+      pending = null;
+      statements.push({ taskId, text: heading[2] ?? "", access: "unknown" });
+      continue;
+    }
+    if (!line.trim()) {
+      pending = null;
+      continue;
+    }
+    const indent = line.length - line.trimStart().length;
+    const text3 = line.trim().replace(/^(?:[-+*]|\d+\.)\s+/u, "");
+    const declared = planPathField(text3);
+    if (field && indent <= field.indent) field = null;
+    const access7 = declared ?? field?.access ?? "unknown";
+    if (declared) field = { indent, access: declared };
+    if (!declared && !/^\s*(?:[-+*]|\d+\.)\s/u.test(line) && !/^[\w -]+:/u.test(text3.replaceAll("*", "")) && pending && indent > 0) {
+      pending.text += ` ${text3}`;
+    } else {
+      pending = { taskId, text: text3, access: access7 };
+      statements.push(pending);
+    }
+  }
+  return statements;
+}
+var PLAN_WRITE_WORDS = "(?:change|edit|modify|update|write|rewrite|create|add|delete|remove|overwrite|replace|patch|configure|set|touch|mkdir|rm|cp|mv|tee)";
+var PLAN_ACTION = `(?:read|inspect|review|compare|consult|check|verify|cat|${PLAN_WRITE_WORDS})`;
+var PLAN_WRITE_ACTION = new RegExp(`\\b${PLAN_WRITE_WORDS}\\b`, "iu");
+var PLAN_PROHIBITION = new RegExp(
+  `^\\W*(?:(?:do|must|should)\\s+not|never)\\s+(?=${PLAN_ACTION}\\b)`,
+  "iu"
+);
+function planClauseAccess(clause, declared) {
+  if (declared === "write") return "write";
+  clause = clause.replace(/^\s*[\w -]+:\s*/u, "");
+  const prohibited = PLAN_PROHIBITION.test(clause);
+  if (!prohibited && PLAN_WRITE_ACTION.test(clause)) return "write";
+  if (/\b(?:and|or)\s+(?!(?:any\s+)?@\d+@(?:\s|$))/iu.test(clause) || new RegExp("@\\d+@[^,]*,\\s*(?!@\\d+@|(?:and|or)\\s+(?:any\\s+)?@\\d+@)\\p{L}", "u").test(clause))
+    return "unknown";
+  if (prohibited) return "read";
+  if (/^\s*(?:preserve|leave|keep)\b.*\bunchanged\s*$/iu.test(clause) || /^\s*@\d+@\s+(?:must\s+)?remain\s+unchanged\s*$/iu.test(clause))
+    return "read";
+  if (/\b(?:read|inspect|review|compare|consult|check|verify|cat)\b/iu.test(
+    clause
+  ))
+    return "read";
+  if (declared === "read" && /^[\s\d@,.:-]*$/u.test(clause)) return "read";
+  return "unknown";
+}
 function validatePlanRunnerControlTasks(markdown, repoRoot, allowedArtifactPaths) {
   parseApprovedPlanTaskIds(markdown);
   const section = markdown.split(/^## Implementation Tasks\s*$/mu)[1]?.split(/^## /mu)[0] ?? "";
@@ -25509,20 +25576,48 @@ function validatePlanRunnerControlTasks(markdown, repoRoot, allowedArtifactPaths
       (value) => path23.posix.normalize(value.replaceAll("\\", "/"))
     )
   );
-  const root = repoRoot.replaceAll("\\", "/").replace(/\/$/u, "");
-  let taskId = "unknown";
-  for (const line of section.split("\n")) {
-    taskId = TASK_HEADING.exec(line)?.[1] ?? taskId;
-    for (const raw of line.split(/[\s*`'"<>()[\]{},;]+/u)) {
-      const token = raw.replaceAll("\\", "/").replace(/:\d+(?::\d+)?$/u, "").replace(/[.!?]+$/u, "");
+  const root = path23.posix.normalize(repoRoot.replaceAll("\\", "/")).replace(/\/$/u, "");
+  let previousTaskId = "";
+  let previousPaths = [];
+  for (const { taskId, text: text3, access: access7 } of planTaskStatements(section)) {
+    if (taskId !== previousTaskId) previousPaths = [];
+    previousTaskId = taskId;
+    const paths = [];
+    const masked = text3.replace(/[^\s*`'"<>()[\]{},;&|]+/gu, (raw) => {
+      const token = raw.replaceAll("\\", "/").replace(/[.!?]+$/u, "").replace(/:\d+(?::\d+)?$/u, "");
+      if (!token.includes("/") && !/^\.[\w-]+$/u.test(token) && !/\.[a-z0-9]+$/iu.test(token))
+        return raw;
       const normalized = path23.posix.normalize(
         path23.posix.isAbsolute(token) || /^[a-z]:\//iu.test(token) ? token : `${root}/${token}`
       );
       const relative2 = normalized.toLowerCase().startsWith(`${root.toLowerCase()}/`) ? normalized.slice(root.length + 1) : normalized;
-      if ((relative2.toLowerCase() === ".banzai" || relative2.toLowerCase().startsWith(".banzai/")) && !allowed.has(relative2)) {
+      paths.push(relative2);
+      return `@${paths.length - 1}@${/[.!?]$/u.test(raw) ? "." : ""}`;
+    }).replace(/\[([^\]]*)\]\((@\d+@)\)/gu, "$2").replace(/[*`'"()]/gu, "");
+    const clauses = masked.split(
+      new RegExp(
+        `;|&&|\\|\\||[.!?](?:\\s+|$)|\\s+(?:but|however|whereas|while)\\s+|(?:,\\s*|\\s+(?:and|then|to)\\s+)(?:then\\s+)?(?=(?:(?:do|must|should)\\s+not\\s+|never\\s+)?${PLAN_ACTION}\\b)`,
+        "iu"
+      )
+    );
+    for (const clause of clauses) {
+      const references = [...clause.matchAll(/@(\d+)@/gu)].map(
+        (match) => paths[Number(match[1])] ?? ""
+      );
+      const mode2 = planClauseAccess(clause, access7);
+      const redirects = [...clause.matchAll(/>{1,2}\s*@(\d+)@/gu)].map(
+        (match) => paths[Number(match[1])] ?? ""
+      );
+      const targets = references.length ? references : /\b(?:it|them|that file|those files)\b/iu.test(clause) ? previousPaths : [];
+      if (references.length) previousPaths = references;
+      for (const relative2 of targets) {
+        const targetMode = redirects.includes(relative2) && !PLAN_PROHIBITION.test(clause) ? "write" : mode2;
+        if (!(relative2.toLowerCase() === ".banzai" || relative2.toLowerCase().startsWith(".banzai/")) || allowed.has(relative2) || targetMode === "read")
+          continue;
+        const target = JSON.stringify(relative2.slice(0, 240));
         throw new BanzaiError(
           "PLAN_RUNNER_CONTROL_TASK",
-          `Plan task ${taskId} names runner control path ${JSON.stringify(relative2.slice(0, 240))}. Remove that task and record missing configuration in Human prerequisites; use banzai verify for runner-owned configuration.`
+          targetMode === "write" ? `Plan task ${taskId} uses runner control path ${target} as a write target. Remove that write from the task; keep unrelated implementation work. If configuration is missing, record it in Human prerequisites and use banzai verify.` : `Plan task ${taskId} has ambiguous access to runner control path ${target}. Clarify the action or list read-only inputs under Read-only references: and protected paths under Unchanged paths:. These declarations do not authorize writes.`
         );
       }
     }
@@ -26240,6 +26335,7 @@ function planningPromptEnvelope(slug, request, adrDecisions, humanDecisions = []
       category: "phase_instructions",
       text: `Phase: plan
 Runner control files are outside model scope. Never plan tasks to edit paths under .banzai/ except the exact runner-bound implementation-report and test-report artifact roles. Record missing verification configuration in a Human prerequisites section. The runner offers guided configuration after implementation; no free-text answer grants an external config-write mechanism.
+Read-only references to runner control paths and explicit constraints preserving them are valid task context. Keep write targets separate from read-only inputs; clarify ambiguous references with a Read-only references: or Unchanged paths: list. These lists grant no write authority.
 Continue through the planning responsibilities: the description is approved as part of the plan bundle,
 not on its own.
 Use only the exact supplied planning write roles and the existing public ADR/manifest authority.
