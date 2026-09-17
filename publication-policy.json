@@ -369,6 +369,16 @@
       "sha256": null
     },
     {
+      "path": "documentation/decisions/0047-runner-owned-completion-projection.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0048-completion-markup-and-viewer-enrichment-boundary.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
       "path": "documentation/decisions/README.md",
       "classification": "maintainer",
       "sha256": null
@@ -460,6 +470,11 @@
     },
     {
       "path": "documentation/releases/2.5.0.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/releases/2.6.0.md",
       "classification": "maintainer",
       "sha256": null
     },

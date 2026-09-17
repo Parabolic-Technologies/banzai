@@ -129,6 +129,7 @@ function workflowStatus(
       total: null,
       diagnostics: []
     },
+    completionPublication: null,
     ...overrides
   };
 }
@@ -229,11 +230,31 @@ function hasCode(code: string): (error: unknown) => boolean {
   return (error) => error instanceof BanzaiError && error.code === code;
 }
 
-test("agent control capabilities declare the exact offline v4 operation set", () => {
+test("agent control capabilities declare the exact offline v5 operation set", () => {
   const capabilities = agentControlCapabilities();
-  assert.equal(capabilities.schema, "banzai-agent-capabilities/v4");
-  assert.equal(capabilities.schemaVersion, 4);
-  assert.equal(capabilities.controlContractVersion, "4.0.0");
+  assert.equal(capabilities.schema, "banzai-agent-capabilities/v5");
+  assert.equal(capabilities.schemaVersion, 5);
+  assert.equal(capabilities.controlContractVersion, "5.0.0");
+  assert.deepEqual(capabilities.completionPublication, {
+    protocol: "banzai-completion-protocol/v1",
+    stages: [
+      "capture",
+      "validate",
+      "render",
+      "candidate",
+      "publication",
+      "receipt",
+      "attempt",
+      "state",
+      "event"
+    ],
+    refusalCodes: [
+      "COMPLETION_PUBLICATION_IO",
+      "COMPLETION_PUBLICATION_DRIFT",
+      "COMPLETION_PUBLICATION_INTEGRITY"
+    ],
+    statusSchema: "banzai-agent-status/v4"
+  });
   assert.equal(capabilities.orchestratorVersion, packageManifest.version);
   assert.equal(capabilities.umbrellaContractVersion, CONTRACT_VERSION);
   assert.deepEqual(Object.keys(capabilities.operations), [
@@ -741,8 +762,8 @@ test("status projection derives every semantic action from runner state", () => 
     }
   }
   assert.deepEqual(emptyAgentControlStatus(), {
-    schema: "banzai-agent-status/v3",
-    schemaVersion: 3,
+    schema: "banzai-agent-status/v4",
+    schemaVersion: 4,
     activeRun: null
   });
 });

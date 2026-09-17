@@ -139,16 +139,20 @@ or unreadable.
 
 Caller-specific process and contract details remain here:
 
-Include a **Plan Task Completion** table with exactly one row per approved
-`TNNN` task, in plan order. Each row contains task ID, `completed`, `incomplete`,
-or `blocked` status, a JSON array of bounded repository-relative evidence
-objects, and a JSON gap object or `null`. Precede the table with
-`` Format: `banzai-plan-task-completion/v1` `` and use the exact columns `Task`,
-`Status`, `Evidence`, and `Gap or deviation`. Create the task records once and
-reuse them verbatim in the table and the structured `taskCompletion` ledger;
-after parsing, the two must be JSON-identical. In orchestrated mode the runner
-prompt supplies the exact cell escaping, field bounds, and a canonical row;
-follow it verbatim and reread the written table before returning the result.
+In standalone mode, include a **Plan Task Completion** table with exactly one
+row per approved `TNNN` task, in plan order. Each row contains task ID,
+`completed`, `incomplete`, or `blocked` status, a JSON array of bounded
+repository-relative evidence objects, and a JSON gap object or `null`. Precede
+the table with `` Format: `banzai-plan-task-completion/v1` `` and use the exact
+columns `Task`, `Status`, `Evidence`, and `Gap or deviation`. Create the task
+records once and reuse them verbatim in the table and the structured
+`taskCompletion` ledger; after parsing, the two must be JSON-identical.
+In orchestrated mode, do not author that table: return the same records only in
+the structured `taskCompletion` ledger under the runner prompt's field bounds,
+write the report narrative under your own headings, and leave at most one
+existing **Plan Task Completion** section for the runner to replace with its
+published `banzai-plan-task-completion/v2` region. A gap reference names a
+unique narrative heading outside that section and outside code fences.
 
 Every completed task needs at least one existing regular repository file in
 the approved run's changed scope, with a bounded detail. Every incomplete or

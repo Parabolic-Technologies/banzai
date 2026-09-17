@@ -187,11 +187,14 @@ function decodeCanonicalAttempt(
       "Canonical attempt identity conflicts with its owner."
     );
   }
+  // pending_application (ADR-0047) is a known physical invocation whose
+  // runner acceptance is still open; its usage counts once like any other.
   if (
     item.status !== "started" &&
     item.status !== "completed" &&
     item.status !== "failed" &&
-    item.status !== "interrupted"
+    item.status !== "interrupted" &&
+    item.status !== "pending_application"
   ) {
     return invalid(runId, attempt.id, "Canonical attempt status is invalid.");
   }

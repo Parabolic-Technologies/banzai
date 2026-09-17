@@ -576,8 +576,8 @@ async function runSmoke(options) {
     );
     requireIdentity(
       capabilities,
-      "banzai-agent-capabilities/v4",
-      4,
+      "banzai-agent-capabilities/v5",
+      5,
       "agent control capabilities"
     );
     if (capabilities.orchestratorVersion !== expectedVersion) {
@@ -587,7 +587,7 @@ async function runSmoke(options) {
       );
     }
     if (
-      capabilities.controlContractVersion !== "4.0.0" ||
+      capabilities.controlContractVersion !== "5.0.0" ||
       capabilities.operations?.status?.supported !== true ||
       JSON.stringify(
         capabilities.operations?.approveVerification?.inputSchemas
@@ -639,8 +639,8 @@ async function runSmoke(options) {
     const status = parseJson(statusFirst, "agent control status");
     requireIdentity(
       status,
-      "banzai-agent-status/v3",
-      3,
+      "banzai-agent-status/v4",
+      4,
       "agent control status"
     );
     if (status.activeRun !== null) {
@@ -696,8 +696,8 @@ async function runSmoke(options) {
     );
     requireIdentity(
       consultationStatus,
-      "banzai-agent-status/v3",
-      3,
+      "banzai-agent-status/v4",
+      4,
       "consultation status"
     );
     if (
@@ -743,8 +743,8 @@ async function runSmoke(options) {
     const answered = parseJson(answeredText, "consultation answer");
     requireIdentity(
       answered,
-      "banzai-agent-status/v3",
-      3,
+      "banzai-agent-status/v4",
+      4,
       "consultation answer"
     );
     if (

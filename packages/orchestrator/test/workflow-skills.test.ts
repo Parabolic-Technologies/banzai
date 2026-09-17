@@ -182,10 +182,13 @@ test("plan policy delivers the approved convention and preserves the completion 
         policy.indexOf("### Opt-in verification obligations")
       )
       .trimEnd() + "\n";
-  // ADR-0038 adds authority interpretation; it does not amend completion prose.
+  // ADR-0038 adds authority interpretation; it does not amend completion
+  // prose. ADR-0047 amends the completion prose once (runner-owned v2
+  // publication beside the retained standalone/legacy v1 table); this pin
+  // freezes that accepted wording.
   assert.equal(
     createHash("sha256").update(completion).digest("hex"),
-    "5b0e9ef93c9a5a0f6d45e32528d32069d6b0bbe618d51039e14fa9cfe8abc87e"
+    "466c97997c7e18ce84d928b673c3108a7eba4b4194fcfe1a4d0485980dbb91d3"
   );
 });
 
@@ -208,7 +211,7 @@ test("shipped strict workflow keeps approved tasks immutable and uses one struct
   assert.match(workflow, /PLAN_TASK_COMPLETION_INVALID/);
   assert.match(planning, /- \[ \] \*\*T001 - Title\*\*/);
   assert.match(writing, /canonical evidence/i);
-  assert.match(writing, /exactly one row per approved\s+`TNNN` task/i);
+  assert.match(writing, /exactly one\s+row per approved\s+`TNNN` task/i);
   assert.match(writing, /completed`, `incomplete`,\s+or `blocked`/i);
   assert.match(writing, /never update approved plan checkboxes/i);
   assert.match(writing, /created or modified relative to\s+the run baseline/i);
@@ -351,7 +354,7 @@ test("shipped workflow and supervisor preserve existing gates and add the runner
   assert.match(feature, /cannot use the planning-only consultation gate/);
 
   const assertSupervisorSafety = (source: string): void => {
-    assert.match(source, /exact supported v4 declaration/i);
+    assert.match(source, /exact supported v5 declaration/i);
     assert.match(source, /answer_consultation/);
     assert.match(
       source,
@@ -370,9 +373,9 @@ test("shipped workflow and supervisor preserve existing gates and add the runner
     );
   });
 
-  assert.match(protocol, /banzai-agent-capabilities\/v4/);
-  assert.match(protocol, /controlContractVersion: "4\.0\.0"/);
-  assert.match(protocol, /banzai-agent-status\/v3/);
+  assert.match(protocol, /banzai-agent-capabilities\/v5/);
+  assert.match(protocol, /controlContractVersion: "5\.0\.0"/);
+  assert.match(protocol, /banzai-agent-status\/v4/);
   assert.match(protocol, /answer_escalation/);
   assert.match(protocol, /answer_consultation/);
   const documents = [...protocol.matchAll(/```json\n([\s\S]*?)\n```/gu)].map(

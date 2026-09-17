@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { BanzaiError } from "./errors.js";
 import type {
   OrchestratorConfig,
+  RunState,
   VerificationCommand,
   VerificationProfile
 } from "./types.js";
@@ -286,11 +287,30 @@ export function configurationHash(value: unknown): string {
 }
 
 /** Shared private-state reader; grants no continuation or config-write authority. */
+/**
+ * Whether a persisted run carries guided configuration state. Schema 6 always
+ * does; schema 7 does exactly when its config-2/3 bootstrap carried it over,
+ * so a config-1 run gains no configuration semantics from the transition.
+ */
+export function hasConfigurationSetup(
+  state: Pick<RunState, "schemaVersion"> & {
+    configurationSetup?: unknown;
+  }
+): boolean {
+  return (
+    state.schemaVersion === 6 ||
+    (state.schemaVersion === 7 && state.configurationSetup !== undefined)
+  );
+}
+
 export function validateConfigurationStateEnvelope(value: unknown): void {
   if (!value || typeof value !== "object" || Array.isArray(value))
     configurationInvalid();
   const state = value as Record<string, unknown>;
-  if (state.schemaVersion !== 6) {
+  if (
+    state.schemaVersion !== 6 &&
+    !(state.schemaVersion === 7 && "configurationSetup" in state)
+  ) {
     if (
       (Array.isArray(state.humanDecisions) &&
         state.humanDecisions.some(

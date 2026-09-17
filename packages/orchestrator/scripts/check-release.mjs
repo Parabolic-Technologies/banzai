@@ -427,14 +427,14 @@ function validatePolicyShape(policy) {
   const state = record(contracts.state, policyPath, "contracts.state");
   requireExact(
     state.currentSchemaVersion,
-    6,
+    7,
     "CONTRACT_POLICY_DRIFT",
     policyPath,
     "current state schema version"
   );
   requireJsonExact(
     state.legacySchemaVersions,
-    [1, 2, 3, 4, 5],
+    [1, 2, 3, 4, 5, 6],
     "CONTRACT_POLICY_DRIFT",
     policyPath,
     "legacy state schema versions"
@@ -445,9 +445,9 @@ function validatePolicyShape(policy) {
     "contracts.agentControl"
   );
   const expectedControl = {
-    contractVersion: "4.0.0",
-    capabilities: "banzai-agent-capabilities/v4",
-    status: "banzai-agent-status/v3",
+    contractVersion: "5.0.0",
+    capabilities: "banzai-agent-capabilities/v5",
+    status: "banzai-agent-status/v4",
     request: "banzai-agent-request/v1",
     answer: "banzai-agent-answer/v2",
     configurationAnswer: "banzai-agent-answer/v3",
@@ -868,14 +868,14 @@ async function validateContracts(root, policy) {
     );
   }
   if (
-    !/export interface RunState\s*{\s*schemaVersion:\s*3\s*\|\s*4\s*\|\s*5\s*\|\s*6;/.test(
+    !/export interface RunState\s*{[^}]*?schemaVersion:\s*3\s*\|\s*4\s*\|\s*5\s*\|\s*6\s*\|\s*7;/.test(
       typesSource
     )
   ) {
     fail(
       "STATE_CONTRACT_DRIFT",
       typesPath,
-      "current run state must retain v3-v5 and support guided v6"
+      "current run state must retain v3-v6 and support completion-protocol v7"
     );
   }
   if (!/schemaVersion:\s*1\s*\|\s*2;/.test(typesSource)) {
@@ -917,8 +917,8 @@ async function validateContracts(root, policy) {
     }
   }
   for (const [name, expected] of [
-    ["AGENT_CAPABILITIES_SCHEMA_VERSION", 4],
-    ["AGENT_STATUS_SCHEMA_VERSION", 3],
+    ["AGENT_CAPABILITIES_SCHEMA_VERSION", 5],
+    ["AGENT_STATUS_SCHEMA_VERSION", 4],
     ["AGENT_ANSWER_SCHEMA_VERSION", 2],
     ["CONFIGURATION_ANSWER_SCHEMA_VERSION", 3],
     ["AGENT_REQUEST_SCHEMA_VERSION", 1],
@@ -950,14 +950,14 @@ async function validateContracts(root, policy) {
     }
   }
   if (
-    !/if\s*\(\s*state\.schemaVersion === 3\s*\|\|\s*state\.schemaVersion === 4\s*\|\|\s*state\.schemaVersion === 5\s*\|\|\s*state\.schemaVersion === 6\s*\)/u.test(
+    !/state\.schemaVersion === 3\s*\|\|\s*state\.schemaVersion === 4\s*\|\|\s*state\.schemaVersion === 5\s*\|\|\s*state\.schemaVersion === 6\s*\|\|\s*state\.schemaVersion === 7/u.test(
       store
     )
   )
     fail(
       "STATE_CONTRACT_DRIFT",
       storePath,
-      "current state reads must retain v3-v5 and support v6"
+      "current state reads must retain v3-v6 and support v7"
     );
   const validationPath = "packages/orchestrator/src/validation.ts";
   const validation = flatText(await readText(root, validationPath));
@@ -968,6 +968,7 @@ async function validateContracts(root, policy) {
     "value.schemaVersion !== 4",
     "value.schemaVersion !== 5",
     "value.schemaVersion !== 6",
+    "value.schemaVersion !== 7",
     "schemaVersion >= 2"
   ]) {
     if (!validation.includes(fragment)) {
@@ -1544,7 +1545,7 @@ async function validateInstructionLayout(root) {
       (contents.split("\n").filter((line) => line === "## Plan Authority")
         .length !== 1 ||
         !contents.includes(
-          "- Owner decision: ADR-0038 (Plan Authority); ADR-0017/0025 (Plan Task Completion Evidence)"
+          "- Owner decision: ADR-0038 (Plan Authority); ADR-0017/0025/0047 (Plan Task Completion Evidence)"
         ))
     ) {
       fail(
@@ -2188,18 +2189,20 @@ async function validateDecisionConsultationPolicy(root) {
         "There are five existing decision gates plus a conditional configuration prerequisite",
         "Consultation is conditional, planning-only, and concise",
         "it does not accept an ADR, approve a plan",
-        "control contract `4.0.0`"
+        "control contract `5.0.0`"
       ]
     ],
     [
       "documentation/orchestrator.md",
       [
         "workflow's five existing decision gates",
-        "banzai-agent-capabilities/v4",
-        "banzai-agent-status/v3",
+        "banzai-agent-capabilities/v5",
+        "banzai-agent-status/v4",
         "banzai-agent-answer/v2",
         "A v1 answer cannot answer a consultation.",
-        "New config-2/3 run state uses schema version 6",
+        "New config-2/3 run state starts at schema version 6",
+        "New config-1 run state starts at schema version 4",
+        "The first new strict implementation or fix attempt transitions state to schema version 7",
         "The model hand-off uses phase-result v3.",
         "phase-result v1 and v2 remain read-only legacy inputs",
         "Evaluation export and KPI stay on their independent privacy-minimized v1 contracts."
@@ -2219,8 +2222,8 @@ async function validateDecisionConsultationPolicy(root) {
       [
         "the five existing decision gates",
         "five existing workflow gates plus a conditional configuration prerequisite",
-        "phase-result schema v3 and state schema v6 with explicit v1-v5 historical readers",
-        "control contract version `4.0.0`",
+        "phase-result schema v3 and state schema v7 with explicit v1-v6 historical readers",
+        "control contract version `5.0.0`",
         "phase-result v3 is current",
         "phase-result v1/v2 remain byte-preserved legacy reader surfaces"
       ]
@@ -2303,8 +2306,8 @@ async function validateDecisionConsultationPolicy(root) {
       "packages/orchestrator/scripts/smoke-committed.mjs",
       [
         "setupConsultationRun",
-        "banzai-agent-capabilities/v4",
-        "banzai-agent-status/v3",
+        "banzai-agent-capabilities/v5",
+        "banzai-agent-status/v4",
         "answer_consultation",
         "banzai-agent-answer/v2",
         "consultation lifecycle events are not count-only",
@@ -2314,8 +2317,8 @@ async function validateDecisionConsultationPolicy(root) {
     [
       "packages/orchestrator/test/committed-smoke.test.ts",
       [
-        "banzai-agent-capabilities/v4",
-        "banzai-agent-status/v3",
+        "banzai-agent-capabilities/v5",
+        "banzai-agent-status/v4",
         "control answer --by Smoke User --no-resume",
         "decision.consultation.answered"
       ]
@@ -2373,7 +2376,7 @@ async function validateOrchestrateSkill(root) {
         "BANZAI_WORKFLOW_DIGEST",
         "banzai control capabilities",
         "banzai control status",
-        "exact supported v4 declaration",
+        "exact supported v5 declaration",
         "banzai-agent-request/v1",
         "banzai-agent-answer/v2",
         "banzai-agent-answer/v1",
@@ -2401,9 +2404,9 @@ async function validateOrchestrateSkill(root) {
     [
       "plugins/banzai/skills/orchestrate/references/control-protocol.md",
       [
-        "banzai-agent-capabilities/v4",
-        "banzai-agent-status/v3",
-        'controlContractVersion: "4.0.0"',
+        "banzai-agent-capabilities/v5",
+        "banzai-agent-status/v4",
+        'controlContractVersion: "5.0.0"',
         "banzai-agent-request/v1",
         "banzai-agent-answer/v2",
         "banzai-agent-answer/v1",

@@ -34,7 +34,7 @@ is a runner-owned phase and follow only its assigned Banzai phase skill.
 ## Establish the control boundary
 
 1. Run `banzai control capabilities` before any state-changing command.
-2. Require the exact supported v4 declaration in the reference. Treat missing
+2. Require the exact supported v5 declaration in the reference. Treat missing
    executable, non-zero exit, stderr error, malformed JSON, unsupported
    identity/version, or a missing operation as incompatible.
 3. Stop with a bounded diagnostic when incompatible. Do not install Banzai,

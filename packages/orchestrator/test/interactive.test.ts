@@ -136,6 +136,7 @@ function workflowStatus(
       total: null,
       diagnostics: []
     },
+    completionPublication: null,
     ...overrides
   };
 }

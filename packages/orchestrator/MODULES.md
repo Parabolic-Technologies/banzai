@@ -72,8 +72,10 @@ is a navigational reference and is updated with the module it describes.
   Capability discovery runs before Git discovery or runner construction;
   status, start, answer, and recover reuse the current `WorkflowRunner`, and
   mutations emit a fresh authoritative status projection.
-- `agent-control.ts` — closed current `banzai-agent-capabilities/v4`,
-  `banzai-agent-status/v3`, and configuration `banzai-agent-answer/v3` contracts;
+- `agent-control.ts` — closed current `banzai-agent-capabilities/v5`
+  (declaring the completion publication protocol, stages, refusal codes and
+  `pending_application`), `banzai-agent-status/v4` (adding the bounded
+  completion publication state), and configuration `banzai-agent-answer/v3` contracts;
   preserved keyed consultation `banzai-agent-answer/v2`, `banzai-agent-request/v1`, ordered escalation
   `banzai-agent-answer/v1`, and `banzai-agent-recovery/v1` inputs; bounded
   privacy allow-list, semantic state/action projection, exact consultation
@@ -251,6 +253,26 @@ is a navigational reference and is updated with the module it describes.
   approval-digest validation, base-commit validation, attempt reconciliation,
   compatible builder-session selection, bounded full/delta reviewer policy,
   and direct terminal completion after complete zero-accepted triage.
+  For new strict implementation and fix attempts it owns the
+  `banzai-completion-protocol/v1` lifecycle (ADR-0047): the v7 state
+  transition with retained prior-state bytes, protocol-selected envelope
+  decoding, `pending_application`, capture, claim validation, deterministic
+  v2 region rendering, candidate persistence, publication, receipt, apply and
+  once-only events, the closed `CompletionRefusal` routes (I/O resume, drift
+  restore-then-resume, integrity cancel), stop results applied with retained
+  diagnostics, linked `<kind>-repair-<hex>` successors via `retryOf`, and the
+  read-only revalidation of published completion at every downstream boundary.
+  Capture derives its baseline from the identities the v2 terminal checkpoint
+  observed, refuses any second observation that differs and refuses a claim
+  without that proof; it revalidates checkpoint configuration and session
+  context before creating a missing capture. Identity-bearing capture/receipt
+  time derives from terminal proof rather than retry time. Ordinary cursor
+  state-write failures and follow-on refusal state/event persistence failures
+  stay on the publication path without becoming model failures; resume appends
+  a durable refusal event once before continuing. Publication authority includes
+  the implementer configuration digest; and a completed protocol
+  attempt interrupted before its summary, cursor and events finishes them
+  idempotently from its receipt.
   `artifactWritePaths` supplies prompt grants and `checkArtifactPhaseScope`:
   strict implementation permits the bound `implementationReport` and
   `testReport`; strict fix additionally permits the existing bound
@@ -318,7 +340,10 @@ is a navigational reference and is updated with the module it describes.
   schema-version-1 verification ledger marker, atomically owns one bounded leaf
   per physical verification attempt plus sequence-qualified log digests,
   enumerates canonical model-attempt leaves with path/identity validation while
-  excluding checkpoint, candidate, and raw-result evidence, and enforces the
+  excluding checkpoint, candidate, raw-result and completion-protocol evidence,
+  writes the immutable attempt-owned completion transition, original report,
+  capture, candidate and publication records (`wx` temp plus link),
+  appends deduplicated events through `appendEventOnce`, and enforces the
   single-active-run lock. Locks this process holds are tracked module-wide, so
   `releaseHeldRunnerLocksSync` can drop them from a signal handler, where the
   `try/finally` that normally releases never runs; a lock file whose token is
@@ -413,7 +438,13 @@ is a navigational reference and is updated with the module it describes.
 - `validation.ts` — runtime decoders (`parseWorkflowSelectionResult`,
   `parsePhaseResult`, `parseReviewResult`, `parseConfig`) that enforce the
   invariants JSON Schema cannot express: non-empty values, identifier patterns,
-  positive integers, uniqueness, and cross-field agreement.
+  positive integers, uniqueness, and cross-field agreement. Also the
+  protocol-selected safe envelope (`parsePhaseResultEnvelope`, which validates
+  everything except the ledger and retains the canonical original plus digest),
+  attempt schema 3 rules (protocol fields required on v3 and forbidden on
+  v1/v2, result bound to the retained envelope original), terminal checkpoint
+  v2, and the closed readers for completion transition, capture, candidate,
+  publication receipt, cursor, summary v2 and diagnostics.
 - `prompt-envelope.ts` — in-memory ordered closed prompt components whose
   concatenation is the exact adapter prompt; it adds no implicit separator and
   persists no component text.
@@ -492,19 +523,25 @@ is a navigational reference and is updated with the module it describes.
   freeze ordinary findings/severity/verdict before Engineering Quality mapping,
   isolate incremental `EQ-SHADOW:` candidates in free-form deferred coverage,
   preserve all opaque shadow strings through runner rendering, and make full-after-fix and delta review
-  closure-oriented under durable human triage. Strict implementation and
-  completion-repair prompts define the runner-authorized changed surface,
-  distinguish carried-in unchanged files from valid report evidence, require
-  the model to reread the report table, and return JSON-identical task records
-  without rewording evidence details. Repair prompts also carry the persisted
-  violation and exact rejected task ID.
+  closure-oriented under durable human triage. Strict implementation, fix and
+  completion-repair prompts request structured claims plus report narrative
+  under `banzai-completion-protocol/v1`: they define the runner-authorized
+  changed surface, distinguish carried-in unchanged files from valid report
+  evidence, state that the runner renders and publishes the **Plan Task
+  Completion** section and that nothing inside it confers authority, and never
+  ask for a model-authored table. Repair prompts also carry the persisted
+  violation, exact rejected task ID and diagnostic, and route report-input
+  violations to narrative-ownership repair.
 - `review-snapshot.ts` — immutable `banzai-review-snapshot/v2` bound identity and historical v1 identity, exact
   approved-file hashes, full/delta lineage, recorded verification/completion and
-  physically owned evidence paths. Storage is a private attempt sidecar,
+  physically owned evidence paths; snapshot v5 additionally freezes the
+  completion publication receipt, capture and candidate identities and admits
+  summary schema 2. Storage is a private attempt sidecar,
   excluded from canonical model-attempt enumeration.
 - `review-artifact.ts` — shared v2 deterministic rendering, complete lossless
   semantic values, required scope versus reviewer assertions, and original
-  runner-evidence projection. Validates exact candidate bytes and publishes only
+  runner-evidence projection; snapshot v5 renders as `banzai-feature-review/v6`
+  with a runner-owned completion publication section. Validates exact candidate bytes and publishes only
   the in-memory validation proof. Legacy v1 rendering, canonical fallback,
   independent prose rules and typed content diagnostics remain readable.
 - `mcp.ts` — `resolveSerenaWhitelist`, the availability-gated Serena MCP
@@ -587,11 +624,13 @@ is a navigational reference and is updated with the module it describes.
   fresh-input remainder, and an optional turn count. It reads no
   process state, so both surfaces are testable against an explicit width.
 - `types.ts` — all shared types, `CONTRACT_VERSION = "1.0.0"`, phase-result
-  schema v3 and state schema v6 with explicit v1-v5 historical readers, independent
-  agent-control schema and `4.0.0` contract identities, independent
+  schema v3 and state schema v7 with explicit v1-v6 historical readers, independent
+  agent-control schema and `5.0.0` contract identities, independent
   `banzai-context-attempt/v1` and `banzai-context-report/v1` identities,
-  model-attempt v2,
-  terminal-checkpoint/recovery contracts, and the pure role/model/effort
+  model-attempt v2 and strict model-attempt v3 under
+  `banzai-completion-protocol/v1`, terminal-checkpoint v1/v2, the completion
+  capture/transition/candidate/publication record identities, completion
+  summary v2, recovery contracts, and the pure role/model/effort
   session-binding matcher; no runtime imports.
 - `errors.ts` — `BanzaiError` (stable `code`, `exitCode`), `ProcessExitError`
   (retains redacted stdout/stderr plus the typed `failureCause` and the usage

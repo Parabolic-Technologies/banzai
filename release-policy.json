@@ -177,19 +177,20 @@
       ]
     },
     "state": {
-      "currentSchemaVersion": 6,
+      "currentSchemaVersion": 7,
       "legacySchemaVersions": [
         1,
         2,
         3,
         4,
-        5
+        5,
+        6
       ]
     },
     "agentControl": {
-      "contractVersion": "4.0.0",
-      "capabilities": "banzai-agent-capabilities/v4",
-      "status": "banzai-agent-status/v3",
+      "contractVersion": "5.0.0",
+      "capabilities": "banzai-agent-capabilities/v5",
+      "status": "banzai-agent-status/v4",
       "request": "banzai-agent-request/v1",
       "answer": "banzai-agent-answer/v2",
       "legacyAnswer": "banzai-agent-answer/v1",

@@ -102,7 +102,9 @@ try {
     outdir: outputRoot,
     outbase: testRoot,
     bundle: true,
-    external: ["@inquirer/core", "@inquirer/prompts"],
+    // Prettier stays test-only: the ADR-0048 syntax oracle loads the existing
+    // installed Markdown plugin at test time instead of bundling it.
+    external: ["@inquirer/core", "@inquirer/prompts", "prettier"],
     format: "esm",
     platform: "node",
     target: "node22",

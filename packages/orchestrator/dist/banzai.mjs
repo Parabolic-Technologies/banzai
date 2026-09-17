@@ -189,7 +189,7 @@ import { constants } from "node:fs";
 import { lstat, open, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 function usesVerificationPolicy(state) {
-  return state.schemaVersion === 5 || state.schemaVersion === 6 && state.verificationMode === "policy";
+  return state.schemaVersion === 5 || (state.schemaVersion === 6 || state.schemaVersion === 7) && state.verificationMode === "policy";
 }
 var DETECTABLE_PROJECT_TYPES = [
   "dotnet",
@@ -633,11 +633,14 @@ function configurationHash(value) {
     configurationInvalid();
   return value;
 }
+function hasConfigurationSetup(state) {
+  return state.schemaVersion === 6 || state.schemaVersion === 7 && state.configurationSetup !== void 0;
+}
 function validateConfigurationStateEnvelope(value) {
   if (!value || typeof value !== "object" || Array.isArray(value))
     configurationInvalid();
   const state = value;
-  if (state.schemaVersion !== 6) {
+  if (state.schemaVersion !== 6 && !(state.schemaVersion === 7 && "configurationSetup" in state)) {
     if (Array.isArray(state.humanDecisions) && state.humanDecisions.some(
       (record7) => record7?.kind === "configuration_prerequisite"
     ) || "configurationSetup" in state || "verificationMode" in state || state.pendingHumanDecision?.kind === "configuration_prerequisite")
@@ -1315,7 +1318,7 @@ function validateConfigurationStateEnvelope2(value) {
   if (!value || typeof value !== "object" || Array.isArray(value))
     configurationInvalid2();
   const state = value;
-  if (state.schemaVersion !== 6) {
+  if (state.schemaVersion !== 6 && !(state.schemaVersion === 7 && "configurationSetup" in state)) {
     if (Array.isArray(state.humanDecisions) && state.humanDecisions.some(
       (record7) => record7?.kind === "configuration_prerequisite"
     ) || "configurationSetup" in state || "verificationMode" in state || state.pendingHumanDecision?.kind === "configuration_prerequisite")
@@ -1779,6 +1782,21 @@ function validateConfigurationSnapshot(snapshot) {
     for (const delta of change.delta) if (!keys3(delta, ["start", "before", "after"]) || !Number.isSafeInteger(delta.start) || delta.start < 0 || typeof delta.before !== "string" || typeof delta.after !== "string" || Buffer.byteLength(delta.before) + Buffer.byteLength(delta.after) > 2 * 1024 * 1024) invalid2("Unbounded or malformed runner configuration delta.");
   }
 }
+var COMPLETION_PROTOCOL = "banzai-completion-protocol/v1";
+function validateCompletionPublicationSnapshot(snapshot) {
+  const hash2 = (value) => typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+  const id = (value) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value) && value.length <= 200;
+  const publication = snapshot.completionPublication;
+  const source = snapshot.completionSource;
+  if (publication === null) {
+    if (source !== null && source.schemaVersion === 2) invalid2("Published completion source requires its frozen publication identities.");
+    return;
+  }
+  if (!object2(publication) || Object.keys(publication).sort().join(",") !== "candidateDigest,captureDigest,completionProtocol,publisherAttemptId,receiptDigest,receiptPath" || publication.completionProtocol !== COMPLETION_PROTOCOL || !id(publication.publisherAttemptId) || publication.receiptPath !== `attempts/${publication.publisherAttemptId}.completion-publication.json` || !hash2(publication.receiptDigest) || !hash2(publication.captureDigest) || !hash2(publication.candidateDigest))
+    invalid2("Invalid frozen completion publication identities.");
+  if (source === null || source.schemaVersion !== 2 || source.completionProtocol !== COMPLETION_PROTOCOL || source.publisherAttemptId !== publication.publisherAttemptId || !object2(source.publication) || source.publication.path !== publication.receiptPath || source.publication.sha256 !== publication.receiptDigest)
+    invalid2("Frozen completion publication disagrees with the completion source.");
+}
 function parseSnapshot(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     invalid2("Review snapshot must be an object.");
@@ -1804,27 +1822,33 @@ function parseSnapshot(value) {
     "artifact",
     "digest"
   ];
-  if (snapshot.schemaVersion >= 2) keys3.push("artifactBinding");
+  const guidedV5 = snapshot.schemaVersion === 5 && "configurationSetup" in snapshot;
+  const bound = snapshot.schemaVersion >= 2 && (snapshot.schemaVersion !== 5 || "artifactBinding" in snapshot);
+  if (bound) keys3.push("artifactBinding");
   if (snapshot.schemaVersion === 4) keys3.push("verificationMode", "configurationSetup");
-  if (Object.keys(snapshot).length !== keys3.length || Object.keys(snapshot).some((key) => !keys3.includes(key)) || !(snapshot.schemaVersion === 1 && snapshot.schema === "banzai-review-snapshot/v1" || snapshot.schemaVersion === 2 && snapshot.schema === "banzai-review-snapshot/v2" || snapshot.schemaVersion === 3 && snapshot.schema === "banzai-review-snapshot/v3" || snapshot.schemaVersion === 4 && snapshot.schema === "banzai-review-snapshot/v4") || !equal(snapshot.outputContract, "review-result/v2") || !/^[a-f0-9]{64}$/u.test(digest22) || digest22 !== digestCanonicalJson(body))
+  if (snapshot.schemaVersion === 5) {
+    keys3.push("completionPublication");
+    if (guidedV5) keys3.push("verificationMode", "configurationSetup");
+  }
+  if (Object.keys(snapshot).length !== keys3.length || Object.keys(snapshot).some((key) => !keys3.includes(key)) || !(snapshot.schemaVersion === 1 && snapshot.schema === "banzai-review-snapshot/v1" || snapshot.schemaVersion === 2 && snapshot.schema === "banzai-review-snapshot/v2" || snapshot.schemaVersion === 3 && snapshot.schema === "banzai-review-snapshot/v3" || snapshot.schemaVersion === 4 && snapshot.schema === "banzai-review-snapshot/v4" || snapshot.schemaVersion === 5 && snapshot.schema === "banzai-review-snapshot/v5") || !equal(snapshot.outputContract, "review-result/v2") || !/^[a-f0-9]{64}$/u.test(digest22) || digest22 !== digestCanonicalJson(body))
     invalid2("Review snapshot version, shape or digest is invalid.");
   for (const id of [snapshot.runId, snapshot.attemptId])
     if (typeof id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(id))
       invalid2("Review snapshot identity is invalid.");
-  if (snapshot.schemaVersion >= 2) {
-    const bound = snapshot.artifactBinding;
-    if (!bound || Object.keys(bound).sort().join(",") !== "binding,sha256" || !/^[a-f0-9]{64}$/u.test(bound.sha256))
+  if (bound) {
+    const bound2 = snapshot.artifactBinding;
+    if (!bound2 || Object.keys(bound2).sort().join(",") !== "binding,sha256" || !/^[a-f0-9]{64}$/u.test(bound2.sha256))
       invalid2("Review snapshot binding is missing or malformed.");
-    parseBinding(bound.binding);
-    if (snapshot.schemaVersion === 2 && bound.binding.schemaVersion !== 1) invalid2("Snapshot v2 retains binding v1 semantics.");
+    parseBinding(bound2.binding);
+    if (snapshot.schemaVersion === 2 && bound2.binding.schemaVersion !== 1) invalid2("Snapshot v2 retains binding v1 semantics.");
     const workspace = snapshot.workspace;
-    if (workspace.schemaVersion !== 2 || workspace.artifactBindingDigest !== bound.sha256 || Object.keys(workspace).sort().join(",") !== "artifactBindingDigest,baseCommit,digest,entries,schemaVersion")
+    if (workspace.schemaVersion !== 2 || workspace.artifactBindingDigest !== bound2.sha256 || Object.keys(workspace).sort().join(",") !== "artifactBindingDigest,baseCommit,digest,entries,schemaVersion")
       invalid2("Review snapshot workspace does not match its binding.");
     const expectedDigest = createHash22("sha256").update(
       JSON.stringify({
         version: 2,
         baseCommit: workspace.baseCommit,
-        artifactBindingDigest: bound.sha256,
+        artifactBindingDigest: bound2.sha256,
         entries: workspace.entries
       })
     ).digest("hex");
@@ -1834,7 +1858,7 @@ function parseSnapshot(value) {
       )
     ))
       invalid2("Review snapshot workspace entries or digest are invalid.");
-    const roles = bound.binding.artifacts;
+    const roles = bound2.binding.artifacts;
     if (snapshot.artifact.path !== `${roles.reviewDirectory}/review-${snapshot.artifact.iteration}.md` || snapshot.approval.paths.some(
       (p) => p !== roles.description && p !== roles.plan && !/^documentation\/decisions\/[0-9]{4}-[a-z0-9-]+\.md$/u.test(p)
     ) || snapshot.completionSource !== null && (snapshot.completionSource.implementationReport.path !== roles.implementationReport || snapshot.completionSource.testReport.path !== roles.testReport))
@@ -1843,8 +1867,10 @@ function parseSnapshot(value) {
     invalid2("Legacy review snapshots cannot carry private storage authority.");
   }
   const artifact = snapshot.artifact;
-  if (snapshot.schemaVersion === 4) validateConfigurationSnapshot(snapshot);
-  if (snapshot.schemaVersion === 3 || snapshot.schemaVersion === 4 && snapshot.verificationMode === "policy" && snapshot.configurationSetup.coverage !== "skipped") {
+  if (snapshot.schemaVersion === 4 || guidedV5) validateConfigurationSnapshot(snapshot);
+  if (snapshot.schemaVersion === 5) validateCompletionPublicationSnapshot(snapshot);
+  if (guidedV5 && !bound) invalid2("Guided review evidence requires a bound run.");
+  if (snapshot.schemaVersion === 3 || (snapshot.schemaVersion === 4 || guidedV5) && snapshot.verificationMode === "policy" && snapshot.configurationSetup.coverage !== "skipped") {
     if (snapshot.artifactBinding.binding.schemaVersion !== 2) invalid2("Verification snapshot requires binding v2.");
     const evidence2 = parseReviewVerificationEvidence(artifact.verificationEvidence);
     if (evidence2.decision.workId !== snapshot.artifactBinding.binding.workId) invalid2("Cross-work review verification evidence.");
@@ -1898,7 +1924,7 @@ function parseSnapshot(value) {
   if (snapshot.completionSource !== null) {
     const source = snapshot.completionSource;
     const projection = artifact.taskCompletion;
-    if (!equal(source.schemaVersion, 1) || !equal(source.status, "valid") || !string(source.sourceAttemptId) || !["implementation", "fix"].includes(source.sourceAttemptKind ?? "") || source.approvalDigest !== snapshot.approval.digest || !hash2(source.ledgerDigest) || !hash2(source.planTaskDigest) || source.ledgerDigest !== projection?.ledgerDigest || source.planTaskDigest !== projection.planTaskDigest || source.approvalDigest !== projection.approvalDigest || source.counts.total !== projection.total || source.counts.completed !== projection.completed || source.implementationReport.path !== projection.implementationReport || source.testReport.path !== projection.testReport)
+    if (!(equal(source.schemaVersion, 1) || snapshot.schemaVersion === 5 && equal(source.schemaVersion, 2)) || !equal(source.status, "valid") || !string(source.sourceAttemptId) || !["implementation", "fix"].includes(source.sourceAttemptKind ?? "") || source.approvalDigest !== snapshot.approval.digest || !hash2(source.ledgerDigest) || !hash2(source.planTaskDigest) || source.ledgerDigest !== projection?.ledgerDigest || source.planTaskDigest !== projection.planTaskDigest || source.approvalDigest !== projection.approvalDigest || source.counts.total !== projection.total || source.counts.completed !== projection.completed || source.implementationReport.path !== projection.implementationReport || source.testReport.path !== projection.testReport)
       invalid2("Snapshot completion identities disagree.");
     for (const report of [source.implementationReport, source.testReport]) {
       reviewScopePath(report.path);
@@ -2336,8 +2362,16 @@ function dependenciesFor(relative2, bytes, sourceRoot = null) {
       else if (value.schema === "banzai-verification-applicability/v1") parseVerificationApplicability(value);
       else if (value.schema === "banzai-verification-origin-start/v1") parseVerificationOriginStart(value);
       else if (value.schema === "banzai-verification-origin-finish/v1") parseVerificationOriginFinish(value);
-      else if (value.schema === "banzai-terminal-attempt-checkpoint/v1")
+      else if (value.schema === "banzai-terminal-attempt-checkpoint/v1" || value.schema === "banzai-terminal-attempt-checkpoint/v2")
         parseTerminalAttemptCheckpoint(value);
+      else if (value.schema === "banzai-completion-transition/v1")
+        parseCompletionTransition(value);
+      else if (value.schema === "banzai-completion-capture/v1")
+        parseCompletionCapture(value);
+      else if (value.schema === "banzai-completion-candidate/v1")
+        parseCompletionCandidate(value);
+      else if (value.schema === "banzai-completion-publication/v1")
+        parseCompletionPublication(value);
       else if (value.schema === "banzai-recovery-authorization/v1")
         parseRecoveryAuthorization(value);
       else if (/^\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative2))
@@ -2357,15 +2391,21 @@ function dependenciesFor(relative2, bytes, sourceRoot = null) {
       parseBinding(value);
       return { refs, supported };
     }
-    if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative2) && ![1, 2, 3, 4, 5, 6].includes(value.schemaVersion))
+    if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative2) && ![1, 2, 3, 4, 5, 6, 7].includes(value.schemaVersion))
       supported = false;
     if (typeof value.schema === "string" && !(/* @__PURE__ */ new Set([
       "banzai-terminal-attempt-checkpoint/v1",
+      "banzai-terminal-attempt-checkpoint/v2",
+      "banzai-completion-transition/v1",
+      "banzai-completion-capture/v1",
+      "banzai-completion-candidate/v1",
+      "banzai-completion-publication/v1",
       "banzai-recovery-authorization/v1",
       "banzai-review-snapshot/v1",
       "banzai-review-snapshot/v2",
       "banzai-review-snapshot/v3",
       "banzai-review-snapshot/v4",
+      "banzai-review-snapshot/v5",
       "banzai-verification-config-transaction/v1",
       "banzai-work-binding/v2",
       "banzai-verification-decision/v1",
@@ -2384,7 +2424,7 @@ function dependenciesFor(relative2, bytes, sourceRoot = null) {
         return { refs, supported: false };
       }
     }
-    if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative2) && value.schemaVersion >= 4) {
+    if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative2) && (value.schemaVersion === 4 || value.schemaVersion === 5 || value.schemaVersion === 6 || value.schemaVersion === 7 && value.artifactBinding !== void 0)) {
       try {
         exactObject(value.artifactBinding, ["binding", "sha256"]);
         parseBinding(value.artifactBinding.binding);
@@ -2402,8 +2442,44 @@ function dependenciesFor(relative2, bytes, sourceRoot = null) {
       refs.set(`${run}/configuration/${value.operationId}.confirmation.json`, true);
     }
     if (run && /^.*\/configuration\/[^/]+\.confirmation\.json$/u.test(relative2)) refs.set(relative2.replace(/\.confirmation\.json$/u, ".transaction.json"), true);
-    if (run && value.schemaVersion === 6 && relative2 === `${run}/state.json`) for (const id of value.configurationSetup.transactions) refs.set(`${run}/configuration/${id}.transaction.json`, true);
-    if (value.schema === "banzai-review-snapshot/v4") for (const change of value.configurationSetup.runnerChanges) refs.set(`.banzai/runs/${value.runId}/configuration/${change.transaction.operationId}.transaction.json`, true);
+    if (run && (value.schemaVersion === 6 || value.schemaVersion === 7 && value.configurationSetup) && relative2 === `${run}/state.json`) for (const id of value.configurationSetup.transactions) refs.set(`${run}/configuration/${id}.transaction.json`, true);
+    if ((value.schema === "banzai-review-snapshot/v4" || value.schema === "banzai-review-snapshot/v5" && value.configurationSetup) && value.configurationSetup) for (const change of value.configurationSetup.runnerChanges) refs.set(`.banzai/runs/${value.runId}/configuration/${change.transaction.operationId}.transaction.json`, true);
+    const completionLeaf = (attemptId, leaf) => `${run}/attempts/${attemptId}.${leaf}`;
+    if (run && value.schemaVersion === 7 && relative2 === `${run}/state.json` && value.completionPublication) {
+      const cursor = value.completionPublication;
+      if (cursor.captureDigest) refs.set(completionLeaf(cursor.attemptId, "completion-input.json"), true);
+      if (cursor.candidateDigest) {
+        refs.set(completionLeaf(cursor.attemptId, "completion-candidate.json"), true);
+        refs.set(completionLeaf(cursor.attemptId, "completion-candidate.md"), true);
+      }
+      if (cursor.receiptDigest) refs.set(completionLeaf(cursor.attemptId, "completion-publication.json"), true);
+    }
+    if (run && value.schemaVersion === 7 && relative2 === `${run}/state.json` && value.planTaskCompletion?.schemaVersion === 2 && value.planTaskCompletion.status === "valid")
+      refs.set(`${run}/${value.planTaskCompletion.publication.path}`, true);
+    if (run && value.schema === "banzai-review-snapshot/v5" && value.completionPublication)
+      refs.set(`.banzai/runs/${value.runId}/${value.completionPublication.receiptPath}`, true);
+    if (run && value.schema === "banzai-completion-capture/v1") {
+      if (value.terminalIntegrityDigest) refs.set(completionLeaf(value.attemptId, "terminal-checkpoint.json"), true);
+      if (value.transitionDigest) {
+        refs.set(completionLeaf(value.attemptId, "completion-transition.json"), true);
+        refs.set(completionLeaf(value.attemptId, "completion-state-input.json"), true);
+      }
+      for (const original of Object.values(value.originals)) if (original) refs.set(`${run}/${original.path}`, true);
+      refs.set(`${run}/attempts/${value.attemptId}-${value.attemptKind}.json`, true);
+    }
+    if (run && value.schema === "banzai-completion-transition/v1") refs.set(`${run}/${value.priorState.path}`, true);
+    if (run && value.schema === "banzai-completion-candidate/v1") {
+      refs.set(completionLeaf(value.attemptId, "completion-input.json"), true);
+      refs.set(`${run}/${value.candidatePath}`, true);
+    }
+    if (run && value.schema === "banzai-completion-publication/v1") {
+      refs.set(completionLeaf(value.attemptId, "completion-input.json"), true);
+      refs.set(completionLeaf(value.attemptId, "completion-candidate.json"), true);
+      refs.set(completionLeaf(value.attemptId, "completion-candidate.md"), true);
+      if (value.terminalIntegrityDigest) refs.set(completionLeaf(value.attemptId, "terminal-checkpoint.json"), true);
+      refs.set(`${run}/attempts/${value.ledgerAuthor.attemptId}-${value.ledgerAuthor.attemptKind}.json`, true);
+    }
+    if (run && value.schema === "banzai-terminal-attempt-checkpoint/v2") refs.set(`${run}/attempts/${value.attempt.id}-${value.attempt.kind}.json`, true);
     const evidenceRoot = relative2.match(/^(\.banzai\/(?:runs\/[^/]+|work\/[^/]+)\/verification)(?:\/|$)/u)?.[1] ?? (run ? `${run}/verification` : null);
     if (evidenceRoot && value.workId) refs.set(`.banzai/work/${value.workId}/work.json`, true);
     if (value.schema === "banzai-verification-origin-finish/v1") refs.set(`${evidenceRoot}/origins/${value.attemptId}.start.json`, true);
@@ -2838,7 +2914,7 @@ async function verifyArchive(input) {
         parseVerificationConfigConfirmation(JSON.parse(confirmationBytes), transaction);
         const stateBytes = objects.get(`${run}/state.json`);
         const state = stateBytes ? JSON.parse(stateBytes) : null;
-        if (!state || state.schemaVersion !== 6 || state.runId !== transaction.runId || transaction.continuation && (transaction.continuation.workId !== state.artifactBinding.binding.workId || transaction.continuation.workBindingSha256 !== state.artifactBinding.sha256 || transaction.continuation.baseCommit !== state.baseCommit)) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Configuration transaction owner conflicts with its retained run.");
+        if (!state || !(state.schemaVersion === 6 || state.schemaVersion === 7 && state.configurationSetup) || state.runId !== transaction.runId || transaction.continuation && (transaction.continuation.workId !== state.artifactBinding.binding.workId || transaction.continuation.workBindingSha256 !== state.artifactBinding.sha256 || transaction.continuation.baseCommit !== state.baseCommit)) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Configuration transaction owner conflicts with its retained run.");
       }
       if (value?.schema === "banzai-review-snapshot/v4") {
         for (const change of value.configurationSetup.runnerChanges) {
@@ -2850,6 +2926,37 @@ async function verifyArchive(input) {
           const confirmation = parseVerificationConfigConfirmation(JSON.parse(confirmationBytes), transaction);
           if (JSON.stringify(transaction) !== JSON.stringify(change.transaction) || JSON.stringify(confirmation.preview.delta) !== JSON.stringify(change.delta)) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Review configuration closure changed.");
         }
+      }
+      if (value?.schema === "banzai-completion-publication/v1") {
+        const attemptLeaf = (leaf) => `${run}/attempts/${value.attemptId}.${leaf}`;
+        const captureBytes = objects.get(attemptLeaf("completion-input.json"));
+        const candidateBytes = objects.get(attemptLeaf("completion-candidate.json"));
+        const candidateText = objects.get(attemptLeaf("completion-candidate.md"));
+        if (!captureBytes || !candidateBytes || !candidateText) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion publication closure is missing.");
+        const capture22 = parseCompletionCapture(JSON.parse(captureBytes));
+        const candidate = parseCompletionCandidate(JSON.parse(candidateBytes));
+        if (capture22.integrityDigest !== value.captureDigest || candidate.integrityDigest !== value.candidateDigest || candidate.captureDigest !== capture22.integrityDigest || digestBytes(candidateText) !== candidate.outputSha256)
+          fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion publication closure changed.");
+        for (const original of Object.values(capture22.originals)) {
+          if (!original) continue;
+          const bytes2 = objects.get(`${run}/${original.path}`);
+          if (!bytes2 || digestBytes(bytes2) !== original.sha256) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion capture original changed or is missing.");
+        }
+        if (value.terminalIntegrityDigest) {
+          const checkpointBytes = objects.get(attemptLeaf("terminal-checkpoint.json"));
+          if (!checkpointBytes || parseTerminalAttemptCheckpoint(JSON.parse(checkpointBytes)).integrityDigest !== value.terminalIntegrityDigest)
+            fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion terminal proof changed or is missing.");
+        }
+      }
+      if (value?.schema === "banzai-completion-transition/v1") {
+        const priorBytes = objects.get(`${run}/${value.priorState.path}`);
+        if (!priorBytes || digestBytes(priorBytes) !== value.priorState.sha256)
+          fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion transition prior state changed or is missing.");
+      }
+      if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(entry.path) && value?.schemaVersion === 7 && value.planTaskCompletion?.schemaVersion === 2 && value.planTaskCompletion.status === "valid") {
+        const receiptBytes = objects.get(`${run}/${value.planTaskCompletion.publication.path}`);
+        if (!receiptBytes || parseCompletionPublication(JSON.parse(receiptBytes)).integrityDigest !== value.planTaskCompletion.publication.sha256)
+          fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Published completion receipt changed or is missing.");
       }
       if (value?.artifactBinding?.binding?.workId) {
         const bindingPath = `.banzai/work/${value.artifactBinding.binding.workId}/work.json`;
@@ -3515,12 +3622,12 @@ async function legacyEvidence(root, declared = false) {
       `.banzai/runs/${entry.name}/state.json`,
       true
     );
-    if (state === null || ![1, 2, 3, 4, 5, 6].includes(state.schemaVersion) || state.runId !== entry.name)
+    if (state === null || ![1, 2, 3, 4, 5, 6, 7].includes(state.schemaVersion) || state.runId !== entry.name)
       fail(
         "ARTIFACT_RECOVERY_REQUIRED",
         "Unrecognized runner evidence requires recovery."
       );
-    if (state.schemaVersion >= 4 && !declared)
+    if (state.schemaVersion >= 4 && state.artifactBinding !== void 0 && !declared)
       fail(
         "ARTIFACT_RECOVERY_REQUIRED",
         "A bound run without its artifact declaration requires recovery."
@@ -4380,8 +4487,33 @@ var DECISION_CONSULTATION_SCHEMA_VERSION = 1;
 var PLAN_TASK_COMPLETION_SCHEMA_VERSION = 1;
 var VERIFICATION_LEDGER_SCHEMA_VERSION = 1;
 var MODEL_ATTEMPT_SCHEMA_VERSION = 2;
+var STRICT_MODEL_ATTEMPT_SCHEMA_VERSION = 3;
 var TERMINAL_CHECKPOINT_SCHEMA = "banzai-terminal-attempt-checkpoint/v1";
 var TERMINAL_CHECKPOINT_SCHEMA_VERSION = 1;
+var TERMINAL_CHECKPOINT_SCHEMA_V2 = "banzai-terminal-attempt-checkpoint/v2";
+var TERMINAL_CHECKPOINT_SCHEMA_VERSION_V2 = 2;
+var COMPLETION_PROTOCOL2 = "banzai-completion-protocol/v1";
+var COMPLETION_CAPTURE_SCHEMA = "banzai-completion-capture/v1";
+var COMPLETION_TRANSITION_SCHEMA = "banzai-completion-transition/v1";
+var COMPLETION_CANDIDATE_SCHEMA = "banzai-completion-candidate/v1";
+var COMPLETION_PUBLICATION_SCHEMA = "banzai-completion-publication/v1";
+var COMPLETION_RECORD_SCHEMA_VERSION = 1;
+var COMPLETION_PUBLICATION_STAGES = [
+  "capture",
+  "validate",
+  "render",
+  "candidate",
+  "publication",
+  "receipt",
+  "attempt",
+  "state",
+  "event"
+];
+var COMPLETION_PUBLICATION_REFUSAL_CODES = [
+  "COMPLETION_PUBLICATION_IO",
+  "COMPLETION_PUBLICATION_DRIFT",
+  "COMPLETION_PUBLICATION_INTEGRITY"
+];
 var RECOVERY_AUTHORIZATION_SCHEMA = "banzai-recovery-authorization/v1";
 var RECOVERY_AUTHORIZATION_SCHEMA_VERSION = 1;
 var VERIFICATION_ATTEMPT_STATUSES = [
@@ -4814,6 +4946,14 @@ function parseWorkflowSelectionResult(value) {
 }
 function parsePhaseResult(value) {
   const record7 = requireRecord(value, "phase result");
+  return {
+    ...parsePhaseResultFields(record7),
+    taskCompletion: parseTaskCompletion(record7.taskCompletion)
+  };
+}
+var MAX_ORIGINAL_RESULT_BYTES = 4 * 1024 * 1024;
+var MAX_UNACCEPTED_LEDGER_PREVIEW = 4e3;
+function parsePhaseResultFields(record7) {
   exactKeys(
     record7,
     [
@@ -4887,7 +5027,6 @@ function parsePhaseResult(value) {
     gate,
     summary: summary2,
     artifacts: parseArtifacts(record7.artifacts),
-    taskCompletion: parseTaskCompletion(record7.taskCompletion),
     touchedPaths: requireStringArray(record7.touchedPaths, "touchedPaths"),
     questions,
     decisionConsultation,
@@ -4900,6 +5039,80 @@ function parsePhaseResult(value) {
       "requestedVerification"
     )
   };
+}
+function parsePhaseResultEnvelope(value) {
+  const record7 = requireRecord(value, "phase result");
+  const fields = parsePhaseResultFields(record7);
+  const original = stableJson(record7);
+  if (Buffer.byteLength(original, "utf8") > MAX_ORIGINAL_RESULT_BYTES) {
+    throw new BanzaiError2(
+      "INVALID_RESULT",
+      "Phase result exceeds the retained original result bound."
+    );
+  }
+  let taskCompletion;
+  try {
+    taskCompletion = {
+      state: "accepted",
+      ledger: parseTaskCompletion(record7.taskCompletion)
+    };
+  } catch (error) {
+    if (!(error instanceof BanzaiError2) || error.code !== "PLAN_TASK_COMPLETION_INVALID") {
+      throw error;
+    }
+    const raw = stableJson(record7.taskCompletion);
+    taskCompletion = {
+      state: "unaccepted",
+      diagnostic: error.message.slice(0, 500),
+      raw: raw.slice(0, MAX_UNACCEPTED_LEDGER_PREVIEW),
+      rawDigest: createHash4("sha256").update(raw).digest("hex")
+    };
+  }
+  return {
+    ...fields,
+    taskCompletion,
+    original,
+    originalDigest: createHash4("sha256").update(original).digest("hex")
+  };
+}
+function parseStoredPhaseResultEnvelope(value, code2 = "ATTEMPT_MALFORMED") {
+  if (!isRecord(value) || typeof value.original !== "string") {
+    return recoveryEvidenceError(
+      code2,
+      "Persisted envelope must retain its original result."
+    );
+  }
+  if (Buffer.byteLength(value.original, "utf8") > MAX_ORIGINAL_RESULT_BYTES) {
+    return recoveryEvidenceError(
+      code2,
+      "Persisted envelope original exceeds its bound."
+    );
+  }
+  let original;
+  try {
+    original = JSON.parse(value.original);
+  } catch {
+    return recoveryEvidenceError(
+      code2,
+      "Persisted envelope original is not JSON."
+    );
+  }
+  let decoded;
+  try {
+    decoded = parsePhaseResultEnvelope(original);
+  } catch (error) {
+    return recoveryEvidenceError(
+      code2,
+      `Persisted envelope original does not decode: ${error.message}`
+    );
+  }
+  if (stableJson(decoded) !== stableJson(value)) {
+    return recoveryEvidenceError(
+      code2,
+      "Persisted envelope conflicts with its retained original result."
+    );
+  }
+  return decoded;
 }
 function parsePersistedPhaseResult(value) {
   const record7 = requireRecord(value, "persisted phase result");
@@ -5412,6 +5625,903 @@ function parseCheckpointResult(kind, value, resultContract) {
 function terminalCheckpointIntegrity(checkpoint) {
   return digestCanonicalJson2(checkpoint);
 }
+function completionRecordIntegrity(record7) {
+  return digestCanonicalJson2(record7);
+}
+function parseCompletionIdentity(value, code2) {
+  if (value.completionProtocol !== COMPLETION_PROTOCOL2) {
+    return recoveryEvidenceError(
+      code2,
+      `Completion record must carry ${COMPLETION_PROTOCOL2}.`
+    );
+  }
+  const attemptKind = value.attemptKind;
+  if (attemptKind !== "implementation" && attemptKind !== "fix") {
+    return recoveryEvidenceError(code2, "attemptKind is unsupported.");
+  }
+  return {
+    runId: evidenceIdentifier(value.runId, code2, "runId", 300),
+    attemptId: evidenceIdentifier(value.attemptId, code2, "attemptId", 200),
+    attemptKind,
+    completionProtocol: COMPLETION_PROTOCOL2
+  };
+}
+function requireIntegrity(value, record7, code2, label) {
+  const integrityDigest = evidenceDigest2(
+    value.integrityDigest,
+    code2,
+    "integrityDigest"
+  );
+  if (integrityDigest !== completionRecordIntegrity(record7)) {
+    return recoveryEvidenceError(code2, `${label} integrity mismatch.`);
+  }
+  return { ...record7, integrityDigest };
+}
+function reportIdentity(value, code2, label) {
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(code2, `${label} must be an object.`);
+  }
+  exactKeys(value, ["path", "sha256"], code2, label);
+  return {
+    path: evidenceString(value.path, code2, `${label}.path`),
+    sha256: evidenceDigest2(value.sha256, code2, `${label}.sha256`)
+  };
+}
+function nullableReportIdentity(value, code2, label) {
+  return value === null ? null : reportIdentity(value, code2, label);
+}
+function ledgerSourceIdentity(value, code2, label) {
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(code2, `${label} must be an object.`);
+  }
+  exactKeys(value, ["attemptId", "attemptKind", "ledgerDigest"], code2, label);
+  const attemptKind = value.attemptKind;
+  if (attemptKind !== "implementation" && attemptKind !== "fix") {
+    return recoveryEvidenceError(code2, `${label}.attemptKind is unsupported.`);
+  }
+  return {
+    attemptId: evidenceIdentifier(value.attemptId, code2, `${label}.attemptId`),
+    attemptKind,
+    ledgerDigest: evidenceDigest2(
+      value.ledgerDigest,
+      code2,
+      `${label}.ledgerDigest`
+    )
+  };
+}
+function parseCompletionTransition(value) {
+  const code2 = "INVALID_COMPLETION_TRANSITION";
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(
+      code2,
+      "Completion transition must be an object."
+    );
+  }
+  exactKeys(
+    value,
+    [
+      "schema",
+      "schemaVersion",
+      "runId",
+      "attemptId",
+      "attemptKind",
+      "completionProtocol",
+      "priorState",
+      "integrityDigest"
+    ],
+    code2,
+    "Completion transition"
+  );
+  if (value.schema !== COMPLETION_TRANSITION_SCHEMA || value.schemaVersion !== COMPLETION_RECORD_SCHEMA_VERSION) {
+    return recoveryEvidenceError(
+      code2,
+      `Completion transition must use ${COMPLETION_TRANSITION_SCHEMA}.`
+    );
+  }
+  if (!isRecord(value.priorState)) {
+    return recoveryEvidenceError(code2, "priorState must be an object.");
+  }
+  exactKeys(
+    value.priorState,
+    ["schemaVersion", "path", "sha256"],
+    code2,
+    "priorState"
+  );
+  if (value.priorState.schemaVersion !== 3 && value.priorState.schemaVersion !== 4 && value.priorState.schemaVersion !== 6) {
+    return recoveryEvidenceError(
+      code2,
+      "priorState.schemaVersion must be a legacy 3 or bootstrap 4/6 state."
+    );
+  }
+  const record7 = {
+    schema: COMPLETION_TRANSITION_SCHEMA,
+    schemaVersion: COMPLETION_RECORD_SCHEMA_VERSION,
+    ...parseCompletionIdentity(value, code2),
+    priorState: {
+      schemaVersion: value.priorState.schemaVersion,
+      path: evidenceString(value.priorState.path, code2, "priorState.path"),
+      sha256: evidenceDigest2(value.priorState.sha256, code2, "priorState.sha256")
+    }
+  };
+  return requireIntegrity(
+    value,
+    record7,
+    code2,
+    "Completion transition"
+  );
+}
+function parseCompletionCapture(value) {
+  const code2 = "INVALID_COMPLETION_CAPTURE";
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(code2, "Completion capture must be an object.");
+  }
+  exactKeys(
+    value,
+    [
+      "schema",
+      "schemaVersion",
+      "runId",
+      "attemptId",
+      "attemptKind",
+      "completionProtocol",
+      "outcome",
+      "resultDigest",
+      "terminalIntegrityDigest",
+      "transitionDigest",
+      "baseCommit",
+      "approvalDigest",
+      "planTaskDigest",
+      "workBinding",
+      "configurationDigest",
+      "scopeDigest",
+      "ledgerSource",
+      "reports",
+      "originals",
+      "workspace",
+      "capturedAt",
+      "integrityDigest"
+    ],
+    code2,
+    "Completion capture"
+  );
+  if (value.schema !== COMPLETION_CAPTURE_SCHEMA || value.schemaVersion !== COMPLETION_RECORD_SCHEMA_VERSION) {
+    return recoveryEvidenceError(
+      code2,
+      `Completion capture must use ${COMPLETION_CAPTURE_SCHEMA}.`
+    );
+  }
+  if (value.outcome !== "completed" && value.outcome !== "stop") {
+    return recoveryEvidenceError(code2, "outcome is unsupported.");
+  }
+  if (!isRecord(value.reports)) {
+    return recoveryEvidenceError(code2, "reports must be an object.");
+  }
+  exactKeys(
+    value.reports,
+    ["implementationReport", "testReport"],
+    code2,
+    "reports"
+  );
+  if (!isRecord(value.originals)) {
+    return recoveryEvidenceError(code2, "originals must be an object.");
+  }
+  exactKeys(
+    value.originals,
+    ["implementationReport", "testReport"],
+    code2,
+    "originals"
+  );
+  if (!isRecord(value.workspace)) {
+    return recoveryEvidenceError(code2, "workspace must be an object.");
+  }
+  exactKeys(value.workspace, ["digest", "excludedPaths"], code2, "workspace");
+  if (!Array.isArray(value.workspace.excludedPaths) || value.workspace.excludedPaths.length > 8) {
+    return recoveryEvidenceError(
+      code2,
+      "workspace.excludedPaths must be a bounded array."
+    );
+  }
+  let workBinding = null;
+  if (value.workBinding !== null) {
+    if (!isRecord(value.workBinding)) {
+      return recoveryEvidenceError(
+        code2,
+        "workBinding must be an object or null."
+      );
+    }
+    exactKeys(value.workBinding, ["workId", "sha256"], code2, "workBinding");
+    workBinding = {
+      workId: evidenceIdentifier(
+        value.workBinding.workId,
+        code2,
+        "workBinding.workId"
+      ),
+      sha256: evidenceDigest2(
+        value.workBinding.sha256,
+        code2,
+        "workBinding.sha256"
+      )
+    };
+  }
+  const record7 = {
+    schema: COMPLETION_CAPTURE_SCHEMA,
+    schemaVersion: COMPLETION_RECORD_SCHEMA_VERSION,
+    ...parseCompletionIdentity(value, code2),
+    outcome: value.outcome,
+    resultDigest: evidenceDigest2(value.resultDigest, code2, "resultDigest"),
+    terminalIntegrityDigest: nullableEvidenceDigest(
+      value.terminalIntegrityDigest,
+      code2,
+      "terminalIntegrityDigest"
+    ),
+    transitionDigest: nullableEvidenceDigest(
+      value.transitionDigest,
+      code2,
+      "transitionDigest"
+    ),
+    baseCommit: evidenceString(value.baseCommit, code2, "baseCommit", 100),
+    approvalDigest: evidenceDigest2(
+      value.approvalDigest,
+      code2,
+      "approvalDigest"
+    ),
+    planTaskDigest: evidenceDigest2(
+      value.planTaskDigest,
+      code2,
+      "planTaskDigest"
+    ),
+    workBinding,
+    configurationDigest: evidenceDigest2(
+      value.configurationDigest,
+      code2,
+      "configurationDigest"
+    ),
+    scopeDigest: nullableEvidenceDigest(value.scopeDigest, code2, "scopeDigest"),
+    ledgerSource: value.ledgerSource === null ? null : ledgerSourceIdentity(value.ledgerSource, code2, "ledgerSource"),
+    reports: {
+      implementationReport: parseReportObservation(
+        value.reports.implementationReport,
+        code2,
+        "reports.implementationReport"
+      ),
+      testReport: parseReportObservation(
+        value.reports.testReport,
+        code2,
+        "reports.testReport"
+      )
+    },
+    originals: {
+      implementationReport: nullableReportIdentity(
+        value.originals.implementationReport,
+        code2,
+        "originals.implementationReport"
+      ),
+      testReport: nullableReportIdentity(
+        value.originals.testReport,
+        code2,
+        "originals.testReport"
+      )
+    },
+    workspace: {
+      digest: evidenceDigest2(value.workspace.digest, code2, "workspace.digest"),
+      excludedPaths: value.workspace.excludedPaths.map(
+        (item, index) => evidenceString(item, code2, `workspace.excludedPaths[${index}]`)
+      )
+    },
+    capturedAt: evidenceTimestamp(value.capturedAt, code2, "capturedAt")
+  };
+  return requireIntegrity(
+    value,
+    record7,
+    code2,
+    "Completion capture"
+  );
+}
+function parseCompletionCandidate(value) {
+  const code2 = "INVALID_COMPLETION_CANDIDATE";
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(
+      code2,
+      "Completion candidate must be an object."
+    );
+  }
+  exactKeys(
+    value,
+    [
+      "schema",
+      "schemaVersion",
+      "runId",
+      "attemptId",
+      "attemptKind",
+      "completionProtocol",
+      "captureDigest",
+      "ledgerDigest",
+      "destination",
+      "inputSha256",
+      "candidatePath",
+      "outputSha256",
+      "outputBytes",
+      "testReportSha256",
+      "region",
+      "preservation",
+      "roundtrip",
+      "integrityDigest"
+    ],
+    code2,
+    "Completion candidate"
+  );
+  if (value.schema !== COMPLETION_CANDIDATE_SCHEMA || value.schemaVersion !== COMPLETION_RECORD_SCHEMA_VERSION) {
+    return recoveryEvidenceError(
+      code2,
+      `Completion candidate must use ${COMPLETION_CANDIDATE_SCHEMA}.`
+    );
+  }
+  if (!isRecord(value.region)) {
+    return recoveryEvidenceError(code2, "region must be an object.");
+  }
+  exactKeys(value.region, ["action", "start", "end"], code2, "region");
+  const action = value.region.action;
+  const { start, end } = value.region;
+  if (action !== "appended" && action !== "replaced" || typeof start !== "number" || typeof end !== "number" || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start) {
+    return recoveryEvidenceError(code2, "region is malformed.");
+  }
+  if (typeof value.outputBytes !== "number" || !Number.isSafeInteger(value.outputBytes) || value.outputBytes < 0 || value.preservation !== "verified" || value.roundtrip !== "verified") {
+    return recoveryEvidenceError(code2, "Candidate proof fields are malformed.");
+  }
+  const record7 = {
+    schema: COMPLETION_CANDIDATE_SCHEMA,
+    schemaVersion: COMPLETION_RECORD_SCHEMA_VERSION,
+    ...parseCompletionIdentity(value, code2),
+    captureDigest: evidenceDigest2(value.captureDigest, code2, "captureDigest"),
+    ledgerDigest: evidenceDigest2(value.ledgerDigest, code2, "ledgerDigest"),
+    destination: evidenceString(value.destination, code2, "destination"),
+    inputSha256: evidenceDigest2(value.inputSha256, code2, "inputSha256"),
+    candidatePath: evidenceString(value.candidatePath, code2, "candidatePath"),
+    outputSha256: evidenceDigest2(value.outputSha256, code2, "outputSha256"),
+    outputBytes: value.outputBytes,
+    testReportSha256: evidenceDigest2(
+      value.testReportSha256,
+      code2,
+      "testReportSha256"
+    ),
+    region: { action, start, end },
+    preservation: "verified",
+    roundtrip: "verified"
+  };
+  return requireIntegrity(
+    value,
+    record7,
+    code2,
+    "Completion candidate"
+  );
+}
+function parseCompletionPublication(value) {
+  const code2 = "INVALID_COMPLETION_PUBLICATION";
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(
+      code2,
+      "Completion publication must be an object."
+    );
+  }
+  exactKeys(
+    value,
+    [
+      "schema",
+      "schemaVersion",
+      "runId",
+      "attemptId",
+      "attemptKind",
+      "completionProtocol",
+      "captureDigest",
+      "candidateDigest",
+      "terminalIntegrityDigest",
+      "authority",
+      "ledgerAuthor",
+      "publisher",
+      "implementationReport",
+      "testReport",
+      "publishedAt",
+      "integrityDigest"
+    ],
+    code2,
+    "Completion publication"
+  );
+  if (value.schema !== COMPLETION_PUBLICATION_SCHEMA || value.schemaVersion !== COMPLETION_RECORD_SCHEMA_VERSION) {
+    return recoveryEvidenceError(
+      code2,
+      `Completion publication must use ${COMPLETION_PUBLICATION_SCHEMA}.`
+    );
+  }
+  if (!isRecord(value.authority)) {
+    return recoveryEvidenceError(code2, "authority must be an object.");
+  }
+  exactKeys(
+    value.authority,
+    [
+      "baseCommit",
+      "approvalDigest",
+      "planTaskDigest",
+      "scopeDigest",
+      "workBindingSha256",
+      "configurationDigest"
+    ],
+    code2,
+    "authority"
+  );
+  if (!isRecord(value.publisher)) {
+    return recoveryEvidenceError(code2, "publisher must be an object.");
+  }
+  exactKeys(value.publisher, ["attemptId", "attemptKind"], code2, "publisher");
+  const publisherKind = value.publisher.attemptKind;
+  if (publisherKind !== "implementation" && publisherKind !== "fix") {
+    return recoveryEvidenceError(code2, "publisher.attemptKind is unsupported.");
+  }
+  const identity = parseCompletionIdentity(value, code2);
+  const publisher = {
+    attemptId: evidenceIdentifier(
+      value.publisher.attemptId,
+      code2,
+      "publisher.attemptId"
+    ),
+    attemptKind: publisherKind
+  };
+  if (publisher.attemptId !== identity.attemptId || publisher.attemptKind !== identity.attemptKind) {
+    return recoveryEvidenceError(
+      code2,
+      "A receipt is owned by the attempt that published it."
+    );
+  }
+  const record7 = {
+    schema: COMPLETION_PUBLICATION_SCHEMA,
+    schemaVersion: COMPLETION_RECORD_SCHEMA_VERSION,
+    ...identity,
+    captureDigest: evidenceDigest2(value.captureDigest, code2, "captureDigest"),
+    candidateDigest: evidenceDigest2(
+      value.candidateDigest,
+      code2,
+      "candidateDigest"
+    ),
+    terminalIntegrityDigest: nullableEvidenceDigest(
+      value.terminalIntegrityDigest,
+      code2,
+      "terminalIntegrityDigest"
+    ),
+    authority: {
+      baseCommit: evidenceString(
+        value.authority.baseCommit,
+        code2,
+        "authority.baseCommit",
+        100
+      ),
+      approvalDigest: evidenceDigest2(
+        value.authority.approvalDigest,
+        code2,
+        "authority.approvalDigest"
+      ),
+      planTaskDigest: evidenceDigest2(
+        value.authority.planTaskDigest,
+        code2,
+        "authority.planTaskDigest"
+      ),
+      scopeDigest: nullableEvidenceDigest(
+        value.authority.scopeDigest,
+        code2,
+        "authority.scopeDigest"
+      ),
+      workBindingSha256: nullableEvidenceDigest(
+        value.authority.workBindingSha256,
+        code2,
+        "authority.workBindingSha256"
+      ),
+      configurationDigest: evidenceDigest2(
+        value.authority.configurationDigest,
+        code2,
+        "authority.configurationDigest"
+      )
+    },
+    ledgerAuthor: ledgerSourceIdentity(
+      value.ledgerAuthor,
+      code2,
+      "ledgerAuthor"
+    ),
+    publisher,
+    implementationReport: reportIdentity(
+      value.implementationReport,
+      code2,
+      "implementationReport"
+    ),
+    testReport: reportIdentity(value.testReport, code2, "testReport"),
+    publishedAt: evidenceTimestamp(value.publishedAt, code2, "publishedAt")
+  };
+  return requireIntegrity(
+    value,
+    record7,
+    code2,
+    "Completion publication"
+  );
+}
+function parseCompletionPublicationCursor(value) {
+  const code2 = "INVALID_COMPLETION_CURSOR";
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(code2, "Completion cursor must be an object.");
+  }
+  exactKeys(
+    value,
+    [
+      "attemptId",
+      "attemptKind",
+      "stage",
+      "captureDigest",
+      "candidateDigest",
+      "receiptDigest",
+      "refusal"
+    ],
+    code2,
+    "Completion cursor"
+  );
+  const attemptKind = value.attemptKind;
+  if (attemptKind !== "implementation" && attemptKind !== "fix") {
+    return recoveryEvidenceError(code2, "attemptKind is unsupported.");
+  }
+  const stage = value.stage;
+  if (typeof stage !== "string" || !COMPLETION_PUBLICATION_STAGES.includes(
+    stage
+  )) {
+    return recoveryEvidenceError(code2, "stage is unsupported.");
+  }
+  let refusal = null;
+  if (value.refusal !== null) {
+    if (!isRecord(value.refusal)) {
+      return recoveryEvidenceError(code2, "refusal must be an object or null.");
+    }
+    exactKeys(value.refusal, ["code", "stage", "proofDigest"], code2, "refusal");
+    const refusalCode = value.refusal.code;
+    const refusalStage = value.refusal.stage;
+    if (typeof refusalCode !== "string" || !COMPLETION_PUBLICATION_REFUSAL_CODES.includes(
+      refusalCode
+    ) || typeof refusalStage !== "string" || !COMPLETION_PUBLICATION_STAGES.includes(
+      refusalStage
+    )) {
+      return recoveryEvidenceError(code2, "refusal is malformed.");
+    }
+    refusal = {
+      code: refusalCode,
+      stage: refusalStage,
+      proofDigest: nullableEvidenceDigest(
+        value.refusal.proofDigest,
+        code2,
+        "refusal.proofDigest"
+      )
+    };
+  }
+  return {
+    attemptId: evidenceIdentifier(value.attemptId, code2, "attemptId"),
+    attemptKind,
+    stage,
+    captureDigest: nullableEvidenceDigest(
+      value.captureDigest,
+      code2,
+      "captureDigest"
+    ),
+    candidateDigest: nullableEvidenceDigest(
+      value.candidateDigest,
+      code2,
+      "candidateDigest"
+    ),
+    receiptDigest: nullableEvidenceDigest(
+      value.receiptDigest,
+      code2,
+      "receiptDigest"
+    ),
+    refusal
+  };
+}
+var COMPLETION_VIOLATIONS = [
+  "approved_plan_invalid",
+  "missing_ledger",
+  "missing_task",
+  "duplicate_task",
+  "unknown_task",
+  "task_order_mismatch",
+  "invalid_task_status",
+  "task_status_conflict",
+  "invalid_evidence_path",
+  "missing_evidence_path",
+  "evidence_scope_violation",
+  "invalid_gap_reference",
+  "implementation_report_missing",
+  "test_report_missing",
+  "report_projection_missing",
+  "report_projection_invalid",
+  "report_projection_mismatch",
+  "report_region_invalid",
+  "approval_invalid",
+  "source_attempt_invalid",
+  "summary_mismatch"
+];
+function parseCompletionDiagnostic(value, code2 = "ATTEMPT_MALFORMED") {
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(
+      code2,
+      "Completion diagnostic must be an object."
+    );
+  }
+  exactKeys(
+    value,
+    ["violation", "taskId", "message"],
+    code2,
+    "Completion diagnostic"
+  );
+  const violation = value.violation;
+  if (typeof violation !== "string" || !COMPLETION_VIOLATIONS.includes(violation)) {
+    return recoveryEvidenceError(
+      code2,
+      "Completion diagnostic violation is unsupported."
+    );
+  }
+  return {
+    violation,
+    taskId: value.taskId === null ? null : evidenceString(value.taskId, code2, "taskId", 4),
+    message: evidenceString(value.message, code2, "message")
+  };
+}
+var REPORT_OBSERVATION_STATES = [
+  "present",
+  "absent",
+  "unsafe",
+  "unavailable"
+];
+function parseReportObservation(value, code2, label) {
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(code2, `${label} must be an object.`);
+  }
+  const state = value.state;
+  if (typeof state !== "string" || !REPORT_OBSERVATION_STATES.includes(
+    state
+  )) {
+    return recoveryEvidenceError(code2, `${label}.state is unsupported.`);
+  }
+  if (state === "present") {
+    exactKeys(value, ["path", "state", "sha256", "bytes"], code2, label);
+    if (typeof value.bytes !== "number" || !Number.isSafeInteger(value.bytes) || value.bytes < 0) {
+      return recoveryEvidenceError(
+        code2,
+        `${label}.bytes must be a non-negative integer.`
+      );
+    }
+    return {
+      path: evidenceString(value.path, code2, `${label}.path`),
+      state: "present",
+      sha256: evidenceDigest2(value.sha256, code2, `${label}.sha256`),
+      bytes: value.bytes
+    };
+  }
+  exactKeys(value, ["path", "state"], code2, label);
+  return {
+    path: evidenceNullableString(value.path, code2, `${label}.path`),
+    state
+  };
+}
+function parseObservedInputs(value, code2, label) {
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(code2, `${label} must be an object.`);
+  }
+  exactKeys(
+    value,
+    ["implementationReport", "testReport", "workspaceDigest"],
+    code2,
+    label
+  );
+  return {
+    implementationReport: parseReportObservation(
+      value.implementationReport,
+      code2,
+      `${label}.implementationReport`
+    ),
+    testReport: parseReportObservation(
+      value.testReport,
+      code2,
+      `${label}.testReport`
+    ),
+    workspaceDigest: value.workspaceDigest === null ? null : evidenceDigest2(
+      value.workspaceDigest,
+      code2,
+      `${label}.workspaceDigest`
+    )
+  };
+}
+function parseCheckpointConfiguration(value, code2) {
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(code2, "configuration must be an object.");
+  }
+  exactKeys(
+    value,
+    [
+      "vendor",
+      "executableDigest",
+      "model",
+      "effort",
+      "sessionMode",
+      "sessionContextDigest"
+    ],
+    code2,
+    "configuration"
+  );
+  const vendor = value.vendor;
+  if (vendor !== "codex" && vendor !== "claude") {
+    return recoveryEvidenceError(code2, "configuration.vendor is unsupported.");
+  }
+  const effort = value.effort;
+  if (typeof effort !== "string" || !["low", "medium", "high", "xhigh", "max", "ultra"].includes(effort)) {
+    return recoveryEvidenceError(code2, "configuration.effort is unsupported.");
+  }
+  const sessionMode = value.sessionMode;
+  if (sessionMode !== "fresh" && sessionMode !== "resumed") {
+    return recoveryEvidenceError(
+      code2,
+      "configuration.sessionMode is unsupported."
+    );
+  }
+  return {
+    vendor,
+    executableDigest: evidenceDigest2(
+      value.executableDigest,
+      code2,
+      "configuration.executableDigest"
+    ),
+    model: evidenceString(value.model, code2, "configuration.model"),
+    effort,
+    sessionMode,
+    sessionContextDigest: evidenceDigest2(
+      value.sessionContextDigest,
+      code2,
+      "configuration.sessionContextDigest"
+    )
+  };
+}
+function parseCheckpointTerminal(value, vendor, code2) {
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(code2, "terminal must be an object.");
+  }
+  exactKeys(value, ["classification", "observedAt"], code2, "terminal");
+  const classification = value.classification;
+  if (classification !== "claude_result" && classification !== "codex_turn_completed") {
+    return recoveryEvidenceError(
+      code2,
+      "terminal.classification is unsupported."
+    );
+  }
+  if (vendor === "claude" && classification !== "claude_result" || vendor === "codex" && classification !== "codex_turn_completed") {
+    return recoveryEvidenceError(
+      code2,
+      "Terminal classification does not match the configured vendor."
+    );
+  }
+  return {
+    classification,
+    observedAt: evidenceTimestamp(value.observedAt, code2, "terminal.observedAt")
+  };
+}
+function nullableEvidenceDigest(value, code2, label) {
+  return value === null ? null : evidenceDigest2(value, code2, label);
+}
+function parseTerminalAttemptCheckpointV2(value) {
+  const code2 = "INVALID_TERMINAL_CHECKPOINT";
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(
+      code2,
+      "Terminal checkpoint must be an object."
+    );
+  }
+  exactKeys(
+    value,
+    [
+      "schema",
+      "schemaVersion",
+      "completionProtocol",
+      "runId",
+      "attempt",
+      "phase",
+      "configuration",
+      "resultContract",
+      "terminal",
+      "envelope",
+      "resultDigest",
+      "observed",
+      "sessionId",
+      "usage",
+      "baseCommit",
+      "approvalDigest",
+      "workflowDigest",
+      "scopeDigest",
+      "integrityDigest"
+    ],
+    code2,
+    "Terminal checkpoint"
+  );
+  if (value.schema !== TERMINAL_CHECKPOINT_SCHEMA_V2 || value.schemaVersion !== TERMINAL_CHECKPOINT_SCHEMA_VERSION_V2 || value.completionProtocol !== COMPLETION_PROTOCOL2) {
+    return recoveryEvidenceError(
+      code2,
+      `Terminal checkpoint must use ${TERMINAL_CHECKPOINT_SCHEMA_V2} under ${COMPLETION_PROTOCOL2}.`
+    );
+  }
+  const attempt = parseEvidenceAttempt(value.attempt, code2, "attempt");
+  if (attempt.kind !== "implementation" && attempt.kind !== "fix" || !attempt.mutable || value.phase !== attempt.kind) {
+    return recoveryEvidenceError(
+      code2,
+      "Protocol checkpoint requires a mutable implementation or fix attempt."
+    );
+  }
+  if (value.resultContract !== "phase-result/v3") {
+    return recoveryEvidenceError(
+      code2,
+      "Checkpoint result contract must be phase-result/v3."
+    );
+  }
+  const configuration = parseCheckpointConfiguration(value.configuration, code2);
+  const envelope = parseStoredPhaseResultEnvelope(value.envelope, code2);
+  if (envelope.phase !== attempt.kind) {
+    return recoveryEvidenceError(
+      code2,
+      "Checkpoint envelope phase must match attempt kind."
+    );
+  }
+  const resultDigest = evidenceDigest2(value.resultDigest, code2, "resultDigest");
+  if (resultDigest !== envelope.originalDigest) {
+    return recoveryEvidenceError(
+      code2,
+      "Checkpoint result digest conflicts with its envelope original."
+    );
+  }
+  const checkpointWithoutIntegrity = {
+    schema: TERMINAL_CHECKPOINT_SCHEMA_V2,
+    schemaVersion: TERMINAL_CHECKPOINT_SCHEMA_VERSION_V2,
+    completionProtocol: COMPLETION_PROTOCOL2,
+    runId: evidenceString(value.runId, code2, "runId", 300),
+    attempt: {
+      id: attempt.id,
+      kind: attempt.kind,
+      mutable: true
+    },
+    phase: attempt.kind,
+    configuration,
+    resultContract: "phase-result/v3",
+    terminal: parseCheckpointTerminal(
+      value.terminal,
+      configuration.vendor,
+      code2
+    ),
+    envelope,
+    resultDigest,
+    observed: parseObservedInputs(value.observed, code2, "observed"),
+    sessionId: evidenceNullableString(value.sessionId, code2, "sessionId", 300),
+    usage: parseEvidenceUsage(value.usage, code2, "usage"),
+    baseCommit: evidenceString(value.baseCommit, code2, "baseCommit", 100),
+    approvalDigest: nullableEvidenceDigest(
+      value.approvalDigest,
+      code2,
+      "approvalDigest"
+    ),
+    workflowDigest: nullableEvidenceDigest(
+      value.workflowDigest,
+      code2,
+      "workflowDigest"
+    ),
+    scopeDigest: nullableEvidenceDigest(value.scopeDigest, code2, "scopeDigest")
+  };
+  const integrityDigest = evidenceDigest2(
+    value.integrityDigest,
+    code2,
+    "integrityDigest"
+  );
+  if (integrityDigest !== terminalCheckpointIntegrity(checkpointWithoutIntegrity)) {
+    return recoveryEvidenceError(
+      code2,
+      "Terminal checkpoint integrity mismatch."
+    );
+  }
+  return { ...checkpointWithoutIntegrity, integrityDigest };
+}
 function parseTerminalAttemptCheckpoint(value) {
   const code2 = "INVALID_TERMINAL_CHECKPOINT";
   if (!isRecord(value)) {
@@ -5419,6 +6529,9 @@ function parseTerminalAttemptCheckpoint(value) {
       code2,
       "Terminal checkpoint must be an object."
     );
+  }
+  if (value.schema === TERMINAL_CHECKPOINT_SCHEMA_V2) {
+    return parseTerminalAttemptCheckpointV2(value);
   }
   exactKeys(
     value,
@@ -5724,18 +6837,64 @@ function parseModelAttemptRecord(value) {
       "sessionContext",
       "planningContext",
       "reviewContext",
-      "reviewDiagnostics"
+      "reviewDiagnostics",
+      "completionProtocol",
+      "retryOf",
+      "envelope",
+      "completionDiagnostic"
     ],
     code2,
     "Attempt record"
   );
-  if (value.schemaVersion !== 1 && value.schemaVersion !== MODEL_ATTEMPT_SCHEMA_VERSION) {
+  if (value.schemaVersion !== 1 && value.schemaVersion !== MODEL_ATTEMPT_SCHEMA_VERSION && value.schemaVersion !== STRICT_MODEL_ATTEMPT_SCHEMA_VERSION) {
     return recoveryEvidenceError(
       code2,
       "Attempt schema version is unsupported."
     );
   }
   const attempt = parseEvidenceAttempt(value.attempt, code2, "attempt");
+  const strict = value.schemaVersion === STRICT_MODEL_ATTEMPT_SCHEMA_VERSION;
+  if (strict) {
+    if (attempt.kind !== "implementation" && attempt.kind !== "fix" || !attempt.mutable || value.completionProtocol !== COMPLETION_PROTOCOL2 || !Object.hasOwn(value, "retryOf") || !Object.hasOwn(value, "envelope") || !Object.hasOwn(value, "completionDiagnostic")) {
+      return recoveryEvidenceError(
+        code2,
+        `Attempt schema v3 requires a mutable implementation or fix attempt under ${COMPLETION_PROTOCOL2} with retryOf, envelope and completionDiagnostic fields.`
+      );
+    }
+    if (value.retryOf !== null) {
+      evidenceIdentifier(value.retryOf, code2, "retryOf", 200);
+      if (value.retryOf === attempt.id)
+        return recoveryEvidenceError(
+          code2,
+          "An evidence-repair retry cannot reference itself."
+        );
+    }
+    if (value.envelope !== null) {
+      const envelope = parseStoredPhaseResultEnvelope(value.envelope, code2);
+      if (envelope.phase !== attempt.kind)
+        return recoveryEvidenceError(
+          code2,
+          "Attempt envelope phase must match attempt kind."
+        );
+      if (value.result !== null && stableJson(value.result) !== stableJson(JSON.parse(envelope.original)))
+        return recoveryEvidenceError(
+          code2,
+          "Attempt result conflicts with its retained envelope original."
+        );
+    } else if (value.result !== null) {
+      return recoveryEvidenceError(
+        code2,
+        "A protocol attempt result requires its decoded envelope."
+      );
+    }
+    if (value.completionDiagnostic !== null)
+      parseCompletionDiagnostic(value.completionDiagnostic, code2);
+  } else if ("completionProtocol" in value || "retryOf" in value || "envelope" in value || "completionDiagnostic" in value) {
+    return recoveryEvidenceError(
+      code2,
+      "Legacy attempt records cannot carry completion protocol fields."
+    );
+  }
   if (value.rotationReason != null && (typeof value.rotationReason !== "string" || ![
     "primary-review",
     "missing-session",
@@ -5847,11 +7006,23 @@ function parseModelAttemptRecord(value) {
     }
   }
   const status = value.status;
-  if (typeof status !== "string" || !["started", "completed", "failed", "interrupted"].includes(status) || value.schemaVersion === 1 && status === "interrupted") {
+  if (typeof status !== "string" || ![
+    "started",
+    "completed",
+    "failed",
+    "interrupted",
+    "pending_application"
+  ].includes(status) || value.schemaVersion === 1 && status === "interrupted" || !strict && status === "pending_application") {
     return recoveryEvidenceError(code2, "Attempt status is unsupported.");
   }
+  if (status === "pending_application" && (value.result === null || value.envelope === null)) {
+    return recoveryEvidenceError(
+      code2,
+      "A pending_application attempt must retain its captured result and envelope."
+    );
+  }
   evidenceTimestamp(value.startedAt, code2, "startedAt");
-  if (value.schemaVersion === MODEL_ATTEMPT_SCHEMA_VERSION) {
+  if (value.schemaVersion === MODEL_ATTEMPT_SCHEMA_VERSION || value.schemaVersion === STRICT_MODEL_ATTEMPT_SCHEMA_VERSION) {
     if (!Object.hasOwn(value, "interruptedAt") || !Object.hasOwn(value, "recoveryOf") || !Object.hasOwn(value, "recoveryAuthorizationId")) {
       return recoveryEvidenceError(
         code2,
@@ -6553,13 +7724,23 @@ function parseEvaluationStateSource(value) {
   if (!isRecord(value)) {
     throw evaluationError("Persisted state is not a supported object.");
   }
-  if (value.schemaVersion !== 1 && value.schemaVersion !== 2 && value.schemaVersion !== 3 && value.schemaVersion !== 4 && value.schemaVersion !== 5 && value.schemaVersion !== 6) {
+  if (value.schemaVersion !== 1 && value.schemaVersion !== 2 && value.schemaVersion !== 3 && value.schemaVersion !== 4 && value.schemaVersion !== 5 && value.schemaVersion !== 6 && value.schemaVersion !== 7) {
     throw new BanzaiError2(
       "EVALUATION_STATE_SCHEMA_UNSUPPORTED",
       "Persisted state uses an unsupported schema."
     );
   }
-  if (value.schemaVersion === 6) validateConfigurationStateEnvelope2(value);
+  if (value.schemaVersion === 6 || value.schemaVersion === 7)
+    validateConfigurationStateEnvelope2(value);
+  if (value.schemaVersion === 7) {
+    if (!Object.hasOwn(value, "completionPublication"))
+      throw new BanzaiError2(
+        "EVALUATION_STATE_SCHEMA_UNSUPPORTED",
+        "Schema-7 state must carry its completion publication cursor."
+      );
+    if (value.completionPublication !== null)
+      parseCompletionPublicationCursor(value.completionPublication);
+  }
   const schemaVersion = value.schemaVersion;
   const issues = [];
   let workflow;
@@ -6687,7 +7868,7 @@ function parseEvaluationStateSource(value) {
   return {
     value: {
       schemaVersion,
-      ...schemaVersion === 6 ? { verificationMode: value.verificationMode } : {},
+      ...schemaVersion === 6 || schemaVersion === 7 && typeof value.verificationMode === "string" ? { verificationMode: value.verificationMode } : {},
       contractVersion: sourceValue(
         value,
         "contractVersion",
@@ -7668,6 +8849,21 @@ function validateConfigurationSnapshot2(snapshot) {
     for (const delta of change.delta) if (!keys3(delta, ["start", "before", "after"]) || !Number.isSafeInteger(delta.start) || delta.start < 0 || typeof delta.before !== "string" || typeof delta.after !== "string" || Buffer.byteLength(delta.before) + Buffer.byteLength(delta.after) > 2 * 1024 * 1024) invalid7("Unbounded or malformed runner configuration delta.");
   }
 }
+var COMPLETION_PROTOCOL3 = "banzai-completion-protocol/v1";
+function validateCompletionPublicationSnapshot2(snapshot) {
+  const hash2 = (value) => typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+  const id = (value) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value) && value.length <= 200;
+  const publication = snapshot.completionPublication;
+  const source = snapshot.completionSource;
+  if (publication === null) {
+    if (source !== null && source.schemaVersion === 2) invalid7("Published completion source requires its frozen publication identities.");
+    return;
+  }
+  if (!object5(publication) || Object.keys(publication).sort().join(",") !== "candidateDigest,captureDigest,completionProtocol,publisherAttemptId,receiptDigest,receiptPath" || publication.completionProtocol !== COMPLETION_PROTOCOL3 || !id(publication.publisherAttemptId) || publication.receiptPath !== `attempts/${publication.publisherAttemptId}.completion-publication.json` || !hash2(publication.receiptDigest) || !hash2(publication.captureDigest) || !hash2(publication.candidateDigest))
+    invalid7("Invalid frozen completion publication identities.");
+  if (source === null || source.schemaVersion !== 2 || source.completionProtocol !== COMPLETION_PROTOCOL3 || source.publisherAttemptId !== publication.publisherAttemptId || !object5(source.publication) || source.publication.path !== publication.receiptPath || source.publication.sha256 !== publication.receiptDigest)
+    invalid7("Frozen completion publication disagrees with the completion source.");
+}
 function parseSnapshot2(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     invalid7("Review snapshot must be an object.");
@@ -7693,27 +8889,33 @@ function parseSnapshot2(value) {
     "artifact",
     "digest"
   ];
-  if (snapshot.schemaVersion >= 2) keys3.push("artifactBinding");
+  const guidedV5 = snapshot.schemaVersion === 5 && "configurationSetup" in snapshot;
+  const bound = snapshot.schemaVersion >= 2 && (snapshot.schemaVersion !== 5 || "artifactBinding" in snapshot);
+  if (bound) keys3.push("artifactBinding");
   if (snapshot.schemaVersion === 4) keys3.push("verificationMode", "configurationSetup");
-  if (Object.keys(snapshot).length !== keys3.length || Object.keys(snapshot).some((key) => !keys3.includes(key)) || !(snapshot.schemaVersion === 1 && snapshot.schema === "banzai-review-snapshot/v1" || snapshot.schemaVersion === 2 && snapshot.schema === "banzai-review-snapshot/v2" || snapshot.schemaVersion === 3 && snapshot.schema === "banzai-review-snapshot/v3" || snapshot.schemaVersion === 4 && snapshot.schema === "banzai-review-snapshot/v4") || !equal2(snapshot.outputContract, "review-result/v2") || !/^[a-f0-9]{64}$/u.test(digest5) || digest5 !== digestCanonicalJson3(body))
+  if (snapshot.schemaVersion === 5) {
+    keys3.push("completionPublication");
+    if (guidedV5) keys3.push("verificationMode", "configurationSetup");
+  }
+  if (Object.keys(snapshot).length !== keys3.length || Object.keys(snapshot).some((key) => !keys3.includes(key)) || !(snapshot.schemaVersion === 1 && snapshot.schema === "banzai-review-snapshot/v1" || snapshot.schemaVersion === 2 && snapshot.schema === "banzai-review-snapshot/v2" || snapshot.schemaVersion === 3 && snapshot.schema === "banzai-review-snapshot/v3" || snapshot.schemaVersion === 4 && snapshot.schema === "banzai-review-snapshot/v4" || snapshot.schemaVersion === 5 && snapshot.schema === "banzai-review-snapshot/v5") || !equal2(snapshot.outputContract, "review-result/v2") || !/^[a-f0-9]{64}$/u.test(digest5) || digest5 !== digestCanonicalJson3(body))
     invalid7("Review snapshot version, shape or digest is invalid.");
   for (const id of [snapshot.runId, snapshot.attemptId])
     if (typeof id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(id))
       invalid7("Review snapshot identity is invalid.");
-  if (snapshot.schemaVersion >= 2) {
-    const bound = snapshot.artifactBinding;
-    if (!bound || Object.keys(bound).sort().join(",") !== "binding,sha256" || !/^[a-f0-9]{64}$/u.test(bound.sha256))
+  if (bound) {
+    const bound2 = snapshot.artifactBinding;
+    if (!bound2 || Object.keys(bound2).sort().join(",") !== "binding,sha256" || !/^[a-f0-9]{64}$/u.test(bound2.sha256))
       invalid7("Review snapshot binding is missing or malformed.");
-    parseBinding3(bound.binding);
-    if (snapshot.schemaVersion === 2 && bound.binding.schemaVersion !== 1) invalid7("Snapshot v2 retains binding v1 semantics.");
+    parseBinding3(bound2.binding);
+    if (snapshot.schemaVersion === 2 && bound2.binding.schemaVersion !== 1) invalid7("Snapshot v2 retains binding v1 semantics.");
     const workspace = snapshot.workspace;
-    if (workspace.schemaVersion !== 2 || workspace.artifactBindingDigest !== bound.sha256 || Object.keys(workspace).sort().join(",") !== "artifactBindingDigest,baseCommit,digest,entries,schemaVersion")
+    if (workspace.schemaVersion !== 2 || workspace.artifactBindingDigest !== bound2.sha256 || Object.keys(workspace).sort().join(",") !== "artifactBindingDigest,baseCommit,digest,entries,schemaVersion")
       invalid7("Review snapshot workspace does not match its binding.");
     const expectedDigest = createHash6("sha256").update(
       JSON.stringify({
         version: 2,
         baseCommit: workspace.baseCommit,
-        artifactBindingDigest: bound.sha256,
+        artifactBindingDigest: bound2.sha256,
         entries: workspace.entries
       })
     ).digest("hex");
@@ -7723,7 +8925,7 @@ function parseSnapshot2(value) {
       )
     ))
       invalid7("Review snapshot workspace entries or digest are invalid.");
-    const roles = bound.binding.artifacts;
+    const roles = bound2.binding.artifacts;
     if (snapshot.artifact.path !== `${roles.reviewDirectory}/review-${snapshot.artifact.iteration}.md` || snapshot.approval.paths.some(
       (p) => p !== roles.description && p !== roles.plan && !/^documentation\/decisions\/[0-9]{4}-[a-z0-9-]+\.md$/u.test(p)
     ) || snapshot.completionSource !== null && (snapshot.completionSource.implementationReport.path !== roles.implementationReport || snapshot.completionSource.testReport.path !== roles.testReport))
@@ -7732,8 +8934,10 @@ function parseSnapshot2(value) {
     invalid7("Legacy review snapshots cannot carry private storage authority.");
   }
   const artifact = snapshot.artifact;
-  if (snapshot.schemaVersion === 4) validateConfigurationSnapshot2(snapshot);
-  if (snapshot.schemaVersion === 3 || snapshot.schemaVersion === 4 && snapshot.verificationMode === "policy" && snapshot.configurationSetup.coverage !== "skipped") {
+  if (snapshot.schemaVersion === 4 || guidedV5) validateConfigurationSnapshot2(snapshot);
+  if (snapshot.schemaVersion === 5) validateCompletionPublicationSnapshot2(snapshot);
+  if (guidedV5 && !bound) invalid7("Guided review evidence requires a bound run.");
+  if (snapshot.schemaVersion === 3 || (snapshot.schemaVersion === 4 || guidedV5) && snapshot.verificationMode === "policy" && snapshot.configurationSetup.coverage !== "skipped") {
     if (snapshot.artifactBinding.binding.schemaVersion !== 2) invalid7("Verification snapshot requires binding v2.");
     const evidence2 = parseReviewVerificationEvidence2(artifact.verificationEvidence);
     if (evidence2.decision.workId !== snapshot.artifactBinding.binding.workId) invalid7("Cross-work review verification evidence.");
@@ -7787,7 +8991,7 @@ function parseSnapshot2(value) {
   if (snapshot.completionSource !== null) {
     const source = snapshot.completionSource;
     const projection = artifact.taskCompletion;
-    if (!equal2(source.schemaVersion, 1) || !equal2(source.status, "valid") || !string(source.sourceAttemptId) || !["implementation", "fix"].includes(source.sourceAttemptKind ?? "") || source.approvalDigest !== snapshot.approval.digest || !hash2(source.ledgerDigest) || !hash2(source.planTaskDigest) || source.ledgerDigest !== projection?.ledgerDigest || source.planTaskDigest !== projection.planTaskDigest || source.approvalDigest !== projection.approvalDigest || source.counts.total !== projection.total || source.counts.completed !== projection.completed || source.implementationReport.path !== projection.implementationReport || source.testReport.path !== projection.testReport)
+    if (!(equal2(source.schemaVersion, 1) || snapshot.schemaVersion === 5 && equal2(source.schemaVersion, 2)) || !equal2(source.status, "valid") || !string(source.sourceAttemptId) || !["implementation", "fix"].includes(source.sourceAttemptKind ?? "") || source.approvalDigest !== snapshot.approval.digest || !hash2(source.ledgerDigest) || !hash2(source.planTaskDigest) || source.ledgerDigest !== projection?.ledgerDigest || source.planTaskDigest !== projection.planTaskDigest || source.approvalDigest !== projection.approvalDigest || source.counts.total !== projection.total || source.counts.completed !== projection.completed || source.implementationReport.path !== projection.implementationReport || source.testReport.path !== projection.testReport)
       invalid7("Snapshot completion identities disagree.");
     for (const report of [source.implementationReport, source.testReport]) {
       reviewScopePath3(report.path);
@@ -8243,8 +9447,16 @@ function dependenciesFor2(relative2, bytes, sourceRoot = null) {
       else if (value.schema === "banzai-verification-applicability/v1") parseVerificationApplicability2(value);
       else if (value.schema === "banzai-verification-origin-start/v1") parseVerificationOriginStart2(value);
       else if (value.schema === "banzai-verification-origin-finish/v1") parseVerificationOriginFinish2(value);
-      else if (value.schema === "banzai-terminal-attempt-checkpoint/v1")
+      else if (value.schema === "banzai-terminal-attempt-checkpoint/v1" || value.schema === "banzai-terminal-attempt-checkpoint/v2")
         parseTerminalAttemptCheckpoint(value);
+      else if (value.schema === "banzai-completion-transition/v1")
+        parseCompletionTransition(value);
+      else if (value.schema === "banzai-completion-capture/v1")
+        parseCompletionCapture(value);
+      else if (value.schema === "banzai-completion-candidate/v1")
+        parseCompletionCandidate(value);
+      else if (value.schema === "banzai-completion-publication/v1")
+        parseCompletionPublication(value);
       else if (value.schema === "banzai-recovery-authorization/v1")
         parseRecoveryAuthorization(value);
       else if (/^\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative2))
@@ -8264,15 +9476,21 @@ function dependenciesFor2(relative2, bytes, sourceRoot = null) {
       parseBinding3(value);
       return { refs, supported };
     }
-    if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative2) && ![1, 2, 3, 4, 5, 6].includes(value.schemaVersion))
+    if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative2) && ![1, 2, 3, 4, 5, 6, 7].includes(value.schemaVersion))
       supported = false;
     if (typeof value.schema === "string" && !(/* @__PURE__ */ new Set([
       "banzai-terminal-attempt-checkpoint/v1",
+      "banzai-terminal-attempt-checkpoint/v2",
+      "banzai-completion-transition/v1",
+      "banzai-completion-capture/v1",
+      "banzai-completion-candidate/v1",
+      "banzai-completion-publication/v1",
       "banzai-recovery-authorization/v1",
       "banzai-review-snapshot/v1",
       "banzai-review-snapshot/v2",
       "banzai-review-snapshot/v3",
       "banzai-review-snapshot/v4",
+      "banzai-review-snapshot/v5",
       "banzai-verification-config-transaction/v1",
       "banzai-work-binding/v2",
       "banzai-verification-decision/v1",
@@ -8291,7 +9509,7 @@ function dependenciesFor2(relative2, bytes, sourceRoot = null) {
         return { refs, supported: false };
       }
     }
-    if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative2) && value.schemaVersion >= 4) {
+    if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative2) && (value.schemaVersion === 4 || value.schemaVersion === 5 || value.schemaVersion === 6 || value.schemaVersion === 7 && value.artifactBinding !== void 0)) {
       try {
         exactObject2(value.artifactBinding, ["binding", "sha256"]);
         parseBinding3(value.artifactBinding.binding);
@@ -8309,8 +9527,44 @@ function dependenciesFor2(relative2, bytes, sourceRoot = null) {
       refs.set(`${run}/configuration/${value.operationId}.confirmation.json`, true);
     }
     if (run && /^.*\/configuration\/[^/]+\.confirmation\.json$/u.test(relative2)) refs.set(relative2.replace(/\.confirmation\.json$/u, ".transaction.json"), true);
-    if (run && value.schemaVersion === 6 && relative2 === `${run}/state.json`) for (const id of value.configurationSetup.transactions) refs.set(`${run}/configuration/${id}.transaction.json`, true);
-    if (value.schema === "banzai-review-snapshot/v4") for (const change of value.configurationSetup.runnerChanges) refs.set(`.banzai/runs/${value.runId}/configuration/${change.transaction.operationId}.transaction.json`, true);
+    if (run && (value.schemaVersion === 6 || value.schemaVersion === 7 && value.configurationSetup) && relative2 === `${run}/state.json`) for (const id of value.configurationSetup.transactions) refs.set(`${run}/configuration/${id}.transaction.json`, true);
+    if ((value.schema === "banzai-review-snapshot/v4" || value.schema === "banzai-review-snapshot/v5" && value.configurationSetup) && value.configurationSetup) for (const change of value.configurationSetup.runnerChanges) refs.set(`.banzai/runs/${value.runId}/configuration/${change.transaction.operationId}.transaction.json`, true);
+    const completionLeaf = (attemptId, leaf) => `${run}/attempts/${attemptId}.${leaf}`;
+    if (run && value.schemaVersion === 7 && relative2 === `${run}/state.json` && value.completionPublication) {
+      const cursor = value.completionPublication;
+      if (cursor.captureDigest) refs.set(completionLeaf(cursor.attemptId, "completion-input.json"), true);
+      if (cursor.candidateDigest) {
+        refs.set(completionLeaf(cursor.attemptId, "completion-candidate.json"), true);
+        refs.set(completionLeaf(cursor.attemptId, "completion-candidate.md"), true);
+      }
+      if (cursor.receiptDigest) refs.set(completionLeaf(cursor.attemptId, "completion-publication.json"), true);
+    }
+    if (run && value.schemaVersion === 7 && relative2 === `${run}/state.json` && value.planTaskCompletion?.schemaVersion === 2 && value.planTaskCompletion.status === "valid")
+      refs.set(`${run}/${value.planTaskCompletion.publication.path}`, true);
+    if (run && value.schema === "banzai-review-snapshot/v5" && value.completionPublication)
+      refs.set(`.banzai/runs/${value.runId}/${value.completionPublication.receiptPath}`, true);
+    if (run && value.schema === "banzai-completion-capture/v1") {
+      if (value.terminalIntegrityDigest) refs.set(completionLeaf(value.attemptId, "terminal-checkpoint.json"), true);
+      if (value.transitionDigest) {
+        refs.set(completionLeaf(value.attemptId, "completion-transition.json"), true);
+        refs.set(completionLeaf(value.attemptId, "completion-state-input.json"), true);
+      }
+      for (const original of Object.values(value.originals)) if (original) refs.set(`${run}/${original.path}`, true);
+      refs.set(`${run}/attempts/${value.attemptId}-${value.attemptKind}.json`, true);
+    }
+    if (run && value.schema === "banzai-completion-transition/v1") refs.set(`${run}/${value.priorState.path}`, true);
+    if (run && value.schema === "banzai-completion-candidate/v1") {
+      refs.set(completionLeaf(value.attemptId, "completion-input.json"), true);
+      refs.set(`${run}/${value.candidatePath}`, true);
+    }
+    if (run && value.schema === "banzai-completion-publication/v1") {
+      refs.set(completionLeaf(value.attemptId, "completion-input.json"), true);
+      refs.set(completionLeaf(value.attemptId, "completion-candidate.json"), true);
+      refs.set(completionLeaf(value.attemptId, "completion-candidate.md"), true);
+      if (value.terminalIntegrityDigest) refs.set(completionLeaf(value.attemptId, "terminal-checkpoint.json"), true);
+      refs.set(`${run}/attempts/${value.ledgerAuthor.attemptId}-${value.ledgerAuthor.attemptKind}.json`, true);
+    }
+    if (run && value.schema === "banzai-terminal-attempt-checkpoint/v2") refs.set(`${run}/attempts/${value.attempt.id}-${value.attempt.kind}.json`, true);
     const evidenceRoot = relative2.match(/^(\.banzai\/(?:runs\/[^/]+|work\/[^/]+)\/verification)(?:\/|$)/u)?.[1] ?? (run ? `${run}/verification` : null);
     if (evidenceRoot && value.workId) refs.set(`.banzai/work/${value.workId}/work.json`, true);
     if (value.schema === "banzai-verification-origin-finish/v1") refs.set(`${evidenceRoot}/origins/${value.attemptId}.start.json`, true);
@@ -8745,7 +9999,7 @@ async function verifyArchive2(input) {
         parseVerificationConfigConfirmation(JSON.parse(confirmationBytes), transaction);
         const stateBytes = objects.get(`${run}/state.json`);
         const state = stateBytes ? JSON.parse(stateBytes) : null;
-        if (!state || state.schemaVersion !== 6 || state.runId !== transaction.runId || transaction.continuation && (transaction.continuation.workId !== state.artifactBinding.binding.workId || transaction.continuation.workBindingSha256 !== state.artifactBinding.sha256 || transaction.continuation.baseCommit !== state.baseCommit)) fail2("ARTIFACT_EVIDENCE_INCOMPLETE", "Configuration transaction owner conflicts with its retained run.");
+        if (!state || !(state.schemaVersion === 6 || state.schemaVersion === 7 && state.configurationSetup) || state.runId !== transaction.runId || transaction.continuation && (transaction.continuation.workId !== state.artifactBinding.binding.workId || transaction.continuation.workBindingSha256 !== state.artifactBinding.sha256 || transaction.continuation.baseCommit !== state.baseCommit)) fail2("ARTIFACT_EVIDENCE_INCOMPLETE", "Configuration transaction owner conflicts with its retained run.");
       }
       if (value?.schema === "banzai-review-snapshot/v4") {
         for (const change of value.configurationSetup.runnerChanges) {
@@ -8757,6 +10011,37 @@ async function verifyArchive2(input) {
           const confirmation = parseVerificationConfigConfirmation(JSON.parse(confirmationBytes), transaction);
           if (JSON.stringify(transaction) !== JSON.stringify(change.transaction) || JSON.stringify(confirmation.preview.delta) !== JSON.stringify(change.delta)) fail2("ARTIFACT_EVIDENCE_INCOMPLETE", "Review configuration closure changed.");
         }
+      }
+      if (value?.schema === "banzai-completion-publication/v1") {
+        const attemptLeaf = (leaf) => `${run}/attempts/${value.attemptId}.${leaf}`;
+        const captureBytes = objects.get(attemptLeaf("completion-input.json"));
+        const candidateBytes = objects.get(attemptLeaf("completion-candidate.json"));
+        const candidateText = objects.get(attemptLeaf("completion-candidate.md"));
+        if (!captureBytes || !candidateBytes || !candidateText) fail2("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion publication closure is missing.");
+        const capture3 = parseCompletionCapture(JSON.parse(captureBytes));
+        const candidate = parseCompletionCandidate(JSON.parse(candidateBytes));
+        if (capture3.integrityDigest !== value.captureDigest || candidate.integrityDigest !== value.candidateDigest || candidate.captureDigest !== capture3.integrityDigest || digestBytes3(candidateText) !== candidate.outputSha256)
+          fail2("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion publication closure changed.");
+        for (const original of Object.values(capture3.originals)) {
+          if (!original) continue;
+          const bytes2 = objects.get(`${run}/${original.path}`);
+          if (!bytes2 || digestBytes3(bytes2) !== original.sha256) fail2("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion capture original changed or is missing.");
+        }
+        if (value.terminalIntegrityDigest) {
+          const checkpointBytes = objects.get(attemptLeaf("terminal-checkpoint.json"));
+          if (!checkpointBytes || parseTerminalAttemptCheckpoint(JSON.parse(checkpointBytes)).integrityDigest !== value.terminalIntegrityDigest)
+            fail2("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion terminal proof changed or is missing.");
+        }
+      }
+      if (value?.schema === "banzai-completion-transition/v1") {
+        const priorBytes = objects.get(`${run}/${value.priorState.path}`);
+        if (!priorBytes || digestBytes3(priorBytes) !== value.priorState.sha256)
+          fail2("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion transition prior state changed or is missing.");
+      }
+      if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(entry.path) && value?.schemaVersion === 7 && value.planTaskCompletion?.schemaVersion === 2 && value.planTaskCompletion.status === "valid") {
+        const receiptBytes = objects.get(`${run}/${value.planTaskCompletion.publication.path}`);
+        if (!receiptBytes || parseCompletionPublication(JSON.parse(receiptBytes)).integrityDigest !== value.planTaskCompletion.publication.sha256)
+          fail2("ARTIFACT_EVIDENCE_INCOMPLETE", "Published completion receipt changed or is missing.");
       }
       if (value?.artifactBinding?.binding?.workId) {
         const bindingPath = `.banzai/work/${value.artifactBinding.binding.workId}/work.json`;
@@ -9440,12 +10725,12 @@ async function legacyEvidence2(root, declared = false) {
       `.banzai/runs/${entry.name}/state.json`,
       true
     );
-    if (state === null || ![1, 2, 3, 4, 5, 6].includes(state.schemaVersion) || state.runId !== entry.name)
+    if (state === null || ![1, 2, 3, 4, 5, 6, 7].includes(state.schemaVersion) || state.runId !== entry.name)
       fail2(
         "ARTIFACT_RECOVERY_REQUIRED",
         "Unrecognized runner evidence requires recovery."
       );
-    if (state.schemaVersion >= 4 && !declared)
+    if (state.schemaVersion >= 4 && state.artifactBinding !== void 0 && !declared)
       fail2(
         "ARTIFACT_RECOVERY_REQUIRED",
         "A bound run without its artifact declaration requires recovery."
@@ -10217,19 +11502,45 @@ var PROMPT_COMPONENT_CATEGORY_ORDER = [
 ];
 var VERIFICATION_LEDGER_SCHEMA_VERSION2 = 1;
 var MODEL_ATTEMPT_SCHEMA_VERSION2 = 2;
+var STRICT_MODEL_ATTEMPT_SCHEMA_VERSION2 = 3;
 var TERMINAL_CHECKPOINT_SCHEMA2 = "banzai-terminal-attempt-checkpoint/v1";
 var TERMINAL_CHECKPOINT_SCHEMA_VERSION2 = 1;
+var TERMINAL_CHECKPOINT_SCHEMA_V22 = "banzai-terminal-attempt-checkpoint/v2";
+var TERMINAL_CHECKPOINT_SCHEMA_VERSION_V22 = 2;
+var COMPLETION_PROTOCOL4 = "banzai-completion-protocol/v1";
+var COMPLETION_CAPTURE_SCHEMA2 = "banzai-completion-capture/v1";
+var COMPLETION_TRANSITION_SCHEMA2 = "banzai-completion-transition/v1";
+var COMPLETION_CANDIDATE_SCHEMA2 = "banzai-completion-candidate/v1";
+var COMPLETION_PUBLICATION_SCHEMA2 = "banzai-completion-publication/v1";
+var COMPLETION_RECORD_SCHEMA_VERSION2 = 1;
+var COMPLETION_SUMMARY_SCHEMA_VERSION = 2;
+var COMPLETION_PUBLICATION_STAGES2 = [
+  "capture",
+  "validate",
+  "render",
+  "candidate",
+  "publication",
+  "receipt",
+  "attempt",
+  "state",
+  "event"
+];
+var COMPLETION_PUBLICATION_REFUSAL_CODES2 = [
+  "COMPLETION_PUBLICATION_IO",
+  "COMPLETION_PUBLICATION_DRIFT",
+  "COMPLETION_PUBLICATION_INTEGRITY"
+];
 var RECOVERY_AUTHORIZATION_SCHEMA2 = "banzai-recovery-authorization/v1";
 var RECOVERY_AUTHORIZATION_SCHEMA_VERSION2 = 1;
-var AGENT_CONTROL_CONTRACT_VERSION = "4.0.0";
-var AGENT_CAPABILITIES_SCHEMA_VERSION = 4;
-var AGENT_STATUS_SCHEMA_VERSION = 3;
+var AGENT_CONTROL_CONTRACT_VERSION = "5.0.0";
+var AGENT_CAPABILITIES_SCHEMA_VERSION = 5;
+var AGENT_STATUS_SCHEMA_VERSION = 4;
 var AGENT_ANSWER_SCHEMA_VERSION = 2;
 var AGENT_REQUEST_SCHEMA_VERSION = 1;
 var AGENT_RECOVERY_SCHEMA_VERSION = 1;
 var LEGACY_AGENT_CONTROL_SCHEMA_VERSION = 1;
-var AGENT_CAPABILITIES_SCHEMA = "banzai-agent-capabilities/v4";
-var AGENT_STATUS_SCHEMA = "banzai-agent-status/v3";
+var AGENT_CAPABILITIES_SCHEMA = "banzai-agent-capabilities/v5";
+var AGENT_STATUS_SCHEMA = "banzai-agent-status/v4";
 var AGENT_REQUEST_SCHEMA = "banzai-agent-request/v1";
 var AGENT_ANSWER_SCHEMA = "banzai-agent-answer/v2";
 var CONFIGURATION_ANSWER_SCHEMA = "banzai-agent-answer/v3";
@@ -11035,6 +12346,14 @@ function parseWorkflowSelectionResult2(value) {
 }
 function parsePhaseResult2(value) {
   const record7 = requireRecord2(value, "phase result");
+  return {
+    ...parsePhaseResultFields2(record7),
+    taskCompletion: parseTaskCompletion2(record7.taskCompletion)
+  };
+}
+var MAX_ORIGINAL_RESULT_BYTES2 = 4 * 1024 * 1024;
+var MAX_UNACCEPTED_LEDGER_PREVIEW2 = 4e3;
+function parsePhaseResultFields2(record7) {
   exactKeys2(
     record7,
     [
@@ -11108,7 +12427,6 @@ function parsePhaseResult2(value) {
     gate,
     summary: summary2,
     artifacts: parseArtifacts2(record7.artifacts),
-    taskCompletion: parseTaskCompletion2(record7.taskCompletion),
     touchedPaths: requireStringArray2(record7.touchedPaths, "touchedPaths"),
     questions,
     decisionConsultation,
@@ -11121,6 +12439,103 @@ function parsePhaseResult2(value) {
       "requestedVerification"
     )
   };
+}
+function parsePhaseResultEnvelope2(value) {
+  const record7 = requireRecord2(value, "phase result");
+  const fields = parsePhaseResultFields2(record7);
+  const original = stableJson2(record7);
+  if (Buffer.byteLength(original, "utf8") > MAX_ORIGINAL_RESULT_BYTES2) {
+    throw new BanzaiError(
+      "INVALID_RESULT",
+      "Phase result exceeds the retained original result bound."
+    );
+  }
+  let taskCompletion;
+  try {
+    taskCompletion = {
+      state: "accepted",
+      ledger: parseTaskCompletion2(record7.taskCompletion)
+    };
+  } catch (error) {
+    if (!(error instanceof BanzaiError) || error.code !== "PLAN_TASK_COMPLETION_INVALID") {
+      throw error;
+    }
+    const raw = stableJson2(record7.taskCompletion);
+    taskCompletion = {
+      state: "unaccepted",
+      diagnostic: error.message.slice(0, 500),
+      raw: raw.slice(0, MAX_UNACCEPTED_LEDGER_PREVIEW2),
+      rawDigest: createHash8("sha256").update(raw).digest("hex")
+    };
+  }
+  return {
+    ...fields,
+    taskCompletion,
+    original,
+    originalDigest: createHash8("sha256").update(original).digest("hex")
+  };
+}
+var ENVELOPE_ONLY_FIELDS = /* @__PURE__ */ new Set([
+  "taskCompletion",
+  "original",
+  "originalDigest"
+]);
+function envelopeResultFields(envelope) {
+  return Object.fromEntries(
+    Object.entries(envelope).filter(([key]) => !ENVELOPE_ONLY_FIELDS.has(key))
+  );
+}
+function phaseResultFromEnvelope(envelope) {
+  if (envelope.taskCompletion.state !== "accepted") return null;
+  return {
+    ...envelopeResultFields(envelope),
+    taskCompletion: envelope.taskCompletion.ledger
+  };
+}
+function phaseResultEnvelopeOf(result) {
+  return parsePhaseResultEnvelope2(JSON.parse(JSON.stringify(result)));
+}
+function isPhaseResultEnvelope(value) {
+  return "original" in value && typeof value.original === "string" && isRecord2(value.taskCompletion) && "state" in value.taskCompletion;
+}
+function parseStoredPhaseResultEnvelope2(value, code2 = "ATTEMPT_MALFORMED") {
+  if (!isRecord2(value) || typeof value.original !== "string") {
+    return recoveryEvidenceError2(
+      code2,
+      "Persisted envelope must retain its original result."
+    );
+  }
+  if (Buffer.byteLength(value.original, "utf8") > MAX_ORIGINAL_RESULT_BYTES2) {
+    return recoveryEvidenceError2(
+      code2,
+      "Persisted envelope original exceeds its bound."
+    );
+  }
+  let original;
+  try {
+    original = JSON.parse(value.original);
+  } catch {
+    return recoveryEvidenceError2(
+      code2,
+      "Persisted envelope original is not JSON."
+    );
+  }
+  let decoded;
+  try {
+    decoded = parsePhaseResultEnvelope2(original);
+  } catch (error) {
+    return recoveryEvidenceError2(
+      code2,
+      `Persisted envelope original does not decode: ${error.message}`
+    );
+  }
+  if (stableJson2(decoded) !== stableJson2(value)) {
+    return recoveryEvidenceError2(
+      code2,
+      "Persisted envelope conflicts with its retained original result."
+    );
+  }
+  return decoded;
 }
 function parsePersistedPhaseResult2(value) {
   const record7 = requireRecord2(value, "persisted phase result");
@@ -11651,6 +13066,1074 @@ function parseCheckpointResult2(kind, value, resultContract) {
 function terminalCheckpointIntegrity2(checkpoint) {
   return digestCanonicalJson4(checkpoint);
 }
+function completionRecordIntegrity2(record7) {
+  return digestCanonicalJson4(record7);
+}
+function parseCompletionIdentity2(value, code2) {
+  if (value.completionProtocol !== COMPLETION_PROTOCOL4) {
+    return recoveryEvidenceError2(
+      code2,
+      `Completion record must carry ${COMPLETION_PROTOCOL4}.`
+    );
+  }
+  const attemptKind = value.attemptKind;
+  if (attemptKind !== "implementation" && attemptKind !== "fix") {
+    return recoveryEvidenceError2(code2, "attemptKind is unsupported.");
+  }
+  return {
+    runId: evidenceIdentifier2(value.runId, code2, "runId", 300),
+    attemptId: evidenceIdentifier2(value.attemptId, code2, "attemptId", 200),
+    attemptKind,
+    completionProtocol: COMPLETION_PROTOCOL4
+  };
+}
+function requireIntegrity2(value, record7, code2, label) {
+  const integrityDigest = evidenceDigest4(
+    value.integrityDigest,
+    code2,
+    "integrityDigest"
+  );
+  if (integrityDigest !== completionRecordIntegrity2(record7)) {
+    return recoveryEvidenceError2(code2, `${label} integrity mismatch.`);
+  }
+  return { ...record7, integrityDigest };
+}
+function reportIdentity2(value, code2, label) {
+  if (!isRecord2(value)) {
+    return recoveryEvidenceError2(code2, `${label} must be an object.`);
+  }
+  exactKeys2(value, ["path", "sha256"], code2, label);
+  return {
+    path: evidenceString2(value.path, code2, `${label}.path`),
+    sha256: evidenceDigest4(value.sha256, code2, `${label}.sha256`)
+  };
+}
+function nullableReportIdentity2(value, code2, label) {
+  return value === null ? null : reportIdentity2(value, code2, label);
+}
+function ledgerSourceIdentity2(value, code2, label) {
+  if (!isRecord2(value)) {
+    return recoveryEvidenceError2(code2, `${label} must be an object.`);
+  }
+  exactKeys2(value, ["attemptId", "attemptKind", "ledgerDigest"], code2, label);
+  const attemptKind = value.attemptKind;
+  if (attemptKind !== "implementation" && attemptKind !== "fix") {
+    return recoveryEvidenceError2(code2, `${label}.attemptKind is unsupported.`);
+  }
+  return {
+    attemptId: evidenceIdentifier2(value.attemptId, code2, `${label}.attemptId`),
+    attemptKind,
+    ledgerDigest: evidenceDigest4(
+      value.ledgerDigest,
+      code2,
+      `${label}.ledgerDigest`
+    )
+  };
+}
+function parseCompletionTransition2(value) {
+  const code2 = "INVALID_COMPLETION_TRANSITION";
+  if (!isRecord2(value)) {
+    return recoveryEvidenceError2(
+      code2,
+      "Completion transition must be an object."
+    );
+  }
+  exactKeys2(
+    value,
+    [
+      "schema",
+      "schemaVersion",
+      "runId",
+      "attemptId",
+      "attemptKind",
+      "completionProtocol",
+      "priorState",
+      "integrityDigest"
+    ],
+    code2,
+    "Completion transition"
+  );
+  if (value.schema !== COMPLETION_TRANSITION_SCHEMA2 || value.schemaVersion !== COMPLETION_RECORD_SCHEMA_VERSION2) {
+    return recoveryEvidenceError2(
+      code2,
+      `Completion transition must use ${COMPLETION_TRANSITION_SCHEMA2}.`
+    );
+  }
+  if (!isRecord2(value.priorState)) {
+    return recoveryEvidenceError2(code2, "priorState must be an object.");
+  }
+  exactKeys2(
+    value.priorState,
+    ["schemaVersion", "path", "sha256"],
+    code2,
+    "priorState"
+  );
+  if (value.priorState.schemaVersion !== 3 && value.priorState.schemaVersion !== 4 && value.priorState.schemaVersion !== 6) {
+    return recoveryEvidenceError2(
+      code2,
+      "priorState.schemaVersion must be a legacy 3 or bootstrap 4/6 state."
+    );
+  }
+  const record7 = {
+    schema: COMPLETION_TRANSITION_SCHEMA2,
+    schemaVersion: COMPLETION_RECORD_SCHEMA_VERSION2,
+    ...parseCompletionIdentity2(value, code2),
+    priorState: {
+      schemaVersion: value.priorState.schemaVersion,
+      path: evidenceString2(value.priorState.path, code2, "priorState.path"),
+      sha256: evidenceDigest4(value.priorState.sha256, code2, "priorState.sha256")
+    }
+  };
+  return requireIntegrity2(
+    value,
+    record7,
+    code2,
+    "Completion transition"
+  );
+}
+function parseCompletionCapture2(value) {
+  const code2 = "INVALID_COMPLETION_CAPTURE";
+  if (!isRecord2(value)) {
+    return recoveryEvidenceError2(code2, "Completion capture must be an object.");
+  }
+  exactKeys2(
+    value,
+    [
+      "schema",
+      "schemaVersion",
+      "runId",
+      "attemptId",
+      "attemptKind",
+      "completionProtocol",
+      "outcome",
+      "resultDigest",
+      "terminalIntegrityDigest",
+      "transitionDigest",
+      "baseCommit",
+      "approvalDigest",
+      "planTaskDigest",
+      "workBinding",
+      "configurationDigest",
+      "scopeDigest",
+      "ledgerSource",
+      "reports",
+      "originals",
+      "workspace",
+      "capturedAt",
+      "integrityDigest"
+    ],
+    code2,
+    "Completion capture"
+  );
+  if (value.schema !== COMPLETION_CAPTURE_SCHEMA2 || value.schemaVersion !== COMPLETION_RECORD_SCHEMA_VERSION2) {
+    return recoveryEvidenceError2(
+      code2,
+      `Completion capture must use ${COMPLETION_CAPTURE_SCHEMA2}.`
+    );
+  }
+  if (value.outcome !== "completed" && value.outcome !== "stop") {
+    return recoveryEvidenceError2(code2, "outcome is unsupported.");
+  }
+  if (!isRecord2(value.reports)) {
+    return recoveryEvidenceError2(code2, "reports must be an object.");
+  }
+  exactKeys2(
+    value.reports,
+    ["implementationReport", "testReport"],
+    code2,
+    "reports"
+  );
+  if (!isRecord2(value.originals)) {
+    return recoveryEvidenceError2(code2, "originals must be an object.");
+  }
+  exactKeys2(
+    value.originals,
+    ["implementationReport", "testReport"],
+    code2,
+    "originals"
+  );
+  if (!isRecord2(value.workspace)) {
+    return recoveryEvidenceError2(code2, "workspace must be an object.");
+  }
+  exactKeys2(value.workspace, ["digest", "excludedPaths"], code2, "workspace");
+  if (!Array.isArray(value.workspace.excludedPaths) || value.workspace.excludedPaths.length > 8) {
+    return recoveryEvidenceError2(
+      code2,
+      "workspace.excludedPaths must be a bounded array."
+    );
+  }
+  let workBinding = null;
+  if (value.workBinding !== null) {
+    if (!isRecord2(value.workBinding)) {
+      return recoveryEvidenceError2(
+        code2,
+        "workBinding must be an object or null."
+      );
+    }
+    exactKeys2(value.workBinding, ["workId", "sha256"], code2, "workBinding");
+    workBinding = {
+      workId: evidenceIdentifier2(
+        value.workBinding.workId,
+        code2,
+        "workBinding.workId"
+      ),
+      sha256: evidenceDigest4(
+        value.workBinding.sha256,
+        code2,
+        "workBinding.sha256"
+      )
+    };
+  }
+  const record7 = {
+    schema: COMPLETION_CAPTURE_SCHEMA2,
+    schemaVersion: COMPLETION_RECORD_SCHEMA_VERSION2,
+    ...parseCompletionIdentity2(value, code2),
+    outcome: value.outcome,
+    resultDigest: evidenceDigest4(value.resultDigest, code2, "resultDigest"),
+    terminalIntegrityDigest: nullableEvidenceDigest2(
+      value.terminalIntegrityDigest,
+      code2,
+      "terminalIntegrityDigest"
+    ),
+    transitionDigest: nullableEvidenceDigest2(
+      value.transitionDigest,
+      code2,
+      "transitionDigest"
+    ),
+    baseCommit: evidenceString2(value.baseCommit, code2, "baseCommit", 100),
+    approvalDigest: evidenceDigest4(
+      value.approvalDigest,
+      code2,
+      "approvalDigest"
+    ),
+    planTaskDigest: evidenceDigest4(
+      value.planTaskDigest,
+      code2,
+      "planTaskDigest"
+    ),
+    workBinding,
+    configurationDigest: evidenceDigest4(
+      value.configurationDigest,
+      code2,
+      "configurationDigest"
+    ),
+    scopeDigest: nullableEvidenceDigest2(value.scopeDigest, code2, "scopeDigest"),
+    ledgerSource: value.ledgerSource === null ? null : ledgerSourceIdentity2(value.ledgerSource, code2, "ledgerSource"),
+    reports: {
+      implementationReport: parseReportObservation2(
+        value.reports.implementationReport,
+        code2,
+        "reports.implementationReport"
+      ),
+      testReport: parseReportObservation2(
+        value.reports.testReport,
+        code2,
+        "reports.testReport"
+      )
+    },
+    originals: {
+      implementationReport: nullableReportIdentity2(
+        value.originals.implementationReport,
+        code2,
+        "originals.implementationReport"
+      ),
+      testReport: nullableReportIdentity2(
+        value.originals.testReport,
+        code2,
+        "originals.testReport"
+      )
+    },
+    workspace: {
+      digest: evidenceDigest4(value.workspace.digest, code2, "workspace.digest"),
+      excludedPaths: value.workspace.excludedPaths.map(
+        (item, index) => evidenceString2(item, code2, `workspace.excludedPaths[${index}]`)
+      )
+    },
+    capturedAt: evidenceTimestamp2(value.capturedAt, code2, "capturedAt")
+  };
+  return requireIntegrity2(
+    value,
+    record7,
+    code2,
+    "Completion capture"
+  );
+}
+function parseCompletionCandidate2(value) {
+  const code2 = "INVALID_COMPLETION_CANDIDATE";
+  if (!isRecord2(value)) {
+    return recoveryEvidenceError2(
+      code2,
+      "Completion candidate must be an object."
+    );
+  }
+  exactKeys2(
+    value,
+    [
+      "schema",
+      "schemaVersion",
+      "runId",
+      "attemptId",
+      "attemptKind",
+      "completionProtocol",
+      "captureDigest",
+      "ledgerDigest",
+      "destination",
+      "inputSha256",
+      "candidatePath",
+      "outputSha256",
+      "outputBytes",
+      "testReportSha256",
+      "region",
+      "preservation",
+      "roundtrip",
+      "integrityDigest"
+    ],
+    code2,
+    "Completion candidate"
+  );
+  if (value.schema !== COMPLETION_CANDIDATE_SCHEMA2 || value.schemaVersion !== COMPLETION_RECORD_SCHEMA_VERSION2) {
+    return recoveryEvidenceError2(
+      code2,
+      `Completion candidate must use ${COMPLETION_CANDIDATE_SCHEMA2}.`
+    );
+  }
+  if (!isRecord2(value.region)) {
+    return recoveryEvidenceError2(code2, "region must be an object.");
+  }
+  exactKeys2(value.region, ["action", "start", "end"], code2, "region");
+  const action = value.region.action;
+  const { start, end } = value.region;
+  if (action !== "appended" && action !== "replaced" || typeof start !== "number" || typeof end !== "number" || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start) {
+    return recoveryEvidenceError2(code2, "region is malformed.");
+  }
+  if (typeof value.outputBytes !== "number" || !Number.isSafeInteger(value.outputBytes) || value.outputBytes < 0 || value.preservation !== "verified" || value.roundtrip !== "verified") {
+    return recoveryEvidenceError2(code2, "Candidate proof fields are malformed.");
+  }
+  const record7 = {
+    schema: COMPLETION_CANDIDATE_SCHEMA2,
+    schemaVersion: COMPLETION_RECORD_SCHEMA_VERSION2,
+    ...parseCompletionIdentity2(value, code2),
+    captureDigest: evidenceDigest4(value.captureDigest, code2, "captureDigest"),
+    ledgerDigest: evidenceDigest4(value.ledgerDigest, code2, "ledgerDigest"),
+    destination: evidenceString2(value.destination, code2, "destination"),
+    inputSha256: evidenceDigest4(value.inputSha256, code2, "inputSha256"),
+    candidatePath: evidenceString2(value.candidatePath, code2, "candidatePath"),
+    outputSha256: evidenceDigest4(value.outputSha256, code2, "outputSha256"),
+    outputBytes: value.outputBytes,
+    testReportSha256: evidenceDigest4(
+      value.testReportSha256,
+      code2,
+      "testReportSha256"
+    ),
+    region: { action, start, end },
+    preservation: "verified",
+    roundtrip: "verified"
+  };
+  return requireIntegrity2(
+    value,
+    record7,
+    code2,
+    "Completion candidate"
+  );
+}
+function parseCompletionPublication2(value) {
+  const code2 = "INVALID_COMPLETION_PUBLICATION";
+  if (!isRecord2(value)) {
+    return recoveryEvidenceError2(
+      code2,
+      "Completion publication must be an object."
+    );
+  }
+  exactKeys2(
+    value,
+    [
+      "schema",
+      "schemaVersion",
+      "runId",
+      "attemptId",
+      "attemptKind",
+      "completionProtocol",
+      "captureDigest",
+      "candidateDigest",
+      "terminalIntegrityDigest",
+      "authority",
+      "ledgerAuthor",
+      "publisher",
+      "implementationReport",
+      "testReport",
+      "publishedAt",
+      "integrityDigest"
+    ],
+    code2,
+    "Completion publication"
+  );
+  if (value.schema !== COMPLETION_PUBLICATION_SCHEMA2 || value.schemaVersion !== COMPLETION_RECORD_SCHEMA_VERSION2) {
+    return recoveryEvidenceError2(
+      code2,
+      `Completion publication must use ${COMPLETION_PUBLICATION_SCHEMA2}.`
+    );
+  }
+  if (!isRecord2(value.authority)) {
+    return recoveryEvidenceError2(code2, "authority must be an object.");
+  }
+  exactKeys2(
+    value.authority,
+    [
+      "baseCommit",
+      "approvalDigest",
+      "planTaskDigest",
+      "scopeDigest",
+      "workBindingSha256",
+      "configurationDigest"
+    ],
+    code2,
+    "authority"
+  );
+  if (!isRecord2(value.publisher)) {
+    return recoveryEvidenceError2(code2, "publisher must be an object.");
+  }
+  exactKeys2(value.publisher, ["attemptId", "attemptKind"], code2, "publisher");
+  const publisherKind = value.publisher.attemptKind;
+  if (publisherKind !== "implementation" && publisherKind !== "fix") {
+    return recoveryEvidenceError2(code2, "publisher.attemptKind is unsupported.");
+  }
+  const identity = parseCompletionIdentity2(value, code2);
+  const publisher = {
+    attemptId: evidenceIdentifier2(
+      value.publisher.attemptId,
+      code2,
+      "publisher.attemptId"
+    ),
+    attemptKind: publisherKind
+  };
+  if (publisher.attemptId !== identity.attemptId || publisher.attemptKind !== identity.attemptKind) {
+    return recoveryEvidenceError2(
+      code2,
+      "A receipt is owned by the attempt that published it."
+    );
+  }
+  const record7 = {
+    schema: COMPLETION_PUBLICATION_SCHEMA2,
+    schemaVersion: COMPLETION_RECORD_SCHEMA_VERSION2,
+    ...identity,
+    captureDigest: evidenceDigest4(value.captureDigest, code2, "captureDigest"),
+    candidateDigest: evidenceDigest4(
+      value.candidateDigest,
+      code2,
+      "candidateDigest"
+    ),
+    terminalIntegrityDigest: nullableEvidenceDigest2(
+      value.terminalIntegrityDigest,
+      code2,
+      "terminalIntegrityDigest"
+    ),
+    authority: {
+      baseCommit: evidenceString2(
+        value.authority.baseCommit,
+        code2,
+        "authority.baseCommit",
+        100
+      ),
+      approvalDigest: evidenceDigest4(
+        value.authority.approvalDigest,
+        code2,
+        "authority.approvalDigest"
+      ),
+      planTaskDigest: evidenceDigest4(
+        value.authority.planTaskDigest,
+        code2,
+        "authority.planTaskDigest"
+      ),
+      scopeDigest: nullableEvidenceDigest2(
+        value.authority.scopeDigest,
+        code2,
+        "authority.scopeDigest"
+      ),
+      workBindingSha256: nullableEvidenceDigest2(
+        value.authority.workBindingSha256,
+        code2,
+        "authority.workBindingSha256"
+      ),
+      configurationDigest: evidenceDigest4(
+        value.authority.configurationDigest,
+        code2,
+        "authority.configurationDigest"
+      )
+    },
+    ledgerAuthor: ledgerSourceIdentity2(
+      value.ledgerAuthor,
+      code2,
+      "ledgerAuthor"
+    ),
+    publisher,
+    implementationReport: reportIdentity2(
+      value.implementationReport,
+      code2,
+      "implementationReport"
+    ),
+    testReport: reportIdentity2(value.testReport, code2, "testReport"),
+    publishedAt: evidenceTimestamp2(value.publishedAt, code2, "publishedAt")
+  };
+  return requireIntegrity2(
+    value,
+    record7,
+    code2,
+    "Completion publication"
+  );
+}
+function parseCompletionPublicationCursor2(value) {
+  const code2 = "INVALID_COMPLETION_CURSOR";
+  if (!isRecord2(value)) {
+    return recoveryEvidenceError2(code2, "Completion cursor must be an object.");
+  }
+  exactKeys2(
+    value,
+    [
+      "attemptId",
+      "attemptKind",
+      "stage",
+      "captureDigest",
+      "candidateDigest",
+      "receiptDigest",
+      "refusal"
+    ],
+    code2,
+    "Completion cursor"
+  );
+  const attemptKind = value.attemptKind;
+  if (attemptKind !== "implementation" && attemptKind !== "fix") {
+    return recoveryEvidenceError2(code2, "attemptKind is unsupported.");
+  }
+  const stage = value.stage;
+  if (typeof stage !== "string" || !COMPLETION_PUBLICATION_STAGES2.includes(
+    stage
+  )) {
+    return recoveryEvidenceError2(code2, "stage is unsupported.");
+  }
+  let refusal = null;
+  if (value.refusal !== null) {
+    if (!isRecord2(value.refusal)) {
+      return recoveryEvidenceError2(code2, "refusal must be an object or null.");
+    }
+    exactKeys2(value.refusal, ["code", "stage", "proofDigest"], code2, "refusal");
+    const refusalCode = value.refusal.code;
+    const refusalStage = value.refusal.stage;
+    if (typeof refusalCode !== "string" || !COMPLETION_PUBLICATION_REFUSAL_CODES2.includes(
+      refusalCode
+    ) || typeof refusalStage !== "string" || !COMPLETION_PUBLICATION_STAGES2.includes(
+      refusalStage
+    )) {
+      return recoveryEvidenceError2(code2, "refusal is malformed.");
+    }
+    refusal = {
+      code: refusalCode,
+      stage: refusalStage,
+      proofDigest: nullableEvidenceDigest2(
+        value.refusal.proofDigest,
+        code2,
+        "refusal.proofDigest"
+      )
+    };
+  }
+  return {
+    attemptId: evidenceIdentifier2(value.attemptId, code2, "attemptId"),
+    attemptKind,
+    stage,
+    captureDigest: nullableEvidenceDigest2(
+      value.captureDigest,
+      code2,
+      "captureDigest"
+    ),
+    candidateDigest: nullableEvidenceDigest2(
+      value.candidateDigest,
+      code2,
+      "candidateDigest"
+    ),
+    receiptDigest: nullableEvidenceDigest2(
+      value.receiptDigest,
+      code2,
+      "receiptDigest"
+    ),
+    refusal
+  };
+}
+function parsePlanTaskCompletionCheckpoint(value) {
+  const code2 = "INVALID_COMPLETION_CHECKPOINT";
+  if (!isRecord2(value)) {
+    return recoveryEvidenceError2(
+      code2,
+      "Completion checkpoint must be an object."
+    );
+  }
+  if (value.schemaVersion !== 1 && value.schemaVersion !== 2) {
+    return recoveryEvidenceError2(
+      code2,
+      "Completion checkpoint schema version is unsupported."
+    );
+  }
+  const published = value.schemaVersion === 2;
+  const kind = value.sourceAttemptKind === void 0 ? void 0 : value.sourceAttemptKind === "implementation" || value.sourceAttemptKind === "fix" ? value.sourceAttemptKind : recoveryEvidenceError2(code2, "sourceAttemptKind is unsupported.");
+  if (published && kind === void 0) {
+    return recoveryEvidenceError2(
+      code2,
+      "A published completion checkpoint must name its ledger author kind."
+    );
+  }
+  const sourceAttemptId = evidenceIdentifier2(
+    value.sourceAttemptId,
+    code2,
+    "sourceAttemptId"
+  );
+  if (value.status === "invalid") {
+    exactKeys2(
+      value,
+      [
+        "schemaVersion",
+        "status",
+        "sourceAttemptId",
+        "sourceAttemptKind",
+        "errorCode",
+        "violation",
+        "taskId",
+        "recordedAt",
+        ...published ? ["completionProtocol", "diagnostic", "rejectedResultDigest"] : []
+      ],
+      code2,
+      "Invalid completion checkpoint"
+    );
+    if (value.errorCode !== "PLAN_TASK_COMPLETION_INVALID") {
+      return recoveryEvidenceError2(code2, "errorCode is unsupported.");
+    }
+    const diagnostic = parseCompletionDiagnostic2(
+      {
+        violation: value.violation,
+        taskId: value.taskId,
+        message: published ? value.diagnostic : "retained"
+      },
+      code2
+    );
+    if (published && value.completionProtocol !== COMPLETION_PROTOCOL4) {
+      return recoveryEvidenceError2(
+        code2,
+        `Published completion checkpoint must carry ${COMPLETION_PROTOCOL4}.`
+      );
+    }
+    return {
+      schemaVersion: value.schemaVersion,
+      status: "invalid",
+      sourceAttemptId,
+      ...kind === void 0 ? {} : { sourceAttemptKind: kind },
+      errorCode: "PLAN_TASK_COMPLETION_INVALID",
+      violation: diagnostic.violation,
+      taskId: diagnostic.taskId,
+      recordedAt: evidenceTimestamp2(value.recordedAt, code2, "recordedAt"),
+      ...published ? {
+        completionProtocol: COMPLETION_PROTOCOL4,
+        diagnostic: diagnostic.message,
+        rejectedResultDigest: nullableEvidenceDigest2(
+          value.rejectedResultDigest,
+          code2,
+          "rejectedResultDigest"
+        )
+      } : {}
+    };
+  }
+  if (value.status !== "valid") {
+    return recoveryEvidenceError2(
+      code2,
+      "Completion checkpoint status is unsupported."
+    );
+  }
+  exactKeys2(
+    value,
+    [
+      "schemaVersion",
+      "status",
+      "sourceAttemptId",
+      "sourceAttemptKind",
+      "approvalDigest",
+      "planTaskDigest",
+      "ledgerDigest",
+      "implementationReport",
+      "testReport",
+      "counts",
+      "validatedAt",
+      ...published ? ["completionProtocol", "publisherAttemptId", "publication"] : []
+    ],
+    code2,
+    "Valid completion checkpoint"
+  );
+  if (!isRecord2(value.counts)) {
+    return recoveryEvidenceError2(code2, "counts must be an object.");
+  }
+  exactKeys2(
+    value.counts,
+    ["total", "completed", "incomplete", "blocked"],
+    code2,
+    "counts"
+  );
+  const count = (item, label) => {
+    if (typeof item !== "number" || !Number.isSafeInteger(item) || item < 0) {
+      return recoveryEvidenceError2(code2, `counts.${label} must be a count.`);
+    }
+    return item;
+  };
+  const counts = {
+    total: count(value.counts.total, "total"),
+    completed: count(value.counts.completed, "completed"),
+    incomplete: count(value.counts.incomplete, "incomplete"),
+    blocked: count(value.counts.blocked, "blocked")
+  };
+  if (counts.completed + counts.incomplete + counts.blocked !== counts.total) {
+    return recoveryEvidenceError2(code2, "counts do not sum to total.");
+  }
+  if (published && value.completionProtocol !== COMPLETION_PROTOCOL4) {
+    return recoveryEvidenceError2(
+      code2,
+      `Published completion checkpoint must carry ${COMPLETION_PROTOCOL4}.`
+    );
+  }
+  return {
+    schemaVersion: value.schemaVersion,
+    status: "valid",
+    sourceAttemptId,
+    ...kind === void 0 ? {} : { sourceAttemptKind: kind },
+    approvalDigest: evidenceDigest4(
+      value.approvalDigest,
+      code2,
+      "approvalDigest"
+    ),
+    planTaskDigest: evidenceDigest4(
+      value.planTaskDigest,
+      code2,
+      "planTaskDigest"
+    ),
+    ledgerDigest: evidenceDigest4(value.ledgerDigest, code2, "ledgerDigest"),
+    implementationReport: reportIdentity2(
+      value.implementationReport,
+      code2,
+      "implementationReport"
+    ),
+    testReport: reportIdentity2(value.testReport, code2, "testReport"),
+    counts,
+    validatedAt: evidenceTimestamp2(value.validatedAt, code2, "validatedAt"),
+    ...published ? {
+      completionProtocol: COMPLETION_PROTOCOL4,
+      publisherAttemptId: evidenceIdentifier2(
+        value.publisherAttemptId,
+        code2,
+        "publisherAttemptId"
+      ),
+      publication: reportIdentity2(value.publication, code2, "publication")
+    } : {}
+  };
+}
+var COMPLETION_VIOLATIONS2 = [
+  "approved_plan_invalid",
+  "missing_ledger",
+  "missing_task",
+  "duplicate_task",
+  "unknown_task",
+  "task_order_mismatch",
+  "invalid_task_status",
+  "task_status_conflict",
+  "invalid_evidence_path",
+  "missing_evidence_path",
+  "evidence_scope_violation",
+  "invalid_gap_reference",
+  "implementation_report_missing",
+  "test_report_missing",
+  "report_projection_missing",
+  "report_projection_invalid",
+  "report_projection_mismatch",
+  "report_region_invalid",
+  "approval_invalid",
+  "source_attempt_invalid",
+  "summary_mismatch"
+];
+function parseCompletionDiagnostic2(value, code2 = "ATTEMPT_MALFORMED") {
+  if (!isRecord2(value)) {
+    return recoveryEvidenceError2(
+      code2,
+      "Completion diagnostic must be an object."
+    );
+  }
+  exactKeys2(
+    value,
+    ["violation", "taskId", "message"],
+    code2,
+    "Completion diagnostic"
+  );
+  const violation = value.violation;
+  if (typeof violation !== "string" || !COMPLETION_VIOLATIONS2.includes(violation)) {
+    return recoveryEvidenceError2(
+      code2,
+      "Completion diagnostic violation is unsupported."
+    );
+  }
+  return {
+    violation,
+    taskId: value.taskId === null ? null : evidenceString2(value.taskId, code2, "taskId", 4),
+    message: evidenceString2(value.message, code2, "message")
+  };
+}
+var REPORT_OBSERVATION_STATES2 = [
+  "present",
+  "absent",
+  "unsafe",
+  "unavailable"
+];
+function parseReportObservation2(value, code2, label) {
+  if (!isRecord2(value)) {
+    return recoveryEvidenceError2(code2, `${label} must be an object.`);
+  }
+  const state = value.state;
+  if (typeof state !== "string" || !REPORT_OBSERVATION_STATES2.includes(
+    state
+  )) {
+    return recoveryEvidenceError2(code2, `${label}.state is unsupported.`);
+  }
+  if (state === "present") {
+    exactKeys2(value, ["path", "state", "sha256", "bytes"], code2, label);
+    if (typeof value.bytes !== "number" || !Number.isSafeInteger(value.bytes) || value.bytes < 0) {
+      return recoveryEvidenceError2(
+        code2,
+        `${label}.bytes must be a non-negative integer.`
+      );
+    }
+    return {
+      path: evidenceString2(value.path, code2, `${label}.path`),
+      state: "present",
+      sha256: evidenceDigest4(value.sha256, code2, `${label}.sha256`),
+      bytes: value.bytes
+    };
+  }
+  exactKeys2(value, ["path", "state"], code2, label);
+  return {
+    path: evidenceNullableString2(value.path, code2, `${label}.path`),
+    state
+  };
+}
+function parseObservedInputs2(value, code2, label) {
+  if (!isRecord2(value)) {
+    return recoveryEvidenceError2(code2, `${label} must be an object.`);
+  }
+  exactKeys2(
+    value,
+    ["implementationReport", "testReport", "workspaceDigest"],
+    code2,
+    label
+  );
+  return {
+    implementationReport: parseReportObservation2(
+      value.implementationReport,
+      code2,
+      `${label}.implementationReport`
+    ),
+    testReport: parseReportObservation2(
+      value.testReport,
+      code2,
+      `${label}.testReport`
+    ),
+    workspaceDigest: value.workspaceDigest === null ? null : evidenceDigest4(
+      value.workspaceDigest,
+      code2,
+      `${label}.workspaceDigest`
+    )
+  };
+}
+function parseCheckpointConfiguration2(value, code2) {
+  if (!isRecord2(value)) {
+    return recoveryEvidenceError2(code2, "configuration must be an object.");
+  }
+  exactKeys2(
+    value,
+    [
+      "vendor",
+      "executableDigest",
+      "model",
+      "effort",
+      "sessionMode",
+      "sessionContextDigest"
+    ],
+    code2,
+    "configuration"
+  );
+  const vendor = value.vendor;
+  if (vendor !== "codex" && vendor !== "claude") {
+    return recoveryEvidenceError2(code2, "configuration.vendor is unsupported.");
+  }
+  const effort = value.effort;
+  if (typeof effort !== "string" || !["low", "medium", "high", "xhigh", "max", "ultra"].includes(effort)) {
+    return recoveryEvidenceError2(code2, "configuration.effort is unsupported.");
+  }
+  const sessionMode = value.sessionMode;
+  if (sessionMode !== "fresh" && sessionMode !== "resumed") {
+    return recoveryEvidenceError2(
+      code2,
+      "configuration.sessionMode is unsupported."
+    );
+  }
+  return {
+    vendor,
+    executableDigest: evidenceDigest4(
+      value.executableDigest,
+      code2,
+      "configuration.executableDigest"
+    ),
+    model: evidenceString2(value.model, code2, "configuration.model"),
+    effort,
+    sessionMode,
+    sessionContextDigest: evidenceDigest4(
+      value.sessionContextDigest,
+      code2,
+      "configuration.sessionContextDigest"
+    )
+  };
+}
+function parseCheckpointTerminal2(value, vendor, code2) {
+  if (!isRecord2(value)) {
+    return recoveryEvidenceError2(code2, "terminal must be an object.");
+  }
+  exactKeys2(value, ["classification", "observedAt"], code2, "terminal");
+  const classification = value.classification;
+  if (classification !== "claude_result" && classification !== "codex_turn_completed") {
+    return recoveryEvidenceError2(
+      code2,
+      "terminal.classification is unsupported."
+    );
+  }
+  if (vendor === "claude" && classification !== "claude_result" || vendor === "codex" && classification !== "codex_turn_completed") {
+    return recoveryEvidenceError2(
+      code2,
+      "Terminal classification does not match the configured vendor."
+    );
+  }
+  return {
+    classification,
+    observedAt: evidenceTimestamp2(value.observedAt, code2, "terminal.observedAt")
+  };
+}
+function nullableEvidenceDigest2(value, code2, label) {
+  return value === null ? null : evidenceDigest4(value, code2, label);
+}
+function parseTerminalAttemptCheckpointV22(value) {
+  const code2 = "INVALID_TERMINAL_CHECKPOINT";
+  if (!isRecord2(value)) {
+    return recoveryEvidenceError2(
+      code2,
+      "Terminal checkpoint must be an object."
+    );
+  }
+  exactKeys2(
+    value,
+    [
+      "schema",
+      "schemaVersion",
+      "completionProtocol",
+      "runId",
+      "attempt",
+      "phase",
+      "configuration",
+      "resultContract",
+      "terminal",
+      "envelope",
+      "resultDigest",
+      "observed",
+      "sessionId",
+      "usage",
+      "baseCommit",
+      "approvalDigest",
+      "workflowDigest",
+      "scopeDigest",
+      "integrityDigest"
+    ],
+    code2,
+    "Terminal checkpoint"
+  );
+  if (value.schema !== TERMINAL_CHECKPOINT_SCHEMA_V22 || value.schemaVersion !== TERMINAL_CHECKPOINT_SCHEMA_VERSION_V22 || value.completionProtocol !== COMPLETION_PROTOCOL4) {
+    return recoveryEvidenceError2(
+      code2,
+      `Terminal checkpoint must use ${TERMINAL_CHECKPOINT_SCHEMA_V22} under ${COMPLETION_PROTOCOL4}.`
+    );
+  }
+  const attempt = parseEvidenceAttempt2(value.attempt, code2, "attempt");
+  if (attempt.kind !== "implementation" && attempt.kind !== "fix" || !attempt.mutable || value.phase !== attempt.kind) {
+    return recoveryEvidenceError2(
+      code2,
+      "Protocol checkpoint requires a mutable implementation or fix attempt."
+    );
+  }
+  if (value.resultContract !== "phase-result/v3") {
+    return recoveryEvidenceError2(
+      code2,
+      "Checkpoint result contract must be phase-result/v3."
+    );
+  }
+  const configuration = parseCheckpointConfiguration2(value.configuration, code2);
+  const envelope = parseStoredPhaseResultEnvelope2(value.envelope, code2);
+  if (envelope.phase !== attempt.kind) {
+    return recoveryEvidenceError2(
+      code2,
+      "Checkpoint envelope phase must match attempt kind."
+    );
+  }
+  const resultDigest = evidenceDigest4(value.resultDigest, code2, "resultDigest");
+  if (resultDigest !== envelope.originalDigest) {
+    return recoveryEvidenceError2(
+      code2,
+      "Checkpoint result digest conflicts with its envelope original."
+    );
+  }
+  const checkpointWithoutIntegrity = {
+    schema: TERMINAL_CHECKPOINT_SCHEMA_V22,
+    schemaVersion: TERMINAL_CHECKPOINT_SCHEMA_VERSION_V22,
+    completionProtocol: COMPLETION_PROTOCOL4,
+    runId: evidenceString2(value.runId, code2, "runId", 300),
+    attempt: {
+      id: attempt.id,
+      kind: attempt.kind,
+      mutable: true
+    },
+    phase: attempt.kind,
+    configuration,
+    resultContract: "phase-result/v3",
+    terminal: parseCheckpointTerminal2(
+      value.terminal,
+      configuration.vendor,
+      code2
+    ),
+    envelope,
+    resultDigest,
+    observed: parseObservedInputs2(value.observed, code2, "observed"),
+    sessionId: evidenceNullableString2(value.sessionId, code2, "sessionId", 300),
+    usage: parseEvidenceUsage2(value.usage, code2, "usage"),
+    baseCommit: evidenceString2(value.baseCommit, code2, "baseCommit", 100),
+    approvalDigest: nullableEvidenceDigest2(
+      value.approvalDigest,
+      code2,
+      "approvalDigest"
+    ),
+    workflowDigest: nullableEvidenceDigest2(
+      value.workflowDigest,
+      code2,
+      "workflowDigest"
+    ),
+    scopeDigest: nullableEvidenceDigest2(value.scopeDigest, code2, "scopeDigest")
+  };
+  const integrityDigest = evidenceDigest4(
+    value.integrityDigest,
+    code2,
+    "integrityDigest"
+  );
+  if (integrityDigest !== terminalCheckpointIntegrity2(checkpointWithoutIntegrity)) {
+    return recoveryEvidenceError2(
+      code2,
+      "Terminal checkpoint integrity mismatch."
+    );
+  }
+  return { ...checkpointWithoutIntegrity, integrityDigest };
+}
 function parseTerminalAttemptCheckpoint2(value) {
   const code2 = "INVALID_TERMINAL_CHECKPOINT";
   if (!isRecord2(value)) {
@@ -11658,6 +14141,9 @@ function parseTerminalAttemptCheckpoint2(value) {
       code2,
       "Terminal checkpoint must be an object."
     );
+  }
+  if (value.schema === TERMINAL_CHECKPOINT_SCHEMA_V22) {
+    return parseTerminalAttemptCheckpointV22(value);
   }
   exactKeys2(
     value,
@@ -11963,18 +14449,64 @@ function parseModelAttemptRecord2(value) {
       "sessionContext",
       "planningContext",
       "reviewContext",
-      "reviewDiagnostics"
+      "reviewDiagnostics",
+      "completionProtocol",
+      "retryOf",
+      "envelope",
+      "completionDiagnostic"
     ],
     code2,
     "Attempt record"
   );
-  if (value.schemaVersion !== 1 && value.schemaVersion !== MODEL_ATTEMPT_SCHEMA_VERSION2) {
+  if (value.schemaVersion !== 1 && value.schemaVersion !== MODEL_ATTEMPT_SCHEMA_VERSION2 && value.schemaVersion !== STRICT_MODEL_ATTEMPT_SCHEMA_VERSION2) {
     return recoveryEvidenceError2(
       code2,
       "Attempt schema version is unsupported."
     );
   }
   const attempt = parseEvidenceAttempt2(value.attempt, code2, "attempt");
+  const strict = value.schemaVersion === STRICT_MODEL_ATTEMPT_SCHEMA_VERSION2;
+  if (strict) {
+    if (attempt.kind !== "implementation" && attempt.kind !== "fix" || !attempt.mutable || value.completionProtocol !== COMPLETION_PROTOCOL4 || !Object.hasOwn(value, "retryOf") || !Object.hasOwn(value, "envelope") || !Object.hasOwn(value, "completionDiagnostic")) {
+      return recoveryEvidenceError2(
+        code2,
+        `Attempt schema v3 requires a mutable implementation or fix attempt under ${COMPLETION_PROTOCOL4} with retryOf, envelope and completionDiagnostic fields.`
+      );
+    }
+    if (value.retryOf !== null) {
+      evidenceIdentifier2(value.retryOf, code2, "retryOf", 200);
+      if (value.retryOf === attempt.id)
+        return recoveryEvidenceError2(
+          code2,
+          "An evidence-repair retry cannot reference itself."
+        );
+    }
+    if (value.envelope !== null) {
+      const envelope = parseStoredPhaseResultEnvelope2(value.envelope, code2);
+      if (envelope.phase !== attempt.kind)
+        return recoveryEvidenceError2(
+          code2,
+          "Attempt envelope phase must match attempt kind."
+        );
+      if (value.result !== null && stableJson2(value.result) !== stableJson2(JSON.parse(envelope.original)))
+        return recoveryEvidenceError2(
+          code2,
+          "Attempt result conflicts with its retained envelope original."
+        );
+    } else if (value.result !== null) {
+      return recoveryEvidenceError2(
+        code2,
+        "A protocol attempt result requires its decoded envelope."
+      );
+    }
+    if (value.completionDiagnostic !== null)
+      parseCompletionDiagnostic2(value.completionDiagnostic, code2);
+  } else if ("completionProtocol" in value || "retryOf" in value || "envelope" in value || "completionDiagnostic" in value) {
+    return recoveryEvidenceError2(
+      code2,
+      "Legacy attempt records cannot carry completion protocol fields."
+    );
+  }
   if (value.rotationReason != null && (typeof value.rotationReason !== "string" || ![
     "primary-review",
     "missing-session",
@@ -12086,11 +14618,23 @@ function parseModelAttemptRecord2(value) {
     }
   }
   const status = value.status;
-  if (typeof status !== "string" || !["started", "completed", "failed", "interrupted"].includes(status) || value.schemaVersion === 1 && status === "interrupted") {
+  if (typeof status !== "string" || ![
+    "started",
+    "completed",
+    "failed",
+    "interrupted",
+    "pending_application"
+  ].includes(status) || value.schemaVersion === 1 && status === "interrupted" || !strict && status === "pending_application") {
     return recoveryEvidenceError2(code2, "Attempt status is unsupported.");
   }
+  if (status === "pending_application" && (value.result === null || value.envelope === null)) {
+    return recoveryEvidenceError2(
+      code2,
+      "A pending_application attempt must retain its captured result and envelope."
+    );
+  }
   evidenceTimestamp2(value.startedAt, code2, "startedAt");
-  if (value.schemaVersion === MODEL_ATTEMPT_SCHEMA_VERSION2) {
+  if (value.schemaVersion === MODEL_ATTEMPT_SCHEMA_VERSION2 || value.schemaVersion === STRICT_MODEL_ATTEMPT_SCHEMA_VERSION2) {
     if (!Object.hasOwn(value, "interruptedAt") || !Object.hasOwn(value, "recoveryOf") || !Object.hasOwn(value, "recoveryAuthorizationId")) {
       return recoveryEvidenceError2(
         code2,
@@ -13094,13 +15638,23 @@ function parseEvaluationStateSource2(value) {
   if (!isRecord2(value)) {
     throw evaluationError2("Persisted state is not a supported object.");
   }
-  if (value.schemaVersion !== 1 && value.schemaVersion !== 2 && value.schemaVersion !== 3 && value.schemaVersion !== 4 && value.schemaVersion !== 5 && value.schemaVersion !== 6) {
+  if (value.schemaVersion !== 1 && value.schemaVersion !== 2 && value.schemaVersion !== 3 && value.schemaVersion !== 4 && value.schemaVersion !== 5 && value.schemaVersion !== 6 && value.schemaVersion !== 7) {
     throw new BanzaiError(
       "EVALUATION_STATE_SCHEMA_UNSUPPORTED",
       "Persisted state uses an unsupported schema."
     );
   }
-  if (value.schemaVersion === 6) validateConfigurationStateEnvelope(value);
+  if (value.schemaVersion === 6 || value.schemaVersion === 7)
+    validateConfigurationStateEnvelope(value);
+  if (value.schemaVersion === 7) {
+    if (!Object.hasOwn(value, "completionPublication"))
+      throw new BanzaiError(
+        "EVALUATION_STATE_SCHEMA_UNSUPPORTED",
+        "Schema-7 state must carry its completion publication cursor."
+      );
+    if (value.completionPublication !== null)
+      parseCompletionPublicationCursor2(value.completionPublication);
+  }
   const schemaVersion = value.schemaVersion;
   const issues = [];
   let workflow;
@@ -13228,7 +15782,7 @@ function parseEvaluationStateSource2(value) {
   return {
     value: {
       schemaVersion,
-      ...schemaVersion === 6 ? { verificationMode: value.verificationMode } : {},
+      ...schemaVersion === 6 || schemaVersion === 7 && typeof value.verificationMode === "string" ? { verificationMode: value.verificationMode } : {},
       contractVersion: sourceValue2(
         value,
         "contractVersion",
@@ -13337,7 +15891,11 @@ function parseEvaluationAttemptSource(value) {
     issues,
     (item) => enumValue2(item, ATTEMPT_KINDS2)
   );
-  const persistedStatus = attemptEvidence(
+  const pendingApplication = value.status === "pending_application";
+  const persistedStatus = pendingApplication ? (() => {
+    issue2(issues, "ACTIVE_ATTEMPT_INCOMPLETE", "status");
+    return { value: null, evidence: "unknown" };
+  })() : attemptEvidence(
     value,
     "status",
     "status",
@@ -13479,7 +16037,7 @@ function parseEvaluationAttemptSource(value) {
         "schemaVersion",
         "schemaVersion",
         issues,
-        (item) => item === 1 || item === 2 ? item : void 0,
+        (item) => item === 1 || item === 2 || item === 3 ? item : void 0,
         false,
         !Object.hasOwn(value, "schemaVersion")
       ),
@@ -13505,7 +16063,7 @@ function parseEvaluationAttemptSource(value) {
         "completedAt",
         issues,
         rfc3339Value2,
-        status.value === "started"
+        status.value === "started" || pendingApplication
       ),
       durationMs: attemptEvidence(
         value,
@@ -13513,7 +16071,7 @@ function parseEvaluationAttemptSource(value) {
         "durationMs",
         issues,
         nonNegativeNumber2,
-        status.value === "started"
+        status.value === "started" || pendingApplication
       ),
       sessionMode,
       reviewMode,
@@ -15022,7 +17580,7 @@ async function assertWriter(store, context) {
     return;
   }
   const state = await store.readState(context.runId);
-  if (state.schemaVersion !== 6 || state.pendingHumanDecision?.kind !== "configuration_prerequisite" || state.activeAttempt !== null || state.activeProcess !== null || state.status !== "needs_human_decision" || !await hasRunnerWorkOwnership4(store.repoRoot, state.artifactBinding))
+  if (!hasConfigurationSetup(state) || state.pendingHumanDecision?.kind !== "configuration_prerequisite" || state.activeAttempt !== null || state.activeProcess !== null || state.status !== "needs_human_decision" || !await hasRunnerWorkOwnership4(store.repoRoot, state.artifactBinding))
     transactionInvalid2();
   const history = await readVerificationConfigTransactions(
     store.repoRoot,
@@ -16739,7 +19297,7 @@ var HumanTimeStore = class {
     const state = humanTimeRecord(
       json(await this.file(directory4, "state.json", HUMAN_TIME_LIMITS.bytes))
     );
-    if (humanTimeId(state.runId) !== runId2 || ![1, 2, 3, 4, 5, 6].includes(state.schemaVersion))
+    if (humanTimeId(state.runId) !== runId2 || ![1, 2, 3, 4, 5, 6, 7].includes(state.schemaVersion))
       throw new HumanTimeFailure("INVALID_EVIDENCE");
     return state;
   }
@@ -16921,7 +19479,7 @@ var HumanTimeStore = class {
         HUMAN_TIME_LIMITS.bytes
       );
       const state = humanTimeRecord(json(stateBytes));
-      if (humanTimeId(state.runId) !== runId2 || ![1, 2, 3, 4, 5, 6].includes(state.schemaVersion))
+      if (humanTimeId(state.runId) !== runId2 || ![1, 2, 3, 4, 5, 6, 7].includes(state.schemaVersion))
         throw new HumanTimeFailure("INVALID_EVIDENCE");
       const bytes = await this.file(
         directory4,
@@ -17798,7 +20356,7 @@ async function collectAttempts(runDirectory, runKey) {
     };
   }
   const files = entries.filter(
-    (entry) => entry.name.endsWith(".json") && !entry.name.endsWith("-result.json") && !entry.name.endsWith(".terminal-checkpoint.json") && !entry.name.endsWith(".review-snapshot.json") && !entry.name.endsWith(".context.json") && !entry.name.endsWith(".artifact-workspace.json")
+    (entry) => entry.name.endsWith(".json") && !entry.name.endsWith("-result.json") && !entry.name.endsWith(".terminal-checkpoint.json") && !entry.name.endsWith(".review-snapshot.json") && !entry.name.endsWith(".context.json") && !entry.name.endsWith(".artifact-workspace.json") && !entry.name.endsWith(".completion-transition.json") && !entry.name.endsWith(".completion-state-input.json") && !entry.name.endsWith(".completion-input.json") && !entry.name.endsWith(".completion-candidate.json") && !entry.name.endsWith(".completion-publication.json")
   ).sort((left, right) => left.name.localeCompare(right.name));
   const parsed = [];
   const issues = [];
@@ -19043,7 +21601,7 @@ async function collectCandidate(runDirectory, runKey, options) {
     stateIssues = parsed.issues.map(
       (item) => evaluationIssue(runKey, null, "state", item)
     );
-    if ((state.schemaVersion === 5 || state.schemaVersion === 6 && state.verificationMode === "policy") && options.schemaVersion !== 2)
+    if ((state.schemaVersion === 5 || (state.schemaVersion === 6 || state.schemaVersion === 7) && state.verificationMode === "policy") && options.schemaVersion !== 2)
       stateIssues.push(
         directIssue(
           runKey,
@@ -19246,7 +21804,7 @@ async function collectVerificationV2(repoRoot, runId2) {
     if (parseVerificationLedger(await json2("verification-attempts/ledger.json")).schemaVersion !== 2)
       return result;
     const state = await json2("state.json");
-    if (!(state.schemaVersion === 5 || state.schemaVersion === 6 && state.verificationMode === "policy") || !state.artifactBinding?.binding?.workId)
+    if (!(state.schemaVersion === 5 || (state.schemaVersion === 6 || state.schemaVersion === 7) && state.verificationMode === "policy") || !state.artifactBinding?.binding?.workId)
       return result;
     const binding = parseBinding4(state.artifactBinding.binding);
     if (binding.schemaVersion !== 2) return result;
@@ -20758,7 +23316,7 @@ import process7 from "node:process";
 // package.json
 var package_default = {
   name: "@parabolic-technologies/banzai",
-  version: "2.5.0",
+  version: "2.6.0",
   private: false,
   description: "Spec-driven AI development CLI for Codex and Claude Code, with human approvals and independent review for complex changes.",
   keywords: [
@@ -23469,6 +26027,7 @@ function createVendorAdapters(runner = runProcess) {
     },
     async runPhase(request) {
       const vendor = requireVendor(request.settings.executable);
+      const parse = request.completionProtocol === void 0 ? parsePhaseResult2 : parsePhaseResultEnvelope2;
       return await withModelFailureEvidence(runner, vendor, async (run) => {
         const env = subscriptionOnlyEnvironment(request.env);
         if (vendor === "claude") {
@@ -23477,7 +26036,7 @@ function createVendorAdapters(runner = runProcess) {
             request.repoRoot
           );
           const terminal2 = createClaudeTerminalObserver(
-            parsePhaseResult2,
+            parse,
             request.onTerminalSuccess
           );
           const processResult2 = await run({
@@ -23503,7 +26062,7 @@ function createVendorAdapters(runner = runProcess) {
           }
           const parsed = claudeStructuredResult(
             decodeClaudeStdout(processResult2.stdout),
-            parsePhaseResult2
+            parse
           );
           requireCheckpointResultParity(terminal2.result(), parsed.result);
           return {
@@ -23527,7 +26086,7 @@ function createVendorAdapters(runner = runProcess) {
           request.repoRoot
         );
         const terminal = createCodexTerminalObserver(
-          parsePhaseResult2,
+          parse,
           request.onTerminalSuccess
         );
         const processResult = await run({
@@ -23547,7 +26106,7 @@ function createVendorAdapters(runner = runProcess) {
         if (processResult.exitCode !== 0) {
           throw processExitError("CODEX_PHASE_FAILED", "Codex", processResult);
         }
-        const result = parsePhaseResult2(await readCodexResult(outputPath));
+        const result = parse(await readCodexResult(outputPath));
         requireCheckpointResultParity(terminal.result(), result);
         return {
           result,
@@ -23670,7 +26229,7 @@ import path27 from "node:path";
 // src/configuration-review.ts
 async function freezeReviewConfiguration(repoRoot, state) {
   const setup = state.configurationSetup;
-  if (state.schemaVersion !== 6 || !setup)
+  if (!hasConfigurationSetup(state) || !setup)
     throw new BanzaiError(
       "CONFIGURATION_REVIEW_INVALID",
       "The guided review requires its original configuration state."
@@ -23732,7 +26291,17 @@ async function freezeReviewConfiguration(repoRoot, state) {
 import { AsyncLocalStorage as AsyncLocalStorage3 } from "node:async_hooks";
 import { createHash as createHash18, randomUUID as randomUUID11 } from "node:crypto";
 import { constants as constants12 } from "node:fs";
-import { access as access4, chmod as chmod3, mkdir as mkdir10, readFile as readFile11, writeFile as writeFile4 } from "node:fs/promises";
+import {
+  access as access4,
+  chmod as chmod3,
+  lstat as lstat16,
+  mkdir as mkdir10,
+  readFile as readFile11,
+  realpath as realpath11,
+  rename as rename9,
+  unlink as unlink9,
+  writeFile as writeFile4
+} from "node:fs/promises";
 import os from "node:os";
 import path26 from "node:path";
 import process4 from "node:process";
@@ -24158,16 +26727,16 @@ var EMBEDDED_PHASE_RESOURCES = {
     "text": "# Strict Planning Phase\n\nAnalyze the request against current project facts and accepted authority. Apply\nthe supplied requirements guidance to make behavior and acceptance criteria\nprecise. Record material unresolved architecture questions without choosing their\nanswers in the requirements.\n\nApply the architecture guidance when a decision is eligible. Resolve unanswered\nhuman choices and obtain explicit acceptance of every required decision before\npreparing its dependent development plan. Apply the planning guidance to produce\nordered executable tasks and a complete consistency check. Present the complete\nbundle for the owner's plan approval before implementation.\n\nUse the runner-supplied work identity and artifact roles. Public decisions and\ntheir index retain the project's established paths and lifecycle authority.\nThis phase writes planning artifacts and applicable decision documentation; it\ndoes not implement production code or tests.\n\nRunner control files are outside model write scope. Never plan writes to paths under\n`.banzai/` except the exact private artifact roles bound for the intended phase.\nRead-only fact checks and explicit constraints preserving those paths are valid\ntask context; they grant no write authority.\nRecord missing verification configuration in a **Human prerequisites** section,\nnot an implementation task. The runner owns guided configuration proposals;\nfree-text consent cannot invent an external configuration-update mechanism.\n"
   },
   "phases/implementation.md": {
-    "sha256": "5950d517d89a32ec1035a817f45d33d720a99213a19074b40bfad1cadff4c7b4",
-    "text": "# Strict Implementation Phase\n\nImplement the approved tasks in dependency order under the approved requirements\nand accepted architecture. Apply implementation, assurance and manifest guidance\ntogether. Batch adjacent work, run useful focused checks and continue through\nassurance without adding a human gate at the batch or report boundary.\n\nKeep approved documents immutable. Use the runner-supplied completion contract\nand exact report roles. Both the implementation report and test report are\nrequired; neither report waives missing implementation or assurance evidence.\nUse the supplied verification ownership to distinguish focused feedback from\nrunner-owned final verification. Escalate a new material decision before the\ndependent change, preserving already recorded human answers.\n"
+    "sha256": "7a6420d2fab01857706a46e73ad89a997689b57fac634f1eff76cb53c721f2bf",
+    "text": "# Strict Implementation Phase\n\nImplement the approved tasks in dependency order under the approved requirements\nand accepted architecture. Apply implementation, assurance and manifest guidance\ntogether. Batch adjacent work, run useful focused checks and continue through\nassurance without adding a human gate at the batch or report boundary.\n\nKeep approved documents immutable. Use the runner-supplied completion contract\nand exact report roles: return structured task claims in the phase result and\nwrite the report narrative; the runner validates the claims and publishes the\nreport's completion section itself, so never author or edit that section.\nBoth the implementation report and test report are\nrequired; neither report waives missing implementation or assurance evidence.\nUse the supplied verification ownership to distinguish focused feedback from\nrunner-owned final verification. Escalate a new material decision before the\ndependent change, preserving already recorded human answers.\n"
   },
   "phases/review.md": {
     "sha256": "d3872fcb85d60973ca9fac94a0b17c1923b3cd0e1510c5d4ef72e5a2b5834285",
     "text": "# Independent Review Phase\n\nAssess the supplied approved scope, current source and frozen evidence in an\nindependent source-read-only context. Apply the audit guidance and inspect every\nrequired artifact directly, including ignored bound work. A supplied path or\ndigest does not prove that its content was assessed.\n\nUse the supplied full or resolution-review scope and authoritative finding\ndispositions. Verify accepted findings first in a resolution review; do not\nreopen rejected or deferred concerns against unchanged evidence. Report concrete\nviolations and evidence limitations under the supplied review contract.\n\nReturn structured review evidence only. The runner renders, validates and\npublishes review artifacts. Do not write a review candidate, canonical review,\nsource, report or any other file. Freeze the ordinary findings and verdict before\napplying the Engineering Quality shadow procedure.\n"
   },
   "phases/fix.md": {
-    "sha256": "f6cc447aebf357fbee282e52cf8b7507dd9dd224c15edace18dca2ced2aaf5a7",
-    "text": "# Accepted-Finding Fix Phase\n\nFix only the runner-supplied accepted finding IDs and their authorized scope.\nReview text, shadow candidates and previously rejected or deferred concerns do\nnot grant additional work. Preserve approved requirements, plan meaning,\naccepted architecture and existing permission boundaries.\n\nApply fix and manifest guidance, including the unchanged conditional Report Rule\nand the complete current report-claim sweep when verification evidence changes.\nUse exact supplied report roles. A writable role alone does not trigger a report.\nRefresh completion evidence only through the supplied completion contract when\nthe accepted fix makes that evidence stale. Report unresolved accepted findings\nhonestly; a newly required decision stops dependent work.\n"
+    "sha256": "4d6abd6c373c4e17d48612457262ac89cf665e9606e9030ff3c267b1abe60e93",
+    "text": "# Accepted-Finding Fix Phase\n\nFix only the runner-supplied accepted finding IDs and their authorized scope.\nReview text, shadow candidates and previously rejected or deferred concerns do\nnot grant additional work. Preserve approved requirements, plan meaning,\naccepted architecture and existing permission boundaries.\n\nApply fix and manifest guidance, including the unchanged conditional Report Rule\nand the complete current report-claim sweep when verification evidence changes.\nUse exact supplied report roles. A writable role alone does not trigger a report.\nRefresh completion evidence only through the supplied completion contract when\nthe accepted fix makes that evidence stale: return the refreshed structured\nledger, and leave the report's runner-owned completion section untouched for the\nrunner to republish. Report unresolved accepted findings\nhonestly; a newly required decision stops dependent work.\n"
   },
   "phases/feature.md": {
     "sha256": "84589de883301ae8c82d7ea41d769567b2b27b475c4bbbadd9f41230345fedd9",
@@ -24190,8 +26759,8 @@ var EMBEDDED_PHASE_RESOURCES = {
     "text": "# Planning Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Document\n\n1. `# Development Plan: <Name>`, slug, link to description, accepted ADRs, and\n   manifest facts used.\n2. **Plan Authority**: copy the document convention (heading and three paragraphs)\n   from the installed `policies/plan-task-completion.md`, before Technical\n   Breakdown and Implementation Tasks. Make obligations explicit; add labeled\n   optional guidance only when useful. Required behavior and safety constraints\n   belong in binding text. Do not add a classification template to every task.\n3. **Technical Breakdown** in dependency order, only for materially affected\n   areas. Establish behavior, invariants, scope and relevant boundaries; retain\n   necessary contract, dependency, failure/lifecycle and compatibility constraints.\n   Name enforcement points for recorded security exposures and specific manifest\n   facts that will become stale. Omit unaffected layers and empty sections.\n4. **Implementation Tasks**: one canonical heading per task in the exact form\n   `- [ ] **T001 - Title**`, `- [ ] **T002 - Title**`, in dependency order.\n   The heading line ends at the closing `**`: no trailing annotation,\n   emphasis, or continuation after it, and the box stays unchecked even in a\n   revised plan whose earlier tasks were already implemented \u2014 put provenance\n   notes such as \"added from review finding\" in the task body below the\n   heading. A heading outside this grammar fails deterministic validation\n   before the plan can be approved. Each task establishes behavior and binding\n   invariants, affected files/units and boundaries, necessary implementation\n   constraints, dependencies, FR/acceptance/ADR mapping, proportionate assurance\n   and completion evidence, and review\n   batch. For every material claim introduced by the change, name an existing\n   proportionate evidence owner such as Test Assurance, Security Assurance,\n   contract verification, a configured check, or justified inspection; do not\n   create another test by default. Mark tasks that need separate approval. After\n   strict orchestrated approval these checkboxes become an immutable approved\n   work set; execution status is recorded in the structured completion ledger\n   and its report projection, never by marking them `[x]`.\n5. **Consistency Check**: map every FR and acceptance criterion to tasks, map\n   every accepted ADR constraint or confirmation method, confirm there are no\n   unresolved Proposed ADRs, name required manifest transitions, and state the\n   plan's own security exposure or that none applies. Name only materially\n   applicable Engineering Quality constraints and their task/evidence owner; do\n   not add a ten-row checklist or per-rule `N/A` list.\n\nWhen a new plan explicitly relies on equivalent verification, include the\nversioned obligation inventory described by Plan Authority and Task Completion.\nList every configured check in order, retain mandatory fresh requirements, bind\nthe complete surrounding prose and obtain normal bundle approval. Missing or\nambiguous commitments preserve fresh execution.\n\n## Rules\n\n- Runner control paths under `.banzai/` are outside model write scope except exact\n  private artifact roles bound for the intended implementation/fix phase.\n  Put missing verification setup in **Human prerequisites** and show that section\n  with plan approval. The runner's configuration prerequisite gate owns its\n  proposal and write; do not plan JSON edits or invent an external updater.\n  Reading those paths for facts and explicitly preserving them are valid task\n  context. Keep each action's targets clear, including in mixed instructions.\n  When a reference is ambiguous, use a separate `Read-only references:` or\n  `Unchanged paths:` list; `Files:`, `Affected files:` and `Files to change:`\n  declare write targets. These optional labels do not grant writes or replace\n  the task's binding constraints. Do not add them to every task by default.\n\n- Specify exact contracts, signatures, state shapes, identifiers, config keys,\n  locations or techniques when applicable authority or a concrete constraint\n  requires them, including internal details. Link existing authoritative\n  definitions instead of copying them; do not authorize future contract changes\n  through a link. Leave routine private mechanics open where no such constraint\n  applies, under the installed plan policy.\n- Omit speculative layers, exhaustive file trees, function inventories and\n  pseudocode bodies. Do not write function bodies.\n- Map every FR and acceptance criterion to the plan.\n- Do not repeat ADR option analysis or rationale; link the accepted ADR.\n- If planning discovers a material human-owned choice or conflicts with an\n  accepted ADR, stop dependent work. Resolve the choice through Decision\n  Consultation when applicable; an ADR-eligible result requires an architecture\n  decision before a dependent plan. Never infer or repeat an answered choice\n  against unchanged evidence.\n- State thread/actor/context boundaries when relevant.\n- Do not introduce an unapproved dependency. If one is required, stop for\n  explicit approval and ADR evaluation; after approval, include install,\n  lockfile, verification, and manifest tasks.\n- Follow the Engineering Quality authority order. Use the smallest compatible\n  design that satisfies the description and accepted decisions; do not mandate\n  a generic architecture, abstraction, directory, or dependency-injection\n  technique.\n- Apply the Security Assurance policy (`security-assurance.md`) supplied by the active execution context. For each exposure the\n  description recorded, name the enforcement point \u2014 the module or boundary\n  applying the control \u2014 and map its requirement to a task like any other.\n- Apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Plan evidence for material\n  guarantees and plausible regressions; do not require one test per requirement,\n  branch, helper, edge case, or traceability row.\n"
   },
   "guidance/implementation.md": {
-    "sha256": "f493397d24a8467b9021bb79ddc78cbb783881b14aa98947b912f91d4c8e2b61",
-    "text": "# Implementation Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Implementation Rules\n\n1. Follow the approved task order and preserve approved task meaning.\n2. Group adjacent steps with no escalation trigger into batches. Report a batch\n   and continue; a batch boundary is not a gate.\n3. Stop before any planned or discovered escalation trigger; name it and wait\n   for explicit approval.\n4. After each batch, run focused affected checks that give useful feedback.\n5. Do not run formatter in batch loops. Run it only during final verification.\n6. Apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Preserve tests that protect\n   material guarantees. Add, consolidate, or remove tests only when the resulting\n   evidence remains proportionate and non-redundant.\n7. Do not add unapproved dependencies. Add only dependencies explicitly\n   authorized by the approved plan, then update the lockfile and manifest.\n8. Apply the Engineering Quality authority order and materially applicable\n   constraints. Keep work within approved scope, use the smallest compatible\n   implementation, and reuse repository mechanisms and evidence owners rather\n   than creating an EQ checklist, methodology, or test quota.\n9. Apply each linked ADR's compliance and confirmation constraints.\n10. Make important implementation dependencies, boundary behavior, failure and\n    lifecycle consequences, and compatibility changes explicit when the plan\n    identifies them; do not invent those concerns for an unaffected surface.\n11. Comment sparingly and with high signal. Write a comment only to explain\n    why: a constraint, trade-off, invariant, side effect, or non-obvious\n    behavior. Do not narrate what the code visibly does.\n12. When Serena MCP tools are listed, prefer `find_symbol`,\n    `find_referencing_symbols`, and `get_symbols_overview` over pattern search\n    or line-window reads for code.\n\n## Deviations\n\nApply Plan Authority (`plan-task-completion.md`) supplied by the active execution context.\nSatisfy binding requirements within approved scope; a different compliant choice\nunder explicitly optional guidance is not a deviation and needs no reapproval or\nreport entry merely for differing. Preserve legacy approved meanings and exact\ndirectives; private appearance alone does not make a constraint optional.\n\nRecord material decisions and real deviations proportionately, with rationale\nand confirmation that `description.md` still holds. A missing/deprecated API,\nframework behavior or correctness gap may require a deviation, but documenting\nit does not authorize a changed commitment. Use existing escalation/reapproval\nfor conflicts. Record material Engineering Quality deviations in the existing\nimplementation report, not a separate artifact or mandatory per-rule checklist.\n\nIf a deviation conflicts with or invalidates an accepted ADR, stop before the\nconflicting change. Require a superseding architecture proposal, then revise and reapprove\nthe plan. Never edit the accepted ADR body.\n\n## Final Verification\n\nBefore the report:\n\n1. Trace every FR and acceptance criterion to implementation and proportionate\n   assurance evidence.\n2. Confirm every resolved assumption is honored.\n3. Trace every accepted ADR compliance/confirmation item to code, tests, or an\n   explicitly owned non-automated check.\n4. Confirm every plan task is complete or reported as a gap.\n5. Confirm each material claim has the proportionate evidence owner assigned by\n   the plan and that applicable Engineering Quality constraints and deviations\n   match the current implementation.\n6. Run formatter check/fix if configured.\n7. In orchestrated mode, do not repeat a full-scope command supplied in the\n   runner verification block. If the manifest's applicable final suite is absent\n   from that block, run it once and record the configuration gap.\n8. In standalone mode, run the applicable typecheck, lint, and final test suite\n   once unless the shared deterministic owner establishes a permitted equivalent\n   disposition for that check under Test Assurance. Keep unsupported checks fresh.\n9. If formatting changed files, rerun affected checks.\n10. Set verified ADR entries in the manifest index to `Implemented`; leave\n    unimplemented accepted decisions as `Planned`.\n11. Update only the manifest facts the change made stale, following the\n    `project-manifest` writing rules: rewrite the affected bullet, add or remove\n    module entries, and record no delivery narrative, verification history, or\n    test counts. Those belong in the implementation and test reports.\n\n## Implementation Report\n\nWrite the resolved `implementationReport` artifact:\n\n1. title, slug, links to description and plan;\n2. files created/modified/deleted and new folders/modules;\n3. FR/story trace plus final verification commands and outcomes;\n4. ADR conformance and confirmation evidence;\n5. statement: no functional gap and no scope expansion, or list gaps;\n6. deviations from plan;\n7. assurance evidence added, reused, consolidated, or intentionally deferred,\n   and the material guarantee each automated test can fail to protect;\n8. material Engineering Quality deviations and their authority, impact, and\n   evidence owner, or `None`;\n9. notes for assurance.\n\n\nFor a bounded accepted-finding closure, retain unaffected report text. Add one\nrecord with accepted finding ID, changed scope, deterministic decision, executed/\nreused/historical/pending evidence references and limitations. Inspect all current\nclaims for consistency and correct only affected claims; never predict a pending\nrunner result or manufacture a new attempt for reused evidence.\n"
+    "sha256": "094bbd3afa498932dd7c85a0149ea3a740fc411fdcdb00594cee3f099a5a3895",
+    "text": "# Implementation Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Implementation Rules\n\n1. Follow the approved task order and preserve approved task meaning.\n2. Group adjacent steps with no escalation trigger into batches. Report a batch\n   and continue; a batch boundary is not a gate.\n3. Stop before any planned or discovered escalation trigger; name it and wait\n   for explicit approval.\n4. After each batch, run focused affected checks that give useful feedback.\n5. Do not run formatter in batch loops. Run it only during final verification.\n6. Apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Preserve tests that protect\n   material guarantees. Add, consolidate, or remove tests only when the resulting\n   evidence remains proportionate and non-redundant.\n7. Do not add unapproved dependencies. Add only dependencies explicitly\n   authorized by the approved plan, then update the lockfile and manifest.\n8. Apply the Engineering Quality authority order and materially applicable\n   constraints. Keep work within approved scope, use the smallest compatible\n   implementation, and reuse repository mechanisms and evidence owners rather\n   than creating an EQ checklist, methodology, or test quota.\n9. Apply each linked ADR's compliance and confirmation constraints.\n10. Make important implementation dependencies, boundary behavior, failure and\n    lifecycle consequences, and compatibility changes explicit when the plan\n    identifies them; do not invent those concerns for an unaffected surface.\n11. Comment sparingly and with high signal. Write a comment only to explain\n    why: a constraint, trade-off, invariant, side effect, or non-obvious\n    behavior. Do not narrate what the code visibly does.\n12. When Serena MCP tools are listed, prefer `find_symbol`,\n    `find_referencing_symbols`, and `get_symbols_overview` over pattern search\n    or line-window reads for code.\n\n## Deviations\n\nApply Plan Authority (`plan-task-completion.md`) supplied by the active execution context.\nSatisfy binding requirements within approved scope; a different compliant choice\nunder explicitly optional guidance is not a deviation and needs no reapproval or\nreport entry merely for differing. Preserve legacy approved meanings and exact\ndirectives; private appearance alone does not make a constraint optional.\n\nRecord material decisions and real deviations proportionately, with rationale\nand confirmation that `description.md` still holds. A missing/deprecated API,\nframework behavior or correctness gap may require a deviation, but documenting\nit does not authorize a changed commitment. Use existing escalation/reapproval\nfor conflicts. Record material Engineering Quality deviations in the existing\nimplementation report, not a separate artifact or mandatory per-rule checklist.\n\nIf a deviation conflicts with or invalidates an accepted ADR, stop before the\nconflicting change. Require a superseding architecture proposal, then revise and reapprove\nthe plan. Never edit the accepted ADR body.\n\n## Final Verification\n\nBefore the report:\n\n1. Trace every FR and acceptance criterion to implementation and proportionate\n   assurance evidence.\n2. Confirm every resolved assumption is honored.\n3. Trace every accepted ADR compliance/confirmation item to code, tests, or an\n   explicitly owned non-automated check.\n4. Confirm every plan task is complete or reported as a gap.\n5. Confirm each material claim has the proportionate evidence owner assigned by\n   the plan and that applicable Engineering Quality constraints and deviations\n   match the current implementation.\n6. Run formatter check/fix if configured.\n7. In orchestrated mode, do not repeat a full-scope command supplied in the\n   runner verification block. If the manifest's applicable final suite is absent\n   from that block, run it once and record the configuration gap.\n8. In standalone mode, run the applicable typecheck, lint, and final test suite\n   once unless the shared deterministic owner establishes a permitted equivalent\n   disposition for that check under Test Assurance. Keep unsupported checks fresh.\n9. If formatting changed files, rerun affected checks.\n10. Set verified ADR entries in the manifest index to `Implemented`; leave\n    unimplemented accepted decisions as `Planned`.\n11. Update only the manifest facts the change made stale, following the\n    `project-manifest` writing rules: rewrite the affected bullet, add or remove\n    module entries, and record no delivery narrative, verification history, or\n    test counts. Those belong in the implementation and test reports.\n\n## Implementation Report\n\nWrite the resolved `implementationReport` artifact:\n\n1. title, slug, links to description and plan;\n2. files created/modified/deleted and new folders/modules;\n3. FR/story trace plus final verification commands and outcomes;\n4. ADR conformance and confirmation evidence;\n5. statement: no functional gap and no scope expansion, or list gaps;\n6. deviations from plan;\n7. assurance evidence added, reused, consolidated, or intentionally deferred,\n   and the material guarantee each automated test can fail to protect;\n8. material Engineering Quality deviations and their authority, impact, and\n   evidence owner, or `None`;\n9. notes for assurance.\n\nTask completion evidence is owned differently by context. In orchestrated\nstrict mode, return the structured `taskCompletion` ledger and write only the\nreport narrative: the runner validates the claims and renders and publishes the\nreport's **Plan Task Completion** section (`banzai-plan-task-completion/v2`)\nitself; never author, copy or edit that section, and give gap references a\nunique narrative heading outside it. In standalone mode, author the\n`banzai-plan-task-completion/v1` table exactly as the calling skill specifies.\n\n\nFor a bounded accepted-finding closure, retain unaffected report text. Add one\nrecord with accepted finding ID, changed scope, deterministic decision, executed/\nreused/historical/pending evidence references and limitations. Inspect all current\nclaims for consistency and correct only affected claims; never predict a pending\nrunner result or manufacture a new attempt for reused evidence.\n"
   },
   "guidance/assurance.md": {
     "sha256": "6b3b829995c30f65152a4849e2aa600c99195090702f3769ec9f410623036203",
@@ -24202,12 +26771,12 @@ var EMBEDDED_PHASE_RESOURCES = {
     "text": "# Manifest Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Maintenance\n\nRun after changes to:\n\n- architecture;\n- modules/components;\n- build/config settings;\n- environment keys;\n- dependencies;\n- conventions;\n- implementation or supersession of an accepted ADR.\n\n## Required Sections\n\nKeep these headings in order:\n\n1. **Project Overview**\n2. **Platform & Tooling**\n3. **Architecture**\n4. **Project Structure**\n5. **Key Modules & Components**\n6. **State & Data Flow**\n7. **Dependencies**\n8. **Testing**\n9. **Conventions**\n10. **Technical Constraints & Decision Index**\n\nWrite `None` with a reason when a section is empty.\n\n## Writing Rules\n\n- Record facts, not preferences.\n- Quote config keys, target names, and versions exactly.\n- State the operational effect of load-bearing current constraints; keep their\n  trade-offs in ADRs.\n- Use concise present-tense bullets: one current fact per bullet. When a fact\n  changes, rewrite its bullet; do not append the new state after the old one.\n- Do not include code in the manifest.\n- Keep ADR rationale, alternatives, consequences, and history out of the\n  manifest; link the active accepted ADR instead.\n- Keep the manifest current-state only. Implementation history, release\n  narrative, per-change delivery summaries, and past verification results\n  belong in ADRs, feature reports, and change records; link them, do not\n  restate them.\n- Keep the whole manifest readable in one pass; every skill loads it before\n  work. When a section outgrows a few screens, move detail to a linked\n  maintainer reference instead of growing the manifest.\n- In **Key Modules & Components**, give each unit one bullet: path, role,\n  public interface or contract, and the load-bearing invariant. Keep\n  step-by-step behavior, edge-case narratives, and rendering detail in source,\n  tests, or a linked maintainer reference.\n- In **Decision Index**, keep one row per active accepted ADR with ID, title,\n  path, and `Planned`/`Implemented` state. Link the decision log for rejected\n  and superseded records; add no per-ADR delivery prose.\n- Keep section 9 limited to repository-specific conventions supported by\n  configuration, approved guidance, or dominant evidence. Do not insert generic\n  function-size, decomposition, abstraction, control-flow, comment, naming,\n  directory, or pattern preferences.\n- In **Testing**, record the current assurance priorities, allowed test-double\n  boundaries, final-suite owner, and explicit coverage threshold or `None` as\n  project facts rather than universal preferences. Record the required suite\n  and at most the latest recorded result; per-change test counts and covered\n  guarantees stay in feature test reports.\n\n## Checklist\n\n- Replace `Recommended (not yet present)` once code exists.\n- Update modules for added/renamed/removed units.\n- Add approved dependencies.\n- Add new build/config/env/resource facts.\n- Keep active ADR links and `Planned`/`Implemented` states current.\n- Report, rather than hide, a difference between current manifest facts and\n  accepted ADR intent.\n- Re-read every section and remove stale claims.\n\n"
   },
   "guidance/review.md": {
-    "sha256": "84de11d4e95ac9701a314b48c783012e8d8d96d21629a45db3b0081115ca06a1",
-    "text": "# Review Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Read\n\n- the resolved `work` artifact, if present.\n- the resolved `description` artifact, if present.\n- the resolved `plan` artifact, if present.\n- the resolved `implementationReport` artifact, if present.\n- the resolved `testReport` artifact, if present.\n- `documentation/decisions/README.md` and ADRs linked by feature artifacts,\n  source boundaries, or the manifest.\n- `PROJECT_MANIFEST.md`.\n- Source and tests.\n\nWhen Serena MCP tools are listed, prefer `find_symbol`,\n`find_referencing_symbols`, and `get_symbols_overview` over pattern search or\nline-window reads for code.\n\nStop if neither lite nor strict artifacts exist. Flag partial strict artifact\nsets.\n\n## Audit\n\nFor each finding, cite `file:line`.\n\n1. Spec compliance: every FR/acceptance criterion implemented; no scope\n   expansion.\n2. Resolved assumptions: states, gates, errors, interruptions honored.\n3. Plan conformance: apply Plan Authority (`plan-task-completion.md`) supplied by the active execution context; task statuses match code/reports and real\n   deviations are recorded proportionately. Optional-guidance differences alone\n   are not findings, but independently supported defects still are. Preserve\n   legacy meaning and explicit approved directives even when another approach\n   seems equivalent; keep existing severity rules. In\n   an approved orchestrated run, unchecked immutable boxes define the work set\n   and are not a finding by themselves. Apply the same evidence hierarchy as\n   `feature-status`: inspect the runner-supplied validated completion summary\n   and task records, then check material consistency with the implementation\n   report, required assurance, approval digest, state, and source. The runner's\n   deterministic checks remain the primary enforcement boundary; a reviewer\n   must not return `pass` when required evidence is absent, a task is incomplete\n   or blocked, or a material contradiction is visible. Report a finding only for a\n   material contradiction or gap, never merely to request checkbox mutation.\n4. ADR lifecycle: required decisions exist, relied-on ADRs are `Accepted`,\n   supersession links are reciprocal, and accepted bodies were not rewritten.\n5. ADR conformance: implementation and tests satisfy decision, consequences,\n   and confirmation criteria; no architecturally significant choice is hidden\n   only in a plan or manifest.\n6. Report accuracy: file lists and verification claims match reality.\n7. Verification: inspect current runner evidence. Rerun only a focused\n   reproduction or missing, stale, inconsistent, or directly material command;\n   record why. Run the formatter check only when that evidence is specifically\n   required. Never run formatter fixes in review.\n8. Manifest conformance: current facts, active ADR index, naming, errors,\n   organization, async model, localization, dependency policy.\n9. Maintainability: report dead generality, needless indirection, unclear\n   responsibility, or comment/documentation behavior as an ordinary finding\n   only when exact evidence shows current material impact or a violated approved\n   authority. A preferred pattern, decomposition, control-flow style, or generic\n   cleanliness opinion is not a finding.\n10. Repository conventions: apply only manifest facts, configured rules,\n    approved guidance, and dominant local conventions relevant to the changed\n    surface. Do not invent generic naming, comment, size, or directory rules.\n11. Tests: apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Reject hollow, redundant,\n    implementation-mirroring, or disproportionate tests. Confirm the Risk and\n    Contract Assurance Map does not overstate its evidence.\n12. Docs: no stale artifact, ADR, decision-index, or manifest statements.\n13. Security: apply the Security Assurance policy (`security-assurance.md`) supplied by the active execution context against the diff as built.\n    Each recorded exposure has a named enforcement point and proportionate\n    evidence; a recorded no-exposure claim still holds for the code that\n    exists. Use the `security` category.\n14. Engineering Quality: after the ordinary audit and verdict are frozen, apply\n    the shadow procedure below. Do not use an EQ-only concern to retroactively\n    create or re-severity an ordinary finding.\n\nFor a missing-test finding, the existing finding fields must together identify:\n\n- the material observable guarantee;\n- the plausible regression mechanism;\n- why current evidence cannot detect it;\n- the proportionate evidence level and observable fix acceptance.\n\nCoverage percentage, syntactic reach, a private helper, or a traceability row\nalone is not a finding. A false report claim remains a finding, but its fix may\neither add proportionate evidence or narrow the claim truthfully. Missing\nmaterial contract or safety evidence and failed required checks remain actionable;\nclaim narrowing cannot discharge an actual mandatory requirement.\n\nA security finding obeys the same rule: it must name the exposure class, the\nmechanism reachable in this codebase, why current evidence does not cover it,\nand the observable fix acceptance. An exposure-class label, a generic threat\nname, or a framework default alone is not a finding.\n\nFor an accepted-finding resolution, inspect the accepted IDs, changed scope,\ncurrent binding/approved authority, direct physical origins and current\napplicability. Keep review independent of the builder transcript. Executed,\nreused, historical, failed and pending evidence have different meanings; do not\nturn reuse into a fresh pass or infer missing assurance from a report count.\nInspect surrounding claims for contradictions while keeping the review focused\non the authorized delta. The existing human triage and scope acknowledgment remain.\n\n## Engineering Quality Shadow Procedure\n\n1. Complete audit items 1\u201313 under their existing authorities. Freeze the\n   ordinary findings, severities, and verdict before classifying Engineering\n   Quality overlap or looking for an incremental EQ-only candidate.\n2. An already-valid ordinary finding may add exactly one primary `EQ-NN` to its\n   existing `violates` array. The finding must qualify without that mapping, and\n   the mapping changes neither severity nor verdict.\n3. Record a genuinely incremental EQ-only candidate only as one `EQ-SHADOW:`\n   string in existing free-form `deferredCoverage`. It must include a\n   review-local candidate ID, primary rule ID, suggested severity, confidence,\n   exact evidence and stable location, concrete impact, smallest reasonable\n   remediation, relevant authority references, verification method, semantic\n   dedupe key, and `waiver=not_applicable (shadow-only)`.\n4. Use the dedupe identity defined by the canonical policy. Merge wording-only\n   duplicates and line-number drift into one record. Ordinary deferred-coverage\n   prose remains valid.\n5. A shadow record is not a finding: it cannot affect ordinary findings,\n   severity, verdict, mandatory human triage, accepted scope, fixing,\n   completion, or a gate. Do not put it in `findings`, and do not promote it even\n   when its suggested severity is `blocker`.\n\nRecommended human-readable form, as a semantic evaluation convention only:\n\n```text\nEQ-SHADOW: candidateId=EQ-S1; ruleId=EQ-04; severity=should_fix; confidence=high; evidence=src/config.ts:84 ConfigLoader.parseConfig; impact=malformed persisted values reach process invocation; remediation=validate with the existing config decoder; references=FR3 and manifest section 6; verification=focused malformed-value rejection plus legacy-valid acceptance; dedupeKey=EQ-04|ConfigLoader.parseConfig|FR3|invalid-config; waiver=not_applicable (shadow-only)\n```\n\nNo EQ-specific field is mandatory in the review-result contract. Do not change the\nstructured schema, parser, or runtime validation to interpret the string.\n\n"
+    "sha256": "d669e214f4ffcb547f31174e48eb32fab769aa83e335980d2366ebcc072b1bcc",
+    "text": "# Review Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Read\n\n- the resolved `work` artifact, if present.\n- the resolved `description` artifact, if present.\n- the resolved `plan` artifact, if present.\n- the resolved `implementationReport` artifact, if present.\n- the resolved `testReport` artifact, if present.\n- `documentation/decisions/README.md` and ADRs linked by feature artifacts,\n  source boundaries, or the manifest.\n- `PROJECT_MANIFEST.md`.\n- Source and tests.\n\nWhen Serena MCP tools are listed, prefer `find_symbol`,\n`find_referencing_symbols`, and `get_symbols_overview` over pattern search or\nline-window reads for code.\n\nStop if neither lite nor strict artifacts exist. Flag partial strict artifact\nsets.\n\n## Audit\n\nFor each finding, cite `file:line`.\n\n1. Spec compliance: every FR/acceptance criterion implemented; no scope\n   expansion.\n2. Resolved assumptions: states, gates, errors, interruptions honored.\n3. Plan conformance: apply Plan Authority (`plan-task-completion.md`) supplied by the active execution context; task statuses match code/reports and real\n   deviations are recorded proportionately. Optional-guidance differences alone\n   are not findings, but independently supported defects still are. Preserve\n   legacy meaning and explicit approved directives even when another approach\n   seems equivalent; keep existing severity rules. In\n   an approved orchestrated run, unchecked immutable boxes define the work set\n   and are not a finding by themselves. Apply the same evidence hierarchy as\n   `feature-status`: inspect the runner-supplied validated completion summary\n   and task records, then check material consistency with the implementation\n   report, required assurance, approval digest, state, and source. A\n   runner-published `banzai-plan-task-completion/v2` region is the runner's\n   receipt of validated claims and a model-authored v1 table is a claim;\n   neither is independent evidence, and only repository files and required\n   report narrative are. The runner's\n   deterministic checks remain the primary enforcement boundary; a reviewer\n   must not return `pass` when required evidence is absent, a task is incomplete\n   or blocked, or a material contradiction is visible. Report a finding only for a\n   material contradiction or gap, never merely to request checkbox mutation.\n4. ADR lifecycle: required decisions exist, relied-on ADRs are `Accepted`,\n   supersession links are reciprocal, and accepted bodies were not rewritten.\n5. ADR conformance: implementation and tests satisfy decision, consequences,\n   and confirmation criteria; no architecturally significant choice is hidden\n   only in a plan or manifest.\n6. Report accuracy: file lists and verification claims match reality.\n7. Verification: inspect current runner evidence. Rerun only a focused\n   reproduction or missing, stale, inconsistent, or directly material command;\n   record why. Run the formatter check only when that evidence is specifically\n   required. Never run formatter fixes in review.\n8. Manifest conformance: current facts, active ADR index, naming, errors,\n   organization, async model, localization, dependency policy.\n9. Maintainability: report dead generality, needless indirection, unclear\n   responsibility, or comment/documentation behavior as an ordinary finding\n   only when exact evidence shows current material impact or a violated approved\n   authority. A preferred pattern, decomposition, control-flow style, or generic\n   cleanliness opinion is not a finding.\n10. Repository conventions: apply only manifest facts, configured rules,\n    approved guidance, and dominant local conventions relevant to the changed\n    surface. Do not invent generic naming, comment, size, or directory rules.\n11. Tests: apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Reject hollow, redundant,\n    implementation-mirroring, or disproportionate tests. Confirm the Risk and\n    Contract Assurance Map does not overstate its evidence.\n12. Docs: no stale artifact, ADR, decision-index, or manifest statements.\n13. Security: apply the Security Assurance policy (`security-assurance.md`) supplied by the active execution context against the diff as built.\n    Each recorded exposure has a named enforcement point and proportionate\n    evidence; a recorded no-exposure claim still holds for the code that\n    exists. Use the `security` category.\n14. Engineering Quality: after the ordinary audit and verdict are frozen, apply\n    the shadow procedure below. Do not use an EQ-only concern to retroactively\n    create or re-severity an ordinary finding.\n\nFor a missing-test finding, the existing finding fields must together identify:\n\n- the material observable guarantee;\n- the plausible regression mechanism;\n- why current evidence cannot detect it;\n- the proportionate evidence level and observable fix acceptance.\n\nCoverage percentage, syntactic reach, a private helper, or a traceability row\nalone is not a finding. A false report claim remains a finding, but its fix may\neither add proportionate evidence or narrow the claim truthfully. Missing\nmaterial contract or safety evidence and failed required checks remain actionable;\nclaim narrowing cannot discharge an actual mandatory requirement.\n\nA security finding obeys the same rule: it must name the exposure class, the\nmechanism reachable in this codebase, why current evidence does not cover it,\nand the observable fix acceptance. An exposure-class label, a generic threat\nname, or a framework default alone is not a finding.\n\nFor an accepted-finding resolution, inspect the accepted IDs, changed scope,\ncurrent binding/approved authority, direct physical origins and current\napplicability. Keep review independent of the builder transcript. Executed,\nreused, historical, failed and pending evidence have different meanings; do not\nturn reuse into a fresh pass or infer missing assurance from a report count.\nInspect surrounding claims for contradictions while keeping the review focused\non the authorized delta. The existing human triage and scope acknowledgment remain.\n\n## Engineering Quality Shadow Procedure\n\n1. Complete audit items 1\u201313 under their existing authorities. Freeze the\n   ordinary findings, severities, and verdict before classifying Engineering\n   Quality overlap or looking for an incremental EQ-only candidate.\n2. An already-valid ordinary finding may add exactly one primary `EQ-NN` to its\n   existing `violates` array. The finding must qualify without that mapping, and\n   the mapping changes neither severity nor verdict.\n3. Record a genuinely incremental EQ-only candidate only as one `EQ-SHADOW:`\n   string in existing free-form `deferredCoverage`. It must include a\n   review-local candidate ID, primary rule ID, suggested severity, confidence,\n   exact evidence and stable location, concrete impact, smallest reasonable\n   remediation, relevant authority references, verification method, semantic\n   dedupe key, and `waiver=not_applicable (shadow-only)`.\n4. Use the dedupe identity defined by the canonical policy. Merge wording-only\n   duplicates and line-number drift into one record. Ordinary deferred-coverage\n   prose remains valid.\n5. A shadow record is not a finding: it cannot affect ordinary findings,\n   severity, verdict, mandatory human triage, accepted scope, fixing,\n   completion, or a gate. Do not put it in `findings`, and do not promote it even\n   when its suggested severity is `blocker`.\n\nRecommended human-readable form, as a semantic evaluation convention only:\n\n```text\nEQ-SHADOW: candidateId=EQ-S1; ruleId=EQ-04; severity=should_fix; confidence=high; evidence=src/config.ts:84 ConfigLoader.parseConfig; impact=malformed persisted values reach process invocation; remediation=validate with the existing config decoder; references=FR3 and manifest section 6; verification=focused malformed-value rejection plus legacy-valid acceptance; dedupeKey=EQ-04|ConfigLoader.parseConfig|FR3|invalid-config; waiver=not_applicable (shadow-only)\n```\n\nNo EQ-specific field is mandatory in the review-result contract. Do not change the\nstructured schema, parser, or runtime validation to interpret the string.\n\n"
   },
   "guidance/fix.md": {
-    "sha256": "3a33889ed68a8be307424da087314b2ff3ae8ea9d92c57639ab04f2eca147579",
-    "text": "# Fix Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Report Rule\n\nWrite the resolved `changeReport` artifact when the fix:\n\n- changes user-visible behavior or a public contract;\n- fixes a documented bug;\n- applies or skips review findings;\n- changes `description.md`, `work.md`, `plan.md`, `test-report.md`,\n  `review-<iteration>.md`, or `PROJECT_MANIFEST.md`;\n- creates, supersedes, deprecates, or changes lifecycle metadata on an ADR;\n- touches an escalation trigger;\n- records a material Engineering Quality deviation;\n- is requested to have an audit trail.\n\nOtherwise verification and a final summary suffice; no change report is required.\n\n## Workflow\n\n1. Read relevant active accepted ADRs and the triaged review artifact when\n   review findings initiated the fix. Require explicit accepted finding IDs;\n   never infer acceptance from the review file alone. For defects, write a\n   failing regression test first only when it protects a material observable\n   regression not already covered and can be done without production changes.\n3. Follow the Engineering Quality authority order and make the smallest\n   compatible code/test/doc change that satisfies the request or accepted\n   finding. Do not turn a shadow candidate, rejected concern, or alternative\n   design opinion into extra scope. For approved strict plans, apply Plan Authority\n   (`plan-task-completion.md`) supplied by the active execution context: preserve binding directives\n   and legacy meaning; a suggested remedy remains optional unless an applicable\n   explicit human decision makes it mandatory. Correcting a report cannot replace\n   satisfying a required check or missing material evidence.\n   Comment sparingly and with high signal:\n   write a comment only to explain why, a constraint, trade-off, invariant,\n   side effect, or non-obvious behavior, and do not narrate what the code\n   visibly does.\n4. Keep feature artifacts and manifest in sync when behavior, design,\n   architecture, build settings, or conventions change. Rewrite only the\n   stale manifest facts under the `project-manifest` writing rules; fix\n   narrative and verification results belong in the change report.\n5. After changing tests or verification commands, including their expected or\n   observed results, search the complete current `test-report.md`,\n   `implementation-report.md`, and the fix's change report when it exists or is\n   required for every test-count and command-result claim. Update every current\n   claim from a command actually run in this fix or a validated equivalent\n   disposition with its exact physical origin, or label earlier evidence\n   explicitly `historical/pre-fix` with its scope. Keep all three artifacts\n   mutually consistent, and never leave an old unqualified count or command\n   outcome describing the current tree. In orchestrated mode, when runner-owned\n   final verification has not run yet, record only\n   `pending at fix handoff; durable runner evidence owns the eventual result`\n   instead of predicting it or copying an earlier total as current.\n6. Never rewrite an accepted ADR body. Route a changed accepted decision to a\n   superseding ADR and reapproved strict plan.\n7. If no upstream feature artifact exists, state that instead of inventing one.\n8. Run focused affected checks. In orchestrated mode, do not repeat supplied\n   full-scope runner commands; if the manifest final suite is absent, run it once\n   and report the gap. In standalone mode, run one final applicable suite unless\n   the shared deterministic owner establishes a permitted equivalent disposition\n   under Test Assurance. Keep every unsupported or mandatory fresh check.\n9. Run formatter check/fix only as final review, if configured. If it rewrites\n   files, rerun affected checks.\n10. Self-review for ADR and applicable Engineering Quality conformance, side\n    effects, missing material negative evidence, disproportionate tests, and doc\n    drift. Fix in-scope findings and rerun affected checks.\n11. Write/update the change report when required.\n\n## Change Report\n\nUse the resolved `changeReport` artifact:\n\n1. title, date, affected feature and ADR links;\n2. what changed;\n3. why;\n4. security exposure: one line per applicable class with the control applied,\n   or one line stating that none applies;\n5. files changed: production/tests/docs;\n6. skipped review findings, if any;\n7. documentation sync;\n8. ADR conformance or lifecycle result;\n9. material Engineering Quality deviations, or `None`;\n10. verification commands and outcomes;\n11. assurance critique result.\n\n\nUse one compact closure record per accepted finding: ID, changed scope, decision,\nexecuted/reused/historical/pending references and limitations. Preserve unaffected\nreport text while correcting every affected current claim. Do not rewrite reports\nor rerun a suite merely to update narrative. The resolution reviewer receives the\naccepted IDs, bounded delta, current authority and exact evidence/origins, with\nexisting independent review and human triage; omit builder transcripts.\n"
+    "sha256": "3047924e5f3c26f86c92fdccde3f1c8982b433f1d5afe39b0a3e2952831b7428",
+    "text": "# Fix Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Report Rule\n\nWrite the resolved `changeReport` artifact when the fix:\n\n- changes user-visible behavior or a public contract;\n- fixes a documented bug;\n- applies or skips review findings;\n- changes `description.md`, `work.md`, `plan.md`, `test-report.md`,\n  `review-<iteration>.md`, or `PROJECT_MANIFEST.md`;\n- creates, supersedes, deprecates, or changes lifecycle metadata on an ADR;\n- touches an escalation trigger;\n- records a material Engineering Quality deviation;\n- is requested to have an audit trail.\n\nOtherwise verification and a final summary suffice; no change report is required.\n\n## Workflow\n\n1. Read relevant active accepted ADRs and the triaged review artifact when\n   review findings initiated the fix. Require explicit accepted finding IDs;\n   never infer acceptance from the review file alone. For defects, write a\n   failing regression test first only when it protects a material observable\n   regression not already covered and can be done without production changes.\n3. Follow the Engineering Quality authority order and make the smallest\n   compatible code/test/doc change that satisfies the request or accepted\n   finding. Do not turn a shadow candidate, rejected concern, or alternative\n   design opinion into extra scope. For approved strict plans, apply Plan Authority\n   (`plan-task-completion.md`) supplied by the active execution context: preserve binding directives\n   and legacy meaning; a suggested remedy remains optional unless an applicable\n   explicit human decision makes it mandatory. Correcting a report cannot replace\n   satisfying a required check or missing material evidence.\n   Comment sparingly and with high signal:\n   write a comment only to explain why, a constraint, trade-off, invariant,\n   side effect, or non-obvious behavior, and do not narrate what the code\n   visibly does.\n4. Keep feature artifacts and manifest in sync when behavior, design,\n   architecture, build settings, or conventions change. Rewrite only the\n   stale manifest facts under the `project-manifest` writing rules; fix\n   narrative and verification results belong in the change report.\n5. After changing tests or verification commands, including their expected or\n   observed results, search the complete current `test-report.md`,\n   `implementation-report.md`, and the fix's change report when it exists or is\n   required for every test-count and command-result claim. Update every current\n   claim from a command actually run in this fix or a validated equivalent\n   disposition with its exact physical origin, or label earlier evidence\n   explicitly `historical/pre-fix` with its scope. Keep all three artifacts\n   mutually consistent, and never leave an old unqualified count or command\n   outcome describing the current tree. In orchestrated mode, when runner-owned\n   final verification has not run yet, record only\n   `pending at fix handoff; durable runner evidence owns the eventual result`\n   instead of predicting it or copying an earlier total as current.\n6. Never rewrite an accepted ADR body. Route a changed accepted decision to a\n   superseding ADR and reapproved strict plan.\n7. If no upstream feature artifact exists, state that instead of inventing one.\n8. Run focused affected checks. In orchestrated mode, do not repeat supplied\n   full-scope runner commands; if the manifest final suite is absent, run it once\n   and report the gap. In standalone mode, run one final applicable suite unless\n   the shared deterministic owner establishes a permitted equivalent disposition\n   under Test Assurance. Keep every unsupported or mandatory fresh check.\n9. Run formatter check/fix only as final review, if configured. If it rewrites\n   files, rerun affected checks.\n10. Self-review for ADR and applicable Engineering Quality conformance, side\n    effects, missing material negative evidence, disproportionate tests, and doc\n    drift. Fix in-scope findings and rerun affected checks.\n11. Write/update the change report when required. In orchestrated strict\n    mode, refresh stale completion evidence only through the returned\n    `taskCompletion` ledger; the runner republishes the implementation report's\n    **Plan Task Completion** section from the canonical ledger, so never edit\n    that section by hand.\n\n## Change Report\n\nUse the resolved `changeReport` artifact:\n\n1. title, date, affected feature and ADR links;\n2. what changed;\n3. why;\n4. security exposure: one line per applicable class with the control applied,\n   or one line stating that none applies;\n5. files changed: production/tests/docs;\n6. skipped review findings, if any;\n7. documentation sync;\n8. ADR conformance or lifecycle result;\n9. material Engineering Quality deviations, or `None`;\n10. verification commands and outcomes;\n11. assurance critique result.\n\n\nUse one compact closure record per accepted finding: ID, changed scope, decision,\nexecuted/reused/historical/pending references and limitations. Preserve unaffected\nreport text while correcting every affected current claim. Do not rewrite reports\nor rerun a suite merely to update narrative. The resolution reviewer receives the\naccepted IDs, bounded delta, current authority and exact evidence/origins, with\nexisting independent review and human triage; omit builder transcripts.\n"
   },
   "guidance/feature.md": {
     "sha256": "3591b0cfb7e285f51aa942ba2f818ac03072512f5ee111650b915ca3ec621937",
@@ -24230,8 +26799,8 @@ var EMBEDDED_PHASE_RESOURCES = {
     "text": "# Engineering Quality\n\n- Owner decision: ADR-0030\n- Consumers: `feature-description`, `architecture-decision`, `development-plan`, `code-writing`, `feature-review`, `feature`, `quick-fix`, `project-manifest`; conditional: None\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning, implementation, review, fix, feature, quick-fix.\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Engineering Quality\n\nThis policy is vendor-neutral. The installed `policies/engineering-quality.md` is only its current storage and\ndelivery surface; the policy does not depend on Claude-specific tools,\npermissions, hooks, commands, sessions, or behavior. Skills and prompts\nreference this section instead of copying the complete rule set. Future Codex\nor other-vendor delivery must preserve these semantics without interpreting the\nfilename as policy authority.\n\nApply the authority order in the project `AGENTS.md` before any generic quality preference. When two\nremedies satisfy the same higher authority, use the smallest compatible\nremediation rather than requiring a preferred pattern.\n\n### EQ-01 \u2014 Local authority and context\n\nFollow approved requirements, accepted ADRs, executable and public contracts,\nmanifest facts, established invariants, and dominant repository conventions.\nDeviate only when the task, an approved decision, or a concrete correctness,\nsecurity, lifecycle, or compatibility need requires it. Generic preference does\nnot override repository authority.\n\nAlways active. An objective conflict with approved authority may be actionable;\na merely different local style is not.\n\n### EQ-02 \u2014 Cohesive responsibilities and explicit boundaries\n\nKeep changed responsibilities together when they share purpose, dependencies,\nlifecycle, and verification needs. Separate them when those concerns materially\ndiffer. Make important boundaries recognizable without arbitrary\nfragmentation.\n\nContextual and advisory unless a concrete consequence independently violates a\nstronger rule. It requires no function or file size, layer, service class, or\ndirectory pattern and never creates a blocker by itself.\n\n### EQ-03 \u2014 Dependency direction and visibility\n\nDo not introduce dependency edges that violate the repository's intended\ndependency direction or unnecessarily couple stable logic to volatile\nimplementation details. Make important runtime dependencies and mutable\ncollaborators visible at an appropriate existing composition or usage boundary.\n\nContextual. It assumes no domain-centric architecture and requires neither\ninterfaces nor a dependency-injection container. A mechanically forbidden edge\nor unapproved dependency may remain actionable under existing repository rules.\n\n### EQ-04 \u2014 Boundary contracts and ingress validation\n\nAt important public, process, network, persistence, filesystem, user-input, or\ninter-module boundaries, make input, output, failure, and compatibility\nsemantics clear using repository-appropriate mechanisms. Validate external or\nuntrusted data at the first boundary where the system assumes it is trustworthy;\nstatic types alone do not validate external bytes.\n\nContextual. A demonstrable contract, correctness, or security consequence may\nbe actionable under existing rules.\n\n### EQ-05 \u2014 Failure semantics and resource lifecycle\n\nPreserve useful failure meaning, original causes, and diagnostic context. Do not\nsilently turn failure into success. For resources with lifecycle semantics,\nidentify ownership and proportionate cleanup behavior for success, failure,\ncancellation, timeout, shutdown, and partial initialization where applicable.\n\nContextual. It requires no universal error hierarchy or resource-management\npattern. Reproducible data loss, leaks, hangs, swallowed failure, or violated\nlifecycle contracts may remain actionable under existing rules.\n\n### EQ-06 \u2014 Proportional design\n\nPrefer existing language, runtime, framework, platform, and project mechanisms\nwhen adequate. Prefer straightforward control and data flow. Add an abstraction\nor dependency only when it provides a concrete benefit such as isolating\nvolatility, enforcing a useful contract, removing meaningful duplication,\nsimplifying usage, or enabling necessary verification.\n\nAlways considered and advisory by default. It is not a ban on abstraction and\nnever creates a blocker by itself.\n\n### EQ-07 \u2014 Bounded change scope\n\nKeep the change within the approved task, plan, or accepted-finding scope. Do\nnot bundle unrelated cleanup, migration, abstraction work, dependency changes,\nor architecture refactoring unless required for correctness or explicitly\napproved.\n\nAlways active. Objective scope expansion remains actionable through existing\napproval, plan, baseline, and accepted-finding enforcement.\n\n### EQ-08 \u2014 Assurance ownership\n\nMaterial claims introduced by a change must have an identifiable,\nproportionate evidence owner. Reuse existing assurance mechanisms rather than\nduplicating them. Test Assurance, Security Assurance, contract verification,\nconfigured checks, or justified inspection may own evidence that compatibility\nis preserved, malformed input is rejected, cancellation cleans up resources,\npersisted data survives migration, or a failure remains observable.\n\nContextual. Engineering Quality detects missing assurance ownership; it does\nnot select tests, create a test quota, or require another test when equivalent\nevidence already exists.\n\n### EQ-09 \u2014 Compatibility\n\nPreserve public APIs, persisted formats, events, protocols, CLI behavior, and\nother externally depended-on semantics unless an approved specification or ADR\nintentionally changes them and defines the relevant migration consequences.\n\nContextual. A high-confidence unapproved breaking change may remain actionable\nunder existing contract, specification, or ADR authority.\n\n### EQ-10 \u2014 Incremental legacy evolution\n\nWhen changing legacy code, prefer a bounded seam, adapter, characterization\nevidence, staged migration, or similarly incremental path when it materially\nreduces risk. Do not demand an incremental technique when a direct local change\nis safer and simpler.\n\nContextual and advisory. It never creates a blocker by itself; a concrete scope\nor compatibility consequence may be reported under the existing authority it\nviolates.\n\n### Finding and shadow semantics\n\nAn actionable Engineering Quality concern must identify a primary rule ID,\nseverity, confidence, exact evidence and location, concrete impact, the smallest\nreasonable remediation, relevant specification, ADR, contract, manifest, or\naccepted-finding authority, a verification method, a stable deduplication\nidentity, and waiver state when applicable. Its identity is the primary rule,\nstable code or contract locus, violated authority, and impact class; wording or\nline-number drift does not create a new concern. Generic design preference\nwithout exact evidence and material impact is not actionable.\n\nIn initial shadow mode, complete the ordinary review first and freeze its\nfindings, severities, and verdict. An ordinary finding that already qualifies\nwithout Engineering Quality may add exactly one primary `EQ-NN` mapping to its\nexisting `violates` list; the mapping cannot create the finding or change its\nseverity or verdict. A genuinely incremental EQ-only candidate may be recorded\nonly as an `EQ-SHADOW:` string in existing free-form `deferredCoverage`. It is\nnot a finding, receives no mandatory human triage, cannot be accepted, never\nenters fixer scope, and cannot affect severity, verdict, completion, or any\ngate. Its suggested severity remains non-authoritative, and its waiver state is\n`not_applicable` because triage does not apply. Ordinary deferred-coverage prose\nremains valid. In reviewer-write mode, copy every structured `EQ-SHADOW:` record\nbyte-for-byte into the canonical Markdown Deferred Coverage section;\nrunner-rendered mode already projects the structured value. This retention rule\ndoes not parse or validate the record. The human-readable shape is an evaluation\nconvention, not a runtime parser or versioned contract.\n\nResolution review is closure-oriented, not discovery-oriented. It first\nverifies every immediately preceding accepted finding ID. A new finding or\nshadow candidate is permitted only when introduced by the fix, newly observable\nbecause the changed evidence surface exposes it, a direct regression of another\napproved contract or established invariant, or a previously unobservable\ncritical correctness, security, or lifecycle issue. Name the new evidence and a\ndistinct deduplication identity. A stylistic opinion, preferred decomposition,\nor alternative design is insufficient. Rejected or deferred findings must not\nreopen against unchanged evidence and authority, including after reviewer\nrotation.\n\n### Enforcement boundaries\n\nThe initial release adds no EQ-native runtime blocker. Existing objective\napproval, contract, scope, dependency, verification, correctness, security,\ntest, lifecycle, compatibility, review, and triage mechanisms retain their\ncurrent enforcement and severity. `EQ-02`, `EQ-06`, and `EQ-10` never create\nblockers by themselves.\n\nAny later blocker-eligibility proposal must require high confidence, exact\ncurrent evidence, current material impact, a violated approved authority,\ncorrectness, security, data-integrity, lifecycle-safety, required-assurance,\nscope, or compatibility invariant, and observable closure. Meeting this\nthreshold does not authorize hard enforcement; a separate approved decision is\nstill required.\n\nEngineering Quality adds no phase, skill, hook, gate, test quota, architecture\nmethodology, static analyzer, or runtime contract.\n"
   },
   "policies/plan-task-completion.md": {
-    "sha256": "a9846215b79db286db07f72103e44b1f4909e0eef8788dedc15180ff70783e7b",
-    "text": "# Plan Authority and Task Completion Evidence\n\n- Owner decision: ADR-0038 (Plan Authority); ADR-0017/0025 (Plan Task Completion Evidence)\n- Consumers: `development-plan`, `code-writing`; conditional: `test-writing`, `feature-review`, `feature-status`, `quick-fix`\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning, implementation, review (conditional), fix (conditional), quick-fix (conditional).\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Plan Authority\n\nApplicable approved requirements, accepted ADR constraints, public and persisted\ncontracts, security and authorization boundaries, transaction and lifecycle\nguarantees, compatibility, scope, and required verification evidence are binding.\nExact internal details remain binding when required by applicable authority or\nconcrete constraints; unlabelled explicit directives remain binding.\n\nOnly paragraphs or list items prefixed `Optional implementation guidance:` are\nnon-binding suggestions. A label covers that paragraph or list item, including\nits nested content, and ends before the next sibling block. A different compliant\nimplementation within approved scope needs no reapproval, finding or deviation\nreport merely for differing from this guidance.\n\nGuidance never overrides binding authority or expands scope. Resolve conflicts\nand ambiguous commitments before dependent work; missing or ambiguous optionality\ndoes not waive an explicit commitment.\n\n### Applying the convention\n\nNew plans copy the `Plan Authority` heading and its three paragraphs above,\nbefore Technical Breakdown and Implementation Tasks. This document convention\ntravels with the approved bytes; neither plugin version nor conversation supplies\nit. Optional guidance is useful only when it helps implement the task. Put required\nbehavior and safety constraints in binding text, never solely in guidance.\n\nApply the new convention only where the approved plan explicitly establishes it.\nLegacy plans keep their approved meaning, including their own explicit optionality;\ndo not retrofit this section or infer new discretion from a label alone. An exact\ninternal directive remains binding even when another approach seems equivalent.\nLinks to authoritative definitions preserve their applicable approved meaning;\nthey do not authorize later contract changes. Never rewrite historical plans,\nsnapshots, findings or triage to fit this convention.\n\nUse the project's existing authority order and conflict/escalation handling.\nChanging an approved commitment requires the applicable ADR and plan reapproval\npath; a deviation report records a deviation and cannot authorize it. Approval\nbinds the whole bundle, including guidance: editing optional text still invalidates\nan orchestrated approval, unlike choosing a compliant implementation under it.\n\n- Planner/approver: make behavior, invariants, scope/boundaries, dependencies,\n  requirement/acceptance/ADR links, necessary constraints and proportionate\n  evidence explicit. Review obligations and marked discretion at the existing gate.\n- Implementer/assurance: satisfy binding requirements within approved scope.\n  Record material decisions and real deviations proportionately in existing\n  reports; a merely different permitted helper, constant or decomposition needs\n  no entry and grants no extra scope.\n- Reviewer: report concrete binding-authority violations and independently\n  supported correctness, security, compatibility, evidence or maintainability\n  defects, including defects in code that follows all guidance. A difference from\n  optional guidance alone is not a finding. Keep existing severity, EQ shadow,\n  independent review, closure and unchanged-evidence rediscovery rules.\n- Fixer: fix only accepted findings under existing authority. A suggested remedy\n  stays optional unless an applicable explicit human decision makes it mandatory;\n  do not waive an accepted directive or turn a recommendation into additional work.\n- Completion/status: structural validity does not prove substantive fulfillment.\n  Failed required checks, missing material evidence and false success claims\n  remain actionable. Correcting a report cannot discharge a mandatory requirement;\n  pending or unavailable evidence does not become a pass.\n\n## Plan Task Completion Evidence\n\n- In strict orchestrated work, the approved description, plan, and accepted ADR\n  bodies are immutable. Unchecked plan boxes define the approved work set; they\n  are not mutable execution status and must not be marked `[x]` after approval.\n- Persisted orchestrator state owns lifecycle status and `nextAction`. A\n  terminal `done` run with `nextAction: null` is never routed back to\n  `code-writing` solely because its immutable plan boxes remain unchecked.\n- New strict implementation results use the versioned structured\n  `taskCompletion` ledger as the sole source of truth. It has exactly one\n  ordered record for every approved `TNNN`, with status `completed`,\n  `incomplete`, or `blocked`, bounded repository-relative evidence, and a\n  report gap/deviation reference when the status is not completed. An\n  accepted-finding fix whose changes made that evidence stale may return a\n  complete refreshed ledger (ADR 0025) \u2014 same task set and order, statuses\n  unchanged, evidence describing the current tree \u2014 validated by the same\n  fail-closed pipeline; there is still exactly one canonical ledger at a time.\n- The implementation report contains the deterministic\n  `banzai-plan-task-completion/v1` Markdown projection of that ledger. Persisted\n  state contains a validated summary, never a separately authored ledger. The\n  runner checks approval digest, task coverage/order, path scope, required\n  reports, and structured/report/state parity before verification, review, and\n  terminal success.\n- `outcome=completed` is invalid when any task is missing, malformed,\n  incomplete, or blocked. Validation fails closed as\n  `PLAN_TASK_COMPLETION_INVALID`; verification and review do not start, and a\n  normally returned invalid implementation result may be retried after the\n  evidence is corrected without editing the approved plan.\n- A legacy orchestrated run without the structured ledger keeps its persisted\n  lifecycle and next action, but task completion is `legacy`, `unknown`, or\n  `inconsistent`; report prose is never retrofitted into canonical `N/N`.\n- Active orchestrated runs remain active even when partial report evidence is\n  present. For standalone work without external completion evidence, checked\n  and unchecked plan boxes retain their normal completed/incomplete meaning.\n- Status and review name the evidence source: `structured completion evidence`,\n  `plan checkbox`, `legacy`, `unknown`, or `inconsistent`. Contradictory state,\n  approval, reports, source, tests, or review evidence requires an\n  artifact/evidence audit and is never silently repaired by editing an approved\n  plan.\n\n\n### Opt-in verification obligations\n\nA new strict plan relying on ADR-0043 contains exactly one fenced\n`banzai-verification-obligations/v1` JSON inventory inside its approved bytes.\nIt carries schema/schemaVersion, complete=true, planRemainderSha256 and an ordered\nchecks array of configured check IDs and fresh/equivalent_evidence modes. The\nremainder digest covers every byte outside that complete fence. The owner reviews\ncompleteness and consistency with all prose commitments before bundle approval.\nMissing, duplicated, stale, ambiguous or contradictory inventories deny reuse;\nlegacy plans retain their original obligations. Release checks are always fresh.\nChanging the inventory requires normal plan approval; no prose claim upgrades it.\n\nEquivalent verification does not replace task-completion validation. Preserve the\ncanonical task records and exact report projection, immutable approved artifacts,\nand existing report-digest versus complete fix-ledger refresh boundaries. Inspect\ncurrent claims for contradictions, update only affected claims and attach one\nbounded closure record; a claim sweep is a consistency check, not a command run.\n"
+    "sha256": "d2578d2512f001738d812d937f918e5cf74af4dfe160d80bd3704b8d5b8790fb",
+    "text": "# Plan Authority and Task Completion Evidence\n\n- Owner decision: ADR-0038 (Plan Authority); ADR-0017/0025/0047 (Plan Task Completion Evidence)\n- Consumers: `development-plan`, `code-writing`; conditional: `test-writing`, `feature-review`, `feature-status`, `quick-fix`\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning, implementation, review (conditional), fix (conditional), quick-fix (conditional).\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Plan Authority\n\nApplicable approved requirements, accepted ADR constraints, public and persisted\ncontracts, security and authorization boundaries, transaction and lifecycle\nguarantees, compatibility, scope, and required verification evidence are binding.\nExact internal details remain binding when required by applicable authority or\nconcrete constraints; unlabelled explicit directives remain binding.\n\nOnly paragraphs or list items prefixed `Optional implementation guidance:` are\nnon-binding suggestions. A label covers that paragraph or list item, including\nits nested content, and ends before the next sibling block. A different compliant\nimplementation within approved scope needs no reapproval, finding or deviation\nreport merely for differing from this guidance.\n\nGuidance never overrides binding authority or expands scope. Resolve conflicts\nand ambiguous commitments before dependent work; missing or ambiguous optionality\ndoes not waive an explicit commitment.\n\n### Applying the convention\n\nNew plans copy the `Plan Authority` heading and its three paragraphs above,\nbefore Technical Breakdown and Implementation Tasks. This document convention\ntravels with the approved bytes; neither plugin version nor conversation supplies\nit. Optional guidance is useful only when it helps implement the task. Put required\nbehavior and safety constraints in binding text, never solely in guidance.\n\nApply the new convention only where the approved plan explicitly establishes it.\nLegacy plans keep their approved meaning, including their own explicit optionality;\ndo not retrofit this section or infer new discretion from a label alone. An exact\ninternal directive remains binding even when another approach seems equivalent.\nLinks to authoritative definitions preserve their applicable approved meaning;\nthey do not authorize later contract changes. Never rewrite historical plans,\nsnapshots, findings or triage to fit this convention.\n\nUse the project's existing authority order and conflict/escalation handling.\nChanging an approved commitment requires the applicable ADR and plan reapproval\npath; a deviation report records a deviation and cannot authorize it. Approval\nbinds the whole bundle, including guidance: editing optional text still invalidates\nan orchestrated approval, unlike choosing a compliant implementation under it.\n\n- Planner/approver: make behavior, invariants, scope/boundaries, dependencies,\n  requirement/acceptance/ADR links, necessary constraints and proportionate\n  evidence explicit. Review obligations and marked discretion at the existing gate.\n- Implementer/assurance: satisfy binding requirements within approved scope.\n  Record material decisions and real deviations proportionately in existing\n  reports; a merely different permitted helper, constant or decomposition needs\n  no entry and grants no extra scope.\n- Reviewer: report concrete binding-authority violations and independently\n  supported correctness, security, compatibility, evidence or maintainability\n  defects, including defects in code that follows all guidance. A difference from\n  optional guidance alone is not a finding. Keep existing severity, EQ shadow,\n  independent review, closure and unchanged-evidence rediscovery rules.\n- Fixer: fix only accepted findings under existing authority. A suggested remedy\n  stays optional unless an applicable explicit human decision makes it mandatory;\n  do not waive an accepted directive or turn a recommendation into additional work.\n- Completion/status: structural validity does not prove substantive fulfillment.\n  Failed required checks, missing material evidence and false success claims\n  remain actionable. Correcting a report cannot discharge a mandatory requirement;\n  pending or unavailable evidence does not become a pass.\n\n## Plan Task Completion Evidence\n\n- In strict orchestrated work, the approved description, plan, and accepted ADR\n  bodies are immutable. Unchecked plan boxes define the approved work set; they\n  are not mutable execution status and must not be marked `[x]` after approval.\n- Persisted orchestrator state owns lifecycle status and `nextAction`. A\n  terminal `done` run with `nextAction: null` is never routed back to\n  `code-writing` solely because its immutable plan boxes remain unchecked.\n- New strict implementation results use the versioned structured\n  `taskCompletion` ledger as the sole source of truth. It has exactly one\n  ordered record for every approved `TNNN`, with status `completed`,\n  `incomplete`, or `blocked`, bounded repository-relative evidence, and a\n  report gap/deviation reference when the status is not completed. An\n  accepted-finding fix whose changes made that evidence stale may return a\n  complete refreshed ledger (ADR 0025) \u2014 same task set and order, statuses\n  unchanged, evidence describing the current tree \u2014 validated by the same\n  fail-closed pipeline; there is still exactly one canonical ledger at a time.\n- In new strict orchestrated attempts (`banzai-completion-protocol/v1`,\n  ADR-0047) the model returns structured claims and report narrative only. The\n  runner validates the ledger against approval digest, task coverage/order,\n  path scope and required reports, then renders and publishes the\n  implementation report's **Plan Task Completion** section itself as the\n  bounded `banzai-plan-task-completion/v2` region, records an immutable\n  publication receipt and only then applies the completion. Nothing inside that region\n  confers authority: a model or hand edit is replaced at the next authorized\n  publication and is never evidence. Persisted state contains a validated\n  summary, never a separately authored ledger.\n- Standalone authored reports keep the `banzai-plan-task-completion/v1` table\n  written by the author, and legacy orchestrated runs keep their v1 projection.\n  Readers recognize both grammars and distinguish model claims, runner receipts\n  and real repository or report evidence; no standalone author generates v2 or\n  manufactures runner state.\n- `outcome=completed` is invalid when any task is missing, malformed,\n  incomplete, or blocked. Validation fails closed as\n  `PLAN_TASK_COMPLETION_INVALID`; verification and review do not start, and a\n  normally returned invalid implementation result may be retried after the\n  evidence is corrected without editing the approved plan. A blocked or\n  escalation result keeps its gate; its completion diagnostics are retained and\n  nothing is published.\n- A legacy orchestrated run without the structured ledger keeps its persisted\n  lifecycle and next action, but task completion is `legacy`, `unknown`, or\n  `inconsistent`; report prose is never retrofitted into canonical `N/N`.\n- Active orchestrated runs remain active even when partial report evidence is\n  present. For standalone work without external completion evidence, checked\n  and unchecked plan boxes retain their normal completed/incomplete meaning.\n- Status and review name the evidence source: `structured completion evidence`,\n  `plan checkbox`, `legacy`, `unknown`, or `inconsistent`. Contradictory state,\n  approval, reports, source, tests, or review evidence requires an\n  artifact/evidence audit and is never silently repaired by editing an approved\n  plan.\n\n\n### Opt-in verification obligations\n\nA new strict plan relying on ADR-0043 contains exactly one fenced\n`banzai-verification-obligations/v1` JSON inventory inside its approved bytes.\nIt carries schema/schemaVersion, complete=true, planRemainderSha256 and an ordered\nchecks array of configured check IDs and fresh/equivalent_evidence modes. The\nremainder digest covers every byte outside that complete fence. The owner reviews\ncompleteness and consistency with all prose commitments before bundle approval.\nMissing, duplicated, stale, ambiguous or contradictory inventories deny reuse;\nlegacy plans retain their original obligations. Release checks are always fresh.\nChanging the inventory requires normal plan approval; no prose claim upgrades it.\n\nEquivalent verification does not replace task-completion validation. Preserve the\ncanonical task records and exact report projection, immutable approved artifacts,\nand existing report-digest versus complete fix-ledger refresh boundaries. Inspect\ncurrent claims for contradictions, update only affected claims and attach one\nbounded closure record; a claim sweep is a consistency check, not a command run.\n"
   },
   "policies/artifact-storage.md": {
     "sha256": "5beb421da67d753b9b1b6a26f55a23d7b6675fef97fb7360f21ea5e758357995",
@@ -24241,7 +26810,7 @@ var EMBEDDED_PHASE_RESOURCES = {
     "sha256": "eb5bce1be31c2dde64a55ae9af27fe0c176cedc911a76209aa5110493238f3a9"
   },
   "hooks/spec-gate.cjs": {
-    "sha256": "643e290d170148ac1c6187ceb5c629bacf939ef868a71b4deb88a3a5a5e5866c"
+    "sha256": "f782079bb9ec0db7e3458c2789d787897fb40abb4bd1ac72d66b535a52207ca0"
   }
 };
 
@@ -25964,7 +28533,7 @@ function validatePlanTaskCompletionLedgerShape(taskIds, ledger, outcome) {
     );
   }
 }
-async function readRequiredReport(repoRoot, relativePath3, violation, requiredReports) {
+async function readRequiredReport(repoRoot, relativePath3, violation, requiredReports, captured) {
   if (relativePath3 === null) {
     return completionFailure(
       violation,
@@ -25975,7 +28544,7 @@ async function readRequiredReport(repoRoot, relativePath3, violation, requiredRe
   if (relativePath3.startsWith(".banzai/"))
     await safePath4(repoRoot, relativePath3);
   const absolute = path23.resolve(repoRoot, normalized);
-  let contents;
+  let bytes;
   try {
     const metadata = await lstat14(absolute);
     if (!metadata.isFile() || metadata.isSymbolicLink()) {
@@ -25986,7 +28555,7 @@ async function readRequiredReport(repoRoot, relativePath3, violation, requiredRe
     if (!resolved.startsWith(`${root}${path23.sep}`)) {
       throw new Error("outside repository");
     }
-    contents = await readFile8(absolute, "utf8");
+    bytes = captured ?? await readFile8(absolute);
   } catch {
     return completionFailure(
       violation,
@@ -25995,8 +28564,9 @@ async function readRequiredReport(repoRoot, relativePath3, violation, requiredRe
   }
   return {
     path: normalized,
-    contents,
-    sha256: createHash15("sha256").update(contents).digest("hex")
+    contents: bytes.toString("utf8"),
+    sha256: createHash15("sha256").update(bytes).digest("hex"),
+    bytes
   };
 }
 async function validatePlanTaskCompletion(input) {
@@ -26137,6 +28707,448 @@ async function validatePlanTaskCompletion(input) {
     },
     tasks: ledger.tasks
   };
+}
+var COMPLETION_REGION_FORMAT = "banzai-plan-task-completion/v2";
+var COMPLETION_REGION_START = `<!-- ${COMPLETION_REGION_FORMAT}:start -->`;
+var COMPLETION_REGION_END = `<!-- ${COMPLETION_REGION_FORMAT}:end -->`;
+var COMPLETION_TABLE_HEADER = "| Task | Status | Evidence | Gap or deviation |";
+var COMPLETION_TABLE_SEPARATOR = "| --- | --- | --- | --- |";
+var ENCODED_PUNCTUATION = /[!-/:-@[-`{-~]/gu;
+var NUMERIC_REFERENCE = /&#([0-9]{2,3});/gu;
+var FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/u;
+var ATX_HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/u;
+function isEncodedPunctuation(code2) {
+  return code2 >= 33 && code2 <= 47 || code2 >= 58 && code2 <= 64 || code2 >= 91 && code2 <= 96 || code2 >= 123 && code2 <= 126;
+}
+function encodeCompletionCell(value) {
+  return JSON.stringify(value).replace(
+    ENCODED_PUNCTUATION,
+    (character) => `&#${character.codePointAt(0)};`
+  );
+}
+function decodeCompletionCell(cell3) {
+  return cell3.replace(NUMERIC_REFERENCE, (reference, digits) => {
+    const code2 = Number(digits);
+    return isEncodedPunctuation(code2) ? String.fromCodePoint(code2) : reference;
+  });
+}
+function completionRow(task) {
+  return `| ${encodeCompletionCell(task.taskId)} | ${encodeCompletionCell(task.status)} | ${encodeCompletionCell(task.evidence)} | ${encodeCompletionCell(task.gap)} |`;
+}
+function renderCompletionRegion(ledger) {
+  return [
+    COMPLETION_REGION_START,
+    SECTION_HEADING,
+    "",
+    COMPLETION_TABLE_HEADER,
+    COMPLETION_TABLE_SEPARATOR,
+    ...ledger.tasks.map(completionRow),
+    COMPLETION_REGION_END
+  ].join("\n");
+}
+function parseCompletionRegionRow(line) {
+  if (!line.startsWith("| ") || !line.endsWith(" |")) {
+    return completionFailure(
+      "report_projection_invalid",
+      "Completion region row is not a four-cell table row."
+    );
+  }
+  const cells = line.slice(2, -2).split(" | ");
+  if (cells.length !== 4 || cells.some((cell3) => cell3.includes("|"))) {
+    return completionFailure(
+      "report_projection_invalid",
+      "Completion region row must contain exactly four encoded cells."
+    );
+  }
+  const decoded = cells.map(decodeCompletionCell);
+  let values;
+  try {
+    values = decoded.map((cell3) => JSON.parse(cell3));
+  } catch {
+    return completionFailure(
+      "report_projection_invalid",
+      "Completion region cell does not decode to JSON."
+    );
+  }
+  const [taskId, status, evidence2, gap] = values;
+  if (typeof taskId !== "string" || !/^T[0-9]{3}$/u.test(taskId) || typeof status !== "string" || !["completed", "incomplete", "blocked"].includes(status) || !Array.isArray(evidence2) || !(gap === null || typeof gap === "object" && !Array.isArray(gap))) {
+    return completionFailure(
+      "report_projection_invalid",
+      "Completion region row is malformed.",
+      typeof taskId === "string" && /^T[0-9]{3}$/u.test(taskId) ? taskId : null
+    );
+  }
+  const record7 = {
+    taskId,
+    status,
+    evidence: evidence2,
+    gap
+  };
+  if (completionRow(record7) !== line) {
+    return completionFailure(
+      "report_projection_invalid",
+      `Completion region row ${taskId} is not canonically encoded.`,
+      taskId
+    );
+  }
+  return record7;
+}
+function parseCompletionRegion(region) {
+  const lines = region.split("\n");
+  if (lines.length < 6 || lines[0] !== COMPLETION_REGION_START || lines[1] !== SECTION_HEADING || lines[2] !== "" || lines[3] !== COMPLETION_TABLE_HEADER || lines[4] !== COMPLETION_TABLE_SEPARATOR || lines.at(-1) !== COMPLETION_REGION_END) {
+    return completionFailure(
+      "report_projection_invalid",
+      `Completion region does not follow the ${COMPLETION_REGION_FORMAT} grammar.`
+    );
+  }
+  return {
+    schemaVersion: PLAN_TASK_COMPLETION_SCHEMA_VERSION2,
+    tasks: lines.slice(5, -1).map(parseCompletionRegionRow)
+  };
+}
+function scanLines(markdown) {
+  const lines = [];
+  let offset = 0;
+  let fence = null;
+  for (const raw of markdown.split("\n")) {
+    const text3 = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+    const start = offset;
+    const end = offset + text3.length;
+    offset += raw.length + 1;
+    if (fence === null) {
+      const open15 = FENCE_OPEN.exec(text3);
+      if (open15?.[1] !== void 0) {
+        fence = { character: open15[1][0] ?? "`", length: open15[1].length };
+        lines.push({ text: text3, start, end, fenced: true });
+        continue;
+      }
+      lines.push({ text: text3, start, end, fenced: false });
+      continue;
+    }
+    const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/u.exec(text3)?.[1];
+    if (close !== void 0 && close.startsWith(fence.character) && close.length >= fence.length) {
+      fence = null;
+    }
+    lines.push({ text: text3, start, end, fenced: true });
+  }
+  if (fence !== null) {
+    return completionFailure(
+      "report_region_invalid",
+      "Implementation report has an unclosed code fence; completion region ownership is ambiguous."
+    );
+  }
+  return lines;
+}
+function headingOf(line) {
+  if (line.fenced) return null;
+  const match = ATX_HEADING.exec(line.text);
+  if (match?.[1] === void 0) return null;
+  const body = (match[2] ?? "").replace(/[ \t]+#+$/u, "").trim();
+  return { level: match[1].length, text: body };
+}
+function scanCompletionRegion(markdown) {
+  const lines = scanLines(markdown);
+  const starts = lines.filter(
+    (line) => !line.fenced && line.text === COMPLETION_REGION_START
+  );
+  const ends = lines.filter(
+    (line) => !line.fenced && line.text === COMPLETION_REGION_END
+  );
+  const looseDelimiters = lines.filter(
+    (line) => !line.fenced && line.text !== COMPLETION_REGION_START && line.text !== COMPLETION_REGION_END && line.text.includes(COMPLETION_REGION_FORMAT) && /^\s*<!--/u.test(line.text)
+  );
+  if (looseDelimiters.length > 0) {
+    return completionFailure(
+      "report_region_invalid",
+      "Implementation report contains a malformed completion region delimiter."
+    );
+  }
+  const legacyHeadings = lines.filter((line) => {
+    const heading = headingOf(line);
+    return heading?.level === 2 && heading.text === "Plan Task Completion";
+  });
+  if (starts.length === 0 && ends.length === 0) {
+    if (legacyHeadings.length === 0) return { kind: "none", start: 0, end: 0 };
+    if (legacyHeadings.length > 1) {
+      return completionFailure(
+        "report_region_invalid",
+        "Implementation report contains duplicate Plan Task Completion sections."
+      );
+    }
+    const heading = legacyHeadings[0];
+    if (heading === void 0) return { kind: "none", start: 0, end: 0 };
+    const next = lines.find((line) => {
+      if (line.start <= heading.start) return false;
+      const candidate = headingOf(line);
+      return candidate !== null && candidate.level <= 2;
+    });
+    return {
+      kind: "legacy",
+      start: heading.start,
+      end: next?.start ?? markdown.length
+    };
+  }
+  const start = starts[0];
+  const end = ends[0];
+  if (starts.length !== 1 || ends.length !== 1 || start === void 0 || end === void 0 || end.start <= start.start) {
+    return completionFailure(
+      "report_region_invalid",
+      "Implementation report must contain exactly one balanced completion region delimiter pair."
+    );
+  }
+  const inside = legacyHeadings.filter(
+    (line) => line.start > start.start && line.start < end.start
+  );
+  if (inside.length !== 1 || legacyHeadings.length !== 1) {
+    return completionFailure(
+      "report_region_invalid",
+      "Completion region delimiters must enclose exactly one Plan Task Completion section and no section may exist outside them."
+    );
+  }
+  const otherTopLevel = lines.some((line) => {
+    if (line.start <= start.start || line.start >= end.start) return false;
+    const heading = headingOf(line);
+    return heading !== null && heading.level <= 2 && heading.text !== "Plan Task Completion";
+  });
+  if (otherTopLevel) {
+    return completionFailure(
+      "report_region_invalid",
+      "Completion region delimiters enclose more than one top-level section."
+    );
+  }
+  return { kind: "v2", start: start.start, end: end.end };
+}
+function eligibleGapHeadings(markdown, region) {
+  const counts = /* @__PURE__ */ new Map();
+  for (const line of scanLines(markdown)) {
+    if (region !== null && region.kind !== "none" && line.start >= region.start && line.start < region.end)
+      continue;
+    const heading = headingOf(line);
+    if (heading === null || heading.level < 2 || heading.text.length === 0)
+      continue;
+    counts.set(heading.text, (counts.get(heading.text) ?? 0) + 1);
+  }
+  return new Set(
+    [...counts.entries()].filter(([, count]) => count === 1).map(([text3]) => text3)
+  );
+}
+function utf8Text(bytes, label) {
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+      bytes
+    );
+  } catch {
+    return completionFailure(
+      "report_region_invalid",
+      `${label} is not valid UTF-8; completion region ownership is ambiguous.`
+    );
+  }
+}
+function composeCompletionCandidate(input, ledger) {
+  const text3 = utf8Text(input, "Implementation report");
+  const scan = scanCompletionRegion(text3);
+  const region = renderCompletionRegion(ledger);
+  let output;
+  let action;
+  let start;
+  let end;
+  if (scan.kind === "none") {
+    const separator = text3.length === 0 ? "" : text3.endsWith("\n\n") ? "" : text3.endsWith("\n") ? "\n" : "\n\n";
+    output = `${text3}${separator}${region}
+`;
+    action = "appended";
+    start = Buffer.byteLength(text3, "utf8");
+    end = start;
+  } else {
+    const prefix = text3.slice(0, scan.start);
+    const suffix = text3.slice(scan.end);
+    const replacement = scan.kind === "legacy" ? suffix.length === 0 ? `${region}
+` : `${region}
+
+` : region;
+    output = `${prefix}${replacement}${suffix}`;
+    action = "replaced";
+    start = Buffer.byteLength(prefix, "utf8");
+    end = start + Buffer.byteLength(text3.slice(scan.start, scan.end), "utf8");
+    if (!output.startsWith(prefix) || !output.endsWith(suffix) || Buffer.byteLength(prefix, "utf8") + Buffer.byteLength(suffix, "utf8") !== Buffer.byteLength(output, "utf8") - Buffer.byteLength(replacement, "utf8")) {
+      return completionFailure(
+        "report_region_invalid",
+        "Candidate composition failed to preserve the narrative outside the completion region."
+      );
+    }
+  }
+  const verification = scanCompletionRegion(output);
+  if (verification.kind !== "v2") {
+    return completionFailure(
+      "report_region_invalid",
+      "Candidate composition did not produce exactly one owned completion region."
+    );
+  }
+  const roundtrip = parseCompletionRegion(
+    output.slice(verification.start, verification.end)
+  );
+  if (JSON.stringify(roundtrip) !== JSON.stringify(ledger) || output.slice(verification.start, verification.end) !== region) {
+    return completionFailure(
+      "report_projection_mismatch",
+      "Candidate completion region does not round-trip to the admitted ledger."
+    );
+  }
+  return { bytes: Buffer.from(output, "utf8"), region: { action, start, end } };
+}
+function parsePublishedCompletionRegion(report) {
+  const text3 = utf8Text(report, "Implementation report");
+  const scan = scanCompletionRegion(text3);
+  if (scan.kind !== "v2") {
+    return completionFailure(
+      scan.kind === "none" ? "report_projection_missing" : "report_projection_invalid",
+      scan.kind === "none" ? "Implementation report has no runner-published completion region." : "Implementation report carries a legacy completion section instead of the published v2 region."
+    );
+  }
+  return parseCompletionRegion(text3.slice(scan.start, scan.end));
+}
+async function validateCompletionClaims(input) {
+  const requiredReports = /* @__PURE__ */ new Set();
+  if (input.artifactBinding !== void 0) {
+    await inspectBoundWork4(input.repoRoot, input.artifactBinding);
+    const roles = input.artifactBinding.binding.artifacts;
+    if (input.planPath !== roles.plan || input.artifacts.implementationReport !== roles.implementationReport || input.artifacts.testReport !== roles.testReport)
+      return completionFailure(
+        "evidence_scope_violation",
+        "Completion must reference the exact bound plan and required reports."
+      );
+    for (const report of [roles.implementationReport, roles.testReport])
+      if (report) requiredReports.add(report);
+  }
+  const approval = await digestArtifactBundle(
+    input.repoRoot,
+    input.approval.paths
+  ).catch(
+    () => completionFailure(
+      "approval_invalid",
+      "Approved artifact bundle cannot be validated."
+    )
+  );
+  if (approval.digest !== input.approval.digest || !input.approval.paths.includes(input.planPath)) {
+    return completionFailure(
+      "approval_invalid",
+      "Approved artifact bundle digest or plan membership is invalid."
+    );
+  }
+  const plan = await readFile8(
+    path23.resolve(input.repoRoot, input.planPath),
+    "utf8"
+  ).catch(
+    () => completionFailure(
+      "approved_plan_invalid",
+      "Exact approved plan cannot be read."
+    )
+  );
+  const taskIds = parseApprovedPlanTaskIds(plan);
+  validatePlanTaskCompletionLedgerShape(taskIds, input.ledger, input.outcome);
+  const ledger = input.ledger;
+  if (ledger === null) {
+    return completionFailure(
+      "missing_ledger",
+      "Strict implementation result is missing taskCompletion."
+    );
+  }
+  const implementationReport = await readRequiredReport(
+    input.repoRoot,
+    input.artifacts.implementationReport,
+    "implementation_report_missing",
+    requiredReports,
+    input.captured?.implementationReport
+  );
+  const testReport = await readRequiredReport(
+    input.repoRoot,
+    input.artifacts.testReport,
+    "test_report_missing",
+    requiredReports,
+    input.captured?.testReport
+  );
+  const region = scanCompletionRegion(
+    utf8Text(implementationReport.bytes, "Implementation report")
+  );
+  const snapshot = await workspaceSnapshot(input.repoRoot, {
+    excludedPaths: input.approval.paths,
+    baseline: input.baseline,
+    artifactBinding: input.artifactBinding
+  });
+  const allowedPaths = new Set(
+    snapshot.entries.filter((entry) => entry.kind === "file").map((entry) => entry.path)
+  );
+  allowedPaths.add(implementationReport.path);
+  allowedPaths.add(testReport.path);
+  const approvedPaths = new Set(input.approval.paths);
+  const gapHeadings = /* @__PURE__ */ new Map([
+    [
+      implementationReport.path,
+      eligibleGapHeadings(implementationReport.contents, region)
+    ],
+    [testReport.path, eligibleGapHeadings(testReport.contents, null)]
+  ]);
+  for (const task of ledger.tasks) {
+    for (const evidence2 of task.evidence) {
+      await validateEvidenceFile(
+        input.repoRoot,
+        evidence2.path,
+        allowedPaths,
+        approvedPaths,
+        task.taskId,
+        requiredReports
+      );
+    }
+    if (task.gap !== null) {
+      const headings3 = gapHeadings.get(task.gap.reportPath);
+      if (headings3 === void 0) {
+        return completionFailure(
+          "invalid_gap_reference",
+          `${task.taskId} gap must reference an exact required report.`,
+          task.taskId
+        );
+      }
+      if (!headings3.has(task.gap.section)) {
+        return completionFailure(
+          "invalid_gap_reference",
+          `${task.taskId} gap section is not a unique preserved narrative heading of its report.`,
+          task.taskId
+        );
+      }
+    }
+  }
+  return {
+    ledger,
+    taskIds,
+    approvalDigest: input.approval.digest,
+    planTaskDigest: digest4(taskIds),
+    ledgerDigest: digest4(ledger),
+    counts: completionCounts(taskIds, ledger),
+    implementationReport: {
+      path: implementationReport.path,
+      bytes: implementationReport.bytes,
+      sha256: implementationReport.sha256,
+      region
+    },
+    testReport: {
+      path: testReport.path,
+      bytes: testReport.bytes,
+      sha256: testReport.sha256
+    }
+  };
+}
+function completionCounts(taskIds, ledger) {
+  return {
+    total: taskIds.length,
+    completed: ledger.tasks.filter((task) => task.status === "completed").length,
+    incomplete: ledger.tasks.filter((task) => task.status === "incomplete").length,
+    blocked: ledger.tasks.filter((task) => task.status === "blocked").length
+  };
+}
+function ledgerDigest(ledger) {
+  return digest4(ledger);
+}
+function planTaskDigest(taskIds) {
+  return digest4(taskIds);
 }
 function summariesMatch(expected, actual) {
   const normalize = (summary2) => ({
@@ -26413,10 +29425,10 @@ report each boundary in the durable artifacts and continue.
 Return outcome=completed with gate=null only after implementation-report.md and test-report.md both exist.
 Approved planning artifacts are immutable during orchestrated execution. Do not edit an approved artifact path or mark plan tasks [x].
 Return phase-result schemaVersion=3 with decisionConsultation=null. The structured taskCompletion ledger is the sole canonical completion source and must use schemaVersion=1 with exactly one record for every approved task below, in the displayed order. Each completed task needs bounded repository-relative evidence from the runner-authorized changed surface: a regular file created or modified relative to the run baseline, or an exact required implementation or test report. Carried-in unchanged source and test files and approved planning artifacts are not valid completion evidence. Incomplete or blocked tasks need a report gap reference and prohibit outcome=completed.
-Create the taskCompletion record set once and reuse its values verbatim. Write exactly one matching implementation-report.md section headed "## Plan Task Completion" and declare format \`banzai-plan-task-completion/v1\`. The report projection and structured ledger must be JSON-identical after parsing: schemaVersion, taskId, status, evidence object order, every path and detail string, and gap must match exactly. Never summarize, reorder, reword, or normalize the copied records.
-The table's Evidence and Gap cells hold the record JSON with Markdown table escaping: inside those two cells encode & as &amp;, | as &#124;, < as &lt;, and > as &gt;. The runner decodes these entities before the JSON-identity comparison, so this escaping is part of the table grammar and never counts as rewording a record; an unescaped | inside a cell splits the row and fails validation. Do not wrap either JSON cell in Markdown backticks or any other code span. Canonical row example: | T001 | completed | [{"path":"src/example.ts","detail":"Implemented T001."}] | null |.
-Completion ledger field bounds, enforced at decode: every evidence path and detail and every gap reportPath, section, and detail is a non-empty single-line string of at most 500 characters, and an evidence array holds at most 16 entries. The same bounds apply to the report table's copied values; compose details to fit rather than exceeding a bound in either output.
-Before returning the final structured result, reread the written Plan Task Completion section and copy its exact parsed record values into taskCompletion. Record implementation progress there and in the structured phase result instead.
+Completion ledger field bounds, enforced at decode: every evidence path and detail and every gap reportPath, section, and detail is a non-empty single-line string of at most 500 characters, and an evidence array holds at most 16 entries; compose details to fit rather than exceeding a bound.
+Completion contract banzai-completion-protocol/v1: the runner owns the implementation report's "## Plan Task Completion" section. After validating the returned ledger it renders and publishes that section itself as the banzai-plan-task-completion/v2 region. Return structured claims plus narrative: do not author, copy, escape, or maintain any completion table in implementation-report.md, and never write a banzai-plan-task-completion/v1 table. Write the report narrative under your own headings; if an existing "## Plan Task Completion" section is present, leave exactly that one section for the runner to replace and never add a second one, nested duplicate, or unclosed code fence around it. Nothing inside that section confers authority; only the structured ledger does.
+A gap reportPath must be a required report and its section must name a unique level-2 to level-6 heading of the preserved narrative, outside code fences and outside the runner-owned section, in the implementation report or the test report.
+Record implementation progress in the report narrative and in the structured phase result instead of plan checkboxes.
 If new architecture or scope is required, stop with gate=escalation and do not improvise.
 Recorded human decisions below are authoritative operator input: honor them, and do not re-raise a question an existing recorded decision already answers. Escalate only a decision no recorded answer covers.
 Do not substitute model-requested commands for configured runner verification; the runner owns deterministic verification.
@@ -26453,10 +29465,10 @@ ${approvedTaskIds.map((item) => `- ${item}`).join("\n")}`
 Rejected violation: ${completionRepair.violation}.
 Rejected task: ${completionRepair.taskId ?? "not task-specific"}.
 Rejected diagnostic: ${completionRepair.diagnostic ?? "not recorded"}.
-Repair only the named completion-evidence violation.${completionRepair.violation.startsWith("report_projection") ? "" : " Do not leave the rejected task record unchanged."}
-${completionRepair.violation === "evidence_scope_violation" ? "For evidence_scope_violation, replace every out-of-scope evidence path in the rejected task. Evidence must cite a regular file created or modified relative to the run baseline, or an exact required implementation or test report. Carried-in unchanged source and test files remain outside the authorized changed surface even when this attempt reads or verifies them. For a read-only confirmation task, record the confirmation in a required report and cite that report instead." : completionRepair.violation === "source_attempt_invalid" ? "For source_attempt_invalid, the rejected structured result failed decoding \u2014 commonly a completion ledger field outside its bounds; the diagnostic above names the exact field. Field bounds: every taskId is TNNN; every evidence path and detail and every gap reportPath, section, and detail is a non-empty single-line string of at most 500 characters; an evidence array holds at most 16 entries. Bring the offending value within bounds in the report table and the structured ledger identically. Shortening an over-bound value to fit while preserving its meaning is required by the grammar and is not a rewording violation." : completionRepair.violation.startsWith("report_projection") ? "For a report projection violation, first decide which side of the divergence is true. When the structured records are correct and only the section text drifted, rewrite only the Plan Task Completion section so it decodes to exactly the ledger records: keep the required heading, format line, and four-column table; remove Markdown backticks around whole JSON cells; escape & as &amp;, | as &#124;, < as &lt;, and > as &gt; inside the Evidence and Gap JSON cells; and do not change record content that already matches the ledger. When the table diverged because an accepted review finding showed a completion record was overstated, do not restore the false claim: return the corrected full ledger with a matching report projection, give every non-completed record a gap reference to a required report heading, and return outcome=needs_human_decision with gate=escalation naming the contradiction instead of outcome=completed." : "Change the rejected record only as needed to satisfy the named violation and keep every unaffected task record stable."}
+Repair only the named completion-evidence violation.${completionRepair.violation.startsWith("report_") ? "" : " Do not leave the rejected task record unchanged."}
+${completionRepair.violation === "evidence_scope_violation" ? "For evidence_scope_violation, replace every out-of-scope evidence path in the rejected task. Evidence must cite a regular file created or modified relative to the run baseline, or an exact required implementation or test report. Carried-in unchanged source and test files remain outside the authorized changed surface even when this attempt reads or verifies them. For a read-only confirmation task, record the confirmation in a required report and cite that report instead." : completionRepair.violation === "source_attempt_invalid" ? "For source_attempt_invalid, the rejected structured result failed decoding \u2014 commonly a completion ledger field outside its bounds; the diagnostic above names the exact field. Field bounds: every taskId is TNNN; every evidence path and detail and every gap reportPath, section, and detail is a non-empty single-line string of at most 500 characters; an evidence array holds at most 16 entries. Bring the offending value within bounds in the structured ledger. Shortening an over-bound value to fit while preserving its meaning is required by the grammar and is not a rewording violation." : completionRepair.violation.startsWith("report_") ? "For a report input violation, the runner could not safely own the implementation report's Plan Task Completion section: a required report was missing, or the report carried duplicate or overlapping completion sections, malformed runner delimiters, or an unclosed code fence that made ownership ambiguous. Repair the report narrative only: keep at most one such section, remove nested duplicates, close every code fence, and never author, format, or escape a completion table; the runner renders the region from the structured ledger. When an accepted review finding showed a completion record was overstated, do not restore the false claim: return the corrected full ledger, give every non-completed record a gap reference to a preserved narrative heading, and return outcome=needs_human_decision with gate=escalation naming the contradiction instead of outcome=completed." : completionRepair.violation === "invalid_gap_reference" ? "For invalid_gap_reference, point the gap at a unique level-2 to level-6 heading of the preserved report narrative, outside code fences and outside the runner-owned Plan Task Completion section; do not move, create, or duplicate a heading merely to satisfy a false reference." : "Change the rejected record only as needed to satisfy the named violation and keep every unaffected task record stable."}
 
-Reread the current Plan Task Completion section before returning; its parsed values and the final taskCompletion ledger must be JSON-identical. Do not duplicate prior records or edit the approved plan.`
+Return the corrected records in taskCompletion; the runner republishes the Plan Task Completion section from them, so do not author or edit that section. Do not duplicate prior records or edit the approved plan.`
     }
   ]);
 }
@@ -26527,9 +29539,8 @@ Approved planning artifacts are immutable during orchestrated execution. Do not 
 Record fix progress in the change report and structured phase result instead.
 List every fixed finding id in resolvedFindingIds.
 Return phase-result schemaVersion=3 with decisionConsultation=null. Return taskCompletion=null when the fix leaves completion evidence untouched.
-When an accepted finding shows the recorded completion evidence no longer describes the current tree \u2014 the fix changed mechanisms, files, or totals the evidence names \u2014 return the complete refreshed taskCompletion ledger instead: the same approved task set in the same order, every status still completed, evidence updated to describe the current implementation within the run's changed surface, and the report's Plan Task Completion section regenerated to decode JSON-identical to that ledger under the same grammar, escaping, and field bounds as implementation.
-When regenerating that section, put raw JSON in the Evidence and Gap cells without Markdown backticks or any other code span. Canonical row example: | T001 | completed | [{"path":"src/example.ts","detail":"Implemented T001."}] | null |.
-The report's Plan Task Completion section always mirrors the canonical ledger: edit it only together with a returned refreshed ledger, never independently, and never contradict its records in the manifest. Downgrading any task status is not a refresh: when an accepted finding says recorded work was never truly completed, complete the missing work when it is within the accepted findings' scope; otherwise leave ledger and projection unchanged, record the contradiction in the change report, exclude that finding from resolvedFindingIds, and stop with gate=escalation naming it.
+When an accepted finding shows the recorded completion evidence no longer describes the current tree \u2014 the fix changed mechanisms, files, or totals the evidence names \u2014 return the complete refreshed taskCompletion ledger instead: the same approved task set in the same order, every status still completed, evidence updated to describe the current implementation within the run's changed surface, under the same field bounds as implementation (500-character single-line strings, at most 16 evidence entries).
+Completion contract banzai-completion-protocol/v1: the runner owns the implementation report's "## Plan Task Completion" section and republishes it from the canonical ledger after every accepted fix. Never edit that section, never author a completion table, and never contradict its records in the manifest; an edit inside it carries no authority and is replaced at publication. Downgrading any task status is not a refresh: when an accepted finding says recorded work was never truly completed, complete the missing work when it is within the accepted findings' scope; otherwise return taskCompletion=null, record the contradiction in the change report, exclude that finding from resolvedFindingIds, and stop with gate=escalation naming it.
 If the fix needs a plan or ADR change, stop with gate=escalation.
 Recorded human decisions below are authoritative operator input: honor them, and do not re-raise a question an existing recorded decision already answers. Escalate only a decision no recorded answer covers.
 The latest review artifact provides the reviewer's full cross-model context.
@@ -26567,7 +29578,7 @@ ${JSON.stringify(findings, null, 2)}`
 Rejected violation: ${completionRepair.violation}.
 Rejected task: ${completionRepair.taskId ?? "not task-specific"}.
 Rejected diagnostic: ${completionRepair.diagnostic ?? "not recorded"}.
-Bring the refreshed ledger and the regenerated Plan Task Completion section within the projection grammar and field bounds so both decode JSON-identical. Remove Markdown backticks around whole JSON cells, and keep every unaffected record stable.`
+Return the corrected refreshed ledger within the field bounds and the runner-authorized changed surface, and keep every unaffected record stable. For a report input violation, repair only the report narrative so exactly one Plan Task Completion section with closed code fences remains for the runner to replace. Do not author or edit the runner-owned Plan Task Completion section; the runner republishes it from taskCompletion.`
     }
   ]);
 }
@@ -26844,9 +29855,10 @@ function renderCurrentReviewArtifact(value, context) {
     blocked: "Review is blocked. Required coverage remains incomplete where recorded. Resolve the blocker before an explicit review retry.",
     replan_required: "Review requires replanning through the existing human approval lifecycle."
   }[result.verdict];
+  const guided = snapshot.schemaVersion === 4 || snapshot.schemaVersion === 5 && snapshot.configurationSetup !== void 0;
   return [
     "# Implementation Review",
-    snapshot.schemaVersion === 4 ? "- Format: `banzai-feature-review/v5`" : snapshot.schemaVersion === 3 ? "- Format: `banzai-feature-review/v4`" : snapshot.schemaVersion === 2 ? "- Format: `banzai-feature-review/v3`" : "- Format: `banzai-feature-review/v2`",
+    snapshot.schemaVersion === 5 ? "- Format: `banzai-feature-review/v6`" : snapshot.schemaVersion === 4 ? "- Format: `banzai-feature-review/v5`" : snapshot.schemaVersion === 3 ? "- Format: `banzai-feature-review/v4`" : snapshot.schemaVersion === 2 ? "- Format: `banzai-feature-review/v3`" : "- Format: `banzai-feature-review/v2`",
     reviewValue({
       slug: context.slug,
       iteration: context.iteration,
@@ -26875,7 +29887,7 @@ function renderCurrentReviewArtifact(value, context) {
     reviewValue(
       snapshot.artifact.verificationEvidence ?? snapshot.artifact.verification
     ),
-    ...snapshot.schemaVersion === 4 ? [
+    ...guided ? [
       "### Configuration coverage and runner-authored changes",
       "Coverage below distinguishes configured, bootstrap-deferred and skipped substantive verification. Only the exact recorded deltas are runner-authored; they do not attribute the whole configuration file. Historical deltas may have later user changes, and carried-in changes retain separate provenance. Inspect .banzai/config.json in this candidate.",
       ...snapshot.configurationSetup?.coverage === "skipped" && snapshot.artifact.verification.length === 0 ? [
@@ -26891,6 +29903,11 @@ function renderCurrentReviewArtifact(value, context) {
       source: snapshot.completionSource,
       projection: snapshot.artifact.taskCompletion ?? null
     }),
+    ...snapshot.schemaVersion === 5 ? [
+      "### Runner-owned completion publication (runner evidence)",
+      "The completion region of the implementation report was rendered and published by the runner from the validated ledger; the model authored the claims, narrative and engineering changes. These identities name the retained capture, candidate and receipt proof. Valid structure is not proof that work was done.",
+      reviewValue(snapshot.completionPublication ?? null)
+    ] : [],
     "## Summary",
     reviewValue(result.summary),
     "## Findings",
@@ -27332,7 +30349,8 @@ function transitionState(state, next) {
   const pending = state.pendingHumanDecision;
   const laterConfigurationBoundary = (state.status === "reviewing" || state.status === "needs_triage") && (next === "needs_human_decision" || next === "verifying");
   const configurationTransition = laterConfigurationBoundary || state.status === "needs_human_decision" && next === "verifying" || state.status === "verifying" && next === "needs_human_decision";
-  if (configurationTransition && (state.schemaVersion !== 6 || (laterConfigurationBoundary && next === "verifying" ? state.pendingHumanDecision != null || !["configured", "bootstrap_deferred"].includes(
+  const guided = state.schemaVersion === 6 || state.schemaVersion === 7 && state.configurationSetup !== void 0;
+  if (configurationTransition && (!guided || (laterConfigurationBoundary && next === "verifying" ? state.pendingHumanDecision != null || !["configured", "bootstrap_deferred"].includes(
     state.configurationSetup?.coverage ?? ""
   ) : state.pendingHumanDecision?.kind !== "configuration_prerequisite") || state.configurationSetup?.continuation === null || state.configurationSetup?.continuation === void 0 || state.activeAttempt !== null || state.activeProcess !== null || next === "verifying" && !laterConfigurationBoundary && !state.configurationSetup.resolutions.some(
     (resolution) => pending?.kind === "configuration_prerequisite" && resolution.proposalId === pending.proposalId
@@ -27492,7 +30510,7 @@ function validateDecisionState(state) {
       return decisionStateError();
     }
     if (pending?.kind === "configuration_prerequisite") {
-      if (state.schemaVersion !== 6 || state.configurationSetup === void 0 || pending.runId !== state.runId)
+      if (!hasConfigurationSetup(state) || state.configurationSetup === void 0 || pending.runId !== state.runId)
         return decisionStateError();
       state.pendingHumanDecision = parseConfigurationPrerequisite(
         pending,
@@ -27520,7 +30538,7 @@ function validateDecisionState(state) {
     const configurationProposalIds = /* @__PURE__ */ new Set();
     for (const decision of state.humanDecisions ?? []) {
       if (decision.kind === "configuration_prerequisite") {
-        if (state.schemaVersion !== 6 || state.configurationSetup === void 0 || decision.runId !== state.runId || configurationProposalIds.has(decision.proposalId))
+        if (!hasConfigurationSetup(state) || state.configurationSetup === void 0 || decision.runId !== state.runId || configurationProposalIds.has(decision.proposalId))
           return decisionStateError();
         const { action, decidedAt, decidedBy, ...request2 } = decision;
         if (!CONFIGURATION_ACTIONS.includes(action))
@@ -27603,7 +30621,7 @@ function validateDecisionState(state) {
   }
 }
 function normalizeRunState(state) {
-  if (![1, 2, 3, 4, 5, 6].includes(state.schemaVersion)) {
+  if (![1, 2, 3, 4, 5, 6, 7].includes(state.schemaVersion)) {
     throw new BanzaiError(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Unsupported persisted run state version."
@@ -27615,7 +30633,32 @@ function normalizeRunState(state) {
       "Legacy run state cannot acquire private binding semantics."
     );
   }
-  if (state.schemaVersion === 4 || state.schemaVersion === 5 || state.schemaVersion === 6) {
+  if (state.schemaVersion === 7) {
+    if (!Object.hasOwn(state, "completionPublication"))
+      throw new BanzaiError(
+        "ARTIFACT_VERSION_UNSUPPORTED",
+        "Run state v7 requires its completion publication cursor."
+      );
+    if (state.completionPublication !== null)
+      state.completionPublication = parseCompletionPublicationCursor2(
+        state.completionPublication
+      );
+    if (state.planTaskCompletion !== null && state.planTaskCompletion !== void 0)
+      state.planTaskCompletion = parsePlanTaskCompletionCheckpoint(
+        state.planTaskCompletion
+      );
+  } else if ("completionPublication" in state) {
+    throw new BanzaiError(
+      "ARTIFACT_VERSION_UNSUPPORTED",
+      "Legacy run state cannot carry a completion publication cursor."
+    );
+  } else if (state.planTaskCompletion !== null && state.planTaskCompletion !== void 0 && state.planTaskCompletion.schemaVersion !== 1) {
+    throw new BanzaiError(
+      "ARTIFACT_VERSION_UNSUPPORTED",
+      "Legacy run state cannot carry runner-published completion evidence."
+    );
+  }
+  if (state.schemaVersion === 4 || state.schemaVersion === 5 || state.schemaVersion === 6 || state.schemaVersion === 7 && state.artifactBinding !== void 0) {
     if (state.artifactBinding === void 0 || !/^[0-9a-f]{64}$/.test(state.artifactBinding.sha256)) {
       throw new BanzaiError(
         "ARTIFACT_RECOVERY_REQUIRED",
@@ -27628,12 +30671,12 @@ function normalizeRunState(state) {
         "Run state requires an exact immutable workflow binding."
       );
   }
-  if (state.schemaVersion === 4 && state.artifactBinding?.binding.schemaVersion !== 1)
+  if ((state.schemaVersion === 4 || state.schemaVersion === 7 && state.artifactBinding !== void 0 && !hasConfigurationSetup(state)) && state.artifactBinding?.binding.schemaVersion !== 1)
     throw new BanzaiError(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Run state v4 retains binding v1 semantics."
     );
-  if (state.schemaVersion === 6) {
+  if (hasConfigurationSetup(state)) {
     if (state.verificationMode !== "ordered" && state.verificationMode !== "policy")
       return decisionStateError();
     state.configurationSetup = parseConfigurationSetupState(
@@ -27643,7 +30686,7 @@ function normalizeRunState(state) {
       return decisionStateError();
   } else if ("verificationMode" in state || "configurationSetup" in state)
     return decisionStateError();
-  const policy = state.schemaVersion === 5 || state.schemaVersion === 6 && state.verificationMode === "policy";
+  const policy = usesVerificationPolicy(state);
   if (policy && state.verificationEvidence !== void 0) {
     parseVerificationDecision2(state.verificationEvidence.decision);
     if (state.verificationEvidence.applicability !== null)
@@ -27659,7 +30702,7 @@ function normalizeRunState(state) {
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Legacy state cannot acquire verification applicability."
     );
-  if (state.schemaVersion === 3 || state.schemaVersion === 4 || state.schemaVersion === 5 || state.schemaVersion === 6) {
+  if (state.schemaVersion === 3 || state.schemaVersion === 4 || state.schemaVersion === 5 || state.schemaVersion === 6 || state.schemaVersion === 7) {
     const recovery = state.recovery ?? null;
     if (recovery !== null && recovery.stage === void 0) {
       recovery.stage = recovery.recoveryAttemptId === null ? state.activeAttempt?.id === recovery.sourceAttemptId ? "authorized" : "source_interrupted" : "attempt_started";
@@ -27911,6 +30954,265 @@ var RunStore = class {
     } finally {
       await handle.close();
     }
+  }
+  /**
+   * Attempt-owned completion protocol evidence (ADR-0047). Every leaf lives
+   * beside the attempt record under `attempts/` and is written once.
+   */
+  completionEvidencePath(runId2, attempt, leaf) {
+    return containedEvidencePath(
+      this.runDirectory(runId2),
+      "attempts",
+      `${safeEvidenceSegment(attempt.id, "attempt.id", 200)}.${leaf}`
+    );
+  }
+  /** Run-relative evidence path as recorded in receipts and summaries. */
+  completionEvidenceRelativePath(runId2, attempt, leaf) {
+    return path25.relative(
+      this.runDirectory(runId2),
+      this.completionEvidencePath(runId2, attempt, leaf)
+    ).split(path25.sep).join(path25.posix.sep);
+  }
+  /**
+   * Writes one immutable private leaf. A second write with identical bytes is
+   * a no-op; different bytes under the same identity are a conflict. Bytes are
+   * never replaced, so a crash between leaves leaves each leaf whole or absent.
+   */
+  async writeImmutableEvidence(destination, bytes, conflictCode) {
+    await mkdir9(path25.dirname(destination), { recursive: true, mode: 448 });
+    const temporary = `${destination}.${process3.pid}.${randomUUID10()}.tmp`;
+    const handle = await open13(temporary, "wx", 384);
+    try {
+      try {
+        await handle.writeFile(bytes);
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      try {
+        await link4(temporary, destination);
+      } catch (error) {
+        if (error.code !== "EEXIST") throw error;
+        const existing = await this.readImmutableEvidence(destination);
+        if (!existing?.equals(bytes))
+          throw new BanzaiError(
+            conflictCode,
+            `${path25.basename(destination)} already exists with different content.`
+          );
+      }
+    } finally {
+      await unlink8(temporary).catch(() => void 0);
+    }
+  }
+  /** Null when absent; every other failure surfaces as a bounded read error. */
+  async readImmutableEvidence(destination) {
+    let handle;
+    try {
+      handle = await open13(
+        destination,
+        constants11.O_RDONLY | constants11.O_NOFOLLOW
+      );
+    } catch (error) {
+      if (error.code === "ENOENT") return null;
+      throw new BanzaiError(
+        "STATE_READ_FAILED",
+        `Could not read ${path25.basename(destination)}: ${error.message}`
+      );
+    }
+    try {
+      const stat6 = await handle.stat();
+      if (!stat6.isFile())
+        throw new BanzaiError(
+          "UNSAFE_EVIDENCE_PATH",
+          "Completion evidence must be a private regular file."
+        );
+      return await handle.readFile();
+    } finally {
+      await handle.close();
+    }
+  }
+  async writeCompletionTransition(runId2, transition, priorStateBytes) {
+    const parsed = parseCompletionTransition2(transition);
+    const attempt = { id: parsed.attemptId, kind: parsed.attemptKind };
+    if (parsed.runId !== runId2 || parsed.priorState.path !== this.completionEvidenceRelativePath(
+      runId2,
+      attempt,
+      "completion-state-input.json"
+    ) || parsed.priorState.sha256 !== createHash17("sha256").update(priorStateBytes).digest("hex"))
+      throw new BanzaiError(
+        "INVALID_COMPLETION_TRANSITION",
+        "Completion transition does not bind the exact prior state bytes."
+      );
+    await this.writeImmutableEvidence(
+      this.completionEvidencePath(
+        runId2,
+        attempt,
+        "completion-state-input.json"
+      ),
+      priorStateBytes,
+      "COMPLETION_TRANSITION_CONFLICT"
+    );
+    await this.writeImmutableEvidence(
+      this.completionEvidencePath(runId2, attempt, "completion-transition.json"),
+      Buffer.from(`${JSON.stringify(parsed, null, 2)}
+`),
+      "COMPLETION_TRANSITION_CONFLICT"
+    );
+  }
+  async readCompletionTransitionIfExists(runId2, attempt) {
+    const bytes = await this.readImmutableEvidence(
+      this.completionEvidencePath(runId2, attempt, "completion-transition.json")
+    );
+    if (bytes === null) return null;
+    const parsed = parseCompletionTransition2(
+      JSON.parse(bytes.toString("utf8"))
+    );
+    if (parsed.runId !== runId2 || parsed.attemptId !== attempt.id || parsed.attemptKind !== attempt.kind)
+      throw new BanzaiError(
+        "INVALID_COMPLETION_TRANSITION",
+        "Completion transition identity conflicts with its path."
+      );
+    return parsed;
+  }
+  /** Byte-identical original report input retained beside the capture manifest. */
+  async writeCompletionOriginal(runId2, attempt, role, bytes) {
+    const leaf = role === "implementationReport" ? "implementation-input.md" : "test-input.md";
+    await this.writeImmutableEvidence(
+      this.completionEvidencePath(runId2, attempt, leaf),
+      bytes,
+      "COMPLETION_CAPTURE_CONFLICT"
+    );
+    return {
+      path: this.completionEvidenceRelativePath(runId2, attempt, leaf),
+      sha256: createHash17("sha256").update(bytes).digest("hex")
+    };
+  }
+  async readCompletionOriginalIfExists(runId2, attempt, role) {
+    return await this.readImmutableEvidence(
+      this.completionEvidencePath(
+        runId2,
+        attempt,
+        role === "implementationReport" ? "implementation-input.md" : "test-input.md"
+      )
+    );
+  }
+  async writeCompletionCapture(runId2, capture3) {
+    const parsed = parseCompletionCapture2(capture3);
+    if (parsed.runId !== runId2)
+      throw new BanzaiError(
+        "INVALID_COMPLETION_CAPTURE",
+        "Completion capture run identity does not match its path."
+      );
+    await this.writeImmutableEvidence(
+      this.completionEvidencePath(
+        runId2,
+        { id: parsed.attemptId },
+        "completion-input.json"
+      ),
+      Buffer.from(`${JSON.stringify(parsed, null, 2)}
+`),
+      "COMPLETION_CAPTURE_CONFLICT"
+    );
+  }
+  async readCompletionCaptureIfExists(runId2, attempt) {
+    const bytes = await this.readImmutableEvidence(
+      this.completionEvidencePath(runId2, attempt, "completion-input.json")
+    );
+    if (bytes === null) return null;
+    const parsed = parseCompletionCapture2(
+      JSON.parse(bytes.toString("utf8"))
+    );
+    if (parsed.runId !== runId2 || parsed.attemptId !== attempt.id || parsed.attemptKind !== attempt.kind)
+      throw new BanzaiError(
+        "INVALID_COMPLETION_CAPTURE",
+        "Completion capture identity conflicts with its path."
+      );
+    return parsed;
+  }
+  async writeCompletionCandidate(runId2, candidate, bytes) {
+    const parsed = parseCompletionCandidate2(candidate);
+    const attempt = { id: parsed.attemptId, kind: parsed.attemptKind };
+    if (parsed.runId !== runId2 || parsed.candidatePath !== this.completionEvidenceRelativePath(
+      runId2,
+      attempt,
+      "completion-candidate.md"
+    ) || parsed.outputSha256 !== createHash17("sha256").update(bytes).digest("hex") || parsed.outputBytes !== bytes.length)
+      throw new BanzaiError(
+        "INVALID_COMPLETION_CANDIDATE",
+        "Completion candidate metadata does not bind its exact bytes."
+      );
+    await this.writeImmutableEvidence(
+      this.completionEvidencePath(runId2, attempt, "completion-candidate.md"),
+      bytes,
+      "COMPLETION_CANDIDATE_CONFLICT"
+    );
+    await this.writeImmutableEvidence(
+      this.completionEvidencePath(runId2, attempt, "completion-candidate.json"),
+      Buffer.from(`${JSON.stringify(parsed, null, 2)}
+`),
+      "COMPLETION_CANDIDATE_CONFLICT"
+    );
+  }
+  async readCompletionCandidateIfExists(runId2, attempt) {
+    const metadata = await this.readImmutableEvidence(
+      this.completionEvidencePath(runId2, attempt, "completion-candidate.json")
+    );
+    if (metadata === null) return null;
+    const candidate = parseCompletionCandidate2(
+      JSON.parse(metadata.toString("utf8"))
+    );
+    const bytes = await this.readImmutableEvidence(
+      this.completionEvidencePath(runId2, attempt, "completion-candidate.md")
+    );
+    if (candidate.runId !== runId2 || candidate.attemptId !== attempt.id || candidate.attemptKind !== attempt.kind || bytes === null || createHash17("sha256").update(bytes).digest("hex") !== candidate.outputSha256 || bytes.length !== candidate.outputBytes)
+      throw new BanzaiError(
+        "INVALID_COMPLETION_CANDIDATE",
+        "Completion candidate bytes or identity conflict with their metadata."
+      );
+    return { candidate, bytes };
+  }
+  async writeCompletionPublication(runId2, receipt) {
+    const parsed = parseCompletionPublication2(receipt);
+    if (parsed.runId !== runId2)
+      throw new BanzaiError(
+        "INVALID_COMPLETION_PUBLICATION",
+        "Completion publication run identity does not match its path."
+      );
+    await this.writeImmutableEvidence(
+      this.completionEvidencePath(
+        runId2,
+        { id: parsed.attemptId },
+        "completion-publication.json"
+      ),
+      Buffer.from(`${JSON.stringify(parsed, null, 2)}
+`),
+      "COMPLETION_PUBLICATION_CONFLICT"
+    );
+  }
+  async readCompletionPublicationIfExists(runId2, attempt) {
+    const bytes = await this.readImmutableEvidence(
+      this.completionEvidencePath(runId2, attempt, "completion-publication.json")
+    );
+    if (bytes === null) return null;
+    const parsed = parseCompletionPublication2(
+      JSON.parse(bytes.toString("utf8"))
+    );
+    if (parsed.runId !== runId2 || parsed.attemptId !== attempt.id || attempt.kind !== void 0 && parsed.attemptKind !== attempt.kind)
+      throw new BanzaiError(
+        "INVALID_COMPLETION_PUBLICATION",
+        "Completion publication identity conflicts with its path."
+      );
+    return parsed;
+  }
+  /** Exact current state bytes, for attempt-owned transition evidence. */
+  async readStateBytes(runId2) {
+    const bytes = await this.readImmutableEvidence(this.statePath(runId2));
+    if (bytes === null)
+      throw new BanzaiError(
+        "STATE_READ_FAILED",
+        `Could not read state for ${runId2}.`
+      );
+    return bytes;
   }
   terminalCheckpointPath(runId2, attempt) {
     return containedEvidencePath(
@@ -28185,7 +31487,7 @@ var RunStore = class {
       if (file.availability !== "available" || file.text === null)
         throw new Error();
       raw = cancellationRecord(JSON.parse(file.text));
-      if (raw.runId !== runId2 || !CANCELLATION_STATUSES.includes(raw.status) || ![1, 2, 3, 4, 5, 6].includes(raw.schemaVersion))
+      if (raw.runId !== runId2 || !CANCELLATION_STATUSES.includes(raw.status) || ![1, 2, 3, 4, 5, 6, 7].includes(raw.schemaVersion))
         throw new Error();
     } catch {
       throw new BanzaiError(
@@ -28294,6 +31596,26 @@ var RunStore = class {
       }
       return event;
     });
+  }
+  /**
+   * Appends a typed event once per exact identity: an identical (type, details)
+   * event already on the ledger is returned instead of duplicated, so repeated
+   * inspection or resume of the same durable refusal adds nothing.
+   */
+  async appendEventOnce(runId2, type, details) {
+    const prior = await readFile10(
+      path25.join(this.runDirectory(runId2), "events.jsonl"),
+      "utf8"
+    ).catch((error) => {
+      if (error.code === "ENOENT") return "";
+      throw error;
+    });
+    const canonical = JSON.stringify(details);
+    const existing = prior.split("\n").filter(Boolean).map((line) => JSON.parse(line)).find(
+      (event) => event.type === type && JSON.stringify(event.details) === canonical
+    );
+    if (existing !== void 0) return existing;
+    return await this.appendEvent(runId2, type, details);
   }
   async writeRunAttempt(runId2, record7) {
     parseModelAttemptRecord2(record7);
@@ -28772,6 +32094,19 @@ var TERMINAL_INTEGRITY_FAILURE_CODES = /* @__PURE__ */ new Set([
   "TERMINAL_RESULT_CONFLICT",
   "SESSION_ID_CONFLICT"
 ]);
+function sameObservedInputs(a, b) {
+  return digestCanonicalJson4(a.implementationReport) === digestCanonicalJson4(b.implementationReport) && digestCanonicalJson4(a.testReport) === digestCanonicalJson4(b.testReport) && a.workspaceDigest === b.workspaceDigest;
+}
+var CompletionRefusal = class extends Error {
+  constructor(code2, stage, proofDigest, remedy) {
+    super(`${code2} at ${stage}`);
+    this.code = code2;
+    this.stage = stage;
+    this.proofDigest = proofDigest;
+    this.remedy = remedy;
+    this.name = "CompletionRefusal";
+  }
+};
 function reviewExecutionPolicy(state, settings, currentInvocationDigest = null) {
   const context = {
     ...sessionContext("reviewer", settings),
@@ -29124,7 +32459,7 @@ var WorkflowRunner = class {
       const state = runId2 ? await this.store.readState(runId2) : null;
       if (state && state.status !== "done" && state.status !== "cancelled") {
         const pending = state.pendingHumanDecision;
-        if (state.schemaVersion !== 6 || state.status !== "needs_human_decision" || pending?.kind !== "configuration_prerequisite" || state.activeAttempt !== null || state.activeProcess !== null)
+        if (!hasConfigurationSetup(state) || state.status !== "needs_human_decision" || pending?.kind !== "configuration_prerequisite" || state.activeAttempt !== null || state.activeProcess !== null)
           throw new BanzaiError(
             "CONFIGURATION_RUN_UNFINISHED",
             "This unfinished run has no eligible configuration checkpoint. Use banzai status and its existing recovery action."
@@ -30449,7 +33784,7 @@ var WorkflowRunner = class {
     }
   }
   async validateConfigurationContinuation(state, continuation) {
-    if (state.schemaVersion !== 6 || state.configurationSetup === void 0 || state.artifactBinding === void 0 || state.activeAttempt !== null || state.activeProcess !== null || state.baseCommit !== continuation.baseCommit || state.artifactBinding.binding.workId !== continuation.workId || state.artifactBinding.sha256 !== continuation.workBindingSha256 || (state.planApproval?.digest ?? null) !== continuation.approvalDigest || (state.workflowSelection?.digest ?? null) !== continuation.workflowSelectionDigest) {
+    if (!hasConfigurationSetup(state) || state.configurationSetup === void 0 || state.artifactBinding === void 0 || state.activeAttempt !== null || state.activeProcess !== null || state.baseCommit !== continuation.baseCommit || state.artifactBinding.binding.workId !== continuation.workId || state.artifactBinding.sha256 !== continuation.workBindingSha256 || (state.planApproval?.digest ?? null) !== continuation.approvalDigest || (state.workflowSelection?.digest ?? null) !== continuation.workflowSelectionDigest) {
       throw new BanzaiError(
         "CONFIGURATION_CONTINUATION_INVALID",
         "The original completed configuration checkpoint is no longer eligible. Use the existing status/recovery action."
@@ -30530,7 +33865,7 @@ var WorkflowRunner = class {
     }
   }
   async inspectConfigurationCheckpoint(state, config, source, records) {
-    if (state.schemaVersion !== 6) return false;
+    if (!hasConfigurationSetup(state)) return false;
     const setup = state.configurationSetup;
     const bound = state.artifactBinding;
     if (!setup || !bound || config.schemaVersion !== setup.configSchemaVersion || usesVerificationPolicy(state) !== Boolean(config.schemaVersion === 3 && config.verification.policy))
@@ -31409,6 +34744,7 @@ var WorkflowRunner = class {
     const retry = await this.retryEligibility(state);
     const recovery = await this.recoveryEligibility(state);
     const taskCompletion = await this.taskCompletionStatus(state);
+    const completionPublication2 = await this.completionPublicationStatus(state);
     let configurationPrerequisite;
     if (state.pendingHumanDecision?.kind === "configuration_prerequisite") {
       const request = state.pendingHumanDecision;
@@ -31456,8 +34792,14 @@ var WorkflowRunner = class {
       latestReview,
       retry,
       recovery,
-      nextAction: this.nextAction(state, retry, recovery),
+      nextAction: this.nextAction(
+        state,
+        retry,
+        recovery,
+        completionPublication2
+      ),
       taskCompletion,
+      completionPublication: completionPublication2,
       ...configurationPrerequisite ? { configurationPrerequisite } : {}
     };
   }
@@ -31675,6 +35017,13 @@ var WorkflowRunner = class {
     }
     if (attempt.mutable) {
       const checkpoint = state.planTaskCompletion;
+      if (record7.status === "pending_application") {
+        return {
+          eligible: false,
+          reason: "Completion publication for this attempt is pending; use banzai resume to reconcile it without another model call, or cancel the run.",
+          attemptId: attempt.id
+        };
+      }
       if ((attempt.kind === "implementation" && state.blockedFrom === "implementing" || attempt.kind === "fix" && state.blockedFrom === "fixing") && record7.status === "failed" && // The runner itself classified this failure as completion evidence
       // when it wrote the invalid checkpoint: a result rejected by ledger
       // validation keeps its decoded evidence, and a result whose decode
@@ -31858,7 +35207,9 @@ var WorkflowRunner = class {
       state.runId,
       source.attempt
     );
-    if (checkpoint !== null && (checkpoint.baseCommit !== state.baseCommit || checkpoint.approvalDigest !== state.planApproval?.digest || checkpoint.scopeDigest !== this.attemptScopeDigest(state, source.attempt) || digestCanonicalJson4(checkpoint.result) !== digestCanonicalJson4(source.result))) {
+    if (checkpoint !== null && (checkpoint.baseCommit !== state.baseCommit || checkpoint.approvalDigest !== state.planApproval?.digest || checkpoint.scopeDigest !== this.attemptScopeDigest(state, source.attempt) || (checkpoint.schemaVersion === 1 ? digestCanonicalJson4(checkpoint.result) : digestCanonicalJson4(
+      JSON.parse(checkpoint.envelope.original)
+    )) !== digestCanonicalJson4(source.result))) {
       throw new BanzaiError(
         "INVALID_TERMINAL_CHECKPOINT",
         "The completed blocked source conflicts with its terminal checkpoint."
@@ -32210,7 +35561,8 @@ var WorkflowRunner = class {
     };
     if (!sourceAlreadyInterrupted && !sourceAlreadyPreserved) {
       if (prerequisiteSource === null) {
-        persistedSourceRecord.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION2;
+        if (persistedSourceRecord.schemaVersion === 1)
+          persistedSourceRecord.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION2;
         persistedSourceRecord.status = "interrupted";
         persistedSourceRecord.completedAt = null;
         persistedSourceRecord.interruptedAt ??= now();
@@ -32307,7 +35659,7 @@ var WorkflowRunner = class {
     );
     return state;
   }
-  nextAction(state, retry, recovery) {
+  nextAction(state, retry, recovery, publication = null) {
     if (state.status === "needs_adr_approval") {
       return "banzai approve adr";
     }
@@ -32321,6 +35673,8 @@ var WorkflowRunner = class {
       return "banzai triage";
     }
     if (state.status === "blocked") {
+      if (publication?.pending === true && publication.action !== null)
+        return `banzai ${publication.action}`;
       return retry.eligible ? "banzai retry" : recovery.terminalCheckpointPresent === true ? "banzai resume" : recovery.eligible ? "banzai recover" : "banzai cancel";
     }
     if ([
@@ -32584,6 +35938,9 @@ var WorkflowRunner = class {
         checkpoint.taskId
       );
     }
+    if (checkpoint.schemaVersion === COMPLETION_SUMMARY_SCHEMA_VERSION) {
+      return await this.revalidatePublishedCompletion(state, checkpoint);
+    }
     const attempt = {
       id: checkpoint.sourceAttemptId,
       kind: checkpoint.sourceAttemptKind ?? "implementation",
@@ -32712,7 +36069,7 @@ var WorkflowRunner = class {
   }
   async beginAttempt(state, attempt, policy) {
     const record7 = {
-      schemaVersion: MODEL_ATTEMPT_SCHEMA_VERSION2,
+      schemaVersion: policy.completion === void 0 ? MODEL_ATTEMPT_SCHEMA_VERSION2 : STRICT_MODEL_ATTEMPT_SCHEMA_VERSION2,
       attempt,
       status: "started",
       startedAt: now(),
@@ -32733,8 +36090,30 @@ var WorkflowRunner = class {
       reviewMode: policy.reviewMode ?? null,
       rotationReason: policy.rotationReason ?? null,
       resumeSessionId: policy.resumeSessionId,
-      sessionContext: policy.sessionContext
+      sessionContext: policy.sessionContext,
+      ...policy.completion === void 0 ? {} : {
+        completionProtocol: COMPLETION_PROTOCOL4,
+        retryOf: policy.completion.retryOf,
+        envelope: null,
+        completionDiagnostic: null
+      }
     };
+    if (policy.completion?.retryOf != null) {
+      const existing = await this.store.readRunAttemptIfExists(
+        state.runId,
+        attempt
+      );
+      if (existing !== null) {
+        if (existing.status !== "started" || existing.result !== null || existing.retryOf !== policy.completion.retryOf || existing.completionProtocol !== COMPLETION_PROTOCOL4 || JSON.stringify(existing.sessionContext) !== JSON.stringify(policy.sessionContext))
+          throw new BanzaiError(
+            "COMPLETION_RETRY_CONFLICT",
+            "A linked evidence-repair successor already exists with different evidence."
+          );
+        state.activeAttempt = attempt;
+        await this.store.writeState(state);
+        return existing;
+      }
+    }
     if (attempt.kind === "selection") {
       state.metrics.attempts.selection = (state.metrics.attempts.selection ?? 0) + 1;
     } else {
@@ -32783,7 +36162,7 @@ var WorkflowRunner = class {
     let record7 = await this.store.readRunAttemptIfExists(state.runId, attempt);
     if (record7 === null) {
       record7 = {
-        schemaVersion: MODEL_ATTEMPT_SCHEMA_VERSION2,
+        schemaVersion: policy.completion === void 0 ? MODEL_ATTEMPT_SCHEMA_VERSION2 : STRICT_MODEL_ATTEMPT_SCHEMA_VERSION2,
         attempt,
         status: "started",
         startedAt: now(),
@@ -32804,10 +36183,16 @@ var WorkflowRunner = class {
         reviewMode: policy.reviewMode ?? null,
         rotationReason: policy.rotationReason ?? null,
         resumeSessionId: policy.resumeSessionId,
-        sessionContext: policy.sessionContext
+        sessionContext: policy.sessionContext,
+        ...policy.completion === void 0 ? {} : {
+          completionProtocol: COMPLETION_PROTOCOL4,
+          retryOf: null,
+          envelope: null,
+          completionDiagnostic: null
+        }
       };
       await this.store.writeRunAttempt(state.runId, record7);
-    } else if (record7.status !== "started" || record7.result !== null || record7.recoveryOf !== authorization.attempt.id || record7.recoveryAuthorizationId !== authorization.authorizationId || record7.attempt.kind !== authorization.phase || record7.sessionMode !== policy.sessionMode || record7.resumeSessionId !== policy.resumeSessionId || JSON.stringify(record7.sessionContext) !== JSON.stringify(policy.sessionContext)) {
+    } else if (record7.status !== "started" || record7.result !== null || policy.completion !== void 0 !== this.completionProtocolAttempt(record7) || record7.recoveryOf !== authorization.attempt.id || record7.recoveryAuthorizationId !== authorization.authorizationId || record7.attempt.kind !== authorization.phase || record7.sessionMode !== policy.sessionMode || record7.resumeSessionId !== policy.resumeSessionId || JSON.stringify(record7.sessionContext) !== JSON.stringify(policy.sessionContext)) {
       throw new BanzaiError(
         "RECOVERY_ATTEMPT_CONFLICT",
         "Persisted recovery attempt conflicts with its authorization."
@@ -32870,7 +36255,7 @@ var WorkflowRunner = class {
       } : { version: 1, acceptedFindingIds }
     );
   }
-  terminalCheckpointWriter(state, attempt, settings, policy) {
+  terminalCheckpointWriter(state, attempt, settings, policy, completion = false) {
     return async (terminal) => {
       const current = await this.store.readState(state.runId);
       if (current.activeAttempt?.id !== attempt.id || current.activeAttempt.kind !== attempt.kind || current.activeAttempt.mutable !== attempt.mutable) {
@@ -32886,6 +36271,64 @@ var WorkflowRunner = class {
           terminal.result
         );
       const vendor = vendorFor(settings.executable) ?? FALLBACK_VENDOR[policy.sessionContext.role];
+      if (completion) {
+        if (attempt.kind !== "implementation" && attempt.kind !== "fix")
+          throw new BanzaiError(
+            "TERMINAL_CHECKPOINT_STATE_CHANGED",
+            "Only strict implementation or fix attempts use the completion protocol."
+          );
+        const envelope = this.completionEnvelopeOf(
+          terminal.result
+        );
+        const observed3 = await this.observeCompletionInputs(
+          current,
+          envelope.artifacts
+        );
+        const checkpoint2 = {
+          schema: TERMINAL_CHECKPOINT_SCHEMA_V22,
+          schemaVersion: TERMINAL_CHECKPOINT_SCHEMA_VERSION_V22,
+          completionProtocol: COMPLETION_PROTOCOL4,
+          runId: current.runId,
+          attempt: { id: attempt.id, kind: attempt.kind, mutable: true },
+          phase: attempt.kind,
+          configuration: {
+            vendor,
+            executableDigest: digestCanonicalJson4(settings.executable),
+            model: settings.model,
+            effort: settings.effort,
+            sessionMode: policy.sessionMode,
+            sessionContextDigest: digestCanonicalJson4(policy.sessionContext)
+          },
+          resultContract: "phase-result/v3",
+          terminal: {
+            classification: terminal.classification,
+            observedAt: terminal.observedAt
+          },
+          envelope,
+          resultDigest: envelope.originalDigest,
+          observed: observed3.observed,
+          sessionId: terminal.sessionId,
+          usage: terminal.usage,
+          baseCommit: current.baseCommit,
+          approvalDigest: current.planApproval?.digest ?? null,
+          workflowDigest: null,
+          scopeDigest: this.attemptScopeDigest(current, attempt)
+        };
+        await this.store.writeTerminalCheckpoint(current.runId, {
+          ...checkpoint2,
+          integrityDigest: terminalCheckpointIntegrity2(checkpoint2)
+        });
+        await this.store.appendEvent(
+          current.runId,
+          "attempt.terminal_checkpoint",
+          {
+            attemptId: attempt.id,
+            kind: attempt.kind,
+            classification: terminal.classification
+          }
+        );
+        return;
+      }
       const checkpoint = {
         schema: TERMINAL_CHECKPOINT_SCHEMA2,
         schemaVersion: TERMINAL_CHECKPOINT_SCHEMA_VERSION2,
@@ -33720,16 +37163,18 @@ var WorkflowRunner = class {
           })
         })
       );
-      await this.persistAdapterResult(state, record7, result);
-      await this.validatePlanningResult(state, result.result);
-      if (!await this.completeAttempt(state, record7, result)) {
+      const planResult = this.legacyPhaseResult(result.result);
+      const applied = { ...result, result: planResult };
+      await this.persistAdapterResult(state, record7, applied);
+      await this.validatePlanningResult(state, planResult);
+      if (!await this.completeAttempt(state, record7, applied)) {
         return await this.store.readState(state.runId);
       }
       try {
         return await this.applyPhaseResult(
           state,
           attempt,
-          result.result,
+          planResult,
           result.sessionId ?? resumeSessionId,
           sessionContext("planner", config.models.planner)
         );
@@ -33804,11 +37249,20 @@ var WorkflowRunner = class {
       transitionState(state, "implementing");
       await this.store.writeState(state);
     }
-    const attempt = recovery === null ? this.newAttempt(state, "implementation", true) : this.recoveryAttempt(recovery);
+    const protocol = !lite;
+    const retryOf = protocol && recovery === null ? await this.completionRetryPredecessor(state, "implementation") : null;
+    const attempt = recovery === null ? retryOf === null ? this.newAttempt(state, "implementation", true) : this.repairAttempt(state, "implementation", retryOf) : this.recoveryAttempt(recovery);
+    if (protocol)
+      await this.transitionToCompletionState(state, {
+        id: attempt.id,
+        kind: "implementation",
+        mutable: true
+      });
     const policy = {
       sessionMode: resumeSessionId === null ? "fresh" : "resumed",
       resumeSessionId,
-      sessionContext: sessionContext("implementer", config.models.implementer)
+      sessionContext: sessionContext("implementer", config.models.implementer),
+      ...protocol ? { completion: { retryOf } } : {}
     };
     const record7 = recovery === null ? await this.beginAttempt(state, attempt, policy) : await this.beginRecoveryAttempt(state, recovery, policy);
     try {
@@ -33911,8 +37365,10 @@ var WorkflowRunner = class {
                   "implementer",
                   config.models.implementer
                 )
-              }
-            )
+              },
+              protocol
+            ),
+            completionProtocol: protocol ? COMPLETION_PROTOCOL4 : void 0
           })
         })
       );
@@ -33922,50 +37378,32 @@ var WorkflowRunner = class {
           `Attempt implementation returned phase ${result.result.phase}.`
         );
       }
-      if (selection === null) {
-        try {
-          if (result.result.outcome === "completed" && result.result.gate === null) {
-            const validated = await this.validateImplementationCompletion(
-              state,
-              attempt,
-              result.result
-            );
-            state.planTaskCompletion = validated.summary;
-          } else {
-            validatePlanTaskCompletionLedgerShape(
-              await this.approvedTaskIds(state),
-              result.result.taskCompletion,
-              result.result.outcome
-            );
-          }
-        } catch (error) {
-          if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
-            throw error;
-          if (!(error instanceof PlanTaskCompletionError)) {
-            throw error;
-          }
-          return await this.recordCompletionFailure(
-            state,
-            record7,
-            result,
-            error,
-            sessionContext("implementer", config.models.implementer)
-          );
-        }
-      } else if (result.result.taskCompletion !== null) {
+      if (protocol) {
+        return await this.applyCompletionResult(
+          state,
+          record7,
+          result,
+          config,
+          resumeSessionId,
+          sessionContext("implementer", config.models.implementer)
+        );
+      }
+      const liteResult = this.legacyPhaseResult(result.result);
+      if (liteResult.taskCompletion !== null) {
         throw new BanzaiError(
           "PLAN_TASK_COMPLETION_INVALID",
           "Lite implementation must not return strict plan-task completion evidence."
         );
       }
-      if (!await this.completeAttempt(state, record7, result)) {
+      const applied = { ...result, result: liteResult };
+      if (!await this.completeAttempt(state, record7, applied)) {
         return await this.store.readState(state.runId);
       }
       try {
         return await this.applyPhaseResult(
           state,
           attempt,
-          result.result,
+          liteResult,
           result.sessionId ?? resumeSessionId,
           sessionContext("implementer", config.models.implementer)
         );
@@ -34051,11 +37489,18 @@ var WorkflowRunner = class {
       role: "implementer",
       phase: "fix"
     });
-    const attempt = recovery === null ? this.newAttempt(state, "fix", true) : this.recoveryAttempt(recovery);
+    const retryOf = recovery === null ? await this.completionRetryPredecessor(state, "fix") : null;
+    const attempt = recovery === null ? retryOf === null ? this.newAttempt(state, "fix", true) : this.repairAttempt(state, "fix", retryOf) : this.recoveryAttempt(recovery);
+    await this.transitionToCompletionState(state, {
+      id: attempt.id,
+      kind: "fix",
+      mutable: true
+    });
     const policy = {
       sessionMode: resumeSessionId === null ? "fresh" : "resumed",
       resumeSessionId,
-      sessionContext: sessionContext("implementer", config.models.implementer)
+      sessionContext: sessionContext("implementer", config.models.implementer),
+      completion: { retryOf }
     };
     const record7 = recovery === null ? await this.beginAttempt(state, attempt, policy) : await this.beginRecoveryAttempt(state, recovery, policy);
     try {
@@ -34155,73 +37600,1566 @@ var WorkflowRunner = class {
                   "implementer",
                   config.models.implementer
                 )
-              }
-            )
+              },
+              true
+            ),
+            completionProtocol: COMPLETION_PROTOCOL4
           })
         })
       );
-      if (result.result.taskCompletion !== null) {
-        try {
-          const validated = await validatePlanTaskCompletion({
-            repoRoot: this.repoRoot,
-            artifactBinding: state.artifactBinding,
-            sourceAttemptId: attempt.id,
-            result: result.result,
-            planPath: this.completionPlanPath(state),
-            approval,
-            baseline: state.baseline
-          });
-          state.planTaskCompletion = {
-            ...validated.summary,
-            sourceAttemptKind: "fix"
-          };
-          await this.store.appendEvent(
-            state.runId,
-            "plan_task_completion.refreshed",
-            {
-              attemptId: attempt.id,
-              ledgerDigest: validated.summary.ledgerDigest
-            }
-          );
-        } catch (error) {
-          if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
-            throw error;
-          if (error instanceof PlanTaskCompletionError) {
-            return await this.recordCompletionFailure(
-              state,
-              record7,
-              result,
-              error,
-              sessionContext("implementer", config.models.implementer)
-            );
-          }
-          throw error;
-        }
-      }
-      if (!await this.completeAttempt(state, record7, result)) {
-        return await this.store.readState(state.runId);
-      }
-      try {
-        return await this.applyPhaseResult(
-          state,
-          attempt,
-          result.result,
-          result.sessionId ?? resumeSessionId,
-          sessionContext("implementer", config.models.implementer)
+      if (result.result.phase !== "fix") {
+        throw new BanzaiError(
+          "PHASE_RESULT_MISMATCH",
+          `Attempt fix returned phase ${result.result.phase}.`
         );
-      } catch (error) {
-        if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
-          throw error;
-        state.activeAttempt = null;
-        blockState(state, errorMessage(error));
-        await this.store.writeState(state);
-        return state;
       }
+      return await this.applyCompletionResult(
+        state,
+        record7,
+        result,
+        config,
+        resumeSessionId,
+        sessionContext("implementer", config.models.implementer)
+      );
     } catch (error) {
       if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
       return await this.failAttempt(state, record7, error);
     }
+  }
+  // ---------------------------------------------------------------------------
+  // Runner-owned completion publication (ADR-0047 / ADR-0048)
+  // ---------------------------------------------------------------------------
+  completionProtocolAttempt(record7) {
+    return record7.schemaVersion === STRICT_MODEL_ATTEMPT_SCHEMA_VERSION2;
+  }
+  completionEnvelopeOf(result) {
+    return isPhaseResultEnvelope(result) ? result : phaseResultEnvelopeOf(result);
+  }
+  /** Lite routes keep the validated result contract; an envelope there is a vendor defect. */
+  legacyPhaseResult(result) {
+    if (!isPhaseResultEnvelope(result)) return result;
+    const validated = phaseResultFromEnvelope(result);
+    if (validated === null)
+      throw new BanzaiError(
+        "PLAN_TASK_COMPLETION_INVALID",
+        result.taskCompletion.state === "unaccepted" ? result.taskCompletion.diagnostic : "Lite phase result carried an unaccepted completion payload."
+      );
+    return validated;
+  }
+  /**
+   * The exact rejected predecessor an evidence-repair successor links to. Only
+   * a failed attempt of the same kind whose input the runner rejected under
+   * PLAN_TASK_COMPLETION_INVALID is a predecessor; a canonical source rejected
+   * at revalidation has no failed predecessor and links to nothing.
+   */
+  async completionRetryPredecessor(state, kind) {
+    const checkpoint = state.planTaskCompletion;
+    if (checkpoint?.status !== "invalid") return null;
+    if ((checkpoint.sourceAttemptKind ?? "implementation") !== kind)
+      return null;
+    const predecessor = await this.store.readRunAttemptIfExists(state.runId, {
+      id: checkpoint.sourceAttemptId,
+      kind,
+      mutable: true
+    });
+    if (predecessor?.status !== "failed" || predecessor.failureCode !== "PLAN_TASK_COMPLETION_INVALID")
+      return null;
+    return predecessor.attempt.id;
+  }
+  /**
+   * A deterministic successor identity for one rejected predecessor under the
+   * same approval and scope, so an interrupted successor creation deduplicates
+   * on resume instead of minting a second linked attempt.
+   */
+  repairAttempt(state, kind, predecessor) {
+    const identity = digestCanonicalJson4({
+      version: 1,
+      runId: state.runId,
+      predecessor,
+      approvalDigest: state.planApproval?.digest ?? null,
+      scopeDigest: this.attemptScopeDigest(state, {
+        id: predecessor,
+        kind,
+        mutable: true
+      })
+    });
+    return {
+      id: `${kind}-repair-${identity.slice(0, 12)}`,
+      kind,
+      mutable: true
+    };
+  }
+  /**
+   * Moves a v4/v6 run to schema 7 exactly once, when its first strict attempt
+   * under the completion protocol is created. The exact prior state bytes are
+   * retained as attempt-owned transition evidence before the new state exists,
+   * and the run keeps its binding, verification mode and configuration setup.
+   */
+  async transitionToCompletionState(state, attempt) {
+    if (state.schemaVersion === 7) return;
+    if (state.schemaVersion !== 3 && state.schemaVersion !== 4 && state.schemaVersion !== 6)
+      throw new BanzaiError(
+        "COMPLETION_STATE_UNSUPPORTED",
+        `Run state v${state.schemaVersion} cannot host a runner-owned completion attempt. Cancel this run and start a new one.`
+      );
+    const priorBytes = await this.store.readStateBytes(state.runId);
+    const transition = {
+      schema: COMPLETION_TRANSITION_SCHEMA2,
+      schemaVersion: COMPLETION_RECORD_SCHEMA_VERSION2,
+      runId: state.runId,
+      attemptId: attempt.id,
+      attemptKind: attempt.kind,
+      completionProtocol: COMPLETION_PROTOCOL4,
+      priorState: {
+        schemaVersion: state.schemaVersion,
+        path: this.store.completionEvidenceRelativePath(
+          state.runId,
+          attempt,
+          "completion-state-input.json"
+        ),
+        sha256: createHash18("sha256").update(priorBytes).digest("hex")
+      }
+    };
+    await this.store.writeCompletionTransition(
+      state.runId,
+      { ...transition, integrityDigest: completionRecordIntegrity2(transition) },
+      priorBytes
+    );
+    state.schemaVersion = 7;
+    state.completionPublication = null;
+  }
+  implementerConfigurationDigest(config) {
+    const settings = config.models.implementer;
+    return digestCanonicalJson4({
+      version: 1,
+      vendor: vendorFor(settings.executable) ?? FALLBACK_VENDOR.implementer,
+      executableDigest: digestCanonicalJson4(settings.executable),
+      model: settings.model,
+      effort: settings.effort
+    });
+  }
+  completionCheckpointConfigurationCurrent(record7, checkpoint, config) {
+    const settings = config.models.implementer;
+    const expectedContext = record7.sessionContext ?? sessionContext("implementer", settings);
+    return checkpoint.configuration.vendor === (vendorFor(settings.executable) ?? FALLBACK_VENDOR.implementer) && checkpoint.configuration.executableDigest === digestCanonicalJson4(settings.executable) && checkpoint.configuration.model === settings.model && checkpoint.configuration.effort === settings.effort && checkpoint.configuration.sessionMode === (record7.sessionMode ?? "fresh") && checkpoint.configuration.sessionContextDigest === digestCanonicalJson4(expectedContext);
+  }
+  /** Observes one required report without following an unsafe path. */
+  async observeReport(relativePath3) {
+    if (relativePath3 === null)
+      return { observation: { path: null, state: "absent" }, bytes: null };
+    let absolute;
+    try {
+      absolute = path26.resolve(this.repoRoot, relativePath3);
+      if (relativePath3.length === 0 || relativePath3.includes("\\") || path26.posix.isAbsolute(relativePath3) || path26.posix.normalize(relativePath3) !== relativePath3 || relativePath3.startsWith("../") || !absolute.startsWith(`${path26.resolve(this.repoRoot)}${path26.sep}`))
+        return {
+          observation: { path: relativePath3, state: "unsafe" },
+          bytes: null
+        };
+      const metadata = await lstat16(absolute);
+      if (!metadata.isFile() || metadata.isSymbolicLink())
+        return {
+          observation: { path: relativePath3, state: "unsafe" },
+          bytes: null
+        };
+      const root = await realpath11(this.repoRoot);
+      if (!(await realpath11(absolute)).startsWith(`${root}${path26.sep}`))
+        return {
+          observation: { path: relativePath3, state: "unsafe" },
+          bytes: null
+        };
+    } catch (error) {
+      return {
+        observation: {
+          path: relativePath3,
+          state: error.code === "ENOENT" ? "absent" : "unavailable"
+        },
+        bytes: null
+      };
+    }
+    try {
+      const bytes = await readFile11(absolute);
+      return {
+        observation: {
+          path: relativePath3,
+          state: "present",
+          sha256: createHash18("sha256").update(bytes).digest("hex"),
+          bytes: bytes.length
+        },
+        bytes
+      };
+    } catch {
+      return {
+        observation: { path: relativePath3, state: "unavailable" },
+        bytes: null
+      };
+    }
+  }
+  /**
+   * Report identities plus the non-report workspace digest, omitting exactly
+   * the two report destinations so a runner-owned report write never counts
+   * as source drift while every other change does.
+   */
+  async observeCompletionInputs(state, artifacts) {
+    const implementation = await this.observeReport(
+      artifacts.implementationReport
+    );
+    const test = await this.observeReport(artifacts.testReport);
+    const excludedPaths = [
+      artifacts.implementationReport,
+      artifacts.testReport
+    ].filter((item) => item !== null);
+    let workspaceDigest2;
+    try {
+      workspaceDigest2 = (await workspaceSnapshot(this.repoRoot, {
+        artifactBinding: state.artifactBinding,
+        baseline: state.baseline,
+        excludedPaths
+      })).digest;
+    } catch {
+      workspaceDigest2 = null;
+    }
+    return {
+      observed: {
+        implementationReport: implementation.observation,
+        testReport: test.observation,
+        workspaceDigest: workspaceDigest2
+      },
+      bytes: {
+        implementationReport: implementation.bytes,
+        testReport: test.bytes
+      },
+      excludedPaths
+    };
+  }
+  async storeCursor(state, cursor) {
+    state.completionPublication = cursor;
+    try {
+      await this.store.writeState(state);
+    } catch (error) {
+      if (error instanceof TerminalRunStateError) throw error;
+      throw new CompletionRefusal(
+        "COMPLETION_PUBLICATION_IO",
+        cursor.stage,
+        cursor.receiptDigest ?? cursor.candidateDigest ?? cursor.captureDigest ?? null,
+        "Retry with banzai resume once storage is available, or cancel."
+      );
+    }
+  }
+  /**
+   * Capture: retain the original decoded result, terminal identity, authority
+   * identities and byte-identical report originals before any validation. A
+   * missing input identity is recorded as absent or unavailable, never inferred.
+   */
+  async captureCompletionInput(state, record7, envelope, config, outcome) {
+    const attempt = record7.attempt;
+    const approval = state.planApproval;
+    if (approval === null)
+      throw new BanzaiError("PLAN_NOT_APPROVED", "Plan approval is missing.");
+    const checkpoint = await this.store.readTerminalCheckpointIfExists(
+      state.runId,
+      attempt
+    );
+    if (checkpoint?.schemaVersion !== 2)
+      throw new CompletionRefusal(
+        "COMPLETION_PUBLICATION_INTEGRITY",
+        "capture",
+        checkpoint?.integrityDigest ?? null,
+        "The exact terminal input observation is unavailable; cancel the run unless intact proof can be reproduced by a corrected runner."
+      );
+    if (checkpoint.observed.workspaceDigest === null)
+      throw new CompletionRefusal(
+        "COMPLETION_PUBLICATION_INTEGRITY",
+        "capture",
+        checkpoint.integrityDigest,
+        "The terminal checkpoint did not prove the non-report workspace identity; cancel the run unless intact proof can be reproduced by a corrected runner."
+      );
+    if (!this.completionCheckpointConfigurationCurrent(record7, checkpoint, config))
+      throw new CompletionRefusal(
+        "COMPLETION_PUBLICATION_DRIFT",
+        "capture",
+        checkpoint.integrityDigest,
+        "The implementer configuration or session context changed after the model returned. Restore the exact recorded authority, then run banzai resume; otherwise cancel."
+      );
+    const transition = await this.store.readCompletionTransitionIfExists(
+      state.runId,
+      attempt
+    );
+    const inputs = await this.observeCompletionInputs(
+      state,
+      envelope.artifacts
+    );
+    const proven = checkpoint.observed;
+    if (!sameObservedInputs(inputs.observed, proven))
+      throw new CompletionRefusal(
+        "COMPLETION_PUBLICATION_DRIFT",
+        "capture",
+        checkpoint.integrityDigest,
+        "A required report or the non-report workspace changed after the model returned. Restore the exact recorded input and matching authority, then run banzai resume; otherwise cancel."
+      );
+    const observed3 = proven;
+    const originals = {
+      implementationReport: null,
+      testReport: null
+    };
+    if (inputs.bytes.implementationReport !== null)
+      originals.implementationReport = await this.store.writeCompletionOriginal(
+        state.runId,
+        attempt,
+        "implementationReport",
+        inputs.bytes.implementationReport
+      );
+    if (inputs.bytes.testReport !== null)
+      originals.testReport = await this.store.writeCompletionOriginal(
+        state.runId,
+        attempt,
+        "testReport",
+        inputs.bytes.testReport
+      );
+    const accepted = envelope.taskCompletion.state === "accepted" ? envelope.taskCompletion.ledger : null;
+    const prior = state.planTaskCompletion;
+    const ledgerSource = accepted !== null ? {
+      attemptId: attempt.id,
+      attemptKind: attempt.kind,
+      ledgerDigest: ledgerDigest(accepted)
+    } : attempt.kind === "fix" && envelope.taskCompletion.state === "accepted" && prior?.status === "valid" ? {
+      attemptId: prior.sourceAttemptId,
+      attemptKind: prior.sourceAttemptKind ?? "implementation",
+      ledgerDigest: prior.ledgerDigest
+    } : null;
+    const capture3 = {
+      schema: COMPLETION_CAPTURE_SCHEMA2,
+      schemaVersion: COMPLETION_RECORD_SCHEMA_VERSION2,
+      runId: state.runId,
+      attemptId: attempt.id,
+      attemptKind: attempt.kind,
+      completionProtocol: COMPLETION_PROTOCOL4,
+      outcome,
+      resultDigest: envelope.originalDigest,
+      terminalIntegrityDigest: checkpoint.integrityDigest,
+      transitionDigest: transition?.integrityDigest ?? null,
+      baseCommit: state.baseCommit,
+      approvalDigest: approval.digest,
+      planTaskDigest: planTaskDigest(await this.approvedTaskIds(state)),
+      workBinding: state.artifactBinding === void 0 ? null : {
+        workId: state.artifactBinding.binding.workId,
+        sha256: state.artifactBinding.sha256
+      },
+      configurationDigest: this.implementerConfigurationDigest(config),
+      scopeDigest: this.attemptScopeDigest(state, attempt),
+      ledgerSource,
+      reports: {
+        implementationReport: observed3.implementationReport,
+        testReport: observed3.testReport
+      },
+      originals,
+      workspace: {
+        digest: observed3.workspaceDigest ?? "0".repeat(64),
+        excludedPaths: inputs.excludedPaths
+      },
+      // Identity-bearing time comes from durable terminal proof, not retry time.
+      capturedAt: checkpoint.terminal.observedAt
+    };
+    const sealed = {
+      ...capture3,
+      integrityDigest: completionRecordIntegrity2(capture3)
+    };
+    await this.store.writeCompletionCapture(state.runId, sealed);
+    return sealed;
+  }
+  /**
+   * A stop result (blocked or escalation) is applied as the model reported
+   * it. Completion diagnostics are retained beside the attempt; they never
+   * suppress, replace or downgrade the stop, and nothing is rendered.
+   */
+  async applyCompletionStop(state, record7, envelope, config, sessionId, context) {
+    const attempt = record7.attempt;
+    let diagnostic = null;
+    if (envelope.taskCompletion.state === "unaccepted") {
+      diagnostic = {
+        violation: "source_attempt_invalid",
+        taskId: null,
+        message: envelope.taskCompletion.diagnostic
+      };
+    } else if (state.planApproval !== null) {
+      try {
+        await validateCompletionClaims({
+          repoRoot: this.repoRoot,
+          artifactBinding: state.artifactBinding,
+          ledger: envelope.taskCompletion.ledger,
+          outcome: envelope.outcome,
+          artifacts: envelope.artifacts,
+          planPath: this.completionPlanPath(state),
+          approval: state.planApproval,
+          baseline: state.baseline
+        });
+      } catch (error) {
+        if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
+          throw error;
+        diagnostic = {
+          violation: error instanceof PlanTaskCompletionError ? error.violation : "source_attempt_invalid",
+          taskId: error instanceof PlanTaskCompletionError ? error.taskId : null,
+          message: errorMessage(error).slice(0, 500)
+        };
+      }
+    }
+    record7.completionDiagnostic = diagnostic;
+    try {
+      await this.captureCompletionInput(
+        state,
+        record7,
+        envelope,
+        config,
+        "stop"
+      );
+    } catch (error) {
+      if (error instanceof TerminalRunStateError) throw error;
+      this.info(`Stop-result capture unavailable: ${errorMessage(error)}`);
+    }
+    record7.status = "completed";
+    record7.completedAt ??= now();
+    record7.durationMs ??= Date.parse(record7.completedAt) - Date.parse(record7.startedAt);
+    await this.store.writeRunAttempt(state.runId, record7);
+    const current = await this.store.readState(state.runId);
+    if (current.status === "cancelled") return current;
+    this.accountCompletedAttempt(state, record7);
+    state.activeProcess = null;
+    await this.store.writeState(state);
+    const fields = envelopeResultFields(envelope);
+    return await this.applyPhaseResult(
+      state,
+      attempt,
+      {
+        ...fields,
+        taskCompletion: envelope.taskCompletion.state === "accepted" ? envelope.taskCompletion.ledger : null
+      },
+      sessionId,
+      context
+    );
+  }
+  completionRejectionCheckpoint(record7, error, capture3) {
+    return {
+      schemaVersion: COMPLETION_SUMMARY_SCHEMA_VERSION,
+      status: "invalid",
+      sourceAttemptId: record7.attempt.id,
+      sourceAttemptKind: record7.attempt.kind === "fix" ? "fix" : "implementation",
+      errorCode: "PLAN_TASK_COMPLETION_INVALID",
+      violation: error.violation,
+      taskId: error.taskId,
+      recordedAt: now(),
+      completionProtocol: COMPLETION_PROTOCOL4,
+      diagnostic: error.message.slice(0, 500),
+      rejectedResultDigest: capture3?.resultDigest ?? record7.envelope?.originalDigest ?? null
+    };
+  }
+  /**
+   * Final input rejection: the attempt fails, the rejected result, input and
+   * prior canonical source stay intact, and retry creates one linked successor.
+   */
+  async rejectCompletionInput(state, record7, error, capture3) {
+    record7.status = "failed";
+    record7.completedAt ??= now();
+    record7.durationMs ??= Date.parse(record7.completedAt) - Date.parse(record7.startedAt);
+    record7.error = `[PLAN_TASK_COMPLETION_INVALID] ${error.message}`;
+    record7.failureCode = "PLAN_TASK_COMPLETION_INVALID";
+    await this.store.writeRunAttempt(state.runId, record7);
+    const current = await this.store.readState(state.runId);
+    if (current.status === "cancelled") return current;
+    this.accountAttemptUsage(state, record7);
+    state.planTaskCompletion = this.completionRejectionCheckpoint(
+      record7,
+      error,
+      capture3
+    );
+    state.completionPublication = {
+      attemptId: record7.attempt.id,
+      attemptKind: record7.attempt.kind === "fix" ? "fix" : "implementation",
+      stage: "validate",
+      captureDigest: capture3?.integrityDigest ?? null,
+      candidateDigest: null,
+      receiptDigest: null,
+      refusal: null
+    };
+    state.activeProcess = null;
+    blockState(state, `[PLAN_TASK_COMPLETION_INVALID] ${error.message}`);
+    await this.store.writeState(state);
+    await this.store.appendEvent(state.runId, "attempt.failed", {
+      attemptId: record7.attempt.id,
+      kind: record7.attempt.kind,
+      error: `[PLAN_TASK_COMPLETION_INVALID] ${error.message}`
+    });
+    await this.store.appendEvent(
+      state.runId,
+      "plan_task_completion.validation_failed",
+      {
+        attemptId: record7.attempt.id,
+        code: "PLAN_TASK_COMPLETION_INVALID",
+        violation: error.violation,
+        taskId: error.taskId
+      }
+    );
+    await this.store.appendEventOnce(state.runId, "completion.input_rejected", {
+      attemptId: record7.attempt.id,
+      attemptKind: record7.attempt.kind,
+      stage: "validate",
+      proofDigest: capture3?.integrityDigest ?? null,
+      code: "PLAN_TASK_COMPLETION_INVALID",
+      violation: error.violation,
+      taskId: error.taskId
+    });
+    return state;
+  }
+  /**
+   * Publication refusal: the attempt stays pending_application with a closed
+   * code, stage and last durable proof digest. No model text or raw error
+   * enters the block reason; resume reconciles or cancel exits.
+   */
+  async appendCompletionPublicationRefusalEvent(state, record7, refusal) {
+    try {
+      await this.store.appendEventOnce(
+        state.runId,
+        "completion.publication_refused",
+        {
+          attemptId: record7.attempt.id,
+          attemptKind: record7.attempt.kind === "fix" ? "fix" : "implementation",
+          stage: refusal.stage,
+          proofDigest: refusal.proofDigest,
+          code: refusal.code,
+          violation: null,
+          taskId: null
+        }
+      );
+      return true;
+    } catch (error) {
+      if (error instanceof TerminalRunStateError) throw error;
+      return false;
+    }
+  }
+  async refuseCompletionPublication(state, record7, refusal) {
+    const attemptKind = record7.attempt.kind === "fix" ? "fix" : "implementation";
+    const cursor = state.completionPublication;
+    const persistedRefusal = {
+      code: refusal.code,
+      stage: refusal.stage,
+      proofDigest: refusal.proofDigest
+    };
+    const applyRefusalState = () => {
+      state.completionPublication = {
+        attemptId: record7.attempt.id,
+        attemptKind,
+        stage: refusal.stage,
+        captureDigest: cursor?.attemptId === record7.attempt.id ? cursor.captureDigest : null,
+        candidateDigest: cursor?.attemptId === record7.attempt.id ? cursor.candidateDigest : null,
+        receiptDigest: cursor?.attemptId === record7.attempt.id ? cursor.receiptDigest : null,
+        refusal: persistedRefusal
+      };
+      state.activeProcess = null;
+      blockState(
+        state,
+        `[${refusal.code}] Completion publication for ${attemptKind} attempt ${record7.attempt.id} stopped at stage ${refusal.stage}. ${refusal.remedy}`
+      );
+    };
+    try {
+      if (record7.status !== "pending_application") {
+        record7.status = "pending_application";
+        await this.store.writeRunAttempt(state.runId, record7);
+      }
+      const current = await this.store.readState(state.runId);
+      if (current.status === "cancelled") return current;
+    } catch (error) {
+      if (error instanceof TerminalRunStateError) throw error;
+      applyRefusalState();
+      return state;
+    }
+    applyRefusalState();
+    try {
+      await this.store.writeState(state);
+    } catch (error) {
+      if (error instanceof TerminalRunStateError) throw error;
+      return state;
+    }
+    await this.appendCompletionPublicationRefusalEvent(
+      state,
+      record7,
+      persistedRefusal
+    );
+    return state;
+  }
+  /** Resolves the canonical ledger a capture names; null-ledger fixes reuse the prior author. */
+  async completionLedgerFor(state, record7, envelope, capture3) {
+    const source = capture3.ledgerSource;
+    if (source === null || envelope.taskCompletion.state !== "accepted")
+      throw new PlanTaskCompletionError(
+        envelope.taskCompletion.state === "unaccepted" ? "source_attempt_invalid" : "missing_ledger",
+        envelope.taskCompletion.state === "unaccepted" ? envelope.taskCompletion.diagnostic : record7.attempt.kind === "fix" ? "Completed fix has no canonical ledger source to republish." : "Strict implementation result is missing taskCompletion."
+      );
+    if (source.attemptId === record7.attempt.id) {
+      const ledger2 = envelope.taskCompletion.ledger;
+      if (ledger2 === null || ledgerDigest(ledger2) !== source.ledgerDigest)
+        throw new CompletionRefusal(
+          "COMPLETION_PUBLICATION_INTEGRITY",
+          "validate",
+          capture3.integrityDigest,
+          "The captured ledger does not match its recorded identity."
+        );
+      return ledger2;
+    }
+    const author = await this.store.readRunAttemptIfExists(state.runId, {
+      id: source.attemptId,
+      kind: source.attemptKind,
+      mutable: true
+    });
+    const ledger = author === null ? null : this.recordLedger(author);
+    if (author?.status !== "completed" || ledger === null || ledgerDigest(ledger) !== source.ledgerDigest)
+      throw new PlanTaskCompletionError(
+        "source_attempt_invalid",
+        "Canonical completion source attempt is missing, incomplete or changed."
+      );
+    return ledger;
+  }
+  /** The ledger a completed attempt record carries, under either protocol. */
+  recordLedger(record7) {
+    if (this.completionProtocolAttempt(record7)) {
+      const envelope = record7.envelope ?? null;
+      return envelope?.taskCompletion.state === "accepted" ? envelope.taskCompletion.ledger : null;
+    }
+    if (record7.result === null) return null;
+    try {
+      return parsePersistedPhaseResult2(record7.result).taskCompletion;
+    } catch {
+      return null;
+    }
+  }
+  async completionAuthorityCurrent(state, capture3, config) {
+    if (state.planApproval === null) return false;
+    try {
+      if (await currentCommit(this.repoRoot) !== capture3.baseCommit)
+        return false;
+      const bundle = await digestArtifactBundle(
+        this.repoRoot,
+        state.planApproval.paths
+      );
+      return bundle.digest === state.planApproval.digest && capture3.approvalDigest === state.planApproval.digest && capture3.planTaskDigest === planTaskDigest(await this.approvedTaskIds(state)) && capture3.scopeDigest === this.attemptScopeDigest(state, {
+        id: capture3.attemptId,
+        kind: capture3.attemptKind,
+        mutable: true
+      }) && (capture3.workBinding?.sha256 ?? null) === (state.artifactBinding?.sha256 ?? null) && // The implementer configuration that produced this result is part of
+      // the recorded authority: `.banzai/config.json` is excluded from the
+      // non-report workspace digest, so nothing else would detect its drift.
+      capture3.configurationDigest === this.implementerConfigurationDigest(config);
+    } catch {
+      return false;
+    }
+  }
+  /** Read-only authority check while a capture manifest is still incomplete. */
+  async completionCheckpointAuthorityCurrent(state, record7, checkpoint, config) {
+    const approval = state.planApproval;
+    if (approval === null || record7.envelope == null) return false;
+    try {
+      if (await currentCommit(this.repoRoot) !== checkpoint.baseCommit)
+        return false;
+      const bundle = await digestArtifactBundle(this.repoRoot, approval.paths);
+      return checkpoint.runId === state.runId && checkpoint.attempt.id === record7.attempt.id && checkpoint.attempt.kind === record7.attempt.kind && checkpoint.phase === record7.attempt.kind && checkpoint.resultDigest === record7.envelope.originalDigest && checkpoint.baseCommit === state.baseCommit && checkpoint.approvalDigest === approval.digest && bundle.digest === approval.digest && checkpoint.workflowDigest === null && checkpoint.scopeDigest === this.attemptScopeDigest(state, record7.attempt) && this.completionCheckpointConfigurationCurrent(
+        record7,
+        checkpoint,
+        config
+      );
+    } catch {
+      return false;
+    }
+  }
+  /**
+   * Deterministic continuation from the last durable stage: validate, render,
+   * persist the candidate, conditionally replace only the exact implementation
+   * report, write the receipt and apply once. Every re-entry recognizes its
+   * interruption boundary from retained proof and never invokes a model.
+   */
+  async continueCompletionPublication(state, record7, config) {
+    const attempt = record7.attempt;
+    const envelope = record7.envelope ?? null;
+    if (envelope === null)
+      return {
+        kind: "stopped",
+        state: await this.refuseCompletionPublication(
+          state,
+          record7,
+          new CompletionRefusal(
+            "COMPLETION_PUBLICATION_INTEGRITY",
+            "capture",
+            null,
+            "The captured envelope is missing; cancel the run."
+          )
+        )
+      };
+    let capture3;
+    try {
+      const retainedCapture = await this.store.readCompletionCaptureIfExists(
+        state.runId,
+        attempt
+      );
+      if (retainedCapture === null) {
+        const [retainedCandidate, retainedReceipt] = await Promise.all([
+          this.store.readCompletionCandidateIfExists(state.runId, attempt),
+          this.store.readCompletionPublicationIfExists(state.runId, attempt)
+        ]);
+        if (retainedCandidate !== null || retainedReceipt !== null)
+          throw new CompletionRefusal(
+            "COMPLETION_PUBLICATION_INTEGRITY",
+            "capture",
+            retainedReceipt?.captureDigest ?? retainedCandidate?.candidate.captureDigest ?? null,
+            "Later publication evidence exists without its capture manifest; cancel the run unless intact proof can be reproduced by a corrected runner."
+          );
+      }
+      capture3 = retainedCapture ?? await this.captureCompletionInput(
+        state,
+        record7,
+        envelope,
+        config,
+        "completed"
+      );
+      if (state.completionPublication?.attemptId !== attempt.id || state.completionPublication.captureDigest !== capture3.integrityDigest)
+        await this.storeCursor(state, {
+          attemptId: attempt.id,
+          attemptKind: attempt.kind,
+          stage: "capture",
+          captureDigest: capture3.integrityDigest,
+          candidateDigest: null,
+          receiptDigest: null,
+          refusal: null
+        });
+    } catch (error) {
+      if (error instanceof TerminalRunStateError) throw error;
+      if (error instanceof CompletionRefusal)
+        return {
+          kind: "stopped",
+          state: await this.refuseCompletionPublication(state, record7, error)
+        };
+      const conflicting = error instanceof BanzaiError && (error.code.startsWith("INVALID_COMPLETION") || error.code === "COMPLETION_CAPTURE_CONFLICT");
+      return {
+        kind: "stopped",
+        state: await this.refuseCompletionPublication(
+          state,
+          record7,
+          new CompletionRefusal(
+            conflicting ? "COMPLETION_PUBLICATION_INTEGRITY" : "COMPLETION_PUBLICATION_IO",
+            "capture",
+            null,
+            conflicting ? "Retained capture evidence is corrupt or conflicts with the recorded input; cancel the run." : "Retry with banzai resume once storage is available, or cancel."
+          )
+        )
+      };
+    }
+    try {
+      return await this.publishCapturedCompletion(
+        state,
+        record7,
+        envelope,
+        capture3,
+        config
+      );
+    } catch (error) {
+      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
+        throw error;
+      if (error instanceof PlanTaskCompletionError)
+        return {
+          kind: "stopped",
+          state: await this.rejectCompletionInput(state, record7, error, capture3)
+        };
+      if (error instanceof CompletionRefusal)
+        return {
+          kind: "stopped",
+          state: await this.refuseCompletionPublication(state, record7, error)
+        };
+      throw error;
+    }
+  }
+  async publishCapturedCompletion(state, record7, envelope, capture3, config) {
+    const attempt = record7.attempt;
+    const proof = capture3.integrityDigest;
+    const drift2 = (message, stage) => new CompletionRefusal(
+      "COMPLETION_PUBLICATION_DRIFT",
+      stage,
+      proof,
+      `${message} Restore the exact recorded input or proven output and matching authority, then run banzai resume; otherwise cancel.`
+    );
+    const integrity = (message, stage) => new CompletionRefusal(
+      "COMPLETION_PUBLICATION_INTEGRITY",
+      stage,
+      proof,
+      `${message} Cancel the run unless intact proof can be reproduced by a corrected runner.`
+    );
+    const receipt = await this.store.readCompletionPublicationIfExists(
+      state.runId,
+      attempt
+    );
+    const existingCandidate = await this.store.readCompletionCandidateIfExists(
+      state.runId,
+      attempt
+    );
+    if (existingCandidate !== null && existingCandidate.candidate.captureDigest !== proof)
+      throw integrity(
+        "The retained candidate belongs to a different capture.",
+        "candidate"
+      );
+    if (receipt !== null) {
+      if (receipt.captureDigest !== proof || receipt.candidateDigest !== existingCandidate?.candidate.integrityDigest)
+        throw integrity(
+          "The retained receipt does not bind this capture and candidate.",
+          "receipt"
+        );
+    }
+    const inputs = await this.observeCompletionInputs(
+      state,
+      envelope.artifacts
+    );
+    const currentImplementation = inputs.observed.implementationReport;
+    const currentTest = inputs.observed.testReport;
+    const capturedImplementation = capture3.reports.implementationReport;
+    const capturedTest = capture3.reports.testReport;
+    const published = existingCandidate !== null && currentImplementation.state === "present" && currentImplementation.sha256 === existingCandidate.candidate.outputSha256;
+    if (!published && (capturedImplementation.state !== "present" || currentImplementation.state !== "present" || currentImplementation.sha256 !== capturedImplementation.sha256)) {
+      if (capturedImplementation.state === "present")
+        throw drift2(
+          "The implementation report no longer equals its captured input.",
+          "publication"
+        );
+      throw new PlanTaskCompletionError(
+        "implementation_report_missing",
+        "Required implementation report was absent, unsafe or unavailable when the model returned."
+      );
+    }
+    if (capturedTest.state !== "present" || currentTest.state !== "present" || currentTest.sha256 !== capturedTest.sha256) {
+      if (capturedTest.state === "present")
+        throw drift2(
+          "The test report no longer equals its captured input.",
+          "publication"
+        );
+      throw new PlanTaskCompletionError(
+        "test_report_missing",
+        "Required test report was absent, unsafe or unavailable when the model returned."
+      );
+    }
+    if (inputs.observed.workspaceDigest === null || inputs.observed.workspaceDigest !== capture3.workspace.digest)
+      throw drift2(
+        "The non-report workspace changed since capture.",
+        "publication"
+      );
+    if (!await this.completionAuthorityCurrent(state, capture3, config))
+      throw drift2(
+        "Base commit, approval, plan tasks, scope, work binding or implementer configuration changed since capture.",
+        "publication"
+      );
+    const originalImplementation = await this.store.readCompletionOriginalIfExists(
+      state.runId,
+      attempt,
+      "implementationReport"
+    );
+    const originalTest = await this.store.readCompletionOriginalIfExists(
+      state.runId,
+      attempt,
+      "testReport"
+    );
+    if (originalImplementation === null || originalTest === null || capture3.originals.implementationReport === null || capture3.originals.testReport === null || createHash18("sha256").update(originalImplementation).digest("hex") !== capture3.originals.implementationReport.sha256 || createHash18("sha256").update(originalTest).digest("hex") !== capture3.originals.testReport.sha256)
+      throw integrity(
+        "Captured report originals are missing or changed.",
+        "capture"
+      );
+    const originals = {
+      implementationReport: originalImplementation,
+      testReport: originalTest
+    };
+    const inputSha256 = capturedImplementation.state === "present" ? capturedImplementation.sha256 : existingCandidate?.candidate.inputSha256 ?? null;
+    if (inputSha256 === null)
+      throw integrity(
+        "The captured implementation report identity is missing.",
+        "capture"
+      );
+    if (state.planApproval === null)
+      throw new PlanTaskCompletionError(
+        "approval_invalid",
+        "Strict completion validation requires an approved plan bundle."
+      );
+    const ledger = await this.completionLedgerFor(
+      state,
+      record7,
+      envelope,
+      capture3
+    );
+    const claims = await validateCompletionClaims({
+      repoRoot: this.repoRoot,
+      artifactBinding: state.artifactBinding,
+      ledger,
+      outcome: "completed",
+      artifacts: envelope.artifacts,
+      planPath: this.completionPlanPath(state),
+      approval: state.planApproval,
+      baseline: state.baseline,
+      captured: originals
+    });
+    if (claims.testReport.sha256 !== capturedTest.sha256)
+      throw integrity(
+        "Captured test report identity conflicts with validation.",
+        "validate"
+      );
+    const composition = composeCompletionCandidate(
+      originals.implementationReport,
+      ledger
+    );
+    const outputSha256 = createHash18("sha256").update(composition.bytes).digest("hex");
+    const eligible = eligibleGapHeadings(
+      composition.bytes.toString("utf8"),
+      scanCompletionRegion(composition.bytes.toString("utf8"))
+    );
+    for (const task of ledger.tasks) {
+      if (task.gap !== null && task.gap.reportPath === claims.implementationReport.path && !eligible.has(task.gap.section))
+        throw new PlanTaskCompletionError(
+          "invalid_gap_reference",
+          `${task.taskId} gap section is not a unique preserved heading of the final candidate.`,
+          task.taskId
+        );
+    }
+    let candidate;
+    if (existingCandidate !== null) {
+      if (existingCandidate.candidate.outputSha256 !== outputSha256 || existingCandidate.candidate.ledgerDigest !== claims.ledgerDigest)
+        throw integrity(
+          "The retained candidate differs from the deterministic rendering.",
+          "candidate"
+        );
+      candidate = existingCandidate.candidate;
+    } else {
+      const metadata = {
+        schema: COMPLETION_CANDIDATE_SCHEMA2,
+        schemaVersion: COMPLETION_RECORD_SCHEMA_VERSION2,
+        runId: state.runId,
+        attemptId: attempt.id,
+        attemptKind: attempt.kind,
+        completionProtocol: COMPLETION_PROTOCOL4,
+        captureDigest: proof,
+        ledgerDigest: claims.ledgerDigest,
+        destination: claims.implementationReport.path,
+        inputSha256,
+        candidatePath: this.store.completionEvidenceRelativePath(
+          state.runId,
+          attempt,
+          "completion-candidate.md"
+        ),
+        outputSha256,
+        outputBytes: composition.bytes.length,
+        testReportSha256: capturedTest.sha256,
+        region: composition.region,
+        preservation: "verified",
+        roundtrip: "verified"
+      };
+      candidate = {
+        ...metadata,
+        integrityDigest: completionRecordIntegrity2(metadata)
+      };
+      try {
+        await this.store.writeCompletionCandidate(
+          state.runId,
+          candidate,
+          composition.bytes
+        );
+      } catch (error) {
+        if (error instanceof TerminalRunStateError) throw error;
+        throw new CompletionRefusal(
+          "COMPLETION_PUBLICATION_IO",
+          "candidate",
+          proof,
+          "Retry with banzai resume once storage is available, or cancel."
+        );
+      }
+    }
+    await this.storeCursor(state, {
+      attemptId: attempt.id,
+      attemptKind: attempt.kind,
+      stage: "candidate",
+      captureDigest: proof,
+      candidateDigest: candidate.integrityDigest,
+      receiptDigest: receipt?.integrityDigest ?? null,
+      refusal: null
+    });
+    const current = await this.store.readState(state.runId);
+    if (current.status === "cancelled")
+      return { kind: "stopped", state: current };
+    const destination = path26.join(this.repoRoot, candidate.destination);
+    if (!published) {
+      if (candidate.destination.startsWith(".banzai/"))
+        await safePath4(this.repoRoot, candidate.destination);
+      const before = await this.observeReport(candidate.destination);
+      if (before.observation.state !== "present" || before.observation.sha256 !== candidate.inputSha256)
+        throw drift2(
+          "The implementation report changed before publication.",
+          "publication"
+        );
+      try {
+        const mode2 = (await lstat16(destination)).mode & 511;
+        const temporary = `${destination}.${randomUUID11()}.completion.tmp`;
+        await writeFile4(temporary, composition.bytes, { flag: "wx", mode: mode2 });
+        try {
+          await rename9(temporary, destination);
+        } catch (error) {
+          await unlink9(temporary).catch(() => void 0);
+          throw error;
+        }
+      } catch (error) {
+        if (error instanceof TerminalRunStateError) throw error;
+        throw new CompletionRefusal(
+          "COMPLETION_PUBLICATION_IO",
+          "publication",
+          candidate.integrityDigest,
+          "Retry with banzai resume once storage is available, or cancel."
+        );
+      }
+    }
+    const final = await this.observeReport(candidate.destination);
+    if (final.observation.state !== "present" || final.observation.sha256 !== candidate.outputSha256)
+      throw integrity(
+        "The published implementation report does not equal the candidate bytes.",
+        "publication"
+      );
+    let sealedReceipt;
+    if (receipt !== null) {
+      sealedReceipt = receipt;
+    } else {
+      const ledgerAuthor = capture3.ledgerSource ?? {
+        attemptId: attempt.id,
+        attemptKind: attempt.kind,
+        ledgerDigest: claims.ledgerDigest
+      };
+      const body = {
+        schema: COMPLETION_PUBLICATION_SCHEMA2,
+        schemaVersion: COMPLETION_RECORD_SCHEMA_VERSION2,
+        runId: state.runId,
+        attemptId: attempt.id,
+        attemptKind: attempt.kind,
+        completionProtocol: COMPLETION_PROTOCOL4,
+        captureDigest: proof,
+        candidateDigest: candidate.integrityDigest,
+        terminalIntegrityDigest: capture3.terminalIntegrityDigest,
+        authority: {
+          baseCommit: capture3.baseCommit,
+          approvalDigest: capture3.approvalDigest,
+          planTaskDigest: capture3.planTaskDigest,
+          scopeDigest: capture3.scopeDigest,
+          workBindingSha256: capture3.workBinding?.sha256 ?? null,
+          configurationDigest: capture3.configurationDigest
+        },
+        ledgerAuthor,
+        publisher: { attemptId: attempt.id, attemptKind: attempt.kind },
+        implementationReport: {
+          path: candidate.destination,
+          sha256: candidate.outputSha256
+        },
+        testReport: {
+          path: claims.testReport.path,
+          sha256: capturedTest.sha256
+        },
+        // Receipt identity remains stable when publication resumes later.
+        publishedAt: capture3.capturedAt
+      };
+      sealedReceipt = {
+        ...body,
+        integrityDigest: completionRecordIntegrity2(body)
+      };
+      try {
+        await this.store.writeCompletionPublication(state.runId, sealedReceipt);
+      } catch (error) {
+        if (error instanceof TerminalRunStateError) throw error;
+        throw new CompletionRefusal(
+          "COMPLETION_PUBLICATION_IO",
+          "receipt",
+          candidate.integrityDigest,
+          "Retry with banzai resume once storage is available, or cancel."
+        );
+      }
+    }
+    return {
+      kind: "applied",
+      result: await this.applyCompletionPublication(
+        state,
+        record7,
+        envelope,
+        ledger,
+        claims,
+        sealedReceipt
+      )
+    };
+  }
+  async applyCompletionPublication(state, record7, envelope, ledger, claims, receipt) {
+    const attempt = record7.attempt;
+    const io = (stage) => new CompletionRefusal(
+      "COMPLETION_PUBLICATION_IO",
+      stage,
+      receipt.integrityDigest,
+      "Retry with banzai resume once storage is available, or cancel."
+    );
+    if (record7.status !== "completed") {
+      record7.status = "completed";
+      record7.completedAt ??= now();
+      record7.durationMs ??= Date.parse(record7.completedAt) - Date.parse(record7.startedAt);
+      record7.error = null;
+      record7.failureCode = null;
+      try {
+        await this.store.writeRunAttempt(state.runId, record7);
+      } catch (error) {
+        if (error instanceof TerminalRunStateError) throw error;
+        throw io("attempt");
+      }
+    }
+    const current = await this.store.readState(state.runId);
+    if (current.status === "cancelled")
+      throw new TerminalRunStateError(current);
+    this.accountCompletedAttempt(state, record7);
+    const refreshedFix = attempt.kind === "fix" && receipt.ledgerAuthor.attemptId === attempt.id;
+    const durable = state.planTaskCompletion;
+    const applied = durable?.status === "valid" && durable.schemaVersion === COMPLETION_SUMMARY_SCHEMA_VERSION && durable.publication?.sha256 === receipt.integrityDigest;
+    if (!applied)
+      state.planTaskCompletion = {
+        schemaVersion: COMPLETION_SUMMARY_SCHEMA_VERSION,
+        status: "valid",
+        sourceAttemptId: receipt.ledgerAuthor.attemptId,
+        sourceAttemptKind: receipt.ledgerAuthor.attemptKind,
+        approvalDigest: claims.approvalDigest,
+        planTaskDigest: claims.planTaskDigest,
+        ledgerDigest: claims.ledgerDigest,
+        implementationReport: receipt.implementationReport,
+        testReport: receipt.testReport,
+        counts: claims.counts,
+        validatedAt: now(),
+        completionProtocol: COMPLETION_PROTOCOL4,
+        publisherAttemptId: attempt.id,
+        publication: {
+          path: this.store.completionEvidenceRelativePath(
+            state.runId,
+            attempt,
+            "completion-publication.json"
+          ),
+          sha256: receipt.integrityDigest
+        }
+      };
+    state.completionPublication = {
+      attemptId: attempt.id,
+      attemptKind: attempt.kind,
+      stage: "state",
+      captureDigest: receipt.captureDigest,
+      candidateDigest: receipt.candidateDigest,
+      receiptDigest: receipt.integrityDigest,
+      refusal: null
+    };
+    state.activeProcess = null;
+    try {
+      await this.store.writeState(state);
+    } catch (error) {
+      if (error instanceof TerminalRunStateError) throw error;
+      throw io("state");
+    }
+    try {
+      await this.store.appendEventOnce(
+        state.runId,
+        "completion.publication_applied",
+        {
+          attemptId: attempt.id,
+          attemptKind: attempt.kind,
+          stage: "event",
+          proofDigest: receipt.integrityDigest,
+          code: null,
+          violation: null,
+          taskId: null
+        }
+      );
+      if (refreshedFix)
+        await this.store.appendEventOnce(
+          state.runId,
+          "plan_task_completion.refreshed",
+          {
+            attemptId: attempt.id,
+            ledgerDigest: claims.ledgerDigest
+          }
+        );
+    } catch (error) {
+      if (error instanceof TerminalRunStateError) throw error;
+      throw io("event");
+    }
+    if (state.completionPublication.stage !== "event") {
+      await this.storeCursor(state, {
+        ...state.completionPublication,
+        stage: "event"
+      });
+    }
+    return { ...envelopeResultFields(envelope), taskCompletion: ledger };
+  }
+  /**
+   * Live route for a strict attempt under the completion protocol after the
+   * vendor returned: persist the original result and envelope, then either
+   * apply a stop or capture and publish a completion claim.
+   */
+  async applyCompletionResult(state, record7, adapterResult, config, resumeSessionId, context) {
+    const envelope = this.completionEnvelopeOf(adapterResult.result);
+    await this.writeAttemptOutput(
+      state,
+      record7,
+      adapterResult.stdout,
+      adapterResult.stderr
+    );
+    record7.usage = adapterResult.usage;
+    record7.result = JSON.parse(envelope.original);
+    record7.envelope = envelope;
+    record7.sessionId = adapterResult.sessionId ?? record7.sessionId;
+    record7.durationMs = Date.now() - Date.parse(record7.startedAt);
+    if (envelope.phase !== record7.attempt.kind)
+      throw new BanzaiError(
+        "PHASE_RESULT_MISMATCH",
+        `Attempt ${record7.attempt.kind} returned phase ${envelope.phase}.`
+      );
+    const sessionId = adapterResult.sessionId ?? resumeSessionId;
+    if (envelope.outcome !== "completed" || envelope.gate !== null) {
+      await this.store.writeRunAttempt(state.runId, record7);
+      return await this.applyCompletionStop(
+        state,
+        record7,
+        envelope,
+        config,
+        sessionId,
+        context
+      );
+    }
+    record7.status = "pending_application";
+    record7.completedAt = now();
+    await this.store.writeRunAttempt(state.runId, record7);
+    const current = await this.store.readState(state.runId);
+    if (current.status === "cancelled") return current;
+    this.accountAttemptUsage(state, record7);
+    state.activeProcess = null;
+    await this.store.writeState(state);
+    const outcome = await this.continueCompletionPublication(
+      state,
+      record7,
+      config
+    );
+    if (outcome.kind === "stopped") return outcome.state;
+    return await this.applyPhaseResult(
+      state,
+      record7.attempt,
+      outcome.result,
+      sessionId,
+      context
+    );
+  }
+  /**
+   * Resume/status reconciliation for a protocol attempt whose vendor returned:
+   * proven terminal evidence becomes pending_application, then the same
+   * deterministic publication continues without another model call.
+   */
+  async reconcileCompletionAttempt(state, record7, config) {
+    const attempt = record7.attempt;
+    const settings = config.models.implementer;
+    const context = record7.sessionContext ?? sessionContext("implementer", settings);
+    const promotable = record7.status === "started" || record7.status === "failed" && !TERMINAL_INTEGRITY_FAILURE_CODES.has(record7.failureCode ?? "") && record7.failureCode !== "PLAN_TASK_COMPLETION_INVALID";
+    if (promotable) {
+      const checkpoint = await this.store.readTerminalCheckpointIfExists(
+        state.runId,
+        attempt
+      );
+      if (checkpoint === null) return null;
+      if (checkpoint.schemaVersion !== 2) {
+        throw new BanzaiError(
+          "TERMINAL_CHECKPOINT_MISMATCH",
+          "A protocol attempt cannot reconcile a legacy terminal checkpoint."
+        );
+      }
+      const expectedContext = record7.sessionContext ?? context;
+      if (checkpoint.runId !== state.runId || checkpoint.attempt.id !== attempt.id || checkpoint.attempt.kind !== attempt.kind || checkpoint.baseCommit !== state.baseCommit || checkpoint.approvalDigest !== (state.planApproval?.digest ?? null) || checkpoint.workflowDigest !== null || checkpoint.scopeDigest !== this.attemptScopeDigest(state, attempt) || checkpoint.configuration.vendor !== (vendorFor(settings.executable) ?? FALLBACK_VENDOR.implementer) || checkpoint.configuration.executableDigest !== digestCanonicalJson4(settings.executable) || checkpoint.configuration.model !== settings.model || checkpoint.configuration.effort !== settings.effort || checkpoint.configuration.sessionMode !== (record7.sessionMode ?? "fresh") || checkpoint.configuration.sessionContextDigest !== digestCanonicalJson4(expectedContext) || state.recovery?.sourceAttemptId === attempt.id) {
+        throw new BanzaiError(
+          "TERMINAL_CHECKPOINT_MISMATCH",
+          "Terminal checkpoint does not match the active run, attempt, authorization, or model context."
+        );
+      }
+      await this.validateBaseCommit(state);
+      await this.validateApproval(state);
+      await this.validateSavedArtifactScope(state, attempt);
+      this.validateArtifactRoleReferences(state, checkpoint.envelope);
+      const envelope = checkpoint.envelope;
+      record7.result = JSON.parse(envelope.original);
+      record7.envelope = envelope;
+      record7.sessionId = checkpoint.sessionId;
+      record7.usage = checkpoint.usage;
+      record7.completedAt = checkpoint.terminal.observedAt;
+      record7.error = null;
+      record7.failureCode = null;
+      record7.durationMs = Math.max(
+        0,
+        Date.parse(checkpoint.terminal.observedAt) - Date.parse(record7.startedAt)
+      );
+      await this.store.appendEventOnce(
+        state.runId,
+        "attempt.terminal_reconciled",
+        {
+          attemptId: attempt.id,
+          kind: attempt.kind
+        }
+      );
+      if (envelope.outcome !== "completed" || envelope.gate !== null) {
+        await this.store.writeRunAttempt(state.runId, record7);
+        state.activeProcess = null;
+        return await this.applyCompletionStop(
+          state,
+          record7,
+          envelope,
+          config,
+          record7.sessionId ?? record7.resumeSessionId ?? null,
+          context
+        );
+      }
+      record7.status = "pending_application";
+      await this.store.writeRunAttempt(state.runId, record7);
+      this.accountAttemptUsage(state, record7);
+      state.activeProcess = null;
+      await this.store.writeState(state);
+    } else if (record7.status === "completed") {
+      const decoded = record7.envelope ?? null;
+      if (decoded === null)
+        return await this.refuseCompletionPublication(
+          state,
+          record7,
+          new CompletionRefusal(
+            "COMPLETION_PUBLICATION_INTEGRITY",
+            "attempt",
+            state.completionPublication?.receiptDigest ?? null,
+            "The completed protocol attempt has no retained envelope; cancel the run."
+          )
+        );
+      state.activeProcess = null;
+      if (decoded.outcome !== "completed" || decoded.gate !== null)
+        return await this.applyCompletionStop(
+          state,
+          record7,
+          decoded,
+          config,
+          record7.sessionId ?? record7.resumeSessionId ?? null,
+          context
+        );
+      let applied;
+      try {
+        applied = await this.store.readCompletionPublicationIfExists(
+          state.runId,
+          attempt
+        );
+      } catch {
+        applied = null;
+      }
+      if (applied === null)
+        return await this.refuseCompletionPublication(
+          state,
+          record7,
+          new CompletionRefusal(
+            "COMPLETION_PUBLICATION_INTEGRITY",
+            "receipt",
+            state.completionPublication?.candidateDigest ?? null,
+            "The completed protocol attempt has no intact publication receipt; cancel the run."
+          )
+        );
+    } else if (record7.status !== "pending_application") {
+      return null;
+    }
+    const durableRefusal = state.completionPublication?.attemptId === attempt.id ? state.completionPublication.refusal : null;
+    if (durableRefusal !== null && !await this.appendCompletionPublicationRefusalEvent(
+      state,
+      record7,
+      durableRefusal
+    ))
+      return state;
+    if (state.status === "blocked") {
+      const from = attempt.kind === "implementation" ? "implementing" : "fixing";
+      if (state.blockedFrom !== from)
+        throw new BanzaiError(
+          "TERMINAL_CHECKPOINT_MISMATCH",
+          "Pending completion publication does not match the blocked phase."
+        );
+      transitionState(state, from);
+    }
+    const outcome = await this.continueCompletionPublication(
+      state,
+      record7,
+      config
+    );
+    if (outcome.kind === "stopped") return outcome.state;
+    return await this.applyPhaseResult(
+      state,
+      attempt,
+      outcome.result,
+      record7.sessionId ?? record7.resumeSessionId ?? null,
+      context
+    );
+  }
+  /**
+   * Read-only revalidation of a runner-published completion: canonical source,
+   * receipt, final report hashes, task set, evidence paths and authority. No
+   * report write, receipt creation or digest refresh happens here.
+   */
+  /** Receipt, capture and candidate identities frozen into a v5 review snapshot. */
+  async frozenCompletionPublication(state, summary2) {
+    if (summary2.schemaVersion !== COMPLETION_SUMMARY_SCHEMA_VERSION || summary2.publisherAttemptId === void 0 || summary2.publication === void 0)
+      return null;
+    const receipt = await this.store.readCompletionPublicationIfExists(
+      state.runId,
+      { id: summary2.publisherAttemptId }
+    );
+    if (receipt?.integrityDigest !== summary2.publication.sha256)
+      throw new BanzaiError(
+        "INVALID_REVIEW_SNAPSHOT",
+        "The published completion receipt is missing or conflicts with the canonical summary."
+      );
+    return {
+      completionProtocol: COMPLETION_PROTOCOL4,
+      publisherAttemptId: summary2.publisherAttemptId,
+      receiptPath: summary2.publication.path,
+      receiptDigest: receipt.integrityDigest,
+      captureDigest: receipt.captureDigest,
+      candidateDigest: receipt.candidateDigest
+    };
+  }
+  async revalidatePublishedCompletion(state, checkpoint) {
+    if (checkpoint.publisherAttemptId === void 0 || checkpoint.publication === void 0)
+      throw new PlanTaskCompletionError(
+        "summary_mismatch",
+        "Published completion summary is missing its publisher identities."
+      );
+    const receipt = await this.store.readCompletionPublicationIfExists(state.runId, {
+      id: checkpoint.publisherAttemptId
+    }).catch(() => null);
+    if (receipt?.integrityDigest !== checkpoint.publication.sha256 || receipt.ledgerAuthor.attemptId !== checkpoint.sourceAttemptId || receipt.ledgerAuthor.attemptKind !== (checkpoint.sourceAttemptKind ?? "implementation") || receipt.ledgerAuthor.ledgerDigest !== checkpoint.ledgerDigest || receipt.authority.approvalDigest !== checkpoint.approvalDigest || receipt.authority.planTaskDigest !== checkpoint.planTaskDigest || receipt.implementationReport.sha256 !== checkpoint.implementationReport.sha256 || receipt.testReport.sha256 !== checkpoint.testReport.sha256)
+      throw new PlanTaskCompletionError(
+        "summary_mismatch",
+        "Publication receipt is missing or conflicts with the canonical completion summary."
+      );
+    const author = await this.store.readRunAttemptIfExists(state.runId, {
+      id: receipt.ledgerAuthor.attemptId,
+      kind: receipt.ledgerAuthor.attemptKind,
+      mutable: true
+    }).catch(() => null);
+    const ledger = author === null ? null : this.recordLedger(author);
+    if (author?.status !== "completed" || ledger === null)
+      throw new PlanTaskCompletionError(
+        "source_attempt_invalid",
+        "Canonical completion source attempt is missing, malformed or not completed."
+      );
+    if (ledgerDigest(ledger) !== receipt.ledgerAuthor.ledgerDigest)
+      throw new PlanTaskCompletionError(
+        "summary_mismatch",
+        "Canonical ledger no longer matches its published identity."
+      );
+    if (state.planApproval === null)
+      throw new PlanTaskCompletionError(
+        "approval_invalid",
+        "Canonical completion source has no plan approval."
+      );
+    if (state.planApproval.digest !== receipt.authority.approvalDigest)
+      throw new PlanTaskCompletionError(
+        "approval_invalid",
+        "Published completion was authorized under a different approval."
+      );
+    const claims = await validateCompletionClaims({
+      repoRoot: this.repoRoot,
+      artifactBinding: state.artifactBinding,
+      ledger,
+      outcome: "completed",
+      artifacts: {
+        implementationReport: receipt.implementationReport.path,
+        testReport: receipt.testReport.path
+      },
+      planPath: this.completionPlanPath(state),
+      approval: state.planApproval,
+      baseline: state.baseline
+    });
+    if (claims.implementationReport.sha256 !== receipt.implementationReport.sha256 || claims.testReport.sha256 !== receipt.testReport.sha256)
+      throw new PlanTaskCompletionError(
+        "summary_mismatch",
+        "A published report changed after publication; restore the exact published bytes or start a new attempt."
+      );
+    const published = parsePublishedCompletionRegion(
+      claims.implementationReport.bytes
+    );
+    if (JSON.stringify(published) !== JSON.stringify(ledger))
+      throw new PlanTaskCompletionError(
+        "report_projection_mismatch",
+        "Published completion region contradicts the canonical ledger."
+      );
+    if (claims.planTaskDigest !== checkpoint.planTaskDigest || claims.ledgerDigest !== checkpoint.ledgerDigest || JSON.stringify(claims.counts) !== JSON.stringify(checkpoint.counts))
+      throw new PlanTaskCompletionError(
+        "summary_mismatch",
+        "Persisted plan-task completion summary is stale or contradictory."
+      );
+    return { summary: checkpoint, tasks: ledger.tasks };
+  }
+  /**
+   * Read-only publication route for status: pending I/O resumes; drift resumes
+   * only once the recorded input or proven output and authority are restored;
+   * corrupt or conflicting proof exposes cancel.
+   */
+  async completionPublicationStatus(state) {
+    const cursor = state.completionPublication ?? null;
+    if (cursor === null) return null;
+    const attempt = {
+      id: cursor.attemptId,
+      kind: cursor.attemptKind,
+      mutable: true
+    };
+    const record7 = await this.store.readRunAttemptIfExists(state.runId, attempt).catch(() => null);
+    const pending = record7?.status === "pending_application";
+    let action = null;
+    if (pending && state.status === "blocked") {
+      const code2 = cursor.refusal?.code ?? "COMPLETION_PUBLICATION_IO";
+      if (code2 === "COMPLETION_PUBLICATION_INTEGRITY") action = "cancel";
+      else {
+        action = "cancel";
+        try {
+          const capture3 = await this.store.readCompletionCaptureIfExists(
+            state.runId,
+            attempt
+          );
+          const candidate = await this.store.readCompletionCandidateIfExists(
+            state.runId,
+            attempt
+          );
+          if (record7.envelope) {
+            const inputs = await this.observeCompletionInputs(
+              state,
+              record7.envelope.artifacts
+            );
+            const config = await loadConfig(this.repoRoot);
+            let restored = false;
+            if (capture3 === null && candidate === null) {
+              const checkpoint = await this.store.readTerminalCheckpointIfExists(
+                state.runId,
+                attempt
+              );
+              restored = checkpoint?.schemaVersion === 2 && checkpoint.observed.workspaceDigest !== null && sameObservedInputs(inputs.observed, checkpoint.observed) && await this.completionCheckpointAuthorityCurrent(
+                state,
+                record7,
+                checkpoint,
+                config
+              );
+            } else if (capture3 !== null) {
+              const implementation = inputs.observed.implementationReport;
+              const test = inputs.observed.testReport;
+              restored = implementation.state === "present" && test.state === "present" && capture3.reports.testReport.state === "present" && test.sha256 === capture3.reports.testReport.sha256 && (capture3.reports.implementationReport.state === "present" && implementation.sha256 === capture3.reports.implementationReport.sha256 || candidate !== null && implementation.sha256 === candidate.candidate.outputSha256) && inputs.observed.workspaceDigest === capture3.workspace.digest && await this.completionAuthorityCurrent(state, capture3, config);
+            }
+            if (restored) action = "resume";
+          }
+        } catch {
+          action = "cancel";
+        }
+      }
+    }
+    return {
+      attemptId: cursor.attemptId,
+      attemptKind: cursor.attemptKind,
+      stage: cursor.stage,
+      refusal: cursor.refusal?.code ?? null,
+      pending,
+      action
+    };
   }
   /**
    * Names what a phase produced, once. The artifacts and the task ledger are
@@ -34438,7 +39376,7 @@ var WorkflowRunner = class {
         mutable: sourceAttempt.mutable
       };
     }
-    if (state.schemaVersion === 6 && state.configurationSetup?.continuation) {
+    if (hasConfigurationSetup(state) && state.configurationSetup?.continuation) {
       const continuation = state.configurationSetup.continuation;
       await this.validateConfigurationContinuation(state, continuation);
       return {
@@ -34608,7 +39546,7 @@ var WorkflowRunner = class {
     return current;
   }
   async requireVerificationApplicability(state, config) {
-    if (state.schemaVersion === 6 && state.configurationSetup?.coverage === "skipped") {
+    if (hasConfigurationSetup(state) && state.configurationSetup?.coverage === "skipped") {
       const current = await loadConfig(this.repoRoot);
       const inspection = await inspectVerificationProject(this.repoRoot);
       if (!this.configurationSkipCurrent(state, current, inspection)) {
@@ -34762,14 +39700,14 @@ var WorkflowRunner = class {
     );
     if (await this.inspectConfigurationCheckpoint(state, config, source, records))
       return state;
-    const continuation = state.schemaVersion === 6 ? state.configurationSetup?.continuation : null;
+    const continuation = hasConfigurationSetup(state) ? state.configurationSetup?.continuation : null;
     const round = continuation ? {
       ...continuation.verificationRound,
       sourcePhase: continuation.attemptKind,
       sourceAttemptId: continuation.attemptId,
       sourceAttemptKind: continuation.attemptKind
     } : this.verificationRound(records, source);
-    const skipped = state.schemaVersion === 6 && state.configurationSetup?.coverage === "skipped";
+    const skipped = hasConfigurationSetup(state) && state.configurationSetup?.coverage === "skipped";
     const descriptors = describeVerificationCommands(config).filter(
       (descriptor) => !skipped || isRepositoryHygieneCommand(descriptor.command)
     );
@@ -35264,13 +40202,19 @@ var WorkflowRunner = class {
           "Review requires an exact approved scope."
         );
       const frozen = sealReviewSnapshot3({
-        schema: state.schemaVersion === 6 ? "banzai-review-snapshot/v4" : state.schemaVersion === 5 ? "banzai-review-snapshot/v3" : state.artifactBinding ? "banzai-review-snapshot/v2" : "banzai-review-snapshot/v1",
-        schemaVersion: state.schemaVersion === 6 ? 4 : state.schemaVersion === 5 ? 3 : state.artifactBinding ? 2 : 1,
-        ...state.schemaVersion === 6 ? {
+        schema: state.schemaVersion === 7 ? "banzai-review-snapshot/v5" : state.schemaVersion === 6 ? "banzai-review-snapshot/v4" : state.schemaVersion === 5 ? "banzai-review-snapshot/v3" : state.artifactBinding ? "banzai-review-snapshot/v2" : "banzai-review-snapshot/v1",
+        schemaVersion: state.schemaVersion === 7 ? 5 : state.schemaVersion === 6 ? 4 : state.schemaVersion === 5 ? 3 : state.artifactBinding ? 2 : 1,
+        ...hasConfigurationSetup(state) ? {
           verificationMode: state.verificationMode ?? "ordered",
           configurationSetup: await freezeReviewConfiguration(
             this.repoRoot,
             state
+          )
+        } : {},
+        ...state.schemaVersion === 7 ? {
+          completionPublication: await this.frozenCompletionPublication(
+            state,
+            validatedCompletion.summary
           )
         } : {},
         ...state.artifactBinding ? { artifactBinding: state.artifactBinding } : {},
@@ -35876,6 +40820,12 @@ var WorkflowRunner = class {
     if (checkpoint === null) {
       return null;
     }
+    if (checkpoint.schemaVersion !== 1) {
+      throw new BanzaiError(
+        "TERMINAL_CHECKPOINT_MISMATCH",
+        "A legacy attempt cannot reconcile a completion-protocol checkpoint."
+      );
+    }
     if (TERMINAL_INTEGRITY_FAILURE_CODES.has(record7.failureCode ?? "")) {
       throw new BanzaiError(
         "TERMINAL_CHECKPOINT_CONFLICT",
@@ -35940,7 +40890,8 @@ var WorkflowRunner = class {
         record7.attempt.id
       ];
     }
-    record7.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION2;
+    if (record7.schemaVersion === 1)
+      record7.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION2;
     record7.result = checkpoint.result;
     record7.sessionId = checkpoint.sessionId;
     record7.usage = checkpoint.usage;
@@ -35950,7 +40901,8 @@ var WorkflowRunner = class {
     if (terminalObservedAt === null) {
       return;
     }
-    record7.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION2;
+    if (record7.schemaVersion === 1)
+      record7.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION2;
     record7.status = "completed";
     record7.completedAt = terminalObservedAt;
     record7.interruptedAt = null;
@@ -35976,6 +40928,31 @@ var WorkflowRunner = class {
       return state;
     }
     const record7 = await this.store.readRunAttempt(state.runId, attempt);
+    if (this.completionProtocolAttempt(record7)) {
+      try {
+        const reconciled = await this.reconcileCompletionAttempt(
+          state,
+          record7,
+          config
+        );
+        if (reconciled !== null) return reconciled;
+      } catch (error) {
+        if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
+          throw error;
+        state.activeProcess = null;
+        blockState(
+          state,
+          `[INVALID_TERMINAL_CHECKPOINT] ${errorMessage(error)}`
+        );
+        await this.store.writeState(state);
+        await this.store.appendEvent(
+          state.runId,
+          "attempt.terminal_checkpoint_rejected",
+          { attemptId: attempt.id, kind: attempt.kind }
+        );
+        return state;
+      }
+    }
     let terminalObservedAt;
     try {
       terminalObservedAt = await this.promoteTerminalCheckpoint(
@@ -36569,6 +41546,12 @@ function agentControlCapabilities() {
       statusSchema: AGENT_STATUS_SCHEMA,
       answerSchema: CONFIGURATION_ANSWER_SCHEMA
     },
+    completionPublication: {
+      protocol: COMPLETION_PROTOCOL4,
+      stages: COMPLETION_PUBLICATION_STAGES2,
+      refusalCodes: COMPLETION_PUBLICATION_REFUSAL_CODES2,
+      statusSchema: AGENT_STATUS_SCHEMA
+    },
     operations: {
       status: { supported: true, ttyRequired: false, inputSchemas: [] },
       start: {
@@ -36791,8 +41774,12 @@ function semanticNextAction(status) {
     }
     case "needs_triage":
       return "triage";
-    case "blocked":
+    case "blocked": {
+      const publication = status.completionPublication;
+      if (publication?.pending === true && publication.action !== null)
+        return publication.action;
       return status.retry.eligible ? "retry" : status.recovery.terminalCheckpointPresent === true ? "resume" : status.recovery.eligible ? "recover" : "cancel";
+    }
     case "created":
     case "selecting":
     case "planning":
@@ -36936,6 +41923,26 @@ function pendingGate(status) {
   }
   return null;
 }
+function completionPublication(state) {
+  const cursor = state.completionPublication ?? null;
+  if (cursor === null) return null;
+  const summary2 = state.planTaskCompletion;
+  return {
+    attemptId: boundedString(
+      cursor.attemptId,
+      "completion publication attempt id",
+      MAX_IDENTIFIER_LENGTH
+    ),
+    attemptKind: cursor.attemptKind,
+    stage: cursor.stage,
+    refusalCode: cursor.refusal?.code ?? null,
+    publisherAttemptId: summary2?.status === "valid" && summary2.schemaVersion === 2 ? boundedString(
+      summary2.publisherAttemptId ?? "",
+      "completion publisher attempt id",
+      MAX_IDENTIFIER_LENGTH
+    ) : null
+  };
+}
 function projectAgentControlStatus(status) {
   const { state } = status;
   const recoveryWorkspace = status.recovery.workspace;
@@ -37053,6 +42060,7 @@ function projectAgentControlStatus(status) {
         total: status.taskCompletion.total,
         diagnostics
       },
+      completionPublication: completionPublication(state),
       verification: {
         total: verificationResults.length,
         passed,
@@ -37481,7 +42489,7 @@ async function executeVersionCli(args, cwd, stdout, sourceEnvironment = process.
 
 // src/context-report.ts
 import { constants as constants13 } from "node:fs";
-import { lstat as lstat16, open as open14, readdir as readdir10 } from "node:fs/promises";
+import { lstat as lstat17, open as open14, readdir as readdir10 } from "node:fs/promises";
 import path28 from "node:path";
 var WORKFLOWS2 = [
   "unselected",
@@ -37585,7 +42593,7 @@ function decodeCanonicalAttempt(value, file, runId2) {
       "Canonical attempt identity conflicts with its owner."
     );
   }
-  if (item.status !== "started" && item.status !== "completed" && item.status !== "failed" && item.status !== "interrupted") {
+  if (item.status !== "started" && item.status !== "completed" && item.status !== "failed" && item.status !== "interrupted" && item.status !== "pending_application") {
     return invalid11(runId2, attempt.id, "Canonical attempt status is invalid.");
   }
   return { attempt, usage: decodeUsage(item.usage, runId2, attempt.id) };
@@ -37807,7 +42815,7 @@ function missing2(error) {
 }
 async function ownedDirectoryStatus(directory4) {
   try {
-    return (await lstat16(directory4)).isDirectory() ? "owned" : "invalid";
+    return (await lstat17(directory4)).isDirectory() ? "owned" : "invalid";
   } catch (error) {
     return missing2(error) ? "missing" : "invalid";
   }
@@ -38159,7 +43167,7 @@ async function executeContextReportWithOptions(repoRoot, options, io) {
 
 // src/doctor.ts
 import { constants as constants14 } from "node:fs";
-import { access as access5, lstat as lstat17, readFile as readFile12, realpath as realpath11, stat as stat4 } from "node:fs/promises";
+import { access as access5, lstat as lstat18, readFile as readFile12, realpath as realpath12, stat as stat4 } from "node:fs/promises";
 import path29 from "node:path";
 import process5 from "node:process";
 var RUN_STATUSES3 = /* @__PURE__ */ new Set([
@@ -38237,7 +43245,7 @@ function isMissingFile2(error) {
 async function readBoundedFile(filePath, boundaryPath, repoRoot) {
   let resolvedRoot;
   try {
-    resolvedRoot = await realpath11(repoRoot);
+    resolvedRoot = await realpath12(repoRoot);
   } catch {
     throw new Error("repository root cannot be resolved");
   }
@@ -38247,10 +43255,10 @@ async function readBoundedFile(filePath, boundaryPath, repoRoot) {
   if (relativeBoundary.length === 0 || relativeBoundary === ".." || relativeBoundary.startsWith(`..${path29.sep}`) || path29.isAbsolute(relativeBoundary)) {
     throw new Error("control boundary is outside the repository");
   }
-  await lstat17(boundaryPath);
+  await lstat18(boundaryPath);
   let resolvedBoundary;
   try {
-    resolvedBoundary = await realpath11(boundaryPath);
+    resolvedBoundary = await realpath12(boundaryPath);
     const boundaryStat = await stat4(resolvedBoundary);
     if (resolvedBoundary !== path29.resolve(resolvedRoot, relativeBoundary) || !boundaryStat.isDirectory()) {
       throw new Error("control boundary escapes the repository");
@@ -38258,10 +43266,10 @@ async function readBoundedFile(filePath, boundaryPath, repoRoot) {
   } catch {
     throw new Error("control boundary cannot be resolved safely");
   }
-  await lstat17(filePath);
+  await lstat18(filePath);
   let resolvedFile;
   try {
-    resolvedFile = await realpath11(filePath);
+    resolvedFile = await realpath12(filePath);
   } catch {
     throw new Error("control file cannot be resolved");
   }
@@ -38567,7 +43575,7 @@ async function activeRunCheck(repoRoot) {
       "The referenced run state is malformed."
     );
   }
-  if (!isRecord4(state) || ![1, 2, 3, 4, 5, 6].includes(state.schemaVersion) || typeof state.runId !== "string" || typeof state.repoRoot !== "string" || typeof state.status !== "string" || !RUN_STATUSES3.has(state.status)) {
+  if (!isRecord4(state) || ![1, 2, 3, 4, 5, 6, 7].includes(state.schemaVersion) || typeof state.runId !== "string" || typeof state.repoRoot !== "string" || typeof state.status !== "string" || !RUN_STATUSES3.has(state.status)) {
     return check(
       "run.active",
       "run-state",
@@ -38575,7 +43583,7 @@ async function activeRunCheck(repoRoot) {
       "The referenced run state uses an unsupported structure."
     );
   }
-  if (state.schemaVersion === 4 || state.schemaVersion === 5 || state.schemaVersion === 6) {
+  if (state.schemaVersion === 4 || state.schemaVersion === 5 || state.schemaVersion === 6 || state.schemaVersion === 7) {
     try {
       validateConfigurationStateEnvelope(state);
       await inspectBoundWork4(
@@ -38592,8 +43600,8 @@ async function activeRunCheck(repoRoot) {
     }
   }
   const [stateRepoRoot, checkoutRoot] = await Promise.all([
-    path29.isAbsolute(state.repoRoot) ? realpath11(state.repoRoot).catch(() => null) : Promise.resolve(null),
-    realpath11(repoRoot).catch(() => null)
+    path29.isAbsolute(state.repoRoot) ? realpath12(state.repoRoot).catch(() => null) : Promise.resolve(null),
+    realpath12(repoRoot).catch(() => null)
   ]);
   if (state.runId !== pointer.runId || stateRepoRoot === null || checkoutRoot === null || stateRepoRoot !== checkoutRoot) {
     return check(
@@ -40385,13 +45393,13 @@ import {
   access as access6,
   chmod as chmod4,
   cp,
-  lstat as lstat18,
+  lstat as lstat19,
   mkdir as mkdir11,
   mkdtemp,
   readFile as readFile14,
   readdir as readdir11,
   readlink,
-  realpath as realpath12,
+  realpath as realpath13,
   rm,
   stat as stat5,
   writeFile as writeFile5
@@ -40579,19 +45587,20 @@ var release_policy_default = {
       ]
     },
     state: {
-      currentSchemaVersion: 6,
+      currentSchemaVersion: 7,
       legacySchemaVersions: [
         1,
         2,
         3,
         4,
-        5
+        5,
+        6
       ]
     },
     agentControl: {
-      contractVersion: "4.0.0",
-      capabilities: "banzai-agent-capabilities/v4",
-      status: "banzai-agent-status/v3",
+      contractVersion: "5.0.0",
+      capabilities: "banzai-agent-capabilities/v5",
+      status: "banzai-agent-status/v4",
       request: "banzai-agent-request/v1",
       answer: "banzai-agent-answer/v2",
       legacyAnswer: "banzai-agent-answer/v1",
@@ -40950,7 +45959,7 @@ async function inspectAuthRoot(root) {
     const entries = await readdir11(directory4, { withFileTypes: true });
     for (const entry of entries) {
       const entryPath = path31.join(directory4, entry.name);
-      const metadata2 = await lstat18(entryPath);
+      const metadata2 = await lstat19(entryPath);
       if (metadata2.isSymbolicLink()) {
         throw new BanzaiError(
           "LIVE_AUTH_UNAVAILABLE",
@@ -41010,7 +46019,7 @@ async function copyAuthRoot(repositoryRoot, sourceValue3, target) {
       "Live subscription auth root is unavailable."
     );
   }
-  const source = await realpath12(sourceValue3).catch(() => null);
+  const source = await realpath13(sourceValue3).catch(() => null);
   if (source === null || source === repositoryRoot || source.startsWith(`${repositoryRoot}${path31.sep}`)) {
     throw new BanzaiError(
       "LIVE_AUTH_UNAVAILABLE",
@@ -41036,7 +46045,7 @@ async function treeDigest(root, excludedPrefixes = []) {
         continue;
       }
       const absolutePath = path31.join(directory4, child.name);
-      const metadata = await lstat18(absolutePath);
+      const metadata = await lstat19(absolutePath);
       const mode2 = metadata.mode & 511;
       if (metadata.isDirectory()) {
         entries.push(`${relativePath3}\0directory\0${mode2}`);
@@ -43703,7 +48712,7 @@ async function runForegroundClient(launch) {
 
 // src/setup-client.ts
 import path34 from "node:path";
-import { realpath as realpath13 } from "node:fs/promises";
+import { realpath as realpath14 } from "node:fs/promises";
 var SETUP_SKILLS = {
   codex: "$banzai:project-manifest",
   claude: "/banzai:project-manifest"
@@ -43722,7 +48731,7 @@ function record6(value) {
 async function verifiedSetupPlugin(directory4, vendor) {
   let root;
   try {
-    root = await realpath13(directory4);
+    root = await realpath14(directory4);
   } catch {
     return null;
   }

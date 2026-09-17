@@ -60,21 +60,33 @@ and rendering contracts; configuration schema 1 remains legacy.
 
 The runner alone raises `configuration_prerequisite` after an eligible completed
 implementation or fix checkpoint. It is not an additional model phase-result
-field. Agent control 4.0.0 declares capabilities v4, status v3 and the closed
+field. Agent control 5.0.0 declares capabilities v5, status v4 and the closed
 configuration-answer v3 input, while existing escalation/consultation answer
-v1/v2 inputs keep their meaning. `banzai approve verification` accepts the same
+v1/v2 inputs keep their meaning. Capabilities v5 also declare the runner-owned
+completion publication protocol, its stages, closed refusal codes and the
+`pending_application` attempt status; status v4 adds the bounded publication
+state of the active run. `banzai approve verification` accepts the same
 exact-current v3 answer as `banzai control answer`. See the maintained
 [control protocol](../skills/orchestrate/references/control-protocol.md) for
 negotiation, human provenance, bounded proposal disclosure and no-resume rules.
 
-For new strict orchestrated implementation attempts, the v2 structured ledger
-is the sole task-completion source of truth. The implementation report contains
-a deterministic `banzai-plan-task-completion/v1` Markdown projection and runner
-state contains a validated summary. The runner checks both projections against
-the canonical ledger before verification, review, and terminal success. A
-legacy attempt without the ledger retains its lifecycle but reports task
-completion as legacy or unknown; unchecked immutable plan boxes are not a
-fallback completion source.
+For new strict orchestrated implementation and fix attempts, the structured
+`taskCompletion` ledger (schema 1) in the phase-result v3 hand-off is the sole
+task-completion source of truth, and the model returns it with report
+narrative only. Under `banzai-completion-protocol/v1` (ADR-0047) the runner
+validates the claims, renders the implementation report's **Plan Task
+Completion** section as the delimited `banzai-plan-task-completion/v2` region,
+persists an immutable candidate and publication receipt, and only then applies
+the completion; runner state holds the validated summary (schema 2) with the
+publisher identity and receipt digest. The v2 region encodes every ASCII
+punctuation code point of its JSON cells as a decimal numeric character
+reference and is decoded exactly once; nothing inside it confers authority.
+Historical runs keep their model-authored `banzai-plan-task-completion/v1`
+projection and summary schema 1 with the original decoders. The runner checks
+the published bytes, receipt and summary against the canonical ledger before
+verification, review, and terminal success. A legacy attempt without the
+ledger retains its lifecycle but reports task completion as legacy or unknown;
+unchecked immutable plan boxes are not a fallback completion source.
 
 Schema changes are backward-compatible within a major contract directory.
 Breaking changes require a new directory and an orchestrator compatibility

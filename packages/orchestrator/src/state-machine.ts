@@ -70,9 +70,12 @@ export function transitionState(state: RunState, next: RunStatus): void {
     laterConfigurationBoundary ||
     (state.status === "needs_human_decision" && next === "verifying") ||
     (state.status === "verifying" && next === "needs_human_decision");
+  const guided =
+    state.schemaVersion === 6 ||
+    (state.schemaVersion === 7 && state.configurationSetup !== undefined);
   if (
     configurationTransition &&
-    (state.schemaVersion !== 6 ||
+    (!guided ||
       (laterConfigurationBoundary && next === "verifying"
         ? state.pendingHumanDecision != null ||
           !["configured", "bootstrap_deferred"].includes(

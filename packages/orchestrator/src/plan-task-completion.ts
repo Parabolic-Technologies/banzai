@@ -20,6 +20,7 @@ import {
   PLAN_TASK_COMPLETION_SCHEMA_VERSION,
   type ApprovalRecord,
   type PersistedPhaseResult,
+  type PhaseArtifacts,
   type PhaseOutcome,
   type PlanTaskCompletionLedger,
   type PlanTaskCompletionRecord,
@@ -722,8 +723,9 @@ async function readRequiredReport(
   repoRoot: string,
   relativePath: string | null,
   violation: "implementation_report_missing" | "test_report_missing",
-  requiredReports: ReadonlySet<string>
-): Promise<{ path: string; contents: string; sha256: string }> {
+  requiredReports: ReadonlySet<string>,
+  captured?: Buffer
+): Promise<{ path: string; contents: string; sha256: string; bytes: Buffer }> {
   if (relativePath === null) {
     return completionFailure(
       violation,
@@ -736,7 +738,7 @@ async function readRequiredReport(
   if (relativePath.startsWith(".banzai/"))
     await safePath(repoRoot, relativePath);
   const absolute = path.resolve(repoRoot, normalized);
-  let contents: string;
+  let bytes: Buffer;
   try {
     const metadata = await lstat(absolute);
     if (!metadata.isFile() || metadata.isSymbolicLink()) {
@@ -747,7 +749,9 @@ async function readRequiredReport(
     if (!resolved.startsWith(`${root}${path.sep}`)) {
       throw new Error("outside repository");
     }
-    contents = await readFile(absolute, "utf8");
+    // A captured original stands in for the destination bytes during
+    // deterministic publication; the path checks above still apply.
+    bytes = captured ?? (await readFile(absolute));
   } catch {
     return completionFailure(
       violation,
@@ -758,8 +762,9 @@ async function readRequiredReport(
   }
   return {
     path: normalized,
-    contents,
-    sha256: createHash("sha256").update(contents).digest("hex")
+    contents: bytes.toString("utf8"),
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+    bytes
   };
 }
 
@@ -936,6 +941,656 @@ export async function validatePlanTaskCompletion(
     },
     tasks: ledger.tasks
   };
+}
+
+// ---------------------------------------------------------------------------
+// Runner-owned completion region (ADR-0047 / ADR-0048): grammar v2.
+// ---------------------------------------------------------------------------
+
+export const COMPLETION_REGION_FORMAT = "banzai-plan-task-completion/v2";
+export const COMPLETION_REGION_START = `<!-- ${COMPLETION_REGION_FORMAT}:start -->`;
+export const COMPLETION_REGION_END = `<!-- ${COMPLETION_REGION_FORMAT}:end -->`;
+const COMPLETION_TABLE_HEADER =
+  "| Task | Status | Evidence | Gap or deviation |";
+const COMPLETION_TABLE_SEPARATOR = "| --- | --- | --- | --- |";
+// Every ASCII punctuation code point: U+0021-002F, U+003A-0040, U+005B-0060,
+// U+007B-007E. Letters, digits, space and admitted Unicode stay literal.
+const ENCODED_PUNCTUATION = /[!-/:-@[-`{-~]/gu;
+const NUMERIC_REFERENCE = /&#([0-9]{2,3});/gu;
+const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/u;
+const ATX_HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/u;
+
+function isEncodedPunctuation(code: number): boolean {
+  return (
+    (code >= 0x21 && code <= 0x2f) ||
+    (code >= 0x3a && code <= 0x40) ||
+    (code >= 0x5b && code <= 0x60) ||
+    (code >= 0x7b && code <= 0x7e)
+  );
+}
+
+/** JSON.stringify first, then one decimal numeric reference per ASCII punctuation code point. */
+export function encodeCompletionCell(value: unknown): string {
+  return JSON.stringify(value).replace(
+    ENCODED_PUNCTUATION,
+    (character) => `&#${character.codePointAt(0)};`
+  );
+}
+
+/**
+ * Decodes exactly once: only the runner's own reference spelling for ASCII
+ * punctuation is expanded, so a literal entity string supplied by the model
+ * (`&#38;`) survives as `&amp;#38;`-free text after a single pass.
+ */
+export function decodeCompletionCell(cell: string): string {
+  return cell.replace(NUMERIC_REFERENCE, (reference, digits: string) => {
+    const code = Number(digits);
+    return isEncodedPunctuation(code) ? String.fromCodePoint(code) : reference;
+  });
+}
+
+function completionRow(task: PlanTaskCompletionRecord): string {
+  return `| ${encodeCompletionCell(task.taskId)} | ${encodeCompletionCell(task.status)} | ${encodeCompletionCell(task.evidence)} | ${encodeCompletionCell(task.gap)} |`;
+}
+
+/** The exact generated region bytes, LF-separated, without a trailing newline. */
+export function renderCompletionRegion(
+  ledger: PlanTaskCompletionLedger
+): string {
+  return [
+    COMPLETION_REGION_START,
+    SECTION_HEADING,
+    "",
+    COMPLETION_TABLE_HEADER,
+    COMPLETION_TABLE_SEPARATOR,
+    ...ledger.tasks.map(completionRow),
+    COMPLETION_REGION_END
+  ].join("\n");
+}
+
+function parseCompletionRegionRow(line: string): PlanTaskCompletionRecord {
+  if (!line.startsWith("| ") || !line.endsWith(" |")) {
+    return completionFailure(
+      "report_projection_invalid",
+      "Completion region row is not a four-cell table row."
+    );
+  }
+  const cells = line.slice(2, -2).split(" | ");
+  if (cells.length !== 4 || cells.some((cell) => cell.includes("|"))) {
+    return completionFailure(
+      "report_projection_invalid",
+      "Completion region row must contain exactly four encoded cells."
+    );
+  }
+  const decoded = cells.map(decodeCompletionCell);
+  let values: unknown[];
+  try {
+    values = decoded.map((cell) => JSON.parse(cell) as unknown);
+  } catch {
+    return completionFailure(
+      "report_projection_invalid",
+      "Completion region cell does not decode to JSON."
+    );
+  }
+  const [taskId, status, evidence, gap] = values;
+  if (
+    typeof taskId !== "string" ||
+    !/^T[0-9]{3}$/u.test(taskId) ||
+    typeof status !== "string" ||
+    !["completed", "incomplete", "blocked"].includes(status) ||
+    !Array.isArray(evidence) ||
+    !(gap === null || (typeof gap === "object" && !Array.isArray(gap)))
+  ) {
+    return completionFailure(
+      "report_projection_invalid",
+      "Completion region row is malformed.",
+      typeof taskId === "string" && /^T[0-9]{3}$/u.test(taskId) ? taskId : null
+    );
+  }
+  const record: PlanTaskCompletionRecord = {
+    taskId,
+    status: status as PlanTaskCompletionRecord["status"],
+    evidence: evidence as PlanTaskCompletionRecord["evidence"],
+    gap: gap as PlanTaskCompletionRecord["gap"]
+  };
+  // The region is deterministic: every cell must be exactly the runner's own
+  // encoding of the decoded value, never a merely equivalent spelling.
+  if (completionRow(record) !== line) {
+    return completionFailure(
+      "report_projection_invalid",
+      `Completion region row ${taskId} is not canonically encoded.`,
+      taskId
+    );
+  }
+  return record;
+}
+
+/** Parses exact generated region text (start delimiter through end delimiter). */
+export function parseCompletionRegion(
+  region: string
+): PlanTaskCompletionLedger {
+  const lines = region.split("\n");
+  if (
+    lines.length < 6 ||
+    lines[0] !== COMPLETION_REGION_START ||
+    lines[1] !== SECTION_HEADING ||
+    lines[2] !== "" ||
+    lines[3] !== COMPLETION_TABLE_HEADER ||
+    lines[4] !== COMPLETION_TABLE_SEPARATOR ||
+    lines.at(-1) !== COMPLETION_REGION_END
+  ) {
+    return completionFailure(
+      "report_projection_invalid",
+      `Completion region does not follow the ${COMPLETION_REGION_FORMAT} grammar.`
+    );
+  }
+  return {
+    schemaVersion: PLAN_TASK_COMPLETION_SCHEMA_VERSION,
+    tasks: lines.slice(5, -1).map(parseCompletionRegionRow)
+  };
+}
+
+interface ScannedLine {
+  text: string;
+  start: number;
+  end: number;
+  fenced: boolean;
+}
+
+/**
+ * Bounded fence-aware line scan. Offsets are UTF-16 code unit indexes into the
+ * decoded text; `end` excludes the line terminator. Headings and delimiters
+ * inside fenced code are never structural.
+ */
+function scanLines(markdown: string): ScannedLine[] {
+  const lines: ScannedLine[] = [];
+  let offset = 0;
+  let fence: { character: string; length: number } | null = null;
+  for (const raw of markdown.split("\n")) {
+    const text = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+    const start = offset;
+    const end = offset + text.length;
+    offset += raw.length + 1;
+    if (fence === null) {
+      const open = FENCE_OPEN.exec(text);
+      if (open?.[1] !== undefined) {
+        fence = { character: open[1][0] ?? "`", length: open[1].length };
+        lines.push({ text, start, end, fenced: true });
+        continue;
+      }
+      lines.push({ text, start, end, fenced: false });
+      continue;
+    }
+    const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/u.exec(text)?.[1];
+    if (
+      close !== undefined &&
+      close.startsWith(fence.character) &&
+      close.length >= fence.length
+    ) {
+      fence = null;
+    }
+    lines.push({ text, start, end, fenced: true });
+  }
+  if (fence !== null) {
+    return completionFailure(
+      "report_region_invalid",
+      "Implementation report has an unclosed code fence; completion region ownership is ambiguous."
+    );
+  }
+  return lines;
+}
+
+function headingOf(line: ScannedLine): { level: number; text: string } | null {
+  if (line.fenced) return null;
+  const match = ATX_HEADING.exec(line.text);
+  if (match?.[1] === undefined) return null;
+  const body = (match[2] ?? "").replace(/[ \t]+#+$/u, "").trim();
+  return { level: match[1].length, text: body };
+}
+
+export interface CompletionRegionScan {
+  kind: "none" | "legacy" | "v2";
+  /** Code-unit range of the owned region in the input; absent for `none`. */
+  start: number;
+  end: number;
+}
+
+/**
+ * Identifies exactly one owned completion region without parsing model table
+ * cells. Duplicate legacy sections, a legacy section outside a v2 pair and
+ * malformed, repeated or overlapping delimiters fail before any overwrite.
+ */
+export function scanCompletionRegion(markdown: string): CompletionRegionScan {
+  const lines = scanLines(markdown);
+  const starts = lines.filter(
+    (line) => !line.fenced && line.text === COMPLETION_REGION_START
+  );
+  const ends = lines.filter(
+    (line) => !line.fenced && line.text === COMPLETION_REGION_END
+  );
+  const looseDelimiters = lines.filter(
+    (line) =>
+      !line.fenced &&
+      line.text !== COMPLETION_REGION_START &&
+      line.text !== COMPLETION_REGION_END &&
+      line.text.includes(COMPLETION_REGION_FORMAT) &&
+      /^\s*<!--/u.test(line.text)
+  );
+  if (looseDelimiters.length > 0) {
+    return completionFailure(
+      "report_region_invalid",
+      "Implementation report contains a malformed completion region delimiter."
+    );
+  }
+  const legacyHeadings = lines.filter((line) => {
+    const heading = headingOf(line);
+    return heading?.level === 2 && heading.text === "Plan Task Completion";
+  });
+  if (starts.length === 0 && ends.length === 0) {
+    if (legacyHeadings.length === 0) return { kind: "none", start: 0, end: 0 };
+    if (legacyHeadings.length > 1) {
+      return completionFailure(
+        "report_region_invalid",
+        "Implementation report contains duplicate Plan Task Completion sections."
+      );
+    }
+    const heading = legacyHeadings[0];
+    if (heading === undefined) return { kind: "none", start: 0, end: 0 };
+    const next = lines.find((line) => {
+      if (line.start <= heading.start) return false;
+      const candidate = headingOf(line);
+      return candidate !== null && candidate.level <= 2;
+    });
+    return {
+      kind: "legacy",
+      start: heading.start,
+      end: next?.start ?? markdown.length
+    };
+  }
+  const start = starts[0];
+  const end = ends[0];
+  if (
+    starts.length !== 1 ||
+    ends.length !== 1 ||
+    start === undefined ||
+    end === undefined ||
+    end.start <= start.start
+  ) {
+    return completionFailure(
+      "report_region_invalid",
+      "Implementation report must contain exactly one balanced completion region delimiter pair."
+    );
+  }
+  const inside = legacyHeadings.filter(
+    (line) => line.start > start.start && line.start < end.start
+  );
+  if (inside.length !== 1 || legacyHeadings.length !== 1) {
+    return completionFailure(
+      "report_region_invalid",
+      "Completion region delimiters must enclose exactly one Plan Task Completion section and no section may exist outside them."
+    );
+  }
+  const otherTopLevel = lines.some((line) => {
+    if (line.start <= start.start || line.start >= end.start) return false;
+    const heading = headingOf(line);
+    return (
+      heading !== null &&
+      heading.level <= 2 &&
+      heading.text !== "Plan Task Completion"
+    );
+  });
+  if (otherTopLevel) {
+    return completionFailure(
+      "report_region_invalid",
+      "Completion region delimiters enclose more than one top-level section."
+    );
+  }
+  return { kind: "v2", start: start.start, end: end.end };
+}
+
+/**
+ * Unique level 2-6 narrative headings outside fences and outside the owned
+ * completion region. A heading that appears twice is never a valid gap target.
+ */
+export function eligibleGapHeadings(
+  markdown: string,
+  region: CompletionRegionScan | null
+): Set<string> {
+  const counts = new Map<string, number>();
+  for (const line of scanLines(markdown)) {
+    if (
+      region !== null &&
+      region.kind !== "none" &&
+      line.start >= region.start &&
+      line.start < region.end
+    )
+      continue;
+    const heading = headingOf(line);
+    if (heading === null || heading.level < 2 || heading.text.length === 0)
+      continue;
+    counts.set(heading.text, (counts.get(heading.text) ?? 0) + 1);
+  }
+  return new Set(
+    [...counts.entries()]
+      .filter(([, count]) => count === 1)
+      .map(([text]) => text)
+  );
+}
+
+export interface CompletionCandidateComposition {
+  bytes: Buffer;
+  region: { action: "appended" | "replaced"; start: number; end: number };
+}
+
+function utf8Text(bytes: Buffer, label: string): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+      bytes
+    );
+  } catch {
+    return completionFailure(
+      "report_region_invalid",
+      `${label} is not valid UTF-8; completion region ownership is ambiguous.`
+    );
+  }
+}
+
+/**
+ * Composes the candidate implementation report: the exact input bytes outside
+ * the owned region, plus the deterministic v2 region. The result is re-scanned
+ * and re-parsed so only a verified roundtrip can become a candidate.
+ */
+export function composeCompletionCandidate(
+  input: Buffer,
+  ledger: PlanTaskCompletionLedger
+): CompletionCandidateComposition {
+  const text = utf8Text(input, "Implementation report");
+  const scan = scanCompletionRegion(text);
+  const region = renderCompletionRegion(ledger);
+  let output: string;
+  let action: "appended" | "replaced";
+  let start: number;
+  let end: number;
+  if (scan.kind === "none") {
+    // Append with only the newlines needed to separate; never normalize the
+    // original prefix.
+    const separator =
+      text.length === 0
+        ? ""
+        : text.endsWith("\n\n")
+          ? ""
+          : text.endsWith("\n")
+            ? "\n"
+            : "\n\n";
+    output = `${text}${separator}${region}\n`;
+    action = "appended";
+    start = Buffer.byteLength(text, "utf8");
+    end = start;
+  } else {
+    const prefix = text.slice(0, scan.start);
+    const suffix = text.slice(scan.end);
+    const replacement =
+      scan.kind === "legacy"
+        ? suffix.length === 0
+          ? `${region}\n`
+          : `${region}\n\n`
+        : region;
+    output = `${prefix}${replacement}${suffix}`;
+    action = "replaced";
+    start = Buffer.byteLength(prefix, "utf8");
+    end = start + Buffer.byteLength(text.slice(scan.start, scan.end), "utf8");
+    if (
+      !output.startsWith(prefix) ||
+      !output.endsWith(suffix) ||
+      Buffer.byteLength(prefix, "utf8") + Buffer.byteLength(suffix, "utf8") !==
+        Buffer.byteLength(output, "utf8") -
+          Buffer.byteLength(replacement, "utf8")
+    ) {
+      return completionFailure(
+        "report_region_invalid",
+        "Candidate composition failed to preserve the narrative outside the completion region."
+      );
+    }
+  }
+  const verification = scanCompletionRegion(output);
+  if (verification.kind !== "v2") {
+    return completionFailure(
+      "report_region_invalid",
+      "Candidate composition did not produce exactly one owned completion region."
+    );
+  }
+  const roundtrip = parseCompletionRegion(
+    output.slice(verification.start, verification.end)
+  );
+  if (
+    JSON.stringify(roundtrip) !== JSON.stringify(ledger) ||
+    output.slice(verification.start, verification.end) !== region
+  ) {
+    return completionFailure(
+      "report_projection_mismatch",
+      "Candidate completion region does not round-trip to the admitted ledger."
+    );
+  }
+  return { bytes: Buffer.from(output, "utf8"), region: { action, start, end } };
+}
+
+/** The v2 ledger a published report carries; anything else is not current v2 evidence. */
+export function parsePublishedCompletionRegion(
+  report: Buffer
+): PlanTaskCompletionLedger {
+  const text = utf8Text(report, "Implementation report");
+  const scan = scanCompletionRegion(text);
+  if (scan.kind !== "v2") {
+    return completionFailure(
+      scan.kind === "none"
+        ? "report_projection_missing"
+        : "report_projection_invalid",
+      scan.kind === "none"
+        ? "Implementation report has no runner-published completion region."
+        : "Implementation report carries a legacy completion section instead of the published v2 region."
+    );
+  }
+  return parseCompletionRegion(text.slice(scan.start, scan.end));
+}
+
+export interface ValidateCompletionClaimsInput {
+  repoRoot: string;
+  artifactBinding?: ArtifactBoundWork | undefined;
+  ledger: PlanTaskCompletionLedger | null;
+  outcome: PhaseOutcome;
+  artifacts: Pick<PhaseArtifacts, "implementationReport" | "testReport">;
+  planPath: string;
+  approval: ApprovalRecord;
+  baseline?: readonly WorkspaceEntry[] | undefined;
+  /** Captured original report bytes; when present they replace destination reads. */
+  captured?: { implementationReport: Buffer; testReport: Buffer } | undefined;
+}
+
+export interface ValidatedCompletionClaims {
+  ledger: PlanTaskCompletionLedger;
+  taskIds: string[];
+  approvalDigest: string;
+  planTaskDigest: string;
+  ledgerDigest: string;
+  counts: ValidPlanTaskCompletionSummary["counts"];
+  implementationReport: {
+    path: string;
+    bytes: Buffer;
+    sha256: string;
+    region: CompletionRegionScan;
+  };
+  testReport: { path: string; bytes: Buffer; sha256: string };
+}
+
+/**
+ * Claim, evidence, authority, report-role and gap validation under the
+ * completion protocol. No report projection is parsed for parity: the runner
+ * publishes the region itself after these checks pass. Gap targets must be
+ * unique preserved narrative headings outside fences and outside the owned
+ * region, or headings in the unchanged test report.
+ */
+export async function validateCompletionClaims(
+  input: ValidateCompletionClaimsInput
+): Promise<ValidatedCompletionClaims> {
+  const requiredReports = new Set<string>();
+  if (input.artifactBinding !== undefined) {
+    await inspectBoundWork(input.repoRoot, input.artifactBinding);
+    const roles = input.artifactBinding.binding.artifacts;
+    if (
+      input.planPath !== roles.plan ||
+      input.artifacts.implementationReport !== roles.implementationReport ||
+      input.artifacts.testReport !== roles.testReport
+    )
+      return completionFailure(
+        "evidence_scope_violation",
+        "Completion must reference the exact bound plan and required reports."
+      );
+    for (const report of [roles.implementationReport, roles.testReport])
+      if (report) requiredReports.add(report);
+  }
+  const approval = await digestArtifactBundle(
+    input.repoRoot,
+    input.approval.paths
+  ).catch(() =>
+    completionFailure(
+      "approval_invalid",
+      "Approved artifact bundle cannot be validated."
+    )
+  );
+  if (
+    approval.digest !== input.approval.digest ||
+    !input.approval.paths.includes(input.planPath)
+  ) {
+    return completionFailure(
+      "approval_invalid",
+      "Approved artifact bundle digest or plan membership is invalid."
+    );
+  }
+  const plan = await readFile(
+    path.resolve(input.repoRoot, input.planPath),
+    "utf8"
+  ).catch(() =>
+    completionFailure(
+      "approved_plan_invalid",
+      "Exact approved plan cannot be read."
+    )
+  );
+  const taskIds = parseApprovedPlanTaskIds(plan);
+  validatePlanTaskCompletionLedgerShape(taskIds, input.ledger, input.outcome);
+  const ledger = input.ledger;
+  if (ledger === null) {
+    return completionFailure(
+      "missing_ledger",
+      "Strict implementation result is missing taskCompletion."
+    );
+  }
+  const implementationReport = await readRequiredReport(
+    input.repoRoot,
+    input.artifacts.implementationReport,
+    "implementation_report_missing",
+    requiredReports,
+    input.captured?.implementationReport
+  );
+  const testReport = await readRequiredReport(
+    input.repoRoot,
+    input.artifacts.testReport,
+    "test_report_missing",
+    requiredReports,
+    input.captured?.testReport
+  );
+  const region = scanCompletionRegion(
+    utf8Text(implementationReport.bytes, "Implementation report")
+  );
+  const snapshot = await workspaceSnapshot(input.repoRoot, {
+    excludedPaths: input.approval.paths,
+    baseline: input.baseline,
+    artifactBinding: input.artifactBinding
+  });
+  const allowedPaths = new Set(
+    snapshot.entries
+      .filter((entry) => entry.kind === "file")
+      .map((entry) => entry.path)
+  );
+  allowedPaths.add(implementationReport.path);
+  allowedPaths.add(testReport.path);
+  const approvedPaths = new Set(input.approval.paths);
+  const gapHeadings = new Map([
+    [
+      implementationReport.path,
+      eligibleGapHeadings(implementationReport.contents, region)
+    ],
+    [testReport.path, eligibleGapHeadings(testReport.contents, null)]
+  ]);
+  for (const task of ledger.tasks) {
+    for (const evidence of task.evidence) {
+      await validateEvidenceFile(
+        input.repoRoot,
+        evidence.path,
+        allowedPaths,
+        approvedPaths,
+        task.taskId,
+        requiredReports
+      );
+    }
+    if (task.gap !== null) {
+      const headings = gapHeadings.get(task.gap.reportPath);
+      if (headings === undefined) {
+        return completionFailure(
+          "invalid_gap_reference",
+          `${task.taskId} gap must reference an exact required report.`,
+          task.taskId
+        );
+      }
+      if (!headings.has(task.gap.section)) {
+        return completionFailure(
+          "invalid_gap_reference",
+          `${task.taskId} gap section is not a unique preserved narrative heading of its report.`,
+          task.taskId
+        );
+      }
+    }
+  }
+  return {
+    ledger,
+    taskIds,
+    approvalDigest: input.approval.digest,
+    planTaskDigest: digest(taskIds),
+    ledgerDigest: digest(ledger),
+    counts: completionCounts(taskIds, ledger),
+    implementationReport: {
+      path: implementationReport.path,
+      bytes: implementationReport.bytes,
+      sha256: implementationReport.sha256,
+      region
+    },
+    testReport: {
+      path: testReport.path,
+      bytes: testReport.bytes,
+      sha256: testReport.sha256
+    }
+  };
+}
+
+export function completionCounts(
+  taskIds: readonly string[],
+  ledger: PlanTaskCompletionLedger
+): ValidPlanTaskCompletionSummary["counts"] {
+  return {
+    total: taskIds.length,
+    completed: ledger.tasks.filter((task) => task.status === "completed")
+      .length,
+    incomplete: ledger.tasks.filter((task) => task.status === "incomplete")
+      .length,
+    blocked: ledger.tasks.filter((task) => task.status === "blocked").length
+  };
+}
+
+export function ledgerDigest(ledger: PlanTaskCompletionLedger): string {
+  return digest(ledger);
+}
+
+export function planTaskDigest(taskIds: readonly string[]): string {
+  return digest(taskIds);
 }
 
 export function summariesMatch(

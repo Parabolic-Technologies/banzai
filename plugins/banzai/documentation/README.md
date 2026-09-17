@@ -65,8 +65,11 @@ Rules:
 - In strict orchestrated work, approved plan checkboxes remain unchanged: v3
   implementation results carry the canonical per-task completion ledger and a
   required nullable planning-only consultation field, and
-  `implementation-report.md` holds its `banzai-plan-task-completion/v1`
-  projection. Completion semantics are defined in the installed
-  `policies/plan-task-completion.md` under **Plan Task Completion Evidence**.
+  `implementation-report.md` holds the runner-published
+  `banzai-plan-task-completion/v2` region rendered from that ledger after
+  validation (ADR-0047); historical runs keep their model-authored
+  `banzai-plan-task-completion/v1` projection. Completion semantics are
+  defined in the installed `policies/plan-task-completion.md` under
+  **Plan Task Completion Evidence**.
 - A terminal run may retain a `changes_requested` review when human triage
   accepts no findings; never rewrite a review artifact as a pass.

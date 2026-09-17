@@ -1,6 +1,6 @@
 # Plan Authority and Task Completion Evidence
 
-- Owner decision: ADR-0038 (Plan Authority); ADR-0017/0025 (Plan Task Completion Evidence)
+- Owner decision: ADR-0038 (Plan Authority); ADR-0017/0025/0047 (Plan Task Completion Evidence)
 - Consumers: `development-plan`, `code-writing`; conditional: `test-writing`, `feature-review`, `feature-status`, `quick-fix`
 - Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)
 - Runner consumers: planning, implementation, review (conditional), fix (conditional), quick-fix (conditional).
@@ -83,17 +83,28 @@ an orchestrated approval, unlike choosing a compliant implementation under it.
   complete refreshed ledger (ADR 0025) — same task set and order, statuses
   unchanged, evidence describing the current tree — validated by the same
   fail-closed pipeline; there is still exactly one canonical ledger at a time.
-- The implementation report contains the deterministic
-  `banzai-plan-task-completion/v1` Markdown projection of that ledger. Persisted
-  state contains a validated summary, never a separately authored ledger. The
-  runner checks approval digest, task coverage/order, path scope, required
-  reports, and structured/report/state parity before verification, review, and
-  terminal success.
+- In new strict orchestrated attempts (`banzai-completion-protocol/v1`,
+  ADR-0047) the model returns structured claims and report narrative only. The
+  runner validates the ledger against approval digest, task coverage/order,
+  path scope and required reports, then renders and publishes the
+  implementation report's **Plan Task Completion** section itself as the
+  bounded `banzai-plan-task-completion/v2` region, records an immutable
+  publication receipt and only then applies the completion. Nothing inside that region
+  confers authority: a model or hand edit is replaced at the next authorized
+  publication and is never evidence. Persisted state contains a validated
+  summary, never a separately authored ledger.
+- Standalone authored reports keep the `banzai-plan-task-completion/v1` table
+  written by the author, and legacy orchestrated runs keep their v1 projection.
+  Readers recognize both grammars and distinguish model claims, runner receipts
+  and real repository or report evidence; no standalone author generates v2 or
+  manufactures runner state.
 - `outcome=completed` is invalid when any task is missing, malformed,
   incomplete, or blocked. Validation fails closed as
   `PLAN_TASK_COMPLETION_INVALID`; verification and review do not start, and a
   normally returned invalid implementation result may be retried after the
-  evidence is corrected without editing the approved plan.
+  evidence is corrected without editing the approved plan. A blocked or
+  escalation result keeps its gate; its completion diagnostics are retained and
+  nothing is published.
 - A legacy orchestrated run without the structured ledger keeps its persisted
   lifecycle and next action, but task completion is `legacy`, `unknown`, or
   `inconsistent`; report prose is never retrofitted into canonical `N/N`.

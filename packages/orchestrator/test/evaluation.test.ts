@@ -17,6 +17,7 @@ import {
   renderEvaluationMarkdown
 } from "../src/evaluation-render.js";
 import type { EvaluationExportOptions, NumericMetric } from "../src/types.js";
+import { phaseResultEnvelopeOf } from "../src/validation.js";
 import {
   createEvaluationRoot,
   evaluationAttemptFixture,
@@ -2464,6 +2465,122 @@ test("never exports forbidden persisted prose and leaves the run tree byte-for-b
         kpiMarkdown,
         new RegExp(forbidden.replaceAll("/", "\\/"))
       );
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a pending runner-owned publication stays an incomplete active attempt in the frozen v1 export", async () => {
+  const root = await createEvaluationRoot();
+  const runId = "pending-publication-schema-seven";
+  const attemptId = "implementation-1-pending";
+  const captureDigest = "f".repeat(64);
+  try {
+    const envelope = phaseResultEnvelopeOf({
+      schemaVersion: 3,
+      contractVersion: "1.0.0",
+      phase: "implementation",
+      outcome: "completed",
+      gate: null,
+      summary: "FORBIDDEN-MODEL-OUTPUT",
+      artifacts: {
+        description: null,
+        plan: null,
+        adrs: [],
+        implementationReport: "FORBIDDEN/implementation-report.md",
+        testReport: "FORBIDDEN/test-report.md"
+      },
+      taskCompletion: {
+        schemaVersion: 1,
+        tasks: [
+          {
+            taskId: "T001",
+            status: "completed",
+            evidence: [
+              { path: "src/example.ts", detail: "FORBIDDEN-EVIDENCE-DETAIL" }
+            ],
+            gap: null
+          }
+        ]
+      },
+      touchedPaths: [],
+      questions: [],
+      decisionConsultation: null,
+      resolvedFindingIds: [],
+      requestedVerification: []
+    });
+    const attempt = evaluationAttemptFixture({
+      id: attemptId,
+      kind: "implementation"
+    });
+    attempt.schemaVersion = 3;
+    attempt.status = "pending_application";
+    attempt.interruptedAt = null;
+    attempt.recoveryOf = null;
+    attempt.recoveryAuthorizationId = null;
+    attempt.error = null;
+    attempt.result = JSON.parse(envelope.original) as unknown;
+    attempt.completionProtocol = "banzai-completion-protocol/v1";
+    attempt.retryOf = null;
+    attempt.envelope = envelope;
+    attempt.completionDiagnostic = null;
+    await writeEvaluationRun(root, runId, {
+      state: evaluationStateFixture({
+        status: "blocked",
+        attempts: { implementation: 1 },
+        extra: {
+          schemaVersion: 7,
+          activeAttempt: {
+            id: attemptId,
+            kind: "implementation",
+            mutable: true
+          },
+          blockedFrom: "implementing",
+          blockReason:
+            "[COMPLETION_PUBLICATION_IO] Completion publication stopped at stage candidate.",
+          completionPublication: {
+            attemptId,
+            attemptKind: "implementation",
+            stage: "candidate",
+            captureDigest,
+            candidateDigest: null,
+            receiptDigest: null,
+            refusal: {
+              code: "COMPLETION_PUBLICATION_IO",
+              stage: "candidate",
+              proofDigest: captureDigest
+            }
+          }
+        }
+      }),
+      attempts: [attempt]
+    });
+
+    const report = await collectEvaluationExport(root, DEFAULT_OPTIONS);
+    const run = report.runs[0];
+    assert.ok(run);
+    assert.deepEqual(run.attempts[0]?.source.schemaVersion, {
+      value: 3,
+      evidence: "observed"
+    });
+    assert.deepEqual(run.attempts[0].status, {
+      value: null,
+      evidence: "unknown"
+    });
+    assert.ok(run.issueCodes.includes("ACTIVE_ATTEMPT_INCOMPLETE"));
+    assert.ok(!run.issueCodes.includes("ATTEMPT_MALFORMED"));
+    // Frozen v1 cannot count a pending publication as any outcome: the
+    // completed count is unknown rather than a guessed success.
+    assert.notEqual(run.metrics.attempts.byOutcome.completed.value, 1);
+    for (const rendered of [
+      renderEvaluationJson(report),
+      renderEvaluationMarkdown(report)
+    ]) {
+      assert.doesNotMatch(rendered, /FORBIDDEN-EVIDENCE-DETAIL/);
+      assert.doesNotMatch(rendered, /FORBIDDEN\/implementation-report/);
+      assert.doesNotMatch(rendered, new RegExp(captureDigest));
+      assert.doesNotMatch(rendered, /COMPLETION_PUBLICATION_IO/);
     }
   } finally {
     await rm(root, { recursive: true, force: true });

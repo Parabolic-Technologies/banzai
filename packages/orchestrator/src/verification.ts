@@ -16,7 +16,8 @@ export function usesVerificationPolicy(
 ): boolean {
   return (
     state.schemaVersion === 5 ||
-    (state.schemaVersion === 6 && state.verificationMode === "policy")
+    ((state.schemaVersion === 6 || state.schemaVersion === 7) &&
+      state.verificationMode === "policy")
   );
 }
 

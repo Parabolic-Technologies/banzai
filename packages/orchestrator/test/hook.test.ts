@@ -465,7 +465,7 @@ test("runner mode fails closed when an edit target cannot be parsed", async () =
   }
 });
 
-for (const stateVersion of [4, 5, 6] as const)
+for (const stateVersion of [4, 5, 6, 7] as const)
   test(`v${stateVersion} hook enforces bound phase roles, read-only selection/review and private layout`, async () => {
     const repository = await createTestRepository({
       artifactLayout: "private"
@@ -521,7 +521,10 @@ for (const stateVersion of [4, 5, 6] as const)
               workflow: "strict",
               extra: {
                 schemaVersion: stateVersion,
-                ...(stateVersion === 6
+                // Schema 7 adds only the nullable completion publication cursor
+                // to the retained configuration/binding combination.
+                ...(stateVersion === 7 ? { completionPublication: null } : {}),
+                ...(stateVersion >= 6
                   ? {
                       verificationMode: "ordered",
                       configurationSetup: {

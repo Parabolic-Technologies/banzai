@@ -487,6 +487,12 @@ by preparing this decision.
 
 ## Lifecycle Links
 
+- Narrowly amended by [ADR-0047](./0047-runner-owned-completion-projection.md),
+  accepted 2026-09-15, section 7: sections 7-8 permit new runner-owned v2 completion
+  regions and version-aware standalone readers, implementing the deferred
+  completion follow-up. Standalone authoring duties, phase delivery, grants and
+  historical instruction evidence remain binding.
+
 - Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted
   2026-09-14: per-role parity with Codex not-applicable, cause-specific remedies
   and doctor v4. Preserve complete instruction delivery, structural refusal and

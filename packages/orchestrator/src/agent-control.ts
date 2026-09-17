@@ -5,12 +5,13 @@ import type {
   AgentControlAnswerV1,
   AgentControlAnswerV2,
   AgentControlAnswerV3,
-  AgentControlCapabilitiesV4,
+  AgentControlCapabilitiesV5,
+  AgentControlCompletionPublicationV1,
   AgentControlNextAction,
   AgentControlPendingGateV3,
   AgentControlRecoveryV1,
   AgentControlRequestV1,
-  AgentControlStatusV3,
+  AgentControlStatusV4,
   DecisionConsultationAnswer,
   DecisionConsultationCard,
   DecisionConsultationRequest,
@@ -30,6 +31,9 @@ import {
   AGENT_REQUEST_SCHEMA_VERSION,
   AGENT_STATUS_SCHEMA,
   AGENT_STATUS_SCHEMA_VERSION,
+  COMPLETION_PROTOCOL,
+  COMPLETION_PUBLICATION_REFUSAL_CODES,
+  COMPLETION_PUBLICATION_STAGES,
   CONTRACT_VERSION,
   DECISION_CONSULTATION_SCHEMA,
   DECISION_CONSULTATION_SCHEMA_VERSION,
@@ -389,7 +393,7 @@ export function decodeAgentControlRecovery(
   };
 }
 
-export function agentControlCapabilities(): AgentControlCapabilitiesV4 {
+export function agentControlCapabilities(): AgentControlCapabilitiesV5 {
   return {
     schema: AGENT_CAPABILITIES_SCHEMA,
     schemaVersion: AGENT_CAPABILITIES_SCHEMA_VERSION,
@@ -407,6 +411,12 @@ export function agentControlCapabilities(): AgentControlCapabilitiesV4 {
       actions: CONFIGURATION_ACTIONS,
       statusSchema: AGENT_STATUS_SCHEMA,
       answerSchema: CONFIGURATION_ANSWER_SCHEMA
+    },
+    completionPublication: {
+      protocol: COMPLETION_PROTOCOL,
+      stages: COMPLETION_PUBLICATION_STAGES,
+      refusalCodes: COMPLETION_PUBLICATION_REFUSAL_CODES,
+      statusSchema: AGENT_STATUS_SCHEMA
     },
     operations: {
       status: { supported: true, ttyRequired: false, inputSchemas: [] },
@@ -698,7 +708,12 @@ function semanticNextAction(status: WorkflowStatus): AgentControlNextAction {
     }
     case "needs_triage":
       return "triage";
-    case "blocked":
+    case "blocked": {
+      // A pending runner-owned publication carries its own closed route:
+      // I/O resumes, drift cancels until restored, integrity cancels.
+      const publication = status.completionPublication;
+      if (publication?.pending === true && publication.action !== null)
+        return publication.action;
       return status.retry.eligible
         ? "retry"
         : status.recovery.terminalCheckpointPresent === true
@@ -706,6 +721,7 @@ function semanticNextAction(status: WorkflowStatus): AgentControlNextAction {
           : status.recovery.eligible
             ? "recover"
             : "cancel";
+    }
     case "created":
     case "selecting":
     case "planning":
@@ -866,9 +882,40 @@ function pendingGate(status: WorkflowStatus): AgentControlPendingGateV3 | null {
   return null;
 }
 
+/**
+ * Bounded projection of the schema-7 publication cursor. Only the newest
+ * strict attempt's durable stage, closed refusal code and the validated
+ * publisher identity leave the runner; digests, paths and prose do not.
+ */
+function completionPublication(
+  state: RunState
+): AgentControlCompletionPublicationV1 | null {
+  const cursor = state.completionPublication ?? null;
+  if (cursor === null) return null;
+  const summary = state.planTaskCompletion;
+  return {
+    attemptId: boundedString(
+      cursor.attemptId,
+      "completion publication attempt id",
+      MAX_IDENTIFIER_LENGTH
+    ),
+    attemptKind: cursor.attemptKind,
+    stage: cursor.stage,
+    refusalCode: cursor.refusal?.code ?? null,
+    publisherAttemptId:
+      summary?.status === "valid" && summary.schemaVersion === 2
+        ? boundedString(
+            summary.publisherAttemptId ?? "",
+            "completion publisher attempt id",
+            MAX_IDENTIFIER_LENGTH
+          )
+        : null
+  };
+}
+
 export function projectAgentControlStatus(
   status: WorkflowStatus
-): AgentControlStatusV3 {
+): AgentControlStatusV4 {
   const { state } = status;
   const recoveryWorkspace = status.recovery.workspace;
   if (
@@ -1011,6 +1058,7 @@ export function projectAgentControlStatus(
         total: status.taskCompletion.total,
         diagnostics
       },
+      completionPublication: completionPublication(state),
       verification: {
         total: verificationResults.length,
         passed,
@@ -1036,7 +1084,7 @@ export function projectAgentControlStatus(
   };
 }
 
-export function emptyAgentControlStatus(): AgentControlStatusV3 {
+export function emptyAgentControlStatus(): AgentControlStatusV4 {
   return {
     schema: AGENT_STATUS_SCHEMA,
     schemaVersion: AGENT_STATUS_SCHEMA_VERSION,
@@ -1045,7 +1093,7 @@ export function emptyAgentControlStatus(): AgentControlStatusV3 {
 }
 
 export function renderAgentControlJson(
-  value: AgentControlCapabilitiesV4 | AgentControlStatusV3
+  value: AgentControlCapabilitiesV5 | AgentControlStatusV4
 ): string {
   return `${JSON.stringify(value, null, 2)}\n`;
 }

@@ -46,7 +46,7 @@ Banzai ships as two separately installed parts:
 | Part         | What it is                                                                                                                                                                                                             |
 | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Orchestrator | The local `banzai` CLI, distributed as `@parabolic-technologies/banzai` on npm. Coordinates the selected workflow, runs configured checks, and presents human decisions. Strict work includes an independent reviewer. |
-| Plugin       | Workflow skills for Claude Code and Codex. Standalone skills share guidance and policies with embedded orchestrator phases.                                                                                                |
+| Plugin       | Workflow skills for Claude Code and Codex. Standalone skills share guidance and policies with embedded orchestrator phases.                                                                                            |
 
 Use the orchestrator to coordinate a complete run, or use the
 [plugin directly](#using-the-plugin-without-the-orchestrator) to guide an agent
@@ -233,7 +233,7 @@ mutable work. Interrupted implementation is never silently retried. Details:
 
 To supervise a run from a chat agent, explicitly invoke `/banzai:orchestrate`
 (Claude Code) or `$banzai:orchestrate` (Codex); the skill can never select
-itself. Compatible supervisors require control contract `4.0.0`; see
+itself. Compatible supervisors require control contract `5.0.0`; see
 [agent control](documentation/orchestrator.md#agent-control) for exact schemas
 and compatibility checks.
 
@@ -251,14 +251,14 @@ for interactive Skip, evidence availability and resource coverage limits.
 There are five existing decision gates plus a conditional configuration prerequisite;
 the CLI presents their human actions:
 
-| Gate                  | You decide                                                                                                             |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Decision consultation | Choose among material options that remain unresolved after strict planning analyzes repository evidence                |
-| ADR acceptance        | Accept, reject, or rework each proposed architecture decision                                                          |
-| Plan approval         | Approve the exact bundle of description, accepted ADRs, and plan                                                       |
-| Review triage         | Accept, reject, or defer every review finding                                                                          |
-| Escalation            | Answer the questions a phase raises for dependencies, contracts, security, deployment, or unspecified product behavior |
-| Configuration prerequisite | Accept or edit the runner's profile proposal, skip within the current run's scope, or cancel |
+| Gate                       | You decide                                                                                                             |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Decision consultation      | Choose among material options that remain unresolved after strict planning analyzes repository evidence                |
+| ADR acceptance             | Accept, reject, or rework each proposed architecture decision                                                          |
+| Plan approval              | Approve the exact bundle of description, accepted ADRs, and plan                                                       |
+| Review triage              | Accept, reject, or defer every review finding                                                                          |
+| Escalation                 | Answer the questions a phase raises for dependencies, contracts, security, deployment, or unspecified product behavior |
+| Configuration prerequisite | Accept or edit the runner's profile proposal, skip within the current run's scope, or cancel                           |
 
 Which gates appear depends on the selected route and the decisions raised by
 the task.
@@ -312,7 +312,7 @@ smallest workflow that matches the risk:
 
 | Situation                                 | Skill                   | Primary artifact                                               |
 | ----------------------------------------- | ----------------------- | -------------------------------------------------------------- |
-| Ordinary new capability                   | `feature`               | `.banzai/work/<uuid>/work.md`                        |
+| Ordinary new capability                   | `feature`               | `.banzai/work/<uuid>/work.md`                                  |
 | Bug, polish, refactor, review cleanup     | `quick-fix`             | Change report only when needed                                 |
 | Significant architecture choice           | `architecture-decision` | `documentation/decisions/NNNN-<slug>.md`                       |
 | Formal requirements or escalation trigger | Strict workflow         | Description, decisions, plan, implementation and test evidence |
@@ -387,7 +387,7 @@ IDs. The sampled rollout procedure and promotion evidence are documented in
   [`documentation/release-checklist.md`](documentation/release-checklist.md)
 - Maintaining this repository — release gate, version parity, conventions:
   [`CONTRIBUTING.md`](CONTRIBUTING.md)
-- Current release notes: [2.5.0](documentation/releases/2.5.0.md).
+- Current release notes: [2.6.0](documentation/releases/2.6.0.md).
 
 ## Author and License
 

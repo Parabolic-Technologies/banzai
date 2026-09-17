@@ -114,7 +114,8 @@ function status(state = currentState()): WorkflowStatus {
       completed: null,
       total: null,
       diagnostics: []
-    }
+    },
+    completionPublication: null
   };
 }
 
@@ -345,7 +346,7 @@ test("capabilities and no-active-run status emit one canonical JSON document", a
   assert.equal(capabilityOutput.length, 1);
   assert.equal(
     (JSON.parse(capabilityOutput[0] ?? "") as { schema: string }).schema,
-    "banzai-agent-capabilities/v4"
+    "banzai-agent-capabilities/v5"
   );
 
   const runner = new FakeRunner();
@@ -361,8 +362,8 @@ test("capabilities and no-active-run status emit one canonical JSON document", a
     "default-user"
   );
   assert.deepEqual(JSON.parse(statusOutput[0] ?? ""), {
-    schema: "banzai-agent-status/v3",
-    schemaVersion: 3,
+    schema: "banzai-agent-status/v4",
+    schemaVersion: 4,
     activeRun: null
   });
 });

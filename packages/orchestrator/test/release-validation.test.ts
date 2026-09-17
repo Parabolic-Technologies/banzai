@@ -128,6 +128,8 @@ const FIXTURE_PATHS = [
   "documentation/decisions/0043-proportionate-verification-evidence.md",
   "documentation/decisions/0044-instruction-baseline-evolution.md",
   "documentation/decisions/0045-guided-verification-setup.md",
+  "documentation/decisions/0047-runner-owned-completion-projection.md",
+  "documentation/decisions/0048-completion-markup-and-viewer-enrichment-boundary.md",
   "packages/orchestrator/scripts/check-dist.mjs",
   "packages/orchestrator/scripts/release-version.mjs",
   "packages/orchestrator/scripts/smoke-committed.mjs",
@@ -915,15 +917,15 @@ for (const relativePath of [
   });
 }
 
-test("release validation protects run-state v3/v4/v5 and agent-control 3.0 identities", async () => {
+test("release validation protects run-state v3-v7 and agent-control 5.0 identities", async () => {
   await withFixture(async (root) => {
     const typesPath = path.join(root, "packages/orchestrator/src/types.ts");
     const accepted = await readFile(typesPath, "utf8");
     await writeFile(
       typesPath,
       accepted.replace(
-        "export interface RunState {\n  schemaVersion: 3 | 4 | 5 | 6;",
-        "export interface RunState {\n  schemaVersion: 2;"
+        "schemaVersion: 3 | 4 | 5 | 6 | 7;",
+        "schemaVersion: 2;"
       ),
       "utf8"
     );
@@ -934,7 +936,7 @@ test("release validation protects run-state v3/v4/v5 and agent-control 3.0 ident
     await writeFile(
       typesPath,
       accepted.replace(
-        '"banzai-agent-status/v3" as const',
+        '"banzai-agent-status/v4" as const',
         '"banzai-agent-status/v1" as const'
       ),
       "utf8"
@@ -969,7 +971,7 @@ for (const [relativePath, fragment] of [
   ],
   [
     "plugins/banzai/skills/orchestrate/SKILL.md",
-    "exact supported v4 declaration"
+    "exact supported v5 declaration"
   ],
   ["plugins/banzai/skills/orchestrate/SKILL.md", "banzai-agent-answer/v2"],
   [
@@ -990,11 +992,11 @@ for (const [relativePath, fragment] of [
   ],
   [
     "plugins/banzai/skills/orchestrate/references/control-protocol.md",
-    "banzai-agent-capabilities/v4"
+    "banzai-agent-capabilities/v5"
   ],
   [
     "plugins/banzai/skills/orchestrate/references/control-protocol.md",
-    'controlContractVersion: "4.0.0"'
+    'controlContractVersion: "5.0.0"'
   ],
   [
     "plugins/banzai/skills/orchestrate/references/control-protocol.md",
@@ -2481,5 +2483,52 @@ test("guided baseline amendment keeps accepted authority bodies pinned and rejec
       )
     );
     await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+  });
+});
+
+test("runner-owned completion annotations admit only the accepted reciprocal images and keep bodies pinned", async () => {
+  await withFixture(async (root) => {
+    await validateGuidanceExtraction(root);
+    const decisions = path.join(root, "documentation/decisions");
+    const authority = path.join(
+      decisions,
+      "0043-proportionate-verification-evidence.md"
+    );
+    const original = await readFile(authority, "utf8");
+    // The accepted body stays pinned beneath the ADR-0047 annotation.
+    await writeFile(
+      authority,
+      original.replace(
+        "Current profiles specify ordered commands.",
+        "Current profiles may omit commands."
+      )
+    );
+    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    // The annotation image is finite: any other lifecycle wording fails.
+    await writeFile(
+      authority,
+      original.replace(
+        "- Narrowly amended by [ADR-0047]",
+        "- Broadly amended by [ADR-0047]"
+      )
+    );
+    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    await writeFile(authority, original);
+    // The image is admitted only while ADR-0047 remains Accepted.
+    const amendment = path.join(
+      decisions,
+      "0047-runner-owned-completion-projection.md"
+    );
+    const accepted = await readFile(amendment, "utf8");
+    assert.match(accepted, /^- Status: Accepted\s*$/mu);
+    await writeFile(
+      amendment,
+      accepted.replace("- Status: Accepted", "- Status: Proposed")
+    );
+    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    await writeFile(amendment, accepted);
+    await validateGuidanceExtraction(root);
+    const proposal = await describeGuidanceTransition(root);
+    assert.match(proposal.predecessorSha256, /^[a-f0-9]{64}$/u);
   });
 });

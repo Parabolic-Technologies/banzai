@@ -4,6 +4,14 @@ import { createHash } from "node:crypto";
 import { BanzaiError } from "./errors.js";
 import { vendorFor } from "./models.js";
 import {
+  COMPLETION_CANDIDATE_SCHEMA,
+  COMPLETION_CAPTURE_SCHEMA,
+  COMPLETION_PROTOCOL,
+  COMPLETION_PUBLICATION_REFUSAL_CODES,
+  COMPLETION_PUBLICATION_SCHEMA,
+  COMPLETION_PUBLICATION_STAGES,
+  COMPLETION_RECORD_SCHEMA_VERSION,
+  COMPLETION_TRANSITION_SCHEMA,
   CONTRACT_VERSION,
   DECISION_CONSULTATION_SCHEMA,
   DECISION_CONSULTATION_SCHEMA_VERSION,
@@ -12,10 +20,29 @@ import {
   PLAN_TASK_COMPLETION_SCHEMA_VERSION,
   RECOVERY_AUTHORIZATION_SCHEMA,
   RECOVERY_AUTHORIZATION_SCHEMA_VERSION,
+  STRICT_MODEL_ATTEMPT_SCHEMA_VERSION,
   TERMINAL_CHECKPOINT_SCHEMA,
+  TERMINAL_CHECKPOINT_SCHEMA_V2,
   TERMINAL_CHECKPOINT_SCHEMA_VERSION,
+  TERMINAL_CHECKPOINT_SCHEMA_VERSION_V2,
   VERIFICATION_LEDGER_SCHEMA_VERSION,
   type AttemptRecord,
+  type CompletionCandidate,
+  type CompletionCapture,
+  type CompletionDiagnostic,
+  type CompletionObservedInputs,
+  type CompletionPublication,
+  type CompletionPublicationCursor,
+  type CompletionPublicationRefusalCode,
+  type CompletionPublicationStage,
+  type CompletionReportObservation,
+  type CompletionTransition,
+  type EnvelopeTaskCompletion,
+  type PersistedTerminalCheckpoint,
+  type PhaseResultEnvelope,
+  type PlanTaskCompletionCheckpoint,
+  type PlanTaskCompletionViolation,
+  type TerminalAttemptCheckpointV2,
   type AttemptReference,
   type ClaudeEnvironmentMode,
   type ClaudeEnvironmentSettings,
@@ -711,6 +738,23 @@ export function parseWorkflowSelectionResult(
 
 export function parsePhaseResult(value: unknown): PhaseResult {
   const record = requireRecord(value, "phase result");
+  return {
+    ...parsePhaseResultFields(record),
+    taskCompletion: parseTaskCompletion(record.taskCompletion)
+  };
+}
+
+const MAX_ORIGINAL_RESULT_BYTES = 4 * 1024 * 1024;
+const MAX_UNACCEPTED_LEDGER_PREVIEW = 4_000;
+
+/**
+ * Decodes every phase-result field except the completion ledger. Under the
+ * completion protocol the envelope must stand on its own, so a malformed
+ * ledger cannot discard a safely established stop.
+ */
+function parsePhaseResultFields(
+  record: Record<string, unknown>
+): Omit<PhaseResult, "taskCompletion"> {
   exactKeys(
     record,
     [
@@ -803,7 +847,6 @@ export function parsePhaseResult(value: unknown): PhaseResult {
     gate,
     summary,
     artifacts: parseArtifacts(record.artifacts),
-    taskCompletion: parseTaskCompletion(record.taskCompletion),
     touchedPaths: requireStringArray(record.touchedPaths, "touchedPaths"),
     questions,
     decisionConsultation,
@@ -816,6 +859,143 @@ export function parsePhaseResult(value: unknown): PhaseResult {
       "requestedVerification"
     )
   };
+}
+
+/**
+ * Safe envelope decoding for the completion protocol: exact keys, versions,
+ * phase, outcome/gate pairing, questions, artifacts, paths and finding
+ * identities validate normally, while the completion ledger is held as a
+ * bounded unaccepted diagnostic when the separate ledger parser rejects it.
+ */
+export function parsePhaseResultEnvelope(value: unknown): PhaseResultEnvelope {
+  const record = requireRecord(value, "phase result");
+  const fields = parsePhaseResultFields(record);
+  const original = stableJson(record);
+  if (Buffer.byteLength(original, "utf8") > MAX_ORIGINAL_RESULT_BYTES) {
+    throw new BanzaiError(
+      "INVALID_RESULT",
+      "Phase result exceeds the retained original result bound."
+    );
+  }
+  let taskCompletion: EnvelopeTaskCompletion;
+  try {
+    taskCompletion = {
+      state: "accepted",
+      ledger: parseTaskCompletion(record.taskCompletion)
+    };
+  } catch (error) {
+    if (
+      !(error instanceof BanzaiError) ||
+      error.code !== "PLAN_TASK_COMPLETION_INVALID"
+    ) {
+      throw error;
+    }
+    const raw = stableJson(record.taskCompletion);
+    taskCompletion = {
+      state: "unaccepted",
+      diagnostic: error.message.slice(0, 500),
+      raw: raw.slice(0, MAX_UNACCEPTED_LEDGER_PREVIEW),
+      rawDigest: createHash("sha256").update(raw).digest("hex")
+    };
+  }
+  return {
+    ...fields,
+    taskCompletion,
+    original,
+    originalDigest: createHash("sha256").update(original).digest("hex")
+  };
+}
+
+const ENVELOPE_ONLY_FIELDS = new Set([
+  "taskCompletion",
+  "original",
+  "originalDigest"
+]);
+
+/** The plain phase-result fields an envelope carries beside its ledger verdict and retained original. */
+export function envelopeResultFields(
+  envelope: PhaseResultEnvelope
+): Omit<PhaseResult, "taskCompletion"> {
+  return Object.fromEntries(
+    Object.entries(envelope).filter(([key]) => !ENVELOPE_ONLY_FIELDS.has(key))
+  ) as Omit<PhaseResult, "taskCompletion">;
+}
+
+/** The validated result an accepted envelope carries; null while the ledger is unaccepted. */
+export function phaseResultFromEnvelope(
+  envelope: PhaseResultEnvelope
+): PhaseResult | null {
+  if (envelope.taskCompletion.state !== "accepted") return null;
+  return {
+    ...envelopeResultFields(envelope),
+    taskCompletion: envelope.taskCompletion.ledger
+  };
+}
+
+/** Re-expresses an already validated result as its accepted envelope. */
+export function phaseResultEnvelopeOf(
+  result: PhaseResult
+): PhaseResultEnvelope {
+  return parsePhaseResultEnvelope(JSON.parse(JSON.stringify(result)));
+}
+
+export function isPhaseResultEnvelope(
+  value: PhaseResult | PhaseResultEnvelope
+): value is PhaseResultEnvelope {
+  return (
+    "original" in value &&
+    typeof value.original === "string" &&
+    isRecord(value.taskCompletion) &&
+    "state" in value.taskCompletion
+  );
+}
+
+/**
+ * Closed reader for a persisted envelope: the stored fields must equal the
+ * envelope re-decoded from its own retained original, so neither the ledger
+ * verdict nor the diagnostic can be edited apart from the original bytes.
+ */
+export function parseStoredPhaseResultEnvelope(
+  value: unknown,
+  code = "ATTEMPT_MALFORMED"
+): PhaseResultEnvelope {
+  if (!isRecord(value) || typeof value.original !== "string") {
+    return recoveryEvidenceError(
+      code,
+      "Persisted envelope must retain its original result."
+    );
+  }
+  if (Buffer.byteLength(value.original, "utf8") > MAX_ORIGINAL_RESULT_BYTES) {
+    return recoveryEvidenceError(
+      code,
+      "Persisted envelope original exceeds its bound."
+    );
+  }
+  let original: unknown;
+  try {
+    original = JSON.parse(value.original);
+  } catch {
+    return recoveryEvidenceError(
+      code,
+      "Persisted envelope original is not JSON."
+    );
+  }
+  let decoded: PhaseResultEnvelope;
+  try {
+    decoded = parsePhaseResultEnvelope(original);
+  } catch (error) {
+    return recoveryEvidenceError(
+      code,
+      `Persisted envelope original does not decode: ${(error as Error).message}`
+    );
+  }
+  if (stableJson(decoded) !== stableJson(value)) {
+    return recoveryEvidenceError(
+      code,
+      "Persisted envelope conflicts with its retained original result."
+    );
+  }
+  return decoded;
 }
 
 export function parsePersistedPhaseResult(
@@ -1484,20 +1664,1283 @@ function parseCheckpointResult(
 }
 
 export function terminalCheckpointIntegrity(
-  checkpoint: Omit<TerminalAttemptCheckpoint, "integrityDigest">
+  checkpoint:
+    | Omit<TerminalAttemptCheckpoint, "integrityDigest">
+    | Omit<TerminalAttemptCheckpointV2, "integrityDigest">
 ): string {
   return digestCanonicalJson(checkpoint);
 }
 
-export function parseTerminalAttemptCheckpoint(
+/** Same canonical hashing for every completion protocol record. */
+export function completionRecordIntegrity(record: unknown): string {
+  return digestCanonicalJson(record);
+}
+
+function parseCompletionIdentity(
+  value: Record<string, unknown>,
+  code: string
+): {
+  runId: string;
+  attemptId: string;
+  attemptKind: "implementation" | "fix";
+  completionProtocol: typeof COMPLETION_PROTOCOL;
+} {
+  if (value.completionProtocol !== COMPLETION_PROTOCOL) {
+    return recoveryEvidenceError(
+      code,
+      `Completion record must carry ${COMPLETION_PROTOCOL}.`
+    );
+  }
+  const attemptKind = value.attemptKind;
+  if (attemptKind !== "implementation" && attemptKind !== "fix") {
+    return recoveryEvidenceError(code, "attemptKind is unsupported.");
+  }
+  return {
+    runId: evidenceIdentifier(value.runId, code, "runId", 300),
+    attemptId: evidenceIdentifier(value.attemptId, code, "attemptId", 200),
+    attemptKind,
+    completionProtocol: COMPLETION_PROTOCOL
+  };
+}
+
+function requireIntegrity<T extends { integrityDigest: string }>(
+  value: Record<string, unknown>,
+  record: Omit<T, "integrityDigest">,
+  code: string,
+  label: string
+): T {
+  const integrityDigest = evidenceDigest(
+    value.integrityDigest,
+    code,
+    "integrityDigest"
+  );
+  if (integrityDigest !== completionRecordIntegrity(record)) {
+    return recoveryEvidenceError(code, `${label} integrity mismatch.`);
+  }
+  return { ...record, integrityDigest } as T;
+}
+
+function reportIdentity(
+  value: unknown,
+  code: string,
+  label: string
+): { path: string; sha256: string } {
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(code, `${label} must be an object.`);
+  }
+  exactKeys(value, ["path", "sha256"], code, label);
+  return {
+    path: evidenceString(value.path, code, `${label}.path`),
+    sha256: evidenceDigest(value.sha256, code, `${label}.sha256`)
+  };
+}
+
+function nullableReportIdentity(
+  value: unknown,
+  code: string,
+  label: string
+): { path: string; sha256: string } | null {
+  return value === null ? null : reportIdentity(value, code, label);
+}
+
+function ledgerSourceIdentity(
+  value: unknown,
+  code: string,
+  label: string
+): {
+  attemptId: string;
+  attemptKind: "implementation" | "fix";
+  ledgerDigest: string;
+} {
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(code, `${label} must be an object.`);
+  }
+  exactKeys(value, ["attemptId", "attemptKind", "ledgerDigest"], code, label);
+  const attemptKind = value.attemptKind;
+  if (attemptKind !== "implementation" && attemptKind !== "fix") {
+    return recoveryEvidenceError(code, `${label}.attemptKind is unsupported.`);
+  }
+  return {
+    attemptId: evidenceIdentifier(value.attemptId, code, `${label}.attemptId`),
+    attemptKind,
+    ledgerDigest: evidenceDigest(
+      value.ledgerDigest,
+      code,
+      `${label}.ledgerDigest`
+    )
+  };
+}
+
+export function parseCompletionTransition(
   value: unknown
-): TerminalAttemptCheckpoint {
+): CompletionTransition {
+  const code = "INVALID_COMPLETION_TRANSITION";
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(
+      code,
+      "Completion transition must be an object."
+    );
+  }
+  exactKeys(
+    value,
+    [
+      "schema",
+      "schemaVersion",
+      "runId",
+      "attemptId",
+      "attemptKind",
+      "completionProtocol",
+      "priorState",
+      "integrityDigest"
+    ],
+    code,
+    "Completion transition"
+  );
+  if (
+    value.schema !== COMPLETION_TRANSITION_SCHEMA ||
+    value.schemaVersion !== COMPLETION_RECORD_SCHEMA_VERSION
+  ) {
+    return recoveryEvidenceError(
+      code,
+      `Completion transition must use ${COMPLETION_TRANSITION_SCHEMA}.`
+    );
+  }
+  if (!isRecord(value.priorState)) {
+    return recoveryEvidenceError(code, "priorState must be an object.");
+  }
+  exactKeys(
+    value.priorState,
+    ["schemaVersion", "path", "sha256"],
+    code,
+    "priorState"
+  );
+  if (
+    value.priorState.schemaVersion !== 3 &&
+    value.priorState.schemaVersion !== 4 &&
+    value.priorState.schemaVersion !== 6
+  ) {
+    return recoveryEvidenceError(
+      code,
+      "priorState.schemaVersion must be a legacy 3 or bootstrap 4/6 state."
+    );
+  }
+  const record: Omit<CompletionTransition, "integrityDigest"> = {
+    schema: COMPLETION_TRANSITION_SCHEMA,
+    schemaVersion: COMPLETION_RECORD_SCHEMA_VERSION,
+    ...parseCompletionIdentity(value, code),
+    priorState: {
+      schemaVersion: value.priorState.schemaVersion,
+      path: evidenceString(value.priorState.path, code, "priorState.path"),
+      sha256: evidenceDigest(value.priorState.sha256, code, "priorState.sha256")
+    }
+  };
+  return requireIntegrity<CompletionTransition>(
+    value,
+    record,
+    code,
+    "Completion transition"
+  );
+}
+
+export function parseCompletionCapture(value: unknown): CompletionCapture {
+  const code = "INVALID_COMPLETION_CAPTURE";
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(code, "Completion capture must be an object.");
+  }
+  exactKeys(
+    value,
+    [
+      "schema",
+      "schemaVersion",
+      "runId",
+      "attemptId",
+      "attemptKind",
+      "completionProtocol",
+      "outcome",
+      "resultDigest",
+      "terminalIntegrityDigest",
+      "transitionDigest",
+      "baseCommit",
+      "approvalDigest",
+      "planTaskDigest",
+      "workBinding",
+      "configurationDigest",
+      "scopeDigest",
+      "ledgerSource",
+      "reports",
+      "originals",
+      "workspace",
+      "capturedAt",
+      "integrityDigest"
+    ],
+    code,
+    "Completion capture"
+  );
+  if (
+    value.schema !== COMPLETION_CAPTURE_SCHEMA ||
+    value.schemaVersion !== COMPLETION_RECORD_SCHEMA_VERSION
+  ) {
+    return recoveryEvidenceError(
+      code,
+      `Completion capture must use ${COMPLETION_CAPTURE_SCHEMA}.`
+    );
+  }
+  if (value.outcome !== "completed" && value.outcome !== "stop") {
+    return recoveryEvidenceError(code, "outcome is unsupported.");
+  }
+  if (!isRecord(value.reports)) {
+    return recoveryEvidenceError(code, "reports must be an object.");
+  }
+  exactKeys(
+    value.reports,
+    ["implementationReport", "testReport"],
+    code,
+    "reports"
+  );
+  if (!isRecord(value.originals)) {
+    return recoveryEvidenceError(code, "originals must be an object.");
+  }
+  exactKeys(
+    value.originals,
+    ["implementationReport", "testReport"],
+    code,
+    "originals"
+  );
+  if (!isRecord(value.workspace)) {
+    return recoveryEvidenceError(code, "workspace must be an object.");
+  }
+  exactKeys(value.workspace, ["digest", "excludedPaths"], code, "workspace");
+  if (
+    !Array.isArray(value.workspace.excludedPaths) ||
+    value.workspace.excludedPaths.length > 8
+  ) {
+    return recoveryEvidenceError(
+      code,
+      "workspace.excludedPaths must be a bounded array."
+    );
+  }
+  let workBinding: CompletionCapture["workBinding"] = null;
+  if (value.workBinding !== null) {
+    if (!isRecord(value.workBinding)) {
+      return recoveryEvidenceError(
+        code,
+        "workBinding must be an object or null."
+      );
+    }
+    exactKeys(value.workBinding, ["workId", "sha256"], code, "workBinding");
+    workBinding = {
+      workId: evidenceIdentifier(
+        value.workBinding.workId,
+        code,
+        "workBinding.workId"
+      ),
+      sha256: evidenceDigest(
+        value.workBinding.sha256,
+        code,
+        "workBinding.sha256"
+      )
+    };
+  }
+  const record: Omit<CompletionCapture, "integrityDigest"> = {
+    schema: COMPLETION_CAPTURE_SCHEMA,
+    schemaVersion: COMPLETION_RECORD_SCHEMA_VERSION,
+    ...parseCompletionIdentity(value, code),
+    outcome: value.outcome,
+    resultDigest: evidenceDigest(value.resultDigest, code, "resultDigest"),
+    terminalIntegrityDigest: nullableEvidenceDigest(
+      value.terminalIntegrityDigest,
+      code,
+      "terminalIntegrityDigest"
+    ),
+    transitionDigest: nullableEvidenceDigest(
+      value.transitionDigest,
+      code,
+      "transitionDigest"
+    ),
+    baseCommit: evidenceString(value.baseCommit, code, "baseCommit", 100),
+    approvalDigest: evidenceDigest(
+      value.approvalDigest,
+      code,
+      "approvalDigest"
+    ),
+    planTaskDigest: evidenceDigest(
+      value.planTaskDigest,
+      code,
+      "planTaskDigest"
+    ),
+    workBinding,
+    configurationDigest: evidenceDigest(
+      value.configurationDigest,
+      code,
+      "configurationDigest"
+    ),
+    scopeDigest: nullableEvidenceDigest(value.scopeDigest, code, "scopeDigest"),
+    ledgerSource:
+      value.ledgerSource === null
+        ? null
+        : ledgerSourceIdentity(value.ledgerSource, code, "ledgerSource"),
+    reports: {
+      implementationReport: parseReportObservation(
+        value.reports.implementationReport,
+        code,
+        "reports.implementationReport"
+      ),
+      testReport: parseReportObservation(
+        value.reports.testReport,
+        code,
+        "reports.testReport"
+      )
+    },
+    originals: {
+      implementationReport: nullableReportIdentity(
+        value.originals.implementationReport,
+        code,
+        "originals.implementationReport"
+      ),
+      testReport: nullableReportIdentity(
+        value.originals.testReport,
+        code,
+        "originals.testReport"
+      )
+    },
+    workspace: {
+      digest: evidenceDigest(value.workspace.digest, code, "workspace.digest"),
+      excludedPaths: value.workspace.excludedPaths.map((item, index) =>
+        evidenceString(item, code, `workspace.excludedPaths[${index}]`)
+      )
+    },
+    capturedAt: evidenceTimestamp(value.capturedAt, code, "capturedAt")
+  };
+  return requireIntegrity<CompletionCapture>(
+    value,
+    record,
+    code,
+    "Completion capture"
+  );
+}
+
+export function parseCompletionCandidate(value: unknown): CompletionCandidate {
+  const code = "INVALID_COMPLETION_CANDIDATE";
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(
+      code,
+      "Completion candidate must be an object."
+    );
+  }
+  exactKeys(
+    value,
+    [
+      "schema",
+      "schemaVersion",
+      "runId",
+      "attemptId",
+      "attemptKind",
+      "completionProtocol",
+      "captureDigest",
+      "ledgerDigest",
+      "destination",
+      "inputSha256",
+      "candidatePath",
+      "outputSha256",
+      "outputBytes",
+      "testReportSha256",
+      "region",
+      "preservation",
+      "roundtrip",
+      "integrityDigest"
+    ],
+    code,
+    "Completion candidate"
+  );
+  if (
+    value.schema !== COMPLETION_CANDIDATE_SCHEMA ||
+    value.schemaVersion !== COMPLETION_RECORD_SCHEMA_VERSION
+  ) {
+    return recoveryEvidenceError(
+      code,
+      `Completion candidate must use ${COMPLETION_CANDIDATE_SCHEMA}.`
+    );
+  }
+  if (!isRecord(value.region)) {
+    return recoveryEvidenceError(code, "region must be an object.");
+  }
+  exactKeys(value.region, ["action", "start", "end"], code, "region");
+  const action = value.region.action;
+  const { start, end } = value.region;
+  if (
+    (action !== "appended" && action !== "replaced") ||
+    typeof start !== "number" ||
+    typeof end !== "number" ||
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    start < 0 ||
+    end < start
+  ) {
+    return recoveryEvidenceError(code, "region is malformed.");
+  }
+  if (
+    typeof value.outputBytes !== "number" ||
+    !Number.isSafeInteger(value.outputBytes) ||
+    value.outputBytes < 0 ||
+    value.preservation !== "verified" ||
+    value.roundtrip !== "verified"
+  ) {
+    return recoveryEvidenceError(code, "Candidate proof fields are malformed.");
+  }
+  const record: Omit<CompletionCandidate, "integrityDigest"> = {
+    schema: COMPLETION_CANDIDATE_SCHEMA,
+    schemaVersion: COMPLETION_RECORD_SCHEMA_VERSION,
+    ...parseCompletionIdentity(value, code),
+    captureDigest: evidenceDigest(value.captureDigest, code, "captureDigest"),
+    ledgerDigest: evidenceDigest(value.ledgerDigest, code, "ledgerDigest"),
+    destination: evidenceString(value.destination, code, "destination"),
+    inputSha256: evidenceDigest(value.inputSha256, code, "inputSha256"),
+    candidatePath: evidenceString(value.candidatePath, code, "candidatePath"),
+    outputSha256: evidenceDigest(value.outputSha256, code, "outputSha256"),
+    outputBytes: value.outputBytes,
+    testReportSha256: evidenceDigest(
+      value.testReportSha256,
+      code,
+      "testReportSha256"
+    ),
+    region: { action, start, end },
+    preservation: "verified",
+    roundtrip: "verified"
+  };
+  return requireIntegrity<CompletionCandidate>(
+    value,
+    record,
+    code,
+    "Completion candidate"
+  );
+}
+
+export function parseCompletionPublication(
+  value: unknown
+): CompletionPublication {
+  const code = "INVALID_COMPLETION_PUBLICATION";
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(
+      code,
+      "Completion publication must be an object."
+    );
+  }
+  exactKeys(
+    value,
+    [
+      "schema",
+      "schemaVersion",
+      "runId",
+      "attemptId",
+      "attemptKind",
+      "completionProtocol",
+      "captureDigest",
+      "candidateDigest",
+      "terminalIntegrityDigest",
+      "authority",
+      "ledgerAuthor",
+      "publisher",
+      "implementationReport",
+      "testReport",
+      "publishedAt",
+      "integrityDigest"
+    ],
+    code,
+    "Completion publication"
+  );
+  if (
+    value.schema !== COMPLETION_PUBLICATION_SCHEMA ||
+    value.schemaVersion !== COMPLETION_RECORD_SCHEMA_VERSION
+  ) {
+    return recoveryEvidenceError(
+      code,
+      `Completion publication must use ${COMPLETION_PUBLICATION_SCHEMA}.`
+    );
+  }
+  if (!isRecord(value.authority)) {
+    return recoveryEvidenceError(code, "authority must be an object.");
+  }
+  exactKeys(
+    value.authority,
+    [
+      "baseCommit",
+      "approvalDigest",
+      "planTaskDigest",
+      "scopeDigest",
+      "workBindingSha256",
+      "configurationDigest"
+    ],
+    code,
+    "authority"
+  );
+  if (!isRecord(value.publisher)) {
+    return recoveryEvidenceError(code, "publisher must be an object.");
+  }
+  exactKeys(value.publisher, ["attemptId", "attemptKind"], code, "publisher");
+  const publisherKind = value.publisher.attemptKind;
+  if (publisherKind !== "implementation" && publisherKind !== "fix") {
+    return recoveryEvidenceError(code, "publisher.attemptKind is unsupported.");
+  }
+  const identity = parseCompletionIdentity(value, code);
+  const publisher: CompletionPublication["publisher"] = {
+    attemptId: evidenceIdentifier(
+      value.publisher.attemptId,
+      code,
+      "publisher.attemptId"
+    ),
+    attemptKind: publisherKind
+  };
+  if (
+    publisher.attemptId !== identity.attemptId ||
+    publisher.attemptKind !== identity.attemptKind
+  ) {
+    return recoveryEvidenceError(
+      code,
+      "A receipt is owned by the attempt that published it."
+    );
+  }
+  const record: Omit<CompletionPublication, "integrityDigest"> = {
+    schema: COMPLETION_PUBLICATION_SCHEMA,
+    schemaVersion: COMPLETION_RECORD_SCHEMA_VERSION,
+    ...identity,
+    captureDigest: evidenceDigest(value.captureDigest, code, "captureDigest"),
+    candidateDigest: evidenceDigest(
+      value.candidateDigest,
+      code,
+      "candidateDigest"
+    ),
+    terminalIntegrityDigest: nullableEvidenceDigest(
+      value.terminalIntegrityDigest,
+      code,
+      "terminalIntegrityDigest"
+    ),
+    authority: {
+      baseCommit: evidenceString(
+        value.authority.baseCommit,
+        code,
+        "authority.baseCommit",
+        100
+      ),
+      approvalDigest: evidenceDigest(
+        value.authority.approvalDigest,
+        code,
+        "authority.approvalDigest"
+      ),
+      planTaskDigest: evidenceDigest(
+        value.authority.planTaskDigest,
+        code,
+        "authority.planTaskDigest"
+      ),
+      scopeDigest: nullableEvidenceDigest(
+        value.authority.scopeDigest,
+        code,
+        "authority.scopeDigest"
+      ),
+      workBindingSha256: nullableEvidenceDigest(
+        value.authority.workBindingSha256,
+        code,
+        "authority.workBindingSha256"
+      ),
+      configurationDigest: evidenceDigest(
+        value.authority.configurationDigest,
+        code,
+        "authority.configurationDigest"
+      )
+    },
+    ledgerAuthor: ledgerSourceIdentity(
+      value.ledgerAuthor,
+      code,
+      "ledgerAuthor"
+    ),
+    publisher,
+    implementationReport: reportIdentity(
+      value.implementationReport,
+      code,
+      "implementationReport"
+    ),
+    testReport: reportIdentity(value.testReport, code, "testReport"),
+    publishedAt: evidenceTimestamp(value.publishedAt, code, "publishedAt")
+  };
+  return requireIntegrity<CompletionPublication>(
+    value,
+    record,
+    code,
+    "Completion publication"
+  );
+}
+
+/** Closed decoder for the schema-7 run-state publication cursor. */
+export function parseCompletionPublicationCursor(
+  value: unknown
+): CompletionPublicationCursor {
+  const code = "INVALID_COMPLETION_CURSOR";
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(code, "Completion cursor must be an object.");
+  }
+  exactKeys(
+    value,
+    [
+      "attemptId",
+      "attemptKind",
+      "stage",
+      "captureDigest",
+      "candidateDigest",
+      "receiptDigest",
+      "refusal"
+    ],
+    code,
+    "Completion cursor"
+  );
+  const attemptKind = value.attemptKind;
+  if (attemptKind !== "implementation" && attemptKind !== "fix") {
+    return recoveryEvidenceError(code, "attemptKind is unsupported.");
+  }
+  const stage = value.stage;
+  if (
+    typeof stage !== "string" ||
+    !COMPLETION_PUBLICATION_STAGES.includes(
+      stage as (typeof COMPLETION_PUBLICATION_STAGES)[number]
+    )
+  ) {
+    return recoveryEvidenceError(code, "stage is unsupported.");
+  }
+  let refusal: CompletionPublicationCursor["refusal"] = null;
+  if (value.refusal !== null) {
+    if (!isRecord(value.refusal)) {
+      return recoveryEvidenceError(code, "refusal must be an object or null.");
+    }
+    exactKeys(value.refusal, ["code", "stage", "proofDigest"], code, "refusal");
+    const refusalCode = value.refusal.code;
+    const refusalStage = value.refusal.stage;
+    if (
+      typeof refusalCode !== "string" ||
+      !COMPLETION_PUBLICATION_REFUSAL_CODES.includes(
+        refusalCode as (typeof COMPLETION_PUBLICATION_REFUSAL_CODES)[number]
+      ) ||
+      typeof refusalStage !== "string" ||
+      !COMPLETION_PUBLICATION_STAGES.includes(
+        refusalStage as (typeof COMPLETION_PUBLICATION_STAGES)[number]
+      )
+    ) {
+      return recoveryEvidenceError(code, "refusal is malformed.");
+    }
+    refusal = {
+      code: refusalCode as CompletionPublicationRefusalCode,
+      stage: refusalStage as CompletionPublicationStage,
+      proofDigest: nullableEvidenceDigest(
+        value.refusal.proofDigest,
+        code,
+        "refusal.proofDigest"
+      )
+    };
+  }
+  return {
+    attemptId: evidenceIdentifier(value.attemptId, code, "attemptId"),
+    attemptKind,
+    stage: stage as CompletionPublicationStage,
+    captureDigest: nullableEvidenceDigest(
+      value.captureDigest,
+      code,
+      "captureDigest"
+    ),
+    candidateDigest: nullableEvidenceDigest(
+      value.candidateDigest,
+      code,
+      "candidateDigest"
+    ),
+    receiptDigest: nullableEvidenceDigest(
+      value.receiptDigest,
+      code,
+      "receiptDigest"
+    ),
+    refusal
+  };
+}
+
+/**
+ * Closed decoder for the persisted plan-task completion checkpoint. Schema 1
+ * keeps its model-projection meaning; schema 2 must carry the protocol and
+ * the publisher/receipt identities that runner publication recorded.
+ */
+export function parsePlanTaskCompletionCheckpoint(
+  value: unknown
+): PlanTaskCompletionCheckpoint {
+  const code = "INVALID_COMPLETION_CHECKPOINT";
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(
+      code,
+      "Completion checkpoint must be an object."
+    );
+  }
+  if (value.schemaVersion !== 1 && value.schemaVersion !== 2) {
+    return recoveryEvidenceError(
+      code,
+      "Completion checkpoint schema version is unsupported."
+    );
+  }
+  const published = value.schemaVersion === 2;
+  const kind =
+    value.sourceAttemptKind === undefined
+      ? undefined
+      : value.sourceAttemptKind === "implementation" ||
+          value.sourceAttemptKind === "fix"
+        ? value.sourceAttemptKind
+        : recoveryEvidenceError(code, "sourceAttemptKind is unsupported.");
+  if (published && kind === undefined) {
+    return recoveryEvidenceError(
+      code,
+      "A published completion checkpoint must name its ledger author kind."
+    );
+  }
+  const sourceAttemptId = evidenceIdentifier(
+    value.sourceAttemptId,
+    code,
+    "sourceAttemptId"
+  );
+  if (value.status === "invalid") {
+    exactKeys(
+      value,
+      [
+        "schemaVersion",
+        "status",
+        "sourceAttemptId",
+        "sourceAttemptKind",
+        "errorCode",
+        "violation",
+        "taskId",
+        "recordedAt",
+        ...(published
+          ? ["completionProtocol", "diagnostic", "rejectedResultDigest"]
+          : [])
+      ],
+      code,
+      "Invalid completion checkpoint"
+    );
+    if (value.errorCode !== "PLAN_TASK_COMPLETION_INVALID") {
+      return recoveryEvidenceError(code, "errorCode is unsupported.");
+    }
+    const diagnostic = parseCompletionDiagnostic(
+      {
+        violation: value.violation,
+        taskId: value.taskId,
+        message: published ? value.diagnostic : "retained"
+      },
+      code
+    );
+    if (published && value.completionProtocol !== COMPLETION_PROTOCOL) {
+      return recoveryEvidenceError(
+        code,
+        `Published completion checkpoint must carry ${COMPLETION_PROTOCOL}.`
+      );
+    }
+    return {
+      schemaVersion: value.schemaVersion,
+      status: "invalid",
+      sourceAttemptId,
+      ...(kind === undefined ? {} : { sourceAttemptKind: kind }),
+      errorCode: "PLAN_TASK_COMPLETION_INVALID",
+      violation: diagnostic.violation,
+      taskId: diagnostic.taskId,
+      recordedAt: evidenceTimestamp(value.recordedAt, code, "recordedAt"),
+      ...(published
+        ? {
+            completionProtocol: COMPLETION_PROTOCOL,
+            diagnostic: diagnostic.message,
+            rejectedResultDigest: nullableEvidenceDigest(
+              value.rejectedResultDigest,
+              code,
+              "rejectedResultDigest"
+            )
+          }
+        : {})
+    };
+  }
+  if (value.status !== "valid") {
+    return recoveryEvidenceError(
+      code,
+      "Completion checkpoint status is unsupported."
+    );
+  }
+  exactKeys(
+    value,
+    [
+      "schemaVersion",
+      "status",
+      "sourceAttemptId",
+      "sourceAttemptKind",
+      "approvalDigest",
+      "planTaskDigest",
+      "ledgerDigest",
+      "implementationReport",
+      "testReport",
+      "counts",
+      "validatedAt",
+      ...(published
+        ? ["completionProtocol", "publisherAttemptId", "publication"]
+        : [])
+    ],
+    code,
+    "Valid completion checkpoint"
+  );
+  if (!isRecord(value.counts)) {
+    return recoveryEvidenceError(code, "counts must be an object.");
+  }
+  exactKeys(
+    value.counts,
+    ["total", "completed", "incomplete", "blocked"],
+    code,
+    "counts"
+  );
+  const count = (item: unknown, label: string): number => {
+    if (typeof item !== "number" || !Number.isSafeInteger(item) || item < 0) {
+      return recoveryEvidenceError(code, `counts.${label} must be a count.`);
+    }
+    return item;
+  };
+  const counts = {
+    total: count(value.counts.total, "total"),
+    completed: count(value.counts.completed, "completed"),
+    incomplete: count(value.counts.incomplete, "incomplete"),
+    blocked: count(value.counts.blocked, "blocked")
+  };
+  if (counts.completed + counts.incomplete + counts.blocked !== counts.total) {
+    return recoveryEvidenceError(code, "counts do not sum to total.");
+  }
+  if (published && value.completionProtocol !== COMPLETION_PROTOCOL) {
+    return recoveryEvidenceError(
+      code,
+      `Published completion checkpoint must carry ${COMPLETION_PROTOCOL}.`
+    );
+  }
+  return {
+    schemaVersion: value.schemaVersion,
+    status: "valid",
+    sourceAttemptId,
+    ...(kind === undefined ? {} : { sourceAttemptKind: kind }),
+    approvalDigest: evidenceDigest(
+      value.approvalDigest,
+      code,
+      "approvalDigest"
+    ),
+    planTaskDigest: evidenceDigest(
+      value.planTaskDigest,
+      code,
+      "planTaskDigest"
+    ),
+    ledgerDigest: evidenceDigest(value.ledgerDigest, code, "ledgerDigest"),
+    implementationReport: reportIdentity(
+      value.implementationReport,
+      code,
+      "implementationReport"
+    ),
+    testReport: reportIdentity(value.testReport, code, "testReport"),
+    counts,
+    validatedAt: evidenceTimestamp(value.validatedAt, code, "validatedAt"),
+    ...(published
+      ? {
+          completionProtocol: COMPLETION_PROTOCOL,
+          publisherAttemptId: evidenceIdentifier(
+            value.publisherAttemptId,
+            code,
+            "publisherAttemptId"
+          ),
+          publication: reportIdentity(value.publication, code, "publication")
+        }
+      : {})
+  };
+}
+
+const COMPLETION_VIOLATIONS: readonly PlanTaskCompletionViolation[] = [
+  "approved_plan_invalid",
+  "missing_ledger",
+  "missing_task",
+  "duplicate_task",
+  "unknown_task",
+  "task_order_mismatch",
+  "invalid_task_status",
+  "task_status_conflict",
+  "invalid_evidence_path",
+  "missing_evidence_path",
+  "evidence_scope_violation",
+  "invalid_gap_reference",
+  "implementation_report_missing",
+  "test_report_missing",
+  "report_projection_missing",
+  "report_projection_invalid",
+  "report_projection_mismatch",
+  "report_region_invalid",
+  "approval_invalid",
+  "source_attempt_invalid",
+  "summary_mismatch"
+];
+
+export function parseCompletionDiagnostic(
+  value: unknown,
+  code = "ATTEMPT_MALFORMED"
+): CompletionDiagnostic {
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(
+      code,
+      "Completion diagnostic must be an object."
+    );
+  }
+  exactKeys(
+    value,
+    ["violation", "taskId", "message"],
+    code,
+    "Completion diagnostic"
+  );
+  const violation = value.violation;
+  if (
+    typeof violation !== "string" ||
+    !COMPLETION_VIOLATIONS.includes(violation as PlanTaskCompletionViolation)
+  ) {
+    return recoveryEvidenceError(
+      code,
+      "Completion diagnostic violation is unsupported."
+    );
+  }
+  return {
+    violation: violation as PlanTaskCompletionViolation,
+    taskId:
+      value.taskId === null
+        ? null
+        : evidenceString(value.taskId, code, "taskId", 4),
+    message: evidenceString(value.message, code, "message")
+  };
+}
+
+const REPORT_OBSERVATION_STATES = [
+  "present",
+  "absent",
+  "unsafe",
+  "unavailable"
+] as const;
+
+function parseReportObservation(
+  value: unknown,
+  code: string,
+  label: string
+): CompletionReportObservation {
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(code, `${label} must be an object.`);
+  }
+  const state = value.state;
+  if (
+    typeof state !== "string" ||
+    !REPORT_OBSERVATION_STATES.includes(
+      state as (typeof REPORT_OBSERVATION_STATES)[number]
+    )
+  ) {
+    return recoveryEvidenceError(code, `${label}.state is unsupported.`);
+  }
+  if (state === "present") {
+    exactKeys(value, ["path", "state", "sha256", "bytes"], code, label);
+    if (
+      typeof value.bytes !== "number" ||
+      !Number.isSafeInteger(value.bytes) ||
+      value.bytes < 0
+    ) {
+      return recoveryEvidenceError(
+        code,
+        `${label}.bytes must be a non-negative integer.`
+      );
+    }
+    return {
+      path: evidenceString(value.path, code, `${label}.path`),
+      state: "present",
+      sha256: evidenceDigest(value.sha256, code, `${label}.sha256`),
+      bytes: value.bytes
+    };
+  }
+  exactKeys(value, ["path", "state"], code, label);
+  return {
+    path: evidenceNullableString(value.path, code, `${label}.path`),
+    state: state as "absent" | "unsafe" | "unavailable"
+  };
+}
+
+function parseObservedInputs(
+  value: unknown,
+  code: string,
+  label: string
+): CompletionObservedInputs {
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(code, `${label} must be an object.`);
+  }
+  exactKeys(
+    value,
+    ["implementationReport", "testReport", "workspaceDigest"],
+    code,
+    label
+  );
+  return {
+    implementationReport: parseReportObservation(
+      value.implementationReport,
+      code,
+      `${label}.implementationReport`
+    ),
+    testReport: parseReportObservation(
+      value.testReport,
+      code,
+      `${label}.testReport`
+    ),
+    workspaceDigest:
+      value.workspaceDigest === null
+        ? null
+        : evidenceDigest(
+            value.workspaceDigest,
+            code,
+            `${label}.workspaceDigest`
+          )
+  };
+}
+
+function parseCheckpointConfiguration(
+  value: unknown,
+  code: string
+): TerminalAttemptCheckpoint["configuration"] {
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(code, "configuration must be an object.");
+  }
+  exactKeys(
+    value,
+    [
+      "vendor",
+      "executableDigest",
+      "model",
+      "effort",
+      "sessionMode",
+      "sessionContextDigest"
+    ],
+    code,
+    "configuration"
+  );
+  const vendor = value.vendor;
+  if (vendor !== "codex" && vendor !== "claude") {
+    return recoveryEvidenceError(code, "configuration.vendor is unsupported.");
+  }
+  const effort = value.effort;
+  if (
+    typeof effort !== "string" ||
+    !["low", "medium", "high", "xhigh", "max", "ultra"].includes(effort)
+  ) {
+    return recoveryEvidenceError(code, "configuration.effort is unsupported.");
+  }
+  const sessionMode = value.sessionMode;
+  if (sessionMode !== "fresh" && sessionMode !== "resumed") {
+    return recoveryEvidenceError(
+      code,
+      "configuration.sessionMode is unsupported."
+    );
+  }
+  return {
+    vendor,
+    executableDigest: evidenceDigest(
+      value.executableDigest,
+      code,
+      "configuration.executableDigest"
+    ),
+    model: evidenceString(value.model, code, "configuration.model"),
+    effort: effort as ModelSettings["effort"],
+    sessionMode,
+    sessionContextDigest: evidenceDigest(
+      value.sessionContextDigest,
+      code,
+      "configuration.sessionContextDigest"
+    )
+  };
+}
+
+function parseCheckpointTerminal(
+  value: unknown,
+  vendor: "codex" | "claude",
+  code: string
+): TerminalAttemptCheckpoint["terminal"] {
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(code, "terminal must be an object.");
+  }
+  exactKeys(value, ["classification", "observedAt"], code, "terminal");
+  const classification = value.classification;
+  if (
+    classification !== "claude_result" &&
+    classification !== "codex_turn_completed"
+  ) {
+    return recoveryEvidenceError(
+      code,
+      "terminal.classification is unsupported."
+    );
+  }
+  if (
+    (vendor === "claude" && classification !== "claude_result") ||
+    (vendor === "codex" && classification !== "codex_turn_completed")
+  ) {
+    return recoveryEvidenceError(
+      code,
+      "Terminal classification does not match the configured vendor."
+    );
+  }
+  return {
+    classification,
+    observedAt: evidenceTimestamp(value.observedAt, code, "terminal.observedAt")
+  };
+}
+
+function nullableEvidenceDigest(
+  value: unknown,
+  code: string,
+  label: string
+): string | null {
+  return value === null ? null : evidenceDigest(value, code, label);
+}
+
+/** Terminal proof under the completion protocol (ADR-0047): v2 checkpoint. */
+export function parseTerminalAttemptCheckpointV2(
+  value: unknown
+): TerminalAttemptCheckpointV2 {
   const code = "INVALID_TERMINAL_CHECKPOINT";
   if (!isRecord(value)) {
     return recoveryEvidenceError(
       code,
       "Terminal checkpoint must be an object."
     );
+  }
+  exactKeys(
+    value,
+    [
+      "schema",
+      "schemaVersion",
+      "completionProtocol",
+      "runId",
+      "attempt",
+      "phase",
+      "configuration",
+      "resultContract",
+      "terminal",
+      "envelope",
+      "resultDigest",
+      "observed",
+      "sessionId",
+      "usage",
+      "baseCommit",
+      "approvalDigest",
+      "workflowDigest",
+      "scopeDigest",
+      "integrityDigest"
+    ],
+    code,
+    "Terminal checkpoint"
+  );
+  if (
+    value.schema !== TERMINAL_CHECKPOINT_SCHEMA_V2 ||
+    value.schemaVersion !== TERMINAL_CHECKPOINT_SCHEMA_VERSION_V2 ||
+    value.completionProtocol !== COMPLETION_PROTOCOL
+  ) {
+    return recoveryEvidenceError(
+      code,
+      `Terminal checkpoint must use ${TERMINAL_CHECKPOINT_SCHEMA_V2} under ${COMPLETION_PROTOCOL}.`
+    );
+  }
+  const attempt = parseEvidenceAttempt(value.attempt, code, "attempt");
+  if (
+    (attempt.kind !== "implementation" && attempt.kind !== "fix") ||
+    !attempt.mutable ||
+    value.phase !== attempt.kind
+  ) {
+    return recoveryEvidenceError(
+      code,
+      "Protocol checkpoint requires a mutable implementation or fix attempt."
+    );
+  }
+  if (value.resultContract !== "phase-result/v3") {
+    return recoveryEvidenceError(
+      code,
+      "Checkpoint result contract must be phase-result/v3."
+    );
+  }
+  const configuration = parseCheckpointConfiguration(value.configuration, code);
+  const envelope = parseStoredPhaseResultEnvelope(value.envelope, code);
+  if (envelope.phase !== attempt.kind) {
+    return recoveryEvidenceError(
+      code,
+      "Checkpoint envelope phase must match attempt kind."
+    );
+  }
+  const resultDigest = evidenceDigest(value.resultDigest, code, "resultDigest");
+  if (resultDigest !== envelope.originalDigest) {
+    return recoveryEvidenceError(
+      code,
+      "Checkpoint result digest conflicts with its envelope original."
+    );
+  }
+  const checkpointWithoutIntegrity: Omit<
+    TerminalAttemptCheckpointV2,
+    "integrityDigest"
+  > = {
+    schema: TERMINAL_CHECKPOINT_SCHEMA_V2,
+    schemaVersion: TERMINAL_CHECKPOINT_SCHEMA_VERSION_V2,
+    completionProtocol: COMPLETION_PROTOCOL,
+    runId: evidenceString(value.runId, code, "runId", 300),
+    attempt: {
+      id: attempt.id,
+      kind: attempt.kind,
+      mutable: true
+    },
+    phase: attempt.kind,
+    configuration,
+    resultContract: "phase-result/v3",
+    terminal: parseCheckpointTerminal(
+      value.terminal,
+      configuration.vendor,
+      code
+    ),
+    envelope,
+    resultDigest,
+    observed: parseObservedInputs(value.observed, code, "observed"),
+    sessionId: evidenceNullableString(value.sessionId, code, "sessionId", 300),
+    usage: parseEvidenceUsage(value.usage, code, "usage"),
+    baseCommit: evidenceString(value.baseCommit, code, "baseCommit", 100),
+    approvalDigest: nullableEvidenceDigest(
+      value.approvalDigest,
+      code,
+      "approvalDigest"
+    ),
+    workflowDigest: nullableEvidenceDigest(
+      value.workflowDigest,
+      code,
+      "workflowDigest"
+    ),
+    scopeDigest: nullableEvidenceDigest(value.scopeDigest, code, "scopeDigest")
+  };
+  const integrityDigest = evidenceDigest(
+    value.integrityDigest,
+    code,
+    "integrityDigest"
+  );
+  if (
+    integrityDigest !== terminalCheckpointIntegrity(checkpointWithoutIntegrity)
+  ) {
+    return recoveryEvidenceError(
+      code,
+      "Terminal checkpoint integrity mismatch."
+    );
+  }
+  return { ...checkpointWithoutIntegrity, integrityDigest };
+}
+
+export function parseTerminalAttemptCheckpoint(
+  value: unknown
+): PersistedTerminalCheckpoint {
+  const code = "INVALID_TERMINAL_CHECKPOINT";
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(
+      code,
+      "Terminal checkpoint must be an object."
+    );
+  }
+  // Route by persisted identity, never by report appearance or CLI version.
+  if (value.schema === TERMINAL_CHECKPOINT_SCHEMA_V2) {
+    return parseTerminalAttemptCheckpointV2(value);
   }
   exactKeys(
     value,
@@ -1845,14 +3288,19 @@ export function parseModelAttemptRecord<T>(value: unknown): AttemptRecord<T> {
       "sessionContext",
       "planningContext",
       "reviewContext",
-      "reviewDiagnostics"
+      "reviewDiagnostics",
+      "completionProtocol",
+      "retryOf",
+      "envelope",
+      "completionDiagnostic"
     ],
     code,
     "Attempt record"
   );
   if (
     value.schemaVersion !== 1 &&
-    value.schemaVersion !== MODEL_ATTEMPT_SCHEMA_VERSION
+    value.schemaVersion !== MODEL_ATTEMPT_SCHEMA_VERSION &&
+    value.schemaVersion !== STRICT_MODEL_ATTEMPT_SCHEMA_VERSION
   ) {
     return recoveryEvidenceError(
       code,
@@ -1860,6 +3308,69 @@ export function parseModelAttemptRecord<T>(value: unknown): AttemptRecord<T> {
     );
   }
   const attempt = parseEvidenceAttempt(value.attempt, code, "attempt");
+  const strict = value.schemaVersion === STRICT_MODEL_ATTEMPT_SCHEMA_VERSION;
+  if (strict) {
+    // The protocol is persisted before invocation and selects every later
+    // reader. A missing marker on a v3 record is malformed evidence, never a
+    // legacy fallback; an absent marker on v1/v2 keeps its legacy meaning.
+    if (
+      (attempt.kind !== "implementation" && attempt.kind !== "fix") ||
+      !attempt.mutable ||
+      value.completionProtocol !== COMPLETION_PROTOCOL ||
+      !Object.hasOwn(value, "retryOf") ||
+      !Object.hasOwn(value, "envelope") ||
+      !Object.hasOwn(value, "completionDiagnostic")
+    ) {
+      return recoveryEvidenceError(
+        code,
+        `Attempt schema v3 requires a mutable implementation or fix attempt under ${COMPLETION_PROTOCOL} with retryOf, envelope and completionDiagnostic fields.`
+      );
+    }
+    if (value.retryOf !== null) {
+      evidenceIdentifier(value.retryOf, code, "retryOf", 200);
+      if (value.retryOf === attempt.id)
+        return recoveryEvidenceError(
+          code,
+          "An evidence-repair retry cannot reference itself."
+        );
+    }
+    if (value.envelope !== null) {
+      const envelope = parseStoredPhaseResultEnvelope(value.envelope, code);
+      if (envelope.phase !== attempt.kind)
+        return recoveryEvidenceError(
+          code,
+          "Attempt envelope phase must match attempt kind."
+        );
+      // The raw result and its envelope are one identity: neither can be
+      // edited apart from the other without failing this reader.
+      if (
+        value.result !== null &&
+        stableJson(value.result) !==
+          stableJson(JSON.parse(envelope.original) as unknown)
+      )
+        return recoveryEvidenceError(
+          code,
+          "Attempt result conflicts with its retained envelope original."
+        );
+    } else if (value.result !== null) {
+      return recoveryEvidenceError(
+        code,
+        "A protocol attempt result requires its decoded envelope."
+      );
+    }
+    if (value.completionDiagnostic !== null)
+      parseCompletionDiagnostic(value.completionDiagnostic, code);
+  } else if (
+    "completionProtocol" in value ||
+    "retryOf" in value ||
+    "envelope" in value ||
+    "completionDiagnostic" in value
+  ) {
+    return recoveryEvidenceError(
+      code,
+      "Legacy attempt records cannot carry completion protocol fields."
+    );
+  }
   if (
     value.rotationReason != null &&
     (typeof value.rotationReason !== "string" ||
@@ -2000,13 +3511,32 @@ export function parseModelAttemptRecord<T>(value: unknown): AttemptRecord<T> {
   const status = value.status;
   if (
     typeof status !== "string" ||
-    !["started", "completed", "failed", "interrupted"].includes(status) ||
-    (value.schemaVersion === 1 && status === "interrupted")
+    ![
+      "started",
+      "completed",
+      "failed",
+      "interrupted",
+      "pending_application"
+    ].includes(status) ||
+    (value.schemaVersion === 1 && status === "interrupted") ||
+    (!strict && status === "pending_application")
   ) {
     return recoveryEvidenceError(code, "Attempt status is unsupported.");
   }
+  if (
+    status === "pending_application" &&
+    (value.result === null || value.envelope === null)
+  ) {
+    return recoveryEvidenceError(
+      code,
+      "A pending_application attempt must retain its captured result and envelope."
+    );
+  }
   evidenceTimestamp(value.startedAt, code, "startedAt");
-  if (value.schemaVersion === MODEL_ATTEMPT_SCHEMA_VERSION) {
+  if (
+    value.schemaVersion === MODEL_ATTEMPT_SCHEMA_VERSION ||
+    value.schemaVersion === STRICT_MODEL_ATTEMPT_SCHEMA_VERSION
+  ) {
     if (
       !Object.hasOwn(value, "interruptedAt") ||
       !Object.hasOwn(value, "recoveryOf") ||
@@ -3037,7 +4567,7 @@ function emptyStateMetrics(
 
 function parseStateMetrics(
   value: unknown,
-  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6,
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7,
   issues: EvaluationSourceIssue[]
 ): EvaluationStateMetricSource {
   if (!isRecord(value)) {
@@ -3286,14 +4816,25 @@ export function parseEvaluationStateSource(
     value.schemaVersion !== 3 &&
     value.schemaVersion !== 4 &&
     value.schemaVersion !== 5 &&
-    value.schemaVersion !== 6
+    value.schemaVersion !== 6 &&
+    value.schemaVersion !== 7
   ) {
     throw new BanzaiError(
       "EVALUATION_STATE_SCHEMA_UNSUPPORTED",
       "Persisted state uses an unsupported schema."
     );
   }
-  if (value.schemaVersion === 6) validateConfigurationStateEnvelope(value);
+  if (value.schemaVersion === 6 || value.schemaVersion === 7)
+    validateConfigurationStateEnvelope(value);
+  if (value.schemaVersion === 7) {
+    if (!Object.hasOwn(value, "completionPublication"))
+      throw new BanzaiError(
+        "EVALUATION_STATE_SCHEMA_UNSUPPORTED",
+        "Schema-7 state must carry its completion publication cursor."
+      );
+    if (value.completionPublication !== null)
+      parseCompletionPublicationCursor(value.completionPublication);
+  }
   const schemaVersion = value.schemaVersion;
   const issues: EvaluationSourceIssue[] = [];
   let workflow: EvidenceValue<WorkflowRoute>;
@@ -3434,7 +4975,8 @@ export function parseEvaluationStateSource(
   return {
     value: {
       schemaVersion,
-      ...(schemaVersion === 6
+      ...(schemaVersion === 6 ||
+      (schemaVersion === 7 && typeof value.verificationMode === "string")
         ? { verificationMode: value.verificationMode as "ordered" | "policy" }
         : {}),
       contractVersion: sourceValue(
@@ -3554,19 +5096,24 @@ export function parseEvaluationAttemptSource(
     issues,
     (item) => enumValue(item, ATTEMPT_KINDS)
   );
-  const persistedStatus = attemptEvidence(
-    value,
-    "status",
-    "status",
-    issues,
-    (item) =>
-      enumValue(item, [
-        "started",
-        "completed",
-        "failed",
-        "interrupted"
-      ] as const)
-  );
+  // Frozen export v1 cannot describe a runner-owned publication that is still
+  // pending: it stays an incomplete active attempt, never a guessed outcome.
+  const pendingApplication = value.status === "pending_application";
+  const persistedStatus = pendingApplication
+    ? (() => {
+        issue(issues, "ACTIVE_ATTEMPT_INCOMPLETE", "status");
+        return { value: null, evidence: "unknown" } as EvidenceValue<
+          "started" | "completed" | "failed" | "interrupted"
+        >;
+      })()
+    : attemptEvidence(value, "status", "status", issues, (item) =>
+        enumValue(item, [
+          "started",
+          "completed",
+          "failed",
+          "interrupted"
+        ] as const)
+      );
   const status: EvaluationAttemptSource["status"] =
     persistedStatus.value === "interrupted"
       ? { value: "started", evidence: "derived" }
@@ -3710,7 +5257,7 @@ export function parseEvaluationAttemptSource(
         "schemaVersion",
         "schemaVersion",
         issues,
-        (item) => (item === 1 || item === 2 ? item : undefined),
+        (item) => (item === 1 || item === 2 || item === 3 ? item : undefined),
         false,
         !Object.hasOwn(value, "schemaVersion")
       ),
@@ -3736,7 +5283,7 @@ export function parseEvaluationAttemptSource(
         "completedAt",
         issues,
         rfc3339Value,
-        status.value === "started"
+        status.value === "started" || pendingApplication
       ),
       durationMs: attemptEvidence(
         value,
@@ -3744,7 +5291,7 @@ export function parseEvaluationAttemptSource(
         "durationMs",
         issues,
         nonNegativeNumber,
-        status.value === "started"
+        status.value === "started" || pendingApplication
       ),
       sessionMode,
       reviewMode,

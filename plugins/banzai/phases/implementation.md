@@ -6,7 +6,10 @@ together. Batch adjacent work, run useful focused checks and continue through
 assurance without adding a human gate at the batch or report boundary.
 
 Keep approved documents immutable. Use the runner-supplied completion contract
-and exact report roles. Both the implementation report and test report are
+and exact report roles: return structured task claims in the phase result and
+write the report narrative; the runner validates the claims and publishes the
+report's completion section itself, so never author or edit that section.
+Both the implementation report and test report are
 required; neither report waives missing implementation or assurance evidence.
 Use the supplied verification ownership to distinguish focused feedback from
 runner-owned final verification. Escalate a new material decision before the

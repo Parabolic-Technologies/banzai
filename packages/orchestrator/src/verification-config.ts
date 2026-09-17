@@ -19,6 +19,7 @@ import {
   configurationText,
   configurationUuid,
   normalizedVerificationCommand,
+  hasConfigurationSetup,
   parseConfigurationContinuation,
   type ConfigurationContinuation
 } from "./configuration-prerequisite.js";
@@ -418,7 +419,7 @@ async function assertWriter(
   }
   const state = await store.readState(context.runId);
   if (
-    state.schemaVersion !== 6 ||
+    !hasConfigurationSetup(state) ||
     state.pendingHumanDecision?.kind !== "configuration_prerequisite" ||
     state.activeAttempt !== null ||
     state.activeProcess !== null ||

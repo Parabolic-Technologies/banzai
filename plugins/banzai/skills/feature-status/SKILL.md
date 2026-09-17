@@ -88,8 +88,10 @@ legacy approved meaning and report missing or contradictory material evidence.
 Report task completion separately from lifecycle, and name its source:
 
 1. `structured completion evidence` only when the supported canonical ledger,
-   approved plan digest, required reports, deterministic Markdown projection,
-   and persisted validated summary agree;
+   approved plan digest, required reports, the report's completion section
+   (the runner-published `banzai-plan-task-completion/v2` region, or the
+   legacy model-authored v1 projection), and the persisted validated summary
+   with its publication receipt when present agree;
 2. `plan checkbox` for standalone or non-approved mutable work without
    orchestrator evidence;
 3. `legacy` or `unknown` for an orchestrated run whose source attempt predates
@@ -105,8 +107,12 @@ and may show only proven partial task evidence. A terminal inconsistency keeps
 the persisted lifecycle and next action visible and recommends an
 artifact/evidence audit, not plan-checkbox mutation.
 
-Never parse legacy report prose into a fabricated `N/N`. The report table is a
-projection and cannot independently establish completion. Persisted state
+Never parse legacy report prose into a fabricated `N/N`. The report's
+completion section cannot independently establish completion: a v2 region is
+the runner's receipt of validated claims, a v1 table is a model-authored
+projection, and neither is repository evidence. A run whose latest attempt is
+`pending_application` or whose completion publication was refused has no
+completed claims yet. Persisted state
 continues to determine lifecycle and `nextAction` even when task completion is
 legacy, unknown, or inconsistent.
 

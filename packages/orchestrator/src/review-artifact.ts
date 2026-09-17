@@ -259,15 +259,20 @@ function renderCurrentReviewArtifact(
     replan_required:
       "Review requires replanning through the existing human approval lifecycle."
   }[result.verdict];
+  const guided =
+    snapshot.schemaVersion === 4 ||
+    (snapshot.schemaVersion === 5 && snapshot.configurationSetup !== undefined);
   return [
     "# Implementation Review",
-    snapshot.schemaVersion === 4
-      ? "- Format: `banzai-feature-review/v5`"
-      : snapshot.schemaVersion === 3
-        ? "- Format: `banzai-feature-review/v4`"
-        : snapshot.schemaVersion === 2
-          ? "- Format: `banzai-feature-review/v3`"
-          : "- Format: `banzai-feature-review/v2`",
+    snapshot.schemaVersion === 5
+      ? "- Format: `banzai-feature-review/v6`"
+      : snapshot.schemaVersion === 4
+        ? "- Format: `banzai-feature-review/v5`"
+        : snapshot.schemaVersion === 3
+          ? "- Format: `banzai-feature-review/v4`"
+          : snapshot.schemaVersion === 2
+            ? "- Format: `banzai-feature-review/v3`"
+            : "- Format: `banzai-feature-review/v2`",
     reviewValue({
       slug: context.slug,
       iteration: context.iteration,
@@ -298,7 +303,7 @@ function renderCurrentReviewArtifact(
     reviewValue(
       snapshot.artifact.verificationEvidence ?? snapshot.artifact.verification
     ),
-    ...(snapshot.schemaVersion === 4
+    ...(guided
       ? [
           "### Configuration coverage and runner-authored changes",
           "Coverage below distinguishes configured, bootstrap-deferred and skipped substantive verification. Only the exact recorded deltas are runner-authored; they do not attribute the whole configuration file. Historical deltas may have later user changes, and carried-in changes retain separate provenance. Inspect .banzai/config.json in this candidate.",
@@ -319,6 +324,13 @@ function renderCurrentReviewArtifact(
       source: snapshot.completionSource,
       projection: snapshot.artifact.taskCompletion ?? null
     }),
+    ...(snapshot.schemaVersion === 5
+      ? [
+          "### Runner-owned completion publication (runner evidence)",
+          "The completion region of the implementation report was rendered and published by the runner from the validated ledger; the model authored the claims, narrative and engineering changes. These identities name the retained capture, candidate and receipt proof. Valid structure is not proof that work was done.",
+          reviewValue(snapshot.completionPublication ?? null)
+        ]
+      : []),
     "## Summary",
     reviewValue(result.summary),
     "## Findings",

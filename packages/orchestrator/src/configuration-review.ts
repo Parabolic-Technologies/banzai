@@ -12,7 +12,10 @@ import {
   type VerificationConfigDelta,
   type VerificationConfigTransaction
 } from "./verification-config.js";
-import { configurationDigest } from "./configuration-prerequisite.js";
+import {
+  configurationDigest,
+  hasConfigurationSetup
+} from "./configuration-prerequisite.js";
 
 export interface ReviewConfigurationSetup {
   coverage: ConfigurationSetupState["coverage"];
@@ -36,7 +39,7 @@ export async function freezeReviewConfiguration(
   state: RunState
 ): Promise<ReviewConfigurationSetup> {
   const setup = state.configurationSetup;
-  if (state.schemaVersion !== 6 || !setup)
+  if (!hasConfigurationSetup(state) || !setup)
     throw new BanzaiError(
       "CONFIGURATION_REVIEW_INVALID",
       "The guided review requires its original configuration state."

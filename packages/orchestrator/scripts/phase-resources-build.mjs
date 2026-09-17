@@ -605,15 +605,74 @@ const GUIDED_AUTHORITY_AMENDMENTS = new Map([
   ]
 ]);
 
+// Exact accepted ADR-0047 reciprocal lifecycle annotation images (section 7):
+// ADR-0017, ADR-0023, ADR-0025, ADR-0042 and ADR-0043. Each before image is the
+// previously retained authority image, so an ADR-0045 amendment chains into its
+// ADR-0047 successor without repinning history. Changed bodies never match.
+const COMPLETION_AUTHORITY_AMENDMENTS = new Map([
+  [
+    "33627a1d6fc7fa8b5699ef09355532de369954bb409c25134c53553d42a54b5e",
+    "9b5658658412c7e71be7f80b39c80bc5ebeab52d31e81f6dcce5bf09e6b18933"
+  ],
+  [
+    "589da799e1352c61970d7493833bfe18b7f03412741bda66e0035ef0ab539e3f",
+    "42d306919f5b13c7470b43986b7695eebc866c7d523d7dfaa197ff5b28b512c2"
+  ],
+  [
+    "2e439bbc8603bad3ad9efcc222f54d79fb4d5745d6571b12df948a86ce3c6022",
+    "753e1fc5d83948b845de53c552564ff40bfda36c41eea3936ecc73d69ff375b4"
+  ],
+  [
+    "381cf2e1835246e42ca0363fd43691a0cecb5bfe9e251afc93e48ffb61e2c129",
+    "9d9ca06a9333d6f7e23e724a8f5d824dc5cb018bec53e2262844dec9ea34a41f"
+  ],
+  [
+    "0d84943485cf44498981993ee2c7507727509345785aff2bc02b115c8bf75580",
+    "f13299859325a704b59b874e114a0378601d7b08d52a100e643912f0e3ca8239"
+  ]
+]);
+
+const RETAINED_AUTHORITY_AMENDMENTS = [
+  {
+    decision: "documentation/decisions/0045-guided-verification-setup.md",
+    images: GUIDED_AUTHORITY_AMENDMENTS
+  },
+  {
+    decision:
+      "documentation/decisions/0047-runner-owned-completion-projection.md",
+    images: COMPLETION_AUTHORITY_AMENDMENTS
+  }
+];
+
+async function acceptedDecision(root, relativePath) {
+  let authority;
+  try {
+    authority = await baselineFile(root, relativePath);
+  } catch {
+    // An absent or unreadable amending decision admits nothing.
+    return false;
+  }
+  return /^- Status: Accepted\s*$/mu.test(authority);
+}
+
+// A retained authority image may only advance through the finite accepted
+// annotation images above, each conditional on its amending decision being
+// Accepted. Arbitrary metadata or body edits leave every image unreachable.
 async function retainedAuthorityMatches(root, text, sha256) {
   const digest = resourceDigest(text);
   if (digest === sha256) return true;
-  if (GUIDED_AUTHORITY_AMENDMENTS.get(sha256) !== digest) return false;
-  const authority = await baselineFile(
-    root,
-    "documentation/decisions/0045-guided-verification-setup.md"
-  );
-  return /^- Status: Accepted\s*$/mu.test(authority);
+  let images = new Set([sha256]);
+  for (const amendment of RETAINED_AUTHORITY_AMENDMENTS) {
+    const next = new Set(images);
+    for (const image of images) {
+      const successor = amendment.images.get(image);
+      if (successor !== undefined) next.add(successor);
+    }
+    if (next.size === images.size) continue;
+    if (!(await acceptedDecision(root, amendment.decision))) continue;
+    images = next;
+  }
+  return images.has(digest);
 }
 
 async function validateAuthorities(root, authorities) {

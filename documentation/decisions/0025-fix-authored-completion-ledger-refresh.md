@@ -104,3 +104,14 @@ escalation truth-channel, and fail-closed rejection semantics all stand.
   `"implementation"`, keeping every pre-existing checkpoint valid.
 - The fix prompt and `quick-fix` skill state the refresh contract and the
   unchanged escalation rule for status downgrades.
+
+## Lifecycle Links
+
+- Narrowly amended by [ADR-0047](./0047-runner-owned-completion-projection.md),
+  accepted 2026-09-15, section 7: runner publication replaces model projection
+  authoring for the new protocol; only completed ungated fixes promote ledgers.
+  Blocked/escalating claims remain unpromoted, and null-ledger fixes distinguish
+  ledger author from report publisher. Approved task/order/status constraints,
+  accepted scope, canonical authorship and the escalation truth channel remain.
+- Supersedes: None.
+- Superseded by: None.

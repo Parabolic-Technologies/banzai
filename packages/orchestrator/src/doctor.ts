@@ -635,7 +635,7 @@ async function activeRunCheck(repoRoot: string): Promise<DoctorCheck> {
   }
   if (
     !isRecord(state) ||
-    ![1, 2, 3, 4, 5, 6].includes(state.schemaVersion as number) ||
+    ![1, 2, 3, 4, 5, 6, 7].includes(state.schemaVersion as number) ||
     typeof state.runId !== "string" ||
     typeof state.repoRoot !== "string" ||
     typeof state.status !== "string" ||
@@ -651,7 +651,8 @@ async function activeRunCheck(repoRoot: string): Promise<DoctorCheck> {
   if (
     state.schemaVersion === 4 ||
     state.schemaVersion === 5 ||
-    state.schemaVersion === 6
+    state.schemaVersion === 6 ||
+    state.schemaVersion === 7
   ) {
     try {
       validateConfigurationStateEnvelope(state);

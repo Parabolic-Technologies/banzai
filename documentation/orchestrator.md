@@ -496,20 +496,26 @@ reviewer phases never invoke it.
 
 `banzai control capabilities` is valid outside a Git repository and performs no
 repository discovery, adapter construction, vendor/authentication call, lock,
-recovery, or write. It emits canonical `banzai-agent-capabilities/v4` JSON with
-schema version 4, control contract `4.0.0`, the package-derived Banzai
+recovery, or write. It emits canonical `banzai-agent-capabilities/v5` JSON with
+schema version 5, control contract `5.0.0`, the package-derived Banzai
 release-train version, umbrella contract, the exact supported non-TTY operation
-set, and an ordered `inputSchemas` list per operation. Capability and doctor
+set, and an ordered `inputSchemas` list per operation. It also declares the
+runner-owned completion publication protocol (`banzai-completion-protocol/v1`),
+its durable stages, the closed refusal codes `COMPLETION_PUBLICATION_IO`,
+`COMPLETION_PUBLICATION_DRIFT` and `COMPLETION_PUBLICATION_INTEGRITY`, and the
+`pending_application` attempt status. Capability and doctor
 output prove neither subscription authentication nor sandbox credential
 visibility. Compatibility still follows these explicit contract and operation
 identities, never the shared release-train value alone.
 
-`banzai control status` emits canonical `banzai-agent-status/v3` JSON. With no
+`banzai control status` emits canonical `banzai-agent-status/v4` JSON. With no
 persisted run, `activeRun` is `null`. Otherwise the allow-list projection
 contains run identity/lifecycle, route, semantic next action, retry and bounded
 recovery eligibility, the pending human gate, approval validity,
-task-completion evidence, bounded verification outcomes, review verdict, and
-review-pass or human-triage completion basis. A terminal `done` or `cancelled`
+task-completion evidence, the bounded completion publication state of the
+active run (publishing attempt and kind, durable stage, closed refusal code and
+publisher identity, or `null`), bounded verification outcomes, review verdict,
+and review-pass or human-triage completion basis. A terminal `done` or `cancelled`
 projection remains available for evidence but does not block an explicitly
 requested new run; only a non-terminal projection does. The status excludes the
 original request, prompts, transcripts, raw model output, environment values,
@@ -1682,19 +1688,56 @@ revised bundle can receive explicit approval. Orchestrated
 implementation and fix prompts keep approved planning artifacts immutable and
 record progress in reports instead of plan checkboxes. New strict
 implementation results carry a versioned canonical task-completion ledger in
-approved `TNNN` order. The **Plan Task Completion** report table and persisted
-summary are deterministic projections validated against approval, repository
-scope, required reports, and each other. Inside the table's Evidence and Gap
-JSON cells the canonical grammar HTML-escapes `&`, `|`, `<`, and `>`
-(`&amp;`, `&#124;`, `&lt;`, `&gt;`) and emits raw JSON rather than Markdown code
-spans. As a narrow compatibility rule for model-authored reports, the decoder
-accepts exactly one complete outer backtick pair around a whole Evidence or Gap
-JSON cell before the normal shape and exact-parity checks; partial and repeated
-wrappers remain invalid. It additionally recovers a row whose JSON cells
-contain a raw unescaped `|` when exactly one rejoin boundary decodes both cells
-to their required shapes, and otherwise fails closed with the offending task
-named in the diagnostic. Implementation and fix-refresh prompts and skills show
-the canonical raw-JSON row and prohibit authoring code-spanned cells. Persisted
+approved `TNNN` order. Under `banzai-completion-protocol/v1` (ADR-0047) the
+model returns that ledger plus report narrative and never authors the
+**Plan Task Completion** table. New strict implementation and fix attempts are
+recorded with attempt schema 3 and the persisted protocol marker, their
+terminal proof uses `banzai-terminal-attempt-checkpoint/v2`, and the first such
+attempt transitions the run state to schema version 7 while retaining the
+pre-transition state bytes as attempt-owned evidence. After the vendor returns
+a completed result, the attempt becomes `pending_application` and the runner
+captures the report and workspace identities that the v2 terminal checkpoint
+recorded when the vendor returned. Capture accepts the files on disk only while
+they still equal those exact identities, so a restart before the capture
+manifest or an original was durable can never adopt bytes written after the
+model finished: a mismatch is `COMPLETION_PUBLICATION_DRIFT`, and a completion
+claim with no durable terminal observation is
+`COMPLETION_PUBLICATION_INTEGRITY` rather than a fresh baseline. The runner
+then validates the claims
+(approval digest, task coverage and order, changed-surface evidence paths,
+required reports, gap headings), renders the report's completion section as the
+delimited `banzai-plan-task-completion/v2` region, persists the candidate,
+publishes it into the implementation report, records an immutable publication
+receipt, and only then applies the result and emits
+`completion.publication_applied`. The v2 region keeps every byte outside it,
+replaces exactly one existing legacy or v2 section, encodes every ASCII
+punctuation code point of its JSON cells as a decimal numeric character
+reference, and is decoded exactly once; text inside it confers no authority. A
+stop result (blocked or escalation) is applied as reported with any completion
+diagnostic retained beside the attempt and nothing published. Invalid completed
+claims and structurally ambiguous report input (duplicate or overlapping
+completion sections, malformed delimiters, an unclosed fence) fail the attempt
+with `PLAN_TASK_COMPLETION_INVALID` and `completion.input_rejected`; a runner
+I/O, drift or integrity failure during publication leaves the attempt
+`pending_application` with a closed refusal code, where `resume` retries only
+the deterministic publication, drift requires restoring the exact recorded
+input or proven output before `resume`, and integrity exposes `cancel`. The
+same boundary contains a failure while persisting the refusal state or event:
+it retains the last durable stage, never becomes a model failure, and `resume`
+appends any durable refusal event once before continuing. The
+authority a publication must still match includes the base commit, approval,
+plan tasks, attempt scope, work binding and the implementer configuration
+digest; the configuration is compared explicitly because `.banzai/config.json`
+is excluded from the non-report workspace digest and no other check would see
+it change. A process death between the attempt-completed write and the durable
+summary, cursor and events leaves a completed protocol attempt whose retained
+receipt lets `resume` finish the missing writes idempotently, without another
+model call and without duplicate accounting or events.
+Historical runs keep their model-authored `banzai-plan-task-completion/v1`
+projection and summary schema 1: that decoder still HTML-escapes `&`, `|`, `<`
+and `>` inside the Evidence and Gap JSON cells, accepts exactly one complete
+outer backtick pair around a whole cell, and recovers a row with one raw
+unescaped `|` when exactly one rejoin boundary decodes both cells. Persisted
 state separately owns lifecycle and `nextAction`; legacy runs without the
 ledger retain that lifecycle but report completion as legacy/unknown rather
 than fabricated `N/N`.
@@ -1713,10 +1756,13 @@ decoding on a completion field — for example a gap detail over the 500
 character single-line bound: the runner classified both as completion-evidence
 failures when it wrote the invalid checkpoint, retains what decoded, and may
 request one replacement result without duplicating the attempt or task ledger.
-The repair prompt carries the rejected attempt's persisted diagnostic so the
-replacement names the exact offending field, and the writing prompts state the
-ledger field bounds (500-character single-line strings, at most 16 evidence
-entries) so first-pass records are composed to fit. Strict implementation and
+Under the completion protocol the repair successor is a deterministic
+`<kind>-repair-<hex>` attempt linked to its rejected source through `retryOf`;
+resume never promotes the rejected attempt. The repair prompt carries the
+rejected attempt's persisted diagnostic so the replacement names the exact
+offending field or the ambiguous report ownership to repair, and the writing
+prompts state the ledger field bounds (500-character single-line strings, at
+most 16 evidence entries) so first-pass records are composed to fit. Strict implementation and
 fix prompts also carry the run's recorded human decisions, with the rule that a
 recorded answer is authoritative and a question it covers is never re-raised as
 a new escalation — so a decision made at any earlier gate stays visible to
@@ -1734,15 +1780,18 @@ total. All three artifacts must remain mutually consistent.
 
 Per ADR 0025, an accepted-finding fix whose changes made the recorded
 completion evidence stale may return a complete refreshed `taskCompletion`
-ledger with a regenerated report projection, validated by the identical
-fail-closed pipeline; the checkpoint then records the fix attempt as the
-canonical source (`sourceAttemptKind: "fix"`, absent means implementation) and
-the runner emits `plan_task_completion.refreshed`. Statuses cannot regress
-through a refresh — a completed fix outcome still requires every task
-completed, and a genuine downgrade still escalates. A rejected refresh fails
-the fix attempt with the invalid checkpoint and offers the same
-`Repair plan-task completion evidence` retry, which reruns the fix with the
-persisted diagnostic and unchanged triage scope.
+ledger, validated by the identical fail-closed pipeline; the runner republishes
+the v2 region from it, the summary records the fix attempt as ledger author and
+publisher (`sourceAttemptKind: "fix"`, absent means implementation) and the
+runner emits `plan_task_completion.refreshed`. A fix that returns
+`taskCompletion: null` republishes the retained canonical ledger into the
+current narrative with a new publisher receipt while the original ledger author
+is preserved. Statuses cannot regress through a refresh — a completed fix
+outcome still requires every task completed, and a genuine downgrade still
+escalates. A rejected refresh fails the fix attempt with the invalid checkpoint
+and offers the same `Repair plan-task completion evidence` retry, which reruns
+the fix as a linked `fix-repair-<hex>` attempt with the persisted diagnostic
+and unchanged triage scope.
 
 The canonical Implementation Tasks heading grammar
 (`- [ ] **TNNN - Title**`, one line, ending at the closing `**`, unchecked
@@ -1760,16 +1809,17 @@ plan-approval gate. Interactive mode labels that action
 retry. If the rejected result also has a terminal checkpoint, the repair action
 takes precedence over reconciliation: `resume` leaves the run unchanged rather
 than replaying the already-rejected evidence. The same repair applies when the
-pre-verification revalidation after a completed fix rejects the evidence — for
-example when the fix edited the frozen Plan Task Completion projection — even
+read-only revalidation of a published completion rejects the evidence — for
+example when a published report's bytes changed after publication
+(`summary_mismatch`) or the ledger author record no longer decodes — even
 though no attempt failed: the retry starts a fresh completion-repair
-implementation attempt from the invalid checkpoint. That repair restores the
-projection when the ledger records are correct; when the divergence reflects an
-accepted review finding that a record was overstated, it returns the corrected
-ledger and matching projection with `gate=escalation` instead of restoring the
-false claim. Fix prompts state the projection is frozen: a fix never edits that
-section, and an accepted finding it cannot truthfully resolve escalates rather
-than rewriting completion evidence. Interrupted selection and review
+implementation attempt from the invalid checkpoint. An edit inside the
+runner-owned region during a fix confers no authority and is simply replaced at
+that fix's publication; when an accepted review finding shows a record was
+overstated, the repair returns the corrected ledger with `gate=escalation`
+instead of restoring the false claim. Fix prompts state that the runner owns
+the section: a fix never edits it, and an accepted finding it cannot truthfully
+resolve escalates rather than rewriting completion evidence. Interrupted selection and review
 are explicitly retryable because their model phases cannot change production
 source; review retains only its bounded attempt-owned candidate evidence.
 When a supported vendor emits a valid terminal success, Banzai atomically
@@ -1831,8 +1881,15 @@ failed attempt records but does not treat candidate Markdown, raw result files,
 terminal checkpoints, recovery authorizations, or failed structured results as
 review verdicts or completion evidence.
 New model attempts use schema version 2 so an interrupted source and its linked
-recovery attempt remain distinct. New config-2/3 run state uses schema version 6 with an immutable artifact binding
-and explicit ordered/policy verification mode. Config-1 runs retain state 4. It retains v3's tagged pending consultation, exact
+recovery attempt remain distinct; new strict implementation and fix attempts use
+attempt schema version 3 with the persisted completion protocol marker and a
+nullable `retryOf` link. New config-2/3 run state starts at schema version 6 with an immutable artifact binding
+and explicit ordered/policy verification mode. New config-1 run state starts at schema version 4.
+The first new strict implementation or fix attempt transitions state to schema version 7,
+which adds only the nullable completion publication cursor and keeps the
+previously valid binding, verification-mode and configuration-setup
+combinations; status never upgrades state, an existing v7 run never
+downgrades, and state v1-v6 remain readable. It retains v3's tagged pending consultation, exact
 keyed decision history and additive `source_preserved` stage; legacy state v1–v3
 remains readable under its original storage semantics, without fabricated
 consultation or binding evidence. The `source_preserved` stage keeps a completed
@@ -1911,7 +1968,10 @@ pass application, zero-accepted triage and lite completion. Failures and interru
 attempts retain existing explicit retry/recovery boundaries.
 
 Historical snapshot v3 and runner-rendered `banzai-feature-review/v4` freeze current
-executed/reused/pending evidence and direct physical origins. Historical formats
+executed/reused/pending evidence and direct physical origins; completion-protocol
+runs freeze `banzai-review-snapshot/v5`, rendered as `banzai-feature-review/v6`,
+which additionally binds the publication receipt, capture and candidate
+identities of the reviewed completion. Historical formats
 keep their decoders/rendering. Review-result v2 and task-completion v1 remain
 unchanged. Offline archive v1 retains the binding, decisions, applicability,
 physical origins and logs through required dependency closure. A restored copy

@@ -345,7 +345,7 @@ Orchestrator (`packages/orchestrator/src/`):
   absent or unreadable plugin versions are explicit, never source-version guesses.
 - `agent-control-cli.ts` / `agent-control.ts` — non-TTY control grammar over
   closed direct-stdin JSON (64 KiB, validated before mutation); current
-  `banzai-agent-capabilities/v4`, `banzai-agent-status/v3`,
+  `banzai-agent-capabilities/v5`, `banzai-agent-status/v4`,
   configuration `banzai-agent-answer/v3`; preserved consultation
   `banzai-agent-answer/v2`, `banzai-agent-request/v1`, escalation
   `banzai-agent-answer/v1`, `banzai-agent-recovery/v1`. Every mutation
@@ -385,10 +385,16 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   A separate owned short guard serializes state/events and rejects stale terminal
   changes; it is never released by the signal handler or reclaimed automatically.
   Normalizes state schema 1 to 2 on read.
-- `plan-task-completion.ts` — approved `TNNN` parsing, the
+- `plan-task-completion.ts` — approved `TNNN` parsing, the legacy
   `banzai-plan-task-completion/v1` projection renderer/decoder, ledger shape
-  validation, and `validatePlanTaskCompletion` against approval, scope, and
-  reports (ADR-0017/0025). Fails closed as `PLAN_TASK_COMPLETION_INVALID`.
+  validation, `validatePlanTaskCompletion` for historical v1 checkpoints, and
+  the runner-owned `banzai-plan-task-completion/v2` region: fence-aware section
+  scanner, deterministic numeric-character-reference renderer, single-decode
+  parser, `validateCompletionClaims` against approval, changed-surface scope,
+  required reports and unique preserved gap headings, and
+  `composeCompletionCandidate`, which replaces exactly one existing section or
+  appends while preserving every other byte (ADR-0017/0025/0047/0048). Fails
+  closed as `PLAN_TASK_COMPLETION_INVALID`.
   Its planning guard rejects runner-control write targets and ambiguous access
   as `PLAN_RUNNER_CONTROL_TASK`, allowing read-only references, preservation
   constraints and exact bound report writes (ADR-0045).
@@ -501,7 +507,9 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   and historical v1-v3 readers,
   full/delta anchors, recorded evidence, digest validation and owned paths.
 - `types.ts` — all shared types, `CONTRACT_VERSION = "1.0.0"`, phase-result
-  schema v3 and state schema v6 with explicit v1-v5 historical readers, and the independent
+  schema v3 and state schema v7 with explicit v1-v6 historical readers, attempt
+  schema v3 under `banzai-completion-protocol/v1`, terminal checkpoint v2, the
+  completion capture/transition/candidate/publication record identities, and the independent
   agent-control, context, and checkpoint/recovery contract identities; no
   runtime imports.
 - `errors.ts` — `BanzaiError` (stable `code`, `exitCode`), `ProcessExitError`
@@ -594,7 +602,7 @@ Plugin (`plugins/banzai/`):
   `PROJECT_MANIFEST.md` in the session directory or a parent — and the hook
   stays silent in repositories without that evidence.
 - `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` — plugin manifests,
-  currently version `2.5.0`. The Codex manifest additionally declares the hook
+  currently version `2.6.0`. The Codex manifest additionally declares the hook
   and the store interface metadata.
 - `PROJECT_MANIFEST.md`, `AGENTS.md`, `CLAUDE.md`, and the placeholder
   `documentation/` tree (`README.md`, `decisions/README.md`, `.gitkeep` files) —
@@ -627,7 +635,6 @@ Restore rejects managed work/run/control ancestry and preserves the original
 manifest as a private retention receipt without changing active pointers or
 resuming runs. Doctor recognizes v4-v6 and verifies their bound identity read-only. Installed-client adoption and external cutover remain unconfirmed
 parts of ADR-0041; its decision-index status remains Planned.
-
 
 Project guidance is inspected before new-run creation and authentication, then
 rechecked under ownership. Continuations inspect instruction layout before
@@ -769,7 +776,7 @@ attempt, approval marker or transcript.
   `banzai status --json`.
 - Agent control: `banzai control capabilities` is offline and can run outside a
   Git checkout; it declares the exact independently versioned non-TTY operation
-  set under control contract `4.0.0`, including keyed consultation answers and
+  set under control contract `5.0.0`, including keyed consultation answers and
   explicit `recover` with the
   closed `banzai-agent-recovery/v1` input. `banzai control status` exposes one
   bounded public projection derived from runner state rather than human
@@ -1202,34 +1209,74 @@ status` reports only whether credentials are visible and stored, so a
   resume is a no-op rather than a replay of invalid evidence.
 - Strict plan completion: persisted orchestrator status and `nextAction` own
   lifecycle; approved plan checkboxes remain immutable; phase-result v3 owns
-  exact `TNNN` completion through one versioned structured ledger. The
-  implementation report and durable state hold deterministic projections.
-  The canonical projection renderer HTML-escapes `&`, `|`, `<`, and `>` inside
-  the Evidence and Gap JSON cells and emits the JSON without Markdown code
-  spans. For compatibility with model-authored reports, the decoder accepts
-  exactly one complete outer backtick pair around an entire Evidence or Gap
-  JSON cell before shape and parity validation; partial or repeated wrappers
-  fail closed. The decoder also recovers a row whose JSON cells carry raw
-  unescaped `|` when exactly one rejoin boundary decodes both cells to their
-  required shapes, and otherwise fails closed naming the task. Implementation
-  and fix-refresh prompts and shipped skills show raw-JSON canonical rows and
-  prohibit authoring code-spanned cells.
-  Missing, malformed, duplicate, unknown, out-of-order, out-of-scope, or
-  contradictory evidence fails closed before verification and review. Per
-  ADR-0025, an accepted-finding fix whose changes made the recorded evidence
-  stale may return a complete refreshed ledger with a regenerated projection —
-  same approved task set and order, statuses unchanged, validated by the
-  identical fail-closed pipeline, checkpointed with
+  exact `TNNN` completion through one versioned structured ledger (schema 1).
+  New strict implementation and fix attempts run under
+  `banzai-completion-protocol/v1` (ADR-0047): the attempt record is schema 3
+  with the persisted protocol marker and nullable `retryOf`, both vendor
+  adapters decode the result through the protocol-selected safe envelope
+  (exact keys, versions, phase, outcome/gate pairing, artifacts, questions and
+  finding identities validated while `taskCompletion` stays a bounded
+  unaccepted value until the ledger parser succeeds), terminal proof is
+  `banzai-terminal-attempt-checkpoint/v2`, and the model returns claims plus
+  report narrative without authoring the **Plan Task Completion** table. A
+  completed result becomes `pending_application`; the runner then captures the
+  report and workspace identities the v2 terminal checkpoint recorded when the
+  vendor returned into immutable attempt-owned evidence, accepting current
+  bytes only while they still equal that proof and refusing a claim with no
+  durable terminal observation, validates the claims, renders the report section as the delimited
+  `banzai-plan-task-completion/v2` region (every ASCII punctuation code point
+  of the JSON cells encoded as a decimal numeric character reference, decoded
+  exactly once, all bytes outside the region preserved, exactly one existing
+  legacy or v2 section replaced), persists the candidate, publishes it,
+  records a `banzai-completion-publication/v1` receipt naming the ledger
+  author and the publisher, and only then applies the result, writes the
+  summary (schema 2 with `completionProtocol`, `publisherAttemptId` and
+  receipt identity) and emits `completion.publication_applied`. Stop results
+  keep their gate with retained completion diagnostics and publish nothing.
+  Invalid completed claims and structurally ambiguous report input fail the
+  attempt with `PLAN_TASK_COMPLETION_INVALID` and `completion.input_rejected`;
+  publication I/O, drift and integrity failures leave the attempt
+  `pending_application` with the closed refusal codes
+  `COMPLETION_PUBLICATION_IO` (resume retries the deterministic publication),
+  `COMPLETION_PUBLICATION_DRIFT` (cancel until the exact recorded input or
+  proven output and authority are restored, then resume) and
+  `COMPLETION_PUBLICATION_INTEGRITY` (cancel), evented once as
+  `completion.publication_refused`. Publication authority covers the base
+  commit, approval, plan tasks, attempt scope, work binding and the implementer
+  configuration and session context, which are compared with the terminal
+  checkpoint before a missing capture is created and with the capture on later
+  continuation because `.banzai/config.json` may be absent from the non-report
+  workspace digest. Capture and receipt identity-bearing timestamps derive from
+  the durable terminal observation rather than retry time. Ordinary cursor
+  state-write failures and follow-on refusal state/event persistence failures
+  remain on the publication path instead of rewriting the model attempt as
+  failed; a durable refusal event is appended once on resume before publication
+  continues. A completed protocol attempt interrupted before its durable
+  summary, cursor and events stays on the protocol path and finishes those
+  writes idempotently from its retained receipt. Downstream boundaries revalidate a
+  published completion strictly read-only against the receipt, the final report
+  hashes, the ledger author and the published region; a changed report byte is
+  `summary_mismatch`. Historical runs keep their model-authored
+  `banzai-plan-task-completion/v1` projection and summary schema 1 with the
+  original decoders, including the single-backtick-pair and single-rejoin
+  compatibility rules. Missing, malformed, duplicate, unknown, out-of-order,
+  out-of-scope, or contradictory evidence fails closed before verification and
+  review. Per ADR-0025, an accepted-finding fix whose changes made the recorded
+  evidence stale may return a complete refreshed ledger — same approved task
+  set and order, statuses unchanged, validated by the identical fail-closed
+  pipeline, republished by the runner, summarized with
   `sourceAttemptKind: "fix"` (absent means implementation) and evented as
-  `plan_task_completion.refreshed`. A fix never edits the projection
-  independently of a returned refreshed ledger, and a status downgrade is
-  never a refresh — it still escalates. When revalidation or fix-ledger
-  validation rejects the evidence, retry offers the completion-evidence
-  repair from the blocked state (a fresh implementation attempt, or a fresh
-  fix rerun when the rejected ledger came from a fix).
-  The repair restores the projection when the records are correct and returns a
-  corrected ledger with `gate=escalation` when an accepted review finding
-  showed a record was overstated. A failed implementation attempt whose
+  `plan_task_completion.refreshed`; a null-ledger fix republishes the retained
+  canonical ledger with a new publisher receipt and the original ledger author.
+  A fix never edits the published region (an edit inside it confers no
+  authority and is replaced at publication), and a status downgrade is never a
+  refresh — it still escalates. When revalidation or fix-ledger validation
+  rejects the evidence, retry offers the completion-evidence repair from the
+  blocked state as one linked `<kind>-repair-<hex>` successor with `retryOf`
+  (a fresh implementation attempt, or a fresh fix rerun when the rejected
+  ledger came from a fix). The repair corrects the claims or the ambiguous
+  report ownership and returns a corrected ledger with `gate=escalation` when
+  an accepted review finding showed a record was overstated. A failed implementation attempt whose
   `failureCode` is `PLAN_TASK_COMPLETION_INVALID` is repair-eligible even when
   its result failed decoding (for example a completion field over the
   500-character single-line bound) and no result was stored; the repair prompt
@@ -1256,12 +1303,27 @@ status` reports only whether credentials are visible and stored, so a
   result, and the three artifacts must not carry contradictory current totals. Legacy
   runs keep their lifecycle with legacy/unknown completion, while standalone
   work without external evidence still uses mutable plan checkboxes.
+- Run-state bootstrap and transition matrix: new config-1 runs start at
+  state schema 4 (ordered verification, binding v1, no configuration setup);
+  new config-2 and config-3 runs start at schema 6 (existing configuration
+  setup, binding v1 or policy binding v2). Selection, planning, review and lite
+  attempts never upgrade state. The first new strict implementation or fix
+  attempt transitions the run to schema 7, retaining the exact pre-transition
+  state bytes as attempt-owned `banzai-completion-transition/v1` evidence and
+  adding only the nullable completion publication cursor; v5 states fail closed
+  as `COMPLETION_STATE_UNSUPPORTED`, a v7 run never downgrades, and legacy
+  states 1-6 stay readable. Review snapshots of protocol runs are
+  `banzai-review-snapshot/v5`, rendered as `banzai-feature-review/v6`, with
+  the receipt, capture and candidate identities in the frozen digest; older
+  snapshot and rendered versions keep their decoders.
 - Agent-control schemas are independently identified as current
-  `banzai-agent-capabilities/v4`, `banzai-agent-status/v3`, and
+  `banzai-agent-capabilities/v5`, `banzai-agent-status/v4`, and
   `banzai-agent-answer/v3` for configuration, plus preserved consultation
   `banzai-agent-answer/v2`, `banzai-agent-request/v1`,
   escalation `banzai-agent-answer/v1`, and `banzai-agent-recovery/v1`, with
-  control contract version `4.0.0`.
+  control contract version `5.0.0`. Capabilities v5 declare the completion
+  publication protocol, stages, refusal codes and the `pending_application`
+  attempt status; status v4 adds the bounded completion publication state.
   Compatibility is the exact capability declaration, not the
   package version. The optional `orchestrate` skill is invocable only by an
   explicit user invocation: Claude Code uses
@@ -1377,7 +1439,7 @@ status` reports only whether credentials are visible and stored, so a
   source, and the only root Claude settings file is the ignored
   `.claude/settings.local.json`. `plugins/banzai/.claude/settings.json` is
   packaged plugin content, not this repository's configuration.
-- Current Banzai release-train version is `2.5.0`, owned solely by root
+- Current Banzai release-train version is `2.6.0`, owned solely by root
   `package.json.version` and mirrored by four plugin/marketplace fields, the
   orchestrator package, and three `package-lock.json` fields (top-level, root
   package, and workspace package). All nine fields across seven files agree.
@@ -1394,48 +1456,50 @@ implementation history stay in the ADR bodies and private work records;
 see `documentation/historical-references.md` for archived references. Do not
 restate them here. Paths are relative to `documentation/decisions/`.
 
-| ID       | Title                                                 | Path                                                            | State       |
-| -------- | ----------------------------------------------------- | --------------------------------------------------------------- | ----------- |
-| ADR-0001 | Automatic workflow selection                          | `0001-automatic-workflow-selection.md`                          | Implemented |
-| ADR-0002 | Session affinity and bounded reviewer continuity      | `0002-session-affinity-and-bounded-reviewer-continuity.md`      | Implemented |
-| ADR-0003 | Versioned evaluation export contract                  | `0003-versioned-evaluation-export-contract.md`                  | Implemented |
-| ADR-0004 | Privacy-minimized read-only evaluation boundary       | `0004-privacy-minimized-read-only-evaluation-boundary.md`       | Implemented |
-| ADR-0005 | Traceable evaluation aggregation                      | `0005-traceable-evaluation-aggregation.md`                      | Implemented |
-| ADR-0006 | Versioned verification profiles                       | `0006-versioned-verification-profiles.md`                       | Implemented |
-| ADR-0007 | Project-type verification readiness                   | `0007-project-type-verification-readiness.md`                   | Implemented |
-| ADR-0008 | Read-only doctor diagnostics                          | `0008-read-only-doctor-diagnostics.md`                          | Implemented |
-| ADR-0009 | Supported Node release matrix                         | `0009-supported-node-release-matrix.md`                         | Implemented |
-| ADR-0010 | Blocking and advisory release evidence                | `0010-blocking-and-advisory-release-evidence.md`                | Implemented |
-| ADR-0011 | Protected live vendor compatibility                   | `0011-protected-live-vendor-compatibility.md`                   | Implemented |
-| ADR-0013 | Risk-driven test assurance                            | `0013-risk-driven-test-assurance.md`                            | Implemented |
-| ADR-0014 | Human-triaged review closure                          | `0014-human-triaged-review-closure.md`                          | Implemented |
-| ADR-0015 | Durable verification attempt ledger                   | `0015-durable-verification-attempt-ledger.md`                   | Implemented |
-| ADR-0017 | Versioned plan task completion ledger                 | `0017-versioned-plan-task-completion-ledger.md`                 | Implemented |
-| ADR-0018 | Agent-supervised Banzai CLI control                   | `0018-agent-supervised-banzai-cli-control.md`                   | Implemented |
-| ADR-0019 | Attempt-owned review candidates                       | `0019-attempt-owned-review-candidates.md`                       | Implemented |
-| ADR-0020 | Scoped Claude subprocess environment                  | `0020-scoped-claude-subprocess-environment.md`                  | Implemented |
-| ADR-0021 | Failure-classified reviewer continuity                | `0021-failure-classified-reviewer-continuity.md`                | Implemented |
-| ADR-0022 | Availability-gated Serena MCP whitelist               | `0022-availability-gated-serena-mcp-whitelist.md`               | Implemented |
-| ADR-0023 | Durable terminal attempt checkpoints                  | `0023-durable-terminal-attempt-checkpoints.md`                  | Implemented |
-| ADR-0024 | Operator-authorized prerequisite-blocked fix recovery | `0024-operator-authorized-prerequisite-blocked-fix-recovery.md` | Implemented |
-| ADR-0025 | Fix-authored completion ledger refresh                | `0025-fix-authored-completion-ledger-refresh.md`                | Implemented |
-| ADR-0026 | Derived evaluation KPI projection contract            | `0026-derived-evaluation-kpi-projection-contract.md`            | Implemented |
-| ADR-0027 | Exposure-driven security assurance                    | `0027-exposure-driven-security-assurance.md`                    | Implemented |
-| ADR-0028 | Phase context accounting and budget policy            | `0028-phase-context-accounting-and-budget-policy.md`            | Implemented |
-| ADR-0029 | ESLint-backed orchestrator import boundary policy     | `0029-eslint-backed-orchestrator-import-boundary-policy.md`     | Implemented |
-| ADR-0030 | Vendor-neutral Engineering Quality policy             | `0030-vendor-neutral-engineering-quality-policy.md`             | Implemented |
-| ADR-0031 | Interactive decision consultation                     | `0031-interactive-decision-consultation.md`                     | Implemented |
-| ADR-0033 | Root package version authority                        | `0033-root-package-version-authority.md`                        | Implemented |
-| ADR-0034 | Durable human-time observations                       | `0034-durable-human-time-observations.md`                       | Implemented |
-| ADR-0035 | Cancellation observations and report                  | `0035-cancellation-observations-and-report.md`                  | Implemented |
-| ADR-0036 | Vendor-neutral policy files and instruction delivery  | `0036-vendor-neutral-policy-files-and-instruction-delivery.md`  | Implemented |
-| ADR-0037 | Unified runner-rendered review artifacts              | `0037-unified-runner-rendered-review-artifacts.md`              | Implemented |
-| ADR-0038 | Explicit plan authority                               | `0038-explicit-plan-authority.md`                               | Implemented |
-| ADR-0039 | npm trusted publishing on GitHub Release              | `0039-npm-trusted-publishing-on-github-release.md`              | Implemented |
-| ADR-0040 | Project adoption preflight and interactive setup | `0040-project-adoption-preflight-and-interactive-setup.md` | Planned |
-| ADR-0041 | Artifact retention and publication boundary | `0041-artifact-retention-and-publication-boundary.md` | Planned |
-| ADR-0042 | Runner-delivered phase instructions | `0042-runner-delivered-phase-instructions.md` | Planned |
-| ADR-0043 | Proportionate verification evidence | `0043-proportionate-verification-evidence.md` | Implemented |
-| ADR-0044 | Instruction baseline evolution | `0044-instruction-baseline-evolution.md` | Implemented |
-| ADR-0045 | Guided verification setup and configuration prerequisite authority | `0045-guided-verification-setup.md` | Implemented |
-| ADR-0046 | Supervised live end-to-end first task | `0046-supervised-live-e2e.md` | Planned |
+| ID       | Title                                                              | Path                                                            | State       |
+| -------- | ------------------------------------------------------------------ | --------------------------------------------------------------- | ----------- |
+| ADR-0001 | Automatic workflow selection                                       | `0001-automatic-workflow-selection.md`                          | Implemented |
+| ADR-0002 | Session affinity and bounded reviewer continuity                   | `0002-session-affinity-and-bounded-reviewer-continuity.md`      | Implemented |
+| ADR-0003 | Versioned evaluation export contract                               | `0003-versioned-evaluation-export-contract.md`                  | Implemented |
+| ADR-0004 | Privacy-minimized read-only evaluation boundary                    | `0004-privacy-minimized-read-only-evaluation-boundary.md`       | Implemented |
+| ADR-0005 | Traceable evaluation aggregation                                   | `0005-traceable-evaluation-aggregation.md`                      | Implemented |
+| ADR-0006 | Versioned verification profiles                                    | `0006-versioned-verification-profiles.md`                       | Implemented |
+| ADR-0007 | Project-type verification readiness                                | `0007-project-type-verification-readiness.md`                   | Implemented |
+| ADR-0008 | Read-only doctor diagnostics                                       | `0008-read-only-doctor-diagnostics.md`                          | Implemented |
+| ADR-0009 | Supported Node release matrix                                      | `0009-supported-node-release-matrix.md`                         | Implemented |
+| ADR-0010 | Blocking and advisory release evidence                             | `0010-blocking-and-advisory-release-evidence.md`                | Implemented |
+| ADR-0011 | Protected live vendor compatibility                                | `0011-protected-live-vendor-compatibility.md`                   | Implemented |
+| ADR-0013 | Risk-driven test assurance                                         | `0013-risk-driven-test-assurance.md`                            | Implemented |
+| ADR-0014 | Human-triaged review closure                                       | `0014-human-triaged-review-closure.md`                          | Implemented |
+| ADR-0015 | Durable verification attempt ledger                                | `0015-durable-verification-attempt-ledger.md`                   | Implemented |
+| ADR-0017 | Versioned plan task completion ledger                              | `0017-versioned-plan-task-completion-ledger.md`                 | Implemented |
+| ADR-0018 | Agent-supervised Banzai CLI control                                | `0018-agent-supervised-banzai-cli-control.md`                   | Implemented |
+| ADR-0019 | Attempt-owned review candidates                                    | `0019-attempt-owned-review-candidates.md`                       | Implemented |
+| ADR-0020 | Scoped Claude subprocess environment                               | `0020-scoped-claude-subprocess-environment.md`                  | Implemented |
+| ADR-0021 | Failure-classified reviewer continuity                             | `0021-failure-classified-reviewer-continuity.md`                | Implemented |
+| ADR-0022 | Availability-gated Serena MCP whitelist                            | `0022-availability-gated-serena-mcp-whitelist.md`               | Implemented |
+| ADR-0023 | Durable terminal attempt checkpoints                               | `0023-durable-terminal-attempt-checkpoints.md`                  | Implemented |
+| ADR-0024 | Operator-authorized prerequisite-blocked fix recovery              | `0024-operator-authorized-prerequisite-blocked-fix-recovery.md` | Implemented |
+| ADR-0025 | Fix-authored completion ledger refresh                             | `0025-fix-authored-completion-ledger-refresh.md`                | Implemented |
+| ADR-0026 | Derived evaluation KPI projection contract                         | `0026-derived-evaluation-kpi-projection-contract.md`            | Implemented |
+| ADR-0027 | Exposure-driven security assurance                                 | `0027-exposure-driven-security-assurance.md`                    | Implemented |
+| ADR-0028 | Phase context accounting and budget policy                         | `0028-phase-context-accounting-and-budget-policy.md`            | Implemented |
+| ADR-0029 | ESLint-backed orchestrator import boundary policy                  | `0029-eslint-backed-orchestrator-import-boundary-policy.md`     | Implemented |
+| ADR-0030 | Vendor-neutral Engineering Quality policy                          | `0030-vendor-neutral-engineering-quality-policy.md`             | Implemented |
+| ADR-0031 | Interactive decision consultation                                  | `0031-interactive-decision-consultation.md`                     | Implemented |
+| ADR-0033 | Root package version authority                                     | `0033-root-package-version-authority.md`                        | Implemented |
+| ADR-0034 | Durable human-time observations                                    | `0034-durable-human-time-observations.md`                       | Implemented |
+| ADR-0035 | Cancellation observations and report                               | `0035-cancellation-observations-and-report.md`                  | Implemented |
+| ADR-0036 | Vendor-neutral policy files and instruction delivery               | `0036-vendor-neutral-policy-files-and-instruction-delivery.md`  | Implemented |
+| ADR-0037 | Unified runner-rendered review artifacts                           | `0037-unified-runner-rendered-review-artifacts.md`              | Implemented |
+| ADR-0038 | Explicit plan authority                                            | `0038-explicit-plan-authority.md`                               | Implemented |
+| ADR-0039 | npm trusted publishing on GitHub Release                           | `0039-npm-trusted-publishing-on-github-release.md`              | Implemented |
+| ADR-0040 | Project adoption preflight and interactive setup                   | `0040-project-adoption-preflight-and-interactive-setup.md`      | Planned     |
+| ADR-0041 | Artifact retention and publication boundary                        | `0041-artifact-retention-and-publication-boundary.md`           | Planned     |
+| ADR-0042 | Runner-delivered phase instructions                                | `0042-runner-delivered-phase-instructions.md`                   | Planned     |
+| ADR-0043 | Proportionate verification evidence                                | `0043-proportionate-verification-evidence.md`                   | Implemented |
+| ADR-0044 | Instruction baseline evolution                                     | `0044-instruction-baseline-evolution.md`                        | Implemented |
+| ADR-0045 | Guided verification setup and configuration prerequisite authority | `0045-guided-verification-setup.md`                             | Implemented |
+| ADR-0046 | Supervised live end-to-end first task                              | `0046-supervised-live-e2e.md`                                   | Planned     |
+| ADR-0047 | Runner-owned completion projection                                 | `0047-runner-owned-completion-projection.md`                    | Implemented |
+| ADR-0048 | Completion markup and viewer enrichment boundary                   | `0048-completion-markup-and-viewer-enrichment-boundary.md`      | Implemented |

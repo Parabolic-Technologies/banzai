@@ -38,7 +38,11 @@ For each finding, cite `file:line`.
    and are not a finding by themselves. Apply the same evidence hierarchy as
    `feature-status`: inspect the runner-supplied validated completion summary
    and task records, then check material consistency with the implementation
-   report, required assurance, approval digest, state, and source. The runner's
+   report, required assurance, approval digest, state, and source. A
+   runner-published `banzai-plan-task-completion/v2` region is the runner's
+   receipt of validated claims and a model-authored v1 table is a claim;
+   neither is independent evidence, and only repository files and required
+   report narrative are. The runner's
    deterministic checks remain the primary enforcement boundary; a reviewer
    must not return `pass` when required evidence is absent, a task is incomplete
    or blocked, or a material contradiction is visible. Report a finding only for a

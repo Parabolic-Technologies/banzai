@@ -278,6 +278,12 @@ disposable candidate, followed by independent review and human triage.
 
 ## Lifecycle Links
 
+- Narrowly amended by [ADR-0047](./0047-runner-owned-completion-projection.md),
+  accepted 2026-09-15, section 7: new-protocol report-digest refresh moves from
+  section 4 revalidation to authorized publication; section 3 retains ledger v1
+  with rendered v2 and versioned summary/provenance. Verification authority,
+  applicability, legacy refresh and frozen evaluation semantics remain binding.
+
 - Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted
   2026-09-14: state-6 verification modes, guided command-ID replacement and
   explicit skipped-round coverage. Preserve historical evidence, policy and

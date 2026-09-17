@@ -288,11 +288,11 @@ if (runnerMode) {
     }
     const controlRoot = path.join(projectRoot, '.banzai');
     let privateWrites = new Set();
-    if (state.schemaVersion === 4 || state.schemaVersion === 5 || state.schemaVersion === 6) {
+    if (state.schemaVersion === 4 || state.schemaVersion === 5 || state.schemaVersion === 6 || (state.schemaVersion === 7 && state.artifactBinding !== undefined)) {
       const storage = await import('../lib/artifact-storage.mjs');
       const bound = await storage.inspectBoundWork(projectRoot, state.artifactBinding);
       if (state.schemaVersion === 5 && bound.binding.schemaVersion !== 2) throw new Error('verification-enabled state requires its original v2 binding');
-      if (state.schemaVersion === 6) {
+      if (state.schemaVersion === 6 || state.schemaVersion === 7) {
         const readers = await import('../lib/artifact-readers.mjs');
         readers.validateConfigurationStateEnvelope(state);
       }

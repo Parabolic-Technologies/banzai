@@ -54,6 +54,7 @@ import type {
   ReviewAdapterRequest,
   WorkflowSelectionAdapterRequest
 } from "../src/types.js";
+import { isPhaseResultEnvelope } from "../src/validation.js";
 
 const settings = {
   executable: "claude",
@@ -2270,5 +2271,101 @@ test("both vendor result decoders feed identical bytes to the shared review rend
     assert.equal(bytes[0], bytes[1]);
   } finally {
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+function malformedLedgerStop() {
+  return {
+    ...terminalPhaseResult(),
+    phase: "implementation" as const,
+    outcome: "blocked" as const,
+    gate: null,
+    summary: "Blocked on a credential.",
+    questions: ["Which credential should the fixture use?"],
+    artifacts: {
+      description: null,
+      plan: null,
+      adrs: [],
+      implementationReport: null,
+      testReport: null
+    },
+    taskCompletion: { schemaVersion: 1, tasks: "not-an-array" }
+  };
+}
+
+test("Claude decodes a protocol attempt through the safe envelope instead of discarding a malformed ledger", async () => {
+  const stop = malformedLedgerStop();
+  const line = JSON.stringify({
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    structured_output: stop,
+    session_id: "claude-session",
+    usage: { input_tokens: 10, output_tokens: 2 }
+  });
+  const runner: ProcessRunner = async () => successful(line);
+  const protocol = await createVendorAdapters(runner).runPhase({
+    ...basePhaseRequest,
+    attemptId: "implementation-1-abcd1234",
+    settings,
+    outputContract: claudePhaseOutputContract,
+    completionProtocol: "banzai-completion-protocol/v1"
+  });
+  assert.ok(isPhaseResultEnvelope(protocol.result));
+  assert.equal(protocol.result.outcome, "blocked");
+  assert.equal(protocol.result.taskCompletion.state, "unaccepted");
+  assert.equal(protocol.sessionId, "claude-session");
+  // The same bytes without the persisted marker keep the legacy decoder.
+  await assert.rejects(
+    createVendorAdapters(runner).runPhase({
+      ...basePhaseRequest,
+      attemptId: "implementation-1-abcd1234",
+      settings,
+      outputContract: claudePhaseOutputContract
+    })
+  );
+});
+
+test("Codex decodes a protocol attempt through the safe envelope instead of discarding a malformed ledger", async () => {
+  const runDirectory = await mkdtemp(
+    path.join(tmpdir(), "banzai-protocol-adapter-")
+  );
+  const stop = malformedLedgerStop();
+  const runner: ProcessRunner = async (spec) => {
+    const outputIndex = spec.args.indexOf("-o");
+    const outputPath = spec.args[outputIndex + 1];
+    assert.ok(outputPath);
+    await mkdir(path.dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, JSON.stringify(stop), "utf8");
+    return successful(
+      [
+        JSON.stringify({ type: "thread.started", thread_id: "thread-id" }),
+        JSON.stringify({
+          type: "turn.completed",
+          usage: { input_tokens: 12, cached_input_tokens: 0, output_tokens: 3 }
+        })
+      ].join("\n")
+    );
+  };
+  try {
+    const protocol = await createVendorAdapters(runner).runPhase({
+      ...basePhaseRequest,
+      attemptId: "implementation-1-abcd1234",
+      runDirectory,
+      completionProtocol: "banzai-completion-protocol/v1"
+    });
+    assert.ok(isPhaseResultEnvelope(protocol.result));
+    assert.equal(protocol.result.outcome, "blocked");
+    assert.equal(protocol.result.taskCompletion.state, "unaccepted");
+    assert.equal(protocol.sessionId, "thread-id");
+    await assert.rejects(
+      createVendorAdapters(runner).runPhase({
+        ...basePhaseRequest,
+        attemptId: "implementation-1-abcd1234",
+        runDirectory
+      })
+    );
+  } finally {
+    await rm(runDirectory, { recursive: true, force: true });
   }
 });
