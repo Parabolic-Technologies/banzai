@@ -1,5 +1,6 @@
 import {
-  phaseResultSchema,
+  legacyPhaseResultV3Schema,
+  taskPhaseResultSchema,
   legacyReviewResultSchema,
   reviewResultSchema,
   workflowSelectionSchema
@@ -17,7 +18,8 @@ export function claudeJsonSchema(schema: object): Record<string, unknown> {
 
 function schemaFor(identity: OutputContractIdentity): object {
   if (identity === "workflow-selection/v1") return workflowSelectionSchema;
-  if (identity === "phase-result/v3") return phaseResultSchema;
+  if (identity === "phase-result/v4") return taskPhaseResultSchema;
+  if (identity === "phase-result/v3") return legacyPhaseResultV3Schema;
   if (identity === "review-result/v1") return legacyReviewResultSchema;
   return reviewResultSchema;
 }

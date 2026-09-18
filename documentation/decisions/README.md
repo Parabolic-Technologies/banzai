@@ -51,6 +51,12 @@ plugin and orchestrator source.
 | [0042](./0042-runner-delivered-phase-instructions.md) | Runner-delivered phase instructions | Accepted | 2026-09-11 | Private work `runner-phase-instructions`; requirements summarized in the ADR |
 | [0043](./0043-proportionate-verification-evidence.md) | Proportionate verification evidence | Accepted | 2026-09-12 | Private work `proportionate-verification-closure`; requirements summarized in the ADR |
 | [0044](./0044-instruction-baseline-evolution.md) | Instruction baseline evolution | Accepted | 2026-09-12 | Private work `proportionate-verification-closure`; independent baseline-evolution decision |
+| [0045](./0045-guided-verification-setup.md) | Guided verification setup and configuration prerequisite authority | Accepted | 2026-09-14 | Private work `guided-verification-setup`; requirements summarized in the ADR |
+| [0046](./0046-supervised-live-e2e.md) | Supervised live end-to-end first task | Accepted | 2026-09-15 | Private work `optional-live-e2e`; requirements summarized in the ADR |
+| [0047](./0047-runner-owned-completion-projection.md) | Runner-owned completion projection | Accepted | 2026-09-15 | Private work `runner-owned-completion-projection`; requirements summarized in the ADR |
+| [0048](./0048-completion-markup-and-viewer-enrichment-boundary.md) | Completion markup and viewer enrichment boundary | Accepted | 2026-09-15 | Private work `runner-owned-completion-projection`; narrow amendment to ADR-0047 |
+| [0049](./0049-task-scoped-verification.md) | Task-scoped verification authority | Accepted | 2026-09-17 | Private work `task-scoped-verification`; partial supersession of 0006/0007/0045 and amendments to 0008/0018/0037/0038/0043; implementation Implemented; independent review recorded privately |
+| [0050](./0050-triggered-code-design-assessment.md) | Triggered code-design assessment | Proposed | 2026-09-18 | Research in `documentation/ideas/` (structural debt, composable code design, method budget draft); narrow amendment to ADR-0030 |
 
 ## File Names
 

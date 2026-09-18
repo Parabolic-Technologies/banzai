@@ -29,6 +29,8 @@ import type {
   OutputContractEnvelope,
   OutputContractIdentity,
   PhaseAdapterRequest,
+  PhaseResult,
+  PhaseResultEnvelope,
   ProcessResult,
   ProcessRunner,
   PromptEnvelope,
@@ -41,6 +43,7 @@ import type {
 import { resolveSerenaWhitelist, serenaAllowedTools } from "./mcp.js";
 import {
   parsePhaseResult,
+  parsePhaseResultEnvelope,
   parseCurrentReviewResult,
   parseWorkflowSelectionResult
 } from "./validation.js";
@@ -1584,7 +1587,13 @@ export function buildClaudePhaseArguments(
     "stream-json",
     "--verbose",
     "--json-schema",
-    requestOutputContract(request, "claude", "phase-result/v3"),
+    requestOutputContract(
+      request,
+      "claude",
+      request.outputContract.identity === "phase-result/v4"
+        ? "phase-result/v4"
+        : "phase-result/v3"
+    ),
     "--model",
     request.settings.model,
     "--effort",
@@ -1977,8 +1986,15 @@ export function createVendorAdapters(
 
     async runPhase(
       request: PhaseAdapterRequest
-    ): Promise<AdapterResult<ReturnType<typeof parsePhaseResult>>> {
+    ): Promise<AdapterResult<PhaseResult | PhaseResultEnvelope>> {
       const vendor = requireVendor(request.settings.executable);
+      // Selected from the persisted attempt protocol, never from the result
+      // shape: under the completion protocol a valid stop with a malformed
+      // ledger is returned as a safe envelope instead of being discarded.
+      const parse: (value: unknown) => PhaseResult | PhaseResultEnvelope =
+        request.completionProtocol === undefined
+          ? parsePhaseResult
+          : parsePhaseResultEnvelope;
       return await withModelFailureEvidence(runner, vendor, async (run) => {
         const env = subscriptionOnlyEnvironment(request.env);
         if (vendor === "claude") {
@@ -1987,7 +2003,7 @@ export function createVendorAdapters(
             request.repoRoot
           );
           const terminal = createClaudeTerminalObserver(
-            parsePhaseResult,
+            parse,
             request.onTerminalSuccess
           );
           const processResult = await run({
@@ -2013,7 +2029,7 @@ export function createVendorAdapters(
           }
           const parsed = claudeStructuredResult(
             decodeClaudeStdout(processResult.stdout),
-            parsePhaseResult
+            parse
           );
           requireCheckpointResultParity(terminal.result(), parsed.result);
           return {
@@ -2031,14 +2047,20 @@ export function createVendorAdapters(
           request.runDirectory,
           request.attemptId,
           "phase-result.schema.json",
-          requestOutputContract(request, "codex", "phase-result/v3")
+          requestOutputContract(
+            request,
+            "codex",
+            request.outputContract.identity === "phase-result/v4"
+              ? "phase-result/v4"
+              : "phase-result/v3"
+          )
         );
         const observeProgress = createCodexProgressObserver(
           request.onProgress,
           request.repoRoot
         );
         const terminal = createCodexTerminalObserver(
-          parsePhaseResult,
+          parse,
           request.onTerminalSuccess
         );
         const processResult = await run({
@@ -2058,7 +2080,7 @@ export function createVendorAdapters(
         if (processResult.exitCode !== 0) {
           throw processExitError("CODEX_PHASE_FAILED", "Codex", processResult);
         }
-        const result = parsePhaseResult(await readCodexResult(outputPath));
+        const result = parse(await readCodexResult(outputPath));
         requireCheckpointResultParity(terminal.result(), result);
         return {
           result,

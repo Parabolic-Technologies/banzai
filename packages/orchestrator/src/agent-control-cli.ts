@@ -13,6 +13,7 @@ import {
 import type { RunState } from "./types.js";
 import type {
   DecisionConsultationInput,
+  ConfigurationDecisionInput,
   RecoverInput,
   WorkflowStatus
 } from "./workflow.js";
@@ -23,6 +24,7 @@ export type AgentControlCliCommand =
   | { command: "start"; slug: string }
   | {
       command: "answer";
+      configurationOnly?: true;
       decidedBy: string | null;
       autoResume: boolean;
     }
@@ -46,6 +48,10 @@ export interface AgentControlRunner {
   ): Promise<RunState>;
   answerDecisionConsultation(
     input: DecisionConsultationInput,
+    autoResume?: boolean
+  ): Promise<RunState>;
+  answerConfigurationPrerequisite(
+    input: ConfigurationDecisionInput,
     autoResume?: boolean
   ): Promise<RunState>;
   recover(input: RecoverInput, autoResume?: boolean): Promise<RunState>;
@@ -131,6 +137,15 @@ export function parseAgentControlArgs(
   );
 }
 
+export function parseVerificationApprovalArgs(
+  args: readonly string[]
+): Extract<AgentControlCliCommand, { command: "answer" }> {
+  const parsed = parseAgentControlArgs(["answer", ...args]);
+  if (parsed.command !== "answer")
+    throw invalidCommand("Invalid verification approval.");
+  return { ...parsed, configurationOnly: true };
+}
+
 async function readControlInput(
   source: AsyncIterable<Uint8Array | string>
 ): Promise<Uint8Array> {
@@ -194,13 +209,46 @@ export async function executeAgentControlCommand(
     await runner.start({ slug: command.slug, request: decoded.value.request });
   } else if (decoded.kind === "answer" && command.command === "answer") {
     const answer = decoded.value;
+    if (
+      command.configurationOnly === true &&
+      answer.schema !== "banzai-agent-answer/v3"
+    )
+      throw new BanzaiError(
+        "CONTROL_SCHEMA_UNSUPPORTED",
+        "Approve verification requires a configuration answer v3 document; it does not imply Accept."
+      );
     const current = await runner.status();
     const pending = current.state.pendingHumanDecision ?? null;
-    if (answer.schema === "banzai-agent-answer/v1") {
-      if (pending?.kind === "decision_consultation") {
+    if (answer.schema === "banzai-agent-answer/v3") {
+      if (
+        pending?.kind !== "configuration_prerequisite" ||
+        current.state.runId !== answer.runId ||
+        pending.decisionId !== answer.decisionId ||
+        pending.proposalId !== answer.proposalId
+      )
+        throw new BanzaiError(
+          "INVALID_CONTROL_INPUT",
+          "The configuration answer must match the current run, decision and proposal."
+        );
+      await runner.answerConfigurationPrerequisite(
+        {
+          runId: answer.runId,
+          decisionId: answer.decisionId,
+          proposalId: answer.proposalId,
+          action: answer.action,
+          ...(answer.profile ? { profile: answer.profile } : {}),
+          decidedBy: command.decidedBy ?? defaultDecisionMaker
+        },
+        command.autoResume
+      );
+    } else if (answer.schema === "banzai-agent-answer/v1") {
+      if (
+        pending?.kind === "decision_consultation" ||
+        pending?.kind === "configuration_prerequisite"
+      ) {
         throw new BanzaiError(
           "CONTROL_SCHEMA_UNSUPPORTED",
-          "Agent answer v1 cannot represent or answer a decision consultation."
+          "Agent answer v1 cannot answer a consultation or configuration prerequisite."
         );
       }
       await runner.answerHumanDecision(

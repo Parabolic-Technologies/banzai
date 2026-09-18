@@ -2,6 +2,8 @@ import { parseVerificationDecision, evidenceDigest } from "./verification-eviden
 import { parseVerificationApplicability, parseVerificationOriginStart, parseVerificationOriginFinish } from "./verification-store.mjs";
 import { parseReviewSnapshot } from "./review-snapshot.mjs";
 import {
+  parseVerificationConfigTransaction,
+  parseVerificationConfigConfirmation,
   parseTerminalAttemptCheckpoint,
   parseRecoveryAuthorization,
   parseModelAttemptRecord,
@@ -10,6 +12,10 @@ import {
   parsePersistedPhaseResult,
   parseReviewResult,
   parseCurrentReviewResult,
+  parseCompletionTransition,
+  parseCompletionCapture,
+  parseCompletionCandidate,
+  parseCompletionPublication,
 } from "./artifact-readers.mjs";
 import {
   lstat,
@@ -153,16 +159,28 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
       return { refs, supported: false };
     }
     try {
-      if (value.schema === "banzai-verification-decision/v1") parseVerificationDecision(value);
+      if (value.schema === "banzai-verification-config-transaction/v1") parseVerificationConfigTransaction(value);
+      else if (value.schema === "banzai-verification-decision/v1") parseVerificationDecision(value);
       else if (value.schema === "banzai-verification-applicability/v1") parseVerificationApplicability(value);
       else if (value.schema === "banzai-verification-origin-start/v1") parseVerificationOriginStart(value);
       else if (value.schema === "banzai-verification-origin-finish/v1") parseVerificationOriginFinish(value);
-      else if (value.schema === "banzai-terminal-attempt-checkpoint/v1")
+      else if (
+        value.schema === "banzai-terminal-attempt-checkpoint/v1" ||
+        value.schema === "banzai-terminal-attempt-checkpoint/v2"
+      )
         parseTerminalAttemptCheckpoint(value);
+      else if (value.schema === "banzai-completion-transition/v1")
+        parseCompletionTransition(value);
+      else if (value.schema === "banzai-completion-capture/v1")
+        parseCompletionCapture(value);
+      else if (value.schema === "banzai-completion-candidate/v1")
+        parseCompletionCandidate(value);
+      else if (value.schema === "banzai-completion-publication/v1")
+        parseCompletionPublication(value);
       else if (value.schema === "banzai-recovery-authorization/v1")
         parseRecoveryAuthorization(value);
       else if (/^\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative))
-        parseEvaluationStateSource(value);
+        value.schemaVersion === 8 ? supported = false : parseEvaluationStateSource(value);
       else if (
         /^\.banzai\/runs\/[^/]+\/attempts\/[^/]+\.json$/u.test(relative) &&
         value.attempt &&
@@ -189,17 +207,25 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
     }
     if (
       /\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative) &&
-      ![1, 2, 3, 4, 5].includes(value.schemaVersion)
+      ![1, 2, 3, 4, 5, 6, 7].includes(value.schemaVersion)
     )
       supported = false;
     if (
       typeof value.schema === "string" &&
       !new Set([
         "banzai-terminal-attempt-checkpoint/v1",
+        "banzai-terminal-attempt-checkpoint/v2",
+        "banzai-completion-transition/v1",
+        "banzai-completion-capture/v1",
+        "banzai-completion-candidate/v1",
+        "banzai-completion-publication/v1",
         "banzai-recovery-authorization/v1",
         "banzai-review-snapshot/v1",
         "banzai-review-snapshot/v2",
         "banzai-review-snapshot/v3",
+        "banzai-review-snapshot/v4",
+        "banzai-review-snapshot/v5",
+        "banzai-verification-config-transaction/v1",
         "banzai-work-binding/v2",
         "banzai-verification-decision/v1",
         "banzai-verification-applicability/v1",
@@ -223,7 +249,10 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
     }
     if (
       /\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative) &&
-      value.schemaVersion >= 4
+      (value.schemaVersion === 4 ||
+        value.schemaVersion === 5 ||
+        value.schemaVersion === 6 ||
+        (value.schemaVersion === 7 && value.artifactBinding !== undefined))
     ) {
       try {
         exactObject(value.artifactBinding, ["binding", "sha256"]);
@@ -240,6 +269,52 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
     if (!workflowEvidence) return { refs, supported };
     const run = relative.match(/^(\.banzai\/runs\/[^/]+)\//u)?.[1];
     if (run && relative !== `${run}/state.json`) refs.set(`${run}/state.json`, true);
+    if (run && value.schema === "banzai-verification-config-transaction/v1") {
+      if (relative !== `${run}/configuration/${value.operationId}.transaction.json` || value.runId !== run.split("/").at(-1)) supported = false;
+      refs.set(`${run}/configuration/${value.operationId}.confirmation.json`, true);
+    }
+    if (run && /^.*\/configuration\/[^/]+\.confirmation\.json$/u.test(relative)) refs.set(relative.replace(/\.confirmation\.json$/u, ".transaction.json"), true);
+    if (run && (value.schemaVersion === 6 || (value.schemaVersion === 7 && value.configurationSetup)) && relative === `${run}/state.json`) for (const id of value.configurationSetup.transactions) refs.set(`${run}/configuration/${id}.transaction.json`, true);
+    if ((value.schema === "banzai-review-snapshot/v4" || (value.schema === "banzai-review-snapshot/v5" && value.configurationSetup)) && value.configurationSetup) for (const change of value.configurationSetup.runnerChanges) refs.set(`.banzai/runs/${value.runId}/configuration/${change.transaction.operationId}.transaction.json`, true);
+    // Runner-owned completion publication (ADR-0047): retained terminal,
+    // transition, capture, original, candidate and receipt bytes are required
+    // authority closure for the attempt that published or is pending.
+    const completionLeaf = (attemptId, leaf) => `${run}/attempts/${attemptId}.${leaf}`;
+    if (run && [7, 8].includes(value.schemaVersion) && relative === `${run}/state.json` && value.completionPublication) {
+      const cursor = value.completionPublication;
+      if (cursor.captureDigest) refs.set(completionLeaf(cursor.attemptId, "completion-input.json"), true);
+      if (cursor.candidateDigest) {
+        refs.set(completionLeaf(cursor.attemptId, "completion-candidate.json"), true);
+        refs.set(completionLeaf(cursor.attemptId, "completion-candidate.md"), true);
+      }
+      if (cursor.receiptDigest) refs.set(completionLeaf(cursor.attemptId, "completion-publication.json"), true);
+    }
+    if (run && [7, 8].includes(value.schemaVersion) && relative === `${run}/state.json` && value.planTaskCompletion?.schemaVersion === 2 && value.planTaskCompletion.status === "valid")
+      refs.set(`${run}/${value.planTaskCompletion.publication.path}`, true);
+    if (run && value.schema === "banzai-review-snapshot/v5" && value.completionPublication)
+      refs.set(`.banzai/runs/${value.runId}/${value.completionPublication.receiptPath}`, true);
+    if (run && value.schema === "banzai-completion-capture/v1") {
+      if (value.terminalIntegrityDigest) refs.set(completionLeaf(value.attemptId, "terminal-checkpoint.json"), true);
+      if (value.transitionDigest) {
+        refs.set(completionLeaf(value.attemptId, "completion-transition.json"), true);
+        refs.set(completionLeaf(value.attemptId, "completion-state-input.json"), true);
+      }
+      for (const original of Object.values(value.originals)) if (original) refs.set(`${run}/${original.path}`, true);
+      refs.set(`${run}/attempts/${value.attemptId}-${value.attemptKind}.json`, true);
+    }
+    if (run && value.schema === "banzai-completion-transition/v1") refs.set(`${run}/${value.priorState.path}`, true);
+    if (run && value.schema === "banzai-completion-candidate/v1") {
+      refs.set(completionLeaf(value.attemptId, "completion-input.json"), true);
+      refs.set(`${run}/${value.candidatePath}`, true);
+    }
+    if (run && value.schema === "banzai-completion-publication/v1") {
+      refs.set(completionLeaf(value.attemptId, "completion-input.json"), true);
+      refs.set(completionLeaf(value.attemptId, "completion-candidate.json"), true);
+      refs.set(completionLeaf(value.attemptId, "completion-candidate.md"), true);
+      if (value.terminalIntegrityDigest) refs.set(completionLeaf(value.attemptId, "terminal-checkpoint.json"), true);
+      refs.set(`${run}/attempts/${value.ledgerAuthor.attemptId}-${value.ledgerAuthor.attemptKind}.json`, true);
+    }
+    if (run && value.schema === "banzai-terminal-attempt-checkpoint/v2") refs.set(`${run}/attempts/${value.attempt.id}-${value.attempt.kind}.json`, true);
     const evidenceRoot = relative.match(/^(\.banzai\/(?:runs\/[^/]+|work\/[^/]+)\/verification)(?:\/|$)/u)?.[1] ?? (run ? `${run}/verification` : null);
     if (evidenceRoot && value.workId) refs.set(`.banzai/work/${value.workId}/work.json`, true);
     if (value.schema === "banzai-verification-origin-finish/v1") refs.set(`${evidenceRoot}/origins/${value.attemptId}.start.json`, true);
@@ -259,7 +334,7 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
           refs.set(`.banzai/work/${item.binding.workId}/work.json`, true);
           return;
         }
-        for (const [name, child] of Object.entries(item)) visit(child, name);
+        for (const [name, child] of Object.entries(item)) if (name !== "configPath") visit(child, name);
       } else if (
         typeof item === "string" &&
         /(?:path|paths|description|plan|implementationReport|testReport|work|changeReport)$/iu.test(
@@ -725,6 +800,58 @@ export async function verifyArchive(input) {
           if (!logBytes || digestBytes(logBytes) !== log.sha256)
             fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Archived verification origin log changed or is missing.");
         }
+      }
+      if (value?.schema === "banzai-verification-config-transaction/v1") {
+        const transaction = parseVerificationConfigTransaction(value);
+        const confirmationPath = entry.path.replace(/\.transaction\.json$/u, ".confirmation.json");
+        const confirmationBytes = objects.get(confirmationPath);
+        if (!confirmationBytes) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Configuration transaction confirmation is missing.");
+        parseVerificationConfigConfirmation(JSON.parse(confirmationBytes), transaction);
+        const stateBytes = objects.get(`${run}/state.json`);
+        const state = stateBytes ? JSON.parse(stateBytes) : null;
+        if (!state || !(state.schemaVersion === 6 || (state.schemaVersion === 7 && state.configurationSetup)) || state.runId !== transaction.runId || (transaction.continuation && (transaction.continuation.workId !== state.artifactBinding.binding.workId || transaction.continuation.workBindingSha256 !== state.artifactBinding.sha256 || transaction.continuation.baseCommit !== state.baseCommit))) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Configuration transaction owner conflicts with its retained run.");
+      }
+      if (value?.schema === "banzai-review-snapshot/v4") {
+        for (const change of value.configurationSetup.runnerChanges) {
+          const transactionPath = `.banzai/runs/${value.runId}/configuration/${change.transaction.operationId}.transaction.json`;
+          const transactionBytes = objects.get(transactionPath);
+          const confirmationBytes = objects.get(transactionPath.replace(/\.transaction\.json$/u, ".confirmation.json"));
+          if (!transactionBytes || !confirmationBytes) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Review configuration closure is missing.");
+          const transaction = parseVerificationConfigTransaction(JSON.parse(transactionBytes));
+          const confirmation = parseVerificationConfigConfirmation(JSON.parse(confirmationBytes), transaction);
+          if (JSON.stringify(transaction) !== JSON.stringify(change.transaction) || JSON.stringify(confirmation.preview.delta) !== JSON.stringify(change.delta)) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Review configuration closure changed.");
+        }
+      }
+      if (value?.schema === "banzai-completion-publication/v1") {
+        const attemptLeaf = (leaf) => `${run}/attempts/${value.attemptId}.${leaf}`;
+        const captureBytes = objects.get(attemptLeaf("completion-input.json"));
+        const candidateBytes = objects.get(attemptLeaf("completion-candidate.json"));
+        const candidateText = objects.get(attemptLeaf("completion-candidate.md"));
+        if (!captureBytes || !candidateBytes || !candidateText) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion publication closure is missing.");
+        const capture = parseCompletionCapture(JSON.parse(captureBytes));
+        const candidate = parseCompletionCandidate(JSON.parse(candidateBytes));
+        if (capture.integrityDigest !== value.captureDigest || candidate.integrityDigest !== value.candidateDigest || candidate.captureDigest !== capture.integrityDigest || digestBytes(candidateText) !== candidate.outputSha256)
+          fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion publication closure changed.");
+        for (const original of Object.values(capture.originals)) {
+          if (!original) continue;
+          const bytes = objects.get(`${run}/${original.path}`);
+          if (!bytes || digestBytes(bytes) !== original.sha256) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion capture original changed or is missing.");
+        }
+        if (value.terminalIntegrityDigest) {
+          const checkpointBytes = objects.get(attemptLeaf("terminal-checkpoint.json"));
+          if (!checkpointBytes || parseTerminalAttemptCheckpoint(JSON.parse(checkpointBytes)).integrityDigest !== value.terminalIntegrityDigest)
+            fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion terminal proof changed or is missing.");
+        }
+      }
+      if (value?.schema === "banzai-completion-transition/v1") {
+        const priorBytes = objects.get(`${run}/${value.priorState.path}`);
+        if (!priorBytes || digestBytes(priorBytes) !== value.priorState.sha256)
+          fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion transition prior state changed or is missing.");
+      }
+      if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(entry.path) && [7, 8].includes(value?.schemaVersion) && value.planTaskCompletion?.schemaVersion === 2 && value.planTaskCompletion.status === "valid") {
+        const receiptBytes = objects.get(`${run}/${value.planTaskCompletion.publication.path}`);
+        if (!receiptBytes || parseCompletionPublication(JSON.parse(receiptBytes)).integrityDigest !== value.planTaskCompletion.publication.sha256)
+          fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Published completion receipt changed or is missing.");
       }
       if (value?.artifactBinding?.binding?.workId) {
         const bindingPath = `.banzai/work/${value.artifactBinding.binding.workId}/work.json`;

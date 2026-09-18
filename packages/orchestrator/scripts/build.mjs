@@ -1,6 +1,7 @@
 import { chmod, rm, writeFile } from "node:fs/promises";
 import { artifactReaderBytes } from "./artifact-readers-build.mjs";
 import { phaseResourceBytes } from "./phase-resources-build.mjs";
+import { initResourceBytes } from "./init-resources-build.mjs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { build } from "esbuild";
@@ -10,6 +11,11 @@ const packageRoot = path.resolve(
   ".."
 );
 const outputFile = path.join(packageRoot, "dist", "banzai.mjs");
+
+await writeFile(
+  path.join(packageRoot, "src", "init-resources.ts"),
+  await initResourceBytes(path.resolve(packageRoot, "../.."))
+);
 
 await writeFile(
   path.join(packageRoot, "src", "phase-resources.ts"),

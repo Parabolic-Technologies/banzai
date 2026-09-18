@@ -13,12 +13,38 @@ const ALLOWED_TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
   ],
   needs_adr_approval: ["planning", "cancelled", "blocked"],
   needs_plan_approval: ["plan_approved", "cancelled", "blocked"],
-  needs_human_decision: ["selecting", "planning", "cancelled", "blocked"],
+  needs_human_decision: [
+    "selecting",
+    "planning",
+    "verifying",
+    "cancelled",
+    "blocked"
+  ],
   plan_approved: ["implementing", "cancelled", "blocked"],
   implementing: ["needs_human_decision", "verifying", "cancelled", "blocked"],
-  verifying: ["reviewing", "done", "cancelled", "blocked"],
-  reviewing: ["needs_triage", "done", "cancelled", "blocked"],
-  needs_triage: ["fixing", "done", "cancelled", "blocked"],
+  verifying: [
+    "needs_human_decision",
+    "reviewing",
+    "done",
+    "cancelled",
+    "blocked"
+  ],
+  reviewing: [
+    "needs_human_decision",
+    "verifying",
+    "needs_triage",
+    "done",
+    "cancelled",
+    "blocked"
+  ],
+  needs_triage: [
+    "needs_human_decision",
+    "verifying",
+    "fixing",
+    "done",
+    "cancelled",
+    "blocked"
+  ],
   fixing: ["needs_human_decision", "verifying", "cancelled", "blocked"],
   done: [],
   blocked: [
@@ -36,6 +62,43 @@ const ALLOWED_TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
 };
 
 export function transitionState(state: RunState, next: RunStatus): void {
+  const pending = state.pendingHumanDecision;
+  const laterConfigurationBoundary =
+    (state.status === "reviewing" || state.status === "needs_triage") &&
+    (next === "needs_human_decision" || next === "verifying");
+  const configurationTransition =
+    laterConfigurationBoundary ||
+    (state.status === "needs_human_decision" && next === "verifying") ||
+    (state.status === "verifying" && next === "needs_human_decision");
+  const guided =
+    state.schemaVersion === 6 ||
+    (state.schemaVersion === 7 && state.configurationSetup !== undefined);
+  if (
+    configurationTransition &&
+    (!guided ||
+      (laterConfigurationBoundary && next === "verifying"
+        ? state.pendingHumanDecision != null ||
+          !["configured", "bootstrap_deferred"].includes(
+            state.configurationSetup?.coverage ?? ""
+          )
+        : state.pendingHumanDecision?.kind !== "configuration_prerequisite") ||
+      state.configurationSetup?.continuation === null ||
+      state.configurationSetup?.continuation === undefined ||
+      state.activeAttempt !== null ||
+      state.activeProcess !== null ||
+      (next === "verifying" &&
+        !laterConfigurationBoundary &&
+        !state.configurationSetup.resolutions.some(
+          (resolution) =>
+            pending?.kind === "configuration_prerequisite" &&
+            resolution.proposalId === pending.proposalId
+        )))
+  ) {
+    throw new BanzaiError(
+      "INVALID_TRANSITION",
+      "Only a validated configuration prerequisite checkpoint can use this continuation."
+    );
+  }
   if (!ALLOWED_TRANSITIONS[state.status].includes(next)) {
     throw new BanzaiError(
       "INVALID_TRANSITION",

@@ -151,8 +151,8 @@
   },
   "contracts": {
     "phaseResult": {
-      "currentPath": "plugins/banzai/contracts/v3/phase-result.schema.json",
-      "currentSchemaVersion": 3,
+      "currentPath": "plugins/banzai/contracts/v4/phase-result.schema.json",
+      "currentSchemaVersion": 4,
       "legacy": [
         {
           "path": "plugins/banzai/contracts/v1/phase-result.schema.json",
@@ -163,6 +163,11 @@
           "path": "plugins/banzai/contracts/v2/phase-result.schema.json",
           "schemaVersion": 2,
           "sha256": "7ede6c88fca7d95b6a7693017f45e9c01339461aa5991e03efabe9598f3ea7fd"
+        },
+        {
+          "path": "plugins/banzai/contracts/v3/phase-result.schema.json",
+          "schemaVersion": 3,
+          "sha256": "4e57274234ee3482c0f700359df78c6c038282450c8a759d47a790ef4f2ff728"
         }
       ]
     },
@@ -177,21 +182,25 @@
       ]
     },
     "state": {
-      "currentSchemaVersion": 4,
+      "currentSchemaVersion": 7,
       "legacySchemaVersions": [
         1,
         2,
-        3
+        3,
+        4,
+        5,
+        6
       ]
     },
     "agentControl": {
-      "contractVersion": "3.0.0",
-      "capabilities": "banzai-agent-capabilities/v3",
-      "status": "banzai-agent-status/v2",
+      "contractVersion": "6.0.0",
+      "capabilities": "banzai-agent-capabilities/v6",
+      "status": "banzai-agent-status/v5",
       "request": "banzai-agent-request/v1",
       "answer": "banzai-agent-answer/v2",
       "legacyAnswer": "banzai-agent-answer/v1",
-      "recovery": "banzai-agent-recovery/v1"
+      "recovery": "banzai-agent-recovery/v1",
+      "configurationAnswer": "banzai-agent-answer/v3"
     },
     "evaluation": {
       "export": "banzai-evaluation-export/v1",

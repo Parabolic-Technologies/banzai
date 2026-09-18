@@ -46,7 +46,7 @@ Banzai ships as two separately installed parts:
 | Part         | What it is                                                                                                                                                                                                             |
 | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Orchestrator | The local `banzai` CLI, distributed as `@parabolic-technologies/banzai` on npm. Coordinates the selected workflow, runs configured checks, and presents human decisions. Strict work includes an independent reviewer. |
-| Plugin       | Workflow skills for Claude Code and Codex. Standalone skills share guidance and policies with embedded orchestrator phases.                                                                                                |
+| Plugin       | Workflow skills for Claude Code and Codex. Standalone skills share guidance and policies with embedded orchestrator phases.                                                                                            |
 
 Use the orchestrator to coordinate a complete run, or use the
 [plugin directly](#using-the-plugin-without-the-orchestrator) to guide an agent
@@ -154,11 +154,9 @@ or invoke the skill manually:
 - Codex: `$banzai:project-manifest`
 
 Review the generated guidance and `.banzai/config.json`, preserving your
-project's existing rules. Add verification profiles for the project's actual
-test, typecheck, lint, or build commands. The default `repository` profile runs
-only `git diff --check`; it does not test your application. Adapt the
-[verification examples](documentation/verification-examples.md), and run the
-configured checks yourself before the first task.
+project's existing rules. Verification follows each task; you do not configure
+profiles or bootstrap. Banzai selects relevant checks from the requested outcome
+and actual project evidence. See [task verification](documentation/verification-examples.md).
 
 ```sh
 banzai doctor
@@ -233,7 +231,7 @@ mutable work. Interrupted implementation is never silently retried. Details:
 
 To supervise a run from a chat agent, explicitly invoke `/banzai:orchestrate`
 (Claude Code) or `$banzai:orchestrate` (Codex); the skill can never select
-itself. Compatible supervisors require control contract `2.0.0`; see
+itself. Compatible supervisors require control contract `6.0.0`; see
 [agent control](documentation/orchestrator.md#agent-control) for exact schemas
 and compatibility checks.
 
@@ -248,15 +246,16 @@ for interactive Skip, evidence availability and resource coverage limits.
 
 ## Where You Decide
 
-There are five decision gates, and the CLI is where you answer all of them:
+There are five existing decision gates;
+the CLI presents their human actions:
 
-| Gate                  | You decide                                                                                                             |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Decision consultation | Choose among material options that remain unresolved after strict planning analyzes repository evidence                |
-| ADR acceptance        | Accept, reject, or rework each proposed architecture decision                                                          |
-| Plan approval         | Approve the exact bundle of description, accepted ADRs, and plan                                                       |
-| Review triage         | Accept, reject, or defer every review finding                                                                          |
-| Escalation            | Answer the questions a phase raises for dependencies, contracts, security, deployment, or unspecified product behavior |
+| Gate                       | You decide                                                                                                             |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Decision consultation      | Choose among material options that remain unresolved after strict planning analyzes repository evidence                |
+| ADR acceptance             | Accept, reject, or rework each proposed architecture decision                                                          |
+| Plan approval              | Approve the exact bundle of description, accepted ADRs, and plan                                                       |
+| Review triage              | Accept, reject, or defer every review finding                                                                          |
+| Escalation                 | Answer the questions a phase raises for dependencies, contracts, security, deployment, or unspecified product behavior |
 
 Which gates appear depends on the selected route and the decisions raised by
 the task.
@@ -310,7 +309,7 @@ smallest workflow that matches the risk:
 
 | Situation                                 | Skill                   | Primary artifact                                               |
 | ----------------------------------------- | ----------------------- | -------------------------------------------------------------- |
-| Ordinary new capability                   | `feature`               | `.banzai/work/<uuid>/work.md`                        |
+| Ordinary new capability                   | `feature`               | `.banzai/work/<uuid>/work.md`                                  |
 | Bug, polish, refactor, review cleanup     | `quick-fix`             | Change report only when needed                                 |
 | Significant architecture choice           | `architecture-decision` | `documentation/decisions/NNNN-<slug>.md`                       |
 | Formal requirements or escalation trigger | Strict workflow         | Description, decisions, plan, implementation and test evidence |
@@ -336,7 +335,7 @@ documentation/
 
 Lite work normally needs only `work.md`. Accepted ADR bodies are immutable;
 changed decisions use a linked superseding ADR. Each `review-<iteration>.md` is
-self-contained: the runner renders and publishes `banzai-feature-review/v2` for
+self-contained: the runner renders and publishes `banzai-feature-review/v7` for
 read-only orchestrated reviewers; standalone reviewers own durable
 `banzai-feature-review/v1` Markdown. A human or another model can continue the
 review from either artifact without a copied transcript.
@@ -385,7 +384,7 @@ IDs. The sampled rollout procedure and promotion evidence are documented in
   [`documentation/release-checklist.md`](documentation/release-checklist.md)
 - Maintaining this repository — release gate, version parity, conventions:
   [`CONTRIBUTING.md`](CONTRIBUTING.md)
-- Current release notes: [2.5.0](documentation/releases/2.5.0.md).
+- Current release notes: [2.6.0](documentation/releases/2.6.0.md).
 
 ## Author and License
 
@@ -401,3 +400,8 @@ Using Banzai does not require open-sourcing your own project. Community
 participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 Work artifacts default to [local private storage](documentation/artifact-storage.md) after normal project setup. Shared ADRs and current product guides remain public; existing work retains explicit legacy paths.
+
+New tasks start without profile setup. Strict mandatory checks belong to the
+approved plan; lite uses the delegated request and actual execution permissions.
+Missing unrelated tooling is not a barrier, and failed required checks prevent
+completion. Legacy `verify` utilities remain explicit compatibility commands.

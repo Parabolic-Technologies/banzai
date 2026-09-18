@@ -450,6 +450,11 @@ No exact final file-count target replaces classification and dependency review.
 
 ## Lifecycle Links
 
+- Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted
+  2026-09-14: state-6/binding-mode compatibility and private runner config
+  transaction evidence. Preserve historical bindings and exact model-writable
+  roles. Implementation of this amendment is Planned.
+
 Supersedes: None in full. Acceptance would establish these bounded amendments:
 
 | Existing authority | Amendment | Preserved authority |

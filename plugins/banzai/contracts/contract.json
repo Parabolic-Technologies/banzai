@@ -2,7 +2,7 @@
   "contractVersion": "1.0.0",
   "schemas": {
     "workflowSelection": "./v1/workflow-selection.schema.json",
-    "phaseResult": "./v3/phase-result.schema.json",
+    "phaseResult": "./v4/phase-result.schema.json",
     "reviewResult": "./v2/review-result.schema.json"
   }
 }

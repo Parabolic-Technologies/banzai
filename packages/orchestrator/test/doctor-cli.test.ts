@@ -20,7 +20,9 @@ function report(options?: {
       id: "repository.git",
       category: "repository",
       status: ready ? "pass" : "fail",
-      message: ready ? "Git is ready." : "Git is unavailable."
+      message: ready ? "Git is ready." : "Git is unavailable.",
+      fixes: [],
+      roles: []
     }
   ];
   if (warning) {
@@ -28,12 +30,14 @@ function report(options?: {
       id: "run.lock",
       category: "run-state",
       status: "warning",
-      message: "A stale lock is present."
+      message: "A stale lock is present.",
+      fixes: [],
+      roles: []
     });
   }
   return {
-    schema: "banzai-doctor/v3",
-    schemaVersion: 3,
+    schema: "banzai-doctor/v5",
+    schemaVersion: 5,
     ready,
     projectTypes: ["node"],
     summary: {

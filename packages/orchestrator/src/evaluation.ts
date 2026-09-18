@@ -700,7 +700,12 @@ async function collectAttempts(
         !entry.name.endsWith(".terminal-checkpoint.json") &&
         !entry.name.endsWith(".review-snapshot.json") &&
         !entry.name.endsWith(".context.json") &&
-        !entry.name.endsWith(".artifact-workspace.json")
+        !entry.name.endsWith(".artifact-workspace.json") &&
+        !entry.name.endsWith(".completion-transition.json") &&
+        !entry.name.endsWith(".completion-state-input.json") &&
+        !entry.name.endsWith(".completion-input.json") &&
+        !entry.name.endsWith(".completion-candidate.json") &&
+        !entry.name.endsWith(".completion-publication.json")
     )
     .sort((left, right) => left.name.localeCompare(right.name));
   const parsed: ParsedAttempt[] = [];
@@ -2330,7 +2335,12 @@ async function collectCandidate(
     stateIssues = parsed.issues.map((item) =>
       evaluationIssue(runKey, null, "state", item)
     );
-    if (state.schemaVersion === 5 && options.schemaVersion !== 2)
+    if (
+      (state.schemaVersion === 5 ||
+        ((state.schemaVersion === 6 || state.schemaVersion === 7) &&
+          state.verificationMode === "policy")) &&
+      options.schemaVersion !== 2
+    )
       stateIssues.push(
         directIssue(
           runKey,
@@ -2575,10 +2585,18 @@ async function collectVerificationV2(
       return result;
     const state = (await json("state.json")) as {
       schemaVersion?: number;
+      verificationMode?: "ordered" | "policy";
       artifactBinding?: { binding?: { workId?: string } };
       verificationEvidence?: RunState["verificationEvidence"];
     };
-    if (state.schemaVersion !== 5 || !state.artifactBinding?.binding?.workId)
+    if (
+      !(
+        state.schemaVersion === 5 ||
+        ((state.schemaVersion === 6 || state.schemaVersion === 7) &&
+          state.verificationMode === "policy")
+      ) ||
+      !state.artifactBinding?.binding?.workId
+    )
       return result;
     const binding = parseBinding(state.artifactBinding.binding);
     if (binding.schemaVersion !== 2) return result;

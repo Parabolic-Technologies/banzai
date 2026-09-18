@@ -525,14 +525,14 @@ async function legacyEvidence(root, declared = false) {
     );
     if (
       state === null ||
-      ![1, 2, 3, 4, 5].includes(state.schemaVersion) ||
+      ![1, 2, 3, 4, 5, 6, 7, 8].includes(state.schemaVersion) ||
       state.runId !== entry.name
     )
       fail(
         "ARTIFACT_RECOVERY_REQUIRED",
         "Unrecognized runner evidence requires recovery.",
       );
-    if (state.schemaVersion >= 4 && !declared)
+    if (state.schemaVersion >= 4 && state.artifactBinding !== undefined && !declared)
       fail(
         "ARTIFACT_RECOVERY_REQUIRED",
         "A bound run without its artifact declaration requires recovery.",
@@ -895,7 +895,7 @@ export async function createWork(input) {
         if (role !== "reviewDirectory" && (await readBytes(root, relative, { optional: true })) !== null)
           fail("ARTIFACT_WORK_AMBIGUOUS", "Original legacy evidence occupies this slug. Inspect its current continuation identity; stale selections cannot create replacement private work.");
     }
-    const layout = continuation ? "legacy" : state.layout;
+    const layout = input.schemaVersion === 2 && !continuation ? "private" : continuation ? "legacy" : state.layout;
     const roles = artifactRoles(
       input.creationId,
       input.slug,

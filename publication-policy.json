@@ -359,6 +359,36 @@
       "sha256": null
     },
     {
+      "path": "documentation/decisions/0045-guided-verification-setup.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0046-supervised-live-e2e.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0047-runner-owned-completion-projection.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0048-completion-markup-and-viewer-enrichment-boundary.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0049-task-scoped-verification.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0050-triggered-code-design-assessment.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
       "path": "documentation/decisions/README.md",
       "classification": "maintainer",
       "sha256": null
@@ -409,6 +439,26 @@
       "sha256": null
     },
     {
+      "path": "documentation/ideas/2026-09-18-code-design-method-draft.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/ideas/2026-09-18-composable-code-design-skill.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/ideas/2026-09-18-preventing-ai-generated-structural-debt.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/ideas/README.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
       "path": "documentation/orchestrator.md",
       "classification": "maintainer",
       "sha256": null
@@ -450,6 +500,11 @@
     },
     {
       "path": "documentation/releases/2.5.0.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/releases/2.6.0.md",
       "classification": "maintainer",
       "sha256": null
     },
@@ -649,6 +704,16 @@
       "sha256": null
     },
     {
+      "path": "packages/orchestrator/test/task-verification-recovery.test.ts",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "packages/orchestrator/test/task-verification.test.ts",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
       "path": "plugins/banzai/.claude-plugin/plugin.json",
       "classification": "product",
       "sha256": null
@@ -804,7 +869,17 @@
       "sha256": null
     },
     {
+      "path": "plugins/banzai/contracts/v2/verification-obligations.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
       "path": "plugins/banzai/contracts/v3/phase-result.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/v4/phase-result.schema.json",
       "classification": "product",
       "sha256": null
     },
@@ -830,6 +905,16 @@
     },
     {
       "path": "plugins/banzai/contracts/verification/v1/result.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/verification/v2/execute-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/verification/v2/inspect-request.schema.json",
       "classification": "product",
       "sha256": null
     },
@@ -945,6 +1030,26 @@
     },
     {
       "path": "plugins/banzai/lib/review-snapshot.mjs",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/lib/task-verification-store.d.mts",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/lib/task-verification-store.mjs",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/lib/task-verification.d.mts",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/lib/task-verification.mjs",
       "classification": "product",
       "sha256": null
     },

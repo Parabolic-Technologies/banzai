@@ -515,5 +515,10 @@ Implementation and independent review must confirm:
 
 ## Lifecycle Links
 
+- Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted
+  2026-09-14: a separate runner configuration decision and control v4, with
+  existing consultation/escalation meanings and human provenance preserved.
+  Implementation of this amendment is Planned.
+
 - Supersedes: None
 - Superseded by: None

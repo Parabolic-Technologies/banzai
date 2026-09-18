@@ -1,3 +1,8 @@
+import {
+  configurationDecisionLines,
+  taskVerificationStatusLines,
+  editVerificationCommands
+} from "./verification-ui.js";
 import type { HumanTimeGateway, HumanTimeSummary } from "./human-time.js";
 import { createHash } from "node:crypto";
 import path from "node:path";
@@ -6,6 +11,7 @@ import packageManifest from "../package.json" with { type: "json" };
 import { createStyler, type Styler } from "./ansi.js";
 import { BanzaiError, errorMessage } from "./errors.js";
 import {
+  escapeTerminalText,
   formatUsage,
   hangingLines,
   labeledLines,
@@ -31,6 +37,7 @@ import type {
 } from "./types.js";
 import type {
   DecisionConsultationInput,
+  ConfigurationDecisionInput,
   HumanDecisionInput,
   RecoverInput,
   StartRunInput,
@@ -89,6 +96,7 @@ import type {
 
 export interface InteractiveRunner {
   readonly repoRoot: string;
+  getPlanHumanPrerequisites?(): Promise<string | null>;
   status(): Promise<WorkflowStatus>;
   start(input: StartRunInput): Promise<RunState>;
   resume(): Promise<RunState>;
@@ -110,6 +118,11 @@ export interface InteractiveRunner {
   ): Promise<RunState>;
   answerDecisionConsultation(
     input: DecisionConsultationInput,
+    autoResume?: boolean
+  ): Promise<RunState>;
+  withConfigurationDecisionOwnership<T>(action: () => Promise<T>): Promise<T>;
+  answerConfigurationPrerequisite(
+    input: ConfigurationDecisionInput,
     autoResume?: boolean
   ): Promise<RunState>;
   triage(input: TriageInput, autoResume?: boolean): Promise<RunState>;
@@ -452,6 +465,7 @@ function renderStatus(
     io.writeLine();
     writeLabeled(io, "Why this workflow", state.workflowSelection.reason);
   }
+  for (const line of taskVerificationStatusLines(state)) io.writeLine(line);
   if (state.blockReason !== null) {
     io.writeLine();
     writeLabeled(io, "Blocked", state.blockReason);
@@ -468,7 +482,14 @@ function renderStatus(
     state.pendingHumanDecision != null
   ) {
     io.writeLine();
-    writeLabeled(io, "Decision needed", state.pendingHumanDecision.summary);
+    if (state.pendingHumanDecision.kind === "configuration_prerequisite") {
+      for (const line of configurationDecisionLines(
+        state.pendingHumanDecision,
+        status.configurationPrerequisite
+      ))
+        io.writeLine(line);
+    } else
+      writeLabeled(io, "Decision needed", state.pendingHumanDecision.summary);
     if (state.pendingHumanDecision.kind === "decision_consultation") {
       for (const [
         index,
@@ -701,6 +722,75 @@ async function handleHumanDecision(
       "INVALID_STATE",
       "The run has no persisted human decision request."
     );
+  }
+  if (pending.kind === "configuration_prerequisite") {
+    const action = await io.select("Verification configuration prerequisite", [
+      {
+        name: "Accept",
+        value: "accept" as const,
+        ...(status.configurationPrerequisite?.acceptUnavailable ||
+        pending.proposal.profile.commands.length === 0
+          ? {
+              disabled:
+                status.configurationPrerequisite?.acceptUnavailable ??
+                "Edit the empty draft first"
+            }
+          : {})
+      },
+      { name: "Edit", value: "edit" as const },
+      {
+        name: "Skip",
+        value: "skip" as const
+      },
+      { name: "Cancel", value: "cancel" as const },
+      { name: "Exit and decide later", value: "exit" as const }
+    ]);
+    if (action === "exit") return false;
+    const profile =
+      action === "edit"
+        ? {
+            id: pending.proposal.profile.id,
+            commands: await editVerificationCommands(
+              io,
+              pending.proposal.profile.commands
+            )
+          }
+        : undefined;
+    if (
+      action === "accept" &&
+      !(await io.confirm(
+        "Apply this exact profile and continue to verification?",
+        false
+      ))
+    )
+      return true;
+    if (
+      action === "skip" &&
+      !(await io.confirm(
+        "Continue with repository hygiene only for this run while project types and verification configuration stay unchanged?",
+        false
+      ))
+    )
+      return true;
+    if (
+      action === "cancel" &&
+      !(await io.confirm("Cancel this run and retain its work?", false))
+    )
+      return true;
+    await runWork(options, () =>
+      runner.answerConfigurationPrerequisite(
+        {
+          runId: pending.runId,
+          decisionId: pending.decisionId,
+          proposalId: pending.proposalId,
+          action,
+          ...(profile ? { profile } : {}),
+          decidedBy: options.decidedBy
+        },
+        true
+      )
+    );
+    return true;
   }
   if (pending.kind === "decision_consultation") {
     const answers: DecisionConsultationAnswer[] = [];
@@ -1050,6 +1140,11 @@ async function handleStatus(
   }
 
   if (state.status === "needs_plan_approval") {
+    const prerequisites = await runner.getPlanHumanPrerequisites?.();
+    if (prerequisites)
+      io.writeLine(
+        `Human prerequisites:\n${escapeTerminalText(prerequisites)}`
+      );
     const action = await io.select<PrimaryAction>("Plan decision", [
       { name: "Approve plan and continue", value: "approve_plan" },
       { name: "Cancel run", value: "cancel" },
@@ -1079,7 +1174,12 @@ async function handleStatus(
   }
 
   if (state.status === "needs_human_decision") {
-    return await handleHumanDecision(runner, io, status, options);
+    return status.state.pendingHumanDecision?.kind ===
+      "configuration_prerequisite"
+      ? runner.withConfigurationDecisionOwnership(() =>
+          handleHumanDecision(runner, io, status, options)
+        )
+      : handleHumanDecision(runner, io, status, options);
   }
 
   if (state.status === "needs_adr_approval") {

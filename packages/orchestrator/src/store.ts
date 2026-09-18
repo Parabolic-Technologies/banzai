@@ -1,8 +1,18 @@
 import {
+  parseTaskVerificationPublication,
   parseVerificationDecision,
   parseVerificationApplicability
 } from "./verification-evidence.js";
 import { parseBinding } from "./artifact-storage.js";
+import {
+  validateConfigurationStateEnvelope,
+  CONFIGURATION_ACTIONS,
+  configurationText,
+  hasConfigurationSetup,
+  parseConfigurationPrerequisite,
+  parseConfigurationSetupState
+} from "./configuration-prerequisite.js";
+import { usesVerificationPolicy } from "./verification.js";
 import { createHash, randomUUID } from "node:crypto";
 import { constants, readFileSync, unlinkSync } from "node:fs";
 import {
@@ -44,13 +54,17 @@ import type {
   ContextInvocationEvidence,
   EscalationDecisionRecord,
   EscalationDecisionRequest,
+  CompletionCandidate,
+  CompletionCapture,
+  CompletionPublication,
+  CompletionTransition,
+  PersistedTerminalCheckpoint,
   RecoveryAuthorization,
   ReviewReference,
   ReviewSnapshot,
   RunMetrics,
   RunState,
   TerminalCheckpointResult,
-  TerminalAttemptCheckpoint,
   TriageRecord,
   VerificationAttemptLogEvidence,
   VerificationAttemptRecord,
@@ -63,10 +77,16 @@ import {
   VERIFICATION_LEDGER_SCHEMA_VERSION
 } from "./types.js";
 import {
+  parseCompletionCandidate,
+  parseCompletionCapture,
+  parseCompletionPublication,
+  parseCompletionPublicationCursor,
+  parseCompletionTransition,
   parseCurrentReviewResult,
   parseDecisionConsultationAnswers,
   parseDecisionConsultationRequest,
   parseModelAttemptRecord,
+  parsePlanTaskCompletionCheckpoint,
   parseRecoveryAuthorization,
   parseTerminalAttemptCheckpoint,
   parseVerificationAttemptRecord,
@@ -264,7 +284,18 @@ function validateDecisionState(state: RunState): RunState {
     ) {
       return decisionStateError();
     }
-    if (pending !== null) {
+    if (pending?.kind === "configuration_prerequisite") {
+      if (
+        !hasConfigurationSetup(state) ||
+        state.configurationSetup === undefined ||
+        pending.runId !== state.runId
+      )
+        return decisionStateError();
+      state.pendingHumanDecision = parseConfigurationPrerequisite(
+        pending,
+        state.configurationSetup.configSchemaVersion
+      );
+    } else if (pending !== null) {
       const record = decisionStateRecord(
         pending,
         pending.kind === "escalation"
@@ -288,7 +319,28 @@ function validateDecisionState(state: RunState): RunState {
     const requestIds = new Set<string>();
     const roundIds = new Set<string>();
     const decisionIds = new Set<string>();
+    const configurationProposalIds = new Set<string>();
     for (const decision of state.humanDecisions ?? []) {
+      if (decision.kind === "configuration_prerequisite") {
+        if (
+          !hasConfigurationSetup(state) ||
+          state.configurationSetup === undefined ||
+          decision.runId !== state.runId ||
+          configurationProposalIds.has(decision.proposalId)
+        )
+          return decisionStateError();
+        const { action, decidedAt, decidedBy, ...request } = decision;
+        if (!CONFIGURATION_ACTIONS.includes(action))
+          return decisionStateError();
+        configurationText(decidedAt, 24);
+        configurationText(decidedBy);
+        parseConfigurationPrerequisite(
+          request,
+          state.configurationSetup.configSchemaVersion
+        );
+        configurationProposalIds.add(decision.proposalId);
+        continue;
+      }
       const record = decisionStateRecord(
         decision,
         decision.kind === "escalation"
@@ -355,6 +407,11 @@ function validateDecisionState(state: RunState): RunState {
       );
     }
     if (
+      pending?.kind === "configuration_prerequisite" &&
+      configurationProposalIds.has(pending.proposalId)
+    )
+      return decisionStateError();
+    if (
       pending?.kind === "decision_consultation" &&
       (requestIds.has(pending.request.requestId) ||
         roundIds.has(pending.request.roundId) ||
@@ -376,7 +433,7 @@ function validateDecisionState(state: RunState): RunState {
 function normalizeRunState(
   state: RunState | LegacyRunStateV2 | LegacyRunState
 ): RunState {
-  if (![1, 2, 3, 4, 5].includes(state.schemaVersion)) {
+  if (![1, 2, 3, 4, 5, 6, 7, 8].includes(state.schemaVersion)) {
     throw new BanzaiError(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Unsupported persisted run state version."
@@ -388,7 +445,50 @@ function normalizeRunState(
       "Legacy run state cannot acquire private binding semantics."
     );
   }
-  if (state.schemaVersion === 4 || state.schemaVersion === 5) {
+  if (state.schemaVersion === 7 || state.schemaVersion === 8) {
+    // Only the completion cursor is new. Everything else must remain one of
+    // the combinations a v4 or v6 bootstrap could have produced.
+    if (!Object.hasOwn(state, "completionPublication"))
+      throw new BanzaiError(
+        "ARTIFACT_VERSION_UNSUPPORTED",
+        "Run state v7 requires its completion publication cursor."
+      );
+    if (state.completionPublication !== null)
+      state.completionPublication = parseCompletionPublicationCursor(
+        state.completionPublication
+      );
+    if (
+      state.planTaskCompletion !== null &&
+      state.planTaskCompletion !== undefined
+    )
+      state.planTaskCompletion = parsePlanTaskCompletionCheckpoint(
+        state.planTaskCompletion
+      );
+  } else if ("completionPublication" in state) {
+    throw new BanzaiError(
+      "ARTIFACT_VERSION_UNSUPPORTED",
+      "Legacy run state cannot carry a completion publication cursor."
+    );
+  } else if (
+    state.planTaskCompletion !== null &&
+    state.planTaskCompletion !== undefined &&
+    state.planTaskCompletion.schemaVersion !== 1
+  ) {
+    throw new BanzaiError(
+      "ARTIFACT_VERSION_UNSUPPORTED",
+      "Legacy run state cannot carry runner-published completion evidence."
+    );
+  }
+  // A schema-7 run keeps whichever binding combination its origin had: an
+  // absent binding is valid only for a v3-origin run, which the later
+  // verification-mode and configuration checks keep free of policy semantics.
+  if (
+    state.schemaVersion === 4 ||
+    state.schemaVersion === 5 ||
+    state.schemaVersion === 6 ||
+    state.schemaVersion === 8 ||
+    (state.schemaVersion === 7 && state.artifactBinding !== undefined)
+  ) {
     if (
       state.artifactBinding === undefined ||
       !/^[0-9a-f]{64}$/.test(state.artifactBinding.sha256)
@@ -409,14 +509,51 @@ function normalizeRunState(
       );
   }
   if (
-    state.schemaVersion === 4 &&
+    (state.schemaVersion === 4 ||
+      (state.schemaVersion === 7 &&
+        state.artifactBinding !== undefined &&
+        !hasConfigurationSetup(state))) &&
     state.artifactBinding?.binding.schemaVersion !== 1
   )
     throw new BanzaiError(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Run state v4 retains binding v1 semantics."
     );
-  if (state.schemaVersion === 5 && state.verificationEvidence !== undefined) {
+  if (state.schemaVersion === 8) {
+    if (state.taskVerification !== undefined) {
+      const publication = parseTaskVerificationPublication(
+        state.taskVerification
+      );
+      if (publication.decision.workId !== state.artifactBinding?.binding.workId)
+        return decisionStateError();
+    }
+    if (
+      state.verificationMode !== "task" ||
+      "configurationSetup" in state ||
+      state.artifactBinding?.binding.schemaVersion !== 2 ||
+      "verificationEvidence" in state
+    )
+      return decisionStateError();
+  } else if (hasConfigurationSetup(state as RunState)) {
+    if (
+      state.verificationMode !== "ordered" &&
+      state.verificationMode !== "policy"
+    )
+      return decisionStateError();
+    state.configurationSetup = parseConfigurationSetupState(
+      state.configurationSetup
+    );
+    if (
+      state.artifactBinding?.binding.schemaVersion !==
+        (state.verificationMode === "policy" ? 2 : 1) ||
+      (state.verificationMode === "policy" &&
+        state.configurationSetup.configSchemaVersion !== 3)
+    )
+      return decisionStateError();
+  } else if ("verificationMode" in state || "configurationSetup" in state)
+    return decisionStateError();
+  const policy = usesVerificationPolicy(state as RunState);
+  if (policy && state.verificationEvidence !== undefined) {
     parseVerificationDecision(state.verificationEvidence.decision);
     if (state.verificationEvidence.applicability !== null)
       parseVerificationApplicability(state.verificationEvidence.applicability);
@@ -429,7 +566,7 @@ function normalizeRunState(
       "ARTIFACT_RECOVERY_REQUIRED",
       "Run state v5 requires its original verification-enabled binding."
     );
-  if (state.schemaVersion !== 5 && state.verificationEvidence !== undefined)
+  if (!policy && state.verificationEvidence !== undefined)
     throw new BanzaiError(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Legacy state cannot acquire verification applicability."
@@ -437,7 +574,10 @@ function normalizeRunState(
   if (
     state.schemaVersion === 3 ||
     state.schemaVersion === 4 ||
-    state.schemaVersion === 5
+    state.schemaVersion === 5 ||
+    state.schemaVersion === 6 ||
+    state.schemaVersion === 7 ||
+    state.schemaVersion === 8
   ) {
     const recovery = state.recovery ?? null;
     if (recovery !== null && recovery.stage === undefined) {
@@ -448,6 +588,7 @@ function normalizeRunState(
             : "source_interrupted"
           : "attempt_started";
     }
+    validateConfigurationStateEnvelope(state);
     return validateDecisionState(state);
   }
   if (state.schemaVersion === 2) {
@@ -768,6 +909,375 @@ export class RunStore {
     }
   }
 
+  /**
+   * Attempt-owned completion protocol evidence (ADR-0047). Every leaf lives
+   * beside the attempt record under `attempts/` and is written once.
+   */
+  completionEvidencePath(
+    runId: string,
+    attempt: Pick<AttemptReference, "id">,
+    leaf:
+      | "completion-transition.json"
+      | "completion-state-input.json"
+      | "completion-input.json"
+      | "implementation-input.md"
+      | "test-input.md"
+      | "completion-candidate.md"
+      | "completion-candidate.json"
+      | "completion-publication.json"
+  ): string {
+    return containedEvidencePath(
+      this.runDirectory(runId),
+      "attempts",
+      `${safeEvidenceSegment(attempt.id, "attempt.id", 200)}.${leaf}`
+    );
+  }
+
+  /** Run-relative evidence path as recorded in receipts and summaries. */
+  completionEvidenceRelativePath(
+    runId: string,
+    attempt: Pick<AttemptReference, "id">,
+    leaf: Parameters<RunStore["completionEvidencePath"]>[2]
+  ): string {
+    return path
+      .relative(
+        this.runDirectory(runId),
+        this.completionEvidencePath(runId, attempt, leaf)
+      )
+      .split(path.sep)
+      .join(path.posix.sep);
+  }
+
+  /**
+   * Writes one immutable private leaf. A second write with identical bytes is
+   * a no-op; different bytes under the same identity are a conflict. Bytes are
+   * never replaced, so a crash between leaves leaves each leaf whole or absent.
+   */
+  private async writeImmutableEvidence(
+    destination: string,
+    bytes: Buffer,
+    conflictCode: string
+  ): Promise<void> {
+    await mkdir(path.dirname(destination), { recursive: true, mode: 0o700 });
+    const temporary = `${destination}.${process.pid}.${randomUUID()}.tmp`;
+    const handle = await open(temporary, "wx", 0o600);
+    try {
+      try {
+        await handle.writeFile(bytes);
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      try {
+        await link(temporary, destination);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        const existing = await this.readImmutableEvidence(destination);
+        if (!existing?.equals(bytes))
+          throw new BanzaiError(
+            conflictCode,
+            `${path.basename(destination)} already exists with different content.`
+          );
+      }
+    } finally {
+      await unlink(temporary).catch(() => undefined);
+    }
+  }
+
+  /** Null when absent; every other failure surfaces as a bounded read error. */
+  private async readImmutableEvidence(
+    destination: string
+  ): Promise<Buffer | null> {
+    let handle;
+    try {
+      handle = await open(
+        destination,
+        constants.O_RDONLY | constants.O_NOFOLLOW
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw new BanzaiError(
+        "STATE_READ_FAILED",
+        `Could not read ${path.basename(destination)}: ${(error as Error).message}`
+      );
+    }
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile())
+        throw new BanzaiError(
+          "UNSAFE_EVIDENCE_PATH",
+          "Completion evidence must be a private regular file."
+        );
+      return await handle.readFile();
+    } finally {
+      await handle.close();
+    }
+  }
+
+  async writeCompletionTransition(
+    runId: string,
+    transition: CompletionTransition,
+    priorStateBytes: Buffer
+  ): Promise<void> {
+    const parsed = parseCompletionTransition(transition);
+    const attempt = { id: parsed.attemptId, kind: parsed.attemptKind };
+    if (
+      parsed.runId !== runId ||
+      parsed.priorState.path !==
+        this.completionEvidenceRelativePath(
+          runId,
+          attempt,
+          "completion-state-input.json"
+        ) ||
+      parsed.priorState.sha256 !==
+        createHash("sha256").update(priorStateBytes).digest("hex")
+    )
+      throw new BanzaiError(
+        "INVALID_COMPLETION_TRANSITION",
+        "Completion transition does not bind the exact prior state bytes."
+      );
+    await this.writeImmutableEvidence(
+      this.completionEvidencePath(
+        runId,
+        attempt,
+        "completion-state-input.json"
+      ),
+      priorStateBytes,
+      "COMPLETION_TRANSITION_CONFLICT"
+    );
+    await this.writeImmutableEvidence(
+      this.completionEvidencePath(runId, attempt, "completion-transition.json"),
+      Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`),
+      "COMPLETION_TRANSITION_CONFLICT"
+    );
+  }
+
+  async readCompletionTransitionIfExists(
+    runId: string,
+    attempt: AttemptReference
+  ): Promise<CompletionTransition | null> {
+    const bytes = await this.readImmutableEvidence(
+      this.completionEvidencePath(runId, attempt, "completion-transition.json")
+    );
+    if (bytes === null) return null;
+    const parsed = parseCompletionTransition(
+      JSON.parse(bytes.toString("utf8")) as unknown
+    );
+    if (
+      parsed.runId !== runId ||
+      parsed.attemptId !== attempt.id ||
+      parsed.attemptKind !== attempt.kind
+    )
+      throw new BanzaiError(
+        "INVALID_COMPLETION_TRANSITION",
+        "Completion transition identity conflicts with its path."
+      );
+    return parsed;
+  }
+
+  /** Byte-identical original report input retained beside the capture manifest. */
+  async writeCompletionOriginal(
+    runId: string,
+    attempt: AttemptReference,
+    role: "implementationReport" | "testReport",
+    bytes: Buffer
+  ): Promise<{ path: string; sha256: string }> {
+    const leaf =
+      role === "implementationReport"
+        ? "implementation-input.md"
+        : "test-input.md";
+    await this.writeImmutableEvidence(
+      this.completionEvidencePath(runId, attempt, leaf),
+      bytes,
+      "COMPLETION_CAPTURE_CONFLICT"
+    );
+    return {
+      path: this.completionEvidenceRelativePath(runId, attempt, leaf),
+      sha256: createHash("sha256").update(bytes).digest("hex")
+    };
+  }
+
+  async readCompletionOriginalIfExists(
+    runId: string,
+    attempt: AttemptReference,
+    role: "implementationReport" | "testReport"
+  ): Promise<Buffer | null> {
+    return await this.readImmutableEvidence(
+      this.completionEvidencePath(
+        runId,
+        attempt,
+        role === "implementationReport"
+          ? "implementation-input.md"
+          : "test-input.md"
+      )
+    );
+  }
+
+  async writeCompletionCapture(
+    runId: string,
+    capture: CompletionCapture
+  ): Promise<void> {
+    const parsed = parseCompletionCapture(capture);
+    if (parsed.runId !== runId)
+      throw new BanzaiError(
+        "INVALID_COMPLETION_CAPTURE",
+        "Completion capture run identity does not match its path."
+      );
+    await this.writeImmutableEvidence(
+      this.completionEvidencePath(
+        runId,
+        { id: parsed.attemptId },
+        "completion-input.json"
+      ),
+      Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`),
+      "COMPLETION_CAPTURE_CONFLICT"
+    );
+  }
+
+  async readCompletionCaptureIfExists(
+    runId: string,
+    attempt: AttemptReference
+  ): Promise<CompletionCapture | null> {
+    const bytes = await this.readImmutableEvidence(
+      this.completionEvidencePath(runId, attempt, "completion-input.json")
+    );
+    if (bytes === null) return null;
+    const parsed = parseCompletionCapture(
+      JSON.parse(bytes.toString("utf8")) as unknown
+    );
+    if (
+      parsed.runId !== runId ||
+      parsed.attemptId !== attempt.id ||
+      parsed.attemptKind !== attempt.kind
+    )
+      throw new BanzaiError(
+        "INVALID_COMPLETION_CAPTURE",
+        "Completion capture identity conflicts with its path."
+      );
+    return parsed;
+  }
+
+  async writeCompletionCandidate(
+    runId: string,
+    candidate: CompletionCandidate,
+    bytes: Buffer
+  ): Promise<void> {
+    const parsed = parseCompletionCandidate(candidate);
+    const attempt = { id: parsed.attemptId, kind: parsed.attemptKind };
+    if (
+      parsed.runId !== runId ||
+      parsed.candidatePath !==
+        this.completionEvidenceRelativePath(
+          runId,
+          attempt,
+          "completion-candidate.md"
+        ) ||
+      parsed.outputSha256 !==
+        createHash("sha256").update(bytes).digest("hex") ||
+      parsed.outputBytes !== bytes.length
+    )
+      throw new BanzaiError(
+        "INVALID_COMPLETION_CANDIDATE",
+        "Completion candidate metadata does not bind its exact bytes."
+      );
+    await this.writeImmutableEvidence(
+      this.completionEvidencePath(runId, attempt, "completion-candidate.md"),
+      bytes,
+      "COMPLETION_CANDIDATE_CONFLICT"
+    );
+    await this.writeImmutableEvidence(
+      this.completionEvidencePath(runId, attempt, "completion-candidate.json"),
+      Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`),
+      "COMPLETION_CANDIDATE_CONFLICT"
+    );
+  }
+
+  async readCompletionCandidateIfExists(
+    runId: string,
+    attempt: AttemptReference
+  ): Promise<{ candidate: CompletionCandidate; bytes: Buffer } | null> {
+    const metadata = await this.readImmutableEvidence(
+      this.completionEvidencePath(runId, attempt, "completion-candidate.json")
+    );
+    if (metadata === null) return null;
+    const candidate = parseCompletionCandidate(
+      JSON.parse(metadata.toString("utf8")) as unknown
+    );
+    const bytes = await this.readImmutableEvidence(
+      this.completionEvidencePath(runId, attempt, "completion-candidate.md")
+    );
+    if (
+      candidate.runId !== runId ||
+      candidate.attemptId !== attempt.id ||
+      candidate.attemptKind !== attempt.kind ||
+      bytes === null ||
+      createHash("sha256").update(bytes).digest("hex") !==
+        candidate.outputSha256 ||
+      bytes.length !== candidate.outputBytes
+    )
+      throw new BanzaiError(
+        "INVALID_COMPLETION_CANDIDATE",
+        "Completion candidate bytes or identity conflict with their metadata."
+      );
+    return { candidate, bytes };
+  }
+
+  async writeCompletionPublication(
+    runId: string,
+    receipt: CompletionPublication
+  ): Promise<void> {
+    const parsed = parseCompletionPublication(receipt);
+    if (parsed.runId !== runId)
+      throw new BanzaiError(
+        "INVALID_COMPLETION_PUBLICATION",
+        "Completion publication run identity does not match its path."
+      );
+    await this.writeImmutableEvidence(
+      this.completionEvidencePath(
+        runId,
+        { id: parsed.attemptId },
+        "completion-publication.json"
+      ),
+      Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`),
+      "COMPLETION_PUBLICATION_CONFLICT"
+    );
+  }
+
+  async readCompletionPublicationIfExists(
+    runId: string,
+    attempt: Pick<AttemptReference, "id"> &
+      Partial<Pick<AttemptReference, "kind">>
+  ): Promise<CompletionPublication | null> {
+    const bytes = await this.readImmutableEvidence(
+      this.completionEvidencePath(runId, attempt, "completion-publication.json")
+    );
+    if (bytes === null) return null;
+    const parsed = parseCompletionPublication(
+      JSON.parse(bytes.toString("utf8")) as unknown
+    );
+    if (
+      parsed.runId !== runId ||
+      parsed.attemptId !== attempt.id ||
+      (attempt.kind !== undefined && parsed.attemptKind !== attempt.kind)
+    )
+      throw new BanzaiError(
+        "INVALID_COMPLETION_PUBLICATION",
+        "Completion publication identity conflicts with its path."
+      );
+    return parsed;
+  }
+
+  /** Exact current state bytes, for attempt-owned transition evidence. */
+  async readStateBytes(runId: string): Promise<Buffer> {
+    const bytes = await this.readImmutableEvidence(this.statePath(runId));
+    if (bytes === null)
+      throw new BanzaiError(
+        "STATE_READ_FAILED",
+        `Could not read state for ${runId}.`
+      );
+    return bytes;
+  }
+
   terminalCheckpointPath(runId: string, attempt: AttemptReference): string {
     return containedEvidencePath(
       this.runDirectory(runId),
@@ -879,6 +1389,27 @@ export class RunStore {
     );
   }
 
+  async assertLockOwned(): Promise<void> {
+    const expected = heldLocks.get(this.lockPath);
+    const named = await lstat(this.lockPath).catch(() => null);
+    const current =
+      named?.isFile() && !named.isSymbolicLink()
+        ? await readJson<LockFile>(this.lockPath, "runner lock").catch(
+            () => null
+          )
+        : null;
+    if (
+      expected === undefined ||
+      current?.token !== expected ||
+      current.pid !== process.pid
+    ) {
+      throw new BanzaiError(
+        "RUNNER_LOCKED",
+        "Configuration changes require the current Banzai session's repository ownership."
+      );
+    }
+  }
+
   /** Called only while setup owns the ordinary runner lock; never repairs state. */
   async assertSetupEligible(): Promise<void> {
     const invalid = () =>
@@ -957,8 +1488,9 @@ export class RunStore {
     await mkdir(path.join(this.runDirectory(state.runId), "attempts"));
     await mkdir(this.verificationAttemptsDirectory(state.runId));
     await atomicWriteJson(this.verificationLedgerPath(state.runId), {
-      schemaVersion:
-        state.schemaVersion === 5 ? 2 : VERIFICATION_LEDGER_SCHEMA_VERSION
+      schemaVersion: usesVerificationPolicy(state)
+        ? 2
+        : VERIFICATION_LEDGER_SCHEMA_VERSION
     });
     await this.withStateMutation(state.runId, async () => {
       await atomicWriteJson(this.statePath(state.runId), state, false);
@@ -1092,7 +1624,7 @@ export class RunStore {
       if (
         raw.runId !== runId ||
         !CANCELLATION_STATUSES.includes(raw.status as RunState["status"]) ||
-        ![1, 2, 3, 4, 5].includes(raw.schemaVersion as number)
+        ![1, 2, 3, 4, 5, 6, 7, 8].includes(raw.schemaVersion as number)
       )
         throw new Error();
     } catch {
@@ -1141,10 +1673,13 @@ export class RunStore {
   ): Promise<RunEvent> {
     return await this.withStateMutation(runId, async () => {
       const { state } = await this.readMutationState(runId);
-      if (oncePerReviewAttempt) {
+      if (oncePerReviewAttempt || type === "config.verification.applied") {
+        const identityKey =
+          type === "config.verification.applied" ? "operationId" : "attemptId";
         if (
-          type !== "review.completed" ||
-          typeof details.attemptId !== "string"
+          (type !== "review.completed" &&
+            type !== "config.verification.applied") ||
+          typeof details[identityKey] !== "string"
         )
           throw new BanzaiError(
             "INVALID_REVIEW_EVENT",
@@ -1164,7 +1699,7 @@ export class RunStore {
           .filter(
             (event) =>
               event.type === type &&
-              event.details.attemptId === details.attemptId
+              event.details[identityKey] === details[identityKey]
           );
         if (
           matches.length > 1 ||
@@ -1247,6 +1782,36 @@ export class RunStore {
       }
       return event;
     });
+  }
+
+  /**
+   * Appends a typed event once per exact identity: an identical (type, details)
+   * event already on the ledger is returned instead of duplicated, so repeated
+   * inspection or resume of the same durable refusal adds nothing.
+   */
+  async appendEventOnce(
+    runId: string,
+    type: string,
+    details: Record<string, unknown>
+  ): Promise<RunEvent> {
+    const prior = await readFile(
+      path.join(this.runDirectory(runId), "events.jsonl"),
+      "utf8"
+    ).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return "";
+      throw error;
+    });
+    const canonical = JSON.stringify(details);
+    const existing = prior
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as RunEvent)
+      .find(
+        (event) =>
+          event.type === type && JSON.stringify(event.details) === canonical
+      );
+    if (existing !== undefined) return existing;
+    return await this.appendEvent(runId, type, details);
   }
 
   async writeRunAttempt(runId: string, record: AttemptRecord): Promise<void> {
@@ -1418,7 +1983,7 @@ export class RunStore {
 
   async writeTerminalCheckpoint(
     runId: string,
-    checkpoint: TerminalAttemptCheckpoint
+    checkpoint: PersistedTerminalCheckpoint
   ): Promise<void> {
     const parsed = parseTerminalAttemptCheckpoint(checkpoint);
     if (parsed.runId !== runId) {
@@ -1458,7 +2023,7 @@ export class RunStore {
   async readTerminalCheckpointIfExists(
     runId: string,
     attempt: AttemptReference
-  ): Promise<TerminalAttemptCheckpoint | null> {
+  ): Promise<PersistedTerminalCheckpoint | null> {
     try {
       const parsed = parseTerminalAttemptCheckpoint(
         await readJson<unknown>(

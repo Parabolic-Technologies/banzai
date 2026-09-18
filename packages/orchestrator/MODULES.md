@@ -13,7 +13,7 @@ is a navigational reference and is updated with the module it describes.
   and archive operations. No runner configuration or CLI installation is needed
   by the standalone helper. Claims exclude overlapping standalone/runner phase
   writers for one work; explicit legacy registration preserves original roles. Workflow grants remain
-  runner-owned. New run state v4 holds binding bytes and SHA-256; workspace v2
+  runner-owned. New state v8 holds private binding v2 bytes and SHA-256; workspace v2
   hashes the selected ignored work. Historical states/digests retain old meaning.
 
 - `cancellation.ts` — closed observation v1 reasons, response/provenance table,
@@ -61,13 +61,22 @@ is a navigational reference and is updated with the module it describes.
   `forceTerminateActiveProcesses`, and `releaseHeldRunnerLocksSync`, and
   restores the terminal an interrupted prompt left in raw mode with the cursor
   hidden.
+- `version-cli.ts` — early, repository-independent `--version` / `-v` and
+  `--plugin-version` / `-pv` commands, also accepting em-dash long aliases.
+  Reads the package mirror or bounded local client inventories, including
+  disabled installations and all distinct installed versions per client.
+  Unknown inventories are unavailable; empty inventories are not installed.
+  No known plugin version produces a nonzero exit; extra arguments fail before
+  any inventory query. Never reads marketplace source versions or starts models.
 - `agent-control-cli.ts` — exact non-TTY control grammar and stdin composition.
   Capability discovery runs before Git discovery or runner construction;
   status, start, answer, and recover reuse the current `WorkflowRunner`, and
   mutations emit a fresh authoritative status projection.
-- `agent-control.ts` — closed current `banzai-agent-capabilities/v3`,
-  `banzai-agent-status/v2`, and keyed `banzai-agent-answer/v2` contracts;
-  preserved `banzai-agent-request/v1`, ordered escalation
+- `agent-control.ts` — closed current `banzai-agent-capabilities/v6`
+  (declaring the completion publication protocol, stages, refusal codes and
+  `pending_application` and task verification), `banzai-agent-status/v5` (bounded
+  task applicability and completion publication state), and configuration `banzai-agent-answer/v3` contracts;
+  preserved keyed consultation `banzai-agent-answer/v2`, `banzai-agent-request/v1`, ordered escalation
   `banzai-agent-answer/v1`, and `banzai-agent-recovery/v1` inputs; bounded
   privacy allow-list, semantic state/action projection, exact consultation
   identity binding, 64 KiB fail-before-mutation input decoding, and
@@ -100,10 +109,10 @@ is a navigational reference and is updated with the module it describes.
   missing Python fails the suite.
 - `doctor-cli.ts` — exact doctor argument contract, injected stdout/stderr
   composition, canonical JSON serialization, and deterministic human
-  projection for `banzai-doctor/v3`, including explicit unavailable project
+  projection for `banzai-doctor/v5`, including explicit unavailable project
   types when marker evidence cannot be read.
-- `doctor.ts` — fixed-order Project Verification Readiness checks, with
-  `project.guidance` immediately after `repository.git` and schema version 3. `claude.instructions` follows `claude.environment`
+- `doctor.ts` — fixed-order project and task-verification diagnostics, with
+  `project.guidance` immediately after `repository.git` and schema version 5. `claude.instructions` follows `claude.environment`
   and precedes `claude.permissions`; it compares the configured role union and
   preserves mismatch/bounded-failure/unverifiable precedence. Uses direct
   privacy-bounded config, active-pointer/state, and lock reads plus injected
@@ -244,13 +253,36 @@ is a navigational reference and is updated with the module it describes.
   approval-digest validation, base-commit validation, attempt reconciliation,
   compatible builder-session selection, bounded full/delta reviewer policy,
   and direct terminal completion after complete zero-accepted triage.
+  For new strict implementation and fix attempts it owns the
+  `banzai-completion-protocol/v1` lifecycle (ADR-0047): the v7 state
+  transition with retained prior-state bytes, protocol-selected envelope
+  decoding, `pending_application`, capture, claim validation, deterministic
+  v2 region rendering, candidate persistence, publication, receipt, apply and
+  once-only events, the closed `CompletionRefusal` routes (I/O resume, drift
+  restore-then-resume, integrity cancel), stop results applied with retained
+  diagnostics, linked `<kind>-repair-<hex>` successors via `retryOf`, and the
+  read-only revalidation of published completion at every downstream boundary.
+  Capture derives its baseline from the identities the v2 terminal checkpoint
+  observed, refuses any second observation that differs and refuses a claim
+  without that proof; it revalidates checkpoint configuration and session
+  context before creating a missing capture. Identity-bearing capture/receipt
+  time derives from terminal proof rather than retry time. Ordinary cursor
+  state-write failures and follow-on refusal state/event persistence failures
+  stay on the publication path without becoming model failures; resume appends
+  a durable refusal event once before continuing. Publication authority includes
+  the implementer configuration digest; and a completed protocol
+  attempt interrupted before its summary, cursor and events finishes them
+  idempotently from its receipt.
   `artifactWritePaths` supplies prompt grants and `checkArtifactPhaseScope`:
   strict implementation permits the bound `implementationReport` and
   `testReport`; strict fix additionally permits the existing bound
   `changeReport`, without requiring a report when its existing trigger does not
   apply. `hooks/spec-gate.cjs` mirrors these roles in `privateWrites`.
   Feature and quick-fix retain `work` and `changeReport` respectively;
-  planning, selection and review grants remain separate.
+  planning, selection and review grants remain separate. Planning also changes
+  public `documentation/**` and the root `PROJECT_MANIFEST.md`, where accepting
+  an ADR adds its `Planned` active-index row; source paths stay outside the
+  planning scope.
   Cancellation captures pre-transition context before clearing the pending
   human decision; durable decision history and the terminal anchor are retained.
   Recovery source discovery distinguishes interrupted mutable work from one
@@ -311,7 +343,10 @@ is a navigational reference and is updated with the module it describes.
   schema-version-1 verification ledger marker, atomically owns one bounded leaf
   per physical verification attempt plus sequence-qualified log digests,
   enumerates canonical model-attempt leaves with path/identity validation while
-  excluding checkpoint, candidate, and raw-result evidence, and enforces the
+  excluding checkpoint, candidate, raw-result and completion-protocol evidence,
+  writes the immutable attempt-owned completion transition, original report,
+  capture, candidate and publication records (`wx` temp plus link),
+  appends deduplicated events through `appendEventOnce`, and enforces the
   single-active-run lock. Locks this process holds are tracked module-wide, so
   `releaseHeldRunnerLocksSync` can drop them from a signal handler, where the
   `try/finally` that normally releases never runs; a lock file whose token is
@@ -406,7 +441,13 @@ is a navigational reference and is updated with the module it describes.
 - `validation.ts` — runtime decoders (`parseWorkflowSelectionResult`,
   `parsePhaseResult`, `parseReviewResult`, `parseConfig`) that enforce the
   invariants JSON Schema cannot express: non-empty values, identifier patterns,
-  positive integers, uniqueness, and cross-field agreement.
+  positive integers, uniqueness, and cross-field agreement. Also the
+  protocol-selected safe envelope (`parsePhaseResultEnvelope`, which validates
+  everything except the ledger and retains the canonical original plus digest),
+  attempt schema 3/4 rules (protocol fields required on v3/v4 and forbidden on
+  v1/v2, result bound to the retained envelope original), terminal checkpoints
+  v1-v3, and the closed readers for completion transition, capture, candidate,
+  publication receipt, cursor, summary v2 and diagnostics.
 - `prompt-envelope.ts` — in-memory ordered closed prompt components whose
   concatenation is the exact adapter prompt; it adds no implicit separator and
   persists no component text.
@@ -423,6 +464,12 @@ is a navigational reference and is updated with the module it describes.
   `SCHEMA_VERSION_MISMATCH` when bundled schemas disagree with
   `CONTRACT_VERSION`; current review-result v2 and byte-preserved v1 resolve
   through distinct output-contract identities.
+- `init-resources.ts` — generated local verification guide embedded in the
+  standalone CLI. `init-resources-build.mjs` reads canonical
+  `documentation/verification-examples.md` and resolves sibling product-guide
+  links to the public repository; build generates and check-dist compares.
+  CLI init creates the local guide under its initialization lock before prompts,
+  using create-only writes and rejecting symlinks or non-regular paths.
 - `config.ts` — `.banzai/config.json` location, `DEFAULT_CONFIG`,
   `loadConfig`, `initializeConfig`, and `applyModelUpdates`, which rewrites only
   requested `model`, `executable`, and `effort` JSON value tokens and preserves
@@ -473,25 +520,31 @@ is a navigational reference and is updated with the module it describes.
   approved meaning, and required evidence despite report corrections. Legacy
   directives, approval bytes and completion contracts remain binding.
   Builder prompts expose ordered configured
-  verification profiles without executing model-selected commands; reviewer
+  approved task obligations and separately validated candidates; reviewer
   prompts treat current runner evidence as default and require material
   risk/contract justification for missing-test findings. Review prompts also
   freeze ordinary findings/severity/verdict before Engineering Quality mapping,
   isolate incremental `EQ-SHADOW:` candidates in free-form deferred coverage,
   preserve all opaque shadow strings through runner rendering, and make full-after-fix and delta review
-  closure-oriented under durable human triage. Strict implementation and
-  completion-repair prompts define the runner-authorized changed surface,
-  distinguish carried-in unchanged files from valid report evidence, require
-  the model to reread the report table, and return JSON-identical task records
-  without rewording evidence details. Repair prompts also carry the persisted
-  violation and exact rejected task ID.
+  closure-oriented under durable human triage. Strict implementation, fix and
+  completion-repair prompts request structured claims plus report narrative
+  under `banzai-completion-protocol/v1`: they define the runner-authorized
+  changed surface, distinguish carried-in unchanged files from valid report
+  evidence, state that the runner renders and publishes the **Plan Task
+  Completion** section and that nothing inside it confers authority, and never
+  ask for a model-authored table. Repair prompts also carry the persisted
+  violation, exact rejected task ID and diagnostic, and route report-input
+  violations to narrative-ownership repair.
 - `review-snapshot.ts` — immutable `banzai-review-snapshot/v2` bound identity and historical v1 identity, exact
   approved-file hashes, full/delta lineage, recorded verification/completion and
-  physically owned evidence paths. Storage is a private attempt sidecar,
+  physically owned evidence paths; snapshot v5 additionally freezes the
+  completion publication receipt, capture and candidate identities and admits
+  summary schema 2. Storage is a private attempt sidecar,
   excluded from canonical model-attempt enumeration.
 - `review-artifact.ts` — shared v2 deterministic rendering, complete lossless
   semantic values, required scope versus reviewer assertions, and original
-  runner-evidence projection. Validates exact candidate bytes and publishes only
+  runner-evidence projection; snapshot v5 renders as `banzai-feature-review/v6`
+  with a runner-owned completion publication section. Validates exact candidate bytes and publishes only
   the in-memory validation proof. Legacy v1 rendering, canonical fallback,
   independent prose rules and typed content diagnostics remain readable.
 - `mcp.ts` — `resolveSerenaWhitelist`, the availability-gated Serena MCP
@@ -574,11 +627,13 @@ is a navigational reference and is updated with the module it describes.
   fresh-input remainder, and an optional turn count. It reads no
   process state, so both surfaces are testable against an explicit width.
 - `types.ts` — all shared types, `CONTRACT_VERSION = "1.0.0"`, phase-result
-  schema v3 and state schema v4 with explicit v1/v2/v3 legacy readers, independent
-  agent-control schema and `3.0.0` contract identities, independent
+  schema v4 and state schema v8 with explicit historical readers, independent
+  agent-control schema and `6.0.0` contract identities, independent
   `banzai-context-attempt/v1` and `banzai-context-report/v1` identities,
-  model-attempt v2,
-  terminal-checkpoint/recovery contracts, and the pure role/model/effort
+  model-attempt v4 and retained v1-v3 readers under
+  `banzai-completion-protocol/v1`, terminal-checkpoint v1-v3, the completion
+  capture/transition/candidate/publication record identities, completion
+  summary v2, recovery contracts, and the pure role/model/effort
   session-binding matcher; no runtime imports.
 - `errors.ts` — `BanzaiError` (stable `code`, `exitCode`), `ProcessExitError`
   (retains redacted stdout/stderr plus the typed `failureCause` and the usage
@@ -592,11 +647,17 @@ is a navigational reference and is updated with the module it describes.
   against the sole root `package.json.version` authority,
   absence of retained `.banzai-version-set` state, hook,
   current phase-result/state/control identities, byte-preserved legacy
-  phase-result schemas, five-gate decision-consultation and supervisor policy,
+  phase-result schemas, the five existing gates and conditional runner
+  configuration gate, decision-consultation and supervisor policy,
   privacy canaries, `orchestrate`, Test Assurance, Security Assurance, and
   Engineering Quality policy references/syntax/identity, the versionless Claude
   marketplace, root version-script wiring, committed bundle mode, and required
-  paths without mutating them. Instruction-layout validation pins the exact
+  paths without mutating them. Before resource and distribution parity it
+  rejects hook-runtime edits (`hooks/spec-gate.cjs`, `hooks/hooks.json`,
+  `plugins/banzai/lib/`) made after the commit that set the current version
+  without a pending working-tree bump, because installed plugin caches refresh
+  only on a version change; it skips repositories without full Git history.
+  Instruction-layout validation pins the exact
   shim, process sections, six policy files, required/conditional consumer
   matrix, scoped reference rules, migration approval and legacy-release literal.
   The
@@ -666,7 +727,8 @@ Inventory selects `workPaths`/`runIds`; export validates fixed `inventoryFile`
 bytes. `bundlePath` verification/restore preserve explicit pins and owner policy,
 required Markdown authority closure and a private restored manifest receipt.
 Managed work/run/control destination ancestry is rejected before staging.
-Doctor's read-only active-state check supports v4/v5 and validates binding identity.
+Doctor's read-only active-state check admits state v8 and retained older shapes,
+and validates binding identity without authorizing historical continuation.
 
 ## Runner instruction generation and parity
 
@@ -704,44 +766,117 @@ claim match. Diagnostics offer rebuild, matching plugin update or explicit ambie
 mode without performing any of them. Tool inventories and real Skill telemetry
 remain available; progress names supplied phases rather than inferred skill loads.
 
-## Verification evidence and versioned consumers
+## Task verification and versioned consumers
 
-`verification-evidence.ts` is a typed facade over the builtin-only plugin decision
-engine and evidence store. Config 3 adds globally stable check IDs and an explicit
-policy with delimited explanatory inputs, dependency exclusions, declared actual
-toolchain files, sanitized environment and volatile-dependency refusal. Capture
-includes both Git index blobs and working/ignored input bytes, kinds, modes and
-path sets. Unknown, unstable, secret-dependent or unproven symlink inputs keep
-checks fresh. Strict plans may provide a complete, remainder-bound obligation
-inventory; legacy plans retain fresh execution. Release gates cannot reuse.
-Unavailable captures preserve physical attempt history but cannot authorize
-current applicability, including same-round resume after a successful process.
+CLI and interactive status share the canonical task-outcome projection in
+`verification-ui.ts`. Timeout, interruption, not-run and unavailable execution
+remain distinct; verification-only retry retains completed implementation and
+revalidates policy, authority and live-process protection before launch.
 
-The same decision/start/finish/application codecs serve workflow state 5 and the
-plugin-only verification helper. New binding v2 reserves `verificationDirectory`
-for that owner; ordinary artifact writes cannot address it. Physical attempt v1
-leaves and metrics count actual subprocesses only. Ledger 2 adds provenance,
-never fabricated success. Execution occurs under existing work ownership; fresh
-source and authority checks gate review, pass application, zero-accepted triage
-and lite completion. Failure/retry/recovery retain their prior authorization.
+`verification-evidence.ts` exposes the shared builtin-only
+`task-verification.mjs` and `task-verification-store.mjs` owners. Discovery reads
+project metadata inertly and distinguishes absent/unavailable inputs and known
+placeholders. Descriptors identify requirement references, executable/argv, cwd,
+timeout, source hashes and permitted future materialization. Strict obligations
+v2 bind the plan remainder; phase-result v4 supplements cannot replace them. A
+supplement reusing an obligation ID that differs only in `sources` is a
+restatement and leaves the approved descriptor in force; any other difference
+fails selection. Plan-time `sources` of a required obligation are not a launch
+precondition, so implementation may keep editing scripts; the captured task
+inputs record what ran. Supplement sources must still match at launch.
+Observed inputs follow Git ignore rules, so a check can pass only when its
+generated output is ignored. A completed check that changes observed files stops
+the round and names up to ten changed paths with the ignore remedy; input drift
+between selection and launch names its paths the same way. The entry lists stay
+in process memory and the persisted observation format is unchanged.
+Lite checks derive authority from the user request and persisted workflow
+selection, with inherited-local permissions. Optional schema-4 project policy
+constrains checks; metadata never grants execution permission.
 
-Snapshot v3 and rendered review artifact v4 freeze direct origins, physical
-leaves and executed/reused/pending applicability. Review-result v2, completion
-v1 and old snapshot/rendering identities stay unchanged. Archive v1 follows this
-closure, including standalone evidence and logs, and validates restored bytes.
-Same-repository environment identity prevents a restored archive from becoming
-reuse authority in another checkout.
+State 8 uses private binding 2 and ledger 3. The runner or standalone helper owns
+immutable decision, physical start/finish, origin and applicability records.
+Actual launch context, safe source paths and authority are checked before launch
+and application. Unknown input captures cannot establish unchanged evidence.
+Retries preserve failed identities. Owner recovery records interrupted outcomes
+without inventing exit codes and repairs missing origins from retained physical
+bytes; terminal success is not re-executed. Equivalent evidence requires complete
+policy-declared inputs/toolchain/environment and a direct compatible successful
+origin. Changes outside declared explanatory regions and release gates stay
+fresh. Helper request v2 accepts bound task identities, not arbitrary argv, and
+its inspect path writes nothing. Legacy helper v1 remains explicitly legacy.
 
-`eval export --schema-version 2` reads the new ledger with complete provenance and
-safe read-only paths, then emits only opaque ordinals and allow-listed numeric
-fields. `eval kpi --schema-version 2` accepts only export v2 and computes each
-source independently from per-run evidence. Physical retries remain attempts;
-terminal dispositions count once per round/check. Incomplete coverage never
-contributes inferred zeroes. Default v1 and context/cancellation/human-time report
-schemas stay unchanged; their state readers recognize v5 where applicable.
-Missing origin-finish proof makes export-v2 coverage incomplete even when the
-historical execution had unavailable captures; such runs cannot enter exact KPIs.
+Review snapshot 6/rendered review 7 freeze task checks, required/supplemental
+status, physical evidence, applicability and completion publication. Review-result
+2 is unchanged. The independent reviewer checks requirement coverage and
+unjustified weakening; a command hash cannot certify semantic adequacy.
+Frozen evaluation/KPI/context/archive formats do not reinterpret task evidence
+as legacy profile passes: unsupported evidence remains partial, with no exact
+completion/KPI claim. Archive restore requires full interpreted closure.
+Human-time's bounded state/attempt projection accepts current versions while
+keeping its report schema unchanged.
 
-The test driver accepts repeated exact `--file` selections before esbuild;
-`--pattern` still filters Node test names. Full default execution, child process
-group termination and output cleanup retain the same owner.
+No historical-run migration or binding v3 is introduced. Start a new task;
+retained artifacts keep their original identity. `doctor` v5 and control
+capabilities v6/status v5 expose task verification without requiring profile
+coverage. Current init emits schema 4 without a verification wizard. The test
+driver's exact file selection, process groups and cleanup are unchanged.
+
+## Legacy guided verification setup
+
+These codecs and explicit profile utilities concern retained formats only. New
+state-8 task runs never enter this prerequisite gate or init wizard.
+
+- `plan-task-completion.ts` classifies task statements and normalized path
+  references before plan offer and approval. Explicit file-change lists and
+  write actions reject protected targets; read-only references and preservation
+  constraints grant no writes. Wrapped list items retain context, while mixed
+  clauses are checked separately. Unrecognized access fails with a clarification
+  diagnostic. This bounded planning lint is not a general natural-language or
+  shell parser; phase scope and hook write enforcement remain authoritative.
+- `verification.ts` performs bounded static root inspection, existing-script
+  suggestions, bootstrap-aware readiness and finite missing-script checks. It
+  never executes discovery commands or infers a stack in an empty folder.
+- `configuration-prerequisite.ts` owns the closed request, continuation, resolution,
+  Skip and state-6 codecs. Normalized command changes (including name/timeout)
+  replace schema-3 IDs; unchanged/reordered commands retain them.
+- `verification-config.ts` publishes concrete token-preserving previews under
+  repository and bound-work ownership. It pins config/source hashes, persists
+  private confirmation and prepared/applied/finalized transaction evidence,
+  reconciles durable before/after/drift states, and emits one applied event per
+  operation. Current config and this run's retained ID lists define collisions.
+- `verification-cli.ts` owns init's static wizard and verify add/edit/remove/list/
+  check. Structured edits cannot change policy fields; explicit check reports all
+  commands while workflow verification remains fail-fast. No configuration write
+  runs concurrently with a model, check or waiting interactive owner.
+- `verification-ui.ts` edits executable/argv fields and renders pending actions
+  before the repair/resume alternative. It performs no project execution.
+- `configuration-review.ts` freezes actual deltas, coverage and resolution/Skip
+  references for snapshot v4/render v5; historical writers/readers remain bound
+  to their original versions. Already-published changes survive source drift and
+  are distinguishable from completed acceptance or whole-file authorship.
+- `persisted-readers.ts` is the canonical generation entry for plugin-only
+  validators. Archive dependency closure includes transaction/confirmation/run/
+  work evidence; model grants still deny all runner control files.
+
+`WorkflowRunner` rechecks prerequisites at the completed implementation/fix
+checkpoint. The pending state is `needs_human_decision`; exact Accept continues
+to verification without clearing approval. Edit produces a fresh proposal, Skip
+is scoped to this run/types/config and preserves binding obligations, and Cancel
+uses existing authority. External repair remains pending until resume revalidates
+it, without inventing a human answer. Atomic config publication cannot infer any
+model/process outcome. State 6 distinguishes ordered binding-v1 and policy
+binding-v2 execution; frozen evaluation/human-time contracts retain their meanings.
+
+Doctor v4 adds ordered per-check `fixes` and `roles`. Codex parity is
+`not_applicable`; verified pinned Claude is quiet. Ambient/unresolved scope is
+`unverifiable` with only an ambient remedy. Mismatch fails readiness, and only
+mismatch/bounded failure receives rebuild/update remedies. Bootstrap changes
+coverage only for confirmed markerless custom projects. Static preflight offers
+configuration before model work; every failed verification-category check and
+`executables.verification` supplies an exact fix command/document pointer.
+
+The instruction baseline retains predecessor and original pins. ADR-0045 permits
+its exact declared hook/planning/supervisor transition, including the supervisor
+entry skeleton. For retained ADR-0043 authority, only a leading, indented ADR-0045
+lifecycle annotation may be excluded for comparison; the original accepted body
+and retained suffix must still match their recorded full-byte hash.

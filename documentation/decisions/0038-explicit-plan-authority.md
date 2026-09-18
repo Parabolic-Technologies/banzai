@@ -7,6 +7,11 @@
 - Owner: Banzai maintainers
 - Decision makers: Repository user; explicitly accepted in chat on 2026-09-08
 
+- Amended by [ADR-0049](./0049-task-scoped-verification.md), accepted 2026-09-17:
+  a self-contained approved verification inventory v2 and separate non-replacing
+  supplements govern new task verification. Approval immutability and human
+  obligation changes remain. Implementation of the amendment is Planned.
+
 ## Related Artifacts
 
 - [Description](../features/proportionate-development-plans/description.md)

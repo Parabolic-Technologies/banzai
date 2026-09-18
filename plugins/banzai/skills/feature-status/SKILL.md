@@ -18,13 +18,16 @@ Keep ADRs, indexes, manifests and maintained product guidance at their existing
 repository paths. Status/loading stays read-only, and orchestrated work follows
 the persisted run binding and exact phase grants.
 
-Standalone verification follows the Test Assurance policy's deterministic
-fallback rule. With explicit project opt-in and a v2 binding, resolve
-`../../scripts/verification.cjs` relative to this installed skill; read-only
-status/review uses inspect or decide, and authorized implementation uses execute
-for configured check IDs. Preserve human plan/ADR/triage gates. In orchestrated
-mode consume the runner's evidence and never invoke this helper or write its
-machine directory. A missing helper or unsupported binding retains fresh checks.
+Standalone verification inspection uses existing task and skill authority.
+With a private v2 binding, resolve `../../scripts/verification.cjs` relative to
+this installed skill and use its v2 inspect or decide request against the bound
+task inventory. These operations are read-only and confer no execution grant.
+This skill does not execute checks through the helper. An authorized implementing
+skill may execute task descriptors within the existing scope; a missing helper,
+v1 binding or unsupported bound artifact retains the applicable fresh-check owner.
+Never require configured profile IDs or fabricate runner approval. Orchestrated
+phases consume runner evidence and never invoke the helper or write its machine
+directory.
 
 ## Sources
 
@@ -88,8 +91,10 @@ legacy approved meaning and report missing or contradictory material evidence.
 Report task completion separately from lifecycle, and name its source:
 
 1. `structured completion evidence` only when the supported canonical ledger,
-   approved plan digest, required reports, deterministic Markdown projection,
-   and persisted validated summary agree;
+   approved plan digest, required reports, the report's completion section
+   (the runner-published `banzai-plan-task-completion/v2` region, or the
+   legacy model-authored v1 projection), and the persisted validated summary
+   with its publication receipt when present agree;
 2. `plan checkbox` for standalone or non-approved mutable work without
    orchestrator evidence;
 3. `legacy` or `unknown` for an orchestrated run whose source attempt predates
@@ -105,8 +110,12 @@ and may show only proven partial task evidence. A terminal inconsistency keeps
 the persisted lifecycle and next action visible and recommends an
 artifact/evidence audit, not plan-checkbox mutation.
 
-Never parse legacy report prose into a fabricated `N/N`. The report table is a
-projection and cannot independently establish completion. Persisted state
+Never parse legacy report prose into a fabricated `N/N`. The report's
+completion section cannot independently establish completion: a v2 region is
+the runner's receipt of validated claims, a v1 table is a model-authored
+projection, and neither is repository evidence. A run whose latest attempt is
+`pending_application` or whose completion publication was refused has no
+completed claims yet. Persisted state
 continues to determine lifecycle and `nextAction` even when task completion is
 legacy, unknown, or inconsistent.
 

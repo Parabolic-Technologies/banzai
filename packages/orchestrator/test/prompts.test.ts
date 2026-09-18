@@ -711,7 +711,7 @@ test("lite execution receives its selected phase without skill choreography", ()
   assert.match(prompt, /runner owns deterministic verification/);
 });
 
-test("builder prompts expose ordered runner profiles and verification ownership", () => {
+test("builder prompts select task verification without a profile catalogue", () => {
   const prompts = [
     implementationPrompt(
       "example",
@@ -744,35 +744,16 @@ test("builder prompts expose ordered runner profiles and verification ownership"
   ];
 
   for (const prompt of prompts) {
-    assert.ok(
-      prompt.indexOf('"id": "node"') < prompt.indexOf('"id": "repository"'),
-      "profile order must remain stable"
-    );
-    assert.match(prompt, /"executable": "npm"/);
-    assert.match(
-      prompt,
-      /"argv": \[\s+"run",\s+"test",\s+"--",\s+"--test-name-pattern",\s+"contract value"\s+\]/
-    );
-    assert.match(prompt, /"timeoutMs": 120000/);
-    assert.match(prompt, /execute the supplied verification profiles.*order/s);
-    assert.match(prompt, /Run focused affected tests/);
-    assert.match(prompt, /Do not rerun a supplied full-scope command/);
-    assert.match(
-      prompt,
-      /applicable final suite recorded in PROJECT_MANIFEST\.md/
-    );
-    assert.match(
-      prompt,
-      /run it once and record the verification-readiness gap/
-    );
-    assert.match(
-      prompt,
-      /requestedVerification field records a request only.*unconfigured model-selected command/s
-    );
+    assert.match(prompt, /Verification is task-scoped/);
+    assert.match(prompt, /Return verificationCandidates/);
+    assert.match(prompt, /cannot replace or weaken approved obligations/);
+    assert.match(prompt, /keep any output they generate Git-ignored/);
+    assert.match(prompt, /Script discovery is evidence, not authority/);
+    assert.doesNotMatch(prompt, /Supplied runner verification profiles/);
   }
 });
 
-test("phase prompts deliver implementation and assurance with the unchanged v3 completion boundary", () => {
+test("phase prompts deliver implementation and assurance with the v4 task verification and existing completion boundary", () => {
   const implementation = implementationPrompt(
     "example",
     "approval-digest",
@@ -791,36 +772,43 @@ test("phase prompts deliver implementation and assurance with the unchanged v3 c
 
   assert.match(implementation, /# Implementation Guidance/);
   assert.match(implementation, /# Assurance Guidance/);
-  assert.match(implementation, /schemaVersion=3/);
+  assert.match(implementation, /schemaVersion=4/);
   assert.match(implementation, /decisionConsultation=null/);
   assert.match(implementation, /sole canonical completion source/);
   assert.match(implementation, /T001[\s\S]*T002/);
-  assert.match(implementation, /banzai-plan-task-completion\/v1/);
-  assert.match(implementation, /JSON-identical after parsing/);
+  // ADR-0047: the model returns claims plus narrative; the runner renders and
+  // publishes the completion region, so no table duty or escaping grammar
+  // survives in the prompt.
+  assert.match(implementation, /banzai-completion-protocol\/v1/);
+  assert.match(implementation, /banzai-plan-task-completion\/v2/);
+  assert.match(implementation, /runner owns the implementation report's/);
   assert.match(
     implementation,
-    /taskId, status, evidence object order, every path and detail string, and gap/
+    /do not author, copy, escape, or maintain any completion table/
   );
   assert.match(
     implementation,
-    /reread.*Plan Task Completion.*copy.*taskCompletion/s
+    /never write a banzai-plan-task-completion\/v1 table/
   );
-  assert.match(implementation, /&#124;/);
-  assert.match(implementation, /escaping is part of the table grammar/);
-  assert.match(
+  assert.match(implementation, /leave exactly that one section for the runner/);
+  assert.match(implementation, /unique level-2 to level-6 heading/);
+  assert.doesNotMatch(
     implementation,
-    /Do not wrap either JSON cell in Markdown backticks/
+    /Format: `banzai-plan-task-completion\/v1`/
   );
-  assert.match(
+  assert.doesNotMatch(implementation, /JSON-identical after parsing/);
+  assert.doesNotMatch(
     implementation,
-    /\| T001 \| completed \| \[\{"path":"src\/example\.ts","detail":"Implemented T001\."\}\] \| null \|/
+    /reread the written Plan Task Completion/
   );
+  assert.doesNotMatch(implementation, /&#124;/);
+  assert.doesNotMatch(implementation, /Canonical row example/);
   assert.match(implementation, /at most 500 characters/);
   assert.match(implementation, /at most 16 entries/);
   for (const prompt of [lite, fix]) {
     assert.doesNotMatch(prompt, /available Skill tool|\$banzai:/);
   }
-  assert.match(lite, /schemaVersion=3 with taskCompletion=null/);
+  assert.match(lite, /schemaVersion=4 with taskCompletion=null/);
   assert.match(lite, /decisionConsultation=null/);
   assert.match(
     fix,
@@ -828,12 +816,15 @@ test("phase prompts deliver implementation and assurance with the unchanged v3 c
   );
   assert.match(fix, /return the complete refreshed taskCompletion ledger/);
   assert.match(fix, /decisionConsultation=null/);
-  assert.match(fix, /without Markdown backticks or any other code span/);
+  assert.match(fix, /banzai-completion-protocol\/v1/);
   assert.match(
     fix,
-    /\| T001 \| completed \| \[\{"path":"src\/example\.ts","detail":"Implemented T001\."\}\] \| null \|/
+    /republishes it from the canonical ledger after every accepted fix/
   );
-  assert.match(fix, /edit it only together with a returned refreshed ledger/);
+  assert.match(fix, /Never edit that section, never author a completion table/);
+  assert.match(fix, /an edit inside it carries no authority/);
+  assert.doesNotMatch(fix, /Canonical row example/);
+  assert.doesNotMatch(fix, /regenerated to decode JSON-identical/);
   assert.match(fix, /never contradict its records in the manifest/);
   assert.match(fix, /Downgrading any task status is not a refresh/);
   assert.match(fix, /exclude that finding from resolvedFindingIds/);
@@ -871,14 +862,16 @@ test("completion repair prompt identifies the rejected task and its evidence sco
   assert.match(prompt, /created or modified relative to the run baseline/);
   assert.match(prompt, /carried-in unchanged source and test files/i);
   assert.match(prompt, /cite that report instead/i);
-  assert.match(prompt, /parsed values.*JSON-identical/s);
+  assert.match(prompt, /runner republishes the Plan Task Completion section/);
+  assert.match(prompt, /do not author or edit that section/);
+  assert.doesNotMatch(prompt, /parsed values.*JSON-identical/s);
   assert.match(
     prompt,
     /do not duplicate prior records or edit the approved plan/i
   );
 });
 
-test("projection repair prompt keeps correct records and teaches the escaping grammar", () => {
+test("report-input repair prompt repairs narrative ownership without a table duty", () => {
   const prompt = implementationPrompt(
     "example",
     "approval-digest",
@@ -887,20 +880,20 @@ test("projection repair prompt keeps correct records and teaches the escaping gr
     ["T001"],
     {
       sourceAttemptId: "implementation-1-abcd1234",
-      violation: "report_projection_invalid",
+      violation: "report_region_invalid",
       taskId: "T005"
     }
   );
 
   assert.match(prompt, /completion-evidence repair retry/);
-  assert.match(prompt, /report_projection_invalid/);
+  assert.match(prompt, /report_region_invalid/);
   assert.match(prompt, /T005/);
-  assert.match(prompt, /decide which side of the divergence is true/);
-  assert.match(
-    prompt,
-    /do not change record content that already matches the ledger/
-  );
-  assert.match(prompt, /remove Markdown backticks around whole JSON cells/);
+  assert.match(prompt, /could not safely own the implementation report's/);
+  assert.match(prompt, /duplicate or overlapping completion sections/);
+  assert.match(prompt, /keep at most one such section/);
+  assert.match(prompt, /never author, format, or escape a completion table/);
+  assert.doesNotMatch(prompt, /remove Markdown backticks/i);
+  assert.doesNotMatch(prompt, /&#124;/);
   assert.match(prompt, /do not restore the false claim/);
   assert.match(
     prompt,
@@ -938,6 +931,14 @@ test("planning prompt states the exact task heading grammar", () => {
   );
 });
 
+test("planning prompt keeps generated check output Git-ignored", () => {
+  const prompt = planningPrompt("example", "Implement it.", []);
+  assert.match(
+    prompt,
+    /the task that creates its tooling must keep that output Git-ignored/
+  );
+});
+
 test("planning prompt makes consultation evidence-first, bounded, and non-authorizing", () => {
   const prompt = planningPrompt("example", "Design the boundary.", []);
 
@@ -956,7 +957,7 @@ test("planning prompt makes consultation evidence-first, bounded, and non-author
     /never reinterpret them as approval, permission, or broader authority/
   );
   assert.match(prompt, /decision consultation never accepts an ADR/);
-  assert.match(prompt, /schemaVersion=3/);
+  assert.match(prompt, /schemaVersion=4/);
 });
 
 test("planning prompt carries exact structured consultation history as human-decision context", () => {
@@ -1092,7 +1093,11 @@ test("fix repair retry prompt names the rejected refresh diagnostic", () => {
   );
   assert.match(prompt, /report_projection_mismatch/);
   assert.match(prompt, /Rejected diagnostic: .*projection contradicts/);
-  assert.match(prompt, /Remove Markdown backticks around whole JSON cells/);
+  assert.match(
+    prompt,
+    /Do not author or edit the runner-owned Plan Task Completion section/
+  );
+  assert.doesNotMatch(prompt, /Remove Markdown backticks/);
   assert.match(prompt, /keep every unaffected record stable/);
 });
 
@@ -1494,4 +1499,18 @@ test("all six envelopes deliver each complete resource once before evidence and 
     assert.equal(bytes, Buffer.byteLength(envelope.rendered, "utf8"));
     assert.ok(bytes > envelope.rendered.length);
   }
+});
+
+test("current planning instructions use task inventory v2 without a profile setup gate", () => {
+  const delivered = phaseInstructionParts("planning").join("\n");
+  assert.match(
+    delivered,
+    /Every new strict task plan includes the self-contained v2 obligation inventory/
+  );
+  assert.match(delivered, /banzai-verification-obligations\/v2/);
+  assert.match(delivered, /v1` format remains historical/);
+  assert.doesNotMatch(
+    delivered,
+    /List every configured check|runner owns guided configuration proposals|configuration prerequisite gate owns/
+  );
 });

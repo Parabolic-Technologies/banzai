@@ -42,14 +42,45 @@ const CHECK_ORDER = [
   "claude.instructions",
   "claude.permissions",
   "project.types",
-  "verification.profiles",
-  "verification.substantive",
+  "verification.task",
   "executables.models",
   "executables.verification",
   "authentication.models",
   "run.active",
   "run.lock"
 ];
+
+test("task readiness is independent of empty, mixed or stale legacy profile coverage", async () => {
+  for (const metadata of [
+    null,
+    "{}",
+    '{"scripts":{"test":"echo no test && exit 1"}}'
+  ]) {
+    const repository = await temporaryRoot();
+    try {
+      await writeConfig(repository.root, DEFAULT_CONFIG);
+      if (metadata !== null)
+        await writeFile(path.join(repository.root, "package.json"), metadata);
+      const before = await snapshotTree(repository.root);
+      const report = await inspectDoctor(repository.root, dependencies());
+      assert.equal(report.schema, "banzai-doctor/v5");
+      assert.equal(report.schemaVersion, 5);
+      assert.equal(checkStatus(report, "verification.task"), "pass");
+      assert.equal(report.ready, true);
+      assert.doesNotMatch(
+        renderDoctorText(report),
+        /Fix: banzai verify|Bootstrap/
+      );
+      assert.deepEqual(
+        report.checks.map((check) => check.id),
+        CHECK_ORDER
+      );
+      assert.deepEqual(await snapshotTree(repository.root), before);
+    } finally {
+      await repository.dispose();
+    }
+  }
+});
 
 test("doctor adoption classifications remain independent of verification and expose only bounded diagnostics", async (t) => {
   for (const classification of [
@@ -85,8 +116,8 @@ test("doctor adoption classifications remain independent of verification and exp
           checkStatus(report, "project.guidance"),
           classification === "ready" ? "pass" : "fail"
         );
-        assert.equal(checkStatus(report, "verification.profiles"), "fail");
-        assert.equal(report.ready, false);
+        assert.equal(checkStatus(report, "verification.task"), "pass");
+        assert.equal(report.ready, classification === "ready");
         assert.deepEqual(
           report.checks.map((item) => item.id),
           CHECK_ORDER
@@ -181,6 +212,40 @@ function locallyExecutableConfig(
   return config;
 }
 
+function policyExecutableConfig(command: string): unknown {
+  return {
+    ...locallyExecutableConfig(),
+    schemaVersion: 4,
+    verification: {
+      policy: {
+        schema: "banzai-task-verification-policy/v1",
+        schemaVersion: 1,
+        required: [
+          {
+            id: "project-check",
+            name: "Project check",
+            requirementRefs: ["project-policy"],
+            command,
+            args: [],
+            cwd: ".",
+            timeoutMs: 1000,
+            evidence: "fresh",
+            sources: [],
+            materialization: null
+          }
+        ],
+        denied: [],
+        limits: {
+          timeoutMs: 1000,
+          workingDirectories: ["."],
+          requiredContext: "inherited-local"
+        },
+        reuse: null
+      }
+    }
+  };
+}
+
 async function writeConfig(
   root: string,
   config: unknown = substantiveConfig()
@@ -222,7 +287,7 @@ test("reports a deterministic ready Node project without mutating it", async () 
         ?.message ?? "",
       /not checked.*not authentication proof.*startup preflight/s
     );
-    assert.equal(first.summary.warnings, 2);
+    assert.equal(first.summary.warnings, 1);
     assert.equal(
       first.summary.passed +
         first.summary.warnings +
@@ -236,142 +301,6 @@ test("reports a deterministic ready Node project without mutating it", async () 
   }
 });
 
-test("requires substantive coverage for every detected project type", async () => {
-  const repository = await temporaryRoot();
-  try {
-    await writeFile(path.join(repository.root, "package.json"), "{}\n", "utf8");
-    await writeFile(
-      path.join(repository.root, "composer.json"),
-      "{}\n",
-      "utf8"
-    );
-    await writeConfig(repository.root, substantiveConfig("node"));
-
-    const partial = await inspectDoctor(repository.root, dependencies());
-    assert.equal(partial.ready, false);
-    assert.deepEqual(partial.projectTypes, ["node", "php"]);
-    assert.equal(checkStatus(partial, "verification.profiles"), "fail");
-    assert.equal(checkStatus(partial, "verification.substantive"), "pass");
-    assert.equal(
-      partial.checks.find((item) => item.id === "verification.profiles")
-        ?.message,
-      "Missing profiles for: php; hygiene-only detected types: none; covered: node; unused profiles: none."
-    );
-    const substantiveMessage =
-      partial.checks.find((item) => item.id === "verification.substantive")
-        ?.message ?? "";
-    assert.equal(
-      substantiveMessage,
-      "1 substantive verification command is configured for detected project types."
-    );
-    const json = JSON.parse(renderDoctorJson(partial)) as DoctorReport;
-    assert.equal(
-      json.checks.find((item) => item.id === "verification.substantive")
-        ?.message,
-      substantiveMessage
-    );
-    assert.match(
-      renderDoctorText(partial),
-      /\[PASS\] verification\.substantive \(verification\): 1 substantive verification command is configured for detected project types\./
-    );
-
-    const coveredConfig = substantiveConfig("node");
-    coveredConfig.verification.profiles.push({
-      id: "php",
-      projectType: "php",
-      commands: [
-        {
-          name: "php verification",
-          command: "project-check",
-          args: ["verify"],
-          timeoutMs: 1_000
-        }
-      ]
-    });
-    await writeConfig(repository.root, coveredConfig);
-    const covered = await inspectDoctor(repository.root, dependencies());
-    assert.equal(
-      covered.checks.find((item) => item.id === "verification.substantive")
-        ?.message,
-      "2 substantive verification commands are configured for detected project types."
-    );
-
-    await rm(path.join(repository.root, "composer.json"));
-    await writeConfig(repository.root, DEFAULT_CONFIG);
-    const missingProfile = await inspectDoctor(repository.root, dependencies());
-    assert.equal(
-      missingProfile.checks.find((item) => item.id === "verification.profiles")
-        ?.message,
-      "Missing profiles for: node; hygiene-only detected types: none; covered: none; unused profiles: none."
-    );
-    assert.equal(
-      missingProfile.checks.find(
-        (item) => item.id === "verification.substantive"
-      )?.message,
-      "No substantive verification command is configured for detected project types or unused project profiles."
-    );
-
-    const matchingHygiene = structuredClone(DEFAULT_CONFIG);
-    const matchingProfile = matchingHygiene.verification.profiles[0];
-    assert.ok(matchingProfile);
-    matchingProfile.id = "node";
-    matchingProfile.projectType = "node";
-    await writeConfig(repository.root, matchingHygiene);
-    const hygieneOnly = await inspectDoctor(repository.root, dependencies());
-    assert.equal(
-      hygieneOnly.checks.find((item) => item.id === "verification.profiles")
-        ?.message,
-      "Missing profiles for: none; hygiene-only detected types: node; covered: none; unused profiles: none."
-    );
-
-    await writeConfig(repository.root, substantiveConfig("rust"));
-    const unusedSubstantive = await inspectDoctor(
-      repository.root,
-      dependencies()
-    );
-    assert.equal(
-      unusedSubstantive.checks.find(
-        (item) => item.id === "verification.profiles"
-      )?.message,
-      "Missing profiles for: node; hygiene-only detected types: none; covered: none; unused profiles: rust."
-    );
-    assert.equal(
-      unusedSubstantive.checks.find(
-        (item) => item.id === "verification.substantive"
-      )?.message,
-      "No substantive verification command is configured for detected project types; 1 substantive command is configured for unused project profiles."
-    );
-  } finally {
-    await repository.dispose();
-  }
-});
-
-test("supports custom projects and keeps unused profiles as warnings", async () => {
-  const repository = await temporaryRoot();
-  try {
-    const config = substantiveConfig("custom");
-    config.verification.profiles.push({
-      id: "unused-node",
-      projectType: "node",
-      commands: [
-        {
-          name: "unused",
-          command: "unused-check",
-          args: [],
-          timeoutMs: 1_000
-        }
-      ]
-    });
-    await writeConfig(repository.root, config);
-    const report = await inspectDoctor(repository.root, dependencies());
-    assert.deepEqual(report.projectTypes, ["custom"]);
-    assert.equal(checkStatus(report, "verification.profiles"), "warning");
-    assert.equal(report.ready, true);
-  } finally {
-    await repository.dispose();
-  }
-});
-
 test("distinguishes missing malformed unsupported invalid and legacy config", async () => {
   const repository = await temporaryRoot();
   try {
@@ -379,7 +308,7 @@ test("distinguishes missing malformed unsupported invalid and legacy config", as
     assert.equal(checkStatus(missing, "config.present"), "fail");
     assert.equal(checkStatus(missing, "config.valid"), "skipped");
     assert.equal(checkStatus(missing, "config.version"), "skipped");
-    assert.equal(checkStatus(missing, "verification.profiles"), "skipped");
+    assert.equal(checkStatus(missing, "verification.task"), "skipped");
 
     await writeConfig(repository.root, "{not-json");
     const malformed = await inspectDoctor(repository.root, dependencies());
@@ -416,10 +345,7 @@ test("distinguishes missing malformed unsupported invalid and legacy config", as
     );
     assert.equal(checkStatus(invalidProfiles, "config.valid"), "fail");
     assert.equal(checkStatus(invalidProfiles, "config.version"), "pass");
-    assert.equal(
-      checkStatus(invalidProfiles, "verification.profiles"),
-      "skipped"
-    );
+    assert.equal(checkStatus(invalidProfiles, "verification.task"), "skipped");
 
     const legacy = {
       ...structuredClone(DEFAULT_CONFIG),
@@ -437,11 +363,7 @@ test("distinguishes missing malformed unsupported invalid and legacy config", as
     const legacyReport = await inspectDoctor(repository.root, dependencies());
     assert.equal(checkStatus(legacyReport, "config.valid"), "pass");
     assert.equal(checkStatus(legacyReport, "config.version"), "fail");
-    assert.equal(checkStatus(legacyReport, "verification.profiles"), "fail");
-    assert.equal(
-      checkStatus(legacyReport, "verification.substantive"),
-      "skipped"
-    );
+    assert.equal(checkStatus(legacyReport, "verification.task"), "pass");
   } finally {
     await repository.dispose();
   }
@@ -608,7 +530,7 @@ test("reports unavailable configured executables without running them", async ()
       dependencies({ unavailable: ["codex", "project-check"] })
     );
     assert.equal(checkStatus(report, "executables.models"), "fail");
-    assert.equal(checkStatus(report, "executables.verification"), "fail");
+    assert.equal(checkStatus(report, "executables.verification"), "pass");
   } finally {
     await repository.dispose();
   }
@@ -618,7 +540,7 @@ test("default executable inspection rejects directories and accepts executable f
   const repository = await temporaryRoot();
   try {
     await writeFile(path.join(repository.root, "package.json"), "{}\n", "utf8");
-    await writeConfig(repository.root, locallyExecutableConfig("."));
+    await writeConfig(repository.root, policyExecutableConfig("."));
 
     const directoryCommand = await inspectDoctor(repository.root);
     assert.equal(
@@ -630,10 +552,7 @@ test("default executable inspection rejects directories and accepts executable f
     const executablePath = path.join(repository.root, "verify-tool");
     await writeFile(executablePath, "#!/bin/sh\nexit 0\n", "utf8");
     await chmod(executablePath, 0o755);
-    await writeConfig(
-      repository.root,
-      locallyExecutableConfig("./verify-tool")
-    );
+    await writeConfig(repository.root, policyExecutableConfig("./verify-tool"));
     const executableFile = await inspectDoctor(repository.root);
     assert.equal(
       checkStatus(executableFile, "executables.verification"),
@@ -642,10 +561,7 @@ test("default executable inspection rejects directories and accepts executable f
     assert.equal(executableFile.ready, true);
 
     await symlink("verify-tool", path.join(repository.root, "verify-link"));
-    await writeConfig(
-      repository.root,
-      locallyExecutableConfig("./verify-link")
-    );
+    await writeConfig(repository.root, policyExecutableConfig("./verify-link"));
     const executableSymlink = await inspectDoctor(repository.root);
     assert.equal(
       checkStatus(executableSymlink, "executables.verification"),
@@ -1119,7 +1035,7 @@ test("does not create local state when the Banzai directory is absent", async ()
   }
 });
 
-test("doctor v3 compares mixed role unions without hiding structural failures or mutating evidence", async () => {
+test("doctor v4 compares mixed role unions without hiding structural failures or mutating evidence", async () => {
   const repository = await temporaryRoot();
   const plugin = await instructionPluginFixture();
   try {
@@ -1133,14 +1049,32 @@ test("doctor v3 compares mixed role unions without hiding structural failures or
     await writeConfig(repository.root, config);
     const before = await snapshotTree(repository.root);
     const verified = await inspectDoctor(repository.root, dependencies());
-    assert.equal(verified.schema, "banzai-doctor/v3");
-    assert.equal(verified.schemaVersion, 3);
+    assert.equal(verified.schema, "banzai-doctor/v5");
+    assert.equal(verified.schemaVersion, 5);
     assert.equal(checkStatus(verified, "claude.instructions"), "pass");
     assert.deepEqual(
       verified.checks.map((entry) => entry.id),
       CHECK_ORDER
     );
     assert.deepEqual(await snapshotTree(repository.root), before);
+    config.models.planner.executable = "codex";
+    config.models.implementer.executable = "codex";
+    await writeConfig(repository.root, config);
+    const defaults = (
+      await inspectDoctor(repository.root, dependencies())
+    ).checks.find((item) => item.id === "claude.instructions");
+    assert.equal(defaults?.status, "pass");
+    assert.deepEqual(
+      defaults.roles.map((role) => [role.role, role.state, role.fixes]),
+      [
+        ["planner", "not_applicable", []],
+        ["implementer", "not_applicable", []],
+        ["reviewer", "verified", []]
+      ]
+    );
+    assert.deepEqual(defaults.fixes, []);
+    config.models.planner.executable = "claude";
+    config.models.implementer.executable = "claude";
     const target = path.join(plugin.directory, "phases/fix.md");
     const original = await readFile(target);
     await writeFile(target, "PRIVATE-INSTRUCTION-CANARY");
@@ -1163,7 +1097,7 @@ test("doctor v3 compares mixed role unions without hiding structural failures or
     await rm(path.join(plugin.directory, "hooks/spec-gate.cjs"));
     const invalid = await inspectDoctor(repository.root, dependencies());
     assert.equal(checkStatus(invalid, "claude.environment"), "fail");
-    assert.equal(checkStatus(invalid, "claude.instructions"), "warning");
+    assert.equal(checkStatus(invalid, "claude.instructions"), "skipped");
     assert.equal(invalid.ready, false);
   } finally {
     await plugin.dispose();

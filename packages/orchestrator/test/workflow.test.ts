@@ -3,7 +3,6 @@ import { RunStore } from "../src/store.js";
 import { instructionPluginFixture } from "./phase-instruction-fixtures.js";
 import { inspectDoctor } from "../src/doctor.js";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
 import {
   acquireWork,
   createWork,
@@ -12,17 +11,12 @@ import {
   inspectArtifacts
 } from "../src/artifact-storage.js";
 import { reviewResultSchema } from "../src/contracts.js";
+import { collectEvaluationExport } from "../src/evaluation.js";
+import { deriveEvaluationKpiReport } from "../src/evaluation-kpi.js";
 import {
-  collectEvaluationExport,
-  collectEvaluationExportV2
-} from "../src/evaluation.js";
-import {
-  deriveEvaluationKpiReport,
-  deriveEvaluationKpiV2
-} from "../src/evaluation-kpi.js";
-import {
-  evidenceDigest,
-  persistVerificationApplicability
+  readTaskVerificationAttempts,
+  parseTaskVerificationDescriptor,
+  evidenceDigest
 } from "../src/verification-evidence.js";
 import { collectContextReport } from "../src/context-report.js";
 import { projectAgentControlStatus } from "../src/agent-control.js";
@@ -51,14 +45,21 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { BanzaiError, ProcessExitError } from "../src/errors.js";
-import { digestArtifactBundle, workspaceSnapshot } from "../src/git.js";
-import { renderReviewArtifact } from "../src/review-artifact.js";
 import {
-  parsePlanTaskCompletionProjection,
+  BanzaiError,
+  ProcessExitError,
+  TerminalRunStateError
+} from "../src/errors.js";
+import { digestArtifactBundle } from "../src/git.js";
+import { renderReviewArtifact } from "../src/review-artifact.js";
+import { vendorFor } from "../src/models.js";
+import {
+  parsePublishedCompletionRegion,
+  renderCompletionRegion,
   renderPlanTaskCompletionProjection
 } from "../src/plan-task-completion.js";
 import { transitionState } from "../src/state-machine.js";
+import { phaseResultEnvelopeOf } from "../src/validation.js";
 import {
   CONTRACT_VERSION,
   PHASE_RESULT_SCHEMA_VERSION,
@@ -79,7 +80,6 @@ import {
   type RunState,
   type SessionInventory,
   type VendorAdapters,
-  type VerificationAttemptRecord,
   type WorkflowSelectionAdapterRequest,
   type WorkflowSelectionResult
 } from "../src/types.js";
@@ -105,8 +105,38 @@ import {
 const descriptionPath = "documentation/features/example/description.md";
 const planPath = "documentation/development-plans/example/plan.md";
 
+// Resolve the fixture's old role labels against the run's actual private binding.
+async function boundFixturePath(
+  root: string,
+  relative: string
+): Promise<string> {
+  if (!relative.startsWith("documentation/")) return path.join(root, relative);
+  const store = new RunStore(root);
+  const active = await store.readActiveRunId();
+  if (active === null) return path.join(root, relative);
+  const state = await store.readState(active);
+  const roles = state.artifactBinding?.binding.artifacts;
+  const parts = relative.split("/");
+  if (!roles || !["example", state.slug].includes(parts[2] ?? ""))
+    return path.join(root, relative);
+  const name = parts.at(-1);
+  const role =
+    name === "plan.md"
+      ? roles.plan
+      : name === "description.md"
+        ? roles.description
+        : name === "implementation-report.md"
+          ? roles.implementationReport
+          : name === "test-report.md"
+            ? roles.testReport
+            : name?.startsWith("review-")
+              ? `${roles.reviewDirectory}/${name}`
+              : null;
+  return path.join(root, role ?? relative);
+}
+
 for (const outcome of ["completed", "cancelled"] as const) {
-  test(`artifact storage archives and restores a ${outcome} strict run with dependency closure`, async () => {
+  test(`frozen archive retains a ${outcome} task run as explicitly unsupported evidence`, async () => {
     const repository = await createTestRepository({
       artifactLayout: "private"
     });
@@ -179,7 +209,12 @@ for (const outcome of ["completed", "cancelled"] as const) {
         destination: archiveDirectory
       });
       const verified = await invoke("verify", { bundlePath: archiveDirectory });
-      assert.equal(exported.complete, true, JSON.stringify(verified));
+      assert.equal(exported.complete, false, JSON.stringify(verified));
+      assert.ok(
+        (verified.uninterpreted as string[]).includes(
+          `.banzai/runs/${state.runId}/state.json`
+        )
+      );
       assert.ok(
         (verified.retainedPaths as string[]).includes(
           `.banzai/runs/${state.runId}/state.json`
@@ -189,29 +224,12 @@ for (const outcome of ["completed", "cancelled"] as const) {
         await realpath(repository.root),
         "restored"
       );
-      await invoke("restore", {
-        bundlePath: archiveDirectory,
-        destination
-      });
-      const manifest = verified.manifest as {
-        entries: { path: string; sha256: string; mode: number }[];
-      };
-      for (const entry of manifest.entries) {
-        const original = await readFile(path.join(repository.root, entry.path));
-        const restored = await readFile(path.join(destination, entry.path));
-        assert.deepEqual(restored, original, entry.path);
-        assert.equal(
-          createHash("sha256").update(restored).digest("hex"),
-          entry.sha256
-        );
-        assert.equal(
-          (await stat(path.join(destination, entry.path))).mode & 0o777,
-          entry.mode
-        );
-      }
       await assert.rejects(
-        readFile(path.join(destination, ".banzai/active-run.json")),
-        { code: "ENOENT" }
+        invoke("restore", {
+          bundlePath: archiveDirectory,
+          destination
+        }),
+        /Restore requires complete dependency interpretation/
       );
       if (outcome === "cancelled") {
         const plan = state.artifactBinding?.binding.artifacts.plan;
@@ -232,12 +250,48 @@ for (const outcome of ["completed", "cancelled"] as const) {
   });
 }
 
+function repinFixtureInventory(markdown: string): string {
+  const pattern = /```banzai-verification-obligations\/v2\n([\s\S]*?)\n```/u;
+  const match = pattern.exec(markdown);
+  if (!match)
+    throw new Error("Fixture plan must retain its verification inventory.");
+  const inventory = JSON.parse(requiredFixture(match[1])) as Record<
+    string,
+    unknown
+  >;
+  inventory.planRemainderSha256 = evidenceDigest(
+    markdown.slice(0, match.index) +
+      markdown.slice(match.index + match[0].length)
+  );
+  return (
+    markdown.slice(0, match.index) +
+    "```banzai-verification-obligations/v2\n" +
+    JSON.stringify(inventory) +
+    "\n```" +
+    markdown.slice(match.index + match[0].length)
+  );
+}
+async function writeFixturePlan(
+  target: string,
+  markdown: string
+): Promise<void> {
+  if (!markdown.includes("```banzai-verification-obligations/v2")) {
+    const original = await readFile(target, "utf8");
+    const inventory =
+      /```banzai-verification-obligations\/v2\n[\s\S]*?\n```/u.exec(original);
+    if (!inventory) throw new Error("No fixture inventory to retain.");
+    markdown += "\n" + inventory[0] + "\n";
+  }
+  await writeFile(target, repinFixtureInventory(markdown));
+}
+
 function phaseResult(
   phase: PhaseResult["phase"],
   overrides: Partial<PhaseResult> = {}
 ): PhaseResult {
   return {
     schemaVersion: PHASE_RESULT_SCHEMA_VERSION,
+    verificationCandidates: null,
     contractVersion: CONTRACT_VERSION,
     phase,
     outcome: phase === "plan" ? "needs_human_decision" : "completed",
@@ -342,6 +396,20 @@ function decisionConsultationResult(
   };
 }
 
+/**
+ * Rewrites a protocol attempt's result together with its retained envelope so
+ * the record stays internally consistent; the reader rejects either alone.
+ */
+function withProtocolResult(
+  record: AttemptRecord,
+  result: PhaseResult
+): AttemptRecord {
+  const envelope = phaseResultEnvelopeOf(result);
+  record.result = JSON.parse(envelope.original) as PhaseResult;
+  record.envelope = envelope;
+  return record;
+}
+
 function completionLedger(taskIds: readonly string[]) {
   return {
     schemaVersion: PLAN_TASK_COMPLETION_SCHEMA_VERSION,
@@ -432,6 +500,7 @@ async function writeImplementationArtifacts(
 }
 
 class FakeAdapters implements VendorAdapters {
+  fixtureTaskChecks = false;
   codexPreflights = 0;
   claudePreflights = 0;
   onCodexPreflight: (() => Promise<void>) | null = null;
@@ -465,15 +534,49 @@ class FakeAdapters implements VendorAdapters {
   onReview: ((request: ReviewAdapterRequest) => Promise<void>) | null = null;
   writeSourceBeforeEscalation = false;
   emitImplementationSkill = true;
-  emitImplementationTerminalCheckpoint = false;
+  emitImplementationTerminalCheckpoint = true;
   failImplementationAfterTerminalCheckpoint = false;
   implementationTerminalUsage: ModelUsage | null = null;
-  emitFixTerminalCheckpoint = false;
+  emitFixTerminalCheckpoint = true;
   failFixAfterTerminalCheckpoint = false;
   fixTerminalUsage: ModelUsage | null = null;
   emitReviewTerminalCheckpoint = true;
   failReviewAfterTerminalCheckpoint = false;
   planTaskIds = ["T001"];
+
+  protected async emitImplementationCheckpoint(
+    request: PhaseAdapterRequest,
+    result: PhaseResult
+  ): Promise<void> {
+    if (!this.emitImplementationTerminalCheckpoint) return;
+    await request.onTerminalSuccess?.({
+      classification:
+        vendorFor(request.settings.executable) === "claude"
+          ? "claude_result"
+          : "codex_turn_completed",
+      observedAt: new Date().toISOString(),
+      result,
+      sessionId: "implementer-session",
+      usage: this.implementationTerminalUsage
+    });
+  }
+
+  protected async emitFixCheckpoint(
+    request: PhaseAdapterRequest,
+    result: PhaseResult
+  ): Promise<void> {
+    if (!this.emitFixTerminalCheckpoint) return;
+    await request.onTerminalSuccess?.({
+      classification:
+        vendorFor(request.settings.executable) === "claude"
+          ? "claude_result"
+          : "codex_turn_completed",
+      observedAt: new Date().toISOString(),
+      result,
+      sessionId: "implementer-session",
+      usage: this.fixTerminalUsage
+    });
+  }
 
   async preflightCodex(): Promise<void> {
     this.codexPreflights += 1;
@@ -520,7 +623,45 @@ class FakeAdapters implements VendorAdapters {
       roles?.description ?? "documentation/features/example/description.md";
     const planPath =
       roles?.plan ?? "documentation/development-plans/example/plan.md";
+    const fixtureChecks = this.fixtureTaskChecks
+      ? (
+          JSON.parse(
+            await readFile(
+              path.join(request.repoRoot, ".banzai/config.json"),
+              "utf8"
+            )
+          ) as OrchestratorConfig
+        ).verification.profiles.flatMap((profile) =>
+          profile.commands.map((command, index) =>
+            parseTaskVerificationDescriptor({
+              name: command.name,
+              command: command.command,
+              args: command.args,
+              timeoutMs: command.timeoutMs,
+              id: `${profile.id}-${index + 1}`,
+              requirementRefs: ["FR1"],
+              cwd: ".",
+              evidence: "fresh",
+              sources: [],
+              materialization: null
+            })
+          )
+        )
+      : [];
     const bind = (result: PhaseResult): PhaseResult => {
+      if (state.verificationMode === "task") {
+        result.schemaVersion = 4;
+        result.verificationCandidates =
+          result.phase === "plan" ||
+          (state.workflowSelection?.workflow ?? "strict") === "strict"
+            ? null
+            : {
+                checks: fixtureChecks,
+                absenceReason: fixtureChecks.length
+                  ? null
+                  : "Fixture task uses direct source assertions."
+              };
+      }
       if (!roles) return result;
       const mapping = new Map<string, string | null>([
         ["documentation/features/example/description.md", descriptionPath],
@@ -588,17 +729,56 @@ class FakeAdapters implements VendorAdapters {
         recursive: true
       });
       await writeFile(
-        path.join(request.repoRoot, descriptionPath),
+        await boundFixturePath(request.repoRoot, descriptionPath),
         "# Description\n\nFR1.\n",
         "utf8"
       );
       await writeFile(
-        path.join(request.repoRoot, planPath),
+        await boundFixturePath(request.repoRoot, planPath),
         `# Plan\n\n## Implementation Tasks\n\n${this.planTaskIds
           .map((taskId) => `- [ ] **${taskId} - Implement the fixture**`)
           .join("\n")}\n`,
         "utf8"
       );
+      if (state.verificationMode === "task") {
+        const file = await boundFixturePath(request.repoRoot, planPath);
+        const before = await readFile(file, "utf8");
+        const config = JSON.parse(
+          await readFile(
+            path.join(request.repoRoot, ".banzai/config.json"),
+            "utf8"
+          )
+        ) as OrchestratorConfig;
+        const checks = config.verification.profiles.flatMap((profile) =>
+          profile.commands.map((command, index) =>
+            parseTaskVerificationDescriptor({
+              ...command,
+              id: `${profile.id}-${index + 1}`,
+              requirementRefs: ["FR1"],
+              cwd: ".",
+              evidence: "fresh",
+              sources: [],
+              materialization: null
+            })
+          )
+        );
+        await writeFile(
+          file,
+          before +
+            "```banzai-verification-obligations/v2\n" +
+            JSON.stringify({
+              schema: "banzai-verification-obligations/v2",
+              schemaVersion: 2,
+              complete: true,
+              planRemainderSha256: evidenceDigest(before + "\n"),
+              checks,
+              absenceReason: checks.length
+                ? null
+                : "Fixture task uses direct source assertions."
+            }) +
+            "\n```\n"
+        );
+      }
       return adapterResult(
         bind(this.planResults.shift() ?? phaseResult("plan")),
         "planner-session"
@@ -661,15 +841,7 @@ class FakeAdapters implements VendorAdapters {
           this.implementationReportTransforms.shift()
         );
       }
-      if (this.emitImplementationTerminalCheckpoint) {
-        await request.onTerminalSuccess?.({
-          classification: "codex_turn_completed",
-          observedAt: new Date().toISOString(),
-          result,
-          sessionId: "implementer-session",
-          usage: this.implementationTerminalUsage
-        });
-      }
+      await this.emitImplementationCheckpoint(request, result);
       if (this.failImplementationAfterTerminalCheckpoint) {
         throw new Error("parent interrupted after terminal checkpoint");
       }
@@ -693,15 +865,7 @@ class FakeAdapters implements VendorAdapters {
       this.fixResults.shift() ??
         phaseResult("fix", { resolvedFindingIds: ["R1-F1"] })
     );
-    if (this.emitFixTerminalCheckpoint) {
-      await request.onTerminalSuccess?.({
-        classification: "codex_turn_completed",
-        observedAt: new Date().toISOString(),
-        result,
-        sessionId: "implementer-session",
-        usage: this.fixTerminalUsage
-      });
-    }
+    await this.emitFixCheckpoint(request, result);
     if (this.failFixAfterTerminalCheckpoint) {
       throw new Error("parent interrupted after fix terminal checkpoint");
     }
@@ -792,127 +956,6 @@ function passingReview(reviewedFindingIds: string[] = []): ReviewResult {
   };
 }
 
-async function completedReviewReconciliationFixture(legacyPolicy: boolean) {
-  const repository = await createTestRepository();
-  const adapters = new FakeAdapters();
-  adapters.reviewResults.push({
-    contractVersion: CONTRACT_VERSION,
-    verdict: "changes_requested",
-    summary: "One finding.",
-    findings: [finding("R1-F1", "Defect.")],
-    reviewedFindingIds: [],
-    deferredCoverage: []
-  });
-  const runner = new WorkflowRunner(repository.root, adapters);
-  await runner.start({ slug: "example", request: "Implement it." });
-  await runner.approvePlan("human");
-  const reviewing = await runner.triage(
-    {
-      accepted: ["R1-F1"],
-      rejected: [],
-      deferred: [],
-      note: null,
-      decidedBy: "human"
-    },
-    false
-  );
-  await writeFile(
-    path.join(repository.root, "src/example.txt"),
-    "fixed\n",
-    "utf8"
-  );
-  transitionState(reviewing, "verifying");
-  transitionState(reviewing, "reviewing");
-  // This fixture deliberately characterizes historical review evidence.
-  reviewing.schemaVersion = 3;
-  delete reviewing.artifactBinding;
-  reviewing.reviewIteration = 2;
-  const artifactPath = "documentation/features/example/review-2.md";
-  const snapshot = await workspaceSnapshot(repository.root, {
-    excludedPaths: [artifactPath],
-    baseline: reviewing.baseline
-  });
-  reviewing.workspaceDigest = snapshot.digest;
-  const attempt = {
-    id: legacyPolicy
-      ? "legacy-review-crash-window"
-      : "delta-review-crash-window",
-    kind: "review" as const,
-    mutable: false
-  };
-  reviewing.activeAttempt = attempt;
-  const result = passingReview(["R1-F1"]);
-  const completion = reviewing.planTaskCompletion;
-  assert.ok(completion?.status === "valid");
-  const completionAttempt = await runner.store.readRunAttempt(reviewing.runId, {
-    id: completion.sourceAttemptId,
-    kind: "implementation",
-    mutable: true
-  });
-  const completionResult = completionAttempt.result as PhaseResult;
-  assert.ok(completionResult.taskCompletion);
-  const artifact = {
-    path: artifactPath,
-    candidatePath: artifactPath,
-    slug: reviewing.slug,
-    iteration: reviewing.reviewIteration,
-    approvedArtifactPaths: reviewing.planApproval?.paths ?? [],
-    workspaceDigest: snapshot.digest,
-    verification: reviewing.verification,
-    taskCompletion: {
-      approvalDigest: completion.approvalDigest,
-      ledgerDigest: completion.ledgerDigest,
-      planTaskDigest: completion.planTaskDigest,
-      completed: completion.counts.completed,
-      total: completion.counts.total,
-      implementationReport: completion.implementationReport.path,
-      testReport: completion.testReport.path,
-      tasks: completionResult.taskCompletion.tasks
-    }
-  };
-  await mkdir(path.join(repository.root, path.dirname(artifactPath)), {
-    recursive: true
-  });
-  await writeFile(
-    path.join(repository.root, artifactPath),
-    renderReviewArtifact(result, artifact),
-    "utf8"
-  );
-  await runner.store.writeState(reviewing);
-  const reviewer = reviewing.sessions.reviewer;
-  assert.ok(reviewer);
-  const record: AttemptRecord = {
-    schemaVersion: 1,
-    attempt,
-    status: "completed",
-    startedAt: "2026-01-01T00:00:00.000Z",
-    completedAt: "2026-01-01T00:01:00.000Z",
-    result,
-    sessionId: reviewer.id,
-    rawStdoutPath: null,
-    rawStderrPath: null,
-    durationMs: 60_000,
-    usage: null,
-    error: null,
-    ...(legacyPolicy
-      ? {}
-      : {
-          sessionMode: "resumed" as const,
-          reviewMode: "delta" as const,
-          rotationReason: null,
-          resumeSessionId: reviewer.id,
-          sessionContext: {
-            role: "reviewer" as const,
-            executable: reviewer.executable,
-            model: reviewer.model,
-            effort: reviewer.effort
-          }
-        })
-  };
-  await runner.store.writeRunAttempt(reviewing.runId, record);
-  return { repository, adapters, runner, reviewer };
-}
-
 test("a quick-fix route skips strict planning and independent review", async () => {
   const repository = await createTestRepository();
   try {
@@ -943,11 +986,8 @@ test("a quick-fix route skips strict planning and independent review", async () 
     assert.equal(state.metrics.attempts.review, 0);
     assert.equal(adapters.phasePrompts.length, 1);
     assert.match(adapters.phasePrompts[0] ?? "", /# Lite Quick-Fix Phase/);
-    assert.match(adapters.phasePrompts[0] ?? "", /"id": "custom"/);
-    assert.match(
-      adapters.phasePrompts[0] ?? "",
-      /"argv": \[\s+"-e",\s+"process\.exit\(0\)"\s+\]/
-    );
+    assert.match(adapters.phasePrompts[0] ?? "", /Verification is task-scoped/);
+
     assert.ok(
       progress.some(
         (event) =>
@@ -1143,6 +1183,7 @@ test("downstream phase validation preserves a completed resumed invocation ledge
   const repository = await createTestRepository();
   try {
     const adapters = new FakeAdapters();
+    adapters.emitImplementationTerminalCheckpoint = false;
     adapters.implementationResults.push(phaseResult("fix"));
     const runner = new WorkflowRunner(repository.root, adapters);
     const planned = await runner.start({
@@ -1399,7 +1440,7 @@ test("a feature route receives its embedded phase and ends after verification", 
       adapters.phasePrompts[0] ?? "",
       /Use the available Skill tool/
     );
-    assert.match(adapters.phasePrompts[0] ?? "", /"id": "custom"/);
+    assert.match(adapters.phasePrompts[0] ?? "", /Verification is task-scoped/);
   } finally {
     await repository.dispose();
   }
@@ -1521,56 +1562,6 @@ test("interrupted read-only selection is retryable with a fresh attempt", async 
   }
 });
 
-test("a legacy run without workflow selection remains on the strict path", async () => {
-  const repository = await createTestRepository();
-  try {
-    const adapters = new FakeAdapters();
-    adapters.reviewResults.push(passingReview());
-    const runner = new WorkflowRunner(repository.root, adapters);
-    const planned = await runner.start({
-      slug: "example",
-      request: "Plan the existing legacy request."
-    });
-    assert.equal(planned.status, "needs_plan_approval");
-    const approvedPlanBytes = await readFile(
-      path.join(repository.root, planPath),
-      "utf8"
-    );
-
-    planned.schemaVersion = 3;
-    delete planned.artifactBinding;
-    delete planned.workflowSelection;
-    delete planned.metrics.attempts.selection;
-    await runner.store.writeState(planned);
-
-    const done = await runner.approvePlan("human");
-    assert.equal(
-      done.status,
-      "done",
-      JSON.stringify({
-        blockReason: done.blockReason,
-        blockedFrom: done.blockedFrom,
-        activeAttempt: done.activeAttempt
-      })
-    );
-    assert.equal(
-      await readFile(path.join(repository.root, planPath), "utf8"),
-      approvedPlanBytes
-    );
-    assert.ok(done.planApproval);
-    assert.equal(
-      (await digestArtifactBundle(repository.root, done.planApproval.paths))
-        .digest,
-      done.planApproval.digest
-    );
-    assert.equal(done.workflowSelection, undefined);
-    assert.equal(done.reviewIteration, 1);
-    assert.equal(done.metrics.attempts.review, 1);
-  } finally {
-    await repository.dispose();
-  }
-});
-
 test("an answered lite escalation reselects before further source changes", async () => {
   const repository = await createTestRepository();
   try {
@@ -1612,7 +1603,9 @@ test("an answered lite escalation reselects before further source changes", asyn
     assert.equal(replanned.status, "needs_plan_approval");
     assert.equal(replanned.workflowSelection?.workflow, "strict");
     assert.equal(adapters.selectionPrompts.length, 2);
-    assert.deepEqual(replanned.humanDecisions?.at(-1)?.answers, [exactAnswer]);
+    const answeredDecision = replanned.humanDecisions?.at(-1);
+    assert.ok(answeredDecision?.kind === "escalation");
+    assert.deepEqual(answeredDecision.answers, [exactAnswer]);
     assert.match(
       adapters.selectionPrompts[1] ?? "",
       /Yes, use the strict workflow\. \| \$\(false\)/
@@ -1702,7 +1695,7 @@ test("phases advertise Serena symbol tools only when the whitelist resolves", as
   }
 });
 
-test("a fix that edits the frozen completion projection blocks with a repairable retry", async () => {
+test("a fix that edits the published completion region is republished from the canonical ledger", async () => {
   const repository = await createTestRepository();
   try {
     class ProjectionEditingAdapters extends FakeAdapters {
@@ -1714,15 +1707,16 @@ test("a fix that edits the frozen completion projection blocks with a repairable
           !request.prompt.includes("Phase: implementation");
         if (isFix) {
           // Mirrors the observed defect: an accepted overstatement finding
-          // led the fixer to edit the frozen projection row directly.
-          const reportPath = path.join(
+          // led the fixer to edit the published region row directly.
+          const reportPath = await boundFixturePath(
             request.repoRoot,
             "documentation/features/example/implementation-report.md"
           );
           const contents = await readFile(reportPath, "utf8");
+          assert.ok(contents.includes("&#34;completed&#34;"));
           await writeFile(
             reportPath,
-            contents.replace("| T001 | completed |", "| T001 | incomplete |"),
+            contents.replace("&#34;completed&#34;", "&#34;incomplete&#34;"),
             "utf8"
           );
         }
@@ -1730,45 +1724,62 @@ test("a fix that edits the frozen completion projection blocks with a repairable
       }
     }
     const adapters = new ProjectionEditingAdapters();
-    adapters.reviewResults.push({
-      contractVersion: CONTRACT_VERSION,
-      verdict: "changes_requested",
-      summary: "Completion overstated.",
-      findings: [finding("R1-F1", "A completion record is overstated.")],
-      reviewedFindingIds: [],
-      deferredCoverage: []
-    });
+    adapters.reviewResults.push(
+      {
+        contractVersion: CONTRACT_VERSION,
+        verdict: "changes_requested",
+        summary: "Completion overstated.",
+        findings: [finding("R1-F1", "A completion record is overstated.")],
+        reviewedFindingIds: [],
+        deferredCoverage: []
+      },
+      passingReview(["R1-F1"])
+    );
     const runner = new WorkflowRunner(repository.root, adapters);
     await runner.start({ slug: "example", request: "Implement it." });
-    await runner.approvePlan("human");
-    const blocked = await runner.triage({
+    const triage = await runner.approvePlan("human");
+    const implementationCompletion = triage.planTaskCompletion;
+    assert.ok(implementationCompletion?.status === "valid");
+    const done = await runner.triage({
       accepted: ["R1-F1"],
       rejected: [],
       deferred: [],
       note: null,
       decidedBy: "human"
     });
-    assert.equal(blocked.status, "blocked");
-    assert.equal(blocked.blockedFrom, "verifying");
-    assert.match(blocked.blockReason ?? "", /projection contradicts/);
-    const checkpoint = blocked.planTaskCompletion;
-    assert.ok(checkpoint?.status === "invalid");
 
-    const status = await runner.status();
-    assert.equal(status.retry.eligible, true);
-    assert.equal(status.retry.attemptId, checkpoint.sourceAttemptId);
-    assert.match(
-      status.retry.reason,
-      /repaired with a new implementation attempt/
+    // ADR-0047: the old region confers no authority. The null-ledger fix
+    // republishes the retained canonical ledger over the edited row, keeps
+    // the implementation as ledger author and records itself as publisher.
+    assert.equal(done.status, "done", done.blockReason ?? "");
+    assert.ok(
+      adapters.phasePrompts.every((prompt) => !/repair retry/i.test(prompt))
     );
-
-    adapters.reviewResults.push(passingReview(["R1-F1"]));
-    const repaired = await runner.retry();
-    const repairPrompt = adapters.phasePrompts.at(-1) ?? "";
-    assert.match(repairPrompt, /completion-evidence repair retry/);
-    assert.match(repairPrompt, /report_projection_mismatch/);
-    assert.equal(repaired.planTaskCompletion?.status, "valid");
-    assert.equal(repaired.status, "done");
+    const completion = done.planTaskCompletion;
+    assert.ok(completion?.status === "valid");
+    assert.equal(completion.schemaVersion, 2);
+    assert.equal(
+      completion.sourceAttemptId,
+      implementationCompletion.sourceAttemptId
+    );
+    assert.equal(completion.sourceAttemptKind, "implementation");
+    assert.equal(
+      completion.ledgerDigest,
+      implementationCompletion.ledgerDigest
+    );
+    assert.notEqual(completion.publisherAttemptId, completion.sourceAttemptId);
+    assert.match(completion.publisherAttemptId ?? "", /^fix-/);
+    const report = await readFile(
+      await boundFixturePath(
+        repository.root,
+        "documentation/features/example/implementation-report.md"
+      )
+    );
+    assert.ok(!report.toString("utf8").includes("&#34;incomplete&#34;"));
+    assert.deepEqual(
+      parsePublishedCompletionRegion(report),
+      phaseResult("implementation").taskCompletion
+    );
   } finally {
     await repository.dispose();
   }
@@ -1827,7 +1838,7 @@ test("a plan with a malformed task heading fails before the approval gate", asyn
         const result = await super.runPhase(request);
         if (request.prompt.includes("Phase: plan") && corruptNextPlan) {
           corruptNextPlan = false;
-          const planFile = path.join(request.repoRoot, planPath);
+          const planFile = await boundFixturePath(request.repoRoot, planPath);
           const contents = await readFile(planFile, "utf8");
           await writeFile(
             planFile,
@@ -1871,7 +1882,7 @@ test("plan approval refuses a bundle whose task grammar broke after the gate", a
       request: "Implement it."
     });
     assert.equal(planned.status, "needs_plan_approval");
-    const planFile = path.join(repository.root, planPath);
+    const planFile = await boundFixturePath(repository.root, planPath);
     const contents = await readFile(planFile, "utf8");
     await writeFile(
       planFile,
@@ -1909,7 +1920,7 @@ test("an approved plan with malformed headings retries into planning, never an e
     // Emulate a bundle that was approved malformed — the pre-guard state this
     // repair path exists for: corrupt the heading and re-bind the recorded
     // approval digest to the corrupted bytes.
-    const planFile = path.join(repository.root, planPath);
+    const planFile = await boundFixturePath(repository.root, planPath);
     const contents = await readFile(planFile, "utf8");
     await writeFile(
       planFile,
@@ -1966,10 +1977,13 @@ test("an accepted-finding fix refreshes the canonical ledger in one attempt", as
         const isFix =
           !request.prompt.includes("Phase: plan") &&
           !request.prompt.includes("Phase: implementation");
+        const emitFixCheckpoint = this.emitFixTerminalCheckpoint;
+        if (isFix) this.emitFixTerminalCheckpoint = false;
         const applied = await super.runPhase(request);
+        this.emitFixTerminalCheckpoint = emitFixCheckpoint;
         if (isFix && applied.result.taskCompletion !== null) {
           await writeFile(
-            path.join(
+            await boundFixturePath(
               request.repoRoot,
               "documentation/features/example/implementation-report.md"
             ),
@@ -1977,6 +1991,8 @@ test("an accepted-finding fix refreshes the canonical ledger in one attempt", as
             "utf8"
           );
         }
+        if (isFix && emitFixCheckpoint)
+          await this.emitFixCheckpoint(request, applied.result);
         return applied;
       }
     }
@@ -2019,34 +2035,7 @@ test("an accepted-finding fix refreshes the canonical ledger in one attempt", as
 test("a rejected fix ledger refresh is repairable by rerunning the fix", async () => {
   const repository = await createTestRepository();
   try {
-    class SecondTryRefreshAdapters extends FakeAdapters {
-      fixCalls = 0;
-      async runPhase(
-        request: PhaseAdapterRequest
-      ): Promise<AdapterResult<PhaseResult>> {
-        const isFix =
-          !request.prompt.includes("Phase: plan") &&
-          !request.prompt.includes("Phase: implementation");
-        const applied = await super.runPhase(request);
-        if (isFix) {
-          this.fixCalls += 1;
-          // The first fix returns a refreshed ledger without regenerating the
-          // projection; only the repair rerun writes the matching section.
-          if (this.fixCalls === 2 && applied.result.taskCompletion !== null) {
-            await writeFile(
-              path.join(
-                request.repoRoot,
-                "documentation/features/example/implementation-report.md"
-              ),
-              `# Implementation Report\n\n${renderPlanTaskCompletionProjection(applied.result.taskCompletion)}\n`,
-              "utf8"
-            );
-          }
-        }
-        return applied;
-      }
-    }
-    const adapters = new SecondTryRefreshAdapters();
+    const adapters = new FakeAdapters();
     adapters.reviewResults.push({
       contractVersion: CONTRACT_VERSION,
       verdict: "changes_requested",
@@ -2055,9 +2044,21 @@ test("a rejected fix ledger refresh is repairable by rerunning the fix", async (
       reviewedFindingIds: [],
       deferredCoverage: []
     });
+    // The first refreshed ledger cites a carried-in unchanged file, which the
+    // runner rejects before any publication; only the rerun cites the changed
+    // surface.
+    const rejected = completionLedger(["T001"]);
+    const rejectedTask = rejected.tasks[0];
+    assert.ok(rejectedTask);
+    rejectedTask.evidence = [
+      {
+        path: "base.txt",
+        detail: "Read-only confirmation of carried-in behavior."
+      }
+    ];
     adapters.fixResults.push(
       phaseResult("fix", {
-        taskCompletion: completionLedger(["T001"]),
+        taskCompletion: rejected,
         resolvedFindingIds: ["R1-F1"]
       }),
       phaseResult("fix", {
@@ -2078,10 +2079,24 @@ test("a rejected fix ledger refresh is repairable by rerunning the fix", async (
     });
     assert.equal(blocked.status, "blocked");
     assert.equal(blocked.blockedFrom, "fixing");
-    assert.match(blocked.blockReason ?? "", /projection contradicts/);
+    assert.match(
+      blocked.blockReason ?? "",
+      /outside the authorized changed surface/
+    );
     const checkpoint = blocked.planTaskCompletion;
     assert.ok(checkpoint?.status === "invalid");
     assert.equal(checkpoint.sourceAttemptKind, "fix");
+    assert.equal(checkpoint.schemaVersion, 2);
+    assert.equal(checkpoint.violation, "evidence_scope_violation");
+    const failedFix = blocked.activeAttempt;
+    assert.ok(failedFix?.kind === "fix");
+    const failedRecord = await runner.store.readRunAttempt(
+      blocked.runId,
+      failedFix
+    );
+    assert.equal(failedRecord.status, "failed");
+    assert.equal(failedRecord.schemaVersion, 4);
+    assert.equal(failedRecord.retryOf, null);
 
     const status = await runner.status();
     assert.equal(status.retry.eligible, true);
@@ -2093,11 +2108,24 @@ test("a rejected fix ledger refresh is repairable by rerunning the fix", async (
       repairPrompt,
       /completion-evidence repair retry for rejected fix attempt/
     );
-    assert.match(repairPrompt, /Rejected diagnostic: .*projection contradicts/);
     assert.equal(repaired.status, "done", repaired.blockReason ?? "");
     const repairedCheckpoint = repaired.planTaskCompletion;
     assert.ok(repairedCheckpoint?.status === "valid");
     assert.equal(repairedCheckpoint.sourceAttemptKind, "fix");
+    assert.notEqual(repairedCheckpoint.sourceAttemptId, failedFix.id);
+    const successor = await runner.store.readRunAttempt(repaired.runId, {
+      id: repairedCheckpoint.sourceAttemptId,
+      kind: "fix",
+      mutable: true
+    });
+    assert.match(successor.attempt.id, /^fix-repair-/);
+    assert.equal(successor.retryOf, failedFix.id);
+    assert.equal(successor.completionProtocol, "banzai-completion-protocol/v1");
+    assert.equal(
+      (await runner.store.readRunAttempt(repaired.runId, failedFix)).status,
+      "failed",
+      "the rejected source stays intact"
+    );
   } finally {
     await repository.dispose();
   }
@@ -2117,7 +2145,7 @@ test("an externally mutated approved bundle restores from the snapshot and retri
     const approved = await runner.approvePlan("human", false);
     assert.equal(approved.status, "plan_approved");
 
-    const planFile = path.join(repository.root, planPath);
+    const planFile = await boundFixturePath(repository.root, planPath);
     const approvedBytes = await readFile(planFile, "utf8");
     await writeFile(
       planFile,
@@ -2137,7 +2165,13 @@ test("an externally mutated approved bundle restores from the snapshot and retri
     const eligibility = await runner.restoreEligibility();
     assert.equal(eligibility.eligible, true, eligibility.reason);
     const restored = await runner.restoreApproval();
-    assert.ok(restored.includes(planPath));
+    assert.ok(
+      restored.includes(
+        requiredFixture(
+          requiredFixture(planned.artifactBinding).binding.artifacts.plan
+        )
+      )
+    );
     assert.equal(await readFile(planFile, "utf8"), approvedBytes);
 
     const done = await runner.retry();
@@ -2176,7 +2210,7 @@ test("a fix-checks approval failure restores and retries from the fixing block",
     );
     assert.equal(fixing.status, "fixing");
 
-    const planFile = path.join(repository.root, planPath);
+    const planFile = await boundFixturePath(repository.root, planPath);
     const approvedBytes = await readFile(planFile, "utf8");
     await writeFile(
       planFile,
@@ -2252,12 +2286,13 @@ test("a Codex reviewer gets its artifact rendered by the runner", async () => {
       false
     );
 
+    assert.ok(completed.latestReview?.artifactPath);
     const artifact = path.join(
       repository.root,
-      "documentation/features/codex-review/review-1.md"
+      completed.latestReview.artifactPath
     );
     const rendered = await readFile(artifact, "utf8");
-    assert.match(rendered, /banzai-feature-review\/v3/);
+    assert.match(rendered, /banzai-feature-review\/v7/);
     assert.match(rendered, /pass/);
   } finally {
     await repository.dispose();
@@ -2356,7 +2391,13 @@ for (const [artifactLayout, writeChangeReport] of [
         override async runPhase(
           request: PhaseAdapterRequest
         ): Promise<AdapterResult<PhaseResult>> {
+          const isFix =
+            !request.prompt.includes("Phase: plan") &&
+            !request.prompt.includes("Phase: implementation");
+          const emitFixCheckpoint = this.emitFixTerminalCheckpoint;
+          if (isFix) this.emitFixTerminalCheckpoint = false;
           const result = await super.runPhase(request);
+          this.emitFixTerminalCheckpoint = emitFixCheckpoint;
           if (result.result.phase === "fix" && writeChangeReport) {
             const state = JSON.parse(
               await readFile(
@@ -2375,6 +2416,8 @@ for (const [artifactLayout, writeChangeReport] of [
               "# Change report\n\nResolved R1-F1.\n"
             );
           }
+          if (isFix && emitFixCheckpoint)
+            await this.emitFixCheckpoint(request, result.result);
           return result;
         }
       }
@@ -2467,7 +2510,7 @@ for (const [artifactLayout, writeChangeReport] of [
         prompt.includes("Phase: implementation")
       );
       assert.ok(implementationPrompt);
-      assert.match(implementationPrompt, /"id": "custom"/);
+      assert.match(implementationPrompt, /Verification is task-scoped/);
       assert.ok(fixPrompt?.includes("R1-F1"));
       assert.ok(fixPrompt);
       const roles = done.artifactBinding?.binding.artifacts;
@@ -2510,7 +2553,7 @@ for (const [artifactLayout, writeChangeReport] of [
           `Latest review artifact: ${reviewed.latestReview.artifactPath}`
         )
       );
-      assert.match(fixPrompt, /"id": "custom"/);
+      assert.match(fixPrompt, /Verification is task-scoped/);
       assert.equal(adapters.reviewPrompts.length, 2);
       assert.match(adapters.reviewPrompts[0] ?? "", /fresh full reviewer/);
       assert.match(adapters.reviewPrompts[1] ?? "", /resumed delta review/);
@@ -3098,7 +3141,12 @@ test("six approved tasks require six canonical records before verification and s
     });
     assert.equal(approvalGate.status, "needs_plan_approval");
     const approvalDigest = (
-      await digestArtifactBundle(repository.root, [descriptionPath, planPath])
+      await digestArtifactBundle(repository.root, [
+        requiredFixture(
+          requiredFixture(approvalGate.planArtifacts).description
+        ),
+        requiredFixture(requiredFixture(approvalGate.planArtifacts).plan)
+      ])
     ).digest;
 
     const done = await runner.approvePlan("human");
@@ -3160,7 +3208,7 @@ test("missing completion evidence is rejected before verification even when the 
   }
 });
 
-test("non-terminal implementation output cannot persist malformed task coverage", async () => {
+test("a malformed completion payload on an escalating implementation keeps the stop and retains its diagnostic", async () => {
   const repository = await createTestRepository();
   try {
     const adapters = new FakeAdapters();
@@ -3178,18 +3226,28 @@ test("non-terminal implementation output cannot persist malformed task coverage"
     const runner = new WorkflowRunner(repository.root, adapters);
     await runner.start({ slug: "example", request: "Implement it." });
 
-    const blocked = await runner.approvePlan("human");
-    assert.equal(blocked.status, "blocked");
-    assert.equal(blocked.blockedFrom, "implementing");
-    assert.equal(blocked.pendingHumanDecision, null);
-    assert.equal(blocked.metrics.attempts.verification, 0);
+    // ADR-0047: a safely decoded stop is applied as reported; the completion
+    // diagnostic is retained beside the attempt and never replaces the stop.
+    const waiting = await runner.approvePlan("human");
+    assert.equal(waiting.status, "needs_human_decision");
+    assert.equal(waiting.pendingHumanDecision?.kind, "escalation");
+    assert.equal(waiting.metrics.attempts.verification, 0);
     assert.equal(adapters.reviewPrompts.length, 0);
-    const attempt = blocked.activeAttempt;
-    assert.ok(attempt);
-    const record = await runner.store.readRunAttempt(blocked.runId, attempt);
-    assert.equal(record.status, "failed");
-    assert.equal(record.failureCode, "PLAN_TASK_COMPLETION_INVALID");
-    assert.match(record.error ?? "", /missing T001/);
+    assert.equal(waiting.planTaskCompletion, null);
+    const records = await runner.store.readRunAttempts(waiting.runId);
+    const record = records.find(
+      (item) => item.attempt.kind === "implementation"
+    );
+    assert.ok(record);
+    assert.equal(record.status, "completed");
+    assert.equal(record.schemaVersion, 4);
+    assert.equal(record.completionDiagnostic?.violation, "missing_task");
+    assert.match(record.completionDiagnostic.message, /missing T001/);
+    assert.equal(
+      waiting.metrics.completedAttemptIds.includes(record.attempt.id),
+      true,
+      "a stop is a completed model attempt, never task completion"
+    );
   } finally {
     await repository.dispose();
   }
@@ -3329,14 +3387,11 @@ test("completion-invalid terminal checkpoint routes to evidence repair without r
   }
 });
 
-test("report detail paraphrases block verification until completion-evidence repair restores exact parity", async () => {
+test("a model-authored legacy completion table is replaced by the runner-published region without a repair call", async () => {
   const repository = await createTestRepository();
   try {
     const adapters = new FakeAdapters();
-    adapters.implementationResults.push(
-      phaseResult("implementation"),
-      phaseResult("implementation")
-    );
+    adapters.implementationResults.push(phaseResult("implementation"));
     adapters.implementationReportTransforms.push((contents) =>
       contents.replace(
         "Implementation fixture output.",
@@ -3347,35 +3402,34 @@ test("report detail paraphrases block verification until completion-evidence rep
     const runner = new WorkflowRunner(repository.root, adapters);
     await runner.start({ slug: "example", request: "Implement it." });
 
-    const blocked = await runner.approvePlan("human");
-    const failedAttempt = blocked.activeAttempt;
-    assert.ok(failedAttempt);
-    assert.equal(blocked.status, "blocked");
-    assert.equal(blocked.blockedFrom, "implementing");
-    assert.equal(blocked.metrics.attempts.verification, 0);
-    assert.equal(
-      blocked.planTaskCompletion?.status === "invalid"
-        ? blocked.planTaskCompletion.violation
-        : null,
-      "report_projection_mismatch"
-    );
-
-    const done = await runner.retry();
-    const retained = await runner.store.readRunAttempt(
-      done.runId,
-      failedAttempt
-    );
+    const done = await runner.approvePlan("human");
     assert.equal(done.status, "done", done.blockReason ?? "");
+    assert.equal(done.metrics.attempts.implementation, 1);
     assert.equal(done.metrics.attempts.verification, 1);
-    assert.equal(retained.status, "failed");
-    assert.match(
-      adapters.phasePrompts.at(-1) ?? "",
-      /Repair only the named completion-evidence violation/
+    assert.ok(
+      adapters.phasePrompts.every((prompt) => !/repair retry/i.test(prompt))
     );
-    assert.match(
-      adapters.phasePrompts.at(-1) ?? "",
-      /parsed values.*JSON-identical/s
+    const report = await readFile(
+      await boundFixturePath(
+        repository.root,
+        "documentation/features/example/implementation-report.md"
+      )
     );
+    const ledger = phaseResult("implementation").taskCompletion;
+    assert.ok(ledger);
+    assert.deepEqual(parsePublishedCompletionRegion(report), ledger);
+    assert.ok(
+      !report.toString("utf8").includes("banzai-plan-task-completion/v1")
+    );
+    assert.ok(report.toString("utf8").includes(renderCompletionRegion(ledger)));
+    const completion = done.planTaskCompletion;
+    assert.ok(completion?.status === "valid");
+    assert.equal(completion.schemaVersion, 2);
+    assert.equal(
+      completion.completionProtocol,
+      "banzai-completion-protocol/v1"
+    );
+    assert.equal(completion.publisherAttemptId, completion.sourceAttemptId);
   } finally {
     await repository.dispose();
   }
@@ -3415,42 +3469,6 @@ test("a reviewer pass cannot reach done after completion evidence becomes invali
     assert.equal(blocked.status, "blocked");
     assert.match(blocked.blockReason ?? "", /PLAN_TASK_COMPLETION_INVALID/);
     assert.equal(blocked.planTaskCompletion?.status, "invalid");
-  } finally {
-    await repository.dispose();
-  }
-});
-
-test("legacy terminal status keeps lifecycle and next action while completion stays unknown", async () => {
-  const repository = await createTestRepository();
-  try {
-    const adapters = new FakeAdapters();
-    const runner = new WorkflowRunner(repository.root, adapters);
-    await runner.start({ slug: "example", request: "Plan it." });
-    const legacy = await runner.approvePlan("human", false);
-    legacy.status = "done";
-    delete legacy.planTaskCompletion;
-    await mkdir(path.join(repository.root, "documentation/features/example"), {
-      recursive: true
-    });
-    await writeFile(
-      path.join(
-        repository.root,
-        "documentation/features/example/implementation-report.md"
-      ),
-      "# Legacy report\n\nNo task table.\n",
-      "utf8"
-    );
-    await runner.store.writeState(legacy);
-
-    const status = await runner.status();
-    assert.equal(status.state.status, "done");
-    assert.equal(status.nextAction, null);
-    assert.equal(status.taskCompletion.state, "legacy");
-    assert.equal(status.taskCompletion.completed, null);
-    assert.match(
-      status.taskCompletion.diagnostics[0]?.message ?? "",
-      /missing ## Plan Task Completion/
-    );
   } finally {
     await repository.dispose();
   }
@@ -3499,7 +3517,7 @@ test("approval digest drift blocks implementation before another model call", as
     await runner.start({ slug: "example", request: "Plan it." });
     await runner.approvePlan("human", false);
     await writeFile(
-      path.join(repository.root, planPath),
+      await boundFixturePath(repository.root, planPath),
       "# Plan\n\nChanged after approval.\n",
       "utf8"
     );
@@ -3518,7 +3536,7 @@ for (const editGuidance of [false, true]) {
   test(`plan authority approval and completion preserve optional bytes (edit=${editGuidance})`, async () => {
     const repository = await createTestRepository();
     try {
-      const plan = await readFile(
+      let plan = await readFile(
         path.join(
           process.cwd(),
           "test/fixtures/plan-authority/opted-in-plan.md"
@@ -3529,8 +3547,9 @@ for (const editGuidance of [false, true]) {
       adapters.reviewResults.push(passingReview());
       const runner = new WorkflowRunner(repository.root, adapters);
       await runner.start({ slug: "example", request: "Plan it." });
-      const target = path.join(repository.root, planPath);
-      await writeFile(target, plan);
+      const target = await boundFixturePath(repository.root, planPath);
+      await writeFixturePlan(target, plan);
+      plan = await readFile(target, "utf8");
       const approved = await runner.approvePlan("human", false);
       assert.ok(approved.planApproval);
       const snapshot = await runner.store.readApprovalSnapshot(approved.runId);
@@ -3538,7 +3557,9 @@ for (const editGuidance of [false, true]) {
       assert.equal(snapshot.digest, approved.planApproval.digest);
       assert.equal(
         snapshot.entries
-          .find((entry) => entry.path === planPath)
+          .find(
+            (entry) => entry.path === path.relative(repository.root, target)
+          )
           ?.contents.toString("utf8"),
         plan
       );
@@ -3559,14 +3580,14 @@ for (const editGuidance of [false, true]) {
         assert.equal(done.planTaskCompletion?.status, "valid");
         assert.equal(done.planTaskCompletion.counts.completed, 1);
         const report = await readFile(
-          path.join(
+          await boundFixturePath(
             repository.root,
             "documentation/features/example/implementation-report.md"
           ),
           "utf8"
         );
         assert.deepEqual(
-          parsePlanTaskCompletionProjection(report),
+          parsePublishedCompletionRegion(Buffer.from(report)),
           phaseResult("implementation").taskCompletion
         );
         assert.equal(await readFile(target, "utf8"), plan);
@@ -3599,7 +3620,8 @@ test("implementation escalation waits for an interactive answer and replans", as
 
     const gated = await runner.approvePlan("human");
     assert.equal(gated.status, "needs_human_decision");
-    assert.equal(gated.pendingHumanDecision?.phase, "implementation");
+    assert.ok(gated.pendingHumanDecision?.kind === "escalation");
+    assert.equal(gated.pendingHumanDecision.phase, "implementation");
     assert.deepEqual(gated.pendingHumanDecision.questions, [
       "Must the existing behavior remain backward compatible?"
     ]);
@@ -3647,7 +3669,8 @@ test("planning escalation waits for an interactive answer instead of blocking", 
       request: "Plan the product change."
     });
     assert.equal(gated.status, "needs_human_decision");
-    assert.equal(gated.pendingHumanDecision?.phase, "plan");
+    assert.ok(gated.pendingHumanDecision?.kind === "escalation");
+    assert.equal(gated.pendingHumanDecision.phase, "plan");
 
     const replanned = await runner.answerHumanDecision({
       answers: ["Yes, retain the legacy behavior."],
@@ -3839,49 +3862,6 @@ test("planning consultation rejects reused answered decision identities", async 
   }
 });
 
-test("resume reconciles a completed mutable attempt without repeating it", async () => {
-  const repository = await createTestRepository();
-  try {
-    const adapters = new FakeAdapters();
-    adapters.reviewResults.push(passingReview());
-    const runner = new WorkflowRunner(repository.root, adapters);
-    await runner.start({ slug: "example", request: "Plan it." });
-    const approved = await runner.approvePlan("human", false);
-
-    transitionState(approved, "implementing");
-    const attempt = {
-      id: "implementation-crash-window",
-      kind: "implementation" as const,
-      mutable: true
-    };
-    approved.activeAttempt = attempt;
-    await runner.store.writeState(approved);
-    const completedResult = phaseResult("implementation");
-    await writeImplementationArtifacts(repository.root, completedResult);
-    const record: AttemptRecord = {
-      schemaVersion: 1,
-      attempt,
-      status: "completed",
-      startedAt: "2026-01-01T00:00:00.000Z",
-      completedAt: "2026-01-01T00:01:00.000Z",
-      result: completedResult,
-      sessionId: "implementation-session",
-      rawStdoutPath: null,
-      rawStderrPath: null,
-      durationMs: 60_000,
-      usage: null,
-      error: null
-    };
-    await runner.store.writeRunAttempt(approved.runId, record);
-
-    const done = await runner.resume();
-    assert.equal(done.status, "done", done.blockReason ?? "");
-    assert.equal(adapters.phasePrompts.length, 1);
-  } finally {
-    await repository.dispose();
-  }
-});
-
 for (const artifactLayout of ["legacy", "private"] as const)
   test(`resume promotes a durable terminal checkpoint after parent interruption without another model call (${artifactLayout})`, async () => {
     const repository = await createTestRepository({ artifactLayout });
@@ -3961,15 +3941,32 @@ test("resume rejects a terminal implementation checkpoint with an invalid task l
     const attempt = blocked.activeAttempt;
     assert.ok(attempt);
     const metricsBefore = structuredClone(blocked.metrics);
+    const promptsBefore = adapters.phasePrompts.length;
     const resumed = await runner.resume();
 
+    // The proven terminal result is reconciled and its usage accounted, but
+    // the missing ledger is a final input rejection: no completion, no
+    // verification, no review and no replay.
     assert.equal(resumed.status, "blocked");
-    assert.match(resumed.blockReason ?? "", /INVALID_TERMINAL_CHECKPOINT/);
-    assert.deepEqual(resumed.metrics, metricsBefore);
+    assert.match(resumed.blockReason ?? "", /PLAN_TASK_COMPLETION_INVALID/);
+    assert.match(resumed.blockReason ?? "", /missing taskCompletion/);
+    assert.equal(adapters.phasePrompts.length, promptsBefore);
+    assert.deepEqual(
+      resumed.metrics.completedAttemptIds,
+      metricsBefore.completedAttemptIds
+    );
+    assert.equal(resumed.metrics.usage.inputTokens, 101);
+    assert.equal(resumed.metrics.usage.costUsd, 1.25);
     assert.equal(resumed.verification.length, 0);
     assert.equal(adapters.reviewPrompts.length, 0);
+    assert.equal(resumed.planTaskCompletion?.status, "invalid");
+    assert.equal(resumed.planTaskCompletion.violation, "missing_ledger");
     const record = await runner.store.readRunAttempt(resumed.runId, attempt);
     assert.equal(record.status, "failed");
+    assert.equal(record.failureCode, "PLAN_TASK_COMPLETION_INVALID");
+    const status = await runner.status();
+    assert.equal(status.retry.eligible, true);
+    assert.equal(status.nextAction, "banzai retry");
   } finally {
     await repository.dispose();
   }
@@ -3989,11 +3986,13 @@ test("resume rejects a terminal checkpoint whose phase does not match its attemp
     assert.ok(attempt);
     const completedBefore = [...blocked.metrics.completedAttemptIds];
 
+    // Under the completion protocol the mismatch is refused when the terminal
+    // proof is written, so no checkpoint exists to replay on resume.
     const resumed = await runner.resume();
     assert.equal(resumed.status, "blocked");
     assert.match(
       resumed.blockReason ?? "",
-      /Attempt implementation returned phase plan/
+      /envelope phase must match attempt kind/
     );
     assert.deepEqual(resumed.metrics.completedAttemptIds, completedBefore);
     assert.equal(
@@ -4005,7 +4004,7 @@ test("resume rejects a terminal checkpoint whose phase does not match its attemp
   }
 });
 
-test("resume rejects a fix checkpoint whose refreshed ledger contradicts the report", async () => {
+test("resume republishes a proven fix checkpoint's refreshed ledger without another model call", async () => {
   const repository = await createTestRepository();
   try {
     const adapters = new FakeAdapters();
@@ -4017,9 +4016,10 @@ test("resume rejects a fix checkpoint whose refreshed ledger contradicts the rep
       reviewedFindingIds: [],
       deferredCoverage: []
     });
+    const refreshed = completionLedger(["T001"]);
     adapters.fixResults.push(
       phaseResult("fix", {
-        taskCompletion: completionLedger(["T001"]),
+        taskCompletion: refreshed,
         resolvedFindingIds: ["R1-F1"]
       })
     );
@@ -4042,20 +4042,42 @@ test("resume rejects a fix checkpoint whose refreshed ledger contradicts the rep
       note: null,
       decidedBy: "human"
     });
+    assert.equal(blocked.status, "blocked");
+    assert.equal(blocked.blockedFrom, "fixing");
     const attempt = blocked.activeAttempt;
-    assert.ok(attempt);
-    const metricsBefore = structuredClone(blocked.metrics);
-    const fixCycleBefore = blocked.fixCycle;
+    assert.ok(attempt?.kind === "fix");
+    const implementationCompletion = blocked.planTaskCompletion;
+    assert.ok(implementationCompletion?.status === "valid");
+    const usageBefore = blocked.metrics.usage.inputTokens;
+    const promptsBefore = adapters.phasePrompts.length;
 
-    const resumed = await runner.resume();
-    assert.equal(resumed.status, "blocked");
-    assert.match(resumed.blockReason ?? "", /INVALID_TERMINAL_CHECKPOINT/);
-    assert.deepEqual(resumed.metrics, metricsBefore);
-    assert.equal(resumed.fixCycle, fixCycleBefore);
-    assert.equal(
-      (await runner.store.readRunAttempt(resumed.runId, attempt)).status,
-      "failed"
+    // The proven terminal result is the model's whole contribution: the
+    // runner renders the refreshed ledger and continues to review itself.
+    adapters.reviewResults.push(passingReview(["R1-F1"]));
+    const done = await runner.resume();
+    assert.equal(done.status, "done", done.blockReason ?? "");
+    assert.equal(adapters.phasePrompts.length, promptsBefore);
+    assert.equal(done.metrics.usage.inputTokens, usageBefore + 71);
+    const record = await runner.store.readRunAttempt(done.runId, attempt);
+    assert.equal(record.status, "completed");
+    assert.equal(record.schemaVersion, 4);
+    const completion = done.planTaskCompletion;
+    assert.ok(completion?.status === "valid");
+    assert.equal(completion.schemaVersion, 2);
+    assert.equal(completion.sourceAttemptKind, "fix");
+    assert.equal(completion.sourceAttemptId, attempt.id);
+    assert.equal(completion.publisherAttemptId, attempt.id);
+    assert.notEqual(
+      completion.ledgerDigest,
+      implementationCompletion.ledgerDigest
     );
+    const report = await readFile(
+      await boundFixturePath(
+        repository.root,
+        "documentation/features/example/implementation-report.md"
+      )
+    );
+    assert.deepEqual(parsePublishedCompletionRegion(report), refreshed);
   } finally {
     await repository.dispose();
   }
@@ -4093,146 +4115,6 @@ test("resume does not complete a review checkpoint before candidate validation",
     assert.equal(record.status, "failed");
   } finally {
     await repository.dispose();
-  }
-});
-
-test("resume reconciles completed delta review policy without another model call", async () => {
-  const fixture = await completedReviewReconciliationFixture(false);
-  try {
-    const promptsBeforeResume = fixture.adapters.reviewPrompts.length;
-    const done = await fixture.runner.resume();
-
-    assert.equal(done.status, "done", done.blockReason ?? "");
-    assert.equal(fixture.adapters.reviewPrompts.length, promptsBeforeResume);
-    const latestReview = done.latestReview;
-    const reviewer = done.sessions.reviewer;
-    assert.ok(latestReview);
-    assert.ok(reviewer);
-    assert.equal(latestReview.sessionMode, "resumed");
-    assert.equal(latestReview.mode, "delta");
-    assert.equal(latestReview.rotationReason, null);
-    assert.equal(reviewer.consecutiveDeltaReviews, 1);
-    assert.equal(
-      reviewer.lastFullIteration,
-      fixture.reviewer.lastFullIteration
-    );
-  } finally {
-    await fixture.repository.dispose();
-  }
-});
-
-test("resume completes a captured started review only from persisted passed candidate evidence", async () => {
-  const fixture = await completedReviewReconciliationFixture(false);
-  try {
-    const state = await fixture.runner.store.requireActiveState();
-    const attempt = state.activeAttempt;
-    assert.ok(attempt);
-    assert.equal(attempt.kind, "review");
-    const record = await fixture.runner.store.readRunAttempt(
-      state.runId,
-      attempt
-    );
-    const artifactPath = `documentation/features/${state.slug}/review-${state.reviewIteration}.md`;
-    const canonicalAbsolute = path.join(fixture.repository.root, artifactPath);
-    const contents = await readFile(canonicalAbsolute, "utf8");
-    const candidateAbsolute = fixture.runner.store.reviewCandidatePath(
-      state.runId,
-      attempt
-    );
-    await mkdir(path.dirname(candidateAbsolute), { recursive: true });
-    await writeFile(candidateAbsolute, contents, "utf8");
-    await rm(canonicalAbsolute);
-    record.status = "started";
-    record.completedAt = null;
-    record.reviewCandidate = {
-      source: "reviewer-write",
-      evidencePath: path.relative(
-        fixture.runner.store.runDirectory(state.runId),
-        candidateAbsolute
-      ),
-      intendedArtifactPath: artifactPath,
-      sha256: createHash("sha256").update(contents).digest("hex"),
-      validation: "passed",
-      validationCode: null,
-      validationError: null,
-      canonical: false
-    };
-    await fixture.runner.store.writeRunAttempt(state.runId, record);
-
-    const promptsBeforeResume = fixture.adapters.reviewPrompts.length;
-    const done = await fixture.runner.resume();
-    assert.equal(done.status, "done", done.blockReason ?? "");
-    assert.equal(fixture.adapters.reviewPrompts.length, promptsBeforeResume);
-    assert.equal(await readFile(canonicalAbsolute, "utf8"), contents);
-    assert.equal(
-      done.metrics.completedAttemptIds.filter((id) => id === attempt.id).length,
-      1
-    );
-    const completed = await fixture.runner.store.readRunAttempt(
-      state.runId,
-      attempt
-    );
-    assert.equal(completed.status, "completed");
-    assert.equal(completed.reviewCandidate?.validation, "passed");
-  } finally {
-    await fixture.repository.dispose();
-  }
-});
-
-test("resume rejects malformed candidate identity without applying completed review output", async () => {
-  const fixture = await completedReviewReconciliationFixture(false);
-  try {
-    const state = await fixture.runner.store.requireActiveState();
-    const attempt = state.activeAttempt;
-    assert.ok(attempt);
-    const record = await fixture.runner.store.readRunAttempt(
-      state.runId,
-      attempt
-    );
-    record.reviewCandidate = {
-      source: "reviewer-write",
-      evidencePath: "reviews/review-2.json",
-      intendedArtifactPath: "documentation/features/example/review-2.md",
-      sha256: "a".repeat(64),
-      validation: "passed",
-      validationCode: null,
-      validationError: null,
-      canonical: false
-    };
-    await fixture.runner.store.writeRunAttempt(state.runId, record);
-
-    const blocked = await fixture.runner.resume();
-    assert.equal(blocked.status, "blocked");
-    assert.equal(blocked.latestReview?.iteration, 1);
-    assert.equal(blocked.pendingReviewRotationReason, "unreliable-review");
-    assert.match(
-      blocked.blockReason ?? "",
-      /malformed candidate evidence identity/
-    );
-  } finally {
-    await fixture.repository.dispose();
-  }
-});
-
-test("completed legacy review attempt reconciles with fresh full fallback", async () => {
-  const fixture = await completedReviewReconciliationFixture(true);
-  try {
-    const promptsBeforeResume = fixture.adapters.reviewPrompts.length;
-    const done = await fixture.runner.resume();
-
-    assert.equal(done.status, "done", done.blockReason ?? "");
-    assert.equal(fixture.adapters.reviewPrompts.length, promptsBeforeResume);
-    const latestReview = done.latestReview;
-    const reviewer = done.sessions.reviewer;
-    assert.ok(latestReview);
-    assert.ok(reviewer);
-    assert.equal(latestReview.sessionMode, "fresh");
-    assert.equal(latestReview.mode, "full");
-    assert.equal(latestReview.rotationReason, "legacy-state");
-    assert.equal(reviewer.consecutiveDeltaReviews, 0);
-    assert.equal(reviewer.lastFullIteration, 2);
-  } finally {
-    await fixture.repository.dispose();
   }
 });
 
@@ -4319,7 +4201,15 @@ test("planning retry resumes the early saved session and preserves failed eviden
     );
     assert.equal(source.sessionId, "planner-session");
     assert.ok(source.planningContext?.workspaceDigest);
-    assert.ok(source.planningContext.artifactPaths.includes(planPath));
+    assert.ok(
+      source.planningContext.artifactPaths.includes(
+        blocked.planArtifacts?.plan ??
+          path.relative(
+            repository.root,
+            await boundFixturePath(repository.root, planPath)
+          )
+      )
+    );
     assert.deepEqual(blocked.metrics.usage, adapters.planningUsage);
     assert.ok(!blocked.metrics.completedAttemptIds.includes(source.attempt.id));
     assert.ok(source.rawStdoutPath);
@@ -4962,7 +4852,7 @@ test("review rendering failures retain primary evidence and make zero formatting
         );
         await assert.rejects(
           readFile(
-            path.join(
+            await boundFixturePath(
               repository.root,
               "documentation/features/example/review-1.md"
             )
@@ -4997,7 +4887,13 @@ test("retry reruns a failed review in a fresh attempt", async () => {
     assert.equal(done.latestReview?.iteration, 1);
     assert.equal(
       done.latestReview.artifactPath,
-      "documentation/features/example/review-1.md"
+      path.relative(
+        repository.root,
+        await boundFixturePath(
+          repository.root,
+          "documentation/features/example/review-1.md"
+        )
+      )
     );
     assert.equal(done.metrics.attempts.review, 2);
     assert.equal(adapters.reviewPrompts.length, 2);
@@ -5081,7 +4977,13 @@ test("invalid review candidate retains diagnostic evidence and retry publishes w
     assert.deepEqual(failedRecord.reviewCandidate, {
       source: "runner-rendered",
       evidencePath: `attempts/${failedAttempt.id}.review-candidate.md`,
-      intendedArtifactPath: "documentation/features/example/review-2.md",
+      intendedArtifactPath: path.relative(
+        repository.root,
+        await boundFixturePath(
+          repository.root,
+          "documentation/features/example/review-2.md"
+        )
+      ),
       sha256: failedRecord.reviewCandidate.sha256,
       validation: "failed",
       validationCode: "INVALID_REVIEW_ARTIFACT",
@@ -5122,7 +5024,7 @@ test("invalid review candidate retains diagnostic evidence and retry publishes w
     );
     await assert.rejects(
       readFile(
-        path.join(
+        await boundFixturePath(
           repository.root,
           "documentation/features/example/review-2.md"
         ),
@@ -5159,9 +5061,10 @@ test("invalid review candidate retains diagnostic evidence and retry publishes w
       path.join(repository.root, retryArtifactPath),
       "utf8"
     );
-    assert.match(
-      canonicalRetry,
-      /"documentation\/features\/example\/description\.md"/
+    assert.ok(
+      canonicalRetry.includes(
+        JSON.stringify(requiredFixture(done.planArtifacts).description)
+      )
     );
     const attemptFiles = (
       await readdir(path.join(runDirectory, "attempts"))
@@ -5472,6 +5375,11 @@ test("explicit recovery preserves the interrupted attempt and creates one linked
     delete sourceRecord.interruptedAt;
     delete sourceRecord.recoveryOf;
     delete sourceRecord.recoveryAuthorizationId;
+    // A schema-1 record predates the completion protocol fields.
+    delete sourceRecord.completionProtocol;
+    delete sourceRecord.retryOf;
+    delete sourceRecord.envelope;
+    delete sourceRecord.completionDiagnostic;
     await runner.store.writeRunAttempt(blocked.runId, sourceRecord);
 
     const status = await runner.status();
@@ -5929,7 +5837,7 @@ async function prerequisiteBlockedFixFixture(
     note: null,
     decidedBy: "human"
   });
-  adapters.emitFixTerminalCheckpoint = false;
+  adapters.emitFixTerminalCheckpoint = true;
   assert.equal(blocked.status, "blocked");
   assert.equal(blocked.blockedFrom, "fixing");
   assert.equal(blocked.activeAttempt, null);
@@ -5937,19 +5845,8 @@ async function prerequisiteBlockedFixFixture(
   if (completion?.status !== "valid") {
     throw new Error("Fixture requires valid plan-task completion.");
   }
-  const reportPaths = [
-    completion.implementationReport.path,
-    completion.testReport.path
-  ];
-  for (const reportPath of reportPaths) {
-    const absolutePath = path.join(repository.root, reportPath);
-    const contents = await readFile(absolutePath, "utf8");
-    await writeFile(
-      absolutePath,
-      `${contents}\nPost-fix evidence recorded after the implementation checkpoint.\n`,
-      "utf8"
-    );
-  }
+  // The blocked fix leaves the runner-published reports untouched: under
+  // ADR-0047 only an authorized publication may change their bytes.
   const sourceRecord = (await runner.store.readRunAttempts(blocked.runId)).find(
     (record) =>
       record.attempt.kind === "fix" &&
@@ -6180,10 +6077,9 @@ test("invalid prerequisite-blocked scopes fail closed without an authorization i
         fixture.sourceRecord.result as PhaseResult
       );
       item.mutate(result);
-      fixture.sourceRecord.result = result;
       await fixture.runner.store.writeRunAttempt(
         fixture.blocked.runId,
-        fixture.sourceRecord
+        withProtocolResult(fixture.sourceRecord, result)
       );
 
       const status = await fixture.runner.status();
@@ -6356,8 +6252,10 @@ test("source-result drift invalidates prerequisite recovery before a model call"
     );
     const result = structuredClone(drifted.result as PhaseResult);
     result.questions = [...result.questions, "A new prerequisite appeared."];
-    drifted.result = result;
-    await runner.store.writeRunAttempt(fixture.blocked.runId, drifted);
+    await runner.store.writeRunAttempt(
+      fixture.blocked.runId,
+      withProtocolResult(drifted, result)
+    );
     const promptsBefore = adapters.phasePrompts.length;
 
     await assert.rejects(
@@ -6636,7 +6534,13 @@ test("another active run is rejected even after the checkout is cleaned", async 
     const firstAdapters = new FakeAdapters();
     const first = new WorkflowRunner(repository.root, firstAdapters);
     await first.start({ slug: "example", request: "First run." });
-    await commitAll(repository.root, "planning artifacts");
+    assert.equal(
+      spawnSync("git", ["status", "--porcelain"], {
+        cwd: repository.root,
+        encoding: "utf8"
+      }).stdout.trim(),
+      ""
+    );
 
     const secondAdapters = new FakeAdapters();
     const second = new WorkflowRunner(repository.root, secondAdapters);
@@ -6668,14 +6572,14 @@ test("failed deterministic verification blocks review", async () => {
     await runner.start({ slug: "example", request: "Implement it." });
     const blocked = await runner.approvePlan("human");
     assert.equal(blocked.status, "blocked");
-    assert.equal(blocked.verification[0]?.exitCode, 7);
+    assert.equal(blocked.taskVerification?.attempts[0]?.exitCode, 7);
     assert.equal(adapters.reviewPrompts.length, 0);
   } finally {
     await repository.dispose();
   }
 });
 
-test("verification executes profiles in declared order and stops on failure", async () => {
+test("verification executes task checks in selected order and stops on failure", async () => {
   const repository = await createTestRepository();
   try {
     const configPath = path.join(repository.root, ".banzai", "config.json");
@@ -6712,6 +6616,7 @@ test("verification executes profiles in declared order and stops on failure", as
       }
     ];
     await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+    await writeFile(path.join(repository.root, "package.json"), "{}");
     await commitAll(repository.root, "ordered verification profiles");
 
     const observed: string[] = [];
@@ -6728,6 +6633,7 @@ test("verification executes profiles in declared order and stops on failure", as
       };
     };
     const adapters = new FakeAdapters();
+    adapters.fixtureTaskChecks = true;
     adapters.selectionResults.push(
       selectionResult({
         recommendedWorkflow: "feature",
@@ -6744,73 +6650,10 @@ test("verification executes profiles in declared order and stops on failure", as
     assert.equal(blocked.status, "blocked");
     assert.deepEqual(observed, ["first", "second"]);
     assert.deepEqual(
-      blocked.verification.map((result) => result.name),
-      ["first", "second"]
+      blocked.taskVerification?.attempts.map((result) => result.checkId),
+      ["node-primary-1", "node-primary-2"]
     );
-    assert.equal(blocked.verification[1]?.exitCode, 7);
-  } finally {
-    await repository.dispose();
-  }
-});
-
-test("legacy schema verification commands remain executable in order", async () => {
-  const repository = await createTestRepository();
-  try {
-    const configPath = path.join(repository.root, ".banzai", "config.json");
-    const config = JSON.parse(await readFile(configPath, "utf8")) as Record<
-      string,
-      unknown
-    >;
-    config.schemaVersion = 1;
-    config.verification = [
-      {
-        name: "legacy-first",
-        command: process.execPath,
-        args: ["-e", "legacy-first"],
-        timeoutMs: 1_000
-      },
-      {
-        name: "legacy-second",
-        command: process.execPath,
-        args: ["-e", "legacy-second"],
-        timeoutMs: 1_000
-      }
-    ];
-    await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
-    await commitAll(repository.root, "legacy verification config");
-
-    const observed: string[] = [];
-    const processRunner: ProcessRunner = async (spec) => {
-      observed.push(spec.args[1] ?? "");
-      return {
-        exitCode: 0,
-        signal: null,
-        stdout: "",
-        stderr: "",
-        startedAt: "2026-01-01T00:00:00.000Z",
-        completedAt: "2026-01-01T00:00:01.000Z"
-      };
-    };
-    const adapters = new FakeAdapters();
-    adapters.selectionResults.push(
-      selectionResult({
-        recommendedWorkflow: "feature",
-        reason: "Exercise legacy verification compatibility."
-      })
-    );
-    const runner = new WorkflowRunner(repository.root, adapters, processRunner);
-
-    const done = await runner.start({
-      slug: "legacy-verification",
-      request: "Exercise legacy verification."
-    });
-
-    assert.equal(done.status, "done", done.blockReason ?? "");
-    assert.deepEqual(observed, ["legacy-first", "legacy-second"]);
-    assert.deepEqual(
-      done.verification.map((result) => result.name),
-      ["legacy-first", "legacy-second"]
-    );
+    assert.equal(blocked.taskVerification.attempts[1]?.exitCode, 7);
   } finally {
     await repository.dispose();
   }
@@ -6820,6 +6663,7 @@ test("resume reconciles a durable completed verification leaf without executing 
   const repository = await createTestRepository();
   try {
     const adapters = new FakeAdapters();
+    adapters.fixtureTaskChecks = true;
     adapters.selectionResults.push(
       selectionResult({ recommendedWorkflow: "feature" })
     );
@@ -6851,11 +6695,18 @@ test("resume reconciles a durable completed verification leaf without executing 
     assert.deepEqual(
       JSON.parse(
         await readFile(
-          path.join(runDirectory, "verification-attempts", "ledger.json"),
+          path.join(
+            repository.root,
+            requiredFixture(
+              requiredFixture(done.artifactBinding).binding.artifacts
+                .verificationDirectory
+            ),
+            "ledger.json"
+          ),
           "utf8"
         )
       ),
-      { schemaVersion: 1 }
+      { schemaVersion: 3 }
     );
     const statePath = path.join(runDirectory, "state.json");
     const persisted = JSON.parse(await readFile(statePath, "utf8")) as Record<
@@ -6878,83 +6729,19 @@ test("resume reconciles a durable completed verification leaf without executing 
     assert.equal(resumed.status, "done");
     assert.equal(executions, 1);
     const files = (
-      await readdir(path.join(runDirectory, "verification-attempts"))
+      await readdir(
+        path.join(
+          repository.root,
+          requiredFixture(
+            requiredFixture(done.artifactBinding).binding.artifacts
+              .verificationDirectory
+          ),
+          "attempts"
+        )
+      )
     ).filter((name) => name !== "ledger.json");
-    assert.equal(files.length, 1);
+    assert.equal(files.length, 2);
     assert.equal(resumed.metrics.attempts.verification, 1);
-  } finally {
-    await repository.dispose();
-  }
-});
-
-test("resume preserves legacy verification behavior when the ledger marker is absent", async () => {
-  const repository = await createTestRepository();
-  try {
-    const adapters = new FakeAdapters();
-    adapters.selectionResults.push(
-      selectionResult({ recommendedWorkflow: "feature" })
-    );
-    let executions = 0;
-    const processRunner: ProcessRunner = async () => {
-      executions += 1;
-      return {
-        exitCode: 0,
-        signal: null,
-        stdout: "",
-        stderr: "",
-        startedAt: new Date().toISOString(),
-        completedAt: new Date().toISOString()
-      };
-    };
-    const done = await new WorkflowRunner(
-      repository.root,
-      adapters,
-      processRunner
-    ).start({
-      slug: "legacy-verification-resume",
-      request: "Exercise legacy verification resume compatibility."
-    });
-    assert.equal(done.status, "done", done.blockReason ?? "");
-    const runDirectory = path.join(
-      repository.root,
-      ".banzai",
-      "runs",
-      done.runId
-    );
-    await rm(path.join(runDirectory, "verification-attempts"), {
-      recursive: true
-    });
-    const statePath = path.join(runDirectory, "state.json");
-    const persisted = JSON.parse(await readFile(statePath, "utf8")) as Record<
-      string,
-      unknown
-    >;
-    persisted.status = "verifying";
-    persisted.verification = [];
-    persisted.activeProcess = null;
-    await writeFile(
-      statePath,
-      `${JSON.stringify(persisted, null, 2)}\n`,
-      "utf8"
-    );
-    executions = 0;
-
-    const resumed = await new WorkflowRunner(
-      repository.root,
-      adapters,
-      processRunner
-    ).resume();
-    assert.equal(resumed.status, "done");
-    assert.equal(executions, 1);
-    assert.equal(resumed.metrics.attempts.verification, 2);
-    assert.equal(resumed.verification.length, 1);
-    await assert.rejects(
-      readFile(
-        path.join(runDirectory, "verification-attempts", "ledger.json"),
-        "utf8"
-      ),
-      { code: "ENOENT" }
-    );
   } finally {
     await repository.dispose();
   }
@@ -6964,6 +6751,7 @@ test("an explicit verification retry gets a new linked identity and durable retr
   const repository = await createTestRepository();
   try {
     const adapters = new FakeAdapters();
+    adapters.fixtureTaskChecks = true;
     adapters.selectionResults.push(
       selectionResult({ recommendedWorkflow: "feature" })
     );
@@ -6994,22 +6782,17 @@ test("an explicit verification retry gets a new linked identity and durable retr
     assert.equal(done.status, "done", done.blockReason ?? "");
     assert.equal(executions, 2);
     assert.equal(done.metrics.attempts.verification, 2);
-    assert.equal(done.verification.length, 1);
-    assert.equal(done.verification[0]?.exitCode, 0);
+    assert.equal(done.taskVerification?.applicability.complete, true);
     const runDirectory = runner.store.runDirectory(done.runId);
-    const attemptsDirectory = path.join(runDirectory, "verification-attempts");
-    const files = (await readdir(attemptsDirectory))
-      .filter((name) => name !== "ledger.json")
-      .sort();
-    assert.equal(files.length, 2);
-    const records = await Promise.all(
-      files.map(
-        async (file) =>
-          JSON.parse(
-            await readFile(path.join(attemptsDirectory, file), "utf8")
-          ) as VerificationAttemptRecord
+    const records = await readTaskVerificationAttempts({
+      repoRoot: repository.root,
+      workId: requiredFixture(done.artifactBinding).binding.workId,
+      directory: requiredFixture(
+        requiredFixture(done.artifactBinding).binding.artifacts
+          .verificationDirectory
       )
-    );
+    });
+    assert.equal(records.length, 2);
     records.sort((left, right) => left.sequence - right.sequence);
     const [failed, retried] = records;
     assert.ok(failed);
@@ -7017,7 +6800,6 @@ test("an explicit verification retry gets a new linked identity and durable retr
     assert.equal(failed.status, "failed");
     assert.equal(retried.status, "completed");
     assert.equal(retried.retryOf, failed.id);
-    assert.equal(retried.restartOf, null);
     assert.match(
       await readFile(path.join(runDirectory, "events.jsonl"), "utf8"),
       /"type":"verification\.retry_requested"/
@@ -7031,6 +6813,7 @@ test("resume closes an interrupted durable verification leaf and links one resta
   const repository = await createTestRepository();
   try {
     const adapters = new FakeAdapters();
+    adapters.fixtureTaskChecks = true;
     adapters.selectionResults.push(
       selectionResult({ recommendedWorkflow: "feature" })
     );
@@ -7058,30 +6841,33 @@ test("resume closes an interrupted durable verification leaf and links one resta
       "runs",
       done.runId
     );
-    const attemptsDirectory = path.join(runDirectory, "verification-attempts");
-    const originalFile = (await readdir(attemptsDirectory)).find(
-      (name) => name !== "ledger.json"
-    );
-    assert.ok(originalFile);
-    const originalPath = path.join(attemptsDirectory, originalFile);
-    const original = JSON.parse(
-      await readFile(originalPath, "utf8")
-    ) as VerificationAttemptRecord;
-    const started: VerificationAttemptRecord = {
-      ...original,
-      status: "started",
-      completedAt: null,
-      durationMs: null,
-      exitCode: null,
-      signal: null,
-      failureCategory: null,
-      stdout: null,
-      stderr: null
+    const storage = {
+      repoRoot: repository.root,
+      workId: requiredFixture(done.artifactBinding).binding.workId,
+      directory: requiredFixture(
+        requiredFixture(done.artifactBinding).binding.artifacts
+          .verificationDirectory
+      )
     };
-    await writeFile(
-      originalPath,
-      `${JSON.stringify(started, null, 2)}\n`,
-      "utf8"
+    const attemptsDirectory = path.join(
+      repository.root,
+      storage.directory,
+      "attempts"
+    );
+    const [original] = await readTaskVerificationAttempts(storage);
+    assert.ok(original);
+    const finish = (await readdir(attemptsDirectory)).find((name) =>
+      name.endsWith(".finish.json")
+    );
+    assert.ok(finish);
+    await rm(path.join(attemptsDirectory, finish));
+    await rm(
+      path.join(
+        repository.root,
+        storage.directory,
+        "origins",
+        `${original.id}.finish.json`
+      )
     );
     const statePath = path.join(runDirectory, "state.json");
     const persisted = JSON.parse(await readFile(statePath, "utf8")) as Record<
@@ -7105,25 +6891,15 @@ test("resume closes an interrupted durable verification leaf and links one resta
     ).resume();
     assert.equal(resumed.status, "done");
     assert.equal(executions, 1);
-    const files = (await readdir(attemptsDirectory))
-      .filter((name) => name !== "ledger.json")
-      .sort();
-    assert.equal(files.length, 2);
-    const records = await Promise.all(
-      files.map(
-        async (file) =>
-          JSON.parse(
-            await readFile(path.join(attemptsDirectory, file), "utf8")
-          ) as VerificationAttemptRecord
-      )
-    );
+    const records = await readTaskVerificationAttempts(storage);
+    assert.equal(records.length, 2);
     records.sort((left, right) => left.sequence - right.sequence);
     const [interrupted, restarted] = records;
     assert.ok(interrupted);
     assert.ok(restarted);
     assert.equal(interrupted.status, "interrupted");
     assert.equal(restarted.status, "completed");
-    assert.equal(restarted.restartOf, interrupted.id);
+    assert.equal(restarted.retryOf, interrupted.id);
     assert.equal(resumed.metrics.attempts.verification, 2);
   } finally {
     await repository.dispose();
@@ -7646,7 +7422,14 @@ test("cancellation: late verification registration leaves interrupted evidence a
     const state = await runner.approvePlan("human");
     assert.equal(state.status, "cancelled");
     assert.equal(adapters.reviewPrompts.length, 0);
-    const attempts = await runner.store.readVerificationAttempts(state.runId);
+    const attempts = await readTaskVerificationAttempts({
+      repoRoot: repository.root,
+      workId: requiredFixture(state.artifactBinding).binding.workId,
+      directory: requiredFixture(
+        requiredFixture(state.artifactBinding).binding.artifacts
+          .verificationDirectory
+      )
+    });
     assert.equal(attempts.at(-1)?.status, "interrupted");
   } finally {
     await repository.dispose();
@@ -7667,8 +7450,13 @@ class LayoutStopAdapters extends FakeAdapters {
     ) {
       this.phasePrompts.push(request.prompt);
       this.phaseResumeSessionIds.push(request.resumeSessionId);
-      const reportPath =
-        "documentation/features/example/implementation-report.md";
+      const reportPath = path.relative(
+        request.repoRoot,
+        await boundFixturePath(
+          request.repoRoot,
+          "documentation/features/example/implementation-report.md"
+        )
+      );
       const strictImplementation =
         this.stopPhase === "implementation" &&
         !request.prompt.includes("Selected workflow:");
@@ -7896,7 +7684,8 @@ for (const stopPoint of [
         );
       } else {
         assert.equal(stopped.status, "needs_human_decision");
-        assert.equal(stopped.pendingHumanDecision?.gate, "escalation");
+        assert.ok(stopped.pendingHumanDecision?.kind === "escalation");
+        assert.equal(stopped.pendingHumanDecision.gate, "escalation");
         assert.equal(stopped.pendingHumanDecision.summary, LAYOUT_DIAGNOSTIC);
         const answered = await runner.answerHumanDecision(
           {
@@ -7914,7 +7703,8 @@ for (const stopPoint of [
         // An answer is not a migration: the next affected phase stops again.
         adapters.stopPhase = "plan";
         const repeated = await runner.resume();
-        assert.equal(repeated.pendingHumanDecision?.summary, LAYOUT_DIAGNOSTIC);
+        assert.ok(repeated.pendingHumanDecision?.kind === "escalation");
+        assert.equal(repeated.pendingHumanDecision.summary, LAYOUT_DIAGNOSTIC);
         assert.deepEqual(await layoutProjectBytes(repository.root), before);
         await installLayoutFixture(
           repository.root,
@@ -7974,7 +7764,8 @@ test("layout stop after authorized recovery grants no migration authority", asyn
       decidedBy: "human"
     });
     assert.equal(stopped.status, "needs_human_decision");
-    assert.equal(stopped.pendingHumanDecision?.summary, LAYOUT_DIAGNOSTIC);
+    assert.ok(stopped.pendingHumanDecision?.kind === "escalation");
+    assert.equal(stopped.pendingHumanDecision.summary, LAYOUT_DIAGNOSTIC);
     assert.deepEqual(await layoutProjectBytes(repository.root), before);
   } finally {
     await repository.dispose();
@@ -8082,7 +7873,8 @@ for (const gate of ["escalation", "decision_consultation"] as const) {
         request: "Try again without migration."
       });
       assert.notEqual(restarted.runId, waiting.runId);
-      assert.equal(restarted.pendingHumanDecision?.summary, LAYOUT_DIAGNOSTIC);
+      assert.ok(restarted.pendingHumanDecision?.kind === "escalation");
+      assert.equal(restarted.pendingHumanDecision.summary, LAYOUT_DIAGNOSTIC);
     } finally {
       await repository.dispose();
     }
@@ -8126,11 +7918,11 @@ test("review v2 publication and application interruptions reconcile exactly once
       const adapters = new FakeAdapters();
       adapters.reviewResults.push(passingReview());
       const runner = new WorkflowRunner(repository.root, adapters);
-      const artifact = path.join(
+      await runner.start({ slug: "example", request: "Implement it." });
+      const artifact = await boundFixturePath(
         repository.root,
         "documentation/features/example/review-1.md"
       );
-      await runner.start({ slug: "example", request: "Implement it." });
       let injected = false;
       const write = runner.store.writeText.bind(runner.store);
       runner.store.writeText = async (id, relative, text) => {
@@ -8290,7 +8082,10 @@ test("review v2 truthful layout blockers publish incomplete coverage without com
     assert.equal(adapters.reviewPrompts.length, 1);
     assert.equal(blocked.triage, null);
     const contents = await readFile(
-      path.join(repository.root, "documentation/features/example/review-1.md"),
+      await boundFixturePath(
+        repository.root,
+        "documentation/features/example/review-1.md"
+      ),
       "utf8"
     );
     assert.match(contents, /not_reviewed/);
@@ -8347,7 +8142,10 @@ test("review v2 retains schema-valid rejected scope and terminal proof before co
     assert.equal(adapters.reviewPrompts.length, 1);
     await assert.rejects(
       readFile(
-        path.join(repository.root, "documentation/features/example/review-1.md")
+        await boundFixturePath(
+          repository.root,
+          "documentation/features/example/review-1.md"
+        )
       ),
       /ENOENT/
     );
@@ -8479,10 +8277,11 @@ test("adoption saved ADR, answer and triage survive refused automatic continuati
         assert.deepEqual(saved.state.metrics.attempts, prior.metrics.attempts);
         if (decision === "adr")
           assert.equal(saved.state.adrDecisions[0]?.decision, "accept");
-        if (decision === "answer")
-          assert.deepEqual(saved.state.humanDecisions?.[0]?.answers, [
-            "Preserve compatibility."
-          ]);
+        if (decision === "answer") {
+          const answer = saved.state.humanDecisions?.[0];
+          assert.ok(answer?.kind === "escalation");
+          assert.deepEqual(answer.answers, ["Preserve compatibility."]);
+        }
         if (decision === "triage")
           assert.equal(saved.state.triage?.items[0]?.disposition, "accepted");
         const tree = await snapshotTree(path.join(repository.root, ".banzai"));
@@ -8543,7 +8342,7 @@ test("adoption saved ADR, answer and triage survive refused automatic continuati
     });
 });
 
-test("adoption zero-accepted triage remains a non-model completion despite missing guidance", async () => {
+test("adoption zero-accepted triage does not complete with stale evidence after guidance removal", async () => {
   const repository = await createTestRepository();
   try {
     const adapters = new FakeAdapters();
@@ -8564,7 +8363,12 @@ test("adoption zero-accepted triage remains a non-model completion despite missi
       note: "No change required.",
       decidedBy: "human"
     });
-    assert.equal(done.status, "done", done.blockReason ?? "");
+    assert.equal(done.status, "blocked");
+    assert.match(
+      done.blockReason ?? "",
+      /verification is unavailable or stale/
+    );
+    assert.equal(done.triage?.items[0]?.disposition, "rejected");
     assert.equal(adapters.phasePrompts.length, calls);
   } finally {
     await repository.dispose();
@@ -8789,6 +8593,13 @@ test("adoption continuation honors the real source-workspace topology", async ()
   const repository = await createTestRepository();
   try {
     await writeIdentity(repository.root, SOURCE_IDENTITY_FIXTURES[2].files);
+    const configPath = path.join(repository.root, ".banzai/config.json");
+    const fixtureConfig = JSON.parse(
+      await readFile(configPath, "utf8")
+    ) as OrchestratorConfig;
+    requiredFixture(fixtureConfig.verification.profiles[0]).projectType =
+      "node";
+    await writeFile(configPath, JSON.stringify(fixtureConfig));
     await writeFile(
       path.join(repository.root, "AGENTS.md"),
       "@/host/instructions\n# Banzai source rules\n"
@@ -8980,7 +8791,7 @@ for (const artifactLayout of ["legacy", "private"] as const) {
                 "utf8"
               )
             ) as RunState;
-            assert.equal(state.schemaVersion, 4);
+            assert.equal(state.schemaVersion, 8);
             assert.equal(state.workflowSelection, null);
             assert.equal(state.artifactBinding?.binding.mode, "workflow");
             originalBinding = await readFile(
@@ -9024,7 +8835,8 @@ for (const artifactLayout of ["legacy", "private"] as const) {
           ),
           originalBinding
         );
-        assert.equal(bound.binding.layout, artifactLayout);
+        assert.equal(bound.binding.layout, "private");
+        assert.equal(bound.binding.schemaVersion, 2);
         if (workflow === "strict") {
           assert.ok(state.latestReview?.artifactPath);
           assert.match(
@@ -9032,7 +8844,7 @@ for (const artifactLayout of ["legacy", "private"] as const) {
               path.join(repository.root, state.latestReview.artifactPath),
               "utf8"
             ),
-            /banzai-feature-review\/v3/u
+            /banzai-feature-review\/v7/u
           );
           assert.equal(state.planTaskCompletion?.status, "valid");
         }
@@ -9148,6 +8960,13 @@ for (const context of [
         );
         assert.ok(identity);
         await writeIdentity(repository.root, identity.files);
+        const configPath = path.join(repository.root, ".banzai/config.json");
+        const fixtureConfig = JSON.parse(
+          await readFile(configPath, "utf8")
+        ) as OrchestratorConfig;
+        requiredFixture(fixtureConfig.verification.profiles[0]).projectType =
+          "node";
+        await writeFile(configPath, JSON.stringify(fixtureConfig));
         await writeFile(
           path.join(repository.root, "AGENTS.md"),
           "# Source repository instructions\n"
@@ -9164,7 +8983,9 @@ for (const context of [
       });
       assert.equal(state.status, "done", state.blockReason ?? "");
       assert.equal(state.artifactBinding?.binding.layout, "private");
-      assert.equal(state.schemaVersion, 4);
+      // The lite feature workflow never enters the completion protocol, so the
+      // run keeps the bootstrap schema.
+      assert.equal(state.schemaVersion, 8);
       assert.ok(
         (await readFile(runner.store.statePath(state.runId), "utf8")).includes(
           state.runId
@@ -9296,7 +9117,7 @@ test("accepted F10 public doctor recognizes actual v4 runs and rejects binding d
       slug: "doctor",
       request: "Inspect a current run."
     });
-    assert.equal(state.schemaVersion, 4);
+    assert.equal(state.schemaVersion, 8);
     assert.ok(state.artifactBinding);
     const report = await inspectDoctor(repository.root);
     assert.notEqual(
@@ -9441,7 +9262,14 @@ test("instruction per-call refusal retains saved approval and triage, exact bind
           );
           const runner = new WorkflowRunner(repository.root, adapters);
           await runner.start({ slug: "example", request: "Implement it." });
-          if (gate === "triage") await runner.approvePlan("human");
+          if (gate === "triage") {
+            const approved = await runner.approvePlan("human");
+            assert.notEqual(
+              approved.status,
+              "blocked",
+              JSON.stringify(approved.blockReason)
+            );
+          }
           const prior = (await runner.status()).state;
           const resource = path.join(
             plugin.directory,
@@ -9519,7 +9347,12 @@ test("instruction per-call refusal retains saved approval and triage, exact bind
           assert.deepEqual(await projections(), beforeProjections);
           assert.equal(adapters.phasePrompts.length, calls);
           await writeFile(resource, original);
-          assert.equal((await runner.resume()).status, "done");
+          const resumed = await runner.resume();
+          assert.equal(
+            resumed.status,
+            "done",
+            JSON.stringify(resumed.blockReason)
+          );
           const bound = saved.artifactBinding;
           assert.ok(bound);
           // Standalone status/review use this same explicit binding reader.
@@ -9674,348 +9507,1149 @@ test("late instruction skew preserves the failed planner retry and authorized re
   });
 });
 
-for (const [workflow, unavailable] of [
-  ["feature", false],
-  ["strict", false],
-  ["feature", true]
-] as const) {
-  test(`verification v2 guards ${workflow} completion and retains physical provenance${unavailable ? " with unavailable capture" : ""}`, async () => {
-    const repository = await createTestRepository({
-      artifactLayout: "private"
-    });
-    try {
-      const configPath = path.join(repository.root, ".banzai/config.json");
-      const config = JSON.parse(
-        await readFile(configPath, "utf8")
-      ) as OrchestratorConfig;
-      const executable = await realpath(process.execPath);
-      config.schemaVersion = 3;
-      config.verification = {
-        profiles: [
-          {
-            id: "node",
-            projectType: "node",
-            commands: [
-              {
-                id: "unit",
-                name: "Unit",
-                command: executable,
-                args: ["-e", "console.log('real verification fixture')"],
-                timeoutMs: 2000,
-                evidence: "equivalent_evidence",
-                ignoreExplanatory: true
-              }
-            ]
-          }
-        ],
-        policy: {
-          schema: "banzai-verification-policy/v1",
-          schemaVersion: 1,
-          explanatory: [],
-          dependencies: {
-            complete: true,
-            exclude: [".banzai/work"],
-            toolchain: [executable],
-            environment: { LANG: "C" },
-            volatile: unavailable ? ["external"] : []
-          }
-        }
-      };
-      await writeFile(configPath, JSON.stringify(config));
-      await commitAll(repository.root, "verification policy fixture");
-      const adapters = new FakeAdapters();
-      adapters.selectionResults.push(
-        selectionResult({ recommendedWorkflow: workflow })
-      );
-      adapters.reviewResults.push(passingReview());
-      const runner = new WorkflowRunner(repository.root, adapters);
-      let state = await runner.start({
-        slug: "evidence",
-        request: "Verify evidence lifecycle."
-      });
-      if (workflow === "strict")
-        state = await runner.approvePlan("human", true);
-      assert.equal(state.schemaVersion, 5);
-      assert.equal(state.artifactBinding?.binding.schemaVersion, 2);
-      if (unavailable) {
-        assert.equal(state.status, "blocked");
-        assert.equal(state.metrics.attempts.verification, 1);
-        const evidence = requiredFixture(state.verificationEvidence);
-        assert.equal(evidence.applicability?.complete, false);
-        const runDirectory = path.join(
-          repository.root,
-          ".banzai/runs",
-          state.runId
-        );
-        const records = await new RunStore(
-          repository.root
-        ).readVerificationAttempts(state.runId);
-        const attempt = requiredFixture(records[0]);
-        assert.equal(attempt.exitCode, 0);
-        // Compatibility fixture for the pre-fix application shape. Its physical
-        // attempt, captures and logs come from the real runner execution above.
-        const { sha256: priorDigest, ...historical } = requiredFixture(
-          evidence.applicability
-        );
-        historical.complete = true;
-        historical.dispositions = [
-          {
-            checkId: "unit",
-            kind: "executed",
-            origin: {
-              attemptId: attempt.id,
-              recordDigest: evidenceDigest(attempt),
-              roundId: attempt.round.id
-            }
-          }
-        ];
-        evidence.applicability = {
-          ...historical,
-          sha256: evidenceDigest(historical)
-        };
-        assert.notEqual(evidence.applicability.sha256, priorDigest);
-        await persistVerificationApplicability(
-          {
-            repoRoot: repository.root,
-            directory: `.banzai/runs/${state.runId}/verification`,
-            workId: requiredFixture(state.artifactBinding).binding.workId
-          },
-          evidence.applicability
-        );
-        await new RunStore(repository.root).writeState(state);
-        const options = {
-          format: "json" as const,
-          from: null,
-          to: null,
-          runIds: [state.runId]
-        };
-        const before = await collectEvaluationExportV2(
-          repository.root,
-          options
-        );
-        assert.equal(before.runs[0]?.verificationEvidence.coverage, "exact");
-        assert.equal(
-          deriveEvaluationKpiV2([before]).sources[0]?.reuseRatio.denominator,
-          1
-        );
-        const legacy = await collectEvaluationExport(repository.root, options);
-        const finishPath = path.join(
-          runDirectory,
-          "verification/origins",
-          `${attempt.id}.finish.json`
-        );
-        const finish = await readFile(finishPath);
-        await rm(finishPath);
-        const missing = await collectEvaluationExportV2(
-          repository.root,
-          options
-        );
-        assert.equal(
-          missing.runs[0]?.verificationEvidence.coverage,
-          "incomplete"
-        );
-        assert.deepEqual(
-          missing.runs[0].verificationEvidence.physicalAttempts,
-          before.runs[0].verificationEvidence.physicalAttempts
-        );
-        assert.ok(
-          missing.runs[0].verificationEvidence.dispositions.every(
-            (item) => item.kind === "pending"
-          )
-        );
-        assert.equal(
-          deriveEvaluationKpiV2([missing]).sources[0]?.reuseRatio.denominator,
-          0
-        );
-        assert.deepEqual(
-          await collectEvaluationExport(repository.root, options),
-          legacy
-        );
-        await writeFile(finishPath, finish);
-        await writeFile(
-          path.join(repository.root, "src/example.txt"),
-          "changed after unavailable capture\n"
-        );
-        const resumed = await runner.resume();
-        assert.equal(resumed.status, "blocked");
-        assert.equal(resumed.metrics.attempts.verification, 1);
-        return;
-      }
-      assert.equal(state.status, "done", state.blockReason ?? "");
-      assert.equal(state.metrics.attempts.verification, 1);
-      assert.equal(state.verificationEvidence?.applicability?.complete, true);
-      assert.equal(
-        state.verificationEvidence.applicability.dispositions[0]?.kind,
-        "executed"
-      );
-      const runDirectory = path.join(
-        repository.root,
-        ".banzai/runs",
-        state.runId
-      );
-      assert.deepEqual(
-        JSON.parse(
-          await readFile(
-            path.join(runDirectory, "verification-attempts/ledger.json"),
-            "utf8"
-          )
-        ),
-        { schemaVersion: 2 }
-      );
-      if (workflow === "strict") {
-        assert.match(
-          adapters.reviewPrompts[0] ?? "",
-          /banzai-verification-applicability\/v1/
-        );
-        const artifact = await readFile(
-          path.join(
-            repository.root,
-            requiredFixture(requiredFixture(state.latestReview).artifactPath)
-          ),
-          "utf8"
-        );
-        assert.match(artifact, /banzai-feature-review\/v4/);
-      }
-      const exported = await collectEvaluationExportV2(repository.root, {
-        format: "json",
-        from: null,
-        to: null,
-        runIds: [state.runId]
-      });
-      assert.equal(exported.runs[0]?.verificationEvidence.coverage, "exact");
-      assert.equal(
-        exported.runs[0].verificationEvidence.physicalAttempts.length,
-        1
-      );
-      assert.equal(
-        exported.runs[0].verificationEvidence.dispositions[0]?.kind,
-        "executed"
-      );
-      const legacyExport = await collectEvaluationExport(repository.root, {
-        format: "json",
-        from: null,
-        to: null,
-        runIds: [state.runId]
-      });
-      assert.ok(
-        legacyExport.issues.some(
-          (issue) => issue.code === "VERIFICATION_HISTORY_INCOMPLETE"
-        )
-      );
-      const context = await collectContextReport(repository.root, {
-        runIds: [state.runId],
-        from: null,
-        to: null,
-        format: "json"
-      });
-      assert.ok(context);
-      // A resumed completed physical round performs no second invocation, but
-      // source drift prevents its old success from being applied again.
-      const persisted = JSON.parse(
-        await readFile(path.join(runDirectory, "state.json"), "utf8")
-      ) as RunState;
-      persisted.status = "verifying";
-      await writeFile(
-        path.join(repository.root, "src/example.txt"),
-        "changed after verification\n"
-      );
-      await writeFile(
-        path.join(runDirectory, "state.json"),
-        JSON.stringify(persisted)
-      );
-      const resumed = await runner.resume();
-      assert.notEqual(resumed.status, "done");
-      assert.equal(resumed.metrics.attempts.verification, 1);
-    } finally {
-      await repository.dispose();
-    }
-  });
-}
-
-test("strict explanatory closure reuses its original physical check through independent resolution review", async () => {
+test("guided planning retains manifest tasks with control-path constraints and read-only evidence through approval", async () => {
   const repository = await createTestRepository({ artifactLayout: "private" });
   try {
-    const executable = await realpath(process.execPath);
-    const configPath = path.join(repository.root, ".banzai/config.json");
-    const config = JSON.parse(
-      await readFile(configPath, "utf8")
-    ) as OrchestratorConfig;
-    config.schemaVersion = 3;
-    config.verification = {
-      profiles: [
-        {
-          id: "node",
-          projectType: "node",
-          commands: [
-            {
-              id: "unit",
-              name: "Unit",
-              command: executable,
-              args: [
-                "-e",
-                "require('node:assert/strict').equal(require('node:fs').readFileSync('src/example.txt','utf8'),'needs-fix\\n')"
-              ],
-              timeoutMs: 2000,
-              evidence: "equivalent_evidence",
-              ignoreExplanatory: true
-            }
-          ]
-        }
-      ],
-      policy: {
-        schema: "banzai-verification-policy/v1",
-        schemaVersion: 1,
-        explanatory: [{ path: "notes.md", regions: [] }],
-        dependencies: {
-          complete: true,
-          exclude: [".banzai/work"],
-          toolchain: [executable],
-          environment: { LANG: "C" },
-          volatile: []
-        }
-      }
-    };
-    await writeFile(configPath, JSON.stringify(config));
-    await writeFile(
-      path.join(repository.root, "notes.md"),
-      "Original explanatory sentence.\n"
-    );
-    await commitAll(repository.root, "explicit verification closure fixture");
-    class ExplanatoryAdapters extends FakeAdapters {
+    class ManifestPlanAdapters extends FakeAdapters {
       override async runPhase(
         request: PhaseAdapterRequest
       ): Promise<AdapterResult<PhaseResult>> {
         const result = await super.runPhase(request);
-        if (result.result.phase === "fix") {
-          await writeFile(
-            path.join(request.repoRoot, "src/example.txt"),
-            "needs-fix\n"
+        if (result.result.phase === "plan") {
+          const target = path.join(
+            request.repoRoot,
+            requiredFixture(result.result.artifacts.plan)
           );
-          await writeFile(
-            path.join(request.repoRoot, "notes.md"),
-            "Corrected explanatory sentence.\n"
-          );
-          const report = requiredFixture(
-            result.result.artifacts.implementationReport
-          );
-          await writeFile(
-            path.join(request.repoRoot, report),
-            `# Implementation Report\n\n${renderPlanTaskCompletionProjection(requiredFixture(result.result.taskCompletion))}\n`
+          await writeFixturePlan(
+            target,
+            (await readFile(target, "utf8")).replace(
+              "## Implementation Tasks",
+              "## Implementation Tasks\n\n- [ ] **T002 - Synchronize manifest facts**\n\n  - Update `PROJECT_MANIFEST.md`.\n  - Do not add scripts, dependencies, verification commands, application\n    architecture, or any `.banzai/` change.\n  - Review the updated statements against `package.json` and\n    `.banzai/config.json`.\n"
+            )
           );
         }
         return result;
       }
     }
-    const adapters = new ExplanatoryAdapters();
-    adapters.reviewResults.push({
-      contractVersion: CONTRACT_VERSION,
-      verdict: "changes_requested",
-      summary: "Explanatory correction.",
-      findings: [finding("R1-F1", "Clarify the informational sentence.")],
-      reviewedFindingIds: [],
-      deferredCoverage: []
+    const runner = new WorkflowRunner(
+      repository.root,
+      new ManifestPlanAdapters()
+    );
+    const state = await runner.start({
+      slug: "manifest-control-references",
+      request: "Initialize the application."
     });
-    adapters.reviewResults.push(passingReview(["R1-F1"]));
+    assert.equal(state.status, "needs_plan_approval");
+    const planPath = path.join(
+      repository.root,
+      requiredFixture(state.planArtifacts?.plan)
+    );
+    const offered = await readFile(planPath, "utf8");
+    assert.match(offered, /T002 - Synchronize manifest facts/u);
+    assert.equal(
+      (await runner.approvePlan("human", false)).status,
+      "plan_approved"
+    );
+    assert.equal(await readFile(planPath, "utf8"), offered);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+for (const targetRole of [
+  "config",
+  "fix_report",
+  "case_alias",
+  "sibling_alias"
+] as const)
+  test(`guided planning rejects ${targetRole} tasks before approval can be offered`, async () => {
+    const repository = await createTestRepository({
+      artifactLayout: "private"
+    });
+    try {
+      class InvalidPlanAdapters extends FakeAdapters {
+        override async runPhase(
+          request: PhaseAdapterRequest
+        ): Promise<AdapterResult<PhaseResult>> {
+          const result = await super.runPhase(request);
+          if (result.result.phase === "plan") {
+            const target = path.join(
+              request.repoRoot,
+              requiredFixture(result.result.artifacts.plan)
+            );
+            await writeFixturePlan(
+              target,
+              (await readFile(target, "utf8"))
+                .replace(
+                  "## Implementation Tasks",
+                  "## Human prerequisites\n\nConfigure verification using banzai verify.\n\n## Implementation Tasks"
+                )
+                .replace(
+                  "**T001 -",
+                  `**T001 - Update ${targetRole === "config" ? ".banzai/config.json" : targetRole === "case_alias" ? ".Banzai/config.json" : targetRole === "sibling_alias" ? `../${path.basename(request.repoRoot)}/.banzai/config.json` : path.posix.join(path.posix.dirname(requiredFixture(result.result.artifacts.plan)), "change-report.md")} and`
+                )
+            );
+          }
+          return result;
+        }
+      }
+      const adapters = new InvalidPlanAdapters();
+      const runner = new WorkflowRunner(repository.root, adapters);
+      const state = await runner.start({
+        slug: "bad-config-task",
+        request: "Initialize the application."
+      });
+      assert.equal(state.status, "blocked");
+      assert.equal(state.planApproval, null);
+      assert.match(state.blockReason ?? "", /T001.*runner control path/u);
+      await assert.rejects(runner.approvePlan("human"));
+      assert.equal(
+        adapters.phasePrompts.filter((prompt) =>
+          prompt.includes("Phase: implementation")
+        ).length,
+        0
+      );
+    } finally {
+      await repository.dispose();
+    }
+  });
+
+test("accepted review F3 committed approval renders prerequisites as inert text", async () => {
+  const repository = await createTestRepository({ artifactLayout: "private" });
+  try {
+    const runner = new WorkflowRunner(repository.root, new FakeAdapters());
+    const state = await runner.start({
+      slug: "approval-preview",
+      request: "A harmless task"
+    });
+    assert.equal(state.status, "needs_plan_approval");
+    const planPath = path.join(
+      repository.root,
+      requiredFixture(state.planArtifacts?.plan)
+    );
+    let plan =
+      (await readFile(planPath, "utf8")) +
+      "\n## Human prerequisites\nNormal multiline\n\x1b[2J\x1b]0;canary\x07\u202eCanary\n";
+    await writeFixturePlan(planPath, plan);
+    plan = await readFile(planPath, "utf8");
+    const result = spawnSync(
+      process.execPath,
+      [
+        path.join(process.cwd(), "dist/banzai.mjs"),
+        "approve",
+        "plan",
+        "--no-resume"
+      ],
+      { cwd: repository.root, encoding: "utf8", env: monochromeEnv() }
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(result.stdout, /[\x1b\x07\u202e]/u);
+    assert.match(result.stdout, /Normal multiline\n/u);
+    assert.match(result.stdout, /\\u001b\[2J/u);
+    assert.equal(await readFile(planPath, "utf8"), plan);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("accepted review F5 approval denies a fix-only report in implementation tasks", async () => {
+  const repository = await createTestRepository({ artifactLayout: "private" });
+  try {
+    const runner = new WorkflowRunner(repository.root, new FakeAdapters());
+    const state = await runner.start({
+      slug: "phase-guard",
+      request: "A harmless task"
+    });
+    assert.equal(state.status, "needs_plan_approval");
+    const roles = requiredFixture(state.artifactBinding).binding.artifacts;
+    const planPath = path.join(
+      repository.root,
+      requiredFixture(state.planArtifacts?.plan)
+    );
+    const plan = await readFile(planPath, "utf8");
+    await writeFixturePlan(
+      planPath,
+      plan + `\nDuring implementation write \`${roles.changeReport}\`.\n`
+    );
+    await assert.rejects(runner.approvePlan("human", false), {
+      code: "PLAN_RUNNER_CONTROL_TASK"
+    });
+    await writeFixturePlan(
+      planPath,
+      plan +
+        `\nDuring implementation write \`${roles.implementationReport}\` and \`${roles.testReport}\`.\n`
+    );
+    assert.equal(
+      (await runner.approvePlan("human", false)).status,
+      "plan_approved"
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// ADR-0047 runner-owned completion publication: durable proof, crash seams,
+// refusal routes, tamper guards, stop diagnostics and archive closure.
+// ---------------------------------------------------------------------------
+
+const NARRATIVE_REPORT =
+  "# Implementation Report\n\n## Narrative\n\nThe fixture was implemented.\n";
+const artifactsCommandPath = path.resolve(
+  "../../plugins/banzai/scripts/artifacts.cjs"
+);
+
+async function completionEventCount(
+  runner: WorkflowRunner,
+  runId: string,
+  type: string
+): Promise<number> {
+  const events = await readFile(
+    path.join(runner.store.runDirectory(runId), "events.jsonl"),
+    "utf8"
+  );
+  return events
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as { type: string })
+    .filter((event) => event.type === type).length;
+}
+
+test("a narrative-only implementation is published once by the runner with attempt-owned durable proof", async () => {
+  const repository = await createTestRepository();
+  try {
+    const adapters = new FakeAdapters();
+    adapters.implementationReportTransforms.push(() => NARRATIVE_REPORT);
+    adapters.reviewResults.push(passingReview());
+    const runner = new WorkflowRunner(repository.root, adapters);
+    await runner.start({ slug: "example", request: "Implement it." });
+    const done = await runner.approvePlan("human");
+    assert.equal(done.status, "done", done.blockReason ?? "");
+    assert.equal(done.schemaVersion, 8);
+    assert.equal(done.metrics.attempts.implementation, 1);
+    assert.ok(
+      adapters.phasePrompts.every((prompt) => !/repair retry/i.test(prompt))
+    );
+    const completion = done.planTaskCompletion;
+    assert.ok(completion?.status === "valid");
+    assert.equal(completion.schemaVersion, 2);
+    assert.equal(
+      completion.completionProtocol,
+      "banzai-completion-protocol/v1"
+    );
+    const attempt = {
+      id: completion.sourceAttemptId,
+      kind: "implementation" as const,
+      mutable: true
+    };
+    const ledger = phaseResult("implementation").taskCompletion;
+    assert.ok(ledger);
+    const reportPath = await boundFixturePath(
+      repository.root,
+      "documentation/features/example/implementation-report.md"
+    );
+    const report = await readFile(reportPath);
+    const text = report.toString("utf8");
+    assert.ok(text.startsWith(NARRATIVE_REPORT));
+    assert.equal(
+      text.split("<!-- banzai-plan-task-completion/v2:start -->").length,
+      2
+    );
+    assert.ok(text.includes(renderCompletionRegion(ledger)));
+    assert.deepEqual(parsePublishedCompletionRegion(report), ledger);
+
+    const candidate = await runner.store.readCompletionCandidateIfExists(
+      done.runId,
+      attempt
+    );
+    assert.ok(candidate);
+    assert.ok(candidate.bytes.equals(report));
+    const receipt = await runner.store.readCompletionPublicationIfExists(
+      done.runId,
+      attempt
+    );
+    assert.ok(receipt);
+    assert.equal(receipt.candidateDigest, candidate.candidate.integrityDigest);
+    assert.deepEqual(receipt.ledgerAuthor, {
+      attemptId: attempt.id,
+      attemptKind: "implementation",
+      ledgerDigest: completion.ledgerDigest
+    });
+    assert.deepEqual(receipt.publisher, {
+      attemptId: attempt.id,
+      attemptKind: "implementation"
+    });
+    assert.equal(completion.publisherAttemptId, attempt.id);
+    assert.equal(completion.publication?.sha256, receipt.integrityDigest);
+    const capture = await runner.store.readCompletionCaptureIfExists(
+      done.runId,
+      attempt
+    );
+    assert.ok(capture);
+    assert.equal(capture.outcome, "completed");
+    assert.equal(capture.integrityDigest, receipt.captureDigest);
+    assert.equal(
+      capture.originals.implementationReport?.sha256,
+      createHash("sha256").update(NARRATIVE_REPORT).digest("hex")
+    );
+    assert.equal(
+      await readFile(
+        runner.store.completionEvidencePath(
+          done.runId,
+          attempt,
+          "implementation-input.md"
+        ),
+        "utf8"
+      ),
+      NARRATIVE_REPORT
+    );
+    const transition = await runner.store.readCompletionTransitionIfExists(
+      done.runId,
+      attempt
+    );
+    assert.equal(transition, null);
+    assert.equal(done.completionPublication?.stage, "event");
+    assert.equal(done.completionPublication.refusal, null);
+    assert.equal(
+      await completionEventCount(
+        runner,
+        done.runId,
+        "completion.publication_applied"
+      ),
+      1
+    );
+    assert.equal(
+      await completionEventCount(
+        runner,
+        done.runId,
+        "completion.publication_refused"
+      ),
+      0
+    );
+    const record = await runner.store.readRunAttempt(done.runId, attempt);
+    assert.equal(record.status, "completed");
+    assert.equal(record.schemaVersion, 4);
+    assert.equal(record.completionProtocol, "banzai-completion-protocol/v1");
+    assert.equal(record.retryOf, null);
+    assert.equal(record.envelope?.originalDigest, capture.resultDigest);
+
+    // The independent review froze the publication identities (snapshot v5,
+    // rendered v6) instead of re-reading mutable report text.
+    const review = (await runner.store.readRunAttempts(done.runId)).find(
+      (item) => item.attempt.kind === "review"
+    );
+    assert.ok(review);
+    const frozen = await runner.store.readReviewSnapshot(
+      done.runId,
+      review.attempt
+    );
+    assert.equal(frozen.schemaVersion, 6);
+    assert.equal(
+      frozen.completionPublication?.receiptDigest,
+      receipt.integrityDigest
+    );
+    const artifact = await readFile(
+      await boundFixturePath(
+        repository.root,
+        "documentation/features/example/review-1.md"
+      ),
+      "utf8"
+    );
+    assert.match(artifact, /banzai-feature-review\/v7/);
+    assert.match(artifact, /Runner-owned completion publication/);
+    assert.ok(artifact.includes(receipt.integrityDigest));
+  } finally {
+    await repository.dispose();
+  }
+});
+
+for (const boundary of ["capture-manifest", "between-originals"] as const)
+  test(`a restart ${boundary} keeps the terminal input authoritative and reconciles only after exact restoration`, async () => {
+    const repository = await createTestRepository();
+    try {
+      const adapters = new FakeAdapters();
+      adapters.reviewResults.push(passingReview());
+      const runner = new WorkflowRunner(repository.root, adapters);
+      let interrupted = false;
+      if (boundary === "capture-manifest") {
+        const writeCapture = runner.store.writeCompletionCapture.bind(
+          runner.store
+        );
+        runner.store.writeCompletionCapture = async (runId, capture) => {
+          if (!interrupted) {
+            interrupted = true;
+            throw new TerminalRunStateError(
+              await runner.store.readState(runId)
+            );
+          }
+          await writeCapture(runId, capture);
+        };
+      } else {
+        const writeOriginal = runner.store.writeCompletionOriginal.bind(
+          runner.store
+        );
+        runner.store.writeCompletionOriginal = async (
+          runId,
+          attempt,
+          role,
+          bytes
+        ) => {
+          const result = await writeOriginal(runId, attempt, role, bytes);
+          if (!interrupted && role === "implementationReport") {
+            interrupted = true;
+            throw new TerminalRunStateError(
+              await runner.store.readState(runId)
+            );
+          }
+          return result;
+        };
+      }
+
+      await runner.start({ slug: "example", request: "Implement it." });
+      await runner.approvePlan("human");
+      assert.equal(interrupted, true);
+      const interruptedState = await runner.store.requireActiveState();
+      assert.ok(interruptedState);
+      const attempt = interruptedState.activeAttempt;
+      assert.ok(attempt?.kind === "implementation");
+      assert.ok(
+        await runner.store.readTerminalCheckpointIfExists(
+          interruptedState.runId,
+          attempt
+        )
+      );
+      assert.equal(
+        await runner.store.readCompletionCaptureIfExists(
+          interruptedState.runId,
+          attempt
+        ),
+        null
+      );
+
+      const target =
+        boundary === "capture-manifest"
+          ? await boundFixturePath(
+              repository.root,
+              "documentation/features/example/implementation-report.md"
+            )
+          : path.join(repository.root, "src/example.txt");
+      const original = await readFile(target);
+      await writeFile(
+        target,
+        Buffer.concat([original, Buffer.from("drift\n")])
+      );
+
+      const resumedRunner = new WorkflowRunner(repository.root, adapters);
+      const promptsBefore = adapters.phasePrompts.length;
+      const drifted = await resumedRunner.resume();
+      assert.equal(drifted.status, "blocked");
+      assert.match(
+        drifted.blockReason ?? "",
+        /^\[COMPLETION_PUBLICATION_DRIFT\]/
+      );
+      assert.equal(adapters.phasePrompts.length, promptsBefore);
+      assert.equal(
+        await resumedRunner.store.readCompletionCaptureIfExists(
+          drifted.runId,
+          attempt
+        ),
+        null,
+        "changed current bytes never become a replacement capture baseline"
+      );
+      const blockedStatus = await resumedRunner.status();
+      assert.equal(blockedStatus.completionPublication?.action, "cancel");
+      assert.equal(blockedStatus.nextAction, "banzai cancel");
+
+      await writeFile(target, original);
+      const restoredStatus = await resumedRunner.status();
+      assert.equal(restoredStatus.completionPublication?.action, "resume");
+      assert.equal(restoredStatus.nextAction, "banzai resume");
+      const done = await resumedRunner.resume();
+      assert.equal(done.status, "done", done.blockReason ?? "");
+      assert.equal(adapters.phasePrompts.length, promptsBefore);
+      assert.equal(
+        done.metrics.completedAttemptIds.filter((id) => id === attempt.id)
+          .length,
+        1
+      );
+      assert.equal(
+        await completionEventCount(
+          resumedRunner,
+          done.runId,
+          "completion.publication_applied"
+        ),
+        1
+      );
+    } finally {
+      await repository.dispose();
+    }
+  });
+
+for (const setting of ["executable", "model", "effort"] as const)
+  test(`checkpoint-only pending publication blocks ${setting} drift until the exact implementer configuration is restored`, async () => {
+    const repository = await createTestRepository();
+    try {
+      const adapters = new FakeAdapters();
+      adapters.reviewResults.push(passingReview());
+      const runner = new WorkflowRunner(repository.root, adapters);
+      const writeCapture = runner.store.writeCompletionCapture.bind(
+        runner.store
+      );
+      let interrupted = false;
+      runner.store.writeCompletionCapture = async (runId, capture) => {
+        if (!interrupted) {
+          interrupted = true;
+          throw new TerminalRunStateError(await runner.store.readState(runId));
+        }
+        await writeCapture(runId, capture);
+      };
+
+      await runner.start({ slug: "example", request: "Implement it." });
+      await runner.approvePlan("human");
+      assert.equal(interrupted, true);
+      const interruptedState = await runner.store.requireActiveState();
+      const attempt = interruptedState.activeAttempt;
+      assert.ok(attempt?.kind === "implementation");
+      assert.equal(
+        (await runner.store.readRunAttempt(interruptedState.runId, attempt))
+          .status,
+        "pending_application"
+      );
+      assert.equal(
+        await runner.store.readCompletionCaptureIfExists(
+          interruptedState.runId,
+          attempt
+        ),
+        null
+      );
+
+      const configPath = path.join(repository.root, ".banzai/config.json");
+      const originalConfig = await readFile(configPath);
+      const hideConfigFromWorkspace = spawnSync(
+        "git",
+        ["update-index", "--assume-unchanged", ".banzai/config.json"],
+        { cwd: repository.root }
+      );
+      assert.equal(
+        hideConfigFromWorkspace.status,
+        0,
+        hideConfigFromWorkspace.stderr.toString()
+      );
+      const config = JSON.parse(
+        originalConfig.toString("utf8")
+      ) as OrchestratorConfig;
+      if (setting === "executable")
+        config.models.implementer.executable += "-changed";
+      else if (setting === "model")
+        config.models.implementer.model = `${config.models.implementer.model}-changed`;
+      else
+        config.models.implementer.effort =
+          config.models.implementer.effort === "high" ? "medium" : "high";
+      await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
+
+      const resumedRunner = new WorkflowRunner(repository.root, adapters);
+      const promptsBefore = adapters.phasePrompts.length;
+      const drifted = await resumedRunner.resume();
+      assert.equal(drifted.status, "blocked");
+      assert.match(
+        drifted.blockReason ?? "",
+        /^\[COMPLETION_PUBLICATION_DRIFT\]/
+      );
+      assert.equal(adapters.phasePrompts.length, promptsBefore);
+      assert.equal(
+        await resumedRunner.store.readCompletionCaptureIfExists(
+          drifted.runId,
+          attempt
+        ),
+        null,
+        "changed configuration never becomes a replacement capture authority"
+      );
+      assert.equal(
+        (await resumedRunner.status()).completionPublication?.action,
+        "cancel"
+      );
+
+      await writeFile(configPath, originalConfig);
+      assert.equal(
+        (await resumedRunner.status()).completionPublication?.action,
+        "resume"
+      );
+      const done = await resumedRunner.resume();
+      assert.equal(done.status, "done", done.blockReason ?? "");
+      assert.equal(adapters.phasePrompts.length, promptsBefore);
+      assert.equal(
+        done.metrics.completedAttemptIds.filter((id) => id === attempt.id)
+          .length,
+        1
+      );
+    } finally {
+      await repository.dispose();
+    }
+  });
+
+for (const setting of ["executable", "model", "effort"] as const)
+  test(`pending publication blocks ${setting} drift until the exact implementer configuration is restored`, async () => {
+    const repository = await createTestRepository();
+    try {
+      const adapters = new FakeAdapters();
+      adapters.reviewResults.push(passingReview());
+      const runner = new WorkflowRunner(repository.root, adapters);
+      const writeCandidate = runner.store.writeCompletionCandidate.bind(
+        runner.store
+      );
+      let injected = false;
+      runner.store.writeCompletionCandidate = async (
+        runId,
+        candidate,
+        bytes
+      ) => {
+        if (!injected) {
+          injected = true;
+          throw new Error("EIO: injected candidate write failure");
+        }
+        await writeCandidate(runId, candidate, bytes);
+      };
+      await runner.start({ slug: "example", request: "Implement it." });
+      const blocked = await runner.approvePlan("human");
+      assert.equal(blocked.status, "blocked");
+      assert.equal(
+        blocked.completionPublication?.refusal?.code,
+        "COMPLETION_PUBLICATION_IO"
+      );
+      const attempt = blocked.activeAttempt;
+      assert.ok(attempt?.kind === "implementation");
+      const configPath = path.join(repository.root, ".banzai/config.json");
+      const originalConfig = await readFile(configPath);
+      const config = JSON.parse(
+        originalConfig.toString("utf8")
+      ) as OrchestratorConfig;
+      if (setting === "executable")
+        config.models.implementer.executable += "-changed";
+      else if (setting === "model")
+        config.models.implementer.model = `${config.models.implementer.model}-changed`;
+      else
+        config.models.implementer.effort =
+          config.models.implementer.effort === "high" ? "medium" : "high";
+      await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
+
+      const promptsBefore = adapters.phasePrompts.length;
+      const driftStatus = await runner.status();
+      assert.equal(driftStatus.completionPublication?.action, "cancel");
+      assert.equal(driftStatus.nextAction, "banzai cancel");
+      assert.equal(
+        projectAgentControlStatus(driftStatus).activeRun?.nextAction,
+        "cancel"
+      );
+      const drifted = await runner.resume();
+      assert.equal(drifted.status, "blocked");
+      assert.match(
+        drifted.blockReason ?? "",
+        /^\[COMPLETION_PUBLICATION_DRIFT\]/
+      );
+      assert.equal(adapters.phasePrompts.length, promptsBefore);
+      assert.equal(drifted.planTaskCompletion, null);
+      assert.equal(
+        (await runner.store.readRunAttempt(drifted.runId, attempt)).status,
+        "pending_application"
+      );
+
+      await writeFile(configPath, originalConfig);
+      assert.equal(
+        (await runner.status()).completionPublication?.action,
+        "resume"
+      );
+      const done = await runner.resume();
+      assert.equal(done.status, "done", done.blockReason ?? "");
+      assert.equal(adapters.phasePrompts.length, promptsBefore);
+      assert.equal(
+        done.metrics.completedAttemptIds.filter((id) => id === attempt.id)
+          .length,
+        1
+      );
+      assert.equal(
+        await completionEventCount(
+          runner,
+          done.runId,
+          "completion.publication_applied"
+        ),
+        1
+      );
+    } finally {
+      await repository.dispose();
+    }
+  });
+
+for (const boundary of ["capture", "candidate", "event"] as const)
+  for (const timing of ["before", "after"] as const)
+    test(`an ordinary ${timing}-write ${boundary} cursor failure remains publication I/O and resumes without a model failure`, async () => {
+      const repository = await createTestRepository();
+      try {
+        const adapters = new FakeAdapters();
+        adapters.reviewResults.push(passingReview());
+        const runner = new WorkflowRunner(repository.root, adapters);
+        const writeState = runner.store.writeState.bind(runner.store);
+        let injected = false;
+        runner.store.writeState = async (state) => {
+          if (
+            !injected &&
+            state.completionPublication?.stage === boundary &&
+            state.completionPublication.refusal === null
+          ) {
+            injected = true;
+            if (timing === "after") await writeState(state);
+            throw new Error(
+              `EIO: injected ${timing} ${boundary} cursor failure`
+            );
+          }
+          await writeState(state);
+        };
+
+        await runner.start({ slug: "example", request: "Implement it." });
+        const blocked = await runner.approvePlan("human");
+        assert.equal(injected, true);
+        assert.equal(blocked.status, "blocked");
+        const refusal = blocked.completionPublication?.refusal;
+        assert.ok(refusal);
+        assert.equal(refusal.code, "COMPLETION_PUBLICATION_IO");
+        assert.equal(refusal.stage, boundary);
+        const attempt = blocked.activeAttempt;
+        assert.ok(attempt?.kind === "implementation");
+        assert.equal(
+          (await runner.store.readRunAttempt(blocked.runId, attempt)).status,
+          "pending_application"
+        );
+        assert.equal(
+          await completionEventCount(runner, blocked.runId, "attempt.failed"),
+          0
+        );
+
+        const promptsBefore = adapters.phasePrompts.length;
+        const resumedRunner = new WorkflowRunner(repository.root, adapters);
+        const done = await resumedRunner.resume();
+        assert.equal(done.status, "done", done.blockReason ?? "");
+        assert.equal(adapters.phasePrompts.length, promptsBefore);
+        assert.equal(
+          done.metrics.completedAttemptIds.filter((id) => id === attempt.id)
+            .length,
+          1
+        );
+        assert.equal(
+          await completionEventCount(
+            resumedRunner,
+            done.runId,
+            "attempt.failed"
+          ),
+          0
+        );
+        assert.equal(
+          await completionEventCount(
+            resumedRunner,
+            done.runId,
+            "completion.publication_applied"
+          ),
+          1
+        );
+      } finally {
+        await repository.dispose();
+      }
+    });
+
+for (const boundary of ["capture", "candidate", "event"] as const)
+  for (const timing of ["before", "after"] as const)
+    test(`consecutive ordinary ${timing}-write ${boundary} cursor and refusal failures never become a model failure`, async () => {
+      const repository = await createTestRepository();
+      try {
+        const adapters = new FakeAdapters();
+        adapters.reviewResults.push(passingReview());
+        const runner = new WorkflowRunner(repository.root, adapters);
+        const writeState = runner.store.writeState.bind(runner.store);
+        let cursorInjected = false;
+        let refusalInjected = false;
+        runner.store.writeState = async (state) => {
+          const publication = state.completionPublication;
+          if (
+            !cursorInjected &&
+            publication?.stage === boundary &&
+            publication.refusal === null
+          ) {
+            cursorInjected = true;
+            if (timing === "after") await writeState(state);
+            throw new Error(
+              `EIO: injected ${timing} ${boundary} cursor failure`
+            );
+          }
+          if (
+            cursorInjected &&
+            !refusalInjected &&
+            publication?.stage === boundary &&
+            publication.refusal?.code === "COMPLETION_PUBLICATION_IO"
+          ) {
+            refusalInjected = true;
+            if (timing === "after") await writeState(state);
+            throw new Error(
+              `EIO: injected ${timing} ${boundary} refusal-state failure`
+            );
+          }
+          await writeState(state);
+        };
+
+        await runner.start({ slug: "example", request: "Implement it." });
+        const blocked = await runner.approvePlan("human");
+        assert.equal(cursorInjected, true);
+        assert.equal(refusalInjected, true);
+        assert.equal(blocked.status, "blocked");
+        const attempt = blocked.activeAttempt;
+        assert.ok(attempt?.kind === "implementation");
+        assert.equal(
+          (await runner.store.readRunAttempt(blocked.runId, attempt)).status,
+          "pending_application"
+        );
+        assert.equal(
+          await completionEventCount(runner, blocked.runId, "attempt.failed"),
+          0
+        );
+
+        const promptsBefore = adapters.phasePrompts.length;
+        const resumedRunner = new WorkflowRunner(repository.root, adapters);
+        const done = await resumedRunner.resume();
+        assert.equal(done.status, "done", done.blockReason ?? "");
+        assert.equal(adapters.phasePrompts.length, promptsBefore);
+        assert.equal(
+          done.metrics.completedAttemptIds.filter((id) => id === attempt.id)
+            .length,
+          1
+        );
+        assert.equal(
+          await completionEventCount(
+            resumedRunner,
+            done.runId,
+            "attempt.failed"
+          ),
+          0
+        );
+        assert.equal(
+          await completionEventCount(
+            resumedRunner,
+            done.runId,
+            "completion.publication_applied"
+          ),
+          1
+        );
+        assert.equal(
+          await completionEventCount(
+            resumedRunner,
+            done.runId,
+            "completion.publication_refused"
+          ),
+          timing === "after" ? 1 : 0
+        );
+
+        const repeated = await resumedRunner.resume();
+        assert.equal(repeated.status, "done");
+        assert.equal(
+          await completionEventCount(
+            resumedRunner,
+            done.runId,
+            "completion.publication_applied"
+          ),
+          1
+        );
+      } finally {
+        await repository.dispose();
+      }
+    });
+
+for (const timing of ["before", "after"] as const)
+  test(`an ordinary ${timing}-append publication-refusal event failure resumes without a model failure`, async () => {
+    const repository = await createTestRepository();
+    try {
+      const adapters = new FakeAdapters();
+      adapters.reviewResults.push(passingReview());
+      const runner = new WorkflowRunner(repository.root, adapters);
+      const writeState = runner.store.writeState.bind(runner.store);
+      let cursorInjected = false;
+      runner.store.writeState = async (state) => {
+        if (
+          !cursorInjected &&
+          state.completionPublication?.stage === "capture" &&
+          state.completionPublication.refusal === null
+        ) {
+          cursorInjected = true;
+          throw new Error("EIO: injected capture cursor failure");
+        }
+        await writeState(state);
+      };
+      const appendEventOnce = runner.store.appendEventOnce.bind(runner.store);
+      let refusalEventInjected = false;
+      runner.store.appendEventOnce = async (runId, type, data) => {
+        if (
+          !refusalEventInjected &&
+          type === "completion.publication_refused"
+        ) {
+          refusalEventInjected = true;
+          if (timing === "after") await appendEventOnce(runId, type, data);
+          throw new Error(
+            `EIO: injected ${timing} publication-refusal event failure`
+          );
+        }
+        return await appendEventOnce(runId, type, data);
+      };
+
+      await runner.start({ slug: "example", request: "Implement it." });
+      const blocked = await runner.approvePlan("human");
+      assert.equal(cursorInjected, true);
+      assert.equal(refusalEventInjected, true);
+      assert.equal(blocked.status, "blocked");
+      const attempt = blocked.activeAttempt;
+      assert.ok(attempt?.kind === "implementation");
+      assert.equal(
+        (await runner.store.readRunAttempt(blocked.runId, attempt)).status,
+        "pending_application"
+      );
+      assert.equal(
+        await completionEventCount(runner, blocked.runId, "attempt.failed"),
+        0
+      );
+
+      const promptsBefore = adapters.phasePrompts.length;
+      const resumedRunner = new WorkflowRunner(repository.root, adapters);
+      const done = await resumedRunner.resume();
+      assert.equal(done.status, "done", done.blockReason ?? "");
+      assert.equal(adapters.phasePrompts.length, promptsBefore);
+      assert.equal(
+        done.metrics.completedAttemptIds.filter((id) => id === attempt.id)
+          .length,
+        1
+      );
+      assert.equal(
+        await completionEventCount(resumedRunner, done.runId, "attempt.failed"),
+        0
+      );
+      assert.equal(
+        await completionEventCount(
+          resumedRunner,
+          done.runId,
+          "completion.publication_refused"
+        ),
+        1
+      );
+      assert.equal(
+        await completionEventCount(
+          resumedRunner,
+          done.runId,
+          "completion.publication_applied"
+        ),
+        1
+      );
+    } finally {
+      await repository.dispose();
+    }
+  });
+
+for (const boundary of ["capture", "receipt"] as const)
+  test(`a delayed ${boundary} retry preserves the deterministic completion identity`, async () => {
+    const repository = await createTestRepository();
+    try {
+      const adapters = new FakeAdapters();
+      adapters.reviewResults.push(passingReview());
+      const runner = new WorkflowRunner(repository.root, adapters);
+      let firstDigest: string | null = null;
+      let firstTimestamp: string | null = null;
+      if (boundary === "capture") {
+        const writeCapture = runner.store.writeCompletionCapture.bind(
+          runner.store
+        );
+        runner.store.writeCompletionCapture = async (runId, capture) => {
+          if (firstDigest === null) {
+            firstDigest = capture.integrityDigest;
+            firstTimestamp = capture.capturedAt;
+            throw new Error("EIO: injected capture manifest failure");
+          }
+          await writeCapture(runId, capture);
+        };
+      } else {
+        const writePublication = runner.store.writeCompletionPublication.bind(
+          runner.store
+        );
+        runner.store.writeCompletionPublication = async (runId, receipt) => {
+          if (firstDigest === null) {
+            firstDigest = receipt.integrityDigest;
+            firstTimestamp = receipt.publishedAt;
+            throw new Error("EIO: injected receipt failure");
+          }
+          await writePublication(runId, receipt);
+        };
+      }
+
+      await runner.start({ slug: "example", request: "Implement it." });
+      const blocked = await runner.approvePlan("human");
+      assert.equal(blocked.status, "blocked");
+      assert.equal(
+        blocked.completionPublication?.refusal?.code,
+        "COMPLETION_PUBLICATION_IO"
+      );
+      const attempt = blocked.activeAttempt;
+      assert.ok(attempt?.kind === "implementation");
+      assert.ok(firstDigest);
+      assert.ok(firstTimestamp);
+
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      const promptsBefore = adapters.phasePrompts.length;
+      const resumedRunner = new WorkflowRunner(repository.root, adapters);
+      const done = await resumedRunner.resume();
+      assert.equal(done.status, "done", done.blockReason ?? "");
+      assert.equal(adapters.phasePrompts.length, promptsBefore);
+      if (boundary === "capture") {
+        const capture = await resumedRunner.store.readCompletionCaptureIfExists(
+          done.runId,
+          attempt
+        );
+        assert.ok(capture);
+        assert.equal(capture.integrityDigest, firstDigest);
+        assert.equal(capture.capturedAt, firstTimestamp);
+      } else {
+        const receipt =
+          await resumedRunner.store.readCompletionPublicationIfExists(
+            done.runId,
+            attempt
+          );
+        assert.ok(receipt);
+        assert.equal(receipt.integrityDigest, firstDigest);
+        assert.equal(receipt.publishedAt, firstTimestamp);
+      }
+    } finally {
+      await repository.dispose();
+    }
+  });
+
+for (const boundary of [
+  "attempt",
+  "state",
+  "publication-event",
+  "event-cursor"
+] as const)
+  test(`a restart after the durable completion ${boundary} reconciles state and events exactly once`, async () => {
+    const repository = await createTestRepository();
+    try {
+      const adapters = new FakeAdapters();
+      adapters.reviewResults.push(passingReview());
+      const runner = new WorkflowRunner(repository.root, adapters);
+      let interrupted = false;
+      if (boundary === "attempt") {
+        const writeAttempt = runner.store.writeRunAttempt.bind(runner.store);
+        runner.store.writeRunAttempt = async (runId, record) => {
+          await writeAttempt(runId, record);
+          if (
+            !interrupted &&
+            record.attempt.kind === "implementation" &&
+            record.status === "completed"
+          ) {
+            interrupted = true;
+            throw new TerminalRunStateError(
+              await runner.store.readState(runId)
+            );
+          }
+        };
+      } else if (boundary === "state" || boundary === "event-cursor") {
+        const writeState = runner.store.writeState.bind(runner.store);
+        runner.store.writeState = async (state) => {
+          await writeState(state);
+          if (
+            !interrupted &&
+            state.activeAttempt?.kind === "implementation" &&
+            state.completionPublication?.stage ===
+              (boundary === "state" ? "state" : "event")
+          ) {
+            interrupted = true;
+            throw new TerminalRunStateError(state);
+          }
+        };
+      } else {
+        const appendEventOnce = runner.store.appendEventOnce.bind(runner.store);
+        runner.store.appendEventOnce = async (runId, type, data) => {
+          const event = await appendEventOnce(runId, type, data);
+          if (!interrupted && type === "completion.publication_applied") {
+            interrupted = true;
+            throw new TerminalRunStateError(
+              await runner.store.readState(runId)
+            );
+          }
+          return event;
+        };
+      }
+
+      await runner.start({ slug: "example", request: "Implement it." });
+      await runner.approvePlan("human");
+      assert.equal(interrupted, true);
+      const interruptedState = await runner.store.requireActiveState();
+      assert.ok(interruptedState.activeAttempt?.kind === "implementation");
+      const attempt = interruptedState.activeAttempt;
+      assert.equal(
+        (await runner.store.readRunAttempt(interruptedState.runId, attempt))
+          .status,
+        "completed"
+      );
+      assert.ok(
+        await runner.store.readCompletionPublicationIfExists(
+          interruptedState.runId,
+          attempt
+        )
+      );
+
+      const promptsBefore = adapters.phasePrompts.length;
+      const resumedRunner = new WorkflowRunner(repository.root, adapters);
+      const done = await resumedRunner.resume();
+      assert.equal(
+        done.status,
+        "done",
+        `${boundary}: ${done.blockReason ?? ""}`
+      );
+      assert.equal(adapters.phasePrompts.length, promptsBefore);
+      assert.equal(
+        done.metrics.completedAttemptIds.filter((id) => id === attempt.id)
+          .length,
+        1
+      );
+      assert.equal(done.metrics.attempts.implementation, 1);
+      assert.equal(done.metrics.attempts.verification, 1);
+      assert.equal(
+        await completionEventCount(
+          resumedRunner,
+          done.runId,
+          "completion.publication_applied"
+        ),
+        1
+      );
+      const repeated = await resumedRunner.resume();
+      assert.equal(repeated.status, "done");
+      assert.equal(
+        await completionEventCount(
+          resumedRunner,
+          done.runId,
+          "completion.publication_applied"
+        ),
+        1
+      );
+    } finally {
+      await repository.dispose();
+    }
+  });
+
+test("a restart after the refreshed-fix event preserves both application events exactly once", async () => {
+  const repository = await createTestRepository();
+  try {
+    const adapters = new FakeAdapters();
+    adapters.reviewResults.push(
+      {
+        contractVersion: CONTRACT_VERSION,
+        verdict: "changes_requested",
+        summary: "One finding requires a fix.",
+        findings: [finding("R1-F1", "Fix the fixture.")],
+        reviewedFindingIds: [],
+        deferredCoverage: []
+      },
+      passingReview(["R1-F1"])
+    );
     adapters.fixResults.push(
       phaseResult("fix", {
         taskCompletion: completionLedger(["T001"]),
@@ -10023,88 +10657,695 @@ test("strict explanatory closure reuses its original physical check through inde
       })
     );
     const runner = new WorkflowRunner(repository.root, adapters);
-    const planned = await runner.start({
-      slug: "closure",
-      request: "Verify a bounded explanatory closure."
-    });
-    const selectedPlan = path.join(
-      repository.root,
-      requiredFixture(planned.artifactBinding?.binding.artifacts.plan)
-    );
-    const remainder = (await readFile(selectedPlan, "utf8")).trimEnd() + "\n\n";
-    const inventory = {
-      schema: "banzai-verification-obligations/v1",
-      schemaVersion: 1,
-      complete: true,
-      planRemainderSha256: createHash("sha256").update(remainder).digest("hex"),
-      checks: [{ id: "unit", evidence: "equivalent_evidence" }]
+    await runner.start({ slug: "example", request: "Implement it." });
+    const triage = await runner.approvePlan("human");
+    assert.equal(triage.status, "needs_triage");
+
+    const appendEventOnce = runner.store.appendEventOnce.bind(runner.store);
+    let interrupted = false;
+    runner.store.appendEventOnce = async (runId, type, data) => {
+      const event = await appendEventOnce(runId, type, data);
+      if (!interrupted && type === "plan_task_completion.refreshed") {
+        interrupted = true;
+        throw new TerminalRunStateError(await runner.store.readState(runId));
+      }
+      return event;
     };
-    await writeFile(
-      selectedPlan,
-      remainder +
-        "```banzai-verification-obligations/v1\n" +
-        JSON.stringify(inventory) +
-        "\n```\n"
-    );
-    const reviewed = await runner.approvePlan("human");
-    assert.equal(reviewed.status, "needs_triage", reviewed.blockReason ?? "");
-    const origin =
-      reviewed.verificationEvidence?.applicability?.dispositions[0]?.origin;
-    assert.ok(origin);
-    const done = await runner.triage({
+    await runner.triage({
       accepted: ["R1-F1"],
       rejected: [],
       deferred: [],
       note: null,
       decidedBy: "human"
     });
+    assert.equal(interrupted, true);
+    const interruptedState = await runner.store.requireActiveState();
+    assert.ok(interruptedState.activeAttempt?.kind === "fix");
+    const attempt = interruptedState.activeAttempt;
+    assert.equal(
+      (await runner.store.readRunAttempt(interruptedState.runId, attempt))
+        .status,
+      "completed"
+    );
+
+    const promptsBefore = adapters.phasePrompts.length;
+    const resumedRunner = new WorkflowRunner(repository.root, adapters);
+    const done = await resumedRunner.resume();
     assert.equal(done.status, "done", done.blockReason ?? "");
-    assert.equal(done.metrics.attempts.verification, 1);
-    const disposition =
-      done.verificationEvidence?.applicability?.dispositions[0];
-    assert.equal(disposition?.kind, "reused");
-    assert.deepEqual(disposition.origin, origin);
-    assert.equal(adapters.reviewPrompts.length, 2);
-    assert.match(adapters.reviewPrompts[1] ?? "", /R1-F1/);
-    assert.match(adapters.reviewPrompts[1] ?? "", /"kind": "reused"/);
-    const report = await collectEvaluationExportV2(repository.root, {
-      runIds: [done.runId],
-      from: null,
-      to: null,
-      format: "json"
-    });
-    assert.equal(report.runs[0]?.verificationEvidence.coverage, "exact");
-    const selectedRuns = [done.runId];
-    const containsRun = selectedRuns.includes.bind(selectedRuns);
-    selectedRuns.includes = (value, fromIndex) => {
-      // Insert a lexically earlier directory after the cohort inventory but
-      // during selection, without timing-dependent background processes.
-      mkdirSync(path.join(repository.root, ".banzai/runs/000-concurrent"), {
-        recursive: true
-      });
-      return containsRun(value, fromIndex);
-    };
-    const concurrent = await collectEvaluationExportV2(repository.root, {
-      runIds: selectedRuns,
-      from: null,
-      to: null,
-      format: "json"
-    });
-    assert.equal(concurrent.cohort.candidateRunCount, 1);
-    assert.equal(concurrent.runs[0]?.verificationEvidence.coverage, "exact");
-    assert.deepEqual(
-      report.runs[0].verificationEvidence.dispositions
-        .map((item) => item.kind)
-        .sort(),
-      ["executed", "reused"]
+    assert.equal(adapters.phasePrompts.length, promptsBefore);
+    assert.equal(
+      done.metrics.completedAttemptIds.filter((id) => id === attempt.id).length,
+      1
     );
     assert.equal(
-      await readFile(selectedPlan, "utf8"),
-      remainder +
-        "```banzai-verification-obligations/v1\n" +
-        JSON.stringify(inventory) +
-        "\n```\n"
+      await completionEventCount(
+        resumedRunner,
+        done.runId,
+        "completion.publication_applied"
+      ),
+      2,
+      "implementation and fix each publish exactly once"
     );
+    assert.equal(
+      await completionEventCount(
+        resumedRunner,
+        done.runId,
+        "plan_task_completion.refreshed"
+      ),
+      1
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("a candidate write failure leaves the proven attempt pending and resume publishes without another model call", async () => {
+  const repository = await createTestRepository();
+  try {
+    const adapters = new FakeAdapters();
+    adapters.reviewResults.push(passingReview());
+    const runner = new WorkflowRunner(repository.root, adapters);
+    const writeCandidate = runner.store.writeCompletionCandidate.bind(
+      runner.store
+    );
+    let injected = 0;
+    runner.store.writeCompletionCandidate = async (runId, candidate, bytes) => {
+      if (injected === 0) {
+        injected += 1;
+        throw new Error("ENOSPC: injected candidate write failure");
+      }
+      await writeCandidate(runId, candidate, bytes);
+    };
+    await runner.start({ slug: "example", request: "Implement it." });
+    const blocked = await runner.approvePlan("human");
+    assert.equal(blocked.status, "blocked");
+    assert.equal(blocked.blockedFrom, "implementing");
+    assert.match(blocked.blockReason ?? "", /^\[COMPLETION_PUBLICATION_IO\]/);
+    assert.match(blocked.blockReason ?? "", /stage candidate/);
+    assert.doesNotMatch(blocked.blockReason ?? "", /ENOSPC/);
+    const attempt = blocked.activeAttempt;
+    assert.ok(attempt?.kind === "implementation");
+    assert.equal(
+      (await runner.store.readRunAttempt(blocked.runId, attempt)).status,
+      "pending_application"
+    );
+    assert.equal(blocked.planTaskCompletion, null);
+    assert.equal(
+      blocked.completionPublication?.refusal?.code,
+      "COMPLETION_PUBLICATION_IO"
+    );
+    assert.equal(blocked.completionPublication.stage, "candidate");
+    const status = await runner.status();
+    assert.deepEqual(status.completionPublication, {
+      attemptId: attempt.id,
+      attemptKind: "implementation",
+      stage: "candidate",
+      refusal: "COMPLETION_PUBLICATION_IO",
+      pending: true,
+      action: "resume"
+    });
+    assert.equal(status.retry.eligible, false);
+    assert.equal(status.recovery.eligible, false);
+    assert.equal(status.nextAction, "banzai resume");
+    const control = projectAgentControlStatus(status).activeRun;
+    assert.ok(control);
+    assert.equal(control.nextAction, "resume");
+    assert.deepEqual(control.completionPublication, {
+      attemptId: attempt.id,
+      attemptKind: "implementation",
+      stage: "candidate",
+      refusalCode: "COMPLETION_PUBLICATION_IO",
+      publisherAttemptId: null
+    });
+    assert.equal(
+      await completionEventCount(
+        runner,
+        blocked.runId,
+        "completion.publication_refused"
+      ),
+      1
+    );
+
+    const promptsBefore = adapters.phasePrompts.length;
+    const done = await runner.resume();
+    assert.equal(done.status, "done", done.blockReason ?? "");
+    assert.equal(adapters.phasePrompts.length, promptsBefore);
+    assert.equal(done.metrics.attempts.implementation, 1);
+    assert.equal(
+      done.metrics.completedAttemptIds.filter((id) => id === attempt.id).length,
+      1
+    );
+    assert.equal(
+      await completionEventCount(
+        runner,
+        done.runId,
+        "completion.publication_applied"
+      ),
+      1
+    );
+    assert.equal(
+      await completionEventCount(
+        runner,
+        done.runId,
+        "completion.publication_refused"
+      ),
+      1
+    );
+    assert.equal(
+      (await runner.store.readRunAttempt(done.runId, attempt)).status,
+      "completed"
+    );
+    assert.equal(done.planTaskCompletion?.status, "valid");
+    assert.equal(done.completionPublication?.refusal, null);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("a receipt write failure after report replacement reconciles the proven bytes once and drift must be restored before resume", async () => {
+  const repository = await createTestRepository();
+  try {
+    const adapters = new FakeAdapters();
+    adapters.reviewResults.push(passingReview());
+    const runner = new WorkflowRunner(repository.root, adapters);
+    const writeReceipt = runner.store.writeCompletionPublication.bind(
+      runner.store
+    );
+    let injected = 0;
+    runner.store.writeCompletionPublication = async (runId, receipt) => {
+      if (injected === 0) {
+        injected += 1;
+        throw new Error("EIO: injected receipt write failure");
+      }
+      await writeReceipt(runId, receipt);
+    };
+    await runner.start({ slug: "example", request: "Implement it." });
+    const blocked = await runner.approvePlan("human");
+    assert.equal(blocked.status, "blocked");
+    assert.match(blocked.blockReason ?? "", /^\[COMPLETION_PUBLICATION_IO\]/);
+    assert.match(blocked.blockReason ?? "", /stage receipt/);
+    const attempt = blocked.activeAttempt;
+    assert.ok(attempt?.kind === "implementation");
+    const reportPath = await boundFixturePath(
+      repository.root,
+      "documentation/features/example/implementation-report.md"
+    );
+    const published = await readFile(reportPath);
+    const candidate = await runner.store.readCompletionCandidateIfExists(
+      blocked.runId,
+      attempt
+    );
+    assert.ok(candidate);
+    assert.ok(
+      published.equals(candidate.bytes),
+      "the destination already holds the exact candidate bytes"
+    );
+    assert.equal(
+      (await runner.status()).completionPublication?.action,
+      "resume"
+    );
+
+    // Drift: a later edit of the destination is never adopted as the output;
+    // the deterministic resume detects it and switches to the drift route.
+    await writeFile(
+      reportPath,
+      Buffer.concat([published, Buffer.from("\nLater edit.\n")])
+    );
+    const drifted = await runner.resume();
+    assert.equal(drifted.status, "blocked");
+    assert.match(
+      drifted.blockReason ?? "",
+      /^\[COMPLETION_PUBLICATION_DRIFT\]/
+    );
+    assert.equal(
+      (await runner.store.readRunAttempt(drifted.runId, attempt)).status,
+      "pending_application"
+    );
+    const driftedStatus = await runner.status();
+    assert.equal(
+      driftedStatus.completionPublication?.refusal,
+      "COMPLETION_PUBLICATION_DRIFT"
+    );
+    assert.equal(driftedStatus.completionPublication.action, "cancel");
+    assert.equal(driftedStatus.nextAction, "banzai cancel");
+    assert.equal(
+      projectAgentControlStatus(driftedStatus).activeRun?.nextAction,
+      "cancel"
+    );
+
+    // Restoring the exact proven output re-enables the deterministic resume.
+    await writeFile(reportPath, candidate.bytes);
+    assert.equal(
+      (await runner.status()).completionPublication?.action,
+      "resume"
+    );
+    const promptsBefore = adapters.phasePrompts.length;
+    const done = await runner.resume();
+    assert.equal(done.status, "done", done.blockReason ?? "");
+    assert.equal(adapters.phasePrompts.length, promptsBefore);
+    assert.ok((await readFile(reportPath)).equals(candidate.bytes));
+    assert.equal(
+      await completionEventCount(
+        runner,
+        done.runId,
+        "completion.publication_applied"
+      ),
+      1
+    );
+    assert.equal(
+      done.metrics.completedAttemptIds.filter((id) => id === attempt.id).length,
+      1
+    );
+    const receipt = await runner.store.readCompletionPublicationIfExists(
+      done.runId,
+      attempt
+    );
+    assert.ok(receipt);
+    assert.equal(receipt.candidateDigest, candidate.candidate.integrityDigest);
+    assert.equal(
+      receipt.implementationReport.sha256,
+      candidate.candidate.outputSha256
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("a receipt whose retained candidate is missing is a publication integrity refusal whose only exit is cancel", async () => {
+  const repository = await createTestRepository();
+  try {
+    const adapters = new FakeAdapters();
+    adapters.reviewResults.push(passingReview());
+    const runner = new WorkflowRunner(repository.root, adapters);
+    const writeAttempt = runner.store.writeRunAttempt.bind(runner.store);
+    let injected = 0;
+    runner.store.writeRunAttempt = async (runId, record) => {
+      if (
+        injected === 0 &&
+        record.attempt.kind === "implementation" &&
+        record.status === "completed"
+      ) {
+        injected += 1;
+        throw new Error("EIO: injected attempt write failure");
+      }
+      await writeAttempt(runId, record);
+    };
+    await runner.start({ slug: "example", request: "Implement it." });
+    const blocked = await runner.approvePlan("human");
+    assert.equal(blocked.status, "blocked");
+    assert.match(blocked.blockReason ?? "", /^\[COMPLETION_PUBLICATION_IO\]/);
+    assert.match(blocked.blockReason ?? "", /stage attempt/);
+    const attempt = blocked.activeAttempt;
+    assert.ok(attempt?.kind === "implementation");
+    assert.ok(
+      await runner.store.readCompletionPublicationIfExists(
+        blocked.runId,
+        attempt
+      )
+    );
+    await rm(
+      runner.store.completionEvidencePath(
+        blocked.runId,
+        attempt,
+        "completion-candidate.json"
+      )
+    );
+    const promptsBefore = adapters.phasePrompts.length;
+    const corrupt = await runner.resume();
+    assert.equal(corrupt.status, "blocked");
+    assert.match(
+      corrupt.blockReason ?? "",
+      /^\[COMPLETION_PUBLICATION_INTEGRITY\]/
+    );
+    assert.equal(adapters.phasePrompts.length, promptsBefore);
+    assert.equal(
+      (await runner.store.readRunAttempt(corrupt.runId, attempt)).status,
+      "pending_application"
+    );
+    assert.equal(corrupt.planTaskCompletion, null);
+    const status = await runner.status();
+    assert.equal(
+      status.completionPublication?.refusal,
+      "COMPLETION_PUBLICATION_INTEGRITY"
+    );
+    assert.equal(status.completionPublication.action, "cancel");
+    assert.equal(status.nextAction, "banzai cancel");
+    assert.equal(status.retry.eligible, false);
+    assert.equal(status.recovery.eligible, false);
+    assert.equal(
+      projectAgentControlStatus(status).activeRun?.nextAction,
+      "cancel"
+    );
+    assert.equal(
+      await completionEventCount(
+        runner,
+        corrupt.runId,
+        "completion.publication_applied"
+      ),
+      0
+    );
+    const cancelled = await runner.cancel();
+    assert.equal(cancelled.outcome, "cancelled");
+    assert.equal(
+      (await runner.store.readState(corrupt.runId)).status,
+      "cancelled"
+    );
+    assert.equal(
+      (await runner.store.readRunAttempt(corrupt.runId, attempt)).status,
+      "pending_application",
+      "cancellation never promotes or rewrites the pending proof"
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+for (const tamper of ["receipt", "report"] as const)
+  test(`a published completion ${tamper} edited before the review pass is rejected read-only with a repair route`, async () => {
+    const repository = await createTestRepository();
+    try {
+      const adapters = new FakeAdapters();
+      adapters.reviewResults.push(passingReview());
+      const runner = new WorkflowRunner(repository.root, adapters);
+      // Tamper between publication and the verification boundary, after the
+      // runner persisted its applied completion.
+      const writeState = runner.store.writeState.bind(runner.store);
+      let tampered = false;
+      runner.store.writeState = async (state) => {
+        await writeState(state);
+        if (tampered || state.status !== "verifying") return;
+        tampered = true;
+        const completion = state.planTaskCompletion;
+        assert.ok(
+          completion?.status === "valid" &&
+            completion.schemaVersion === 2 &&
+            completion.publication
+        );
+        if (tamper === "receipt") {
+          const receiptPath = path.join(
+            runner.store.runDirectory(state.runId),
+            completion.publication.path
+          );
+          const receipt = JSON.parse(await readFile(receiptPath, "utf8")) as {
+            implementationReport: { sha256: string };
+          };
+          receipt.implementationReport.sha256 = "0".repeat(64);
+          await writeFile(receiptPath, JSON.stringify(receipt), "utf8");
+        } else {
+          const reportPath = path.join(
+            repository.root,
+            completion.implementationReport.path
+          );
+          await writeFile(
+            reportPath,
+            `${await readFile(reportPath, "utf8")}\nEdited after publication.\n`,
+            "utf8"
+          );
+        }
+      };
+      await runner.start({ slug: "example", request: "Implement it." });
+      const blocked = await runner.approvePlan("human");
+      assert.equal(tampered, true);
+      assert.equal(blocked.status, "blocked");
+      assert.equal(blocked.blockedFrom, "verifying");
+      assert.equal(adapters.reviewPrompts.length, 0);
+      assert.match(blocked.blockReason ?? "", /PLAN_TASK_COMPLETION_INVALID/);
+      assert.equal(blocked.planTaskCompletion?.status, "invalid");
+      assert.equal(blocked.planTaskCompletion.violation, "summary_mismatch");
+      assert.equal(
+        await completionEventCount(
+          runner,
+          blocked.runId,
+          "completion.publication_applied"
+        ),
+        1
+      );
+      const status = await runner.status();
+      assert.equal(status.retry.eligible, true);
+      assert.match(
+        status.retry.reason,
+        /repaired with a new implementation attempt/
+      );
+    } finally {
+      await repository.dispose();
+    }
+  });
+
+test("a blocked implementation whose gap targets the runner-owned section keeps its stop with an invalid-gap diagnostic", async () => {
+  const repository = await createTestRepository();
+  try {
+    const adapters = new FakeAdapters();
+    adapters.implementationResults.push(
+      phaseResult("implementation", {
+        outcome: "blocked",
+        gate: null,
+        summary: "Blocked on an operator prerequisite.",
+        questions: ["Provision the fixture credential."],
+        taskCompletion: {
+          schemaVersion: PLAN_TASK_COMPLETION_SCHEMA_VERSION,
+          tasks: [
+            {
+              taskId: "T001",
+              status: "blocked",
+              evidence: [],
+              gap: {
+                reportPath:
+                  "documentation/features/example/implementation-report.md",
+                section: "Plan Task Completion",
+                detail: "Blocked until the credential exists."
+              }
+            }
+          ]
+        }
+      })
+    );
+    const runner = new WorkflowRunner(repository.root, adapters);
+    await runner.start({ slug: "example", request: "Implement it." });
+    const blocked = await runner.approvePlan("human");
+    assert.equal(blocked.status, "blocked");
+    assert.equal(blocked.blockedFrom, "implementing");
+    assert.equal(blocked.planTaskCompletion, null);
+    assert.equal(blocked.metrics.attempts.verification, 0);
+    assert.equal(adapters.reviewPrompts.length, 0);
+    const record = (await runner.store.readRunAttempts(blocked.runId)).find(
+      (item) => item.attempt.kind === "implementation"
+    );
+    assert.ok(record);
+    assert.equal(record.status, "completed");
+    assert.equal(
+      record.completionDiagnostic?.violation,
+      "invalid_gap_reference"
+    );
+    assert.equal(record.completionDiagnostic.taskId, "T001");
+    assert.equal(
+      await runner.store.readCompletionPublicationIfExists(
+        blocked.runId,
+        record.attempt
+      ),
+      null
+    );
+    assert.equal(
+      await runner.store.readCompletionCandidateIfExists(
+        blocked.runId,
+        record.attempt
+      ),
+      null
+    );
+    const capture = await runner.store.readCompletionCaptureIfExists(
+      blocked.runId,
+      record.attempt
+    );
+    assert.equal(capture?.outcome, "stop");
+    assert.equal(
+      await completionEventCount(
+        runner,
+        blocked.runId,
+        "completion.publication_applied"
+      ),
+      0
+    );
+    assert.ok(
+      (
+        await readFile(
+          await boundFixturePath(
+            repository.root,
+            "documentation/features/example/implementation-report.md"
+          ),
+          "utf8"
+        )
+      ).includes("banzai-plan-task-completion/v1"),
+      "a stop never rewrites the model's report"
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("a completed claim with an incomplete task is rejected before any publication and repaired by one linked successor", async () => {
+  const repository = await createTestRepository();
+  try {
+    const adapters = new FakeAdapters();
+    adapters.implementationResults.push(
+      phaseResult("implementation", {
+        taskCompletion: {
+          schemaVersion: PLAN_TASK_COMPLETION_SCHEMA_VERSION,
+          tasks: [
+            {
+              taskId: "T001",
+              status: "incomplete",
+              evidence: [],
+              gap: {
+                reportPath:
+                  "documentation/features/example/implementation-report.md",
+                section: "Plan Task Completion",
+                detail: "Still open."
+              }
+            }
+          ]
+        }
+      }),
+      phaseResult("implementation")
+    );
+    adapters.reviewResults.push(passingReview());
+    const runner = new WorkflowRunner(repository.root, adapters);
+    await runner.start({ slug: "example", request: "Implement it." });
+    const blocked = await runner.approvePlan("human");
+    assert.equal(blocked.status, "blocked");
+    assert.equal(blocked.blockedFrom, "implementing");
+    assert.match(
+      blocked.blockReason ?? "",
+      /^\[PLAN_TASK_COMPLETION_INVALID\]/
+    );
+    const failed = blocked.activeAttempt;
+    assert.ok(failed?.kind === "implementation");
+    const record = await runner.store.readRunAttempt(blocked.runId, failed);
+    assert.equal(record.status, "failed");
+    assert.equal(record.failureCode, "PLAN_TASK_COMPLETION_INVALID");
+    assert.equal(blocked.planTaskCompletion?.status, "invalid");
+    assert.equal(
+      await runner.store.readCompletionCandidateIfExists(blocked.runId, failed),
+      null
+    );
+    assert.equal(
+      await runner.store.readCompletionPublicationIfExists(
+        blocked.runId,
+        failed
+      ),
+      null
+    );
+    assert.equal(
+      await completionEventCount(
+        runner,
+        blocked.runId,
+        "completion.input_rejected"
+      ),
+      1
+    );
+    const status = await runner.status();
+    assert.equal(status.nextAction, "banzai retry");
+    const done = await runner.retry();
+    assert.equal(done.status, "done", done.blockReason ?? "");
+    const completion = done.planTaskCompletion;
+    assert.ok(completion?.status === "valid");
+    assert.notEqual(completion.sourceAttemptId, failed.id);
+    assert.match(
+      completion.sourceAttemptId,
+      /^implementation-repair-[0-9a-f]{12}$/
+    );
+    const successor = await runner.store.readRunAttempt(done.runId, {
+      id: completion.sourceAttemptId,
+      kind: "implementation",
+      mutable: true
+    });
+    assert.equal(successor.retryOf, failed.id);
+    assert.equal(
+      (await runner.store.readRunAttempt(done.runId, failed)).status,
+      "failed",
+      "the rejected source is retained unchanged"
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("archive closure carries the runner-owned completion proof and fails when the receipt is missing", async () => {
+  const repository = await createTestRepository({ artifactLayout: "private" });
+  try {
+    const root = await realpath(repository.root);
+    const adapters = new FakeAdapters();
+    adapters.reviewResults.push(passingReview());
+    const runner = new WorkflowRunner(repository.root, adapters);
+    await runner.start({ slug: "example", request: "Implement it." });
+    const done = await runner.approvePlan("human");
+    assert.equal(done.status, "done", done.blockReason ?? "");
+    assert.ok(done.artifactBinding);
+    const workPath = `.banzai/work/${done.artifactBinding.binding.workId}`;
+    const completion = done.planTaskCompletion;
+    assert.ok(completion?.status === "valid" && completion.publication);
+    const invoke = async (
+      operation: string,
+      fields: Record<string, unknown>
+    ) => {
+      const requestFile = path.join(root, "archive-request.json");
+      await writeFile(
+        requestFile,
+        JSON.stringify({
+          schema: "banzai-artifact-request/v1",
+          schemaVersion: 1,
+          repoRoot: root,
+          ...fields
+        })
+      );
+      const child = spawnSync(
+        process.execPath,
+        [artifactsCommandPath, operation, "--json", requestFile],
+        { encoding: "utf8" }
+      );
+      return JSON.parse(child.stdout) as {
+        ok: boolean;
+        result?: unknown;
+        error?: { code: string; message: string };
+      };
+    };
+    const archive = async (destination: string) => {
+      const inventoried = await invoke("inventory", {
+        workPaths: [workPath],
+        runIds: [done.runId]
+      });
+      if (!inventoried.ok) return inventoried;
+      const inventoryFile = path.join(root, "reviewed-inventory.json");
+      await writeFile(
+        inventoryFile,
+        JSON.stringify((inventoried.result as { inventory: unknown }).inventory)
+      );
+      return await invoke("export", { inventoryFile, destination });
+    };
+    const first = path.join(root, "archive-one");
+    const exported = await archive(first);
+    assert.equal(exported.ok, true, JSON.stringify(exported.error));
+    const verified = await invoke("verify", { bundlePath: first });
+    assert.equal(verified.ok, true, JSON.stringify(verified.error));
+    const manifest = JSON.parse(
+      await readFile(path.join(first, "manifest.json"), "utf8")
+    ) as { entries: { path: string }[] };
+    const receiptPath = `.banzai/runs/${done.runId}/${completion.publication.path}`;
+    assert.ok(manifest.entries.some((entry) => entry.path === receiptPath));
+    for (const leaf of [
+      "completion-input.json",
+      "completion-candidate.json",
+      "completion-candidate.md",
+      "implementation-input.md"
+    ])
+      assert.ok(
+        manifest.entries.some((entry) => entry.path.endsWith(`.${leaf}`)),
+        leaf
+      );
+
+    // Removing the receipt breaks completion closure even for a partial archive.
+    await rm(path.join(root, receiptPath));
+    const broken = await archive(path.join(root, "archive-two"));
+    assert.equal(broken.ok, false);
+    assert.equal(broken.error?.code, "ARTIFACT_EVIDENCE_INCOMPLETE");
   } finally {
     await repository.dispose();
   }

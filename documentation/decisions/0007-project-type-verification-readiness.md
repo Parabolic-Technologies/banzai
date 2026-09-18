@@ -7,6 +7,11 @@
 - Owner: Banzai maintainers
 - Decision makers: User, explicitly accepted in chat on 2026-08-04
 
+- Partially superseded by [ADR-0049](./0049-task-scoped-verification.md), accepted
+  2026-09-17: new-task readiness no longer requires project-type profile coverage.
+  Read-only diagnostics, truthful assurance and legacy applicability remain.
+  Implementation of the transition is Planned.
+
 ## Related Artifacts
 
 - Feature description:
@@ -204,6 +209,11 @@ Implementation and review must confirm:
 9. no automatic migration, dependency, or plugin-version change occurs.
 
 ## Lifecycle Links
+
+- Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted
+  2026-09-14: explicit bootstrap readiness and new-run substantive-coverage
+  preflight, with taxonomy and hygiene meaning preserved. Implementation of
+  this amendment is Planned.
 
 - Supersedes: None
 - Superseded by: None

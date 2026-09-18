@@ -4,10 +4,20 @@ import path from "node:path";
 import test from "node:test";
 import { digestArtifactBundle } from "../src/git.js";
 import {
+  COMPLETION_REGION_END,
+  COMPLETION_REGION_START,
+  composeCompletionCandidate,
+  decodeCompletionCell,
   parseApprovedPlanTaskIds,
+  parseCompletionRegion,
+  parsePublishedCompletionRegion,
+  validatePlanRunnerControlTasks,
   parsePlanTaskCompletionProjection,
   PlanTaskCompletionError,
+  renderCompletionRegion,
   renderPlanTaskCompletionProjection,
+  scanCompletionRegion,
+  validateCompletionClaims,
   validatePlanTaskCompletionLedgerShape,
   validatePlanTaskCompletion
 } from "../src/plan-task-completion.js";
@@ -79,6 +89,7 @@ function firstEvidence(record: PlanTaskCompletionRecord) {
 function result(taskCompletion: PlanTaskCompletionLedger | null): PhaseResult {
   return {
     schemaVersion: PHASE_RESULT_SCHEMA_VERSION,
+    verificationCandidates: null,
     contractVersion: CONTRACT_VERSION,
     phase: "implementation",
     outcome: "completed",
@@ -607,4 +618,663 @@ test("approval and both required reports are part of completion validation", asy
   } finally {
     await current.dispose();
   }
+});
+
+test("plan control guard normalizes task paths, permits exact report roles and keeps prerequisites explanatory", () => {
+  const root = "/project";
+  const report =
+    ".banzai/work/11111111-1111-4111-8111-111111111111/implementation-report.md";
+  const plan = (body: string) =>
+    `# Plan\n\n## Human prerequisites\n\nConfigure .banzai/config.json with banzai verify add node.\n\n## Implementation Tasks\n\n- [ ] **T001 - Work**\n\n${body}\n`;
+  validatePlanRunnerControlTasks(plan(`Write ${report}.`), root, [report]);
+  for (const target of [
+    ".banzai/config.json",
+    "**.banzai/config.json**",
+    "./.banzai/config.json",
+    "src/../.banzai/config.json",
+    "/project/.banzai/config.json",
+    String.raw` .banzai\config.json`,
+    ".banzai/work/other/test-report.md",
+    ".banzai/runs/current/state.json"
+  ])
+    assert.throws(
+      () => {
+        validatePlanRunnerControlTasks(plan(`Update \`${target}\`.`), root, [
+          report
+        ]);
+      },
+      {
+        code: "PLAN_RUNNER_CONTROL_TASK",
+        message: /T001.*runner control path/u
+      }
+    );
+});
+
+test("guided plan guard resolves root aliases and denies ambiguous control-directory case", () => {
+  const plan = (target: string) =>
+    `## Implementation Tasks\n\n- [ ] **T001 - Change source**\n  Write \`${target}\`.\n`;
+  const report = ".banzai/work/work-id/implementation-report.md";
+  for (const target of [
+    ".banzai/config.json",
+    ".Banzai/config.json",
+    "../example/.banzai/config.json",
+    "/tmp/example/../example/.BANZAI/config.json",
+    "..\\example\\.banzai\\config.json",
+    ".Banzai/work/work-id/implementation-report.md"
+  ])
+    assert.throws(
+      () => {
+        validatePlanRunnerControlTasks(plan(target), "/tmp/example", [report]);
+      },
+      { code: "PLAN_RUNNER_CONTROL_TASK" }
+    );
+  for (const target of [report, `../example/${report}`, "src/app.ts"])
+    assert.doesNotThrow(() => {
+      validatePlanRunnerControlTasks(plan(target), "/tmp/example", [report]);
+    });
+});
+
+const controlPlan = (body: string) =>
+  `## Implementation Tasks\n\n- [ ] **T002 - Synchronize manifest facts**\n\n${body}\n`;
+
+test("plan guard accepts wrapped manifest constraints and read-only fact checking", () => {
+  const body = `  - Update the affected current-state and verification facts in
+    \`PROJECT_MANIFEST.md\` to describe the generated root manifest.
+  - Do not add scripts, dependencies, verification commands, application
+    architecture, or any \`.banzai/\` change.
+  - Assurance and completion evidence: review the updated statements against
+    \`package.json\` and \`.banzai/config.json\`; the runner executes configured
+    \`git-diff-check\` as repository hygiene.`;
+  assert.doesNotThrow(() => {
+    validatePlanRunnerControlTasks(controlPlan(body), "/project", []);
+  });
+});
+
+test("plan guard distinguishes path roles without interpreting surrounding prose language", () => {
+  for (const body of [
+    "Read-only references: `.banzai/config.json`",
+    "Unchanged paths:\n  - `.banzai/`",
+    "Files to change: `PROJECT_MANIFEST.md`\nRead-only references:\n  - `.banzai/config.json`\nNotes: Звірити поточні факти.",
+    "**Read-only references:**\n  - [configuration](./.banzai/config.json)"
+  ])
+    assert.doesNotThrow(() => {
+      validatePlanRunnerControlTasks(controlPlan(body), "/project", []);
+    }, body);
+  for (const body of [
+    "Files to change: `.banzai/config.json`\nNotes: Актуалізувати налаштування.",
+    "**Affected files:**\n  - `.banzai/config.json`",
+    "Files:\n  - `.banzai/runs/current/state.json`"
+  ])
+    assert.throws(
+      () => {
+        validatePlanRunnerControlTasks(controlPlan(body), "/project", []);
+      },
+      { code: "PLAN_RUNNER_CONTROL_TASK", message: /T002.*write target/u },
+      body
+    );
+});
+
+test("plan guard keeps prohibitions and reads local to each instruction", () => {
+  for (const body of [
+    "Never modify `.banzai/config.json`.",
+    "  Do not change `.banzai/`.",
+    "Constraints: Do not modify `.banzai/config.json`.",
+    "Preserve `.banzai/config.json` unchanged.",
+    "Do not change `.banzai/`; update `PROJECT_MANIFEST.md`.",
+    "Read `.banzai/config.json` and update `PROJECT_MANIFEST.md`.",
+    "Inspect [configuration](.banzai/config.json) to confirm the facts.",
+    "`cat .banzai/config.json`",
+    "`cat .banzai/config.json > config-snapshot.json`",
+    "Compare `PROJECT_MANIFEST.md` with `.banzai/config.json`."
+  ])
+    assert.doesNotThrow(() => {
+      validatePlanRunnerControlTasks(controlPlan(body), "/project", []);
+    }, body);
+  for (const body of [
+    "Do not edit `package.json`; update `.banzai/config.json`.",
+    "Do not edit `package.json`;write `.banzai/config.json`.",
+    "Do not modify `package.json`, but ensure `.banzai/config.json` is updated.",
+    "Do not modify `package.json` && write `.banzai/config.json`.",
+    "Read `.banzai/config.json&&rm .banzai/config.json`.",
+    "Read `.banzai/config.json` and then update `.banzai/config.json`.",
+    "Never modify `.banzai/config.json`, but delete `.banzai/runs/current/state.json`.",
+    "Do not edit `.banzai/config.json`.\nWrite `.banzai/config.json`.",
+    "Read-only references: `.banzai/config.json`; overwrite `.banzai/config.json`.",
+    "Update `.banzai/config.json` and do not edit `package.json`.",
+    "Read `.banzai/config.json` and then overwrite it.",
+    "Read `.banzai/config.json` and make changes to it.",
+    "Read `.banzai/config.json`, which should be modified.",
+    "Do not edit `package.json` and make changes to `.banzai/config.json`.",
+    "- Read `.banzai/config.json`.\n- Then overwrite it.",
+    "**Unchanged paths:** `.banzai/config.json`\n**Files to change:** `.banzai/config.json`",
+    "`printf '{}' > .banzai/config.json`",
+    "`cp template.json .banzai/config.json`",
+    "`rm .banzai/config.json`",
+    "`rm .banzai/config.json > output.log`"
+  ])
+    assert.throws(
+      () => {
+        validatePlanRunnerControlTasks(controlPlan(body), "/project", []);
+      },
+      { code: "PLAN_RUNNER_CONTROL_TASK" },
+      body
+    );
+});
+
+test("plan guard does not carry access declarations or implicit targets into another task", () => {
+  const prefix = controlPlan(
+    "Read-only references:\n  - `.banzai/config.json`"
+  );
+  assert.throws(
+    () => {
+      validatePlanRunnerControlTasks(
+        `${prefix}\n- [ ] **T003 - Update configuration**\n\nFiles: .banzai/config.json\n`,
+        "/project",
+        []
+      );
+    },
+    { code: "PLAN_RUNNER_CONTROL_TASK", message: /T003.*write target/u }
+  );
+  assert.doesNotThrow(() => {
+    validatePlanRunnerControlTasks(
+      `${prefix}\n- [ ] **T003 - Change the manifest**\n\nInspect PROJECT_MANIFEST.md and then update it.\n`,
+      "/project",
+      []
+    );
+  });
+});
+
+test("plan guard diagnoses unresolved access without claiming a configuration write", () => {
+  assert.throws(
+    () => {
+      validatePlanRunnerControlTasks(
+        controlPlan(
+          "Update `.banzai/config.json` and invalidate cached settings."
+        ),
+        "/project",
+        []
+      );
+    },
+    { code: "PLAN_RUNNER_CONTROL_TASK", message: /T002.*write target/u }
+  );
+  assert.throws(
+    () => {
+      validatePlanRunnerControlTasks(
+        controlPlan("Consider `.banzai/config.json`."),
+        "/project",
+        []
+      );
+    },
+    {
+      code: "PLAN_RUNNER_CONTROL_TASK",
+      message: /T002.*ambiguous.*Read-only references/u
+    }
+  );
+});
+
+test("plan guard applies normalized path identity equally to reads, writes and exact reports", () => {
+  const report = ".banzai/work/current/test-report.md";
+  for (const target of [
+    "./.banzai/config.json:12:3",
+    "src/../.BANZAI/config.json",
+    "/project/./.banzai/config.json",
+    String.raw`.banzai\config.json`,
+    "../project/.banzai/config.json"
+  ]) {
+    assert.doesNotThrow(() => {
+      validatePlanRunnerControlTasks(
+        controlPlan(`Read \`${target}\`.`),
+        "/project",
+        [report]
+      );
+    }, target);
+    assert.throws(
+      () => {
+        validatePlanRunnerControlTasks(
+          controlPlan(`Write \`${target}\`.`),
+          "/project",
+          [report]
+        );
+      },
+      { code: "PLAN_RUNNER_CONTROL_TASK" },
+      target
+    );
+  }
+  for (const target of [report, `./${report}`, `/project/${report}`])
+    assert.doesNotThrow(() => {
+      validatePlanRunnerControlTasks(
+        controlPlan(`Write \`${target}\`.`),
+        "/project",
+        [report]
+      );
+    });
+  for (const target of [
+    `${report}.bak`,
+    `${report}/../state.json`,
+    ".banzai/work/other/test-report.md"
+  ])
+    assert.throws(
+      () => {
+        validatePlanRunnerControlTasks(
+          controlPlan(`Write \`${target}\`.`),
+          "/project",
+          [report]
+        );
+      },
+      { code: "PLAN_RUNNER_CONTROL_TASK" }
+    );
+});
+
+// ---------------------------------------------------------------------------
+// Runner-owned completion region v2 (ADR-0047 / ADR-0048)
+// ---------------------------------------------------------------------------
+
+const ASCII_PUNCTUATION = [
+  ...Array.from({ length: 0x7f - 0x21 }, (_, index) =>
+    String.fromCodePoint(0x21 + index)
+  )
+]
+  .filter((character) => !/[0-9A-Za-z]/u.test(character))
+  .join("");
+
+function specialLedger(): PlanTaskCompletionLedger {
+  const base = ledger();
+  firstEvidence(task(base, 0)).detail =
+    `All punctuation ${ASCII_PUNCTUATION} end`;
+  firstEvidence(task(base, 1)).detail =
+    "Unicode Кирилиця 日本語 ✓ 🚀 and a literal entity &#38; &amp; &#124; stays literal";
+  firstEvidence(task(base, 2)).detail =
+    "[link](https://example.com/target) *emphasis* _under_ `code` <b>html</b> ![image](https://example.com/i.png)";
+  firstEvidence(task(base, 3)).detail =
+    "Plain https://example.com/x then www.example.com then user@example.com";
+  firstEvidence(task(base, 4)).path = "src/t005 (copy).txt";
+  const blocked = task(base, 5);
+  blocked.status = "blocked";
+  blocked.gap = {
+    reportPath: testReport,
+    section: "Remaining | pipes & <angles>",
+    detail: "Table breakout attempt | --- | still inert \\ backslash"
+  };
+  return base;
+}
+
+function rawPayloadCells(region: string): string[][] {
+  return region
+    .split("\n")
+    .slice(5, -1)
+    .map((row) => row.slice(2, -2).split(" | "));
+}
+
+test("v2 region encoding is deterministic, decodes once and leaves no raw model punctuation", () => {
+  const candidate = specialLedger();
+  const first = renderCompletionRegion(candidate);
+  const second = renderCompletionRegion(structuredClone(candidate));
+  assert.equal(first, second, "equal ledgers must render identical bytes");
+  assert.deepEqual(parseCompletionRegion(first), candidate);
+  const rows = rawPayloadCells(first);
+  assert.equal(rows.length, candidate.tasks.length);
+  for (const [index, cells] of rows.entries()) {
+    const record = task(candidate, index);
+    assert.equal(cells.length, 4);
+    const expected = [
+      record.taskId,
+      record.status,
+      record.evidence,
+      record.gap
+    ];
+    for (const [cellIndex, cell] of cells.entries()) {
+      // Byte-level property (ADR-0048 section 3.1): every serialized ASCII
+      // punctuation code point is exactly one generated decimal reference.
+      const residual = cell.replaceAll(/&#[0-9]{2,3};/gu, "");
+      assert.doesNotMatch(
+        residual,
+        /[!-/:-@[-`{-~]/u,
+        `row ${index} cell ${cellIndex} leaks raw punctuation`
+      );
+      for (const reference of cell.matchAll(/&#([0-9]+);/gu)) {
+        const code = Number(reference[1]);
+        assert.ok(
+          (code >= 0x21 && code <= 0x2f) ||
+            (code >= 0x3a && code <= 0x40) ||
+            (code >= 0x5b && code <= 0x60) ||
+            (code >= 0x7b && code <= 0x7e),
+          `unexpected reference ${reference[0]}`
+        );
+        assert.equal(reference[0], `&#${code};`, "no leading zeroes");
+      }
+      const decoded = decodeCompletionCell(cell);
+      assert.equal(decoded, JSON.stringify(expected[cellIndex]));
+      // A single decode returns the admitted value; a literal entity string
+      // supplied by the model survives as itself instead of being expanded.
+      assert.deepEqual(JSON.parse(decoded), expected[cellIndex]);
+    }
+  }
+  // Negative control in the exact generated cell and row context: an unsafe
+  // encoder that leaves markup delimiters raw is detected by the property.
+  const unsafeEncoder = (value: unknown) =>
+    JSON.stringify(value).replaceAll(/[!-/:-@[-`{-~]/gu, (character) =>
+      "|*[]()<>`_!".includes(character)
+        ? character
+        : `&#${character.codePointAt(0)};`
+    );
+  const unsafeRecord = task(candidate, 2);
+  const unsafeRow = `| ${unsafeEncoder(unsafeRecord.taskId)} | ${unsafeEncoder(unsafeRecord.status)} | ${unsafeEncoder(unsafeRecord.evidence)} | ${unsafeEncoder(unsafeRecord.gap)} |`;
+  const unsafeRegion = first.replace(first.split("\n")[5 + 2] ?? "", unsafeRow);
+  const leaking = rawPayloadCells(unsafeRegion)[2] ?? [];
+  assert.ok(
+    leaking.some((cell) =>
+      /[!-/:-@[-`{-~]/u.test(cell.replaceAll(/&#[0-9]{2,3};/gu, ""))
+    ),
+    "the property must detect an unsafe encoder"
+  );
+  assert.throws(
+    () => parseCompletionRegion(unsafeRegion),
+    (error: unknown) =>
+      error instanceof PlanTaskCompletionError &&
+      error.violation === "report_projection_invalid"
+  );
+});
+
+test("candidate composition appends, replaces legacy or v2 regions and preserves every other byte", () => {
+  const candidate = ledger();
+  const region = renderCompletionRegion(candidate);
+  for (const [input, expected] of [
+    ["", `${region}\n`],
+    ["# Report", `# Report\n\n${region}\n`],
+    ["# Report\n", `# Report\n\n${region}\n`],
+    ["# Report\n\n", `# Report\n\n${region}\n`],
+    ["# Report\r\nIntro\r\n", `# Report\r\nIntro\r\n\n${region}\n`]
+  ] as const) {
+    const composed = composeCompletionCandidate(Buffer.from(input), candidate);
+    assert.equal(
+      composed.bytes.toString("utf8"),
+      expected,
+      JSON.stringify(input)
+    );
+    assert.equal(composed.region.action, "appended");
+    assert.equal(composed.region.start, Buffer.byteLength(input));
+  }
+  const legacy = `# Report\r\n\r\nNarrative stays.\r\n\r\n${renderPlanTaskCompletionProjection(candidate)}\n\nTrailing legacy prose.\n\n## Assurance Gap\n\nKept.\n`;
+  const replacedLegacy = composeCompletionCandidate(
+    Buffer.from(legacy),
+    candidate
+  );
+  assert.equal(
+    replacedLegacy.bytes.toString("utf8"),
+    `# Report\r\n\r\nNarrative stays.\r\n\r\n${region}\n\n## Assurance Gap\n\nKept.\n`
+  );
+  assert.equal(replacedLegacy.region.action, "replaced");
+  const legacyAtEnd = `# Report\n\n${renderPlanTaskCompletionProjection(candidate)}\n`;
+  assert.equal(
+    composeCompletionCandidate(
+      Buffer.from(legacyAtEnd),
+      candidate
+    ).bytes.toString("utf8"),
+    `# Report\n\n${region}\n`
+  );
+  const stale = structuredClone(candidate);
+  firstEvidence(task(stale, 0)).detail = "Stale published claim.";
+  const published = `# Report\n\nBefore.\n\n${renderCompletionRegion(stale)}\n\n## After\n\nAfter.\n`;
+  const replacedV2 = composeCompletionCandidate(
+    Buffer.from(published),
+    candidate
+  );
+  assert.equal(
+    replacedV2.bytes.toString("utf8"),
+    `# Report\n\nBefore.\n\n${region}\n\n## After\n\nAfter.\n`
+  );
+  assert.deepEqual(parsePublishedCompletionRegion(replacedV2.bytes), candidate);
+  // A fenced example of the region or heading is never structural.
+  const fenced = `# Report\n\n\`\`\`text\n${region}\n## Plan Task Completion\n\`\`\`\n`;
+  assert.equal(scanCompletionRegion(fenced).kind, "none");
+  assert.equal(
+    composeCompletionCandidate(Buffer.from(fenced), candidate).bytes.toString(
+      "utf8"
+    ),
+    `${fenced}\n${region}\n`
+  );
+});
+
+test("ambiguous completion region ownership fails before any overwrite", () => {
+  const candidate = ledger();
+  const region = renderCompletionRegion(candidate);
+  const legacy = renderPlanTaskCompletionProjection(candidate);
+  for (const [label, input] of [
+    ["duplicate legacy sections", `${legacy}\n\n${legacy}\n`],
+    ["legacy section outside a v2 pair", `${region}\n\n${legacy}\n`],
+    ["repeated start delimiter", `${region}\n\n${COMPLETION_REGION_START}\n`],
+    [
+      "end before start",
+      `${COMPLETION_REGION_END}\n## Plan Task Completion\n${COMPLETION_REGION_START}\n`
+    ],
+    ["unclosed fence", `# Report\n\n\`\`\`\n${legacy}\n`],
+    [
+      "malformed delimiter",
+      `<!-- banzai-plan-task-completion/v2:begin -->\n## Plan Task Completion\n${COMPLETION_REGION_END}\n`
+    ],
+    [
+      "second top-level section inside the pair",
+      `${COMPLETION_REGION_START}\n## Plan Task Completion\n\n## Other\n${COMPLETION_REGION_END}\n`
+    ],
+    ["invalid UTF-8", Buffer.from([0x23, 0x20, 0xff, 0xfe])]
+  ] as const) {
+    assert.throws(
+      () =>
+        composeCompletionCandidate(
+          typeof input === "string" ? Buffer.from(input) : input,
+          candidate
+        ),
+      (error: unknown) =>
+        error instanceof PlanTaskCompletionError &&
+        error.violation === "report_region_invalid",
+      label
+    );
+  }
+  assert.throws(
+    () => parsePublishedCompletionRegion(Buffer.from(`${legacy}\n`)),
+    (error: unknown) =>
+      error instanceof PlanTaskCompletionError &&
+      error.violation === "report_projection_invalid"
+  );
+  assert.throws(
+    () => parsePublishedCompletionRegion(Buffer.from("# Report\n")),
+    (error: unknown) =>
+      error instanceof PlanTaskCompletionError &&
+      error.violation === "report_projection_missing"
+  );
+});
+
+test("claim validation keeps evidence, scope, approval and report-role checks and requires preserved unique gap headings", async () => {
+  const current = await fixture();
+  const approval = {
+    kind: "plan" as const,
+    digest: current.approval.digest,
+    approvedAt: "2026-09-16T00:00:00.000Z",
+    approvedBy: "test",
+    paths: current.approval.paths
+  };
+  const validate = (
+    candidate: PlanTaskCompletionLedger | null,
+    outcome: PhaseResult["outcome"] = "completed"
+  ) =>
+    validateCompletionClaims({
+      repoRoot: current.root,
+      ledger: candidate,
+      outcome,
+      artifacts: { implementationReport, testReport },
+      planPath,
+      approval
+    });
+  try {
+    // Narrative-only report: no completion section is required as input.
+    await writeFile(
+      path.join(current.root, implementationReport),
+      "# Implementation Report\n\nNarrative only.\n\n## Remaining Work\n\nNone.\n",
+      "utf8"
+    );
+    const validated = await validate(current.canonical);
+    assert.equal(validated.counts.completed, 6);
+    assert.equal(validated.implementationReport.region.kind, "none");
+    assert.equal(validated.ledgerDigest.length, 64);
+
+    await expectViolation(validate(null), "missing_ledger");
+    const carriedIn = ledger();
+    firstEvidence(task(carriedIn, 0)).path = "base.txt";
+    await expectViolation(validate(carriedIn), "evidence_scope_violation");
+    const missing = ledger();
+    firstEvidence(task(missing, 0)).path = "src/missing.txt";
+    await expectViolation(validate(missing), "missing_evidence_path");
+    const control = ledger();
+    firstEvidence(task(control, 0)).path = ".banzai/config.json";
+    await expectViolation(validate(control), "evidence_scope_violation");
+
+    const gapped = ledger();
+    const gap = task(gapped, 5);
+    gap.status = "blocked";
+    // A heading inside the replaced legacy region is never eligible.
+    await writeFile(
+      path.join(current.root, implementationReport),
+      `# Implementation Report\n\n${renderPlanTaskCompletionProjection(gapped)}\n\n### Nested Gap\n\nInside the replaced region.\n\n## Preserved Gap\n\nOutside.\n\n## Preserved Gap\n\nDuplicate.\n\n\`\`\`\n## Fenced Gap\n\`\`\`\n\n## Unique Gap\n\nEligible.\n`,
+      "utf8"
+    );
+    for (const section of ["Nested Gap", "Preserved Gap", "Fenced Gap"]) {
+      gap.gap = { reportPath: implementationReport, section, detail: "Gap." };
+      await expectViolation(
+        validate(gapped, "needs_human_decision"),
+        "invalid_gap_reference"
+      );
+    }
+    gap.gap = {
+      reportPath: implementationReport,
+      section: "Unique Gap",
+      detail: "Gap."
+    };
+    const blocked = await validate(gapped, "needs_human_decision");
+    assert.equal(blocked.counts.blocked, 1);
+    assert.equal(blocked.implementationReport.region.kind, "legacy");
+    gap.gap = {
+      reportPath: testReport,
+      section: "Assurance Gap",
+      detail: "Gap."
+    };
+    await writeFile(
+      path.join(current.root, testReport),
+      "# Test Report\n\n## Assurance Gap\n\nRequired work remains.\n",
+      "utf8"
+    );
+    assert.equal((await validate(gapped, "blocked")).counts.blocked, 1);
+    await expectViolation(validate(gapped), "task_status_conflict");
+
+    await writeFile(
+      path.join(current.root, descriptionPath),
+      "# Description\n\nFR1 was changed after approval.\n",
+      "utf8"
+    );
+    await expectViolation(validate(current.canonical), "approval_invalid");
+  } finally {
+    await current.dispose();
+  }
+});
+
+interface MarkdownNode {
+  type: string;
+  value?: string;
+  children?: MarkdownNode[];
+}
+
+function descendants(node: MarkdownNode): MarkdownNode[] {
+  return [node, ...(node.children ?? []).flatMap(descendants)];
+}
+
+test("Prettier AST oracle: generated cells parse as literal text while raw controls create real syntax nodes", async (t) => {
+  const prettier = (await import("prettier")) as unknown as {
+    version: string;
+    __debug: {
+      parse(
+        text: string,
+        options: { parser: string }
+      ): Promise<{ ast: MarkdownNode }>;
+    };
+  };
+  const locked = JSON.parse(
+    await readFile(
+      path.join(process.cwd(), "../../node_modules/prettier/package.json"),
+      "utf8"
+    )
+  ) as { version: string };
+  assert.equal(
+    prettier.version,
+    locked.version,
+    "oracle must be the lockfile-resolved Prettier"
+  );
+  t.diagnostic(`Prettier AST oracle version ${prettier.version}`);
+  const candidate = specialLedger();
+  const region = renderCompletionRegion(candidate);
+  const { ast } = await prettier.__debug.parse(`${region}\n`, {
+    parser: "markdown"
+  });
+  const table = ast.children?.find((node) => node.type === "table");
+  assert.ok(table, "the region must parse as one table");
+  assert.deepEqual(
+    (ast.children ?? []).map((node) => node.type),
+    ["html", "heading", "table", "html"],
+    "delimiters, heading and one table; no extra rows or sections"
+  );
+  const rows = table.children ?? [];
+  assert.equal(rows.length, candidate.tasks.length + 1);
+  for (const [index, row] of rows.slice(1).entries()) {
+    const record = task(candidate, index);
+    const expected = [
+      record.taskId,
+      record.status,
+      record.evidence,
+      record.gap
+    ];
+    const cells = row.children ?? [];
+    assert.equal(cells.length, 4);
+    for (const [cellIndex, cell] of cells.entries()) {
+      const nodes = descendants(cell).filter((node) => node !== cell);
+      // Attribution rule (ADR-0048 section 3): any non-text node inside a
+      // generated cell would originate from raw payload characters and is a
+      // guarantee violation; the encoded fixtures include explicit link/image
+      // syntax with separate targets, HTML, emphasis, code, table breakout and
+      // URL/www/email strings.
+      assert.deepEqual(
+        nodes.map((node) => node.type),
+        ["text"],
+        `row ${index} cell ${cellIndex} must contain exactly one text node`
+      );
+      assert.equal(nodes[0]?.value, JSON.stringify(expected[cellIndex]));
+    }
+  }
+  // Positive controls in the exact cell and row context: raw syntax in the
+  // same table must produce the corresponding syntax nodes, so a control
+  // asserted out of context cannot pass vacuously.
+  const controlRow =
+    "| T009 | control | [link](https://example.com/target) *emphasis* <b>html</b> `code` ![image](https://example.com/i.png) | www.example.com user@example.com https://example.com/x |";
+  const controlRegion = region.replace(
+    COMPLETION_REGION_END,
+    `${controlRow}\n${COMPLETION_REGION_END}`
+  );
+  const controlAst = await prettier.__debug.parse(`${controlRegion}\n`, {
+    parser: "markdown"
+  });
+  const controlTable = controlAst.ast.children?.find(
+    (node) => node.type === "table"
+  );
+  const controlCells =
+    controlTable?.children?.at(-1)?.children ?? ([] as MarkdownNode[]);
+  const syntaxCell = controlCells[2];
+  const autolinkCell = controlCells[3];
+  assert.ok(syntaxCell && autolinkCell);
+  const syntaxTypes = new Set(descendants(syntaxCell).map((node) => node.type));
+  for (const type of ["link", "emphasis", "html", "inlineCode", "image"]) {
+    assert.ok(syntaxTypes.has(type), `raw control must create a ${type} node`);
+  }
+  // Raw URL/www/email text is autolinked by the same parser; the encoded
+  // fixtures above stayed literal text, which is the protected boundary.
+  const autolinks = descendants(autolinkCell).filter(
+    (node) => node.type === "link"
+  );
+  assert.equal(autolinks.length, 3, "raw autolink literals must link");
 });

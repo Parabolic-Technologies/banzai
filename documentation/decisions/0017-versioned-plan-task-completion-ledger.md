@@ -442,6 +442,12 @@ Implementation and independent review must confirm:
 
 ## Lifecycle Links
 
+- Narrowly amended by [ADR-0047](./0047-runner-owned-completion-projection.md),
+  accepted 2026-09-15, section 7: new-protocol runner publication, eligible
+  narrative gap targets, structural-input repair, stop-envelope diagnostics and
+  durable implementation/fix retry links. Existing coverage, evidence, approval,
+  revalidation, review and historical semantics remain binding.
+
 - Amended by [ADR-0042](./0042-runner-delivered-phase-instructions.md), accepted
   2026-09-11: runner implementation/assurance receive their complete obligations
   through embedded instructions instead of required host skill loading.

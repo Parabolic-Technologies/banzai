@@ -214,31 +214,27 @@ acceptance always requires an explicit human decision gate.
 - If formatting rewrites files, rerun affected typecheck/lint/tests.
 - Never claim compile/test success without running the command, unless the
   manifest says no command exists.
-- In orchestrated mode the runner also executes the project's configured
-  verification profiles in profile order and then command order after each code
-  phase. Writing prompts identify those commands. Do not repeat a supplied
-  full-scope command merely to recreate final evidence. If the manifest's
-  applicable final suite is absent from the supplied profiles, run it once and
-  record the verification-readiness gap.
+- In orchestrated mode the runner owns final task checks and physical evidence.
+  Strict checks come from the approved plan; additional candidates remain
+  separate and cannot weaken required obligations. Do not repeat a supplied
+  final command merely to recreate evidence. Identify any required missing
+  check and create permitted tooling within the approved task scope.
 - In standalone mode the implementing skill owns one final applicable manifest
   suite because no runner supplies that boundary.
 - In orchestrated review, current runner verification is the default command
   evidence. Rerun only a focused reproduction or a command whose evidence is
   missing, stale, inconsistent, or directly material to a finding; record the
   reason. Never run formatter fixes in review.
-- New project configuration uses schema version 2 explicit profiles. Each
-  detected root project type needs a matching profile with at least one
-  substantive command; the `repository` profile and exact `git diff --check`
-  are hygiene and do not prove project-type readiness.
-- Run `banzai doctor` after configuring verification. It diagnoses profile
-  coverage, executable availability, and local run-control evidence without
-  executing commands, invoking vendors, recovering state, or writing files.
-  Schema-version-1 flat verification remains executable but must be migrated
-  manually before doctor reports it ready.
+- New project configuration uses schema 4 without mandatory profiles or
+  bootstrap. Discovery supplies information, never execution permission. Missing
+  optional tooling is a normal starting state; mandatory failed or unavailable
+  checks prevent confirmed completion.
+- `banzai doctor` inspects project guidance, configuration and execution
+  prerequisites read-only. It never runs checks or asks for profile coverage.
 
 ## Decision Gates
 
-A gate stops work until a human decides. There are exactly five:
+A gate stops work until a human decides. There are five existing gates:
 
 - a material planning choice after repository analysis
   (`decision_consultation`);
@@ -248,8 +244,10 @@ A gate stops work until a human decides. There are exactly five:
 - an escalation trigger discovered in any phase (`escalation`);
 - review triage, because only human-accepted findings reach a fix.
 
-Orchestrated runs return the named gate and the `banzai` CLI asks the engineer.
-Standalone runs ask the same question in chat. Nothing else blocks.
+Orchestrated model phases return their existing named gates and the CLI asks
+for the human decision. Models cannot write runner control files. Standalone
+runs ask their existing gates in chat. Task verification requires no separate
+profile-configuration approval.
 
 ## Progress Reports
 
@@ -270,7 +268,8 @@ Default continuations:
   ADR needs, otherwise `development-plan`;
 - `development-plan` -> plan approval gate;
 - `code-writing` -> `test-writing`;
-- `test-writing` -> verification, then `feature-review`;
+- `test-writing` -> task verification, then `feature-review`; required failures
+  preserve implemented work and use the eligible verification retry path;
 - `feature-review` -> review triage gate;
 - review triage with no accepted findings -> done by human triage, without
   another review and without reporting reviewer `pass`;
@@ -305,7 +304,7 @@ approved plan.
 - Claude Code: reliable after plugin reload.
 - Codex: trust via `/hooks`; `apply_patch` may bypass hook interception.
 
-The hook is a backstop, not one of the five decision gates. Skill escalation
+The hook is a backstop, not one of the decision gates. Skill escalation
 gates still apply. ADR files are documentation and remain free to draft; the
 hook does not accept decisions. The `architecture-decision` gate is
 authoritative.

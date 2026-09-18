@@ -127,10 +127,12 @@ return to Banzai; it rechecks guidance and starts no task automatically. Use
 - Claude Code: `/banzai:project-manifest`
 - Codex: `$banzai:project-manifest`
 
-Review the generated project guidance and `.banzai/config.json`. Add verification
-profiles for your project's actual test, typecheck, lint, or build commands.
-The default profile contains only `git diff --check`; it does not run tests.
-See [verification profile examples](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/verification-examples.md).
+Review the generated project guidance and model configuration. Verification is
+organized around the task: Banzai proposes relevant checks from real project
+evidence and executes them within the task's authority. Empty repositories and
+missing tooling require no profile or bootstrap setup. Strict plans bind required
+checks; lite uses the existing request and execution permissions. Optional project
+policy may add constraints. See [task verification](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/verification-examples.md).
 
 ```sh
 banzai doctor
@@ -174,7 +176,7 @@ blocked or interrupted run, see [Failure Recovery](https://github.com/Parabolic-
 
 AI-assisted contributions are welcome. Useful places to start:
 
-- **Improve onboarding:** clarify a setup step or propose a verification profile
+- **Improve onboarding:** clarify a setup step or improve task verification guidance
   for your stack.
 - **Report a reproducible bug:** include versions, a minimal reproduction, and
   expected versus actual behavior in

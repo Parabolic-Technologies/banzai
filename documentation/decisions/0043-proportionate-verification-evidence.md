@@ -7,6 +7,11 @@
 - Owner: Banzai maintainers
 - Decision makers: Project owner; explicitly accepted on 2026-09-12 after owner revisions.
 
+- Amended by [ADR-0049](./0049-task-scoped-verification.md), accepted 2026-09-17:
+  new tasks use task-bound authority, command identity and a v2 plan inventory.
+  Conservative input, provenance and evidence-reuse guarantees remain, as do
+  legacy contract meanings. Implementation of the amendment is Planned.
+
 ## Related Artifacts
 
 - Private strict work: `proportionate-verification-closure`; FR1-FR12 and
@@ -277,6 +282,17 @@ focused checks, explicit build and one valid full release gate on a coherent
 disposable candidate, followed by independent review and human triage.
 
 ## Lifecycle Links
+
+- Narrowly amended by [ADR-0047](./0047-runner-owned-completion-projection.md),
+  accepted 2026-09-15, section 7: new-protocol report-digest refresh moves from
+  section 4 revalidation to authorized publication; section 3 retains ledger v1
+  with rendered v2 and versioned summary/provenance. Verification authority,
+  applicability, legacy refresh and frozen evaluation semantics remain binding.
+
+- Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted
+  2026-09-14: state-6 verification modes, guided command-ID replacement and
+  explicit skipped-round coverage. Preserve historical evidence, policy and
+  approved-obligation authority. Implementation of this amendment is Planned.
 
 - Supersedes: None in full.
 - Proposed amendments: ADR-0006 profiles/config; ADR-0015 ledger identities;

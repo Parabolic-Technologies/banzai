@@ -7,6 +7,11 @@
 - Owner: Banzai maintainers
 - Decision makers: User, explicitly accepted in chat on 2026-08-04
 
+- Amended by [ADR-0049](./0049-task-scoped-verification.md), accepted 2026-09-17:
+  successor diagnostics describe task verification without a new-task profile
+  readiness gate. Offline, read-only and historical-contract guarantees remain.
+  Implementation of the amendment is Planned.
+
 ## Related Artifacts
 
 - Feature description:
@@ -219,6 +224,11 @@ Implementation and review must confirm:
 10. docs, manifest, tests, smoke checks, and committed dist parity are current.
 
 ## Lifecycle Links
+
+- Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted
+  2026-09-14: doctor v4, per-role parity and cause-specific remedies. Preserve
+  offline/read-only behavior and historical diagnostic meanings.
+  Implementation of this amendment is Planned.
 
 - Amended by [ADR-0042](./0042-runner-delivered-phase-instructions.md), accepted
   2026-09-11: new doctor reports use v3 with `claude.instructions` in category

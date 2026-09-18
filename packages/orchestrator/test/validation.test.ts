@@ -16,8 +16,8 @@ import {
   PHASE_RESULT_SCHEMA_VERSION,
   RECOVERY_AUTHORIZATION_SCHEMA,
   RECOVERY_AUTHORIZATION_SCHEMA_VERSION,
-  TERMINAL_CHECKPOINT_SCHEMA,
-  TERMINAL_CHECKPOINT_SCHEMA_VERSION,
+  COMPLETION_PROTOCOL,
+  STRICT_MODEL_ATTEMPT_SCHEMA_VERSION,
   type TerminalAttemptCheckpoint
 } from "../src/types.js";
 import {
@@ -31,6 +31,9 @@ import {
   parseDecisionConsultationAnswers,
   parseModelAttemptRecord,
   parsePhaseResult,
+  parsePhaseResultEnvelope,
+  phaseResultEnvelopeOf,
+  phaseResultFromEnvelope,
   parsePersistedPhaseResult,
   parseRecoveryAuthorization,
   parseReviewResult,
@@ -51,6 +54,7 @@ function phase(
 ): Record<string, unknown> {
   return {
     schemaVersion: PHASE_RESULT_SCHEMA_VERSION,
+    verificationCandidates: null,
     contractVersion: CONTRACT_VERSION,
     phase: "plan",
     outcome: "needs_human_decision",
@@ -243,7 +247,7 @@ test("an existing config without a Claude environment section defaults to isolat
 
 test("plugin and runner contract versions match", () => {
   assert.doesNotThrow(assertContractParity);
-  assert.match(phaseResultSchema.$id, /\/v3\/phase-result\.schema\.json$/);
+  assert.match(phaseResultSchema.$id, /\/v4\/phase-result\.schema\.json$/);
   assert.match(
     legacyPhaseResultSchema.$id,
     /\/v1\/phase-result\.schema\.json$/
@@ -252,7 +256,7 @@ test("plugin and runner contract versions match", () => {
     legacyPhaseResultV2Schema.$id,
     /\/v2\/phase-result\.schema\.json$/
   );
-  assert.equal(phaseResultSchema.properties.schemaVersion.const, 3);
+  assert.equal(phaseResultSchema.properties.schemaVersion.const, 4);
   assert.equal(legacyPhaseResultV2Schema.properties.schemaVersion.const, 2);
   assert.ok(phaseResultSchema.required.includes("taskCompletion"));
   assert.ok(phaseResultSchema.required.includes("decisionConsultation"));
@@ -314,10 +318,10 @@ test("phase results require consistent human gates and outcomes", () => {
   );
 });
 
-test("new phase results require v3 and decode the structured completion ledger", () => {
+test("new phase results require v4 and decode the structured completion ledger", () => {
   assert.throws(
     () => parsePhaseResult(phase({ schemaVersion: 1 })),
-    /Phase result must use schema 3/
+    /unknown fields: verificationCandidates/
   );
 
   const result = parsePhaseResult(
@@ -548,7 +552,12 @@ test("decision consultation validates one bounded planning-only request", () => 
 
 test("persisted phase results retain truthful v1 and v2 evidence", () => {
   const current = phase({ phase: "fix", outcome: "blocked", gate: null });
-  const { decisionConsultation: _decisionConsultation, ...legacyV2 } = current;
+  const {
+    decisionConsultation: _decisionConsultation,
+    verificationCandidates: _candidates,
+    ...legacyV2
+  } = current;
+  assert.equal(_candidates, null);
   assert.equal(_decisionConsultation, null);
   assert.equal(
     parsePersistedPhaseResult({ ...legacyV2, schemaVersion: 2 }).schemaVersion,
@@ -561,7 +570,7 @@ test("persisted phase results retain truthful v1 and v2 evidence", () => {
     artifacts,
     ...legacyFields
   } = legacyV2;
-  assert.equal(_schemaVersion, 3);
+  assert.equal(_schemaVersion, 4);
   assert.equal(_taskCompletion, null);
   const { testReport: _testReport, ...legacyArtifacts } = artifacts as Record<
     string,
@@ -578,7 +587,7 @@ test("persisted phase results retain truthful v1 and v2 evidence", () => {
 
   assert.throws(
     () => parsePhaseResult({ ...legacyV2, schemaVersion: 2 }),
-    /must use schema 3/
+    /must use schema 4/
   );
 });
 
@@ -844,8 +853,8 @@ test("verification ledger decoding accepts bounded lifecycle evidence and reject
 
 function terminalCheckpoint(): TerminalAttemptCheckpoint {
   const checkpoint: Omit<TerminalAttemptCheckpoint, "integrityDigest"> = {
-    schema: TERMINAL_CHECKPOINT_SCHEMA,
-    schemaVersion: TERMINAL_CHECKPOINT_SCHEMA_VERSION,
+    schema: "banzai-terminal-attempt-checkpoint/v3",
+    schemaVersion: 3,
     runId: "run-one",
     attempt: { id: "fix-1-abcd1234", kind: "fix", mutable: true },
     phase: "fix",
@@ -857,7 +866,7 @@ function terminalCheckpoint(): TerminalAttemptCheckpoint {
       sessionMode: "resumed",
       sessionContextDigest: "b".repeat(64)
     },
-    resultContract: "phase-result/v3",
+    resultContract: "phase-result/v4",
     terminal: {
       classification: "claude_result",
       observedAt: "2026-08-18T13:23:43.000Z"
@@ -1061,5 +1070,160 @@ test("planning retry cache metadata is bounded and cannot authorize another phas
   );
   assert.throws(() =>
     parseModelAttemptRecord({ ...record, sessionId: "--last" })
+  );
+});
+
+test("attempt v3 binds its result to the retained envelope and keeps protocol fields off legacy records", () => {
+  const result = {
+    schemaVersion: PHASE_RESULT_SCHEMA_VERSION,
+    verificationCandidates: null,
+    contractVersion: CONTRACT_VERSION,
+    phase: "implementation" as const,
+    outcome: "completed" as const,
+    gate: null,
+    summary: "Implemented T001.",
+    artifacts: {
+      description: null,
+      plan: null,
+      adrs: [],
+      implementationReport:
+        "documentation/features/example/implementation-report.md",
+      testReport: "documentation/features/example/test-report.md"
+    },
+    taskCompletion: {
+      schemaVersion: 1 as const,
+      tasks: [
+        {
+          taskId: "T001",
+          status: "completed" as const,
+          evidence: [{ path: "src/example.ts", detail: "Implemented T001." }],
+          gap: null
+        }
+      ]
+    },
+    touchedPaths: [],
+    questions: [],
+    decisionConsultation: null,
+    resolvedFindingIds: [],
+    requestedVerification: []
+  };
+  const envelope = phaseResultEnvelopeOf(result);
+  assert.equal(envelope.taskCompletion.state, "accepted");
+  assert.deepEqual(phaseResultFromEnvelope(envelope), result);
+  const record = {
+    schemaVersion: STRICT_MODEL_ATTEMPT_SCHEMA_VERSION,
+    attempt: {
+      id: "implementation-1-abcd1234",
+      kind: "implementation" as const,
+      mutable: true
+    },
+    status: "pending_application" as const,
+    startedAt: "2026-09-16T10:00:00.000Z",
+    completedAt: "2026-09-16T10:05:00.000Z",
+    interruptedAt: null,
+    recoveryOf: null,
+    recoveryAuthorizationId: null,
+    result: JSON.parse(envelope.original) as unknown,
+    sessionId: "implementer-session",
+    rawStdoutPath: null,
+    rawStderrPath: null,
+    durationMs: 300_000,
+    usage: null,
+    error: null,
+    sessionMode: "fresh" as const,
+    reviewMode: null,
+    rotationReason: null,
+    sessionContext: {
+      role: "implementer" as const,
+      executable: "codex",
+      model: "gpt-test",
+      effort: "high" as const
+    },
+    completionProtocol: COMPLETION_PROTOCOL,
+    retryOf: null,
+    envelope,
+    completionDiagnostic: null
+  };
+  assert.deepEqual(parseModelAttemptRecord(record), record);
+  assert.deepEqual(
+    parseModelAttemptRecord({
+      ...record,
+      status: "failed",
+      failureCode: "PLAN_TASK_COMPLETION_INVALID",
+      error: "[PLAN_TASK_COMPLETION_INVALID] T001 evidence is out of scope.",
+      retryOf: null
+    }).status,
+    "failed"
+  );
+  const omit = (value: Record<string, unknown>, keys: string[]) =>
+    Object.fromEntries(
+      Object.entries(value).filter(([key]) => !keys.includes(key))
+    );
+  assert.throws(
+    () => parseModelAttemptRecord(omit(record, ["completionProtocol"])),
+    /requires a mutable implementation or fix attempt under banzai-completion-protocol\/v1/
+  );
+  assert.throws(
+    () => parseModelAttemptRecord({ ...record, schemaVersion: 2 }),
+    /Legacy attempt records cannot carry completion protocol fields/
+  );
+  assert.throws(
+    () =>
+      parseModelAttemptRecord({
+        ...omit(record, [
+          "completionProtocol",
+          "retryOf",
+          "envelope",
+          "completionDiagnostic"
+        ]),
+        schemaVersion: 2,
+        status: "pending_application"
+      }),
+    /unsupported|pending_application/
+  );
+  assert.throws(
+    () =>
+      parseModelAttemptRecord({
+        ...record,
+        result: { ...result, summary: "edited apart from the envelope" }
+      }),
+    /conflicts with its retained envelope original/
+  );
+  assert.throws(
+    () =>
+      parseModelAttemptRecord({
+        ...record,
+        envelope: { ...envelope, phase: "fix" }
+      }),
+    /envelope/
+  );
+  assert.throws(() =>
+    parseModelAttemptRecord({ ...record, retryOf: record.attempt.id })
+  );
+
+  // A malformed ledger stays a bounded unaccepted value: the stop, phase and
+  // finding identities of the envelope survive, and no result is invented.
+  const malformed = parsePhaseResultEnvelope({
+    ...result,
+    outcome: "blocked",
+    questions: ["Which credential?"],
+    taskCompletion: { schemaVersion: 1, tasks: "not-an-array" }
+  });
+  assert.equal(malformed.phase, "implementation");
+  assert.equal(malformed.outcome, "blocked");
+  assert.equal(malformed.taskCompletion.state, "unaccepted");
+  assert.match(malformed.taskCompletion.rawDigest, /^[0-9a-f]{64}$/);
+  assert.match(malformed.taskCompletion.raw, /not-an-array/);
+  assert.equal(phaseResultFromEnvelope(malformed), null);
+  assert.throws(() => parsePhaseResult({ ...result, taskCompletion: "bogus" }));
+  assert.throws(() =>
+    parsePhaseResultEnvelope({ ...result, phase: "nonsense" })
+  );
+  assert.throws(() =>
+    parsePhaseResultEnvelope({
+      ...result,
+      outcome: "completed",
+      gate: "escalation"
+    })
   );
 });

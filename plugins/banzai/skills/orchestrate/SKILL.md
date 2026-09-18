@@ -34,7 +34,7 @@ is a runner-owned phase and follow only its assigned Banzai phase skill.
 ## Establish the control boundary
 
 1. Run `banzai control capabilities` before any state-changing command.
-2. Require the exact supported v3 declaration in the reference. Treat missing
+2. Require the exact supported v6 declaration in the reference. Treat missing
    executable, non-zero exit, stderr error, malformed JSON, unsupported
    identity/version, or a missing operation as incompatible.
 3. Stop with a bounded diagnostic when incompatible. Do not install Banzai,
@@ -78,7 +78,7 @@ escalation question or blocked/retry state; never run `project-manifest` or
 edit files for it.
 
 At `approve_adr`, `approve_plan`, `answer_escalation`,
-`answer_consultation`, or `triage`, present the exact
+`answer_consultation`, `answer_configuration_prerequisite`, or `triage`, present the exact
 current artifact paths, ADR/finding IDs, questions, dispositions, evidence
 classification, and decision provenance shown by status. Wait for an explicit
 answer to this current gate.
@@ -102,6 +102,14 @@ rewrite, complete, or infer a decision.
   ADR, approves a plan, authorizes code/fixes, triages review, authorizes
   recovery/release, or permits an external side effect. Those later operations
   require their own current status and explicit human decision.
+- For the retained legacy `answer_configuration_prerequisite` format, show the proposal commands,
+  source, checkpoint and fixed Accept/Edit/Skip/Cancel options. Relay only the
+  current human's exact choice and, for Edit, exact structured command fields
+  through `banzai-agent-answer/v3`. Preserve run/decision/proposal identities;
+  Edit previews and does not apply. Never downcast this kind to escalation,
+  infer Accept from plan approval, invent an external updater or edit config.
+  This historical format does not authorize old-run continuation. New task runs
+  never require this configuration gate.
 - Relay an ADR or plan decision only through its existing approval command.
 - Relay review triage only after every latest finding ID has exactly one user
   disposition: `accept`, `reject`, or `defer`.

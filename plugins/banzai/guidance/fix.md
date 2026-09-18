@@ -67,7 +67,11 @@ Otherwise verification and a final summary suffice; no change report is required
 10. Self-review for ADR and applicable Engineering Quality conformance, side
     effects, missing material negative evidence, disproportionate tests, and doc
     drift. Fix in-scope findings and rerun affected checks.
-11. Write/update the change report when required.
+11. Write/update the change report when required. In orchestrated strict
+    mode, refresh stale completion evidence only through the returned
+    `taskCompletion` ledger; the runner republishes the implementation report's
+    **Plan Task Completion** section from the canonical ledger, so never edit
+    that section by hand.
 
 ## Change Report
 

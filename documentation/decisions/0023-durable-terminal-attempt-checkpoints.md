@@ -426,6 +426,12 @@ Implementation and independent review must confirm:
 
 ## Lifecycle Links
 
+- Narrowly amended by [ADR-0047](./0047-runner-owned-completion-projection.md),
+  accepted 2026-09-15, section 7: new strict recovery returns claims and narrative;
+  proven terminal results may remain pending_application until deterministic
+  runner publication. Durable proof, exact authority, operator authorization for
+  unknown partial work and historical checkpoint meanings remain binding.
+
 - Supersedes: None. This decision refines ADR 0002 and ADR 0017 by keeping
   ordinary mutable retry prohibited while defining a separate, current-human
   recovery authorization for new work.

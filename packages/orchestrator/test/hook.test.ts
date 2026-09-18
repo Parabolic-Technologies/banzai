@@ -15,7 +15,11 @@ import { digestArtifactBundle, workspaceSnapshot } from "../src/git.js";
 import { createWork } from "../src/artifact-storage.js";
 import { createVendorAdapters } from "../src/adapters.js";
 import { randomUUID } from "node:crypto";
-import { CONTRACT_VERSION, type RunState } from "../src/types.js";
+import {
+  CONTRACT_VERSION,
+  RUN_STATE_SCHEMA_VERSION,
+  type RunState
+} from "../src/types.js";
 import {
   WorkflowRunner,
   workflowAuthorizationDigest
@@ -465,7 +469,9 @@ test("runner mode fails closed when an edit target cannot be parsed", async () =
   }
 });
 
-for (const stateVersion of [4, 5] as const)
+// The last entry is the schema the current runner writes, so a runner schema
+// bump fails here until the hook learns it.
+for (const stateVersion of [4, 5, 6, 7, RUN_STATE_SCHEMA_VERSION] as const)
   test(`v${stateVersion} hook enforces bound phase roles, read-only selection/review and private layout`, async () => {
     const repository = await createTestRepository({
       artifactLayout: "private"
@@ -475,7 +481,7 @@ for (const stateVersion of [4, 5] as const)
       const bound = await createWork({
         repoRoot: root,
         slug: "hook-bound",
-        schemaVersion: stateVersion === 5 ? 2 : 1,
+        schemaVersion: stateVersion === 5 || stateVersion === 8 ? 2 : 1,
         mode: "workflow",
         creationId: randomUUID()
       });
@@ -521,6 +527,27 @@ for (const stateVersion of [4, 5] as const)
               workflow: "strict",
               extra: {
                 schemaVersion: stateVersion,
+                // Schema 7 adds only the nullable completion publication cursor
+                // to the retained configuration/binding combination; schema 8
+                // keeps the cursor and replaces setup with task verification.
+                ...(stateVersion >= 7 ? { completionPublication: null } : {}),
+                ...(stateVersion === 8 ? { verificationMode: "task" } : {}),
+                ...(stateVersion === 6 || stateVersion === 7
+                  ? {
+                      verificationMode: "ordered",
+                      configurationSetup: {
+                        configSchemaVersion: 2,
+                        configurationDigest: "a".repeat(64),
+                        coverage: "configured",
+                        projectTypes: ["custom"],
+                        uncoveredTypes: [],
+                        continuation: null,
+                        resolutions: [],
+                        skip: null,
+                        transactions: []
+                      }
+                    }
+                  : {}),
                 runId,
                 repoRoot: root,
                 artifactBinding: bound,
@@ -599,6 +626,21 @@ for (const stateVersion of [4, 5] as const)
         ])
           expect(target, "deny");
         expect(roles.changeReport, phase === "fix" ? "allow" : "deny");
+      }
+      if (stateVersion === RUN_STATE_SCHEMA_VERSION) {
+        await save("plan", "planning", { schemaVersion: stateVersion + 1 });
+        const stale = runHook({
+          cwd: root,
+          target: roles.plan,
+          env: { BANZAI_RUN_ID: runId, BANZAI_APPROVAL_DIGEST: "" }
+        });
+        assert.equal(stale.decision, "deny");
+        assert.match(
+          stale.reason,
+          new RegExp(
+            `run state schema ${stateVersion + 1} is newer than this installed Banzai hook supports \\(up to ${stateVersion}\\); update the Banzai plugin`
+          )
+        );
       }
       await save("plan", "planning", {
         artifactBinding: { ...bound, sha256: "0".repeat(64) }
@@ -798,6 +840,80 @@ for (const artifactLayout of ["private", "legacy"] as const)
       await repository.dispose();
     }
   });
+
+test("strict planning may record an accepted ADR in the manifest index under hook and runner", async () => {
+  const repository = await createTestRepository({ artifactLayout: "private" });
+  try {
+    const root = await realpath(repository.root);
+    const bound = await createWork({
+      repoRoot: root,
+      slug: "adr-index",
+      mode: "workflow",
+      creationId: randomUUID()
+    });
+    const runId = "adr-index";
+    await mkdir(path.join(root, ".banzai/runs", runId), { recursive: true });
+    await writeFile(
+      path.join(root, ".banzai/active-run.json"),
+      JSON.stringify({ schemaVersion: 1, runId })
+    );
+    const state = evaluationStateFixture({
+      workflow: "strict",
+      extra: {
+        schemaVersion: 4,
+        runId,
+        repoRoot: root,
+        artifactBinding: bound,
+        status: "planning",
+        activeAttempt: { id: "plan-1", kind: "plan", mutable: true }
+      }
+    }) as unknown as RunState;
+    await writeFile(
+      path.join(root, ".banzai/runs", runId, "state.json"),
+      JSON.stringify(state)
+    );
+    const runner = new WorkflowRunner(
+      root,
+      createVendorAdapters(async () => {
+        throw new Error("Grant-boundary tests must not invoke a vendor.");
+      })
+    );
+    const phaseBoundary = runner as unknown as {
+      checkArtifactPhaseScope: WorkflowRunner["checkArtifactPhaseScope"];
+    };
+    // Accepting an ADR during planning updates its public record, the decision
+    // index and the manifest's active ADR index; source stays out of scope.
+    for (const [target, decision] of [
+      ["PROJECT_MANIFEST.md", "allow"],
+      ["documentation/decisions/0001-example.md", "allow"],
+      ["src/example.ts", "deny"]
+    ] as const) {
+      assert.equal(
+        runHook({ cwd: root, target, env: { BANZAI_RUN_ID: runId } }).decision,
+        decision,
+        target
+      );
+      const before = await workspaceSnapshot(root, { artifactBinding: bound });
+      const absolute = path.join(root, target);
+      await mkdir(path.dirname(absolute), { recursive: true });
+      await writeFile(absolute, "changed by planning\n");
+      const check = phaseBoundary.checkArtifactPhaseScope(
+        state,
+        "plan",
+        before
+      );
+      if (decision === "allow") await assert.doesNotReject(check, target);
+      else
+        await assert.rejects(
+          check,
+          { code: "ARTIFACT_PHASE_SCOPE_INVALID" },
+          target
+        );
+    }
+  } finally {
+    await repository.dispose();
+  }
+});
 
 test("R4-F4 manual hook defers only for validated private role paths", async () => {
   const repository = await createTestRepository({ artifactLayout: "private" });

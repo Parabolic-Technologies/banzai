@@ -136,6 +136,7 @@ function workflowStatus(
       total: null,
       diagnostics: []
     },
+    completionPublication: null,
     ...overrides
   };
 }
@@ -245,6 +246,15 @@ class FakeIO implements InteractiveIO {
 }
 
 class FakeRunner implements InteractiveRunner {
+  async withConfigurationDecisionOwnership<T>(
+    action: () => Promise<T>
+  ): Promise<T> {
+    return action();
+  }
+  async answerConfigurationPrerequisite(): Promise<RunState> {
+    throw new Error("Unexpected configuration prerequisite answer");
+  }
+
   readonly repoRoot = "/repo/example";
   readonly calls: { operation: string; value: unknown }[] = [];
   restoreEligible: { eligible: boolean; reason: string } = {
@@ -2300,4 +2310,31 @@ test("cancellation: prompt interruption before confirmation preserves the run an
     } else assert.deepEqual(runner.calls, []);
     assert.equal(io.selections.length, 0);
   }
+});
+
+test("accepted review F3 interactive approval escapes controls before the decision", async () => {
+  class PrerequisiteRunner extends FakeRunner {
+    async getPlanHumanPrerequisites(): Promise<string> {
+      return "Normal multiline\n\tIndented\n\x1b[2J\x1b]0;canary\x07\u202e\u2066Canary";
+    }
+  }
+  const runner = new PrerequisiteRunner([
+    workflowStatus(runState("needs_plan_approval"))
+  ]);
+  const io = new FakeIO(["exit"]);
+  const select = io.select.bind(io);
+  io.select = async (message, choices) => {
+    if (message === "Plan decision") {
+      const output = io.lines.join("\n");
+      assert.match(output, /Normal multiline\n\tIndented/u);
+      assert.doesNotMatch(output, /[\x1b\x07\u202e\u2066]/u);
+      assert.match(output, /\\u001b\[2J/u);
+    }
+    return select(message, choices);
+  };
+  await runInteractive(runner, io, { decidedBy: "human" });
+  assert.equal(
+    runner.calls.some((call) => call.operation === "approvePlan"),
+    false
+  );
 });

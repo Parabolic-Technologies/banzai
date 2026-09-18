@@ -505,7 +505,7 @@ test("committed doctor CLI rejects invalid options before Git discovery", async 
   }
 });
 
-test("committed doctor reports missing hygiene-only and unused profiles distinctly", async () => {
+test("committed doctor does not require missing hygiene-only or unused profiles", async () => {
   const repository = await createTestRepository();
   try {
     await writeFile(path.join(repository.root, "package.json"), "{}\n", "utf8");
@@ -555,31 +555,20 @@ test("committed doctor reports missing hygiene-only and unused profiles distinct
       const before = await snapshotTree(path.join(repository.root, ".banzai"));
       const jsonResult = runCommittedDoctor(repository.root, ["--json"]);
       const humanResult = runCommittedDoctor(repository.root, []);
-      assert.equal(jsonResult.status, 1);
+      assert.equal(jsonResult.status, 0);
       assert.equal(jsonResult.stderr, "");
-      assert.equal(humanResult.status, 1);
+      assert.equal(humanResult.status, 0);
       assert.equal(humanResult.stderr, "");
       const report = JSON.parse(jsonResult.stdout) as unknown;
-      assert.equal(
-        checkMessage(report, "verification.profiles"),
-        scenario.profileMessage
-      );
-      assert.equal(
-        checkMessage(report, "verification.substantive"),
-        scenario.substantiveMessage
-      );
-      assert.equal(humanResult.stdout.includes(scenario.profileMessage), true);
-      assert.equal(
-        humanResult.stdout.includes(scenario.substantiveMessage),
-        true
-      );
+      assert.equal(checkStatus(report, "verification.task"), "pass");
+      assert.doesNotMatch(humanResult.stdout, /Missing profiles for/);
       assert.deepEqual(
         await snapshotTree(path.join(repository.root, ".banzai")),
         before
       );
       jsonOutputs.push(jsonResult.stdout);
     }
-    assert.notEqual(jsonOutputs[0], jsonOutputs[1]);
+    assert.equal(jsonOutputs[0], jsonOutputs[1]);
   } finally {
     await repository.dispose();
   }
@@ -779,20 +768,13 @@ test("committed doctor fails closed on unreadable project marker evidence", asyn
     assert.equal(checkStatus(report, "project.types"), "fail");
     assert.equal(
       checkMessage(report, "project.types"),
-      "Project marker evidence is unreadable."
+      "Project marker evidence is unreadable or invalid."
     );
-    assert.equal(checkStatus(report, "verification.profiles"), "skipped");
+    assert.equal(checkStatus(report, "verification.task"), "pass");
     assert.equal(
-      checkMessage(report, "verification.profiles"),
-      "Profile coverage requires readable project marker evidence."
-    );
-    assert.equal(checkStatus(report, "verification.substantive"), "skipped");
-    assert.equal(
-      checkMessage(report, "verification.substantive"),
-      "Substantive verification requires readable project marker evidence."
-    );
-    assert.equal(
-      humanResult.stdout.includes("Project marker evidence is unreadable."),
+      humanResult.stdout.includes(
+        "Project marker evidence is unreadable or invalid."
+      ),
       true
     );
     assert.equal(

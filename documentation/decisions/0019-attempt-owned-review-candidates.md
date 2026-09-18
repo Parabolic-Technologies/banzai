@@ -365,6 +365,11 @@ Implementation and review must confirm all of the following:
 
 ## Lifecycle Links
 
+- Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted
+  2026-09-14: exact runner configuration-delta authorship and coverage in
+  versioned review evidence. Model write grants remain unchanged.
+  Implementation of this amendment is Planned.
+
 - Supersedes: None
 - Superseded by: None
 - Amended by [ADR-0037](./0037-unified-runner-rendered-review-artifacts.md),

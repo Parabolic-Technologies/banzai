@@ -222,6 +222,12 @@ Current release-train identity:
 - [ ] Confirm repository-maintenance-only CI/scripts/tests/root docs/checklist
       work did not manufacture a release-train bump unless an explicit Banzai
       release is being prepared.
+- [ ] Select a new target whenever `plugins/banzai/hooks/spec-gate.cjs`,
+      `plugins/banzai/hooks/hooks.json` or `plugins/banzai/lib/` changed since
+      the current version was set. Codex and Claude Code refresh installed
+      plugin caches only on a version change, so a linked runner would
+      otherwise meet a stale hook. `npm run release:validate` enforces this in
+      a full Git checkout as `HOOK_CHANGED_WITHOUT_VERSION_BUMP`.
 - [ ] Run `npm run version:set -- <version>` once for the approved target and
       record its successful nine-field/seven-file result. The command does not build,
       validate, test, install, publish, or perform Git delivery.
@@ -245,7 +251,7 @@ Current release-train identity:
 - [ ] Confirm committed dist was rebuilt after source changes.
 - [ ] Confirm independent source-read-only feature review is complete.
 - [ ] Confirm every finding has human triage and only accepted IDs were fixed.
-- [ ] Confirm all five Banzai human decision gates and exact-path hook boundary
+- [ ] Confirm all five existing Banzai human decision gates and exact-path hook boundary
       remain intact.
 - [ ] Record the human release owner and explicit release authorization.
 

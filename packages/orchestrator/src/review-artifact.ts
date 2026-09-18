@@ -259,13 +259,22 @@ function renderCurrentReviewArtifact(
     replan_required:
       "Review requires replanning through the existing human approval lifecycle."
   }[result.verdict];
+  const guided =
+    snapshot.schemaVersion === 4 ||
+    (snapshot.schemaVersion === 5 && snapshot.configurationSetup !== undefined);
   return [
     "# Implementation Review",
-    snapshot.schemaVersion === 3
-      ? "- Format: `banzai-feature-review/v4`"
-      : snapshot.schemaVersion === 2
-        ? "- Format: `banzai-feature-review/v3`"
-        : "- Format: `banzai-feature-review/v2`",
+    snapshot.schemaVersion === 6
+      ? "- Format: `banzai-feature-review/v7`"
+      : snapshot.schemaVersion === 5
+        ? "- Format: `banzai-feature-review/v6`"
+        : snapshot.schemaVersion === 4
+          ? "- Format: `banzai-feature-review/v5`"
+          : snapshot.schemaVersion === 3
+            ? "- Format: `banzai-feature-review/v4`"
+            : snapshot.schemaVersion === 2
+              ? "- Format: `banzai-feature-review/v3`"
+              : "- Format: `banzai-feature-review/v2`",
     reviewValue({
       slug: context.slug,
       iteration: context.iteration,
@@ -296,11 +305,41 @@ function renderCurrentReviewArtifact(
     reviewValue(
       snapshot.artifact.verificationEvidence ?? snapshot.artifact.verification
     ),
+    ...(guided
+      ? [
+          "### Configuration coverage and runner-authored changes",
+          "Coverage below distinguishes configured, bootstrap-deferred and skipped substantive verification. Only the exact recorded deltas are runner-authored; they do not attribute the whole configuration file. Historical deltas may have later user changes, and carried-in changes retain separate provenance. Inspect .banzai/config.json in this candidate.",
+          ...(snapshot.configurationSetup?.coverage === "skipped" &&
+          snapshot.artifact.verification.length === 0
+            ? [
+                "No hygiene commands were configured; no verification command was executed for this skipped round."
+              ]
+            : []),
+          reviewValue({
+            verificationMode: snapshot.verificationMode,
+            ...snapshot.configurationSetup
+          })
+        ]
+      : []),
     "### Validated plan task completion (runner evidence)",
     reviewValue({
       source: snapshot.completionSource,
       projection: snapshot.artifact.taskCompletion ?? null
     }),
+    ...(snapshot.schemaVersion === 5 || snapshot.schemaVersion === 6
+      ? [
+          "### Runner-owned completion publication (runner evidence)",
+          "The completion region of the implementation report was rendered and published by the runner from the validated ledger; the model authored the claims, narrative and engineering changes. These identities name the retained capture, candidate and receipt proof. Valid structure is not proof that work was done.",
+          reviewValue(snapshot.completionPublication ?? null)
+        ]
+      : []),
+    ...(snapshot.schemaVersion === 6
+      ? [
+          "### Task verification (runner evidence)",
+          "Check absence is not a passing suite. Assess requirement coverage and unjustified weakening independently of command identity.",
+          reviewValue(snapshot.taskVerification)
+        ]
+      : []),
     "## Summary",
     reviewValue(result.summary),
     "## Findings",

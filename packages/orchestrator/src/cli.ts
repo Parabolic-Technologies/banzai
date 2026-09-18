@@ -1,3 +1,12 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import {
+  executeVerificationCli,
+  parseVerificationArgs
+} from "./verification-cli.js";
+import {
+  configurationDecisionLines,
+  taskVerificationStatusLines
+} from "./verification-ui.js";
 import { InteractiveHumanTime } from "./interactive-human-time.js";
 import {
   CANCELLATION_HELP,
@@ -14,11 +23,13 @@ import { createVendorAdapters } from "./adapters.js";
 import {
   executeAgentControlCapabilities,
   executeAgentControlCommand,
+  parseVerificationApprovalArgs,
   parseAgentControlArgs,
   type AgentControlCliIO
 } from "./agent-control-cli.js";
 import { colorDepth, colorEnabled, createStyler } from "./ansi.js";
 import { resolveCliMode, stripGlobalFlags } from "./cli-routing.js";
+import { executeVersionCli } from "./version-cli.js";
 import { applyModelUpdates, initializeConfig, loadConfig } from "./config.js";
 import {
   executeContextReportWithOptions,
@@ -33,6 +44,7 @@ import {
   parseEvaluationKpiArgs
 } from "./evaluation-kpi-cli.js";
 import {
+  escapeTerminalText,
   formatUsage,
   hangingLines,
   labeledLines,
@@ -91,7 +103,8 @@ import {
   type WorkflowStatus
 } from "./workflow.js";
 
-import { artifactCommand } from "./artifact-storage.js";
+import { artifactCommand, safePath } from "./artifact-storage.js";
+import { VERIFICATION_EXAMPLES } from "./init-resources.js";
 
 function authenticationGateway(
   adapters: VendorAdapters
@@ -159,6 +172,8 @@ function repositoryIdentityGateway(
 const HELP = `Banzai v${packageManifest.version} local cross-vendor workflow runner
 
 Usage:
+  banzai --version | -v
+  banzai --plugin-version | -pv
   banzai artifacts <inspect|initialize|create|acquire|write|release|inventory|export|verify|restore> --json <request-file>
   banzai
   banzai interactive
@@ -184,6 +199,8 @@ Usage:
   banzai restore
   banzai recover
   banzai approve plan [--by <name>] [--no-resume]
+  banzai verify add <type> | edit <id> | remove <id> | list | check
+  banzai approve verification [--by <name>] [--no-resume]
   banzai approve adr --id <id> --decision <accept|reject|rework> [--note <text>] [--by <name>] [--no-resume]
   banzai triage --accept <ids> --reject <ids> --defer <ids> [--note <text>] [--by <name>] [--no-resume]
   banzai cancel [--run <run-id>] [--reason <enum>]
@@ -199,11 +216,15 @@ On a terminal, a live status line reports the running phase until it settles.
 Finding lists are comma-separated. Pass an empty string for an empty list.
 Run without arguments in a terminal for interactive mode.
 \`banzai model\` picks the model and effort for each phase and needs a terminal.
-Five human decision gates remain distinct: conditional planning consultation,
+Five existing human decision gates remain distinct: conditional planning consultation,
 ADR acceptance, plan approval, escalation, and review triage. Consultation
 records preference provenance; it is not approval or execution authority.
-\`banzai control answer\` reads a keyed \`banzai-agent-answer/v2\` consultation
-or ordered \`banzai-agent-answer/v1\` escalation document from direct stdin.
+New tasks use task-scoped verification without profiles, bootstrap, or a
+configuration-prerequisite gate. Legacy configuration commands and answer formats
+remain explicit utilities; they do not authorize continuation of historical runs.
+The legacy \`banzai approve verification\` command reads a closed \`banzai-agent-answer/v3\` document.
+\`banzai control answer\` reads \`banzai-agent-answer/v3\` configuration, keyed
+\`banzai-agent-answer/v2\` consultation, or ordered \`banzai-agent-answer/v1\` escalation document from direct stdin.
 The runner uses the current checkout and never creates or manages Git worktrees.`;
 
 function option(args: string[], name: string): string | null {
@@ -294,6 +315,7 @@ function printState(status: WorkflowStatus, metrics = false): void {
       `${state.workflowSelection.workflow} (${state.workflowSelection.reason})`
     );
   }
+  for (const line of taskVerificationStatusLines(state)) console.log(line);
   if (state.blockReason !== null) {
     printLabeled("Blocked", state.blockReason);
   }
@@ -321,7 +343,17 @@ function printState(status: WorkflowStatus, metrics = false): void {
   } else if (status.recovery.terminalCheckpointPresent === true) {
     printLabeled("Terminal checkpoint", status.recovery.reason);
   }
-  if (state.pendingHumanDecision != null) {
+  if (state.configurationSetup?.coverage === "skipped")
+    console.log(
+      `Substantive coverage skipped for this run: ${state.configurationSetup.uncoveredTypes.join(", ")}. Recorded hygiene results: ${state.verification.length}.`
+    );
+  if (state.pendingHumanDecision?.kind === "configuration_prerequisite") {
+    for (const line of configurationDecisionLines(
+      state.pendingHumanDecision,
+      status.configurationPrerequisite
+    ))
+      console.log(line);
+  } else if (state.pendingHumanDecision != null) {
     printLabeled("Decision needed", state.pendingHumanDecision.summary);
     for (const question of state.pendingHumanDecision.kind === "escalation"
       ? state.pendingHumanDecision.questions
@@ -479,15 +511,25 @@ function restoreTerminal(): void {
   }
 }
 
-function installSignalCleanup(): () => void {
+function installSignalCleanup(settled?: Promise<void>): () => void {
   const handlers = new Map<NodeJS.Signals, () => void>();
   const interrupt = createInterruptHandler({
     closeProgress,
     restoreTerminal,
     write: (line) => {
-      process.stderr.write(`${line}\n`);
+      process.stderr.write(
+        `${
+          settled && line.startsWith("[banzai] Stopped.")
+            ? "[banzai] Verification check stopped. Run banzai verify check to start again."
+            : line
+        }\n`
+      );
     },
-    shutdown: shutdownActiveProcesses,
+    shutdown: async (timeoutMs) => {
+      const drained = await shutdownActiveProcesses(timeoutMs);
+      await settled;
+      return drained;
+    },
     forceTerminate: forceTerminateActiveProcesses,
     releaseLocks: releaseHeldRunnerLocksSync,
     removeListeners: () => {
@@ -524,6 +566,12 @@ function installSignalCleanup(): () => void {
 
 async function main(): Promise<void> {
   const invocation = process.argv.slice(2);
+  if (
+    await executeVersionCli(invocation, process.cwd(), (text) =>
+      process.stdout.write(text)
+    )
+  )
+    return;
   if (invocation[0] === "artifacts") {
     const response = await artifactCommand(invocation.slice(1));
     process.stdout.write(`${JSON.stringify(response)}\n`);
@@ -541,7 +589,11 @@ async function main(): Promise<void> {
     return;
   }
   const controlCommand =
-    command === "control" ? parseAgentControlArgs(args.slice(1)) : null;
+    command === "control"
+      ? parseAgentControlArgs(args.slice(1))
+      : command === "approve" && args[1] === "verification"
+        ? parseVerificationApprovalArgs(args.slice(2))
+        : null;
   const controlIO: AgentControlCliIO = {
     stdin: process.stdin,
     stdout: (value) => process.stdout.write(value)
@@ -573,6 +625,8 @@ async function main(): Promise<void> {
   if (command === "doctor") {
     parseDoctorArgs(args.slice(1));
   }
+  const verificationCommand =
+    command === "verify" ? parseVerificationArgs(args.slice(1)) : null;
   if (command === "compatibility") {
     if (args[1] !== "live") {
       throw new BanzaiError(
@@ -645,8 +699,72 @@ async function main(): Promise<void> {
     repoRoot = await discoverRepositoryRoot(process.cwd());
   }
   if (command === "init") {
-    const result = await initializeConfig(repoRoot);
+    if (
+      [
+        "BANZAI_RUN_ID",
+        "BANZAI_APPROVAL_DIGEST",
+        "BANZAI_WORKFLOW_DIGEST"
+      ].some((name) => Object.hasOwn(process.env, name))
+    )
+      throw new BanzaiError(
+        "CONFIGURATION_MODEL_WRITE_DENIED",
+        "Model phases cannot initialize runner configuration. Record missing configuration in Human prerequisites."
+      );
+    const configDirectory = await safePath(repoRoot, ".banzai", {
+      directory: true,
+      missing: true
+    });
+    await mkdir(configDirectory, { recursive: true, mode: 0o700 });
+    await safePath(repoRoot, ".banzai", { directory: true });
+    await safePath(repoRoot, ".banzai/config.json", { missing: true });
+    await safePath(repoRoot, ".gitignore", { missing: true });
+    const examplesPath = await safePath(
+      repoRoot,
+      "documentation/verification-examples.md",
+      { missing: true }
+    );
+    const initStore = new RunStore(repoRoot);
+    const initLock = await initStore.acquireLock({ reclaimStale: false });
+    let result;
+    let examplesCreated = false;
+    try {
+      const activeId = await initStore.readActiveRunId();
+      if (activeId) {
+        const active = await initStore.readState(activeId);
+        if (active.status !== "done" && active.status !== "cancelled")
+          throw new BanzaiError(
+            "CONFIGURATION_RUN_UNFINISHED",
+            "An unfinished run retains its configuration checkpoint. Use banzai status and the supported verify repair path, then banzai resume."
+          );
+      }
+      result = await initializeConfig(repoRoot);
+      const documentationDirectory = await safePath(repoRoot, "documentation", {
+        directory: true,
+        missing: true
+      });
+      await mkdir(documentationDirectory, { recursive: true });
+      await safePath(repoRoot, "documentation/verification-examples.md", {
+        missing: true
+      });
+      try {
+        await writeFile(examplesPath, VERIFICATION_EXAMPLES, {
+          encoding: "utf8",
+          flag: "wx"
+        });
+        examplesCreated = true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        await safePath(repoRoot, "documentation/verification-examples.md");
+      }
+    } finally {
+      await initLock.release();
+    }
     console.log(`Initialized Banzai in ${repoRoot}`);
+    console.log(
+      examplesCreated
+        ? "Created documentation/verification-examples.md."
+        : "Kept existing documentation/verification-examples.md."
+    );
     console.log(
       result.configCreated
         ? "Created .banzai/config.json."
@@ -685,8 +803,35 @@ async function main(): Promise<void> {
         );
     }
     console.log(
-      "Add project-specific verification profiles, run banzai doctor, then review and commit your files before starting a task."
+      "Verification follows each task; no profile setup is required."
     );
+    console.log(
+      "Run banzai doctor, then review and commit your files before starting a task."
+    );
+    return;
+  }
+
+  if (verificationCommand) {
+    let finishCheck = (): void => {};
+    const settled = new Promise<void>((resolve) => {
+      finishCheck = resolve;
+    });
+    const removeCleanup =
+      verificationCommand.command === "check"
+        ? installSignalCleanup(settled)
+        : () => {};
+    try {
+      process.exitCode = await executeVerificationCli(
+        verificationCommand,
+        new WorkflowRunner(repoRoot, createVendorAdapters()),
+        new InquirerInteractiveIO(),
+        defaultDecisionMaker(),
+        interactiveTerminal
+      );
+    } finally {
+      finishCheck();
+      removeCleanup();
+    }
     return;
   }
 
@@ -853,6 +998,7 @@ async function main(): Promise<void> {
           return false;
         }
         await currentCommit(repoRoot);
+        await loadConfig(repoRoot);
         return true;
       },
       attention,
@@ -890,6 +1036,7 @@ async function main(): Promise<void> {
     return;
   }
   if (command === "run") {
+    await loadConfig(repoRoot);
     await attention.run(() =>
       runner.start({
         slug: requireOption(args, "--slug"),
@@ -985,6 +1132,11 @@ async function main(): Promise<void> {
     const approvedBy = option(args, "--by") ?? defaultDecisionMaker();
     const autoResume = !args.includes("--no-resume");
     if (target === "plan") {
+      const prerequisites = await runner.getPlanHumanPrerequisites();
+      if (prerequisites)
+        console.log(
+          `Human prerequisites:\n${escapeTerminalText(prerequisites)}`
+        );
       await attention.run(() => runner.approvePlan(approvedBy, autoResume));
       await printRunnerState(runner, metrics);
       return;

@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://banzai.local/contracts/v2/verification-obligations.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "banzai-verification-obligations/v2"
+    },
+    "schemaVersion": {
+      "type": "integer",
+      "const": 2
+    },
+    "complete": {
+      "type": "boolean",
+      "const": true
+    },
+    "planRemainderSha256": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "checks": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "requirementRefs": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          "command": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "args": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 4096
+            }
+          },
+          "cwd": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 86400000
+          },
+          "evidence": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "equivalent_evidence"
+            ]
+          },
+          "sources": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                "sha256": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                }
+              },
+              "required": [
+                "path",
+                "sha256"
+              ]
+            }
+          },
+          "materialization": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "taskRef": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "paths": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    }
+                  }
+                },
+                "required": [
+                  "taskRef",
+                  "paths"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "requirementRefs",
+          "command",
+          "args",
+          "cwd",
+          "timeoutMs",
+          "evidence",
+          "sources",
+          "materialization"
+        ]
+      }
+    },
+    "absenceReason": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema",
+    "schemaVersion",
+    "complete",
+    "planRemainderSha256",
+    "checks",
+    "absenceReason"
+  ]
+}

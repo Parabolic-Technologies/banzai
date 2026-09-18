@@ -95,6 +95,14 @@ Write the resolved `implementationReport` artifact:
    evidence owner, or `None`;
 9. notes for assurance.
 
+Task completion evidence is owned differently by context. In orchestrated
+strict mode, return the structured `taskCompletion` ledger and write only the
+report narrative: the runner validates the claims and renders and publishes the
+report's **Plan Task Completion** section (`banzai-plan-task-completion/v2`)
+itself; never author, copy or edit that section, and give gap references a
+unique narrative heading outside it. In standalone mode, author the
+`banzai-plan-task-completion/v1` table exactly as the calling skill specifies.
+
 
 For a bounded accepted-finding closure, retain unaffected report text. Add one
 record with accepted finding ID, changed scope, deterministic decision, executed/

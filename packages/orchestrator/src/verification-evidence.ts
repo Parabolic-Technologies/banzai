@@ -37,3 +37,40 @@ export type {
   VerificationStorage,
   ReviewVerificationEvidence
 } from "../../../plugins/banzai/lib/verification-store.mjs";
+
+export {
+  parseTaskVerificationDescriptor,
+  parseTaskVerificationCandidates,
+  parseTaskVerificationObligations,
+  parseTaskVerificationPolicy,
+  selectTaskVerification,
+  taskVerificationPath,
+  authorizeTaskVerification,
+  discoverTaskVerification
+} from "../../../plugins/banzai/lib/task-verification.mjs";
+export type {
+  TaskVerificationDescriptor,
+  TaskVerificationCandidates,
+  TaskVerificationObligations,
+  TaskVerificationPolicy,
+  TaskVerificationAuthority,
+  TaskVerificationContext,
+  TaskVerificationSelection
+} from "../../../plugins/banzai/lib/task-verification.mjs";
+
+export {
+  parseTaskVerificationPublication,
+  parseTaskVerificationDecision,
+  parseTaskVerificationAttempt,
+  captureTaskVerificationInputs,
+  readTaskVerificationAttempts,
+  taskVerificationApplicability,
+  executeTaskVerification
+} from "../../../plugins/banzai/lib/task-verification-store.mjs";
+export type {
+  TaskVerificationPublication,
+  TaskVerificationAttempt,
+  TaskVerificationDecision,
+  TaskVerificationApplicability,
+  TaskVerificationCapture
+} from "../../../plugins/banzai/lib/task-verification-store.mjs";

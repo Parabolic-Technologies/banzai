@@ -1,6 +1,6 @@
 # Plan Authority and Task Completion Evidence
 
-- Owner decision: ADR-0038 (Plan Authority); ADR-0017/0025 (Plan Task Completion Evidence)
+- Owner decision: ADR-0038 (Plan Authority); ADR-0017/0025/0047 (Plan Task Completion Evidence)
 - Consumers: `development-plan`, `code-writing`; conditional: `test-writing`, `feature-review`, `feature-status`, `quick-fix`
 - Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)
 - Runner consumers: planning, implementation, review (conditional), fix (conditional), quick-fix (conditional).
@@ -83,17 +83,28 @@ an orchestrated approval, unlike choosing a compliant implementation under it.
   complete refreshed ledger (ADR 0025) — same task set and order, statuses
   unchanged, evidence describing the current tree — validated by the same
   fail-closed pipeline; there is still exactly one canonical ledger at a time.
-- The implementation report contains the deterministic
-  `banzai-plan-task-completion/v1` Markdown projection of that ledger. Persisted
-  state contains a validated summary, never a separately authored ledger. The
-  runner checks approval digest, task coverage/order, path scope, required
-  reports, and structured/report/state parity before verification, review, and
-  terminal success.
+- In new strict orchestrated attempts (`banzai-completion-protocol/v1`,
+  ADR-0047) the model returns structured claims and report narrative only. The
+  runner validates the ledger against approval digest, task coverage/order,
+  path scope and required reports, then renders and publishes the
+  implementation report's **Plan Task Completion** section itself as the
+  bounded `banzai-plan-task-completion/v2` region, records an immutable
+  publication receipt and only then applies the completion. Nothing inside that region
+  confers authority: a model or hand edit is replaced at the next authorized
+  publication and is never evidence. Persisted state contains a validated
+  summary, never a separately authored ledger.
+- Standalone authored reports keep the `banzai-plan-task-completion/v1` table
+  written by the author, and legacy orchestrated runs keep their v1 projection.
+  Readers recognize both grammars and distinguish model claims, runner receipts
+  and real repository or report evidence; no standalone author generates v2 or
+  manufactures runner state.
 - `outcome=completed` is invalid when any task is missing, malformed,
   incomplete, or blocked. Validation fails closed as
   `PLAN_TASK_COMPLETION_INVALID`; verification and review do not start, and a
   normally returned invalid implementation result may be retried after the
-  evidence is corrected without editing the approved plan.
+  evidence is corrected without editing the approved plan. A blocked or
+  escalation result keeps its gate; its completion diagnostics are retained and
+  nothing is published.
 - A legacy orchestrated run without the structured ledger keeps its persisted
   lifecycle and next action, but task completion is `legacy`, `unknown`, or
   `inconsistent`; report prose is never retrofitted into canonical `N/N`.
@@ -107,17 +118,28 @@ an orchestrated approval, unlike choosing a compliant implementation under it.
   plan.
 
 
-### Opt-in verification obligations
+### Task verification obligations
 
-A new strict plan relying on ADR-0043 contains exactly one fenced
-`banzai-verification-obligations/v1` JSON inventory inside its approved bytes.
-It carries schema/schemaVersion, complete=true, planRemainderSha256 and an ordered
-checks array of configured check IDs and fresh/equivalent_evidence modes. The
-remainder digest covers every byte outside that complete fence. The owner reviews
-completeness and consistency with all prose commitments before bundle approval.
-Missing, duplicated, stale, ambiguous or contradictory inventories deny reuse;
-legacy plans retain their original obligations. Release checks are always fresh.
-Changing the inventory requires normal plan approval; no prose claim upgrades it.
+A new strict task plan contains exactly one fenced
+`banzai-verification-obligations/v2` JSON inventory inside its approved bytes.
+It carries schema/schemaVersion, complete=true, planRemainderSha256, exact
+self-contained check descriptors and an explicit absence rationale when empty.
+The remainder digest covers every byte outside that complete fence. The owner
+reviews requirement coverage, permitted future tooling, descriptors and execution
+scope before approving the complete bundle. Discovery is information, not
+execution permission, and no configured profile catalogue is required.
+
+Mandatory checks cannot be removed, replaced or weakened by phase candidates.
+Permitted supplemental checks remain separate from approved bytes. A changed
+mandatory obligation follows the existing plan approval path. Equivalent evidence
+still requires the shared owner's current applicability decision and direct
+physical origin under ADR-0043; release checks always run fresh. Missing,
+duplicated, stale or contradictory inventories cannot authorize task verification.
+
+The profile-derived `banzai-verification-obligations/v1` format remains historical:
+retain its original meaning when inspecting old artifacts; do not add it to a new
+task plan or combine it with v2. Historical decoding does not authorize old-run
+continuation or migration.
 
 Equivalent verification does not replace task-completion validation. Preserve the
 canonical task records and exact report projection, immutable approved artifacts,

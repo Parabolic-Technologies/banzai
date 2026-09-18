@@ -39,6 +39,14 @@ export function renderDoctorText(report: DoctorReport): string {
     lines.push(
       `  [${item.status.toUpperCase()}] ${item.id} (${item.category}): ${item.message}`
     );
+    for (const remedy of item.fixes) {
+      lines.push(`    Fix: ${remedy.action} (${remedy.documentation})`);
+    }
+    for (const role of item.roles) {
+      lines.push(`    ${role.role} (${role.vendor}): ${role.state}`);
+      for (const remedy of role.fixes)
+        lines.push(`      Fix: ${remedy.action} (${remedy.documentation})`);
+    }
   }
   lines.push(
     `Summary: passed=${report.summary.passed}, warnings=${report.summary.warnings}, failed=${report.summary.failed}, skipped=${report.summary.skipped}`

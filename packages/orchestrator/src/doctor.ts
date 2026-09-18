@@ -1,3 +1,4 @@
+import { validateConfigurationStateEnvelope } from "./configuration-prerequisite.js";
 import { constants } from "node:fs";
 import { access, lstat, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
@@ -24,7 +25,8 @@ import {
 import { assertContractParity } from "./contracts.js";
 import {
   combineInstructionParity,
-  inspectInstructionParity,
+  inspectRoleInstructionParity,
+  instructionParityFixes,
   instructionParityDiagnostic,
   instructionPhasesForRole
 } from "./phase-instructions.js";
@@ -38,11 +40,7 @@ import type {
 import { inspectBoundWork } from "./artifact-storage.js";
 import type { ArtifactBoundWork } from "./artifact-storage.js";
 import { parseConfig } from "./validation.js";
-import {
-  assessVerificationProfiles,
-  detectProjectTypes,
-  flattenVerificationCommands
-} from "./verification.js";
+import { inspectVerificationProject } from "./verification.js";
 
 export type DoctorCheckCategory =
   | "repository"
@@ -59,6 +57,28 @@ export interface DoctorCheck {
   category: DoctorCheckCategory;
   status: DoctorCheckStatus;
   message: string;
+  fixes: DoctorFix[];
+  roles: DoctorInstructionRole[];
+}
+
+export interface DoctorFix {
+  action: string;
+  documentation: string;
+}
+
+export interface DoctorInstructionRole {
+  role: "planner" | "implementer" | "reviewer";
+  vendor: "codex" | "claude";
+  state:
+    | "not_applicable"
+    | "verified"
+    | "mismatch"
+    | "bounded_failure"
+    | "unverifiable";
+  resourceIds: string[];
+  mismatched: string[];
+  unavailable: string[];
+  fixes: DoctorFix[];
 }
 
 export interface DoctorSummary {
@@ -69,8 +89,8 @@ export interface DoctorSummary {
 }
 
 export interface DoctorReport {
-  schema: "banzai-doctor/v3";
-  schemaVersion: 3;
+  schema: "banzai-doctor/v5";
+  schemaVersion: 5;
   ready: boolean;
   projectTypes: VerificationProjectType[];
   summary: DoctorSummary;
@@ -171,9 +191,11 @@ function check(
   id: string,
   category: DoctorCheckCategory,
   status: DoctorCheckStatus,
-  message: string
+  message: string,
+  fixes: DoctorFix[] = [],
+  roles: DoctorInstructionRole[] = []
 ): DoctorCheck {
-  return { id, category, status, message };
+  return { id, category, status, message, fixes, roles };
 }
 
 function summary(checks: readonly DoctorCheck[]): DoctorSummary {
@@ -274,7 +296,11 @@ function configVersionCheck(document: unknown): DoctorCheck {
       "Configuration schema version 1 is legacy and requires manual migration."
     );
   }
-  if (document.schemaVersion !== 2 && document.schemaVersion !== 3) {
+  if (
+    document.schemaVersion !== 2 &&
+    document.schemaVersion !== 3 &&
+    document.schemaVersion !== 4
+  ) {
     return check(
       "config.version",
       "config",
@@ -286,7 +312,7 @@ function configVersionCheck(document: unknown): DoctorCheck {
     "config.version",
     "config",
     "pass",
-    "Configuration uses schema version 2 and the supported contract version."
+    `Configuration uses schema version ${document.schemaVersion} and the supported contract version.`
   );
 }
 
@@ -345,8 +371,8 @@ async function claudeInstructionsCheck(
     return check(
       "claude.instructions",
       "config",
-      "warning",
-      "Instruction resource parity is unverifiable without a valid configuration."
+      "skipped",
+      "Instruction comparison is skipped without a valid configuration."
     );
   let directory: string | null;
   try {
@@ -362,31 +388,47 @@ async function claudeInstructionsCheck(
     return check(
       "claude.instructions",
       "config",
-      "warning",
-      "Instruction resource parity is unverifiable because the invocation environment cannot be verified."
+      "skipped",
+      "Instruction comparison is skipped because structural Claude scope validation failed."
     );
   }
-  const results = await Promise.all(
-    MODEL_ROLES.map((role) =>
-      inspectInstructionParity(
-        (vendorFor(config.models[role].executable) ?? FALLBACK_VENDOR[role]) ===
-          "claude"
-          ? directory
-          : null,
+  const roles = await Promise.all(
+    MODEL_ROLES.map(async (role): Promise<DoctorInstructionRole> => {
+      const vendor =
+        vendorFor(config.models[role].executable) ?? FALLBACK_VENDOR[role];
+      const parity = await inspectRoleInstructionParity(
+        vendor,
+        directory,
         instructionPhasesForRole(role, null) ?? []
-      )
-    )
+      );
+      return {
+        role,
+        vendor,
+        ...parity,
+        fixes: instructionParityFixes(
+          parity,
+          config.claudeEnvironment.mode === "ambient"
+        )
+      };
+    })
   );
-  const parity = combineInstructionParity(results);
+  const parity = combineInstructionParity(roles);
+  const fixes = [
+    ...new Map(
+      roles.flatMap((role) => role.fixes).map((fix) => [fix.action, fix])
+    ).values()
+  ];
   return check(
     "claude.instructions",
     "config",
-    parity.state === "verified"
+    parity.state === "verified" || parity.state === "not_applicable"
       ? "pass"
       : parity.state === "mismatch"
         ? "fail"
         : "warning",
-    instructionParityDiagnostic(parity)
+    instructionParityDiagnostic(parity),
+    fixes,
+    roles
   );
 }
 
@@ -489,7 +531,16 @@ async function configuredExecutableCheck(
       id,
       "executables",
       "fail",
-      `${missing} of ${uniqueCommands.length} configured ${subject} executables are unavailable.`
+      `${missing} of ${uniqueCommands.length} configured ${subject} executables are unavailable.`,
+      id === "executables.verification"
+        ? [
+            {
+              action:
+                "Run banzai verify list to identify the configured executables; restore their installation or PATH, or use banzai verify edit <id> to select an available executable.",
+              documentation: "documentation/verification-examples.md"
+            }
+          ]
+        : []
     );
   }
   return check(
@@ -583,7 +634,7 @@ async function activeRunCheck(repoRoot: string): Promise<DoctorCheck> {
   }
   if (
     !isRecord(state) ||
-    ![1, 2, 3, 4, 5].includes(state.schemaVersion as number) ||
+    ![1, 2, 3, 4, 5, 6, 7, 8].includes(state.schemaVersion as number) ||
     typeof state.runId !== "string" ||
     typeof state.repoRoot !== "string" ||
     typeof state.status !== "string" ||
@@ -596,8 +647,15 @@ async function activeRunCheck(repoRoot: string): Promise<DoctorCheck> {
       "The referenced run state uses an unsupported structure."
     );
   }
-  if (state.schemaVersion === 4 || state.schemaVersion === 5) {
+  if (
+    state.schemaVersion === 4 ||
+    state.schemaVersion === 5 ||
+    state.schemaVersion === 6 ||
+    state.schemaVersion === 7 ||
+    state.schemaVersion === 8
+  ) {
     try {
+      validateConfigurationStateEnvelope(state);
       await inspectBoundWork(
         repoRoot,
         state.artifactBinding as ArtifactBoundWork
@@ -858,10 +916,9 @@ export async function inspectDoctor(
   checks.push(await claudePermissionsCheck(repoRoot, config, dependencies));
 
   let projectTypes: VerificationProjectType[] = [];
-  let projectTypesReadable = false;
   try {
-    projectTypes = await detectProjectTypes(repoRoot);
-    projectTypesReadable = true;
+    const inspection = await inspectVerificationProject(repoRoot);
+    projectTypes = inspection.projectTypes;
     checks.push(
       check(
         "project.types",
@@ -876,121 +933,28 @@ export async function inspectDoctor(
         "project.types",
         "verification",
         "fail",
-        "Project marker evidence is unreadable."
+        "Project marker evidence is unreadable or invalid.",
+        [
+          {
+            action:
+              "Restore readable, valid root project metadata, then run banzai doctor.",
+            documentation: "documentation/verification-examples.md"
+          }
+        ]
       )
     );
   }
 
-  if (!projectTypesReadable) {
-    checks.push(
-      check(
-        "verification.profiles",
-        "verification",
-        "skipped",
-        "Profile coverage requires readable project marker evidence."
-      ),
-      check(
-        "verification.substantive",
-        "verification",
-        "skipped",
-        "Substantive verification requires readable project marker evidence."
-      )
-    );
-  } else if (config === null) {
-    checks.push(
-      check(
-        "verification.profiles",
-        "verification",
-        "skipped",
-        "Explicit profile coverage requires a valid configuration."
-      ),
-      check(
-        "verification.substantive",
-        "verification",
-        "skipped",
-        "Substantive verification requires a valid configuration."
-      )
-    );
-  } else {
-    const assessment = assessVerificationProfiles(config, projectTypes);
-    if (!assessment.explicit) {
-      checks.push(
-        check(
-          "verification.profiles",
-          "verification",
-          "fail",
-          "Legacy configuration has no explicit project-type profiles."
-        ),
-        check(
-          "verification.substantive",
-          "verification",
-          "skipped",
-          "Legacy commands cannot prove substantive project-type coverage."
-        )
-      );
-    } else {
-      const coveredTypes = projectTypes.filter(
-        (projectType) =>
-          !assessment.missingProjectTypes.includes(projectType) &&
-          !assessment.hygieneOnlyProjectTypes.includes(projectType)
-      );
-      if (
-        assessment.missingProjectTypes.length > 0 ||
-        assessment.hygieneOnlyProjectTypes.length > 0
-      ) {
-        checks.push(
-          check(
-            "verification.profiles",
-            "verification",
-            "fail",
-            `Missing profiles for: ${assessment.missingProjectTypes.join(", ") || "none"}; hygiene-only detected types: ${assessment.hygieneOnlyProjectTypes.join(", ") || "none"}; covered: ${coveredTypes.join(", ") || "none"}; unused profiles: ${assessment.extraProfileIds.join(", ") || "none"}.`
-          )
-        );
-      } else if (assessment.extraProfileIds.length > 0) {
-        checks.push(
-          check(
-            "verification.profiles",
-            "verification",
-            "warning",
-            `All detected types are covered; unused profiles: ${assessment.extraProfileIds.join(", ")}.`
-          )
-        );
-      } else {
-        checks.push(
-          check(
-            "verification.profiles",
-            "verification",
-            "pass",
-            projectTypes.length === 1
-              ? "The detected project type has explicit profile coverage."
-              : `All ${projectTypes.length} detected project types have explicit profile coverage.`
-          )
-        );
-      }
-      checks.push(
-        assessment.substantiveCommandCount > 0
-          ? check(
-              "verification.substantive",
-              "verification",
-              "pass",
-              `${assessment.substantiveCommandCount} substantive verification ${assessment.substantiveCommandCount === 1 ? "command is" : "commands are"} configured for detected project types.`
-            )
-          : assessment.totalSubstantiveCommandCount > 0
-            ? check(
-                "verification.substantive",
-                "verification",
-                "fail",
-                `No substantive verification command is configured for detected project types; ${assessment.totalSubstantiveCommandCount} substantive ${assessment.totalSubstantiveCommandCount === 1 ? "command is" : "commands are"} configured for unused project profiles.`
-              )
-            : check(
-                "verification.substantive",
-                "verification",
-                "fail",
-                "No substantive verification command is configured for detected project types or unused project profiles."
-              )
-      );
-    }
-  }
+  checks.push(
+    check(
+      "verification.task",
+      "verification",
+      config === null ? "skipped" : "pass",
+      config === null
+        ? "Task verification policy requires valid configuration."
+        : "Checks are selected per task; profiles and project-type coverage are not prerequisites."
+    )
+  );
 
   checks.push(
     await configuredExecutableCheck(
@@ -1009,7 +973,9 @@ export async function inspectDoctor(
       "executables.verification",
       config === null
         ? null
-        : flattenVerificationCommands(config).map((command) => command.command),
+        : (config.verification.taskPolicy?.required ?? []).map(
+            (command) => command.command
+          ),
       repoRoot,
       dependencies
     ),
@@ -1025,8 +991,8 @@ export async function inspectDoctor(
 
   const reportSummary = summary(checks);
   return {
-    schema: "banzai-doctor/v3",
-    schemaVersion: 3,
+    schema: "banzai-doctor/v5",
+    schemaVersion: 5,
     ready: reportSummary.failed === 0,
     projectTypes,
     summary: reportSummary,

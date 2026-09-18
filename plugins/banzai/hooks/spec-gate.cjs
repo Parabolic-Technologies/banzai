@@ -41,6 +41,12 @@ const crypto = require('crypto');
 const os = require('os');
 const path = require('path');
 
+// Newest run-state schema this hook can interpret; it tracks the runner's
+// RUN_STATE_SCHEMA_VERSION. Codex and Claude Code refresh an installed plugin
+// cache only on a version change, so a newer state means this hook is stale,
+// not that the run is legacy.
+const NEWEST_RUN_STATE_SCHEMA = 8;
+
 function deferAndExit() {
   // No stdout + exit 0 => Claude Code falls through to normal permission flow.
   process.exit(0);
@@ -288,10 +294,14 @@ if (runnerMode) {
     }
     const controlRoot = path.join(projectRoot, '.banzai');
     let privateWrites = new Set();
-    if (state.schemaVersion === 4 || state.schemaVersion === 5) {
+    if (state.schemaVersion === 8 || state.schemaVersion === 4 || state.schemaVersion === 5 || state.schemaVersion === 6 || (state.schemaVersion === 7 && state.artifactBinding !== undefined)) {
       const storage = await import('../lib/artifact-storage.mjs');
       const bound = await storage.inspectBoundWork(projectRoot, state.artifactBinding);
-      if (state.schemaVersion === 5 && bound.binding.schemaVersion !== 2) throw new Error('verification-enabled state requires its original v2 binding');
+      if ((state.schemaVersion === 5 || state.schemaVersion === 8) && bound.binding.schemaVersion !== 2) throw new Error('verification-enabled state requires its original v2 binding');
+      if (state.schemaVersion === 6 || state.schemaVersion === 7 || state.schemaVersion === 8) {
+        const readers = await import('../lib/artifact-readers.mjs');
+        readers.validateConfigurationStateEnvelope(state);
+      }
       const roles = bound.binding.artifacts;
       const phase = state.activeAttempt?.kind;
       if (phase === 'selection' || state.status === 'selecting') throw new Error('workflow selection is read-only');
@@ -308,6 +318,9 @@ if (runnerMode) {
         return privateWrites.has(relative) || !relative.startsWith('.banzai/') && isDocArtifact(relative);
       })) runnerDecision('allow', 'banzai spec-gate: exact planning artifacts are writable during planning.');
     } else if (state.artifactBinding !== undefined) {
+      if (typeof state.schemaVersion === 'number' && state.schemaVersion > NEWEST_RUN_STATE_SCHEMA) {
+        throw new Error(`run state schema ${state.schemaVersion} is newer than this installed Banzai hook supports (up to ${NEWEST_RUN_STATE_SCHEMA}); update the Banzai plugin installed for this model client to the banzai CLI release (compare \`banzai --version\` with \`banzai --plugin-version\`)`);
+      }
       throw new Error('legacy run cannot carry private artifact authority');
     }
     if (state.status === 'reviewing' || state.activeAttempt?.kind === 'review') {

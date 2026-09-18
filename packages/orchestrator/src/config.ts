@@ -5,7 +5,8 @@ import type { ModelRole } from "./models.js";
 import {
   CONTRACT_VERSION,
   type ModelSettings,
-  type OrchestratorConfig
+  type OrchestratorConfig,
+  type VerificationProfile
 } from "./types.js";
 import { parseConfig } from "./validation.js";
 
@@ -62,6 +63,16 @@ export const DEFAULT_CONFIG: OrchestratorConfig = {
   maxFixCycles: 3
 };
 
+/** New-project wire configuration. Legacy defaults above support old profile operations. */
+export const DEFAULT_TASK_CONFIG = {
+  schemaVersion: 4 as const,
+  contractVersion: CONTRACT_VERSION,
+  models: structuredClone(DEFAULT_CONFIG.models),
+  claudeEnvironment: structuredClone(DEFAULT_CONFIG.claudeEnvironment),
+  context: structuredClone(DEFAULT_CONFIG.context),
+  maxFixCycles: DEFAULT_CONFIG.maxFixCycles
+};
+
 async function pathExists(filePath: string): Promise<boolean> {
   try {
     await access(filePath);
@@ -111,13 +122,20 @@ interface JsonValueReplacement {
   value: string;
 }
 
+interface JsonValueLocation {
+  start: number;
+  end: number;
+  propertyStart?: number;
+}
+
 function jsonPathKey(pathParts: readonly string[]): string {
   return JSON.stringify(pathParts);
 }
 
 function replaceJsonValues(
   raw: string,
-  replacements: ReadonlyMap<string, string>
+  replacements: ReadonlyMap<string, string>,
+  locations?: Map<string, JsonValueLocation>
 ): string {
   let index = 0;
   const located = new Map<string, JsonValueReplacement>();
@@ -164,6 +182,7 @@ function replaceJsonValues(
     }
     while (index < raw.length) {
       skipWhitespace();
+      const propertyStart = index;
       const key = parseStringToken();
       skipWhitespace();
       if (raw[index] !== ":") {
@@ -171,6 +190,8 @@ function replaceJsonValues(
       }
       index += 1;
       parseValue([...pathParts, key]);
+      const location = locations?.get(jsonPathKey([...pathParts, key]));
+      if (location) location.propertyStart = propertyStart;
       skipWhitespace();
       if (raw[index] === "}") {
         index += 1;
@@ -227,6 +248,10 @@ function replaceJsonValues(
     }
 
     const key = jsonPathKey(pathParts);
+    if (locations) {
+      if (locations.has(key)) invalidSource();
+      locations.set(key, { start, end: index });
+    }
     const replacement = replacements.get(key);
     if (replacement !== undefined) {
       located.set(key, { start, end: index, value: replacement });
@@ -249,6 +274,298 @@ function replaceJsonValues(
       replacement.value +
       updated.slice(replacement.end);
   }
+  return updated;
+}
+
+function jsonLocations(raw: string): Map<string, JsonValueLocation> {
+  const locations = new Map<string, JsonValueLocation>();
+  replaceJsonValues(raw, new Map(), locations);
+  return locations;
+}
+
+function requiredConfigValue<T>(value: T | undefined): T {
+  if (value === undefined)
+    throw new BanzaiError(
+      "INVALID_CONFIG",
+      "Configuration token evidence is incomplete."
+    );
+  return value;
+}
+
+function editJsonProperty(
+  raw: string,
+  parent: string[],
+  key: string,
+  value: string | undefined
+): string {
+  const locations = jsonLocations(raw);
+  const object = locations.get(jsonPathKey(parent));
+  if (!object || raw[object.start] !== "{")
+    throw new BanzaiError(
+      "INVALID_CONFIG",
+      "The selected configuration object is unavailable."
+    );
+  const target = locations.get(jsonPathKey([...parent, key]));
+  const children = [...locations.entries()]
+    .filter(([encoded]) => {
+      const parts = JSON.parse(encoded) as string[];
+      return (
+        parts.length === parent.length + 1 &&
+        parent.every((part, index) => parts[index] === part)
+      );
+    })
+    .map(([, location]) => location)
+    .sort((a, b) => a.start - b.start);
+  if (target && value !== undefined)
+    return raw.slice(0, target.start) + value + raw.slice(target.end);
+  if (target) {
+    const position = children.indexOf(target);
+    const previous = children[position - 1];
+    const next = children[position + 1];
+    const start = previous?.end ?? requiredConfigValue(target.propertyStart);
+    const end = previous ? target.end : (next?.propertyStart ?? target.end);
+    return raw.slice(0, start) + raw.slice(end);
+  }
+  if (value === undefined) return raw;
+  const at = children.at(-1)?.end ?? object.start + 1;
+  return (
+    raw.slice(0, at) +
+    (children.length ? "," : "") +
+    JSON.stringify(key) +
+    ":" +
+    value +
+    raw.slice(at)
+  );
+}
+
+function editJsonArray(
+  raw: string,
+  parent: string[],
+  values: string[]
+): string {
+  const locations = jsonLocations(raw);
+  const array = locations.get(jsonPathKey(parent));
+  if (!array || raw[array.start] !== "[")
+    throw new BanzaiError(
+      "INVALID_CONFIG",
+      "The selected configuration list is unavailable."
+    );
+  const existing: JsonValueLocation[] = [];
+  for (let i = 0; locations.has(jsonPathKey([...parent, String(i)])); i++)
+    existing.push(
+      requiredConfigValue(locations.get(jsonPathKey([...parent, String(i)])))
+    );
+  if (existing.length === values.length) {
+    const edits = new Map<string, string>();
+    values.forEach((value, i) => {
+      const original = requiredConfigValue(existing[i]);
+      if (value !== raw.slice(original.start, original.end))
+        edits.set(jsonPathKey([...parent, String(i)]), value);
+    });
+    return replaceJsonValues(raw, edits);
+  }
+  const originals = existing.map(({ start, end }) => raw.slice(start, end));
+  let prefix = 0;
+  while (
+    prefix < Math.min(originals.length, values.length) &&
+    originals[prefix] === values[prefix]
+  )
+    prefix++;
+  let suffix = 0;
+  while (
+    suffix < Math.min(originals.length, values.length) - prefix &&
+    originals[originals.length - 1 - suffix] ===
+      values[values.length - 1 - suffix]
+  )
+    suffix++;
+  const left = existing[prefix - 1];
+  const right = existing[existing.length - suffix];
+  const changed = values.slice(prefix, values.length - suffix);
+  const leading = raw.slice(
+    array.start + 1,
+    existing[0]?.start ?? array.end - 1
+  );
+  const separator =
+    existing.length > 1
+      ? raw.slice(
+          requiredConfigValue(existing[0]).end,
+          requiredConfigValue(existing[1]).start
+        )
+      : "," + leading;
+  // Keep every retained element and its unaffected separators verbatim. Only
+  // the contiguous structural edit and its necessary adjacent separator move.
+  if (changed.length === 0) {
+    const start = right
+      ? (existing[prefix]?.start ?? right.start)
+      : (left?.end ?? array.start + 1);
+    const end = right ? right.start : (existing.at(-1)?.end ?? array.end - 1);
+    return raw.slice(0, start) + raw.slice(end);
+  }
+  const start = existing[prefix]?.start ?? left?.end ?? array.start + 1;
+  const end = suffix
+    ? (existing[existing.length - suffix - 1]?.end ?? start)
+    : (existing.at(-1)?.end ?? start);
+  // An insertion has no old elements; leave their separator on its original side.
+  const insertion = prefix + suffix === existing.length;
+  const at = insertion && right ? right.start : start;
+  const until = insertion ? at : end;
+  return (
+    raw.slice(0, at) +
+    (insertion && left && !right ? separator : "") +
+    (!existing.length ? leading : "") +
+    changed.join(separator) +
+    (insertion && right ? separator : "") +
+    raw.slice(until)
+  );
+}
+
+export type VerificationConfigEdit =
+  | {
+      operation: "add" | "edit";
+      profile: VerificationProfile;
+      clearBootstrap: boolean;
+      commandOrigins?: (number | null)[];
+    }
+  | { operation: "remove"; profileId: string; clearBootstrap: false }
+  | { operation: "bootstrap"; value: boolean | undefined };
+
+/** Produces reviewable bytes only; the exclusive transaction owner publishes them. */
+export function editVerificationConfigBytes(
+  raw: string,
+  edit: VerificationConfigEdit
+): string {
+  const config = parseConfig(JSON.parse(raw) as unknown);
+  if (config.schemaVersion === 1)
+    throw new BanzaiError(
+      "VERIFICATION_LEGACY_CONFIG",
+      "Guided changes require schema 2 or 3. Follow documentation/orchestrator.md#project-verification-readiness for the legacy migration."
+    );
+  let updated = raw;
+  if (edit.operation === "bootstrap") {
+    updated = editJsonProperty(
+      updated,
+      ["verification"],
+      "bootstrap",
+      edit.value === undefined ? undefined : JSON.stringify(edit.value)
+    );
+  } else {
+    const locations = jsonLocations(raw);
+    const profiles = config.verification.profiles;
+    const selectedId =
+      edit.operation === "remove" ? edit.profileId : edit.profile.id;
+    const selected = profiles.findIndex((profile) => profile.id === selectedId);
+    const texts = profiles.map((_, index) => {
+      const location = requiredConfigValue(
+        locations.get(jsonPathKey(["verification", "profiles", String(index)]))
+      );
+      return raw.slice(location.start, location.end);
+    });
+    if (edit.operation === "add") {
+      if (selected >= 0)
+        throw new BanzaiError(
+          "VERIFICATION_PROFILE_CONFLICT",
+          "Profile ID is already configured. Request a fresh preview."
+        );
+      texts.push(JSON.stringify(edit.profile));
+    } else {
+      if (selected < 0)
+        throw new BanzaiError(
+          "VERIFICATION_PROFILE_MISSING",
+          "The selected profile no longer exists. Run banzai verify list."
+        );
+      if (edit.operation === "remove") {
+        if (profiles.length === 1)
+          throw new BanzaiError(
+            "VERIFICATION_PROFILE_REQUIRED",
+            "The final verification profile cannot be removed. Add or edit a profile first."
+          );
+        texts.splice(selected, 1);
+      } else {
+        const original = requiredConfigValue(profiles[selected]);
+        if (original.projectType !== edit.profile.projectType)
+          throw new BanzaiError(
+            "VERIFICATION_PROFILE_CONFLICT",
+            "Profile editing must preserve the project type."
+          );
+        const text = requiredConfigValue(texts[selected]);
+        const commandLocations = jsonLocations(text);
+        const used = new Set<number>();
+        if (
+          edit.commandOrigins &&
+          (edit.commandOrigins.length !== edit.profile.commands.length ||
+            edit.commandOrigins.some(
+              (value) =>
+                value !== null &&
+                (!Number.isSafeInteger(value) ||
+                  value < 0 ||
+                  value >= original.commands.length)
+            ) ||
+            new Set(edit.commandOrigins.filter((value) => value !== null))
+              .size !==
+              edit.commandOrigins.filter((value) => value !== null).length)
+        )
+          throw new BanzaiError(
+            "VERIFICATION_PROFILE_CONFLICT",
+            "Command origins must identify distinct original entries."
+          );
+        const commandTexts = edit.profile.commands.map((command, index) => {
+          let priorIndex = edit.commandOrigins
+            ? (edit.commandOrigins[index] ?? -1)
+            : original.commands.findIndex(
+                (candidate, i) =>
+                  !used.has(i) &&
+                  (command.id !== undefined
+                    ? candidate.id === command.id
+                    : JSON.stringify(candidate) === JSON.stringify(command))
+              );
+          // Callers editing and moving entries supply explicit original ordinals.
+          // Never attach another command's unknown fields to a newly assigned ID.
+          if (
+            !edit.commandOrigins &&
+            config.schemaVersion === 2 &&
+            priorIndex < 0 &&
+            index < original.commands.length &&
+            !used.has(index)
+          )
+            priorIndex = index;
+          if (priorIndex < 0) return JSON.stringify(command);
+          used.add(priorIndex);
+          const location = requiredConfigValue(
+            commandLocations.get(jsonPathKey(["commands", String(priorIndex)]))
+          );
+          let commandText = text.slice(location.start, location.end);
+          const document = JSON.parse(commandText) as Record<string, unknown>;
+          for (const [field, value] of Object.entries(command)) {
+            // Defaults do not justify rewriting an unselected representation.
+            if (
+              document[field] === undefined &&
+              ((field === "evidence" && value === "fresh") ||
+                (field === "ignoreExplanatory" && value === false))
+            )
+              continue;
+            if (JSON.stringify(document[field]) !== JSON.stringify(value))
+              commandText = editJsonProperty(
+                commandText,
+                [],
+                field,
+                JSON.stringify(value)
+              );
+          }
+          return commandText;
+        });
+        texts[selected] = editJsonArray(text, ["commands"], commandTexts);
+      }
+    }
+    updated = editJsonArray(updated, ["verification", "profiles"], texts);
+    if (edit.clearBootstrap)
+      updated = editJsonProperty(
+        updated,
+        ["verification"],
+        "bootstrap",
+        undefined
+      );
+  }
+  parseConfig(JSON.parse(updated) as unknown);
   return updated;
 }
 
@@ -352,7 +669,7 @@ export async function initializeConfig(
   if (!(await pathExists(configPath))) {
     await writeFile(
       configPath,
-      `${JSON.stringify(DEFAULT_CONFIG, null, 2)}\n`,
+      `${JSON.stringify(DEFAULT_TASK_CONFIG, null, 2)}\n`,
       {
         encoding: "utf8",
         flag: "wx"

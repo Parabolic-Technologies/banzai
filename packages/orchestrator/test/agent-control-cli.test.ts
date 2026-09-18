@@ -114,7 +114,8 @@ function status(state = currentState()): WorkflowStatus {
       completed: null,
       total: null,
       diagnostics: []
-    }
+    },
+    completionPublication: null
   };
 }
 
@@ -194,6 +195,10 @@ function escalationState(): RunState {
 }
 
 class FakeRunner implements AgentControlRunner {
+  async answerConfigurationPrerequisite(): Promise<RunState> {
+    throw new Error("Unexpected configuration prerequisite answer");
+  }
+
   readonly starts: { slug: string; request: string }[] = [];
   readonly answers: {
     input: { answers: string[]; decidedBy: string };
@@ -341,7 +346,7 @@ test("capabilities and no-active-run status emit one canonical JSON document", a
   assert.equal(capabilityOutput.length, 1);
   assert.equal(
     (JSON.parse(capabilityOutput[0] ?? "") as { schema: string }).schema,
-    "banzai-agent-capabilities/v3"
+    "banzai-agent-capabilities/v6"
   );
 
   const runner = new FakeRunner();
@@ -357,8 +362,8 @@ test("capabilities and no-active-run status emit one canonical JSON document", a
     "default-user"
   );
   assert.deepEqual(JSON.parse(statusOutput[0] ?? ""), {
-    schema: "banzai-agent-status/v2",
-    schemaVersion: 2,
+    schema: "banzai-agent-status/v5",
+    schemaVersion: 5,
     activeRun: null
   });
 });

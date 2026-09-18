@@ -29,6 +29,21 @@ For other guides, see the [documentation index](README.md).
 - [Failure Recovery](#failure-recovery)
 - [Local State](#local-state)
 
+## Task verification
+
+New tasks use task-scoped verification and private work binding v2. They do not
+require profiles, bootstrap, project-type coverage, or a verification setup gate.
+Strict checks belong to the approved plan; lite checks use the delegated task and
+current process permissions. Optional project policy may add requirements and
+execution limits. The local runner does not inherit the model CLI sandbox.
+
+Actual checks and their outcomes are retained as runner evidence. Missing unrelated
+scripts are not requirements; failed or absent mandatory checks prevent completion.
+Strict independent review assesses meaningful test coverage and weakening of
+assertions. See [task verification](verification-examples.md). Earlier profile and
+configuration-gate details below describe legacy utilities and retained historical
+formats. Existing runs are not migration targets; begin new work for this model.
+
 ## Workflow Reference
 
 The `banzai` CLI. It first uses the configured planning model to select a
@@ -152,12 +167,12 @@ policy threshold. Boundary fakes are valid when assertions exercise the real
 contract; tests that mirror private call order or duplicate existing evidence
 are not useful assurance.
 
-Implementation and fix prompts contain the configured profiles in exact profile
-and command order, including argv and timeout. Builders run focused affected
-tests and leave supplied full-scope commands to the runner's post-phase gate. If
-the manifest's applicable final suite is absent from the supplied profiles, the
-builder runs it once and records the readiness gap. A structured
-`requestedVerification` entry never authorizes an unconfigured command.
+Implementation and fix prompts describe task verification authority. Builders
+run focused affected tests and leave the selected final checks to the runner.
+Strict obligations are part of the approved plan; phase-result v4 candidates
+add checks separately, within task permissions. Discovery and the legacy
+`requestedVerification` prose field confer no execution authority. Missing
+tooling is created only within the authorized task scope.
 
 Independent review treats successful current runner evidence as authoritative
 by default. It may run a focused reproduction or repeat missing, stale,
@@ -434,6 +449,26 @@ cancellation fraction is not itself the objective. See
 
 ## Commands
 
+### Versions
+
+```bash
+banzai --version          # Running orchestrator version
+banzai -v                # Same as --version
+banzai --plugin-version   # Installed Banzai versions in Codex and Claude Code
+banzai -pv               # Same as --plugin-version
+```
+
+These commands work outside a Git repository and require no project configuration.
+The long options also accept an em dash (`—version`, `—plugin-version`). Pass
+each version option alone. `--version` prints the package version on one line.
+`--plugin-version` prints one labeled line per client, including disabled
+installations and multiple distinct versions when present. It uses local client
+inventories, preserving build metadata; marketplace source files do not determine
+the installed version. Missing installations show `not installed`; failed or
+unsupported discovery shows `unavailable`. If neither client reports a version,
+the command exits nonzero. Plugin discovery requires the clients on `PATH` and
+does not launch a model or install anything.
+
 ```text
 banzai
 banzai interactive
@@ -476,28 +511,34 @@ reviewer phases never invoke it.
 
 `banzai control capabilities` is valid outside a Git repository and performs no
 repository discovery, adapter construction, vendor/authentication call, lock,
-recovery, or write. It emits canonical `banzai-agent-capabilities/v3` JSON with
-schema version 3, control contract `3.0.0`, the package-derived Banzai
+recovery, or write. It emits canonical `banzai-agent-capabilities/v6` JSON with
+schema version 6, control contract `6.0.0`, the package-derived Banzai
 release-train version, umbrella contract, the exact supported non-TTY operation
-set, and an ordered `inputSchemas` list per operation. Capability and doctor
+set, and an ordered `inputSchemas` list per operation. It also declares the
+runner-owned completion publication protocol (`banzai-completion-protocol/v1`),
+its durable stages, the closed refusal codes `COMPLETION_PUBLICATION_IO`,
+`COMPLETION_PUBLICATION_DRIFT` and `COMPLETION_PUBLICATION_INTEGRITY`, and the
+`pending_application` attempt status. Capability and doctor
 output prove neither subscription authentication nor sandbox credential
 visibility. Compatibility still follows these explicit contract and operation
 identities, never the shared release-train value alone.
 
-`banzai control status` emits canonical `banzai-agent-status/v2` JSON. With no
+`banzai control status` emits canonical `banzai-agent-status/v5` JSON. With no
 persisted run, `activeRun` is `null`. Otherwise the allow-list projection
 contains run identity/lifecycle, route, semantic next action, retry and bounded
 recovery eligibility, the pending human gate, approval validity,
-task-completion evidence, bounded verification outcomes, review verdict, and
-review-pass or human-triage completion basis. A terminal `done` or `cancelled`
+task-completion evidence, the bounded completion publication state of the
+active run (publishing attempt and kind, durable stage, closed refusal code and
+publisher identity, or `null`), bounded verification outcomes, review verdict,
+and review-pass or human-triage completion basis. A terminal `done` or `cancelled`
 projection remains available for evidence but does not block an explicitly
 requested new run; only a non-terminal projection does. The status excludes the
 original request, prompts, transcripts, raw model output, environment values,
 secrets, approval digests, raw commands, arguments/logs, absolute repository
-paths, raw `.banzai` paths, and completed consultation history. A current
-`decision_consultation` gate is the only public surface that includes its
-bounded one-to-three-card request because the supervisor needs it for the next
-action.
+paths, raw `.banzai` paths, and completed consultation history. Current consultation and configuration-prerequisite gates expose only the
+bounded request fields needed for their next action. The configuration gate
+includes structured command proposals and repair commands, but no raw config,
+private hashes, continuation internals, or completed decision history.
 
 Start, escalation answer, keyed consultation answer, and recovery accept one
 closed JSON document of at most 64 KiB through direct process stdin. Request
@@ -612,33 +653,37 @@ source map, rejecting staged/working instruction skew.
 ## Project Verification Readiness
 
 For ready-to-adapt snippets and setup guidance, see
-[Verification profile examples](verification-examples.md) and
+[Task verification](verification-examples.md) and
 [Your first Banzai task](getting-started.md).
 
 `banzai doctor` inspects the current Git checkout and writes a deterministic
 human report to stdout. `banzai doctor --json` writes the authoritative
-`banzai-doctor/v3` object instead. It exits 0 exactly when no check failed and
+`banzai-doctor/v5` object instead. It exits 0 exactly when no check failed and
 exits 1 when the checkout is not ready. Warnings, including a live or stale
 valid runner lock, remain visible without changing readiness.
 
 Doctor checks Git, structural project guidance, the supported Node/platform and contract versions, config
 presence and structure, the Claude invocation environment and its tool
-permissions, detected project types, explicit profile coverage, substantive
-commands, configured executable availability, the active-run pointer and
+permissions, detected project types, optional task policy,
+required executable availability, the active-run pointer and
 referenced state, and the runner lock. The report's fixed check
 order, sorted project types, two-space JSON, and final newline are stable for
 automation. Expected readiness findings stay in the selected stdout report;
 unexpected CLI failures go to stderr.
 
-Doctor v3 uses `schemaVersion: 3`. It retains `project.guidance` after
-`repository.git` and inserts `claude.instructions` in category `config`, after
-`claude.environment` and before `claude.permissions`. This checks the applicable
-instruction and hook resource union for configured roles. A confirmed mismatch
-is a failure; unverifiable or bounded-failure evidence is a warning. A mismatch
-wins mixed evidence, then bounded failure, then unverifiable. Configuration and
-structural-plugin failures remain independent. Historical v1/v2 reports retain
-their identities; consumers must recognize v3. There is no legacy-output flag.
-The check is offline, read-only and does not execute a vendor or repair files.
+Doctor v5 uses `schemaVersion: 5`. Every check has ordered `id`, `category`,
+`status`, `message`, `fixes`, and `roles` fields. Failed verification-category
+checks and `executables.verification` include an exact `Fix:` next step and a
+pointer to the verification guide; this does not expand remedies to unrelated
+categories. The schema diagnostic reports the file's actual config version.
+
+`claude.instructions` reports each role: Codex is informational `not_applicable`
+with no remedies; pinned Claude can be `verified`, `mismatch`, or bounded
+`failure`. A mismatch fails readiness. Ambient or unresolved scope is
+`unverifiable` with an ambient remedy only. Rebuild/update remedies apply only
+to mismatch or bounded failure. Default Codex planner/implementer and pinned
+Claude reviewer produce no parity warning when resources match. Historical
+v1-v3 reports retain their identities; consumers must negotiate v5.
 
 Doctor also emits an `authentication.models` advisory: it does not invoke a
 vendor, so authentication readiness is not checked and executable availability
@@ -662,100 +707,24 @@ Project detection is root-only and uses these markers:
 The `custom` fallback requires confirmed absence of every recognized marker.
 If marker metadata or root enumeration fails because of permissions or I/O,
 `project.types` fails, the human projection reports project types as
-unavailable, and dependent profile checks are skipped. Doctor never converts
+unavailable. Doctor never converts
 unreadable evidence into a ready custom project.
 
-Every detected type in a polyglot root needs at least one matching explicit
-profile with a substantive command. A `repository` profile is reserved for
-checkout-wide hygiene and cannot satisfy a detected project type. The exact
-`git` command with `args: ["diff", "--check"]` never counts as substantive,
-regardless of its name or profile. Doctor validates the declared coverage and
-executable paths; it does not claim that a command is a good test and never
-executes it.
+Detected project types are information for selecting checks, not a required
+profile inventory. Missing tests or tooling do not prevent starting a task.
+New schema-4 configuration has no verification catalogue. Optional policy
+can require checks, deny commands and constrain execution; an invalid explicit
+policy fails with its concrete diagnostic.
 
-A schema-version-2 verification section is an ordered profile list. Profiles
-execute in list order and commands execute in their listed order. Each command
-is always spawned directly from `command` plus `args`, without a shell:
+`banzai init` creates `documentation/verification-examples.md` from its bundled
+guide before prompts, including in non-TTY mode. Existing files are preserved.
+After model selection it offers project guidance setup without a verification
+wizard. No project verification command runs during initialization.
 
-```json
-{
-  "schemaVersion": 2,
-  "verification": {
-    "profiles": [
-      {
-        "id": "node",
-        "projectType": "node",
-        "commands": [
-          {
-            "name": "unit tests",
-            "command": "npm",
-            "args": ["test"],
-            "timeoutMs": 600000
-          }
-        ]
-      },
-      {
-        "id": "repository",
-        "projectType": "repository",
-        "commands": [
-          {
-            "name": "git diff check",
-            "command": "git",
-            "args": ["diff", "--check"],
-            "timeoutMs": 120000
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-For a root containing both `package.json` and `composer.json`, declare both
-types explicitly; repository hygiene can remain a third profile:
-
-```json
-{
-  "verification": {
-    "profiles": [
-      {
-        "id": "node",
-        "projectType": "node",
-        "commands": [
-          {
-            "name": "node tests",
-            "command": "npm",
-            "args": ["test"],
-            "timeoutMs": 600000
-          }
-        ]
-      },
-      {
-        "id": "php",
-        "projectType": "php",
-        "commands": [
-          {
-            "name": "php tests",
-            "command": "composer",
-            "args": ["test"],
-            "timeoutMs": 600000
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-Existing schema-version-1 files remain runner-compatible and retain their flat
-command order, but doctor reports their project coverage as legacy and not
-ready. Migration is manual: change `schemaVersion` to 2 and wrap the former
-flat `verification` array in `verification.profiles[0].commands`, adding a
-unique kebab-case `id` and the correct `projectType`. Split commands into
-multiple profiles when the checkout has multiple detected types; keep
-repository-only hygiene in a `repository` profile. Neither config loading,
-`banzai init` on an existing project, `banzai model`, nor doctor performs this
-migration.
+`banzai verify add/edit/remove/list/check` are explicit legacy profile utilities
+for old config formats. They do not configure new-task checks. Existing runs
+are not migration targets; start a new task. Retained historical evidence is
+neither rewritten nor treated as current task authorization.
 
 Model selection preserves this tracked representation byte-for-byte outside
 the exact requested `model`, `executable`, and `effort` JSON value tokens,
@@ -973,10 +942,11 @@ state:
 - eligible retry, including explicit plan-task completion-evidence repair;
 - resume, confirmed cancellation, or exit.
 
-These are the workflow's five decision gates: conditional planning-only decision
+These are the workflow's five existing decision gates: conditional planning-only decision
 consultation, ADR acceptance, plan approval, review triage, and escalation. The
-interface is the only place they are answered, and no other phase boundary asks
-for confirmation.
+interface presents their answers. The runner adds a conditional configuration
+prerequisite after a completed implementation/fix checkpoint; other phase
+boundaries do not ask for confirmation.
 
 When a model requests a recognized human gate, the model process returns
 control to the orchestrator but the interactive session does not exit. Banzai
@@ -1635,19 +1605,55 @@ revised bundle can receive explicit approval. Orchestrated
 implementation and fix prompts keep approved planning artifacts immutable and
 record progress in reports instead of plan checkboxes. New strict
 implementation results carry a versioned canonical task-completion ledger in
-approved `TNNN` order. The **Plan Task Completion** report table and persisted
-summary are deterministic projections validated against approval, repository
-scope, required reports, and each other. Inside the table's Evidence and Gap
-JSON cells the canonical grammar HTML-escapes `&`, `|`, `<`, and `>`
-(`&amp;`, `&#124;`, `&lt;`, `&gt;`) and emits raw JSON rather than Markdown code
-spans. As a narrow compatibility rule for model-authored reports, the decoder
-accepts exactly one complete outer backtick pair around a whole Evidence or Gap
-JSON cell before the normal shape and exact-parity checks; partial and repeated
-wrappers remain invalid. It additionally recovers a row whose JSON cells
-contain a raw unescaped `|` when exactly one rejoin boundary decodes both cells
-to their required shapes, and otherwise fails closed with the offending task
-named in the diagnostic. Implementation and fix-refresh prompts and skills show
-the canonical raw-JSON row and prohibit authoring code-spanned cells. Persisted
+approved `TNNN` order. Under `banzai-completion-protocol/v1` (ADR-0047) the
+model returns that ledger plus report narrative and never authors the
+**Plan Task Completion** table. New strict implementation and fix attempts are
+recorded with attempt schema 4 and the persisted protocol marker. Their
+terminal proof uses `banzai-terminal-attempt-checkpoint/v3` directly in state 8,
+without a legacy transition record. After the vendor returns
+a completed result, the attempt becomes `pending_application` and the runner
+captures the report and workspace identities that the terminal checkpoint
+recorded when the vendor returned. Capture accepts the files on disk only while
+they still equal those exact identities, so a restart before the capture
+manifest or an original was durable can never adopt bytes written after the
+model finished: a mismatch is `COMPLETION_PUBLICATION_DRIFT`, and a completion
+claim with no durable terminal observation is
+`COMPLETION_PUBLICATION_INTEGRITY` rather than a fresh baseline. The runner
+then validates the claims
+(approval digest, task coverage and order, changed-surface evidence paths,
+required reports, gap headings), renders the report's completion section as the
+delimited `banzai-plan-task-completion/v2` region, persists the candidate,
+publishes it into the implementation report, records an immutable publication
+receipt, and only then applies the result and emits
+`completion.publication_applied`. The v2 region keeps every byte outside it,
+replaces exactly one existing legacy or v2 section, encodes every ASCII
+punctuation code point of its JSON cells as a decimal numeric character
+reference, and is decoded exactly once; text inside it confers no authority. A
+stop result (blocked or escalation) is applied as reported with any completion
+diagnostic retained beside the attempt and nothing published. Invalid completed
+claims and structurally ambiguous report input (duplicate or overlapping
+completion sections, malformed delimiters, an unclosed fence) fail the attempt
+with `PLAN_TASK_COMPLETION_INVALID` and `completion.input_rejected`; a runner
+I/O, drift or integrity failure during publication leaves the attempt
+`pending_application` with a closed refusal code, where `resume` retries only
+the deterministic publication, drift requires restoring the exact recorded
+input or proven output before `resume`, and integrity exposes `cancel`. The
+same boundary contains a failure while persisting the refusal state or event:
+it retains the last durable stage, never becomes a model failure, and `resume`
+appends any durable refusal event once before continuing. The
+authority a publication must still match includes the base commit, approval,
+plan tasks, attempt scope, work binding and the implementer configuration
+digest; the configuration is compared explicitly because `.banzai/config.json`
+is excluded from the non-report workspace digest and no other check would see
+it change. A process death between the attempt-completed write and the durable
+summary, cursor and events leaves a completed protocol attempt whose retained
+receipt lets `resume` finish the missing writes idempotently, without another
+model call and without duplicate accounting or events.
+Historical runs keep their model-authored `banzai-plan-task-completion/v1`
+projection and summary schema 1: that decoder still HTML-escapes `&`, `|`, `<`
+and `>` inside the Evidence and Gap JSON cells, accepts exactly one complete
+outer backtick pair around a whole cell, and recovers a row with one raw
+unescaped `|` when exactly one rejoin boundary decodes both cells. Persisted
 state separately owns lifecycle and `nextAction`; legacy runs without the
 ledger retain that lifecycle but report completion as legacy/unknown rather
 than fabricated `N/N`.
@@ -1666,10 +1672,13 @@ decoding on a completion field — for example a gap detail over the 500
 character single-line bound: the runner classified both as completion-evidence
 failures when it wrote the invalid checkpoint, retains what decoded, and may
 request one replacement result without duplicating the attempt or task ledger.
-The repair prompt carries the rejected attempt's persisted diagnostic so the
-replacement names the exact offending field, and the writing prompts state the
-ledger field bounds (500-character single-line strings, at most 16 evidence
-entries) so first-pass records are composed to fit. Strict implementation and
+Under the completion protocol the repair successor is a deterministic
+`<kind>-repair-<hex>` attempt linked to its rejected source through `retryOf`;
+resume never promotes the rejected attempt. The repair prompt carries the
+rejected attempt's persisted diagnostic so the replacement names the exact
+offending field or the ambiguous report ownership to repair, and the writing
+prompts state the ledger field bounds (500-character single-line strings, at
+most 16 evidence entries) so first-pass records are composed to fit. Strict implementation and
 fix prompts also carry the run's recorded human decisions, with the rule that a
 recorded answer is authoritative and a question it covers is never re-raised as
 a new escalation — so a decision made at any earlier gate stays visible to
@@ -1687,15 +1696,18 @@ total. All three artifacts must remain mutually consistent.
 
 Per ADR 0025, an accepted-finding fix whose changes made the recorded
 completion evidence stale may return a complete refreshed `taskCompletion`
-ledger with a regenerated report projection, validated by the identical
-fail-closed pipeline; the checkpoint then records the fix attempt as the
-canonical source (`sourceAttemptKind: "fix"`, absent means implementation) and
-the runner emits `plan_task_completion.refreshed`. Statuses cannot regress
-through a refresh — a completed fix outcome still requires every task
-completed, and a genuine downgrade still escalates. A rejected refresh fails
-the fix attempt with the invalid checkpoint and offers the same
-`Repair plan-task completion evidence` retry, which reruns the fix with the
-persisted diagnostic and unchanged triage scope.
+ledger, validated by the identical fail-closed pipeline; the runner republishes
+the v2 region from it, the summary records the fix attempt as ledger author and
+publisher (`sourceAttemptKind: "fix"`, absent means implementation) and the
+runner emits `plan_task_completion.refreshed`. A fix that returns
+`taskCompletion: null` republishes the retained canonical ledger into the
+current narrative with a new publisher receipt while the original ledger author
+is preserved. Statuses cannot regress through a refresh — a completed fix
+outcome still requires every task completed, and a genuine downgrade still
+escalates. A rejected refresh fails the fix attempt with the invalid checkpoint
+and offers the same `Repair plan-task completion evidence` retry, which reruns
+the fix as a linked `fix-repair-<hex>` attempt with the persisted diagnostic
+and unchanged triage scope.
 
 The canonical Implementation Tasks heading grammar
 (`- [ ] **TNNN - Title**`, one line, ending at the closing `**`, unchecked
@@ -1713,16 +1725,17 @@ plan-approval gate. Interactive mode labels that action
 retry. If the rejected result also has a terminal checkpoint, the repair action
 takes precedence over reconciliation: `resume` leaves the run unchanged rather
 than replaying the already-rejected evidence. The same repair applies when the
-pre-verification revalidation after a completed fix rejects the evidence — for
-example when the fix edited the frozen Plan Task Completion projection — even
+read-only revalidation of a published completion rejects the evidence — for
+example when a published report's bytes changed after publication
+(`summary_mismatch`) or the ledger author record no longer decodes — even
 though no attempt failed: the retry starts a fresh completion-repair
-implementation attempt from the invalid checkpoint. That repair restores the
-projection when the ledger records are correct; when the divergence reflects an
-accepted review finding that a record was overstated, it returns the corrected
-ledger and matching projection with `gate=escalation` instead of restoring the
-false claim. Fix prompts state the projection is frozen: a fix never edits that
-section, and an accepted finding it cannot truthfully resolve escalates rather
-than rewriting completion evidence. Interrupted selection and review
+implementation attempt from the invalid checkpoint. An edit inside the
+runner-owned region during a fix confers no authority and is simply replaced at
+that fix's publication; when an accepted review finding shows a record was
+overstated, the repair returns the corrected ledger with `gate=escalation`
+instead of restoring the false claim. Fix prompts state that the runner owns
+the section: a fix never edits it, and an accepted finding it cannot truthfully
+resolve escalates rather than rewriting completion evidence. Interrupted selection and review
 are explicitly retryable because their model phases cannot change production
 source; review retains only its bounded attempt-owned candidate evidence.
 When a supported vendor emits a valid terminal success, Banzai atomically
@@ -1783,17 +1796,18 @@ remain local under the ignored run directory. Evaluation counts supported
 failed attempt records but does not treat candidate Markdown, raw result files,
 terminal checkpoints, recovery authorizations, or failed structured results as
 review verdicts or completion evidence.
-New model attempts use schema version 2 so an interrupted source and its linked
-recovery attempt remain distinct. New run state uses schema version 4 to add an
-immutable artifact binding. It retains v3's tagged pending consultation, exact
-keyed decision history and additive `source_preserved` stage; legacy state v1–v3
-remains readable under its original storage semantics, without fabricated
-consultation or binding evidence. The `source_preserved` stage keeps a completed
+New model attempts use schema version 4 with phase-result 4. Strict implementation
+and fix retain the existing completion protocol and nullable `retryOf` linkage.
+New runs start at schema version 8 with immutable private binding v2 and task
+verification. Historical run continuation is outside the current transition.
+State 8 carries the completion publication cursor from creation.
+Tagged pending consultations, exact keyed decision history and recovery lineage
+retain their existing meanings. The `source_preserved` stage keeps a completed
 blocked source immutable while one linked attempt is prepared. Checkpoints and recovery
 authorizations are immutable atomic mode-`0600` evidence; users and supervisors
 must never edit them manually.
 
-The model hand-off uses phase-result v3. It adds the planning-only
+The model hand-off uses phase-result v4. It adds the planning-only
 `decision_consultation` gate and required nullable `decisionConsultation`
 payload; phase-result v1 and v2 remain read-only legacy inputs and cannot be
 returned by a new attempt. Evaluation export and KPI stay on their independent
@@ -1854,21 +1868,17 @@ are absent.
 
 ## Proportionate verification and focused closure
 
-Projects can explicitly opt into config 3 as described in
-[verification examples](verification-examples.md#explicit-equivalent-evidence-config-3).
-Only new enabled runs use state 5, binding v2 and verification ledger 2; existing
-runs retain their versions. Decisions and applicability records are separate from
-v1 physical leaves. The runner decides under work ownership after approval and
-completion checks, and revalidates source, authority and origins before review,
-pass application, zero-accepted triage and lite completion. Failures and interrupted
-attempts retain existing explicit retry/recovery boundaries.
+New task runs use private binding 2 and verification ledger 3. Immutable physical
+start/finish records link exact descriptors and observed inputs to current
+applicability. Reuse requires explicit complete dependency declarations and a
+compatible direct successful origin. Missing proof runs fresh; required failures
+block completion. Release gates always run fresh.
 
-Review snapshot v3 and runner-rendered `banzai-feature-review/v4` freeze current
-executed/reused/pending evidence and direct physical origins. Historical formats
-keep their decoders/rendering. Review-result v2 and task-completion v1 remain
-unchanged. Offline archive v1 retains the binding, decisions, applicability,
-physical origins and logs through required dependency closure. A restored copy
-retains historical proof; it does not gain same-repository reuse authority.
+Review snapshot 6 and rendered artifact 7 freeze task checks and completion
+publication. Review-result 2 is unchanged. The independent reviewer assesses
+whether checks cover requirements and were unjustifiably weakened. Frozen
+export formats report unsupported task evidence as partial; archive restore
+requires complete interpreted closure. Historical formats retain their meanings.
 
 For an accepted-finding closure, keep unaffected report text and add one bounded
 record: accepted ID, changed scope, decision, executed/reused/historical/pending
@@ -1877,3 +1887,54 @@ only affected claims. A consistency sweep does not execute commands. Resolution
 review receives the accepted IDs, delta, current authority and evidence, preserving
 independent review and human triage. Runner instruction and policy bodies remain
 complete on every model call.
+
+## Guided configuration checkpoints
+
+This section documents retained historical formats only. New task runs do not
+enter configuration-prerequisite gates or offer Accept/Edit/Skip for profiles.
+
+Historical schema-2/3 runs used state 6 with explicit `verificationMode: ordered|policy`;
+legacy config-1 runs and state readers retain historical semantics. Binding v1
+continues in ordered mode and v2 in policy mode. After a completed implementation
+or fix attempt, missing coverage or a finite known missing script raises
+`configuration_prerequisite` in `needs_human_decision`. It is a pending decision,
+not a new blocked lifecycle. Plan approval, implemented work and the completed
+attempt remain intact.
+
+Accept adds the previewed profile automatically; Edit returns a fresh proposal;
+Skip records hygiene-only scope for this run; Cancel uses existing cancellation.
+Proposals pin exact config bytes and bounded project evidence. Drift requires a
+fresh proposal, never a blind write. Existing profiles are never overwritten by
+Accept. A separately confirmed `verify edit/remove` can repair them. External
+repair leaves the decision pending until `banzai resume` revalidates it; resume
+records `satisfied_by_configuration` without inventing a human answer. Config
+transactions retain prepared/applied/finalized evidence and a single logical
+`config.verification.applied` event. A write already published before source drift
+remains a real change and cannot authorize continuation on stale evidence.
+
+`status` leads with Accept/Edit/Skip/Cancel, then the alternative “Fix
+prerequisites, then run banzai resume.” A waiting interactive session holds
+configuration ownership. Answer there, or exit it before repair in another
+terminal. No model or active verification process can use guided commands to
+write runner control files. Plans place configuration needs in **Human
+prerequisites**, displayed during plan approval; executable tasks targeting
+`.banzai/` outside exact bound artifact roles are rejected before approval.
+
+Control 4 declares this kind and `banzai-agent-answer/v3`. Both `banzai control
+answer` and `banzai approve verification` take the same closed JSON on stdin:
+`schema`, `schemaVersion: 3`, `kind: configuration_prerequisite`, exact `runId`,
+`decisionId`, `proposalId`, and `action: accept|edit|skip|cancel`. Only Edit adds
+`profile: { id, commands }`. Commands accept `name`, `command`, `args`, `timeoutMs`
+and an optional current ID; policy fields and invented IDs are forbidden.
+`--no-resume` applies a valid choice without starting a process. V1 escalation
+and v2 consultation inputs keep their existing meanings. Supervisors negotiate
+capabilities before relaying the current human's exact answer.
+
+Snapshot v4 and `banzai-feature-review/v5` expose actual coverage disposition,
+resolution/Skip references and exact runner configuration deltas. They separate
+carried-in or later user changes and never attribute the entire config file to
+the runner. Skip creates neither substantive success nor all-check applicability;
+actual hygiene leaves/logs remain required, and absence of hygiene is explicit.
+Frozen human-time/evaluation outputs keep their versioned incomplete/unknown
+semantics. See [ADR-0045](decisions/0045-guided-verification-setup.md) for the closed
+contracts and retained authority boundaries.

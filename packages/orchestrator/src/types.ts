@@ -1,4 +1,8 @@
+import type { ReviewConfigurationSetup } from "./configuration-review.js";
 import type {
+  TaskVerificationPublication,
+  TaskVerificationCandidates,
+  TaskVerificationPolicy,
   VerificationPolicy,
   ReviewVerificationEvidence,
   VerificationPhysicalAttempt,
@@ -7,13 +11,20 @@ import type {
 } from "./verification-evidence.js";
 import type { ArtifactBoundWork } from "./artifact-storage.js";
 import type {
+  ConfigurationAction,
+  ConfigurationPrerequisiteRequest,
+  ConfigurationDecisionRecord,
+  ConfigurationSetupState
+} from "./configuration-prerequisite.js";
+import type {
   WorkspaceEntry,
   WorkspaceSnapshot,
   WorkspaceChange
 } from "./git.js";
 
 export const CONTRACT_VERSION = "1.0.0" as const;
-export const PHASE_RESULT_SCHEMA_VERSION = 3 as const;
+export const PHASE_RESULT_SCHEMA_VERSION = 4 as const;
+export const TASK_PHASE_RESULT_SCHEMA_VERSION = 4 as const;
 export const DECISION_CONSULTATION_SCHEMA =
   "banzai-decision-consultation/v1" as const;
 export const DECISION_CONSULTATION_SCHEMA_VERSION = 1 as const;
@@ -41,24 +52,68 @@ export const PROMPT_COMPONENT_CATEGORY_ORDER = [
 ] as const;
 export const VERIFICATION_LEDGER_SCHEMA_VERSION = 1 as const;
 export const MODEL_ATTEMPT_SCHEMA_VERSION = 2 as const;
+/** Strict implementation/fix attempts created under runner-owned completion (ADR-0047). */
+export const STRICT_MODEL_ATTEMPT_SCHEMA_VERSION = 3 as const;
 export const TERMINAL_CHECKPOINT_SCHEMA =
   "banzai-terminal-attempt-checkpoint/v1" as const;
 export const TERMINAL_CHECKPOINT_SCHEMA_VERSION = 1 as const;
+export const TERMINAL_CHECKPOINT_SCHEMA_V2 =
+  "banzai-terminal-attempt-checkpoint/v2" as const;
+export const TERMINAL_CHECKPOINT_SCHEMA_VERSION_V2 = 2 as const;
+/**
+ * Lifecycle/ownership protocol persisted on every new strict implementation or
+ * accepted-finding fix attempt before invocation. Distinct from the receipt
+ * record schema below: the protocol selects semantics, the schema a shape.
+ */
+export const COMPLETION_PROTOCOL = "banzai-completion-protocol/v1" as const;
+export const COMPLETION_CAPTURE_SCHEMA =
+  "banzai-completion-capture/v1" as const;
+export const COMPLETION_TRANSITION_SCHEMA =
+  "banzai-completion-transition/v1" as const;
+export const COMPLETION_CANDIDATE_SCHEMA =
+  "banzai-completion-candidate/v1" as const;
+export const COMPLETION_PUBLICATION_SCHEMA =
+  "banzai-completion-publication/v1" as const;
+export const COMPLETION_RECORD_SCHEMA_VERSION = 1 as const;
+export const COMPLETION_SUMMARY_SCHEMA_VERSION = 2 as const;
+export const RUN_STATE_SCHEMA_VERSION = 8 as const;
+export const COMPLETION_PUBLICATION_STAGES = [
+  "capture",
+  "validate",
+  "render",
+  "candidate",
+  "publication",
+  "receipt",
+  "attempt",
+  "state",
+  "event"
+] as const;
+export const COMPLETION_PUBLICATION_REFUSAL_CODES = [
+  "COMPLETION_PUBLICATION_IO",
+  "COMPLETION_PUBLICATION_DRIFT",
+  "COMPLETION_PUBLICATION_INTEGRITY"
+] as const;
+export type CompletionPublicationStage =
+  (typeof COMPLETION_PUBLICATION_STAGES)[number];
+export type CompletionPublicationRefusalCode =
+  (typeof COMPLETION_PUBLICATION_REFUSAL_CODES)[number];
 export const RECOVERY_AUTHORIZATION_SCHEMA =
   "banzai-recovery-authorization/v1" as const;
 export const RECOVERY_AUTHORIZATION_SCHEMA_VERSION = 1 as const;
-export const AGENT_CONTROL_CONTRACT_VERSION = "3.0.0" as const;
-export const AGENT_CAPABILITIES_SCHEMA_VERSION = 3 as const;
-export const AGENT_STATUS_SCHEMA_VERSION = 2 as const;
+export const AGENT_CONTROL_CONTRACT_VERSION = "6.0.0" as const;
+export const AGENT_CAPABILITIES_SCHEMA_VERSION = 6 as const;
+export const AGENT_STATUS_SCHEMA_VERSION = 5 as const;
 export const AGENT_ANSWER_SCHEMA_VERSION = 2 as const;
 export const AGENT_REQUEST_SCHEMA_VERSION = 1 as const;
 export const AGENT_RECOVERY_SCHEMA_VERSION = 1 as const;
 export const LEGACY_AGENT_CONTROL_SCHEMA_VERSION = 1 as const;
 export const AGENT_CAPABILITIES_SCHEMA =
-  "banzai-agent-capabilities/v3" as const;
-export const AGENT_STATUS_SCHEMA = "banzai-agent-status/v2" as const;
+  "banzai-agent-capabilities/v6" as const;
+export const AGENT_STATUS_SCHEMA = "banzai-agent-status/v5" as const;
 export const AGENT_REQUEST_SCHEMA = "banzai-agent-request/v1" as const;
 export const AGENT_ANSWER_SCHEMA = "banzai-agent-answer/v2" as const;
+export const CONFIGURATION_ANSWER_SCHEMA = "banzai-agent-answer/v3" as const;
+export const CONFIGURATION_ANSWER_SCHEMA_VERSION = 3 as const;
 export const AGENT_RECOVERY_SCHEMA = "banzai-agent-recovery/v1" as const;
 export const LEGACY_AGENT_CAPABILITIES_SCHEMA =
   "banzai-agent-capabilities/v1" as const;
@@ -71,6 +126,7 @@ export type AgentControlOperationName =
   | "answer"
   | "approveAdr"
   | "approvePlan"
+  | "approveVerification"
   | "triage"
   | "resume"
   | "retry"
@@ -83,12 +139,13 @@ export interface AgentControlOperationV2 {
   inputSchemas: (
     | typeof AGENT_REQUEST_SCHEMA
     | typeof AGENT_ANSWER_SCHEMA
+    | typeof CONFIGURATION_ANSWER_SCHEMA
     | typeof LEGACY_AGENT_ANSWER_SCHEMA
     | typeof AGENT_RECOVERY_SCHEMA
   )[];
 }
 
-export interface AgentControlCapabilitiesV3 {
+export interface AgentControlCapabilitiesV5 {
   schema: typeof AGENT_CAPABILITIES_SCHEMA;
   schemaVersion: typeof AGENT_CAPABILITIES_SCHEMA_VERSION;
   controlContractVersion: typeof AGENT_CONTROL_CONTRACT_VERSION;
@@ -96,9 +153,22 @@ export interface AgentControlCapabilitiesV3 {
   umbrellaContractVersion: typeof CONTRACT_VERSION;
   artifactStorage: {
     declarationSchemas: ["banzai-artifact-layout/v1"];
-    bindingSchemas: ["banzai-work-binding/v1"];
+    bindingSchemas: ["banzai-work-binding/v1", "banzai-work-binding/v2"];
     privateWorkspaceSnapshotVersion: 2;
     layouts: readonly ["legacy", "private"];
+  };
+  configurationPrerequisite: {
+    kind: "configuration_prerequisite";
+    actions: readonly ["accept", "edit", "skip", "cancel"];
+    statusSchema: typeof AGENT_STATUS_SCHEMA;
+    answerSchema: typeof CONFIGURATION_ANSWER_SCHEMA;
+  };
+  /** Runner-owned completion publication declared by the status projection. */
+  completionPublication: {
+    protocol: typeof COMPLETION_PROTOCOL;
+    stages: typeof COMPLETION_PUBLICATION_STAGES;
+    refusalCodes: typeof COMPLETION_PUBLICATION_REFUSAL_CODES;
+    statusSchema: typeof AGENT_STATUS_SCHEMA;
   };
   operations: Record<AgentControlOperationName, AgentControlOperationV2>;
 }
@@ -124,6 +194,17 @@ export interface AgentControlAnswerV2 {
   answers: DecisionConsultationAnswer[];
 }
 
+export interface AgentControlAnswerV3 {
+  schema: typeof CONFIGURATION_ANSWER_SCHEMA;
+  schemaVersion: typeof CONFIGURATION_ANSWER_SCHEMA_VERSION;
+  kind: "configuration_prerequisite";
+  runId: string;
+  decisionId: string;
+  proposalId: string;
+  action: ConfigurationAction;
+  profile?: { id: string; commands: VerificationCommand[] };
+}
+
 export interface AgentControlRecoveryV1 {
   schema: typeof AGENT_RECOVERY_SCHEMA;
   schemaVersion: typeof AGENT_RECOVERY_SCHEMA_VERSION;
@@ -146,7 +227,8 @@ export type AgentControlNextActionV1 =
 export type AgentControlNextAction =
   | Exclude<AgentControlNextActionV1, "answer">
   | "answer_escalation"
-  | "answer_consultation";
+  | "answer_consultation"
+  | "answer_configuration_prerequisite";
 
 export type AgentControlPendingGateV1 =
   | {
@@ -274,12 +356,60 @@ export interface AgentControlRunV1 {
   } | null;
 }
 
-export interface AgentControlRunV2 extends Omit<
+export type AgentControlPendingGateV3 =
+  | AgentControlPendingGateV2
+  | {
+      kind: "configuration_prerequisite";
+      runId: string;
+      decisionId: string;
+      proposalId: string;
+      requestedAt: string;
+      reason: ConfigurationPrerequisiteRequest["reason"];
+      proposal: ConfigurationPrerequisiteRequest["proposal"];
+      options: ConfigurationPrerequisiteRequest["options"];
+      checkpoint: {
+        attemptKind: "implementation" | "fix";
+        verificationRound: number;
+        eligible: boolean;
+      };
+      repairCommands: string[];
+    };
+
+export interface AgentControlRunV3 extends Omit<
   AgentControlRunV1,
   "nextAction" | "pendingGate"
 > {
   nextAction: AgentControlNextAction;
-  pendingGate: AgentControlPendingGateV2 | null;
+  pendingGate: AgentControlPendingGateV3 | null;
+}
+
+/**
+ * Bounded runner-owned completion publication state. `stage` names the last
+ * durable stage; a refusal names the closed code and the last proof digest.
+ * `publisherAttemptId` is the attempt that published the current canonical
+ * completion section, which may differ from the ledger author.
+ */
+export interface AgentControlCompletionPublicationV1 {
+  attemptId: string;
+  attemptKind: "implementation" | "fix";
+  stage: CompletionPublicationStage;
+  refusalCode: CompletionPublicationRefusalCode | null;
+  publisherAttemptId: string | null;
+}
+
+export interface AgentControlRunV4 extends AgentControlRunV3 {
+  completionPublication: AgentControlCompletionPublicationV1 | null;
+  taskVerification?: {
+    outcome: "checked" | "absent" | "not_run";
+    complete: boolean;
+    absenceReason: string | null;
+    checks: {
+      checkId: string;
+      required: boolean;
+      kind: string;
+      attemptId: string | null;
+    }[];
+  };
 }
 
 export interface AgentControlStatusV1 {
@@ -288,10 +418,10 @@ export interface AgentControlStatusV1 {
   activeRun: AgentControlRunV1 | null;
 }
 
-export interface AgentControlStatusV2 {
+export interface AgentControlStatusV4 {
   schema: typeof AGENT_STATUS_SCHEMA;
   schemaVersion: typeof AGENT_STATUS_SCHEMA_VERSION;
-  activeRun: AgentControlRunV2 | null;
+  activeRun: AgentControlRunV4 | null;
 }
 
 export type Phase = "plan" | "implementation" | "fix";
@@ -426,7 +556,9 @@ export interface PlanTaskCompletionLedger {
 }
 
 export interface PhaseResult {
-  schemaVersion: typeof PHASE_RESULT_SCHEMA_VERSION;
+  schemaVersion: typeof PHASE_RESULT_SCHEMA_VERSION | 3;
+  /** Required (nullable) in v4, absent in v3. */
+  verificationCandidates?: TaskVerificationCandidates | null;
   contractVersion: typeof CONTRACT_VERSION;
   phase: Phase;
   outcome: PhaseOutcome;
@@ -449,6 +581,36 @@ export interface LegacyPhaseResult extends Omit<
 }
 
 export type PersistedPhaseResult = PhaseResult | LegacyPhaseResult;
+
+/**
+ * The taskCompletion field of a safely decoded phase-result envelope. Under the
+ * runner-owned completion protocol a malformed ledger never discards a valid
+ * stop envelope; it stays an unaccepted bounded diagnostic beside the original.
+ */
+export type EnvelopeTaskCompletion =
+  | { state: "accepted"; ledger: PlanTaskCompletionLedger | null }
+  | {
+      state: "unaccepted";
+      diagnostic: string;
+      /** Bounded canonical JSON prefix of the rejected value. */
+      raw: string;
+      rawDigest: string;
+    };
+
+/**
+ * A phase result whose envelope (keys, versions, phase, outcome/gate pairing,
+ * artifacts, questions, paths and finding identities) validated independently
+ * of its completion ledger. `original` is the canonical JSON of the exact
+ * structured output the vendor returned; `originalDigest` identifies it.
+ */
+export interface PhaseResultEnvelope extends Omit<
+  PhaseResult,
+  "taskCompletion"
+> {
+  taskCompletion: EnvelopeTaskCompletion;
+  original: string;
+  originalDigest: string;
+}
 
 export interface ReviewEvidence {
   path: string;
@@ -542,12 +704,30 @@ export interface ReviewArtifactContext {
   } | null;
 }
 
+/** Frozen identities of the runner-published completion proof reviewed by a v5 snapshot. */
+export interface ReviewCompletionPublication {
+  completionProtocol: typeof COMPLETION_PROTOCOL;
+  publisherAttemptId: string;
+  receiptPath: string;
+  receiptDigest: string;
+  captureDigest: string;
+  candidateDigest: string;
+}
+
 export interface ReviewSnapshot {
   schema:
     | "banzai-review-snapshot/v1"
     | "banzai-review-snapshot/v2"
-    | "banzai-review-snapshot/v3";
-  schemaVersion: 1 | 2 | 3;
+    | "banzai-review-snapshot/v3"
+    | "banzai-review-snapshot/v4"
+    | "banzai-review-snapshot/v5"
+    | "banzai-review-snapshot/v6";
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6;
+  verificationMode?: "ordered" | "policy" | "task";
+  taskVerification?: TaskVerificationPublication;
+  configurationSetup?: ReviewConfigurationSetup;
+  /** Required and nullable on snapshot v5 only. */
+  completionPublication?: ReviewCompletionPublication | null;
   artifactBinding?: ArtifactBoundWork;
   runId: string;
   attemptId: string;
@@ -682,6 +862,7 @@ export interface PromptEnvelope {
 export type OutputContractIdentity =
   | "workflow-selection/v1"
   | "phase-result/v3"
+  | "phase-result/v4"
   | "review-result/v1"
   | "review-result/v2";
 
@@ -935,7 +1116,7 @@ export interface VerificationProfile {
 }
 
 export interface OrchestratorConfig {
-  schemaVersion: 1 | 2 | 3;
+  schemaVersion: 1 | 2 | 3 | 4;
   contractVersion: typeof CONTRACT_VERSION;
   models: {
     planner: ModelSettings;
@@ -945,6 +1126,8 @@ export interface OrchestratorConfig {
   verification: {
     profiles: VerificationProfile[];
     policy?: VerificationPolicy;
+    taskPolicy?: TaskVerificationPolicy;
+    bootstrap?: boolean;
   };
   claudeEnvironment: ClaudeEnvironmentSettings;
   context: ContextPolicy;
@@ -1018,10 +1201,14 @@ export interface ConsultationDecisionRecord extends ConsultationDecisionRequest 
 }
 
 export type HumanDecisionRequest =
-  EscalationDecisionRequest | ConsultationDecisionRequest;
+  | EscalationDecisionRequest
+  | ConsultationDecisionRequest
+  | ConfigurationPrerequisiteRequest;
 
 export type HumanDecisionRecord =
-  EscalationDecisionRecord | ConsultationDecisionRecord;
+  | EscalationDecisionRecord
+  | ConsultationDecisionRecord
+  | ConfigurationDecisionRecord;
 
 export interface AttemptReference {
   id: string;
@@ -1170,12 +1357,20 @@ export type PlanTaskCompletionViolation =
   | "report_projection_missing"
   | "report_projection_invalid"
   | "report_projection_mismatch"
+  | "report_region_invalid"
   | "approval_invalid"
   | "source_attempt_invalid"
   | "summary_mismatch";
 
 export interface ValidPlanTaskCompletionSummary {
-  schemaVersion: typeof PLAN_TASK_COMPLETION_SCHEMA_VERSION;
+  /**
+   * 1: model-authored v1 projection (ADR-0017/0025). 2: runner-published v2
+   * completion region under the completion protocol (ADR-0047); the ledger
+   * itself stays schema 1.
+   */
+  schemaVersion:
+    | typeof PLAN_TASK_COMPLETION_SCHEMA_VERSION
+    | typeof COMPLETION_SUMMARY_SCHEMA_VERSION;
   status: "valid";
   sourceAttemptId: string;
   /**
@@ -1197,10 +1392,22 @@ export interface ValidPlanTaskCompletionSummary {
     blocked: number;
   };
   validatedAt: string;
+  /** Required on schema 2: the protocol that published the completion region. */
+  completionProtocol?: typeof COMPLETION_PROTOCOL;
+  /**
+   * Required on schema 2: the attempt whose publication receipt wrote the
+   * current completion region. A completed null-ledger fix is a new publisher
+   * of the unchanged ledger author's claims.
+   */
+  publisherAttemptId?: string;
+  /** Required on schema 2: run-relative receipt path and its integrity digest. */
+  publication?: { path: string; sha256: string };
 }
 
 export interface InvalidPlanTaskCompletionCheckpoint {
-  schemaVersion: typeof PLAN_TASK_COMPLETION_SCHEMA_VERSION;
+  schemaVersion:
+    | typeof PLAN_TASK_COMPLETION_SCHEMA_VERSION
+    | typeof COMPLETION_SUMMARY_SCHEMA_VERSION;
   status: "invalid";
   sourceAttemptId: string;
   /** Absent means "implementation" (pre-ADR-0025 checkpoints). */
@@ -1209,6 +1416,30 @@ export interface InvalidPlanTaskCompletionCheckpoint {
   violation: PlanTaskCompletionViolation;
   taskId: string | null;
   recordedAt: string;
+  /** Required on schema 2: the protocol under which the input was rejected. */
+  completionProtocol?: typeof COMPLETION_PROTOCOL;
+  /** Required on schema 2: bounded diagnostic and the rejected result identity. */
+  diagnostic?: string;
+  rejectedResultDigest?: string | null;
+}
+
+/**
+ * Cache of immutable publication proof for the newest strict attempt on a
+ * schema-7 run. It never reconstructs proof: every digest names a retained
+ * attempt-owned record, and a null digest means that stage is not durable.
+ */
+export interface CompletionPublicationCursor {
+  attemptId: string;
+  attemptKind: "implementation" | "fix";
+  stage: CompletionPublicationStage;
+  captureDigest: string | null;
+  candidateDigest: string | null;
+  receiptDigest: string | null;
+  refusal: {
+    code: CompletionPublicationRefusalCode;
+    stage: CompletionPublicationStage;
+    proofDigest: string | null;
+  } | null;
 }
 
 export type PlanTaskCompletionCheckpoint =
@@ -1221,8 +1452,18 @@ export interface CancellationAnchor {
 }
 
 export interface RunState {
-  schemaVersion: 3 | 4 | 5;
+  /**
+   * 7 is reached only when the first strict implementation or fix attempt under
+   * the completion protocol is created; new runs still bootstrap at 4 or 6 and
+   * keep their configuration/binding combination unchanged across the move.
+   */
+  schemaVersion: 3 | 4 | 5 | 6 | 7 | 8;
+  verificationMode?: "ordered" | "policy" | "task";
+  taskVerification?: TaskVerificationPublication;
+  configurationSetup?: ConfigurationSetupState;
   artifactBinding?: ArtifactBoundWork;
+  /** Required and nullable on schema 7; absent on every earlier version. */
+  completionPublication?: CompletionPublicationCursor | null;
   contractVersion: typeof CONTRACT_VERSION;
   runId: string;
   slug: string;
@@ -1288,20 +1529,49 @@ export interface RunState {
   cancellation?: CancellationAnchor;
 }
 
+/**
+ * A bounded diagnostic retained beside a stop result whose completion payload
+ * failed ledger checks. It never suppresses or replaces the model's stop.
+ */
+export interface CompletionDiagnostic {
+  violation: PlanTaskCompletionViolation;
+  taskId: string | null;
+  message: string;
+}
+
 export interface AttemptRecord<
   T = WorkflowSelectionResult | PersistedPhaseResult | ReviewResult
 > {
-  schemaVersion: 1 | typeof MODEL_ATTEMPT_SCHEMA_VERSION;
+  schemaVersion:
+    | 1
+    | typeof MODEL_ATTEMPT_SCHEMA_VERSION
+    | typeof STRICT_MODEL_ATTEMPT_SCHEMA_VERSION
+    | 4;
   attempt: AttemptReference;
-  status: "started" | "completed" | "failed" | "interrupted";
+  /**
+   * `pending_application` exists only on schema v3: the vendor returned and
+   * the runner has captured terminal proof but has not accepted or applied the
+   * result. It contributes no completed attempt, task, verification or review.
+   */
+  status:
+    "started" | "completed" | "failed" | "interrupted" | "pending_application";
   startedAt: string;
   completedAt: string | null;
-  /** Required and nullable on schema v2; absent on schema v1. */
+  /** Required and nullable on schema v2/v3; absent on schema v1. */
   interruptedAt?: string | null;
-  /** Required and nullable on schema v2; absent on schema v1. */
+  /** Required and nullable on schema v2/v3; absent on schema v1. */
   recoveryOf?: string | null;
-  /** Required and nullable on schema v2; absent on schema v1. */
+  /** Required and nullable on schema v2/v3; absent on schema v1. */
   recoveryAuthorizationId?: string | null;
+  /** Required on schema v3 strict implementation/fix attempts (ADR-0047). */
+  completionProtocol?: typeof COMPLETION_PROTOCOL;
+  /** Required and nullable on schema v3: the exact rejected predecessor of an evidence-repair retry. */
+  retryOf?: string | null;
+  /** Required and nullable on schema v3: the safe envelope decoded from `result`. */
+  envelope?: PhaseResultEnvelope | null;
+  /** Required and nullable on schema v3: retained stop-result completion diagnostic. */
+  completionDiagnostic?: CompletionDiagnostic | null;
+  /** The raw structured output on schema v3; a validated result before it. */
   result: T | null;
   sessionId: string | null;
   rawStdoutPath: string | null;
@@ -1345,14 +1615,16 @@ export type TerminalResultContract =
   | "workflow-selection/v1"
   | "phase-result/v2"
   | "phase-result/v3"
+  | "phase-result/v4"
   | "review-result/v1"
   | "review-result/v2";
 
 export interface TerminalAttemptCheckpoint<
   T extends TerminalCheckpointResult = TerminalCheckpointResult
 > {
-  schema: typeof TERMINAL_CHECKPOINT_SCHEMA;
-  schemaVersion: typeof TERMINAL_CHECKPOINT_SCHEMA_VERSION;
+  schema:
+    typeof TERMINAL_CHECKPOINT_SCHEMA | "banzai-terminal-attempt-checkpoint/v3";
+  schemaVersion: typeof TERMINAL_CHECKPOINT_SCHEMA_VERSION | 3;
   runId: string;
   attempt: AttemptReference;
   phase: AttemptReference["kind"];
@@ -1379,6 +1651,142 @@ export interface TerminalAttemptCheckpoint<
   integrityDigest: string;
 }
 
+/** What the runner observed about one required report at capture time. */
+export type CompletionReportObservation =
+  | { path: string; state: "present"; sha256: string; bytes: number }
+  | { path: string | null; state: "absent" | "unsafe" | "unavailable" };
+
+export interface CompletionObservedInputs {
+  implementationReport: CompletionReportObservation;
+  testReport: CompletionReportObservation;
+  /** Non-report workspace snapshot digest with both report destinations omitted. */
+  workspaceDigest: string | null;
+}
+
+/**
+ * Terminal proof for a strict attempt under the completion protocol. It binds
+ * the exact original structured output, the independently decoded envelope and
+ * the report/workspace identities observed when the vendor returned.
+ */
+export interface TerminalAttemptCheckpointV2 {
+  schema:
+    | typeof TERMINAL_CHECKPOINT_SCHEMA_V2
+    | "banzai-terminal-attempt-checkpoint/v3";
+  schemaVersion: typeof TERMINAL_CHECKPOINT_SCHEMA_VERSION_V2 | 3;
+  completionProtocol: typeof COMPLETION_PROTOCOL;
+  runId: string;
+  attempt: AttemptReference & { kind: "implementation" | "fix"; mutable: true };
+  phase: "implementation" | "fix";
+  configuration: TerminalAttemptCheckpoint["configuration"];
+  resultContract: "phase-result/v3" | "phase-result/v4";
+  terminal: TerminalAttemptCheckpoint["terminal"];
+  envelope: PhaseResultEnvelope;
+  resultDigest: string;
+  observed: CompletionObservedInputs;
+  sessionId: string | null;
+  usage: ModelUsage | null;
+  baseCommit: string;
+  approvalDigest: string | null;
+  workflowDigest: string | null;
+  scopeDigest: string | null;
+  integrityDigest: string;
+}
+
+export type PersistedTerminalCheckpoint =
+  TerminalAttemptCheckpoint | TerminalAttemptCheckpointV2;
+
+interface CompletionRecordIdentity {
+  runId: string;
+  attemptId: string;
+  attemptKind: "implementation" | "fix";
+  completionProtocol: typeof COMPLETION_PROTOCOL;
+}
+
+/** Attempt-owned evidence of the exact pre-transition run state bytes. */
+export interface CompletionTransition extends CompletionRecordIdentity {
+  schema: typeof COMPLETION_TRANSITION_SCHEMA;
+  schemaVersion: typeof COMPLETION_RECORD_SCHEMA_VERSION;
+  priorState: { schemaVersion: 3 | 4 | 6; path: string; sha256: string };
+  integrityDigest: string;
+}
+
+/** Immutable capture manifest written before validation, rendering or publication. */
+export interface CompletionCapture extends CompletionRecordIdentity {
+  schema: typeof COMPLETION_CAPTURE_SCHEMA;
+  schemaVersion: typeof COMPLETION_RECORD_SCHEMA_VERSION;
+  outcome: "completed" | "stop";
+  resultDigest: string;
+  terminalIntegrityDigest: string | null;
+  transitionDigest: string | null;
+  baseCommit: string;
+  approvalDigest: string;
+  planTaskDigest: string;
+  workBinding: { workId: string; sha256: string } | null;
+  configurationDigest: string;
+  scopeDigest: string | null;
+  ledgerSource: {
+    attemptId: string;
+    attemptKind: "implementation" | "fix";
+    ledgerDigest: string;
+  } | null;
+  reports: {
+    implementationReport: CompletionReportObservation;
+    testReport: CompletionReportObservation;
+  };
+  originals: {
+    implementationReport: { path: string; sha256: string } | null;
+    testReport: { path: string; sha256: string } | null;
+  };
+  workspace: { digest: string; excludedPaths: string[] };
+  capturedAt: string;
+  integrityDigest: string;
+}
+
+/** Immutable candidate metadata for the deterministic completion candidate bytes. */
+export interface CompletionCandidate extends CompletionRecordIdentity {
+  schema: typeof COMPLETION_CANDIDATE_SCHEMA;
+  schemaVersion: typeof COMPLETION_RECORD_SCHEMA_VERSION;
+  captureDigest: string;
+  ledgerDigest: string;
+  destination: string;
+  inputSha256: string;
+  candidatePath: string;
+  outputSha256: string;
+  outputBytes: number;
+  testReportSha256: string;
+  region: { action: "appended" | "replaced"; start: number; end: number };
+  preservation: "verified";
+  roundtrip: "verified";
+  integrityDigest: string;
+}
+
+/** Immutable publication receipt written after the exact destination replacement. */
+export interface CompletionPublication extends CompletionRecordIdentity {
+  schema: typeof COMPLETION_PUBLICATION_SCHEMA;
+  schemaVersion: typeof COMPLETION_RECORD_SCHEMA_VERSION;
+  captureDigest: string;
+  candidateDigest: string;
+  terminalIntegrityDigest: string | null;
+  authority: {
+    baseCommit: string;
+    approvalDigest: string;
+    planTaskDigest: string;
+    scopeDigest: string | null;
+    workBindingSha256: string | null;
+    configurationDigest: string;
+  };
+  ledgerAuthor: {
+    attemptId: string;
+    attemptKind: "implementation" | "fix";
+    ledgerDigest: string;
+  };
+  publisher: { attemptId: string; attemptKind: "implementation" | "fix" };
+  implementationReport: { path: string; sha256: string };
+  testReport: { path: string; sha256: string };
+  publishedAt: string;
+  integrityDigest: string;
+}
+
 export interface RecoveryAuthorization {
   schema: typeof RECOVERY_AUTHORIZATION_SCHEMA;
   schemaVersion: typeof RECOVERY_AUTHORIZATION_SCHEMA_VERSION;
@@ -1399,7 +1807,8 @@ export interface RecoveryAuthorization {
 }
 
 export interface AdapterTerminalSuccess<
-  T extends TerminalCheckpointResult = TerminalCheckpointResult
+  T extends TerminalCheckpointResult | PhaseResultEnvelope =
+    TerminalCheckpointResult | PhaseResultEnvelope
 > {
   classification: TerminalSuccessClassification;
   observedAt: string;
@@ -1438,10 +1847,11 @@ export type EvaluationCompleteness = "complete" | "partial" | "unreadable";
 export type EvaluationCohortMembership = "included" | "unresolved";
 export type EvaluationVendor = "codex" | "claude" | "unknown";
 export type EvaluationAttemptKind = AttemptReference["kind"] | "verification";
-export type EvaluationAttemptOutcome = Exclude<
-  AttemptRecord["status"],
-  "interrupted"
->;
+/**
+ * Frozen export v1 enum, pinned explicitly: a later persisted attempt status
+ * (`interrupted`, `pending_application`) must never widen this contract.
+ */
+export type EvaluationAttemptOutcome = "started" | "completed" | "failed";
 export type EvaluationFailureCategory =
   | "startup_check"
   | "model_attempt"
@@ -1523,7 +1933,9 @@ export interface EvaluationStateMetricSource {
 }
 
 export interface EvaluationStateSource {
-  schemaVersion: 1 | 2 | 3 | 4 | 5;
+  verificationMode?: "ordered" | "policy" | "task";
+  taskVerification?: TaskVerificationPublication;
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7;
   contractVersion: EvidenceValue<string>;
   status: EvidenceValue<RunStatus>;
   createdAt: EvidenceValue<string>;
@@ -1911,9 +2323,15 @@ export interface PhaseAdapterRequest {
   /** Persist the vendor identity before any terminal result is available. */
   onSessionStarted?: (sessionId: string) => Promise<void>;
   onTerminalSuccess?: (
-    terminal: AdapterTerminalSuccess<PhaseResult>
+    terminal: AdapterTerminalSuccess<PhaseResult | PhaseResultEnvelope>
   ) => Promise<void>;
   environment?: ClaudeInvocationScope;
+  /**
+   * Selected from the persisted attempt protocol before invocation. When set,
+   * both vendors decode the safe envelope: a valid stop with a malformed
+   * completion payload is still returned, never discarded or repaired.
+   */
+  completionProtocol?: typeof COMPLETION_PROTOCOL | undefined;
 }
 
 export interface WorkflowSelectionAdapterRequest {
@@ -1970,7 +2388,13 @@ export interface VendorAdapters {
   runSelection(
     request: WorkflowSelectionAdapterRequest
   ): Promise<AdapterResult<WorkflowSelectionResult>>;
-  runPhase(request: PhaseAdapterRequest): Promise<AdapterResult<PhaseResult>>;
+  /**
+   * Returns a validated `PhaseResult` for legacy requests and a safe
+   * `PhaseResultEnvelope` when the request carries the completion protocol.
+   */
+  runPhase(
+    request: PhaseAdapterRequest
+  ): Promise<AdapterResult<PhaseResult | PhaseResultEnvelope>>;
   /**
    * Resolves the availability-gated MCP whitelist for this checkout. Optional
    * so test doubles that never touch MCP stay valid; the workflow treats an
@@ -1990,7 +2414,12 @@ export type InstructionPhase =
 
 /** Ephemeral comparison evidence; never added to persisted or exported contracts. */
 export interface InstructionParity {
-  state: "verified" | "mismatch" | "unverifiable" | "bounded_failure";
+  state:
+    | "verified"
+    | "mismatch"
+    | "unverifiable"
+    | "bounded_failure"
+    | "not_applicable";
   resourceIds: string[];
   mismatched: string[];
   unavailable: string[];

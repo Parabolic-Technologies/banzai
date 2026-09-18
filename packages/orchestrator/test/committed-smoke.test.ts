@@ -75,19 +75,20 @@ async function stdinText() {
   return Buffer.concat(chunks).toString("utf8");
 }
 if (command === "help") {
-  process.stdout.write("Banzai v" + (variant === "help-version-mismatch" ? "0.0.0" : version) + " local cross-vendor workflow runner\\nUsage: banzai <command>\\n  banzai init\\nFive human decision gates remain distinct\\nbanzai-agent-answer/v2\\n  banzai eval context [--json] [--from <RFC3339>] [--to <RFC3339>] [--run <run-id>]...\\n");
+  process.stdout.write("Banzai v" + (variant === "help-version-mismatch" ? "0.0.0" : version) + " local cross-vendor workflow runner\\nUsage: banzai <command>\\n  banzai init\\nFive existing human decision gates remain distinct\\nbanzai-agent-answer/v2\\n  banzai eval context [--json] [--from <RFC3339>] [--to <RFC3339>] [--run <run-id>]...\\n");
 } else if (command === "control capabilities") {
   if (variant === "mutation") await writeFile(path.join(process.cwd(), "mutated.txt"), "mutated\\n");
   process.stdout.write(variant === "malformed-capabilities" ? "{bad\\n" : JSON.stringify({
-    schema: variant === "incompatible-capabilities" ? "banzai-agent-capabilities/v1" : "banzai-agent-capabilities/v3",
-    schemaVersion: variant === "incompatible-capabilities" ? 1 : 3,
-    controlContractVersion: "3.0.0",
+    schema: variant === "incompatible-capabilities" ? "banzai-agent-capabilities/v1" : "banzai-agent-capabilities/v6",
+    schemaVersion: variant === "incompatible-capabilities" ? 1 : 6,
+    controlContractVersion: "6.0.0",
     orchestratorVersion: variant === "capability-version-mismatch" ? "0.0.0" : version,
     umbrellaContractVersion: "1.0.0",
     operations: {
       status: { supported: true, ttyRequired: false, inputSchemas: [] },
       start: { supported: true, ttyRequired: false, inputSchemas: ["banzai-agent-request/v1"] },
-      answer: { supported: true, ttyRequired: false, inputSchemas: ["banzai-agent-answer/v2", "banzai-agent-answer/v1"] },
+      answer: { supported: true, ttyRequired: false, inputSchemas: ["banzai-agent-answer/v3", "banzai-agent-answer/v2", "banzai-agent-answer/v1"] },
+      approveVerification: { supported: true, ttyRequired: false, inputSchemas: ["banzai-agent-answer/v3"] },
       approveAdr: { supported: true, ttyRequired: false, inputSchemas: [] },
       approvePlan: { supported: true, ttyRequired: false, inputSchemas: [] },
       triage: { supported: true, ttyRequired: false, inputSchemas: [] },
@@ -100,14 +101,13 @@ if (command === "help") {
 } else if (command === "init") {
   await mkdir(path.join(process.cwd(), ".banzai"), { recursive: true });
   await writeFile(path.join(process.cwd(), ".banzai/config.json"), JSON.stringify({
-    schemaVersion: 2,
+    schemaVersion: 4,
     contractVersion: "1.0.0",
     models: {
       planner: { executable: process.execPath },
       implementer: { executable: process.execPath },
       reviewer: { executable: process.execPath }
-    },
-    verification: { profiles: [] }
+    }
   }) + "\\n");
 } else if (command === "doctor --json") {
   if (variant === "nonzero") process.exit(7);
@@ -116,9 +116,9 @@ if (command === "help") {
     await new Promise(() => {});
   }
   if (variant === "stderr") process.stderr.write("private output\\n");
-  process.stdout.write(variant === "malformed-doctor" ? "{bad\\n" : JSON.stringify({ schema: "banzai-doctor/v3", schemaVersion: 3, ready: variant !== "not-ready" }) + "\\n");
+  process.stdout.write(variant === "malformed-doctor" ? "{bad\\n" : JSON.stringify({ schema: "banzai-doctor/v5", schemaVersion: 5, ready: variant !== "not-ready" }) + "\\n");
 } else if (command === "control status") {
-  process.stdout.write(variant === "malformed-status" ? "{bad\\n" : JSON.stringify({ schema: "banzai-agent-status/v2", schemaVersion: 2, activeRun: await activeStatus() }) + "\\n");
+  process.stdout.write(variant === "malformed-status" ? "{bad\\n" : JSON.stringify({ schema: "banzai-agent-status/v5", schemaVersion: 5, activeRun: await activeStatus() }) + "\\n");
 } else if (command === "control answer --by Smoke User --no-resume") {
   const answer = JSON.parse(await stdinText());
   const pointer = JSON.parse(await readFile(path.join(process.cwd(), ".banzai/active-run.json"), "utf8"));
@@ -143,7 +143,7 @@ if (command === "help") {
     runId: state.runId,
     details: { cardCount: answer.answers.length, answerModes: { option: 0, preference: 1 }, completion: "answered" }
   }) + "\\n");
-  process.stdout.write(JSON.stringify({ schema: "banzai-agent-status/v2", schemaVersion: 2, activeRun: await activeStatus() }) + "\\n");
+  process.stdout.write(JSON.stringify({ schema: "banzai-agent-status/v5", schemaVersion: 5, activeRun: await activeStatus() }) + "\\n");
 } else if (command === "eval export --json") {
   process.stderr.write("[EVAL_PARTIAL] Export includes incomplete evidence; inspect the structured issues in the report.\\n");
   process.stdout.write(variant === "malformed-evaluation" ? "{bad\\n" : JSON.stringify({ schema: "banzai-evaluation-export/v1", schemaVersion: 1, runs: [] }) + "\\n");
@@ -221,6 +221,8 @@ test("forward release smoke accepts synchronized metadata and a freshly rebuilt 
       ...new Set(VERSION_SURFACES.map((surface) => surface.path)),
       "packages/orchestrator/src",
       "packages/orchestrator/scripts/build.mjs",
+      "packages/orchestrator/scripts/init-resources-build.mjs",
+      "documentation/verification-examples.md",
       "packages/orchestrator/scripts/artifact-readers-build.mjs",
       "packages/orchestrator/scripts/phase-resources-build.mjs",
       "packages/orchestrator/scripts/smoke-committed.mjs",
