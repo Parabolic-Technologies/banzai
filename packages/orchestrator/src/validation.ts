@@ -1,5 +1,9 @@
 import { validateConfigurationStateEnvelope } from "./configuration-prerequisite.js";
-import { parseVerificationConfiguration } from "./verification-evidence.js";
+import {
+  parseTaskVerificationCandidates,
+  parseTaskVerificationPolicy,
+  parseVerificationConfiguration
+} from "./verification-evidence.js";
 import { createHash } from "node:crypto";
 import { BanzaiError } from "./errors.js";
 import { vendorFor } from "./models.js";
@@ -770,12 +774,13 @@ function parsePhaseResultFields(
       "questions",
       "decisionConsultation",
       "resolvedFindingIds",
-      "requestedVerification"
+      "requestedVerification",
+      ...(record.schemaVersion === 4 ? ["verificationCandidates"] : [])
     ],
     "INVALID_RESULT",
     "Phase result"
   );
-  if (record.schemaVersion !== PHASE_RESULT_SCHEMA_VERSION) {
+  if (record.schemaVersion !== 3 && record.schemaVersion !== 4) {
     throw new BanzaiError(
       "PHASE_RESULT_SCHEMA_MISMATCH",
       `Phase result must use schema ${PHASE_RESULT_SCHEMA_VERSION}.`
@@ -840,7 +845,14 @@ function parsePhaseResultFields(
   }
 
   return {
-    schemaVersion: PHASE_RESULT_SCHEMA_VERSION,
+    schemaVersion: record.schemaVersion,
+    ...(record.schemaVersion === 4
+      ? {
+          verificationCandidates: parseTaskVerificationCandidates(
+            record.verificationCandidates
+          )
+        }
+      : {}),
     contractVersion: CONTRACT_VERSION,
     phase,
     outcome,
@@ -1002,7 +1014,7 @@ export function parsePersistedPhaseResult(
   value: unknown
 ): PersistedPhaseResult {
   const record = requireRecord(value, "persisted phase result");
-  if (record.schemaVersion === PHASE_RESULT_SCHEMA_VERSION) {
+  if (record.schemaVersion === 3 || record.schemaVersion === 4) {
     return parsePhaseResult(record);
   }
   const schemaVersion =
@@ -1650,8 +1662,17 @@ function parseCheckpointResult(
       );
     return parseReviewFields(value);
   }
-  if (resultContract === "phase-result/v3") {
-    return parsePhaseResult(value);
+  if (
+    resultContract === "phase-result/v3" ||
+    resultContract === "phase-result/v4"
+  ) {
+    const result = parsePhaseResult(value);
+    if (result.schemaVersion !== (resultContract === "phase-result/v4" ? 4 : 3))
+      throw new BanzaiError(
+        "PHASE_RESULT_SCHEMA_MISMATCH",
+        "Phase result does not match the attempted contract."
+      );
+    return result;
   }
   const result = parsePersistedPhaseResult(value);
   if (result.schemaVersion !== 2) {
@@ -2832,8 +2853,12 @@ export function parseTerminalAttemptCheckpointV2(
     "Terminal checkpoint"
   );
   if (
-    value.schema !== TERMINAL_CHECKPOINT_SCHEMA_V2 ||
-    value.schemaVersion !== TERMINAL_CHECKPOINT_SCHEMA_VERSION_V2 ||
+    !(
+      (value.schema === TERMINAL_CHECKPOINT_SCHEMA_V2 &&
+        value.schemaVersion === 2) ||
+      (value.schema === "banzai-terminal-attempt-checkpoint/v3" &&
+        value.schemaVersion === 3)
+    ) ||
     value.completionProtocol !== COMPLETION_PROTOCOL
   ) {
     return recoveryEvidenceError(
@@ -2852,7 +2877,10 @@ export function parseTerminalAttemptCheckpointV2(
       "Protocol checkpoint requires a mutable implementation or fix attempt."
     );
   }
-  if (value.resultContract !== "phase-result/v3") {
+  if (
+    value.resultContract !==
+    (value.schemaVersion === 3 ? "phase-result/v4" : "phase-result/v3")
+  ) {
     return recoveryEvidenceError(
       code,
       "Checkpoint result contract must be phase-result/v3."
@@ -2877,8 +2905,12 @@ export function parseTerminalAttemptCheckpointV2(
     TerminalAttemptCheckpointV2,
     "integrityDigest"
   > = {
-    schema: TERMINAL_CHECKPOINT_SCHEMA_V2,
-    schemaVersion: TERMINAL_CHECKPOINT_SCHEMA_VERSION_V2,
+    schema:
+      value.schemaVersion === 3
+        ? "banzai-terminal-attempt-checkpoint/v3"
+        : TERMINAL_CHECKPOINT_SCHEMA_V2,
+    schemaVersion:
+      value.schemaVersion === 3 ? 3 : TERMINAL_CHECKPOINT_SCHEMA_VERSION_V2,
     completionProtocol: COMPLETION_PROTOCOL,
     runId: evidenceString(value.runId, code, "runId", 300),
     attempt: {
@@ -2888,7 +2920,8 @@ export function parseTerminalAttemptCheckpointV2(
     },
     phase: attempt.kind,
     configuration,
-    resultContract: "phase-result/v3",
+    resultContract:
+      value.schemaVersion === 3 ? "phase-result/v4" : "phase-result/v3",
     terminal: parseCheckpointTerminal(
       value.terminal,
       configuration.vendor,
@@ -2939,7 +2972,11 @@ export function parseTerminalAttemptCheckpoint(
     );
   }
   // Route by persisted identity, never by report appearance or CLI version.
-  if (value.schema === TERMINAL_CHECKPOINT_SCHEMA_V2) {
+  if (
+    value.schema === TERMINAL_CHECKPOINT_SCHEMA_V2 ||
+    (value.schema === "banzai-terminal-attempt-checkpoint/v3" &&
+      "completionProtocol" in value)
+  ) {
     return parseTerminalAttemptCheckpointV2(value);
   }
   exactKeys(
@@ -2965,10 +3002,12 @@ export function parseTerminalAttemptCheckpoint(
     code,
     "Terminal checkpoint"
   );
-  if (
-    value.schema !== TERMINAL_CHECKPOINT_SCHEMA ||
-    value.schemaVersion !== TERMINAL_CHECKPOINT_SCHEMA_VERSION
-  ) {
+  if (!(
+    (value.schema === TERMINAL_CHECKPOINT_SCHEMA &&
+      value.schemaVersion === 1) ||
+    (value.schema === "banzai-terminal-attempt-checkpoint/v3" &&
+      value.schemaVersion === 3)
+  )) {
     return recoveryEvidenceError(
       code,
       `Terminal checkpoint must use ${TERMINAL_CHECKPOINT_SCHEMA}.`
@@ -3023,15 +3062,18 @@ export function parseTerminalAttemptCheckpoint(
         ? resultContract === "review-result/v2"
           ? "review-result/v2"
           : "review-result/v1"
-        : resultContract === "phase-result/v2"
-          ? "phase-result/v2"
-          : "phase-result/v3";
+        : value.schemaVersion === 3
+          ? "phase-result/v4"
+          : resultContract === "phase-result/v2"
+            ? "phase-result/v2"
+            : "phase-result/v3";
   if (
     resultContract !== expectedContract ||
     (attempt.kind !== "selection" &&
       attempt.kind !== "review" &&
       resultContract !== "phase-result/v2" &&
-      resultContract !== "phase-result/v3")
+      resultContract !== "phase-result/v3" &&
+      resultContract !== "phase-result/v4")
   ) {
     return recoveryEvidenceError(
       code,
@@ -3065,8 +3107,12 @@ export function parseTerminalAttemptCheckpoint(
     TerminalAttemptCheckpoint,
     "integrityDigest"
   > = {
-    schema: TERMINAL_CHECKPOINT_SCHEMA,
-    schemaVersion: TERMINAL_CHECKPOINT_SCHEMA_VERSION,
+    schema:
+      value.schemaVersion === 3
+        ? "banzai-terminal-attempt-checkpoint/v3"
+        : TERMINAL_CHECKPOINT_SCHEMA,
+    schemaVersion:
+      value.schemaVersion === 3 ? 3 : TERMINAL_CHECKPOINT_SCHEMA_VERSION,
     runId: evidenceString(value.runId, code, "runId", 300),
     attempt,
     phase: attempt.kind,
@@ -3300,7 +3346,8 @@ export function parseModelAttemptRecord<T>(value: unknown): AttemptRecord<T> {
   if (
     value.schemaVersion !== 1 &&
     value.schemaVersion !== MODEL_ATTEMPT_SCHEMA_VERSION &&
-    value.schemaVersion !== STRICT_MODEL_ATTEMPT_SCHEMA_VERSION
+    value.schemaVersion !== STRICT_MODEL_ATTEMPT_SCHEMA_VERSION &&
+    value.schemaVersion !== 4
   ) {
     return recoveryEvidenceError(
       code,
@@ -3308,7 +3355,9 @@ export function parseModelAttemptRecord<T>(value: unknown): AttemptRecord<T> {
     );
   }
   const attempt = parseEvidenceAttempt(value.attempt, code, "attempt");
-  const strict = value.schemaVersion === STRICT_MODEL_ATTEMPT_SCHEMA_VERSION;
+  const strict =
+    value.schemaVersion === STRICT_MODEL_ATTEMPT_SCHEMA_VERSION ||
+    (value.schemaVersion === 4 && value.completionProtocol !== undefined);
   if (strict) {
     // The protocol is persisted before invocation and selects every later
     // reader. A missing marker on a v3 record is malformed evidence, never a
@@ -3535,7 +3584,8 @@ export function parseModelAttemptRecord<T>(value: unknown): AttemptRecord<T> {
   evidenceTimestamp(value.startedAt, code, "startedAt");
   if (
     value.schemaVersion === MODEL_ATTEMPT_SCHEMA_VERSION ||
-    value.schemaVersion === STRICT_MODEL_ATTEMPT_SCHEMA_VERSION
+    value.schemaVersion === STRICT_MODEL_ATTEMPT_SCHEMA_VERSION ||
+    value.schemaVersion === 4
   ) {
     if (
       !Object.hasOwn(value, "interruptedAt") ||
@@ -3700,6 +3750,22 @@ export function parseConfig(value: unknown): OrchestratorConfig {
         }
       ]
     };
+  } else if (record.schemaVersion === 4) {
+    const task =
+      record.verification === undefined
+        ? {}
+        : requireRecord(record.verification, "verification");
+    if (Object.keys(task).some((key) => key !== "policy"))
+      throw new BanzaiError(
+        "INVALID_CONFIG",
+        "Schema 4 verification accepts only optional project policy."
+      );
+    verification = {
+      profiles: [],
+      ...(task.policy === undefined
+        ? {}
+        : { taskPolicy: parseTaskVerificationPolicy(task.policy) })
+    };
   } else if (record.schemaVersion === 3) {
     try {
       verification = parseVerificationConfiguration(record.verification);
@@ -3750,7 +3816,7 @@ export function parseConfig(value: unknown): OrchestratorConfig {
   } else {
     throw new BanzaiError(
       "INVALID_CONFIG",
-      "Config must use schemaVersion 1, 2 or 3."
+      "Config must use schemaVersion 1, 2, 3 or 4."
     );
   }
 

@@ -42,19 +42,21 @@ and policies; entry, host transport and contract mechanics remain with the calle
    applicable Engineering Quality constraints and their task/evidence owner; do
    not add a ten-row checklist or per-rule `N/A` list.
 
-When a new plan explicitly relies on equivalent verification, include the
-versioned obligation inventory described by Plan Authority and Task Completion.
-List every configured check in order, retain mandatory fresh requirements, bind
-the complete surrounding prose and obtain normal bundle approval. Missing or
-ambiguous commitments preserve fresh execution.
+Every new strict task plan includes the self-contained v2 obligation inventory
+described by Plan Authority and Task Completion. Select checks for the task,
+retain mandatory fresh requirements, bind the complete surrounding prose and
+obtain normal bundle approval. No profile catalogue defines this inventory.
+Equivalent evidence requires an eligible shared-owner decision; missing or
+ambiguous reuse commitments preserve fresh execution.
 
 ## Rules
 
 - Runner control paths under `.banzai/` are outside model write scope except exact
   private artifact roles bound for the intended implementation/fix phase.
-  Put missing verification setup in **Human prerequisites** and show that section
-  with plan approval. The runner's configuration prerequisite gate owns its
-  proposal and write; do not plan JSON edits or invent an external updater.
+  Put actual owner-only requirements in **Human prerequisites** and show that
+  section with plan approval. Missing tests or tooling belong to the approved
+  task scope, not a profile-setup gate. Do not plan runner-configuration JSON
+  edits or invent an external updater.
   Reading those paths for facts and explicitly preserving them are valid task
   context. Keep each action's targets clear, including in mixed instructions.
   When a reference is ambiguous, use a separate `Read-only references:` or

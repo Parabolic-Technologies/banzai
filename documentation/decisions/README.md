@@ -55,6 +55,7 @@ plugin and orchestrator source.
 | [0046](./0046-supervised-live-e2e.md) | Supervised live end-to-end first task | Accepted | 2026-09-15 | Private work `optional-live-e2e`; requirements summarized in the ADR |
 | [0047](./0047-runner-owned-completion-projection.md) | Runner-owned completion projection | Accepted | 2026-09-15 | Private work `runner-owned-completion-projection`; requirements summarized in the ADR |
 | [0048](./0048-completion-markup-and-viewer-enrichment-boundary.md) | Completion markup and viewer enrichment boundary | Accepted | 2026-09-15 | Private work `runner-owned-completion-projection`; narrow amendment to ADR-0047 |
+| [0049](./0049-task-scoped-verification.md) | Task-scoped verification authority | Accepted | 2026-09-17 | Private work `task-scoped-verification`; partial supersession of 0006/0007/0045 and amendments to 0008/0018/0037/0038/0043; implementation Implemented; independent review recorded privately |
 
 ## File Names
 

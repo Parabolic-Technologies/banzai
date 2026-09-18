@@ -1,4 +1,5 @@
 import {
+  parseTaskVerificationPublication,
   parseVerificationDecision,
   parseVerificationApplicability
 } from "./verification-evidence.js";
@@ -432,7 +433,7 @@ function validateDecisionState(state: RunState): RunState {
 function normalizeRunState(
   state: RunState | LegacyRunStateV2 | LegacyRunState
 ): RunState {
-  if (![1, 2, 3, 4, 5, 6, 7].includes(state.schemaVersion)) {
+  if (![1, 2, 3, 4, 5, 6, 7, 8].includes(state.schemaVersion)) {
     throw new BanzaiError(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Unsupported persisted run state version."
@@ -444,7 +445,7 @@ function normalizeRunState(
       "Legacy run state cannot acquire private binding semantics."
     );
   }
-  if (state.schemaVersion === 7) {
+  if (state.schemaVersion === 7 || state.schemaVersion === 8) {
     // Only the completion cursor is new. Everything else must remain one of
     // the combinations a v4 or v6 bootstrap could have produced.
     if (!Object.hasOwn(state, "completionPublication"))
@@ -485,6 +486,7 @@ function normalizeRunState(
     state.schemaVersion === 4 ||
     state.schemaVersion === 5 ||
     state.schemaVersion === 6 ||
+    state.schemaVersion === 8 ||
     (state.schemaVersion === 7 && state.artifactBinding !== undefined)
   ) {
     if (
@@ -517,7 +519,22 @@ function normalizeRunState(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Run state v4 retains binding v1 semantics."
     );
-  if (hasConfigurationSetup(state as RunState)) {
+  if (state.schemaVersion === 8) {
+    if (state.taskVerification !== undefined) {
+      const publication = parseTaskVerificationPublication(
+        state.taskVerification
+      );
+      if (publication.decision.workId !== state.artifactBinding?.binding.workId)
+        return decisionStateError();
+    }
+    if (
+      state.verificationMode !== "task" ||
+      "configurationSetup" in state ||
+      state.artifactBinding?.binding.schemaVersion !== 2 ||
+      "verificationEvidence" in state
+    )
+      return decisionStateError();
+  } else if (hasConfigurationSetup(state as RunState)) {
     if (
       state.verificationMode !== "ordered" &&
       state.verificationMode !== "policy"
@@ -559,7 +576,8 @@ function normalizeRunState(
     state.schemaVersion === 4 ||
     state.schemaVersion === 5 ||
     state.schemaVersion === 6 ||
-    state.schemaVersion === 7
+    state.schemaVersion === 7 ||
+    state.schemaVersion === 8
   ) {
     const recovery = state.recovery ?? null;
     if (recovery !== null && recovery.stage === undefined) {
@@ -1606,7 +1624,7 @@ export class RunStore {
       if (
         raw.runId !== runId ||
         !CANCELLATION_STATUSES.includes(raw.status as RunState["status"]) ||
-        ![1, 2, 3, 4, 5, 6, 7].includes(raw.schemaVersion as number)
+        ![1, 2, 3, 4, 5, 6, 7, 8].includes(raw.schemaVersion as number)
       )
         throw new Error();
     } catch {

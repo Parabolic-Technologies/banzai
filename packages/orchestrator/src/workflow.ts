@@ -1,6 +1,14 @@
 import { freezeReviewConfiguration } from "./configuration-review.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
+  discoverTaskVerification,
+  executeTaskVerification,
+  readTaskVerificationAttempts,
+  captureTaskVerificationInputs,
+  taskVerificationApplicability,
+  authorizeTaskVerification,
+  parseTaskVerificationObligations,
+  selectTaskVerification,
   captureVerificationInputs,
   decideVerification,
   evidenceDigest,
@@ -15,6 +23,9 @@ import {
   persistVerificationApplicability
 } from "./verification-evidence.js";
 import type {
+  TaskVerificationContext,
+  TaskVerificationAuthority,
+  TaskVerificationPolicy,
   VerificationCapture,
   VerificationStorage
 } from "./verification-evidence.js";
@@ -192,7 +203,10 @@ import {
   workflowSelectionPromptEnvelope,
   workflowPhases
 } from "./prompts.js";
-import { insertPhaseInstructions } from "./prompt-envelope.js";
+import {
+  appendPromptComponent,
+  insertPhaseInstructions
+} from "./prompt-envelope.js";
 import { resolveOutputContract } from "./output-contract.js";
 import {
   FALLBACK_VENDOR,
@@ -987,13 +1001,16 @@ function runId(slug: string): string {
 }
 
 function terminalResultContract(
-  kind: AttemptReference["kind"]
+  kind: AttemptReference["kind"],
+  taskMode = false
 ): TerminalResultContract {
   return kind === "selection"
     ? "workflow-selection/v1"
     : kind === "review"
       ? "review-result/v2"
-      : "phase-result/v3";
+      : taskMode
+        ? "phase-result/v4"
+        : "phase-result/v3";
 }
 
 function commandDisplay(command: string, args: string[]): string {
@@ -1585,38 +1602,19 @@ export class WorkflowRunner {
       // Validate before lock acquisition because the lock initializes the local
       // run directory. Reload under the lock below so a concurrent config edit
       // cannot swap policy after this mutation-free validation boundary.
-      const initialConfig = await loadConfig(this.repoRoot);
-      await this.assertVerificationPreflight(initialConfig, false);
+      await loadConfig(this.repoRoot);
       await currentCommit(this.repoRoot);
       await this.assertProjectGuidance(false);
       const lock = await this.acquireWorkflowLock();
       try {
         this.info(`Preparing run ${input.slug} in ${this.repoRoot}`);
         const config = await loadConfig(this.repoRoot);
-        await this.assertVerificationPreflight(config, true);
         const baseCommit = await currentCommit(this.repoRoot);
         const createdAt = now();
         const state: RunState = {
-          schemaVersion: config.schemaVersion === 1 ? 4 : 6,
-          ...(config.schemaVersion === 1
-            ? {}
-            : {
-                verificationMode:
-                  config.schemaVersion === 3 && config.verification.policy
-                    ? ("policy" as const)
-                    : ("ordered" as const),
-                configurationSetup: {
-                  configSchemaVersion: config.schemaVersion,
-                  configurationDigest: configurationDigest(config.verification),
-                  coverage: "configured" as const,
-                  projectTypes: [],
-                  uncoveredTypes: [],
-                  continuation: null,
-                  resolutions: [],
-                  skip: null,
-                  transactions: []
-                }
-              }),
+          schemaVersion: 8,
+          verificationMode: "task",
+          completionPublication: null,
           contractVersion: CONTRACT_VERSION,
           runId: runId(input.slug),
           slug: input.slug,
@@ -1687,7 +1685,10 @@ export class WorkflowRunner {
           slug: state.slug,
           mode: "workflow",
           creationId: randomUUID(),
-          schemaVersion: usesVerificationPolicy(state) ? 2 : 1
+          schemaVersion:
+            state.verificationMode === "task" || usesVerificationPolicy(state)
+              ? 2
+              : 1
         });
         await this.store.createRun(state);
         await this.observeHumanTime(state, "run_created");
@@ -1886,7 +1887,9 @@ export class WorkflowRunner {
               : retryCheckpoint === "verifying"
                 ? state.planTaskCompletion?.status === "invalid"
                   ? `Retry requested to repair completion evidence rejected for ${expectedAttemptId}`
-                  : `Retry requested for verification attempt ${expectedAttemptId}`
+                  : expectedAttemptId === null
+                    ? "Retry requested for verification prerequisites"
+                    : `Retry requested for verification attempt ${expectedAttemptId}`
                 : `Retry requested for failed attempt ${expectedAttemptId}`
         );
       } finally {
@@ -1953,7 +1956,10 @@ export class WorkflowRunner {
             // record a check failure against; the run stays blocked as it was.
             throw error;
           }
-          if (retryCheckpoint === "verifying" && expectedAttemptId !== null) {
+          if (
+            retryCheckpoint === "verifying" &&
+            (expectedAttemptId !== null || state.verificationMode === "task")
+          ) {
             return await this.recordVerificationRetryCheckFailure(
               state,
               expectedAttemptId,
@@ -2109,7 +2115,10 @@ export class WorkflowRunner {
             commitTransition
           );
         }
-        if (retryCheckpoint === "verifying" && expectedAttemptId !== null) {
+        if (
+          retryCheckpoint === "verifying" &&
+          (expectedAttemptId !== null || state.verificationMode === "task")
+        ) {
           await this.validateBaseCommit(state);
           transitionState(state, "verifying");
           state.activeProcess = null;
@@ -2125,13 +2134,15 @@ export class WorkflowRunner {
               )
           );
           this.info(
-            `Retrying verification attempt ${expectedAttemptId} with a new physical identity`
+            expectedAttemptId === null
+              ? "Retrying verification prerequisites without replaying implementation"
+              : `Retrying verification attempt ${expectedAttemptId} with a new physical identity`
           );
           return await this.executeVerification(
             state,
             config,
             undefined,
-            expectedAttemptId,
+            expectedAttemptId ?? undefined,
             commitTransition
           );
         }
@@ -2583,7 +2594,14 @@ export class WorkflowRunner {
         // the gate and the approval cannot smuggle in a malformed heading.
         await this.approvedTaskIds(state);
         const approvalConfig = await loadConfig(this.repoRoot);
-        if (approvalConfig.schemaVersion === 3)
+        if (state.verificationMode === "task")
+          parseTaskVerificationObligations(
+            await readFile(
+              path.join(this.repoRoot, this.completionPlanPath(state)),
+              "utf8"
+            )
+          );
+        else if (approvalConfig.schemaVersion === 3)
           validatePlanVerificationObligations(
             await readFile(
               path.join(this.repoRoot, this.completionPlanPath(state)),
@@ -4279,6 +4297,25 @@ export class WorkflowRunner {
       }
       if (state.blockedFrom === "verifying") {
         try {
+          if (state.verificationMode === "task") {
+            const latest = (
+              await readTaskVerificationAttempts(
+                this.taskVerificationStorage(state)
+              )
+            ).at(-1);
+            const unresolved = latest?.status === "started";
+            const unsuccessful =
+              latest?.status === "failed" || latest?.status === "interrupted";
+            return {
+              eligible: true,
+              reason: unresolved
+                ? "Retry reconciles the unresolved physical attempt before running eligible checks."
+                : unsuccessful
+                  ? "The unsuccessful task check can be retried explicitly."
+                  : "Verification prerequisites can be retried without replaying implementation.",
+              attemptId: unsuccessful ? latest.id : null
+            };
+          }
           if (!(await this.store.verificationLedgerSupported(state.runId))) {
             return {
               eligible: false,
@@ -4664,7 +4701,7 @@ export class WorkflowRunner {
         checkpoint.approvalDigest !== state.planApproval?.digest ||
         checkpoint.scopeDigest !==
           this.attemptScopeDigest(state, source.attempt) ||
-        (checkpoint.schemaVersion === 1
+        ("result" in checkpoint
           ? digestCanonicalJson(checkpoint.result)
           : digestCanonicalJson(
               JSON.parse(checkpoint.envelope.original) as unknown
@@ -5249,7 +5286,7 @@ export class WorkflowRunner {
 
   private async recordVerificationRetryCheckFailure(
     state: RunState,
-    attemptId: string,
+    attemptId: string | null,
     error: unknown
   ): Promise<RunState> {
     const reason = checkFailureReason(error);
@@ -5387,7 +5424,9 @@ export class WorkflowRunner {
     for (const usage of vendorUsage(config)) {
       await assertExecutable(usage.executable, this.repoRoot, environment);
     }
-    for (const verification of flattenVerificationCommands(config)) {
+    for (const verification of state.verificationMode === "task"
+      ? []
+      : flattenVerificationCommands(config)) {
       await assertExecutable(verification.command, this.repoRoot, environment);
     }
     // One check per vendor/executable pair, so roles sharing a vendor are not
@@ -5778,9 +5817,11 @@ export class WorkflowRunner {
   ): Promise<AttemptRecord> {
     const record: AttemptRecord = {
       schemaVersion:
-        policy.completion === undefined
-          ? MODEL_ATTEMPT_SCHEMA_VERSION
-          : STRICT_MODEL_ATTEMPT_SCHEMA_VERSION,
+        state.verificationMode === "task"
+          ? 4
+          : policy.completion === undefined
+            ? MODEL_ATTEMPT_SCHEMA_VERSION
+            : STRICT_MODEL_ATTEMPT_SCHEMA_VERSION,
       attempt,
       status: "started",
       startedAt: now(),
@@ -5898,9 +5939,11 @@ export class WorkflowRunner {
     if (record === null) {
       record = {
         schemaVersion:
-          policy.completion === undefined
-            ? MODEL_ATTEMPT_SCHEMA_VERSION
-            : STRICT_MODEL_ATTEMPT_SCHEMA_VERSION,
+          state.verificationMode === "task"
+            ? 4
+            : policy.completion === undefined
+              ? MODEL_ATTEMPT_SCHEMA_VERSION
+              : STRICT_MODEL_ATTEMPT_SCHEMA_VERSION,
         attempt,
         status: "started",
         startedAt: now(),
@@ -6080,8 +6123,14 @@ export class WorkflowRunner {
         );
         const checkpoint: Omit<TerminalAttemptCheckpointV2, "integrityDigest"> =
           {
-            schema: TERMINAL_CHECKPOINT_SCHEMA_V2,
-            schemaVersion: TERMINAL_CHECKPOINT_SCHEMA_VERSION_V2,
+            schema:
+              state.verificationMode === "task"
+                ? "banzai-terminal-attempt-checkpoint/v3"
+                : TERMINAL_CHECKPOINT_SCHEMA_V2,
+            schemaVersion:
+              state.verificationMode === "task"
+                ? 3
+                : TERMINAL_CHECKPOINT_SCHEMA_VERSION_V2,
             completionProtocol: COMPLETION_PROTOCOL,
             runId: current.runId,
             attempt: { id: attempt.id, kind: attempt.kind, mutable: true },
@@ -6094,7 +6143,10 @@ export class WorkflowRunner {
               sessionMode: policy.sessionMode,
               sessionContextDigest: digestCanonicalJson(policy.sessionContext)
             },
-            resultContract: "phase-result/v3",
+            resultContract:
+              state.verificationMode === "task"
+                ? "phase-result/v4"
+                : "phase-result/v3",
             terminal: {
               classification: terminal.classification,
               observedAt: terminal.observedAt
@@ -6125,8 +6177,14 @@ export class WorkflowRunner {
         return;
       }
       const checkpoint: Omit<TerminalAttemptCheckpoint, "integrityDigest"> = {
-        schema: TERMINAL_CHECKPOINT_SCHEMA,
-        schemaVersion: TERMINAL_CHECKPOINT_SCHEMA_VERSION,
+        schema:
+          state.verificationMode === "task"
+            ? "banzai-terminal-attempt-checkpoint/v3"
+            : TERMINAL_CHECKPOINT_SCHEMA,
+        schemaVersion:
+          state.verificationMode === "task"
+            ? 3
+            : TERMINAL_CHECKPOINT_SCHEMA_VERSION,
         runId: current.runId,
         attempt,
         phase: attempt.kind,
@@ -6138,7 +6196,10 @@ export class WorkflowRunner {
           sessionMode: policy.sessionMode,
           sessionContextDigest: digestCanonicalJson(policy.sessionContext)
         },
-        resultContract: terminalResultContract(attempt.kind),
+        resultContract: terminalResultContract(
+          attempt.kind,
+          state.verificationMode === "task"
+        ),
         terminal: {
           classification: terminal.classification,
           observedAt: terminal.observedAt
@@ -7087,12 +7148,15 @@ export class WorkflowRunner {
         this.serenaGuidanceFor(environment, config.models.planner.executable)
       ]
     );
+    prompt = await this.taskDiscoveryPrompt(state, prompt);
     const invocationDigest = digestCanonicalJson({
       environment,
       prompt: prompt.rendered,
       outputContract: resolveOutputContract(
         vendorFor(config.models.planner.executable) ?? "codex",
-        "phase-result/v3"
+        state.verificationMode === "task"
+          ? "phase-result/v4"
+          : "phase-result/v3"
       ).serialized
     });
     let resumeSessionId = plannerBinding?.id ?? null;
@@ -7196,7 +7260,10 @@ export class WorkflowRunner {
             sessionMode: resumeSessionId === null ? "fresh" : "resumed",
             kind: "primary",
             prompt,
-            outputIdentity: "phase-result/v3",
+            outputIdentity:
+              state.verificationMode === "task"
+                ? "phase-result/v4"
+                : "phase-result/v3",
             invoke: async (outputContract) =>
               await this.adapters.runPhase({
                 repoRoot: this.repoRoot,
@@ -7459,13 +7526,16 @@ export class WorkflowRunner {
       // run-level MCP whitelist, which reports on first resolution and would
       // otherwise print as if it were the phase's own first action.
       const environment = await this.invocationScope(state.runId, config);
-      const invocationPrompt = insertPhaseInstructions(prompt, [
-        this.artifactInstructions(state, attempt.kind),
-        this.serenaGuidanceFor(
-          environment,
-          config.models.implementer.executable
-        )
-      ]);
+      const invocationPrompt = insertPhaseInstructions(
+        await this.taskDiscoveryPrompt(state, prompt),
+        [
+          this.artifactInstructions(state, attempt.kind),
+          this.serenaGuidanceFor(
+            environment,
+            config.models.implementer.executable
+          )
+        ]
+      );
       const result = await this.activity(
         "Implementation",
         {
@@ -7494,7 +7564,10 @@ export class WorkflowRunner {
             sessionMode: resumeSessionId === null ? "fresh" : "resumed",
             kind: "primary",
             prompt: invocationPrompt,
-            outputIdentity: "phase-result/v3",
+            outputIdentity:
+              state.verificationMode === "task"
+                ? "phase-result/v4"
+                : "phase-result/v3",
             invoke: async (outputContract) =>
               await this.adapters.runPhase({
                 repoRoot: this.repoRoot,
@@ -7742,13 +7815,16 @@ export class WorkflowRunner {
                     prerequisites: prerequisiteRecovery.prerequisites
                   }
             );
-      const invocationPrompt = insertPhaseInstructions(recoveredPrompt, [
-        this.artifactInstructions(state, attempt.kind),
-        this.serenaGuidanceFor(
-          environment,
-          config.models.implementer.executable
-        )
-      ]);
+      const invocationPrompt = insertPhaseInstructions(
+        await this.taskDiscoveryPrompt(state, recoveredPrompt),
+        [
+          this.artifactInstructions(state, attempt.kind),
+          this.serenaGuidanceFor(
+            environment,
+            config.models.implementer.executable
+          )
+        ]
+      );
       const result = await this.activity(
         "Fix",
         {
@@ -7773,7 +7849,10 @@ export class WorkflowRunner {
             sessionMode: resumeSessionId === null ? "fresh" : "resumed",
             kind: "primary",
             prompt: invocationPrompt,
-            outputIdentity: "phase-result/v3",
+            outputIdentity:
+              state.verificationMode === "task"
+                ? "phase-result/v4"
+                : "phase-result/v3",
             invoke: async (outputContract) =>
               await this.adapters.runPhase({
                 repoRoot: this.repoRoot,
@@ -7847,7 +7926,11 @@ export class WorkflowRunner {
   // ---------------------------------------------------------------------------
 
   private completionProtocolAttempt(record: AttemptRecord): boolean {
-    return record.schemaVersion === STRICT_MODEL_ATTEMPT_SCHEMA_VERSION;
+    return (
+      record.schemaVersion === STRICT_MODEL_ATTEMPT_SCHEMA_VERSION ||
+      (record.schemaVersion === 4 &&
+        record.completionProtocol === COMPLETION_PROTOCOL)
+    );
   }
 
   private completionEnvelopeOf(
@@ -7939,7 +8022,7 @@ export class WorkflowRunner {
     state: RunState,
     attempt: AttemptReference & { kind: "implementation" | "fix" }
   ): Promise<void> {
-    if (state.schemaVersion === 7) return;
+    if (state.schemaVersion === 7 || state.schemaVersion === 8) return;
     if (
       state.schemaVersion !== 3 &&
       state.schemaVersion !== 4 &&
@@ -8164,7 +8247,7 @@ export class WorkflowRunner {
       state.runId,
       attempt
     );
-    if (checkpoint?.schemaVersion !== 2)
+    if (!checkpoint || !("envelope" in checkpoint))
       throw new CompletionRefusal(
         "COMPLETION_PUBLICATION_INTEGRITY",
         "capture",
@@ -9436,7 +9519,7 @@ export class WorkflowRunner {
         attempt
       );
       if (checkpoint === null) return null;
-      if (checkpoint.schemaVersion !== 2) {
+      if (!("envelope" in checkpoint)) {
         throw new BanzaiError(
           "TERMINAL_CHECKPOINT_MISMATCH",
           "A protocol attempt cannot reconcile a legacy terminal checkpoint."
@@ -9788,7 +9871,8 @@ export class WorkflowRunner {
                   attempt
                 );
               restored =
-                checkpoint?.schemaVersion === 2 &&
+                checkpoint !== null &&
+                "envelope" in checkpoint &&
                 checkpoint.observed.workspaceDigest !== null &&
                 sameObservedInputs(inputs.observed, checkpoint.observed) &&
                 (await this.completionCheckpointAuthorityCurrent(
@@ -10311,6 +10395,70 @@ export class WorkflowRunner {
     state: RunState,
     config?: OrchestratorConfig
   ): Promise<boolean> {
+    if (state.verificationMode === "task") {
+      try {
+        const publication = state.taskVerification;
+        if (!publication)
+          throw new BanzaiError(
+            "VERIFICATION_EVIDENCE_INVALID",
+            "Task verification has no physical evidence publication."
+          );
+        const storage = this.taskVerificationStorage(state);
+        const policy = this.taskVerificationPolicy(
+          config ?? (await loadConfig(this.repoRoot))
+        );
+        if (
+          (policy ? evidenceDigest(policy) : null) !==
+          publication.decision.policyDigest
+        )
+          throw new BanzaiError(
+            "VERIFICATION_POLICY_CHANGED",
+            "Verification policy changed after execution."
+          );
+        const expectedContext = this.taskExecutionContext(state, policy);
+        const authority = publication.decision.authority;
+        if (
+          authority.workId !== storage.workId ||
+          authority.taskDigest !== evidenceDigest(state.request) ||
+          authority.selectionDigest !== state.workflowSelection?.digest ||
+          authority.approvalDigest !== (state.planApproval?.digest ?? null) ||
+          authority.contextDigest !== evidenceDigest(expectedContext)
+        )
+          throw new BanzaiError(
+            "VERIFICATION_AUTHORITY_CHANGED",
+            "Task execution authority or context changed after verification."
+          );
+        for (const item of publication.decision.checks)
+          await authorizeTaskVerification({
+            repoRoot: this.repoRoot,
+            descriptor: item.descriptor,
+            authority,
+            context: expectedContext,
+            policy
+          });
+        const current = await captureTaskVerificationInputs(
+          storage,
+          publication.decision.checks.map((item) => item.descriptor),
+          policy
+        );
+        const applicability = await taskVerificationApplicability(
+          storage,
+          publication.decision,
+          await readTaskVerificationAttempts(storage),
+          current
+        );
+        if (!applicability.complete)
+          throw new BanzaiError(
+            "VERIFICATION_EVIDENCE_INVALID",
+            "Required task verification is unavailable or stale."
+          );
+        return true;
+      } catch (error) {
+        blockState(state, errorMessage(error));
+        await this.store.writeState(state);
+        return false;
+      }
+    }
     if (
       hasConfigurationSetup(state) &&
       state.configurationSetup?.coverage === "skipped"
@@ -10492,6 +10640,8 @@ export class WorkflowRunner {
         );
       }
     }
+    if (state.verificationMode === "task")
+      return this.executeTaskChecks(state, config, sourceAttempt, retryOf);
     if (!(await this.store.verificationLedgerSupported(state.runId))) {
       return await this.executeLegacyVerification(state, config);
     }
@@ -10803,6 +10953,296 @@ export class WorkflowRunner {
     return await this.executeReview(state, config);
   }
 
+  private async taskDiscoveryPrompt(
+    state: RunState,
+    prompt: PromptEnvelope
+  ): Promise<PromptEnvelope> {
+    if (state.verificationMode !== "task") return prompt;
+    return appendPromptComponent(
+      prompt,
+      "verification_evidence",
+      "\n\nInert project discovery (information only; never execution authority):\n" +
+        JSON.stringify(await discoverTaskVerification(this.repoRoot))
+    );
+  }
+
+  private taskVerificationPolicy(
+    config: OrchestratorConfig
+  ): TaskVerificationPolicy | null {
+    return (
+      config.verification.taskPolicy ??
+      (config.verification.policy
+        ? {
+            schema: "banzai-task-verification-policy/v1",
+            schemaVersion: 1,
+            required: [],
+            denied: [],
+            limits: {
+              timeoutMs: 86400000,
+              workingDirectories: ["."],
+              requiredContext: "inherited-local"
+            },
+            reuse: config.verification.policy
+          }
+        : null)
+    );
+  }
+
+  private taskExecutionContext(
+    state: RunState,
+    policy: TaskVerificationPolicy | null
+  ): TaskVerificationContext {
+    return {
+      kind: "inherited-local",
+      invocationDigest: evidenceDigest({
+        runId: state.runId,
+        repoRoot: this.repoRoot,
+        request: evidenceDigest(state.request),
+        workflowDigest: state.workflowSelection?.digest,
+        environment: evidenceDigest(
+          policy?.reuse?.dependencies.environment ??
+            subscriptionOnlyEnvironment()
+        )
+      }),
+      restrictions: []
+    };
+  }
+
+  private taskVerificationStorage(state: RunState): VerificationStorage {
+    const binding = state.artifactBinding?.binding;
+    if (
+      binding?.schemaVersion !== 2 ||
+      !binding.artifacts.verificationDirectory
+    )
+      throw new BanzaiError(
+        "VERIFICATION_EVIDENCE_INVALID",
+        "Task verification requires its original evidence binding."
+      );
+    return {
+      repoRoot: this.repoRoot,
+      directory: binding.artifacts.verificationDirectory,
+      workId: binding.workId
+    };
+  }
+
+  private async executeTaskChecks(
+    state: RunState,
+    config: OrchestratorConfig,
+    sourceAttempt?: AttemptReference,
+    retryOf?: string
+  ): Promise<RunState> {
+    try {
+      const source = await this.verificationSourceAttempt(
+        state,
+        [],
+        sourceAttempt
+      );
+      const record = await this.store.readRunAttempt(state.runId, source);
+      const result = record.result;
+      if (!result || !("phase" in result) || result.schemaVersion !== 4)
+        throw new BanzaiError(
+          "PHASE_RESULT_SCHEMA_MISMATCH",
+          "Task verification requires phase-result v4 from its completed source attempt."
+        );
+      const storage = this.taskVerificationStorage(state);
+      const workflow = state.workflowSelection?.workflow;
+      if (!workflow || !state.workflowSelection?.digest)
+        throw new BanzaiError(
+          "VERIFICATION_AUTHORITY_MISSING",
+          "Verification has no persisted workflow authority."
+        );
+      const policy = this.taskVerificationPolicy(config);
+      const obligations =
+        workflow === "strict"
+          ? parseTaskVerificationObligations(
+              await readFile(
+                path.join(this.repoRoot, this.completionPlanPath(state)),
+                "utf8"
+              )
+            )
+          : null;
+      if (workflow !== "strict" && !result.verificationCandidates)
+        throw new BanzaiError(
+          "VERIFICATION_SELECTION_MISSING",
+          "Lite verification requires selected task checks or an explicit absence rationale."
+        );
+      const selection = selectTaskVerification({
+        required: obligations?.checks ?? [],
+        candidates:
+          result.verificationCandidates ??
+          (obligations
+            ? {
+                checks: [],
+                absenceReason:
+                  obligations.absenceReason ??
+                  "Mandatory checks are specified by the plan."
+              }
+            : null),
+        policy
+      });
+      if (!selection.checks.length && !selection.absenceReason)
+        throw new BanzaiError(
+          "VERIFICATION_SELECTION_MISSING",
+          "An empty task selection requires its actual assurance rationale."
+        );
+      const context = this.taskExecutionContext(state, policy);
+      const authority: TaskVerificationAuthority = {
+        workId: storage.workId,
+        sourceAttemptId: source.id,
+        workflow,
+        taskDigest: evidenceDigest(state.request),
+        selectionDigest: state.workflowSelection.digest,
+        approvalDigest:
+          workflow === "strict" ? (state.planApproval?.digest ?? null) : null,
+        contextDigest: evidenceDigest(context)
+      };
+      const revalidate = async () => {
+        const current = await this.store.readState(state.runId);
+        if (
+          current.status === "cancelled" ||
+          current.verificationMode !== "task" ||
+          current.workflowSelection?.digest !== authority.selectionDigest ||
+          evidenceDigest(current.request) !== authority.taskDigest ||
+          current.artifactBinding?.sha256 !== state.artifactBinding?.sha256
+        )
+          throw new BanzaiError(
+            "VERIFICATION_AUTHORITY_CHANGED",
+            "Task authority changed before verification could be applied."
+          );
+        if (
+          evidenceDigest(
+            this.taskVerificationPolicy(await loadConfig(this.repoRoot))
+          ) !== evidenceDigest(policy)
+        )
+          throw new BanzaiError(
+            "VERIFICATION_POLICY_CHANGED",
+            "Project verification policy changed."
+          );
+        const currentContext = this.taskExecutionContext(state, policy);
+        if (evidenceDigest(currentContext) !== authority.contextDigest)
+          throw new BanzaiError(
+            "VERIFICATION_CONTEXT_CHANGED",
+            "The actual execution context changed."
+          );
+        if (workflow === "strict") await this.validateApproval(state);
+      };
+      if (
+        state.activeProcess?.kind === "verification" &&
+        this.store.processAlive(state.activeProcess.pid)
+      )
+        throw new BanzaiError(
+          "VERIFICATION_PROCESS_LIVE",
+          "A recorded verification process is still live; resume cannot start a duplicate."
+        );
+      await revalidate();
+      const previous = await readTaskVerificationAttempts(storage, true);
+      const roundId =
+        previous.find((item) => item.sourceAttemptId === source.id)?.roundId ??
+        randomUUID();
+      state.taskVerification = await executeTaskVerification({
+        ...storage,
+        selection,
+        authority,
+        context,
+        policy,
+        roundId,
+        ...(retryOf ? { retryOf } : {}),
+        recoverInterrupted: true,
+        revalidate,
+        invoke: async (descriptor, cwd) => {
+          state.metrics.attempts.verification += 1;
+          await this.store.writeState(state);
+          try {
+            const observed = await this.processRunner({
+              command: descriptor.command,
+              args: descriptor.args,
+              cwd,
+              env:
+                policy?.reuse?.dependencies.environment ??
+                subscriptionOnlyEnvironment(),
+              timeoutMs: descriptor.timeoutMs,
+              onStart: async (pid) => {
+                await this.processStarted(state, { kind: "verification" }, pid);
+              }
+            });
+            return {
+              ...observed,
+              status: observed.signal
+                ? "interrupted"
+                : observed.exitCode === 0
+                  ? "completed"
+                  : "failed",
+              failureCategory:
+                observed.exitCode === 0 && !observed.signal
+                  ? null
+                  : "command_exit"
+            };
+          } catch (error) {
+            const observed =
+              error instanceof ProcessExitError
+                ? error.result
+                : {
+                    stdout: "",
+                    stderr: "Process could not be started.",
+                    exitCode: null,
+                    signal: null,
+                    completedAt: now()
+                  };
+            return {
+              ...observed,
+              status:
+                error instanceof TerminalRunStateError || observed.signal
+                  ? "interrupted"
+                  : "failed",
+              failureCategory:
+                error instanceof BanzaiError && error.code === "PROCESS_TIMEOUT"
+                  ? "timeout"
+                  : error instanceof BanzaiError &&
+                      error.code === "PROCESS_OUTPUT_LIMIT"
+                    ? "output_limit"
+                    : error instanceof ProcessExitError
+                      ? "runner_failure"
+                      : "process_start"
+            };
+          } finally {
+            state.activeProcess = null;
+          }
+        }
+      });
+      // Legacy aggregate commands are not a second evidence source for task mode.
+      state.verification = [];
+      if (!state.taskVerification.applicability.complete) {
+        blockState(
+          state,
+          "Task verification is incomplete. Inspect the retained physical evidence and retry the failed check without replaying implementation."
+        );
+        await this.store.writeState(state);
+        return state;
+      }
+      this.info(
+        state.taskVerification.applicability.outcome === "absent"
+          ? `Verification: absent. ${selection.absenceReason}`
+          : `Task verification completed (${selection.checks.length} checks).`
+      );
+      transitionState(state, workflow === "strict" ? "reviewing" : "done");
+      await this.store.writeState(state);
+      if (workflow === "strict") return await this.executeReview(state, config);
+      await this.store.appendEvent(state.runId, "run.completed", {
+        workflow,
+        taskVerification: state.taskVerification.references.applicability
+      });
+      return state;
+    } catch (error) {
+      const current = await this.store.readState(state.runId);
+      if (current.status === "cancelled") return current;
+      state.activeProcess = null;
+      delete state.taskVerification;
+      blockState(state, errorMessage(error));
+      await this.store.writeState(state);
+      return state;
+    }
+  }
+
   private async executeLegacyVerification(
     state: RunState,
     config: OrchestratorConfig
@@ -10916,8 +11356,22 @@ export class WorkflowRunner {
         this.executeReview(state, config, commitTransition)
       );
     requireState(state, ["reviewing"], "Review");
-    if (!(await this.requireVerificationApplicability(state, config)))
+    if (!(await this.requireVerificationApplicability(state, config))) {
+      // An explicit review retry may refresh stale successful checks before a
+      // new snapshot. Ordinary resume never silently blesses changed inputs.
+      if (
+        commitTransition &&
+        state.verificationMode === "task" &&
+        state.blockReason ===
+          "Required task verification is unavailable or stale."
+      ) {
+        await commitTransition();
+        transitionState(state, "verifying");
+        await this.store.writeState(state);
+        return await this.executeVerification(state, config);
+      }
       return state;
+    }
     await this.assertProjectGuidance();
     let validatedCompletion: ValidatedPlanTaskCompletion;
     try {
@@ -11075,25 +11529,29 @@ export class WorkflowRunner {
         );
       const frozen = sealReviewSnapshot({
         schema:
-          state.schemaVersion === 7
-            ? "banzai-review-snapshot/v5"
-            : state.schemaVersion === 6
-              ? "banzai-review-snapshot/v4"
-              : state.schemaVersion === 5
-                ? "banzai-review-snapshot/v3"
-                : state.artifactBinding
-                  ? "banzai-review-snapshot/v2"
-                  : "banzai-review-snapshot/v1",
+          state.schemaVersion === 8
+            ? "banzai-review-snapshot/v6"
+            : state.schemaVersion === 7
+              ? "banzai-review-snapshot/v5"
+              : state.schemaVersion === 6
+                ? "banzai-review-snapshot/v4"
+                : state.schemaVersion === 5
+                  ? "banzai-review-snapshot/v3"
+                  : state.artifactBinding
+                    ? "banzai-review-snapshot/v2"
+                    : "banzai-review-snapshot/v1",
         schemaVersion:
-          state.schemaVersion === 7
-            ? 5
-            : state.schemaVersion === 6
-              ? 4
-              : state.schemaVersion === 5
-                ? 3
-                : state.artifactBinding
-                  ? 2
-                  : 1,
+          state.schemaVersion === 8
+            ? 6
+            : state.schemaVersion === 7
+              ? 5
+              : state.schemaVersion === 6
+                ? 4
+                : state.schemaVersion === 5
+                  ? 3
+                  : state.artifactBinding
+                    ? 2
+                    : 1,
         ...(hasConfigurationSetup(state)
           ? {
               verificationMode: state.verificationMode ?? "ordered",
@@ -11103,7 +11561,13 @@ export class WorkflowRunner {
               )
             }
           : {}),
-        ...(state.schemaVersion === 7
+        ...(state.schemaVersion === 8
+          ? {
+              verificationMode: "task" as const,
+              taskVerification: state.taskVerification
+            }
+          : {}),
+        ...(state.schemaVersion === 7 || state.schemaVersion === 8
           ? {
               completionPublication: await this.frozenCompletionPublication(
                 state,
@@ -11746,6 +12210,8 @@ export class WorkflowRunner {
         "utf8"
       );
       parseApprovedPlanTaskIds(markdown);
+      if (state.verificationMode === "task")
+        parseTaskVerificationObligations(markdown);
       this.validateRunnerControlTasks(state, markdown);
     } catch (error) {
       if (
@@ -11875,7 +12341,7 @@ export class WorkflowRunner {
     if (checkpoint === null) {
       return null;
     }
-    if (checkpoint.schemaVersion !== 1) {
+    if ("envelope" in checkpoint) {
       throw new BanzaiError(
         "TERMINAL_CHECKPOINT_MISMATCH",
         "A legacy attempt cannot reconcile a completion-protocol checkpoint."
@@ -11898,7 +12364,10 @@ export class WorkflowRunner {
     const expectedResultContract =
       attempt.kind === "review" && record.reviewContext === undefined
         ? "review-result/v1"
-        : terminalResultContract(attempt.kind);
+        : terminalResultContract(
+            attempt.kind,
+            state.verificationMode === "task"
+          );
     const resultContractMatches =
       checkpoint.resultContract === expectedResultContract ||
       (expectedResultContract === "phase-result/v3" &&

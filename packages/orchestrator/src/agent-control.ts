@@ -1059,6 +1059,27 @@ export function projectAgentControlStatus(
         diagnostics
       },
       completionPublication: completionPublication(state),
+      ...(state.verificationMode === "task"
+        ? {
+            taskVerification: {
+              outcome:
+                state.taskVerification?.applicability.outcome ??
+                ("not_run" as const),
+              complete: state.taskVerification?.applicability.complete ?? false,
+              absenceReason:
+                state.taskVerification?.applicability.absenceReason ?? null,
+              checks:
+                state.taskVerification?.applicability.dispositions.map(
+                  ({ checkId, required, kind, attemptId }) => ({
+                    checkId,
+                    required,
+                    kind,
+                    attemptId
+                  })
+                ) ?? []
+            }
+          }
+        : {}),
       verification: {
         total: verificationResults.length,
         passed,

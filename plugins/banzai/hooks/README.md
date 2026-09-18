@@ -37,7 +37,7 @@ implementation provides `BANZAI_RUN_ID` and `BANZAI_WORKFLOW_DIGEST`. Both
 orchestrated reviewers receive only `BANZAI_RUN_ID` and
 `BANZAI_APPROVAL_DIGEST` as runner context for required reads; review and
 selection provide no artifact write authorization. The runner owns rendering,
-validation and publication of `banzai-feature-review/v5` Markdown. The hook:
+validation and publication of `banzai-feature-review/v7` Markdown. The hook:
 
 - requires the run to be the active run in `.banzai/active-run.json`;
 - denies every mutation while state is `reviewing` or an active review attempt
@@ -84,7 +84,7 @@ manual gate; they do not require an orchestrator.
 - After hook edits, reload Claude Code or restart Codex and re-trust via
   `/hooks`.
 
-State 6 preserves exact bound artifact grants. The conditional
-`configuration_prerequisite` gate is runner-raised after a completed mutable
-attempt; it grants no model write to configuration or other runner controls.
-An owning runner applies a confirmed profile and preserves the plan approval.
+Current task verification preserves exact bound artifact grants and adds no
+configuration prerequisite gate. The retained legacy `configuration_prerequisite`
+recognition grants no model write to configuration or other runner controls.
+Historical format recognition does not authorize old-run continuation.

@@ -369,14 +369,14 @@ function validatePolicyShape(policy) {
   );
   requireExact(
     phaseResult.currentPath,
-    "plugins/banzai/contracts/v3/phase-result.schema.json",
+    "plugins/banzai/contracts/v4/phase-result.schema.json",
     "CONTRACT_POLICY_DRIFT",
     policyPath,
     "current phase-result path"
   );
   requireExact(
     phaseResult.currentSchemaVersion,
-    3,
+    4,
     "CONTRACT_POLICY_DRIFT",
     policyPath,
     "current phase-result schema version"
@@ -401,6 +401,11 @@ function validatePolicyShape(policy) {
         "plugins/banzai/contracts/v2/phase-result.schema.json",
         2,
         "7ede6c88fca7d95b6a7693017f45e9c01339461aa5991e03efabe9598f3ea7fd"
+      ],
+      [
+        "plugins/banzai/contracts/v3/phase-result.schema.json",
+        3,
+        "4e57274234ee3482c0f700359df78c6c038282450c8a759d47a790ef4f2ff728"
       ]
     ],
     "CONTRACT_POLICY_DRIFT",
@@ -445,9 +450,9 @@ function validatePolicyShape(policy) {
     "contracts.agentControl"
   );
   const expectedControl = {
-    contractVersion: "5.0.0",
-    capabilities: "banzai-agent-capabilities/v5",
-    status: "banzai-agent-status/v4",
+    contractVersion: "6.0.0",
+    capabilities: "banzai-agent-capabilities/v6",
+    status: "banzai-agent-status/v5",
     request: "banzai-agent-request/v1",
     answer: "banzai-agent-answer/v2",
     configurationAnswer: "banzai-agent-answer/v3",
@@ -673,10 +678,10 @@ async function validateContracts(root, policy) {
   );
   requireExact(
     schemas.phaseResult,
-    "./v3/phase-result.schema.json",
+    "./v4/phase-result.schema.json",
     "INVALID_CONTRACT_REFERENCE",
     manifestPath,
-    "phaseResult must reference the current v3 schema"
+    "phaseResult must reference the current v4 schema"
   );
   requireExact(
     schemas.reviewResult,
@@ -831,12 +836,23 @@ async function validateContracts(root, policy) {
     const properties = record(schema.properties, relativePath, "properties");
     requireJsonExact(
       record(properties.gate, relativePath, "gate").enum,
-      ["adr_approval", "plan_approval", "escalation", null],
+      legacy.schemaVersion === 3
+        ? [
+            "adr_approval",
+            "plan_approval",
+            "escalation",
+            "decision_consultation",
+            null
+          ]
+        : ["adr_approval", "plan_approval", "escalation", null],
       "LEGACY_CONTRACT_DRIFT",
       relativePath,
       "legacy phase-result gates"
     );
-    if (Object.hasOwn(properties, "decisionConsultation")) {
+    if (
+      legacy.schemaVersion < 3 &&
+      Object.hasOwn(properties, "decisionConsultation")
+    ) {
       fail(
         "LEGACY_CONTRACT_DRIFT",
         relativePath,
@@ -864,18 +880,18 @@ async function validateContracts(root, policy) {
     fail(
       "CONTRACT_VERSION_MISMATCH",
       typesPath,
-      "runner phase-result schema version must be 3"
+      "runner phase-result schema version must be 4"
     );
   }
   if (
-    !/export interface RunState\s*{[^}]*?schemaVersion:\s*3\s*\|\s*4\s*\|\s*5\s*\|\s*6\s*\|\s*7;/.test(
+    !/export interface RunState\s*{[^}]*?schemaVersion:\s*3\s*\|\s*4\s*\|\s*5\s*\|\s*6\s*\|\s*7\s*\|\s*8;/.test(
       typesSource
     )
   ) {
     fail(
       "STATE_CONTRACT_DRIFT",
       typesPath,
-      "current run state must retain v3-v6 and support completion-protocol v7"
+      "current run state must retain v3-v6 and support task-verification v8"
     );
   }
   if (!/schemaVersion:\s*1\s*\|\s*2;/.test(typesSource)) {
@@ -917,8 +933,8 @@ async function validateContracts(root, policy) {
     }
   }
   for (const [name, expected] of [
-    ["AGENT_CAPABILITIES_SCHEMA_VERSION", 5],
-    ["AGENT_STATUS_SCHEMA_VERSION", 4],
+    ["AGENT_CAPABILITIES_SCHEMA_VERSION", 6],
+    ["AGENT_STATUS_SCHEMA_VERSION", 5],
     ["AGENT_ANSWER_SCHEMA_VERSION", 2],
     ["CONFIGURATION_ANSWER_SCHEMA_VERSION", 3],
     ["AGENT_REQUEST_SCHEMA_VERSION", 1],
@@ -2119,10 +2135,7 @@ async function validateDecisionConsultationPolicy(root) {
     ],
     [
       "plugins/banzai/AGENTS.md",
-      [
-        "There are five existing gates plus one conditional runner-owned gate:",
-        "The hook is a backstop"
-      ]
+      ["There are five existing gates:", "The hook is a backstop"]
     ],
     [
       "plugins/banzai/skills/feature-description/SKILL.md",
@@ -2145,7 +2158,7 @@ async function validateDecisionConsultationPolicy(root) {
     [
       "plugins/banzai/skills/development-plan/SKILL.md",
       [
-        "contracts/v3/phase-result.schema.json",
+        "contracts/v4/phase-result.schema.json",
         "before drafting a plan or Proposed ADR",
         "Consultation is conditional and planning-only",
         "one of the five existing decision gates",
@@ -2154,23 +2167,23 @@ async function validateDecisionConsultationPolicy(root) {
     ],
     [
       "plugins/banzai/skills/code-writing/SKILL.md",
-      ["contracts/v3/phase-result.schema.json", "decisionConsultation: null"]
+      ["contracts/v4/phase-result.schema.json", "decisionConsultation: null"]
     ],
     [
       "plugins/banzai/skills/test-writing/SKILL.md",
-      ["contracts/v3/phase-result.schema.json", "decisionConsultation: null"]
+      ["contracts/v4/phase-result.schema.json", "decisionConsultation: null"]
     ],
     [
       "plugins/banzai/skills/feature/SKILL.md",
       [
-        "contracts/v3/phase-result.schema.json",
+        "contracts/v4/phase-result.schema.json",
         "decisionConsultation: null",
         "cannot use the planning-only consultation gate"
       ]
     ],
     [
       "plugins/banzai/skills/quick-fix/SKILL.md",
-      ["contracts/v3/phase-result.schema.json", "decisionConsultation: null"]
+      ["contracts/v4/phase-result.schema.json", "decisionConsultation: null"]
     ],
     [
       "packages/orchestrator/src/prompts.ts",
@@ -2186,24 +2199,23 @@ async function validateDecisionConsultationPolicy(root) {
     [
       "README.md",
       [
-        "There are five existing decision gates plus a conditional configuration prerequisite",
+        "There are five existing decision gates",
         "Consultation is conditional, planning-only, and concise",
         "it does not accept an ADR, approve a plan",
-        "control contract `5.0.0`"
+        "control contract `6.0.0`"
       ]
     ],
     [
       "documentation/orchestrator.md",
       [
         "workflow's five existing decision gates",
-        "banzai-agent-capabilities/v5",
-        "banzai-agent-status/v4",
+        "banzai-agent-capabilities/v6",
+        "banzai-agent-status/v5",
         "banzai-agent-answer/v2",
         "A v1 answer cannot answer a consultation.",
-        "New config-2/3 run state starts at schema version 6",
-        "New config-1 run state starts at schema version 4",
-        "The first new strict implementation or fix attempt transitions state to schema version 7",
-        "The model hand-off uses phase-result v3.",
+        "New runs start at schema version 8",
+        "State 8 carries the completion publication cursor from creation.",
+        "The model hand-off uses phase-result v4.",
         "phase-result v1 and v2 remain read-only legacy inputs",
         "Evaluation export and KPI stay on their independent privacy-minimized v1 contracts."
       ]
@@ -2221,18 +2233,18 @@ async function validateDecisionConsultationPolicy(root) {
       "PROJECT_MANIFEST.md",
       [
         "the five existing decision gates",
-        "five existing workflow gates plus a conditional configuration prerequisite",
-        "phase-result schema v3 and state schema v7 with explicit v1-v6 historical readers",
-        "control contract version `5.0.0`",
-        "phase-result v3 is current",
-        "phase-result v1/v2 remain byte-preserved legacy reader surfaces"
+        "five existing workflow gates",
+        "phase-result schema v4 and state schema v8 with explicit historical readers",
+        "control contract version `6.0.0`",
+        "phase-result v4 is current",
+        "phase-result v1/v2/v3 remain byte-preserved legacy reader surfaces"
       ]
     ],
     [
       "plugins/banzai/contracts/README.md",
       [
         "v2/phase-result.schema.json` is the preserved legacy",
-        "v3/phase-result.schema.json` is the current hand-off",
+        "v4/phase-result.schema.json` is the current hand-off",
         "planning-only `decision_consultation` gate"
       ]
     ],
@@ -2240,20 +2252,22 @@ async function validateDecisionConsultationPolicy(root) {
       "plugins/banzai/documentation/README.md",
       [
         "v2/phase-result.schema.json # legacy task-completion attempts",
-        "v3/phase-result.schema.json # current consultation-aware phase hand-off",
-        "v3 implementation results carry the canonical per-task completion ledger",
+        "v4/phase-result.schema.json # current task-verification phase hand-off",
+        "v4 implementation results carry the canonical per-task completion ledger",
         "required nullable planning-only consultation field"
       ]
     ],
     [
       "plugins/banzai/hooks/README.md",
-      ["conditional", "configuration_prerequisite"]
+      [
+        "adds no",
+        "configuration_prerequisite",
+        "Historical format recognition does not authorize old-run continuation."
+      ]
     ],
     [
       "documentation/release-checklist.md",
-      [
-        "Confirm all five existing Banzai human decision gates and the conditional configuration prerequisite"
-      ]
+      ["Confirm all five existing Banzai human decision gates"]
     ],
     [
       "documentation/decisions/README.md",
@@ -2266,7 +2280,7 @@ async function validateDecisionConsultationPolicy(root) {
     [
       "packages/orchestrator/test/workflow-skills.test.ts",
       [
-        "shipped workflow and supervisor preserve existing gates and add the runner-only configuration contract",
+        "shipped workflow preserves five gates and scopes retained configuration formats as legacy",
         "assertSupervisorSafety",
         "May choose and rewrite"
       ]
@@ -2306,8 +2320,8 @@ async function validateDecisionConsultationPolicy(root) {
       "packages/orchestrator/scripts/smoke-committed.mjs",
       [
         "setupConsultationRun",
-        "banzai-agent-capabilities/v5",
-        "banzai-agent-status/v4",
+        "banzai-agent-capabilities/v6",
+        "banzai-agent-status/v5",
         "answer_consultation",
         "banzai-agent-answer/v2",
         "consultation lifecycle events are not count-only",
@@ -2317,8 +2331,8 @@ async function validateDecisionConsultationPolicy(root) {
     [
       "packages/orchestrator/test/committed-smoke.test.ts",
       [
-        "banzai-agent-capabilities/v5",
-        "banzai-agent-status/v4",
+        "banzai-agent-capabilities/v6",
+        "banzai-agent-status/v5",
         "control answer --by Smoke User --no-resume",
         "decision.consultation.answered"
       ]
@@ -2376,7 +2390,7 @@ async function validateOrchestrateSkill(root) {
         "BANZAI_WORKFLOW_DIGEST",
         "banzai control capabilities",
         "banzai control status",
-        "exact supported v5 declaration",
+        "exact supported v6 declaration",
         "banzai-agent-request/v1",
         "banzai-agent-answer/v2",
         "banzai-agent-answer/v1",
@@ -2404,9 +2418,9 @@ async function validateOrchestrateSkill(root) {
     [
       "plugins/banzai/skills/orchestrate/references/control-protocol.md",
       [
-        "banzai-agent-capabilities/v5",
-        "banzai-agent-status/v4",
-        'controlContractVersion: "5.0.0"',
+        "banzai-agent-capabilities/v6",
+        "banzai-agent-status/v5",
+        'controlContractVersion: "6.0.0"',
         "banzai-agent-request/v1",
         "banzai-agent-answer/v2",
         "banzai-agent-answer/v1",

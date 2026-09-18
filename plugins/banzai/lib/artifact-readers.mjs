@@ -171,17 +171,17 @@ function configurationText(value, maximum = 200, empty = false) {
   return value;
 }
 function configurationId(value) {
-  const id = configurationText(value, 80);
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)) configurationInvalid();
-  return id;
+  const id2 = configurationText(value, 80);
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id2)) configurationInvalid();
+  return id2;
 }
 function configurationUuid(value) {
-  const id = configurationText(value, 36);
+  const id2 = configurationText(value, 36);
   if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(
-    id
+    id2
   ))
     configurationInvalid();
-  return id;
+  return id2;
 }
 function configurationHash(value) {
   if (typeof value !== "string" || !/^[a-f0-9]{64}$/.test(value))
@@ -192,10 +192,12 @@ function validateConfigurationStateEnvelope(value) {
   if (!value || typeof value !== "object" || Array.isArray(value))
     configurationInvalid();
   const state = value;
+  if (state.schemaVersion === 8 && state.verificationMode !== "task")
+    configurationInvalid();
   if (state.schemaVersion !== 6 && !(state.schemaVersion === 7 && "configurationSetup" in state)) {
     if (Array.isArray(state.humanDecisions) && state.humanDecisions.some(
       (record) => record?.kind === "configuration_prerequisite"
-    ) || "configurationSetup" in state || "verificationMode" in state || state.pendingHumanDecision?.kind === "configuration_prerequisite")
+    ) || "configurationSetup" in state || "verificationMode" in state && !(state.schemaVersion === 8 && state.verificationMode === "task") || state.pendingHumanDecision?.kind === "configuration_prerequisite")
       configurationInvalid();
     return;
   }
@@ -535,7 +537,7 @@ function parseVerificationDecision(value) {
     object(action.identity, ["checkId", "profileOrdinal", "commandOrdinal", "configurationDigest", "policyDigest", "authorityDigest", "commandDigest"]);
     if (action.identity.checkId !== action.checkId || action.identity.configurationDigest !== record.configurationDigest || action.identity.authorityDigest !== record.authorityDigest || ![action.identity.profileOrdinal, action.identity.commandOrdinal].every((n) => Number.isSafeInteger(n) && n > 0)) invalid("Inconsistent verification decision identity.");
     digest(action.identity.commandDigest);
-    for (const hash of [action.identity.policyDigest, action.inputDigest, action.environmentDigest]) if (hash !== null) digest(hash);
+    for (const hash2 of [action.identity.policyDigest, action.inputDigest, action.environmentDigest]) if (hash2 !== null) digest(hash2);
     if (!["execute", "reuse"].includes(action.action) || !VERIFICATION_REASONS.includes(action.reason)) invalid("Invalid verification disposition.");
     if (action.action === "reuse") {
       object(action.origin, ["attemptId", "recordDigest", "roundId"]);
@@ -552,7 +554,7 @@ function parseVerificationDecision(value) {
 }
 
 // ../../plugins/banzai/lib/verification-store.mjs
-import path4 from "node:path";
+import path6 from "node:path";
 
 // ../../plugins/banzai/lib/artifact-storage.mjs
 var artifact_storage_exports = {};
@@ -577,7 +579,7 @@ __export(artifact_storage_exports, {
   createWork: () => createWork,
   digestBytes: () => digestBytes,
   exactObject: () => exactObject,
-  fail: () => fail,
+  fail: () => fail3,
   git: () => git,
   hasRunnerWorkOwnership: () => hasRunnerWorkOwnership,
   initializeArtifacts: () => initializeArtifacts,
@@ -606,6 +608,185 @@ __export(artifact_storage_exports, {
   withRunnerWorkOwnership: () => withRunnerWorkOwnership,
   writeArtifact: () => writeArtifact
 });
+
+// ../../plugins/banzai/lib/task-verification-store.mjs
+import path2 from "node:path";
+
+// ../../plugins/banzai/lib/task-verification.mjs
+import path from "node:path";
+var fail = (message) => {
+  throw new VerificationEvidenceError(message);
+};
+var HASH2 = /^[a-f0-9]{64}$/u;
+var ID2 = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+function object2(value, keys) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || keys.some((key) => !Object.hasOwn(value, key)) || Object.keys(value).some((key) => !keys.includes(key))) fail("Invalid task verification fields.");
+  return value;
+}
+function text2(value, limit = 500, empty = false) {
+  if (typeof value !== "string" || !empty && !value.length || value.length > limit || /[\x00-\x1f\x7f]/u.test(value)) fail("Invalid task verification text.");
+  return value;
+}
+function list2(value, maximum = 200) {
+  if (!Array.isArray(value) || value.length > maximum) fail("Task verification inventory exceeds its bound.");
+  return value;
+}
+function unique2(values) {
+  if (new Set(values).size !== values.length) fail("Duplicate task verification identity.");
+  return values;
+}
+function hash(value) {
+  if (typeof value !== "string" || !HASH2.test(value)) fail("Invalid task verification digest.");
+  return value;
+}
+function id(value) {
+  if (!ID2.test(text2(value, 80))) fail("Invalid task verification identifier.");
+  return value;
+}
+function relative(value, root = false) {
+  text2(value);
+  if (root && value === ".") return value;
+  if (path.posix.isAbsolute(value) || value.includes("\\") || value.split("/").some((part) => !part || part === "." || part === "..") || /^(?:\.git|\.banzai)(?:\/|$)/u.test(value)) fail("Invalid task verification project path.");
+  return value;
+}
+function boundedTime(value) {
+  if (!Number.isSafeInteger(value) || value < 1 || value > 864e5) fail("Invalid task verification timeout.");
+  return value;
+}
+function parseTaskVerificationDescriptor(value) {
+  const v = object2(value, ["id", "name", "requirementRefs", "command", "args", "cwd", "timeoutMs", "evidence", "sources", "materialization"]);
+  const requirementRefs = unique2(list2(v.requirementRefs, 32).map((ref) => text2(ref, 200)));
+  if (!requirementRefs.length) fail("Verification must identify its task requirement or project rule.");
+  const command = text2(v.command);
+  if (command.startsWith("-") || /\s/u.test(command) || command.includes("\\") || command.includes("/") && command.split("/").includes("..")) fail("Expected an executable, not shell text or a traversal path.");
+  if (!["fresh", "equivalent_evidence"].includes(v.evidence)) fail("Unsupported task evidence mode.");
+  const sources = list2(v.sources, 32).map((source) => {
+    object2(source, ["path", "sha256"]);
+    return { path: relative(source.path), sha256: hash(source.sha256) };
+  });
+  unique2(sources.map((source) => source.path));
+  const materialization = v.materialization === null ? null : (() => {
+    const m = object2(v.materialization, ["taskRef", "paths"]);
+    const paths = unique2(list2(m.paths, 32).map((item) => relative(item)));
+    if (!paths.length) fail("Future tooling requires materialization paths.");
+    return { taskRef: text2(m.taskRef, 200), paths };
+  })();
+  const args = list2(v.args, 200).map((arg) => text2(arg, 4096, true));
+  if (args.some((arg) => /(?:\b(?:sk|sk-ant|sess)-[A-Za-z0-9_-]{12,}\b|\bBearer\s+[^ ]+|^--?(?:password|api[-_]?key|access[-_]?token|auth[-_]?token|secret)(?:=|$)|["'](?:password|api[_-]?key|access[_-]?token|auth[_-]?token)["']\s*:)/iu.test(arg))) fail("Credentials must not be embedded in verification descriptors.");
+  return {
+    id: id(v.id),
+    name: text2(v.name, 200),
+    requirementRefs,
+    command,
+    args,
+    cwd: relative(v.cwd, true),
+    timeoutMs: boundedTime(v.timeoutMs),
+    evidence: v.evidence,
+    sources,
+    materialization
+  };
+}
+function parseTaskVerificationCandidates(value) {
+  if (value === null) return null;
+  const v = object2(value, ["checks", "absenceReason"]);
+  const checks = list2(v.checks).map(parseTaskVerificationDescriptor);
+  unique2(checks.map((check) => check.id));
+  if (checks.length ? v.absenceReason !== null : typeof v.absenceReason !== "string") fail("Empty selection requires an absence rationale; selected checks do not.");
+  return { checks, absenceReason: v.absenceReason === null ? null : text2(v.absenceReason, 2e3) };
+}
+
+// ../../plugins/banzai/lib/task-verification-store.mjs
+var fail2 = (message) => {
+  throw new VerificationEvidenceError(message);
+};
+var HASH3 = /^[a-f0-9]{64}$/u;
+var UUID = /^[a-f0-9-]{36}$/u;
+function closed(v, keys) {
+  if (!v || typeof v !== "object" || Array.isArray(v) || keys.some((key) => !Object.hasOwn(v, key)) || Object.keys(v).some((key) => !keys.includes(key))) fail2("Invalid task verification record.");
+}
+function captureRecord(value) {
+  closed(value, ["observedDigest", "complete", "reusable"]);
+  if (value.observedDigest !== null && !HASH3.test(value.observedDigest) || typeof value.complete !== "boolean") fail2("Invalid observed task inputs.");
+  if (value.reusable !== null) {
+    closed(value.reusable, ["complete", "reason", "candidateDigest", "checks"]);
+    if (typeof value.reusable.complete !== "boolean" || !Array.isArray(value.reusable.checks) || value.reusable.checks.length > 200) fail2("Invalid reusable input capture.");
+    if (value.reusable.complete ? !HASH3.test(value.reusable.candidateDigest) || value.reusable.reason !== null : value.reusable.candidateDigest !== null) fail2("Incomplete reusable input identity.");
+    for (const check of value.reusable.checks) {
+      closed(check, ["checkId", "executable", "environmentDigest", "inputDigest"]);
+      if (typeof check.checkId !== "string" || !path2.isAbsolute(check.executable) || !HASH3.test(check.environmentDigest) || !HASH3.test(check.inputDigest)) fail2("Invalid reusable check inputs.");
+    }
+  }
+  if (value.complete !== (value.reusable?.complete === true)) fail2("Task capture completeness conflicts with its evidence.");
+}
+function reference(value) {
+  closed(value, ["relativePath", "sha256"]);
+  if (typeof value.relativePath !== "string" || !/^\.banzai\/(?:work\/[a-f0-9-]{36}|runs\/[a-z0-9][a-z0-9.-]{0,199})\/verification\/(?:decisions|applications|attempts|origins|logs)\/[a-z0-9.-]+$/u.test(value.relativePath) || !HASH3.test(value.sha256)) fail2("Invalid task evidence reference.");
+}
+function parseTaskVerificationDecision(value) {
+  closed(value, ["schema", "schemaVersion", "workId", "roundId", "sourceAttemptId", "authority", "context", "policyDigest", "checks", "absenceReason", "before", "sha256"]);
+  if (value.schema !== "banzai-verification-decision/v2" || value.schemaVersion !== 2 || !UUID.test(value.workId) || !UUID.test(value.roundId) || !Array.isArray(value.checks) || value.checks.length > 200) fail2("Unsupported task verification decision.");
+  for (const item of value.checks) {
+    closed(item, ["descriptor", "required"]);
+    parseTaskVerificationDescriptor(item.descriptor);
+    if (typeof item.required !== "boolean") fail2("Invalid required check marker.");
+  }
+  if (new Set(value.checks.map((item) => item.descriptor.id)).size !== value.checks.length) fail2("Duplicate task check.");
+  closed(value.authority, ["workId", "sourceAttemptId", "workflow", "taskDigest", "selectionDigest", "approvalDigest", "contextDigest"]);
+  closed(value.context, ["kind", "invocationDigest", "restrictions"]);
+  if (value.authority.workId !== value.workId || value.authority.sourceAttemptId !== value.sourceAttemptId || !["strict", "feature", "quick-fix"].includes(value.authority.workflow) || !HASH3.test(value.authority.taskDigest) || !HASH3.test(value.authority.selectionDigest) || evidenceDigest(value.context) !== value.authority.contextDigest || value.context.kind !== "inherited-local" || !HASH3.test(value.context.invocationDigest) || !Array.isArray(value.context.restrictions) || value.context.restrictions.some((item) => typeof item !== "string" || item.length > 200)) fail2("Invalid persisted task execution authority.");
+  if (value.authority.workflow === "strict" ? !HASH3.test(value.authority.approvalDigest) : value.authority.approvalDigest !== null) fail2("Invalid persisted approval identity.");
+  if (value.checks.length ? value.absenceReason !== null : typeof value.absenceReason !== "string" || !value.absenceReason.length || value.absenceReason.length > 2e3) fail2("Invalid task absence rationale.");
+  captureRecord(value.before);
+  const { sha256, ...body } = value;
+  if (!HASH3.test(sha256) || evidenceDigest(body) !== sha256 || value.policyDigest !== null && !HASH3.test(value.policyDigest)) fail2("Task verification decision digest mismatch.");
+  return value;
+}
+function parseTaskVerificationAttempt(value) {
+  closed(value, ["schemaVersion", "id", "sequence", "workId", "roundId", "sourceAttemptId", "checkId", "descriptor", "cwd", "authorityDigest", "contextDigest", "status", "startedAt", "completedAt", "durationMs", "exitCode", "signal", "failureCategory", "retryOf", "before", "after", "stdout", "stderr"]);
+  if (value.schemaVersion !== 2 || !/^verification-[a-f0-9-]{36}$/u.test(value.id) || !UUID.test(value.workId) || !UUID.test(value.roundId) || !Number.isSafeInteger(value.sequence) || value.sequence < 1) fail2("Unsupported task physical attempt.");
+  if (!["started", "completed", "failed", "interrupted"].includes(value.status) || !HASH3.test(value.authorityDigest) || !HASH3.test(value.contextDigest) || typeof value.cwd !== "string" || !path2.isAbsolute(value.cwd)) fail2("Invalid task physical facts.");
+  closed(value.descriptor, ["relativePath", "sha256", "checkId"]);
+  if (!HASH3.test(value.descriptor.sha256) || value.descriptor.checkId !== value.checkId) fail2("Invalid physical descriptor reference.");
+  reference({ relativePath: value.descriptor.relativePath, sha256: value.descriptor.sha256 });
+  if (typeof value.sourceAttemptId !== "string" || value.sourceAttemptId.length > 200 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(value.checkId) || !Number.isFinite(Date.parse(value.startedAt)) || /[\x00-\x1f\x7f]/u.test(value.cwd) || value.cwd.length > 4096) fail2("Invalid bounded physical metadata.");
+  if (![null, "command_exit", "process_start", "timeout", "output_limit", "runner_failure"].includes(value.failureCategory) || value.exitCode !== null && (!Number.isSafeInteger(value.exitCode) || value.exitCode < 0 || value.exitCode > 255) || value.signal !== null && !/^SIG[A-Z0-9]{1,20}$/u.test(value.signal)) fail2("Invalid physical outcome.");
+  if (value.durationMs !== null && (!Number.isSafeInteger(value.durationMs) || value.durationMs < 0)) fail2("Invalid physical duration.");
+  captureRecord(value.before);
+  if (value.after !== null) captureRecord(value.after);
+  for (const ref of [value.stdout, value.stderr]) {
+    if (ref !== null) reference(ref);
+  }
+  if (value.status === "started" ? value.completedAt !== null || value.exitCode !== null || value.after !== null : !Number.isFinite(Date.parse(value.completedAt))) fail2("Invalid physical terminal state.");
+  if (value.status === "completed" && (value.exitCode !== 0 || value.signal !== null || value.failureCategory !== null)) fail2("Successful physical result requires a clean zero exit.");
+  return value;
+}
+function parseTaskVerificationPublication(value) {
+  closed(value, ["decision", "applicability", "attempts", "references"]);
+  const decision = parseTaskVerificationDecision(value.decision);
+  const application = value.applicability;
+  closed(application, ["schema", "schemaVersion", "workId", "roundId", "decisionSha256", "observedDigest", "complete", "outcome", "absenceReason", "dispositions", "sha256"]);
+  const { sha256, ...body } = application;
+  if (application.schema !== "banzai-verification-applicability/v2" || application.schemaVersion !== 2 || sha256 !== evidenceDigest(body) || application.workId !== decision.workId || application.roundId !== decision.roundId || application.decisionSha256 !== decision.sha256 || application.observedDigest !== null && !HASH3.test(application.observedDigest) || application.absenceReason !== decision.absenceReason || application.outcome !== (decision.checks.length ? "checked" : "absent") || !Array.isArray(application.dispositions) || application.dispositions.length !== decision.checks.length) fail2("Invalid task applicability projection.");
+  if (!Array.isArray(value.attempts) || value.attempts.length > 1e4) fail2("Unbounded task attempts.");
+  const attempts = value.attempts.map(parseTaskVerificationAttempt);
+  if (new Set(attempts.map((item) => item.id)).size !== attempts.length || attempts.some((item) => item.workId !== decision.workId)) fail2("Conflicting task attempts.");
+  for (const [index, disposition] of application.dispositions.entries()) {
+    closed(disposition, ["checkId", "required", "kind", "reason", "attemptId"]);
+    const check = decision.checks[index];
+    if (disposition.checkId !== check.descriptor.id || disposition.required !== check.required || !["not_run", "unavailable", "interrupted", "timed_out", "failed", "passed", "reused"].includes(disposition.kind) || typeof disposition.reason !== "string" || disposition.reason.length > 2e3) fail2("Invalid task disposition.");
+    const physical = attempts.find((item) => item.id === disposition.attemptId);
+    if (disposition.attemptId !== null && (!physical || physical.checkId !== disposition.checkId)) fail2("Missing direct task attempt.");
+    if (["passed", "reused"].includes(disposition.kind) && physical?.status !== "completed") fail2("Task success has no physical success.");
+  }
+  if (application.complete !== application.dispositions.every((item) => ["passed", "reused"].includes(item.kind))) fail2("Task completeness contradicts dispositions.");
+  closed(value.references, ["decision", "applicability"]);
+  for (const [name, ref] of Object.entries(value.references)) {
+    reference(ref);
+    const record = name === "decision" ? decision : application;
+    if (ref.sha256 !== evidenceDigest(JSON.stringify(record, null, 2) + "\n")) fail2("Task publication reference mismatch.");
+  }
+  return value;
+}
 
 // ../../plugins/banzai/lib/review-snapshot.mjs
 import { createHash as createHash2 } from "node:crypto";
@@ -638,7 +819,7 @@ function parseReviewSnapshot(value) {
     invalid2("Review snapshot contains invalid nested evidence.");
   }
 }
-function object2(value) {
+function object3(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function equal(value, expected) {
@@ -646,15 +827,15 @@ function equal(value, expected) {
 }
 function validateConfigurationSnapshot(snapshot) {
   const setup = snapshot.configurationSetup;
-  const hash = (value) => typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+  const hash2 = (value) => typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
   const uuid = (value) => typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(value);
-  const keys = (value, fields) => object2(value) && Object.keys(value).sort().join(",") === [...fields].sort().join(",");
+  const keys = (value, fields) => object3(value) && Object.keys(value).sort().join(",") === [...fields].sort().join(",");
   const ids = (value) => Array.isArray(value) && value.length <= 1e3 && value.every(uuid) && new Set(value).size === value.length;
   const types = (value) => Array.isArray(value) && value.length <= 9 && value.every((type) => ["custom", "node", "php", "python", "ruby", "rust", "go", "jvm", "dotnet"].includes(type)) && new Set(value).size === value.length && JSON.stringify(value) === JSON.stringify([...value].sort());
-  if (!keys(setup, ["coverage", "projectTypes", "uncoveredTypes", "resolutionIds", "skip", "configPath", "configSha256", "carriedInConfigSha256", "runnerChanges"]) || !["ordered", "policy"].includes(snapshot.verificationMode) || snapshot.artifactBinding.binding.schemaVersion !== (snapshot.verificationMode === "policy" ? 2 : 1) || !["configured", "bootstrap_deferred", "skipped"].includes(setup.coverage) || !types(setup.projectTypes) || !types(setup.uncoveredTypes) || !ids(setup.resolutionIds) || setup.configPath !== ".banzai/config.json" || !hash(setup.configSha256) || setup.carriedInConfigSha256 !== null && !hash(setup.carriedInConfigSha256) || !Array.isArray(setup.runnerChanges) || setup.runnerChanges.length > 1e3) invalid2("Invalid guided configuration review evidence.");
+  if (!keys(setup, ["coverage", "projectTypes", "uncoveredTypes", "resolutionIds", "skip", "configPath", "configSha256", "carriedInConfigSha256", "runnerChanges"]) || !["ordered", "policy"].includes(snapshot.verificationMode) || snapshot.artifactBinding.binding.schemaVersion !== (snapshot.verificationMode === "policy" ? 2 : 1) || !["configured", "bootstrap_deferred", "skipped"].includes(setup.coverage) || !types(setup.projectTypes) || !types(setup.uncoveredTypes) || !ids(setup.resolutionIds) || setup.configPath !== ".banzai/config.json" || !hash2(setup.configSha256) || setup.carriedInConfigSha256 !== null && !hash2(setup.carriedInConfigSha256) || !Array.isArray(setup.runnerChanges) || setup.runnerChanges.length > 1e3) invalid2("Invalid guided configuration review evidence.");
   if (setup.skip !== null) {
     const skip = setup.skip;
-    if (!keys(skip, ["id", "runId", "decisionId", "proposalId", "projectTypes", "configurationDigest"]) || !uuid(skip.id) || !uuid(skip.decisionId) || !uuid(skip.proposalId) || skip.runId !== snapshot.runId || !types(skip.projectTypes) || !hash(skip.configurationDigest) || JSON.stringify(skip.projectTypes) !== JSON.stringify(setup.projectTypes)) invalid2("Invalid configuration skip scope.");
+    if (!keys(skip, ["id", "runId", "decisionId", "proposalId", "projectTypes", "configurationDigest"]) || !uuid(skip.id) || !uuid(skip.decisionId) || !uuid(skip.proposalId) || skip.runId !== snapshot.runId || !types(skip.projectTypes) || !hash2(skip.configurationDigest) || JSON.stringify(skip.projectTypes) !== JSON.stringify(setup.projectTypes)) invalid2("Invalid configuration skip scope.");
   }
   if (setup.coverage === "skipped" !== (setup.skip !== null)) invalid2("Skipped review coverage requires its exact skip reference.");
   const operations = /* @__PURE__ */ new Set();
@@ -669,17 +850,17 @@ function validateConfigurationSnapshot(snapshot) {
 }
 var COMPLETION_PROTOCOL = "banzai-completion-protocol/v1";
 function validateCompletionPublicationSnapshot(snapshot) {
-  const hash = (value) => typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
-  const id = (value) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value) && value.length <= 200;
+  const hash2 = (value) => typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+  const id2 = (value) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value) && value.length <= 200;
   const publication = snapshot.completionPublication;
   const source = snapshot.completionSource;
   if (publication === null) {
     if (source !== null && source.schemaVersion === 2) invalid2("Published completion source requires its frozen publication identities.");
     return;
   }
-  if (!object2(publication) || Object.keys(publication).sort().join(",") !== "candidateDigest,captureDigest,completionProtocol,publisherAttemptId,receiptDigest,receiptPath" || publication.completionProtocol !== COMPLETION_PROTOCOL || !id(publication.publisherAttemptId) || publication.receiptPath !== `attempts/${publication.publisherAttemptId}.completion-publication.json` || !hash(publication.receiptDigest) || !hash(publication.captureDigest) || !hash(publication.candidateDigest))
+  if (!object3(publication) || Object.keys(publication).sort().join(",") !== "candidateDigest,captureDigest,completionProtocol,publisherAttemptId,receiptDigest,receiptPath" || publication.completionProtocol !== COMPLETION_PROTOCOL || !id2(publication.publisherAttemptId) || publication.receiptPath !== `attempts/${publication.publisherAttemptId}.completion-publication.json` || !hash2(publication.receiptDigest) || !hash2(publication.captureDigest) || !hash2(publication.candidateDigest))
     invalid2("Invalid frozen completion publication identities.");
-  if (source === null || source.schemaVersion !== 2 || source.completionProtocol !== COMPLETION_PROTOCOL || source.publisherAttemptId !== publication.publisherAttemptId || !object2(source.publication) || source.publication.path !== publication.receiptPath || source.publication.sha256 !== publication.receiptDigest)
+  if (source === null || source.schemaVersion !== 2 || source.completionProtocol !== COMPLETION_PROTOCOL || source.publisherAttemptId !== publication.publisherAttemptId || !object3(source.publication) || source.publication.path !== publication.receiptPath || source.publication.sha256 !== publication.receiptDigest)
     invalid2("Frozen completion publication disagrees with the completion source.");
 }
 function parseSnapshot(value) {
@@ -710,15 +891,16 @@ function parseSnapshot(value) {
   const guidedV5 = snapshot.schemaVersion === 5 && "configurationSetup" in snapshot;
   const bound = snapshot.schemaVersion >= 2 && (snapshot.schemaVersion !== 5 || "artifactBinding" in snapshot);
   if (bound) keys.push("artifactBinding");
+  if (snapshot.schemaVersion === 6) keys.push("verificationMode", "taskVerification", "completionPublication");
   if (snapshot.schemaVersion === 4) keys.push("verificationMode", "configurationSetup");
   if (snapshot.schemaVersion === 5) {
     keys.push("completionPublication");
     if (guidedV5) keys.push("verificationMode", "configurationSetup");
   }
-  if (Object.keys(snapshot).length !== keys.length || Object.keys(snapshot).some((key) => !keys.includes(key)) || !(snapshot.schemaVersion === 1 && snapshot.schema === "banzai-review-snapshot/v1" || snapshot.schemaVersion === 2 && snapshot.schema === "banzai-review-snapshot/v2" || snapshot.schemaVersion === 3 && snapshot.schema === "banzai-review-snapshot/v3" || snapshot.schemaVersion === 4 && snapshot.schema === "banzai-review-snapshot/v4" || snapshot.schemaVersion === 5 && snapshot.schema === "banzai-review-snapshot/v5") || !equal(snapshot.outputContract, "review-result/v2") || !/^[a-f0-9]{64}$/u.test(digest2) || digest2 !== digestCanonicalJson(body))
+  if (Object.keys(snapshot).length !== keys.length || Object.keys(snapshot).some((key) => !keys.includes(key)) || !(snapshot.schemaVersion === 1 && snapshot.schema === "banzai-review-snapshot/v1" || snapshot.schemaVersion === 2 && snapshot.schema === "banzai-review-snapshot/v2" || snapshot.schemaVersion === 3 && snapshot.schema === "banzai-review-snapshot/v3" || snapshot.schemaVersion === 4 && snapshot.schema === "banzai-review-snapshot/v4" || snapshot.schemaVersion === 5 && snapshot.schema === "banzai-review-snapshot/v5" || snapshot.schemaVersion === 6 && snapshot.schema === "banzai-review-snapshot/v6") || !equal(snapshot.outputContract, "review-result/v2") || !/^[a-f0-9]{64}$/u.test(digest2) || digest2 !== digestCanonicalJson(body))
     invalid2("Review snapshot version, shape or digest is invalid.");
-  for (const id of [snapshot.runId, snapshot.attemptId])
-    if (typeof id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(id))
+  for (const id2 of [snapshot.runId, snapshot.attemptId])
+    if (typeof id2 !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(id2))
       invalid2("Review snapshot identity is invalid.");
   if (bound) {
     const bound2 = snapshot.artifactBinding;
@@ -753,14 +935,18 @@ function parseSnapshot(value) {
   }
   const artifact = snapshot.artifact;
   if (snapshot.schemaVersion === 4 || guidedV5) validateConfigurationSnapshot(snapshot);
-  if (snapshot.schemaVersion === 5) validateCompletionPublicationSnapshot(snapshot);
+  if (snapshot.schemaVersion === 5 || snapshot.schemaVersion === 6) validateCompletionPublicationSnapshot(snapshot);
+  if (snapshot.schemaVersion === 6) {
+    const publication = parseTaskVerificationPublication(snapshot.taskVerification);
+    if (snapshot.verificationMode !== "task" || snapshot.artifactBinding.binding.schemaVersion !== 2 || publication.decision.workId !== snapshot.artifactBinding.binding.workId || publication.decision.authority.approvalDigest !== snapshot.approval.digest || !publication.applicability.complete) invalid2("Task review authority or applicability mismatch.");
+  }
   if (guidedV5 && !bound) invalid2("Guided review evidence requires a bound run.");
   if (snapshot.schemaVersion === 3 || (snapshot.schemaVersion === 4 || guidedV5) && snapshot.verificationMode === "policy" && snapshot.configurationSetup.coverage !== "skipped") {
     if (snapshot.artifactBinding.binding.schemaVersion !== 2) invalid2("Verification snapshot requires binding v2.");
     const evidence = parseReviewVerificationEvidence(artifact.verificationEvidence);
     if (evidence.decision.workId !== snapshot.artifactBinding.binding.workId) invalid2("Cross-work review verification evidence.");
   } else if (artifact?.verificationEvidence !== void 0) invalid2("Legacy snapshots cannot carry new verification evidence.");
-  if (!object2(artifact) || !object2(snapshot.approval) || !object2(snapshot.workspace) || !Array.isArray(snapshot.approval.paths) || !Array.isArray(snapshot.approvedArtifacts) || !Array.isArray(snapshot.workspace.entries) || !Array.isArray(snapshot.changes) || !Array.isArray(snapshot.triage) || !Array.isArray(snapshot.requiredFindingIds) || !Array.isArray(artifact.verification) || !["full", "delta"].includes(snapshot.reviewMode) || !Number.isInteger(artifact.iteration) || artifact.iteration < 1)
+  if (!object3(artifact) || !object3(snapshot.approval) || !object3(snapshot.workspace) || !Array.isArray(snapshot.approval.paths) || !Array.isArray(snapshot.approvedArtifacts) || !Array.isArray(snapshot.workspace.entries) || !Array.isArray(snapshot.changes) || !Array.isArray(snapshot.triage) || !Array.isArray(snapshot.requiredFindingIds) || !Array.isArray(artifact.verification) || !["full", "delta"].includes(snapshot.reviewMode) || !Number.isInteger(artifact.iteration) || artifact.iteration < 1)
     invalid2("Review snapshot evidence is malformed.");
   if ("snapshot" in artifact || JSON.stringify(artifact.approvedArtifactPaths) !== JSON.stringify(snapshot.approval.paths) || artifact.workspaceDigest !== snapshot.workspace.digest || snapshot.baseCommit !== snapshot.workspace.baseCommit || new Set(snapshot.approval.paths).size !== snapshot.approval.paths.length || snapshot.approvedArtifacts.length !== snapshot.approval.paths.length)
     invalid2("Review snapshot scope and workspace identities disagree.");
@@ -776,15 +962,15 @@ function parseSnapshot(value) {
   reviewScopePath(artifact.path);
   reviewScopePath(artifact.candidatePath);
   if (new Set(snapshot.requiredFindingIds).size !== snapshot.requiredFindingIds.length || snapshot.requiredFindingIds.some(
-    (id) => typeof id !== "string" || !/^R[1-9][0-9]*-F[1-9][0-9]*$/u.test(id)
+    (id2) => typeof id2 !== "string" || !/^R[1-9][0-9]*-F[1-9][0-9]*$/u.test(id2)
   ))
     invalid2("Snapshot accepted finding IDs are invalid.");
-  const hash = (value2) => typeof value2 === "string" && /^[a-f0-9]{64}$/u.test(value2);
+  const hash2 = (value2) => typeof value2 === "string" && /^[a-f0-9]{64}$/u.test(value2);
   const string = (value2) => typeof value2 === "string" && value2.length > 0;
-  if (!string(snapshot.baseCommit) || !equal(snapshot.approval.kind, "plan") || !hash(snapshot.approval.digest) || !string(snapshot.approval.approvedBy) || !string(snapshot.approval.approvedAt) || !hash(snapshot.workspace.digest) || !string(artifact.slug))
+  if (!string(snapshot.baseCommit) || !equal(snapshot.approval.kind, "plan") || !hash2(snapshot.approval.digest) || !string(snapshot.approval.approvedBy) || !string(snapshot.approval.approvedAt) || !hash2(snapshot.workspace.digest) || !string(artifact.slug))
     invalid2("Snapshot authority identity is malformed.");
   const anchor = snapshot.fullReviewAnchor;
-  if (anchor !== null && (!Number.isInteger(anchor.iteration) || anchor.iteration < 1 || !string(anchor.sessionId) || !hash(anchor.approvalDigest) || !equal(anchor.outputContract, "review-result/v2")))
+  if (anchor !== null && (!Number.isInteger(anchor.iteration) || anchor.iteration < 1 || !string(anchor.sessionId) || !hash2(anchor.approvalDigest) || !equal(anchor.outputContract, "review-result/v2")))
     invalid2("Full review anchor is malformed.");
   if (snapshot.reviewMode === "delta" && (snapshot.anchor === null || anchor?.approvalDigest !== snapshot.approval.digest || anchor.iteration > snapshot.anchor.iteration || snapshot.anchor.iteration >= artifact.iteration || !["full", "delta"].includes(snapshot.anchor.mode)))
     invalid2(
@@ -792,7 +978,7 @@ function parseSnapshot(value) {
     );
   for (const entry of snapshot.workspace.entries) {
     reviewScopePath(entry.path);
-    if (!string(entry.kind) || entry.sha256 !== null && !hash(entry.sha256))
+    if (!string(entry.kind) || entry.sha256 !== null && !hash2(entry.sha256))
       invalid2("Snapshot workspace entry is malformed.");
   }
   for (const change of snapshot.changes) {
@@ -809,11 +995,11 @@ function parseSnapshot(value) {
   if (snapshot.completionSource !== null) {
     const source = snapshot.completionSource;
     const projection = artifact.taskCompletion;
-    if (!(equal(source.schemaVersion, 1) || snapshot.schemaVersion === 5 && equal(source.schemaVersion, 2)) || !equal(source.status, "valid") || !string(source.sourceAttemptId) || !["implementation", "fix"].includes(source.sourceAttemptKind ?? "") || source.approvalDigest !== snapshot.approval.digest || !hash(source.ledgerDigest) || !hash(source.planTaskDigest) || source.ledgerDigest !== projection?.ledgerDigest || source.planTaskDigest !== projection.planTaskDigest || source.approvalDigest !== projection.approvalDigest || source.counts.total !== projection.total || source.counts.completed !== projection.completed || source.implementationReport.path !== projection.implementationReport || source.testReport.path !== projection.testReport)
+    if (!(equal(source.schemaVersion, 1) || [5, 6].includes(snapshot.schemaVersion) && equal(source.schemaVersion, 2)) || !equal(source.status, "valid") || !string(source.sourceAttemptId) || !["implementation", "fix"].includes(source.sourceAttemptKind ?? "") || source.approvalDigest !== snapshot.approval.digest || !hash2(source.ledgerDigest) || !hash2(source.planTaskDigest) || source.ledgerDigest !== projection?.ledgerDigest || source.planTaskDigest !== projection.planTaskDigest || source.approvalDigest !== projection.approvalDigest || source.counts.total !== projection.total || source.counts.completed !== projection.completed || source.implementationReport.path !== projection.implementationReport || source.testReport.path !== projection.testReport)
       invalid2("Snapshot completion identities disagree.");
     for (const report of [source.implementationReport, source.testReport]) {
       reviewScopePath(report.path);
-      if (!hash(report.sha256))
+      if (!hash2(report.sha256))
         invalid2("Snapshot report identity is malformed.");
     }
   } else if (artifact.taskCompletion != null)
@@ -824,7 +1010,7 @@ function parseSnapshot(value) {
 // ../../plugins/banzai/lib/project-adoption.mjs
 import { constants } from "node:fs";
 import { lstat, open, realpath, stat } from "node:fs/promises";
-import path from "node:path";
+import path3 from "node:path";
 var ADOPTION_LABELS = {
   ready: "Project guidance ready",
   setup_required: "Project setup required",
@@ -862,8 +1048,8 @@ var SOURCE_FILES = [
   "plugins/banzai/.codex-plugin/plugin.json"
 ];
 function contained(root, target) {
-  const relative = path.relative(root, target);
-  return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+  const relative2 = path3.relative(root, target);
+  return relative2 !== ".." && !relative2.startsWith(`..${path3.sep}`) && !path3.isAbsolute(relative2);
 }
 async function readAdoptionFile(root, file, limit) {
   const missing = { text: null, problem: null };
@@ -871,7 +1057,7 @@ async function readAdoptionFile(root, file, limit) {
   try {
     let candidate = root;
     for (const part of file.split("/")) {
-      candidate = path.join(candidate, part);
+      candidate = path3.join(candidate, part);
       try {
         await lstat(candidate);
       } catch (error) {
@@ -927,11 +1113,11 @@ async function readAdoptionFile(root, file, limit) {
     return unsafe;
   }
 }
-function visibleMarkdown(text2) {
+function visibleMarkdown(text3) {
   let comment = false;
   let fence = null;
   const lines = [];
-  for (const raw of text2.split(/\r?\n/)) {
+  for (const raw of text3.split(/\r?\n/)) {
     if (fence !== null) {
       const close = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(raw);
       if (close?.[1]?.[0] === fence.marker && close[1].length >= fence.length)
@@ -959,15 +1145,15 @@ function visibleMarkdown(text2) {
   }
   return lines;
 }
-function headings(text2) {
+function headings(text3) {
   return new Set(
-    visibleMarkdown(text2).flatMap((line) => {
+    visibleMarkdown(text3).flatMap((line) => {
       const match = /^ {0,3}##[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(line);
       return match?.[1] ? [match[1]] : [];
     })
   );
 }
-function object3(value) {
+function object4(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 async function sourceIdentity(root, issues) {
@@ -981,7 +1167,7 @@ async function sourceIdentity(root, issues) {
     if (entry.text !== null) {
       try {
         const value = JSON.parse(entry.text);
-        if (object3(value)) return value;
+        if (object4(value)) return value;
       } catch {
       }
       problem = "invalid identity metadata";
@@ -1006,9 +1192,9 @@ async function sourceIdentity(root, issues) {
     });
   }
   const entries = Array.isArray(marketplace?.plugins) ? marketplace.plugins.filter(
-    (value) => object3(value) && value.name === "banzai"
+    (value) => object4(value) && value.name === "banzai"
   ) : [];
-  const sourceWorkspace = pkg?.name === "banzai-spec-driven-dev" && pkg.private === true && Array.isArray(pkg.workspaces) && pkg.workspaces.includes("packages/*") && entries.length === 1 && object3(entries[0]) && entries[0].source === "./plugins/banzai" && nestedClaude?.name === "banzai" && nestedCodex?.name === "banzai";
+  const sourceWorkspace = pkg?.name === "banzai-spec-driven-dev" && pkg.private === true && Array.isArray(pkg.workspaces) && pkg.workspaces.includes("packages/*") && entries.length === 1 && object4(entries[0]) && entries[0].source === "./plugins/banzai" && nestedClaude?.name === "banzai" && nestedCodex?.name === "banzai";
   if (pkg?.name === "banzai-spec-driven-dev" && (entries.length > 1 || [nestedClaude, nestedCodex].some(
     (value) => value && value.name !== "banzai"
   ))) {
@@ -1020,8 +1206,8 @@ async function sourceIdentity(root, issues) {
   }
   return !issues.some((issue2) => issue2.classification === "needs_attention") && (pluginRoot || sourceWorkspace);
 }
-function inspectManifest(text2, issues) {
-  for (const line of text2.split(/\r?\n/)) {
+function inspectManifest(text3, issues) {
+  for (const line of text3.split(/\r?\n/)) {
     if (/^ {0,3}#{1,6}(?:[ \t]|$)/.test(line)) break;
     if (line === SCAFFOLD_MARKER) {
       issues.push({
@@ -1033,7 +1219,7 @@ function inspectManifest(text2, issues) {
     }
   }
   const sections = [];
-  for (const line of visibleMarkdown(text2)) {
+  for (const line of visibleMarkdown(text3)) {
     const match = /^ {0,3}##[ \t]+(?:\d+\.[ \t]+)?(.+?)(?:[ \t]+#+)?[ \t]*$/.exec(line);
     if (match?.[1]) sections.push({ name: match[1], content: false });
     else if (line.trim() && !/^ {0,3}#{1,6}(?:[ \t]|$)/.test(line) && sections.length > 0) {
@@ -1163,7 +1349,7 @@ import {
   open as open2,
   unlink
 } from "node:fs/promises";
-import path2 from "node:path";
+import path4 from "node:path";
 import { randomUUID } from "node:crypto";
 var ARCHIVE_SCHEMA = "banzai-artifact-archive/v1";
 var LIMIT = 25e3;
@@ -1172,7 +1358,7 @@ var secretPath = /(?:^|\/)(?:\.ssh|\.aws|\.gnupg|\.codex|\.claude|node_modules|a
 var control = /(?:^|\/)(?:active-run\.json|runner\.lock|\.writer-claim\.json|\.artifact-init\.lock)$/u;
 function bounded(value, name) {
   if (typeof value !== "string" || !value.length || value.length > 200 || /[\x00-\x1f\x7f]/u.test(value))
-    fail(
+    fail3(
       "ARTIFACT_INPUT_INVALID",
       `${name} must be a bounded explicit identity.`
     );
@@ -1181,42 +1367,42 @@ function bounded(value, name) {
 function archivePath(value) {
   relativePath(value);
   if (secretPath.test(value) || value === ".banzai/archive-manifest.json")
-    fail(
+    fail3(
       "ARTIFACT_UNSAFE_PATH",
       "Authentication, credential and key locations cannot enter an artifact archive."
     );
   return value;
 }
 async function directory(input) {
-  if (typeof input !== "string" || !path2.isAbsolute(input))
-    fail(
+  if (typeof input !== "string" || !path4.isAbsolute(input))
+    fail3(
       "ARTIFACT_INPUT_INVALID",
       "Archive directories must be absolute local paths."
     );
-  const root = path2.parse(input).root;
-  await safePath(root, path2.relative(root, input), { directory: true });
+  const root = path4.parse(input).root;
+  await safePath(root, path4.relative(root, input), { directory: true });
   return input;
 }
 async function missingDestination(input) {
-  if (typeof input !== "string" || !path2.isAbsolute(input))
-    fail(
+  if (typeof input !== "string" || !path4.isAbsolute(input))
+    fail3(
       "ARTIFACT_INPUT_INVALID",
       "Destination must be an absolute local directory."
     );
-  if (input !== path2.resolve(input))
-    fail("ARTIFACT_UNSAFE_PATH", "Destination must be canonical, without dot segments or path aliases.");
-  await directory(path2.dirname(input));
-  await safePath(path2.dirname(input), path2.basename(input), {
+  if (input !== path4.resolve(input))
+    fail3("ARTIFACT_UNSAFE_PATH", "Destination must be canonical, without dot segments or path aliases.");
+  await directory(path4.dirname(input));
+  await safePath(path4.dirname(input), path4.basename(input), {
     missing: true,
     directory: true
   });
   return input;
 }
-function sourcePath(parent, reference, sourceRoot = null) {
-  if (typeof reference !== "string" || !reference.length || /^(?:https?:|mailto:|#|app:)/u.test(reference))
+function sourcePath(parent, reference2, sourceRoot = null) {
+  if (typeof reference2 !== "string" || !reference2.length || /^(?:https?:|mailto:|#|app:)/u.test(reference2))
     return null;
-  let clean = reference.split("#")[0];
-  if (path2.posix.isAbsolute(clean)) {
+  let clean = reference2.split("#")[0];
+  if (path4.posix.isAbsolute(clean)) {
     if (sourceRoot && clean.startsWith(`${sourceRoot}/`))
       clean = clean.slice(sourceRoot.length + 1);
     else return `external/${digestBytes(clean)}`;
@@ -1226,16 +1412,16 @@ function sourcePath(parent, reference, sourceRoot = null) {
   if (work && clean.startsWith("verification/")) clean = `${work}/${clean}`;
   if (run && /^(?:attempts|reviews|verification|approval|recovery)\//u.test(clean))
     clean = `${run}/${clean}`;
-  const candidate = clean.startsWith("./") || clean.startsWith("../") ? path2.posix.normalize(path2.posix.join(path2.posix.dirname(parent), clean)) : clean;
-  if (candidate.startsWith("../") || path2.posix.isAbsolute(candidate) || /[\x00-\x20<>`{}]/u.test(candidate))
+  const candidate = clean.startsWith("./") || clean.startsWith("../") ? path4.posix.normalize(path4.posix.join(path4.posix.dirname(parent), clean)) : clean;
+  if (candidate.startsWith("../") || path4.posix.isAbsolute(candidate) || /[\x00-\x20<>`{}]/u.test(candidate))
     return null;
   if (!candidate.includes("/") && !/\.(?:md|json|jsonl|log)$/u.test(candidate))
     return null;
   return candidate.replace(/\/$/u, "");
 }
-function markdownProse(text2) {
+function markdownProse(text3) {
   let fence = null;
-  return text2.split("\n").map((line) => {
+  return text3.split("\n").map((line) => {
     const marker = /^ {0,3}(`{3,}|~{3,})/u.exec(line)?.[1];
     if (fence !== null) {
       if (marker && marker[0] === fence[0] && marker.length >= fence.length) fence = null;
@@ -1248,14 +1434,14 @@ function markdownProse(text2) {
     return line.replace(/(`+).*?\1/gu, "");
   }).join("\n");
 }
-function dependenciesFor(relative, bytes, sourceRoot = null) {
+function dependenciesFor(relative2, bytes, sourceRoot = null) {
   const refs = /* @__PURE__ */ new Map();
   let supported = true;
-  const text2 = bytes.toString("utf8");
-  if (relative.endsWith(".json")) {
+  const text3 = bytes.toString("utf8");
+  if (relative2.endsWith(".json")) {
     let value;
     try {
-      value = JSON.parse(text2);
+      value = JSON.parse(text3);
     } catch {
       return { refs, supported: false };
     }
@@ -1277,11 +1463,11 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
         parseCompletionPublication(value);
       else if (value.schema === "banzai-recovery-authorization/v1")
         parseRecoveryAuthorization(value);
-      else if (/^\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative))
-        parseEvaluationStateSource(value);
-      else if (/^\.banzai\/runs\/[^/]+\/attempts\/[^/]+\.json$/u.test(relative) && value.attempt && "startedAt" in value)
+      else if (/^\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative2))
+        value.schemaVersion === 8 ? supported = false : parseEvaluationStateSource(value);
+      else if (/^\.banzai\/runs\/[^/]+\/attempts\/[^/]+\.json$/u.test(relative2) && value.attempt && "startedAt" in value)
         parseModelAttemptRecord(value);
-      else if (/^\.banzai\/(?:runs\/[^/]+\/verification-attempts|work\/[^/]+\/verification\/attempts)\//u.test(relative) && "command" in value)
+      else if (/^\.banzai\/(?:runs\/[^/]+\/verification-attempts|work\/[^/]+\/verification\/attempts)\//u.test(relative2) && "command" in value)
         parseVerificationAttemptRecord(value);
       else if ("phase" in value && "outcome" in value)
         parsePersistedPhaseResult(value);
@@ -1290,11 +1476,11 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
     } catch {
       return { refs, supported: false };
     }
-    if (relative.endsWith("/work.json")) {
+    if (relative2.endsWith("/work.json")) {
       parseBinding(value);
       return { refs, supported };
     }
-    if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative) && ![1, 2, 3, 4, 5, 6, 7].includes(value.schemaVersion))
+    if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative2) && ![1, 2, 3, 4, 5, 6, 7].includes(value.schemaVersion))
       supported = false;
     if (typeof value.schema === "string" && !(/* @__PURE__ */ new Set([
       "banzai-terminal-attempt-checkpoint/v1",
@@ -1327,7 +1513,7 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
         return { refs, supported: false };
       }
     }
-    if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative) && (value.schemaVersion === 4 || value.schemaVersion === 5 || value.schemaVersion === 6 || value.schemaVersion === 7 && value.artifactBinding !== void 0)) {
+    if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative2) && (value.schemaVersion === 4 || value.schemaVersion === 5 || value.schemaVersion === 6 || value.schemaVersion === 7 && value.artifactBinding !== void 0)) {
       try {
         exactObject(value.artifactBinding, ["binding", "sha256"]);
         parseBinding(value.artifactBinding.binding);
@@ -1336,19 +1522,19 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
         supported = false;
       }
     }
-    const workflowEvidence = relative.startsWith(".banzai/runs/") || relative.includes("/verification/") || typeof value.schema === "string" && /^banzai-(?:review-snapshot|work-binding)\/v/u.test(value.schema);
+    const workflowEvidence = relative2.startsWith(".banzai/runs/") || relative2.includes("/verification/") || typeof value.schema === "string" && /^banzai-(?:review-snapshot|work-binding)\/v/u.test(value.schema);
     if (!workflowEvidence) return { refs, supported };
-    const run = relative.match(/^(\.banzai\/runs\/[^/]+)\//u)?.[1];
-    if (run && relative !== `${run}/state.json`) refs.set(`${run}/state.json`, true);
+    const run = relative2.match(/^(\.banzai\/runs\/[^/]+)\//u)?.[1];
+    if (run && relative2 !== `${run}/state.json`) refs.set(`${run}/state.json`, true);
     if (run && value.schema === "banzai-verification-config-transaction/v1") {
-      if (relative !== `${run}/configuration/${value.operationId}.transaction.json` || value.runId !== run.split("/").at(-1)) supported = false;
+      if (relative2 !== `${run}/configuration/${value.operationId}.transaction.json` || value.runId !== run.split("/").at(-1)) supported = false;
       refs.set(`${run}/configuration/${value.operationId}.confirmation.json`, true);
     }
-    if (run && /^.*\/configuration\/[^/]+\.confirmation\.json$/u.test(relative)) refs.set(relative.replace(/\.confirmation\.json$/u, ".transaction.json"), true);
-    if (run && (value.schemaVersion === 6 || value.schemaVersion === 7 && value.configurationSetup) && relative === `${run}/state.json`) for (const id of value.configurationSetup.transactions) refs.set(`${run}/configuration/${id}.transaction.json`, true);
+    if (run && /^.*\/configuration\/[^/]+\.confirmation\.json$/u.test(relative2)) refs.set(relative2.replace(/\.confirmation\.json$/u, ".transaction.json"), true);
+    if (run && (value.schemaVersion === 6 || value.schemaVersion === 7 && value.configurationSetup) && relative2 === `${run}/state.json`) for (const id2 of value.configurationSetup.transactions) refs.set(`${run}/configuration/${id2}.transaction.json`, true);
     if ((value.schema === "banzai-review-snapshot/v4" || value.schema === "banzai-review-snapshot/v5" && value.configurationSetup) && value.configurationSetup) for (const change of value.configurationSetup.runnerChanges) refs.set(`.banzai/runs/${value.runId}/configuration/${change.transaction.operationId}.transaction.json`, true);
     const completionLeaf = (attemptId, leaf) => `${run}/attempts/${attemptId}.${leaf}`;
-    if (run && value.schemaVersion === 7 && relative === `${run}/state.json` && value.completionPublication) {
+    if (run && [7, 8].includes(value.schemaVersion) && relative2 === `${run}/state.json` && value.completionPublication) {
       const cursor = value.completionPublication;
       if (cursor.captureDigest) refs.set(completionLeaf(cursor.attemptId, "completion-input.json"), true);
       if (cursor.candidateDigest) {
@@ -1357,7 +1543,7 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
       }
       if (cursor.receiptDigest) refs.set(completionLeaf(cursor.attemptId, "completion-publication.json"), true);
     }
-    if (run && value.schemaVersion === 7 && relative === `${run}/state.json` && value.planTaskCompletion?.schemaVersion === 2 && value.planTaskCompletion.status === "valid")
+    if (run && [7, 8].includes(value.schemaVersion) && relative2 === `${run}/state.json` && value.planTaskCompletion?.schemaVersion === 2 && value.planTaskCompletion.status === "valid")
       refs.set(`${run}/${value.planTaskCompletion.publication.path}`, true);
     if (run && value.schema === "banzai-review-snapshot/v5" && value.completionPublication)
       refs.set(`.banzai/runs/${value.runId}/${value.completionPublication.receiptPath}`, true);
@@ -1383,7 +1569,7 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
       refs.set(`${run}/attempts/${value.ledgerAuthor.attemptId}-${value.ledgerAuthor.attemptKind}.json`, true);
     }
     if (run && value.schema === "banzai-terminal-attempt-checkpoint/v2") refs.set(`${run}/attempts/${value.attempt.id}-${value.attempt.kind}.json`, true);
-    const evidenceRoot = relative.match(/^(\.banzai\/(?:runs\/[^/]+|work\/[^/]+)\/verification)(?:\/|$)/u)?.[1] ?? (run ? `${run}/verification` : null);
+    const evidenceRoot = relative2.match(/^(\.banzai\/(?:runs\/[^/]+|work\/[^/]+)\/verification)(?:\/|$)/u)?.[1] ?? (run ? `${run}/verification` : null);
     if (evidenceRoot && value.workId) refs.set(`.banzai/work/${value.workId}/work.json`, true);
     if (value.schema === "banzai-verification-origin-finish/v1") refs.set(`${evidenceRoot}/origins/${value.attemptId}.start.json`, true);
     if (value.schema === "banzai-verification-applicability/v1") refs.set(`${evidenceRoot}/decisions/${value.decisionSha256}.json`, true);
@@ -1406,16 +1592,16 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
       } else if (typeof item === "string" && /(?:path|paths|description|plan|implementationReport|testReport|work|changeReport)$/iu.test(
         key
       )) {
-        const ref = sourcePath(relative, item, sourceRoot);
+        const ref = sourcePath(relative2, item, sourceRoot);
         if (ref && !control.test(ref)) refs.set(ref, true);
       }
     };
     visit(value);
-  } else if (relative.endsWith(".md")) {
-    for (const match of markdownProse(text2).matchAll(/\[([^\]\n]*)\]\(([^)\s]+)\)/gu)) {
+  } else if (relative2.endsWith(".md")) {
+    for (const match of markdownProse(text3).matchAll(/\[([^\]\n]*)\]\(([^)\s]+)\)/gu)) {
       const raw = match[2].split("#")[0];
       if (/^(?:https?:|mailto:|#)/u.test(match[2])) continue;
-      const ref = sourcePath(relative, raw.startsWith(".") ? raw : `./${raw}`);
+      const ref = sourcePath(relative2, raw.startsWith(".") ? raw : `./${raw}`);
       if (ref) {
         const authority = /(?:^|\/)(?:description|plan|work)\.md$/u.test(ref) || /^documentation\/decisions\/(?!README\.md$)[^/]+\.md$/u.test(ref) || /(?:Accepted ADR|Required (?:ADR|description|plan))/iu.test(match[1]);
         const optional = /^Historical \(optional\): /u.test(match[1]);
@@ -1433,7 +1619,7 @@ function retainedPaths(manifest, objects) {
   for (const pin of manifest.retention.pins) {
     const bindingPath = `.banzai/work/${pin.workId}/work.json`;
     const bindingEntry = manifest.entries.find((entry) => entry.path === bindingPath);
-    if (!bindingEntry) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Pinned work has no archived binding provenance.");
+    if (!bindingEntry) fail3("ARTIFACT_EVIDENCE_INCOMPLETE", "Pinned work has no archived binding provenance.");
     protectedPaths.add(bindingPath);
     for (const entry of manifest.entries) {
       const run = entry.path.match(/^(\.banzai\/runs\/[^/]+)\/state\.json$/u)?.[1];
@@ -1467,43 +1653,43 @@ async function inventoryArtifacts(input) {
   const root = await projectRoot(input.repoRoot);
   const workPaths = input.workPaths ?? [];
   const selectedRunIds = input.runIds ?? [];
-  if (!Array.isArray(workPaths) || !Array.isArray(selectedRunIds) || workPaths.length + selectedRunIds.length < 1 || workPaths.length + selectedRunIds.length > LIMIT || selectedRunIds.some((id) => typeof id !== "string" || !/^[a-zA-Z0-9_-]+$/u.test(id)))
-    fail("ARTIFACT_INPUT_INVALID", "Select a bounded nonempty list of workPaths and/or selectedRunIds.");
-  const selectedPaths = [...workPaths.map(relativePath), ...selectedRunIds.map((id) => `.banzai/runs/${id}`)];
+  if (!Array.isArray(workPaths) || !Array.isArray(selectedRunIds) || workPaths.length + selectedRunIds.length < 1 || workPaths.length + selectedRunIds.length > LIMIT || selectedRunIds.some((id2) => typeof id2 !== "string" || !/^[a-zA-Z0-9_-]+$/u.test(id2)))
+    fail3("ARTIFACT_INPUT_INVALID", "Select a bounded nonempty list of workPaths and/or selectedRunIds.");
+  const selectedPaths = [...workPaths.map(relativePath), ...selectedRunIds.map((id2) => `.banzai/runs/${id2}`)];
   const files = /* @__PURE__ */ new Map();
   const excluded = [];
-  const walk = async (relative) => {
-    archivePath(relative);
-    const target = path2.join(root, relative);
+  const walk = async (relative2) => {
+    archivePath(relative2);
+    const target = path4.join(root, relative2);
     const stat2 = await lstat2(target).catch(
-      () => fail(
+      () => fail3(
         "ARTIFACT_EVIDENCE_INCOMPLETE",
         "Selected archive evidence is unavailable."
       )
     );
-    await safePath(root, relative, { directory: stat2.isDirectory() });
-    if (control.test(relative)) {
-      excluded.push(relative);
+    await safePath(root, relative2, { directory: stat2.isDirectory() });
+    if (control.test(relative2)) {
+      excluded.push(relative2);
       return;
     }
     if (stat2.isDirectory()) {
       for (const name of (await readdir(target)).sort())
-        await walk(`${relative}/${name}`);
+        await walk(`${relative2}/${name}`);
     } else {
-      const bytes = await readBytes(root, relative);
-      files.set(relative, { bytes, mode: stat2.mode & 511 });
+      const bytes = await readBytes(root, relative2);
+      files.set(relative2, { bytes, mode: stat2.mode & 511 });
       if (files.size > LIMIT)
-        fail(
+        fail3(
           "ARTIFACT_DISCOVERY_LIMIT",
           "Archive selection exceeds the bounded inventory."
         );
     }
   };
-  for (const relative of selectedPaths) await walk(relative);
+  for (const relative2 of selectedPaths) await walk(relative2);
   const dependencies = [];
   const uninterpreted = [];
-  for (const [relative, value] of files) {
-    if (/^\.banzai\/work\/[^/]+\/work\.json$/u.test(relative)) {
+  for (const [relative2, value] of files) {
+    if (/^\.banzai\/work\/[^/]+\/work\.json$/u.test(relative2)) {
       const binding = parseBinding(JSON.parse(value.bytes.toString("utf8")));
       for (const target of Object.values(binding.artifacts)) {
         try {
@@ -1513,7 +1699,7 @@ async function inventoryArtifacts(input) {
         }
       }
     }
-    const run = relative.match(/^(\.banzai\/runs\/[^/]+)\//u)?.[1];
+    const run = relative2.match(/^(\.banzai\/runs\/[^/]+)\//u)?.[1];
     if (run && !files.has(`${run}/state.json`)) {
       try {
         await walk(`${run}/state.json`);
@@ -1527,14 +1713,14 @@ async function inventoryArtifacts(input) {
       )?.repoRoot ?? null;
     } catch {
     }
-    const decoded = dependenciesFor(relative, value.bytes, sourceRoot);
-    if (!decoded.supported) uninterpreted.push(relative);
-    for (const [reference, required] of decoded.refs) {
+    const decoded = dependenciesFor(relative2, value.bytes, sourceRoot);
+    if (!decoded.supported) uninterpreted.push(relative2);
+    for (const [reference2, required] of decoded.refs) {
       let status = "included";
-      if (reference.startsWith("external/")) status = "external";
-      else if (!files.has(reference)) {
+      if (reference2.startsWith("external/")) status = "external";
+      else if (!files.has(reference2)) {
         try {
-          await walk(reference);
+          await walk(reference2);
         } catch (error) {
           if (!["ARTIFACT_EVIDENCE_INCOMPLETE", "ARTIFACT_UNSAFE_PATH"].includes(
             error.code
@@ -1543,23 +1729,23 @@ async function inventoryArtifacts(input) {
           status = "missing";
         }
       }
-      if (status === "included" && !files.has(reference)) status = "external";
+      if (status === "included" && !files.has(reference2)) status = "external";
       dependencies.push({
         sourceId: "project",
-        from: relative,
-        to: reference,
+        from: relative2,
+        to: reference2,
         required,
         status
       });
     }
   }
-  for (const [relative, value] of files) {
-    if (!/^\.banzai\/work\/[^/]+\/work\.json$/u.test(relative)) continue;
+  for (const [relative2, value] of files) {
+    if (!/^\.banzai\/work\/[^/]+\/work\.json$/u.test(relative2)) continue;
     const binding = parseBinding(JSON.parse(value.bytes.toString("utf8")));
     for (const [role, target] of Object.entries(binding.artifacts)) {
       for (const filename of files.keys()) {
         if (filename === target || role === "reviewDirectory" && filename.startsWith(`${target}/`))
-          dependencies.push({ sourceId: "project", from: relative, to: filename, required: true, status: "included" });
+          dependencies.push({ sourceId: "project", from: relative2, to: filename, required: true, status: "included" });
       }
     }
   }
@@ -1569,17 +1755,17 @@ async function inventoryArtifacts(input) {
   } catch {
   }
   const workIds = [], runIds = [];
-  for (const relative of files.keys()) {
-    const work = relative.match(/^\.banzai\/work\/([^/]+)\/work\.json$/u);
+  for (const relative2 of files.keys()) {
+    const work = relative2.match(/^\.banzai\/work\/([^/]+)\/work\.json$/u);
     if (work) workIds.push(work[1]);
-    const run = relative.match(/^\.banzai\/runs\/([^/]+)\/state\.json$/u);
+    const run = relative2.match(/^\.banzai\/runs\/([^/]+)\/state\.json$/u);
     if (run) runIds.push(run[1]);
   }
-  const entries = [...files].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([relative, value]) => {
+  const entries = [...files].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([relative2, value]) => {
     const sha256 = digestBytes(value.bytes);
     return {
       sourceId: "project",
-      path: relative,
+      path: relative2,
       size: value.bytes.length,
       mode: value.mode,
       sha256,
@@ -1626,13 +1812,13 @@ function parseArchive(value) {
     "retention"
   ]);
   if (value.schema !== ARCHIVE_SCHEMA || value.schemaVersion !== 1)
-    fail(
+    fail3(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Unsupported artifact archive version."
     );
   bounded(value.bundleId, "bundleId");
   if (!Number.isFinite(Date.parse(value.createdAt)) || !Array.isArray(value.sources) || value.sources.length !== 1 || !Array.isArray(value.entries) || value.entries.length > LIMIT || !Array.isArray(value.dependencies) || value.dependencies.length > LIMIT * 10)
-    fail(
+    fail3(
       "ARTIFACT_INPUT_INVALID",
       "Archive inventory is malformed or exceeds its bound."
     );
@@ -1644,12 +1830,12 @@ function parseArchive(value) {
     "runIds"
   ]);
   if (source.id !== "project")
-    fail("ARTIFACT_INPUT_INVALID", "Archive source identity is unsupported.");
+    fail3("ARTIFACT_INPUT_INVALID", "Archive source identity is unsupported.");
   bounded(source.projectIdentity, "projectIdentity");
   if (!(source.sourceCommit === null || /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(source.sourceCommit)) || !Array.isArray(source.workIds) || !Array.isArray(source.runIds) || [...source.workIds, ...source.runIds].some(
-    (id) => typeof id !== "string" || !/^[a-zA-Z0-9_-]+$/u.test(id)
+    (id2) => typeof id2 !== "string" || !/^[a-zA-Z0-9_-]+$/u.test(id2)
   ))
-    fail("ARTIFACT_INPUT_INVALID", "Archive provenance is malformed.");
+    fail3("ARTIFACT_INPUT_INVALID", "Archive provenance is malformed.");
   const paths = /* @__PURE__ */ new Set();
   for (const entry of value.entries) {
     exactObject(entry, [
@@ -1662,7 +1848,7 @@ function parseArchive(value) {
     ]);
     archivePath(entry.path);
     if (control.test(entry.path) || paths.has(entry.path) || entry.sourceId !== source.id || !Number.isSafeInteger(entry.size) || entry.size < 0 || !Number.isInteger(entry.mode) || entry.mode < 0 || entry.mode > 511 || !SHA.test(entry.sha256) || entry.object !== `objects/${entry.sha256}`)
-      fail(
+      fail3(
         "ARTIFACT_INPUT_INVALID",
         "Archive entry identity is malformed or duplicated."
       );
@@ -1673,7 +1859,7 @@ function parseArchive(value) {
     archivePath(edge.from);
     relativePath(edge.to);
     if (edge.sourceId !== source.id || !paths.has(edge.from) || typeof edge.required !== "boolean" || !["included", "missing", "external"].includes(edge.status) || edge.status === "included" && !paths.has(edge.to))
-      fail(
+      fail3(
         "ARTIFACT_EVIDENCE_INCOMPLETE",
         "Archive dependency identity is unresolved."
       );
@@ -1686,7 +1872,7 @@ function parseArchive(value) {
     "pins"
   ]);
   if (!["banzai", "owner", "unspecified"].includes(retention.policy) || retention.deletionAuthorized !== false)
-    fail(
+    fail3(
       "ARTIFACT_INPUT_INVALID",
       "Archive retention policy cannot authorize deletion."
     );
@@ -1694,17 +1880,17 @@ function parseArchive(value) {
     exactObject(retention.ownerPolicy, ["ownerId", "recordedAt", "terms"]);
     bounded(retention.ownerPolicy.ownerId, "retention ownerId");
     if (!Number.isFinite(Date.parse(retention.ownerPolicy.recordedAt)) || typeof retention.ownerPolicy.terms !== "string" || !retention.ownerPolicy.terms.trim() || retention.ownerPolicy.terms.length > 1e4)
-      fail("ARTIFACT_INPUT_INVALID", "Explicit owner retention terms and provenance are required.");
+      fail3("ARTIFACT_INPUT_INVALID", "Explicit owner retention terms and provenance are required.");
   } else if (retention.ownerPolicy !== null)
-    fail("ARTIFACT_INPUT_INVALID", "Owner policy must be null unless explicitly selected.");
+    fail3("ARTIFACT_INPUT_INVALID", "Owner policy must be null unless explicitly selected.");
   if (!Array.isArray(retention.pins) || retention.pins.length > LIMIT)
-    fail("ARTIFACT_INPUT_INVALID", "Retention pins exceed the inventory bound.");
+    fail3("ARTIFACT_INPUT_INVALID", "Retention pins exceed the inventory bound.");
   const pinned = /* @__PURE__ */ new Set();
   for (const pin of retention.pins) {
     exactObject(pin, ["sourceId", "workId", "reason", "recordedAt"]);
     bounded(pin.reason, "pin reason");
     if (pin.sourceId !== source.id || !source.workIds.includes(pin.workId) || !paths.has(`.banzai/work/${pin.workId}/work.json`) || !Number.isFinite(Date.parse(pin.recordedAt)) || pinned.has(pin.workId))
-      fail("ARTIFACT_INPUT_INVALID", "Pin must identify unique archived work and its source provenance.");
+      fail3("ARTIFACT_INPUT_INVALID", "Pin must identify unique archived work and its source provenance.");
     pinned.add(pin.workId);
   }
   const keys = retention.policy === "banzai" ? [
@@ -1727,7 +1913,7 @@ function parseArchive(value) {
     "override-expiry"
   ];
   if (keys.some((key, index) => retention.rules[key] !== expected[index]))
-    fail(
+    fail3(
       "ARTIFACT_INPUT_INVALID",
       "Archive retention rules differ from their declared policy."
     );
@@ -1743,7 +1929,7 @@ async function verifyArchive(input) {
     manifest = parseArchive(JSON.parse(manifestBytes.toString("utf8")));
   } catch (error) {
     if (error.code) throw error;
-    fail("ARTIFACT_INPUT_INVALID", "Archive manifest is not valid JSON.");
+    fail3("ARTIFACT_INPUT_INVALID", "Archive manifest is not valid JSON.");
   }
   const uninterpreted = [];
   const recordedEdges = new Map(
@@ -1753,7 +1939,7 @@ async function verifyArchive(input) {
   for (const entry of manifest.entries) {
     const bytes = await readBytes(root, entry.object);
     if (bytes.length !== entry.size || digestBytes(bytes) !== entry.sha256)
-      fail(
+      fail3(
         "ARTIFACT_EVIDENCE_INCOMPLETE",
         "Archive object size or SHA-256 verification failed."
       );
@@ -1770,10 +1956,10 @@ async function verifyArchive(input) {
     const decoded = dependenciesFor(entry.path, bytes, sourceRoot);
     if (/^\.banzai\/work\/[^/]+\/work\.json$/u.test(entry.path)) {
       const binding = parseBinding(JSON.parse(bytes.toString("utf8")));
-      if (!manifest.sources[0].workIds.includes(binding.workId)) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Archived work is absent from source provenance.");
-      for (const [role, relative] of Object.entries(binding.artifacts)) {
+      if (!manifest.sources[0].workIds.includes(binding.workId)) fail3("ARTIFACT_EVIDENCE_INCOMPLETE", "Archived work is absent from source provenance.");
+      for (const [role, relative2] of Object.entries(binding.artifacts)) {
         for (const item of manifest.entries) {
-          if (item.path === relative || role === "reviewDirectory" && item.path.startsWith(`${relative}/`)) decoded.refs.set(item.path, true);
+          if (item.path === relative2 || role === "reviewDirectory" && item.path.startsWith(`${relative2}/`)) decoded.refs.set(item.path, true);
         }
       }
     }
@@ -1789,9 +1975,9 @@ async function verifyArchive(input) {
         const stateBytes = runOwner ? objects.get(`${runOwner}/state.json`) : null;
         const ownerId = workOwner ?? (stateBytes ? JSON.parse(stateBytes).artifactBinding?.binding?.workId : null);
         if (!ownerId || ownerId !== value.workId)
-          fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Archived verification evidence conflicts with its bound owner.");
+          fail3("ARTIFACT_EVIDENCE_INCOMPLETE", "Archived verification evidence conflicts with its bound owner.");
         if (value.sha256 && !entry.path.endsWith(`/${value.sha256}.json`))
-          fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Archived verification decision identity changed.");
+          fail3("ARTIFACT_EVIDENCE_INCOMPLETE", "Archived verification decision identity changed.");
       }
       if (value?.schema === "banzai-verification-origin-finish/v1") {
         const startPath = entry.path.replace(/\.finish\.json$/u, ".start.json");
@@ -1799,35 +1985,35 @@ async function verifyArchive(input) {
         const start = startBytes ? parseVerificationOriginStart(JSON.parse(startBytes)) : null;
         const physicalBytes = start ? objects.get(start.physicalPath) : null;
         if (!start || !physicalBytes || digestBytes(startBytes) !== value.startSha256 || evidenceDigest(parseVerificationAttemptRecord(JSON.parse(physicalBytes))) !== value.physicalSha256 || start.workId !== value.workId || start.attemptId !== value.attemptId)
-          fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Archived verification origin closure is missing or changed.");
+          fail3("ARTIFACT_EVIDENCE_INCOMPLETE", "Archived verification origin closure is missing or changed.");
         const physical = parseVerificationAttemptRecord(JSON.parse(physicalBytes));
         for (const log of [physical.stdout, physical.stderr]) {
           if (log === null) continue;
           const logPath = sourcePath(start.physicalPath, log.relativePath);
           const logBytes = objects.get(logPath);
           if (!logBytes || digestBytes(logBytes) !== log.sha256)
-            fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Archived verification origin log changed or is missing.");
+            fail3("ARTIFACT_EVIDENCE_INCOMPLETE", "Archived verification origin log changed or is missing.");
         }
       }
       if (value?.schema === "banzai-verification-config-transaction/v1") {
         const transaction = parseVerificationConfigTransaction(value);
         const confirmationPath = entry.path.replace(/\.transaction\.json$/u, ".confirmation.json");
         const confirmationBytes = objects.get(confirmationPath);
-        if (!confirmationBytes) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Configuration transaction confirmation is missing.");
+        if (!confirmationBytes) fail3("ARTIFACT_EVIDENCE_INCOMPLETE", "Configuration transaction confirmation is missing.");
         parseVerificationConfigConfirmation(JSON.parse(confirmationBytes), transaction);
         const stateBytes = objects.get(`${run}/state.json`);
         const state = stateBytes ? JSON.parse(stateBytes) : null;
-        if (!state || !(state.schemaVersion === 6 || state.schemaVersion === 7 && state.configurationSetup) || state.runId !== transaction.runId || transaction.continuation && (transaction.continuation.workId !== state.artifactBinding.binding.workId || transaction.continuation.workBindingSha256 !== state.artifactBinding.sha256 || transaction.continuation.baseCommit !== state.baseCommit)) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Configuration transaction owner conflicts with its retained run.");
+        if (!state || !(state.schemaVersion === 6 || state.schemaVersion === 7 && state.configurationSetup) || state.runId !== transaction.runId || transaction.continuation && (transaction.continuation.workId !== state.artifactBinding.binding.workId || transaction.continuation.workBindingSha256 !== state.artifactBinding.sha256 || transaction.continuation.baseCommit !== state.baseCommit)) fail3("ARTIFACT_EVIDENCE_INCOMPLETE", "Configuration transaction owner conflicts with its retained run.");
       }
       if (value?.schema === "banzai-review-snapshot/v4") {
         for (const change of value.configurationSetup.runnerChanges) {
           const transactionPath = `.banzai/runs/${value.runId}/configuration/${change.transaction.operationId}.transaction.json`;
           const transactionBytes = objects.get(transactionPath);
           const confirmationBytes = objects.get(transactionPath.replace(/\.transaction\.json$/u, ".confirmation.json"));
-          if (!transactionBytes || !confirmationBytes) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Review configuration closure is missing.");
+          if (!transactionBytes || !confirmationBytes) fail3("ARTIFACT_EVIDENCE_INCOMPLETE", "Review configuration closure is missing.");
           const transaction = parseVerificationConfigTransaction(JSON.parse(transactionBytes));
           const confirmation = parseVerificationConfigConfirmation(JSON.parse(confirmationBytes), transaction);
-          if (JSON.stringify(transaction) !== JSON.stringify(change.transaction) || JSON.stringify(confirmation.preview.delta) !== JSON.stringify(change.delta)) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Review configuration closure changed.");
+          if (JSON.stringify(transaction) !== JSON.stringify(change.transaction) || JSON.stringify(confirmation.preview.delta) !== JSON.stringify(change.delta)) fail3("ARTIFACT_EVIDENCE_INCOMPLETE", "Review configuration closure changed.");
         }
       }
       if (value?.schema === "banzai-completion-publication/v1") {
@@ -1835,31 +2021,31 @@ async function verifyArchive(input) {
         const captureBytes = objects.get(attemptLeaf("completion-input.json"));
         const candidateBytes = objects.get(attemptLeaf("completion-candidate.json"));
         const candidateText = objects.get(attemptLeaf("completion-candidate.md"));
-        if (!captureBytes || !candidateBytes || !candidateText) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion publication closure is missing.");
+        if (!captureBytes || !candidateBytes || !candidateText) fail3("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion publication closure is missing.");
         const capture2 = parseCompletionCapture(JSON.parse(captureBytes));
         const candidate = parseCompletionCandidate(JSON.parse(candidateBytes));
         if (capture2.integrityDigest !== value.captureDigest || candidate.integrityDigest !== value.candidateDigest || candidate.captureDigest !== capture2.integrityDigest || digestBytes(candidateText) !== candidate.outputSha256)
-          fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion publication closure changed.");
+          fail3("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion publication closure changed.");
         for (const original of Object.values(capture2.originals)) {
           if (!original) continue;
           const bytes2 = objects.get(`${run}/${original.path}`);
-          if (!bytes2 || digestBytes(bytes2) !== original.sha256) fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion capture original changed or is missing.");
+          if (!bytes2 || digestBytes(bytes2) !== original.sha256) fail3("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion capture original changed or is missing.");
         }
         if (value.terminalIntegrityDigest) {
           const checkpointBytes = objects.get(attemptLeaf("terminal-checkpoint.json"));
           if (!checkpointBytes || parseTerminalAttemptCheckpoint(JSON.parse(checkpointBytes)).integrityDigest !== value.terminalIntegrityDigest)
-            fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion terminal proof changed or is missing.");
+            fail3("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion terminal proof changed or is missing.");
         }
       }
       if (value?.schema === "banzai-completion-transition/v1") {
         const priorBytes = objects.get(`${run}/${value.priorState.path}`);
         if (!priorBytes || digestBytes(priorBytes) !== value.priorState.sha256)
-          fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion transition prior state changed or is missing.");
+          fail3("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion transition prior state changed or is missing.");
       }
-      if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(entry.path) && value?.schemaVersion === 7 && value.planTaskCompletion?.schemaVersion === 2 && value.planTaskCompletion.status === "valid") {
+      if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(entry.path) && [7, 8].includes(value?.schemaVersion) && value.planTaskCompletion?.schemaVersion === 2 && value.planTaskCompletion.status === "valid") {
         const receiptBytes = objects.get(`${run}/${value.planTaskCompletion.publication.path}`);
         if (!receiptBytes || parseCompletionPublication(JSON.parse(receiptBytes)).integrityDigest !== value.planTaskCompletion.publication.sha256)
-          fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Published completion receipt changed or is missing.");
+          fail3("ARTIFACT_EVIDENCE_INCOMPLETE", "Published completion receipt changed or is missing.");
       }
       if (value?.artifactBinding?.binding?.workId) {
         const bindingPath = `.banzai/work/${value.artifactBinding.binding.workId}/work.json`;
@@ -1867,7 +2053,7 @@ async function verifyArchive(input) {
           (item) => item.path === bindingPath
         );
         if (archivedBinding && archivedBinding.sha256 !== value.artifactBinding.sha256)
-          fail(
+          fail3(
             "ARTIFACT_EVIDENCE_INCOMPLETE",
             "Archived run or snapshot binding bytes conflict with their recorded identity."
           );
@@ -1876,7 +2062,7 @@ async function verifyArchive(input) {
     if (!decoded.supported) uninterpreted.push(entry.path);
     for (const [ref, required] of decoded.refs)
       if (!recordedEdges.has(`${entry.path}\0${ref}`) || required && recordedEdges.get(`${entry.path}\0${ref}`).required !== true)
-        fail(
+        fail3(
           "ARTIFACT_EVIDENCE_INCOMPLETE",
           "Archive manifest omits a recognized dependency."
         );
@@ -1895,7 +2081,7 @@ async function exportArtifacts(input) {
   const destination = await missingDestination(input.destination);
   try {
     await lstat2(destination);
-    fail(
+    fail3(
       "ARTIFACT_DESTINATION_CONFLICT",
       "Archive destination already exists; verify it explicitly."
     );
@@ -1908,20 +2094,20 @@ async function exportArtifacts(input) {
     inventory = parseArchive(JSON.parse(inventoryBytes.toString("utf8")));
   } catch (error) {
     if (error.code) throw error;
-    fail("ARTIFACT_INPUT_INVALID", "Reviewed inventory is not valid JSON.");
+    fail3("ARTIFACT_INPUT_INVALID", "Reviewed inventory is not valid JSON.");
   }
   const result = { inventory, excluded: [] };
   const root = await projectRoot(input.repoRoot);
   if (inventory.sources[0].projectIdentity !== localProjectIdentity(root))
-    fail("ARTIFACT_OWNERSHIP_CONFLICT", "Reviewed inventory belongs to another source checkout.");
+    fail3("ARTIFACT_OWNERSHIP_CONFLICT", "Reviewed inventory belongs to another source checkout.");
   for (const entry of inventory.entries) {
     const bytes = await readBytes(root, entry.path);
-    const mode = (await lstat2(path2.join(root, entry.path))).mode & 511;
+    const mode = (await lstat2(path4.join(root, entry.path))).mode & 511;
     if (bytes.length !== entry.size || digestBytes(bytes) !== entry.sha256 || mode !== entry.mode)
-      fail("ARTIFACT_OWNERSHIP_CONFLICT", "Source bytes or modes no longer match the reviewed inventory. Inspect and inventory again.");
+      fail3("ARTIFACT_OWNERSHIP_CONFLICT", "Source bytes or modes no longer match the reviewed inventory. Inspect and inventory again.");
   }
-  const temporary = path2.join(
-    path2.dirname(destination),
+  const temporary = path4.join(
+    path4.dirname(destination),
     `.banzai-archive-${result.inventory.bundleId}`
   );
   await mkdir(temporary, { mode: 448 });
@@ -1930,7 +2116,7 @@ async function exportArtifacts(input) {
   for (const entry of result.inventory.entries) {
     const bytes = await readBytes(root, entry.path);
     if (digestBytes(bytes) !== entry.sha256)
-      fail(
+      fail3(
         "ARTIFACT_OWNERSHIP_CONFLICT",
         "Source changed while archiving; incomplete staging evidence was retained."
       );
@@ -1950,7 +2136,7 @@ async function exportArtifacts(input) {
   try {
     handle = await open2(guard, "wx", 384);
   } catch {
-    fail(
+    fail3(
       "ARTIFACT_OWNERSHIP_CONFLICT",
       "Archive destination is owned by another operation."
     );
@@ -1959,7 +2145,7 @@ async function exportArtifacts(input) {
   try {
     try {
       await lstat2(destination);
-      fail(
+      fail3(
         "ARTIFACT_DESTINATION_CONFLICT",
         "Archive destination appeared during verification."
       );
@@ -1984,14 +2170,14 @@ async function exportArtifacts(input) {
 }
 async function withRestoreOwnership(root, action) {
   await makeDirectories(root, ".banzai");
-  const relative = ".banzai/runner.lock";
-  await safePath(root, relative, { missing: true });
+  const relative2 = ".banzai/runner.lock";
+  await safePath(root, relative2, { missing: true });
   const token = randomUUID();
   let handle;
   try {
-    handle = await open2(path2.join(root, relative), "wx", 384);
+    handle = await open2(path4.join(root, relative2), "wx", 384);
   } catch {
-    fail(
+    fail3(
       "ARTIFACT_OWNERSHIP_CONFLICT",
       "Existing runner ownership prevents archive verification; no lock was reclaimed."
     );
@@ -2010,15 +2196,15 @@ async function withRestoreOwnership(root, action) {
     return await action();
   } finally {
     await handle.close();
-    const current = await lstat2(path2.join(root, relative));
+    const current = await lstat2(path4.join(root, relative2));
     if (current.dev === owned.dev && current.ino === owned.ino)
-      await unlink(path2.join(root, relative));
+      await unlink(path4.join(root, relative2));
   }
 }
 async function restoreArtifacts(input) {
   const verified = await verifyArchive(input);
   if (!verified.complete)
-    fail(
+    fail3(
       "ARTIFACT_EVIDENCE_INCOMPLETE",
       "Restore requires complete dependency interpretation and closure."
     );
@@ -2027,7 +2213,7 @@ async function restoreArtifacts(input) {
   const receiptPath = ".banzai/archive-manifest.json";
   const receiptBytes = await readBytes(input.bundlePath, "manifest.json", { limit: 32 * 1024 * 1024 });
   if (/(?:^|\/)\.banzai\/(?:work|runs|control)(?:\/|$)/u.test(destination))
-    fail("ARTIFACT_UNSAFE_PATH", "Restore requires a separate inactive inspection directory outside managed work, run and control ancestry.");
+    fail3("ARTIFACT_UNSAFE_PATH", "Restore requires a separate inactive inspection directory outside managed work, run and control ancestry.");
   const historicalOnly = source.projectIdentity !== localProjectIdentity(destination);
   let exists = false;
   try {
@@ -2044,7 +2230,7 @@ async function restoreArtifacts(input) {
         true
       );
       if (active !== null)
-        fail(
+        fail3(
           "ARTIFACT_OWNERSHIP_CONFLICT",
           "Restore destination has runner authority; use an inactive fresh directory."
         );
@@ -2052,15 +2238,15 @@ async function restoreArtifacts(input) {
         const bytes = await readBytes(destination, entry.path, {
           optional: true
         });
-        if (bytes === null || digestBytes(bytes) !== entry.sha256 || ((await lstat2(path2.join(destination, entry.path))).mode & 511) !== entry.mode)
-          fail(
+        if (bytes === null || digestBytes(bytes) !== entry.sha256 || ((await lstat2(path4.join(destination, entry.path))).mode & 511) !== entry.mode)
+          fail3(
             "ARTIFACT_DESTINATION_CONFLICT",
             "Restore destination has missing or conflicting evidence. Use a fresh directory."
           );
       }
       const receipt = await readBytes(destination, receiptPath, { optional: true, limit: 32 * 1024 * 1024 });
       if (receipt === null || !receipt.equals(receiptBytes))
-        fail("ARTIFACT_DESTINATION_CONFLICT", "Restore provenance or retention receipt is missing or conflicts.");
+        fail3("ARTIFACT_DESTINATION_CONFLICT", "Restore provenance or retention receipt is missing or conflicts.");
       return {
         destination,
         bundleId: verified.manifest.bundleId,
@@ -2072,22 +2258,22 @@ async function restoreArtifacts(input) {
         retainedPaths: verified.retainedPaths
       };
     });
-  const temporary = path2.join(
-    path2.dirname(destination),
+  const temporary = path4.join(
+    path4.dirname(destination),
     `.banzai-restore-${randomUUID()}`
   );
   await mkdir(temporary, { mode: 448 });
   for (const entry of verified.manifest.entries) {
-    if (path2.posix.dirname(entry.path) !== ".")
-      await makeDirectories(temporary, path2.posix.dirname(entry.path));
+    if (path4.posix.dirname(entry.path) !== ".")
+      await makeDirectories(temporary, path4.posix.dirname(entry.path));
     await publishNew(
       temporary,
       entry.path,
       await readBytes(input.bundlePath, entry.object)
     );
-    await chmod(path2.join(temporary, entry.path), entry.mode);
+    await chmod(path4.join(temporary, entry.path), entry.mode);
     if (digestBytes(await readBytes(temporary, entry.path)) !== entry.sha256)
-      fail(
+      fail3(
         "ARTIFACT_EVIDENCE_INCOMPLETE",
         "Restored bytes failed verification; staging evidence was retained."
       );
@@ -2099,7 +2285,7 @@ async function restoreArtifacts(input) {
   try {
     handle = await open2(guard, "wx", 384);
   } catch {
-    fail(
+    fail3(
       "ARTIFACT_OWNERSHIP_CONFLICT",
       "Restore destination is owned by another operation."
     );
@@ -2107,7 +2293,7 @@ async function restoreArtifacts(input) {
   try {
     try {
       await lstat2(destination);
-      fail(
+      fail3(
         "ARTIFACT_DESTINATION_CONFLICT",
         "Restore destination appeared during verification."
       );
@@ -2144,7 +2330,7 @@ import {
   unlink as unlink2,
   rename as rename2
 } from "node:fs/promises";
-import path3 from "node:path";
+import path5 from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash as createHash3, randomUUID as randomUUID2 } from "node:crypto";
@@ -2157,7 +2343,7 @@ var METADATA_LIMIT = 64 * 1024;
 var DISCOVERY_LIMIT = 1e3;
 var DECLARATION_PATH = ".banzai/artifacts.json";
 var WORK_ROOT = ".banzai/work";
-var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+var UUID2 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 var SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 var SHA256 = /^[0-9a-f]{64}$/u;
 var MODES = ["strict", "lite", "fix", "workflow"];
@@ -2172,7 +2358,7 @@ var ArtifactStorageError = class extends Error {
     this.code = code;
   }
 };
-function fail(code, message) {
+function fail3(code, message) {
   throw new ArtifactStorageError(code, message);
 }
 function digestBytes(value) {
@@ -2189,7 +2375,7 @@ function exactObject(value, required, optional = []) {
   if (value === null || typeof value !== "object" || Array.isArray(value) || required.some((key) => !Object.hasOwn(value, key)) || Object.keys(value).some(
     (key) => !required.includes(key) && !optional.includes(key)
   )) {
-    fail(
+    fail3(
       "ARTIFACT_INPUT_INVALID",
       "Artifact metadata has an invalid object shape."
     );
@@ -2197,40 +2383,40 @@ function exactObject(value, required, optional = []) {
   return value;
 }
 function relativePath(value) {
-  if (typeof value !== "string" || value.length === 0 || value.length > 500 || /[\\\x00-\x1f\x7f]/u.test(value) || path3.posix.isAbsolute(value) || value.split("/").some(
+  if (typeof value !== "string" || value.length === 0 || value.length > 500 || /[\\\x00-\x1f\x7f]/u.test(value) || path5.posix.isAbsolute(value) || value.split("/").some(
     (segment) => segment === "" || segment === "." || segment === ".." || segment === ".git"
   )) {
-    fail(
+    fail3(
       "ARTIFACT_UNSAFE_PATH",
       "A bounded, contained project-relative artifact path is required."
     );
   }
   return value;
 }
-async function safePath(root, relative, { missing = false, directory: directory2 = false } = {}) {
-  relativePath(relative);
+async function safePath(root, relative2, { missing = false, directory: directory2 = false } = {}) {
+  relativePath(relative2);
   let current = root;
-  const parts = relative.split("/");
+  const parts = relative2.split("/");
   for (const [index, part] of parts.entries()) {
-    current = path3.join(current, part);
+    current = path5.join(current, part);
     let stat2;
     try {
       stat2 = await lstat3(current);
     } catch (error) {
-      if (error.code === "ENOENT" && missing) return path3.join(root, relative);
+      if (error.code === "ENOENT" && missing) return path5.join(root, relative2);
       if (error.code === "ENOENT")
-        fail(
+        fail3(
           "ARTIFACT_EVIDENCE_INCOMPLETE",
           "Required artifact evidence is missing."
         );
-      fail(
+      fail3(
         "ARTIFACT_IO_ERROR",
         "Artifact storage could not be inspected. Check local permissions."
       );
     }
     const needsDirectory = index < parts.length - 1 || directory2;
     if (stat2.isSymbolicLink() || (needsDirectory ? !stat2.isDirectory() : !stat2.isFile())) {
-      fail(
+      fail3(
         "ARTIFACT_UNSAFE_PATH",
         "Artifact storage requires owned directories and regular files without symlinks."
       );
@@ -2238,31 +2424,31 @@ async function safePath(root, relative, { missing = false, directory: directory2
   }
   return current;
 }
-async function readBytes(root, relative, { optional = false, limit = Infinity } = {}) {
-  const target = await safePath(root, relative, { missing: optional });
+async function readBytes(root, relative2, { optional = false, limit = Infinity } = {}) {
+  const target = await safePath(root, relative2, { missing: optional });
   let handle;
   try {
     handle = await open3(target, constants2.O_RDONLY | constants2.O_NOFOLLOW);
     const stat2 = await handle.stat();
     if (!stat2.isFile())
-      fail("ARTIFACT_UNSAFE_PATH", "Artifact input must be a regular file.");
+      fail3("ARTIFACT_UNSAFE_PATH", "Artifact input must be a regular file.");
     if (stat2.size > limit)
-      fail(
+      fail3(
         "ARTIFACT_INPUT_INVALID",
         "Artifact metadata exceeds its size bound."
       );
     const bytes = await handle.readFile();
     if (bytes.length > limit)
-      fail(
+      fail3(
         "ARTIFACT_INPUT_INVALID",
         "Artifact metadata exceeds its size bound."
       );
-    await safePath(root, relative);
+    await safePath(root, relative2);
     return bytes;
   } catch (error) {
     if (error instanceof ArtifactStorageError) throw error;
     if (error.code === "ENOENT" && optional) return null;
-    fail(
+    fail3(
       "ARTIFACT_IO_ERROR",
       "Artifact input could not be read. Check its path and local permissions."
     );
@@ -2270,8 +2456,8 @@ async function readBytes(root, relative, { optional = false, limit = Infinity } 
     await handle?.close();
   }
 }
-async function readJson(root, relative, optional = false) {
-  const bytes = await readBytes(root, relative, {
+async function readJson(root, relative2, optional = false) {
+  const bytes = await readBytes(root, relative2, {
     optional,
     limit: METADATA_LIMIT
   });
@@ -2279,33 +2465,33 @@ async function readJson(root, relative, optional = false) {
   try {
     return JSON.parse(bytes.toString("utf8"));
   } catch {
-    fail("ARTIFACT_INPUT_INVALID", "Artifact metadata is not valid JSON.");
+    fail3("ARTIFACT_INPUT_INVALID", "Artifact metadata is not valid JSON.");
   }
 }
 async function readInvocationBytes(input, label, options = {}) {
-  if (typeof input !== "string" || !path3.isAbsolute(input))
-    fail("ARTIFACT_INPUT_INVALID", `${label} must name an absolute local regular file.`);
+  if (typeof input !== "string" || !path5.isAbsolute(input))
+    fail3("ARTIFACT_INPUT_INVALID", `${label} must name an absolute local regular file.`);
   try {
-    const parent = await realpath2(path3.dirname(input));
-    return await readBytes(parent, path3.basename(input), options);
+    const parent = await realpath2(path5.dirname(input));
+    return await readBytes(parent, path5.basename(input), options);
   } catch (error) {
-    fail(
+    fail3(
       error instanceof ArtifactStorageError ? error.code : "ARTIFACT_IO_ERROR",
       `${label} (${input}): ${error instanceof ArtifactStorageError ? error.message : "Input parent could not be resolved. Check its path and local permissions."}`
     );
   }
 }
-async function makeDirectories(root, relative) {
-  relativePath(relative);
+async function makeDirectories(root, relative2) {
+  relativePath(relative2);
   let current = "";
-  for (const part of relative.split("/")) {
+  for (const part of relative2.split("/")) {
     current = current ? `${current}/${part}` : part;
     await safePath(root, current, { missing: true, directory: true });
     try {
-      await mkdir2(path3.join(root, current), { mode: 448 });
+      await mkdir2(path5.join(root, current), { mode: 448 });
     } catch (error) {
       if (error.code !== "EEXIST")
-        fail(
+        fail3(
           "ARTIFACT_IO_ERROR",
           "Private artifact directory could not be created."
         );
@@ -2313,19 +2499,19 @@ async function makeDirectories(root, relative) {
     await safePath(root, current, { directory: true });
   }
 }
-async function publishNew(root, relative, bytes) {
-  await safePath(root, relative, { missing: true });
-  const parent = path3.posix.dirname(relative);
+async function publishNew(root, relative2, bytes) {
+  await safePath(root, relative2, { missing: true });
+  const parent = path5.posix.dirname(relative2);
   const temporary = `${parent}/.artifact-tmp-${randomUUID2()}`;
-  const handle = await open3(path3.join(root, temporary), "wx", 384);
+  const handle = await open3(path5.join(root, temporary), "wx", 384);
   try {
     await handle.writeFile(bytes);
     await handle.sync();
-    await safePath(root, relative, { missing: true });
-    await link(path3.join(root, temporary), path3.join(root, relative));
+    await safePath(root, relative2, { missing: true });
+    await link(path5.join(root, temporary), path5.join(root, relative2));
   } finally {
     await handle.close();
-    await unlink2(path3.join(root, temporary)).catch(() => {
+    await unlink2(path5.join(root, temporary)).catch(() => {
     });
   }
 }
@@ -2336,8 +2522,8 @@ async function git(root, args) {
   });
 }
 async function projectRoot(input) {
-  if (typeof input !== "string" || !path3.isAbsolute(input) || /[\x00-\x1f]/u.test(input)) {
-    fail(
+  if (typeof input !== "string" || !path5.isAbsolute(input) || /[\x00-\x1f]/u.test(input)) {
+    fail3(
       "ARTIFACT_INPUT_INVALID",
       "repoRoot must be an absolute local directory."
     );
@@ -2346,16 +2532,16 @@ async function projectRoot(input) {
   try {
     resolved = await realpath2(input);
   } catch {
-    fail("ARTIFACT_UNSAFE_PATH", "The project directory is unavailable.");
+    fail3("ARTIFACT_UNSAFE_PATH", "The project directory is unavailable.");
   }
   if (!(await lstat3(resolved)).isDirectory())
-    fail("ARTIFACT_UNSAFE_PATH", "The project root must be a directory.");
+    fail3("ARTIFACT_UNSAFE_PATH", "The project root must be a directory.");
   try {
     const result = await git(resolved, ["rev-parse", "--show-toplevel"]);
     return await realpath2(result.stdout.trim());
   } catch (error) {
     if (!error.stderr?.startsWith("fatal: not a git repository (or any"))
-      fail(
+      fail3(
         "ARTIFACT_IO_ERROR",
         "Git project discovery failed. Inspect repository ownership or Git metadata."
       );
@@ -2366,11 +2552,11 @@ async function projectRoot(input) {
         limit: 256 * 1024
       }) !== null)
         return candidate;
-      const parent = path3.dirname(candidate);
+      const parent = path5.dirname(candidate);
       if (candidate === parent) break;
       candidate = parent;
     }
-    fail(
+    fail3(
       "ARTIFACT_INPUT_INVALID",
       "No Git project or project manifest root was found."
     );
@@ -2379,12 +2565,12 @@ async function projectRoot(input) {
 function parseDeclaration(value) {
   exactObject(value, ["schema", "schemaVersion", "layout"]);
   if (value.schema !== DECLARATION_SCHEMA || value.schemaVersion !== 1)
-    fail(
+    fail3(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Unsupported artifact declaration version."
     );
   if (!LAYOUTS.includes(value.layout))
-    fail(
+    fail3(
       "ARTIFACT_INPUT_INVALID",
       "Artifact layout must be private or legacy."
     );
@@ -2419,14 +2605,14 @@ function parseBinding(value) {
     "artifacts"
   ]);
   if (!(value.schema === BINDING_SCHEMA && value.schemaVersion === 1 || value.schema === "banzai-work-binding/v2" && value.schemaVersion === 2 && value.layout === "private"))
-    fail(
+    fail3(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Unsupported artifact work binding version."
     );
-  if (!UUID.test(value.workId) || typeof value.slug !== "string" || value.slug.length > 100 || !SLUG.test(value.slug) || !MODES.includes(value.mode) || !LAYOUTS.includes(value.layout) || typeof value.createdAt !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(
+  if (!UUID2.test(value.workId) || typeof value.slug !== "string" || value.slug.length > 100 || !SLUG.test(value.slug) || !MODES.includes(value.mode) || !LAYOUTS.includes(value.layout) || typeof value.createdAt !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(
     value.createdAt
   ) || !Number.isFinite(Date.parse(value.createdAt)) || !(value.sourceCommit === null || typeof value.sourceCommit === "string" && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(value.sourceCommit))) {
-    fail("ARTIFACT_INPUT_INVALID", "Artifact work identity is malformed.");
+    fail3("ARTIFACT_INPUT_INVALID", "Artifact work identity is malformed.");
   }
   const expected = artifactRoles(
     value.workId,
@@ -2439,22 +2625,22 @@ function parseBinding(value) {
   for (const key of Object.keys(expected)) {
     relativePath(value.artifacts[key]);
     if (value.artifacts[key] !== expected[key])
-      fail(
+      fail3(
         "ARTIFACT_UNSAFE_PATH",
         "Artifact role is outside its work binding."
       );
   }
   return value;
 }
-async function directories(root, relative, optional = true) {
-  const target = await safePath(root, relative, {
+async function directories(root, relative2, optional = true) {
+  const target = await safePath(root, relative2, {
     missing: optional,
     directory: true
   });
   try {
     const entries = await readdir2(target, { withFileTypes: true });
     if (entries.length > DISCOVERY_LIMIT)
-      fail(
+      fail3(
         "ARTIFACT_DISCOVERY_LIMIT",
         "Artifact discovery exceeded its bound. Select explicit work or recover the inventory."
       );
@@ -2462,11 +2648,11 @@ async function directories(root, relative, optional = true) {
   } catch (error) {
     if (error.code === "ENOENT" && optional) return [];
     if (error instanceof ArtifactStorageError) throw error;
-    fail("ARTIFACT_IO_ERROR", "Artifact directories could not be inspected.");
+    fail3("ARTIFACT_IO_ERROR", "Artifact directories could not be inspected.");
   }
 }
-async function readHeader(root, relative) {
-  const target = await safePath(root, relative, { missing: true });
+async function readHeader(root, relative2) {
+  const target = await safePath(root, relative2, { missing: true });
   let handle;
   try {
     handle = await open3(target, constants2.O_RDONLY | constants2.O_NOFOLLOW);
@@ -2475,7 +2661,7 @@ async function readHeader(root, relative) {
     return buffer.subarray(0, bytesRead).toString("utf8");
   } catch (error) {
     if (error.code === "ENOENT") return null;
-    fail(
+    fail3(
       "ARTIFACT_IO_ERROR",
       "Legacy artifact evidence could not be inspected."
     );
@@ -2492,49 +2678,49 @@ async function legacyEvidence(root, declared = false) {
   ]) {
     for (const entry of await directories(root, folder)) {
       if (++count > DISCOVERY_LIMIT)
-        fail(
+        fail3(
           "ARTIFACT_DISCOVERY_LIMIT",
           "Legacy artifact discovery exceeded its bound."
         );
       if (entry.isSymbolicLink())
-        fail(
+        fail3(
           "ARTIFACT_UNSAFE_PATH",
           "Legacy artifact discovery encountered a symlink."
         );
       if (!entry.isDirectory()) continue;
       const files = folder.endsWith("features") ? ["description.md", "work.md"] : ["plan.md"];
       for (const name of files) {
-        const relative = `${folder}/${entry.name}/${name}`;
-        const header = await readHeader(root, relative);
+        const relative2 = `${folder}/${entry.name}/${name}`;
+        const header = await readHeader(root, relative2);
         if (header === null) continue;
         if (/^# Feature: /mu.test(header) && header.includes(`Slug: \`${entry.name}\``) || /^# Development Plan: /mu.test(header) && header.includes(`/features/${entry.name}/description.md`))
-          evidence.push(relative);
+          evidence.push(relative2);
       }
     }
   }
   for (const entry of await directories(root, "documentation/changes")) {
-    if (++count > DISCOVERY_LIMIT) fail("ARTIFACT_DISCOVERY_LIMIT", "Legacy change discovery exceeded its bound.");
+    if (++count > DISCOVERY_LIMIT) fail3("ARTIFACT_DISCOVERY_LIMIT", "Legacy change discovery exceeded its bound.");
     if (!entry.isFile() || !/^[a-z0-9]+(?:-[a-z0-9]+)*\.md$/u.test(entry.name)) continue;
-    const relative = `documentation/changes/${entry.name}`;
-    if (/^# Change Report:/mu.test(await readHeader(root, relative) ?? "")) evidence.push(relative);
+    const relative2 = `documentation/changes/${entry.name}`;
+    if (/^# Change Report:/mu.test(await readHeader(root, relative2) ?? "")) evidence.push(relative2);
   }
   const manifest = await readHeader(root, "PROJECT_MANIFEST.md");
   const refs = manifest?.match(
     /documentation\/(?:features|changes|development-plans)\/[a-z0-9/.-]+\.md/gu
   ) ?? [];
-  for (const relative of [...new Set(refs)]) {
+  for (const relative2 of [...new Set(refs)]) {
     if (++count > DISCOVERY_LIMIT)
-      fail(
+      fail3(
         "ARTIFACT_DISCOVERY_LIMIT",
         "Legacy reference discovery exceeded its bound."
       );
-    if (await readHeader(root, relative) !== null) evidence.push(relative);
+    if (await readHeader(root, relative2) !== null) evidence.push(relative2);
   }
   for (const entry of await directories(root, ".banzai/runs")) {
     if (++count > DISCOVERY_LIMIT)
-      fail("ARTIFACT_DISCOVERY_LIMIT", "Run discovery exceeded its bound.");
+      fail3("ARTIFACT_DISCOVERY_LIMIT", "Run discovery exceeded its bound.");
     if (!entry.isDirectory())
-      fail(
+      fail3(
         "ARTIFACT_RECOVERY_REQUIRED",
         "Runner evidence requires explicit inspection."
       );
@@ -2543,13 +2729,13 @@ async function legacyEvidence(root, declared = false) {
       `.banzai/runs/${entry.name}/state.json`,
       true
     );
-    if (state === null || ![1, 2, 3, 4, 5, 6, 7].includes(state.schemaVersion) || state.runId !== entry.name)
-      fail(
+    if (state === null || ![1, 2, 3, 4, 5, 6, 7, 8].includes(state.schemaVersion) || state.runId !== entry.name)
+      fail3(
         "ARTIFACT_RECOVERY_REQUIRED",
         "Unrecognized runner evidence requires recovery."
       );
     if (state.schemaVersion >= 4 && state.artifactBinding !== void 0 && !declared)
-      fail(
+      fail3(
         "ARTIFACT_RECOVERY_REQUIRED",
         "A bound run without its artifact declaration requires recovery."
       );
@@ -2559,27 +2745,27 @@ async function legacyEvidence(root, declared = false) {
 }
 async function legacyCandidates(root, evidence, boundWorks) {
   const groups = /* @__PURE__ */ new Map();
-  for (const relative of evidence) {
-    const match = /^documentation\/(features|development-plans|changes)\/([a-z0-9-]+)(?:\.md|\/)/u.exec(relative);
+  for (const relative2 of evidence) {
+    const match = /^documentation\/(features|development-plans|changes)\/([a-z0-9-]+)(?:\.md|\/)/u.exec(relative2);
     if (!match || boundWorks.some((work) => work.binding.layout === "legacy" && work.binding.slug === match[2])) continue;
     const slug = match[2];
-    const mode = match[1] === "changes" ? "fix" : relative.endsWith("/work.md") ? "lite" : "strict";
+    const mode = match[1] === "changes" ? "fix" : relative2.endsWith("/work.md") ? "lite" : "strict";
     groups.set(`${slug}:${mode}`, { slug, mode });
   }
   const candidates = [];
   for (const { slug, mode } of groups.values()) {
     const artifacts = artifactRoles("00000000-0000-4000-8000-000000000000", slug, mode, "legacy");
     const originals = [];
-    for (const [role, relative] of Object.entries(artifacts)) {
+    for (const [role, relative2] of Object.entries(artifacts)) {
       if (role === "reviewDirectory") {
-        for (const entry of await directories(root, relative)) {
+        for (const entry of await directories(root, relative2)) {
           if (!/^review-[1-9][0-9]*\.md$/u.test(entry.name)) continue;
-          const bytes = await readBytes(root, `${relative}/${entry.name}`);
-          originals.push({ path: `${relative}/${entry.name}`, sha256: digestBytes(bytes) });
+          const bytes = await readBytes(root, `${relative2}/${entry.name}`);
+          originals.push({ path: `${relative2}/${entry.name}`, sha256: digestBytes(bytes) });
         }
       } else {
-        const bytes = await readBytes(root, relative, { optional: true });
-        if (bytes !== null) originals.push({ path: relative, sha256: digestBytes(bytes) });
+        const bytes = await readBytes(root, relative2, { optional: true });
+        if (bytes !== null) originals.push({ path: relative2, sha256: digestBytes(bytes) });
       }
     }
     let sourceCommit = null;
@@ -2596,22 +2782,22 @@ async function legacyCandidates(root, evidence, boundWorks) {
 async function readBinding(root, workPath) {
   relativePath(workPath);
   const match = /^\.banzai\/work\/([^/]+)(?:\/work\.json)?$/u.exec(workPath);
-  if (match === null || !UUID.test(match[1]))
-    fail(
+  if (match === null || !UUID2.test(match[1]))
+    fail3(
       "ARTIFACT_UNSAFE_PATH",
       "Select a work ID or its project-relative work.json path."
     );
-  const relative = `${WORK_ROOT}/${match[1]}/work.json`;
-  const bytes = await readBytes(root, relative, { limit: METADATA_LIMIT });
+  const relative2 = `${WORK_ROOT}/${match[1]}/work.json`;
+  const bytes = await readBytes(root, relative2, { limit: METADATA_LIMIT });
   let parsed;
   try {
     parsed = JSON.parse(bytes.toString("utf8"));
   } catch {
-    fail("ARTIFACT_INPUT_INVALID", "Work binding is not valid JSON.");
+    fail3("ARTIFACT_INPUT_INVALID", "Work binding is not valid JSON.");
   }
   const binding = parseBinding(parsed);
   if (binding.workId !== match[1])
-    fail(
+    fail3(
       "ARTIFACT_RECOVERY_REQUIRED",
       "Work directory and binding identities disagree."
     );
@@ -2620,9 +2806,9 @@ async function readBinding(root, workPath) {
 async function inspectArtifacts(input) {
   const root = await projectRoot(input.repoRoot);
   if (input.workId !== void 0 && input.workPath !== void 0)
-    fail("ARTIFACT_INPUT_INVALID", "Select either workId or workPath.");
-  if (input.workId !== void 0 && !UUID.test(input.workId))
-    fail("ARTIFACT_INPUT_INVALID", "Invalid work ID.");
+    fail3("ARTIFACT_INPUT_INVALID", "Select either workId or workPath.");
+  if (input.workId !== void 0 && !UUID2.test(input.workId))
+    fail3("ARTIFACT_INPUT_INVALID", "Invalid work ID.");
   const declarationValue = await readJson(root, DECLARATION_PATH, true);
   const declaration = declarationValue === null ? null : parseDeclaration(declarationValue);
   const selector = input.workPath ?? (input.workId === void 0 ? null : `${WORK_ROOT}/${input.workId}`);
@@ -2637,13 +2823,13 @@ async function inspectArtifacts(input) {
     }
     if (matches.length === 0 && bound.length === 1) return inspectArtifacts({ repoRoot: root, workId: bound[0].workId });
     if (matches.length !== 1 || bound.length)
-      fail("ARTIFACT_WORK_AMBIGUOUS", "Select one recognized original legacy bundle or its registered work ID.");
+      fail3("ARTIFACT_WORK_AMBIGUOUS", "Select one recognized original legacy bundle or its registered work ID.");
     return { ...current, legacyCandidates: matches, legacySelection: matches[0] };
   }
   if (selector !== null) {
     const selected = await readBinding(root, selector);
     if (declaration === null)
-      fail(
+      fail3(
         "ARTIFACT_RECOVERY_REQUIRED",
         "Selected work has no declaration. Recover its verified layout before continuation."
       );
@@ -2671,15 +2857,15 @@ async function inspectArtifacts(input) {
   for (const entry of entries) {
     if (/^\.create-[0-9a-f-]{36}$/u.test(entry.name) && entry.isDirectory())
       continue;
-    if (!entry.isDirectory() || !UUID.test(entry.name))
-      fail(
+    if (!entry.isDirectory() || !UUID2.test(entry.name))
+      fail3(
         "ARTIFACT_RECOVERY_REQUIRED",
         "Private work inventory contains unrecognized evidence."
       );
     works.push(await readBinding(root, `${WORK_ROOT}/${entry.name}`));
   }
   if (declaration === null && entries.length > 0)
-    fail(
+    fail3(
       "ARTIFACT_RECOVERY_REQUIRED",
       "Private work exists without its declaration. Recover the declaration from verified bindings."
     );
@@ -2702,13 +2888,13 @@ async function inspectArtifacts(input) {
     legacySelection: null
   };
 }
-async function ignored(root, relative) {
+async function ignored(root, relative2) {
   try {
-    await git(root, ["check-ignore", "--no-index", "--quiet", "--", relative]);
+    await git(root, ["check-ignore", "--no-index", "--quiet", "--", relative2]);
     return true;
   } catch (error) {
     if (error.code === 1) return false;
-    fail(
+    fail3(
       "ARTIFACT_IGNORE_CONFLICT",
       "Private evidence requires verifiable Git exclusions. Initialize Git explicitly first."
     );
@@ -2716,7 +2902,7 @@ async function ignored(root, relative) {
 }
 async function verifyIgnores(root, binding = null, destinations = []) {
   if (await ignored(root, DECLARATION_PATH))
-    fail(
+    fail3(
       "ARTIFACT_IGNORE_CONFLICT",
       "The artifact declaration is ignored. Narrow the rule hiding .banzai/artifacts.json explicitly."
     );
@@ -2727,14 +2913,14 @@ async function verifyIgnores(root, binding = null, destinations = []) {
       ([role, value]) => role === "reviewDirectory" ? `${value}/review-1.md` : value
     ) : []
   ];
-  for (const relative of [
+  for (const relative2 of [
     `${WORK_ROOT}/00000000-0000-4000-8000-000000000000/probe.md`,
     ...selected,
     ...destinations
   ]) {
-    relativePath(relative);
-    if (!await ignored(root, relative))
-      fail(
+    relativePath(relative2);
+    if (!await ignored(root, relative2))
+      fail3(
         "ARTIFACT_IGNORE_CONFLICT",
         "Selected private evidence is not effectively ignored. Repair its Git exclusions before writing."
       );
@@ -2746,11 +2932,11 @@ async function withInitializationLock(root, action) {
   for (let attempt = 0; attempt < 100; attempt++) {
     await safePath(root, INIT_LOCK, { missing: true });
     try {
-      handle = await open3(path3.join(root, INIT_LOCK), "wx", 384);
+      handle = await open3(path5.join(root, INIT_LOCK), "wx", 384);
       break;
     } catch (error) {
       if (error.code !== "EEXIST")
-        fail(
+        fail3(
           "ARTIFACT_IO_ERROR",
           "Artifact initialization ownership could not be acquired."
         );
@@ -2758,7 +2944,7 @@ async function withInitializationLock(root, action) {
     }
   }
   if (handle === void 0)
-    fail(
+    fail3(
       "ARTIFACT_OWNERSHIP_CONFLICT",
       "Artifact initialization is already owned. Retry or inspect an abandoned initialization lock."
     );
@@ -2767,42 +2953,42 @@ async function withInitializationLock(root, action) {
     return await action();
   } finally {
     await handle.close();
-    const current = await lstat3(path3.join(root, INIT_LOCK));
+    const current = await lstat3(path5.join(root, INIT_LOCK));
     if (current.dev !== ownership.dev || current.ino !== ownership.ino)
-      fail(
+      fail3(
         "ARTIFACT_OWNERSHIP_CONFLICT",
         "Initialization lock ownership changed; evidence was retained."
       );
-    await unlink2(path3.join(root, INIT_LOCK));
+    await unlink2(path5.join(root, INIT_LOCK));
   }
 }
 async function initializeArtifacts(input) {
   const before = await inspectArtifacts({ repoRoot: input.repoRoot });
   if (input.layout !== void 0 && !LAYOUTS.includes(input.layout))
-    fail(
+    fail3(
       "ARTIFACT_INPUT_INVALID",
       "Artifact layout must be private or legacy."
     );
   if (input.layout !== void 0 && input.layout !== before.layout && (before.declaration !== null || before.classification === "legacy"))
-    fail(
+    fail3(
       "ARTIFACT_RECOVERY_REQUIRED",
       "Changing an existing layout requires an explicit storage migration."
     );
   const root = before.projectRoot;
   const adoption = await inspectProjectAdoption(root);
   if (adoption.classification !== "ready")
-    fail(
+    fail3(
       "ARTIFACT_SETUP_REQUIRED",
       "Complete normal project guidance setup or migration before initializing artifact storage."
     );
   await git(root, ["rev-parse", "--show-toplevel"]).catch(
-    () => fail(
+    () => fail3(
       "ARTIFACT_IGNORE_CONFLICT",
       "Initialize Git explicitly before creating private evidence."
     )
   );
   if (await ignored(root, DECLARATION_PATH))
-    fail(
+    fail3(
       "ARTIFACT_IGNORE_CONFLICT",
       "Narrow the existing ignore rule hiding the artifact declaration before setup."
     );
@@ -2818,7 +3004,7 @@ async function initializeArtifacts(input) {
       if (original === null) await publishNew(root, ".gitignore", contents);
       else {
         const handle = await open3(
-          path3.join(root, ".gitignore"),
+          path5.join(root, ".gitignore"),
           constants2.O_WRONLY | constants2.O_APPEND | constants2.O_NOFOLLOW
         );
         try {
@@ -2826,7 +3012,7 @@ async function initializeArtifacts(input) {
             limit: METADATA_LIMIT
           });
           if (!latest.equals(original))
-            fail(
+            fail3(
               "ARTIFACT_OWNERSHIP_CONFLICT",
               "Ignore rules changed during initialization; retry after inspection."
             );
@@ -2855,9 +3041,9 @@ async function initializeArtifacts(input) {
 }
 async function createWork(input) {
   if (input.schemaVersion !== void 0 && ![1, 2].includes(input.schemaVersion))
-    fail("ARTIFACT_VERSION_UNSUPPORTED", "Unsupported new work binding version.");
-  if (!UUID.test(input.creationId) || typeof input.slug !== "string" || input.slug.length > 100 || !SLUG.test(input.slug) || !MODES.includes(input.mode))
-    fail(
+    fail3("ARTIFACT_VERSION_UNSUPPORTED", "Unsupported new work binding version.");
+  if (!UUID2.test(input.creationId) || typeof input.slug !== "string" || input.slug.length > 100 || !SLUG.test(input.slug) || !MODES.includes(input.mode))
+    fail3(
       "ARTIFACT_INPUT_INVALID",
       "Create requires a UUID creationId, bounded slug and supported mode."
     );
@@ -2870,7 +3056,7 @@ async function createWork(input) {
     if (existing !== null) {
       const bound = parseBinding(existing);
       if (bound.workId !== input.creationId || bound.slug !== input.slug || bound.mode !== input.mode || bound.schemaVersion !== (input.schemaVersion === 2 ? 2 : 1))
-        fail(
+        fail3(
           "ARTIFACT_OWNERSHIP_CONFLICT",
           "creationId already identifies different work."
         );
@@ -2881,11 +3067,11 @@ async function createWork(input) {
     const continuation = state2.legacyCandidates.find((item) => item.slug === input.slug && item.mode === input.mode && item.creationId === input.creationId);
     if (!continuation) {
       const legacyRoles = artifactRoles(input.creationId, input.slug, "workflow", "legacy");
-      for (const [role, relative] of Object.entries(legacyRoles))
-        if (role !== "reviewDirectory" && await readBytes(root, relative, { optional: true }) !== null)
-          fail("ARTIFACT_WORK_AMBIGUOUS", "Original legacy evidence occupies this slug. Inspect its current continuation identity; stale selections cannot create replacement private work.");
+      for (const [role, relative2] of Object.entries(legacyRoles))
+        if (role !== "reviewDirectory" && await readBytes(root, relative2, { optional: true }) !== null)
+          fail3("ARTIFACT_WORK_AMBIGUOUS", "Original legacy evidence occupies this slug. Inspect its current continuation identity; stale selections cannot create replacement private work.");
     }
-    const layout = continuation ? "legacy" : state2.layout;
+    const layout = input.schemaVersion === 2 && !continuation ? "private" : continuation ? "legacy" : state2.layout;
     const roles = artifactRoles(
       input.creationId,
       input.slug,
@@ -2893,19 +3079,19 @@ async function createWork(input) {
       layout
     );
     if (input.schemaVersion === 2) {
-      if (layout !== "private") fail("ARTIFACT_INPUT_INVALID", "Verification-enabled work requires a new private binding.");
+      if (layout !== "private") fail3("ARTIFACT_INPUT_INVALID", "Verification-enabled work requires a new private binding.");
       roles.verificationDirectory = `${directory2}/verification`;
     }
     if (layout === "legacy") {
-      for (const [role, relative] of Object.entries(roles)) {
-        if (!continuation && role !== "reviewDirectory" && await readBytes(root, relative, { optional: true }) !== null)
-          fail(
+      for (const [role, relative2] of Object.entries(roles)) {
+        if (!continuation && role !== "reviewDirectory" && await readBytes(root, relative2, { optional: true }) !== null)
+          fail3(
             "ARTIFACT_WORK_AMBIGUOUS",
             "Legacy artifacts already occupy this slug. Inspect their original workPath and register using its exact continuation creationId, slug and mode."
           );
       }
       if (state2.candidates.some((work) => work.slug === input.slug))
-        fail(
+        fail3(
           "ARTIFACT_WORK_AMBIGUOUS",
           "Legacy work with this slug is already bound. Select its work ID."
         );
@@ -2932,7 +3118,7 @@ async function createWork(input) {
       artifacts: roles
     }) : parseBinding(staged);
     if (binding.workId !== input.creationId || binding.slug !== input.slug || binding.mode !== input.mode)
-      fail(
+      fail3(
         "ARTIFACT_RECOVERY_REQUIRED",
         "Interrupted work creation has conflicting identity evidence."
       );
@@ -2944,8 +3130,8 @@ async function createWork(input) {
       );
     await safePath(root, directory2, { missing: true, directory: true });
     try {
-      await lstat3(path3.join(root, directory2));
-      fail(
+      await lstat3(path5.join(root, directory2));
+      fail3(
         "ARTIFACT_RECOVERY_REQUIRED",
         "The work destination already exists without a valid binding."
       );
@@ -2953,29 +3139,29 @@ async function createWork(input) {
       if (error.code !== "ENOENT") throw error;
     }
     await verifyIgnores(root, binding, [`${staging}/work.json`]);
-    await rename2(path3.join(root, staging), path3.join(root, directory2));
+    await rename2(path5.join(root, staging), path5.join(root, directory2));
     return readBinding(root, directory2);
   });
 }
-function ownsArtifact(binding, relative) {
-  relativePath(relative);
+function ownsArtifact(binding, relative2) {
+  relativePath(relative2);
   return Object.entries(binding.artifacts).some(
-    ([role, value]) => role !== "reviewDirectory" && role !== "verificationDirectory" && value === relative
-  ) || relative.startsWith(`${binding.artifacts.reviewDirectory}/`) && /^review-[1-9][0-9]*\.md$/u.test(
-    relative.slice(binding.artifacts.reviewDirectory.length + 1)
+    ([role, value]) => role !== "reviewDirectory" && role !== "verificationDirectory" && value === relative2
+  ) || relative2.startsWith(`${binding.artifacts.reviewDirectory}/`) && /^review-[1-9][0-9]*\.md$/u.test(
+    relative2.slice(binding.artifacts.reviewDirectory.length + 1)
   );
 }
 async function inspectBoundWork(root, bound) {
   exactObject(bound, ["binding", "sha256"]);
   const binding = parseBinding(bound.binding);
   if (!SHA256.test(bound.sha256))
-    fail("ARTIFACT_INPUT_INVALID", "Invalid persisted work binding digest.");
+    fail3("ARTIFACT_INPUT_INVALID", "Invalid persisted work binding digest.");
   const current = await inspectArtifacts({
     repoRoot: root,
     workId: binding.workId
   });
   if (current.work.sha256 !== bound.sha256 || canonicalJson(current.work.binding) !== canonicalJson(binding))
-    fail(
+    fail3(
       "ARTIFACT_RECOVERY_REQUIRED",
       "The persisted work binding no longer matches its original bytes."
     );
@@ -2986,13 +3172,13 @@ async function privateArtifactInventory(root, bound) {
   await inspectBoundWork(root, bound);
   const directory2 = `${WORK_ROOT}/${bound.binding.workId}`;
   const entries = [];
-  const walk = async (relative) => {
-    for (const item of await directories(root, relative, false)) {
-      const filename = `${relative}/${item.name}`;
+  const walk = async (relative2) => {
+    for (const item of await directories(root, relative2, false)) {
+      const filename = `${relative2}/${item.name}`;
       if (filename === `${directory2}/work.json`) continue;
       if (filename === `${directory2}/${CLAIM}`) {
         if (await hasRunnerWorkOwnership(root, bound)) continue;
-        fail(
+        fail3(
           "ARTIFACT_OWNERSHIP_CONFLICT",
           "A standalone writer owns this work. Release its claim before runner continuation."
         );
@@ -3008,7 +3194,7 @@ async function privateArtifactInventory(root, bound) {
         sha256: digestBytes(Buffer.concat([Buffer.from("file\0"), bytes]))
       });
       if (entries.length > DISCOVERY_LIMIT)
-        fail(
+        fail3(
           "ARTIFACT_DISCOVERY_LIMIT",
           "Selected work inventory exceeds its bound."
         );
@@ -3025,7 +3211,7 @@ async function selectedWork(input) {
     workPath: input.workPath
   });
   if (state.work === null)
-    fail(
+    fail3(
       "ARTIFACT_WORK_AMBIGUOUS",
       "Select an explicit work identity before writing."
     );
@@ -3038,7 +3224,7 @@ async function selectedWork(input) {
 }
 async function acquireWork(input) {
   if (typeof input.ownerId !== "string" || input.ownerId.length === 0 || input.ownerId.length > 100 || /[\x00-\x1f]/u.test(input.ownerId))
-    fail("ARTIFACT_INPUT_INVALID", "A bounded local ownerId is required.");
+    fail3("ARTIFACT_INPUT_INVALID", "A bounded local ownerId is required.");
   const work = await selectedWork(input);
   const token = randomUUID2();
   try {
@@ -3054,7 +3240,7 @@ async function acquireWork(input) {
     );
   } catch (error) {
     if (error.code === "EEXIST")
-      fail(
+      fail3(
         "ARTIFACT_OWNERSHIP_CONFLICT",
         "This work already has a writer. Use another work item or resolve the existing owner."
       );
@@ -3068,7 +3254,7 @@ async function hasRunnerWorkOwnership(root, bound) {
   if (!owner || owner.root !== root || owner.workId !== bound.binding.workId || owner.bindingDigest !== bound.sha256) return false;
   const claim = await readJson(root, `${WORK_ROOT}/${owner.workId}/${CLAIM}`, true);
   if (claim?.token !== owner.token || claim?.bindingDigest !== bound.sha256)
-    fail("ARTIFACT_OWNERSHIP_CONFLICT", "Runner work ownership changed; inspect the retained evidence.");
+    fail3("ARTIFACT_OWNERSHIP_CONFLICT", "Runner work ownership changed; inspect the retained evidence.");
   return true;
 }
 async function withRunnerWorkOwnership(root, bound, action) {
@@ -3081,20 +3267,20 @@ async function withRunnerWorkOwnership(root, bound, action) {
     try {
       return await action();
     } finally {
-      const relative = `${WORK_ROOT}/${owner.workId}/${CLAIM}`;
-      const current = await readJson(root, relative, true);
+      const relative2 = `${WORK_ROOT}/${owner.workId}/${CLAIM}`;
+      const current = await readJson(root, relative2, true);
       if (current?.token !== owner.token || current?.bindingDigest !== owner.bindingDigest)
-        fail("ARTIFACT_OWNERSHIP_CONFLICT", "Runner claim changed; evidence was retained for owner recovery.");
-      await safePath(root, relative);
-      await unlink2(path3.join(root, relative));
+        fail3("ARTIFACT_OWNERSHIP_CONFLICT", "Runner claim changed; evidence was retained for owner recovery.");
+      await safePath(root, relative2);
+      await unlink2(path5.join(root, relative2));
     }
   });
 }
 async function requireClaim(input) {
   const work = await selectedWork(input);
   const claim = await readJson(work.root, `${work.directory}/${CLAIM}`, true);
-  if (claim === null || claim.token !== input.token || claim.bindingDigest !== work.sha256 || !UUID.test(input.token))
-    fail(
+  if (claim === null || claim.token !== input.token || claim.bindingDigest !== work.sha256 || !UUID2.test(input.token))
+    fail3(
       "ARTIFACT_OWNERSHIP_CONFLICT",
       "The caller does not own the current work binding."
     );
@@ -3107,12 +3293,12 @@ async function writeArtifact(input) {
 async function writeClaimedArtifact(input) {
   const work = await requireClaim(input);
   if (!ownsArtifact(work.binding, input.artifactPath))
-    fail(
+    fail3(
       "ARTIFACT_UNSAFE_PATH",
       "Write is outside the selected work's artifact roles."
     );
   if (!(input.expectedSha256 === null || typeof input.expectedSha256 === "string" && SHA256.test(input.expectedSha256)))
-    fail(
+    fail3(
       "ARTIFACT_INPUT_INVALID",
       "expectedSha256 must be a SHA-256 identity or null for creation."
     );
@@ -3121,43 +3307,43 @@ async function writeClaimedArtifact(input) {
     optional: true
   });
   if ((existing === null ? null : digestBytes(existing)) !== input.expectedSha256)
-    fail(
+    fail3(
       "ARTIFACT_OWNERSHIP_CONFLICT",
       "Artifact bytes changed. Inspect the current evidence before writing."
     );
-  await makeDirectories(work.root, path3.posix.dirname(input.artifactPath));
+  await makeDirectories(work.root, path5.posix.dirname(input.artifactPath));
   if (work.binding.layout === "private") await verifyIgnores(work.root, work.binding, [input.artifactPath]);
   if (existing === null) {
     try {
       await publishNew(work.root, input.artifactPath, bytes);
     } catch (error) {
       if (error.code === "EEXIST")
-        fail(
+        fail3(
           "ARTIFACT_OWNERSHIP_CONFLICT",
           "Artifact was created by another writer."
         );
       throw error;
     }
   } else {
-    const temporary = `${path3.posix.dirname(input.artifactPath)}/.artifact-tmp-${randomUUID2()}`;
+    const temporary = `${path5.posix.dirname(input.artifactPath)}/.artifact-tmp-${randomUUID2()}`;
     try {
       if (work.binding.layout === "private") await verifyIgnores(work.root, work.binding, [temporary, input.artifactPath]);
       await publishNew(work.root, temporary, bytes);
       await requireClaim(input);
       const latest = await readBytes(work.root, input.artifactPath);
       if (digestBytes(latest) !== input.expectedSha256)
-        fail(
+        fail3(
           "ARTIFACT_OWNERSHIP_CONFLICT",
           "Artifact bytes changed during writing."
         );
       if (work.binding.layout === "private") await verifyIgnores(work.root, work.binding, [input.artifactPath]);
       await safePath(work.root, input.artifactPath);
       await rename2(
-        path3.join(work.root, temporary),
-        path3.join(work.root, input.artifactPath)
+        path5.join(work.root, temporary),
+        path5.join(work.root, input.artifactPath)
       );
     } finally {
-      await unlink2(path3.join(work.root, temporary)).catch(() => {
+      await unlink2(path5.join(work.root, temporary)).catch(() => {
       });
     }
   }
@@ -3167,7 +3353,7 @@ async function releaseWork(input) {
   const root = await projectRoot(input.repoRoot);
   return withInitializationLock(root, async () => {
     const work = await requireClaim(input);
-    await unlink2(path3.join(work.root, work.directory, CLAIM));
+    await unlink2(path5.join(work.root, work.directory, CLAIM));
     return { workId: work.binding.workId, released: true };
   });
 }
@@ -3189,14 +3375,14 @@ var operationFields = {
 async function runArtifactOperation(operation, input) {
   const fields = operationFields[operation];
   if (fields === void 0)
-    fail("ARTIFACT_INPUT_INVALID", "Unsupported artifact operation.");
+    fail3("ARTIFACT_INPUT_INVALID", "Unsupported artifact operation.");
   exactObject(
     input,
     ["schema", "schemaVersion", "repoRoot", ...fields[0]],
     fields[1]
   );
   if (!(input.schema === REQUEST_SCHEMA && input.schemaVersion === 1 || operation === "create" && input.schema === "banzai-artifact-request/v2" && input.schemaVersion === 2))
-    fail(
+    fail3(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Unsupported artifact request version."
     );
@@ -3218,17 +3404,17 @@ async function artifactCommand(args) {
   const operation = args[0] ?? "";
   try {
     if (args.length !== 3 || args[1] !== "--json" || !Object.hasOwn(operationFields, operation))
-      fail(
+      fail3(
         "ARTIFACT_INPUT_INVALID",
         "Usage: artifacts <operation> --json <request-file>"
       );
-    const filename = path3.resolve(args[2]);
+    const filename = path5.resolve(args[2]);
     const bytes = await readInvocationBytes(filename, "requestFile", { limit: METADATA_LIMIT });
     let input;
     try {
       input = JSON.parse(bytes.toString("utf8"));
     } catch {
-      fail("ARTIFACT_INPUT_INVALID", `requestFile (${filename}) must contain valid JSON.`);
+      fail3("ARTIFACT_INPUT_INVALID", `requestFile (${filename}) must contain valid JSON.`);
     }
     const result = await runArtifactOperation(operation, input);
     return {
@@ -3258,23 +3444,23 @@ async function artifactCommand(args) {
 var invalid3 = (message) => {
   throw new VerificationEvidenceError(message);
 };
-var HASH2 = /^[a-f0-9]{64}$/u;
-function closed(value, fields) {
+var HASH4 = /^[a-f0-9]{64}$/u;
+function closed2(value, fields) {
   if (!value || typeof value !== "object" || Array.isArray(value) || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify([...fields].sort())) invalid3("Invalid persisted verification fields.");
 }
 function capture(value) {
-  closed(value, ["complete", "reason", "candidateDigest", "checks"]);
-  if (typeof value.complete !== "boolean" || !Array.isArray(value.checks) || value.checks.length > 1e4 || (value.complete ? !HASH2.test(value.candidateDigest) || value.reason !== null : value.candidateDigest !== null || value.checks.length !== 0 || !["inputs_unavailable", "policy_disabled"].includes(value.reason))) invalid3("Invalid persisted verification capture.");
+  closed2(value, ["complete", "reason", "candidateDigest", "checks"]);
+  if (typeof value.complete !== "boolean" || !Array.isArray(value.checks) || value.checks.length > 1e4 || (value.complete ? !HASH4.test(value.candidateDigest) || value.reason !== null : value.candidateDigest !== null || value.checks.length !== 0 || !["inputs_unavailable", "policy_disabled"].includes(value.reason))) invalid3("Invalid persisted verification capture.");
   const seen = /* @__PURE__ */ new Set();
   for (const check of value.checks) {
-    closed(check, ["checkId", "executable", "environmentDigest", "inputDigest"]);
-    if (typeof check.checkId !== "string" || seen.has(check.checkId) || typeof check.executable !== "string" || !path4.isAbsolute(check.executable) || !HASH2.test(check.environmentDigest) || !HASH2.test(check.inputDigest)) invalid3("Invalid captured check.");
+    closed2(check, ["checkId", "executable", "environmentDigest", "inputDigest"]);
+    if (typeof check.checkId !== "string" || seen.has(check.checkId) || typeof check.executable !== "string" || !path6.isAbsolute(check.executable) || !HASH4.test(check.environmentDigest) || !HASH4.test(check.inputDigest)) invalid3("Invalid captured check.");
     seen.add(check.checkId);
   }
   return value;
 }
 function parseVerificationOriginStart(value) {
-  closed(value, ["schema", "schemaVersion", "workId", "attemptId", "checkId", "decision", "before", "physicalPath"]);
+  closed2(value, ["schema", "schemaVersion", "workId", "attemptId", "checkId", "decision", "before", "physicalPath"]);
   if (value.schema !== "banzai-verification-origin-start/v1" || value.schemaVersion !== 1 || !/^verification-[a-f0-9-]{36}$/u.test(value.attemptId)) invalid3("Invalid verification origin start.");
   if (typeof value.physicalPath !== "string" || !/^\.banzai\/(?:runs\/[a-z0-9][a-z0-9.-]{0,199}\/verification-attempts|work\/[a-f0-9-]{36}\/verification\/attempts)\/verification-\d{6}-verification-[a-f0-9-]{36}\.json$/u.test(value.physicalPath)) invalid3("Invalid physical origin path.");
   const decision = parseVerificationDecision(value.decision);
@@ -3284,24 +3470,24 @@ function parseVerificationOriginStart(value) {
   return value;
 }
 function parseVerificationOriginFinish(value) {
-  closed(value, ["schema", "schemaVersion", "workId", "attemptId", "startSha256", "physicalSha256", "after"]);
-  if (value.schema !== "banzai-verification-origin-finish/v1" || value.schemaVersion !== 1 || !/^verification-[a-f0-9-]{36}$/u.test(value.attemptId) || !HASH2.test(value.startSha256) || !HASH2.test(value.physicalSha256)) invalid3("Invalid verification origin finish.");
+  closed2(value, ["schema", "schemaVersion", "workId", "attemptId", "startSha256", "physicalSha256", "after"]);
+  if (value.schema !== "banzai-verification-origin-finish/v1" || value.schemaVersion !== 1 || !/^verification-[a-f0-9-]{36}$/u.test(value.attemptId) || !HASH4.test(value.startSha256) || !HASH4.test(value.physicalSha256)) invalid3("Invalid verification origin finish.");
   capture(value.after);
   return value;
 }
 function parseVerificationApplicability(value) {
-  closed(value, ["schema", "schemaVersion", "workId", "roundId", "decisionSha256", "candidateDigest", "complete", "dispositions", "sha256"]);
-  if (value.schema !== "banzai-verification-applicability/v1" || value.schemaVersion !== 1 || !HASH2.test(value.decisionSha256) || !Array.isArray(value.dispositions) || value.dispositions.length > 1e4 || value.candidateDigest !== null && !HASH2.test(value.candidateDigest)) invalid3("Invalid verification applicability.");
+  closed2(value, ["schema", "schemaVersion", "workId", "roundId", "decisionSha256", "candidateDigest", "complete", "dispositions", "sha256"]);
+  if (value.schema !== "banzai-verification-applicability/v1" || value.schemaVersion !== 1 || !HASH4.test(value.decisionSha256) || !Array.isArray(value.dispositions) || value.dispositions.length > 1e4 || value.candidateDigest !== null && !HASH4.test(value.candidateDigest)) invalid3("Invalid verification applicability.");
   const seen = /* @__PURE__ */ new Set();
   for (const item of value.dispositions) {
-    closed(item, ["checkId", "kind", "origin"]);
+    closed2(item, ["checkId", "kind", "origin"]);
     if (typeof item.checkId !== "string" || seen.has(item.checkId) || !["executed", "reused", "pending"].includes(item.kind)) invalid3("Invalid verification applicability disposition.");
     seen.add(item.checkId);
     if (item.kind === "pending") {
       if (item.origin !== null) invalid3("Pending checks cannot claim origin evidence.");
     } else {
-      closed(item.origin, ["attemptId", "recordDigest", "roundId"]);
-      if (!/^verification-[a-f0-9-]{36}$/u.test(item.origin.attemptId) || !HASH2.test(item.origin.recordDigest) || typeof item.origin.roundId !== "string") invalid3("Invalid applicability origin.");
+      closed2(item.origin, ["attemptId", "recordDigest", "roundId"]);
+      if (!/^verification-[a-f0-9-]{36}$/u.test(item.origin.attemptId) || !HASH4.test(item.origin.recordDigest) || typeof item.origin.roundId !== "string") invalid3("Invalid applicability origin.");
     }
   }
   if (value.complete !== (value.dispositions.length > 0 && value.dispositions.every((item) => item.kind !== "pending"))) invalid3("Invalid applicability completion.");
@@ -3310,13 +3496,13 @@ function parseVerificationApplicability(value) {
   return value;
 }
 function parseReviewVerificationEvidence(value) {
-  closed(value, ["decision", "applicability", "origins", "attempts"]);
+  closed2(value, ["decision", "applicability", "origins", "attempts"]);
   const decision = parseVerificationDecision(value.decision);
   const applicability = parseVerificationApplicability(value.applicability);
   if (applicability.decisionSha256 !== decision.sha256 || applicability.workId !== decision.workId || applicability.roundId !== decision.roundId || !Array.isArray(value.origins) || !Array.isArray(value.attempts) || value.origins.length > 1e4 || value.attempts.length !== value.origins.length) invalid3("Invalid frozen verification closure.");
   const ids = /* @__PURE__ */ new Set();
   for (const [index, origin] of value.origins.entries()) {
-    closed(origin, ["workId", "checkId", "attemptId", "roundId", "recordDigest", "status", "exitCode", "signal", "failureCategory", "complete", "logsIntact", "identity", "before", "after"]);
+    closed2(origin, ["workId", "checkId", "attemptId", "roundId", "recordDigest", "status", "exitCode", "signal", "failureCategory", "complete", "logsIntact", "identity", "before", "after"]);
     const attempt = parseVerificationAttemptRecord(value.attempts[index]);
     capture(origin.before);
     capture(origin.after);
@@ -3411,7 +3597,7 @@ var CODEX_EFFORTS = [...FULL_EFFORTS, "ultra"];
 
 // src/types.ts
 var CONTRACT_VERSION = "1.0.0";
-var PHASE_RESULT_SCHEMA_VERSION = 3;
+var PHASE_RESULT_SCHEMA_VERSION = 4;
 var DECISION_CONSULTATION_SCHEMA = "banzai-decision-consultation/v1";
 var DECISION_CONSULTATION_SCHEMA_VERSION = 1;
 var PLAN_TASK_COMPLETION_SCHEMA_VERSION = 1;
@@ -3901,12 +4087,13 @@ function parsePhaseResultFields(record) {
       "questions",
       "decisionConsultation",
       "resolvedFindingIds",
-      "requestedVerification"
+      "requestedVerification",
+      ...record.schemaVersion === 4 ? ["verificationCandidates"] : []
     ],
     "INVALID_RESULT",
     "Phase result"
   );
-  if (record.schemaVersion !== PHASE_RESULT_SCHEMA_VERSION) {
+  if (record.schemaVersion !== 3 && record.schemaVersion !== 4) {
     throw new BanzaiError(
       "PHASE_RESULT_SCHEMA_MISMATCH",
       `Phase result must use schema ${PHASE_RESULT_SCHEMA_VERSION}.`
@@ -3952,7 +4139,12 @@ function parsePhaseResultFields(record) {
     );
   }
   return {
-    schemaVersion: PHASE_RESULT_SCHEMA_VERSION,
+    schemaVersion: record.schemaVersion,
+    ...record.schemaVersion === 4 ? {
+      verificationCandidates: parseTaskVerificationCandidates(
+        record.verificationCandidates
+      )
+    } : {},
     contractVersion: CONTRACT_VERSION,
     phase,
     outcome,
@@ -4048,7 +4240,7 @@ function parseStoredPhaseResultEnvelope(value, code = "ATTEMPT_MALFORMED") {
 }
 function parsePersistedPhaseResult(value) {
   const record = requireRecord(value, "persisted phase result");
-  if (record.schemaVersion === PHASE_RESULT_SCHEMA_VERSION) {
+  if (record.schemaVersion === 3 || record.schemaVersion === 4) {
     return parsePhaseResult(record);
   }
   const schemaVersion = record.schemaVersion === 2 ? 2 : record.schemaVersion === void 0 || record.schemaVersion === 1 ? 1 : null;
@@ -4173,27 +4365,27 @@ function parseEvidence(value, findingId) {
 }
 function parseFinding(value) {
   const record = requireRecord(value, "finding");
-  const id = requireString(record.id, "finding.id");
-  if (!/^R[1-9][0-9]*-F[1-9][0-9]*$/.test(id)) {
+  const id2 = requireString(record.id, "finding.id");
+  if (!/^R[1-9][0-9]*-F[1-9][0-9]*$/.test(id2)) {
     throw new BanzaiError(
       "INVALID_RESULT",
-      `Finding id ${id} must match R<iteration>-F<number>.`
+      `Finding id ${id2} must match R<iteration>-F<number>.`
     );
   }
   if (!Array.isArray(record.evidence) || record.evidence.length === 0) {
     throw new BanzaiError(
       "INVALID_RESULT",
-      `${id}.evidence must contain at least one item.`
+      `${id2}.evidence must contain at least one item.`
     );
   }
   return {
-    id,
-    severity: requireEnum(record.severity, `${id}.severity`, [
+    id: id2,
+    severity: requireEnum(record.severity, `${id2}.severity`, [
       "blocker",
       "should_fix",
       "nit"
     ]),
-    category: requireEnum(record.category, `${id}.category`, [
+    category: requireEnum(record.category, `${id2}.category`, [
       "spec",
       "plan",
       "adr",
@@ -4203,15 +4395,15 @@ function parseFinding(value) {
       "maintainability",
       "documentation"
     ]),
-    summary: requireString(record.summary, `${id}.summary`),
-    evidence: record.evidence.map((item) => parseEvidence(item, id)),
-    violates: requireStringArray(record.violates, `${id}.violates`),
+    summary: requireString(record.summary, `${id2}.summary`),
+    evidence: record.evidence.map((item) => parseEvidence(item, id2)),
+    violates: requireStringArray(record.violates, `${id2}.violates`),
     reproduction: requireNullableString(
       record.reproduction,
-      `${id}.reproduction`
+      `${id2}.reproduction`
     ),
-    fixAcceptance: requireString(record.fixAcceptance, `${id}.fixAcceptance`),
-    confidence: requireEnum(record.confidence, `${id}.confidence`, [
+    fixAcceptance: requireString(record.fixAcceptance, `${id2}.fixAcceptance`),
+    confidence: requireEnum(record.confidence, `${id2}.confidence`, [
       "high",
       "medium",
       "low"
@@ -4378,7 +4570,7 @@ function parseCurrentReviewResult(value) {
       "INVALID_REVIEW_SCOPE",
       "Scope entry"
     );
-    const path6 = reviewScopePath2(entry.path);
+    const path8 = reviewScopePath2(entry.path);
     const status = requireEnum(entry.status, "scope status", [
       "reviewed",
       "not_reviewed"
@@ -4388,7 +4580,7 @@ function parseCurrentReviewResult(value) {
         "INVALID_REVIEW_SCOPE",
         "Reviewed scope requires a null reason; unreviewed scope requires a nonblank reason."
       );
-    return { path: path6, status, reason: entry.reason };
+    return { path: path8, status, reason: entry.reason };
   });
   if (new Set(artifacts.map((entry) => entry.path)).size !== artifacts.length || new Set(result.reviewedFindingIds).size !== result.reviewedFindingIds.length)
     throw new BanzaiError(
@@ -4474,7 +4666,7 @@ function parseEvidenceAttempt(value, code, label) {
     return recoveryEvidenceError(code, `${label} must be an object.`);
   }
   exactKeys(value, ["id", "kind", "mutable"], code, label);
-  const id = evidenceIdentifier(value.id, code, `${label}.id`, 200);
+  const id2 = evidenceIdentifier(value.id, code, `${label}.id`, 200);
   const kind = value.kind;
   if (typeof kind !== "string" || !["selection", "plan", "implementation", "fix", "review"].includes(kind)) {
     return recoveryEvidenceError(code, `${label}.kind is unsupported.`);
@@ -4483,7 +4675,7 @@ function parseEvidenceAttempt(value, code, label) {
     return recoveryEvidenceError(code, `${label}.mutable must be boolean.`);
   }
   return {
-    id,
+    id: id2,
     kind,
     mutable: value.mutable
   };
@@ -4542,8 +4734,14 @@ function parseCheckpointResult(kind, value, resultContract) {
       );
     return parseReviewFields(value);
   }
-  if (resultContract === "phase-result/v3") {
-    return parsePhaseResult(value);
+  if (resultContract === "phase-result/v3" || resultContract === "phase-result/v4") {
+    const result2 = parsePhaseResult(value);
+    if (result2.schemaVersion !== (resultContract === "phase-result/v4" ? 4 : 3))
+      throw new BanzaiError(
+        "PHASE_RESULT_SCHEMA_MISMATCH",
+        "Phase result does not match the attempted contract."
+      );
+    return result2;
   }
   const result = parsePersistedPhaseResult(value);
   if (result.schemaVersion !== 2) {
@@ -5542,7 +5740,7 @@ function parseTerminalAttemptCheckpointV2(value) {
     code,
     "Terminal checkpoint"
   );
-  if (value.schema !== TERMINAL_CHECKPOINT_SCHEMA_V2 || value.schemaVersion !== TERMINAL_CHECKPOINT_SCHEMA_VERSION_V2 || value.completionProtocol !== COMPLETION_PROTOCOL2) {
+  if (!(value.schema === TERMINAL_CHECKPOINT_SCHEMA_V2 && value.schemaVersion === 2 || value.schema === "banzai-terminal-attempt-checkpoint/v3" && value.schemaVersion === 3) || value.completionProtocol !== COMPLETION_PROTOCOL2) {
     return recoveryEvidenceError(
       code,
       `Terminal checkpoint must use ${TERMINAL_CHECKPOINT_SCHEMA_V2} under ${COMPLETION_PROTOCOL2}.`
@@ -5555,7 +5753,7 @@ function parseTerminalAttemptCheckpointV2(value) {
       "Protocol checkpoint requires a mutable implementation or fix attempt."
     );
   }
-  if (value.resultContract !== "phase-result/v3") {
+  if (value.resultContract !== (value.schemaVersion === 3 ? "phase-result/v4" : "phase-result/v3")) {
     return recoveryEvidenceError(
       code,
       "Checkpoint result contract must be phase-result/v3."
@@ -5577,8 +5775,8 @@ function parseTerminalAttemptCheckpointV2(value) {
     );
   }
   const checkpointWithoutIntegrity = {
-    schema: TERMINAL_CHECKPOINT_SCHEMA_V2,
-    schemaVersion: TERMINAL_CHECKPOINT_SCHEMA_VERSION_V2,
+    schema: value.schemaVersion === 3 ? "banzai-terminal-attempt-checkpoint/v3" : TERMINAL_CHECKPOINT_SCHEMA_V2,
+    schemaVersion: value.schemaVersion === 3 ? 3 : TERMINAL_CHECKPOINT_SCHEMA_VERSION_V2,
     completionProtocol: COMPLETION_PROTOCOL2,
     runId: evidenceString(value.runId, code, "runId", 300),
     attempt: {
@@ -5588,7 +5786,7 @@ function parseTerminalAttemptCheckpointV2(value) {
     },
     phase: attempt.kind,
     configuration,
-    resultContract: "phase-result/v3",
+    resultContract: value.schemaVersion === 3 ? "phase-result/v4" : "phase-result/v3",
     terminal: parseCheckpointTerminal(
       value.terminal,
       configuration.vendor,
@@ -5633,7 +5831,7 @@ function parseTerminalAttemptCheckpoint(value) {
       "Terminal checkpoint must be an object."
     );
   }
-  if (value.schema === TERMINAL_CHECKPOINT_SCHEMA_V2) {
+  if (value.schema === TERMINAL_CHECKPOINT_SCHEMA_V2 || value.schema === "banzai-terminal-attempt-checkpoint/v3" && "completionProtocol" in value) {
     return parseTerminalAttemptCheckpointV2(value);
   }
   exactKeys(
@@ -5659,7 +5857,7 @@ function parseTerminalAttemptCheckpoint(value) {
     code,
     "Terminal checkpoint"
   );
-  if (value.schema !== TERMINAL_CHECKPOINT_SCHEMA || value.schemaVersion !== TERMINAL_CHECKPOINT_SCHEMA_VERSION) {
+  if (!(value.schema === TERMINAL_CHECKPOINT_SCHEMA && value.schemaVersion === 1 || value.schema === "banzai-terminal-attempt-checkpoint/v3" && value.schemaVersion === 3)) {
     return recoveryEvidenceError(
       code,
       `Terminal checkpoint must use ${TERMINAL_CHECKPOINT_SCHEMA}.`
@@ -5704,8 +5902,8 @@ function parseTerminalAttemptCheckpoint(value) {
     );
   }
   const resultContract = value.resultContract;
-  const expectedContract = attempt.kind === "selection" ? "workflow-selection/v1" : attempt.kind === "review" ? resultContract === "review-result/v2" ? "review-result/v2" : "review-result/v1" : resultContract === "phase-result/v2" ? "phase-result/v2" : "phase-result/v3";
-  if (resultContract !== expectedContract || attempt.kind !== "selection" && attempt.kind !== "review" && resultContract !== "phase-result/v2" && resultContract !== "phase-result/v3") {
+  const expectedContract = attempt.kind === "selection" ? "workflow-selection/v1" : attempt.kind === "review" ? resultContract === "review-result/v2" ? "review-result/v2" : "review-result/v1" : value.schemaVersion === 3 ? "phase-result/v4" : resultContract === "phase-result/v2" ? "phase-result/v2" : "phase-result/v3";
+  if (resultContract !== expectedContract || attempt.kind !== "selection" && attempt.kind !== "review" && resultContract !== "phase-result/v2" && resultContract !== "phase-result/v3" && resultContract !== "phase-result/v4") {
     return recoveryEvidenceError(
       code,
       `Checkpoint result contract must be ${expectedContract}.`
@@ -5729,8 +5927,8 @@ function parseTerminalAttemptCheckpoint(value) {
     );
   }
   const checkpointWithoutIntegrity = {
-    schema: TERMINAL_CHECKPOINT_SCHEMA,
-    schemaVersion: TERMINAL_CHECKPOINT_SCHEMA_VERSION,
+    schema: value.schemaVersion === 3 ? "banzai-terminal-attempt-checkpoint/v3" : TERMINAL_CHECKPOINT_SCHEMA,
+    schemaVersion: value.schemaVersion === 3 ? 3 : TERMINAL_CHECKPOINT_SCHEMA_VERSION,
     runId: evidenceString(value.runId, code, "runId", 300),
     attempt,
     phase: attempt.kind,
@@ -5949,14 +6147,14 @@ function parseModelAttemptRecord(value) {
     code,
     "Attempt record"
   );
-  if (value.schemaVersion !== 1 && value.schemaVersion !== MODEL_ATTEMPT_SCHEMA_VERSION && value.schemaVersion !== STRICT_MODEL_ATTEMPT_SCHEMA_VERSION) {
+  if (value.schemaVersion !== 1 && value.schemaVersion !== MODEL_ATTEMPT_SCHEMA_VERSION && value.schemaVersion !== STRICT_MODEL_ATTEMPT_SCHEMA_VERSION && value.schemaVersion !== 4) {
     return recoveryEvidenceError(
       code,
       "Attempt schema version is unsupported."
     );
   }
   const attempt = parseEvidenceAttempt(value.attempt, code, "attempt");
-  const strict = value.schemaVersion === STRICT_MODEL_ATTEMPT_SCHEMA_VERSION;
+  const strict = value.schemaVersion === STRICT_MODEL_ATTEMPT_SCHEMA_VERSION || value.schemaVersion === 4 && value.completionProtocol !== void 0;
   if (strict) {
     if (attempt.kind !== "implementation" && attempt.kind !== "fix" || !attempt.mutable || value.completionProtocol !== COMPLETION_PROTOCOL2 || !Object.hasOwn(value, "retryOf") || !Object.hasOwn(value, "envelope") || !Object.hasOwn(value, "completionDiagnostic")) {
       return recoveryEvidenceError(
@@ -6125,7 +6323,7 @@ function parseModelAttemptRecord(value) {
     );
   }
   evidenceTimestamp(value.startedAt, code, "startedAt");
-  if (value.schemaVersion === MODEL_ATTEMPT_SCHEMA_VERSION || value.schemaVersion === STRICT_MODEL_ATTEMPT_SCHEMA_VERSION) {
+  if (value.schemaVersion === MODEL_ATTEMPT_SCHEMA_VERSION || value.schemaVersion === STRICT_MODEL_ATTEMPT_SCHEMA_VERSION || value.schemaVersion === 4) {
     if (!Object.hasOwn(value, "interruptedAt") || !Object.hasOwn(value, "recoveryOf") || !Object.hasOwn(value, "recoveryAuthorizationId")) {
       return recoveryEvidenceError(
         code,
@@ -6282,7 +6480,7 @@ function parseVerificationAttemptRecord(value) {
     throw verificationEvidenceError(code, "schemaVersion");
   }
   const idPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
-  const id = verificationString(record.id, code, "id", idPattern);
+  const id2 = verificationString(record.id, code, "id", idPattern);
   const sequence = verificationPositiveInteger(
     record.sequence,
     code,
@@ -6413,7 +6611,7 @@ function parseVerificationAttemptRecord(value) {
   }
   return {
     schemaVersion: VERIFICATION_LEDGER_SCHEMA_VERSION,
-    id,
+    id: id2,
     sequence,
     round,
     command,
@@ -7071,9 +7269,9 @@ var {
 } = artifact_storage_exports;
 
 // src/config.ts
-import path5 from "node:path";
+import path7 from "node:path";
 var CONFIG_DIRECTORY = ".banzai";
-var CONFIG_FILE = path5.join(CONFIG_DIRECTORY, "config.json");
+var CONFIG_FILE = path7.join(CONFIG_DIRECTORY, "config.json");
 var DEFAULT_CONFIG = {
   schemaVersion: 2,
   contractVersion: CONTRACT_VERSION,
@@ -7122,6 +7320,14 @@ var DEFAULT_CONFIG = {
     ]
   },
   maxFixCycles: 3
+};
+var DEFAULT_TASK_CONFIG = {
+  schemaVersion: 4,
+  contractVersion: CONTRACT_VERSION,
+  models: structuredClone(DEFAULT_CONFIG.models),
+  claudeEnvironment: structuredClone(DEFAULT_CONFIG.claudeEnvironment),
+  context: structuredClone(DEFAULT_CONFIG.context),
+  maxFixCycles: DEFAULT_CONFIG.maxFixCycles
 };
 
 // src/cancellation-evidence.ts

@@ -10,6 +10,11 @@ the project owner's request. The accepted decision and lifecycle are unchanged.
 - Owner: Banzai maintainers
 - Decision makers: User, explicitly accepted in chat on 2026-08-17
 
+- Amended by [ADR-0049](./0049-task-scoped-verification.md), accepted 2026-09-17:
+  successor control projections expose task verification and distinguish legacy
+  configuration continuation. Existing authority, privacy and historical contract
+  meanings remain. Implementation of the amendment is Planned.
+
 ## Related Artifacts
 
 - Feature description:

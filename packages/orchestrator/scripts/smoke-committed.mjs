@@ -318,15 +318,16 @@ async function setupRepository(root, bundle, expectedVersion) {
 
   const configPath = path.join(root, ".banzai", "config.json");
   const config = parseJson(await readFile(configPath, "utf8"), "init config");
-  if (config.schemaVersion !== 2 || config.contractVersion !== "1.0.0") {
+  if (config.schemaVersion !== 4 || config.contractVersion !== "1.0.0") {
     fail(
       "SMOKE_CONFIG_MISMATCH",
-      "init did not create schema-version-2 config"
+      "init did not create schema-version-4 config"
     );
   }
   for (const role of ["planner", "implementer", "reviewer"]) {
     config.models[role].executable = process.execPath;
   }
+  config.schemaVersion = 2; // Explicit legacy verify-utility fixture.
   config.verification = {
     profiles: [
       {
@@ -576,8 +577,8 @@ async function runSmoke(options) {
     );
     requireIdentity(
       capabilities,
-      "banzai-agent-capabilities/v5",
-      5,
+      "banzai-agent-capabilities/v6",
+      6,
       "agent control capabilities"
     );
     if (capabilities.orchestratorVersion !== expectedVersion) {
@@ -587,7 +588,7 @@ async function runSmoke(options) {
       );
     }
     if (
-      capabilities.controlContractVersion !== "5.0.0" ||
+      capabilities.controlContractVersion !== "6.0.0" ||
       capabilities.operations?.status?.supported !== true ||
       JSON.stringify(
         capabilities.operations?.approveVerification?.inputSchemas
@@ -639,8 +640,8 @@ async function runSmoke(options) {
     const status = parseJson(statusFirst, "agent control status");
     requireIdentity(
       status,
-      "banzai-agent-status/v4",
-      4,
+      "banzai-agent-status/v5",
+      5,
       "agent control status"
     );
     if (status.activeRun !== null) {
@@ -669,7 +670,7 @@ async function runSmoke(options) {
       "doctor repeat"
     );
     const doctor = parseJson(doctorFirst, "doctor");
-    requireIdentity(doctor, "banzai-doctor/v4", 4, "doctor");
+    requireIdentity(doctor, "banzai-doctor/v5", 5, "doctor");
     if (doctor.ready !== true) {
       fail(
         "SMOKE_DOCTOR_NOT_READY",
@@ -696,8 +697,8 @@ async function runSmoke(options) {
     );
     requireIdentity(
       consultationStatus,
-      "banzai-agent-status/v4",
-      4,
+      "banzai-agent-status/v5",
+      5,
       "consultation status"
     );
     if (
@@ -743,8 +744,8 @@ async function runSmoke(options) {
     const answered = parseJson(answeredText, "consultation answer");
     requireIdentity(
       answered,
-      "banzai-agent-status/v4",
-      4,
+      "banzai-agent-status/v5",
+      5,
       "consultation answer"
     );
     if (

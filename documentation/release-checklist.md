@@ -245,7 +245,7 @@ Current release-train identity:
 - [ ] Confirm committed dist was rebuilt after source changes.
 - [ ] Confirm independent source-read-only feature review is complete.
 - [ ] Confirm every finding has human triage and only accepted IDs were fixed.
-- [ ] Confirm all five existing Banzai human decision gates and the conditional configuration prerequisite and exact-path hook boundary
+- [ ] Confirm all five existing Banzai human decision gates and exact-path hook boundary
       remain intact.
 - [ ] Record the human release owner and explicit release authorization.
 

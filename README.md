@@ -154,11 +154,9 @@ or invoke the skill manually:
 - Codex: `$banzai:project-manifest`
 
 Review the generated guidance and `.banzai/config.json`, preserving your
-project's existing rules. Add verification profiles for the project's actual
-test, typecheck, lint, or build commands. The default `repository` profile runs
-only `git diff --check`; it does not test your application. Adapt the
-[verification examples](documentation/verification-examples.md), and run the
-configured checks yourself before the first task.
+project's existing rules. Verification follows each task; you do not configure
+profiles or bootstrap. Banzai selects relevant checks from the requested outcome
+and actual project evidence. See [task verification](documentation/verification-examples.md).
 
 ```sh
 banzai doctor
@@ -233,7 +231,7 @@ mutable work. Interrupted implementation is never silently retried. Details:
 
 To supervise a run from a chat agent, explicitly invoke `/banzai:orchestrate`
 (Claude Code) or `$banzai:orchestrate` (Codex); the skill can never select
-itself. Compatible supervisors require control contract `5.0.0`; see
+itself. Compatible supervisors require control contract `6.0.0`; see
 [agent control](documentation/orchestrator.md#agent-control) for exact schemas
 and compatibility checks.
 
@@ -248,7 +246,7 @@ for interactive Skip, evidence availability and resource coverage limits.
 
 ## Where You Decide
 
-There are five existing decision gates plus a conditional configuration prerequisite;
+There are five existing decision gates;
 the CLI presents their human actions:
 
 | Gate                       | You decide                                                                                                             |
@@ -258,7 +256,6 @@ the CLI presents their human actions:
 | Plan approval              | Approve the exact bundle of description, accepted ADRs, and plan                                                       |
 | Review triage              | Accept, reject, or defer every review finding                                                                          |
 | Escalation                 | Answer the questions a phase raises for dependencies, contracts, security, deployment, or unspecified product behavior |
-| Configuration prerequisite | Accept or edit the runner's profile proposal, skip within the current run's scope, or cancel                           |
 
 Which gates appear depends on the selected route and the decisions raised by
 the task.
@@ -338,7 +335,7 @@ documentation/
 
 Lite work normally needs only `work.md`. Accepted ADR bodies are immutable;
 changed decisions use a linked superseding ADR. Each `review-<iteration>.md` is
-self-contained: the runner renders and publishes `banzai-feature-review/v5` for
+self-contained: the runner renders and publishes `banzai-feature-review/v7` for
 read-only orchestrated reviewers; standalone reviewers own durable
 `banzai-feature-review/v1` Markdown. A human or another model can continue the
 review from either artifact without a copied transcript.
@@ -404,9 +401,7 @@ participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 Work artifacts default to [local private storage](documentation/artifact-storage.md) after normal project setup. Shared ADRs and current product guides remain public; existing work retains explicit legacy paths.
 
-Guided verification setup uses `banzai verify add <type>`, `edit <id>`, `remove
-<id>`, `list`, and explicit `check`. Init saves confirmed choices without running
-project commands. Empty projects can confirm bootstrap; after the first
-implementation, the runner proposes a profile with Accept/Edit/Skip/Cancel.
-Accept preserves the plan and continues verification. Exit an owning session
-before external repair, then use `banzai resume` for the pending checkpoint.
+New tasks start without profile setup. Strict mandatory checks belong to the
+approved plan; lite uses the delegated request and actual execution permissions.
+Missing unrelated tooling is not a barrier, and failed required checks prevent
+completion. Legacy `verify` utilities remain explicit compatibility commands.

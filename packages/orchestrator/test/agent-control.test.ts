@@ -232,9 +232,9 @@ function hasCode(code: string): (error: unknown) => boolean {
 
 test("agent control capabilities declare the exact offline v5 operation set", () => {
   const capabilities = agentControlCapabilities();
-  assert.equal(capabilities.schema, "banzai-agent-capabilities/v5");
-  assert.equal(capabilities.schemaVersion, 5);
-  assert.equal(capabilities.controlContractVersion, "5.0.0");
+  assert.equal(capabilities.schema, "banzai-agent-capabilities/v6");
+  assert.equal(capabilities.schemaVersion, 6);
+  assert.equal(capabilities.controlContractVersion, "6.0.0");
   assert.deepEqual(capabilities.completionPublication, {
     protocol: "banzai-completion-protocol/v1",
     stages: [
@@ -253,7 +253,7 @@ test("agent control capabilities declare the exact offline v5 operation set", ()
       "COMPLETION_PUBLICATION_DRIFT",
       "COMPLETION_PUBLICATION_INTEGRITY"
     ],
-    statusSchema: "banzai-agent-status/v4"
+    statusSchema: "banzai-agent-status/v5"
   });
   assert.equal(capabilities.orchestratorVersion, packageManifest.version);
   assert.equal(capabilities.umbrellaContractVersion, CONTRACT_VERSION);
@@ -762,8 +762,8 @@ test("status projection derives every semantic action from runner state", () => 
     }
   }
   assert.deepEqual(emptyAgentControlStatus(), {
-    schema: "banzai-agent-status/v4",
-    schemaVersion: 4,
+    schema: "banzai-agent-status/v5",
+    schemaVersion: 5,
     activeRun: null
   });
 });

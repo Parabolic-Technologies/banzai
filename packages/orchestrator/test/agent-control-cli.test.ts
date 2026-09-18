@@ -346,7 +346,7 @@ test("capabilities and no-active-run status emit one canonical JSON document", a
   assert.equal(capabilityOutput.length, 1);
   assert.equal(
     (JSON.parse(capabilityOutput[0] ?? "") as { schema: string }).schema,
-    "banzai-agent-capabilities/v5"
+    "banzai-agent-capabilities/v6"
   );
 
   const runner = new FakeRunner();
@@ -362,8 +362,8 @@ test("capabilities and no-active-run status emit one canonical JSON document", a
     "default-user"
   );
   assert.deepEqual(JSON.parse(statusOutput[0] ?? ""), {
-    schema: "banzai-agent-status/v4",
-    schemaVersion: 4,
+    schema: "banzai-agent-status/v5",
+    schemaVersion: 5,
     activeRun: null
   });
 });

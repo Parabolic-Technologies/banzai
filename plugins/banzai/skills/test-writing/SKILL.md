@@ -25,13 +25,14 @@ Keep ADRs, indexes, manifests and maintained product guidance at their existing
 repository paths. Status/loading stays read-only, and orchestrated work follows
 the persisted run binding and exact phase grants.
 
-Standalone verification follows the Test Assurance policy's deterministic
-fallback rule. With explicit project opt-in and a v2 binding, resolve
-`../../scripts/verification.cjs` relative to this installed skill; read-only
-status/review uses inspect or decide, and authorized implementation uses execute
-for configured check IDs. Preserve human plan/ADR/triage gates. In orchestrated
-mode consume the runner's evidence and never invoke this helper or write its
-machine directory. A missing helper or unsupported binding retains fresh checks.
+Standalone verification uses the existing task and skill authorization. With a
+new private v2 work binding, invoke the installed `../../scripts/verification.cjs`
+v2 helper using the task inventory in the bound plan or work artifact. Inspect
+and decide are read-only; execute runs the authorized checks. Do not fabricate a
+runner approval or add a report solely to use the helper. Where no applicable
+bound artifact exists, retain fresh task checks and their actual results.
+Orchestrated phases consume runner evidence and never invoke the helper or write
+its machine directory.
 
 ## Sources
 
@@ -72,7 +73,7 @@ In strict mode this skill is the second half of the runner's implementation
 phase: `code-writing` hands over directly, with no human decision in between.
 Keep the approved description, plan, and accepted ADRs immutable, and report
 assurance in `test-report.md` and the structured phase result required by
-`contracts/v3/phase-result.schema.json` with `decisionConsultation: null`.
+`contracts/v4/phase-result.schema.json` with `decisionConsultation: null`.
 Preserve the implementation phase's canonical `taskCompletion` ledger and
 exact report projection; do not create a second ledger. Stop with
 `gate=escalation` only when assurance work exposes a missing requirement or
@@ -83,6 +84,12 @@ The test report owns risk and contract assurance, not implementation-task
 completion. Identify any `TNNN` whose required assurance remains incomplete or
 contradicts the implementation report; do not promote an incomplete or blocked
 implementation task to completed merely because a test exists.
+
+Task verification is supplied by the runner. Return `verificationCandidates`
+with relevant task checks or an explicit absence rationale; strict mandatory
+checks remain in the approved plan. Planning returns this field as `null` and
+includes a self-contained `banzai-verification-obligations/v2` inventory in the
+plan before requesting approval. Never edit profiles or machine evidence.
 
 ## Rules
 

@@ -1,5 +1,8 @@
 import type { ReviewConfigurationSetup } from "./configuration-review.js";
 import type {
+  TaskVerificationPublication,
+  TaskVerificationCandidates,
+  TaskVerificationPolicy,
   VerificationPolicy,
   ReviewVerificationEvidence,
   VerificationPhysicalAttempt,
@@ -20,7 +23,8 @@ import type {
 } from "./git.js";
 
 export const CONTRACT_VERSION = "1.0.0" as const;
-export const PHASE_RESULT_SCHEMA_VERSION = 3 as const;
+export const PHASE_RESULT_SCHEMA_VERSION = 4 as const;
+export const TASK_PHASE_RESULT_SCHEMA_VERSION = 4 as const;
 export const DECISION_CONSULTATION_SCHEMA =
   "banzai-decision-consultation/v1" as const;
 export const DECISION_CONSULTATION_SCHEMA_VERSION = 1 as const;
@@ -72,7 +76,7 @@ export const COMPLETION_PUBLICATION_SCHEMA =
   "banzai-completion-publication/v1" as const;
 export const COMPLETION_RECORD_SCHEMA_VERSION = 1 as const;
 export const COMPLETION_SUMMARY_SCHEMA_VERSION = 2 as const;
-export const RUN_STATE_SCHEMA_VERSION = 7 as const;
+export const RUN_STATE_SCHEMA_VERSION = 8 as const;
 export const COMPLETION_PUBLICATION_STAGES = [
   "capture",
   "validate",
@@ -96,16 +100,16 @@ export type CompletionPublicationRefusalCode =
 export const RECOVERY_AUTHORIZATION_SCHEMA =
   "banzai-recovery-authorization/v1" as const;
 export const RECOVERY_AUTHORIZATION_SCHEMA_VERSION = 1 as const;
-export const AGENT_CONTROL_CONTRACT_VERSION = "5.0.0" as const;
-export const AGENT_CAPABILITIES_SCHEMA_VERSION = 5 as const;
-export const AGENT_STATUS_SCHEMA_VERSION = 4 as const;
+export const AGENT_CONTROL_CONTRACT_VERSION = "6.0.0" as const;
+export const AGENT_CAPABILITIES_SCHEMA_VERSION = 6 as const;
+export const AGENT_STATUS_SCHEMA_VERSION = 5 as const;
 export const AGENT_ANSWER_SCHEMA_VERSION = 2 as const;
 export const AGENT_REQUEST_SCHEMA_VERSION = 1 as const;
 export const AGENT_RECOVERY_SCHEMA_VERSION = 1 as const;
 export const LEGACY_AGENT_CONTROL_SCHEMA_VERSION = 1 as const;
 export const AGENT_CAPABILITIES_SCHEMA =
-  "banzai-agent-capabilities/v5" as const;
-export const AGENT_STATUS_SCHEMA = "banzai-agent-status/v4" as const;
+  "banzai-agent-capabilities/v6" as const;
+export const AGENT_STATUS_SCHEMA = "banzai-agent-status/v5" as const;
 export const AGENT_REQUEST_SCHEMA = "banzai-agent-request/v1" as const;
 export const AGENT_ANSWER_SCHEMA = "banzai-agent-answer/v2" as const;
 export const CONFIGURATION_ANSWER_SCHEMA = "banzai-agent-answer/v3" as const;
@@ -395,6 +399,17 @@ export interface AgentControlCompletionPublicationV1 {
 
 export interface AgentControlRunV4 extends AgentControlRunV3 {
   completionPublication: AgentControlCompletionPublicationV1 | null;
+  taskVerification?: {
+    outcome: "checked" | "absent" | "not_run";
+    complete: boolean;
+    absenceReason: string | null;
+    checks: {
+      checkId: string;
+      required: boolean;
+      kind: string;
+      attemptId: string | null;
+    }[];
+  };
 }
 
 export interface AgentControlStatusV1 {
@@ -541,7 +556,9 @@ export interface PlanTaskCompletionLedger {
 }
 
 export interface PhaseResult {
-  schemaVersion: typeof PHASE_RESULT_SCHEMA_VERSION;
+  schemaVersion: typeof PHASE_RESULT_SCHEMA_VERSION | 3;
+  /** Required (nullable) in v4, absent in v3. */
+  verificationCandidates?: TaskVerificationCandidates | null;
   contractVersion: typeof CONTRACT_VERSION;
   phase: Phase;
   outcome: PhaseOutcome;
@@ -703,9 +720,11 @@ export interface ReviewSnapshot {
     | "banzai-review-snapshot/v2"
     | "banzai-review-snapshot/v3"
     | "banzai-review-snapshot/v4"
-    | "banzai-review-snapshot/v5";
-  schemaVersion: 1 | 2 | 3 | 4 | 5;
-  verificationMode?: "ordered" | "policy";
+    | "banzai-review-snapshot/v5"
+    | "banzai-review-snapshot/v6";
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6;
+  verificationMode?: "ordered" | "policy" | "task";
+  taskVerification?: TaskVerificationPublication;
   configurationSetup?: ReviewConfigurationSetup;
   /** Required and nullable on snapshot v5 only. */
   completionPublication?: ReviewCompletionPublication | null;
@@ -843,6 +862,7 @@ export interface PromptEnvelope {
 export type OutputContractIdentity =
   | "workflow-selection/v1"
   | "phase-result/v3"
+  | "phase-result/v4"
   | "review-result/v1"
   | "review-result/v2";
 
@@ -1096,7 +1116,7 @@ export interface VerificationProfile {
 }
 
 export interface OrchestratorConfig {
-  schemaVersion: 1 | 2 | 3;
+  schemaVersion: 1 | 2 | 3 | 4;
   contractVersion: typeof CONTRACT_VERSION;
   models: {
     planner: ModelSettings;
@@ -1106,6 +1126,7 @@ export interface OrchestratorConfig {
   verification: {
     profiles: VerificationProfile[];
     policy?: VerificationPolicy;
+    taskPolicy?: TaskVerificationPolicy;
     bootstrap?: boolean;
   };
   claudeEnvironment: ClaudeEnvironmentSettings;
@@ -1436,8 +1457,9 @@ export interface RunState {
    * the completion protocol is created; new runs still bootstrap at 4 or 6 and
    * keep their configuration/binding combination unchanged across the move.
    */
-  schemaVersion: 3 | 4 | 5 | 6 | 7;
-  verificationMode?: "ordered" | "policy";
+  schemaVersion: 3 | 4 | 5 | 6 | 7 | 8;
+  verificationMode?: "ordered" | "policy" | "task";
+  taskVerification?: TaskVerificationPublication;
   configurationSetup?: ConfigurationSetupState;
   artifactBinding?: ArtifactBoundWork;
   /** Required and nullable on schema 7; absent on every earlier version. */
@@ -1523,7 +1545,8 @@ export interface AttemptRecord<
   schemaVersion:
     | 1
     | typeof MODEL_ATTEMPT_SCHEMA_VERSION
-    | typeof STRICT_MODEL_ATTEMPT_SCHEMA_VERSION;
+    | typeof STRICT_MODEL_ATTEMPT_SCHEMA_VERSION
+    | 4;
   attempt: AttemptReference;
   /**
    * `pending_application` exists only on schema v3: the vendor returned and
@@ -1592,14 +1615,16 @@ export type TerminalResultContract =
   | "workflow-selection/v1"
   | "phase-result/v2"
   | "phase-result/v3"
+  | "phase-result/v4"
   | "review-result/v1"
   | "review-result/v2";
 
 export interface TerminalAttemptCheckpoint<
   T extends TerminalCheckpointResult = TerminalCheckpointResult
 > {
-  schema: typeof TERMINAL_CHECKPOINT_SCHEMA;
-  schemaVersion: typeof TERMINAL_CHECKPOINT_SCHEMA_VERSION;
+  schema:
+    typeof TERMINAL_CHECKPOINT_SCHEMA | "banzai-terminal-attempt-checkpoint/v3";
+  schemaVersion: typeof TERMINAL_CHECKPOINT_SCHEMA_VERSION | 3;
   runId: string;
   attempt: AttemptReference;
   phase: AttemptReference["kind"];
@@ -1644,14 +1669,16 @@ export interface CompletionObservedInputs {
  * the report/workspace identities observed when the vendor returned.
  */
 export interface TerminalAttemptCheckpointV2 {
-  schema: typeof TERMINAL_CHECKPOINT_SCHEMA_V2;
-  schemaVersion: typeof TERMINAL_CHECKPOINT_SCHEMA_VERSION_V2;
+  schema:
+    | typeof TERMINAL_CHECKPOINT_SCHEMA_V2
+    | "banzai-terminal-attempt-checkpoint/v3";
+  schemaVersion: typeof TERMINAL_CHECKPOINT_SCHEMA_VERSION_V2 | 3;
   completionProtocol: typeof COMPLETION_PROTOCOL;
   runId: string;
   attempt: AttemptReference & { kind: "implementation" | "fix"; mutable: true };
   phase: "implementation" | "fix";
   configuration: TerminalAttemptCheckpoint["configuration"];
-  resultContract: "phase-result/v3";
+  resultContract: "phase-result/v3" | "phase-result/v4";
   terminal: TerminalAttemptCheckpoint["terminal"];
   envelope: PhaseResultEnvelope;
   resultDigest: string;
@@ -1906,7 +1933,8 @@ export interface EvaluationStateMetricSource {
 }
 
 export interface EvaluationStateSource {
-  verificationMode?: "ordered" | "policy";
+  verificationMode?: "ordered" | "policy" | "task";
+  taskVerification?: TaskVerificationPublication;
   schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7;
   contractVersion: EvidenceValue<string>;
   status: EvidenceValue<RunStatus>;

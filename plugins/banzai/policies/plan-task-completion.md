@@ -118,17 +118,28 @@ an orchestrated approval, unlike choosing a compliant implementation under it.
   plan.
 
 
-### Opt-in verification obligations
+### Task verification obligations
 
-A new strict plan relying on ADR-0043 contains exactly one fenced
-`banzai-verification-obligations/v1` JSON inventory inside its approved bytes.
-It carries schema/schemaVersion, complete=true, planRemainderSha256 and an ordered
-checks array of configured check IDs and fresh/equivalent_evidence modes. The
-remainder digest covers every byte outside that complete fence. The owner reviews
-completeness and consistency with all prose commitments before bundle approval.
-Missing, duplicated, stale, ambiguous or contradictory inventories deny reuse;
-legacy plans retain their original obligations. Release checks are always fresh.
-Changing the inventory requires normal plan approval; no prose claim upgrades it.
+A new strict task plan contains exactly one fenced
+`banzai-verification-obligations/v2` JSON inventory inside its approved bytes.
+It carries schema/schemaVersion, complete=true, planRemainderSha256, exact
+self-contained check descriptors and an explicit absence rationale when empty.
+The remainder digest covers every byte outside that complete fence. The owner
+reviews requirement coverage, permitted future tooling, descriptors and execution
+scope before approving the complete bundle. Discovery is information, not
+execution permission, and no configured profile catalogue is required.
+
+Mandatory checks cannot be removed, replaced or weakened by phase candidates.
+Permitted supplemental checks remain separate from approved bytes. A changed
+mandatory obligation follows the existing plan approval path. Equivalent evidence
+still requires the shared owner's current applicability decision and direct
+physical origin under ADR-0043; release checks always run fresh. Missing,
+duplicated, stale or contradictory inventories cannot authorize task verification.
+
+The profile-derived `banzai-verification-obligations/v1` format remains historical:
+retain its original meaning when inspecting old artifacts; do not add it to a new
+task plan or combine it with v2. Historical decoding does not authorize old-run
+continuation or migration.
 
 Equivalent verification does not replace task-completion validation. Preserve the
 canonical task records and exact report projection, immutable approved artifacts,

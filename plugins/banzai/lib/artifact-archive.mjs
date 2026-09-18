@@ -180,7 +180,7 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
       else if (value.schema === "banzai-recovery-authorization/v1")
         parseRecoveryAuthorization(value);
       else if (/^\.banzai\/runs\/[^/]+\/state\.json$/u.test(relative))
-        parseEvaluationStateSource(value);
+        value.schemaVersion === 8 ? supported = false : parseEvaluationStateSource(value);
       else if (
         /^\.banzai\/runs\/[^/]+\/attempts\/[^/]+\.json$/u.test(relative) &&
         value.attempt &&
@@ -280,7 +280,7 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
     // transition, capture, original, candidate and receipt bytes are required
     // authority closure for the attempt that published or is pending.
     const completionLeaf = (attemptId, leaf) => `${run}/attempts/${attemptId}.${leaf}`;
-    if (run && value.schemaVersion === 7 && relative === `${run}/state.json` && value.completionPublication) {
+    if (run && [7, 8].includes(value.schemaVersion) && relative === `${run}/state.json` && value.completionPublication) {
       const cursor = value.completionPublication;
       if (cursor.captureDigest) refs.set(completionLeaf(cursor.attemptId, "completion-input.json"), true);
       if (cursor.candidateDigest) {
@@ -289,7 +289,7 @@ function dependenciesFor(relative, bytes, sourceRoot = null) {
       }
       if (cursor.receiptDigest) refs.set(completionLeaf(cursor.attemptId, "completion-publication.json"), true);
     }
-    if (run && value.schemaVersion === 7 && relative === `${run}/state.json` && value.planTaskCompletion?.schemaVersion === 2 && value.planTaskCompletion.status === "valid")
+    if (run && [7, 8].includes(value.schemaVersion) && relative === `${run}/state.json` && value.planTaskCompletion?.schemaVersion === 2 && value.planTaskCompletion.status === "valid")
       refs.set(`${run}/${value.planTaskCompletion.publication.path}`, true);
     if (run && value.schema === "banzai-review-snapshot/v5" && value.completionPublication)
       refs.set(`.banzai/runs/${value.runId}/${value.completionPublication.receiptPath}`, true);
@@ -848,7 +848,7 @@ export async function verifyArchive(input) {
         if (!priorBytes || digestBytes(priorBytes) !== value.priorState.sha256)
           fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Completion transition prior state changed or is missing.");
       }
-      if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(entry.path) && value?.schemaVersion === 7 && value.planTaskCompletion?.schemaVersion === 2 && value.planTaskCompletion.status === "valid") {
+      if (/\.banzai\/runs\/[^/]+\/state\.json$/u.test(entry.path) && [7, 8].includes(value?.schemaVersion) && value.planTaskCompletion?.schemaVersion === 2 && value.planTaskCompletion.status === "valid") {
         const receiptBytes = objects.get(`${run}/${value.planTaskCompletion.publication.path}`);
         if (!receiptBytes || parseCompletionPublication(JSON.parse(receiptBytes)).integrityDigest !== value.planTaskCompletion.publication.sha256)
           fail("ARTIFACT_EVIDENCE_INCOMPLETE", "Published completion receipt changed or is missing.");

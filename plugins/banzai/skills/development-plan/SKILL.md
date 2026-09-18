@@ -24,13 +24,16 @@ Keep ADRs, indexes, manifests and maintained product guidance at their existing
 repository paths. Status/loading stays read-only, and orchestrated work follows
 the persisted run binding and exact phase grants.
 
-Standalone verification follows the Test Assurance policy's deterministic
-fallback rule. With explicit project opt-in and a v2 binding, resolve
-`../../scripts/verification.cjs` relative to this installed skill; read-only
-status/review uses inspect or decide, and authorized implementation uses execute
-for configured check IDs. Preserve human plan/ADR/triage gates. In orchestrated
-mode consume the runner's evidence and never invoke this helper or write its
-machine directory. A missing helper or unsupported binding retains fresh checks.
+Standalone verification inspection uses existing task and skill authority.
+With a private v2 binding, resolve `../../scripts/verification.cjs` relative to
+this installed skill and use its v2 inspect or decide request against the bound
+task inventory. These operations are read-only and confer no execution grant.
+This skill does not execute checks through the helper. An authorized implementing
+skill may execute task descriptors within the existing scope; a missing helper,
+v1 binding or unsupported bound artifact retains the applicable fresh-check owner.
+Never require configured profile IDs or fabricate runner approval. Orchestrated
+phases consume runner evidence and never invoke the helper or write its machine
+directory.
 
 ## Sources
 
@@ -71,7 +74,7 @@ the migration step, and no source change.
 
 When a local runner supplies a versioned output schema, follow this skill
 normally and return the matching structured phase result from
-`contracts/v3/phase-result.schema.json` with `taskCompletion: null`. This skill
+`contracts/v4/phase-result.schema.json` with `taskCompletion: null`. This skill
 closes the runner's planning
 phase: use `decision_consultation` with `questions=[]` before drafting a plan or
 Proposed ADR that depends on an unresolved material human-owned choice; use
@@ -80,6 +83,12 @@ the consistency-checked plan exists. The CLI collects that approval and starts
 implementation itself; never invoke `code-writing` from this phase.
 Without runner context, the plan approval gate below is answered in chat
 instead.
+
+Task verification is supplied by the runner. Return `verificationCandidates`
+with relevant task checks or an explicit absence rationale; strict mandatory
+checks remain in the approved plan. Planning returns this field as `null` and
+includes a self-contained `banzai-verification-obligations/v2` inventory in the
+plan before requesting approval. Never edit profiles or machine evidence.
 
 ## Preconditions
 
@@ -131,7 +140,6 @@ This is one of the five existing decision gates in `AGENTS.md`, and the only gat
 authorizes the exact bundle for code work. Consultation and ADR lifecycle
 decisions remain separate and non-substitutable. Approval covers the whole
 bundle, so ordinary implementation, tests, verification and review continue
-without another plan confirmation. A runner-raised configuration prerequisite
-may require Accept/Edit/Skip/Cancel before verification; it retains this approval
-and implemented work. Models cannot raise that gate or write runner control
-files. Present Human prerequisites alongside this exact bundle. Do not start `code-writing` before approval.
+without another plan confirmation. Task verification adds no profile or
+configuration-prerequisite gate. Models cannot write runner control files.
+Present actual Human prerequisites alongside this exact bundle. Do not start `code-writing` before approval.

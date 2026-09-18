@@ -10,7 +10,11 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { initializeConfig, CONFIG_FILE } from "../src/config.js";
+import {
+  initializeConfig,
+  CONFIG_FILE,
+  DEFAULT_CONFIG
+} from "../src/config.js";
 import { RunStore } from "../src/store.js";
 import {
   applyVerificationConfigDelta,
@@ -24,6 +28,10 @@ test("confirmed inactive saves require ownership, pin bytes/source, and retain a
   const root = await mkdtemp(path.join(tmpdir(), "banzai-guided-config-"));
   try {
     await initializeConfig(root);
+    await writeFile(
+      path.join(root, CONFIG_FILE),
+      JSON.stringify(DEFAULT_CONFIG)
+    );
     const store = new RunStore(root);
     const before = await readVerificationConfig(root);
     const bootstrap = await previewVerificationConfig(root, {
@@ -115,6 +123,10 @@ test("unsafe config targets and unavailable selected-run identity evidence refus
   const root = await mkdtemp(path.join(tmpdir(), "banzai-guided-unsafe-"));
   try {
     await initializeConfig(root);
+    await writeFile(
+      path.join(root, CONFIG_FILE),
+      JSON.stringify(DEFAULT_CONFIG)
+    );
     const original = await readFile(path.join(root, CONFIG_FILE));
     await writeFile(path.join(root, "unrelated.json"), original);
     await rm(path.join(root, CONFIG_FILE));

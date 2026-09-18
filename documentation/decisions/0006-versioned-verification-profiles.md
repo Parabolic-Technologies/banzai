@@ -7,6 +7,11 @@
 - Owner: Banzai maintainers
 - Decision makers: User, explicitly accepted in chat on 2026-08-04
 
+- Partially superseded by [ADR-0049](./0049-task-scoped-verification.md), accepted
+  2026-09-17: new tasks use task-bound verification authority instead of mandatory
+  profiles. Historical configuration interpretation and legacy continuation
+  remain governed by this ADR. Implementation of the transition is Planned.
+
 ## Related Artifacts
 
 - Feature description:

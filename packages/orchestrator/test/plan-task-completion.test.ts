@@ -89,6 +89,7 @@ function firstEvidence(record: PlanTaskCompletionRecord) {
 function result(taskCompletion: PlanTaskCompletionLedger | null): PhaseResult {
   return {
     schemaVersion: PHASE_RESULT_SCHEMA_VERSION,
+    verificationCandidates: null,
     contractVersion: CONTRACT_VERSION,
     phase: "implementation",
     outcome: "completed",

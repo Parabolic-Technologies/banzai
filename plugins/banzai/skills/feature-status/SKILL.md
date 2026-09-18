@@ -18,13 +18,16 @@ Keep ADRs, indexes, manifests and maintained product guidance at their existing
 repository paths. Status/loading stays read-only, and orchestrated work follows
 the persisted run binding and exact phase grants.
 
-Standalone verification follows the Test Assurance policy's deterministic
-fallback rule. With explicit project opt-in and a v2 binding, resolve
-`../../scripts/verification.cjs` relative to this installed skill; read-only
-status/review uses inspect or decide, and authorized implementation uses execute
-for configured check IDs. Preserve human plan/ADR/triage gates. In orchestrated
-mode consume the runner's evidence and never invoke this helper or write its
-machine directory. A missing helper or unsupported binding retains fresh checks.
+Standalone verification inspection uses existing task and skill authority.
+With a private v2 binding, resolve `../../scripts/verification.cjs` relative to
+this installed skill and use its v2 inspect or decide request against the bound
+task inventory. These operations are read-only and confer no execution grant.
+This skill does not execute checks through the helper. An authorized implementing
+skill may execute task descriptors within the existing scope; a missing helper,
+v1 binding or unsupported bound artifact retains the applicable fresh-check owner.
+Never require configured profile IDs or fabricate runner approval. Orchestrated
+phases consume runner evidence and never invoke the helper or write its machine
+directory.
 
 ## Sources
 

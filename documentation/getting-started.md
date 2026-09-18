@@ -60,10 +60,7 @@ when missing, adds local run-state entries to `.gitignore`, and offers the model
 picker in an interactive terminal. Existing configuration and guide contents are
 retained. The local guide is saved before any prompts, including in non-TTY mode;
 rerunning `banzai init` restores a missing guide without replacing your edits.
-Next, the static verification wizard offers
-Accept / Edit / Skip. It saves confirmed changes before opening a project-manifest
-client and never runs project commands. With no root markers, it asks whether to
-enable explicit bootstrap mode; it does not assume Node or any other stack.
+No verification profiles or bootstrap setup is required.
 Use `banzai model` later to change the
 model and effort for each role.
 
@@ -86,35 +83,22 @@ proposed settings changes. Preserve your project's existing instructions and
 resolve proposed merges before continuing. The manifest should describe the
 actual stack, conventions, and checks for this project.
 
-## 2. Configure checks that exercise your project
+## 2. Describe the result you need
 
-Use the wizard during `banzai init`, or configure a detected type later:
+Start with an ordinary task, including in an empty repository. Banzai identifies
+relevant checks from the request and project evidence. It can create required
+tests and tooling within the authorized scope. You do not maintain a separate
+command catalogue.
 
-```sh
-banzai verify add node
-banzai verify list
-banzai verify edit node
-banzai verify check
-```
+Strict work presents mandatory checks in the plan for approval. Lite work uses
+the delegated task and existing execution permissions, without a verification
+setup gate. Optional project policy can require or forbid checks and limit their
+execution. Missing unrelated scripts and npm placeholders do not become task
+requirements. A failed required check prevents completion.
 
-Node suggestions come only from existing `test`, `lint`, `build` and `typecheck`
-scripts. Other stacks use [editable examples](verification-examples.md); confirm
-commands appropriate to your project. Each detected type needs substantive
-coverage. `git diff --check` supplies hygiene only.
-
-`add` and `edit` show a concrete preview and require confirmation. Use
-`banzai verify remove <id>` to remove a broken profile after reviewing its coverage
-impact; the final profile cannot be removed. These commands never execute checks.
-`verify check` is the explicit execution step: it reports every configured command,
-including failures, and returns nonzero if any fail. Use one-shot commands, not
-watch mode. Doctor remains read-only and does not execute them.
-
-An empty repository can be ready in confirmed bootstrap mode. The first task
-creates its stack, and the runner then proposes a profile from the resulting
-metadata. Answer Accept to apply it and continue to verification with the same
-plan approval. Edit revises the proposal; Skip permits hygiene only in this run
-while detected types and verification configuration stay unchanged. Skip does not
-waive binding plan obligations or mandatory project policy.
+See [task verification](verification-examples.md) for the evidence and policy
+model. Historical profile commands remain legacy configuration utilities; they
+are not required to start new work.
 
 ## 3. Check readiness and save the reviewed setup
 
@@ -125,9 +109,8 @@ banzai doctor
 Resolve every failed check and review the warnings. For structured diagnostic
 output, use `banzai doctor --json`.
 
-Doctor v4 checks structural project guidance, configuration, installed instruction
-resource parity, declared project
-coverage, executable paths, and
+Doctor v5 checks structural project guidance, configuration, installed instruction
+resource parity, task policy, executable paths, and
 local state. It does not execute your verification commands or call either
 model vendor. Its authentication advisory is expected: a ready report does
 not prove that a subscription is authenticated or has capacity. Workflow

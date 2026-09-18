@@ -711,7 +711,7 @@ test("lite execution receives its selected phase without skill choreography", ()
   assert.match(prompt, /runner owns deterministic verification/);
 });
 
-test("builder prompts expose ordered runner profiles and verification ownership", () => {
+test("builder prompts select task verification without a profile catalogue", () => {
   const prompts = [
     implementationPrompt(
       "example",
@@ -744,35 +744,15 @@ test("builder prompts expose ordered runner profiles and verification ownership"
   ];
 
   for (const prompt of prompts) {
-    assert.ok(
-      prompt.indexOf('"id": "node"') < prompt.indexOf('"id": "repository"'),
-      "profile order must remain stable"
-    );
-    assert.match(prompt, /"executable": "npm"/);
-    assert.match(
-      prompt,
-      /"argv": \[\s+"run",\s+"test",\s+"--",\s+"--test-name-pattern",\s+"contract value"\s+\]/
-    );
-    assert.match(prompt, /"timeoutMs": 120000/);
-    assert.match(prompt, /execute the supplied verification profiles.*order/s);
-    assert.match(prompt, /Run focused affected tests/);
-    assert.match(prompt, /Do not rerun a supplied full-scope command/);
-    assert.match(
-      prompt,
-      /applicable final suite recorded in PROJECT_MANIFEST\.md/
-    );
-    assert.match(
-      prompt,
-      /run it once and record the verification-readiness gap/
-    );
-    assert.match(
-      prompt,
-      /requestedVerification field records a request only.*unconfigured model-selected command/s
-    );
+    assert.match(prompt, /Verification is task-scoped/);
+    assert.match(prompt, /Return verificationCandidates/);
+    assert.match(prompt, /cannot replace or weaken approved obligations/);
+    assert.match(prompt, /Script discovery is evidence, not authority/);
+    assert.doesNotMatch(prompt, /Supplied runner verification profiles/);
   }
 });
 
-test("phase prompts deliver implementation and assurance with the unchanged v3 completion boundary", () => {
+test("phase prompts deliver implementation and assurance with the v4 task verification and existing completion boundary", () => {
   const implementation = implementationPrompt(
     "example",
     "approval-digest",
@@ -791,7 +771,7 @@ test("phase prompts deliver implementation and assurance with the unchanged v3 c
 
   assert.match(implementation, /# Implementation Guidance/);
   assert.match(implementation, /# Assurance Guidance/);
-  assert.match(implementation, /schemaVersion=3/);
+  assert.match(implementation, /schemaVersion=4/);
   assert.match(implementation, /decisionConsultation=null/);
   assert.match(implementation, /sole canonical completion source/);
   assert.match(implementation, /T001[\s\S]*T002/);
@@ -827,7 +807,7 @@ test("phase prompts deliver implementation and assurance with the unchanged v3 c
   for (const prompt of [lite, fix]) {
     assert.doesNotMatch(prompt, /available Skill tool|\$banzai:/);
   }
-  assert.match(lite, /schemaVersion=3 with taskCompletion=null/);
+  assert.match(lite, /schemaVersion=4 with taskCompletion=null/);
   assert.match(lite, /decisionConsultation=null/);
   assert.match(
     fix,
@@ -968,7 +948,7 @@ test("planning prompt makes consultation evidence-first, bounded, and non-author
     /never reinterpret them as approval, permission, or broader authority/
   );
   assert.match(prompt, /decision consultation never accepts an ADR/);
-  assert.match(prompt, /schemaVersion=3/);
+  assert.match(prompt, /schemaVersion=4/);
 });
 
 test("planning prompt carries exact structured consultation history as human-decision context", () => {
@@ -1510,4 +1490,18 @@ test("all six envelopes deliver each complete resource once before evidence and 
     assert.equal(bytes, Buffer.byteLength(envelope.rendered, "utf8"));
     assert.ok(bytes > envelope.rendered.length);
   }
+});
+
+test("current planning instructions use task inventory v2 without a profile setup gate", () => {
+  const delivered = phaseInstructionParts("planning").join("\n");
+  assert.match(
+    delivered,
+    /Every new strict task plan includes the self-contained v2 obligation inventory/
+  );
+  assert.match(delivered, /banzai-verification-obligations\/v2/);
+  assert.match(delivered, /v1` format remains historical/);
+  assert.doesNotMatch(
+    delivered,
+    /List every configured check|runner owns guided configuration proposals|configuration prerequisite gate owns/
+  );
 });

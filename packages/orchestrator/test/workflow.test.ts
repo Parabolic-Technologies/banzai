@@ -3,7 +3,6 @@ import { RunStore } from "../src/store.js";
 import { instructionPluginFixture } from "./phase-instruction-fixtures.js";
 import { inspectDoctor } from "../src/doctor.js";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
 import {
   acquireWork,
   createWork,
@@ -12,17 +11,12 @@ import {
   inspectArtifacts
 } from "../src/artifact-storage.js";
 import { reviewResultSchema } from "../src/contracts.js";
+import { collectEvaluationExport } from "../src/evaluation.js";
+import { deriveEvaluationKpiReport } from "../src/evaluation-kpi.js";
 import {
-  collectEvaluationExport,
-  collectEvaluationExportV2
-} from "../src/evaluation.js";
-import {
-  deriveEvaluationKpiReport,
-  deriveEvaluationKpiV2
-} from "../src/evaluation-kpi.js";
-import {
-  evidenceDigest,
-  persistVerificationApplicability
+  readTaskVerificationAttempts,
+  parseTaskVerificationDescriptor,
+  evidenceDigest
 } from "../src/verification-evidence.js";
 import { collectContextReport } from "../src/context-report.js";
 import { projectAgentControlStatus } from "../src/agent-control.js";
@@ -56,7 +50,7 @@ import {
   ProcessExitError,
   TerminalRunStateError
 } from "../src/errors.js";
-import { digestArtifactBundle, workspaceSnapshot } from "../src/git.js";
+import { digestArtifactBundle } from "../src/git.js";
 import { renderReviewArtifact } from "../src/review-artifact.js";
 import { vendorFor } from "../src/models.js";
 import {
@@ -65,10 +59,7 @@ import {
   renderPlanTaskCompletionProjection
 } from "../src/plan-task-completion.js";
 import { transitionState } from "../src/state-machine.js";
-import {
-  parsePersistedPhaseResult,
-  phaseResultEnvelopeOf
-} from "../src/validation.js";
+import { phaseResultEnvelopeOf } from "../src/validation.js";
 import {
   CONTRACT_VERSION,
   PHASE_RESULT_SCHEMA_VERSION,
@@ -89,7 +80,6 @@ import {
   type RunState,
   type SessionInventory,
   type VendorAdapters,
-  type VerificationAttemptRecord,
   type WorkflowSelectionAdapterRequest,
   type WorkflowSelectionResult
 } from "../src/types.js";
@@ -115,8 +105,38 @@ import {
 const descriptionPath = "documentation/features/example/description.md";
 const planPath = "documentation/development-plans/example/plan.md";
 
+// Resolve the fixture's old role labels against the run's actual private binding.
+async function boundFixturePath(
+  root: string,
+  relative: string
+): Promise<string> {
+  if (!relative.startsWith("documentation/")) return path.join(root, relative);
+  const store = new RunStore(root);
+  const active = await store.readActiveRunId();
+  if (active === null) return path.join(root, relative);
+  const state = await store.readState(active);
+  const roles = state.artifactBinding?.binding.artifacts;
+  const parts = relative.split("/");
+  if (!roles || !["example", state.slug].includes(parts[2] ?? ""))
+    return path.join(root, relative);
+  const name = parts.at(-1);
+  const role =
+    name === "plan.md"
+      ? roles.plan
+      : name === "description.md"
+        ? roles.description
+        : name === "implementation-report.md"
+          ? roles.implementationReport
+          : name === "test-report.md"
+            ? roles.testReport
+            : name?.startsWith("review-")
+              ? `${roles.reviewDirectory}/${name}`
+              : null;
+  return path.join(root, role ?? relative);
+}
+
 for (const outcome of ["completed", "cancelled"] as const) {
-  test(`artifact storage archives and restores a ${outcome} strict run with dependency closure`, async () => {
+  test(`frozen archive retains a ${outcome} task run as explicitly unsupported evidence`, async () => {
     const repository = await createTestRepository({
       artifactLayout: "private"
     });
@@ -189,7 +209,12 @@ for (const outcome of ["completed", "cancelled"] as const) {
         destination: archiveDirectory
       });
       const verified = await invoke("verify", { bundlePath: archiveDirectory });
-      assert.equal(exported.complete, true, JSON.stringify(verified));
+      assert.equal(exported.complete, false, JSON.stringify(verified));
+      assert.ok(
+        (verified.uninterpreted as string[]).includes(
+          `.banzai/runs/${state.runId}/state.json`
+        )
+      );
       assert.ok(
         (verified.retainedPaths as string[]).includes(
           `.banzai/runs/${state.runId}/state.json`
@@ -199,29 +224,12 @@ for (const outcome of ["completed", "cancelled"] as const) {
         await realpath(repository.root),
         "restored"
       );
-      await invoke("restore", {
-        bundlePath: archiveDirectory,
-        destination
-      });
-      const manifest = verified.manifest as {
-        entries: { path: string; sha256: string; mode: number }[];
-      };
-      for (const entry of manifest.entries) {
-        const original = await readFile(path.join(repository.root, entry.path));
-        const restored = await readFile(path.join(destination, entry.path));
-        assert.deepEqual(restored, original, entry.path);
-        assert.equal(
-          createHash("sha256").update(restored).digest("hex"),
-          entry.sha256
-        );
-        assert.equal(
-          (await stat(path.join(destination, entry.path))).mode & 0o777,
-          entry.mode
-        );
-      }
       await assert.rejects(
-        readFile(path.join(destination, ".banzai/active-run.json")),
-        { code: "ENOENT" }
+        invoke("restore", {
+          bundlePath: archiveDirectory,
+          destination
+        }),
+        /Restore requires complete dependency interpretation/
       );
       if (outcome === "cancelled") {
         const plan = state.artifactBinding?.binding.artifacts.plan;
@@ -242,12 +250,48 @@ for (const outcome of ["completed", "cancelled"] as const) {
   });
 }
 
+function repinFixtureInventory(markdown: string): string {
+  const pattern = /```banzai-verification-obligations\/v2\n([\s\S]*?)\n```/u;
+  const match = pattern.exec(markdown);
+  if (!match)
+    throw new Error("Fixture plan must retain its verification inventory.");
+  const inventory = JSON.parse(requiredFixture(match[1])) as Record<
+    string,
+    unknown
+  >;
+  inventory.planRemainderSha256 = evidenceDigest(
+    markdown.slice(0, match.index) +
+      markdown.slice(match.index + match[0].length)
+  );
+  return (
+    markdown.slice(0, match.index) +
+    "```banzai-verification-obligations/v2\n" +
+    JSON.stringify(inventory) +
+    "\n```" +
+    markdown.slice(match.index + match[0].length)
+  );
+}
+async function writeFixturePlan(
+  target: string,
+  markdown: string
+): Promise<void> {
+  if (!markdown.includes("```banzai-verification-obligations/v2")) {
+    const original = await readFile(target, "utf8");
+    const inventory =
+      /```banzai-verification-obligations\/v2\n[\s\S]*?\n```/u.exec(original);
+    if (!inventory) throw new Error("No fixture inventory to retain.");
+    markdown += "\n" + inventory[0] + "\n";
+  }
+  await writeFile(target, repinFixtureInventory(markdown));
+}
+
 function phaseResult(
   phase: PhaseResult["phase"],
   overrides: Partial<PhaseResult> = {}
 ): PhaseResult {
   return {
     schemaVersion: PHASE_RESULT_SCHEMA_VERSION,
+    verificationCandidates: null,
     contractVersion: CONTRACT_VERSION,
     phase,
     outcome: phase === "plan" ? "needs_human_decision" : "completed",
@@ -456,6 +500,7 @@ async function writeImplementationArtifacts(
 }
 
 class FakeAdapters implements VendorAdapters {
+  fixtureTaskChecks = false;
   codexPreflights = 0;
   claudePreflights = 0;
   onCodexPreflight: (() => Promise<void>) | null = null;
@@ -578,7 +623,45 @@ class FakeAdapters implements VendorAdapters {
       roles?.description ?? "documentation/features/example/description.md";
     const planPath =
       roles?.plan ?? "documentation/development-plans/example/plan.md";
+    const fixtureChecks = this.fixtureTaskChecks
+      ? (
+          JSON.parse(
+            await readFile(
+              path.join(request.repoRoot, ".banzai/config.json"),
+              "utf8"
+            )
+          ) as OrchestratorConfig
+        ).verification.profiles.flatMap((profile) =>
+          profile.commands.map((command, index) =>
+            parseTaskVerificationDescriptor({
+              name: command.name,
+              command: command.command,
+              args: command.args,
+              timeoutMs: command.timeoutMs,
+              id: `${profile.id}-${index + 1}`,
+              requirementRefs: ["FR1"],
+              cwd: ".",
+              evidence: "fresh",
+              sources: [],
+              materialization: null
+            })
+          )
+        )
+      : [];
     const bind = (result: PhaseResult): PhaseResult => {
+      if (state.verificationMode === "task") {
+        result.schemaVersion = 4;
+        result.verificationCandidates =
+          result.phase === "plan" ||
+          (state.workflowSelection?.workflow ?? "strict") === "strict"
+            ? null
+            : {
+                checks: fixtureChecks,
+                absenceReason: fixtureChecks.length
+                  ? null
+                  : "Fixture task uses direct source assertions."
+              };
+      }
       if (!roles) return result;
       const mapping = new Map<string, string | null>([
         ["documentation/features/example/description.md", descriptionPath],
@@ -646,17 +729,56 @@ class FakeAdapters implements VendorAdapters {
         recursive: true
       });
       await writeFile(
-        path.join(request.repoRoot, descriptionPath),
+        await boundFixturePath(request.repoRoot, descriptionPath),
         "# Description\n\nFR1.\n",
         "utf8"
       );
       await writeFile(
-        path.join(request.repoRoot, planPath),
+        await boundFixturePath(request.repoRoot, planPath),
         `# Plan\n\n## Implementation Tasks\n\n${this.planTaskIds
           .map((taskId) => `- [ ] **${taskId} - Implement the fixture**`)
           .join("\n")}\n`,
         "utf8"
       );
+      if (state.verificationMode === "task") {
+        const file = await boundFixturePath(request.repoRoot, planPath);
+        const before = await readFile(file, "utf8");
+        const config = JSON.parse(
+          await readFile(
+            path.join(request.repoRoot, ".banzai/config.json"),
+            "utf8"
+          )
+        ) as OrchestratorConfig;
+        const checks = config.verification.profiles.flatMap((profile) =>
+          profile.commands.map((command, index) =>
+            parseTaskVerificationDescriptor({
+              ...command,
+              id: `${profile.id}-${index + 1}`,
+              requirementRefs: ["FR1"],
+              cwd: ".",
+              evidence: "fresh",
+              sources: [],
+              materialization: null
+            })
+          )
+        );
+        await writeFile(
+          file,
+          before +
+            "```banzai-verification-obligations/v2\n" +
+            JSON.stringify({
+              schema: "banzai-verification-obligations/v2",
+              schemaVersion: 2,
+              complete: true,
+              planRemainderSha256: evidenceDigest(before + "\n"),
+              checks,
+              absenceReason: checks.length
+                ? null
+                : "Fixture task uses direct source assertions."
+            }) +
+            "\n```\n"
+        );
+      }
       return adapterResult(
         bind(this.planResults.shift() ?? phaseResult("plan")),
         "planner-session"
@@ -834,165 +956,6 @@ function passingReview(reviewedFindingIds: string[] = []): ReviewResult {
   };
 }
 
-async function completedReviewReconciliationFixture(legacyPolicy: boolean) {
-  const repository = await createTestRepository();
-  const adapters = new FakeAdapters();
-  adapters.reviewResults.push({
-    contractVersion: CONTRACT_VERSION,
-    verdict: "changes_requested",
-    summary: "One finding.",
-    findings: [finding("R1-F1", "Defect.")],
-    reviewedFindingIds: [],
-    deferredCoverage: []
-  });
-  const runner = new WorkflowRunner(repository.root, adapters);
-  await runner.start({ slug: "example", request: "Implement it." });
-  await runner.approvePlan("human");
-  const reviewing = await runner.triage(
-    {
-      accepted: ["R1-F1"],
-      rejected: [],
-      deferred: [],
-      note: null,
-      decidedBy: "human"
-    },
-    false
-  );
-  await writeFile(
-    path.join(repository.root, "src/example.txt"),
-    "fixed\n",
-    "utf8"
-  );
-  transitionState(reviewing, "verifying");
-  transitionState(reviewing, "reviewing");
-  // This fixture deliberately characterizes historical review evidence: a
-  // schema-3 run whose implementation report still carries the model-authored
-  // v1 projection and whose summary is the legacy v1 checkpoint.
-  reviewing.schemaVersion = 3;
-  delete reviewing.verificationMode;
-  delete reviewing.configurationSetup;
-  delete reviewing.artifactBinding;
-  delete reviewing.completionPublication;
-  const publishedCompletion = reviewing.planTaskCompletion;
-  assert.ok(publishedCompletion?.status === "valid");
-  const legacyRecord = await runner.store.readRunAttempt(reviewing.runId, {
-    id: publishedCompletion.sourceAttemptId,
-    kind: "implementation",
-    mutable: true
-  });
-  // Historical records stored the parsed result shape, not the canonical
-  // envelope original, so the v1 projection follows the parsed key order.
-  const legacyLedger = parsePersistedPhaseResult(
-    legacyRecord.result
-  ).taskCompletion;
-  assert.ok(legacyLedger);
-  const legacyReport = `# Implementation Report\n\n${renderPlanTaskCompletionProjection(legacyLedger)}\n`;
-  await writeFile(
-    path.join(repository.root, publishedCompletion.implementationReport.path),
-    legacyReport,
-    "utf8"
-  );
-  reviewing.planTaskCompletion = {
-    schemaVersion: 1,
-    status: "valid",
-    sourceAttemptId: publishedCompletion.sourceAttemptId,
-    approvalDigest: publishedCompletion.approvalDigest,
-    planTaskDigest: publishedCompletion.planTaskDigest,
-    ledgerDigest: publishedCompletion.ledgerDigest,
-    implementationReport: {
-      path: publishedCompletion.implementationReport.path,
-      sha256: createHash("sha256").update(legacyReport).digest("hex")
-    },
-    testReport: publishedCompletion.testReport,
-    counts: publishedCompletion.counts,
-    validatedAt: publishedCompletion.validatedAt
-  };
-  reviewing.reviewIteration = 2;
-  const artifactPath = "documentation/features/example/review-2.md";
-  const snapshot = await workspaceSnapshot(repository.root, {
-    excludedPaths: [artifactPath],
-    baseline: reviewing.baseline
-  });
-  reviewing.workspaceDigest = snapshot.digest;
-  const attempt = {
-    id: legacyPolicy
-      ? "legacy-review-crash-window"
-      : "delta-review-crash-window",
-    kind: "review" as const,
-    mutable: false
-  };
-  reviewing.activeAttempt = attempt;
-  const result = passingReview(["R1-F1"]);
-  const completion = reviewing.planTaskCompletion;
-  const completionAttempt = await runner.store.readRunAttempt(reviewing.runId, {
-    id: completion.sourceAttemptId,
-    kind: "implementation",
-    mutable: true
-  });
-  const completionResult = parsePersistedPhaseResult(completionAttempt.result);
-  assert.ok(completionResult.taskCompletion);
-  const artifact = {
-    path: artifactPath,
-    candidatePath: artifactPath,
-    slug: reviewing.slug,
-    iteration: reviewing.reviewIteration,
-    approvedArtifactPaths: reviewing.planApproval?.paths ?? [],
-    workspaceDigest: snapshot.digest,
-    verification: reviewing.verification,
-    taskCompletion: {
-      approvalDigest: completion.approvalDigest,
-      ledgerDigest: completion.ledgerDigest,
-      planTaskDigest: completion.planTaskDigest,
-      completed: completion.counts.completed,
-      total: completion.counts.total,
-      implementationReport: completion.implementationReport.path,
-      testReport: completion.testReport.path,
-      tasks: completionResult.taskCompletion.tasks
-    }
-  };
-  await mkdir(path.join(repository.root, path.dirname(artifactPath)), {
-    recursive: true
-  });
-  await writeFile(
-    path.join(repository.root, artifactPath),
-    renderReviewArtifact(result, artifact),
-    "utf8"
-  );
-  await runner.store.writeState(reviewing);
-  const reviewer = reviewing.sessions.reviewer;
-  assert.ok(reviewer);
-  const record: AttemptRecord = {
-    schemaVersion: 1,
-    attempt,
-    status: "completed",
-    startedAt: "2026-01-01T00:00:00.000Z",
-    completedAt: "2026-01-01T00:01:00.000Z",
-    result,
-    sessionId: reviewer.id,
-    rawStdoutPath: null,
-    rawStderrPath: null,
-    durationMs: 60_000,
-    usage: null,
-    error: null,
-    ...(legacyPolicy
-      ? {}
-      : {
-          sessionMode: "resumed" as const,
-          reviewMode: "delta" as const,
-          rotationReason: null,
-          resumeSessionId: reviewer.id,
-          sessionContext: {
-            role: "reviewer" as const,
-            executable: reviewer.executable,
-            model: reviewer.model,
-            effort: reviewer.effort
-          }
-        })
-  };
-  await runner.store.writeRunAttempt(reviewing.runId, record);
-  return { repository, adapters, runner, reviewer };
-}
-
 test("a quick-fix route skips strict planning and independent review", async () => {
   const repository = await createTestRepository();
   try {
@@ -1023,11 +986,8 @@ test("a quick-fix route skips strict planning and independent review", async () 
     assert.equal(state.metrics.attempts.review, 0);
     assert.equal(adapters.phasePrompts.length, 1);
     assert.match(adapters.phasePrompts[0] ?? "", /# Lite Quick-Fix Phase/);
-    assert.match(adapters.phasePrompts[0] ?? "", /"id": "custom"/);
-    assert.match(
-      adapters.phasePrompts[0] ?? "",
-      /"argv": \[\s+"-e",\s+"process\.exit\(0\)"\s+\]/
-    );
+    assert.match(adapters.phasePrompts[0] ?? "", /Verification is task-scoped/);
+
     assert.ok(
       progress.some(
         (event) =>
@@ -1480,7 +1440,7 @@ test("a feature route receives its embedded phase and ends after verification", 
       adapters.phasePrompts[0] ?? "",
       /Use the available Skill tool/
     );
-    assert.match(adapters.phasePrompts[0] ?? "", /"id": "custom"/);
+    assert.match(adapters.phasePrompts[0] ?? "", /Verification is task-scoped/);
   } finally {
     await repository.dispose();
   }
@@ -1597,58 +1557,6 @@ test("interrupted read-only selection is retryable with a fresh attempt", async 
     const retried = await runner.retry();
     assert.equal(retried.status, "needs_plan_approval");
     assert.equal(retried.metrics.attempts.selection, 2);
-  } finally {
-    await repository.dispose();
-  }
-});
-
-test("a legacy run without workflow selection remains on the strict path", async () => {
-  const repository = await createTestRepository();
-  try {
-    const adapters = new FakeAdapters();
-    adapters.reviewResults.push(passingReview());
-    const runner = new WorkflowRunner(repository.root, adapters);
-    const planned = await runner.start({
-      slug: "example",
-      request: "Plan the existing legacy request."
-    });
-    assert.equal(planned.status, "needs_plan_approval");
-    const approvedPlanBytes = await readFile(
-      path.join(repository.root, planPath),
-      "utf8"
-    );
-
-    planned.schemaVersion = 3;
-    delete planned.verificationMode;
-    delete planned.configurationSetup;
-    delete planned.artifactBinding;
-    delete planned.workflowSelection;
-    delete planned.metrics.attempts.selection;
-    await runner.store.writeState(planned);
-
-    const done = await runner.approvePlan("human");
-    assert.equal(
-      done.status,
-      "done",
-      JSON.stringify({
-        blockReason: done.blockReason,
-        blockedFrom: done.blockedFrom,
-        activeAttempt: done.activeAttempt
-      })
-    );
-    assert.equal(
-      await readFile(path.join(repository.root, planPath), "utf8"),
-      approvedPlanBytes
-    );
-    assert.ok(done.planApproval);
-    assert.equal(
-      (await digestArtifactBundle(repository.root, done.planApproval.paths))
-        .digest,
-      done.planApproval.digest
-    );
-    assert.equal(done.workflowSelection, undefined);
-    assert.equal(done.reviewIteration, 1);
-    assert.equal(done.metrics.attempts.review, 1);
   } finally {
     await repository.dispose();
   }
@@ -1800,7 +1708,7 @@ test("a fix that edits the published completion region is republished from the c
         if (isFix) {
           // Mirrors the observed defect: an accepted overstatement finding
           // led the fixer to edit the published region row directly.
-          const reportPath = path.join(
+          const reportPath = await boundFixturePath(
             request.repoRoot,
             "documentation/features/example/implementation-report.md"
           );
@@ -1862,7 +1770,7 @@ test("a fix that edits the published completion region is republished from the c
     assert.notEqual(completion.publisherAttemptId, completion.sourceAttemptId);
     assert.match(completion.publisherAttemptId ?? "", /^fix-/);
     const report = await readFile(
-      path.join(
+      await boundFixturePath(
         repository.root,
         "documentation/features/example/implementation-report.md"
       )
@@ -1930,7 +1838,7 @@ test("a plan with a malformed task heading fails before the approval gate", asyn
         const result = await super.runPhase(request);
         if (request.prompt.includes("Phase: plan") && corruptNextPlan) {
           corruptNextPlan = false;
-          const planFile = path.join(request.repoRoot, planPath);
+          const planFile = await boundFixturePath(request.repoRoot, planPath);
           const contents = await readFile(planFile, "utf8");
           await writeFile(
             planFile,
@@ -1974,7 +1882,7 @@ test("plan approval refuses a bundle whose task grammar broke after the gate", a
       request: "Implement it."
     });
     assert.equal(planned.status, "needs_plan_approval");
-    const planFile = path.join(repository.root, planPath);
+    const planFile = await boundFixturePath(repository.root, planPath);
     const contents = await readFile(planFile, "utf8");
     await writeFile(
       planFile,
@@ -2012,7 +1920,7 @@ test("an approved plan with malformed headings retries into planning, never an e
     // Emulate a bundle that was approved malformed — the pre-guard state this
     // repair path exists for: corrupt the heading and re-bind the recorded
     // approval digest to the corrupted bytes.
-    const planFile = path.join(repository.root, planPath);
+    const planFile = await boundFixturePath(repository.root, planPath);
     const contents = await readFile(planFile, "utf8");
     await writeFile(
       planFile,
@@ -2075,7 +1983,7 @@ test("an accepted-finding fix refreshes the canonical ledger in one attempt", as
         this.emitFixTerminalCheckpoint = emitFixCheckpoint;
         if (isFix && applied.result.taskCompletion !== null) {
           await writeFile(
-            path.join(
+            await boundFixturePath(
               request.repoRoot,
               "documentation/features/example/implementation-report.md"
             ),
@@ -2187,7 +2095,7 @@ test("a rejected fix ledger refresh is repairable by rerunning the fix", async (
       failedFix
     );
     assert.equal(failedRecord.status, "failed");
-    assert.equal(failedRecord.schemaVersion, 3);
+    assert.equal(failedRecord.schemaVersion, 4);
     assert.equal(failedRecord.retryOf, null);
 
     const status = await runner.status();
@@ -2237,7 +2145,7 @@ test("an externally mutated approved bundle restores from the snapshot and retri
     const approved = await runner.approvePlan("human", false);
     assert.equal(approved.status, "plan_approved");
 
-    const planFile = path.join(repository.root, planPath);
+    const planFile = await boundFixturePath(repository.root, planPath);
     const approvedBytes = await readFile(planFile, "utf8");
     await writeFile(
       planFile,
@@ -2257,7 +2165,13 @@ test("an externally mutated approved bundle restores from the snapshot and retri
     const eligibility = await runner.restoreEligibility();
     assert.equal(eligibility.eligible, true, eligibility.reason);
     const restored = await runner.restoreApproval();
-    assert.ok(restored.includes(planPath));
+    assert.ok(
+      restored.includes(
+        requiredFixture(
+          requiredFixture(planned.artifactBinding).binding.artifacts.plan
+        )
+      )
+    );
     assert.equal(await readFile(planFile, "utf8"), approvedBytes);
 
     const done = await runner.retry();
@@ -2296,7 +2210,7 @@ test("a fix-checks approval failure restores and retries from the fixing block",
     );
     assert.equal(fixing.status, "fixing");
 
-    const planFile = path.join(repository.root, planPath);
+    const planFile = await boundFixturePath(repository.root, planPath);
     const approvedBytes = await readFile(planFile, "utf8");
     await writeFile(
       planFile,
@@ -2372,12 +2286,13 @@ test("a Codex reviewer gets its artifact rendered by the runner", async () => {
       false
     );
 
+    assert.ok(completed.latestReview?.artifactPath);
     const artifact = path.join(
       repository.root,
-      "documentation/features/codex-review/review-1.md"
+      completed.latestReview.artifactPath
     );
     const rendered = await readFile(artifact, "utf8");
-    assert.match(rendered, /banzai-feature-review\/v6/);
+    assert.match(rendered, /banzai-feature-review\/v7/);
     assert.match(rendered, /pass/);
   } finally {
     await repository.dispose();
@@ -2595,7 +2510,7 @@ for (const [artifactLayout, writeChangeReport] of [
         prompt.includes("Phase: implementation")
       );
       assert.ok(implementationPrompt);
-      assert.match(implementationPrompt, /"id": "custom"/);
+      assert.match(implementationPrompt, /Verification is task-scoped/);
       assert.ok(fixPrompt?.includes("R1-F1"));
       assert.ok(fixPrompt);
       const roles = done.artifactBinding?.binding.artifacts;
@@ -2638,7 +2553,7 @@ for (const [artifactLayout, writeChangeReport] of [
           `Latest review artifact: ${reviewed.latestReview.artifactPath}`
         )
       );
-      assert.match(fixPrompt, /"id": "custom"/);
+      assert.match(fixPrompt, /Verification is task-scoped/);
       assert.equal(adapters.reviewPrompts.length, 2);
       assert.match(adapters.reviewPrompts[0] ?? "", /fresh full reviewer/);
       assert.match(adapters.reviewPrompts[1] ?? "", /resumed delta review/);
@@ -3226,7 +3141,12 @@ test("six approved tasks require six canonical records before verification and s
     });
     assert.equal(approvalGate.status, "needs_plan_approval");
     const approvalDigest = (
-      await digestArtifactBundle(repository.root, [descriptionPath, planPath])
+      await digestArtifactBundle(repository.root, [
+        requiredFixture(
+          requiredFixture(approvalGate.planArtifacts).description
+        ),
+        requiredFixture(requiredFixture(approvalGate.planArtifacts).plan)
+      ])
     ).digest;
 
     const done = await runner.approvePlan("human");
@@ -3320,7 +3240,7 @@ test("a malformed completion payload on an escalating implementation keeps the s
     );
     assert.ok(record);
     assert.equal(record.status, "completed");
-    assert.equal(record.schemaVersion, 3);
+    assert.equal(record.schemaVersion, 4);
     assert.equal(record.completionDiagnostic?.violation, "missing_task");
     assert.match(record.completionDiagnostic.message, /missing T001/);
     assert.equal(
@@ -3490,7 +3410,7 @@ test("a model-authored legacy completion table is replaced by the runner-publish
       adapters.phasePrompts.every((prompt) => !/repair retry/i.test(prompt))
     );
     const report = await readFile(
-      path.join(
+      await boundFixturePath(
         repository.root,
         "documentation/features/example/implementation-report.md"
       )
@@ -3554,42 +3474,6 @@ test("a reviewer pass cannot reach done after completion evidence becomes invali
   }
 });
 
-test("legacy terminal status keeps lifecycle and next action while completion stays unknown", async () => {
-  const repository = await createTestRepository();
-  try {
-    const adapters = new FakeAdapters();
-    const runner = new WorkflowRunner(repository.root, adapters);
-    await runner.start({ slug: "example", request: "Plan it." });
-    const legacy = await runner.approvePlan("human", false);
-    legacy.status = "done";
-    delete legacy.planTaskCompletion;
-    await mkdir(path.join(repository.root, "documentation/features/example"), {
-      recursive: true
-    });
-    await writeFile(
-      path.join(
-        repository.root,
-        "documentation/features/example/implementation-report.md"
-      ),
-      "# Legacy report\n\nNo task table.\n",
-      "utf8"
-    );
-    await runner.store.writeState(legacy);
-
-    const status = await runner.status();
-    assert.equal(status.state.status, "done");
-    assert.equal(status.nextAction, null);
-    assert.equal(status.taskCompletion.state, "legacy");
-    assert.equal(status.taskCompletion.completed, null);
-    assert.match(
-      status.taskCompletion.diagnostics[0]?.message ?? "",
-      /missing ## Plan Task Completion/
-    );
-  } finally {
-    await repository.dispose();
-  }
-});
-
 test("a blocked review verdict rotates before an explicit retry", async () => {
   const repository = await createTestRepository();
   try {
@@ -3633,7 +3517,7 @@ test("approval digest drift blocks implementation before another model call", as
     await runner.start({ slug: "example", request: "Plan it." });
     await runner.approvePlan("human", false);
     await writeFile(
-      path.join(repository.root, planPath),
+      await boundFixturePath(repository.root, planPath),
       "# Plan\n\nChanged after approval.\n",
       "utf8"
     );
@@ -3652,7 +3536,7 @@ for (const editGuidance of [false, true]) {
   test(`plan authority approval and completion preserve optional bytes (edit=${editGuidance})`, async () => {
     const repository = await createTestRepository();
     try {
-      const plan = await readFile(
+      let plan = await readFile(
         path.join(
           process.cwd(),
           "test/fixtures/plan-authority/opted-in-plan.md"
@@ -3663,8 +3547,9 @@ for (const editGuidance of [false, true]) {
       adapters.reviewResults.push(passingReview());
       const runner = new WorkflowRunner(repository.root, adapters);
       await runner.start({ slug: "example", request: "Plan it." });
-      const target = path.join(repository.root, planPath);
-      await writeFile(target, plan);
+      const target = await boundFixturePath(repository.root, planPath);
+      await writeFixturePlan(target, plan);
+      plan = await readFile(target, "utf8");
       const approved = await runner.approvePlan("human", false);
       assert.ok(approved.planApproval);
       const snapshot = await runner.store.readApprovalSnapshot(approved.runId);
@@ -3672,7 +3557,9 @@ for (const editGuidance of [false, true]) {
       assert.equal(snapshot.digest, approved.planApproval.digest);
       assert.equal(
         snapshot.entries
-          .find((entry) => entry.path === planPath)
+          .find(
+            (entry) => entry.path === path.relative(repository.root, target)
+          )
           ?.contents.toString("utf8"),
         plan
       );
@@ -3693,7 +3580,7 @@ for (const editGuidance of [false, true]) {
         assert.equal(done.planTaskCompletion?.status, "valid");
         assert.equal(done.planTaskCompletion.counts.completed, 1);
         const report = await readFile(
-          path.join(
+          await boundFixturePath(
             repository.root,
             "documentation/features/example/implementation-report.md"
           ),
@@ -3975,49 +3862,6 @@ test("planning consultation rejects reused answered decision identities", async 
   }
 });
 
-test("resume reconciles a completed mutable attempt without repeating it", async () => {
-  const repository = await createTestRepository();
-  try {
-    const adapters = new FakeAdapters();
-    adapters.reviewResults.push(passingReview());
-    const runner = new WorkflowRunner(repository.root, adapters);
-    await runner.start({ slug: "example", request: "Plan it." });
-    const approved = await runner.approvePlan("human", false);
-
-    transitionState(approved, "implementing");
-    const attempt = {
-      id: "implementation-crash-window",
-      kind: "implementation" as const,
-      mutable: true
-    };
-    approved.activeAttempt = attempt;
-    await runner.store.writeState(approved);
-    const completedResult = phaseResult("implementation");
-    await writeImplementationArtifacts(repository.root, completedResult);
-    const record: AttemptRecord = {
-      schemaVersion: 1,
-      attempt,
-      status: "completed",
-      startedAt: "2026-01-01T00:00:00.000Z",
-      completedAt: "2026-01-01T00:01:00.000Z",
-      result: completedResult,
-      sessionId: "implementation-session",
-      rawStdoutPath: null,
-      rawStderrPath: null,
-      durationMs: 60_000,
-      usage: null,
-      error: null
-    };
-    await runner.store.writeRunAttempt(approved.runId, record);
-
-    const done = await runner.resume();
-    assert.equal(done.status, "done", done.blockReason ?? "");
-    assert.equal(adapters.phasePrompts.length, 1);
-  } finally {
-    await repository.dispose();
-  }
-});
-
 for (const artifactLayout of ["legacy", "private"] as const)
   test(`resume promotes a durable terminal checkpoint after parent interruption without another model call (${artifactLayout})`, async () => {
     const repository = await createTestRepository({ artifactLayout });
@@ -4216,7 +4060,7 @@ test("resume republishes a proven fix checkpoint's refreshed ledger without anot
     assert.equal(done.metrics.usage.inputTokens, usageBefore + 71);
     const record = await runner.store.readRunAttempt(done.runId, attempt);
     assert.equal(record.status, "completed");
-    assert.equal(record.schemaVersion, 3);
+    assert.equal(record.schemaVersion, 4);
     const completion = done.planTaskCompletion;
     assert.ok(completion?.status === "valid");
     assert.equal(completion.schemaVersion, 2);
@@ -4228,7 +4072,7 @@ test("resume republishes a proven fix checkpoint's refreshed ledger without anot
       implementationCompletion.ledgerDigest
     );
     const report = await readFile(
-      path.join(
+      await boundFixturePath(
         repository.root,
         "documentation/features/example/implementation-report.md"
       )
@@ -4271,146 +4115,6 @@ test("resume does not complete a review checkpoint before candidate validation",
     assert.equal(record.status, "failed");
   } finally {
     await repository.dispose();
-  }
-});
-
-test("resume reconciles completed delta review policy without another model call", async () => {
-  const fixture = await completedReviewReconciliationFixture(false);
-  try {
-    const promptsBeforeResume = fixture.adapters.reviewPrompts.length;
-    const done = await fixture.runner.resume();
-
-    assert.equal(done.status, "done", done.blockReason ?? "");
-    assert.equal(fixture.adapters.reviewPrompts.length, promptsBeforeResume);
-    const latestReview = done.latestReview;
-    const reviewer = done.sessions.reviewer;
-    assert.ok(latestReview);
-    assert.ok(reviewer);
-    assert.equal(latestReview.sessionMode, "resumed");
-    assert.equal(latestReview.mode, "delta");
-    assert.equal(latestReview.rotationReason, null);
-    assert.equal(reviewer.consecutiveDeltaReviews, 1);
-    assert.equal(
-      reviewer.lastFullIteration,
-      fixture.reviewer.lastFullIteration
-    );
-  } finally {
-    await fixture.repository.dispose();
-  }
-});
-
-test("resume completes a captured started review only from persisted passed candidate evidence", async () => {
-  const fixture = await completedReviewReconciliationFixture(false);
-  try {
-    const state = await fixture.runner.store.requireActiveState();
-    const attempt = state.activeAttempt;
-    assert.ok(attempt);
-    assert.equal(attempt.kind, "review");
-    const record = await fixture.runner.store.readRunAttempt(
-      state.runId,
-      attempt
-    );
-    const artifactPath = `documentation/features/${state.slug}/review-${state.reviewIteration}.md`;
-    const canonicalAbsolute = path.join(fixture.repository.root, artifactPath);
-    const contents = await readFile(canonicalAbsolute, "utf8");
-    const candidateAbsolute = fixture.runner.store.reviewCandidatePath(
-      state.runId,
-      attempt
-    );
-    await mkdir(path.dirname(candidateAbsolute), { recursive: true });
-    await writeFile(candidateAbsolute, contents, "utf8");
-    await rm(canonicalAbsolute);
-    record.status = "started";
-    record.completedAt = null;
-    record.reviewCandidate = {
-      source: "reviewer-write",
-      evidencePath: path.relative(
-        fixture.runner.store.runDirectory(state.runId),
-        candidateAbsolute
-      ),
-      intendedArtifactPath: artifactPath,
-      sha256: createHash("sha256").update(contents).digest("hex"),
-      validation: "passed",
-      validationCode: null,
-      validationError: null,
-      canonical: false
-    };
-    await fixture.runner.store.writeRunAttempt(state.runId, record);
-
-    const promptsBeforeResume = fixture.adapters.reviewPrompts.length;
-    const done = await fixture.runner.resume();
-    assert.equal(done.status, "done", done.blockReason ?? "");
-    assert.equal(fixture.adapters.reviewPrompts.length, promptsBeforeResume);
-    assert.equal(await readFile(canonicalAbsolute, "utf8"), contents);
-    assert.equal(
-      done.metrics.completedAttemptIds.filter((id) => id === attempt.id).length,
-      1
-    );
-    const completed = await fixture.runner.store.readRunAttempt(
-      state.runId,
-      attempt
-    );
-    assert.equal(completed.status, "completed");
-    assert.equal(completed.reviewCandidate?.validation, "passed");
-  } finally {
-    await fixture.repository.dispose();
-  }
-});
-
-test("resume rejects malformed candidate identity without applying completed review output", async () => {
-  const fixture = await completedReviewReconciliationFixture(false);
-  try {
-    const state = await fixture.runner.store.requireActiveState();
-    const attempt = state.activeAttempt;
-    assert.ok(attempt);
-    const record = await fixture.runner.store.readRunAttempt(
-      state.runId,
-      attempt
-    );
-    record.reviewCandidate = {
-      source: "reviewer-write",
-      evidencePath: "reviews/review-2.json",
-      intendedArtifactPath: "documentation/features/example/review-2.md",
-      sha256: "a".repeat(64),
-      validation: "passed",
-      validationCode: null,
-      validationError: null,
-      canonical: false
-    };
-    await fixture.runner.store.writeRunAttempt(state.runId, record);
-
-    const blocked = await fixture.runner.resume();
-    assert.equal(blocked.status, "blocked");
-    assert.equal(blocked.latestReview?.iteration, 1);
-    assert.equal(blocked.pendingReviewRotationReason, "unreliable-review");
-    assert.match(
-      blocked.blockReason ?? "",
-      /malformed candidate evidence identity/
-    );
-  } finally {
-    await fixture.repository.dispose();
-  }
-});
-
-test("completed legacy review attempt reconciles with fresh full fallback", async () => {
-  const fixture = await completedReviewReconciliationFixture(true);
-  try {
-    const promptsBeforeResume = fixture.adapters.reviewPrompts.length;
-    const done = await fixture.runner.resume();
-
-    assert.equal(done.status, "done", done.blockReason ?? "");
-    assert.equal(fixture.adapters.reviewPrompts.length, promptsBeforeResume);
-    const latestReview = done.latestReview;
-    const reviewer = done.sessions.reviewer;
-    assert.ok(latestReview);
-    assert.ok(reviewer);
-    assert.equal(latestReview.sessionMode, "fresh");
-    assert.equal(latestReview.mode, "full");
-    assert.equal(latestReview.rotationReason, "legacy-state");
-    assert.equal(reviewer.consecutiveDeltaReviews, 0);
-    assert.equal(reviewer.lastFullIteration, 2);
-  } finally {
-    await fixture.repository.dispose();
   }
 });
 
@@ -4497,7 +4201,15 @@ test("planning retry resumes the early saved session and preserves failed eviden
     );
     assert.equal(source.sessionId, "planner-session");
     assert.ok(source.planningContext?.workspaceDigest);
-    assert.ok(source.planningContext.artifactPaths.includes(planPath));
+    assert.ok(
+      source.planningContext.artifactPaths.includes(
+        blocked.planArtifacts?.plan ??
+          path.relative(
+            repository.root,
+            await boundFixturePath(repository.root, planPath)
+          )
+      )
+    );
     assert.deepEqual(blocked.metrics.usage, adapters.planningUsage);
     assert.ok(!blocked.metrics.completedAttemptIds.includes(source.attempt.id));
     assert.ok(source.rawStdoutPath);
@@ -5140,7 +4852,7 @@ test("review rendering failures retain primary evidence and make zero formatting
         );
         await assert.rejects(
           readFile(
-            path.join(
+            await boundFixturePath(
               repository.root,
               "documentation/features/example/review-1.md"
             )
@@ -5175,7 +4887,13 @@ test("retry reruns a failed review in a fresh attempt", async () => {
     assert.equal(done.latestReview?.iteration, 1);
     assert.equal(
       done.latestReview.artifactPath,
-      "documentation/features/example/review-1.md"
+      path.relative(
+        repository.root,
+        await boundFixturePath(
+          repository.root,
+          "documentation/features/example/review-1.md"
+        )
+      )
     );
     assert.equal(done.metrics.attempts.review, 2);
     assert.equal(adapters.reviewPrompts.length, 2);
@@ -5259,7 +4977,13 @@ test("invalid review candidate retains diagnostic evidence and retry publishes w
     assert.deepEqual(failedRecord.reviewCandidate, {
       source: "runner-rendered",
       evidencePath: `attempts/${failedAttempt.id}.review-candidate.md`,
-      intendedArtifactPath: "documentation/features/example/review-2.md",
+      intendedArtifactPath: path.relative(
+        repository.root,
+        await boundFixturePath(
+          repository.root,
+          "documentation/features/example/review-2.md"
+        )
+      ),
       sha256: failedRecord.reviewCandidate.sha256,
       validation: "failed",
       validationCode: "INVALID_REVIEW_ARTIFACT",
@@ -5300,7 +5024,7 @@ test("invalid review candidate retains diagnostic evidence and retry publishes w
     );
     await assert.rejects(
       readFile(
-        path.join(
+        await boundFixturePath(
           repository.root,
           "documentation/features/example/review-2.md"
         ),
@@ -5337,9 +5061,10 @@ test("invalid review candidate retains diagnostic evidence and retry publishes w
       path.join(repository.root, retryArtifactPath),
       "utf8"
     );
-    assert.match(
-      canonicalRetry,
-      /"documentation\/features\/example\/description\.md"/
+    assert.ok(
+      canonicalRetry.includes(
+        JSON.stringify(requiredFixture(done.planArtifacts).description)
+      )
     );
     const attemptFiles = (
       await readdir(path.join(runDirectory, "attempts"))
@@ -6809,7 +6534,13 @@ test("another active run is rejected even after the checkout is cleaned", async 
     const firstAdapters = new FakeAdapters();
     const first = new WorkflowRunner(repository.root, firstAdapters);
     await first.start({ slug: "example", request: "First run." });
-    await commitAll(repository.root, "planning artifacts");
+    assert.equal(
+      spawnSync("git", ["status", "--porcelain"], {
+        cwd: repository.root,
+        encoding: "utf8"
+      }).stdout.trim(),
+      ""
+    );
 
     const secondAdapters = new FakeAdapters();
     const second = new WorkflowRunner(repository.root, secondAdapters);
@@ -6841,14 +6572,14 @@ test("failed deterministic verification blocks review", async () => {
     await runner.start({ slug: "example", request: "Implement it." });
     const blocked = await runner.approvePlan("human");
     assert.equal(blocked.status, "blocked");
-    assert.equal(blocked.verification[0]?.exitCode, 7);
+    assert.equal(blocked.taskVerification?.attempts[0]?.exitCode, 7);
     assert.equal(adapters.reviewPrompts.length, 0);
   } finally {
     await repository.dispose();
   }
 });
 
-test("verification executes profiles in declared order and stops on failure", async () => {
+test("verification executes task checks in selected order and stops on failure", async () => {
   const repository = await createTestRepository();
   try {
     const configPath = path.join(repository.root, ".banzai", "config.json");
@@ -6902,6 +6633,7 @@ test("verification executes profiles in declared order and stops on failure", as
       };
     };
     const adapters = new FakeAdapters();
+    adapters.fixtureTaskChecks = true;
     adapters.selectionResults.push(
       selectionResult({
         recommendedWorkflow: "feature",
@@ -6918,73 +6650,10 @@ test("verification executes profiles in declared order and stops on failure", as
     assert.equal(blocked.status, "blocked");
     assert.deepEqual(observed, ["first", "second"]);
     assert.deepEqual(
-      blocked.verification.map((result) => result.name),
-      ["first", "second"]
+      blocked.taskVerification?.attempts.map((result) => result.checkId),
+      ["node-primary-1", "node-primary-2"]
     );
-    assert.equal(blocked.verification[1]?.exitCode, 7);
-  } finally {
-    await repository.dispose();
-  }
-});
-
-test("legacy schema verification commands remain executable in order", async () => {
-  const repository = await createTestRepository();
-  try {
-    const configPath = path.join(repository.root, ".banzai", "config.json");
-    const config = JSON.parse(await readFile(configPath, "utf8")) as Record<
-      string,
-      unknown
-    >;
-    config.schemaVersion = 1;
-    config.verification = [
-      {
-        name: "legacy-first",
-        command: process.execPath,
-        args: ["-e", "legacy-first"],
-        timeoutMs: 1_000
-      },
-      {
-        name: "legacy-second",
-        command: process.execPath,
-        args: ["-e", "legacy-second"],
-        timeoutMs: 1_000
-      }
-    ];
-    await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
-    await commitAll(repository.root, "legacy verification config");
-
-    const observed: string[] = [];
-    const processRunner: ProcessRunner = async (spec) => {
-      observed.push(spec.args[1] ?? "");
-      return {
-        exitCode: 0,
-        signal: null,
-        stdout: "",
-        stderr: "",
-        startedAt: "2026-01-01T00:00:00.000Z",
-        completedAt: "2026-01-01T00:00:01.000Z"
-      };
-    };
-    const adapters = new FakeAdapters();
-    adapters.selectionResults.push(
-      selectionResult({
-        recommendedWorkflow: "feature",
-        reason: "Exercise legacy verification compatibility."
-      })
-    );
-    const runner = new WorkflowRunner(repository.root, adapters, processRunner);
-
-    const done = await runner.start({
-      slug: "legacy-verification",
-      request: "Exercise legacy verification."
-    });
-
-    assert.equal(done.status, "done", done.blockReason ?? "");
-    assert.deepEqual(observed, ["legacy-first", "legacy-second"]);
-    assert.deepEqual(
-      done.verification.map((result) => result.name),
-      ["legacy-first", "legacy-second"]
-    );
+    assert.equal(blocked.taskVerification.attempts[1]?.exitCode, 7);
   } finally {
     await repository.dispose();
   }
@@ -6994,6 +6663,7 @@ test("resume reconciles a durable completed verification leaf without executing 
   const repository = await createTestRepository();
   try {
     const adapters = new FakeAdapters();
+    adapters.fixtureTaskChecks = true;
     adapters.selectionResults.push(
       selectionResult({ recommendedWorkflow: "feature" })
     );
@@ -7025,11 +6695,18 @@ test("resume reconciles a durable completed verification leaf without executing 
     assert.deepEqual(
       JSON.parse(
         await readFile(
-          path.join(runDirectory, "verification-attempts", "ledger.json"),
+          path.join(
+            repository.root,
+            requiredFixture(
+              requiredFixture(done.artifactBinding).binding.artifacts
+                .verificationDirectory
+            ),
+            "ledger.json"
+          ),
           "utf8"
         )
       ),
-      { schemaVersion: 1 }
+      { schemaVersion: 3 }
     );
     const statePath = path.join(runDirectory, "state.json");
     const persisted = JSON.parse(await readFile(statePath, "utf8")) as Record<
@@ -7052,83 +6729,19 @@ test("resume reconciles a durable completed verification leaf without executing 
     assert.equal(resumed.status, "done");
     assert.equal(executions, 1);
     const files = (
-      await readdir(path.join(runDirectory, "verification-attempts"))
+      await readdir(
+        path.join(
+          repository.root,
+          requiredFixture(
+            requiredFixture(done.artifactBinding).binding.artifacts
+              .verificationDirectory
+          ),
+          "attempts"
+        )
+      )
     ).filter((name) => name !== "ledger.json");
-    assert.equal(files.length, 1);
+    assert.equal(files.length, 2);
     assert.equal(resumed.metrics.attempts.verification, 1);
-  } finally {
-    await repository.dispose();
-  }
-});
-
-test("resume preserves legacy verification behavior when the ledger marker is absent", async () => {
-  const repository = await createTestRepository();
-  try {
-    const adapters = new FakeAdapters();
-    adapters.selectionResults.push(
-      selectionResult({ recommendedWorkflow: "feature" })
-    );
-    let executions = 0;
-    const processRunner: ProcessRunner = async () => {
-      executions += 1;
-      return {
-        exitCode: 0,
-        signal: null,
-        stdout: "",
-        stderr: "",
-        startedAt: new Date().toISOString(),
-        completedAt: new Date().toISOString()
-      };
-    };
-    const done = await new WorkflowRunner(
-      repository.root,
-      adapters,
-      processRunner
-    ).start({
-      slug: "legacy-verification-resume",
-      request: "Exercise legacy verification resume compatibility."
-    });
-    assert.equal(done.status, "done", done.blockReason ?? "");
-    const runDirectory = path.join(
-      repository.root,
-      ".banzai",
-      "runs",
-      done.runId
-    );
-    await rm(path.join(runDirectory, "verification-attempts"), {
-      recursive: true
-    });
-    const statePath = path.join(runDirectory, "state.json");
-    const persisted = JSON.parse(await readFile(statePath, "utf8")) as Record<
-      string,
-      unknown
-    >;
-    persisted.status = "verifying";
-    persisted.verification = [];
-    persisted.activeProcess = null;
-    await writeFile(
-      statePath,
-      `${JSON.stringify(persisted, null, 2)}\n`,
-      "utf8"
-    );
-    executions = 0;
-
-    const resumed = await new WorkflowRunner(
-      repository.root,
-      adapters,
-      processRunner
-    ).resume();
-    assert.equal(resumed.status, "done");
-    assert.equal(executions, 1);
-    assert.equal(resumed.metrics.attempts.verification, 2);
-    assert.equal(resumed.verification.length, 1);
-    await assert.rejects(
-      readFile(
-        path.join(runDirectory, "verification-attempts", "ledger.json"),
-        "utf8"
-      ),
-      { code: "ENOENT" }
-    );
   } finally {
     await repository.dispose();
   }
@@ -7138,6 +6751,7 @@ test("an explicit verification retry gets a new linked identity and durable retr
   const repository = await createTestRepository();
   try {
     const adapters = new FakeAdapters();
+    adapters.fixtureTaskChecks = true;
     adapters.selectionResults.push(
       selectionResult({ recommendedWorkflow: "feature" })
     );
@@ -7168,22 +6782,17 @@ test("an explicit verification retry gets a new linked identity and durable retr
     assert.equal(done.status, "done", done.blockReason ?? "");
     assert.equal(executions, 2);
     assert.equal(done.metrics.attempts.verification, 2);
-    assert.equal(done.verification.length, 1);
-    assert.equal(done.verification[0]?.exitCode, 0);
+    assert.equal(done.taskVerification?.applicability.complete, true);
     const runDirectory = runner.store.runDirectory(done.runId);
-    const attemptsDirectory = path.join(runDirectory, "verification-attempts");
-    const files = (await readdir(attemptsDirectory))
-      .filter((name) => name !== "ledger.json")
-      .sort();
-    assert.equal(files.length, 2);
-    const records = await Promise.all(
-      files.map(
-        async (file) =>
-          JSON.parse(
-            await readFile(path.join(attemptsDirectory, file), "utf8")
-          ) as VerificationAttemptRecord
+    const records = await readTaskVerificationAttempts({
+      repoRoot: repository.root,
+      workId: requiredFixture(done.artifactBinding).binding.workId,
+      directory: requiredFixture(
+        requiredFixture(done.artifactBinding).binding.artifacts
+          .verificationDirectory
       )
-    );
+    });
+    assert.equal(records.length, 2);
     records.sort((left, right) => left.sequence - right.sequence);
     const [failed, retried] = records;
     assert.ok(failed);
@@ -7191,7 +6800,6 @@ test("an explicit verification retry gets a new linked identity and durable retr
     assert.equal(failed.status, "failed");
     assert.equal(retried.status, "completed");
     assert.equal(retried.retryOf, failed.id);
-    assert.equal(retried.restartOf, null);
     assert.match(
       await readFile(path.join(runDirectory, "events.jsonl"), "utf8"),
       /"type":"verification\.retry_requested"/
@@ -7205,6 +6813,7 @@ test("resume closes an interrupted durable verification leaf and links one resta
   const repository = await createTestRepository();
   try {
     const adapters = new FakeAdapters();
+    adapters.fixtureTaskChecks = true;
     adapters.selectionResults.push(
       selectionResult({ recommendedWorkflow: "feature" })
     );
@@ -7232,30 +6841,33 @@ test("resume closes an interrupted durable verification leaf and links one resta
       "runs",
       done.runId
     );
-    const attemptsDirectory = path.join(runDirectory, "verification-attempts");
-    const originalFile = (await readdir(attemptsDirectory)).find(
-      (name) => name !== "ledger.json"
-    );
-    assert.ok(originalFile);
-    const originalPath = path.join(attemptsDirectory, originalFile);
-    const original = JSON.parse(
-      await readFile(originalPath, "utf8")
-    ) as VerificationAttemptRecord;
-    const started: VerificationAttemptRecord = {
-      ...original,
-      status: "started",
-      completedAt: null,
-      durationMs: null,
-      exitCode: null,
-      signal: null,
-      failureCategory: null,
-      stdout: null,
-      stderr: null
+    const storage = {
+      repoRoot: repository.root,
+      workId: requiredFixture(done.artifactBinding).binding.workId,
+      directory: requiredFixture(
+        requiredFixture(done.artifactBinding).binding.artifacts
+          .verificationDirectory
+      )
     };
-    await writeFile(
-      originalPath,
-      `${JSON.stringify(started, null, 2)}\n`,
-      "utf8"
+    const attemptsDirectory = path.join(
+      repository.root,
+      storage.directory,
+      "attempts"
+    );
+    const [original] = await readTaskVerificationAttempts(storage);
+    assert.ok(original);
+    const finish = (await readdir(attemptsDirectory)).find((name) =>
+      name.endsWith(".finish.json")
+    );
+    assert.ok(finish);
+    await rm(path.join(attemptsDirectory, finish));
+    await rm(
+      path.join(
+        repository.root,
+        storage.directory,
+        "origins",
+        `${original.id}.finish.json`
+      )
     );
     const statePath = path.join(runDirectory, "state.json");
     const persisted = JSON.parse(await readFile(statePath, "utf8")) as Record<
@@ -7279,25 +6891,15 @@ test("resume closes an interrupted durable verification leaf and links one resta
     ).resume();
     assert.equal(resumed.status, "done");
     assert.equal(executions, 1);
-    const files = (await readdir(attemptsDirectory))
-      .filter((name) => name !== "ledger.json")
-      .sort();
-    assert.equal(files.length, 2);
-    const records = await Promise.all(
-      files.map(
-        async (file) =>
-          JSON.parse(
-            await readFile(path.join(attemptsDirectory, file), "utf8")
-          ) as VerificationAttemptRecord
-      )
-    );
+    const records = await readTaskVerificationAttempts(storage);
+    assert.equal(records.length, 2);
     records.sort((left, right) => left.sequence - right.sequence);
     const [interrupted, restarted] = records;
     assert.ok(interrupted);
     assert.ok(restarted);
     assert.equal(interrupted.status, "interrupted");
     assert.equal(restarted.status, "completed");
-    assert.equal(restarted.restartOf, interrupted.id);
+    assert.equal(restarted.retryOf, interrupted.id);
     assert.equal(resumed.metrics.attempts.verification, 2);
   } finally {
     await repository.dispose();
@@ -7820,7 +7422,14 @@ test("cancellation: late verification registration leaves interrupted evidence a
     const state = await runner.approvePlan("human");
     assert.equal(state.status, "cancelled");
     assert.equal(adapters.reviewPrompts.length, 0);
-    const attempts = await runner.store.readVerificationAttempts(state.runId);
+    const attempts = await readTaskVerificationAttempts({
+      repoRoot: repository.root,
+      workId: requiredFixture(state.artifactBinding).binding.workId,
+      directory: requiredFixture(
+        requiredFixture(state.artifactBinding).binding.artifacts
+          .verificationDirectory
+      )
+    });
     assert.equal(attempts.at(-1)?.status, "interrupted");
   } finally {
     await repository.dispose();
@@ -7841,8 +7450,13 @@ class LayoutStopAdapters extends FakeAdapters {
     ) {
       this.phasePrompts.push(request.prompt);
       this.phaseResumeSessionIds.push(request.resumeSessionId);
-      const reportPath =
-        "documentation/features/example/implementation-report.md";
+      const reportPath = path.relative(
+        request.repoRoot,
+        await boundFixturePath(
+          request.repoRoot,
+          "documentation/features/example/implementation-report.md"
+        )
+      );
       const strictImplementation =
         this.stopPhase === "implementation" &&
         !request.prompt.includes("Selected workflow:");
@@ -8304,11 +7918,11 @@ test("review v2 publication and application interruptions reconcile exactly once
       const adapters = new FakeAdapters();
       adapters.reviewResults.push(passingReview());
       const runner = new WorkflowRunner(repository.root, adapters);
-      const artifact = path.join(
+      await runner.start({ slug: "example", request: "Implement it." });
+      const artifact = await boundFixturePath(
         repository.root,
         "documentation/features/example/review-1.md"
       );
-      await runner.start({ slug: "example", request: "Implement it." });
       let injected = false;
       const write = runner.store.writeText.bind(runner.store);
       runner.store.writeText = async (id, relative, text) => {
@@ -8468,7 +8082,10 @@ test("review v2 truthful layout blockers publish incomplete coverage without com
     assert.equal(adapters.reviewPrompts.length, 1);
     assert.equal(blocked.triage, null);
     const contents = await readFile(
-      path.join(repository.root, "documentation/features/example/review-1.md"),
+      await boundFixturePath(
+        repository.root,
+        "documentation/features/example/review-1.md"
+      ),
       "utf8"
     );
     assert.match(contents, /not_reviewed/);
@@ -8525,7 +8142,10 @@ test("review v2 retains schema-valid rejected scope and terminal proof before co
     assert.equal(adapters.reviewPrompts.length, 1);
     await assert.rejects(
       readFile(
-        path.join(repository.root, "documentation/features/example/review-1.md")
+        await boundFixturePath(
+          repository.root,
+          "documentation/features/example/review-1.md"
+        )
       ),
       /ENOENT/
     );
@@ -8722,7 +8342,7 @@ test("adoption saved ADR, answer and triage survive refused automatic continuati
     });
 });
 
-test("adoption zero-accepted triage remains a non-model completion despite missing guidance", async () => {
+test("adoption zero-accepted triage does not complete with stale evidence after guidance removal", async () => {
   const repository = await createTestRepository();
   try {
     const adapters = new FakeAdapters();
@@ -8743,7 +8363,12 @@ test("adoption zero-accepted triage remains a non-model completion despite missi
       note: "No change required.",
       decidedBy: "human"
     });
-    assert.equal(done.status, "done", done.blockReason ?? "");
+    assert.equal(done.status, "blocked");
+    assert.match(
+      done.blockReason ?? "",
+      /verification is unavailable or stale/
+    );
+    assert.equal(done.triage?.items[0]?.disposition, "rejected");
     assert.equal(adapters.phasePrompts.length, calls);
   } finally {
     await repository.dispose();
@@ -9166,7 +8791,7 @@ for (const artifactLayout of ["legacy", "private"] as const) {
                 "utf8"
               )
             ) as RunState;
-            assert.equal(state.schemaVersion, 6);
+            assert.equal(state.schemaVersion, 8);
             assert.equal(state.workflowSelection, null);
             assert.equal(state.artifactBinding?.binding.mode, "workflow");
             originalBinding = await readFile(
@@ -9210,7 +8835,8 @@ for (const artifactLayout of ["legacy", "private"] as const) {
           ),
           originalBinding
         );
-        assert.equal(bound.binding.layout, artifactLayout);
+        assert.equal(bound.binding.layout, "private");
+        assert.equal(bound.binding.schemaVersion, 2);
         if (workflow === "strict") {
           assert.ok(state.latestReview?.artifactPath);
           assert.match(
@@ -9218,7 +8844,7 @@ for (const artifactLayout of ["legacy", "private"] as const) {
               path.join(repository.root, state.latestReview.artifactPath),
               "utf8"
             ),
-            /banzai-feature-review\/v6/u
+            /banzai-feature-review\/v7/u
           );
           assert.equal(state.planTaskCompletion?.status, "valid");
         }
@@ -9359,7 +8985,7 @@ for (const context of [
       assert.equal(state.artifactBinding?.binding.layout, "private");
       // The lite feature workflow never enters the completion protocol, so the
       // run keeps the bootstrap schema.
-      assert.equal(state.schemaVersion, 6);
+      assert.equal(state.schemaVersion, 8);
       assert.ok(
         (await readFile(runner.store.statePath(state.runId), "utf8")).includes(
           state.runId
@@ -9491,7 +9117,7 @@ test("accepted F10 public doctor recognizes actual v4 runs and rejects binding d
       slug: "doctor",
       request: "Inspect a current run."
     });
-    assert.equal(state.schemaVersion, 6);
+    assert.equal(state.schemaVersion, 8);
     assert.ok(state.artifactBinding);
     const report = await inspectDoctor(repository.root);
     assert.notEqual(
@@ -9881,995 +9507,6 @@ test("late instruction skew preserves the failed planner retry and authorized re
   });
 });
 
-for (const [workflow, unavailable] of [
-  ["feature", false],
-  ["strict", false],
-  ["feature", true]
-] as const) {
-  test(`verification v2 guards ${workflow} completion and retains physical provenance${unavailable ? " with unavailable capture" : ""}`, async () => {
-    const repository = await createTestRepository({
-      artifactLayout: "private"
-    });
-    try {
-      const configPath = path.join(repository.root, ".banzai/config.json");
-      const config = JSON.parse(
-        await readFile(configPath, "utf8")
-      ) as OrchestratorConfig;
-      const executable = await realpath(process.execPath);
-      config.schemaVersion = 3;
-      config.verification = {
-        profiles: [
-          {
-            id: "node",
-            projectType: "node",
-            commands: [
-              {
-                id: "unit",
-                name: "Unit",
-                command: executable,
-                args: ["-e", "console.log('real verification fixture')"],
-                timeoutMs: 2000,
-                evidence: "equivalent_evidence",
-                ignoreExplanatory: true
-              }
-            ]
-          }
-        ],
-        policy: {
-          schema: "banzai-verification-policy/v1",
-          schemaVersion: 1,
-          explanatory: [],
-          dependencies: {
-            complete: true,
-            exclude: [".banzai/work"],
-            toolchain: [executable],
-            environment: { LANG: "C" },
-            volatile: unavailable ? ["external"] : []
-          }
-        }
-      };
-      await writeFile(configPath, JSON.stringify(config));
-      await writeFile(path.join(repository.root, "package.json"), "{}");
-      await commitAll(repository.root, "verification policy fixture");
-      const adapters = new FakeAdapters();
-      adapters.selectionResults.push(
-        selectionResult({ recommendedWorkflow: workflow })
-      );
-      adapters.reviewResults.push(passingReview());
-      const runner = new WorkflowRunner(repository.root, adapters);
-      let state = await runner.start({
-        slug: "evidence",
-        request: "Verify evidence lifecycle."
-      });
-      if (workflow === "strict")
-        state = await runner.approvePlan("human", true);
-      assert.equal(state.schemaVersion, workflow === "strict" ? 7 : 6);
-      assert.equal(state.artifactBinding?.binding.schemaVersion, 2);
-      if (unavailable) {
-        assert.equal(state.status, "blocked");
-        assert.equal(state.metrics.attempts.verification, 1);
-        const evidence = requiredFixture(state.verificationEvidence);
-        assert.equal(evidence.applicability?.complete, false);
-        const runDirectory = path.join(
-          repository.root,
-          ".banzai/runs",
-          state.runId
-        );
-        const records = await new RunStore(
-          repository.root
-        ).readVerificationAttempts(state.runId);
-        const attempt = requiredFixture(records[0]);
-        assert.equal(attempt.exitCode, 0);
-        // Compatibility fixture for the pre-fix application shape. Its physical
-        // attempt, captures and logs come from the real runner execution above.
-        const { sha256: priorDigest, ...historical } = requiredFixture(
-          evidence.applicability
-        );
-        historical.complete = true;
-        historical.dispositions = [
-          {
-            checkId: "unit",
-            kind: "executed",
-            origin: {
-              attemptId: attempt.id,
-              recordDigest: evidenceDigest(attempt),
-              roundId: attempt.round.id
-            }
-          }
-        ];
-        evidence.applicability = {
-          ...historical,
-          sha256: evidenceDigest(historical)
-        };
-        assert.notEqual(evidence.applicability.sha256, priorDigest);
-        await persistVerificationApplicability(
-          {
-            repoRoot: repository.root,
-            directory: `.banzai/runs/${state.runId}/verification`,
-            workId: requiredFixture(state.artifactBinding).binding.workId
-          },
-          evidence.applicability
-        );
-        await new RunStore(repository.root).writeState(state);
-        const options = {
-          format: "json" as const,
-          from: null,
-          to: null,
-          runIds: [state.runId]
-        };
-        const before = await collectEvaluationExportV2(
-          repository.root,
-          options
-        );
-        assert.equal(before.runs[0]?.verificationEvidence.coverage, "exact");
-        assert.equal(
-          deriveEvaluationKpiV2([before]).sources[0]?.reuseRatio.denominator,
-          1
-        );
-        const legacy = await collectEvaluationExport(repository.root, options);
-        const finishPath = path.join(
-          runDirectory,
-          "verification/origins",
-          `${attempt.id}.finish.json`
-        );
-        const finish = await readFile(finishPath);
-        await rm(finishPath);
-        const missing = await collectEvaluationExportV2(
-          repository.root,
-          options
-        );
-        assert.equal(
-          missing.runs[0]?.verificationEvidence.coverage,
-          "incomplete"
-        );
-        assert.deepEqual(
-          missing.runs[0].verificationEvidence.physicalAttempts,
-          before.runs[0].verificationEvidence.physicalAttempts
-        );
-        assert.ok(
-          missing.runs[0].verificationEvidence.dispositions.every(
-            (item) => item.kind === "pending"
-          )
-        );
-        assert.equal(
-          deriveEvaluationKpiV2([missing]).sources[0]?.reuseRatio.denominator,
-          0
-        );
-        assert.deepEqual(
-          await collectEvaluationExport(repository.root, options),
-          legacy
-        );
-        await writeFile(finishPath, finish);
-        await writeFile(
-          path.join(repository.root, "src/example.txt"),
-          "changed after unavailable capture\n"
-        );
-        const resumed = await runner.resume();
-        assert.equal(resumed.status, "blocked");
-        assert.equal(resumed.metrics.attempts.verification, 1);
-        return;
-      }
-      assert.equal(state.status, "done", state.blockReason ?? "");
-      assert.equal(state.metrics.attempts.verification, 1);
-      assert.equal(state.verificationEvidence?.applicability?.complete, true);
-      assert.equal(
-        state.verificationEvidence.applicability.dispositions[0]?.kind,
-        "executed"
-      );
-      const runDirectory = path.join(
-        repository.root,
-        ".banzai/runs",
-        state.runId
-      );
-      assert.deepEqual(
-        JSON.parse(
-          await readFile(
-            path.join(runDirectory, "verification-attempts/ledger.json"),
-            "utf8"
-          )
-        ),
-        { schemaVersion: 2 }
-      );
-      if (workflow === "strict") {
-        assert.match(
-          adapters.reviewPrompts[0] ?? "",
-          /banzai-verification-applicability\/v1/
-        );
-        const artifact = await readFile(
-          path.join(
-            repository.root,
-            requiredFixture(requiredFixture(state.latestReview).artifactPath)
-          ),
-          "utf8"
-        );
-        assert.match(artifact, /banzai-feature-review\/v6/);
-      }
-      const exported = await collectEvaluationExportV2(repository.root, {
-        format: "json",
-        from: null,
-        to: null,
-        runIds: [state.runId]
-      });
-      assert.equal(exported.runs[0]?.verificationEvidence.coverage, "exact");
-      assert.equal(
-        exported.runs[0].verificationEvidence.physicalAttempts.length,
-        1
-      );
-      assert.equal(
-        exported.runs[0].verificationEvidence.dispositions[0]?.kind,
-        "executed"
-      );
-      const legacyExport = await collectEvaluationExport(repository.root, {
-        format: "json",
-        from: null,
-        to: null,
-        runIds: [state.runId]
-      });
-      assert.ok(
-        legacyExport.issues.some(
-          (issue) => issue.code === "VERIFICATION_HISTORY_INCOMPLETE"
-        )
-      );
-      const context = await collectContextReport(repository.root, {
-        runIds: [state.runId],
-        from: null,
-        to: null,
-        format: "json"
-      });
-      assert.ok(context);
-      // A resumed completed physical round performs no second invocation, but
-      // source drift prevents its old success from being applied again.
-      const persisted = JSON.parse(
-        await readFile(path.join(runDirectory, "state.json"), "utf8")
-      ) as RunState;
-      persisted.status = "verifying";
-      await writeFile(
-        path.join(repository.root, "src/example.txt"),
-        "changed after verification\n"
-      );
-      await writeFile(
-        path.join(runDirectory, "state.json"),
-        JSON.stringify(persisted)
-      );
-      const resumed = await runner.resume();
-      assert.notEqual(resumed.status, "done");
-      assert.equal(resumed.metrics.attempts.verification, 1);
-    } finally {
-      await repository.dispose();
-    }
-  });
-}
-
-test("strict explanatory closure reuses its original physical check through independent resolution review", async () => {
-  const repository = await createTestRepository({ artifactLayout: "private" });
-  try {
-    const executable = await realpath(process.execPath);
-    const configPath = path.join(repository.root, ".banzai/config.json");
-    const config = JSON.parse(
-      await readFile(configPath, "utf8")
-    ) as OrchestratorConfig;
-    config.schemaVersion = 3;
-    config.verification = {
-      profiles: [
-        {
-          id: "node",
-          projectType: "node",
-          commands: [
-            {
-              id: "unit",
-              name: "Unit",
-              command: executable,
-              args: [
-                "-e",
-                "require('node:assert/strict').equal(require('node:fs').readFileSync('src/example.txt','utf8'),'needs-fix\\n')"
-              ],
-              timeoutMs: 2000,
-              evidence: "equivalent_evidence",
-              ignoreExplanatory: true
-            }
-          ]
-        }
-      ],
-      policy: {
-        schema: "banzai-verification-policy/v1",
-        schemaVersion: 1,
-        explanatory: [{ path: "notes.md", regions: [] }],
-        dependencies: {
-          complete: true,
-          exclude: [".banzai/work"],
-          toolchain: [executable],
-          environment: { LANG: "C" },
-          volatile: []
-        }
-      }
-    };
-    await writeFile(configPath, JSON.stringify(config));
-    await writeFile(
-      path.join(repository.root, "notes.md"),
-      "Original explanatory sentence.\n"
-    );
-    await writeFile(path.join(repository.root, "package.json"), "{}");
-    await commitAll(repository.root, "explicit verification closure fixture");
-    class ExplanatoryAdapters extends FakeAdapters {
-      override async runPhase(
-        request: PhaseAdapterRequest
-      ): Promise<AdapterResult<PhaseResult>> {
-        const isFix =
-          !request.prompt.includes("Phase: plan") &&
-          !request.prompt.includes("Phase: implementation");
-        const emitFixCheckpoint = this.emitFixTerminalCheckpoint;
-        if (isFix) this.emitFixTerminalCheckpoint = false;
-        const result = await super.runPhase(request);
-        this.emitFixTerminalCheckpoint = emitFixCheckpoint;
-        if (result.result.phase === "fix") {
-          await writeFile(
-            path.join(request.repoRoot, "src/example.txt"),
-            "needs-fix\n"
-          );
-          await writeFile(
-            path.join(request.repoRoot, "notes.md"),
-            "Corrected explanatory sentence.\n"
-          );
-          const report = requiredFixture(
-            result.result.artifacts.implementationReport
-          );
-          await writeFile(
-            path.join(request.repoRoot, report),
-            `# Implementation Report\n\n${renderPlanTaskCompletionProjection(requiredFixture(result.result.taskCompletion))}\n`
-          );
-        }
-        if (isFix && emitFixCheckpoint)
-          await this.emitFixCheckpoint(request, result.result);
-        return result;
-      }
-    }
-    const adapters = new ExplanatoryAdapters();
-    adapters.reviewResults.push({
-      contractVersion: CONTRACT_VERSION,
-      verdict: "changes_requested",
-      summary: "Explanatory correction.",
-      findings: [finding("R1-F1", "Clarify the informational sentence.")],
-      reviewedFindingIds: [],
-      deferredCoverage: []
-    });
-    adapters.reviewResults.push(passingReview(["R1-F1"]));
-    adapters.fixResults.push(
-      phaseResult("fix", {
-        taskCompletion: completionLedger(["T001"]),
-        resolvedFindingIds: ["R1-F1"]
-      })
-    );
-    const runner = new WorkflowRunner(repository.root, adapters);
-    const planned = await runner.start({
-      slug: "closure",
-      request: "Verify a bounded explanatory closure."
-    });
-    const selectedPlan = path.join(
-      repository.root,
-      requiredFixture(planned.artifactBinding?.binding.artifacts.plan)
-    );
-    const remainder = (await readFile(selectedPlan, "utf8")).trimEnd() + "\n\n";
-    const inventory = {
-      schema: "banzai-verification-obligations/v1",
-      schemaVersion: 1,
-      complete: true,
-      planRemainderSha256: createHash("sha256").update(remainder).digest("hex"),
-      checks: [{ id: "unit", evidence: "equivalent_evidence" }]
-    };
-    await writeFile(
-      selectedPlan,
-      remainder +
-        "```banzai-verification-obligations/v1\n" +
-        JSON.stringify(inventory) +
-        "\n```\n"
-    );
-    const reviewed = await runner.approvePlan("human");
-    assert.equal(reviewed.status, "needs_triage", reviewed.blockReason ?? "");
-    const origin =
-      reviewed.verificationEvidence?.applicability?.dispositions[0]?.origin;
-    assert.ok(origin);
-    const done = await runner.triage({
-      accepted: ["R1-F1"],
-      rejected: [],
-      deferred: [],
-      note: null,
-      decidedBy: "human"
-    });
-    assert.equal(done.status, "done", done.blockReason ?? "");
-    assert.equal(done.metrics.attempts.verification, 1);
-    const disposition =
-      done.verificationEvidence?.applicability?.dispositions[0];
-    assert.equal(disposition?.kind, "reused");
-    assert.deepEqual(disposition.origin, origin);
-    assert.equal(adapters.reviewPrompts.length, 2);
-    assert.match(adapters.reviewPrompts[1] ?? "", /R1-F1/);
-    assert.match(adapters.reviewPrompts[1] ?? "", /"kind": "reused"/);
-    const report = await collectEvaluationExportV2(repository.root, {
-      runIds: [done.runId],
-      from: null,
-      to: null,
-      format: "json"
-    });
-    assert.equal(report.runs[0]?.verificationEvidence.coverage, "exact");
-    const selectedRuns = [done.runId];
-    const containsRun = selectedRuns.includes.bind(selectedRuns);
-    selectedRuns.includes = (value, fromIndex) => {
-      // Insert a lexically earlier directory after the cohort inventory but
-      // during selection, without timing-dependent background processes.
-      mkdirSync(path.join(repository.root, ".banzai/runs/000-concurrent"), {
-        recursive: true
-      });
-      return containsRun(value, fromIndex);
-    };
-    const concurrent = await collectEvaluationExportV2(repository.root, {
-      runIds: selectedRuns,
-      from: null,
-      to: null,
-      format: "json"
-    });
-    assert.equal(concurrent.cohort.candidateRunCount, 1);
-    assert.equal(concurrent.runs[0]?.verificationEvidence.coverage, "exact");
-    assert.deepEqual(
-      report.runs[0].verificationEvidence.dispositions
-        .map((item) => item.kind)
-        .sort(),
-      ["executed", "reused"]
-    );
-    assert.equal(
-      await readFile(selectedPlan, "utf8"),
-      remainder +
-        "```banzai-verification-obligations/v1\n" +
-        JSON.stringify(inventory) +
-        "\n```\n"
-    );
-  } finally {
-    await repository.dispose();
-  }
-});
-
-test("guided bootstrap pauses after completed implementation and exact Accept retains approval through verification", async () => {
-  const repository = await createTestRepository({ artifactLayout: "private" });
-  try {
-    const configPath = path.join(repository.root, ".banzai/config.json");
-    const config = JSON.parse(
-      await readFile(configPath, "utf8")
-    ) as OrchestratorConfig;
-    config.verification.bootstrap = true;
-    config.verification.profiles = [
-      {
-        id: "repository",
-        projectType: "repository",
-        commands: [
-          {
-            name: "hygiene",
-            command: "git",
-            args: ["diff", "--check"],
-            timeoutMs: 1000
-          }
-        ]
-      }
-    ];
-    await writeFile(configPath, JSON.stringify(config, null, 2) + "\n");
-    await commitAll(repository.root, "bootstrap fixture");
-    class BootstrapAdapters extends FakeAdapters {
-      override async runPhase(
-        request: PhaseAdapterRequest
-      ): Promise<AdapterResult<PhaseResult>> {
-        const isImplementation = request.prompt.includes(
-          "Phase: implementation"
-        );
-        const emitImplementationCheckpoint =
-          this.emitImplementationTerminalCheckpoint;
-        if (isImplementation) this.emitImplementationTerminalCheckpoint = false;
-        const result = await super.runPhase(request);
-        this.emitImplementationTerminalCheckpoint =
-          emitImplementationCheckpoint;
-        if (isImplementation)
-          await writeFile(
-            path.join(request.repoRoot, "package.json"),
-            JSON.stringify({
-              packageManager: "npm@10.0.0",
-              scripts: { test: "test-command", lint: "lint-command" }
-            })
-          );
-        if (isImplementation && emitImplementationCheckpoint)
-          await this.emitImplementationCheckpoint(request, result.result);
-        return result;
-      }
-    }
-    const adapters = new BootstrapAdapters();
-    adapters.reviewResults.push(passingReview());
-    const executed: string[] = [];
-    const processRunner: ProcessRunner = async (spec) => {
-      executed.push([spec.command, ...spec.args].join(" "));
-      return {
-        exitCode: 0,
-        signal: null,
-        stdout: "",
-        stderr: "",
-        startedAt: new Date().toISOString(),
-        completedAt: new Date().toISOString()
-      };
-    };
-    const runner = new WorkflowRunner(repository.root, adapters, processRunner);
-    const planned = await runner.start({
-      slug: "guided-bootstrap",
-      request: "Initialize the application with tests and lint."
-    });
-    assert.equal(
-      planned.status,
-      "needs_plan_approval",
-      planned.blockReason ?? ""
-    );
-    const waiting = await runner.approvePlan("human");
-    assert.equal(waiting.schemaVersion, 7);
-    assert.equal(
-      waiting.status,
-      "needs_human_decision",
-      waiting.blockReason ?? ""
-    );
-    assert.equal(waiting.activeAttempt, null);
-    assert.deepEqual(executed, []);
-    const pending = waiting.pendingHumanDecision;
-    assert.ok(pending?.kind === "configuration_prerequisite");
-    assert.deepEqual(
-      pending.proposal.profile.commands.map((command) => command.args),
-      [
-        ["run", "test"],
-        ["run", "lint"]
-      ]
-    );
-    const answer = {
-      runId: waiting.runId,
-      decisionId: pending.decisionId,
-      proposalId: pending.proposalId,
-      action: "accept" as const,
-      decidedBy: "human"
-    };
-    await assert.rejects(
-      runner.answerConfigurationPrerequisite(
-        { ...answer, proposalId: randomUUID() },
-        false
-      ),
-      { code: "CONFIGURATION_PROPOSAL_STALE" }
-    );
-    const saved = await runner.answerConfigurationPrerequisite(answer, false);
-    assert.equal(saved.status, "verifying");
-    assert.equal(saved.planApproval?.digest, waiting.planApproval?.digest);
-    assert.equal(
-      saved.configurationSetup?.resolutions.at(-1)?.kind,
-      "accepted"
-    );
-    assert.equal(
-      (JSON.parse(await readFile(configPath, "utf8")) as OrchestratorConfig)
-        .verification.bootstrap,
-      undefined
-    );
-    await assert.rejects(
-      runner.answerConfigurationPrerequisite(answer, false),
-      { code: "CONFIGURATION_PROPOSAL_STALE" }
-    );
-    const completed = await runner.resume();
-    assert.equal(completed.status, "done", completed.blockReason ?? "");
-    assert.deepEqual(executed, [
-      "git diff --check",
-      "npm run test",
-      "npm run lint"
-    ]);
-    assert.equal(
-      adapters.phasePrompts.filter((prompt) =>
-        prompt.includes("Phase: implementation")
-      ).length,
-      1
-    );
-    assert.equal(
-      adapters.phasePrompts.filter((prompt) => prompt.includes("Phase: plan"))
-        .length,
-      1
-    );
-    assert.equal(completed.configurationSetup?.transactions.length, 1);
-  } finally {
-    await repository.dispose();
-  }
-});
-
-async function guidedConfigurationFixture(policy = false) {
-  const repository = await createTestRepository({ artifactLayout: "private" });
-  const configPath = path.join(repository.root, ".banzai/config.json");
-  const config = JSON.parse(
-    await readFile(configPath, "utf8")
-  ) as OrchestratorConfig;
-  config.verification = {
-    bootstrap: true,
-    profiles: [
-      {
-        id: "repository",
-        projectType: "repository",
-        commands: [
-          {
-            name: "hygiene",
-            command: "git",
-            args: ["diff", "--check"],
-            timeoutMs: 1000
-          }
-        ]
-      }
-    ]
-  };
-  if (policy) {
-    config.schemaVersion = 3;
-    requiredFixture(config.verification.profiles[0]?.commands[0]).id =
-      "hygiene";
-    config.verification.profiles.push({
-      id: "custom",
-      projectType: "custom",
-      commands: [
-        {
-          id: "mandatory",
-          name: "mandatory",
-          command: process.execPath,
-          args: ["-e", "process.exit(0)"],
-          timeoutMs: 1000
-        }
-      ]
-    });
-    config.verification.policy = {
-      schema: "banzai-verification-policy/v1",
-      schemaVersion: 1,
-      explanatory: [],
-      dependencies: {
-        complete: true,
-        exclude: [".banzai/work"],
-        toolchain: [await realpath(process.execPath)],
-        environment: { LANG: "C" },
-        volatile: []
-      }
-    };
-  }
-  await writeFile(configPath, JSON.stringify(config));
-  await commitAll(repository.root, "guided fixture");
-  class GuidedAdapters extends FakeAdapters {
-    afterFix: ((request: PhaseAdapterRequest) => Promise<void>) | null = null;
-
-    override async runPhase(
-      request: PhaseAdapterRequest
-    ): Promise<AdapterResult<PhaseResult>> {
-      const isImplementation = request.prompt.includes("Phase: implementation");
-      const isFix = request.prompt.includes("Phase: fix");
-      const emitImplementationCheckpoint =
-        this.emitImplementationTerminalCheckpoint;
-      const emitFixCheckpoint = this.emitFixTerminalCheckpoint;
-      if (isImplementation) this.emitImplementationTerminalCheckpoint = false;
-      if (isFix) this.emitFixTerminalCheckpoint = false;
-      let result: AdapterResult<PhaseResult>;
-      try {
-        result = await super.runPhase(request);
-      } catch (error) {
-        this.emitImplementationTerminalCheckpoint =
-          emitImplementationCheckpoint;
-        this.emitFixTerminalCheckpoint = emitFixCheckpoint;
-        throw error;
-      }
-      this.emitImplementationTerminalCheckpoint = emitImplementationCheckpoint;
-      this.emitFixTerminalCheckpoint = emitFixCheckpoint;
-      if (isImplementation)
-        await writeFile(
-          path.join(request.repoRoot, "package.json"),
-          '{"packageManager":"npm@10.0.0","scripts":{"test":"test-stub"}}'
-        );
-      if (isFix) await this.afterFix?.(request);
-      if (isImplementation && emitImplementationCheckpoint)
-        await this.emitImplementationCheckpoint(request, result.result);
-      if (isFix && emitFixCheckpoint)
-        await this.emitFixCheckpoint(request, result.result);
-      return result;
-    }
-  }
-  const adapters = new GuidedAdapters();
-  adapters.reviewResults.push(passingReview());
-  const executed: string[] = [];
-  const processRunner: ProcessRunner = async (spec) => {
-    executed.push([spec.command, ...spec.args].join(" "));
-    return {
-      exitCode: 0,
-      signal: null,
-      stdout: "physical output",
-      stderr: "",
-      startedAt: new Date().toISOString(),
-      completedAt: new Date().toISOString()
-    };
-  };
-  const runner = new WorkflowRunner(repository.root, adapters, processRunner);
-  await runner.start({ slug: "guided", request: "Initialize an application." });
-  const state = await runner.approvePlan("human");
-  assert.equal(state.status, "needs_human_decision", state.blockReason ?? "");
-  const pending = state.pendingHumanDecision;
-  assert.ok(pending?.kind === "configuration_prerequisite");
-  return {
-    repository,
-    configPath,
-    runner,
-    state,
-    pending,
-    adapters,
-    executed,
-    answer: {
-      runId: state.runId,
-      decisionId: pending.decisionId,
-      proposalId: pending.proposalId,
-      action: "accept" as const,
-      decidedBy: "human"
-    }
-  };
-}
-
-test("guided Edit produces a new proposal, and waiting ownership excludes another terminal", async () => {
-  const f = await guidedConfigurationFixture();
-  try {
-    const bytes = await readFile(f.configPath, "utf8");
-    await f.runner.withConfigurationDecisionOwnership(async () => {
-      const other = new WorkflowRunner(f.repository.root, new FakeAdapters());
-      await assert.rejects(
-        other.withVerificationConfiguration(async () => undefined),
-        /Answer there, or pause\/exit/u
-      );
-      const edited = await f.runner.answerConfigurationPrerequisite(
-        {
-          ...f.answer,
-          action: "edit",
-          profile: {
-            id: f.pending.proposal.profile.id,
-            commands: [
-              {
-                name: "Build",
-                command: "npm",
-                args: ["run", "test"],
-                timeoutMs: 5000
-              }
-            ]
-          }
-        },
-        false
-      );
-      assert.equal(edited.status, "needs_human_decision");
-      assert.ok(
-        edited.pendingHumanDecision?.kind === "configuration_prerequisite"
-      );
-      assert.notEqual(
-        edited.pendingHumanDecision.proposalId,
-        f.pending.proposalId
-      );
-      assert.equal(edited.planApproval?.digest, f.state.planApproval?.digest);
-    });
-    assert.equal(await readFile(f.configPath, "utf8"), bytes);
-    assert.deepEqual(f.executed, []);
-    await assert.rejects(
-      f.runner.answerConfigurationPrerequisite(f.answer, false),
-      { code: "CONFIGURATION_PROPOSAL_STALE" }
-    );
-  } finally {
-    await f.repository.dispose();
-  }
-});
-
-test("guided external repair remains pending until resume without recording an invented human answer", async () => {
-  const f = await guidedConfigurationFixture();
-  try {
-    const { previewVerificationConfig, publishVerificationConfig } =
-      await import("../src/verification-config.js");
-    await f.runner.withVerificationConfiguration(async (context) => {
-      assert.ok(context);
-      const preview = await previewVerificationConfig(f.repository.root, {
-        operation: "add",
-        profile: { projectType: "node", ...f.pending.proposal.profile },
-        clearBootstrap: true
-      });
-      await publishVerificationConfig(
-        f.runner.store,
-        preview,
-        "external-human",
-        context
-      );
-    });
-    const repaired = await f.runner.store.requireActiveState();
-    assert.equal(repaired.status, "needs_human_decision");
-    assert.equal(
-      repaired.pendingHumanDecision?.kind,
-      "configuration_prerequisite"
-    );
-    assert.deepEqual(f.executed, []);
-    const done = await f.runner.resume();
-    assert.equal(done.status, "done", done.blockReason ?? "");
-    assert.equal(done.planApproval?.digest, f.state.planApproval?.digest);
-    assert.equal(
-      done.configurationSetup?.resolutions.at(-1)?.kind,
-      "satisfied_by_configuration"
-    );
-    assert.equal(
-      done.humanDecisions?.filter(
-        (record) => record.kind === "configuration_prerequisite"
-      ).length ?? 0,
-      0
-    );
-    assert.equal(done.configurationSetup.transactions.length, 1);
-    const archiveRoot = await realpath(f.repository.root);
-    const archiveRequest = path.join(archiveRoot, "archive-request.json");
-    const archiveCall = async (
-      operation: string,
-      fields: Record<string, unknown>
-    ) => {
-      await writeFile(
-        archiveRequest,
-        JSON.stringify({
-          schema: "banzai-artifact-request/v1",
-          schemaVersion: 1,
-          repoRoot: f.repository.root,
-          ...fields
-        })
-      );
-      const response = await artifactCommand([
-        operation,
-        "--json",
-        archiveRequest
-      ]);
-      assert.equal(response.ok, true, JSON.stringify(response));
-      return response.result as Record<string, unknown>;
-    };
-    const inventory = await archiveCall("inventory", { runIds: [done.runId] });
-    const inventoryFile = path.join(archiveRoot, "reviewed-inventory.json");
-    await writeFile(inventoryFile, JSON.stringify(inventory.inventory));
-    const bundlePath = path.join(archiveRoot, "archive");
-    await archiveCall("export", { inventoryFile, destination: bundlePath });
-    const archived = await archiveCall("verify", { bundlePath });
-    assert.equal(archived.complete, true, JSON.stringify(archived));
-    assert.doesNotMatch(
-      JSON.stringify(archived.retainedPaths),
-      /"\.banzai\/config\.json"/u
-    );
-  } finally {
-    await f.repository.dispose();
-  }
-});
-
-for (const interruption of ["applied_event", "resolved_state"] as const)
-  test(`guided interrupted ${interruption} reconciles exactly once without implementation replay`, async () => {
-    const f = await guidedConfigurationFixture();
-    try {
-      const append = f.runner.store.appendEvent.bind(f.runner.store);
-      const write = f.runner.store.writeState.bind(f.runner.store);
-      let interrupted = false;
-      if (interruption === "applied_event")
-        f.runner.store.appendEvent = async (...args) => {
-          if (!interrupted && args[1] === "config.verification.applied") {
-            interrupted = true;
-            throw new Error("simulated interruption");
-          }
-          return append(...args);
-        };
-      else
-        f.runner.store.writeState = async (state) => {
-          if (
-            !interrupted &&
-            state.status === "verifying" &&
-            state.configurationSetup?.resolutions.some(
-              (item) => item.kind === "accepted"
-            )
-          ) {
-            interrupted = true;
-            throw new Error("simulated interruption");
-          }
-          return write(state);
-        };
-      await assert.rejects(
-        f.runner.answerConfigurationPrerequisite(f.answer, false),
-        /simulated interruption/u
-      );
-      const done = await f.runner.resume();
-      assert.equal(done.status, "done", done.blockReason ?? "");
-      assert.equal(done.configurationSetup?.resolutions.length, 1);
-      assert.equal(
-        done.humanDecisions?.filter(
-          (record) => record.kind === "configuration_prerequisite"
-        ).length,
-        1
-      );
-      const events = await readFile(
-        path.join(f.runner.store.runDirectory(done.runId), "events.jsonl"),
-        "utf8"
-      );
-      assert.equal(
-        events
-          .split("\n")
-          .filter((line) =>
-            line.includes('"type":"config.verification.applied"')
-          ).length,
-        1
-      );
-      assert.equal(
-        f.adapters.phasePrompts.filter((prompt) =>
-          prompt.includes("Phase: implementation")
-        ).length,
-        1
-      );
-    } finally {
-      await f.repository.dispose();
-    }
-  });
-
-test("guided Skip runs only physical hygiene and exposes omitted coverage in review", async () => {
-  const f = await guidedConfigurationFixture();
-  try {
-    const done = await f.runner.answerConfigurationPrerequisite({
-      ...f.answer,
-      action: "skip"
-    });
-    assert.equal(done.status, "done", done.blockReason ?? "");
-    assert.deepEqual(f.executed, ["git diff --check"]);
-    assert.equal(done.configurationSetup?.coverage, "skipped");
-    assert.deepEqual(done.configurationSetup.uncoveredTypes, ["node"]);
-    assert.equal(done.verificationEvidence, undefined);
-    const report = await readFile(
-      path.join(
-        f.repository.root,
-        requiredFixture(
-          done.artifactBinding?.binding.artifacts.reviewDirectory
-        ),
-        "review-1.md"
-      ),
-      "utf8"
-    );
-    assert.match(report, /banzai-feature-review\/v6/u);
-    assert.match(report, /"coverage": "skipped"/u);
-    assert.match(report, /Only the exact recorded deltas are runner-authored/u);
-  } finally {
-    await f.repository.dispose();
-  }
-});
-
-test("guided Skip scope expires before resume when verification configuration changes", async () => {
-  const f = await guidedConfigurationFixture();
-  try {
-    await f.runner.answerConfigurationPrerequisite(
-      { ...f.answer, action: "skip" },
-      false
-    );
-    const changed = JSON.parse(
-      await readFile(f.configPath, "utf8")
-    ) as OrchestratorConfig;
-    requiredFixture(changed.verification.profiles[0]?.commands[0]).timeoutMs +=
-      1;
-    await writeFile(f.configPath, JSON.stringify(changed));
-    const pending = await f.runner.resume();
-    assert.equal(pending.status, "needs_human_decision");
-    assert.equal(
-      pending.pendingHumanDecision?.kind,
-      "configuration_prerequisite"
-    );
-    assert.deepEqual(f.executed, []);
-  } finally {
-    await f.repository.dispose();
-  }
-});
-
-test("guided Cancel uses existing cancellation authority without scheduling verification", async () => {
-  const f = await guidedConfigurationFixture();
-  try {
-    const cancelled = await f.runner.answerConfigurationPrerequisite(
-      { ...f.answer, action: "cancel" },
-      false
-    );
-    assert.equal(cancelled.status, "cancelled");
-    assert.equal(cancelled.pendingHumanDecision, null);
-    assert.equal(
-      cancelled.humanDecisions?.at(-1)?.kind,
-      "configuration_prerequisite"
-    );
-    assert.deepEqual(f.executed, []);
-  } finally {
-    await f.repository.dispose();
-  }
-});
-
 test("guided planning retains manifest tasks with control-path constraints and read-only evidence through approval", async () => {
   const repository = await createTestRepository({ artifactLayout: "private" });
   try {
@@ -10883,7 +9520,7 @@ test("guided planning retains manifest tasks with control-path constraints and r
             request.repoRoot,
             requiredFixture(result.result.artifacts.plan)
           );
-          await writeFile(
+          await writeFixturePlan(
             target,
             (await readFile(target, "utf8")).replace(
               "## Implementation Tasks",
@@ -10940,7 +9577,7 @@ for (const targetRole of [
               request.repoRoot,
               requiredFixture(result.result.artifacts.plan)
             );
-            await writeFile(
+            await writeFixturePlan(
               target,
               (await readFile(target, "utf8"))
                 .replace(
@@ -10977,325 +9614,6 @@ for (const targetRole of [
     }
   });
 
-test("guided prepared external publication remains unapplied and exact re-confirmation reuses its operation", async () => {
-  const f = await guidedConfigurationFixture();
-  try {
-    const {
-      previewVerificationConfig,
-      publishVerificationConfig,
-      readVerificationConfigTransactions
-    } = await import("../src/verification-config.js");
-    const before = await readFile(f.configPath, "utf8");
-    const preview = await previewVerificationConfig(f.repository.root, {
-      operation: "add",
-      profile: { projectType: "node", ...f.pending.proposal.profile },
-      clearBootstrap: true
-    });
-    await assert.rejects(
-      f.runner.withVerificationConfiguration(async (context) => {
-        assert.ok(context);
-        const revalidate = context.revalidate.bind(context);
-        let calls = 0;
-        context.revalidate = async () => {
-          if (++calls === 2) throw new Error("before publication");
-          await revalidate();
-        };
-        await publishVerificationConfig(
-          f.runner.store,
-          preview,
-          "external-human",
-          context
-        );
-      }),
-      /before publication/u
-    );
-    assert.equal(await readFile(f.configPath, "utf8"), before);
-    const history = await readVerificationConfigTransactions(
-      f.repository.root,
-      f.state.runId
-    );
-    assert.equal(history.length, 1);
-    assert.equal(history[0]?.stage, "prepared");
-    assert.equal((await f.runner.resume()).status, "needs_human_decision");
-    await f.runner.withVerificationConfiguration(async (context) => {
-      assert.ok(context);
-      await publishVerificationConfig(
-        f.runner.store,
-        preview,
-        "external-human",
-        context
-      );
-    });
-    assert.equal(
-      (
-        await readVerificationConfigTransactions(
-          f.repository.root,
-          f.state.runId
-        )
-      ).length,
-      1
-    );
-    const done = await f.runner.resume();
-    assert.equal(done.status, "done", done.blockReason ?? "");
-    assert.equal(
-      done.configurationSetup?.resolutions.at(-1)?.kind,
-      "satisfied_by_configuration"
-    );
-  } finally {
-    await f.repository.dispose();
-  }
-});
-
-for (const drift of ["source", "third_image"] as const)
-  test(`guided interrupted Accept preserves publication on ${drift} drift and rechecks the checkpoint`, async () => {
-    const f = await guidedConfigurationFixture();
-    try {
-      const append = f.runner.store.appendEvent.bind(f.runner.store);
-      let interrupted = false;
-      f.runner.store.appendEvent = async (...args) => {
-        if (!interrupted && args[1] === "config.verification.applied") {
-          interrupted = true;
-          throw new Error("interrupted publication");
-        }
-        return append(...args);
-      };
-      await assert.rejects(
-        f.runner.answerConfigurationPrerequisite(f.answer, false),
-        /interrupted publication/u
-      );
-      if (drift === "source")
-        await writeFile(
-          path.join(f.repository.root, "package.json"),
-          '{"scripts":{"test":"changed-script"},"packageManager":"npm@10.0.0"}'
-        );
-      else
-        await writeFile(
-          f.configPath,
-          (await readFile(f.configPath, "utf8")) + "\n"
-        );
-      const preserved = await readFile(f.configPath, "utf8");
-      const done = await f.runner.resume();
-      assert.equal(done.status, "done", done.blockReason ?? "");
-      assert.equal(await readFile(f.configPath, "utf8"), preserved);
-      assert.equal(
-        done.configurationSetup?.resolutions.at(-1)?.kind,
-        "satisfied_by_configuration"
-      );
-      assert.equal(done.planApproval?.digest, f.state.planApproval?.digest);
-      assert.equal(
-        f.adapters.phasePrompts.filter((prompt) =>
-          prompt.includes("Phase: implementation")
-        ).length,
-        1
-      );
-    } finally {
-      await f.repository.dispose();
-    }
-  });
-
-for (const route of ["control", "approve"] as const)
-  test(`guided ${route} accepts exact v3 input without starting a process with no-resume`, async () => {
-    const f = await guidedConfigurationFixture();
-    try {
-      const { Readable } = await import("node:stream");
-      const {
-        executeAgentControlCommand,
-        parseAgentControlArgs,
-        parseVerificationApprovalArgs
-      } = await import("../src/agent-control-cli.js");
-      const before = projectAgentControlStatus(await f.runner.status());
-      const publicGate = JSON.stringify(before.activeRun?.pendingGate);
-      assert.match(publicGate, /configuration_prerequisite/u);
-      assert.doesNotMatch(
-        publicGate,
-        /configSha256|sourceSha256|workBindingSha256|approvalDigest|continuation/u
-      );
-      const command =
-        route === "control"
-          ? parseAgentControlArgs(["answer", "--by", "human", "--no-resume"])
-          : parseVerificationApprovalArgs(["--by", "human", "--no-resume"]);
-      assert.equal(command.command, "answer");
-      const output: string[] = [];
-      await executeAgentControlCommand(
-        command,
-        () => f.runner,
-        {
-          stdin: Readable.from([
-            JSON.stringify({
-              schema: "banzai-agent-answer/v3",
-              schemaVersion: 3,
-              kind: "configuration_prerequisite",
-              runId: f.answer.runId,
-              decisionId: f.answer.decisionId,
-              proposalId: f.answer.proposalId,
-              action: "accept"
-            })
-          ]),
-          stdout: (value) => {
-            output.push(value);
-          }
-        },
-        "default-human"
-      );
-      assert.deepEqual(f.executed, []);
-      const state = await f.runner.store.requireActiveState();
-      assert.equal(state.status, "verifying");
-      assert.equal(state.planApproval?.digest, f.state.planApproval?.digest);
-      assert.equal(output.length, 1);
-      assert.match(output[0] ?? "", /banzai-agent-status\/v4/u);
-    } finally {
-      await f.repository.dispose();
-    }
-  });
-
-test("guided Skip cannot waive mandatory policy verification and preserves the pending decision", async () => {
-  const f = await guidedConfigurationFixture(true);
-  try {
-    const config = await readFile(f.configPath, "utf8");
-    await assert.rejects(
-      f.runner.answerConfigurationPrerequisite(
-        { ...f.answer, action: "skip" },
-        false
-      ),
-      { code: "CONFIGURATION_SKIP_OBLIGATION" }
-    );
-    const pending = await f.runner.store.requireActiveState();
-    assert.equal(pending.status, "needs_human_decision");
-    assert.ok(
-      pending.pendingHumanDecision?.kind === "configuration_prerequisite"
-    );
-    assert.equal(pending.pendingHumanDecision.proposalId, f.pending.proposalId);
-    assert.equal(pending.planApproval?.digest, f.state.planApproval?.digest);
-    assert.equal(await readFile(f.configPath, "utf8"), config);
-    assert.deepEqual(f.executed, []);
-  } finally {
-    await f.repository.dispose();
-  }
-});
-
-for (const interruption of [
-  "applied_event",
-  "state_link",
-  "third_image",
-  "source"
-] as const) {
-  test(`accepted review F1 external repair reconciles ${interruption} once`, async () => {
-    const f = await guidedConfigurationFixture();
-    try {
-      const {
-        previewVerificationConfig,
-        publishVerificationConfig,
-        readVerificationConfigTransactions
-      } = await import("../src/verification-config.js");
-      const append = f.runner.store.appendEvent.bind(f.runner.store);
-      const write = f.runner.store.writeState.bind(f.runner.store);
-      let interrupted = false;
-      f.runner.store.appendEvent = async (...args) => {
-        if (
-          interruption !== "state_link" &&
-          !interrupted &&
-          args[1] === "config.verification.applied"
-        ) {
-          interrupted = true;
-          throw new Error("external publication interrupted");
-        }
-        return append(...args);
-      };
-      f.runner.store.writeState = async (state) => {
-        if (
-          interruption === "state_link" &&
-          !interrupted &&
-          state.configurationSetup?.transactions.length
-        ) {
-          interrupted = true;
-          throw new Error("external publication interrupted");
-        }
-        return write(state);
-      };
-      await assert.rejects(
-        f.runner.withVerificationConfiguration(async (context) => {
-          const preview = await previewVerificationConfig(f.repository.root, {
-            operation: "add",
-            profile: { projectType: "node", ...f.pending.proposal.profile },
-            clearBootstrap: true
-          });
-          await publishVerificationConfig(
-            f.runner.store,
-            preview,
-            "external-human",
-            context
-          );
-        }),
-        /external publication interrupted/u
-      );
-      if (interruption === "third_image") {
-        await writeFile(
-          f.configPath,
-          (await readFile(f.configPath, "utf8")) + "\n"
-        );
-      } else if (interruption === "source") {
-        const marker = path.join(f.repository.root, "package.json");
-        await writeFile(marker, (await readFile(marker, "utf8")) + "\n");
-      }
-      const config = await readFile(f.configPath, "utf8");
-      const done = await f.runner.resume();
-      assert.equal(done.status, "done");
-      const history = await readVerificationConfigTransactions(
-        f.repository.root,
-        done.runId
-      );
-      assert.equal(history.length, 1);
-      assert.equal(
-        history[0]?.stage,
-        ["source", "third_image"].includes(interruption)
-          ? "applied"
-          : "finalized"
-      );
-      assert.deepEqual(done.configurationSetup?.transactions, [
-        history[0].operationId
-      ]);
-      assert.equal(
-        done.configurationSetup.resolutions.at(-1)?.kind,
-        "satisfied_by_configuration"
-      );
-      assert.equal(done.planApproval?.digest, f.state.planApproval?.digest);
-      assert.equal(
-        done.humanDecisions?.some(
-          (d) => d.kind === "configuration_prerequisite"
-        ) ?? false,
-        false
-      );
-      assert.equal(await readFile(f.configPath, "utf8"), config);
-      await f.runner.resume();
-      const events = await readFile(
-        path.join(f.runner.store.runDirectory(done.runId), "events.jsonl"),
-        "utf8"
-      );
-      assert.equal(
-        events
-          .split("\n")
-          .filter((line) =>
-            line.includes('"type":"config.verification.applied"')
-          ).length,
-        1
-      );
-      const review = await readFile(
-        path.join(
-          f.repository.root,
-          requiredFixture(
-            done.artifactBinding?.binding.artifacts.reviewDirectory
-          ),
-          "review-1.md"
-        ),
-        "utf8"
-      );
-      assert.ok(review.includes(history[0].operationId));
-    } finally {
-      await f.repository.dispose();
-    }
-  });
-}
-
 test("accepted review F3 committed approval renders prerequisites as inert text", async () => {
   const repository = await createTestRepository({ artifactLayout: "private" });
   try {
@@ -11309,10 +9627,11 @@ test("accepted review F3 committed approval renders prerequisites as inert text"
       repository.root,
       requiredFixture(state.planArtifacts?.plan)
     );
-    const plan =
+    let plan =
       (await readFile(planPath, "utf8")) +
       "\n## Human prerequisites\nNormal multiline\n\x1b[2J\x1b]0;canary\x07\u202eCanary\n";
-    await writeFile(planPath, plan);
+    await writeFixturePlan(planPath, plan);
+    plan = await readFile(planPath, "utf8");
     const result = spawnSync(
       process.execPath,
       [
@@ -11348,14 +9667,14 @@ test("accepted review F5 approval denies a fix-only report in implementation tas
       requiredFixture(state.planArtifacts?.plan)
     );
     const plan = await readFile(planPath, "utf8");
-    await writeFile(
+    await writeFixturePlan(
       planPath,
       plan + `\nDuring implementation write \`${roles.changeReport}\`.\n`
     );
     await assert.rejects(runner.approvePlan("human", false), {
       code: "PLAN_RUNNER_CONTROL_TASK"
     });
-    await writeFile(
+    await writeFixturePlan(
       planPath,
       plan +
         `\nDuring implementation write \`${roles.implementationReport}\` and \`${roles.testReport}\`.\n`
@@ -11366,386 +9685,6 @@ test("accepted review F5 approval denies a fix-only report in implementation tas
     );
   } finally {
     await repository.dispose();
-  }
-});
-
-for (const route of ["accept", "skip", "external", "no_resume"] as const)
-  test(`guided fix configuration ${route} retains the completed fix as verification source`, async () => {
-    const f = await guidedConfigurationFixture();
-    try {
-      f.adapters.reviewResults.splice(0, f.adapters.reviewResults.length, {
-        contractVersion: CONTRACT_VERSION,
-        verdict: "changes_requested",
-        summary: "Fix source.",
-        findings: [finding("R1-F1", "Fix source.")],
-        reviewedFindingIds: [],
-        deferredCoverage: []
-      });
-      assert.equal(
-        (await f.runner.answerConfigurationPrerequisite(f.answer)).status,
-        "needs_triage"
-      );
-      f.adapters.afterFix = async () => {
-        await writeFile(
-          path.join(f.repository.root, "go.mod"),
-          "module fixture\n"
-        );
-      };
-      f.adapters.reviewResults.push(passingReview(["R1-F1"]));
-      const pending = await f.runner.triage({
-        accepted: ["R1-F1"],
-        rejected: [],
-        deferred: [],
-        note: null,
-        decidedBy: "human"
-      });
-      const request = pending.pendingHumanDecision;
-      assert.ok(request?.kind === "configuration_prerequisite");
-      assert.equal(request.continuation.attemptKind, "fix");
-      const completed = [...pending.metrics.completedAttemptIds];
-      let done: RunState;
-      if (route === "external") {
-        const { previewVerificationConfig, publishVerificationConfig } =
-          await import("../src/verification-config.js");
-        await f.runner.withVerificationConfiguration(async (context) => {
-          assert.ok(context);
-          const preview = await previewVerificationConfig(f.repository.root, {
-            operation: "add",
-            profile: {
-              projectType: request.proposal.projectType,
-              ...request.proposal.profile
-            },
-            clearBootstrap: true
-          });
-          await publishVerificationConfig(
-            f.runner.store,
-            preview,
-            "human",
-            context
-          );
-        });
-        done = await f.runner.resume();
-      } else {
-        done = await f.runner.answerConfigurationPrerequisite(
-          {
-            ...f.answer,
-            decisionId: request.decisionId,
-            proposalId: request.proposalId,
-            action: route === "skip" ? "skip" : "accept"
-          },
-          route !== "no_resume"
-        );
-        if (route === "no_resume") {
-          assert.equal(done.status, "verifying");
-          done = await f.runner.resume();
-        }
-      }
-      assert.equal(done.status, "done", done.blockReason ?? "");
-      const records = await f.runner.store.readVerificationAttempts(done.runId);
-      assert.equal(
-        records.at(-1)?.round.sourceAttemptId,
-        request.continuation.attemptId
-      );
-      assert.equal(records.at(-1)?.round.sourceAttemptKind, "fix");
-      assert.equal(
-        records.at(-1)?.round.ordinal,
-        request.continuation.verificationRound.ordinal
-      );
-      assert.ok(
-        completed.every((id) => done.metrics.completedAttemptIds.includes(id))
-      );
-      assert.equal(
-        f.adapters.phasePrompts.filter((prompt) =>
-          prompt.includes("Phase: fix")
-        ).length,
-        1
-      );
-      assert.equal(done.planApproval?.digest, f.state.planApproval?.digest);
-    } finally {
-      await f.repository.dispose();
-    }
-  });
-
-for (const drift of ["missing", "repaired"] as const)
-  test(`guided Skip drift at zero-accepted triage re-evaluates ${drift} prerequisites`, async () => {
-    const f = await guidedConfigurationFixture();
-    try {
-      f.adapters.reviewResults.splice(0, f.adapters.reviewResults.length, {
-        contractVersion: CONTRACT_VERSION,
-        verdict: "changes_requested",
-        summary: "One finding.",
-        findings: [finding("R1-F1", "Fix source.")],
-        reviewedFindingIds: [],
-        deferredCoverage: []
-      });
-      const state = await f.runner.answerConfigurationPrerequisite({
-        ...f.answer,
-        action: "skip"
-      });
-      assert.equal(state.status, "needs_triage");
-      const config = JSON.parse(
-        await readFile(f.configPath, "utf8")
-      ) as OrchestratorConfig;
-      requiredFixture(config.verification.profiles[0]?.commands[0]).timeoutMs +=
-        1;
-      if (drift === "repaired")
-        config.verification.profiles.push({
-          projectType: "node",
-          ...f.pending.proposal.profile
-        });
-      await writeFile(f.configPath, JSON.stringify(config));
-      f.adapters.reviewResults.push(passingReview());
-      let result = await f.runner.triage({
-        accepted: [],
-        rejected: ["R1-F1"],
-        deferred: [],
-        note: "Owner rejected",
-        decidedBy: "human"
-      });
-      assert.deepEqual(
-        result.triage?.items
-          .filter((item) => item.disposition === "rejected")
-          .map((item) => item.findingId),
-        ["R1-F1"]
-      );
-      assert.equal(result.planApproval?.digest, f.state.planApproval?.digest);
-      if (drift === "missing") {
-        assert.equal(
-          result.status,
-          "needs_human_decision",
-          result.blockReason ?? ""
-        );
-        const request = result.pendingHumanDecision;
-        assert.ok(request?.kind === "configuration_prerequisite");
-        assert.equal(
-          request.continuation.attemptId,
-          f.pending.continuation.attemptId
-        );
-        result = await f.runner.answerConfigurationPrerequisite({
-          ...f.answer,
-          decisionId: request.decisionId,
-          proposalId: request.proposalId
-        });
-      }
-      assert.equal(result.status, "done", result.blockReason ?? "");
-      assert.deepEqual(
-        result.triageHistory
-          .at(-1)
-          ?.items.filter((item) => item.disposition === "rejected")
-          .map((item) => item.findingId),
-        ["R1-F1"]
-      );
-      assert.equal(
-        f.adapters.phasePrompts.filter((prompt) =>
-          prompt.includes("Phase: implementation")
-        ).length,
-        1
-      );
-    } finally {
-      await f.repository.dispose();
-    }
-  });
-
-for (const fragment of [
-  "empty",
-  "prefix",
-  "utf8",
-  "foreign",
-  "symlink",
-  "third_image"
-] as const)
-  test(`guided prepared configuration recovery handles ${fragment} temporary safely`, async () => {
-    const f = await guidedConfigurationFixture();
-    try {
-      const {
-        previewVerificationConfig,
-        publishVerificationConfig,
-        readVerificationConfigTransactions,
-        applyVerificationConfigDelta
-      } = await import("../src/verification-config.js");
-      if (fragment === "utf8") {
-        const config = JSON.parse(
-          await readFile(f.configPath, "utf8")
-        ) as OrchestratorConfig;
-        requiredFixture(config.verification.profiles[0]?.commands[0]).name =
-          "Є";
-        await writeFile(f.configPath, JSON.stringify(config));
-      }
-      const before = await readFile(f.configPath, "utf8");
-      const preview = await previewVerificationConfig(f.repository.root, {
-        operation: "add",
-        profile: { projectType: "node", ...f.pending.proposal.profile },
-        clearBootstrap: true
-      });
-      await assert.rejects(
-        f.runner.withVerificationConfiguration(async (context) => {
-          assert.ok(context);
-          const revalidate = context.revalidate.bind(context);
-          let count = 0;
-          context.revalidate = async () => {
-            if (++count === 2) throw new Error("pause before rename");
-            await revalidate();
-          };
-          await publishVerificationConfig(
-            f.runner.store,
-            preview,
-            "human",
-            context
-          );
-        }),
-        /pause before rename/u
-      );
-      const record = requiredFixture(
-        (
-          await readVerificationConfigTransactions(
-            f.repository.root,
-            f.state.runId
-          )
-        )[0]
-      );
-      const filename = `${f.configPath}.verification-${record.operationId}.tmp`;
-      const after = applyVerificationConfigDelta(before, preview.delta);
-      if (fragment === "symlink") await symlink(f.configPath, filename);
-      else
-        await writeFile(
-          filename,
-          fragment === "empty"
-            ? ""
-            : fragment === "utf8"
-              ? Buffer.from(after).subarray(
-                  0,
-                  Buffer.from(after).indexOf(Buffer.from("Є")) + 1
-                )
-              : fragment === "prefix" || fragment === "third_image"
-                ? after.slice(0, 31)
-                : "foreign bytes",
-          { mode: 0o600 }
-        );
-      if (fragment === "third_image")
-        await writeFile(f.configPath, before + "\n");
-      if (
-        fragment === "foreign" ||
-        fragment === "symlink" ||
-        fragment === "third_image"
-      ) {
-        await assert.rejects(f.runner.resume());
-        assert.equal(
-          await readFile(f.configPath, "utf8"),
-          fragment === "third_image" ? before + "\n" : before
-        );
-        return;
-      }
-      const resumed = await f.runner.resume();
-      assert.equal(resumed.status, "needs_human_decision");
-      assert.equal(await readFile(f.configPath, "utf8"), before);
-      await assert.rejects(readFile(filename), { code: "ENOENT" });
-      await f.runner.withVerificationConfiguration(async (context) => {
-        assert.ok(context);
-        await publishVerificationConfig(
-          f.runner.store,
-          preview,
-          "human",
-          context
-        );
-      });
-      const done = await f.runner.resume();
-      assert.equal(done.status, "done", done.blockReason ?? "");
-      assert.equal(done.planApproval?.digest, f.state.planApproval?.digest);
-      assert.equal(
-        f.adapters.phasePrompts.filter((prompt) =>
-          prompt.includes("Phase: implementation")
-        ).length,
-        1
-      );
-    } finally {
-      await f.repository.dispose();
-    }
-  });
-
-test("guided missing-script status identifies existing profiles and unavailable Accept without request expansion", async () => {
-  const f = await guidedConfigurationFixture();
-  try {
-    await f.runner.answerConfigurationPrerequisite(f.answer, false);
-    await writeFile(
-      path.join(f.repository.root, "package.json"),
-      '{"scripts":{"build":"build-stub"}}'
-    );
-    const pending = await f.runner.resume();
-    assert.equal(pending.status, "needs_human_decision");
-    const request = pending.pendingHumanDecision;
-    assert.ok(request?.kind === "configuration_prerequisite");
-    assert.equal(request.reason, "missing_script");
-    const status = await f.runner.status();
-    assert.deepEqual(status.configurationPrerequisite?.repairCommands, [
-      "banzai verify edit node",
-      "banzai verify remove node",
-      "banzai verify list",
-      "banzai resume"
-    ]);
-    const projected = projectAgentControlStatus(status);
-    assert.deepEqual(
-      projected.activeRun?.pendingGate?.kind === "configuration_prerequisite"
-        ? projected.activeRun.pendingGate.repairCommands
-        : null,
-      status.configurationPrerequisite.repairCommands
-    );
-    const { configurationDecisionLines } =
-      await import("../src/verification-ui.js");
-    const lines = configurationDecisionLines(
-      request,
-      status.configurationPrerequisite
-    ).join("\n");
-    assert.match(lines, /Accept unavailable:.*node/u);
-    assert.match(lines, /banzai verify edit node/u);
-    assert.doesNotMatch(lines, /banzai verify add node/u);
-    assert.equal("repairCommands" in request, false);
-    const { runInteractive } = await import("../src/interactive.js");
-    const actionNames: string[] = [];
-    const rendered: string[] = [];
-    const io: import("../src/interactive.js").InteractiveIO = {
-      async select<T>(
-        _message: string,
-        choices: readonly import("../src/interactive.js").InteractiveChoice<T>[]
-      ): Promise<T> {
-        actionNames.push(...choices.map((choice) => choice.name));
-        assert.match(
-          String(choices.find((choice) => choice.name === "Accept")?.disabled),
-          /existing profiles: node/u
-        );
-        return requiredFixture(
-          choices.find((choice) => choice.value === "exit")
-        ).value;
-      },
-      async input() {
-        assert.fail("No text input expected");
-      },
-      async confirm() {
-        assert.fail("No confirmation expected");
-      },
-      writeLine(line = "") {
-        rendered.push(line);
-      }
-    };
-    await runInteractive(f.runner, io, { decidedBy: "human" });
-    assert.deepEqual(actionNames, [
-      "Accept",
-      "Edit",
-      "Skip",
-      "Cancel",
-      "Exit and decide later"
-    ]);
-    assert.match(rendered.join("\n"), /Accept unavailable/u);
-
-    await assert.rejects(
-      f.runner.answerConfigurationPrerequisite({
-        ...f.answer,
-        decisionId: request.decisionId,
-        proposalId: request.proposalId
-      }),
-      { code: "CONFIGURATION_PREREQUISITE_UNMET" }
-    );
-  } finally {
-    await f.repository.dispose();
   }
 });
 
@@ -11786,7 +9725,7 @@ test("a narrative-only implementation is published once by the runner with attem
     await runner.start({ slug: "example", request: "Implement it." });
     const done = await runner.approvePlan("human");
     assert.equal(done.status, "done", done.blockReason ?? "");
-    assert.equal(done.schemaVersion, 7);
+    assert.equal(done.schemaVersion, 8);
     assert.equal(done.metrics.attempts.implementation, 1);
     assert.ok(
       adapters.phasePrompts.every((prompt) => !/repair retry/i.test(prompt))
@@ -11805,7 +9744,7 @@ test("a narrative-only implementation is published once by the runner with attem
     };
     const ledger = phaseResult("implementation").taskCompletion;
     assert.ok(ledger);
-    const reportPath = path.join(
+    const reportPath = await boundFixturePath(
       repository.root,
       "documentation/features/example/implementation-report.md"
     );
@@ -11868,8 +9807,7 @@ test("a narrative-only implementation is published once by the runner with attem
       done.runId,
       attempt
     );
-    assert.ok(transition);
-    assert.equal(transition.priorState.schemaVersion, 6);
+    assert.equal(transition, null);
     assert.equal(done.completionPublication?.stage, "event");
     assert.equal(done.completionPublication.refusal, null);
     assert.equal(
@@ -11890,7 +9828,7 @@ test("a narrative-only implementation is published once by the runner with attem
     );
     const record = await runner.store.readRunAttempt(done.runId, attempt);
     assert.equal(record.status, "completed");
-    assert.equal(record.schemaVersion, 3);
+    assert.equal(record.schemaVersion, 4);
     assert.equal(record.completionProtocol, "banzai-completion-protocol/v1");
     assert.equal(record.retryOf, null);
     assert.equal(record.envelope?.originalDigest, capture.resultDigest);
@@ -11905,16 +9843,19 @@ test("a narrative-only implementation is published once by the runner with attem
       done.runId,
       review.attempt
     );
-    assert.equal(frozen.schemaVersion, 5);
+    assert.equal(frozen.schemaVersion, 6);
     assert.equal(
       frozen.completionPublication?.receiptDigest,
       receipt.integrityDigest
     );
     const artifact = await readFile(
-      path.join(repository.root, "documentation/features/example/review-1.md"),
+      await boundFixturePath(
+        repository.root,
+        "documentation/features/example/review-1.md"
+      ),
       "utf8"
     );
-    assert.match(artifact, /banzai-feature-review\/v6/);
+    assert.match(artifact, /banzai-feature-review\/v7/);
     assert.match(artifact, /Runner-owned completion publication/);
     assert.ok(artifact.includes(receipt.integrityDigest));
   } finally {
@@ -11987,7 +9928,7 @@ for (const boundary of ["capture-manifest", "between-originals"] as const)
 
       const target =
         boundary === "capture-manifest"
-          ? path.join(
+          ? await boundFixturePath(
               repository.root,
               "documentation/features/example/implementation-report.md"
             )
@@ -12905,7 +10846,7 @@ test("a receipt write failure after report replacement reconciles the proven byt
     assert.match(blocked.blockReason ?? "", /stage receipt/);
     const attempt = blocked.activeAttempt;
     assert.ok(attempt?.kind === "implementation");
-    const reportPath = path.join(
+    const reportPath = await boundFixturePath(
       repository.root,
       "documentation/features/example/implementation-report.md"
     );
@@ -13226,7 +11167,7 @@ test("a blocked implementation whose gap targets the runner-owned section keeps 
     assert.ok(
       (
         await readFile(
-          path.join(
+          await boundFixturePath(
             repository.root,
             "documentation/features/example/implementation-report.md"
           ),
@@ -13393,7 +11334,6 @@ test("archive closure carries the runner-owned completion proof and fails when t
       "completion-input.json",
       "completion-candidate.json",
       "completion-candidate.md",
-      "completion-transition.json",
       "implementation-input.md"
     ])
       assert.ok(
@@ -13401,7 +11341,7 @@ test("archive closure carries the runner-owned completion proof and fails when t
         leaf
       );
 
-    // Removing the receipt breaks the v7 state closure at export time.
+    // Removing the receipt breaks completion closure even for a partial archive.
     await rm(path.join(root, receiptPath));
     const broken = await archive(path.join(root, "archive-two"));
     assert.equal(broken.ok, false);

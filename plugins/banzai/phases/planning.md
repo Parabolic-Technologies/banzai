@@ -20,6 +20,7 @@ Runner control files are outside model write scope. Never plan writes to paths u
 `.banzai/` except the exact private artifact roles bound for the intended phase.
 Read-only fact checks and explicit constraints preserving those paths are valid
 task context; they grant no write authority.
-Record missing verification configuration in a **Human prerequisites** section,
-not an implementation task. The runner owns guided configuration proposals;
-free-text consent cannot invent an external configuration-update mechanism.
+Record actual owner-only requirements in **Human prerequisites**. Missing tests
+or tooling may be created within the approved task scope; they do not require
+profiles or a configuration gate. Never plan writes to runner configuration or
+invent an external configuration-update mechanism.

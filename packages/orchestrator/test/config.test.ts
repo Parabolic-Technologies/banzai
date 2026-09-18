@@ -170,22 +170,9 @@ test("init is idempotent and preserves tracked config", async () => {
     assert.match(ignore, /^coverage\/\n/);
     assert.match(ignore, /\.banzai\/runs\//);
     const config = await loadConfig(root);
-    assert.equal(config.schemaVersion, 2);
+    assert.equal(config.schemaVersion, 4);
     assert.deepEqual(config.context, { mode: "observe", limits: [] });
-    assert.deepEqual(config.verification.profiles, [
-      {
-        id: "repository",
-        projectType: "repository",
-        commands: [
-          {
-            name: "git diff check",
-            command: "git",
-            args: ["diff", "--check"],
-            timeoutMs: 120_000
-          }
-        ]
-      }
-    ]);
+    assert.deepEqual(config.verification.profiles, []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

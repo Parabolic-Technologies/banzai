@@ -1,10 +1,37 @@
 import type { InteractiveIO } from "./interactive.js";
-import type { VerificationCommand } from "./types.js";
+import type { RunState, VerificationCommand } from "./types.js";
 import { escapeTerminalText } from "./format.js";
 import {
   configurationText,
   type ConfigurationPrerequisiteRequest
 } from "./configuration-prerequisite.js";
+
+export function taskVerificationStatusLines(state: RunState): string[] {
+  if (state.verificationMode !== "task") return [];
+  const application = state.taskVerification?.applicability;
+  if (!application)
+    return [
+      state.status === "blocked" && state.blockedFrom === "verifying"
+        ? "Verification: unavailable. See the blocked prerequisite."
+        : "Verification: not run"
+    ];
+  if (application.outcome === "absent") return ["Verification: absent"];
+  const label = (kind: string): string =>
+    kind === "reused" ? "passed" : kind.replaceAll("_", " ");
+  const kinds = application.dispositions.map((item) => item.kind);
+  const outcome =
+    ["unavailable", "timed_out", "interrupted", "failed", "not_run"].find(
+      (kind) => kinds.some((value) => value === kind)
+    ) ?? (application.complete && kinds.length > 0 ? "passed" : "not_run");
+  return [
+    `Verification: ${label(outcome)}`,
+    ...application.dispositions.map((item) =>
+      escapeTerminalText(
+        `  ${item.checkId} (${item.required ? "required" : "supplemental"}): ${label(item.kind)}${item.kind === "reused" ? " (reused evidence)" : ""}${item.kind === "unavailable" ? `. ${item.reason}` : ""}`
+      )
+    )
+  ];
+}
 
 export function verificationCommandLines(
   commands: readonly VerificationCommand[]

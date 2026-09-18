@@ -130,6 +130,7 @@ const FIXTURE_PATHS = [
   "documentation/decisions/0045-guided-verification-setup.md",
   "documentation/decisions/0047-runner-owned-completion-projection.md",
   "documentation/decisions/0048-completion-markup-and-viewer-enrichment-boundary.md",
+  "documentation/decisions/0049-task-scoped-verification.md",
   "packages/orchestrator/scripts/check-dist.mjs",
   "packages/orchestrator/scripts/release-version.mjs",
   "packages/orchestrator/scripts/smoke-committed.mjs",
@@ -812,7 +813,7 @@ for (const [relativePath, fragment] of [
   ["plugins/banzai/skills/development-plan/SKILL.md", "only gate that"],
   [
     "plugins/banzai/skills/code-writing/SKILL.md",
-    "contracts/v3/phase-result.schema.json"
+    "contracts/v4/phase-result.schema.json"
   ],
   ["plugins/banzai/skills/test-writing/SKILL.md", "decisionConsultation: null"],
   [
@@ -821,28 +822,22 @@ for (const [relativePath, fragment] of [
   ],
   [
     "plugins/banzai/skills/quick-fix/SKILL.md",
-    "contracts/v3/phase-result.schema.json"
+    "contracts/v4/phase-result.schema.json"
   ],
   [
     "packages/orchestrator/src/prompts.ts",
     "stop before authoring a Proposed ADR or plan that selects an option"
   ],
-  [
-    "README.md",
-    "There are five existing decision gates plus a conditional configuration prerequisite"
-  ],
+  ["README.md", "There are five existing decision gates"],
   ["documentation/orchestrator.md", "A v1 answer cannot answer a"],
   [
     "packages/orchestrator/src/cli.ts",
     "Five existing human decision gates remain distinct"
   ],
-  [
-    "PROJECT_MANIFEST.md",
-    "five existing workflow gates plus a conditional configuration prerequisite"
-  ],
+  ["PROJECT_MANIFEST.md", "five existing workflow gates"],
   [
     "plugins/banzai/documentation/README.md",
-    "v3/phase-result.schema.json # current consultation-aware phase hand-off"
+    "v4/phase-result.schema.json # current task-verification phase hand-off"
   ],
   [
     "packages/orchestrator/test/agent-control.test.ts",
@@ -870,7 +865,7 @@ for (const [relativePath, fragment] of [
   });
 }
 
-test("release validation pins the phase-result v3 manifest and schema identity", async () => {
+test("release validation pins the phase-result v4 manifest and schema identity", async () => {
   await withFixture(async (root) => {
     await mutateJson(
       root,
@@ -890,10 +885,10 @@ test("release validation pins the phase-result v3 manifest and schema identity",
     );
     await mutateJson(
       root,
-      "plugins/banzai/contracts/v3/phase-result.schema.json",
+      "plugins/banzai/contracts/v4/phase-result.schema.json",
       (value) => {
         const properties = value.properties as Record<string, unknown>;
-        (properties.schemaVersion as Record<string, unknown>).const = 4;
+        (properties.schemaVersion as Record<string, unknown>).const = 5;
       }
     );
     result = validate(root);
@@ -917,14 +912,14 @@ for (const relativePath of [
   });
 }
 
-test("release validation protects run-state v3-v7 and agent-control 5.0 identities", async () => {
+test("release validation protects run-state v3-v8 and agent-control 6.0 identities", async () => {
   await withFixture(async (root) => {
     const typesPath = path.join(root, "packages/orchestrator/src/types.ts");
     const accepted = await readFile(typesPath, "utf8");
     await writeFile(
       typesPath,
       accepted.replace(
-        "schemaVersion: 3 | 4 | 5 | 6 | 7;",
+        "schemaVersion: 3 | 4 | 5 | 6 | 7 | 8;",
         "schemaVersion: 2;"
       ),
       "utf8"
@@ -936,7 +931,7 @@ test("release validation protects run-state v3-v7 and agent-control 5.0 identiti
     await writeFile(
       typesPath,
       accepted.replace(
-        '"banzai-agent-status/v4" as const',
+        '"banzai-agent-status/v5" as const',
         '"banzai-agent-status/v1" as const'
       ),
       "utf8"
@@ -971,7 +966,7 @@ for (const [relativePath, fragment] of [
   ],
   [
     "plugins/banzai/skills/orchestrate/SKILL.md",
-    "exact supported v5 declaration"
+    "exact supported v6 declaration"
   ],
   ["plugins/banzai/skills/orchestrate/SKILL.md", "banzai-agent-answer/v2"],
   [
@@ -992,11 +987,11 @@ for (const [relativePath, fragment] of [
   ],
   [
     "plugins/banzai/skills/orchestrate/references/control-protocol.md",
-    "banzai-agent-capabilities/v5"
+    "banzai-agent-capabilities/v6"
   ],
   [
     "plugins/banzai/skills/orchestrate/references/control-protocol.md",
-    'controlContractVersion: "5.0.0"'
+    'controlContractVersion: "6.0.0"'
   ],
   [
     "plugins/banzai/skills/orchestrate/references/control-protocol.md",
@@ -1648,8 +1643,8 @@ for (const [relativePath, code] of [
     "MISSING_RELEASE_FILE"
   ],
   [
-    "plugins/banzai/contracts/v3/phase-result.schema.json",
-    "MISSING_RELEASE_FILE"
+    "plugins/banzai/contracts/v4/phase-result.schema.json",
+    "MALFORMED_RELEASE_JSON"
   ]
 ] as const) {
   test(`release validation rejects missing ${relativePath}`, async () => {

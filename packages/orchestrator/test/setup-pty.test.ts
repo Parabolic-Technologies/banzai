@@ -187,7 +187,6 @@ test("setup PTY fresh and repeated init preserve default wording and offer manua
           { wait: "Planning model", send: "\r" },
           { wait: "Implementation model", send: "\r" },
           { wait: "Review model", send: "\r" },
-          ...(fresh ? [{ wait: "Enable bootstrap mode", send: "y\r" }] : []),
           { wait: "? Project setup", send: "\u001b[B\u001b[B\r" },
           { wait: "explicitly invoke:", send: "\u001b[B\u001b[B\u001b[B\r" }
         ]
@@ -205,11 +204,11 @@ test("setup PTY fresh and repeated init preserve default wording and offer manua
           path.join(host.root, "documentation/verification-examples.md"),
           "utf8"
         ),
-        /# Verification Profile Examples/
+        /# Task Verification/
       );
       assert.match(
         result.output,
-        /Banzai configuration saved\.\s+Project setup required\s+PROJECT_MANIFEST\.md\s+Missing\s+AGENTS\.md\s+Missing\s+CLAUDE\.md\s+Missing \(created during setup\)\s+Run banzai:project-manifest to prepare project guidance\./
+        /Banzai configuration saved\.[\s\S]*Project setup required\s+PROJECT_MANIFEST\.md\s+Missing\s+AGENTS\.md\s+Missing\s+CLAUDE\.md\s+Missing \(created during setup\)\s+Run banzai:project-manifest to prepare project guidance\./
       );
       assert.match(
         result.output,
@@ -394,7 +393,7 @@ test("setup CLI non-TTY init creates local verification guidance without launchi
             "](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/$1.md"
           )
         );
-        assert.match(guide, /banzai verify add <type>/);
+        assert.match(guide, /without verification profiles/);
         await writeFile(
           guidePath,
           "# Project-specific checks\r\nKeep my edits.\r\n"

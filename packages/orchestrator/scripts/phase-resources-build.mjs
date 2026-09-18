@@ -321,12 +321,10 @@ export async function validateGuidanceExtraction(root, candidate = null) {
       throw new Error(`Non-enumerated skill change: ${source.skill}.`);
     const orchestrated = sourceSections.get("Orchestrated Mode");
     if (
-      original.sources.find((entry) => entry.skill === source.skill)
-        .orchestratedSha256 &&
+      source.orchestratedSha256 &&
       (!orchestrated ||
         resourceDigest(skill.slice(orchestrated.start, orchestrated.end)) !==
-          original.sources.find((entry) => entry.skill === source.skill)
-            .orchestratedSha256)
+          source.orchestratedSha256)
     ) {
       throw new Error(`Retained Orchestrated Mode changed: ${source.skill}.`);
     }
@@ -632,6 +630,45 @@ const COMPLETION_AUTHORITY_AMENDMENTS = new Map([
   ]
 ]);
 
+const TASK_AUTHORITY_AMENDMENTS = new Map([
+  [
+    "9a6fda0780d3595c809e425fec82726b38b868ebdb3e3950cf0b379b6c9dd870",
+    "282717e36e60da2523d269918e4c8bcad455ac7c0f4ee6bb96734641d7c4c284"
+  ],
+  [
+    "e886482951b39fb0ce4bd7009c372d09003338b362c20e58620fa93ba32a74d0",
+    "ba6ea30b1e4a28071f84fe0e4ac079933bccbe4a02a9abef3fb34bd376ea83c8"
+  ],
+  [
+    "eead23c8ed3004f4be2cb1d17c9fbf741ae7c92ed5802dcfc4919887f254cf73",
+    "3e40b9fc887c483f6c805e39d6d1f27aa3fa80336e74af168db032bb3e261c20"
+  ],
+  [
+    "efa7ec6e30a0ce6df85b59e191b7cf52f27a3afc24acf59022266914dc284456",
+    "6f45181708024e574b0e7d0b8925df5788a2a8899ba759b8f5b1cbabde9b1925"
+  ],
+  [
+    "88c38f1b6ef9e47a103375a32d2a3e7f70a09b5cc305a49af3f9ecd1f9cb64a9",
+    "0d307249537a78dddcb00b44a8edc0874e274da2a85982c58d8be11f4caa5041"
+  ],
+  [
+    "3991c3744410bb16a315339dd2ba98bf7d7b54c2d28cf94f31651e092ee14050",
+    "e8f0796f45e423d978b9b4f8a299d95bbb9f15f7a2c992281aff02302ddea8bf"
+  ],
+  [
+    "0816e089790ef1cb6337233c8b68aa6a99bc01d8b809433e3bd4e0ed27dcdd3b",
+    "dc5e1eb32158174796dd654e24e60156cba7f603534426caa8dfdd68cf689aa9"
+  ],
+  [
+    "f13299859325a704b59b874e114a0378601d7b08d52a100e643912f0e3ca8239",
+    "9ed25e92078f2ff58efea112abbe1ebebd892764a61150e28a8b82f3380579db"
+  ],
+  [
+    "2e9eba248cb61b613220aeb1a5c92d731af2aa2414c8e3f2e9af8b6628c0c835",
+    "2223816677806b7c02979e7d73a7e1ed4ab6ccd099ac4b5d59e8ea015dd25e49"
+  ]
+]);
+
 const RETAINED_AUTHORITY_AMENDMENTS = [
   {
     decision: "documentation/decisions/0045-guided-verification-setup.md",
@@ -641,6 +678,10 @@ const RETAINED_AUTHORITY_AMENDMENTS = [
     decision:
       "documentation/decisions/0047-runner-owned-completion-projection.md",
     images: COMPLETION_AUTHORITY_AMENDMENTS
+  },
+  {
+    decision: "documentation/decisions/0049-task-scoped-verification.md",
+    images: TASK_AUTHORITY_AMENDMENTS
   }
 ];
 
@@ -726,7 +767,13 @@ async function applyTransition(root, original, previous, transition) {
     transition.changes.length > 300
   )
     throw new Error("Invalid instruction transition scope.");
+  const retainedKeys = original.sources
+    .filter((source) => source.orchestratedSha256)
+    .map(
+      (source) => `plugins/banzai/skills/${source.skill}/SKILL.md#orchestrated`
+    );
   const allowed = new Set([
+    ...retainedKeys,
     ...Object.keys(rootExpectations(original)),
     ...rawResourceKeys()
   ]);
@@ -736,6 +783,12 @@ async function applyTransition(root, original, previous, transition) {
     closed(change, ["key", "before", "after"], "change");
     if (
       !allowed.has(change.key) ||
+      (change.key.endsWith("#orchestrated") &&
+        !transition.authorities.some(
+          (authority) =>
+            authority.path ===
+            "documentation/decisions/0049-task-scoped-verification.md"
+        )) ||
       (last !== null && last.localeCompare(change.key, "en") >= 0) ||
       !SHA256.test(change.after) ||
       change.before !== (previous[change.key] ?? null) ||
@@ -744,10 +797,11 @@ async function applyTransition(root, original, previous, transition) {
         change.key
       ) ||
       (change.key === "plugins/banzai/skills/orchestrate/SKILL.md" &&
-        !transition.authorities.some(
-          (authority) =>
-            authority.path ===
-            "documentation/decisions/0045-guided-verification-setup.md"
+        !transition.authorities.some((authority) =>
+          [
+            "documentation/decisions/0045-guided-verification-setup.md",
+            "documentation/decisions/0049-task-scoped-verification.md"
+          ].includes(authority.path)
         ))
     )
       throw new Error("Invalid or protected instruction transition scope.");
@@ -786,6 +840,8 @@ function projectInventory(original, expectations) {
   const inventory = structuredClone(original);
   for (const source of inventory.sources) {
     const skill = `plugins/banzai/skills/${source.skill}/SKILL.md`;
+    source.orchestratedSha256 =
+      expectations[`${skill}#orchestrated`] ?? source.orchestratedSha256;
     source.skeletonSha256 = expectations[`${skill}#skeleton`];
     for (const entry of source.sections) {
       entry.consumerNormalizedSha256 =
@@ -863,15 +919,15 @@ async function captureExpectations(root, original) {
         skeleton.slice(section.end);
     expected[`${skillPath}#skeleton`] = resourceDigest(skeleton);
     const orchestrated = sections.get("Orchestrated Mode");
-    if (
-      source.orchestratedSha256 &&
-      (!orchestrated ||
-        resourceDigest(skill.slice(orchestrated.start, orchestrated.end)) !==
-          source.orchestratedSha256)
-    )
-      throw new Error(
-        "Retained Orchestrated Mode cannot be changed by a transition."
+    if (source.orchestratedSha256) {
+      if (!orchestrated)
+        throw new Error("Retained Orchestrated Mode cannot be removed.");
+      const digest = resourceDigest(
+        skill.slice(orchestrated.start, orchestrated.end)
       );
+      if (digest !== source.orchestratedSha256)
+        expected[`${skillPath}#orchestrated`] = digest;
+    }
   }
   for (const key of Object.keys(original.preservedFiles)) {
     let text = await baselineFile(root, key);

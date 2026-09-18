@@ -63,6 +63,16 @@ export const DEFAULT_CONFIG: OrchestratorConfig = {
   maxFixCycles: 3
 };
 
+/** New-project wire configuration. Legacy defaults above support old profile operations. */
+export const DEFAULT_TASK_CONFIG = {
+  schemaVersion: 4 as const,
+  contractVersion: CONTRACT_VERSION,
+  models: structuredClone(DEFAULT_CONFIG.models),
+  claudeEnvironment: structuredClone(DEFAULT_CONFIG.claudeEnvironment),
+  context: structuredClone(DEFAULT_CONFIG.context),
+  maxFixCycles: DEFAULT_CONFIG.maxFixCycles
+};
+
 async function pathExists(filePath: string): Promise<boolean> {
   try {
     await access(filePath);
@@ -659,7 +669,7 @@ export async function initializeConfig(
   if (!(await pathExists(configPath))) {
     await writeFile(
       configPath,
-      `${JSON.stringify(DEFAULT_CONFIG, null, 2)}\n`,
+      `${JSON.stringify(DEFAULT_TASK_CONFIG, null, 2)}\n`,
       {
         encoding: "utf8",
         flag: "wx"

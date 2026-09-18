@@ -66,7 +66,7 @@ export function parseVerificationArgs(
 }
 
 function supportedConfig(config: OrchestratorConfig): 2 | 3 {
-  if (config.schemaVersion === 1)
+  if (config.schemaVersion !== 2 && config.schemaVersion !== 3)
     throw new BanzaiError(
       "VERIFICATION_LEGACY_CONFIG",
       "Guided verification requires config schema 2 or 3. Follow the legacy migration in documentation/verification-examples.md; no migration was applied."

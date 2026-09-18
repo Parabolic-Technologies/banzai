@@ -307,6 +307,8 @@ export function validateConfigurationStateEnvelope(value: unknown): void {
   if (!value || typeof value !== "object" || Array.isArray(value))
     configurationInvalid();
   const state = value as Record<string, unknown>;
+  if (state.schemaVersion === 8 && state.verificationMode !== "task")
+    configurationInvalid();
   if (
     state.schemaVersion !== 6 &&
     !(state.schemaVersion === 7 && "configurationSetup" in state)
@@ -319,7 +321,8 @@ export function validateConfigurationStateEnvelope(value: unknown): void {
             "configuration_prerequisite"
         )) ||
       "configurationSetup" in state ||
-      "verificationMode" in state ||
+      ("verificationMode" in state &&
+        !(state.schemaVersion === 8 && state.verificationMode === "task")) ||
       (state.pendingHumanDecision as { kind?: unknown } | null)?.kind ===
         "configuration_prerequisite"
     )
@@ -826,7 +829,7 @@ export function verificationProposal(
   manager: VerificationPackageManager | null = inspection.node
     ?.packageManager ?? null
 ): ConfigurationProposal {
-  if (config.schemaVersion === 1)
+  if (config.schemaVersion !== 2 && config.schemaVersion !== 3)
     configurationInvalid(
       "Guided profiles require schema 2 or 3. Follow the documented legacy migration first."
     );

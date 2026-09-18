@@ -9,6 +9,11 @@
 - Rework: R1-F1, R1-F2 and R1-F3 accepted for proposal rework in chat on
   2026-09-08; this is not ADR acceptance.
 
+- Amended by [ADR-0049](./0049-task-scoped-verification.md), accepted 2026-09-17:
+  successor review projections carry task verification and assess its connection
+  to requirements. Independent read-only review, frozen evidence and historical
+  artifact semantics remain. Implementation of the amendment is Planned.
+
 ## Related Artifacts
 
 - [Feature description](../features/unified-review-artifacts/description.md)

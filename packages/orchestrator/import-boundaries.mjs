@@ -14,6 +14,7 @@ const ADR_0041 = "ADR-0041";
 const ADR_0042 = "ADR-0042";
 const ADR_0043 = "ADR-0043";
 const ADR_0045 = "ADR-0045";
+const ADR_0049 = "ADR-0049";
 const POLICY_ADR_AUTHORITIES = new Set([
   ADR_0026,
   ADR_0028,
@@ -24,7 +25,8 @@ const POLICY_ADR_AUTHORITIES = new Set([
   ADR_0041,
   ADR_0042,
   ADR_0043,
-  ADR_0045
+  ADR_0045,
+  ADR_0049
 ]);
 const POLICY_ERROR_CODE = "IMPORT_BOUNDARY_POLICY_INVALID";
 const IMPORTER_PATTERN =
@@ -144,13 +146,21 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/verification-evidence.ts",
     "shared-verification-evidence",
-    [ADR_0043],
+    [ADR_0043, ADR_0049],
     [
       permission(
         "../../../plugins/banzai/lib/verification-evidence.mjs",
         ADR_0043
       ),
-      permission("../../../plugins/banzai/lib/verification-store.mjs", ADR_0043)
+      permission(
+        "../../../plugins/banzai/lib/verification-store.mjs",
+        ADR_0043
+      ),
+      permission("../../../plugins/banzai/lib/task-verification.mjs", ADR_0049),
+      permission(
+        "../../../plugins/banzai/lib/task-verification-store.mjs",
+        ADR_0049
+      )
     ]
   ),
   boundary("src/phase-resources.ts", "embedded-phase-resources", [ADR_0042]),
@@ -427,11 +437,15 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/contracts.ts",
     "model-contracts",
-    [MANIFEST_ARCHITECTURE, MANIFEST_MODULES],
+    [MANIFEST_ARCHITECTURE, MANIFEST_MODULES, ADR_0049],
     [
       permission(
         "../../../plugins/banzai/contracts/contract.json",
         MANIFEST_MODULES
+      ),
+      permission(
+        "../../../plugins/banzai/contracts/v4/phase-result.schema.json",
+        ADR_0049
       ),
       permission(
         "../../../plugins/banzai/contracts/v1/phase-result.schema.json",
@@ -916,7 +930,9 @@ function validTargetShape(target) {
       ![
         "../../../plugins/banzai/lib/artifact-storage.mjs",
         "../../../plugins/banzai/lib/verification-evidence.mjs",
-        "../../../plugins/banzai/lib/verification-store.mjs"
+        "../../../plugins/banzai/lib/verification-store.mjs",
+        "../../../plugins/banzai/lib/task-verification.mjs",
+        "../../../plugins/banzai/lib/task-verification-store.mjs"
       ].includes(target)) ||
     TARGET_META_PATTERN.test(target) ||
     target.includes("//")

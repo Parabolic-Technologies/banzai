@@ -22,13 +22,14 @@ Keep ADRs, indexes, manifests and maintained product guidance at their existing
 repository paths. Status/loading stays read-only, and orchestrated work follows
 the persisted run binding and exact phase grants.
 
-Standalone verification follows the Test Assurance policy's deterministic
-fallback rule. With explicit project opt-in and a v2 binding, resolve
-`../../scripts/verification.cjs` relative to this installed skill; read-only
-status/review uses inspect or decide, and authorized implementation uses execute
-for configured check IDs. Preserve human plan/ADR/triage gates. In orchestrated
-mode consume the runner's evidence and never invoke this helper or write its
-machine directory. A missing helper or unsupported binding retains fresh checks.
+Standalone verification uses the existing task and skill authorization. With a
+new private v2 work binding, invoke the installed `../../scripts/verification.cjs`
+v2 helper using the task inventory in the bound plan or work artifact. Inspect
+and decide are read-only; execute runs the authorized checks. Do not fabricate a
+runner approval or add a report solely to use the helper. Where no applicable
+bound artifact exists, retain fresh task checks and their actual results.
+Orchestrated phases consume runner evidence and never invoke the helper or write
+its machine directory.
 
 ## Sources
 
@@ -68,7 +69,7 @@ the migration step, and no source change.
 
 `BANZAI_RUN_ID` and `BANZAI_APPROVAL_DIGEST` identify a runner-recorded human
 approval; do not edit or reinterpret runner state. Follow this skill normally
-and return the phase result required by `contracts/v3/phase-result.schema.json`
+and return the phase result required by `contracts/v4/phase-result.schema.json`
 with `decisionConsultation: null`; on a new escalation trigger, stop with
 `gate=escalation`. The approved description, plan, and accepted ADRs are
 immutable: do not edit them or mark plan tasks `[x]`. The structured
@@ -91,6 +92,12 @@ Outputs:
 - source/test changes;
 - `documentation/features/<slug>/implementation-report.md`;
 - manifest updates when code changes project facts.
+
+Task verification is supplied by the runner. Return `verificationCandidates`
+with relevant task checks or an explicit absence rationale; strict mandatory
+checks remain in the approved plan. Planning returns this field as `null` and
+includes a self-contained `banzai-verification-obligations/v2` inventory in the
+plan before requesting approval. Never edit profiles or machine evidence.
 
 ## Preconditions
 

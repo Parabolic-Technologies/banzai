@@ -1,3 +1,5 @@
+import { parseTaskVerificationObligations, parseTaskVerificationPolicy, selectTaskVerification } from "./task-verification.mjs";
+import { executeTaskVerification, captureTaskVerificationInputs, readTaskVerificationAttempts, taskVerificationApplicability, parseTaskVerificationDecision } from "./task-verification-store.mjs";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { rename, readdir } from "node:fs/promises";
@@ -60,6 +62,7 @@ async function invoke(command, root, environment) {
 
 /** A closed request selects configured identities, never arbitrary commands. */
 export async function verificationOperation(operation, request) {
+  if (request?.schemaVersion === 2) return taskVerificationOperation(operation, request);
   if (!["inspect", "decide", "execute"].includes(operation)) fail("Unsupported verification operation.");
   exactObject(request, ["schema", "schemaVersion", "repoRoot", "workPath", "roundId"], operation === "execute" ? ["checkId", "retryOf"] : []);
   if (request.schema !== "banzai-verification-request/v1" || request.schemaVersion !== 1 || !/^[a-f0-9-]{36}$/u.test(request.roundId)) fail("Unsupported verification request identity.");
@@ -165,4 +168,54 @@ export async function verificationOperation(operation, request) {
   } finally {
     await releaseWork({ repoRoot: root, workPath: request.workPath, token: claim.token });
   }
+}
+
+/** Standalone execution uses the caller's existing skill/task authority, never a runner approval receipt. */
+async function taskVerificationOperation(operation, request) {
+  if (!["inspect", "decide", "execute"].includes(operation)) fail("Unsupported task verification operation.");
+  exactObject(request, ["schema", "schemaVersion", "repoRoot", "workPath", "roundId"], operation === "execute" ? ["retryOf"] : []);
+  if (request.schema !== "banzai-verification-request/v2" || !/^[a-f0-9-]{36}$/u.test(request.roundId)) fail("Unsupported task verification request.");
+  const inspection = await inspectArtifacts({ repoRoot: request.repoRoot, workPath: request.workPath });
+  const binding = inspection.work?.binding;
+  if (binding?.schemaVersion !== 2) fail("Task verification requires new private work binding v2.");
+  const root = inspection.projectRoot;
+  const strict = binding.mode === "strict" || binding.mode === "workflow";
+  const document = strict ? binding.artifacts.plan : binding.artifacts.work ?? binding.artifacts.changeReport;
+  if (!document) fail("Task authority document is missing.");
+  const bytes = await readBytes(root, document, { limit: 16 * 1024 * 1024 });
+  const obligations = parseTaskVerificationObligations(bytes.toString("utf8"));
+  const rawConfig = await readJson(root, ".banzai/config.json", true);
+  let policy = null;
+  try {
+    if (rawConfig?.schemaVersion === 4 && rawConfig.verification !== undefined)
+      exactObject(rawConfig.verification, [], ["policy"]);
+    if (rawConfig?.schemaVersion === 4 && Object.hasOwn(rawConfig.verification ?? {}, "policy"))
+      policy = parseTaskVerificationPolicy(rawConfig.verification.policy);
+  } catch {
+    const error = new VerificationEvidenceError("The declared task verification policy is invalid.");
+    error.code = "VERIFICATION_POLICY_INVALID";
+    throw error;
+  }
+  const selection = selectTaskVerification({ required: strict ? obligations.checks : [], candidates: strict ? { checks: [], absenceReason: obligations.absenceReason ?? "Required plan checks." } : {checks: obligations.checks, absenceReason: obligations.absenceReason}, policy });
+  const storage = { repoRoot: root, directory: binding.artifacts.verificationDirectory, workId: binding.workId };
+  const environment = policy?.reuse?.dependencies.environment ?? Object.fromEntries(Object.entries(process.env).filter(([key, value]) => value !== undefined && !/(?:API_KEY|ACCESS_TOKEN|AUTH_TOKEN|PASSWORD|SECRET)/iu.test(key)));
+  const context = { kind: "inherited-local", invocationDigest: evidenceDigest({ owner: "standalone-skill", binding: inspection.work.sha256, authority: evidenceDigest(bytes), environment: evidenceDigest(environment) }), restrictions: [] };
+  const authority = { workId: binding.workId, sourceAttemptId: request.roundId, workflow: strict ? "strict" : binding.mode === "fix" ? "quick-fix" : "feature", taskDigest: evidenceDigest(bytes), selectionDigest: inspection.work.sha256, approvalDigest: strict ? evidenceDigest(bytes) : null, contextDigest: evidenceDigest(context) };
+  const revalidate = async () => {
+    const current = await inspectArtifacts({ repoRoot: root, workPath: request.workPath });
+    if (current.work?.sha256 !== inspection.work.sha256 || evidenceDigest(await readBytes(root, document, { limit: 16 * 1024 * 1024 })) !== authority.taskDigest || JSON.stringify(await readJson(root, ".banzai/config.json", true)) !== JSON.stringify(rawConfig)) fail("Standalone task authority changed.");
+  };
+  if (operation !== "execute") {
+    await revalidate();
+    const before = await captureTaskVerificationInputs(storage, selection.checks.map(item => item.descriptor), policy);
+    const body = { schema: "banzai-verification-decision/v2", schemaVersion: 2, workId: binding.workId, roundId: request.roundId, sourceAttemptId: authority.sourceAttemptId, authority, context, policyDigest: policy ? evidenceDigest(policy) : null, ...selection, before };
+    const decision = parseTaskVerificationDecision({ ...body, sha256: evidenceDigest(body) });
+    const attempts = await readTaskVerificationAttempts(storage);
+    return { supported: true, authorityKind: "standalone-skill", decision, applicability: await taskVerificationApplicability(storage, decision, attempts, before), physicalAttempts: attempts.length };
+  }
+  const claim = await acquireWork({ repoRoot: root, workPath: request.workPath, ownerId: "task-verification-helper" });
+  try {
+    const publication = await executeTaskVerification({ ...storage, selection, authority, context, policy, roundId: request.roundId, retryOf: request.retryOf, revalidate, invoke: (descriptor, cwd) => invoke(descriptor, cwd, environment) });
+    return { supported: true, authorityKind: "standalone-skill", ...publication, physicalAttempts: publication.attempts.length };
+  } finally { await releaseWork({ repoRoot: root, workPath: request.workPath, token: claim.token }); }
 }

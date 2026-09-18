@@ -13,9 +13,9 @@ banzai control capabilities
 
 Require one clean JSON document with:
 
-- `schema: "banzai-agent-capabilities/v5"`
-- `schemaVersion: 5`
-- `controlContractVersion: "5.0.0"`
+- `schema: "banzai-agent-capabilities/v6"`
+- `schemaVersion: 6`
+- `controlContractVersion: "6.0.0"`
 - non-empty `orchestratorVersion`
 - `umbrellaContractVersion: "1.0.0"`
 - exactly these supported, non-TTY operations: `status`, `start`, `answer`,
@@ -26,7 +26,7 @@ Require one clean JSON document with:
 "banzai-agent-answer/v1"]` in that order
 - `approveVerification.inputSchemas: ["banzai-agent-answer/v3"]`
 - `configurationPrerequisite` declares the kind, fixed actions
-  `["accept", "edit", "skip", "cancel"]`, status v4 and answer v3 schemas
+  `["accept", "edit", "skip", "cancel"]`, status v5 and answer v3 schemas
 - `completionPublication` declares `banzai-completion-protocol/v1`, the closed
   refusal codes `COMPLETION_PUBLICATION_IO`, `COMPLETION_PUBLICATION_DRIFT` and
   `COMPLETION_PUBLICATION_INTEGRITY`, and the `pending_application` attempt
@@ -112,7 +112,7 @@ label; otherwise omit it and keep the CLI default. Never identify the agent as
 the human decision maker. Use `--no-resume` only when the user explicitly wants
 the decision persisted without continuing.
 
-Decision consultation uses the same fixed argv only when the latest v3 status
+Decision consultation uses the same fixed argv only when the latest v5 status
 reports `nextAction: "answer_consultation"`. Present each exact bounded card
 sequentially with the labels `Decision`, `Why this matters`, `Repository
 evidence`, `Options`, and `Recommendation` when present. Preserve the current
@@ -234,7 +234,7 @@ Run:
 banzai control status
 ```
 
-Require `schema: "banzai-agent-status/v4"` and `schemaVersion: 4`.
+Require `schema: "banzai-agent-status/v5"` and `schemaVersion: 5`.
 `activeRun: null` means no persisted run is available. A non-null `done` or
 `cancelled` projection is terminal evidence, not an in-progress run. Otherwise
 use only these fields:
@@ -320,4 +320,6 @@ human stdout. Ignore that prose as state and query versioned control status.
 
 ## Artifact storage capability
 
-Current capabilities v5/control 5.0.0 advertise the declarationSchemas and bindingSchemas arrays, layouts and privateWorkspaceSnapshotVersion: 2 in `artifactStorage`. Require this capability before supervising private work. A v2/control 2.0.0 consumer is legacy-only and must not infer private storage support. Require declarationSchemas `["banzai-artifact-layout/v1"]`, bindingSchemas `["banzai-work-binding/v1", "banzai-work-binding/v2"]` and layouts `["legacy", "private"]`. Request v1, recovery v1, escalation answer v1 and consultation answer v2 retain their original meanings; status v4 and configuration answer v3 are required for the new kind. Never create or edit run work bindings through supervisor tools; the runner persists their authority.
+Current capabilities v6/control 6.0.0 advertise the declarationSchemas and bindingSchemas arrays, layouts and privateWorkspaceSnapshotVersion: 2 in `artifactStorage`. Require this capability before supervising private work. A v2/control 2.0.0 consumer is legacy-only and must not infer private storage support. Require declarationSchemas `["banzai-artifact-layout/v1"]`, bindingSchemas `["banzai-work-binding/v1", "banzai-work-binding/v2"]` and layouts `["legacy", "private"]`. Request v1, recovery v1, escalation answer v1 and consultation answer v2 retain their original meanings; status v5 and configuration answer v3 are required for the new kind. Never create or edit run work bindings through supervisor tools; the runner persists their authority.
+
+New task runs expose bounded `taskVerification` status: outcome, completeness, absence rationale and check dispositions. Never request profiles or infer a pass from an empty legacy verification array. Configuration-prerequisite inputs above apply only to retained historical formats.

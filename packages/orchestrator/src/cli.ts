@@ -1,14 +1,12 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import {
   executeVerificationCli,
-  parseVerificationArgs,
-  runVerificationWizard
+  parseVerificationArgs
 } from "./verification-cli.js";
 import {
-  assessVerificationReadiness,
-  inspectVerificationProject
-} from "./verification.js";
-import { configurationDecisionLines } from "./verification-ui.js";
+  configurationDecisionLines,
+  taskVerificationStatusLines
+} from "./verification-ui.js";
 import { InteractiveHumanTime } from "./interactive-human-time.js";
 import {
   CANCELLATION_HELP,
@@ -221,9 +219,10 @@ Run without arguments in a terminal for interactive mode.
 Five existing human decision gates remain distinct: conditional planning consultation,
 ADR acceptance, plan approval, escalation, and review triage. Consultation
 records preference provenance; it is not approval or execution authority.
-The runner alone raises a conditional configuration prerequisite after completed
-implementation/fix: Accept, Edit, Skip or Cancel; approval is preserved.
-\`banzai approve verification\` reads a closed \`banzai-agent-answer/v3\` document.
+New tasks use task-scoped verification without profiles, bootstrap, or a
+configuration-prerequisite gate. Legacy configuration commands and answer formats
+remain explicit utilities; they do not authorize continuation of historical runs.
+The legacy \`banzai approve verification\` command reads a closed \`banzai-agent-answer/v3\` document.
 \`banzai control answer\` reads \`banzai-agent-answer/v3\` configuration, keyed
 \`banzai-agent-answer/v2\` consultation, or ordered \`banzai-agent-answer/v1\` escalation document from direct stdin.
 The runner uses the current checkout and never creates or manages Git worktrees.`;
@@ -316,6 +315,7 @@ function printState(status: WorkflowStatus, metrics = false): void {
       `${state.workflowSelection.workflow} (${state.workflowSelection.reason})`
     );
   }
+  for (const line of taskVerificationStatusLines(state)) console.log(line);
   if (state.blockReason !== null) {
     printLabeled("Blocked", state.blockReason);
   }
@@ -786,16 +786,6 @@ async function main(): Promise<void> {
         "Run `banzai model` in a terminal to choose the model and effort for each phase."
       );
     }
-    if (interactiveTerminal)
-      await runVerificationWizard(
-        new WorkflowRunner(repoRoot, createVendorAdapters()),
-        new InquirerInteractiveIO(),
-        defaultDecisionMaker()
-      );
-    else
-      console.log(
-        "Verification setup requires a terminal for Accept/Edit/Skip or explicit bootstrap confirmation. Run banzai init in a terminal, or banzai verify add <type>."
-      );
     const config = await loadConfig(repoRoot);
     console.log("Banzai configuration saved.\n");
     if (interactiveTerminal) {
@@ -812,21 +802,9 @@ async function main(): Promise<void> {
           `Run banzai setup in a terminal, or explicitly invoke banzai:project-manifest in your installed client. ${SETUP_PLUGIN_PREREQUISITE}`
         );
     }
-    const readiness = assessVerificationReadiness(
-      config,
-      await inspectVerificationProject(repoRoot)
-    );
     console.log(
-      readiness.bootstrapEffective
-        ? "Verification ready in bootstrap mode; substantive coverage is deferred."
-        : readiness.uncoveredTypes.length === 0
-          ? "Verification profiles are configured; setup did not run project commands."
-          : "Substantive verification coverage is missing."
+      "Verification follows each task; no profile setup is required."
     );
-    for (const type of readiness.uncoveredTypes)
-      console.log(
-        `Fix: banzai verify add ${type} — documentation/verification-examples.md`
-      );
     console.log(
       "Run banzai doctor, then review and commit your files before starting a task."
     );
@@ -1020,25 +998,7 @@ async function main(): Promise<void> {
           return false;
         }
         await currentCommit(repoRoot);
-        const config = await loadConfig(repoRoot);
-        if (
-          config.schemaVersion !== 1 &&
-          assessVerificationReadiness(
-            config,
-            await inspectVerificationProject(repoRoot)
-          ).uncoveredTypes.length > 0
-        ) {
-          const io = interactiveIO ?? new InquirerInteractiveIO();
-          io.writeLine("Substantive verification coverage is missing.");
-          if (
-            !(await io.confirm(
-              "Configure verification before starting this task?",
-              false
-            ))
-          )
-            return false;
-          await runVerificationWizard(runner, io, defaultDecisionMaker());
-        }
+        await loadConfig(repoRoot);
         return true;
       },
       attention,
@@ -1076,28 +1036,7 @@ async function main(): Promise<void> {
     return;
   }
   if (command === "run") {
-    const initial = await loadConfig(repoRoot);
-    if (
-      interactiveTerminal &&
-      initial.schemaVersion !== 1 &&
-      assessVerificationReadiness(
-        initial,
-        await inspectVerificationProject(repoRoot)
-      ).uncoveredTypes.length > 0
-    ) {
-      const io = new InquirerInteractiveIO();
-      io.writeLine(
-        "Substantive verification coverage is missing; no model attempt has started."
-      );
-      if (
-        !(await io.confirm(
-          "Configure verification before starting this run?",
-          true
-        ))
-      )
-        return;
-      await runVerificationWizard(runner, io, defaultDecisionMaker());
-    }
+    await loadConfig(repoRoot);
     await attention.run(() =>
       runner.start({
         slug: requireOption(args, "--slug"),

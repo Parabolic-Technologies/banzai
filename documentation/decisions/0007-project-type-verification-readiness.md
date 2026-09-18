@@ -7,6 +7,11 @@
 - Owner: Banzai maintainers
 - Decision makers: User, explicitly accepted in chat on 2026-08-04
 
+- Partially superseded by [ADR-0049](./0049-task-scoped-verification.md), accepted
+  2026-09-17: new-task readiness no longer requires project-type profile coverage.
+  Read-only diagnostics, truthful assurance and legacy applicability remain.
+  Implementation of the transition is Planned.
+
 ## Related Artifacts
 
 - Feature description:

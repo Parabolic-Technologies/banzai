@@ -7,6 +7,11 @@
 - Owner: Banzai maintainers
 - Decision makers: Project owner; explicitly accepted on 2026-09-12 after owner revisions.
 
+- Amended by [ADR-0049](./0049-task-scoped-verification.md), accepted 2026-09-17:
+  new tasks use task-bound authority, command identity and a v2 plan inventory.
+  Conservative input, provenance and evidence-reuse guarantees remain, as do
+  legacy contract meanings. Implementation of the amendment is Planned.
+
 ## Related Artifacts
 
 - Private strict work: `proportionate-verification-closure`; FR1-FR12 and

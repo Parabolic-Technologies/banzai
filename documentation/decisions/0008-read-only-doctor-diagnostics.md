@@ -7,6 +7,11 @@
 - Owner: Banzai maintainers
 - Decision makers: User, explicitly accepted in chat on 2026-08-04
 
+- Amended by [ADR-0049](./0049-task-scoped-verification.md), accepted 2026-09-17:
+  successor diagnostics describe task verification without a new-task profile
+  readiness gate. Offline, read-only and historical-contract guarantees remain.
+  Implementation of the amendment is Planned.
+
 ## Related Artifacts
 
 - Feature description:

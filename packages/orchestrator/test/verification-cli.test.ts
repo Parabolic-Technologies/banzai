@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { initializeConfig } from "../src/config.js";
+import { initializeConfig, DEFAULT_CONFIG } from "../src/config.js";
 import { WorkflowRunner } from "../src/workflow.js";
 import { RunStore } from "../src/store.js";
 import { createVendorAdapters } from "../src/adapters.js";
@@ -63,6 +63,11 @@ const forbiddenExecution: ProcessRunner = async () => {
 async function fixture() {
   const root = await mkdtemp(path.join(tmpdir(), "banzai-verification-ui-"));
   await initializeConfig(root);
+  // These tests exercise retained explicit legacy profile utilities, not new-task setup.
+  await writeFile(
+    path.join(root, ".banzai/config.json"),
+    JSON.stringify(DEFAULT_CONFIG)
+  );
   return {
     root,
     runner: new WorkflowRunner(

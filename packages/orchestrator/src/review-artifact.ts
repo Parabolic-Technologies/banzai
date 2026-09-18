@@ -264,15 +264,17 @@ function renderCurrentReviewArtifact(
     (snapshot.schemaVersion === 5 && snapshot.configurationSetup !== undefined);
   return [
     "# Implementation Review",
-    snapshot.schemaVersion === 5
-      ? "- Format: `banzai-feature-review/v6`"
-      : snapshot.schemaVersion === 4
-        ? "- Format: `banzai-feature-review/v5`"
-        : snapshot.schemaVersion === 3
-          ? "- Format: `banzai-feature-review/v4`"
-          : snapshot.schemaVersion === 2
-            ? "- Format: `banzai-feature-review/v3`"
-            : "- Format: `banzai-feature-review/v2`",
+    snapshot.schemaVersion === 6
+      ? "- Format: `banzai-feature-review/v7`"
+      : snapshot.schemaVersion === 5
+        ? "- Format: `banzai-feature-review/v6`"
+        : snapshot.schemaVersion === 4
+          ? "- Format: `banzai-feature-review/v5`"
+          : snapshot.schemaVersion === 3
+            ? "- Format: `banzai-feature-review/v4`"
+            : snapshot.schemaVersion === 2
+              ? "- Format: `banzai-feature-review/v3`"
+              : "- Format: `banzai-feature-review/v2`",
     reviewValue({
       slug: context.slug,
       iteration: context.iteration,
@@ -324,11 +326,18 @@ function renderCurrentReviewArtifact(
       source: snapshot.completionSource,
       projection: snapshot.artifact.taskCompletion ?? null
     }),
-    ...(snapshot.schemaVersion === 5
+    ...(snapshot.schemaVersion === 5 || snapshot.schemaVersion === 6
       ? [
           "### Runner-owned completion publication (runner evidence)",
           "The completion region of the implementation report was rendered and published by the runner from the validated ledger; the model authored the claims, narrative and engineering changes. These identities name the retained capture, candidate and receipt proof. Valid structure is not proof that work was done.",
           reviewValue(snapshot.completionPublication ?? null)
+        ]
+      : []),
+    ...(snapshot.schemaVersion === 6
+      ? [
+          "### Task verification (runner evidence)",
+          "Check absence is not a passing suite. Assess requirement coverage and unjustified weakening independently of command identity.",
+          reviewValue(snapshot.taskVerification)
         ]
       : []),
     "## Summary",

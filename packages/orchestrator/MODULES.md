@@ -13,7 +13,7 @@ is a navigational reference and is updated with the module it describes.
   and archive operations. No runner configuration or CLI installation is needed
   by the standalone helper. Claims exclude overlapping standalone/runner phase
   writers for one work; explicit legacy registration preserves original roles. Workflow grants remain
-  runner-owned. New config-2/3 state v6 holds binding bytes and SHA-256; workspace v2
+  runner-owned. New state v8 holds private binding v2 bytes and SHA-256; workspace v2
   hashes the selected ignored work. Historical states/digests retain old meaning.
 
 - `cancellation.ts` — closed observation v1 reasons, response/provenance table,
@@ -72,10 +72,10 @@ is a navigational reference and is updated with the module it describes.
   Capability discovery runs before Git discovery or runner construction;
   status, start, answer, and recover reuse the current `WorkflowRunner`, and
   mutations emit a fresh authoritative status projection.
-- `agent-control.ts` — closed current `banzai-agent-capabilities/v5`
+- `agent-control.ts` — closed current `banzai-agent-capabilities/v6`
   (declaring the completion publication protocol, stages, refusal codes and
-  `pending_application`), `banzai-agent-status/v4` (adding the bounded
-  completion publication state), and configuration `banzai-agent-answer/v3` contracts;
+  `pending_application` and task verification), `banzai-agent-status/v5` (bounded
+  task applicability and completion publication state), and configuration `banzai-agent-answer/v3` contracts;
   preserved keyed consultation `banzai-agent-answer/v2`, `banzai-agent-request/v1`, ordered escalation
   `banzai-agent-answer/v1`, and `banzai-agent-recovery/v1` inputs; bounded
   privacy allow-list, semantic state/action projection, exact consultation
@@ -109,10 +109,10 @@ is a navigational reference and is updated with the module it describes.
   missing Python fails the suite.
 - `doctor-cli.ts` — exact doctor argument contract, injected stdout/stderr
   composition, canonical JSON serialization, and deterministic human
-  projection for `banzai-doctor/v4`, including explicit unavailable project
+  projection for `banzai-doctor/v5`, including explicit unavailable project
   types when marker evidence cannot be read.
-- `doctor.ts` — fixed-order Project Verification Readiness checks, with
-  `project.guidance` immediately after `repository.git` and schema version 4. `claude.instructions` follows `claude.environment`
+- `doctor.ts` — fixed-order project and task-verification diagnostics, with
+  `project.guidance` immediately after `repository.git` and schema version 5. `claude.instructions` follows `claude.environment`
   and precedes `claude.permissions`; it compares the configured role union and
   preserves mismatch/bounded-failure/unverifiable precedence. Uses direct
   privacy-bounded config, active-pointer/state, and lock reads plus injected
@@ -441,9 +441,9 @@ is a navigational reference and is updated with the module it describes.
   positive integers, uniqueness, and cross-field agreement. Also the
   protocol-selected safe envelope (`parsePhaseResultEnvelope`, which validates
   everything except the ledger and retains the canonical original plus digest),
-  attempt schema 3 rules (protocol fields required on v3 and forbidden on
-  v1/v2, result bound to the retained envelope original), terminal checkpoint
-  v2, and the closed readers for completion transition, capture, candidate,
+  attempt schema 3/4 rules (protocol fields required on v3/v4 and forbidden on
+  v1/v2, result bound to the retained envelope original), terminal checkpoints
+  v1-v3, and the closed readers for completion transition, capture, candidate,
   publication receipt, cursor, summary v2 and diagnostics.
 - `prompt-envelope.ts` — in-memory ordered closed prompt components whose
   concatenation is the exact adapter prompt; it adds no implicit separator and
@@ -517,7 +517,7 @@ is a navigational reference and is updated with the module it describes.
   approved meaning, and required evidence despite report corrections. Legacy
   directives, approval bytes and completion contracts remain binding.
   Builder prompts expose ordered configured
-  verification profiles without executing model-selected commands; reviewer
+  approved task obligations and separately validated candidates; reviewer
   prompts treat current runner evidence as default and require material
   risk/contract justification for missing-test findings. Review prompts also
   freeze ordinary findings/severity/verdict before Engineering Quality mapping,
@@ -624,11 +624,11 @@ is a navigational reference and is updated with the module it describes.
   fresh-input remainder, and an optional turn count. It reads no
   process state, so both surfaces are testable against an explicit width.
 - `types.ts` — all shared types, `CONTRACT_VERSION = "1.0.0"`, phase-result
-  schema v3 and state schema v7 with explicit v1-v6 historical readers, independent
-  agent-control schema and `5.0.0` contract identities, independent
+  schema v4 and state schema v8 with explicit historical readers, independent
+  agent-control schema and `6.0.0` contract identities, independent
   `banzai-context-attempt/v1` and `banzai-context-report/v1` identities,
-  model-attempt v2 and strict model-attempt v3 under
-  `banzai-completion-protocol/v1`, terminal-checkpoint v1/v2, the completion
+  model-attempt v4 and retained v1-v3 readers under
+  `banzai-completion-protocol/v1`, terminal-checkpoint v1-v3, the completion
   capture/transition/candidate/publication record identities, completion
   summary v2, recovery contracts, and the pure role/model/effort
   session-binding matcher; no runtime imports.
@@ -719,7 +719,8 @@ Inventory selects `workPaths`/`runIds`; export validates fixed `inventoryFile`
 bytes. `bundlePath` verification/restore preserve explicit pins and owner policy,
 required Markdown authority closure and a private restored manifest receipt.
 Managed work/run/control destination ancestry is rejected before staging.
-Doctor's read-only active-state check supports v4/v5/v6 and validates binding identity.
+Doctor's read-only active-state check admits state v8 and retained older shapes,
+and validates binding identity without authorizing historical continuation.
 
 ## Runner instruction generation and parity
 
@@ -757,49 +758,55 @@ claim match. Diagnostics offer rebuild, matching plugin update or explicit ambie
 mode without performing any of them. Tool inventories and real Skill telemetry
 remain available; progress names supplied phases rather than inferred skill loads.
 
-## Verification evidence and versioned consumers
+## Task verification and versioned consumers
 
-`verification-evidence.ts` is a typed facade over the builtin-only plugin decision
-engine and evidence store. Config 3 adds globally stable check IDs and an explicit
-policy with delimited explanatory inputs, dependency exclusions, declared actual
-toolchain files, sanitized environment and volatile-dependency refusal. Capture
-includes both Git index blobs and working/ignored input bytes, kinds, modes and
-path sets. Unknown, unstable, secret-dependent or unproven symlink inputs keep
-checks fresh. Strict plans may provide a complete, remainder-bound obligation
-inventory; legacy plans retain fresh execution. Release gates cannot reuse.
-Unavailable captures preserve physical attempt history but cannot authorize
-current applicability, including same-round resume after a successful process.
+CLI and interactive status share the canonical task-outcome projection in
+`verification-ui.ts`. Timeout, interruption, not-run and unavailable execution
+remain distinct; verification-only retry retains completed implementation and
+revalidates policy, authority and live-process protection before launch.
 
-The same decision/start/finish/application codecs serve policy-mode workflow state 6, historical state 5 and the
-plugin-only verification helper. New binding v2 reserves `verificationDirectory`
-for that owner; ordinary artifact writes cannot address it. Physical attempt v1
-leaves and metrics count actual subprocesses only. Ledger 2 adds provenance,
-never fabricated success. Execution occurs under existing work ownership; fresh
-source and authority checks gate review, pass application, zero-accepted triage
-and lite completion. Failure/retry/recovery retain their prior authorization.
+`verification-evidence.ts` exposes the shared builtin-only
+`task-verification.mjs` and `task-verification-store.mjs` owners. Discovery reads
+project metadata inertly and distinguishes absent/unavailable inputs and known
+placeholders. Descriptors identify requirement references, executable/argv, cwd,
+timeout, source hashes and permitted future materialization. Strict obligations
+v2 bind the plan remainder; phase-result v4 supplements cannot replace them.
+Lite checks derive authority from the user request and persisted workflow
+selection, with inherited-local permissions. Optional schema-4 project policy
+constrains checks; metadata never grants execution permission.
 
-Historical snapshot v3 and rendered review artifact v4 freeze direct origins, physical
-leaves and executed/reused/pending applicability. Review-result v2, completion
-v1 and old snapshot/rendering identities stay unchanged. Archive v1 follows this
-closure, including standalone evidence and logs, and validates restored bytes.
-Same-repository environment identity prevents a restored archive from becoming
-reuse authority in another checkout.
+State 8 uses private binding 2 and ledger 3. The runner or standalone helper owns
+immutable decision, physical start/finish, origin and applicability records.
+Actual launch context, safe source paths and authority are checked before launch
+and application. Unknown input captures cannot establish unchanged evidence.
+Retries preserve failed identities. Owner recovery records interrupted outcomes
+without inventing exit codes and repairs missing origins from retained physical
+bytes; terminal success is not re-executed. Equivalent evidence requires complete
+policy-declared inputs/toolchain/environment and a direct compatible successful
+origin. Changes outside declared explanatory regions and release gates stay
+fresh. Helper request v2 accepts bound task identities, not arbitrary argv, and
+its inspect path writes nothing. Legacy helper v1 remains explicitly legacy.
 
-`eval export --schema-version 2` reads the new ledger with complete provenance and
-safe read-only paths, then emits only opaque ordinals and allow-listed numeric
-fields. `eval kpi --schema-version 2` accepts only export v2 and computes each
-source independently from per-run evidence. Physical retries remain attempts;
-terminal dispositions count once per round/check. Incomplete coverage never
-contributes inferred zeroes. Default v1 and context/cancellation/human-time report
-schemas stay unchanged; their state readers recognize v5/v6 where applicable.
-Missing origin-finish proof makes export-v2 coverage incomplete even when the
-historical execution had unavailable captures; such runs cannot enter exact KPIs.
+Review snapshot 6/rendered review 7 freeze task checks, required/supplemental
+status, physical evidence, applicability and completion publication. Review-result
+2 is unchanged. The independent reviewer checks requirement coverage and
+unjustified weakening; a command hash cannot certify semantic adequacy.
+Frozen evaluation/KPI/context/archive formats do not reinterpret task evidence
+as legacy profile passes: unsupported evidence remains partial, with no exact
+completion/KPI claim. Archive restore requires full interpreted closure.
+Human-time's bounded state/attempt projection accepts current versions while
+keeping its report schema unchanged.
 
-The test driver accepts repeated exact `--file` selections before esbuild;
-`--pattern` still filters Node test names. Full default execution, child process
-group termination and output cleanup retain the same owner.
+No historical-run migration or binding v3 is introduced. Start a new task;
+retained artifacts keep their original identity. `doctor` v5 and control
+capabilities v6/status v5 expose task verification without requiring profile
+coverage. Current init emits schema 4 without a verification wizard. The test
+driver's exact file selection, process groups and cleanup are unchanged.
 
-## Guided verification setup
+## Legacy guided verification setup
+
+These codecs and explicit profile utilities concern retained formats only. New
+state-8 task runs never enter this prerequisite gate or init wizard.
 
 - `plan-task-completion.ts` classifies task statements and normalized path
   references before plan offer and approval. Explicit file-change lists and

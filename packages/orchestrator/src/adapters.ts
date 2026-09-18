@@ -1587,7 +1587,13 @@ export function buildClaudePhaseArguments(
     "stream-json",
     "--verbose",
     "--json-schema",
-    requestOutputContract(request, "claude", "phase-result/v3"),
+    requestOutputContract(
+      request,
+      "claude",
+      request.outputContract.identity === "phase-result/v4"
+        ? "phase-result/v4"
+        : "phase-result/v3"
+    ),
     "--model",
     request.settings.model,
     "--effort",
@@ -2041,7 +2047,13 @@ export function createVendorAdapters(
           request.runDirectory,
           request.attemptId,
           "phase-result.schema.json",
-          requestOutputContract(request, "codex", "phase-result/v3")
+          requestOutputContract(
+            request,
+            "codex",
+            request.outputContract.identity === "phase-result/v4"
+              ? "phase-result/v4"
+              : "phase-result/v3"
+          )
         );
         const observeProgress = createCodexProgressObserver(
           request.onProgress,

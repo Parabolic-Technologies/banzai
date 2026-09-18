@@ -79,9 +79,9 @@ if (command === "help") {
 } else if (command === "control capabilities") {
   if (variant === "mutation") await writeFile(path.join(process.cwd(), "mutated.txt"), "mutated\\n");
   process.stdout.write(variant === "malformed-capabilities" ? "{bad\\n" : JSON.stringify({
-    schema: variant === "incompatible-capabilities" ? "banzai-agent-capabilities/v1" : "banzai-agent-capabilities/v5",
-    schemaVersion: variant === "incompatible-capabilities" ? 1 : 5,
-    controlContractVersion: "5.0.0",
+    schema: variant === "incompatible-capabilities" ? "banzai-agent-capabilities/v1" : "banzai-agent-capabilities/v6",
+    schemaVersion: variant === "incompatible-capabilities" ? 1 : 6,
+    controlContractVersion: "6.0.0",
     orchestratorVersion: variant === "capability-version-mismatch" ? "0.0.0" : version,
     umbrellaContractVersion: "1.0.0",
     operations: {
@@ -101,14 +101,13 @@ if (command === "help") {
 } else if (command === "init") {
   await mkdir(path.join(process.cwd(), ".banzai"), { recursive: true });
   await writeFile(path.join(process.cwd(), ".banzai/config.json"), JSON.stringify({
-    schemaVersion: 2,
+    schemaVersion: 4,
     contractVersion: "1.0.0",
     models: {
       planner: { executable: process.execPath },
       implementer: { executable: process.execPath },
       reviewer: { executable: process.execPath }
-    },
-    verification: { profiles: [] }
+    }
   }) + "\\n");
 } else if (command === "doctor --json") {
   if (variant === "nonzero") process.exit(7);
@@ -117,9 +116,9 @@ if (command === "help") {
     await new Promise(() => {});
   }
   if (variant === "stderr") process.stderr.write("private output\\n");
-  process.stdout.write(variant === "malformed-doctor" ? "{bad\\n" : JSON.stringify({ schema: "banzai-doctor/v4", schemaVersion: 4, ready: variant !== "not-ready" }) + "\\n");
+  process.stdout.write(variant === "malformed-doctor" ? "{bad\\n" : JSON.stringify({ schema: "banzai-doctor/v5", schemaVersion: 5, ready: variant !== "not-ready" }) + "\\n");
 } else if (command === "control status") {
-  process.stdout.write(variant === "malformed-status" ? "{bad\\n" : JSON.stringify({ schema: "banzai-agent-status/v4", schemaVersion: 4, activeRun: await activeStatus() }) + "\\n");
+  process.stdout.write(variant === "malformed-status" ? "{bad\\n" : JSON.stringify({ schema: "banzai-agent-status/v5", schemaVersion: 5, activeRun: await activeStatus() }) + "\\n");
 } else if (command === "control answer --by Smoke User --no-resume") {
   const answer = JSON.parse(await stdinText());
   const pointer = JSON.parse(await readFile(path.join(process.cwd(), ".banzai/active-run.json"), "utf8"));
@@ -144,7 +143,7 @@ if (command === "help") {
     runId: state.runId,
     details: { cardCount: answer.answers.length, answerModes: { option: 0, preference: 1 }, completion: "answered" }
   }) + "\\n");
-  process.stdout.write(JSON.stringify({ schema: "banzai-agent-status/v4", schemaVersion: 4, activeRun: await activeStatus() }) + "\\n");
+  process.stdout.write(JSON.stringify({ schema: "banzai-agent-status/v5", schemaVersion: 5, activeRun: await activeStatus() }) + "\\n");
 } else if (command === "eval export --json") {
   process.stderr.write("[EVAL_PARTIAL] Export includes incomplete evidence; inspect the structured issues in the report.\\n");
   process.stdout.write(variant === "malformed-evaluation" ? "{bad\\n" : JSON.stringify({ schema: "banzai-evaluation-export/v1", schemaVersion: 1, runs: [] }) + "\\n");

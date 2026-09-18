@@ -34,6 +34,7 @@ import {
 } from "../src/adapters.js";
 import {
   phaseResultSchema,
+  legacyPhaseResultV3Schema,
   reviewResultSchema,
   workflowSelectionSchema
 } from "../src/contracts.js";
@@ -772,7 +773,7 @@ test("Claude can run a writing phase with edit and shell tools", () => {
   // The phase contract, not the review contract, and without the meta-schema.
   assert.equal(raw.includes("$schema"), false);
   const schema = JSON.parse(raw) as Record<string, unknown>;
-  assert.equal(schema.$id, phaseResultSchema.$id);
+  assert.equal(schema.$id, legacyPhaseResultV3Schema.$id);
   const properties = schema.properties as Record<
     string,
     Record<string, unknown>

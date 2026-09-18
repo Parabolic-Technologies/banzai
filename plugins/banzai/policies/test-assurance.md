@@ -33,26 +33,25 @@
   tests, and false evidence claims remain actionable. Lower test volume is not a
   goal independent of assurance.
 
-### Deterministic equivalent evidence
+### Task verification evidence
 
-ADR-0043 permits an explicitly configured check to use equivalent evidence only
-when the shared verification owner returns a valid current decision and direct
-physical origin. Config schema 3, project-owned dependency/explanatory rules and
-complete non-secret input/environment evidence are required. A model's docs-only
-label, a report claim or an earlier green command is never a waiver. Missing or
-unsafe evidence, unknown/mixed changes, authoritative Markdown, tests, generated
-inputs, config or toolchain changes retain required checks. Plan/project commands
-marked fresh and every release:check execute afresh.
+New work starts without verification profiles or bootstrap. Select relevant
+checks from the task requirements and actual project evidence. Discovery is
+inert information, never execution authority. An npm placeholder or absent
+unrelated typecheck is not a task requirement. Create missing required tests
+and tooling only within the authorized scope.
 
-The runner owns decisions, physical starts/finishes and application under its
-work claim; phase models do not invoke the standalone helper or write machine
-evidence. Standalone callers use the installed `../scripts/verification.cjs`
-through an explicitly selected v2 work binding. Helper absence, v1 bindings,
-unapproved/missing policy and unsupported plans preserve the existing applicable
-final-suite owner. A check without a supported reusable disposition still runs.
+Strict mandatory descriptors belong to the approved plan. Lite checks use the
+user's delegated task and actual execution permissions. Additional checks cannot
+replace or weaken mandatory obligations or edit approved bytes. The runner owns
+physical execution and evidence. Its local process permissions are independent
+of the model CLI sandbox. Standalone skills retain their human authorization;
+helper evidence never manufactures an approval.
 
-Distinguish executed, reused, historical/pre-fix, failed, unavailable and pending
-evidence. Reuse references the exact original attempt, round and evidence digest;
-it has no new process, exit code, log, duration or saved-time claim. Revalidate
-source and origin applicability before completion. Never reclassify a failed or
-incomplete physical attempt as reuse.
+Record passed, failed, not-run, unavailable, interrupted and absent distinctly.
+An absent unnecessary check permits progress; an absent or failed required check
+prevents claiming completion. Equivalent evidence requires opt-in policy,
+complete known inputs and a direct successful physical origin. Unknown input
+identity, a newer failure, or a fresh/release:check obligation requires fresh
+execution. Reviewers assess actual requirement coverage and unjustified weakening
+of tests, not merely command identity or zero exit.

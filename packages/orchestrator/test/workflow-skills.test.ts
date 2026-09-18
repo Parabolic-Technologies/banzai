@@ -179,7 +179,7 @@ test("plan policy delivers the approved convention and preserves the completion 
     policy
       .slice(
         policy.indexOf("## Plan Task Completion Evidence\n"),
-        policy.indexOf("### Opt-in verification obligations")
+        policy.indexOf("### Task verification obligations")
       )
       .trimEnd() + "\n";
   // ADR-0038 adds authority interpretation; it does not amend completion
@@ -295,7 +295,7 @@ test("quick fix reconciles verification claims after changing tests", async () =
   );
 });
 
-test("shipped workflow and supervisor preserve existing gates and add the runner-only configuration contract", async () => {
+test("shipped workflow preserves five gates and scopes retained configuration formats as legacy", async () => {
   const [
     workflow,
     consultation,
@@ -324,13 +324,13 @@ test("shipped workflow and supervisor preserve existing gates and add the runner
     )
   ]);
 
-  assert.match(
-    workflow,
-    /five existing gates plus one conditional runner-owned gate/
-  );
+  assert.match(workflow, /five existing gates/);
   assert.match(workflow, /decision_consultation/);
-  assert.match(workflow, /configuration_prerequisite/);
-  assert.match(planning, /runner-raised configuration prerequisite/);
+  assert.doesNotMatch(workflow, /configuration_prerequisite/);
+  assert.match(
+    planning,
+    /Task verification adds no profile or\nconfiguration-prerequisite gate/
+  );
   assert.match(protocol, /banzai-agent-answer\/v3/);
   assert.match(workflow, /conditional gate, not a\s+route or mandatory phase/i);
   assert.match(workflow, /first analyzes.*repository evidence/is);
@@ -345,16 +345,16 @@ test("shipped workflow and supervisor preserve existing gates and add the runner
     assert.match(source, /Do not.*Proposed ADR|Do not create a Proposed ADR/is);
     assert.match(source, /Never select|Do not infer|Never self-answer/i);
   }
-  assert.match(planning, /contracts\/v3\/phase-result\.schema\.json/);
+  assert.match(planning, /contracts\/v4\/phase-result\.schema\.json/);
   assert.match(architecture, /separate non-authorizing prerequisite/i);
   for (const source of [codeWriting, testWriting, feature, quickFix]) {
-    assert.match(source, /contracts\/v3\/phase-result\.schema\.json/);
+    assert.match(source, /contracts\/v4\/phase-result\.schema\.json/);
     assert.match(source, /decisionConsultation: null/);
   }
   assert.match(feature, /cannot use the planning-only consultation gate/);
 
   const assertSupervisorSafety = (source: string): void => {
-    assert.match(source, /exact supported v5 declaration/i);
+    assert.match(source, /exact supported v6 declaration/i);
     assert.match(source, /answer_consultation/);
     assert.match(
       source,
@@ -373,9 +373,9 @@ test("shipped workflow and supervisor preserve existing gates and add the runner
     );
   });
 
-  assert.match(protocol, /banzai-agent-capabilities\/v5/);
-  assert.match(protocol, /controlContractVersion: "5\.0\.0"/);
-  assert.match(protocol, /banzai-agent-status\/v4/);
+  assert.match(protocol, /banzai-agent-capabilities\/v6/);
+  assert.match(protocol, /controlContractVersion: "6\.0\.0"/);
+  assert.match(protocol, /banzai-agent-status\/v5/);
   assert.match(protocol, /answer_escalation/);
   assert.match(protocol, /answer_consultation/);
   const documents = [...protocol.matchAll(/```json\n([\s\S]*?)\n```/gu)].map(

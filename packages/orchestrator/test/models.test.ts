@@ -267,7 +267,7 @@ test("applying model updates rewrites only the named model fields", async () => 
     >;
     assert.deepEqual(raw.futureField, { keep: true });
     assert.deepEqual(raw.verification, verification);
-    assert.equal(raw.schemaVersion, 2);
+    assert.equal(raw.schemaVersion, 4);
     assert.match(await readFile(configPath, "utf8"), /\n$/);
   } finally {
     await rm(root, { recursive: true, force: true });

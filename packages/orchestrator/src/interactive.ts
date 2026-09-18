@@ -1,5 +1,6 @@
 import {
   configurationDecisionLines,
+  taskVerificationStatusLines,
   editVerificationCommands
 } from "./verification-ui.js";
 import type { HumanTimeGateway, HumanTimeSummary } from "./human-time.js";
@@ -464,6 +465,7 @@ function renderStatus(
     io.writeLine();
     writeLabeled(io, "Why this workflow", state.workflowSelection.reason);
   }
+  for (const line of taskVerificationStatusLines(state)) io.writeLine(line);
   if (state.blockReason !== null) {
     io.writeLine();
     writeLabeled(io, "Blocked", state.blockReason);

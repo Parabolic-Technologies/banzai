@@ -1,0 +1,611 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://banzai.local/contracts/v4/phase-result.schema.json",
+  "title": "Banzai orchestrated phase result",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 4
+    },
+    "contractVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "phase": {
+      "type": "string",
+      "enum": [
+        "plan",
+        "implementation",
+        "fix"
+      ]
+    },
+    "outcome": {
+      "type": "string",
+      "description": "Use needs_human_decision whenever gate is non-null. Use completed only with gate null.",
+      "enum": [
+        "completed",
+        "needs_human_decision",
+        "blocked"
+      ]
+    },
+    "gate": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "A non-null gate transfers control to the human through the interactive orchestrator and requires outcome needs_human_decision.",
+      "enum": [
+        "adr_approval",
+        "plan_approval",
+        "escalation",
+        "decision_consultation",
+        null
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "plan": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "adrs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "implementationReport": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "testReport": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "description",
+        "plan",
+        "adrs",
+        "implementationReport",
+        "testReport"
+      ]
+    },
+    "taskCompletion": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schemaVersion": {
+              "type": "integer",
+              "const": 1
+            },
+            "tasks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "taskId": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "completed",
+                      "incomplete",
+                      "blocked"
+                    ]
+                  },
+                  "evidence": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "path": {
+                          "type": "string"
+                        },
+                        "detail": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "detail"
+                      ]
+                    }
+                  },
+                  "gap": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "reportPath": {
+                            "type": "string"
+                          },
+                          "section": {
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "reportPath",
+                          "section",
+                          "detail"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "taskId",
+                  "status",
+                  "evidence",
+                  "gap"
+                ]
+              }
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "tasks"
+          ]
+        }
+      ]
+    },
+    "touchedPaths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "decisionConsultation": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schema": {
+              "type": "string",
+              "const": "banzai-decision-consultation/v1"
+            },
+            "schemaVersion": {
+              "type": "integer",
+              "const": 1
+            },
+            "requestId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "roundId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "decisions": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 3,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "decisionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "question": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000
+                  },
+                  "why": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1200
+                  },
+                  "affectedRequirements": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 16,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    }
+                  },
+                  "evidence": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 12,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 300
+                        },
+                        "line": {
+                          "type": [
+                            "integer",
+                            "null"
+                          ],
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "detail": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 500
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "line",
+                        "detail"
+                      ]
+                    }
+                  },
+                  "decisionOwner": {
+                    "type": "string",
+                    "const": "human"
+                  },
+                  "responseMode": {
+                    "type": "string",
+                    "enum": [
+                      "single_choice",
+                      "free_text"
+                    ]
+                  },
+                  "options": {
+                    "type": "array",
+                    "maxItems": 6,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "optionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "title": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160
+                        },
+                        "benefits": {
+                          "type": "array",
+                          "maxItems": 8,
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          }
+                        },
+                        "costs": {
+                          "type": "array",
+                          "maxItems": 8,
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          }
+                        },
+                        "risks": {
+                          "type": "array",
+                          "maxItems": 8,
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          }
+                        },
+                        "consequences": {
+                          "type": "array",
+                          "maxItems": 8,
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          }
+                        }
+                      },
+                      "required": [
+                        "optionId",
+                        "title",
+                        "benefits",
+                        "costs",
+                        "risks",
+                        "consequences"
+                      ]
+                    }
+                  },
+                  "recommendation": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "optionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "rationale": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 1000
+                          }
+                        },
+                        "required": [
+                          "optionId",
+                          "rationale"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "decisionId",
+                  "title",
+                  "question",
+                  "why",
+                  "affectedRequirements",
+                  "evidence",
+                  "decisionOwner",
+                  "responseMode",
+                  "options",
+                  "recommendation"
+                ]
+              }
+            }
+          },
+          "required": [
+            "schema",
+            "schemaVersion",
+            "requestId",
+            "roundId",
+            "decisions"
+          ]
+        }
+      ]
+    },
+    "resolvedFindingIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "requestedVerification": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "verificationCandidates": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "checks": {
+              "type": "array",
+              "maxItems": 200,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "requirementRefs": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    }
+                  },
+                  "command": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "args": {
+                    "type": "array",
+                    "maxItems": 200,
+                    "items": {
+                      "type": "string",
+                      "minLength": 0,
+                      "maxLength": 4096
+                    }
+                  },
+                  "cwd": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "timeoutMs": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 86400000
+                  },
+                  "evidence": {
+                    "type": "string",
+                    "enum": [
+                      "fresh",
+                      "equivalent_evidence"
+                    ]
+                  },
+                  "sources": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 500
+                        },
+                        "sha256": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        }
+                      },
+                      "required": [
+                        "path",
+                        "sha256"
+                      ]
+                    }
+                  },
+                  "materialization": {
+                    "anyOf": [
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "taskRef": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "paths": {
+                            "type": "array",
+                            "maxItems": 32,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 500
+                            }
+                          }
+                        },
+                        "required": [
+                          "taskRef",
+                          "paths"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "requirementRefs",
+                  "command",
+                  "args",
+                  "cwd",
+                  "timeoutMs",
+                  "evidence",
+                  "sources",
+                  "materialization"
+                ]
+              }
+            },
+            "absenceReason": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000
+                }
+              ]
+            }
+          },
+          "required": [
+            "checks",
+            "absenceReason"
+          ]
+        }
+      ]
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "contractVersion",
+    "phase",
+    "outcome",
+    "gate",
+    "summary",
+    "artifacts",
+    "taskCompletion",
+    "touchedPaths",
+    "questions",
+    "decisionConsultation",
+    "resolvedFindingIds",
+    "requestedVerification",
+    "verificationCandidates"
+  ]
+}

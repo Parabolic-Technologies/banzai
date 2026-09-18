@@ -205,7 +205,7 @@ setup reuses the existing runner lock without stale ownership reclamation.
     subscription-only authentication and the others disable the enforcement
     hook.
   - Structured hand-off uses the JSON Schemas in
-    `plugins/banzai/contracts/`, with current phase-result v3 and review-result
+    `plugins/banzai/contracts/`, with current phase-result v4 and review-result
     v2, passed to Codex as a schema file and to Claude inline.
   - The plugin hook runs as a separate Node process per file-mutating tool call,
     reading the host's JSON payload on stdin and reading authorization from
@@ -345,7 +345,7 @@ Orchestrator (`packages/orchestrator/src/`):
   absent or unreadable plugin versions are explicit, never source-version guesses.
 - `agent-control-cli.ts` / `agent-control.ts` — non-TTY control grammar over
   closed direct-stdin JSON (64 KiB, validated before mutation); current
-  `banzai-agent-capabilities/v5`, `banzai-agent-status/v4`,
+  `banzai-agent-capabilities/v6`, `banzai-agent-status/v5`,
   configuration `banzai-agent-answer/v3`; preserved consultation
   `banzai-agent-answer/v2`, `banzai-agent-request/v1`, escalation
   `banzai-agent-answer/v1`, `banzai-agent-recovery/v1`. Every mutation
@@ -373,7 +373,7 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   implementation, verification, review, fixes). Owns preflight including
   `assertClaudePermissions`, approval-digest and base-commit validation, attempt
   reconciliation, builder-session selection, full/delta reviewer policy,
-  snapshot-bound v3/v4 review publication without formatting-only model calls,
+  snapshot-v6-bound rendered-review-v7 publication without formatting-only model calls,
   and recovery source discovery.
 - `state-machine.ts` — `transitionState`, `blockState`, `requireState`; the
   only place `RunStatus` changes, so illegal transitions fail closed.
@@ -411,11 +411,12 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
 - `mcp.ts` — `resolveSerenaWhitelist`: availability-gated and never throws; a
   missing Serena becomes a note, never a blocked run.
 - `verification-evidence.ts` — typed facade over the canonical plugin decision and
-  evidence-storage owners. Config 3 opts new work into bound physical provenance
-  and current applicability; runner and standalone helper use the same rules.
+  evidence-storage owners for task descriptors, inert discovery, execution authority,
+  immutable physical provenance and current applicability; runner and standalone
+  helper use the same rules.
 - `verification.ts` — root project-marker detection, hygiene classification,
-  explicit-profile readiness, and deterministic command descriptors shared by
-  doctor and workflow.
+  explicit legacy-profile diagnostics and command descriptors. Task discovery and
+  policy live in the shared task owner.
 - `claude-permissions.ts` — offline audit of the permission rules a spawned
   Claude session honors: a missing or refused `Write` blocks; `Edit`, `Bash`,
   and path-scoped gaps are advisories.
@@ -427,7 +428,7 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
 - `setup-client.ts` / `foreground-client.ts` — locally verified explicit
   project-manifest invocation, selected subscription authentication, filtered
   environment, foreground terminal ownership and bounded child cleanup.
-- `doctor-cli.ts` / `doctor.ts` — read-only fixed-order `banzai-doctor/v4`
+- `doctor-cli.ts` / `doctor.ts` — read-only fixed-order `banzai-doctor/v5`
   readiness checks; constructs no `RunStore`, adapters, or `WorkflowRunner`.
 - `live-compatibility-cli.ts` / `live-compatibility.ts` — the protected,
   explicitly confirmed live vendor probe producing closed
@@ -468,9 +469,10 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   config transactions; selected-run history supplies command collision evidence.
 - `configuration-review.ts` — freezes real runner deltas and coverage disposition
   without attributing carried-in or later user config changes to the runner.
-- `verification-cli.ts` — static init wizard, confirmed profile CRUD/list and
+- `verification-cli.ts` — explicit legacy profile CRUD/list and
   explicit all-command check execution under repository ownership.
-- `verification-ui.ts` — structured command editor and decision-first guidance;
+- `verification-ui.ts` — shared task-verification outcome lines for CLI and
+  interactive status, plus the retained structured command editor and legacy decision guidance;
   no shell parsing, model invocation or config write.
 - `persisted-readers.ts` — canonical exports for generated plugin readers;
   the build resolves those imports to source, never stale generated output.
@@ -499,16 +501,16 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   per route), and `serenaGuidance`. Strict planning, implementation, review and
   accepted-finding fixes inline the applicable shared guidance and policies while preserving
   approved scope, legacy directives and required evidence.
-- `review-artifact.ts` — deterministic `banzai-feature-review/v5` rendering for
-  guided snapshots, retaining historical v1-v4 rendering,
+- `review-artifact.ts` — deterministic `banzai-feature-review/v7` rendering for
+  task snapshots, retaining historical renderers,
   exact snapshot/result validation and atomic publication of validated bytes;
   legacy v1 rendering and diagnostics remain readable.
-- `review-snapshot.ts` — `banzai-review-snapshot/v4` bound scope/content and configuration identities
-  and historical v1-v3 readers,
+- `review-snapshot.ts` — `banzai-review-snapshot/v6` frozen task checks, physical origins and completion identities
+  with historical readers,
   full/delta anchors, recorded evidence, digest validation and owned paths.
 - `types.ts` — all shared types, `CONTRACT_VERSION = "1.0.0"`, phase-result
-  schema v3 and state schema v7 with explicit v1-v6 historical readers, attempt
-  schema v3 under `banzai-completion-protocol/v1`, terminal checkpoint v2, the
+  schema v4 and state schema v8 with explicit historical readers, attempt
+  schema v4 under `banzai-completion-protocol/v1`, terminal checkpoint v3, the
   completion capture/transition/candidate/publication record identities, and the independent
   agent-control, context, and checkpoint/recovery contract identities; no
   runtime imports.
@@ -588,11 +590,11 @@ Plugin (`plugins/banzai/`):
   new gate exists. Effective delivery on each host requires separate evidence.
 - `contracts/contract.json`, `contracts/v1/*.schema.json`,
   `contracts/v2/phase-result.schema.json`, `contracts/v2/review-result.schema.json`, and
-  `contracts/v3/phase-result.schema.json` — umbrella contract version `1.0.0`;
+  `contracts/v4/phase-result.schema.json` — umbrella contract version `1.0.0`;
   workflow selection remains v1, orchestrated review-result v2 is current, and
-  phase-result v3 is current with the planning-only consultation request.
+  phase-result v4 is current with the planning-only consultation request and task verification candidates.
   `contracts/v1/review-result.schema.json` is byte-preserved for legacy reads
-  and standalone review; phase-result v1/v2 remain byte-preserved legacy reader surfaces.
+  and standalone review; phase-result v1/v2/v3 remain byte-preserved legacy reader surfaces.
 - `hooks/spec-gate.cjs` and `hooks/hooks.json` — the `PreToolUse` /
   `PostToolUse` gate on `Edit|Write|MultiEdit|NotebookEdit|apply_patch`. It
   defers to the host permission flow on an unparseable payload, gates the first
@@ -617,24 +619,16 @@ Plugin (`plugins/banzai/`):
   Report duties, conditional changeReport triggers, approval immutability,
   standalone role readers and runner-only review rendering remain unchanged.
 
-New config-2/3 runs use state v6 with explicit ordered/policy verification mode
-and an immutable artifact binding from creation; config-1 runs retain state v4. Storage
-mode `workflow` supplies capacity; `workflowSelection` retains phase authority.
-For work artifacts, strict implementation grants only the bound `implementationReport` and
-`testReport`; strict fix also grants the existing bound `changeReport` in the
-runner's phase-scope check and the hook's write-role set. This grant does not
-change the quick-fix report trigger. Feature and quick-fix retain their bound
-`work` and `changeReport` grants respectively.
-Workspace v2 includes only the selected ignored work with the binding digest.
-Exact bound reports can satisfy completion evidence; arbitrary runner/control
-paths cannot. Attempt-owned workspace evidence also guards terminal reconciliation.
-Legacy state versions 1–3 keep their prior path/digest semantics. Offline archive
-v1 exports a fixed reviewed inventory, preserving source bytes, required Markdown
-and machine authority closure, explicit pins and custodian retention terms.
-Restore rejects managed work/run/control ancestry and preserves the original
-manifest as a private retention receipt without changing active pointers or
-resuming runs. Doctor recognizes v4-v6 and verifies their bound identity read-only. Installed-client adoption and external cutover remain unconfirmed
-parts of ADR-0041; its decision-index status remains Planned.
+New runs use state v8 with task verification and immutable private binding v2,
+including projects whose stored layout default is legacy. No profile/bootstrap
+readiness gate runs. Strict implementation grants the bound implementation and
+test reports; strict fix also grants the bound change report. Lite routes retain
+their existing work/change-report grants. Workspace v2 binds the selected ignored
+work. Historical runs are not migration or continuation targets for ADR-0049;
+retained readers preserve their original meanings. Archive v1 can retain new
+bytes but reports unsupported task evidence as incomplete and refuses restore.
+Doctor v5 checks bound state v8 read-only. External client installation remains
+separate delivery evidence.
 
 Project guidance is inspected before new-run creation and authentication, then
 rechecked under ownership. Continuations inspect instruction layout before
@@ -644,53 +638,37 @@ resume/retry/recover action remains authoritative after manual repair. CLI
 setup is unavailable while that run remains unfinished; setup creates no run,
 attempt, approval marker or transcript.
 
-- Configuration: `.banzai/config.json` in the **target** project, created by
-  `banzai init` and intended to be committed there. New config uses schema
-  version 2 and holds `contractVersion`, the `planner` / `implementer` /
-  `reviewer` model settings, ordered explicit `verification.profiles`, the
-  optional `claudeEnvironment` section, and `maxFixCycles`. `claudeEnvironment`
-  is `{ mode: "scoped" | "ambient", pluginDirectory: string | null }`; an absent
-  section defaults to `scoped` with a null directory, so files written before
-  ADR 0020 need no migration. Each profile has a unique ID, one declared project type, and
-  ordered direct executable-plus-argv commands. Schema version 1 flat commands
-  remain execution-compatible through an in-memory legacy profile and are never
-  migrated automatically. `DEFAULT_CONFIG` pairs a `codex gpt-5.6-sol` planner
-  and implementer with a `claude claude-opus-5` reviewer, all at
-  `effort: "xhigh"`, one `repository` hygiene profile containing
-  `git diff --check`, and `maxFixCycles: 3`. Every workflow command reloads and
-  revalidates config, so no phase caches model settings.
-- Guided verification: schemas 2 and 3 accept optional `verification.bootstrap`.
-  Init saves confirmed bootstrap/profile choices before the project-manifest
-  client and executes no checks. For markerless roots with uncovered `custom`
-  and existing substantive profiles, the wizard preserves configuration and
-  explains the conflict instead of offering ineffective bootstrap. It lists
-  profile removal commands only when another profile would remain, with explicit
-  confirmation through `verify remove` and a subsequent init confirmation.
-  `verify add/edit/remove` share repository
-  ownership and previewed, lossless config publication; `verify list` reads and
-  `verify check` executes all configured commands once. A configuration
-  prerequisite after a completed implementation/fix remains pending with fixed
-  Accept/Edit/Skip/Cancel actions. Accept writes through the runner; external
-  repair requires resume. Neither path clears plan approval or replays the
-  model attempt. Skip binds this run, detected types and verification config;
-  it cannot waive binding obligations. Details: [ADR-0045](documentation/decisions/0045-guided-verification-setup.md).
-- Opt-in verification: config schema 3 requires stable check IDs and accepts an
-  explicit verification policy. New policy-enabled runs use state 6,
-  private work binding v2 and ledger 2; ordered state 6 uses binding v1. Historical
-  state-5 policy and state-1–4 readers retain their meanings. Physical leaves stay v1, with separate immutable
-  decisions, before/after origins and current applicability records. Strict reuse
-  requires a complete approved plan obligation inventory; unknown inputs, missing
-  proof and mandatory-fresh checks execute. Source/authority drift blocks application.
-  An unavailable capture leaves current applicability pending even after a physical
-  success; equal null digests cannot establish unchanged inputs.
-  The plugin-only `scripts/verification.cjs` selects configured checks under the
-  same exclusive work claim; models cannot write verification evidence.
+- Configuration: `banzai init` creates schema 4 with model settings,
+  `contractVersion`, optional `claudeEnvironment`, and `maxFixCycles`. There is no
+  mandatory verification section. Optional `verification.policy` can require or
+  deny checks and constrain timeout/cwd/context. Profiles and bootstrap are
+  rejected in schema 4; explicit legacy profile utilities remain scoped to old
+  config formats and do not control new tasks. `DEFAULT_TASK_CONFIG` selects
+  Codex `gpt-5.6-sol` for planning/implementation and Claude `claude-opus-5` for
+  review, with `xhigh` effort. Each workflow action reloads configuration.
+- Task verification: inert project discovery supplies evidence, never permission.
+  Strict plans carry self-contained remainder-bound obligations v2 inside the
+  approved bundle; phase-result v4 supplies separate additional candidates.
+  Lite selection remains under the user request and inherited local execution
+  permissions. A project script cannot confer new permissions. The shared task
+  owner validates descriptors, source/materialization paths, policy and actual
+  context before direct executable/argv invocation. Missing optional tooling
+  creates no configuration gate; mandatory failure prevents completion.
+- Physical task evidence: binding v2 reserves a private verification directory.
+  Ledger 3 retains immutable decision v2, physical start/finish v2, origin v2 and
+  applicability v2 records. Direct command descriptors, cwd, actual context and
+  observed inputs remain linked by hashes; hashes establish identity, not test
+  quality. Explicit retries retain failures, interrupted starts require owner
+  recovery, and retained terminal results are reconciled without duplicate
+  execution. Equivalent evidence requires declared complete dependencies and
+  matching direct origins; release checks stay fresh. Standalone helper request
+  v2 uses bound task documents and exclusive work ownership; inspect is read-only.
 - Run state: `.banzai/runs/<run-id>/state.json` is atomically replaced;
   `events.jsonl` is an append-only summary without transcripts; `attempts/`
-  holds model-attempt v1/v2 records, structured results, redacted CLI output,
+  holds current task-mode model-attempt v4 records, structured results, redacted CLI output,
   immutable mode-0600 terminal checkpoints, one mode-0600 review candidate
-  and an immutable mode-0600 review snapshot per new physical review attempt. Model-attempt v2 adds `interrupted` lifecycle
-  evidence and recovery linkage while v1 remains readable.
+  and an immutable mode-0600 review snapshot per new physical review attempt. Historical model-attempt v1-v3 readers retain their original semantics, including
+  interrupted lifecycle evidence and recovery linkage where present.
   Optional `planningContext` on planning attempts holds bounded invocation and
   stopped-workspace digests, artifact paths, and `retryOf`; it is cache evidence,
   never a completion or authorization record. Optional
@@ -744,9 +722,9 @@ attempt, approval marker or transcript.
   meaningful prose. Markdown separates required scope from acknowledged
   coverage and projects verification/completion only from the frozen snapshot.
   Standalone review owns durable v1 Markdown; legacy records gain no assertion.
-- Human decisions: five existing workflow gates plus a conditional configuration prerequisite — conditional planning-only
+- Human decisions: five existing workflow gates — conditional planning-only
   decision consultation, `adr_approval`, `plan_approval`, `escalation`, and
-  review triage. Configuration is runner-raised after completed implementation/fix.
+  review triage. Task verification adds no configuration prerequisite gate.
   No other phase boundary asks for confirmation; every other
   model boundary emits a report and continues. Operator recovery is a separate
   explicit risk authorization, distinct from workflow gates, retry, approval, or
@@ -776,7 +754,7 @@ attempt, approval marker or transcript.
   `banzai status --json`.
 - Agent control: `banzai control capabilities` is offline and can run outside a
   Git checkout; it declares the exact independently versioned non-TTY operation
-  set under control contract `5.0.0`, including keyed consultation answers and
+  set under control contract `6.0.0`, including keyed consultation answers and
   explicit `recover` with the
   closed `banzai-agent-recovery/v1` input. `banzai control status` exposes one
   bounded public projection derived from runner state rather than human
@@ -804,7 +782,7 @@ attempt, approval marker or transcript.
   Model-attempt v2 `interrupted` maps to the existing public incomplete/started
   bucket so export v1 adds no enum or key.
   Terminal-checkpoint and recovery-authorization content is never exported.
-  New runs have an explicit verification-ledger marker and stable physical
+  Supported historical runs have an explicit verification-ledger marker and stable physical
   attempt leaves; unique valid leaves own attempt/outcome/duration history while
   cumulative and retained state are consistency checks. A missing marker means
   legacy evidence, so genuinely lost outcomes remain partial with
@@ -882,16 +860,15 @@ attempt, approval marker or transcript.
   `banzai doctor` invocations then discover the checkout with a bounded
   doctor-only Git diagnostic before progress, adapters, or `WorkflowRunner`.
   Ordinary runner Git errors retain their existing behavior. Doctor detects
-  root project markers, distinguishes missing, matching hygiene-only, covered,
-  and unused schema-version-2 profiles, and never treats marker permission/I/O
+  root project markers without imposing profile coverage, reports optional
+  task-policy requirements, and never treats marker permission/I/O
   failure as confirmed `custom` absence. Unreadable marker evidence fails
-  `project.types`, exports an empty project-type list, and skips dependent
-  profile checks. Doctor checks executable access relative to the checkout and
+  `project.types` and exports an empty project-type list. Doctor checks executable access relative to the checkout and
   reads only the active pointer/referenced state and runner lock through direct
   bounded readers. It also reads the Claude permission rules and workspace trust
   record a spawned session would honor, and fails readiness when the tools a
   Claude planning phase must call are ungranted or refused. Persisted repository roots must be absolute and compare
-  through canonical identity. Its `banzai-doctor/v4` JSON is authoritative and
+  through canonical identity. Its `banzai-doctor/v5` JSON is authoritative and
   the human report is a deterministic projection. It executes no configured
   command, authentication, model, recovery, or network path and writes no state,
   source, config, lock, approval marker, or report file. A fixed advisory says
@@ -965,7 +942,7 @@ attempt, approval marker or transcript.
 
 - Instruction assurance covers exact raw embedding and normalized extraction,
   phase/category byte accounting, per-call parity refusal and preserved
-  continuation authority, doctor v4, standalone binding readers, and actual
+  continuation authority, doctor v5, standalone binding readers, and actual
   archive/bundle/map identity and privacy boundaries. Deterministic fixtures do
   not establish installed-client compatibility or model compliance.
 
@@ -1031,9 +1008,9 @@ attempts without another model call`.
   behavior.
 - Final verification ownership: during orchestrated work, builders use focused
   affected tests and do not repeat supplied full-scope commands; the runner
-  executes configured profiles after the phase. If those profiles omit the
+  executes task-scoped checks after the phase. If supplied checks omit the
   manifest's applicable final suite, the builder runs it once and records the
-  readiness gap. Standalone skills own one final applicable suite unless the
+  verification gap. Standalone skills own one final applicable suite unless the
   explicitly enabled shared engine proves equivalent evidence for an eligible check.
   Required release gates remain fresh. Review uses
   current runner results and reruns a complete command only for a concrete
@@ -1164,7 +1141,7 @@ status` reports only whether credentials are visible and stored, so a
 - Interactive setup: `banzai setup` requires a TTY and existing config. TTY
   `init` offers setup after model selection, and new-task entry offers it before
   task input. Both TTY and non-TTY `init` create
-  `documentation/verification-examples.md` when missing before any wizard or
+  `documentation/verification-examples.md` when missing before any
   client launch, preserve existing guide bytes, and report Created/Kept.
   Non-TTY `init` creates configuration and renders manual next steps;
   bare non-TTY entry prints help. A fresh foreground Codex or Claude session
@@ -1208,19 +1185,19 @@ status` reports only whether credentials are visible and stored, so a
   precedence over checkpoint reconciliation on every surface, and repeated
   resume is a no-op rather than a replay of invalid evidence.
 - Strict plan completion: persisted orchestrator status and `nextAction` own
-  lifecycle; approved plan checkboxes remain immutable; phase-result v3 owns
+  lifecycle; approved plan checkboxes remain immutable; phase-result v4 owns
   exact `TNNN` completion through one versioned structured ledger (schema 1).
   New strict implementation and fix attempts run under
-  `banzai-completion-protocol/v1` (ADR-0047): the attempt record is schema 3
+  `banzai-completion-protocol/v1` (ADR-0047): the task-mode attempt record is schema 4
   with the persisted protocol marker and nullable `retryOf`, both vendor
   adapters decode the result through the protocol-selected safe envelope
   (exact keys, versions, phase, outcome/gate pairing, artifacts, questions and
   finding identities validated while `taskCompletion` stays a bounded
   unaccepted value until the ledger parser succeeds), terminal proof is
-  `banzai-terminal-attempt-checkpoint/v2`, and the model returns claims plus
+  `banzai-terminal-attempt-checkpoint/v3`, and the model returns claims plus
   report narrative without authoring the **Plan Task Completion** table. A
   completed result becomes `pending_application`; the runner then captures the
-  report and workspace identities the v2 terminal checkpoint recorded when the
+  report and workspace identities the v3 terminal checkpoint recorded when the
   vendor returned into immutable attempt-owned evidence, accepting current
   bytes only while they still equal that proof and refusing a claim with no
   durable terminal observation, validates the claims, renders the report section as the delimited
@@ -1300,30 +1277,24 @@ status` reports only whether credentials are visible and stored, so a
   Every claim must be updated from evidence actually run in the fix or scoped
   explicitly as `historical/pre-fix`; runner-owned final evidence remains
   `pending at fix handoff`, with durable runner evidence owning the eventual
-  result, and the three artifacts must not carry contradictory current totals. Legacy
-  runs keep their lifecycle with legacy/unknown completion, while standalone
-  work without external evidence still uses mutable plan checkboxes.
-- Run-state bootstrap and transition matrix: new config-1 runs start at
-  state schema 4 (ordered verification, binding v1, no configuration setup);
-  new config-2 and config-3 runs start at schema 6 (existing configuration
-  setup, binding v1 or policy binding v2). Selection, planning, review and lite
-  attempts never upgrade state. The first new strict implementation or fix
-  attempt transitions the run to schema 7, retaining the exact pre-transition
-  state bytes as attempt-owned `banzai-completion-transition/v1` evidence and
-  adding only the nullable completion publication cursor; v5 states fail closed
-  as `COMPLETION_STATE_UNSUPPORTED`, a v7 run never downgrades, and legacy
-  states 1-6 stay readable. Review snapshots of protocol runs are
-  `banzai-review-snapshot/v5`, rendered as `banzai-feature-review/v6`, with
-  the receipt, capture and candidate identities in the frozen digest; older
-  snapshot and rendered versions keep their decoders.
+  result, and the three artifacts must not carry contradictory current totals. Historical
+  runs remain read-only evidence with legacy/unknown completion where applicable;
+  their readers do not authorize continuation or migration. Standalone work without
+  external evidence still uses mutable plan checkboxes.
+- Current bootstrap: every new route begins at state 8 with private binding 2
+  and a nullable completion cursor. Strict completion uses the existing protocol
+  directly, without a legacy state-transition record. Snapshot 6/rendered review
+  7 freeze task verification and completion receipt identities. Independent
+  review assesses requirement coverage and unjustified weakening of checks.
+  Historical snapshot/phase/result readers retain their original semantics.
 - Agent-control schemas are independently identified as current
-  `banzai-agent-capabilities/v5`, `banzai-agent-status/v4`, and
+  `banzai-agent-capabilities/v6`, `banzai-agent-status/v5`, and
   `banzai-agent-answer/v3` for configuration, plus preserved consultation
   `banzai-agent-answer/v2`, `banzai-agent-request/v1`,
   escalation `banzai-agent-answer/v1`, and `banzai-agent-recovery/v1`, with
-  control contract version `5.0.0`. Capabilities v5 declare the completion
+  control contract version `6.0.0`. Capabilities v6 declare task verification and the completion
   publication protocol, stages, refusal codes and the `pending_application`
-  attempt status; status v4 adds the bounded completion publication state.
+  attempt status; status v5 includes bounded task dispositions and completion publication state.
   Compatibility is the exact capability declaration, not the
   package version. The optional `orchestrate` skill is invocable only by an
   explicit user invocation: Claude Code uses
@@ -1390,27 +1361,28 @@ status` reports only whether credentials are visible and stored, so a
   evaluation-export, and KPI contracts. Context-report semantic or privacy
   changes require a new context-report version; no context field may be added
   to either frozen evaluation contract.
-- Doctor contract `banzai-doctor/v4` is an independent fixed-order local
-  diagnostic (`schemaVersion: 4`), with JSON-authoritative checks carrying
+- Doctor contract `banzai-doctor/v5` is an independent fixed-order local
+  diagnostic (`schemaVersion: 5`), with JSON-authoritative checks carrying
   `id`, `category`, `status`, `message`, `fixes`, and `roles`. Verification
   failures include actionable remedies. Codex roles are informational
   `not_applicable`; pinned Claude parity can verify or fail on mismatch.
   Ambient/unresolved scopes are unverifiable; their only remedy is ambient.
   Rebuild/update remedies apply only to mismatch/bounded failure. Doctor runs
   no configured command, vendor path, network, or write. Exit 0 means no failed
-  check; warnings do not fail readiness. Historical v1-v3 reports retain their
-  identities. Workflow preflight independently enforces guidance, substantive
-  coverage and confirmed instruction mismatch before model attempts.
-- Verification readiness detects only root Node, PHP, Python, Go, Rust, Ruby,
-  JVM, and .NET markers, or `custom` when none is recognized. Every detected
-  type requires an explicit matching substantive profile, except explicit
-  markerless bootstrap. A `repository`
-  profile and exact `git diff --check` are hygiene only and cannot satisfy a
-  project type. Doctor reports missing and matching hygiene-only types
-  separately, keeps unused profiles visible, and scopes substantive-command
-  counts to detected versus unused project profiles. `custom` requires confirmed
-  marker absence; unreadable marker evidence is a bounded failure, never a
-  fallback.
+  check; warnings do not fail readiness. Historical v1-v4 reports retain their
+  identities. Workflow preflight independently enforces guidance and confirmed
+  instruction mismatch before model attempts; current task mode does not require
+  configured profile coverage.
+- Doctor inspects root Node, PHP, Python, Go, Rust, Ruby, JVM and .NET markers,
+  or reports `custom` when no known marker is present. Unreadable or invalid
+  marker evidence is a bounded diagnostic failure. Current task verification
+  requires no project-type profile, bootstrap flag or configured substantive
+  coverage. Missing tests/tooling are valid initial states; task obligations and
+  optional project policy determine what must be satisfied before completion.
+  Doctor checks executables declared by required task policy without running
+  them. Retained legacy profile inspection utilities keep their historical
+  matching and hygiene semantics; those utilities do not gate new tasks or
+  authorize old-run continuation.
 - Build-time coupling: `src/contracts.ts` imports JSON from
   `plugins/banzai/contracts/`, outside the workspace. A contract edit is not
   live until the orchestrator is rebuilt. The same explicit-build rule applies
@@ -1503,3 +1475,4 @@ restate them here. Paths are relative to `documentation/decisions/`.
 | ADR-0046 | Supervised live end-to-end first task                              | `0046-supervised-live-e2e.md`                                   | Planned     |
 | ADR-0047 | Runner-owned completion projection                                 | `0047-runner-owned-completion-projection.md`                    | Implemented |
 | ADR-0048 | Completion markup and viewer enrichment boundary                   | `0048-completion-markup-and-viewer-enrichment-boundary.md`      | Implemented |
+| ADR-0049 | Task-scoped verification authority                                 | `0049-task-scoped-verification.md`                              | Implemented     |

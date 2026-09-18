@@ -7,6 +7,11 @@
 - Owner: Banzai maintainers
 - Decision makers: Project owner; explicitly accepted in chat on 2026-09-14.
 
+- Partially superseded by [ADR-0049](./0049-task-scoped-verification.md), accepted
+  2026-09-17: new tasks do not use bootstrap, mandatory profile setup or the
+  configuration-prerequisite gate. Legacy continuation and unrelated instruction
+  and parity protections remain. Implementation of the transition is Planned.
+
 ## Related Artifacts
 
 - Private strict work: `guided-verification-setup`. Its description contains

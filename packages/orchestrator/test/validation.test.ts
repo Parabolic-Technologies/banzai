@@ -16,8 +16,6 @@ import {
   PHASE_RESULT_SCHEMA_VERSION,
   RECOVERY_AUTHORIZATION_SCHEMA,
   RECOVERY_AUTHORIZATION_SCHEMA_VERSION,
-  TERMINAL_CHECKPOINT_SCHEMA,
-  TERMINAL_CHECKPOINT_SCHEMA_VERSION,
   COMPLETION_PROTOCOL,
   STRICT_MODEL_ATTEMPT_SCHEMA_VERSION,
   type TerminalAttemptCheckpoint
@@ -56,6 +54,7 @@ function phase(
 ): Record<string, unknown> {
   return {
     schemaVersion: PHASE_RESULT_SCHEMA_VERSION,
+    verificationCandidates: null,
     contractVersion: CONTRACT_VERSION,
     phase: "plan",
     outcome: "needs_human_decision",
@@ -248,7 +247,7 @@ test("an existing config without a Claude environment section defaults to isolat
 
 test("plugin and runner contract versions match", () => {
   assert.doesNotThrow(assertContractParity);
-  assert.match(phaseResultSchema.$id, /\/v3\/phase-result\.schema\.json$/);
+  assert.match(phaseResultSchema.$id, /\/v4\/phase-result\.schema\.json$/);
   assert.match(
     legacyPhaseResultSchema.$id,
     /\/v1\/phase-result\.schema\.json$/
@@ -257,7 +256,7 @@ test("plugin and runner contract versions match", () => {
     legacyPhaseResultV2Schema.$id,
     /\/v2\/phase-result\.schema\.json$/
   );
-  assert.equal(phaseResultSchema.properties.schemaVersion.const, 3);
+  assert.equal(phaseResultSchema.properties.schemaVersion.const, 4);
   assert.equal(legacyPhaseResultV2Schema.properties.schemaVersion.const, 2);
   assert.ok(phaseResultSchema.required.includes("taskCompletion"));
   assert.ok(phaseResultSchema.required.includes("decisionConsultation"));
@@ -319,10 +318,10 @@ test("phase results require consistent human gates and outcomes", () => {
   );
 });
 
-test("new phase results require v3 and decode the structured completion ledger", () => {
+test("new phase results require v4 and decode the structured completion ledger", () => {
   assert.throws(
     () => parsePhaseResult(phase({ schemaVersion: 1 })),
-    /Phase result must use schema 3/
+    /unknown fields: verificationCandidates/
   );
 
   const result = parsePhaseResult(
@@ -553,7 +552,12 @@ test("decision consultation validates one bounded planning-only request", () => 
 
 test("persisted phase results retain truthful v1 and v2 evidence", () => {
   const current = phase({ phase: "fix", outcome: "blocked", gate: null });
-  const { decisionConsultation: _decisionConsultation, ...legacyV2 } = current;
+  const {
+    decisionConsultation: _decisionConsultation,
+    verificationCandidates: _candidates,
+    ...legacyV2
+  } = current;
+  assert.equal(_candidates, null);
   assert.equal(_decisionConsultation, null);
   assert.equal(
     parsePersistedPhaseResult({ ...legacyV2, schemaVersion: 2 }).schemaVersion,
@@ -566,7 +570,7 @@ test("persisted phase results retain truthful v1 and v2 evidence", () => {
     artifacts,
     ...legacyFields
   } = legacyV2;
-  assert.equal(_schemaVersion, 3);
+  assert.equal(_schemaVersion, 4);
   assert.equal(_taskCompletion, null);
   const { testReport: _testReport, ...legacyArtifacts } = artifacts as Record<
     string,
@@ -583,7 +587,7 @@ test("persisted phase results retain truthful v1 and v2 evidence", () => {
 
   assert.throws(
     () => parsePhaseResult({ ...legacyV2, schemaVersion: 2 }),
-    /must use schema 3/
+    /must use schema 4/
   );
 });
 
@@ -849,8 +853,8 @@ test("verification ledger decoding accepts bounded lifecycle evidence and reject
 
 function terminalCheckpoint(): TerminalAttemptCheckpoint {
   const checkpoint: Omit<TerminalAttemptCheckpoint, "integrityDigest"> = {
-    schema: TERMINAL_CHECKPOINT_SCHEMA,
-    schemaVersion: TERMINAL_CHECKPOINT_SCHEMA_VERSION,
+    schema: "banzai-terminal-attempt-checkpoint/v3",
+    schemaVersion: 3,
     runId: "run-one",
     attempt: { id: "fix-1-abcd1234", kind: "fix", mutable: true },
     phase: "fix",
@@ -862,7 +866,7 @@ function terminalCheckpoint(): TerminalAttemptCheckpoint {
       sessionMode: "resumed",
       sessionContextDigest: "b".repeat(64)
     },
-    resultContract: "phase-result/v3",
+    resultContract: "phase-result/v4",
     terminal: {
       classification: "claude_result",
       observedAt: "2026-08-18T13:23:43.000Z"
@@ -1072,6 +1076,7 @@ test("planning retry cache metadata is bounded and cannot authorize another phas
 test("attempt v3 binds its result to the retained envelope and keeps protocol fields off legacy records", () => {
   const result = {
     schemaVersion: PHASE_RESULT_SCHEMA_VERSION,
+    verificationCandidates: null,
     contractVersion: CONTRACT_VERSION,
     phase: "implementation" as const,
     outcome: "completed" as const,

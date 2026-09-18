@@ -1,3 +1,4 @@
+import { parseTaskVerificationPublication } from "./task-verification-store.mjs";
 import { parseVerificationConfigTransaction } from "./artifact-readers.mjs";
 import { parseReviewVerificationEvidence } from "./verification-store.mjs";
 import { createHash } from "node:crypto";
@@ -147,6 +148,7 @@ function parseSnapshot(value) {
     snapshot.schemaVersion >= 2 &&
     (snapshot.schemaVersion !== 5 || "artifactBinding" in snapshot);
   if (bound) keys.push("artifactBinding");
+  if (snapshot.schemaVersion === 6) keys.push("verificationMode", "taskVerification", "completionPublication");
   if (snapshot.schemaVersion === 4) keys.push("verificationMode", "configurationSetup");
   if (snapshot.schemaVersion === 5) {
     keys.push("completionPublication");
@@ -162,7 +164,8 @@ function parseSnapshot(value) {
         snapshot.schema === "banzai-review-snapshot/v2") ||
       (snapshot.schemaVersion === 3 && snapshot.schema === "banzai-review-snapshot/v3") ||
       (snapshot.schemaVersion === 4 && snapshot.schema === "banzai-review-snapshot/v4") ||
-      (snapshot.schemaVersion === 5 && snapshot.schema === "banzai-review-snapshot/v5")
+      (snapshot.schemaVersion === 5 && snapshot.schema === "banzai-review-snapshot/v5") ||
+      (snapshot.schemaVersion === 6 && snapshot.schema === "banzai-review-snapshot/v6")
     ) ||
     !equal(snapshot.outputContract, "review-result/v2") ||
     !/^[a-f0-9]{64}$/u.test(digest) ||
@@ -236,7 +239,11 @@ function parseSnapshot(value) {
   }
   const artifact = snapshot.artifact;
   if (snapshot.schemaVersion === 4 || guidedV5) validateConfigurationSnapshot(snapshot);
-  if (snapshot.schemaVersion === 5) validateCompletionPublicationSnapshot(snapshot);
+  if (snapshot.schemaVersion === 5 || snapshot.schemaVersion === 6) validateCompletionPublicationSnapshot(snapshot);
+  if (snapshot.schemaVersion === 6) {
+    const publication = parseTaskVerificationPublication(snapshot.taskVerification);
+    if (snapshot.verificationMode !== "task" || snapshot.artifactBinding.binding.schemaVersion !== 2 || publication.decision.workId !== snapshot.artifactBinding.binding.workId || publication.decision.authority.approvalDigest !== snapshot.approval.digest || !publication.applicability.complete) invalid("Task review authority or applicability mismatch.");
+  }
   if (guidedV5 && !bound) invalid("Guided review evidence requires a bound run.");
   if (snapshot.schemaVersion === 3 || ((snapshot.schemaVersion === 4 || guidedV5) && snapshot.verificationMode === "policy" && snapshot.configurationSetup.coverage !== "skipped")) {
     if (snapshot.artifactBinding.binding.schemaVersion !== 2) invalid("Verification snapshot requires binding v2.");
@@ -361,7 +368,7 @@ function parseSnapshot(value) {
     if (
       !(
         equal(source.schemaVersion, 1) ||
-        (snapshot.schemaVersion === 5 && equal(source.schemaVersion, 2))
+        ([5, 6].includes(snapshot.schemaVersion) && equal(source.schemaVersion, 2))
       ) ||
       !equal(source.status, "valid") ||
       !string(source.sourceAttemptId) ||
