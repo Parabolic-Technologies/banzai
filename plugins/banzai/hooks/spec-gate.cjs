@@ -41,6 +41,12 @@ const crypto = require('crypto');
 const os = require('os');
 const path = require('path');
 
+// Newest run-state schema this hook can interpret; it tracks the runner's
+// RUN_STATE_SCHEMA_VERSION. Codex and Claude Code refresh an installed plugin
+// cache only on a version change, so a newer state means this hook is stale,
+// not that the run is legacy.
+const NEWEST_RUN_STATE_SCHEMA = 8;
+
 function deferAndExit() {
   // No stdout + exit 0 => Claude Code falls through to normal permission flow.
   process.exit(0);
@@ -312,6 +318,9 @@ if (runnerMode) {
         return privateWrites.has(relative) || !relative.startsWith('.banzai/') && isDocArtifact(relative);
       })) runnerDecision('allow', 'banzai spec-gate: exact planning artifacts are writable during planning.');
     } else if (state.artifactBinding !== undefined) {
+      if (typeof state.schemaVersion === 'number' && state.schemaVersion > NEWEST_RUN_STATE_SCHEMA) {
+        throw new Error(`run state schema ${state.schemaVersion} is newer than this installed Banzai hook supports (up to ${NEWEST_RUN_STATE_SCHEMA}); update the Banzai plugin installed for this model client to the banzai CLI release (compare \`banzai --version\` with \`banzai --plugin-version\`)`);
+      }
       throw new Error('legacy run cannot carry private artifact authority');
     }
     if (state.status === 'reviewing' || state.activeAttempt?.kind === 'review') {

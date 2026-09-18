@@ -747,6 +747,7 @@ test("builder prompts select task verification without a profile catalogue", () 
     assert.match(prompt, /Verification is task-scoped/);
     assert.match(prompt, /Return verificationCandidates/);
     assert.match(prompt, /cannot replace or weaken approved obligations/);
+    assert.match(prompt, /keep any output they generate Git-ignored/);
     assert.match(prompt, /Script discovery is evidence, not authority/);
     assert.doesNotMatch(prompt, /Supplied runner verification profiles/);
   }
@@ -927,6 +928,14 @@ test("planning prompt states the exact task heading grammar", () => {
   assert.match(
     prompt,
     /fails deterministic validation before the plan can be approved/
+  );
+});
+
+test("planning prompt keeps generated check output Git-ignored", () => {
+  const prompt = planningPrompt("example", "Implement it.", []);
+  assert.match(
+    prompt,
+    /the task that creates its tooling must keep that output Git-ignored/
   );
 });
 

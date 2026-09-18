@@ -384,6 +384,11 @@
       "sha256": null
     },
     {
+      "path": "documentation/decisions/0050-triggered-code-design-assessment.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
       "path": "documentation/decisions/README.md",
       "classification": "maintainer",
       "sha256": null
@@ -430,6 +435,16 @@
     },
     {
       "path": "documentation/historical-references.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/ideas/2026-09-18-code-design-method-draft.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/ideas/2026-09-18-composable-code-design-skill.md",
       "classification": "maintainer",
       "sha256": null
     },

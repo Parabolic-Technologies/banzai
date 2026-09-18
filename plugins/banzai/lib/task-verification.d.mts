@@ -30,7 +30,7 @@ export function parseTaskVerificationObligations(plan: string): TaskVerification
 export function parseTaskVerificationPolicy(value: unknown): TaskVerificationPolicy;
 export function selectTaskVerification(input: { required: TaskVerificationDescriptor[]; candidates: TaskVerificationCandidates | null; policy?: TaskVerificationPolicy | null }): TaskVerificationSelection;
 export function taskVerificationPath(repoRoot: string, relativePath: string, directory?: boolean): Promise<string>;
-export function authorizeTaskVerification(input: { repoRoot: string; descriptor: TaskVerificationDescriptor; authority: TaskVerificationAuthority; context: TaskVerificationContext; policy?: TaskVerificationPolicy | null }): Promise<{ descriptor: TaskVerificationDescriptor; cwd: string; authorityDigest: string; contextDigest: string; policyDigest: string | null }>;
+export function authorizeTaskVerification(input: { repoRoot: string; descriptor: TaskVerificationDescriptor; authority: TaskVerificationAuthority; context: TaskVerificationContext; policy?: TaskVerificationPolicy | null; required?: boolean }):Promise<{ descriptor: TaskVerificationDescriptor; cwd: string; authorityDigest: string; contextDigest: string; policyDigest: string | null }>;
 
 export interface TaskVerificationDiscovery {
   sources: { path: string; status: "inspected" | "absent" | "unavailable"; sha256: string | null; reason: string | null }[];

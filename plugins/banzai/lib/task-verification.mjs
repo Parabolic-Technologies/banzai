@@ -108,9 +108,12 @@ export function selectTaskVerification({ required, candidates, policy = null }) 
     selected.set(check.id, { descriptor: check, required: true });
   }
   const proposal = parseTaskVerificationCandidates(candidates);
+  // The runner captures actual inputs (ADR-0049 section 2), so a restatement that
+  // differs only in source identities leaves the approved obligation in force.
+  const obligation = (descriptor) => evidenceDigest({ ...descriptor, sources: [] });
   for (const check of proposal?.checks ?? []) {
     const previous = selected.get(check.id);
-    if (previous && evidenceDigest(previous.descriptor) !== evidenceDigest(check)) fail("A proposal cannot change an existing verification obligation.");
+    if (previous && obligation(previous.descriptor) !== obligation(check)) fail("A proposal cannot change an existing verification obligation.");
     if (!previous) selected.set(check.id, { descriptor: check, required: false });
   }
   return { checks: [...selected.values()], absenceReason: selected.size ? null : proposal?.absenceReason ?? null };
@@ -132,7 +135,7 @@ export async function taskVerificationPath(repoRoot, relativePath, directory = f
 }
 
 /** Called by the owner immediately before launch, not by proposal validation. */
-export async function authorizeTaskVerification({ repoRoot, descriptor, authority, context, policy = null }) {
+export async function authorizeTaskVerification({ repoRoot, descriptor, authority, context, policy = null, required = false }) {
   const check = parseTaskVerificationDescriptor(descriptor);
   object(authority, ["workId", "sourceAttemptId", "workflow", "taskDigest", "selectionDigest", "approvalDigest", "contextDigest"]);
   text(authority.workId, 128); text(authority.sourceAttemptId, 128); hash(authority.taskDigest); hash(authority.selectionDigest); hash(authority.contextDigest);
@@ -149,7 +152,10 @@ export async function authorizeTaskVerification({ repoRoot, descriptor, authorit
   }
   const cwd = await taskVerificationPath(repoRoot, check.cwd, true);
   if (check.command.includes("/") && !path.isAbsolute(check.command)) await taskVerificationPath(repoRoot, path.posix.normalize(path.posix.join(check.cwd, check.command)));
-  for (const source of check.sources) {
+  // An approved obligation binds its command, not the pre-implementation bytes
+  // its plan observed (ADR-0049 sections 2 and 4); the owner's captured inputs
+  // record what actually ran. Supplements stay bound to their proposal sources.
+  for (const source of required ? [] : check.sources) {
     const file = await taskVerificationPath(repoRoot, source.path);
     if ((await lstat(file)).size > 1024 * 1024 || evidenceDigest(await readFile(file)) !== source.sha256) fail("Verification selection source changed before launch.");
   }

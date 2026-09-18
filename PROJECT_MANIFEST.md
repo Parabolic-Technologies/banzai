@@ -523,8 +523,12 @@ Repository release scripts (`packages/orchestrator/scripts/`):
   consistency, plugin and marketplace JSON, nine-way version parity, hook and
   contract identities, whitespace-normalized policy-section drift checks,
   instruction-layout structure and consumer-matrix validation, scoped
-  references and migration/legacy-release pins, and
-  committed bundle mode and parity.
+  references and migration/legacy-release pins,
+  committed bundle mode and parity, and a hook-runtime version rule:
+  `hooks/spec-gate.cjs`, `hooks/hooks.json` and `plugins/banzai/lib/` must
+  match the commit that set the current version unless the working tree
+  carries a pending bump (`HOOK_CHANGED_WITHOUT_VERSION_BUMP`). The rule is
+  skipped without full Git history (release fixtures, shallow CI clones).
 - `smoke-committed.mjs` — runs the committed bundle in disposable repositories
   and asserts clean streams, fixed schema identities, deterministic bytes, no
   mutation, and unconditional cleanup.
@@ -599,12 +603,14 @@ Plugin (`plugins/banzai/`):
   `PostToolUse` gate on `Edit|Write|MultiEdit|NotebookEdit|apply_patch`. It
   defers to the host permission flow on an unparseable payload, gates the first
   code edit of a manual session behind a human approval it records itself, and
-  fails closed in runner context. Manual-session gating applies only in
+  fails closed in runner context. A bound run state newer than the hook's
+  `NEWEST_RUN_STATE_SCHEMA` is denied as installed-plugin skew with an update
+  remedy instead of as a legacy run. Manual-session gating applies only in
   Banzai-adopted projects — `.banzai/config.json` or a root
   `PROJECT_MANIFEST.md` in the session directory or a parent — and the hook
   stays silent in repositories without that evidence.
 - `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` — plugin manifests,
-  currently version `2.6.0`. The Codex manifest additionally declares the hook
+  currently version `2.6.1`. The Codex manifest additionally declares the hook
   and the store interface metadata.
 - `PROJECT_MANIFEST.md`, `AGENTS.md`, `CLAUDE.md`, and the placeholder
   `documentation/` tree (`README.md`, `decisions/README.md`, `.gitkeep` files) —
@@ -1411,7 +1417,7 @@ status` reports only whether credentials are visible and stored, so a
   source, and the only root Claude settings file is the ignored
   `.claude/settings.local.json`. `plugins/banzai/.claude/settings.json` is
   packaged plugin content, not this repository's configuration.
-- Current Banzai release-train version is `2.6.0`, owned solely by root
+- Current Banzai release-train version is `2.6.1`, owned solely by root
   `package.json.version` and mirrored by four plugin/marketplace fields, the
   orchestrator package, and three `package-lock.json` fields (top-level, root
   package, and workspace package). All nine fields across seven files agree.

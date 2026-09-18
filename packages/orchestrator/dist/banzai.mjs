@@ -1644,9 +1644,10 @@ function selectTaskVerification({ required, candidates, policy = null }) {
     selected.set(check2.id, { descriptor: check2, required: true });
   }
   const proposal = parseTaskVerificationCandidates(candidates);
+  const obligation = (descriptor) => evidenceDigest({ ...descriptor, sources: [] });
   for (const check2 of proposal?.checks ?? []) {
     const previous = selected.get(check2.id);
-    if (previous && evidenceDigest(previous.descriptor) !== evidenceDigest(check2)) fail("A proposal cannot change an existing verification obligation.");
+    if (previous && obligation(previous.descriptor) !== obligation(check2)) fail("A proposal cannot change an existing verification obligation.");
     if (!previous) selected.set(check2.id, { descriptor: check2, required: false });
   }
   return { checks: [...selected.values()], absenceReason: selected.size ? null : proposal?.absenceReason ?? null };
@@ -1664,7 +1665,7 @@ async function taskVerificationPath(repoRoot, relativePath3, directory4 = false)
   if (directory4 ? !entry.isDirectory() : !entry.isFile()) fail("Verification input has an unsupported file type.");
   return current;
 }
-async function authorizeTaskVerification({ repoRoot, descriptor, authority, context, policy = null }) {
+async function authorizeTaskVerification({ repoRoot, descriptor, authority, context, policy = null, required = false }) {
   const check2 = parseTaskVerificationDescriptor(descriptor);
   object2(authority, ["workId", "sourceAttemptId", "workflow", "taskDigest", "selectionDigest", "approvalDigest", "contextDigest"]);
   text2(authority.workId, 128);
@@ -1686,7 +1687,7 @@ async function authorizeTaskVerification({ repoRoot, descriptor, authority, cont
   }
   const cwd = await taskVerificationPath(repoRoot, check2.cwd, true);
   if (check2.command.includes("/") && !path3.isAbsolute(check2.command)) await taskVerificationPath(repoRoot, path3.posix.normalize(path3.posix.join(check2.cwd, check2.command)));
-  for (const source of check2.sources) {
+  for (const source of required ? [] : check2.sources) {
     const file = await taskVerificationPath(repoRoot, source.path);
     if ((await lstat3(file)).size > 1024 * 1024 || evidenceDigest(await readFile(file)) !== source.sha256) fail("Verification selection source changed before launch.");
   }
@@ -1794,6 +1795,21 @@ async function publish(input, suffix, value) {
   return { relativePath: relativePath3, sha256: evidenceDigest(bytes) };
 }
 var redact = (value) => value.replace(/("(?:api[_-]?key|access[_-]?token|auth[_-]?token|password)"\s*:\s*")[^"]+(")/giu, "$1[REDACTED]$2").replace(/\b(?:sk|sk-ant|sess)-[A-Za-z0-9_-]{12,}\b/gu, "[REDACTED]");
+var observedEntries = /* @__PURE__ */ new WeakMap();
+function observedChanges(before, after) {
+  const earlier = observedEntries.get(before);
+  const later = observedEntries.get(after);
+  if (!earlier || !later) return null;
+  const identity = (entry) => `${entry.sha256}:${entry.mode}`;
+  const previous = new Map(earlier.map((entry) => [entry.path, identity(entry)]));
+  const current = new Map(later.map((entry) => [entry.path, identity(entry)]));
+  const changes = [
+    ...[...current].filter(([file, value]) => previous.get(file) !== value).map(([file]) => [file, previous.has(file) ? "modified" : "added"]),
+    ...[...previous.keys()].filter((file) => !current.has(file)).map((file) => [file, "removed"])
+  ].sort(([a], [b]) => a.localeCompare(b, "en")).map(([file, kind]) => `${JSON.stringify(file.slice(0, 200))} (${kind})`);
+  if (!changes.length) return null;
+  return changes.length > 10 ? `${changes.slice(0, 10).join(", ")} and ${changes.length - 10} more` : changes.join(", ");
+}
 async function captureTaskVerificationInputs(input, descriptors, policy) {
   const entries = [];
   let bytes = 0;
@@ -1857,7 +1873,9 @@ async function captureTaskVerificationInputs(input, descriptors, policy) {
     const commands = descriptors.map((check2) => ({ id: check2.id, name: check2.name, command: path4.isAbsolute(check2.command) ? check2.command : check2.command.includes("/") ? path4.posix.join(check2.cwd, check2.command) : check2.command, args: check2.args, timeoutMs: check2.timeoutMs, evidence: check2.evidence, ignoreExplanatory: check2.evidence === "equivalent_evidence" }));
     reusable = await captureVerificationInputs({ repoRoot: root, workId: input.workId, evidenceDirectories: [input.directory], configuration: { profiles: [{ id: "task-capture", projectType: "custom", commands }], policy: policy.reuse } });
   }
-  return { observedDigest: observedDigest2, complete: reusable?.complete === true, reusable };
+  const observation2 = { observedDigest: observedDigest2, complete: reusable?.complete === true, reusable };
+  if (observedDigest2 !== null) observedEntries.set(observation2, entries);
+  return observation2;
 }
 function parseTaskVerificationDecision(value) {
   closed(value, ["schema", "schemaVersion", "workId", "roundId", "sourceAttemptId", "authority", "context", "policyDigest", "checks", "absenceReason", "before", "sha256"]);
@@ -2030,9 +2048,12 @@ async function executeTaskVerification(input) {
     if (["passed", "reused"].includes(applicability2.dispositions.find((entry) => entry.checkId === item.descriptor.id)?.kind)) continue;
     if (previous?.roundId === roundId && (previous.status === "started" || (previous.status === "interrupted" ? !input.recoverInterrupted && previous.id !== input.retryOf : previous.status === "failed" && previous.id !== input.retryOf))) fail2("Task verification retains an unresolved attempt; use its explicit retry or recovery action.");
     await revalidate();
-    const authorized = await authorizeTaskVerification({ repoRoot: input.repoRoot, descriptor: item.descriptor, authority, context, policy });
+    const authorized = await authorizeTaskVerification({ repoRoot: input.repoRoot, descriptor: item.descriptor, authority, context, policy, required: item.required });
     const current = await capture3();
-    if (before.observedDigest !== null && current.observedDigest !== before.observedDigest) fail2("Task inputs changed between selection and launch.");
+    if (before.observedDigest !== null && current.observedDigest !== before.observedDigest) {
+      const changes = observedChanges(before, current);
+      fail2(`Task inputs changed between selection and launch${changes ? `: ${changes}` : ""}.`);
+    }
     const attempt = parseTaskVerificationAttempt({
       schemaVersion: 2,
       id: `verification-${randomUUID2()}`,
@@ -2069,10 +2090,12 @@ async function executeTaskVerification(input) {
     const physical = await publish(input, `attempts/${stem}.finish.json`, terminal);
     await publish(input, `origins/${attempt.id}.finish.json`, { schema: "banzai-verification-origin-finish/v2", schemaVersion: 2, workId: input.workId, attemptId: attempt.id, start, physical, after });
     attempts = await readTaskVerificationAttempts(input);
+    if (terminal.status === "completed" && current.observedDigest !== null && after.observedDigest !== null && after.observedDigest !== current.observedDigest)
+      fail2(`Check ${JSON.stringify(item.descriptor.id)} changed observed project files: ${observedChanges(current, after) ?? "paths unavailable"}. Keep generated output Git-ignored (.gitignore) or make the check leave project files unchanged, then retry verification.`);
     if (terminal.status !== "completed") break;
   }
   await revalidate();
-  for (const item of selection.checks) await authorizeTaskVerification({ repoRoot: input.repoRoot, descriptor: item.descriptor, authority, context, policy });
+  for (const item of selection.checks) await authorizeTaskVerification({ repoRoot: input.repoRoot, descriptor: item.descriptor, authority, context, policy, required: item.required });
   const applicability = await taskVerificationApplicability(input, decision, attempts, await capture3());
   const application = await publish(input, `applications/${applicability.sha256}.json`, applicability);
   return { decision, applicability, attempts, references: { decision: decisionRef, applicability: application } };
@@ -24105,7 +24128,7 @@ import process7 from "node:process";
 // package.json
 var package_default = {
   name: "@parabolic-technologies/banzai",
-  version: "2.6.0",
+  version: "2.6.1",
   private: false,
   description: "Spec-driven AI development CLI for Codex and Claude Code, with human approvals and independent review for complex changes.",
   keywords: [
@@ -28221,7 +28244,7 @@ var EMBEDDED_PHASE_RESOURCES = {
     "sha256": "eb5bce1be31c2dde64a55ae9af27fe0c176cedc911a76209aa5110493238f3a9"
   },
   "hooks/spec-gate.cjs": {
-    "sha256": "c03de3e659ab3475c3e9e795fb2daab66a6d3d764e6e30317640b58a53807cd3"
+    "sha256": "1aed9a6657d6c015bc96e644446c7fd7ed497c49bbf6cf577a0b417528be1583"
   }
 };
 
@@ -30694,8 +30717,8 @@ function phaseEnvelope(phase, components) {
 }
 function builderVerificationInstructions() {
   return `The runner owns final task verification. Run focused checks for implementation feedback.
-Return verificationCandidates with concrete relevant checks and absenceReason=null, or checks=[] with a precise absenceReason when no executable check is applicable. Planning returns verificationCandidates=null; its mandatory checks belong in the approved plan. In strict implementation/fix, candidates are supplemental and cannot replace or weaken approved obligations.
-Each check has id, name, requirementRefs, command (an executable, not shell text), args, cwd (repository-relative), timeoutMs, evidence (fresh or equivalent_evidence), sources (path/sha256 pairs), and materialization (null or taskRef/paths). Propose only checks within the authorized task and actual execution permissions. Script discovery is evidence, not authority. Reject npm placeholders and unrelated missing scripts. Missing mandatory tooling must be created within approved scope or reported as a gap. Never report absence as a passing suite.
+Return verificationCandidates with concrete relevant checks and absenceReason=null, or checks=[] with a precise absenceReason when no executable check is applicable. Planning returns verificationCandidates=null; its mandatory checks belong in the approved plan. In strict implementation/fix, candidates are supplemental and cannot replace or weaken approved obligations; return only additional checks under new ids, because approved obligations already run as approved.
+Each check has id, name, requirementRefs, command (an executable, not shell text), args, cwd (repository-relative), timeoutMs, evidence (fresh or equivalent_evidence), sources (path/sha256 pairs), and materialization (null or taskRef/paths). Propose only checks within the authorized task and actual execution permissions. Checks must leave project files unchanged; keep any output they generate Git-ignored within the approved scope, because a check that writes observed files cannot pass. Script discovery is evidence, not authority. Reject npm placeholders and unrelated missing scripts. Missing mandatory tooling must be created within approved scope or reported as a gap. Never report absence as a passing suite.
 The execution context is the local runner's inherited permissions, not a model CLI sandbox. Escalate genuinely missing permission through the existing workflow.
 `;
 }
@@ -30772,7 +30795,7 @@ In plan.md's Implementation Tasks section every task heading is exactly "- [ ] *
 Return phase-result schemaVersion=4 with taskCompletion=null; planning never
 authors implementation completion evidence. Use decisionConsultation only with
 gate=decision_consultation and set it to null for ADR or plan approval.
-Set verificationCandidates=null. Before requesting plan approval, include exactly one fenced banzai-verification-obligations/v2 JSON block in plan.md. It contains schema="banzai-verification-obligations/v2", schemaVersion=2, complete=true, checks, absenceReason, and planRemainderSha256. Compute the SHA-256 of the exact plan bytes after removing that complete fenced block (leave surrounding newlines). Checks are ordered self-contained descriptors with id, name, requirementRefs, command, args, cwd, timeoutMs, evidence, sources, materialization. Empty checks require a substantive absenceReason; otherwise absenceReason=null. For tooling created by the task, use materialization={taskRef,paths}; do not pin old bytes of files the approved implementation must change. Every requirement needing verification must have a meaningful obligation; do not add unrelated conventional checks. Scope any test/tooling creation explicitly in the plan.`
+Set verificationCandidates=null. Before requesting plan approval, include exactly one fenced banzai-verification-obligations/v2 JSON block in plan.md. It contains schema="banzai-verification-obligations/v2", schemaVersion=2, complete=true, checks, absenceReason, and planRemainderSha256. Compute the SHA-256 of the exact plan bytes after removing that complete fenced block (leave surrounding newlines). Checks are ordered self-contained descriptors with id, name, requirementRefs, command, args, cwd, timeoutMs, evidence, sources, materialization. Empty checks require a substantive absenceReason; otherwise absenceReason=null. For tooling created by the task, use materialization={taskRef,paths}; do not pin old bytes of files the approved implementation must change. Checks must leave project files unchanged: when a check generates output such as build, compiled or coverage files, the task that creates its tooling must keep that output Git-ignored. Every requirement needing verification must have a meaningful obligation; do not add unrelated conventional checks. Scope any test/tooling creation explicitly in the plan.`
     },
     {
       category: "user_request_scope",
@@ -38021,7 +38044,9 @@ var WorkflowRunner = class {
       const legacyWork = /^documentation\/(?:features|development-plans|changes)\//.test(
         candidate
       );
-      const prohibited = phase === "selection" || phase === "review" || privatePath && !allowed.has(candidate) || legacyWork && !allowed.has(candidate) || phase === "plan" && !allowed.has(candidate) && !isDocumentationPath(candidate);
+      const prohibited = phase === "selection" || phase === "review" || privatePath && !allowed.has(candidate) || legacyWork && !allowed.has(candidate) || // Accepting an ADR during planning adds its row to the manifest's
+      // active ADR index, as the delivered architecture guidance requires.
+      phase === "plan" && !allowed.has(candidate) && !isDocumentationPath(candidate) && candidate !== "PROJECT_MANIFEST.md";
       if (prohibited)
         throw new BanzaiError(
           "ARTIFACT_PHASE_SCOPE_INVALID",
@@ -40999,7 +41024,8 @@ var WorkflowRunner = class {
             descriptor: item.descriptor,
             authority,
             context: expectedContext,
-            policy
+            policy,
+            required: item.required
           });
         const current = await captureTaskVerificationInputs(
           storage2,

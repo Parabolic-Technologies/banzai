@@ -4,6 +4,7 @@ import { spawn, spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   access,
+  appendFile,
   chmod,
   cp,
   lstat,
@@ -610,6 +611,67 @@ for (const [relativePath, fragment] of [
     });
   });
 }
+
+test("release validation requires a version bump after hook runtime changes", async () => {
+  await withFixture(async (root) => {
+    const git = (...args: string[]) => {
+      const result = spawnSync(
+        "git",
+        [
+          "-c",
+          "user.name=Banzai Test",
+          "-c",
+          "user.email=test@example.invalid",
+          "-c",
+          "commit.gpgsign=false",
+          "-c",
+          "core.hooksPath=/dev/null",
+          ...args
+        ],
+        { cwd: root, encoding: "utf8" }
+      );
+      assert.equal(result.status, 0, result.stderr);
+    };
+    const commit = (message: string) => {
+      git("add", "-A");
+      git("commit", "-q", "-m", message);
+    };
+    const expectPass = () => {
+      const result = validate(root);
+      assert.equal(result.status, 0, result.stderr);
+    };
+    const expectMissingBump = () => {
+      const result = validate(root);
+      assert.equal(result.status, 1);
+      assert.match(
+        result.stderr,
+        /^HOOK_CHANGED_WITHOUT_VERSION_BUMP plugins\/banzai\/hooks\/hooks\.json, plugins\/banzai\/hooks\/spec-gate\.cjs, plugins\/banzai\/lib: changed since release-train version 1\.19\.0 was set in [0-9a-f]{12};/
+      );
+    };
+    const [rootVersion] = VERSION_SURFACES;
+    // Not bundled into dist or embedded as a phase resource, so editing it
+    // leaves every other release check green.
+    const helper = path.join(root, "plugins/banzai/lib/verification-helper.mjs");
+    git("init", "-q");
+    await setSurfaceVersion(root, rootVersion, "1.18.9");
+    commit("release 1.18.9");
+    await setSurfaceVersion(root, rootVersion, "1.19.0");
+    await appendFile(helper, "// pending with the bump\n");
+    expectPass();
+    commit("release 1.19.0");
+    expectPass();
+    await appendFile(path.join(root, "plugins/banzai/hooks/README.md"), "\n");
+    expectPass();
+    const hook = path.join(root, "plugins/banzai/hooks/spec-gate.cjs");
+    const hookBytes = await readFile(hook);
+    await appendFile(hook, "// uncommitted drift\n");
+    expectMissingBump();
+    await writeFile(hook, hookBytes);
+    await appendFile(helper, "// committed drift\n");
+    commit("lib change without a bump");
+    expectMissingBump();
+  });
+});
 
 test("release validation rejects a duplicated security assurance policy heading", async () => {
   await withFixture(async (root) => {

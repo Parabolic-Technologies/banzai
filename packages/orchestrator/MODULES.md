@@ -279,7 +279,10 @@ is a navigational reference and is updated with the module it describes.
   `changeReport`, without requiring a report when its existing trigger does not
   apply. `hooks/spec-gate.cjs` mirrors these roles in `privateWrites`.
   Feature and quick-fix retain `work` and `changeReport` respectively;
-  planning, selection and review grants remain separate.
+  planning, selection and review grants remain separate. Planning also changes
+  public `documentation/**` and the root `PROJECT_MANIFEST.md`, where accepting
+  an ADR adds its `Planned` active-index row; source paths stay outside the
+  planning scope.
   Cancellation captures pre-transition context before clearing the pending
   human decision; durable decision history and the terminal anchor are retained.
   Recovery source discovery distinguishes interrupted mutable work from one
@@ -649,7 +652,12 @@ is a navigational reference and is updated with the module it describes.
   privacy canaries, `orchestrate`, Test Assurance, Security Assurance, and
   Engineering Quality policy references/syntax/identity, the versionless Claude
   marketplace, root version-script wiring, committed bundle mode, and required
-  paths without mutating them. Instruction-layout validation pins the exact
+  paths without mutating them. Before resource and distribution parity it
+  rejects hook-runtime edits (`hooks/spec-gate.cjs`, `hooks/hooks.json`,
+  `plugins/banzai/lib/`) made after the commit that set the current version
+  without a pending working-tree bump, because installed plugin caches refresh
+  only on a version change; it skips repositories without full Git history.
+  Instruction-layout validation pins the exact
   shim, process sections, six policy files, required/conditional consumer
   matrix, scoped reference rules, migration approval and legacy-release literal.
   The
@@ -770,7 +778,17 @@ revalidates policy, authority and live-process protection before launch.
 project metadata inertly and distinguishes absent/unavailable inputs and known
 placeholders. Descriptors identify requirement references, executable/argv, cwd,
 timeout, source hashes and permitted future materialization. Strict obligations
-v2 bind the plan remainder; phase-result v4 supplements cannot replace them.
+v2 bind the plan remainder; phase-result v4 supplements cannot replace them. A
+supplement reusing an obligation ID that differs only in `sources` is a
+restatement and leaves the approved descriptor in force; any other difference
+fails selection. Plan-time `sources` of a required obligation are not a launch
+precondition, so implementation may keep editing scripts; the captured task
+inputs record what ran. Supplement sources must still match at launch.
+Observed inputs follow Git ignore rules, so a check can pass only when its
+generated output is ignored. A completed check that changes observed files stops
+the round and names up to ten changed paths with the ignore remedy; input drift
+between selection and launch names its paths the same way. The entry lists stay
+in process memory and the persisted observation format is unchanged.
 Lite checks derive authority from the user request and persisted workflow
 selection, with inherited-local permissions. Optional schema-4 project policy
 constrains checks; metadata never grants execution permission.

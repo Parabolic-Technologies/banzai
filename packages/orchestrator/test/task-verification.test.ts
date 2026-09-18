@@ -212,6 +212,36 @@ test("supplements cannot weaken mandatory checks or conflict with project requir
   );
 });
 
+test("restating a materialized obligation with captured sources keeps the approved descriptor", () => {
+  const planned = {
+    ...check,
+    materialization: { taskRef: "T001", paths: ["package.json"] }
+  };
+  const restated = {
+    ...planned,
+    sources: [{ path: "package.json", sha256: evidenceDigest("{}") }]
+  };
+  const selected = selectTaskVerification({
+    required: [planned],
+    candidates: { checks: [restated], absenceReason: null }
+  });
+  assert.deepEqual(
+    selected.checks.map((item) => [item.descriptor, item.required]),
+    [[planned, true]]
+  );
+  assert.throws(
+    () =>
+      selectTaskVerification({
+        required: [planned],
+        candidates: {
+          checks: [{ ...restated, evidence: "equivalent_evidence" }],
+          absenceReason: null
+        }
+      }),
+    /A proposal cannot change an existing verification obligation/
+  );
+});
+
 test("execution validation checks actual context, source drift, policy and safe cwd ancestry", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "banzai-task-verification-"));
   try {
@@ -283,6 +313,19 @@ test("execution validation checks actual context, source drift, policy and safe 
         context
       }),
       /source changed/
+    );
+    // Approved implementation may keep editing scripts after planning pinned them.
+    assert.equal(
+      (
+        await authorizeTaskVerification({
+          repoRoot: root,
+          descriptor: sourced,
+          authority,
+          context,
+          required: true
+        })
+      ).descriptor.id,
+      sourced.id
     );
     await symlink(root, path.join(root, "alias"));
     await assert.rejects(
@@ -445,6 +488,75 @@ test("real executor publishes private descriptor references and refuses denied l
     );
     assert.equal(applied.complete, false);
     assert.equal(applied.dispositions[0]?.kind, "unavailable");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a check writing non-ignored output names the paths; ignored output passes", async () => {
+  const root = await realpath(
+    await mkdtemp(path.join(tmpdir(), "banzai-task-output-"))
+  );
+  const workId = randomUUID();
+  const storage = {
+    repoRoot: root,
+    directory: `.banzai/work/${workId}/verification`,
+    workId
+  };
+  const descriptor = {
+    ...check,
+    id: "build",
+    command: "node",
+    args: [
+      "-e",
+      "require('fs').mkdirSync('build',{recursive:true});require('fs').writeFileSync('build/out.js','built')"
+    ],
+    timeoutMs: 10000
+  };
+  const invoke = async (command: TaskVerificationDescriptor, cwd: string) => {
+    const result = await runProcess({
+      command: command.command,
+      args: command.args,
+      cwd,
+      timeoutMs: command.timeoutMs,
+      env: subscriptionOnlyEnvironment()
+    });
+    return {
+      ...result,
+      status:
+        result.exitCode === 0 ? ("completed" as const) : ("failed" as const),
+      failureCategory: result.exitCode === 0 ? null : ("command_exit" as const)
+    };
+  };
+  const round = () => ({
+    ...storage,
+    selection: {
+      checks: [{ descriptor, required: true }],
+      absenceReason: null
+    },
+    authority: { ...authority, workId },
+    context,
+    policy: null,
+    roundId: randomUUID(),
+    revalidate: async () => {},
+    invoke
+  });
+  try {
+    await runProcess({
+      command: "git",
+      args: ["init", "-q"],
+      cwd: root,
+      timeoutMs: 30000,
+      env: subscriptionOnlyEnvironment()
+    });
+    await writeFile(path.join(root, "index.js"), "source");
+    await assert.rejects(
+      executeTaskVerification(round()),
+      /Check "build" changed observed project files: "build\/out\.js" \(added\)\. Keep generated output Git-ignored/
+    );
+    await writeFile(path.join(root, ".gitignore"), "build/\n");
+    const passed = await executeTaskVerification(round());
+    assert.equal(passed.applicability.dispositions[0]?.kind, "passed");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

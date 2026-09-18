@@ -49,6 +49,24 @@ async function publish(input, suffix, value) {
 const redact = (value) => value.replace(/("(?:api[_-]?key|access[_-]?token|auth[_-]?token|password)"\s*:\s*")[^"]+(")/giu, "$1[REDACTED]$2").replace(/\b(?:sk|sk-ant|sess)-[A-Za-z0-9_-]{12,}\b/gu, "[REDACTED]");
 
 /** Complete reuse capture is opt-in; ordinary fresh runs still record observed inputs. */
+// Observed entries stay in process memory so a diagnostic can name changed paths
+// without widening the persisted observation record.
+const observedEntries = new WeakMap();
+
+function observedChanges(before, after) {
+  const earlier = observedEntries.get(before); const later = observedEntries.get(after);
+  if (!earlier || !later) return null;
+  const identity = (entry) => `${entry.sha256}:${entry.mode}`;
+  const previous = new Map(earlier.map((entry) => [entry.path, identity(entry)]));
+  const current = new Map(later.map((entry) => [entry.path, identity(entry)]));
+  const changes = [
+    ...[...current].filter(([file, value]) => previous.get(file) !== value).map(([file]) => [file, previous.has(file) ? "modified" : "added"]),
+    ...[...previous.keys()].filter((file) => !current.has(file)).map((file) => [file, "removed"])
+  ].sort(([a], [b]) => a.localeCompare(b, "en")).map(([file, kind]) => `${JSON.stringify(file.slice(0, 200))} (${kind})`);
+  if (!changes.length) return null;
+  return changes.length > 10 ? `${changes.slice(0, 10).join(", ")} and ${changes.length - 10} more` : changes.join(", ");
+}
+
 export async function captureTaskVerificationInputs(input, descriptors, policy) {
   const entries = []; let bytes = 0; let unavailable = false;
   const root = input.repoRoot;
@@ -88,7 +106,9 @@ export async function captureTaskVerificationInputs(input, descriptors, policy) 
     const commands = descriptors.map((check) => ({ id: check.id, name: check.name, command: path.isAbsolute(check.command) ? check.command : check.command.includes("/") ? path.posix.join(check.cwd, check.command) : check.command, args: check.args, timeoutMs: check.timeoutMs, evidence: check.evidence, ignoreExplanatory: check.evidence === "equivalent_evidence" }));
     reusable = await captureVerificationInputs({ repoRoot: root, workId: input.workId, evidenceDirectories: [input.directory], configuration: { profiles: [{ id: "task-capture", projectType: "custom", commands }], policy: policy.reuse } });
   }
-  return { observedDigest, complete: reusable?.complete === true, reusable };
+  const observation = { observedDigest, complete: reusable?.complete === true, reusable };
+  if (observedDigest !== null) observedEntries.set(observation, entries);
+  return observation;
 }
 
 export function parseTaskVerificationDecision(value) {
@@ -245,9 +265,12 @@ export async function executeTaskVerification(input) {
     if (["passed", "reused"].includes(applicability.dispositions.find((entry) => entry.checkId === item.descriptor.id)?.kind)) continue;
     if (previous?.roundId === roundId && (previous.status === "started" || (previous.status === "interrupted" ? !input.recoverInterrupted && previous.id !== input.retryOf : previous.status === "failed" && previous.id !== input.retryOf))) fail("Task verification retains an unresolved attempt; use its explicit retry or recovery action.");
     await revalidate();
-    const authorized = await authorizeTaskVerification({ repoRoot: input.repoRoot, descriptor: item.descriptor, authority, context, policy });
+    const authorized = await authorizeTaskVerification({ repoRoot: input.repoRoot, descriptor: item.descriptor, authority, context, policy, required: item.required });
     const current = await capture();
-    if (before.observedDigest !== null && current.observedDigest !== before.observedDigest) fail("Task inputs changed between selection and launch.");
+    if (before.observedDigest !== null && current.observedDigest !== before.observedDigest) {
+      const changes = observedChanges(before, current);
+      fail(`Task inputs changed between selection and launch${changes ? `: ${changes}` : ""}.`);
+    }
     const attempt = parseTaskVerificationAttempt({ schemaVersion: 2, id: `verification-${randomUUID()}`, sequence: (attempts.at(-1)?.sequence ?? 0) + 1, workId: input.workId, roundId, sourceAttemptId: authority.sourceAttemptId, checkId: item.descriptor.id,
       descriptor: { ...decisionRef, checkId: item.descriptor.id }, cwd: authorized.cwd, authorityDigest: authorized.authorityDigest, contextDigest: authorized.contextDigest,
       status: "started", startedAt: new Date().toISOString(), completedAt: null, durationMs: null, exitCode: null, signal: null, failureCategory: null, retryOf: previous?.id ?? null, before: current, after: null, stdout: null, stderr: null });
@@ -263,10 +286,14 @@ export async function executeTaskVerification(input) {
     const physical = await publish(input, `attempts/${stem}.finish.json`, terminal);
     await publish(input, `origins/${attempt.id}.finish.json`, { schema: "banzai-verification-origin-finish/v2", schemaVersion: 2, workId: input.workId, attemptId: attempt.id, start, physical, after });
     attempts = await readTaskVerificationAttempts(input);
+    // Evidence requires unchanged observed inputs, so a check that writes project
+    // files can never pass; name the paths and the remedy at the source.
+    if (terminal.status === "completed" && current.observedDigest !== null && after.observedDigest !== null && after.observedDigest !== current.observedDigest)
+      fail(`Check ${JSON.stringify(item.descriptor.id)} changed observed project files: ${observedChanges(current, after) ?? "paths unavailable"}. Keep generated output Git-ignored (.gitignore) or make the check leave project files unchanged, then retry verification.`);
     if (terminal.status !== "completed") break;
   }
   await revalidate();
-  for (const item of selection.checks) await authorizeTaskVerification({ repoRoot: input.repoRoot, descriptor: item.descriptor, authority, context, policy });
+  for (const item of selection.checks) await authorizeTaskVerification({ repoRoot: input.repoRoot, descriptor: item.descriptor, authority, context, policy, required: item.required });
   const applicability = await taskVerificationApplicability(input, decision, attempts, await capture());
   const application = await publish(input, `applications/${applicability.sha256}.json`, applicability);
   return { decision, applicability, attempts, references: { decision: decisionRef, applicability: application } };

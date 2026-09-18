@@ -6594,9 +6594,12 @@ export class WorkflowRunner {
         phase === "review" ||
         (privatePath && !allowed.has(candidate)) ||
         (legacyWork && !allowed.has(candidate)) ||
+        // Accepting an ADR during planning adds its row to the manifest's
+        // active ADR index, as the delivered architecture guidance requires.
         (phase === "plan" &&
           !allowed.has(candidate) &&
-          !isDocumentationPath(candidate));
+          !isDocumentationPath(candidate) &&
+          candidate !== "PROJECT_MANIFEST.md");
       if (prohibited)
         throw new BanzaiError(
           "ARTIFACT_PHASE_SCOPE_INVALID",
@@ -10434,7 +10437,8 @@ export class WorkflowRunner {
             descriptor: item.descriptor,
             authority,
             context: expectedContext,
-            policy
+            policy,
+            required: item.required
           });
         const current = await captureTaskVerificationInputs(
           storage,

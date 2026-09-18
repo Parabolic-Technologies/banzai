@@ -1032,6 +1032,91 @@ async function validateHook(root) {
   }
 }
 
+// Codex and Claude Code refresh an installed plugin cache only when the plugin
+// version changes, while a linked runner always executes current source. The
+// hook and the modules it imports enforce the runner's state contract, so
+// changing them under an already-set version leaves installed hooks stale.
+const HOOK_RUNTIME_PATHS = [
+  "plugins/banzai/hooks/hooks.json",
+  "plugins/banzai/hooks/spec-gate.cjs",
+  "plugins/banzai/lib"
+];
+
+async function git(root, args) {
+  const { stdout } = await execFileAsync("git", ["-C", root, ...args], {
+    encoding: "utf8",
+    timeout: 30_000,
+    maxBuffer: 16 * 1024 * 1024
+  });
+  return stdout.trim();
+}
+
+async function committedReleaseVersion(root, revision) {
+  try {
+    return JSON.parse(await git(root, ["show", `${revision}:package.json`]))
+      .version;
+  } catch {
+    return null;
+  }
+}
+
+async function validateHookRuntimeVersion(root, releaseVersion) {
+  // Release fixtures and packed sources carry no history, and a shallow CI
+  // clone cannot show where the version was set.
+  try {
+    if (
+      (await git(root, ["rev-parse", "--show-toplevel"])) !==
+        (await realpath(root)) ||
+      (await git(root, ["rev-parse", "--is-shallow-repository"])) !== "false"
+    ) {
+      return;
+    }
+  } catch {
+    return;
+  }
+  // A working-tree bump covers every uncommitted hook change.
+  if ((await committedReleaseVersion(root, "HEAD")) !== releaseVersion) {
+    return;
+  }
+  let introducedAt = null;
+  const commits = await git(root, [
+    "log",
+    "--first-parent",
+    "--format=%H",
+    "--",
+    "package.json"
+  ]);
+  for (const commit of commits.split("\n").filter(Boolean)) {
+    if ((await committedReleaseVersion(root, commit)) !== releaseVersion) {
+      break;
+    }
+    introducedAt = commit;
+  }
+  if (introducedAt === null) {
+    return;
+  }
+  try {
+    await git(root, [
+      "diff",
+      "--quiet",
+      "--no-ext-diff",
+      "--no-textconv",
+      introducedAt,
+      "--",
+      ...HOOK_RUNTIME_PATHS
+    ]);
+  } catch (error) {
+    if (error?.code !== 1) {
+      throw error;
+    }
+    fail(
+      "HOOK_CHANGED_WITHOUT_VERSION_BUMP",
+      HOOK_RUNTIME_PATHS.join(", "),
+      `changed since release-train version ${releaseVersion} was set in ${introducedAt.slice(0, 12)}; installed plugin caches refresh only on a version change, so run \`npm run version:set -- <next version>\``
+    );
+  }
+}
+
 const ciWorkflow = ".github/workflows/ci.yml";
 
 function jobBlock(source, job) {
@@ -2503,6 +2588,9 @@ async function validateRepository(root) {
     "package.json",
     "project version"
   );
+  // Runs before the resource and distribution parity checks, which would
+  // otherwise report a hook edit without naming the missing version bump.
+  await validateHookRuntimeVersion(root, expectedReleaseVersion);
   const versions = [];
   for (const source of array(
     policy.plugin.versionMirrors,
