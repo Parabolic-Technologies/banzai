@@ -897,7 +897,11 @@ test("strict planning may record an accepted ADR in the manifest index under hoo
       const absolute = path.join(root, target);
       await mkdir(path.dirname(absolute), { recursive: true });
       await writeFile(absolute, "changed by planning\n");
-      const check = phaseBoundary.checkArtifactPhaseScope(state, "plan", before);
+      const check = phaseBoundary.checkArtifactPhaseScope(
+        state,
+        "plan",
+        before
+      );
       if (decision === "allow") await assert.doesNotReject(check, target);
       else
         await assert.rejects(

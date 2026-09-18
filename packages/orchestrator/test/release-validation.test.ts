@@ -651,7 +651,10 @@ test("release validation requires a version bump after hook runtime changes", as
     const [rootVersion] = VERSION_SURFACES;
     // Not bundled into dist or embedded as a phase resource, so editing it
     // leaves every other release check green.
-    const helper = path.join(root, "plugins/banzai/lib/verification-helper.mjs");
+    const helper = path.join(
+      root,
+      "plugins/banzai/lib/verification-helper.mjs"
+    );
     git("init", "-q");
     await setSurfaceVersion(root, rootVersion, "1.18.9");
     commit("release 1.18.9");
