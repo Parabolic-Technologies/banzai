@@ -46,9 +46,15 @@ export {
   selectTaskVerification,
   taskVerificationPath,
   authorizeTaskVerification,
-  discoverTaskVerification
+  discoverTaskVerification,
+  comparableTaskVerificationSources,
+  taskVerificationDigestRole,
+  TaskVerificationDigestError,
+  TASK_VERIFICATION_SOURCE_MAX_BYTES
 } from "../../../plugins/banzai/lib/task-verification.mjs";
 export type {
+  TaskVerificationDigestRole,
+  TaskVerificationDigestDetail,
   TaskVerificationDescriptor,
   TaskVerificationCandidates,
   TaskVerificationObligations,

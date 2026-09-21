@@ -1111,7 +1111,9 @@ async function main(): Promise<void> {
     const confirmation =
       status.recovery.sourceKind === "prerequisite_blocked_fix"
         ? "Confirm the displayed prerequisites are addressed and authorize one new fix attempt for only the remaining accepted findings in this exact workspace?"
-        : "Authorize one new recovery attempt for this exact workspace and accept that repository or external side effects may be partial or duplicated?";
+        : status.recovery.sourceKind === "digest_rejected"
+          ? "Authorize one linked attempt to supply a corrected result for the rejected phase, keeping the rejected attempt and its result as evidence?"
+          : "Authorize one new recovery attempt for this exact workspace and accept that repository or external side effects may be partial or duplicated?";
     if (!(await io.confirm(confirmation, false))) {
       return;
     }

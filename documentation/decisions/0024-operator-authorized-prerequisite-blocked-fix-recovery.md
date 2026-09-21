@@ -380,3 +380,8 @@ Implementation and independent review must confirm:
 - Would amend if accepted: ADR 0023, by adding this completed-blocked source to
   its operator-authorized recovery mechanism while leaving its accepted body
   otherwise immutable.
+- Amended by [ADR-0051](./0051-acceptance-time-digest-validation.md), accepted
+  2026-09-21: a digest-rejected result joins this decision's completed
+  prerequisite-blocked fix source in the same operator-authorized recovery
+  mechanism. This decision's own source, its explicit-authorization requirement
+  and its refusals remain unchanged.

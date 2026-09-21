@@ -221,7 +221,9 @@ is a navigational reference and is updated with the module it describes.
   labels a retryable invalid implementation ledger as plan-task completion
   evidence repair instead of a read-only attempt, and distinguishes an
   interrupted recovery from one completed prerequisite-blocked fix whose
-  remaining accepted scope requires fresh operator authorization,
+  remaining accepted scope requires fresh operator authorization and from a
+  digest-rejected result whose authorized repair outranks replaying its terminal
+  checkpoint,
   derives the kebab-case feature slug via `generateFeatureSlug`, and keeps the
   session open when a phase returns a gate. It uses the shared review-completion
   projection so terminal triage is never displayed as reviewer pass.
@@ -795,6 +797,17 @@ restatement and leaves the approved descriptor in force; any other difference
 fails selection. Plan-time `sources` of a required obligation are not a launch
 precondition, so implementation may keep editing scripts; the captured task
 inputs record what ran. Supplement sources must still match at launch.
+`taskVerificationDigestRole` is the single implementation of that role rule, and
+both the acceptance comparison and `authorizeTaskVerification` classify through
+`comparableTaskVerificationSources`. A model-authored digest is established when
+its artifact is accepted: `workflow.ts` compares each effective supplement
+source and records the outcome through `store.ts` as
+`banzai-result-digest-evidence/v1`, written once per attempt and never restated,
+while `validatePlanningResult` classifies the existing plan-remainder detection
+the same way. A rejection carries the field, path, declared and observed digests
+only; the size rejection stays a separate typed cause. The launch comparison
+keeps its authority unchanged and states a causal history only from a recorded
+baseline, reporting unknown when none exists.
 Observed inputs follow Git ignore rules, so a check can pass only when its
 generated output is ignored. A completed check that changes observed files stops
 the round and names up to ten changed paths with the ignore remedy; input drift

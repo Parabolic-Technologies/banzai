@@ -1771,6 +1771,39 @@ linked fix attempt containing only the remaining accepted findings. The source
 record remains completed and byte-stable; a new descendant cannot seed another
 prerequisite recovery chain.
 
+A third source covers a model-authored digest that never matched the bytes it
+named. Every such digest is established when the artifact carrying it is
+accepted: a phase result's proposed descriptor sources are compared before the
+result is accepted, and a planning artifact's `planRemainderSha256` is compared
+when the plan is read. Which digests are compared follows one rule shared by
+acceptance and launch — a plan remainder digest binds its inventory to the plan
+bytes outside it, a source identity on a lite or supplemental descriptor is an
+execution precondition, and a source identity recorded on a required obligation
+stays descriptive metadata and is never compared. A rejection names the contract
+field, the repository-relative path, the declared digest and the observed digest
+and nothing else; a source above the permitted size is reported separately with
+that size and the permitted limit. The comparison is recorded per attempt as
+`banzai-result-digest-evidence/v1` under `.banzai/runs/<run-id>/digests/`,
+written once and never restated, so the later launch check can say whether the
+bytes changed after acceptance or never matched. With no such record the causal
+history is reported as unknown and is never reconstructed from the bytes on disk
+now.
+
+A rejected result fails its attempt and keeps its result as evidence. When the
+run is non-terminal with no live attempt, the attempt reached a terminal
+checkpoint so its repository changes are known rather than partial, its only
+recorded failure is that digest rejection, and no successor exists for the
+phase, status offers `banzai recover` in preference to replaying the rejected
+evidence. The closed `banzai-agent-recovery/v1` document authorizes one linked
+attempt for the same phase and no additional scope; a planning source is
+represented with `phase: "plan"`. `banzai-recovery-authorization/v1` keeps its
+schema identity: the accepted attempt kinds grew to include `plan`, and every
+authorization an earlier version wrote holds `implementation` or `fix` and
+parses unchanged. A replacement strict plan passes the ordinary approval gate
+and never inherits the prior approval. An attempt outside these conditions keeps
+its current disposition; a failed mutable attempt whose side effects are unknown
+or partial is still refused ordinary retry.
+
 The source result, exact checkout, approval, configuration, and remaining scope
 are rebound before and after implementer preflight. Drift invalidates the
 authorization before a model call. Banzai never executes the recorded

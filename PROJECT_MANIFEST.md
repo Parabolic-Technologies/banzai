@@ -380,13 +380,18 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   `assertClaudePermissions`, approval-digest and base-commit validation, attempt
   reconciliation, builder-session selection, full/delta reviewer policy,
   snapshot-v6-bound rendered-review-v7 publication without formatting-only model calls,
-  and recovery source discovery.
+  and recovery source discovery. It establishes every model-authored digest
+  against the bytes it names when the carrying artifact is accepted, records
+  that comparison as durable acceptance evidence, and recognizes a
+  digest-rejected result as one recovery source whose authorized repair
+  outranks replaying the rejected terminal checkpoint.
 - `state-machine.ts` — `transitionState`, `blockState`, `requireState`; the
   only place `RunStatus` changes, so illegal transitions fail closed.
 - `store.ts` — `RunStore`: atomic `state.json`, append-only `events.jsonl`,
   model-attempt records with redacted output, mode-0600 context ledgers,
   attempt-owned review candidates and immutable private review snapshots,
-  verification-ledger leaves, and the
+  write-once `banzai-result-digest-evidence/v1` acceptance baselines under
+  `digests/`, verification-ledger leaves, and the
   single-active-run lock (`releaseHeldRunnerLocksSync` for signal handlers).
   A separate owned short guard serializes state/events and rejects stale terminal
   changes; it is never released by the signal handler or reclaimed automatically.
@@ -419,7 +424,9 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
 - `verification-evidence.ts` — typed facade over the canonical plugin decision and
   evidence-storage owners for task descriptors, inert discovery, execution authority,
   immutable physical provenance and current applicability; runner and standalone
-  helper use the same rules.
+  helper use the same rules. It also exposes the single digest-role rule
+  (`taskVerificationDigestRole`, `comparableTaskVerificationSources`) that
+  acceptance and launch both classify through.
 - `verification.ts` — root project-marker detection, hygiene classification,
   explicit legacy-profile diagnostics and command descriptors. Task discovery and
   policy live in the shared task owner.
@@ -466,7 +473,10 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   cannot authorize or replay workflow work.
 - `validation.ts` — runtime decoders (`parseWorkflowSelectionResult`,
   `parsePhaseResult`, `parseReviewResult`, `parseConfig`) enforcing the
-  invariants JSON Schema cannot express.
+  invariants JSON Schema cannot express, including
+  `effectiveResultSourceIdentities` and `parseResultDigestEvidence`.
+  `banzai-recovery-authorization/v1` keeps its schema identity while accepting a
+  read-only `plan` attempt beside the mutable implementation and fix attempts.
 - `contracts.ts` — re-exports the plugin contract JSON; `assertContractParity`
   fails startup on `CONTRACT_VERSION_MISMATCH` or `SCHEMA_VERSION_MISMATCH`.
 - `configuration-prerequisite.ts` — bounded closed configuration decisions,
@@ -617,7 +627,7 @@ Plugin (`plugins/banzai/`):
   `PROJECT_MANIFEST.md` in the session directory or a parent — and the hook
   stays silent in repositories without that evidence.
 - `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` — plugin manifests,
-  currently version `2.6.2`. The Codex manifest additionally declares the hook
+  currently version `2.6.3`. The Codex manifest additionally declares the hook
   and the store interface metadata.
 - `PROJECT_MANIFEST.md`, `AGENTS.md`, `CLAUDE.md`, and the placeholder
   `documentation/` tree (`README.md`, `decisions/README.md`, `.gitkeep` files) —
@@ -1428,7 +1438,7 @@ status` reports only whether credentials are visible and stored, so a
   source, and the only root Claude settings file is the ignored
   `.claude/settings.local.json`. `plugins/banzai/.claude/settings.json` is
   packaged plugin content, not this repository's configuration.
-- Current Banzai release-train version is `2.6.2`, owned solely by root
+- Current Banzai release-train version is `2.6.3`, owned solely by root
   `package.json.version` and mirrored by four plugin/marketplace fields, the
   orchestrator package, and three `package-lock.json` fields (top-level, root
   package, and workspace package). All nine fields across seven files agree.
@@ -1492,5 +1502,6 @@ restate them here. Paths are relative to `documentation/decisions/`.
 | ADR-0046 | Supervised live end-to-end first task                              | `0046-supervised-live-e2e.md`                                   | Planned     |
 | ADR-0047 | Runner-owned completion projection                                 | `0047-runner-owned-completion-projection.md`                    | Implemented |
 | ADR-0048 | Completion markup and viewer enrichment boundary                   | `0048-completion-markup-and-viewer-enrichment-boundary.md`      | Implemented |
-| ADR-0049 | Task-scoped verification authority                                 | `0049-task-scoped-verification.md`                              | Implemented     |
+| ADR-0049 | Task-scoped verification authority                                 | `0049-task-scoped-verification.md`                              | Implemented |
 | ADR-0050 | Triggered code-design assessment                                   | `0050-triggered-code-design-assessment.md`                      | Planned     |
+| ADR-0051 | Acceptance-time validation of model-authored digests               | `0051-acceptance-time-digest-validation.md`                     | Implemented |

@@ -1519,6 +1519,30 @@ import { lstat as lstat3, readFile, realpath as realpath2 } from "node:fs/promis
 var fail = (message) => {
   throw new VerificationEvidenceError(message);
 };
+var TASK_VERIFICATION_SOURCE_MAX_BYTES = 1024 * 1024;
+var TaskVerificationDigestError = class extends VerificationEvidenceError {
+  constructor(code2, message, detail) {
+    super(message);
+    this.name = "TaskVerificationDigestError";
+    this.code = code2;
+    this.detail = detail;
+  }
+};
+var digestFail = (code2, message, detail) => {
+  throw new TaskVerificationDigestError(code2, message, detail);
+};
+function taskVerificationDigestRole(kind, required = false) {
+  if (kind === "plan-remainder") return "binding";
+  if (kind !== "descriptor-source") fail("Unknown task verification digest role.");
+  return required === true ? "descriptive" : "precondition";
+}
+function comparableTaskVerificationSources(descriptor, required = false) {
+  if (taskVerificationDigestRole("descriptor-source", required) !== "precondition") return [];
+  return list2(descriptor?.sources ?? [], 32).map((source) => {
+    object2(source, ["path", "sha256"]);
+    return { path: relative2(source.path), sha256: hash(source.sha256) };
+  });
+}
 var HASH2 = /^[a-f0-9]{64}$/u;
 var ID2 = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 function object2(value, keys3) {
@@ -1609,7 +1633,13 @@ function parseTaskVerificationObligations(plan) {
   const v = object2(parsed, ["schema", "schemaVersion", "complete", "planRemainderSha256", "checks", "absenceReason"]);
   if (v.schema !== "banzai-verification-obligations/v2" || v.schemaVersion !== 2 || v.complete !== true) fail("Unsupported task verification inventory.");
   const remainder = plan.slice(0, blocks[0].index) + plan.slice(blocks[0].index + blocks[0][0].length);
-  if (hash(v.planRemainderSha256) !== evidenceDigest(remainder)) fail("Verification inventory no longer binds the surrounding plan.");
+  const observedRemainder = evidenceDigest(remainder);
+  if (hash(v.planRemainderSha256) !== observedRemainder)
+    digestFail(
+      "TASK_VERIFICATION_DIGEST_MISMATCH",
+      `planRemainderSha256 does not match the plan bytes outside its inventory: declared ${v.planRemainderSha256}, observed ${observedRemainder}.`,
+      { role: taskVerificationDigestRole("plan-remainder"), field: "planRemainderSha256", checkId: null, path: null, declared: v.planRemainderSha256, observed: observedRemainder, size: null, limit: null }
+    );
   const selection = parseTaskVerificationCandidates({ checks: v.checks, absenceReason: v.absenceReason });
   if (/\b(?:fresh|rerun|re-run)\b|\brelease:check\b/iu.test(remainder) && selection.checks.some((check2) => check2.evidence !== "fresh")) fail("Equivalent evidence cannot override fresh plan commitments.");
   return { schema: v.schema, schemaVersion: 2, complete: true, planRemainderSha256: v.planRemainderSha256, ...selection };
@@ -1687,9 +1717,23 @@ async function authorizeTaskVerification({ repoRoot, descriptor, authority, cont
   }
   const cwd = await taskVerificationPath(repoRoot, check2.cwd, true);
   if (check2.command.includes("/") && !path3.isAbsolute(check2.command)) await taskVerificationPath(repoRoot, path3.posix.normalize(path3.posix.join(check2.cwd, check2.command)));
-  for (const source of required ? [] : check2.sources) {
+  for (const source of comparableTaskVerificationSources(check2, required)) {
     const file = await taskVerificationPath(repoRoot, source.path);
-    if ((await lstat3(file)).size > 1024 * 1024 || evidenceDigest(await readFile(file)) !== source.sha256) fail("Verification selection source changed before launch.");
+    const field = `checks[${check2.id}].sources[${source.path}].sha256`;
+    const size = (await lstat3(file)).size;
+    if (size > TASK_VERIFICATION_SOURCE_MAX_BYTES)
+      digestFail(
+        "TASK_VERIFICATION_SOURCE_TOO_LARGE",
+        `Verification source ${source.path} is ${size} bytes, above the ${TASK_VERIFICATION_SOURCE_MAX_BYTES}-byte limit.`,
+        { role: "precondition", field, checkId: check2.id, path: source.path, declared: source.sha256, observed: null, size, limit: TASK_VERIFICATION_SOURCE_MAX_BYTES }
+      );
+    const observed3 = evidenceDigest(await readFile(file));
+    if (observed3 !== source.sha256)
+      digestFail(
+        "TASK_VERIFICATION_DIGEST_MISMATCH",
+        `Verification source ${source.path} does not match the identity recorded for check ${check2.id}: declared ${source.sha256}, observed ${observed3}.`,
+        { role: "precondition", field, checkId: check2.id, path: source.path, declared: source.sha256, observed: observed3, size, limit: null }
+      );
   }
   for (const file of check2.materialization?.paths ?? []) await taskVerificationPath(repoRoot, file);
   return { descriptor: check2, cwd, authorityDigest: evidenceDigest(authority), contextDigest: evidenceDigest(context), policyDigest: activePolicy ? evidenceDigest(activePolicy) : null };
@@ -1704,7 +1748,7 @@ async function discoverTaskVerification(repoRoot, directories3 = ["."], addition
     let bytes;
     try {
       const target = await taskVerificationPath(repoRoot, file);
-      if ((await lstat3(target)).size > 1024 * 1024) fail("Discovery source exceeds one MiB.");
+      if ((await lstat3(target)).size > TASK_VERIFICATION_SOURCE_MAX_BYTES) fail("Discovery source exceeds one MiB.");
       bytes = await readFile(target);
     } catch (error) {
       sources.push({ path: file, status: error.code === "ENOENT" ? "absent" : "unavailable", sha256: null, reason: error.code === "ENOENT" ? null : "Source could not be inspected safely." });
@@ -2764,6 +2808,7 @@ __export2(artifact_storage_exports, {
 var fail3 = (message) => {
   throw new VerificationEvidenceError2(message);
 };
+var TASK_VERIFICATION_SOURCE_MAX_BYTES2 = 1024 * 1024;
 var HASH22 = /^[a-f0-9]{64}$/u;
 var ID22 = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 function object22(value, keys3) {
@@ -7968,10 +8013,10 @@ function parseRecoveryAuthorization(value) {
     );
   }
   const attempt = parseEvidenceAttempt(value.attempt, code2, "attempt");
-  if (attempt.kind !== "implementation" && attempt.kind !== "fix" || !attempt.mutable) {
+  if (attempt.kind !== "implementation" && attempt.kind !== "fix" && attempt.kind !== "plan" || attempt.mutable !== (attempt.kind !== "plan")) {
     return recoveryEvidenceError(
       code2,
-      "Recovery authorization requires a mutable implementation or fix attempt."
+      "Recovery authorization requires a read-only plan attempt or a mutable implementation or fix attempt."
     );
   }
   const phase = value.phase;
@@ -12359,6 +12404,8 @@ var COMPLETION_PUBLICATION_REFUSAL_CODES2 = [
 ];
 var RECOVERY_AUTHORIZATION_SCHEMA2 = "banzai-recovery-authorization/v1";
 var RECOVERY_AUTHORIZATION_SCHEMA_VERSION2 = 1;
+var RESULT_DIGEST_EVIDENCE_SCHEMA = "banzai-result-digest-evidence/v1";
+var RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION = 1;
 var AGENT_CONTROL_CONTRACT_VERSION = "6.0.0";
 var AGENT_CAPABILITIES_SCHEMA_VERSION = 6;
 var AGENT_STATUS_SCHEMA_VERSION = 5;
@@ -13273,6 +13320,135 @@ function parsePhaseResultFields2(record7) {
     )
   };
 }
+var ResultDigestRejectedError = class extends BanzaiError {
+  constructor(message, comparisons) {
+    super("RESULT_DIGEST_REJECTED", message);
+    this.comparisons = comparisons;
+    this.name = "ResultDigestRejectedError";
+  }
+};
+function effectiveResultSourceIdentities(candidates, requiredCheckIds) {
+  const required = new Set(requiredCheckIds);
+  return (candidates?.checks ?? []).flatMap(
+    (check2) => comparableTaskVerificationSources(check2, required.has(check2.id)).map(
+      (source) => ({
+        field: `verificationCandidates.checks[${check2.id}].sources[${source.path}].sha256`,
+        checkId: check2.id,
+        path: source.path,
+        declared: source.sha256
+      })
+    )
+  );
+}
+function resultDigestDiagnostic(comparison) {
+  const where = comparison.path === null ? "" : ` at ${comparison.path}`;
+  if (comparison.observed === null && comparison.size !== null) {
+    const bound = comparison.limit === null ? "permitted" : `${comparison.limit}-byte`;
+    return `${comparison.field}${where} names a source of ${comparison.size} bytes, above the ${bound} limit.`;
+  }
+  return `${comparison.field}${where} declared ${comparison.declared} but the bytes hash to ${comparison.observed ?? "an unreadable source"}.`;
+}
+var RESULT_DIGEST_FIELD_MAX_LENGTH = 700;
+function parseResultDigestEvidence(value, code2 = "RESULT_DIGEST_EVIDENCE_INVALID") {
+  if (!isRecord2(value)) {
+    return recoveryEvidenceError2(
+      code2,
+      "Result digest evidence must be an object."
+    );
+  }
+  exactKeys2(
+    value,
+    ["schema", "schemaVersion", "runId", "attempt", "outcome", "comparisons"],
+    code2,
+    "Result digest evidence"
+  );
+  if (value.schema !== RESULT_DIGEST_EVIDENCE_SCHEMA || value.schemaVersion !== RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION) {
+    return recoveryEvidenceError2(
+      code2,
+      `Result digest evidence must use ${RESULT_DIGEST_EVIDENCE_SCHEMA}.`
+    );
+  }
+  if (value.outcome !== "accepted" && value.outcome !== "rejected") {
+    return recoveryEvidenceError2(code2, "Result digest outcome is unsupported.");
+  }
+  if (!isRecord2(value.attempt)) {
+    return recoveryEvidenceError2(code2, "attempt must be an object.");
+  }
+  exactKeys2(value.attempt, ["id", "kind"], code2, "attempt");
+  const kind = value.attempt.kind;
+  if (typeof kind !== "string" || !["selection", "plan", "implementation", "fix", "review"].includes(kind)) {
+    return recoveryEvidenceError2(code2, "attempt.kind is unsupported.");
+  }
+  if (!Array.isArray(value.comparisons) || value.comparisons.length > 512) {
+    return recoveryEvidenceError2(
+      code2,
+      "Result digest comparisons exceed their bound."
+    );
+  }
+  const comparisons = value.comparisons.map(
+    (item, index) => {
+      const label = `comparisons[${index}]`;
+      if (!isRecord2(item)) {
+        return recoveryEvidenceError2(code2, `${label} must be an object.`);
+      }
+      exactKeys2(
+        item,
+        [
+          "role",
+          "field",
+          "checkId",
+          "path",
+          "declared",
+          "observed",
+          "size",
+          "limit",
+          "matched"
+        ],
+        code2,
+        label
+      );
+      if (item.role !== "binding" && item.role !== "precondition") {
+        return recoveryEvidenceError2(code2, `${label}.role is unsupported.`);
+      }
+      if (typeof item.matched !== "boolean") {
+        return recoveryEvidenceError2(code2, `${label}.matched must be boolean.`);
+      }
+      return {
+        role: item.role,
+        field: evidenceString2(
+          item.field,
+          code2,
+          `${label}.field`,
+          RESULT_DIGEST_FIELD_MAX_LENGTH
+        ),
+        checkId: item.checkId === null ? null : evidenceIdentifier2(item.checkId, code2, `${label}.checkId`, 80),
+        path: item.path === null ? null : evidenceString2(item.path, code2, `${label}.path`, 500),
+        declared: evidenceDigest3(item.declared, code2, `${label}.declared`),
+        observed: item.observed === null ? null : evidenceDigest3(item.observed, code2, `${label}.observed`),
+        size: evidenceByteCount(item.size, code2, `${label}.size`),
+        limit: evidenceByteCount(item.limit, code2, `${label}.limit`),
+        matched: item.matched
+      };
+    }
+  );
+  if (comparisons.some((comparison) => !comparison.matched) !== (value.outcome === "rejected")) {
+    return recoveryEvidenceError2(
+      code2,
+      "Result digest outcome conflicts with its recorded comparisons."
+    );
+  }
+  return {
+    schema: RESULT_DIGEST_EVIDENCE_SCHEMA,
+    schemaVersion: RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION,
+    runId: evidenceIdentifier2(value.runId, code2, "runId", 300),
+    attempt: {
+      id: evidenceIdentifier2(value.attempt.id, code2, "attempt.id", 200),
+      kind
+    },
+    outcome: value.outcome,
+    comparisons
+  };
+}
 function parsePhaseResultEnvelope2(value) {
   const record7 = requireRecord2(value, "phase result");
   const fields = parsePhaseResultFields2(record7);
@@ -13773,6 +13949,12 @@ function evidenceString2(value, code2, label, maximum = 500) {
 }
 function evidenceNullableString2(value, code2, label, maximum = 500) {
   return value === null ? null : evidenceString2(value, code2, label, maximum);
+}
+function evidenceByteCount(value, code2, label) {
+  if (value !== null && (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)) {
+    return recoveryEvidenceError2(code2, `${label} must be a byte count.`);
+  }
+  return value;
 }
 function evidenceIdentifier2(value, code2, label, maximum = 200) {
   const identifier4 = evidenceString2(value, code2, label, maximum);
@@ -15194,10 +15376,10 @@ function parseRecoveryAuthorization2(value) {
     );
   }
   const attempt = parseEvidenceAttempt2(value.attempt, code2, "attempt");
-  if (attempt.kind !== "implementation" && attempt.kind !== "fix" || !attempt.mutable) {
+  if (attempt.kind !== "implementation" && attempt.kind !== "fix" && attempt.kind !== "plan" || attempt.mutable !== (attempt.kind !== "plan")) {
     return recoveryEvidenceError2(
       code2,
-      "Recovery authorization requires a mutable implementation or fix attempt."
+      "Recovery authorization requires a read-only plan attempt or a mutable implementation or fix attempt."
     );
   }
   const phase = value.phase;
@@ -24128,7 +24310,7 @@ import process7 from "node:process";
 // package.json
 var package_default = {
   name: "@parabolic-technologies/banzai",
-  version: "2.6.2",
+  version: "2.6.3",
   private: false,
   description: "Spec-driven AI development CLI for Codex and Claude Code, with human approvals and independent review for complex changes.",
   keywords: [
@@ -33247,6 +33429,66 @@ var RunStore = class {
       throw error;
     }
   }
+  resultDigestEvidencePath(runId2, attempt) {
+    return containedEvidencePath(
+      this.runDirectory(runId2),
+      "digests",
+      `${safeEvidenceSegment(attempt.id, "attempt.id", 200)}-${attempt.kind}.json`
+    );
+  }
+  /**
+   * Records what a model-authored digest was compared against when its result
+   * was accepted or rejected. The baseline is established exactly once per
+   * attempt: an existing record is returned unchanged rather than rewritten,
+   * so a later comparison against different bytes cannot silently restate
+   * history. The write itself is atomic, so a restart observes either no
+   * record or a whole one.
+   */
+  async establishResultDigestEvidence(runId2, evidence2) {
+    const parsed = parseResultDigestEvidence(evidence2);
+    if (parsed.runId !== runId2) {
+      throw new BanzaiError(
+        "RESULT_DIGEST_EVIDENCE_INVALID",
+        "Result digest evidence run identity does not match its path."
+      );
+    }
+    const existing = await this.readResultDigestEvidenceIfExists(
+      runId2,
+      parsed.attempt
+    );
+    if (existing !== null) return existing;
+    await this.writeImmutableEvidence(
+      this.resultDigestEvidencePath(runId2, parsed.attempt),
+      Buffer.from(`${JSON.stringify(parsed, null, 2)}
+`),
+      "RESULT_DIGEST_EVIDENCE_CONFLICT"
+    );
+    return parsed;
+  }
+  /** Null means no baseline exists; it is never reconstructed from current bytes. */
+  async readResultDigestEvidenceIfExists(runId2, attempt) {
+    const bytes = await this.readImmutableEvidence(
+      this.resultDigestEvidencePath(runId2, attempt)
+    );
+    if (bytes === null) return null;
+    let decoded;
+    try {
+      decoded = JSON.parse(bytes.toString("utf8"));
+    } catch {
+      throw new BanzaiError(
+        "RESULT_DIGEST_EVIDENCE_INVALID",
+        "Result digest evidence is malformed."
+      );
+    }
+    const parsed = parseResultDigestEvidence(decoded);
+    if (parsed.runId !== runId2 || parsed.attempt.id !== attempt.id || parsed.attempt.kind !== attempt.kind) {
+      throw new BanzaiError(
+        "RESULT_DIGEST_EVIDENCE_INVALID",
+        "Result digest evidence identity does not match its path."
+      );
+    }
+    return parsed;
+  }
   async writeRecoveryAuthorization(runId2, authorization) {
     const parsed = parseRecoveryAuthorization2(authorization);
     if (parsed.runId !== runId2) {
@@ -33534,6 +33776,14 @@ var TERMINAL_INTEGRITY_FAILURE_CODES = /* @__PURE__ */ new Set([
   "TERMINAL_RESULT_CONFLICT",
   "SESSION_ID_CONFLICT"
 ]);
+var DIGEST_REJECTED_FAILURE_CODES = /* @__PURE__ */ new Set([
+  "RESULT_DIGEST_REJECTED",
+  "PLAN_TASK_COMPLETION_INVALID"
+]);
+function taskVerificationDigestDetail(error) {
+  const candidate = error;
+  return (candidate.code === "TASK_VERIFICATION_DIGEST_MISMATCH" || candidate.code === "TASK_VERIFICATION_SOURCE_TOO_LARGE") && candidate.detail !== void 0 ? candidate.detail : null;
+}
 function sameObservedInputs(a, b) {
   return digestCanonicalJson4(a.implementationReport) === digestCanonicalJson4(b.implementationReport) && digestCanonicalJson4(a.testReport) === digestCanonicalJson4(b.testReport) && a.workspaceDigest === b.workspaceDigest;
 }
@@ -34932,7 +35182,9 @@ var WorkflowRunner = class {
         const attempt = {
           id: eligibility.attemptId,
           kind: eligibility.phase,
-          mutable: true
+          // Planning attempts are created read-only for repository mutation
+          // accounting; every other recovery source is a mutable phase.
+          mutable: eligibility.phase !== "plan"
         };
         let authorization;
         if (state.recovery?.sourceAttemptId === attempt.id && state.recovery.recoveryAttemptId === null) {
@@ -36759,6 +37011,180 @@ var WorkflowRunner = class {
       );
     }
   }
+  /**
+   * ADR-0051's digest-rejected source, recognized from durable evidence only:
+   * a failed attempt whose sole recorded failure is a digest rejection at
+   * acceptance, whose terminal checkpoint proves its repository changes are
+   * complete rather than partial, and which no successor has replaced.
+   * Returns null when the source does not apply, leaving every existing
+   * disposition — including the refusal of a failed mutable attempt with
+   * unknown side effects — exactly as it is.
+   */
+  async digestRejectedRecoveryEligibility(state, attempt) {
+    if (attempt.kind !== "plan" && attempt.kind !== "implementation" && attempt.kind !== "fix")
+      return null;
+    const phase = attempt.kind;
+    const expectedBlockedFrom = phase === "plan" ? "planning" : phase === "implementation" ? "implementing" : "fixing";
+    if (state.blockedFrom !== expectedBlockedFrom) return null;
+    let record7;
+    let evidence2;
+    try {
+      record7 = await this.store.readRunAttempt(state.runId, attempt);
+      evidence2 = await this.store.readResultDigestEvidenceIfExists(
+        state.runId,
+        attempt
+      );
+    } catch (error) {
+      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
+        throw error;
+      return recoveryIneligible(
+        error instanceof BanzaiError && error.code === "RESULT_DIGEST_EVIDENCE_INVALID" ? `${error.message} Audit the run before continuing.` : "Digest acceptance evidence is unreadable or inconsistent.",
+        attempt.id,
+        phase
+      );
+    }
+    if (evidence2?.outcome !== "rejected" || record7.status !== "failed" || !DIGEST_REJECTED_FAILURE_CODES.has(record7.failureCode ?? ""))
+      return null;
+    if (state.activeProcess !== null && this.store.processAlive(state.activeProcess.pid)) {
+      return recoveryIneligible(
+        "Recovery is unavailable while the model process is still active.",
+        attempt.id,
+        phase
+      );
+    }
+    try {
+      const checkpoint = await this.store.readTerminalCheckpointIfExists(
+        state.runId,
+        attempt
+      );
+      if (checkpoint === null) {
+        return recoveryIneligible(
+          `The rejected ${phase} result has no terminal checkpoint, so its repository side effects are unknown. Inspect the checkout, then cancel the run.`,
+          attempt.id,
+          phase
+        );
+      }
+      if ((await this.store.readRunAttempts(state.runId)).some(
+        (other) => other.attempt.kind === attempt.kind && other.attempt.id !== attempt.id && Date.parse(other.startedAt) > Date.parse(record7.startedAt)
+      ) || state.recovery?.sourceAttemptId === attempt.id && state.recovery.recoveryAttemptId !== null) {
+        return recoveryIneligible(
+          `A later ${phase} attempt already supersedes this rejected result.`,
+          attempt.id,
+          phase,
+          true
+        );
+      }
+      if (await currentCommit(this.repoRoot) !== state.baseCommit) {
+        return recoveryIneligible(
+          "Recovery is unavailable because checkout HEAD changed.",
+          attempt.id,
+          phase
+        );
+      }
+      const config = await loadConfig(this.repoRoot);
+      assertContractParity();
+      const settings = phase === "plan" ? config.models.planner : config.models.implementer;
+      const vendor = vendorFor(settings.executable) ?? FALLBACK_VENDOR[phase === "plan" ? "planner" : "implementer"];
+      let approvalDigest = null;
+      let workflowDigest = null;
+      if (phase === "plan") {
+        const selection = state.workflowSelection ?? null;
+        workflowDigest = selection?.digest ?? null;
+        const authorized = selection !== null && workflowAuthorizationDigest({
+          runId: state.runId,
+          request: state.request,
+          ...selection
+        }) === selection.digest;
+        if (!authorized) {
+          return recoveryIneligible(
+            "Planning recovery requires the unchanged persisted workflow selection.",
+            attempt.id,
+            phase
+          );
+        }
+      } else if ((state.workflowSelection?.workflow ?? "strict") === "strict" || phase === "fix") {
+        await this.validateApproval(state);
+        approvalDigest = state.planApproval?.digest ?? null;
+      } else {
+        workflowDigest = this.validateWorkflowSelection(state).digest;
+      }
+      const scopeDigest = this.attemptScopeDigest(state, attempt);
+      const configurationDigest2 = digestCanonicalJson4({
+        version: 1,
+        vendor,
+        executableDigest: digestCanonicalJson4(settings.executable),
+        model: settings.model,
+        effort: settings.effort
+      });
+      const snapshot = await workspaceSnapshot(this.repoRoot, {
+        artifactBinding: state.artifactBinding,
+        baseline: state.baseline
+      });
+      if (snapshot.baseCommit !== state.baseCommit) {
+        return recoveryIneligible(
+          "Recovery is unavailable because the workspace base commit changed.",
+          attempt.id,
+          phase
+        );
+      }
+      const counts = await workspaceChangeCounts(this.repoRoot, snapshot);
+      const recoveryIdentity = digestCanonicalJson4({
+        version: 1,
+        sourceKind: "digest_rejected",
+        runId: state.runId,
+        attempt,
+        phase,
+        baseCommit: state.baseCommit,
+        workspaceDigest: snapshot.digest,
+        approvalDigest,
+        workflowDigest,
+        scopeDigest,
+        configurationDigest: configurationDigest2,
+        digestEvidence: digestCanonicalJson4(evidence2)
+      });
+      if (state.recovery?.sourceAttemptId === attempt.id && state.recovery.recoveryAttemptId === null) {
+        const authorization = await this.store.readRecoveryAuthorization(
+          state.runId,
+          state.recovery.authorizationId
+        );
+        if (authorization.attempt.id !== attempt.id || authorization.recoveryIdentity !== recoveryIdentity) {
+          return recoveryIneligible(
+            "Persisted recovery authorization is stale or inconsistent.",
+            attempt.id,
+            phase
+          );
+        }
+      }
+      return {
+        eligible: true,
+        terminalCheckpointPresent: true,
+        reason: `The ${phase} result was refused because ${evidence2.comparisons.filter((comparison) => !comparison.matched).length} digest it authored never matched the bytes it named. Recovery authorizes one linked ${phase} attempt to supply a corrected result; the rejected attempt and its result are retained.`,
+        warning: "The rejected attempt keeps its failed status and its result. Recovery authorizes one new attempt for the same phase and no additional scope; a replacement strict plan still passes the existing approval gate.",
+        sourceKind: "digest_rejected",
+        attemptId: attempt.id,
+        phase,
+        resolvedFindingIds: [],
+        remainingFindingIds: [],
+        prerequisites: [],
+        authorization: approvalDigest === null ? "workflow_selection" : "plan_approval",
+        recoveryIdentity,
+        workspace: { digest: snapshot.digest, ...counts },
+        baseCommit: state.baseCommit,
+        approvalDigest,
+        workflowDigest,
+        scopeDigest,
+        configurationDigest: configurationDigest2
+      };
+    } catch (error) {
+      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
+        throw error;
+      return recoveryIneligible(
+        "Digest-rejected recovery preconditions could not be validated; inspect or cancel the run.",
+        attempt.id,
+        phase
+      );
+    }
+  }
   async recoveryEligibility(state) {
     if (state.status !== "blocked") {
       return recoveryIneligible(
@@ -36766,6 +37192,13 @@ var WorkflowRunner = class {
       );
     }
     const attempt = state.activeAttempt;
+    if (attempt !== null) {
+      const digestRejected = await this.digestRejectedRecoveryEligibility(
+        state,
+        attempt
+      );
+      if (digestRejected !== null) return digestRejected;
+    }
     if (attempt === null && state.blockedFrom === "fixing") {
       return await this.prerequisiteBlockedFixRecoveryEligibility(state);
     }
@@ -36942,7 +37375,8 @@ var WorkflowRunner = class {
   }
   async executeAuthorizedRecovery(state, config, authorization) {
     await this.assertProjectGuidance();
-    await this.preflightVendor("implementer", config.models.implementer);
+    if (authorization.phase !== "plan")
+      await this.preflightVendor("implementer", config.models.implementer);
     const persistedSourceRecord = await this.store.readRunAttempt(
       state.runId,
       authorization.attempt
@@ -36952,12 +37386,19 @@ var WorkflowRunner = class {
       persistedSourceRecord,
       false
     ) : null;
+    const digestRejected = persistedSourceRecord.status === "failed" && DIGEST_REJECTED_FAILURE_CODES.has(
+      persistedSourceRecord.failureCode ?? ""
+    ) && (await this.store.readResultDigestEvidenceIfExists(
+      state.runId,
+      authorization.attempt
+    ))?.outcome === "rejected";
+    const authorizedBlockedFrom = authorization.phase === "plan" ? "planning" : authorization.phase === "implementation" ? "implementing" : "fixing";
     const sourceAlreadyInterrupted = state.recovery?.sourceAttemptId === authorization.attempt.id && state.recovery.recoveryAttemptId === null && state.recovery.stage === "source_interrupted";
     const sourceAlreadyPreserved = state.recovery?.sourceAttemptId === authorization.attempt.id && state.recovery.recoveryAttemptId === null && state.recovery.stage === "source_preserved";
-    const eligibilityState = sourceAlreadyInterrupted ? {
+    const eligibilityState = sourceAlreadyInterrupted || sourceAlreadyPreserved && digestRejected ? {
       ...state,
       status: "blocked",
-      blockedFrom: authorization.phase === "implementation" ? "implementing" : "fixing",
+      blockedFrom: authorizedBlockedFrom,
       activeAttempt: authorization.attempt,
       activeProcess: null
     } : sourceAlreadyPreserved && prerequisiteSource !== null ? {
@@ -36971,7 +37412,7 @@ var WorkflowRunner = class {
     const eligibility = await this.recoveryEligibility(eligibilityState);
     await this.assertProjectGuidance();
     const workspace = eligibility.workspace;
-    const expectedSourceKind = prerequisiteSource === null ? "interrupted" : "prerequisite_blocked_fix";
+    const expectedSourceKind = digestRejected ? "digest_rejected" : prerequisiteSource === null ? "interrupted" : "prerequisite_blocked_fix";
     if (!eligibility.eligible || workspace === null || eligibility.sourceKind !== expectedSourceKind || eligibility.attemptId !== authorization.attempt.id || eligibility.phase !== authorization.phase || eligibility.recoveryIdentity !== authorization.recoveryIdentity || workspace.digest !== authorization.workspaceDigest || eligibility.baseCommit !== authorization.baseCommit || eligibility.approvalDigest !== authorization.approvalDigest || eligibility.workflowDigest !== authorization.workflowDigest || eligibility.scopeDigest !== authorization.scopeDigest || eligibility.configurationDigest !== authorization.configurationDigest) {
       state.recovery = null;
       state.activeAttempt = prerequisiteSource === null ? authorization.attempt : null;
@@ -36992,7 +37433,7 @@ var WorkflowRunner = class {
       );
     }
     const sourceAttempt = authorization.attempt;
-    if (prerequisiteSource === null && !sourceAlreadyInterrupted && state.activeAttempt?.id !== authorization.attempt.id || prerequisiteSource !== null && !sourceAlreadyPreserved && state.activeAttempt !== null) {
+    if (prerequisiteSource === null && !sourceAlreadyInterrupted && !(sourceAlreadyPreserved && digestRejected) && state.activeAttempt?.id !== authorization.attempt.id || prerequisiteSource !== null && !sourceAlreadyPreserved && state.activeAttempt !== null) {
       throw new BanzaiError(
         "RECOVERY_STATE_CHANGED",
         "The recovery source changed before recovery execution."
@@ -37004,8 +37445,9 @@ var WorkflowRunner = class {
       for (const publish2 of pendingTransition) await publish2();
       pendingTransition.length = 0;
     };
+    const preserveSource = prerequisiteSource !== null || digestRejected;
     if (!sourceAlreadyInterrupted && !sourceAlreadyPreserved) {
-      if (prerequisiteSource === null) {
+      if (!preserveSource) {
         if (persistedSourceRecord.schemaVersion === 1)
           persistedSourceRecord.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION2;
         persistedSourceRecord.status = "interrupted";
@@ -37020,15 +37462,12 @@ var WorkflowRunner = class {
       }
       state.activeAttempt = null;
       state.activeProcess = null;
-      transitionState(
-        state,
-        authorization.phase === "implementation" ? "implementing" : "fixing"
-      );
+      transitionState(state, authorizedBlockedFrom);
       state.recovery = {
         authorizationId: authorization.authorizationId,
         sourceAttemptId: sourceAttempt.id,
         recoveryAttemptId: null,
-        stage: prerequisiteSource === null ? "source_interrupted" : "source_preserved"
+        stage: preserveSource ? "source_preserved" : "source_interrupted"
       };
       pendingTransition.push(async () => {
         await this.store.writeState(state);
@@ -37036,7 +37475,7 @@ var WorkflowRunner = class {
       pendingTransition.push(
         async () => await this.store.appendEvent(
           state.runId,
-          prerequisiteSource === null ? "attempt.interrupted" : "attempt.blocked_source_preserved",
+          digestRejected ? "attempt.digest_rejected_source_preserved" : prerequisiteSource === null ? "attempt.interrupted" : "attempt.blocked_source_preserved",
           {
             attemptId: sourceAttempt.id,
             kind: sourceAttempt.kind,
@@ -37046,15 +37485,27 @@ var WorkflowRunner = class {
       );
     }
     this.info(
-      prerequisiteSource === null ? `Recovering interrupted ${authorization.phase} attempt ${sourceAttempt.id} from the authorized workspace` : `Recovering remaining accepted findings from completed blocked fix attempt ${sourceAttempt.id}`
+      digestRejected ? `Recovering digest-rejected ${authorization.phase} attempt ${sourceAttempt.id} with one linked replacement attempt` : prerequisiteSource === null ? `Recovering interrupted ${authorization.phase} attempt ${sourceAttempt.id} from the authorized workspace` : `Recovering remaining accepted findings from completed blocked fix attempt ${sourceAttempt.id}`
     );
     try {
-      return authorization.phase === "implementation" ? await this.executeImplementation(
+      return authorization.phase === "plan" ? await this.executePlan(
+        state,
+        config,
+        persistedSourceRecord,
+        null,
+        commitTransition,
+        authorization
+      ) : authorization.phase === "implementation" ? await this.executeImplementation(
         state,
         config,
         authorization,
         commitTransition
-      ) : await this.executeFix(state, config, authorization, commitTransition);
+      ) : await this.executeFix(
+        state,
+        config,
+        authorization,
+        commitTransition
+      );
     } catch (error) {
       if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
@@ -37120,7 +37571,9 @@ var WorkflowRunner = class {
     if (state.status === "blocked") {
       if (publication?.pending === true && publication.action !== null)
         return `banzai ${publication.action}`;
-      return retry.eligible ? "banzai retry" : recovery.terminalCheckpointPresent === true ? "banzai resume" : recovery.eligible ? "banzai recover" : "banzai cancel";
+      if (recovery.eligible && recovery.sourceKind === "digest_rejected")
+        return "banzai recover";
+      return retry.eligible ? "banzai retry" : recovery.eligible ? "banzai recover" : recovery.terminalCheckpointPresent === true ? "banzai resume" : "banzai cancel";
     }
     if ([
       "created",
@@ -38439,7 +38892,7 @@ var WorkflowRunner = class {
     );
     return selection.workflow === "strict" ? await this.executePlan(state, config) : await this.executeImplementation(state, config);
   }
-  async executePlan(state, config, retrySource = null, checkpointRejection = null, commitTransition) {
+  async executePlan(state, config, retrySource = null, checkpointRejection = null, commitTransition, recovery = null) {
     if (!await hasRunnerWorkOwnership4(this.repoRoot, state.artifactBinding))
       return withRunnerWorkOwnership4(
         this.repoRoot,
@@ -38449,7 +38902,8 @@ var WorkflowRunner = class {
           config,
           retrySource,
           checkpointRejection,
-          commitTransition
+          commitTransition,
+          recovery
         )
       );
     requireState(state, ["planning"], "Planning");
@@ -38539,6 +38993,28 @@ var WorkflowRunner = class {
       artifactPaths: [],
       retryOf: retrySource?.attempt.id ?? null
     };
+    if (recovery !== null) {
+      if (state.recovery?.sourceAttemptId !== recovery.attempt.id || state.recovery.authorizationId !== recovery.authorizationId || state.recovery.recoveryAttemptId !== null || state.recovery.stage !== "source_preserved") {
+        throw new BanzaiError(
+          "RECOVERY_STATE_CHANGED",
+          "Recovery state changed before the new planning attempt could be linked."
+        );
+      }
+      record7.recoveryOf = recovery.attempt.id;
+      record7.recoveryAuthorizationId = recovery.authorizationId;
+      state.recovery = {
+        authorizationId: recovery.authorizationId,
+        sourceAttemptId: recovery.attempt.id,
+        recoveryAttemptId: attempt.id,
+        stage: "attempt_started"
+      };
+      await this.store.writeState(state);
+      await this.store.appendEvent(state.runId, "attempt.recovery_started", {
+        sourceAttemptId: recovery.attempt.id,
+        attemptId: attempt.id,
+        kind: attempt.kind
+      });
+    }
     await this.store.writeRunAttempt(state.runId, record7);
     try {
       const result = await this.activity(
@@ -38617,7 +39093,7 @@ var WorkflowRunner = class {
       const planResult = this.legacyPhaseResult(result.result);
       const applied = { ...result, result: planResult };
       await this.persistAdapterResult(state, record7, applied);
-      await this.validatePlanningResult(state, planResult);
+      await this.validatePlanningResult(state, attempt, planResult);
       if (!await this.completeAttempt(state, record7, applied)) {
         return await this.store.readState(state.runId);
       }
@@ -38850,6 +39326,13 @@ var WorkflowRunner = class {
         );
       }
       const applied = { ...result, result: liteResult };
+      await this.persistAdapterResult(state, record7, applied);
+      await this.establishResultSourceIdentities(
+        state,
+        attempt,
+        liteResult,
+        config
+      );
       if (!await this.completeAttempt(state, record7, applied)) {
         return await this.store.readState(state.runId);
       }
@@ -40269,6 +40752,12 @@ var WorkflowRunner = class {
         "PHASE_RESULT_MISMATCH",
         `Attempt ${record7.attempt.kind} returned phase ${envelope.phase}.`
       );
+    await this.establishResultSourceIdentities(
+      state,
+      record7.attempt,
+      record7.result,
+      config
+    );
     const sessionId = adapterResult.sessionId ?? resumeSessionId;
     if (envelope.outcome !== "completed" || envelope.gate !== null) {
       await this.store.writeRunAttempt(state.runId, record7);
@@ -40312,7 +40801,9 @@ var WorkflowRunner = class {
     const attempt = record7.attempt;
     const settings = config.models.implementer;
     const context = record7.sessionContext ?? sessionContext("implementer", settings);
-    const promotable = record7.status === "started" || record7.status === "failed" && !TERMINAL_INTEGRITY_FAILURE_CODES.has(record7.failureCode ?? "") && record7.failureCode !== "PLAN_TASK_COMPLETION_INVALID";
+    const promotable = record7.status === "started" || record7.status === "failed" && !TERMINAL_INTEGRITY_FAILURE_CODES.has(record7.failureCode ?? "") && record7.failureCode !== "PLAN_TASK_COMPLETION_INVALID" && // A result refused because a digest it authored never matched is a
+    // final input rejection too: replaying it reproduces the rejection.
+    record7.failureCode !== "RESULT_DIGEST_REJECTED";
     if (promotable) {
       const checkpoint = await this.store.readTerminalCheckpointIfExists(
         state.runId,
@@ -40338,6 +40829,12 @@ var WorkflowRunner = class {
       this.validateArtifactRoleReferences(state, checkpoint.envelope);
       const envelope = checkpoint.envelope;
       record7.result = JSON.parse(envelope.original);
+      await this.establishResultSourceIdentities(
+        state,
+        attempt,
+        record7.result,
+        config
+      );
       record7.envelope = envelope;
       record7.sessionId = checkpoint.sessionId;
       record7.usage = checkpoint.usage;
@@ -41054,7 +41551,14 @@ var WorkflowRunner = class {
           );
         return true;
       } catch (error) {
-        blockState(state, errorMessage(error));
+        blockState(
+          state,
+          await this.digestRejectionReason(
+            state,
+            state.taskVerification?.decision.authority.sourceAttemptId ?? null,
+            error
+          )
+        );
         await this.store.writeState(state);
         return false;
       }
@@ -41526,6 +42030,43 @@ var WorkflowRunner = class {
       workId: binding.workId
     };
   }
+  /** The acceptance baseline recorded for one attempt, by identity, or null. */
+  async resultDigestBaseline(state, sourceAttemptId) {
+    if (sourceAttemptId === null) return null;
+    const record7 = (await this.store.readRunAttempts(state.runId)).find(
+      (item) => item.attempt.id === sourceAttemptId
+    );
+    return record7 === void 0 ? null : await this.store.readResultDigestEvidenceIfExists(
+      state.runId,
+      record7.attempt
+    );
+  }
+  /**
+   * ADR-0051: a consumption-time rejection keeps its own authority to refuse
+   * execution and gains only a causal history, stated from the recorded
+   * acceptance baseline. With no record the history is unknown and is never
+   * reconstructed from the bytes that happen to be on disk now. A size
+   * rejection stays a separate cause and asserts no history at all.
+   */
+  async digestRejectionReason(state, sourceAttemptId, error) {
+    const base = errorMessage(error);
+    const detail = taskVerificationDigestDetail(error);
+    if (detail === null) return base;
+    if (detail.observed === null) return base;
+    let baseline;
+    try {
+      baseline = await this.resultDigestBaseline(state, sourceAttemptId);
+    } catch (readError) {
+      return `${base} Its acceptance baseline could not be read, so the causal history is unavailable: ${errorMessage(readError)}`;
+    }
+    const recorded = baseline?.comparisons.find(
+      (comparison) => comparison.checkId === detail.checkId && comparison.path === detail.path && comparison.declared === detail.declared
+    ) ?? null;
+    if (recorded === null) {
+      return `${base} This run recorded no acceptance baseline for that digest, so whether it ever matched is unknown.`;
+    }
+    return recorded.matched ? `${base} It matched when the result was accepted, so the source changed after acceptance.` : `${base} It did not match when the result was accepted, so it never matched.`;
+  }
   async executeTaskChecks(state, config, sourceAttempt, retryOf) {
     try {
       const source = await this.verificationSourceAttempt(
@@ -41683,8 +42224,12 @@ var WorkflowRunner = class {
       const current = await this.store.readState(state.runId);
       if (current.status === "cancelled") return current;
       state.activeProcess = null;
+      const sourceAttemptId = state.taskVerification?.decision.authority.sourceAttemptId ?? null;
       delete state.taskVerification;
-      blockState(state, errorMessage(error));
+      blockState(
+        state,
+        await this.digestRejectionReason(state, sourceAttemptId, error)
+      );
       await this.store.writeState(state);
       return state;
     }
@@ -42450,7 +42995,140 @@ var WorkflowRunner = class {
       )
     );
   }
-  async validatePlanningResult(state, result) {
+  /**
+   * The check identities whose descriptors draw execution authority from the
+   * approved plan or project policy. A candidate restating one of them leaves
+   * the approved obligation in force, so the restatement's source identities
+   * never take effect and are never compared (ADR-0049 section 2, ADR-0051).
+   */
+  async requiredCheckIds(state, config) {
+    const ids = new Set(
+      (this.taskVerificationPolicy(config)?.required ?? []).map(
+        (check2) => check2.id
+      )
+    );
+    if ((state.workflowSelection?.workflow ?? "strict") !== "strict" || state.planApproval === null)
+      return ids;
+    for (const check2 of parseTaskVerificationObligations(
+      await readFile13(
+        path27.join(this.repoRoot, this.completionPlanPath(state)),
+        "utf8"
+      )
+    ).checks)
+      ids.add(check2.id);
+    return ids;
+  }
+  /**
+   * Establishes the acceptance baseline for one attempt and rejects the result
+   * when any comparison failed. The record is written before the outcome is
+   * decided, so a rejection is durable evidence rather than a lost diagnosis,
+   * and an existing baseline is never restated: the current comparisons decide
+   * acceptance, the recorded ones describe what acceptance observed.
+   */
+  async recordResultDigestEvidence(state, attempt, comparisons) {
+    const rejected = comparisons.filter((comparison) => !comparison.matched);
+    const evidence2 = await this.store.establishResultDigestEvidence(
+      state.runId,
+      {
+        schema: RESULT_DIGEST_EVIDENCE_SCHEMA,
+        schemaVersion: RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION,
+        runId: state.runId,
+        attempt: { id: attempt.id, kind: attempt.kind },
+        outcome: rejected.length > 0 ? "rejected" : "accepted",
+        comparisons
+      }
+    );
+    if (rejected.length > 0) {
+      throw new ResultDigestRejectedError(
+        `The ${attempt.kind} result declared ${rejected.length} digest${rejected.length === 1 ? "" : "s"} that did not match the bytes it named when the result was accepted. ${rejected.map(resultDigestDiagnostic).join(" ")}`,
+        rejected
+      );
+    }
+    return evidence2;
+  }
+  /**
+   * ADR-0051: every model-authored source identity that acts as an execution
+   * precondition is established against the bytes it names at the boundary
+   * where the result is accepted, before any later phase depends on it.
+   */
+  async establishResultSourceIdentities(state, attempt, result, config) {
+    if (state.verificationMode !== "task") return;
+    const candidates = result.schemaVersion === 4 ? result.verificationCandidates ?? null : null;
+    const observe = async (relativePath3) => {
+      try {
+        const file = await taskVerificationPath(this.repoRoot, relativePath3);
+        const size = (await lstat17(file)).size;
+        return size > TASK_VERIFICATION_SOURCE_MAX_BYTES ? { observed: null, size, limit: TASK_VERIFICATION_SOURCE_MAX_BYTES } : {
+          observed: evidenceDigest(await readFile13(file)),
+          size,
+          limit: null
+        };
+      } catch {
+        return { observed: null, size: null, limit: null };
+      }
+    };
+    const comparisons = [];
+    for (const identity of effectiveResultSourceIdentities(
+      candidates,
+      await this.requiredCheckIds(state, config)
+    )) {
+      const { observed: observed3, size, limit } = await observe(identity.path);
+      comparisons.push({
+        role: "precondition",
+        field: identity.field,
+        checkId: identity.checkId,
+        path: identity.path,
+        declared: identity.declared,
+        observed: observed3,
+        size,
+        limit,
+        matched: observed3 === identity.declared
+      });
+    }
+    await this.recordResultDigestEvidence(state, attempt, comparisons);
+  }
+  /**
+   * The plan remainder digest is the one binding role ADR-0051 fixes, and the
+   * detection that establishes it already lives in the shared inventory
+   * parser. This only classifies that existing outcome: an accepted record
+   * becomes the baseline a later reader may cite, and a rejected record is
+   * what makes the attempt recognizable as a digest-rejected result. No strict
+   * plan-task completion ledger is written for a planning attempt.
+   */
+  async establishPlanRemainderDigest(state, attempt, planPath, markdown) {
+    let comparison;
+    try {
+      const obligations = parseTaskVerificationObligations(markdown);
+      comparison = {
+        role: "binding",
+        field: "planRemainderSha256",
+        checkId: null,
+        path: planPath,
+        declared: obligations.planRemainderSha256,
+        observed: obligations.planRemainderSha256,
+        size: null,
+        limit: null,
+        matched: true
+      };
+    } catch (error) {
+      const detail = taskVerificationDigestDetail(error);
+      if (detail === null) throw error;
+      if (detail.role !== "binding") throw error;
+      comparison = {
+        role: "binding",
+        field: detail.field,
+        checkId: null,
+        path: planPath,
+        declared: detail.declared,
+        observed: detail.observed,
+        size: null,
+        limit: null,
+        matched: false
+      };
+    }
+    await this.recordResultDigestEvidence(state, attempt, [comparison]);
+  }
+  async validatePlanningResult(state, attempt, result) {
     if (result.gate !== "plan_approval" || result.artifacts.plan === null)
       return;
     try {
@@ -42460,11 +43138,21 @@ var WorkflowRunner = class {
       );
       parseApprovedPlanTaskIds(markdown);
       if (state.verificationMode === "task")
-        parseTaskVerificationObligations(markdown);
+        await this.establishPlanRemainderDigest(
+          state,
+          attempt,
+          result.artifacts.plan,
+          markdown
+        );
       this.validateRunnerControlTasks(state, markdown);
     } catch (error) {
       if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
+      if (error instanceof ResultDigestRejectedError)
+        throw new PlanTaskCompletionError(
+          "approved_plan_invalid",
+          error.message
+        );
       if (error instanceof PlanTaskCompletionError || error instanceof BanzaiError && error.code === "PLAN_RUNNER_CONTROL_TASK")
         throw error;
       throw new PlanTaskCompletionError(
@@ -42473,7 +43161,7 @@ var WorkflowRunner = class {
       );
     }
   }
-  async validateTerminalCheckpointResult(state, attempt, result) {
+  async validateTerminalCheckpointResult(state, attempt, result, config) {
     await this.validateSavedArtifactScope(state, attempt);
     if (attempt.kind === "selection") {
       return;
@@ -42508,9 +43196,15 @@ var WorkflowRunner = class {
       );
     }
     if (attempt.kind === "plan") {
-      await this.validatePlanningResult(state, phaseResult);
+      await this.validatePlanningResult(state, attempt, phaseResult);
       return;
     }
+    await this.establishResultSourceIdentities(
+      state,
+      attempt,
+      phaseResult,
+      config
+    );
     if (attempt.kind === "fix") {
       if (phaseResult.taskCompletion !== null) {
         if (state.planApproval === null) {
@@ -42611,7 +43305,8 @@ var WorkflowRunner = class {
     await this.validateTerminalCheckpointResult(
       state,
       attempt,
-      checkpoint.result
+      checkpoint.result,
+      config
     );
     if (record7.status === "completed") {
       if (record7.result === null || JSON.stringify(record7.result) !== JSON.stringify(checkpoint.result)) {
@@ -43522,7 +44217,9 @@ function semanticNextAction(status) {
       const publication = status.completionPublication;
       if (publication?.pending === true && publication.action !== null)
         return publication.action;
-      return status.retry.eligible ? "retry" : status.recovery.terminalCheckpointPresent === true ? "resume" : status.recovery.eligible ? "recover" : "cancel";
+      if (status.recovery.eligible && status.recovery.sourceKind === "digest_rejected")
+        return "recover";
+      return status.retry.eligible ? "retry" : status.recovery.eligible ? "recover" : status.recovery.terminalCheckpointPresent === true ? "resume" : "cancel";
     }
     case "created":
     case "selecting":
@@ -49196,20 +49893,26 @@ ${escapeTerminalText(prerequisites)}`
     const invalidCompletion = state.planTaskCompletion?.status === "invalid" ? state.planTaskCompletion : null;
     const isPlanBundleRepair = invalidCompletion !== null && (invalidCompletion.violation === "approved_plan_invalid" || invalidCompletion.violation === "approval_invalid");
     const isCompletionEvidenceRepair = !isPlanBundleRepair && (state.blockedFrom === "implementing" || state.blockedFrom === "verifying" || state.blockedFrom === "fixing") && status.retry.attemptId !== null && invalidCompletion !== null && invalidCompletion.sourceAttemptId === status.retry.attemptId;
-    if (status.retry.eligible) {
+    const isDigestRejectedRepair = status.recovery.eligible && status.recovery.sourceKind === "digest_rejected";
+    if (isDigestRejectedRepair) {
+      choices.push({
+        name: "Authorize a replacement attempt for the rejected result",
+        value: "recover"
+      });
+    } else if (status.retry.eligible) {
       choices.push({
         name: status.retry.attemptId === null ? state.blockedFrom === "reviewing" ? "Retry review checks" : "Retry start checks" : isPlanBundleRepair ? "Rerun planning to correct the approved plan" : isCompletionEvidenceRepair ? "Repair plan-task completion evidence" : state.blockedFrom === "planning" ? "Continue the failed planning attempt" : "Retry the failed read-only attempt",
         value: "retry"
-      });
-    } else if (status.recovery.terminalCheckpointPresent === true) {
-      choices.push({
-        name: "Resume the proven terminal result",
-        value: "resume"
       });
     } else if (status.recovery.eligible) {
       choices.push({
         name: status.recovery.sourceKind === "prerequisite_blocked_fix" ? "Recover the remaining accepted findings" : "Recover from this exact partial workspace",
         value: "recover"
+      });
+    } else if (status.recovery.terminalCheckpointPresent === true) {
+      choices.push({
+        name: "Resume the proven terminal result",
+        value: "resume"
       });
     }
     const restore = await runner.restoreEligibility();
@@ -49255,7 +49958,7 @@ ${escapeTerminalText(prerequisites)}`
       }
       writeLabeled(io, "Recovery warning", status.recovery.warning);
       io.writeLine(`Recovery identity: ${status.recovery.recoveryIdentity}`);
-      const confirmation = status.recovery.sourceKind === "prerequisite_blocked_fix" ? "Confirm the displayed prerequisites are addressed and authorize one new fix attempt for only the remaining accepted findings in this exact workspace?" : "Authorize one new recovery attempt for this exact workspace and accept that repository or external side effects may be partial or duplicated?";
+      const confirmation = status.recovery.sourceKind === "prerequisite_blocked_fix" ? "Confirm the displayed prerequisites are addressed and authorize one new fix attempt for only the remaining accepted findings in this exact workspace?" : status.recovery.sourceKind === "digest_rejected" ? "Authorize one linked attempt to supply a corrected result for the rejected phase, keeping the rejected attempt and its result as evidence?" : "Authorize one new recovery attempt for this exact workspace and accept that repository or external side effects may be partial or duplicated?";
       if (await io.confirm(confirmation, false)) {
         const { attemptId, recoveryIdentity } = status.recovery;
         await runWork(
@@ -51687,7 +52390,7 @@ async function main() {
       throw new BanzaiError("RECOVERY_NOT_ALLOWED", status.recovery.reason);
     }
     const io = new InquirerInteractiveIO();
-    const confirmation = status.recovery.sourceKind === "prerequisite_blocked_fix" ? "Confirm the displayed prerequisites are addressed and authorize one new fix attempt for only the remaining accepted findings in this exact workspace?" : "Authorize one new recovery attempt for this exact workspace and accept that repository or external side effects may be partial or duplicated?";
+    const confirmation = status.recovery.sourceKind === "prerequisite_blocked_fix" ? "Confirm the displayed prerequisites are addressed and authorize one new fix attempt for only the remaining accepted findings in this exact workspace?" : status.recovery.sourceKind === "digest_rejected" ? "Authorize one linked attempt to supply a corrected result for the rejected phase, keeping the rejected attempt and its result as evidence?" : "Authorize one new recovery attempt for this exact workspace and accept that repository or external side effects may be partial or duplicated?";
     if (!await io.confirm(confirmation, false)) {
       return;
     }

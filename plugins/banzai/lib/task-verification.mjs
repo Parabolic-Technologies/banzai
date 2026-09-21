@@ -5,6 +5,34 @@ import { lstat, readFile, realpath } from "node:fs/promises";
 import { evidenceDigest, parseVerificationPolicy, VerificationEvidenceError } from "./verification-evidence.mjs";
 
 const fail = (message) => { throw new VerificationEvidenceError(message); };
+/** Every model-authored source identity is read under this bound. */
+export const TASK_VERIFICATION_SOURCE_MAX_BYTES = 1024 * 1024;
+/** A model-authored digest disagreed with the bytes it names (ADR-0051). */
+export class TaskVerificationDigestError extends VerificationEvidenceError {
+  constructor(code, message, detail) { super(message); this.name = "TaskVerificationDigestError"; this.code = code; this.detail = detail; }
+}
+const digestFail = (code, message, detail) => { throw new TaskVerificationDigestError(code, message, detail); };
+/**
+ * The single implementation of the digest-role rule ADR-0051 fixes. A plan
+ * remainder digest binds its inventory to the plan bytes outside it; an
+ * effective source identity on a lite or supplemental descriptor is an
+ * execution precondition; a source identity recorded on a required obligation
+ * is descriptive metadata. Result acceptance and launch authorization both
+ * classify here, so the two comparisons cannot disagree about what they cover.
+ */
+export function taskVerificationDigestRole(kind, required = false) {
+  if (kind === "plan-remainder") return "binding";
+  if (kind !== "descriptor-source") fail("Unknown task verification digest role.");
+  return required === true ? "descriptive" : "precondition";
+}
+/** The source identities of one selected check that bear on its execution. */
+export function comparableTaskVerificationSources(descriptor, required = false) {
+  if (taskVerificationDigestRole("descriptor-source", required) !== "precondition") return [];
+  return list(descriptor?.sources ?? [], 32).map((source) => {
+    object(source, ["path", "sha256"]);
+    return { path: relative(source.path), sha256: hash(source.sha256) };
+  });
+}
 const HASH = /^[a-f0-9]{64}$/u;
 const ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 function object(value, keys) {
@@ -75,7 +103,10 @@ export function parseTaskVerificationObligations(plan) {
   const v = object(parsed, ["schema", "schemaVersion", "complete", "planRemainderSha256", "checks", "absenceReason"]);
   if (v.schema !== "banzai-verification-obligations/v2" || v.schemaVersion !== 2 || v.complete !== true) fail("Unsupported task verification inventory.");
   const remainder = plan.slice(0, blocks[0].index) + plan.slice(blocks[0].index + blocks[0][0].length);
-  if (hash(v.planRemainderSha256) !== evidenceDigest(remainder)) fail("Verification inventory no longer binds the surrounding plan.");
+  const observedRemainder = evidenceDigest(remainder);
+  if (hash(v.planRemainderSha256) !== observedRemainder)
+    digestFail("TASK_VERIFICATION_DIGEST_MISMATCH", `planRemainderSha256 does not match the plan bytes outside its inventory: declared ${v.planRemainderSha256}, observed ${observedRemainder}.`,
+      { role: taskVerificationDigestRole("plan-remainder"), field: "planRemainderSha256", checkId: null, path: null, declared: v.planRemainderSha256, observed: observedRemainder, size: null, limit: null });
   const selection = parseTaskVerificationCandidates({ checks: v.checks, absenceReason: v.absenceReason });
   if (/\b(?:fresh|rerun|re-run)\b|\brelease:check\b/iu.test(remainder) && selection.checks.some((check) => check.evidence !== "fresh")) fail("Equivalent evidence cannot override fresh plan commitments.");
   return { schema: v.schema, schemaVersion: 2, complete: true, planRemainderSha256: v.planRemainderSha256, ...selection };
@@ -155,9 +186,19 @@ export async function authorizeTaskVerification({ repoRoot, descriptor, authorit
   // An approved obligation binds its command, not the pre-implementation bytes
   // its plan observed (ADR-0049 sections 2 and 4); the owner's captured inputs
   // record what actually ran. Supplements stay bound to their proposal sources.
-  for (const source of required ? [] : check.sources) {
+  for (const source of comparableTaskVerificationSources(check, required)) {
     const file = await taskVerificationPath(repoRoot, source.path);
-    if ((await lstat(file)).size > 1024 * 1024 || evidenceDigest(await readFile(file)) !== source.sha256) fail("Verification selection source changed before launch.");
+    const field = `checks[${check.id}].sources[${source.path}].sha256`;
+    const size = (await lstat(file)).size;
+    // A size rejection and a digest mismatch are separate causes and never
+    // share a diagnostic; neither ever carries the bytes it read.
+    if (size > TASK_VERIFICATION_SOURCE_MAX_BYTES)
+      digestFail("TASK_VERIFICATION_SOURCE_TOO_LARGE", `Verification source ${source.path} is ${size} bytes, above the ${TASK_VERIFICATION_SOURCE_MAX_BYTES}-byte limit.`,
+        { role: "precondition", field, checkId: check.id, path: source.path, declared: source.sha256, observed: null, size, limit: TASK_VERIFICATION_SOURCE_MAX_BYTES });
+    const observed = evidenceDigest(await readFile(file));
+    if (observed !== source.sha256)
+      digestFail("TASK_VERIFICATION_DIGEST_MISMATCH", `Verification source ${source.path} does not match the identity recorded for check ${check.id}: declared ${source.sha256}, observed ${observed}.`,
+        { role: "precondition", field, checkId: check.id, path: source.path, declared: source.sha256, observed, size, limit: null });
   }
   for (const file of check.materialization?.paths ?? []) await taskVerificationPath(repoRoot, file);
   return { descriptor: check, cwd, authorityDigest: evidenceDigest(authority), contextDigest: evidenceDigest(context), policyDigest: activePolicy ? evidenceDigest(activePolicy) : null };
@@ -173,7 +214,7 @@ export async function discoverTaskVerification(repoRoot, directories = ["."], ad
     let bytes;
     try {
       const target = await taskVerificationPath(repoRoot, file);
-      if ((await lstat(target)).size > 1024 * 1024) fail("Discovery source exceeds one MiB.");
+      if ((await lstat(target)).size > TASK_VERIFICATION_SOURCE_MAX_BYTES) fail("Discovery source exceeds one MiB.");
       bytes = await readFile(target);
     } catch (error) {
       sources.push({ path: file, status: error.code === "ENOENT" ? "absent" : "unavailable", sha256: null, reason: error.code === "ENOENT" ? null : "Source could not be inspected safely." });

@@ -24,6 +24,18 @@ export interface TaskVerificationContext { kind: "inherited-local"; invocationDi
 export interface TaskVerificationSelection {
   checks: { descriptor: TaskVerificationDescriptor; required: boolean }[]; absenceReason: string | null;
 }
+export type TaskVerificationDigestRole = "binding" | "precondition" | "descriptive";
+export interface TaskVerificationDigestDetail {
+  role: TaskVerificationDigestRole; field: string; checkId: string | null; path: string | null;
+  declared: string; observed: string | null; size: number | null; limit: number | null;
+}
+export const TASK_VERIFICATION_SOURCE_MAX_BYTES: number;
+export class TaskVerificationDigestError extends Error {
+  readonly code: "TASK_VERIFICATION_DIGEST_MISMATCH" | "TASK_VERIFICATION_SOURCE_TOO_LARGE";
+  readonly detail: TaskVerificationDigestDetail;
+}
+export function taskVerificationDigestRole(kind: "plan-remainder" | "descriptor-source", required?: boolean): TaskVerificationDigestRole;
+export function comparableTaskVerificationSources(descriptor: { sources?: { path: string; sha256: string }[] } | null | undefined, required?: boolean): { path: string; sha256: string }[];
 export function parseTaskVerificationDescriptor(value: unknown): TaskVerificationDescriptor;
 export function parseTaskVerificationCandidates(value: unknown): TaskVerificationCandidates | null;
 export function parseTaskVerificationObligations(plan: string): TaskVerificationObligations;

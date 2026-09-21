@@ -100,6 +100,9 @@ export type CompletionPublicationRefusalCode =
 export const RECOVERY_AUTHORIZATION_SCHEMA =
   "banzai-recovery-authorization/v1" as const;
 export const RECOVERY_AUTHORIZATION_SCHEMA_VERSION = 1 as const;
+export const RESULT_DIGEST_EVIDENCE_SCHEMA =
+  "banzai-result-digest-evidence/v1" as const;
+export const RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION = 1 as const;
 export const AGENT_CONTROL_CONTRACT_VERSION = "6.0.0" as const;
 export const AGENT_CAPABILITIES_SCHEMA_VERSION = 6 as const;
 export const AGENT_STATUS_SCHEMA_VERSION = 5 as const;
@@ -1792,8 +1795,15 @@ export interface RecoveryAuthorization {
   schemaVersion: typeof RECOVERY_AUTHORIZATION_SCHEMA_VERSION;
   authorizationId: string;
   runId: string;
-  attempt: AttemptReference & { kind: "implementation" | "fix" };
-  phase: "implementation" | "fix";
+  /**
+   * ADR-0051 adds the digest-rejected source, so a planning attempt is now
+   * representable. The schema identity stays `v1`: the value set grew, and
+   * every authorization an earlier version wrote holds `implementation` or
+   * `fix`, which this parser still accepts byte-for-byte. The reverse
+   * direction is refused fail-closed by the older enum check.
+   */
+  attempt: AttemptReference & { kind: "implementation" | "fix" | "plan" };
+  phase: "implementation" | "fix" | "plan";
   recoveryIdentity: string;
   workspaceDigest: string;
   baseCommit: string;
@@ -1804,6 +1814,38 @@ export interface RecoveryAuthorization {
   decidedBy: string;
   decidedAt: string;
   unknownSideEffectsAccepted: true;
+}
+
+/**
+ * One acceptance-time comparison of a model-authored digest against the bytes
+ * it names (ADR-0051). `role` comes from the shared task-verification rule.
+ */
+export interface ResultDigestComparison {
+  role: "binding" | "precondition";
+  field: string;
+  checkId: string | null;
+  path: string | null;
+  declared: string;
+  observed: string | null;
+  size: number | null;
+  /** The bound a size rejection exceeded; null for every other outcome. */
+  limit: number | null;
+  matched: boolean;
+}
+
+/**
+ * Runner-owned durable evidence of what a model-authored digest was compared
+ * against when its result was accepted. Written once per attempt, before the
+ * attempt is accepted or failed, and never rewritten: absence means no
+ * baseline exists and none may be reconstructed from current bytes.
+ */
+export interface ResultDigestEvidence {
+  schema: typeof RESULT_DIGEST_EVIDENCE_SCHEMA;
+  schemaVersion: typeof RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION;
+  runId: string;
+  attempt: { id: string; kind: AttemptReference["kind"] };
+  outcome: "accepted" | "rejected";
+  comparisons: ResultDigestComparison[];
 }
 
 export interface AdapterTerminalSuccess<

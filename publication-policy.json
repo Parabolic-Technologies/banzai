@@ -389,6 +389,11 @@
       "sha256": null
     },
     {
+      "path": "documentation/decisions/0051-acceptance-time-digest-validation.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
       "path": "documentation/decisions/README.md",
       "classification": "maintainer",
       "sha256": null
@@ -450,6 +455,11 @@
     },
     {
       "path": "documentation/ideas/2026-09-18-preventing-ai-generated-structural-debt.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/ideas/2026-09-21-borrowed-design-disciplines.md",
       "classification": "maintainer",
       "sha256": null
     },

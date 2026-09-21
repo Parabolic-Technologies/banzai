@@ -714,12 +714,19 @@ function semanticNextAction(status: WorkflowStatus): AgentControlNextAction {
       const publication = status.completionPublication;
       if (publication?.pending === true && publication.action !== null)
         return publication.action;
+      // A digest-rejected result is repaired through its authorized recovery;
+      // resuming its terminal evidence only reproduces the same rejection.
+      if (
+        status.recovery.eligible &&
+        status.recovery.sourceKind === "digest_rejected"
+      )
+        return "recover";
       return status.retry.eligible
         ? "retry"
-        : status.recovery.terminalCheckpointPresent === true
-          ? "resume"
-          : status.recovery.eligible
-            ? "recover"
+        : status.recovery.eligible
+          ? "recover"
+          : status.recovery.terminalCheckpointPresent === true
+            ? "resume"
             : "cancel";
     }
     case "created":
