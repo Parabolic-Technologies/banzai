@@ -132,6 +132,7 @@ const FIXTURE_PATHS = [
   "documentation/decisions/0047-runner-owned-completion-projection.md",
   "documentation/decisions/0048-completion-markup-and-viewer-enrichment-boundary.md",
   "documentation/decisions/0049-task-scoped-verification.md",
+  "documentation/decisions/0050-triggered-code-design-assessment.md",
   "packages/orchestrator/scripts/check-dist.mjs",
   "packages/orchestrator/scripts/release-version.mjs",
   "packages/orchestrator/scripts/smoke-committed.mjs",
@@ -2268,6 +2269,157 @@ test("instruction layout rejects a missing packaged policy file", async () => {
     const result = validate(root);
     assert.equal(result.status, 1);
     assert.match(result.stderr, /^MISSING_RELEASE_FILE /);
+  });
+});
+
+test("directly authored guidance is covered by a raw key and drifts without a transition", async () => {
+  await withFixture(async (root) => {
+    const target = path.join(root, "plugins/banzai/guidance/code-design.md");
+    const source = await readFile(target, "utf8");
+    await writeFile(
+      target,
+      source.replace("## Ownership Discovery", "## Ownership discovery")
+    );
+    const result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^INSTRUCTION_RESOURCE_DRIFT /);
+  });
+});
+
+test("directly authored guidance enters the baseline through a first transition with before: null", async () => {
+  await withFixture(async (root) => {
+    const key = "plugins/banzai/guidance/code-design.md";
+    // The immutable root pins section digests for extracted guidance only, so a
+    // directly authored resource has no predecessor image to record.
+    const baseline = JSON.parse(
+      await readFile(
+        path.join(root, "packages/orchestrator/phase-guidance-baseline.json"),
+        "utf8"
+      )
+    ) as { sources: { guidance: string }[] };
+    assert.ok(
+      !baseline.sources.some((entry) => entry.guidance === "code-design")
+    );
+    const current = JSON.parse(
+      await readFile(
+        path.join(root, "packages/orchestrator/phase-guidance-current.json"),
+        "utf8"
+      )
+    ) as {
+      expectations: Record<string, string>;
+      transitions: { changes: { key: string; before: string | null }[] }[];
+    };
+    const introductions = current.transitions
+      .flatMap((transition) => transition.changes)
+      .filter((change) => change.key === key);
+    assert.equal(introductions.length, 1);
+    assert.equal(introductions[0]?.before, null);
+    assert.ok(current.expectations[key]);
+    await validateGuidanceExtraction(root);
+  });
+});
+
+// Any instruction-resource edit drifts the baseline first, so a negative case
+// for the ADR-0050 checks must record its own authorized transition to reach
+// them.
+const withAuthorizedInstructionEdit = async (
+  root: string,
+  edit: () => Promise<void>
+) => {
+  await edit();
+  const proposal = await describeGuidanceTransition(root);
+  const authorityPath =
+    "documentation/decisions/0050-triggered-code-design-assessment.md";
+  await evolveGuidanceBaseline(root, {
+    schema: "banzai-instruction-authorization/v1",
+    schemaVersion: 1,
+    predecessorSha256: proposal.predecessorSha256,
+    authorities: [
+      {
+        path: authorityPath,
+        sha256: resourceDigest(await readFile(path.join(root, authorityPath))),
+        scope: "ADR 0050 section 8; fixture negative case"
+      }
+    ],
+    scope: proposal.changes.map((change) => change.key)
+  });
+  await validateGuidanceExtraction(root);
+};
+
+test("release validation rejects a duplicated structural assessment trigger heading", async () => {
+  await withFixture(async (root) => {
+    const target = path.join(
+      root,
+      "plugins/banzai/policies/engineering-quality.md"
+    );
+    await withAuthorizedInstructionEdit(root, async () => {
+      const source = await readFile(target, "utf8");
+      await writeFile(
+        target,
+        source.replace(
+          "### Structural Assessment Triggers\n",
+          "### Structural Assessment Triggers\n\n### Structural Assessment Triggers\n"
+        )
+      );
+    });
+    const result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^CODE_DESIGN_POLICY_DRIFT /);
+  });
+});
+
+test("release validation rejects a code-design method over its byte budget", async () => {
+  await withFixture(async (root) => {
+    const target = path.join(root, "plugins/banzai/guidance/code-design.md");
+    await withAuthorizedInstructionEdit(root, async () => {
+      const source = await readFile(target, "utf8");
+      const padding = `\nBudget overflow padding. ${"x".repeat(2400)}\n`;
+      await writeFile(target, source + padding);
+    });
+    const result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^CODE_DESIGN_METHOD_DRIFT /);
+  });
+});
+
+test("release validation rejects a consumer skill missing its code-design anchors", async () => {
+  await withFixture(async (root) => {
+    const target = path.join(
+      root,
+      "plugins/banzai/skills/development-plan/SKILL.md"
+    );
+    await withAuthorizedInstructionEdit(root, async () => {
+      const source = await readFile(target, "utf8");
+      await writeFile(
+        target,
+        source.replace(
+          "[Planning Assessment](../../guidance/code-design.md#planning-assessment)",
+          "[Planning Assessment](../../guidance/planning.md#rules)"
+        )
+      );
+    });
+    const result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^CODE_DESIGN_CONSUMER_DRIFT /);
+  });
+});
+
+test("release validation rejects audit instructions that reference the code-design method", async () => {
+  await withFixture(async (root) => {
+    const target = path.join(root, "plugins/banzai/guidance/review.md");
+    await withAuthorizedInstructionEdit(root, async () => {
+      const source = await readFile(target, "utf8");
+      await writeFile(
+        target,
+        source.replace(
+          "For an ADR-0050 structural assessment obligation,",
+          "Read code-design.md, then for an ADR-0050 structural assessment obligation,"
+        )
+      );
+    });
+    const result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^CODE_DESIGN_CONSUMER_DRIFT /);
   });
 });
 

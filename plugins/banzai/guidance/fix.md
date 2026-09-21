@@ -15,6 +15,7 @@ Write the resolved `changeReport` artifact when the fix:
 - creates, supersedes, deprecates, or changes lifecycle metadata on an ADR;
 - touches an escalation trigger;
 - records a material Engineering Quality deviation;
+- meets an Engineering Quality structural assessment trigger;
 - is requested to have an audit trail.
 
 Otherwise verification and a final summary suffice; no change report is required.
@@ -28,8 +29,13 @@ Otherwise verification and a final summary suffice; no change report is required
    regression not already covered and can be done without production changes.
 3. Follow the Engineering Quality authority order and make the smallest
    compatible code/test/doc change that satisfies the request or accepted
-   finding. Do not turn a shadow candidate, rejected concern, or alternative
-   design opinion into extra scope. For approved strict plans, apply Plan Authority
+   finding, meaning the simplest compatible resulting design within that scope
+   rather than the smallest diff. When a structural assessment trigger
+   applies, apply the code-design guidance and record the assessment in the
+   change report; in lite quick-fix work, first show a brief pre-edit chat
+   summary of owner, boundary, dependencies and disposition as visibility
+   rather than an approval request. Do not turn a shadow candidate, rejected
+   concern, or alternative design opinion into extra scope. For approved strict plans, apply Plan Authority
    (`plan-task-completion.md`) supplied by the active execution context: preserve binding directives
    and legacy meaning; a suggested remedy remains optional unless an applicable
    explicit human decision makes it mandatory. Correcting a report cannot replace
@@ -88,7 +94,8 @@ Use the resolved `changeReport` artifact:
 8. ADR conformance or lifecycle result;
 9. material Engineering Quality deviations, or `None`;
 10. verification commands and outcomes;
-11. assurance critique result.
+11. assurance critique result;
+12. structural assessment record or reuse-search citation, when applicable.
 
 
 Use one compact closure record per accepted finding: ID, changed scope, decision,

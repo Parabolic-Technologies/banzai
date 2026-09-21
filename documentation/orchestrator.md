@@ -617,7 +617,7 @@ control status after those commands instead of parsing their human prose.
 ## Runner instruction delivery
 
 The runner embeds six phase resources (`planning`, `implementation`, `review`,
-`fix`, `feature`, `quick-fix`), nine shared guidance resources and their ordered
+`fix`, `feature`, `quick-fix`), ten shared guidance resources and their ordered
 six-policy unions from the plugin. Standalone skills load the shared guidance
 relatively. Selection remains prompt-only. Every fresh or resumed call, retry
 and authorized recovery receives the complete applicable payload, exact bound

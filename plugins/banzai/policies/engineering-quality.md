@@ -1,6 +1,6 @@
 # Engineering Quality
 
-- Owner decision: ADR-0030
+- Owner decision: ADR-0030; ADR-0050 (Structural Assessment Triggers)
 - Consumers: `feature-description`, `architecture-decision`, `development-plan`, `code-writing`, `feature-review`, `feature`, `quick-fix`, `project-manifest`; conditional: None
 - Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)
 - Runner consumers: planning, implementation, review, fix, feature, quick-fix.
@@ -17,7 +17,9 @@ filename as policy authority.
 
 Apply the authority order in the project `AGENTS.md` before any generic quality preference. When two
 remedies satisfy the same higher authority, use the smallest compatible
-remediation rather than requiring a preferred pattern.
+remediation rather than requiring a preferred pattern. Smallest compatible
+means the simplest compatible resulting design, weighing maintenance cost;
+diff size alone is not the measure.
 
 ### EQ-01 — Local authority and context
 
@@ -90,7 +92,9 @@ never creates a blocker by itself.
 Keep the change within the approved task, plan, or accepted-finding scope. Do
 not bundle unrelated cleanup, migration, abstraction work, dependency changes,
 or architecture refactoring unless required for correctness or explicitly
-approved.
+approved. Decomposition recorded in an approved plan or work scope is
+explicitly approved, and private restructuring within approved behavior,
+affected scope and write authority is not unrelated refactoring.
 
 Always active. Objective scope expansion remains actionable through existing
 approval, plan, baseline, and accepted-finding enforcement.
@@ -181,5 +185,52 @@ scope, or compatibility invariant, and observable closure. Meeting this
 threshold does not authorize hard enforcement; a separate approved decision is
 still required.
 
-Engineering Quality adds no phase, skill, hook, gate, test quota, architecture
-methodology, static analyzer, or runtime contract.
+Engineering Quality adds no phase, hook, gate, test quota, or runtime contract.
+Apart from the ADR-0050 structural assessment triggers below and the shared
+`guidance/code-design.md` method they invoke, it adds no skill, architecture
+methodology, or static analyzer.
+
+### Structural Assessment Triggers
+
+Consumers link this section and never copy its trigger list.
+
+- Semantic triggers: a change adds a state-machine state or transition, an
+  execution phase, a resource lifecycle, a mutable-state owner or a dependency
+  across subsystem boundaries; adds an independently changing responsibility; or
+  copies or near-duplicates an existing implementation of the same behavior. A
+  responsibility is independent when its reason to change, collaborators,
+  lifecycle or verification materially differs from its proposed host's. These
+  triggers include pure computations and same-subsystem changes.
+- Reuse-search duty: before adding a helper or rule implementation, search for
+  existing owners by behavior and symbol names. Cite matches considered or the
+  bounded search scope with no match in one line of the caller's existing
+  artifact, or in the final chat report when no artifact is otherwise required.
+  This duty alone creates no full assessment, pre-edit summary or new artifact.
+  A match showing copying or semantic near-duplication, an independent
+  responsibility or another trigger requires the full assessment. Similar syntax
+  alone is not semantic duplication, and merely calling an existing helper
+  triggers neither duty.
+- Numeric triggers: changed executable code in a function, class or file exceeds
+  a size, nesting, complexity or member-count threshold adopted in the target
+  project's configuration and executed by its verification. Warning and error
+  signals both require an assessment, even with unchanged ownership and
+  dependencies and without a Banzai adapter. Without an adopted threshold,
+  measurements are advisory for this duty. A missing or failed measurement of an
+  adopted threshold is unknown coverage, never advisory status or a pass. Banzai
+  defines no universal thresholds.
+- Only a non-executable edit that meets no semantic trigger, such as formatting,
+  comments or documentation text, is exempt. Preserving externally observable
+  behavior never waives a trigger.
+- An applicable prior assessment satisfies a triggered duty by reference while
+  the relevant responsibility and dependencies remain unchanged. Reuse never
+  suppresses trigger detection.
+
+When a trigger applies, apply the shared method in the installed
+`guidance/code-design.md` before dependent code changes and record the
+assessment in the caller's existing permitted artifact. A trigger requires
+analysis, not a human gate. Use applicable baseline check evidence before edits
+and the task's authorized verification afterwards. A newly exposed threshold
+crossing requires assessment and any needed correction before completion; this
+grants no additional command-execution authority. Triggers do not expand ADR
+eligibility or escalation triggers, and existing project hard limits, required
+checks and approved invariants keep their authority.

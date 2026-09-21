@@ -547,3 +547,8 @@ does not authorize future hard enforcement.
 
 - Supersedes: None
 - Superseded by: None
+- Narrowly amended by
+  [ADR-0050](./0050-triggered-code-design-assessment.md), accepted 2026-09-19:
+  structural-assessment triggers, the shared code-design method, conditional
+  assessment records and staged checks. The ten rules, shadow semantics and
+  blocker threshold remain; this body is unchanged.

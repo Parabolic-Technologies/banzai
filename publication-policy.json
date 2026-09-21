@@ -954,6 +954,11 @@
       "sha256": null
     },
     {
+      "path": "plugins/banzai/guidance/code-design.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
       "path": "plugins/banzai/guidance/feature.md",
       "classification": "product",
       "sha256": null

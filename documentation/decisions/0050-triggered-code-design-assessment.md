@@ -2,10 +2,15 @@
 
 ## Status / Date / Owner / Decision Makers
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-09-18
 - Owner: Banzai maintainers
-- Decision makers: Pending explicit user lifecycle decision
+- Decision makers: Project owner; explicitly accepted in chat on 2026-09-19.
+- Accepted proposal SHA-256:
+  `eb565fd7ffffb063754e2625e5726775a9efb982539d57bf1e7e7ab88a22f788`.
+- Review: five proposal review iterations resolved F1–F6; the final resolution
+  review passed the accepted proposal without findings. Reviews are recorded in
+  private work artifacts and were not an independent runner lineage.
 - Amends: ADR-0030 (Vendor-Neutral Engineering Quality Policy)
 
 ## Related Artifacts
@@ -54,7 +59,10 @@ prove that missing triggers caused the debt or that a method will fix it.
 Target state: structural quality becomes an explicit, triggered responsibility of
 the planner and implementer in both standalone and runner execution. Review
 verifies obligations and remains the backstop, not the first place where module
-design is considered.
+design is considered. Success means less concentration of independently changing
+responsibilities, fewer competing implementations of the same rule, and narrower
+shared-state access in changed code; producing assessment records alone is not
+success. Existing concentration debt still needs separately scoped remediation.
 
 Decision question: Should Banzai adopt named structural-assessment triggers and a
 shared code-design method, delivered through existing skills and runner phases
@@ -98,8 +106,8 @@ Add size, nesting and complexity limits or a CI ratchet without a design method.
 - Costs and rejection reason: invites gaming by arbitrary extraction and wide
   context objects; does not identify state ownership, lifecycle or dependency
   direction; universal thresholds would override repository authority. Rejected
-  as the sole remedy. Project-configured measurements remain trigger inputs in
-  stage 2b.
+  as the sole remedy. Project-configured measurements trigger assessment at
+  stage 2a; stage 2b automates coverage checks.
 
 ### Option 3: Copy the method into each consumer's guidance
 
@@ -174,23 +182,42 @@ section and never copy its trigger list.
 
 - Semantic triggers, active from stage 2a: a change adds a state-machine state or
   transition, an execution phase, a resource lifecycle, a mutable-state owner or
-  a dependency across subsystem boundaries.
-- Numeric triggers: a change to executable code inside a function, class or file
-  beyond a project-calibrated size, nesting, complexity or member-count
-  threshold. Until
-  stage 2b activates a supported checker for that stack and metric together with
-  calibrated thresholds, a numeric signal is advisory for this duty. Banzai
-  defines no universal thresholds; they live in the target project's
-  configuration.
-- An edit that leaves responsibilities, owners, dependencies and lifecycles
-  unchanged, such as formatting, comments or documentation text, does not
-  trigger. Preserving externally observable behavior never waives a semantic
-  trigger: a behavior-preserving extraction that creates an owner or changes a
-  subsystem dependency is assessed. An applicable prior assessment is reused
-  while the relevant responsibility and dependencies remain unchanged.
+  a dependency across subsystem boundaries; adds an independently changing
+  responsibility; or copies or near-duplicates an existing implementation of
+  the same behavior. A responsibility is independent when its reason to change,
+  collaborators, lifecycle or verification materially differs from its proposed
+  host's. These triggers include pure computations and same-subsystem changes.
+- Reuse-search duty, active from stage 2a: before adding a helper or rule
+  implementation, search for existing owners by behavior and symbol names.
+  Cite matches considered or the bounded search scope with no match in one line
+  of the caller's existing artifact; if no artifact is otherwise required, use
+  the final chat report. This duty alone creates neither a full assessment nor
+  a lite pre-edit summary or new artifact. A match showing copying or semantic
+  near-duplication, an independent responsibility, or another trigger requires
+  the full assessment. Similar syntax alone is not semantic duplication. Merely
+  calling an existing helper does not by itself trigger either duty.
+- Numeric triggers, active from stage 2a: changed executable code in a function,
+  class or file exceeds a size, nesting, complexity or member-count threshold
+  adopted in the target project's configuration and executed by its verification.
+  Warning and error signals both require assessment, even with unchanged
+  ownership and dependencies and without a Banzai adapter. Treat those configured
+  values as project authority; invent no universal thresholds. Without an adopted
+  threshold, measurements remain advisory for this duty. Missing or failed
+  measurement of an adopted threshold is unknown coverage, not advisory status
+  or a pass. Stage 2b automates trigger-to-record coverage, not duty activation.
+- Only a non-executable edit that meets no semantic trigger, such as formatting,
+  comments or documentation text, is exempt. Preserving externally observable
+  behavior never waives a trigger: a behavior-preserving extraction that creates
+  an owner or changes a subsystem dependency is assessed.
+- An applicable prior assessment satisfies a triggered duty by reference while
+  the relevant responsibility and dependencies remain unchanged. Reuse never
+  suppresses trigger detection.
 
 A trigger requires analysis before dependent code changes, not a new human
-gate. It does not expand ADR eligibility or the existing escalation triggers,
+gate. Use applicable baseline check evidence before edits and refresh it through
+the task's authorized verification. A newly exposed threshold crossing requires
+assessment and any needed correction before completion; late discovery is not
+a waiver, and this rule grants no additional command-execution authority. It does not expand ADR eligibility or the existing escalation triggers,
 which retain their decisions where a change overlaps them. Existing project hard
 limits, required checks and approved invariants keep their authority
 independently of this rollout.
@@ -206,12 +233,40 @@ existing owners; separation of pure decisions from effects only when read
 timing, failure and resource ownership are preserved; and rejection of
 extraction that passes a whole coordinator or shared mutable context.
 
+Ownership Discovery also serves the lightweight reuse-search duty. The remaining
+method and full record apply only when an assessment trigger holds.
+
+For triggered work, the method must produce these outcomes before dependent
+edits and verify them against the resulting code:
+
+- Identify the owner of each changed responsibility and the relevant existing
+  implementations and callers. Search by behavior as well as symbol names before
+  adding a helper or rule; cite matches considered or the bounded search with
+  no match. Similar syntax alone does not establish a shared responsibility.
+- Keep one implementation owner for the same rule unless a concrete contract,
+  dependency, lifecycle or compatibility constraint requires separation. Name
+  that constraint and the divergence risk for an intentional duplicate.
+- Give an independently changing responsibility an explicit boundary; appending
+  it to an overloaded owner requires the retention rationale below. Do not
+  broaden shared mutable access or expose a coordinator merely to shorten files.
+- State task-specific ownership, reuse and effect invariants and verify them
+  against source. File count, line reduction and record presence are not proof.
+
+`retained` must explain why the existing boundary fits the changed responsibility,
+what coupling or duplication the change adds or avoids, and why the smallest
+plausible extraction or reuse is less suitable. A smaller diff, passing behavior
+tests or legacy precedent alone is insufficient. Where a scope or compatibility
+constraint prevents improvement, name the remaining debt and constraint; do not
+claim structural improvement or waive an obligation. Escalate an actual authority
+conflict through the existing workflow. No repository-wide cleanup is required.
+
 The budget is a binding ceiling of 2,400 UTF-8 bytes for the whole file. Line
 count is a readability guide of about 40 lines. An over-budget draft is
 compressed; its content must not move into another always-delivered resource,
 and required duties must not be dropped. Raising the ceiling requires a new ADR.
-Review verifies compliance with the ceiling and cannot grant another. Direct-consultation, save and handoff instructions belong to the stage 3
-entry point, not to this resource.
+Review verifies compliance with the ceiling and cannot grant another. Direct
+consultation, save and handoff instructions belong to the stage 3 entry point,
+not to this resource.
 
 Consumers use the established `Read and apply` convention with explicit section
 anchors and name the common sections they require:
@@ -244,14 +299,16 @@ permitted artifact: the strict plan and implementation report, lite `work.md`,
 or the quick-fix change report produced for triggered work. Runner routes use
 their existing role artifacts. The record states the trigger, affected container
 and evidence; owner, collaborators, effects and allowed dependency direction; a
-disposition of `reused`, `extracted` or `retained` with a concrete reason;
+disposition of `reused`, `extracted` or `retained` with the section 2 evidence
+and rationale, including reuse-search results and any intentional duplication;
 invariants and how each is verified; and the authority outcome.
 
 Before triggered lite edits, show a brief chat summary of owner, boundary,
 dependencies and disposition. This is visibility, not an approval request. A
 retained assessment is input, not approval, and is revalidated against current
 source before reuse. A `retained` disposition never waives a binding obligation
-or hard limit. Untriggered work gains no artifact duty. Add no artifact role,
+or hard limit. Search-only work retains just the one-line citation from section 1;
+untriggered work gains no new artifact duty. Add no artifact role,
 `taskCompletion` field or completion schema version.
 
 ### 4. Binding obligations through Plan Authority
@@ -265,17 +322,34 @@ them. Include needed extraction and its documentation or policy updates in
 scope. Obligations need a real design rationale, never a relabelled preference.
 Never retrofit obligations into approved plans.
 
+The section 2 assessment duties also apply in triggered standalone lite work: capture concrete
+invariants in `work.md` or the triggered fix report before dependent edits and
+check the resulting code against them. These are implementation commitments
+under existing task authority, not human-approved plans. Material design
+changes require reassessment; a record cannot authorize an existing escalation
+or silently erase an obligation after a failure.
+
 A violation of an approved obligation is an ordinary plan-conformance finding.
 ADR-0030 shadow semantics are unchanged: EQ-only observations stay shadow, and
 EQ-02, EQ-06 and EQ-10 never block by themselves.
+Missing required searches (including search-only citations) or rationale, source evidence contradicting the
+assessment, and violations of applicable explicit invariants are auditable
+obligation failures under this amendment. Findings still need exact evidence,
+concrete impact and observable closure through existing review and triage;
+there is no automatic structural blocker or finding merely because a reviewer
+prefers another decomposition. These duties do not promote general cohesion
+preferences out of shadow mode.
 
 ### 5. Review audit duty
 
 Add a minimal audit duty to `guidance/review.md`: determine which assessment
 obligation applies, inspect the record and its source identity, check available
-coverage evidence, and verify approved invariants against code. An assessment's
-presence does not prove cohesion, missing coverage is not a pass, and an
-unsupported advisory metric creates no duty. Review never receives the
+coverage evidence, check section 2 outcome evidence and rationale, and verify
+applicable invariants against code. Review guidance names the required search,
+retention and source-conformance evidence without embedding the authoring
+procedure. An assessment's presence does not prove cohesion, and missing coverage
+is not a pass. A metric without an adopted project threshold creates no numeric
+duty; a missing Banzai adapter never waives an existing duty. Review never receives the
 design-authoring method. Resolution-review convergence is unchanged.
 
 ### 6. Numeric-trigger coverage (stage 2b)
@@ -290,10 +364,15 @@ passes explicit source, configuration and report inputs.
 The checker joins a measured trigger inventory to assessment records bound to a
 source snapshot, including moved or removed containers. A missing adapter,
 parser, baseline, metric or record, or a stale or failed run, yields incomplete
-or failed evidence, never a pass. A numeric duty becomes mandatory per stack and
-metric only when calibrated thresholds and a supported checker ship together.
-Once required, a failure never returns to advisory status. No parser is bundled,
+or failed evidence, never a pass. Numeric assessment duties already apply under
+section 1 at stage 2a, using project verification output and source inspection.
+Activate mandatory automated coverage per stack and metric only with a supported
+checker. Lack of that adapter does not defer the assessment duty; once automated
+coverage is required, a failure never returns it to advisory status. No parser is bundled,
 installed or globally discovered, and no project configuration is rewritten.
+The checker proves numeric-trigger coverage only; it cannot certify ownership,
+deduplication, retention rationale or structural quality. Semantic trigger and
+outcome checks remain source-based planning, implementation and review duties.
 
 Stage 2b may add newly versioned plugin-local contracts for the checker's
 request, result and in-report record grammar. Existing contract versions,
@@ -306,7 +385,8 @@ Authorize a twelfth discoverable skill, `code-design`, only when all of these
 conditions, fixed before results are observed, are met:
 
 1. stage 2a has shipped and its evaluation covers standalone strict, `feature`,
-   `quick-fix` and runner work;
+   `quick-fix` and runner work, with a positive outcome against the predeclared
+   section 9 criteria, not merely complete records;
 2. a bounded, unreleased prototype produced at least three direct consultations
    on distinct real targets, and at least two handoffs were consumed by strict
    planning or a quick-fix after source revalidation;
@@ -339,13 +419,13 @@ evidence.
 
 Deliver in this order:
 
-| Stage | Scope                                                                                                               |
-| ----- | ------------------------------------------------------------------------------------------------------------------- |
-| 1     | This ADR, followed by approved work scope for the policy section, wording reconciliation and review audit duty.     |
-| 2a    | Shared method, semantic triggers, pre-edit visibility and conditional records in existing skills and runner phases. |
-| 2b    | Calibrated numeric triggers and the coverage checker, activated per supported stack and metric.                     |
-| 3     | Public `code-design` entry point, only under section 7.                                                             |
-| 4     | Selective section delivery. Not authorized here; requires a separate decision backed by measured context cost.      |
+| Stage | Scope                                                                                                                    |
+| ----- | ------------------------------------------------------------------------------------------------------------------------ |
+| 1     | This ADR, followed by approved work scope for the policy section, wording reconciliation and review audit duty.          |
+| 2a    | Shared method, tiered reuse search, semantic/project-numeric duties and conditional records in skills and runner phases. |
+| 2b    | Automated trigger-to-record coverage, activated per supported stack and metric.                                          |
+| 3     | Public `code-design` entry point, only under section 7.                                                                  |
+| 4     | Selective section delivery. Not authorized here; requires a separate decision backed by measured context cost.           |
 
 Stage 2a must not wait for stage 2b, and stage 3 may follow stage 2a without
 additional adapters. Each instruction change is an ADR-0044 transition that cites
@@ -354,13 +434,48 @@ budgets apply to every delivered byte; required instructions are never
 truncated. Changing packaged `AGENTS.md` bootstrap templates is not a delivery
 mechanism for these duties.
 
+### 9. Outcome evaluation and bounded legacy pilot
+
+Before observing pilot results, the approved evaluation scope fixes comparable
+tasks, source baselines, execution modes, a structural-concern rubric and
+decision criteria for benefit versus added effort. Compare current practice
+with stage 2a, then stage 2a with stage 3; identify stage 2b separately. Assess
+source changes using the same rubric for shadow and ordinary observations:
+
+- newly concentrated independent responsibilities and their actual owners;
+- competing implementations of the same rule, distinguishing justified
+  separation from avoidable duplication;
+- changes in shared mutable access and dependency coupling;
+- concentration of privately owned types in shared contract/type modules,
+  assessed against their actual owners and consumers; a repository-mandated
+  shared types module is not itself a regression or grounds to override that
+  convention;
+- structural rework after first review, fix cycles and total reasoning/review
+  effort, including pre-edit assessment cost.
+
+Use changed responsibilities/tasks as comparison units and report sample counts,
+task differences, regressions and uncertainty. Lines and complexity locate
+hotspots; they are not standalone quality scores. Record compliance and checker
+coverage are process measures, reported separately from code outcomes. No
+improvement, excessive cost or insufficient evidence requires revising or
+extending the pilot; it cannot be presented as demonstrated effectiveness or
+used to qualify stage 3.
+
+Include one separately authorized, bounded legacy-hotspot refactor to test that
+the method can guide an actual extraction or consolidation while preserving
+behavior. Capture before/after ownership, reuse, state access and relevant
+behavioral evidence. It complements comparable feature/fix tasks rather than
+substituting for them: one successful extraction does not demonstrate prevention. Selection,
+scope and any repository boundary changes belong to its own approved work;
+this ADR does not authorize editing `WorkflowRunner` or any client project.
+
 ### Amended decisions
 
-| Decision                          | Change                                                                                                                                                                                                                               | Preserved                                                                                                                                   |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| ADR-0030                          | Its no-skill, no-methodology and no-analyzer boundaries admit sections 1–7. The authority-order phrase "smallest compatible remediation" means the simplest compatible resulting design. EQ-07 receives the section 2 clarification. | Ten rules, authority order, finding model, shadow semantics, resolution convergence, blocker threshold, and no mandated architecture style. |
-| ADR-0036, as amended by 0040/0041 | The Engineering Quality policy gains one named section.                                                                                                                                                                              | Six-policy layout, relative resolution, consumer matrix and fail-closed availability.                                                       |
-| ADR-0042                          | Adds the `code-design` guidance resource to five phase lists; stage 3 adds one discoverable skill.                                                                                                                                   | Composition order, whole-body delivery, cross-vendor text parity, review guidance boundary and the historical extraction scope.             |
+| Decision                          | Change                                                                                                                                                                                                                                                                                                   | Preserved                                                                                                                                   |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| ADR-0030                          | Its no-skill, no-methodology and no-analyzer boundaries admit sections 1–9, including triggered outcome duties and their evidence requirements. The authority-order phrase "smallest compatible remediation" means the simplest compatible resulting design. EQ-07 receives the section 2 clarification. | Ten rules, authority order, finding model, shadow semantics, resolution convergence, blocker threshold, and no mandated architecture style. |
+| ADR-0036, as amended by 0040/0041 | The Engineering Quality policy gains one named section.                                                                                                                                                                                                                                                  | Six-policy layout, relative resolution, consumer matrix and fail-closed availability.                                                       |
+| ADR-0042                          | Adds the `code-design` guidance resource to five phase lists; stage 3 adds one discoverable skill.                                                                                                                                                                                                       | Composition order, whole-body delivery, cross-vendor text parity, review guidance boundary and the historical extraction scope.             |
 
 ## Explicit Non-Goals
 
@@ -397,8 +512,8 @@ Negative:
 
 - every call of five runner phases carries up to 2,400 additional bytes,
   including retries and recovery;
-- in stage 2a semantic triggers depend on agent judgment, with review as the
-  backstop;
+- in stage 2a semantic triggers and numeric trigger-to-record matching depend
+  on agent judgment and project verification evidence, with review as backstop;
 - standalone skills cannot guarantee that an agent invokes the stage 2b checker;
 - stage 2b adds a checker, adapters and new versioned contracts to maintain;
 - a twelfth skill widens the selection surface.
@@ -421,7 +536,8 @@ Required follow-ups:
   changes;
 - separate stage 2b planning for checker contracts and the first adapter;
 - a repository-local decision on Banzai's own concentration debt and manifest
-  wording.
+  wording, and separately approved scope for the bounded legacy pilot in
+  section 9.
 
 ## Compliance and Confirmation
 
@@ -431,9 +547,20 @@ Implementation and review must confirm:
    `Structural Assessment Triggers` section with semantic triggers, the numeric
    activation rule and exclusions. EQ-01 through EQ-10, shadow semantics and the
    blocker threshold are unchanged apart from the enumerated amendments. The
-   exclusion exempts a formatting- or comment-only edit, while a
-   behavior-preserving extraction that creates an owner or changes a subsystem
-   dependency is assessed.
+   exemption covers only a non-executable edit that meets no semantic trigger,
+   such as a formatting- or comment-only edit. A behavior-preserving extraction
+   that creates an owner or changes a subsystem dependency is assessed. Changed
+   executable code above an active numeric threshold requires an assessment even
+   with unchanged ownership and dependencies. Configured project warning/error
+   signals activate this duty at stage 2a without a Banzai adapter; measurements
+   without an adopted threshold stay advisory. Missing measurement of an adopted
+   threshold is unknown coverage, not a waiver. Reuse of an applicable record satisfies a duty without
+   suppressing trigger detection.
+   Routine helper creation requires only a reuse-search citation unless another
+   trigger applies. Copying or semantic near-duplication and a new independent
+   responsibility require a full assessment at stage 2a even without state,
+   lifecycle, cross-subsystem or numeric changes. Existing-helper use alone
+   remains untriggered.
 2. "Smallest compatible" wording in the policy and in planning, implementation,
    feature and fix guidance distinguishes the resulting design from diff size,
    and the EQ-07 clarification is present.
@@ -446,9 +573,19 @@ Implementation and review must confirm:
 5. Instruction changes pass ADR-0044 transition validation citing this ADR, the
    historical root stays unchanged, and `npm run release:check` passes.
 6. Stage 2a acceptance uses an installed plugin in an adopted project without the
-   orchestrator, covering strict, `feature` and `quick-fix`: semantic triggers,
-   pre-edit summaries, conditional records and no artifacts for untriggered work,
-   plus equivalent runner behavior. No numeric coverage is claimed.
+   orchestrator, covering strict, `feature` and `quick-fix`: semantic and configured
+   numeric triggers, pre-edit summaries, conditional records and no new artifacts
+   for search-only or untriggered work,
+   plus equivalent runner behavior. Include pure-rule duplication, independent
+   responsibility, justified retention and unjustified retention cases. Include a
+   routine private formatting helper with one search citation and no full record
+   or pre-edit summary, plus a report-free quick-fix using a chat citation. Inspect
+   reuse-search evidence, resulting owners and invariant conformance, including
+   lite work; a filled record with contradictory source or only a small-diff
+   rationale fails the applicable duty. Include growth beyond a configured warning
+   threshold without a semantic trigger: project check evidence requires an
+   assessment without an adapter. Verify no-threshold advisory and missing-check
+   unknown cases. Stage 2a claims no automated trigger-to-record coverage.
 7. At stage 2a, `plugins/banzai/contracts/**` and the completion, phase-result,
    review-result and work-binding schemas are byte-identical.
 8. Stage 2b acceptance shows equivalent standalone and runner coverage decisions
@@ -463,7 +600,10 @@ Implementation and review must confirm:
     method's effect, and stage 2a versus stage 3 for the entry point's value. It
     applies one structural-concern rubric across shadow and ordinary categories,
     separates execution modes and stage 2b effects, and reports inconclusive
-    evidence as inconclusive.
+    evidence as inconclusive. Apply section 9's predeclared code-outcome and
+    effort criteria; distinguish record compliance from effectiveness. Include
+    evidence from the separately authorized bounded legacy pilot. Stage 3 cannot
+    qualify on process compliance alone.
 
 ## Lifecycle Links
 

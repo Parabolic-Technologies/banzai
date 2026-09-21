@@ -97,6 +97,14 @@ mechanism reachable in this codebase, why current evidence does not cover it,
 and the observable fix acceptance. An exposure-class label, a generic threat
 name, or a framework default alone is not a finding.
 
+For an ADR-0050 structural assessment obligation, determine which trigger or
+reuse-search duty applies, inspect the record and its source identity, check
+available coverage evidence, check reuse-search and retention evidence, and
+verify applicable invariants against code. Record presence does not prove
+cohesion, missing coverage is not a pass, and an advisory metric creates no
+duty. Report findings under existing authority; EQ shadow treatment is
+unchanged.
+
 For an accepted-finding resolution, inspect the accepted IDs, changed scope,
 current binding/approved authority, direct physical origins and current
 applicability. Keep review independent of the builder transcript. Executed,

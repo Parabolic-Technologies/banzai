@@ -289,7 +289,7 @@ test("actual source/plugin/npm archive resources and source-map bytes must descr
     assert.equal(
       (await checkInstructionPayloads(root, { source, plugin, npm }))
         .resourceCount,
-      23
+      24
     );
     const policy = JSON.parse(
       await readFile(path.join(root, "publication-policy.json"), "utf8")

@@ -12,7 +12,12 @@ and policies; entry, host transport and contract mechanics remain with the calle
 5. Create/update the resolved `work` artifact.
 7. Apply the Engineering Quality authority order and only constraints material
    to the changed surface. Keep the change bounded and use the smallest
-   compatible repository mechanism; do not add a checklist or methodology.
+   compatible repository mechanism, meaning the simplest compatible resulting
+   design rather than the smallest diff; do not add a checklist or methodology.
+   When a structural assessment trigger applies, apply the code-design
+   guidance, show a brief pre-edit chat summary of owner, boundary,
+   dependencies and disposition as visibility rather than an approval request,
+   and record the assessment in `work.md`.
 8. Implement code and proportionate assurance evidence together under the Test
    Assurance policy (`test-assurance.md`) supplied by the active execution context. Every material claim needs an identifiable
    existing evidence owner, but Engineering Quality does not select tests.
@@ -47,8 +52,8 @@ Write these sections:
    and the requirement covering it, or one line stating that none applies.
 6. **Implementation Plan**: ordered bullets naming units, materially changed
    boundaries or dependency/lifecycle/compatibility constraints when present,
-   assurance evidence owners, and manifest follow-up. Do not add a per-rule
-   checklist.
+   assurance evidence owners, any structural assessment record or reuse-search
+   citation, and manifest follow-up. Do not add a per-rule checklist.
 7. **Files Changed**: production, tests, docs/config; one-line reason each.
 8. **Verification**: commands, outcomes, and FR-to-implementation/assurance
    mapping.

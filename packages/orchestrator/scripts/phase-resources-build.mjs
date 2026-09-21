@@ -14,7 +14,7 @@ import path from "node:path";
 
 export const PHASE_DEFINITIONS = {
   planning: {
-    guidance: ["requirements", "architecture", "planning"],
+    guidance: ["requirements", "architecture", "planning", "code-design"],
     policies: [
       "decision-consultation",
       "test-assurance",
@@ -26,7 +26,7 @@ export const PHASE_DEFINITIONS = {
     conditionalPolicies: ["decision-consultation"]
   },
   implementation: {
-    guidance: ["implementation", "assurance", "manifest"],
+    guidance: ["implementation", "assurance", "manifest", "code-design"],
     policies: [
       "test-assurance",
       "security-assurance",
@@ -48,7 +48,7 @@ export const PHASE_DEFINITIONS = {
     conditionalPolicies: ["plan-task-completion"]
   },
   fix: {
-    guidance: ["fix", "manifest"],
+    guidance: ["fix", "manifest", "code-design"],
     policies: [
       "test-assurance",
       "security-assurance",
@@ -59,7 +59,7 @@ export const PHASE_DEFINITIONS = {
     conditionalPolicies: ["plan-task-completion"]
   },
   feature: {
-    guidance: ["feature", "manifest"],
+    guidance: ["feature", "manifest", "code-design"],
     policies: [
       "test-assurance",
       "security-assurance",
@@ -69,7 +69,7 @@ export const PHASE_DEFINITIONS = {
     conditionalPolicies: []
   },
   "quick-fix": {
-    guidance: ["fix", "manifest"],
+    guidance: ["fix", "manifest", "code-design"],
     policies: [
       "test-assurance",
       "security-assurance",
@@ -546,9 +546,17 @@ function rootExpectations(original) {
   );
 }
 
-function rawResourceKeys() {
-  return INSTRUCTION_RESOURCE_IDS.filter((id) =>
-    /^(phases|policies)\//u.test(id)
+function rawResourceKeys(original) {
+  // Guidance extracted from skill sections is pinned per section by the
+  // immutable root; guidance authored directly has no section origin, so it
+  // needs a raw key to be covered at all.
+  const extracted = new Set(
+    original.sources.map((source) => `guidance/${source.guidance}.md`)
+  );
+  return INSTRUCTION_RESOURCE_IDS.filter(
+    (id) =>
+      /^(phases|policies)\//u.test(id) ||
+      (id.startsWith("guidance/") && !extracted.has(id))
   ).map((id) => `plugins/banzai/${id}`);
 }
 
@@ -775,7 +783,7 @@ async function applyTransition(root, original, previous, transition) {
   const allowed = new Set([
     ...retainedKeys,
     ...Object.keys(rootExpectations(original)),
-    ...rawResourceKeys()
+    ...rawResourceKeys(original)
   ]);
   const next = { ...previous };
   let last = null;
@@ -855,7 +863,7 @@ function projectInventory(original, expectations) {
   for (const file of Object.keys(inventory.preservedFiles))
     inventory.preservedFiles[file] = expectations[file];
   const resources = Object.fromEntries(
-    rawResourceKeys()
+    rawResourceKeys(original)
       .filter((key) => expectations[key])
       .map((key) => [key.slice("plugins/banzai/".length), expectations[key]])
   );
@@ -935,7 +943,7 @@ async function captureExpectations(root, original) {
       text = text.replace(/("version"\s*:\s*)"[^"\n]+"/, '$1"2.3.0"');
     expected[key] = resourceDigest(text);
   }
-  for (const key of rawResourceKeys())
+  for (const key of rawResourceKeys(original))
     expected[key] = resourceDigest(
       (await declaredResource(root, key.slice("plugins/banzai/".length))).text
     );

@@ -25,12 +25,12 @@ const PHASES: InstructionPhase[] = [
 
 test("embedded phase bodies preserve all canonical UTF-8 bytes in the exact resource order", async () => {
   const guidance = {
-    planning: ["requirements", "architecture", "planning"],
-    implementation: ["implementation", "assurance", "manifest"],
+    planning: ["requirements", "architecture", "planning", "code-design"],
+    implementation: ["implementation", "assurance", "manifest", "code-design"],
     review: ["review"],
-    fix: ["fix", "manifest"],
-    feature: ["feature", "manifest"],
-    "quick-fix": ["fix", "manifest"]
+    fix: ["fix", "manifest", "code-design"],
+    feature: ["feature", "manifest", "code-design"],
+    "quick-fix": ["fix", "manifest", "code-design"]
   };
   for (const phase of PHASES) {
     const ids = instructionResourceIds([phase]).filter(
@@ -58,6 +58,30 @@ test("embedded phase bodies preserve all canonical UTF-8 bytes in the exact reso
     assert.deepEqual(phaseInstructionParts(phase), source, phase);
     assert.equal(ids.filter((id) => id.startsWith("phases/")).length, 1);
     assert.equal(new Set(ids).size, ids.length);
+  }
+});
+
+test("composed review instructions exclude the code-design method that its consumers receive", async () => {
+  const method = await readFile(
+    path.join(SOURCE_PLUGIN, "guidance/code-design.md"),
+    "utf8"
+  );
+  // Reviewers assess the recorded assessment under existing authority; giving
+  // them the method itself would couple the audit to the design procedure.
+  const review = phaseInstructionParts("review").join("\n\n");
+  assert.ok(!review.includes(method));
+  assert.ok(!review.includes("# Code Design Guidance"));
+  for (const phase of [
+    "planning",
+    "implementation",
+    "fix",
+    "feature",
+    "quick-fix"
+  ] as const) {
+    assert.ok(
+      phaseInstructionParts(phase).join("\n\n").includes(method),
+      phase
+    );
   }
 });
 
