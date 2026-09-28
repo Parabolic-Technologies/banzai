@@ -500,6 +500,19 @@ for (const baseline of ["present", "absent", "unrelated"] as const) {
         assert.doesNotMatch(reason, /never matched/);
       }
       assert.doesNotMatch(reason, new RegExp(SECRET));
+
+      // FR5: an action is offered only when it can change the condition. A
+      // recorded match makes the bytes restorable, so retry stays available;
+      // an unestablished history leaves cancelling as the honest remainder.
+      const status = await f.runner.status();
+      if (baseline === "present") {
+        assert.equal(status.retry.eligible, true, status.retry.reason);
+        assert.equal(status.nextAction, "banzai retry");
+      } else {
+        assert.equal(status.retry.eligible, false, status.retry.reason);
+        assert.match(status.retry.reason, /fails identically/);
+        assert.equal(status.nextAction, "banzai cancel");
+      }
     } finally {
       await f.repository.dispose();
     }

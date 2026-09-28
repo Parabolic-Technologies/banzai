@@ -33780,6 +33780,7 @@ var DIGEST_REJECTED_FAILURE_CODES = /* @__PURE__ */ new Set([
   "RESULT_DIGEST_REJECTED",
   "PLAN_TASK_COMPLETION_INVALID"
 ]);
+var DIGEST_UNRESOLVED_BLOCK_PREFIX = "[RESULT_DIGEST_UNRESOLVED]";
 function taskVerificationDigestDetail(error) {
   const candidate = error;
   return (candidate.code === "TASK_VERIFICATION_DIGEST_MISMATCH" || candidate.code === "TASK_VERIFICATION_SOURCE_TOO_LARGE") && candidate.detail !== void 0 ? candidate.detail : null;
@@ -36644,6 +36645,13 @@ var WorkflowRunner = class {
         };
       }
       if (state.blockedFrom === "verifying") {
+        if (state.blockReason?.startsWith(DIGEST_UNRESOLVED_BLOCK_PREFIX)) {
+          return {
+            eligible: false,
+            reason: "A digest this run's result authored does not match the bytes it names, and no recorded baseline shows those bytes changed after acceptance. Retrying reads the same bytes and fails identically. Inspect the checkout, then cancel the run.",
+            attemptId: null
+          };
+        }
         try {
           if (state.verificationMode === "task") {
             const latest2 = (await readTaskVerificationAttempts(
@@ -42063,9 +42071,9 @@ var WorkflowRunner = class {
       (comparison) => comparison.checkId === detail.checkId && comparison.path === detail.path && comparison.declared === detail.declared
     ) ?? null;
     if (recorded === null) {
-      return `${base} This run recorded no acceptance baseline for that digest, so whether it ever matched is unknown.`;
+      return `${DIGEST_UNRESOLVED_BLOCK_PREFIX} ${base} This run recorded no acceptance baseline for that digest, so whether it ever matched is unknown.`;
     }
-    return recorded.matched ? `${base} It matched when the result was accepted, so the source changed after acceptance.` : `${base} It did not match when the result was accepted, so it never matched.`;
+    return recorded.matched ? `${base} It matched when the result was accepted, so the source changed after acceptance.` : `${DIGEST_UNRESOLVED_BLOCK_PREFIX} ${base} It did not match when the result was accepted, so it never matched.`;
   }
   async executeTaskChecks(state, config, sourceAttempt, retryOf) {
     try {

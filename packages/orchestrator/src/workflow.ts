@@ -474,14 +474,25 @@ const TERMINAL_INTEGRITY_FAILURE_CODES = new Set([
 ]);
 
 /**
- * Failure codes that mark an attempt whose result was refused because a digest
- * it authored disagreed with the bytes it named. Both are produced only by the
- * acceptance comparison, and both are paired with a rejected digest record.
+ * Failure codes an attempt may carry when a digest it authored disagreed with
+ * the bytes it named. `PLAN_TASK_COMPLETION_INVALID` is a long-standing
+ * completion-validation code produced elsewhere too, so membership here is
+ * never sufficient: `digestRejectedRecoveryEligibility` admits an attempt only
+ * together with a rejected digest record attributed to that exact attempt.
+ * Dropping that conjunct would widen recovery authority.
  */
 const DIGEST_REJECTED_FAILURE_CODES = new Set([
   "RESULT_DIGEST_REJECTED",
   "PLAN_TASK_COMPLETION_INVALID"
 ]);
+
+/**
+ * Marks a consumption-time digest rejection that no command can clear: the
+ * bytes disagree and no recorded baseline establishes a target to restore
+ * them to. Read back by retry eligibility exactly as the approval-invalidation
+ * reason is, so the run never advertises an action that must fail identically.
+ */
+const DIGEST_UNRESOLVED_BLOCK_PREFIX = "[RESULT_DIGEST_UNRESOLVED]";
 
 /** The structured facts a shared-library digest failure carries, if any. */
 function taskVerificationDigestDetail(
@@ -4334,6 +4345,14 @@ export class WorkflowRunner {
         };
       }
       if (state.blockedFrom === "verifying") {
+        if (state.blockReason?.startsWith(DIGEST_UNRESOLVED_BLOCK_PREFIX)) {
+          return {
+            eligible: false,
+            reason:
+              "A digest this run's result authored does not match the bytes it names, and no recorded baseline shows those bytes changed after acceptance. Retrying reads the same bytes and fails identically. Inspect the checkout, then cancel the run.",
+            attemptId: null
+          };
+        }
         try {
           if (state.verificationMode === "task") {
             const latest = (
@@ -11463,11 +11482,13 @@ export class WorkflowRunner {
           comparison.declared === detail.declared
       ) ?? null;
     if (recorded === null) {
-      return `${base} This run recorded no acceptance baseline for that digest, so whether it ever matched is unknown.`;
+      return `${DIGEST_UNRESOLVED_BLOCK_PREFIX} ${base} This run recorded no acceptance baseline for that digest, so whether it ever matched is unknown.`;
     }
+    // Only a recorded match makes the bytes restorable to a known target, so
+    // only that case leaves an action an operator can actually take.
     return recorded.matched
       ? `${base} It matched when the result was accepted, so the source changed after acceptance.`
-      : `${base} It did not match when the result was accepted, so it never matched.`;
+      : `${DIGEST_UNRESOLVED_BLOCK_PREFIX} ${base} It did not match when the result was accepted, so it never matched.`;
   }
 
   private async executeTaskChecks(
