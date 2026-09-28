@@ -1,9 +1,11 @@
 import { validateConfigurationStateEnvelope } from "./configuration-prerequisite.js";
 import {
+  comparableTaskVerificationSources,
   parseTaskVerificationCandidates,
   parseTaskVerificationPolicy,
   parseVerificationConfiguration
 } from "./verification-evidence.js";
+import type { TaskVerificationCandidates } from "./verification-evidence.js";
 import { createHash } from "node:crypto";
 import { BanzaiError } from "./errors.js";
 import { vendorFor } from "./models.js";
@@ -24,6 +26,8 @@ import {
   PLAN_TASK_COMPLETION_SCHEMA_VERSION,
   RECOVERY_AUTHORIZATION_SCHEMA,
   RECOVERY_AUTHORIZATION_SCHEMA_VERSION,
+  RESULT_DIGEST_EVIDENCE_SCHEMA,
+  RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION,
   STRICT_MODEL_ATTEMPT_SCHEMA_VERSION,
   TERMINAL_CHECKPOINT_SCHEMA,
   TERMINAL_CHECKPOINT_SCHEMA_V2,
@@ -76,6 +80,8 @@ import {
   type PlanTaskCompletionLedger,
   type PlanTaskCompletionRecord,
   type RecoveryAuthorization,
+  type ResultDigestComparison,
+  type ResultDigestEvidence,
   type ReviewEvidence,
   type ReviewFinding,
   type ReviewResult,
@@ -873,6 +879,189 @@ function parsePhaseResultFields(
   };
 }
 
+/** A model-authored digest in an accepted result disagreed with its bytes. */
+export class ResultDigestRejectedError extends BanzaiError {
+  constructor(
+    message: string,
+    readonly comparisons: ResultDigestComparison[]
+  ) {
+    super("RESULT_DIGEST_REJECTED", message);
+    this.name = "ResultDigestRejectedError";
+  }
+}
+
+/**
+ * The model-authored source identities in a phase result that act as execution
+ * preconditions, each named by its exact contract field. Classification comes
+ * from the shared task-verification rule, so acceptance and launch cover the
+ * same digests. A candidate restating an approved obligation contributes none:
+ * the approved descriptor stays in force and the restatement's sources never
+ * take effect (ADR-0049 section 2, ADR-0051).
+ */
+export function effectiveResultSourceIdentities(
+  candidates: TaskVerificationCandidates | null,
+  requiredCheckIds: Iterable<string>
+): { field: string; checkId: string; path: string; declared: string }[] {
+  const required = new Set(requiredCheckIds);
+  return (candidates?.checks ?? []).flatMap((check) =>
+    comparableTaskVerificationSources(check, required.has(check.id)).map(
+      (source) => ({
+        field: `verificationCandidates.checks[${check.id}].sources[${source.path}].sha256`,
+        checkId: check.id,
+        path: source.path,
+        declared: source.sha256
+      })
+    )
+  );
+}
+
+/**
+ * One operator-readable line per comparison. Paths, digests and sizes only:
+ * no diagnostic this module builds carries the bytes it read.
+ */
+export function resultDigestDiagnostic(
+  comparison: ResultDigestComparison
+): string {
+  const where = comparison.path === null ? "" : ` at ${comparison.path}`;
+  if (comparison.observed === null && comparison.size !== null) {
+    const bound =
+      comparison.limit === null ? "permitted" : `${comparison.limit}-byte`;
+    return `${comparison.field}${where} names a source of ${comparison.size} bytes, above the ${bound} limit.`;
+  }
+  return `${comparison.field}${where} declared ${comparison.declared} but the bytes hash to ${comparison.observed ?? "an unreadable source"}.`;
+}
+
+/**
+ * A recorded comparison names its check id and source path inside the contract
+ * field template, so this bound must admit the longest field that template can
+ * produce: 48 fixed characters, an 80-character check id and a 500-character
+ * source path. A tighter bound would reject the runner's own evidence for a
+ * result whose digests all match.
+ */
+const RESULT_DIGEST_FIELD_MAX_LENGTH = 700;
+
+export function parseResultDigestEvidence(
+  value: unknown,
+  code = "RESULT_DIGEST_EVIDENCE_INVALID"
+): ResultDigestEvidence {
+  if (!isRecord(value)) {
+    return recoveryEvidenceError(
+      code,
+      "Result digest evidence must be an object."
+    );
+  }
+  exactKeys(
+    value,
+    ["schema", "schemaVersion", "runId", "attempt", "outcome", "comparisons"],
+    code,
+    "Result digest evidence"
+  );
+  if (
+    value.schema !== RESULT_DIGEST_EVIDENCE_SCHEMA ||
+    value.schemaVersion !== RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION
+  ) {
+    return recoveryEvidenceError(
+      code,
+      `Result digest evidence must use ${RESULT_DIGEST_EVIDENCE_SCHEMA}.`
+    );
+  }
+  if (value.outcome !== "accepted" && value.outcome !== "rejected") {
+    return recoveryEvidenceError(code, "Result digest outcome is unsupported.");
+  }
+  if (!isRecord(value.attempt)) {
+    return recoveryEvidenceError(code, "attempt must be an object.");
+  }
+  exactKeys(value.attempt, ["id", "kind"], code, "attempt");
+  const kind = value.attempt.kind;
+  if (
+    typeof kind !== "string" ||
+    !["selection", "plan", "implementation", "fix", "review"].includes(kind)
+  ) {
+    return recoveryEvidenceError(code, "attempt.kind is unsupported.");
+  }
+  if (!Array.isArray(value.comparisons) || value.comparisons.length > 512) {
+    return recoveryEvidenceError(
+      code,
+      "Result digest comparisons exceed their bound."
+    );
+  }
+  const comparisons = value.comparisons.map(
+    (item, index): ResultDigestComparison => {
+      const label = `comparisons[${index}]`;
+      if (!isRecord(item)) {
+        return recoveryEvidenceError(code, `${label} must be an object.`);
+      }
+      exactKeys(
+        item,
+        [
+          "role",
+          "field",
+          "checkId",
+          "path",
+          "declared",
+          "observed",
+          "size",
+          "limit",
+          "matched"
+        ],
+        code,
+        label
+      );
+      if (item.role !== "binding" && item.role !== "precondition") {
+        return recoveryEvidenceError(code, `${label}.role is unsupported.`);
+      }
+      if (typeof item.matched !== "boolean") {
+        return recoveryEvidenceError(code, `${label}.matched must be boolean.`);
+      }
+      return {
+        role: item.role,
+        field: evidenceString(
+          item.field,
+          code,
+          `${label}.field`,
+          RESULT_DIGEST_FIELD_MAX_LENGTH
+        ),
+        checkId:
+          item.checkId === null
+            ? null
+            : evidenceIdentifier(item.checkId, code, `${label}.checkId`, 80),
+        path:
+          item.path === null
+            ? null
+            : evidenceString(item.path, code, `${label}.path`, 500),
+        declared: evidenceDigest(item.declared, code, `${label}.declared`),
+        observed:
+          item.observed === null
+            ? null
+            : evidenceDigest(item.observed, code, `${label}.observed`),
+        size: evidenceByteCount(item.size, code, `${label}.size`),
+        limit: evidenceByteCount(item.limit, code, `${label}.limit`),
+        matched: item.matched
+      };
+    }
+  );
+  if (
+    comparisons.some((comparison) => !comparison.matched) !==
+    (value.outcome === "rejected")
+  ) {
+    return recoveryEvidenceError(
+      code,
+      "Result digest outcome conflicts with its recorded comparisons."
+    );
+  }
+  return {
+    schema: RESULT_DIGEST_EVIDENCE_SCHEMA,
+    schemaVersion: RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION,
+    runId: evidenceIdentifier(value.runId, code, "runId", 300),
+    attempt: {
+      id: evidenceIdentifier(value.attempt.id, code, "attempt.id", 200),
+      kind: kind as AttemptReference["kind"]
+    },
+    outcome: value.outcome,
+    comparisons
+  };
+}
+
 /**
  * Safe envelope decoding for the completion protocol: exact keys, versions,
  * phase, outcome/gate pairing, questions, artifacts, paths and finding
@@ -1506,6 +1695,20 @@ function evidenceNullableString(
   maximum = 500
 ): string | null {
   return value === null ? null : evidenceString(value, code, label, maximum);
+}
+
+function evidenceByteCount(
+  value: unknown,
+  code: string,
+  label: string
+): number | null {
+  if (
+    value !== null &&
+    (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
+  ) {
+    return recoveryEvidenceError(code, `${label} must be a byte count.`);
+  }
+  return value;
 }
 
 function evidenceIdentifier(
@@ -3236,13 +3439,18 @@ export function parseRecoveryAuthorization(
     );
   }
   const attempt = parseEvidenceAttempt(value.attempt, code, "attempt");
+  // ADR-0051 adds the digest-rejected planning source. The accepted value set
+  // grew; an authorization written before it still holds implementation or fix
+  // and parses unchanged.
   if (
-    (attempt.kind !== "implementation" && attempt.kind !== "fix") ||
-    !attempt.mutable
+    (attempt.kind !== "implementation" &&
+      attempt.kind !== "fix" &&
+      attempt.kind !== "plan") ||
+    attempt.mutable !== (attempt.kind !== "plan")
   ) {
     return recoveryEvidenceError(
       code,
-      "Recovery authorization requires a mutable implementation or fix attempt."
+      "Recovery authorization requires a read-only plan attempt or a mutable implementation or fix attempt."
     );
   }
   const phase = value.phase;

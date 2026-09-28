@@ -84,9 +84,10 @@ ambiguous reuse commitments preserve fresh execution.
   explicit approval and ADR evaluation; after approval, include install,
   lockfile, verification, and manifest tasks.
 - Follow the Engineering Quality authority order. Use the smallest compatible
-  design that satisfies the description and accepted decisions; do not mandate
-  a generic architecture, abstraction, directory, or dependency-injection
-  technique.
+  design that satisfies the description and accepted decisions, meaning the
+  simplest compatible resulting design rather than the smallest diff; do not
+  mandate a generic architecture, abstraction, directory, or
+  dependency-injection technique.
 - Apply the Security Assurance policy (`security-assurance.md`) supplied by the active execution context. For each exposure the
   description recorded, name the enforcement point — the module or boundary
   applying the control — and map its requirement to a task like any other.

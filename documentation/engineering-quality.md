@@ -61,6 +61,7 @@ Engineering Quality is projected through existing responsibilities:
 | ADRs               | Use applicable properties as decision drivers without preselecting a pattern.                                                        |
 | Plans              | Name changed boundaries, dependency and compatibility effects, lifecycle constraints, and evidence owners in existing plan sections. |
 | Implementation     | Apply approved authority, keep scope bounded, and record material deviations in existing reports.                                    |
+| Code design        | On a structural assessment trigger, apply the shared `guidance/code-design.md` method and record the assessment in the existing report. |
 | Review             | Complete the ordinary audit first, then classify overlap and record isolated shadow-only candidates.                                 |
 | Triage and fixing  | Continue to use only ordinary human-triaged findings; shadow candidates have no authority.                                           |
 | Resolution review  | Verify accepted-finding closure and admit new concerns only under the policy's convergence conditions.                               |
@@ -95,8 +96,10 @@ interprets shadow entries, promotes them to findings, or adds an EQ contract.
 ## Evolution rules
 
 Release validation may protect the canonical heading, rule identities, selected
-invariant language, consuming references, shadow isolation, and closure-oriented
-resolution wording. It must not attempt semantic source-code analysis or decide
+invariant language, consuming references, shadow isolation, closure-oriented
+resolution wording, the single structural-assessment trigger heading, and the
+shared code-design method's ordered sections, byte budget, consumer anchors and
+absence from audit and assurance instructions. It must not attempt semantic source-code analysis or decide
 whether a repository's architecture is good.
 
 Changes to the normative rule text require an ADR-compatible decision and must

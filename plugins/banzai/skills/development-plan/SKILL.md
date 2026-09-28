@@ -126,6 +126,18 @@ Caller-specific process and contract details remain here:
 - If planning conflicts with an accepted ADR, stop and route to
   `architecture-decision`.
 
+## Code Design
+
+When an Engineering Quality structural assessment trigger or the
+reuse-search duty applies, read and apply
+[Ownership Discovery](../../guidance/code-design.md#ownership-discovery)
+from this installed skill. When a structural assessment trigger applies, also
+read and apply
+[Assessment Contract](../../guidance/code-design.md#assessment-contract) and
+[Planning Assessment](../../guidance/code-design.md#planning-assessment)
+from this installed skill. Stop before affected work if that guidance is
+missing or unreadable.
+
 ## Plan Approval Gate
 
 Planning ends here. Present `plan.md`, the task list, the consistency result, and

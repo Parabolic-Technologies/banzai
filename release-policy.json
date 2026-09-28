@@ -146,6 +146,7 @@
       "plugins/banzai/guidance/feature.md",
       "plugins/banzai/guidance/fix.md",
       "plugins/banzai/guidance/manifest.md",
+      "plugins/banzai/guidance/code-design.md",
       "packages/orchestrator/src/phase-resources.ts"
     ]
   },

@@ -24,3 +24,7 @@ Record actual owner-only requirements in **Human prerequisites**. Missing tests
 or tooling may be created within the approved task scope; they do not require
 profiles or a configuration gate. Never plan writes to runner configuration or
 invent an external configuration-update mechanism.
+
+Apply the code-design guidance only when an Engineering Quality structural
+assessment trigger or the reuse-search duty applies; the reuse-search duty alone
+uses only its Ownership Discovery section.

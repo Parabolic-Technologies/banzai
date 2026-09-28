@@ -54,6 +54,7 @@ import type {
   ContextInvocationEvidence,
   EscalationDecisionRecord,
   EscalationDecisionRequest,
+  ResultDigestEvidence,
   CompletionCandidate,
   CompletionCapture,
   CompletionPublication,
@@ -88,6 +89,7 @@ import {
   parseModelAttemptRecord,
   parsePlanTaskCompletionCheckpoint,
   parseRecoveryAuthorization,
+  parseResultDigestEvidence,
   parseTerminalAttemptCheckpoint,
   parseVerificationAttemptRecord,
   parseVerificationLedger
@@ -2054,6 +2056,81 @@ export class RunStore {
       }
       throw error;
     }
+  }
+
+  resultDigestEvidencePath(
+    runId: string,
+    attempt: { id: string; kind: AttemptReference["kind"] }
+  ): string {
+    return containedEvidencePath(
+      this.runDirectory(runId),
+      "digests",
+      `${safeEvidenceSegment(attempt.id, "attempt.id", 200)}-${attempt.kind}.json`
+    );
+  }
+
+  /**
+   * Records what a model-authored digest was compared against when its result
+   * was accepted or rejected. The baseline is established exactly once per
+   * attempt: an existing record is returned unchanged rather than rewritten,
+   * so a later comparison against different bytes cannot silently restate
+   * history. The write itself is atomic, so a restart observes either no
+   * record or a whole one.
+   */
+  async establishResultDigestEvidence(
+    runId: string,
+    evidence: ResultDigestEvidence
+  ): Promise<ResultDigestEvidence> {
+    const parsed = parseResultDigestEvidence(evidence);
+    if (parsed.runId !== runId) {
+      throw new BanzaiError(
+        "RESULT_DIGEST_EVIDENCE_INVALID",
+        "Result digest evidence run identity does not match its path."
+      );
+    }
+    const existing = await this.readResultDigestEvidenceIfExists(
+      runId,
+      parsed.attempt
+    );
+    if (existing !== null) return existing;
+    await this.writeImmutableEvidence(
+      this.resultDigestEvidencePath(runId, parsed.attempt),
+      Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`),
+      "RESULT_DIGEST_EVIDENCE_CONFLICT"
+    );
+    return parsed;
+  }
+
+  /** Null means no baseline exists; it is never reconstructed from current bytes. */
+  async readResultDigestEvidenceIfExists(
+    runId: string,
+    attempt: { id: string; kind: AttemptReference["kind"] }
+  ): Promise<ResultDigestEvidence | null> {
+    const bytes = await this.readImmutableEvidence(
+      this.resultDigestEvidencePath(runId, attempt)
+    );
+    if (bytes === null) return null;
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(bytes.toString("utf8"));
+    } catch {
+      throw new BanzaiError(
+        "RESULT_DIGEST_EVIDENCE_INVALID",
+        "Result digest evidence is malformed."
+      );
+    }
+    const parsed = parseResultDigestEvidence(decoded);
+    if (
+      parsed.runId !== runId ||
+      parsed.attempt.id !== attempt.id ||
+      parsed.attempt.kind !== attempt.kind
+    ) {
+      throw new BanzaiError(
+        "RESULT_DIGEST_EVIDENCE_INVALID",
+        "Result digest evidence identity does not match its path."
+      );
+    }
+    return parsed;
   }
 
   async writeRecoveryAuthorization(

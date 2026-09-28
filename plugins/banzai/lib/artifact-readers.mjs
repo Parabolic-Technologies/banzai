@@ -617,6 +617,7 @@ import path from "node:path";
 var fail = (message) => {
   throw new VerificationEvidenceError(message);
 };
+var TASK_VERIFICATION_SOURCE_MAX_BYTES = 1024 * 1024;
 var HASH2 = /^[a-f0-9]{64}$/u;
 var ID2 = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 function object2(value, keys) {
@@ -6044,10 +6045,10 @@ function parseRecoveryAuthorization(value) {
     );
   }
   const attempt = parseEvidenceAttempt(value.attempt, code, "attempt");
-  if (attempt.kind !== "implementation" && attempt.kind !== "fix" || !attempt.mutable) {
+  if (attempt.kind !== "implementation" && attempt.kind !== "fix" && attempt.kind !== "plan" || attempt.mutable !== (attempt.kind !== "plan")) {
     return recoveryEvidenceError(
       code,
-      "Recovery authorization requires a mutable implementation or fix attempt."
+      "Recovery authorization requires a read-only plan attempt or a mutable implementation or fix attempt."
     );
   }
   const phase = value.phase;

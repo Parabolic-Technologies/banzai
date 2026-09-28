@@ -221,7 +221,9 @@ is a navigational reference and is updated with the module it describes.
   labels a retryable invalid implementation ledger as plan-task completion
   evidence repair instead of a read-only attempt, and distinguishes an
   interrupted recovery from one completed prerequisite-blocked fix whose
-  remaining accepted scope requires fresh operator authorization,
+  remaining accepted scope requires fresh operator authorization and from a
+  digest-rejected result whose authorized repair outranks replaying its terminal
+  checkpoint,
   derives the kebab-case feature slug via `generateFeatureSlug`, and keeps the
   session open when a phase returns a gate. It uses the shared review-completion
   projection so terminal triage is never displayed as reviewer pass.
@@ -650,7 +652,9 @@ is a navigational reference and is updated with the module it describes.
   phase-result schemas, the five existing gates and conditional runner
   configuration gate, decision-consultation and supervisor policy,
   privacy canaries, `orchestrate`, Test Assurance, Security Assurance, and
-  Engineering Quality policy references/syntax/identity, the versionless Claude
+  Engineering Quality policy references/syntax/identity, the ADR-0050
+  structural-assessment trigger heading, code-design method shape and budget,
+  consumer anchors and audit exclusion, the versionless Claude
   marketplace, root version-script wiring, committed bundle mode, and required
   paths without mutating them. Before resource and distribution parity it
   rejects hook-runtime edits (`hooks/spec-gate.cjs`, `hooks/hooks.json`,
@@ -684,6 +688,12 @@ is a navigational reference and is updated with the module it describes.
   committed smoke with a vendor-free environment and tracked-tree mutation
   detection. Its default component list excludes version synchronization and
   recovery.
+- `release-candidate-check.mjs` copies the enumerated checkout into a temporary
+  candidate outside the repository, links installed dependencies read-only with
+  workspace entries resolving to the candidate's own packages, indexes the
+  candidate without committing, and runs the candidate's `release-check.mjs`
+  fresh. It never stages, commits or writes in the real checkout and removes the
+  candidate on success and failure.
 - `release-version.mjs` owns canonical SemVer comparison, fixed policy and JSON
   pointer decoding, exact byte-span candidates, restrictive durable transaction
   state, an exact bounded cleanup guard that survives main-journal removal and
@@ -739,7 +749,10 @@ previous output. `build.mjs` explicitly regenerates the committed
 module; typecheck/lint/test never repair it. `check-dist.mjs` compares it and the
 bundle/map. Extraction validation preserves the immutable pre-change root and exact
 Orchestrated Mode blocks. The current baseline v1/pin contains the maintained
-expectations plus replayable, Accepted-ADR-scoped transitions. The explicit
+expectations plus replayable, Accepted-ADR-scoped transitions. Raw expectation
+keys cover phases, policies and guidance authored directly rather than extracted
+from a skill section, so such a resource enters through a first transition whose
+`before` is `null`. The explicit
 `instruction-baseline.mjs --describe` interface reports the exact pending scope;
 `--authorization <file> --check` validates without writes and the authoring command
 publishes the exact reviewed transition. Interrupted publication retains a journal
@@ -784,6 +797,17 @@ restatement and leaves the approved descriptor in force; any other difference
 fails selection. Plan-time `sources` of a required obligation are not a launch
 precondition, so implementation may keep editing scripts; the captured task
 inputs record what ran. Supplement sources must still match at launch.
+`taskVerificationDigestRole` is the single implementation of that role rule, and
+both the acceptance comparison and `authorizeTaskVerification` classify through
+`comparableTaskVerificationSources`. A model-authored digest is established when
+its artifact is accepted: `workflow.ts` compares each effective supplement
+source and records the outcome through `store.ts` as
+`banzai-result-digest-evidence/v1`, written once per attempt and never restated,
+while `validatePlanningResult` classifies the existing plan-remainder detection
+the same way. A rejection carries the field, path, declared and observed digests
+only; the size rejection stays a separate typed cause. The launch comparison
+keeps its authority unchanged and states a causal history only from a recorded
+baseline, reporting unknown when none exists.
 Observed inputs follow Git ignore rules, so a check can pass only when its
 generated output is ignored. A completed check that changes observed files stops
 the round and names up to ten changed paths with the ignore remedy; input drift

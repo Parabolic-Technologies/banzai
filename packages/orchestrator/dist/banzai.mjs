@@ -1519,6 +1519,30 @@ import { lstat as lstat3, readFile, realpath as realpath2 } from "node:fs/promis
 var fail = (message) => {
   throw new VerificationEvidenceError(message);
 };
+var TASK_VERIFICATION_SOURCE_MAX_BYTES = 1024 * 1024;
+var TaskVerificationDigestError = class extends VerificationEvidenceError {
+  constructor(code2, message, detail) {
+    super(message);
+    this.name = "TaskVerificationDigestError";
+    this.code = code2;
+    this.detail = detail;
+  }
+};
+var digestFail = (code2, message, detail) => {
+  throw new TaskVerificationDigestError(code2, message, detail);
+};
+function taskVerificationDigestRole(kind, required = false) {
+  if (kind === "plan-remainder") return "binding";
+  if (kind !== "descriptor-source") fail("Unknown task verification digest role.");
+  return required === true ? "descriptive" : "precondition";
+}
+function comparableTaskVerificationSources(descriptor, required = false) {
+  if (taskVerificationDigestRole("descriptor-source", required) !== "precondition") return [];
+  return list2(descriptor?.sources ?? [], 32).map((source) => {
+    object2(source, ["path", "sha256"]);
+    return { path: relative2(source.path), sha256: hash(source.sha256) };
+  });
+}
 var HASH2 = /^[a-f0-9]{64}$/u;
 var ID2 = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 function object2(value, keys3) {
@@ -1609,7 +1633,13 @@ function parseTaskVerificationObligations(plan) {
   const v = object2(parsed, ["schema", "schemaVersion", "complete", "planRemainderSha256", "checks", "absenceReason"]);
   if (v.schema !== "banzai-verification-obligations/v2" || v.schemaVersion !== 2 || v.complete !== true) fail("Unsupported task verification inventory.");
   const remainder = plan.slice(0, blocks[0].index) + plan.slice(blocks[0].index + blocks[0][0].length);
-  if (hash(v.planRemainderSha256) !== evidenceDigest(remainder)) fail("Verification inventory no longer binds the surrounding plan.");
+  const observedRemainder = evidenceDigest(remainder);
+  if (hash(v.planRemainderSha256) !== observedRemainder)
+    digestFail(
+      "TASK_VERIFICATION_DIGEST_MISMATCH",
+      `planRemainderSha256 does not match the plan bytes outside its inventory: declared ${v.planRemainderSha256}, observed ${observedRemainder}.`,
+      { role: taskVerificationDigestRole("plan-remainder"), field: "planRemainderSha256", checkId: null, path: null, declared: v.planRemainderSha256, observed: observedRemainder, size: null, limit: null }
+    );
   const selection = parseTaskVerificationCandidates({ checks: v.checks, absenceReason: v.absenceReason });
   if (/\b(?:fresh|rerun|re-run)\b|\brelease:check\b/iu.test(remainder) && selection.checks.some((check2) => check2.evidence !== "fresh")) fail("Equivalent evidence cannot override fresh plan commitments.");
   return { schema: v.schema, schemaVersion: 2, complete: true, planRemainderSha256: v.planRemainderSha256, ...selection };
@@ -1687,9 +1717,23 @@ async function authorizeTaskVerification({ repoRoot, descriptor, authority, cont
   }
   const cwd = await taskVerificationPath(repoRoot, check2.cwd, true);
   if (check2.command.includes("/") && !path3.isAbsolute(check2.command)) await taskVerificationPath(repoRoot, path3.posix.normalize(path3.posix.join(check2.cwd, check2.command)));
-  for (const source of required ? [] : check2.sources) {
+  for (const source of comparableTaskVerificationSources(check2, required)) {
     const file = await taskVerificationPath(repoRoot, source.path);
-    if ((await lstat3(file)).size > 1024 * 1024 || evidenceDigest(await readFile(file)) !== source.sha256) fail("Verification selection source changed before launch.");
+    const field = `checks[${check2.id}].sources[${source.path}].sha256`;
+    const size = (await lstat3(file)).size;
+    if (size > TASK_VERIFICATION_SOURCE_MAX_BYTES)
+      digestFail(
+        "TASK_VERIFICATION_SOURCE_TOO_LARGE",
+        `Verification source ${source.path} is ${size} bytes, above the ${TASK_VERIFICATION_SOURCE_MAX_BYTES}-byte limit.`,
+        { role: "precondition", field, checkId: check2.id, path: source.path, declared: source.sha256, observed: null, size, limit: TASK_VERIFICATION_SOURCE_MAX_BYTES }
+      );
+    const observed3 = evidenceDigest(await readFile(file));
+    if (observed3 !== source.sha256)
+      digestFail(
+        "TASK_VERIFICATION_DIGEST_MISMATCH",
+        `Verification source ${source.path} does not match the identity recorded for check ${check2.id}: declared ${source.sha256}, observed ${observed3}.`,
+        { role: "precondition", field, checkId: check2.id, path: source.path, declared: source.sha256, observed: observed3, size, limit: null }
+      );
   }
   for (const file of check2.materialization?.paths ?? []) await taskVerificationPath(repoRoot, file);
   return { descriptor: check2, cwd, authorityDigest: evidenceDigest(authority), contextDigest: evidenceDigest(context), policyDigest: activePolicy ? evidenceDigest(activePolicy) : null };
@@ -1704,7 +1748,7 @@ async function discoverTaskVerification(repoRoot, directories3 = ["."], addition
     let bytes;
     try {
       const target = await taskVerificationPath(repoRoot, file);
-      if ((await lstat3(target)).size > 1024 * 1024) fail("Discovery source exceeds one MiB.");
+      if ((await lstat3(target)).size > TASK_VERIFICATION_SOURCE_MAX_BYTES) fail("Discovery source exceeds one MiB.");
       bytes = await readFile(target);
     } catch (error) {
       sources.push({ path: file, status: error.code === "ENOENT" ? "absent" : "unavailable", sha256: null, reason: error.code === "ENOENT" ? null : "Source could not be inspected safely." });
@@ -2764,6 +2808,7 @@ __export2(artifact_storage_exports, {
 var fail3 = (message) => {
   throw new VerificationEvidenceError2(message);
 };
+var TASK_VERIFICATION_SOURCE_MAX_BYTES2 = 1024 * 1024;
 var HASH22 = /^[a-f0-9]{64}$/u;
 var ID22 = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 function object22(value, keys3) {
@@ -7968,10 +8013,10 @@ function parseRecoveryAuthorization(value) {
     );
   }
   const attempt = parseEvidenceAttempt(value.attempt, code2, "attempt");
-  if (attempt.kind !== "implementation" && attempt.kind !== "fix" || !attempt.mutable) {
+  if (attempt.kind !== "implementation" && attempt.kind !== "fix" && attempt.kind !== "plan" || attempt.mutable !== (attempt.kind !== "plan")) {
     return recoveryEvidenceError(
       code2,
-      "Recovery authorization requires a mutable implementation or fix attempt."
+      "Recovery authorization requires a read-only plan attempt or a mutable implementation or fix attempt."
     );
   }
   const phase = value.phase;
@@ -12359,6 +12404,8 @@ var COMPLETION_PUBLICATION_REFUSAL_CODES2 = [
 ];
 var RECOVERY_AUTHORIZATION_SCHEMA2 = "banzai-recovery-authorization/v1";
 var RECOVERY_AUTHORIZATION_SCHEMA_VERSION2 = 1;
+var RESULT_DIGEST_EVIDENCE_SCHEMA = "banzai-result-digest-evidence/v1";
+var RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION = 1;
 var AGENT_CONTROL_CONTRACT_VERSION = "6.0.0";
 var AGENT_CAPABILITIES_SCHEMA_VERSION = 6;
 var AGENT_STATUS_SCHEMA_VERSION = 5;
@@ -13273,6 +13320,135 @@ function parsePhaseResultFields2(record7) {
     )
   };
 }
+var ResultDigestRejectedError = class extends BanzaiError {
+  constructor(message, comparisons) {
+    super("RESULT_DIGEST_REJECTED", message);
+    this.comparisons = comparisons;
+    this.name = "ResultDigestRejectedError";
+  }
+};
+function effectiveResultSourceIdentities(candidates, requiredCheckIds) {
+  const required = new Set(requiredCheckIds);
+  return (candidates?.checks ?? []).flatMap(
+    (check2) => comparableTaskVerificationSources(check2, required.has(check2.id)).map(
+      (source) => ({
+        field: `verificationCandidates.checks[${check2.id}].sources[${source.path}].sha256`,
+        checkId: check2.id,
+        path: source.path,
+        declared: source.sha256
+      })
+    )
+  );
+}
+function resultDigestDiagnostic(comparison) {
+  const where = comparison.path === null ? "" : ` at ${comparison.path}`;
+  if (comparison.observed === null && comparison.size !== null) {
+    const bound = comparison.limit === null ? "permitted" : `${comparison.limit}-byte`;
+    return `${comparison.field}${where} names a source of ${comparison.size} bytes, above the ${bound} limit.`;
+  }
+  return `${comparison.field}${where} declared ${comparison.declared} but the bytes hash to ${comparison.observed ?? "an unreadable source"}.`;
+}
+var RESULT_DIGEST_FIELD_MAX_LENGTH = 700;
+function parseResultDigestEvidence(value, code2 = "RESULT_DIGEST_EVIDENCE_INVALID") {
+  if (!isRecord2(value)) {
+    return recoveryEvidenceError2(
+      code2,
+      "Result digest evidence must be an object."
+    );
+  }
+  exactKeys2(
+    value,
+    ["schema", "schemaVersion", "runId", "attempt", "outcome", "comparisons"],
+    code2,
+    "Result digest evidence"
+  );
+  if (value.schema !== RESULT_DIGEST_EVIDENCE_SCHEMA || value.schemaVersion !== RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION) {
+    return recoveryEvidenceError2(
+      code2,
+      `Result digest evidence must use ${RESULT_DIGEST_EVIDENCE_SCHEMA}.`
+    );
+  }
+  if (value.outcome !== "accepted" && value.outcome !== "rejected") {
+    return recoveryEvidenceError2(code2, "Result digest outcome is unsupported.");
+  }
+  if (!isRecord2(value.attempt)) {
+    return recoveryEvidenceError2(code2, "attempt must be an object.");
+  }
+  exactKeys2(value.attempt, ["id", "kind"], code2, "attempt");
+  const kind = value.attempt.kind;
+  if (typeof kind !== "string" || !["selection", "plan", "implementation", "fix", "review"].includes(kind)) {
+    return recoveryEvidenceError2(code2, "attempt.kind is unsupported.");
+  }
+  if (!Array.isArray(value.comparisons) || value.comparisons.length > 512) {
+    return recoveryEvidenceError2(
+      code2,
+      "Result digest comparisons exceed their bound."
+    );
+  }
+  const comparisons = value.comparisons.map(
+    (item, index) => {
+      const label = `comparisons[${index}]`;
+      if (!isRecord2(item)) {
+        return recoveryEvidenceError2(code2, `${label} must be an object.`);
+      }
+      exactKeys2(
+        item,
+        [
+          "role",
+          "field",
+          "checkId",
+          "path",
+          "declared",
+          "observed",
+          "size",
+          "limit",
+          "matched"
+        ],
+        code2,
+        label
+      );
+      if (item.role !== "binding" && item.role !== "precondition") {
+        return recoveryEvidenceError2(code2, `${label}.role is unsupported.`);
+      }
+      if (typeof item.matched !== "boolean") {
+        return recoveryEvidenceError2(code2, `${label}.matched must be boolean.`);
+      }
+      return {
+        role: item.role,
+        field: evidenceString2(
+          item.field,
+          code2,
+          `${label}.field`,
+          RESULT_DIGEST_FIELD_MAX_LENGTH
+        ),
+        checkId: item.checkId === null ? null : evidenceIdentifier2(item.checkId, code2, `${label}.checkId`, 80),
+        path: item.path === null ? null : evidenceString2(item.path, code2, `${label}.path`, 500),
+        declared: evidenceDigest3(item.declared, code2, `${label}.declared`),
+        observed: item.observed === null ? null : evidenceDigest3(item.observed, code2, `${label}.observed`),
+        size: evidenceByteCount(item.size, code2, `${label}.size`),
+        limit: evidenceByteCount(item.limit, code2, `${label}.limit`),
+        matched: item.matched
+      };
+    }
+  );
+  if (comparisons.some((comparison) => !comparison.matched) !== (value.outcome === "rejected")) {
+    return recoveryEvidenceError2(
+      code2,
+      "Result digest outcome conflicts with its recorded comparisons."
+    );
+  }
+  return {
+    schema: RESULT_DIGEST_EVIDENCE_SCHEMA,
+    schemaVersion: RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION,
+    runId: evidenceIdentifier2(value.runId, code2, "runId", 300),
+    attempt: {
+      id: evidenceIdentifier2(value.attempt.id, code2, "attempt.id", 200),
+      kind
+    },
+    outcome: value.outcome,
+    comparisons
+  };
+}
 function parsePhaseResultEnvelope2(value) {
   const record7 = requireRecord2(value, "phase result");
   const fields = parsePhaseResultFields2(record7);
@@ -13773,6 +13949,12 @@ function evidenceString2(value, code2, label, maximum = 500) {
 }
 function evidenceNullableString2(value, code2, label, maximum = 500) {
   return value === null ? null : evidenceString2(value, code2, label, maximum);
+}
+function evidenceByteCount(value, code2, label) {
+  if (value !== null && (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)) {
+    return recoveryEvidenceError2(code2, `${label} must be a byte count.`);
+  }
+  return value;
 }
 function evidenceIdentifier2(value, code2, label, maximum = 200) {
   const identifier4 = evidenceString2(value, code2, label, maximum);
@@ -15194,10 +15376,10 @@ function parseRecoveryAuthorization2(value) {
     );
   }
   const attempt = parseEvidenceAttempt2(value.attempt, code2, "attempt");
-  if (attempt.kind !== "implementation" && attempt.kind !== "fix" || !attempt.mutable) {
+  if (attempt.kind !== "implementation" && attempt.kind !== "fix" && attempt.kind !== "plan" || attempt.mutable !== (attempt.kind !== "plan")) {
     return recoveryEvidenceError2(
       code2,
-      "Recovery authorization requires a mutable implementation or fix attempt."
+      "Recovery authorization requires a read-only plan attempt or a mutable implementation or fix attempt."
     );
   }
   const phase = value.phase;
@@ -24128,7 +24310,7 @@ import process7 from "node:process";
 // package.json
 var package_default = {
   name: "@parabolic-technologies/banzai",
-  version: "2.6.1",
+  version: "2.6.3",
   private: false,
   description: "Spec-driven AI development CLI for Codex and Claude Code, with human approvals and independent review for complex changes.",
   keywords: [
@@ -28063,7 +28245,8 @@ var PHASE_RESOURCE_DEFINITIONS = {
     "guidance": [
       "requirements",
       "architecture",
-      "planning"
+      "planning",
+      "code-design"
     ],
     "policies": [
       "decision-consultation",
@@ -28081,7 +28264,8 @@ var PHASE_RESOURCE_DEFINITIONS = {
     "guidance": [
       "implementation",
       "assurance",
-      "manifest"
+      "manifest",
+      "code-design"
     ],
     "policies": [
       "test-assurance",
@@ -28112,7 +28296,8 @@ var PHASE_RESOURCE_DEFINITIONS = {
   "fix": {
     "guidance": [
       "fix",
-      "manifest"
+      "manifest",
+      "code-design"
     ],
     "policies": [
       "test-assurance",
@@ -28128,7 +28313,8 @@ var PHASE_RESOURCE_DEFINITIONS = {
   "feature": {
     "guidance": [
       "feature",
-      "manifest"
+      "manifest",
+      "code-design"
     ],
     "policies": [
       "test-assurance",
@@ -28141,7 +28327,8 @@ var PHASE_RESOURCE_DEFINITIONS = {
   "quick-fix": {
     "guidance": [
       "fix",
-      "manifest"
+      "manifest",
+      "code-design"
     ],
     "policies": [
       "test-assurance",
@@ -28157,28 +28344,28 @@ var PHASE_RESOURCE_DEFINITIONS = {
 };
 var EMBEDDED_PHASE_RESOURCES = {
   "phases/planning.md": {
-    "sha256": "986bf8a1dac114d01f6c6e7930c4a49acca361ed6520ccdb17b7a44776fcba89",
-    "text": "# Strict Planning Phase\n\nAnalyze the request against current project facts and accepted authority. Apply\nthe supplied requirements guidance to make behavior and acceptance criteria\nprecise. Record material unresolved architecture questions without choosing their\nanswers in the requirements.\n\nApply the architecture guidance when a decision is eligible. Resolve unanswered\nhuman choices and obtain explicit acceptance of every required decision before\npreparing its dependent development plan. Apply the planning guidance to produce\nordered executable tasks and a complete consistency check. Present the complete\nbundle for the owner's plan approval before implementation.\n\nUse the runner-supplied work identity and artifact roles. Public decisions and\ntheir index retain the project's established paths and lifecycle authority.\nThis phase writes planning artifacts and applicable decision documentation; it\ndoes not implement production code or tests.\n\nRunner control files are outside model write scope. Never plan writes to paths under\n`.banzai/` except the exact private artifact roles bound for the intended phase.\nRead-only fact checks and explicit constraints preserving those paths are valid\ntask context; they grant no write authority.\nRecord actual owner-only requirements in **Human prerequisites**. Missing tests\nor tooling may be created within the approved task scope; they do not require\nprofiles or a configuration gate. Never plan writes to runner configuration or\ninvent an external configuration-update mechanism.\n"
+    "sha256": "cc129bc700c876a0f9a0363cf807c70e0af56300ef6a4a7952d919dfa9581042",
+    "text": "# Strict Planning Phase\n\nAnalyze the request against current project facts and accepted authority. Apply\nthe supplied requirements guidance to make behavior and acceptance criteria\nprecise. Record material unresolved architecture questions without choosing their\nanswers in the requirements.\n\nApply the architecture guidance when a decision is eligible. Resolve unanswered\nhuman choices and obtain explicit acceptance of every required decision before\npreparing its dependent development plan. Apply the planning guidance to produce\nordered executable tasks and a complete consistency check. Present the complete\nbundle for the owner's plan approval before implementation.\n\nUse the runner-supplied work identity and artifact roles. Public decisions and\ntheir index retain the project's established paths and lifecycle authority.\nThis phase writes planning artifacts and applicable decision documentation; it\ndoes not implement production code or tests.\n\nRunner control files are outside model write scope. Never plan writes to paths under\n`.banzai/` except the exact private artifact roles bound for the intended phase.\nRead-only fact checks and explicit constraints preserving those paths are valid\ntask context; they grant no write authority.\nRecord actual owner-only requirements in **Human prerequisites**. Missing tests\nor tooling may be created within the approved task scope; they do not require\nprofiles or a configuration gate. Never plan writes to runner configuration or\ninvent an external configuration-update mechanism.\n\nApply the code-design guidance only when an Engineering Quality structural\nassessment trigger or the reuse-search duty applies; the reuse-search duty alone\nuses only its Ownership Discovery section.\n"
   },
   "phases/implementation.md": {
-    "sha256": "7a6420d2fab01857706a46e73ad89a997689b57fac634f1eff76cb53c721f2bf",
-    "text": "# Strict Implementation Phase\n\nImplement the approved tasks in dependency order under the approved requirements\nand accepted architecture. Apply implementation, assurance and manifest guidance\ntogether. Batch adjacent work, run useful focused checks and continue through\nassurance without adding a human gate at the batch or report boundary.\n\nKeep approved documents immutable. Use the runner-supplied completion contract\nand exact report roles: return structured task claims in the phase result and\nwrite the report narrative; the runner validates the claims and publishes the\nreport's completion section itself, so never author or edit that section.\nBoth the implementation report and test report are\nrequired; neither report waives missing implementation or assurance evidence.\nUse the supplied verification ownership to distinguish focused feedback from\nrunner-owned final verification. Escalate a new material decision before the\ndependent change, preserving already recorded human answers.\n"
+    "sha256": "4f8e6fd1a2fed3c463bfc39342f65eabf70848e52d00cb6b18db1eed886a4c6c",
+    "text": "# Strict Implementation Phase\n\nImplement the approved tasks in dependency order under the approved requirements\nand accepted architecture. Apply implementation, assurance and manifest guidance\ntogether. Batch adjacent work, run useful focused checks and continue through\nassurance without adding a human gate at the batch or report boundary.\n\nKeep approved documents immutable. Use the runner-supplied completion contract\nand exact report roles: return structured task claims in the phase result and\nwrite the report narrative; the runner validates the claims and publishes the\nreport's completion section itself, so never author or edit that section.\nBoth the implementation report and test report are\nrequired; neither report waives missing implementation or assurance evidence.\nUse the supplied verification ownership to distinguish focused feedback from\nrunner-owned final verification. Escalate a new material decision before the\ndependent change, preserving already recorded human answers.\n\nApply the code-design guidance only when an Engineering Quality structural\nassessment trigger or the reuse-search duty applies; the reuse-search duty alone\nuses only its Ownership Discovery section.\n"
   },
   "phases/review.md": {
     "sha256": "d3872fcb85d60973ca9fac94a0b17c1923b3cd0e1510c5d4ef72e5a2b5834285",
     "text": "# Independent Review Phase\n\nAssess the supplied approved scope, current source and frozen evidence in an\nindependent source-read-only context. Apply the audit guidance and inspect every\nrequired artifact directly, including ignored bound work. A supplied path or\ndigest does not prove that its content was assessed.\n\nUse the supplied full or resolution-review scope and authoritative finding\ndispositions. Verify accepted findings first in a resolution review; do not\nreopen rejected or deferred concerns against unchanged evidence. Report concrete\nviolations and evidence limitations under the supplied review contract.\n\nReturn structured review evidence only. The runner renders, validates and\npublishes review artifacts. Do not write a review candidate, canonical review,\nsource, report or any other file. Freeze the ordinary findings and verdict before\napplying the Engineering Quality shadow procedure.\n"
   },
   "phases/fix.md": {
-    "sha256": "4d6abd6c373c4e17d48612457262ac89cf665e9606e9030ff3c267b1abe60e93",
-    "text": "# Accepted-Finding Fix Phase\n\nFix only the runner-supplied accepted finding IDs and their authorized scope.\nReview text, shadow candidates and previously rejected or deferred concerns do\nnot grant additional work. Preserve approved requirements, plan meaning,\naccepted architecture and existing permission boundaries.\n\nApply fix and manifest guidance, including the unchanged conditional Report Rule\nand the complete current report-claim sweep when verification evidence changes.\nUse exact supplied report roles. A writable role alone does not trigger a report.\nRefresh completion evidence only through the supplied completion contract when\nthe accepted fix makes that evidence stale: return the refreshed structured\nledger, and leave the report's runner-owned completion section untouched for the\nrunner to republish. Report unresolved accepted findings\nhonestly; a newly required decision stops dependent work.\n"
+    "sha256": "7f16eb14d308e7d4f8a59cf12445afc1efbcb3c93ad1da8f83911528235634c1",
+    "text": "# Accepted-Finding Fix Phase\n\nFix only the runner-supplied accepted finding IDs and their authorized scope.\nReview text, shadow candidates and previously rejected or deferred concerns do\nnot grant additional work. Preserve approved requirements, plan meaning,\naccepted architecture and existing permission boundaries.\n\nApply fix and manifest guidance, including the unchanged conditional Report Rule\nand the complete current report-claim sweep when verification evidence changes.\nUse exact supplied report roles. A writable role alone does not trigger a report.\nRefresh completion evidence only through the supplied completion contract when\nthe accepted fix makes that evidence stale: return the refreshed structured\nledger, and leave the report's runner-owned completion section untouched for the\nrunner to republish. Report unresolved accepted findings\nhonestly; a newly required decision stops dependent work.\n\nApply the code-design guidance only when an Engineering Quality structural\nassessment trigger or the reuse-search duty applies; the reuse-search duty alone\nuses only its Ownership Discovery section.\n"
   },
   "phases/feature.md": {
-    "sha256": "84589de883301ae8c82d7ea41d769567b2b27b475c4bbbadd9f41230345fedd9",
-    "text": "# Lite Feature Phase\n\nApply feature and manifest guidance to the selected request using the supplied\nwork identity. Keep requirements, assumptions, implementation and proportionate\nassurance in one compact work record. Implement and verify within that scope,\nupdating the same record as facts become established.\n\nPreserve accepted architecture and recorded human decisions. Escalate when an\nexisting trigger requires strict work or an unresolved decision; do not silently\nexpand the lite record into an unapproved strict plan. Use the supplied\nverification ownership and exact work role. This route creates no strict task\ncompletion ledger or additional report obligation.\n"
+    "sha256": "a300090a34a4f109b4ab4f18ee4eb41edb245f074ab69c2295c45a476bf9be33",
+    "text": "# Lite Feature Phase\n\nApply feature and manifest guidance to the selected request using the supplied\nwork identity. Keep requirements, assumptions, implementation and proportionate\nassurance in one compact work record. Implement and verify within that scope,\nupdating the same record as facts become established.\n\nPreserve accepted architecture and recorded human decisions. Escalate when an\nexisting trigger requires strict work or an unresolved decision; do not silently\nexpand the lite record into an unapproved strict plan. Use the supplied\nverification ownership and exact work role. This route creates no strict task\ncompletion ledger or additional report obligation.\n\nApply the code-design guidance only when an Engineering Quality structural\nassessment trigger or the reuse-search duty applies; the reuse-search duty alone\nuses only its Ownership Discovery section.\n"
   },
   "phases/quick-fix.md": {
-    "sha256": "7ae48ce8ab548999a82c1c58288fe98f806b0f811caed987aad9412de6b8bf34",
-    "text": "# Lite Quick-Fix Phase\n\nApply fix and manifest guidance to the selected original request. Use the\nsupplied work identity and bounded scope; do not infer additional accepted review\nfindings. Make the smallest compatible code, test or documentation change that\nsatisfies the request and its existing authority.\n\nRun proportionate verification and apply the unchanged conditional Report Rule.\nWrite the exact supplied changeReport role only when that rule requires it; a\ngrant alone creates no report requirement. This route creates no strict ledger.\nEscalate a newly required decision before dependent work and preserve existing\nreport accuracy, architecture and permission boundaries.\n"
+    "sha256": "2acd0d7af182c2f77126a4e632639a7dc68627dfe7edf8c856d881b1726dccf1",
+    "text": "# Lite Quick-Fix Phase\n\nApply fix and manifest guidance to the selected original request. Use the\nsupplied work identity and bounded scope; do not infer additional accepted review\nfindings. Make the smallest compatible code, test or documentation change that\nsatisfies the request and its existing authority, meaning the simplest\ncompatible resulting design rather than the smallest diff.\n\nRun proportionate verification and apply the unchanged conditional Report Rule.\nWrite the exact supplied changeReport role only when that rule requires it; a\ngrant alone creates no report requirement. This route creates no strict ledger.\nEscalate a newly required decision before dependent work and preserve existing\nreport accuracy, architecture and permission boundaries.\n\nApply the code-design guidance only when an Engineering Quality structural\nassessment trigger or the reuse-search duty applies; the reuse-search duty alone\nuses only its Ownership Discovery section.\n"
   },
   "guidance/requirements.md": {
     "sha256": "7c46fb326875993ae0a5fad7d5115ccc7b78d726b0700e1258348693dced5541",
@@ -28189,12 +28376,16 @@ var EMBEDDED_PHASE_RESOURCES = {
     "text": "# Architecture Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Proposal\n\n1. State one decision question and its owner. Split independent decisions.\n2. Search the decision log for duplicates, conflicts, and decisions this one\n   would deprecate or supersede.\n3. Choose the next unused four-digit ID and recheck for collisions before write.\n4. Evaluate viable options against requirements, quality attributes, security,\n   current facts, accepted ADRs, cost, risk, reversibility, and operational\n   impact. A new or changed trust boundary, authorization model, or\n   secret-handling approach is ADR-eligible; apply the Security Assurance\n   policy (`security-assurance.md`) supplied by the active execution context when weighing options. Use materially applicable\n   Engineering Quality properties as decision drivers, not as a preselected\n   architecture pattern or methodology.\n5. Write the ADR with status `Proposed`.\n6. Update `documentation/decisions/README.md` with the proposed record.\n7. Present the proposal and wait for an explicit human lifecycle decision.\n\n## ADR Document\n\nWrite these sections:\n\n1. `# ADR NNNN: <Title>`.\n2. **Status / Date / Owner / Decision Makers**.\n3. **Related Artifacts**: feature, plan, manifest sections, and related ADRs.\n4. **Context and Decision Drivers**: current/target distinction, requirements,\n   constraints, and quality attributes.\n5. **Options Considered**: material benefits, costs, risks, and rejection reason\n   for each non-selected viable option.\n6. **Decision**: direct, imperative outcome. Keep implementation steps out.\n7. **Consequences**: positive, negative, risks, and required follow-ups.\n8. **Compliance and Confirmation**: observable checks for implementation and\n   review.\n9. **Lifecycle Links**: `Supersedes`, `Superseded by`, or `None`.\n\n## Lifecycle\n\n- `Proposed`: revise, accept, or reject after review. Planning cannot rely on it.\n- `Accepted`: record approval date and decision makers. The body becomes\n  immutable and can guide planning before implementation exists.\n- `Rejected`: preserve the proposal and add the rejection reason.\n- `Superseded`: allowed only when a linked replacement ADR is accepted.\n- `Deprecated`: use when the decision no longer applies without replacement.\n\n## Apply The Decision\n\n- Rework: keep `Proposed`, revise the proposal, and request another review.\n- Accept: set `Accepted`, record approval date and decision makers, update the\n  decision index, and add a `Planned` row to the manifest's active ADR index.\n  The row carries only ID, title, path, and state; rationale, options, and\n  consequences stay in the ADR body. The manifest stays current state and the\n  ADR is approved target intent: `code-writing` moves the row to `Implemented`\n  only after verification, and any current/target difference must be explicit\n  in `plan.md`.\n- Reject: set `Rejected`, record the reason, and update the decision index.\n- Supersede: accept the replacement first, then change only status and lifecycle\n  links on the older ADR, keep both in the decision log, and update both\n  indexes.\n- Deprecate: require explicit approval, record why it no longer applies, and\n  remove it from the manifest's active index.\n\nUpdate the decision-log row after every lifecycle change. Change an accepted\ndecision only with a new Proposed ADR; never rewrite its context, options,\ndecision, or consequences.\n\nEngineering Quality does not expand ADR eligibility. Keep a local, reversible\nimplementation choice in the calling plan even when one policy property informs\nit; create an ADR only when the existing eligibility threshold is met.\n\n"
   },
   "guidance/planning.md": {
-    "sha256": "ee51c40ea0ef410c54ea736de597ce5d499b7353ad632edd58c09186b274a878",
-    "text": "# Planning Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Document\n\n1. `# Development Plan: <Name>`, slug, link to description, accepted ADRs, and\n   manifest facts used.\n2. **Plan Authority**: copy the document convention (heading and three paragraphs)\n   from the installed `policies/plan-task-completion.md`, before Technical\n   Breakdown and Implementation Tasks. Make obligations explicit; add labeled\n   optional guidance only when useful. Required behavior and safety constraints\n   belong in binding text. Do not add a classification template to every task.\n3. **Technical Breakdown** in dependency order, only for materially affected\n   areas. Establish behavior, invariants, scope and relevant boundaries; retain\n   necessary contract, dependency, failure/lifecycle and compatibility constraints.\n   Name enforcement points for recorded security exposures and specific manifest\n   facts that will become stale. Omit unaffected layers and empty sections.\n4. **Implementation Tasks**: one canonical heading per task in the exact form\n   `- [ ] **T001 - Title**`, `- [ ] **T002 - Title**`, in dependency order.\n   The heading line ends at the closing `**`: no trailing annotation,\n   emphasis, or continuation after it, and the box stays unchecked even in a\n   revised plan whose earlier tasks were already implemented \u2014 put provenance\n   notes such as \"added from review finding\" in the task body below the\n   heading. A heading outside this grammar fails deterministic validation\n   before the plan can be approved. Each task establishes behavior and binding\n   invariants, affected files/units and boundaries, necessary implementation\n   constraints, dependencies, FR/acceptance/ADR mapping, proportionate assurance\n   and completion evidence, and review\n   batch. For every material claim introduced by the change, name an existing\n   proportionate evidence owner such as Test Assurance, Security Assurance,\n   contract verification, a configured check, or justified inspection; do not\n   create another test by default. Mark tasks that need separate approval. After\n   strict orchestrated approval these checkboxes become an immutable approved\n   work set; execution status is recorded in the structured completion ledger\n   and its report projection, never by marking them `[x]`.\n5. **Consistency Check**: map every FR and acceptance criterion to tasks, map\n   every accepted ADR constraint or confirmation method, confirm there are no\n   unresolved Proposed ADRs, name required manifest transitions, and state the\n   plan's own security exposure or that none applies. Name only materially\n   applicable Engineering Quality constraints and their task/evidence owner; do\n   not add a ten-row checklist or per-rule `N/A` list.\n\nEvery new strict task plan includes the self-contained v2 obligation inventory\ndescribed by Plan Authority and Task Completion. Select checks for the task,\nretain mandatory fresh requirements, bind the complete surrounding prose and\nobtain normal bundle approval. No profile catalogue defines this inventory.\nEquivalent evidence requires an eligible shared-owner decision; missing or\nambiguous reuse commitments preserve fresh execution.\n\n## Rules\n\n- Runner control paths under `.banzai/` are outside model write scope except exact\n  private artifact roles bound for the intended implementation/fix phase.\n  Put actual owner-only requirements in **Human prerequisites** and show that\n  section with plan approval. Missing tests or tooling belong to the approved\n  task scope, not a profile-setup gate. Do not plan runner-configuration JSON\n  edits or invent an external updater.\n  Reading those paths for facts and explicitly preserving them are valid task\n  context. Keep each action's targets clear, including in mixed instructions.\n  When a reference is ambiguous, use a separate `Read-only references:` or\n  `Unchanged paths:` list; `Files:`, `Affected files:` and `Files to change:`\n  declare write targets. These optional labels do not grant writes or replace\n  the task's binding constraints. Do not add them to every task by default.\n\n- Specify exact contracts, signatures, state shapes, identifiers, config keys,\n  locations or techniques when applicable authority or a concrete constraint\n  requires them, including internal details. Link existing authoritative\n  definitions instead of copying them; do not authorize future contract changes\n  through a link. Leave routine private mechanics open where no such constraint\n  applies, under the installed plan policy.\n- Omit speculative layers, exhaustive file trees, function inventories and\n  pseudocode bodies. Do not write function bodies.\n- Map every FR and acceptance criterion to the plan.\n- Do not repeat ADR option analysis or rationale; link the accepted ADR.\n- If planning discovers a material human-owned choice or conflicts with an\n  accepted ADR, stop dependent work. Resolve the choice through Decision\n  Consultation when applicable; an ADR-eligible result requires an architecture\n  decision before a dependent plan. Never infer or repeat an answered choice\n  against unchanged evidence.\n- State thread/actor/context boundaries when relevant.\n- Do not introduce an unapproved dependency. If one is required, stop for\n  explicit approval and ADR evaluation; after approval, include install,\n  lockfile, verification, and manifest tasks.\n- Follow the Engineering Quality authority order. Use the smallest compatible\n  design that satisfies the description and accepted decisions; do not mandate\n  a generic architecture, abstraction, directory, or dependency-injection\n  technique.\n- Apply the Security Assurance policy (`security-assurance.md`) supplied by the active execution context. For each exposure the\n  description recorded, name the enforcement point \u2014 the module or boundary\n  applying the control \u2014 and map its requirement to a task like any other.\n- Apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Plan evidence for material\n  guarantees and plausible regressions; do not require one test per requirement,\n  branch, helper, edge case, or traceability row.\n"
+    "sha256": "c4cfaea2b69410e17e032d0c980e0a28feb3fc5994bc078d5ed240bab04e97eb",
+    "text": "# Planning Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Document\n\n1. `# Development Plan: <Name>`, slug, link to description, accepted ADRs, and\n   manifest facts used.\n2. **Plan Authority**: copy the document convention (heading and three paragraphs)\n   from the installed `policies/plan-task-completion.md`, before Technical\n   Breakdown and Implementation Tasks. Make obligations explicit; add labeled\n   optional guidance only when useful. Required behavior and safety constraints\n   belong in binding text. Do not add a classification template to every task.\n3. **Technical Breakdown** in dependency order, only for materially affected\n   areas. Establish behavior, invariants, scope and relevant boundaries; retain\n   necessary contract, dependency, failure/lifecycle and compatibility constraints.\n   Name enforcement points for recorded security exposures and specific manifest\n   facts that will become stale. Omit unaffected layers and empty sections.\n4. **Implementation Tasks**: one canonical heading per task in the exact form\n   `- [ ] **T001 - Title**`, `- [ ] **T002 - Title**`, in dependency order.\n   The heading line ends at the closing `**`: no trailing annotation,\n   emphasis, or continuation after it, and the box stays unchecked even in a\n   revised plan whose earlier tasks were already implemented \u2014 put provenance\n   notes such as \"added from review finding\" in the task body below the\n   heading. A heading outside this grammar fails deterministic validation\n   before the plan can be approved. Each task establishes behavior and binding\n   invariants, affected files/units and boundaries, necessary implementation\n   constraints, dependencies, FR/acceptance/ADR mapping, proportionate assurance\n   and completion evidence, and review\n   batch. For every material claim introduced by the change, name an existing\n   proportionate evidence owner such as Test Assurance, Security Assurance,\n   contract verification, a configured check, or justified inspection; do not\n   create another test by default. Mark tasks that need separate approval. After\n   strict orchestrated approval these checkboxes become an immutable approved\n   work set; execution status is recorded in the structured completion ledger\n   and its report projection, never by marking them `[x]`.\n5. **Consistency Check**: map every FR and acceptance criterion to tasks, map\n   every accepted ADR constraint or confirmation method, confirm there are no\n   unresolved Proposed ADRs, name required manifest transitions, and state the\n   plan's own security exposure or that none applies. Name only materially\n   applicable Engineering Quality constraints and their task/evidence owner; do\n   not add a ten-row checklist or per-rule `N/A` list.\n\nEvery new strict task plan includes the self-contained v2 obligation inventory\ndescribed by Plan Authority and Task Completion. Select checks for the task,\nretain mandatory fresh requirements, bind the complete surrounding prose and\nobtain normal bundle approval. No profile catalogue defines this inventory.\nEquivalent evidence requires an eligible shared-owner decision; missing or\nambiguous reuse commitments preserve fresh execution.\n\n## Rules\n\n- Runner control paths under `.banzai/` are outside model write scope except exact\n  private artifact roles bound for the intended implementation/fix phase.\n  Put actual owner-only requirements in **Human prerequisites** and show that\n  section with plan approval. Missing tests or tooling belong to the approved\n  task scope, not a profile-setup gate. Do not plan runner-configuration JSON\n  edits or invent an external updater.\n  Reading those paths for facts and explicitly preserving them are valid task\n  context. Keep each action's targets clear, including in mixed instructions.\n  When a reference is ambiguous, use a separate `Read-only references:` or\n  `Unchanged paths:` list; `Files:`, `Affected files:` and `Files to change:`\n  declare write targets. These optional labels do not grant writes or replace\n  the task's binding constraints. Do not add them to every task by default.\n\n- Specify exact contracts, signatures, state shapes, identifiers, config keys,\n  locations or techniques when applicable authority or a concrete constraint\n  requires them, including internal details. Link existing authoritative\n  definitions instead of copying them; do not authorize future contract changes\n  through a link. Leave routine private mechanics open where no such constraint\n  applies, under the installed plan policy.\n- Omit speculative layers, exhaustive file trees, function inventories and\n  pseudocode bodies. Do not write function bodies.\n- Map every FR and acceptance criterion to the plan.\n- Do not repeat ADR option analysis or rationale; link the accepted ADR.\n- If planning discovers a material human-owned choice or conflicts with an\n  accepted ADR, stop dependent work. Resolve the choice through Decision\n  Consultation when applicable; an ADR-eligible result requires an architecture\n  decision before a dependent plan. Never infer or repeat an answered choice\n  against unchanged evidence.\n- State thread/actor/context boundaries when relevant.\n- Do not introduce an unapproved dependency. If one is required, stop for\n  explicit approval and ADR evaluation; after approval, include install,\n  lockfile, verification, and manifest tasks.\n- Follow the Engineering Quality authority order. Use the smallest compatible\n  design that satisfies the description and accepted decisions, meaning the\n  simplest compatible resulting design rather than the smallest diff; do not\n  mandate a generic architecture, abstraction, directory, or\n  dependency-injection technique.\n- Apply the Security Assurance policy (`security-assurance.md`) supplied by the active execution context. For each exposure the\n  description recorded, name the enforcement point \u2014 the module or boundary\n  applying the control \u2014 and map its requirement to a task like any other.\n- Apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Plan evidence for material\n  guarantees and plausible regressions; do not require one test per requirement,\n  branch, helper, edge case, or traceability row.\n"
+  },
+  "guidance/code-design.md": {
+    "sha256": "288e8ee2cc43652caeae33886d0da057f9a481e6c3832b4d093d4c046f3c9d97",
+    "text": "# Code Design Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Ownership Discovery\n\nFind owners via manifest, symbols, callers and imports; read relevant bodies.\nBefore new helpers/rules, search by behavior/name. Cite matches or no-match scope\nin one artifact line (chat if none). Search alone needs no full record/summary.\nRecord manifest conflicts, never proposed owners as facts.\n\n## Assessment Contract\n\nUnder Engineering Quality `Structural Assessment Triggers`, group by reason to\nchange, collaborators, state, lifecycle and verification; prefer existing owners.\nGive independent responsibilities explicit boundaries. Keep one implementation\nowner per rule unless contract, dependency, lifecycle or compatibility requires\nseparation; name that constraint and divergence risk. Similar syntax is not proof.\nSeparate decisions from effects only with read timing, failures and ownership\npreserved. Never widen shared mutable access or pass a whole coordinator merely\nto split files. Compare decision-relevant alternatives.\nRecord in the caller's artifact:\n\n- trigger, container, source evidence and reuse search;\n- owner, collaborators, effects and dependency direction;\n- disposition (`reused`, `extracted`, `retained`) and reason;\n- ownership/reuse/effect invariants, verification and remaining debt;\n- authority: within scope, needs decision/scope change, or undetermined.\n\nFor retention, explain boundary fit, added/avoided coupling or duplication and\nwhy bounded extraction/reuse is less suitable. Small diff, passing tests or\nprecedent alone cannot justify it. Name constraints; never waive obligations.\n\n## Planning Assessment\n\nFor triggered work, put invariants in the plan summary and binding tasks,\nor in work/fix records with a pre-edit chat summary. Scope extraction and docs.\nUse invariants, not layouts; lite records do not grant human approval.\n\n## Implementation Assessment\n\nBefore triggered edits, assess or revalidate a prior assessment against source;\nit is input, not approval. Reassess changed responsibilities, dependencies,\nlifecycles or failed checks. Verify source against invariants and record results;\nrecords or fewer lines prove no improvement. Refine within invariants; escalate\nconflicts, never amend approved obligations.\n"
   },
   "guidance/implementation.md": {
-    "sha256": "094bbd3afa498932dd7c85a0149ea3a740fc411fdcdb00594cee3f099a5a3895",
-    "text": "# Implementation Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Implementation Rules\n\n1. Follow the approved task order and preserve approved task meaning.\n2. Group adjacent steps with no escalation trigger into batches. Report a batch\n   and continue; a batch boundary is not a gate.\n3. Stop before any planned or discovered escalation trigger; name it and wait\n   for explicit approval.\n4. After each batch, run focused affected checks that give useful feedback.\n5. Do not run formatter in batch loops. Run it only during final verification.\n6. Apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Preserve tests that protect\n   material guarantees. Add, consolidate, or remove tests only when the resulting\n   evidence remains proportionate and non-redundant.\n7. Do not add unapproved dependencies. Add only dependencies explicitly\n   authorized by the approved plan, then update the lockfile and manifest.\n8. Apply the Engineering Quality authority order and materially applicable\n   constraints. Keep work within approved scope, use the smallest compatible\n   implementation, and reuse repository mechanisms and evidence owners rather\n   than creating an EQ checklist, methodology, or test quota.\n9. Apply each linked ADR's compliance and confirmation constraints.\n10. Make important implementation dependencies, boundary behavior, failure and\n    lifecycle consequences, and compatibility changes explicit when the plan\n    identifies them; do not invent those concerns for an unaffected surface.\n11. Comment sparingly and with high signal. Write a comment only to explain\n    why: a constraint, trade-off, invariant, side effect, or non-obvious\n    behavior. Do not narrate what the code visibly does.\n12. When Serena MCP tools are listed, prefer `find_symbol`,\n    `find_referencing_symbols`, and `get_symbols_overview` over pattern search\n    or line-window reads for code.\n\n## Deviations\n\nApply Plan Authority (`plan-task-completion.md`) supplied by the active execution context.\nSatisfy binding requirements within approved scope; a different compliant choice\nunder explicitly optional guidance is not a deviation and needs no reapproval or\nreport entry merely for differing. Preserve legacy approved meanings and exact\ndirectives; private appearance alone does not make a constraint optional.\n\nRecord material decisions and real deviations proportionately, with rationale\nand confirmation that `description.md` still holds. A missing/deprecated API,\nframework behavior or correctness gap may require a deviation, but documenting\nit does not authorize a changed commitment. Use existing escalation/reapproval\nfor conflicts. Record material Engineering Quality deviations in the existing\nimplementation report, not a separate artifact or mandatory per-rule checklist.\n\nIf a deviation conflicts with or invalidates an accepted ADR, stop before the\nconflicting change. Require a superseding architecture proposal, then revise and reapprove\nthe plan. Never edit the accepted ADR body.\n\n## Final Verification\n\nBefore the report:\n\n1. Trace every FR and acceptance criterion to implementation and proportionate\n   assurance evidence.\n2. Confirm every resolved assumption is honored.\n3. Trace every accepted ADR compliance/confirmation item to code, tests, or an\n   explicitly owned non-automated check.\n4. Confirm every plan task is complete or reported as a gap.\n5. Confirm each material claim has the proportionate evidence owner assigned by\n   the plan and that applicable Engineering Quality constraints and deviations\n   match the current implementation.\n6. Run formatter check/fix if configured.\n7. In orchestrated mode, do not repeat a full-scope command supplied in the\n   runner verification block. If the manifest's applicable final suite is absent\n   from that block, run it once and record the configuration gap.\n8. In standalone mode, run the applicable typecheck, lint, and final test suite\n   once unless the shared deterministic owner establishes a permitted equivalent\n   disposition for that check under Test Assurance. Keep unsupported checks fresh.\n9. If formatting changed files, rerun affected checks.\n10. Set verified ADR entries in the manifest index to `Implemented`; leave\n    unimplemented accepted decisions as `Planned`.\n11. Update only the manifest facts the change made stale, following the\n    `project-manifest` writing rules: rewrite the affected bullet, add or remove\n    module entries, and record no delivery narrative, verification history, or\n    test counts. Those belong in the implementation and test reports.\n\n## Implementation Report\n\nWrite the resolved `implementationReport` artifact:\n\n1. title, slug, links to description and plan;\n2. files created/modified/deleted and new folders/modules;\n3. FR/story trace plus final verification commands and outcomes;\n4. ADR conformance and confirmation evidence;\n5. statement: no functional gap and no scope expansion, or list gaps;\n6. deviations from plan;\n7. assurance evidence added, reused, consolidated, or intentionally deferred,\n   and the material guarantee each automated test can fail to protect;\n8. material Engineering Quality deviations and their authority, impact, and\n   evidence owner, or `None`;\n9. notes for assurance.\n\nTask completion evidence is owned differently by context. In orchestrated\nstrict mode, return the structured `taskCompletion` ledger and write only the\nreport narrative: the runner validates the claims and renders and publishes the\nreport's **Plan Task Completion** section (`banzai-plan-task-completion/v2`)\nitself; never author, copy or edit that section, and give gap references a\nunique narrative heading outside it. In standalone mode, author the\n`banzai-plan-task-completion/v1` table exactly as the calling skill specifies.\n\n\nFor a bounded accepted-finding closure, retain unaffected report text. Add one\nrecord with accepted finding ID, changed scope, deterministic decision, executed/\nreused/historical/pending evidence references and limitations. Inspect all current\nclaims for consistency and correct only affected claims; never predict a pending\nrunner result or manufacture a new attempt for reused evidence.\n"
+    "sha256": "c452d5be33a4a84e031a7ea0ab062981f6c095c4c76481832b810d9e7b2aee83",
+    "text": "# Implementation Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Implementation Rules\n\n1. Follow the approved task order and preserve approved task meaning.\n2. Group adjacent steps with no escalation trigger into batches. Report a batch\n   and continue; a batch boundary is not a gate.\n3. Stop before any planned or discovered escalation trigger; name it and wait\n   for explicit approval.\n4. After each batch, run focused affected checks that give useful feedback.\n5. Do not run formatter in batch loops. Run it only during final verification.\n6. Apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Preserve tests that protect\n   material guarantees. Add, consolidate, or remove tests only when the resulting\n   evidence remains proportionate and non-redundant.\n7. Do not add unapproved dependencies. Add only dependencies explicitly\n   authorized by the approved plan, then update the lockfile and manifest.\n8. Apply the Engineering Quality authority order and materially applicable\n   constraints. Keep work within approved scope, use the smallest compatible\n   implementation, meaning the simplest compatible resulting design rather than\n   the smallest diff, and reuse repository mechanisms and evidence owners\n   rather than creating an EQ checklist, methodology, or test quota.\n9. Apply each linked ADR's compliance and confirmation constraints.\n10. Make important implementation dependencies, boundary behavior, failure and\n    lifecycle consequences, and compatibility changes explicit when the plan\n    identifies them; do not invent those concerns for an unaffected surface.\n11. Comment sparingly and with high signal. Write a comment only to explain\n    why: a constraint, trade-off, invariant, side effect, or non-obvious\n    behavior. Do not narrate what the code visibly does.\n12. When Serena MCP tools are listed, prefer `find_symbol`,\n    `find_referencing_symbols`, and `get_symbols_overview` over pattern search\n    or line-window reads for code.\n\n## Deviations\n\nApply Plan Authority (`plan-task-completion.md`) supplied by the active execution context.\nSatisfy binding requirements within approved scope; a different compliant choice\nunder explicitly optional guidance is not a deviation and needs no reapproval or\nreport entry merely for differing. Preserve legacy approved meanings and exact\ndirectives; private appearance alone does not make a constraint optional.\n\nRecord material decisions and real deviations proportionately, with rationale\nand confirmation that `description.md` still holds. A missing/deprecated API,\nframework behavior or correctness gap may require a deviation, but documenting\nit does not authorize a changed commitment. Use existing escalation/reapproval\nfor conflicts. Record material Engineering Quality deviations in the existing\nimplementation report, not a separate artifact or mandatory per-rule checklist.\n\nIf a deviation conflicts with or invalidates an accepted ADR, stop before the\nconflicting change. Require a superseding architecture proposal, then revise and reapprove\nthe plan. Never edit the accepted ADR body.\n\n## Final Verification\n\nBefore the report:\n\n1. Trace every FR and acceptance criterion to implementation and proportionate\n   assurance evidence.\n2. Confirm every resolved assumption is honored.\n3. Trace every accepted ADR compliance/confirmation item to code, tests, or an\n   explicitly owned non-automated check.\n4. Confirm every plan task is complete or reported as a gap.\n5. Confirm each material claim has the proportionate evidence owner assigned by\n   the plan and that applicable Engineering Quality constraints and deviations\n   match the current implementation.\n6. Run formatter check/fix if configured.\n7. In orchestrated mode, do not repeat a full-scope command supplied in the\n   runner verification block. If the manifest's applicable final suite is absent\n   from that block, run it once and record the configuration gap.\n8. In standalone mode, run the applicable typecheck, lint, and final test suite\n   once unless the shared deterministic owner establishes a permitted equivalent\n   disposition for that check under Test Assurance. Keep unsupported checks fresh.\n9. If formatting changed files, rerun affected checks.\n10. Set verified ADR entries in the manifest index to `Implemented`; leave\n    unimplemented accepted decisions as `Planned`.\n11. Update only the manifest facts the change made stale, following the\n    `project-manifest` writing rules: rewrite the affected bullet, add or remove\n    module entries, and record no delivery narrative, verification history, or\n    test counts. Those belong in the implementation and test reports.\n\n## Implementation Report\n\nWrite the resolved `implementationReport` artifact:\n\n1. title, slug, links to description and plan;\n2. files created/modified/deleted and new folders/modules;\n3. FR/story trace plus final verification commands and outcomes;\n4. ADR conformance and confirmation evidence;\n5. statement: no functional gap and no scope expansion, or list gaps;\n6. deviations from plan;\n7. assurance evidence added, reused, consolidated, or intentionally deferred,\n   and the material guarantee each automated test can fail to protect;\n8. material Engineering Quality deviations and their authority, impact, and\n   evidence owner, or `None`;\n9. notes for assurance;\n10. structural assessment records and their verified outcomes for triggered\n    work, or `None`.\n\nTask completion evidence is owned differently by context. In orchestrated\nstrict mode, return the structured `taskCompletion` ledger and write only the\nreport narrative: the runner validates the claims and renders and publishes the\nreport's **Plan Task Completion** section (`banzai-plan-task-completion/v2`)\nitself; never author, copy or edit that section, and give gap references a\nunique narrative heading outside it. In standalone mode, author the\n`banzai-plan-task-completion/v1` table exactly as the calling skill specifies.\n\n\nFor a bounded accepted-finding closure, retain unaffected report text. Add one\nrecord with accepted finding ID, changed scope, deterministic decision, executed/\nreused/historical/pending evidence references and limitations. Inspect all current\nclaims for consistency and correct only affected claims; never predict a pending\nrunner result or manufacture a new attempt for reused evidence.\n"
   },
   "guidance/assurance.md": {
     "sha256": "6b3b829995c30f65152a4849e2aa600c99195090702f3769ec9f410623036203",
@@ -28205,16 +28396,16 @@ var EMBEDDED_PHASE_RESOURCES = {
     "text": "# Manifest Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Maintenance\n\nRun after changes to:\n\n- architecture;\n- modules/components;\n- build/config settings;\n- environment keys;\n- dependencies;\n- conventions;\n- implementation or supersession of an accepted ADR.\n\n## Required Sections\n\nKeep these headings in order:\n\n1. **Project Overview**\n2. **Platform & Tooling**\n3. **Architecture**\n4. **Project Structure**\n5. **Key Modules & Components**\n6. **State & Data Flow**\n7. **Dependencies**\n8. **Testing**\n9. **Conventions**\n10. **Technical Constraints & Decision Index**\n\nWrite `None` with a reason when a section is empty.\n\n## Writing Rules\n\n- Record facts, not preferences.\n- Quote config keys, target names, and versions exactly.\n- State the operational effect of load-bearing current constraints; keep their\n  trade-offs in ADRs.\n- Use concise present-tense bullets: one current fact per bullet. When a fact\n  changes, rewrite its bullet; do not append the new state after the old one.\n- Do not include code in the manifest.\n- Keep ADR rationale, alternatives, consequences, and history out of the\n  manifest; link the active accepted ADR instead.\n- Keep the manifest current-state only. Implementation history, release\n  narrative, per-change delivery summaries, and past verification results\n  belong in ADRs, feature reports, and change records; link them, do not\n  restate them.\n- Keep the whole manifest readable in one pass; every skill loads it before\n  work. When a section outgrows a few screens, move detail to a linked\n  maintainer reference instead of growing the manifest.\n- In **Key Modules & Components**, give each unit one bullet: path, role,\n  public interface or contract, and the load-bearing invariant. Keep\n  step-by-step behavior, edge-case narratives, and rendering detail in source,\n  tests, or a linked maintainer reference.\n- In **Decision Index**, keep one row per active accepted ADR with ID, title,\n  path, and `Planned`/`Implemented` state. Link the decision log for rejected\n  and superseded records; add no per-ADR delivery prose.\n- Keep section 9 limited to repository-specific conventions supported by\n  configuration, approved guidance, or dominant evidence. Do not insert generic\n  function-size, decomposition, abstraction, control-flow, comment, naming,\n  directory, or pattern preferences.\n- In **Testing**, record the current assurance priorities, allowed test-double\n  boundaries, final-suite owner, and explicit coverage threshold or `None` as\n  project facts rather than universal preferences. Record the required suite\n  and at most the latest recorded result; per-change test counts and covered\n  guarantees stay in feature test reports.\n\n## Checklist\n\n- Replace `Recommended (not yet present)` once code exists.\n- Update modules for added/renamed/removed units.\n- Add approved dependencies.\n- Add new build/config/env/resource facts.\n- Keep active ADR links and `Planned`/`Implemented` states current.\n- Report, rather than hide, a difference between current manifest facts and\n  accepted ADR intent.\n- Re-read every section and remove stale claims.\n\n"
   },
   "guidance/review.md": {
-    "sha256": "d669e214f4ffcb547f31174e48eb32fab769aa83e335980d2366ebcc072b1bcc",
-    "text": "# Review Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Read\n\n- the resolved `work` artifact, if present.\n- the resolved `description` artifact, if present.\n- the resolved `plan` artifact, if present.\n- the resolved `implementationReport` artifact, if present.\n- the resolved `testReport` artifact, if present.\n- `documentation/decisions/README.md` and ADRs linked by feature artifacts,\n  source boundaries, or the manifest.\n- `PROJECT_MANIFEST.md`.\n- Source and tests.\n\nWhen Serena MCP tools are listed, prefer `find_symbol`,\n`find_referencing_symbols`, and `get_symbols_overview` over pattern search or\nline-window reads for code.\n\nStop if neither lite nor strict artifacts exist. Flag partial strict artifact\nsets.\n\n## Audit\n\nFor each finding, cite `file:line`.\n\n1. Spec compliance: every FR/acceptance criterion implemented; no scope\n   expansion.\n2. Resolved assumptions: states, gates, errors, interruptions honored.\n3. Plan conformance: apply Plan Authority (`plan-task-completion.md`) supplied by the active execution context; task statuses match code/reports and real\n   deviations are recorded proportionately. Optional-guidance differences alone\n   are not findings, but independently supported defects still are. Preserve\n   legacy meaning and explicit approved directives even when another approach\n   seems equivalent; keep existing severity rules. In\n   an approved orchestrated run, unchecked immutable boxes define the work set\n   and are not a finding by themselves. Apply the same evidence hierarchy as\n   `feature-status`: inspect the runner-supplied validated completion summary\n   and task records, then check material consistency with the implementation\n   report, required assurance, approval digest, state, and source. A\n   runner-published `banzai-plan-task-completion/v2` region is the runner's\n   receipt of validated claims and a model-authored v1 table is a claim;\n   neither is independent evidence, and only repository files and required\n   report narrative are. The runner's\n   deterministic checks remain the primary enforcement boundary; a reviewer\n   must not return `pass` when required evidence is absent, a task is incomplete\n   or blocked, or a material contradiction is visible. Report a finding only for a\n   material contradiction or gap, never merely to request checkbox mutation.\n4. ADR lifecycle: required decisions exist, relied-on ADRs are `Accepted`,\n   supersession links are reciprocal, and accepted bodies were not rewritten.\n5. ADR conformance: implementation and tests satisfy decision, consequences,\n   and confirmation criteria; no architecturally significant choice is hidden\n   only in a plan or manifest.\n6. Report accuracy: file lists and verification claims match reality.\n7. Verification: inspect current runner evidence. Rerun only a focused\n   reproduction or missing, stale, inconsistent, or directly material command;\n   record why. Run the formatter check only when that evidence is specifically\n   required. Never run formatter fixes in review.\n8. Manifest conformance: current facts, active ADR index, naming, errors,\n   organization, async model, localization, dependency policy.\n9. Maintainability: report dead generality, needless indirection, unclear\n   responsibility, or comment/documentation behavior as an ordinary finding\n   only when exact evidence shows current material impact or a violated approved\n   authority. A preferred pattern, decomposition, control-flow style, or generic\n   cleanliness opinion is not a finding.\n10. Repository conventions: apply only manifest facts, configured rules,\n    approved guidance, and dominant local conventions relevant to the changed\n    surface. Do not invent generic naming, comment, size, or directory rules.\n11. Tests: apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Reject hollow, redundant,\n    implementation-mirroring, or disproportionate tests. Confirm the Risk and\n    Contract Assurance Map does not overstate its evidence.\n12. Docs: no stale artifact, ADR, decision-index, or manifest statements.\n13. Security: apply the Security Assurance policy (`security-assurance.md`) supplied by the active execution context against the diff as built.\n    Each recorded exposure has a named enforcement point and proportionate\n    evidence; a recorded no-exposure claim still holds for the code that\n    exists. Use the `security` category.\n14. Engineering Quality: after the ordinary audit and verdict are frozen, apply\n    the shadow procedure below. Do not use an EQ-only concern to retroactively\n    create or re-severity an ordinary finding.\n\nFor a missing-test finding, the existing finding fields must together identify:\n\n- the material observable guarantee;\n- the plausible regression mechanism;\n- why current evidence cannot detect it;\n- the proportionate evidence level and observable fix acceptance.\n\nCoverage percentage, syntactic reach, a private helper, or a traceability row\nalone is not a finding. A false report claim remains a finding, but its fix may\neither add proportionate evidence or narrow the claim truthfully. Missing\nmaterial contract or safety evidence and failed required checks remain actionable;\nclaim narrowing cannot discharge an actual mandatory requirement.\n\nA security finding obeys the same rule: it must name the exposure class, the\nmechanism reachable in this codebase, why current evidence does not cover it,\nand the observable fix acceptance. An exposure-class label, a generic threat\nname, or a framework default alone is not a finding.\n\nFor an accepted-finding resolution, inspect the accepted IDs, changed scope,\ncurrent binding/approved authority, direct physical origins and current\napplicability. Keep review independent of the builder transcript. Executed,\nreused, historical, failed and pending evidence have different meanings; do not\nturn reuse into a fresh pass or infer missing assurance from a report count.\nInspect surrounding claims for contradictions while keeping the review focused\non the authorized delta. The existing human triage and scope acknowledgment remain.\n\n## Engineering Quality Shadow Procedure\n\n1. Complete audit items 1\u201313 under their existing authorities. Freeze the\n   ordinary findings, severities, and verdict before classifying Engineering\n   Quality overlap or looking for an incremental EQ-only candidate.\n2. An already-valid ordinary finding may add exactly one primary `EQ-NN` to its\n   existing `violates` array. The finding must qualify without that mapping, and\n   the mapping changes neither severity nor verdict.\n3. Record a genuinely incremental EQ-only candidate only as one `EQ-SHADOW:`\n   string in existing free-form `deferredCoverage`. It must include a\n   review-local candidate ID, primary rule ID, suggested severity, confidence,\n   exact evidence and stable location, concrete impact, smallest reasonable\n   remediation, relevant authority references, verification method, semantic\n   dedupe key, and `waiver=not_applicable (shadow-only)`.\n4. Use the dedupe identity defined by the canonical policy. Merge wording-only\n   duplicates and line-number drift into one record. Ordinary deferred-coverage\n   prose remains valid.\n5. A shadow record is not a finding: it cannot affect ordinary findings,\n   severity, verdict, mandatory human triage, accepted scope, fixing,\n   completion, or a gate. Do not put it in `findings`, and do not promote it even\n   when its suggested severity is `blocker`.\n\nRecommended human-readable form, as a semantic evaluation convention only:\n\n```text\nEQ-SHADOW: candidateId=EQ-S1; ruleId=EQ-04; severity=should_fix; confidence=high; evidence=src/config.ts:84 ConfigLoader.parseConfig; impact=malformed persisted values reach process invocation; remediation=validate with the existing config decoder; references=FR3 and manifest section 6; verification=focused malformed-value rejection plus legacy-valid acceptance; dedupeKey=EQ-04|ConfigLoader.parseConfig|FR3|invalid-config; waiver=not_applicable (shadow-only)\n```\n\nNo EQ-specific field is mandatory in the review-result contract. Do not change the\nstructured schema, parser, or runtime validation to interpret the string.\n\n"
+    "sha256": "c4f7a8182116b30214b8a0ea5e69a3386744445f32e61c3658efbdc90cbd125d",
+    "text": "# Review Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Read\n\n- the resolved `work` artifact, if present.\n- the resolved `description` artifact, if present.\n- the resolved `plan` artifact, if present.\n- the resolved `implementationReport` artifact, if present.\n- the resolved `testReport` artifact, if present.\n- `documentation/decisions/README.md` and ADRs linked by feature artifacts,\n  source boundaries, or the manifest.\n- `PROJECT_MANIFEST.md`.\n- Source and tests.\n\nWhen Serena MCP tools are listed, prefer `find_symbol`,\n`find_referencing_symbols`, and `get_symbols_overview` over pattern search or\nline-window reads for code.\n\nStop if neither lite nor strict artifacts exist. Flag partial strict artifact\nsets.\n\n## Audit\n\nFor each finding, cite `file:line`.\n\n1. Spec compliance: every FR/acceptance criterion implemented; no scope\n   expansion.\n2. Resolved assumptions: states, gates, errors, interruptions honored.\n3. Plan conformance: apply Plan Authority (`plan-task-completion.md`) supplied by the active execution context; task statuses match code/reports and real\n   deviations are recorded proportionately. Optional-guidance differences alone\n   are not findings, but independently supported defects still are. Preserve\n   legacy meaning and explicit approved directives even when another approach\n   seems equivalent; keep existing severity rules. In\n   an approved orchestrated run, unchecked immutable boxes define the work set\n   and are not a finding by themselves. Apply the same evidence hierarchy as\n   `feature-status`: inspect the runner-supplied validated completion summary\n   and task records, then check material consistency with the implementation\n   report, required assurance, approval digest, state, and source. A\n   runner-published `banzai-plan-task-completion/v2` region is the runner's\n   receipt of validated claims and a model-authored v1 table is a claim;\n   neither is independent evidence, and only repository files and required\n   report narrative are. The runner's\n   deterministic checks remain the primary enforcement boundary; a reviewer\n   must not return `pass` when required evidence is absent, a task is incomplete\n   or blocked, or a material contradiction is visible. Report a finding only for a\n   material contradiction or gap, never merely to request checkbox mutation.\n4. ADR lifecycle: required decisions exist, relied-on ADRs are `Accepted`,\n   supersession links are reciprocal, and accepted bodies were not rewritten.\n5. ADR conformance: implementation and tests satisfy decision, consequences,\n   and confirmation criteria; no architecturally significant choice is hidden\n   only in a plan or manifest.\n6. Report accuracy: file lists and verification claims match reality.\n7. Verification: inspect current runner evidence. Rerun only a focused\n   reproduction or missing, stale, inconsistent, or directly material command;\n   record why. Run the formatter check only when that evidence is specifically\n   required. Never run formatter fixes in review.\n8. Manifest conformance: current facts, active ADR index, naming, errors,\n   organization, async model, localization, dependency policy.\n9. Maintainability: report dead generality, needless indirection, unclear\n   responsibility, or comment/documentation behavior as an ordinary finding\n   only when exact evidence shows current material impact or a violated approved\n   authority. A preferred pattern, decomposition, control-flow style, or generic\n   cleanliness opinion is not a finding.\n10. Repository conventions: apply only manifest facts, configured rules,\n    approved guidance, and dominant local conventions relevant to the changed\n    surface. Do not invent generic naming, comment, size, or directory rules.\n11. Tests: apply the Test Assurance policy (`test-assurance.md`) supplied by the active execution context. Reject hollow, redundant,\n    implementation-mirroring, or disproportionate tests. Confirm the Risk and\n    Contract Assurance Map does not overstate its evidence.\n12. Docs: no stale artifact, ADR, decision-index, or manifest statements.\n13. Security: apply the Security Assurance policy (`security-assurance.md`) supplied by the active execution context against the diff as built.\n    Each recorded exposure has a named enforcement point and proportionate\n    evidence; a recorded no-exposure claim still holds for the code that\n    exists. Use the `security` category.\n14. Engineering Quality: after the ordinary audit and verdict are frozen, apply\n    the shadow procedure below. Do not use an EQ-only concern to retroactively\n    create or re-severity an ordinary finding.\n\nFor a missing-test finding, the existing finding fields must together identify:\n\n- the material observable guarantee;\n- the plausible regression mechanism;\n- why current evidence cannot detect it;\n- the proportionate evidence level and observable fix acceptance.\n\nCoverage percentage, syntactic reach, a private helper, or a traceability row\nalone is not a finding. A false report claim remains a finding, but its fix may\neither add proportionate evidence or narrow the claim truthfully. Missing\nmaterial contract or safety evidence and failed required checks remain actionable;\nclaim narrowing cannot discharge an actual mandatory requirement.\n\nA security finding obeys the same rule: it must name the exposure class, the\nmechanism reachable in this codebase, why current evidence does not cover it,\nand the observable fix acceptance. An exposure-class label, a generic threat\nname, or a framework default alone is not a finding.\n\nFor an ADR-0050 structural assessment obligation, determine which trigger or\nreuse-search duty applies, inspect the record and its source identity, check\navailable coverage evidence, check reuse-search and retention evidence, and\nverify applicable invariants against code. Record presence does not prove\ncohesion, missing coverage is not a pass, and an advisory metric creates no\nduty. Report findings under existing authority; EQ shadow treatment is\nunchanged.\n\nFor an accepted-finding resolution, inspect the accepted IDs, changed scope,\ncurrent binding/approved authority, direct physical origins and current\napplicability. Keep review independent of the builder transcript. Executed,\nreused, historical, failed and pending evidence have different meanings; do not\nturn reuse into a fresh pass or infer missing assurance from a report count.\nInspect surrounding claims for contradictions while keeping the review focused\non the authorized delta. The existing human triage and scope acknowledgment remain.\n\n## Engineering Quality Shadow Procedure\n\n1. Complete audit items 1\u201313 under their existing authorities. Freeze the\n   ordinary findings, severities, and verdict before classifying Engineering\n   Quality overlap or looking for an incremental EQ-only candidate.\n2. An already-valid ordinary finding may add exactly one primary `EQ-NN` to its\n   existing `violates` array. The finding must qualify without that mapping, and\n   the mapping changes neither severity nor verdict.\n3. Record a genuinely incremental EQ-only candidate only as one `EQ-SHADOW:`\n   string in existing free-form `deferredCoverage`. It must include a\n   review-local candidate ID, primary rule ID, suggested severity, confidence,\n   exact evidence and stable location, concrete impact, smallest reasonable\n   remediation, relevant authority references, verification method, semantic\n   dedupe key, and `waiver=not_applicable (shadow-only)`.\n4. Use the dedupe identity defined by the canonical policy. Merge wording-only\n   duplicates and line-number drift into one record. Ordinary deferred-coverage\n   prose remains valid.\n5. A shadow record is not a finding: it cannot affect ordinary findings,\n   severity, verdict, mandatory human triage, accepted scope, fixing,\n   completion, or a gate. Do not put it in `findings`, and do not promote it even\n   when its suggested severity is `blocker`.\n\nRecommended human-readable form, as a semantic evaluation convention only:\n\n```text\nEQ-SHADOW: candidateId=EQ-S1; ruleId=EQ-04; severity=should_fix; confidence=high; evidence=src/config.ts:84 ConfigLoader.parseConfig; impact=malformed persisted values reach process invocation; remediation=validate with the existing config decoder; references=FR3 and manifest section 6; verification=focused malformed-value rejection plus legacy-valid acceptance; dedupeKey=EQ-04|ConfigLoader.parseConfig|FR3|invalid-config; waiver=not_applicable (shadow-only)\n```\n\nNo EQ-specific field is mandatory in the review-result contract. Do not change the\nstructured schema, parser, or runtime validation to interpret the string.\n\n"
   },
   "guidance/fix.md": {
-    "sha256": "3047924e5f3c26f86c92fdccde3f1c8982b433f1d5afe39b0a3e2952831b7428",
-    "text": "# Fix Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Report Rule\n\nWrite the resolved `changeReport` artifact when the fix:\n\n- changes user-visible behavior or a public contract;\n- fixes a documented bug;\n- applies or skips review findings;\n- changes `description.md`, `work.md`, `plan.md`, `test-report.md`,\n  `review-<iteration>.md`, or `PROJECT_MANIFEST.md`;\n- creates, supersedes, deprecates, or changes lifecycle metadata on an ADR;\n- touches an escalation trigger;\n- records a material Engineering Quality deviation;\n- is requested to have an audit trail.\n\nOtherwise verification and a final summary suffice; no change report is required.\n\n## Workflow\n\n1. Read relevant active accepted ADRs and the triaged review artifact when\n   review findings initiated the fix. Require explicit accepted finding IDs;\n   never infer acceptance from the review file alone. For defects, write a\n   failing regression test first only when it protects a material observable\n   regression not already covered and can be done without production changes.\n3. Follow the Engineering Quality authority order and make the smallest\n   compatible code/test/doc change that satisfies the request or accepted\n   finding. Do not turn a shadow candidate, rejected concern, or alternative\n   design opinion into extra scope. For approved strict plans, apply Plan Authority\n   (`plan-task-completion.md`) supplied by the active execution context: preserve binding directives\n   and legacy meaning; a suggested remedy remains optional unless an applicable\n   explicit human decision makes it mandatory. Correcting a report cannot replace\n   satisfying a required check or missing material evidence.\n   Comment sparingly and with high signal:\n   write a comment only to explain why, a constraint, trade-off, invariant,\n   side effect, or non-obvious behavior, and do not narrate what the code\n   visibly does.\n4. Keep feature artifacts and manifest in sync when behavior, design,\n   architecture, build settings, or conventions change. Rewrite only the\n   stale manifest facts under the `project-manifest` writing rules; fix\n   narrative and verification results belong in the change report.\n5. After changing tests or verification commands, including their expected or\n   observed results, search the complete current `test-report.md`,\n   `implementation-report.md`, and the fix's change report when it exists or is\n   required for every test-count and command-result claim. Update every current\n   claim from a command actually run in this fix or a validated equivalent\n   disposition with its exact physical origin, or label earlier evidence\n   explicitly `historical/pre-fix` with its scope. Keep all three artifacts\n   mutually consistent, and never leave an old unqualified count or command\n   outcome describing the current tree. In orchestrated mode, when runner-owned\n   final verification has not run yet, record only\n   `pending at fix handoff; durable runner evidence owns the eventual result`\n   instead of predicting it or copying an earlier total as current.\n6. Never rewrite an accepted ADR body. Route a changed accepted decision to a\n   superseding ADR and reapproved strict plan.\n7. If no upstream feature artifact exists, state that instead of inventing one.\n8. Run focused affected checks. In orchestrated mode, do not repeat supplied\n   full-scope runner commands; if the manifest final suite is absent, run it once\n   and report the gap. In standalone mode, run one final applicable suite unless\n   the shared deterministic owner establishes a permitted equivalent disposition\n   under Test Assurance. Keep every unsupported or mandatory fresh check.\n9. Run formatter check/fix only as final review, if configured. If it rewrites\n   files, rerun affected checks.\n10. Self-review for ADR and applicable Engineering Quality conformance, side\n    effects, missing material negative evidence, disproportionate tests, and doc\n    drift. Fix in-scope findings and rerun affected checks.\n11. Write/update the change report when required. In orchestrated strict\n    mode, refresh stale completion evidence only through the returned\n    `taskCompletion` ledger; the runner republishes the implementation report's\n    **Plan Task Completion** section from the canonical ledger, so never edit\n    that section by hand.\n\n## Change Report\n\nUse the resolved `changeReport` artifact:\n\n1. title, date, affected feature and ADR links;\n2. what changed;\n3. why;\n4. security exposure: one line per applicable class with the control applied,\n   or one line stating that none applies;\n5. files changed: production/tests/docs;\n6. skipped review findings, if any;\n7. documentation sync;\n8. ADR conformance or lifecycle result;\n9. material Engineering Quality deviations, or `None`;\n10. verification commands and outcomes;\n11. assurance critique result.\n\n\nUse one compact closure record per accepted finding: ID, changed scope, decision,\nexecuted/reused/historical/pending references and limitations. Preserve unaffected\nreport text while correcting every affected current claim. Do not rewrite reports\nor rerun a suite merely to update narrative. The resolution reviewer receives the\naccepted IDs, bounded delta, current authority and exact evidence/origins, with\nexisting independent review and human triage; omit builder transcripts.\n"
+    "sha256": "8367a41ac6d5976214d59cfc51d80e9d57e112bb9e5b283846633725f2ea53d2",
+    "text": "# Fix Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Report Rule\n\nWrite the resolved `changeReport` artifact when the fix:\n\n- changes user-visible behavior or a public contract;\n- fixes a documented bug;\n- applies or skips review findings;\n- changes `description.md`, `work.md`, `plan.md`, `test-report.md`,\n  `review-<iteration>.md`, or `PROJECT_MANIFEST.md`;\n- creates, supersedes, deprecates, or changes lifecycle metadata on an ADR;\n- touches an escalation trigger;\n- records a material Engineering Quality deviation;\n- meets an Engineering Quality structural assessment trigger;\n- is requested to have an audit trail.\n\nOtherwise verification and a final summary suffice; no change report is required.\n\n## Workflow\n\n1. Read relevant active accepted ADRs and the triaged review artifact when\n   review findings initiated the fix. Require explicit accepted finding IDs;\n   never infer acceptance from the review file alone. For defects, write a\n   failing regression test first only when it protects a material observable\n   regression not already covered and can be done without production changes.\n3. Follow the Engineering Quality authority order and make the smallest\n   compatible code/test/doc change that satisfies the request or accepted\n   finding, meaning the simplest compatible resulting design within that scope\n   rather than the smallest diff. When a structural assessment trigger\n   applies, apply the code-design guidance and record the assessment in the\n   change report; in lite quick-fix work, first show a brief pre-edit chat\n   summary of owner, boundary, dependencies and disposition as visibility\n   rather than an approval request. Do not turn a shadow candidate, rejected\n   concern, or alternative design opinion into extra scope. For approved strict plans, apply Plan Authority\n   (`plan-task-completion.md`) supplied by the active execution context: preserve binding directives\n   and legacy meaning; a suggested remedy remains optional unless an applicable\n   explicit human decision makes it mandatory. Correcting a report cannot replace\n   satisfying a required check or missing material evidence.\n   Comment sparingly and with high signal:\n   write a comment only to explain why, a constraint, trade-off, invariant,\n   side effect, or non-obvious behavior, and do not narrate what the code\n   visibly does.\n4. Keep feature artifacts and manifest in sync when behavior, design,\n   architecture, build settings, or conventions change. Rewrite only the\n   stale manifest facts under the `project-manifest` writing rules; fix\n   narrative and verification results belong in the change report.\n5. After changing tests or verification commands, including their expected or\n   observed results, search the complete current `test-report.md`,\n   `implementation-report.md`, and the fix's change report when it exists or is\n   required for every test-count and command-result claim. Update every current\n   claim from a command actually run in this fix or a validated equivalent\n   disposition with its exact physical origin, or label earlier evidence\n   explicitly `historical/pre-fix` with its scope. Keep all three artifacts\n   mutually consistent, and never leave an old unqualified count or command\n   outcome describing the current tree. In orchestrated mode, when runner-owned\n   final verification has not run yet, record only\n   `pending at fix handoff; durable runner evidence owns the eventual result`\n   instead of predicting it or copying an earlier total as current.\n6. Never rewrite an accepted ADR body. Route a changed accepted decision to a\n   superseding ADR and reapproved strict plan.\n7. If no upstream feature artifact exists, state that instead of inventing one.\n8. Run focused affected checks. In orchestrated mode, do not repeat supplied\n   full-scope runner commands; if the manifest final suite is absent, run it once\n   and report the gap. In standalone mode, run one final applicable suite unless\n   the shared deterministic owner establishes a permitted equivalent disposition\n   under Test Assurance. Keep every unsupported or mandatory fresh check.\n9. Run formatter check/fix only as final review, if configured. If it rewrites\n   files, rerun affected checks.\n10. Self-review for ADR and applicable Engineering Quality conformance, side\n    effects, missing material negative evidence, disproportionate tests, and doc\n    drift. Fix in-scope findings and rerun affected checks.\n11. Write/update the change report when required. In orchestrated strict\n    mode, refresh stale completion evidence only through the returned\n    `taskCompletion` ledger; the runner republishes the implementation report's\n    **Plan Task Completion** section from the canonical ledger, so never edit\n    that section by hand.\n\n## Change Report\n\nUse the resolved `changeReport` artifact:\n\n1. title, date, affected feature and ADR links;\n2. what changed;\n3. why;\n4. security exposure: one line per applicable class with the control applied,\n   or one line stating that none applies;\n5. files changed: production/tests/docs;\n6. skipped review findings, if any;\n7. documentation sync;\n8. ADR conformance or lifecycle result;\n9. material Engineering Quality deviations, or `None`;\n10. verification commands and outcomes;\n11. assurance critique result;\n12. structural assessment record or reuse-search citation, when applicable.\n\n\nUse one compact closure record per accepted finding: ID, changed scope, decision,\nexecuted/reused/historical/pending references and limitations. Preserve unaffected\nreport text while correcting every affected current claim. Do not rewrite reports\nor rerun a suite merely to update narrative. The resolution reviewer receives the\naccepted IDs, bounded delta, current authority and exact evidence/origins, with\nexisting independent review and human triage; omit builder transcripts.\n"
   },
   "guidance/feature.md": {
-    "sha256": "3591b0cfb7e285f51aa942ba2f818ac03072512f5ee111650b915ca3ec621937",
-    "text": "# Feature Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Workflow\n\n1. Read relevant code, tests, docs, existing artifacts, and manifest sections.\n3. Ask only blocking questions. Record local default decisions with reason and\n   provenance.\n4. Identify relevant active ADRs and apply the ADR eligibility check.\n5. Create/update the resolved `work` artifact.\n7. Apply the Engineering Quality authority order and only constraints material\n   to the changed surface. Keep the change bounded and use the smallest\n   compatible repository mechanism; do not add a checklist or methodology.\n8. Implement code and proportionate assurance evidence together under the Test\n   Assurance policy (`test-assurance.md`) supplied by the active execution context. Every material claim needs an identifiable\n   existing evidence owner, but Engineering Quality does not select tests.\n9. Run focused affected checks. In orchestrated mode, do not repeat supplied\n   full-scope runner commands; run the manifest's applicable final suite once\n   only when it is absent from that block and record the gap. In standalone mode,\n   run one final applicable suite after the work stabilizes unless the shared\n   deterministic owner establishes a permitted equivalent disposition under Test\n   Assurance. Unsupported evidence retains fresh execution.\n10. Self-review for correctness, applicable Engineering Quality constraints,\n    missing material evidence, ADR conformance, async/concurrency, doc drift,\n    and scope creep.\n11. After code stabilizes, run formatter check/fix if configured. If it\n    rewrites files, rerun affected checks.\n12. Update `work.md` and manifest if stale. Change only the manifest facts this\n    work made stale, under the `project-manifest` writing rules; verification\n    results and delivery narrative stay in `work.md`. Record only material\n    Engineering Quality deviations in the existing **Deviations & Follow-ups**\n    section.\n\n## `work.md`\n\nWrite these sections:\n\n1. `# Feature: <Name>` and `Slug: <slug>`.\n2. **Related artifacts**: include relevant accepted ADRs or `None`.\n3. **Goal**: capability, value, explicit non-goals.\n4. **Requirements**: numbered `FR1`, `FR2`; each concrete and verifiable.\n5. **Assumptions & Decisions**: numbered, tagged `User-confirmed`,\n   `Sensible default`, or `Manifest convention`; exclude ADR-eligible choices.\n   Include one line per applicable security exposure class naming its mechanism\n   and the requirement covering it, or one line stating that none applies.\n6. **Implementation Plan**: ordered bullets naming units, materially changed\n   boundaries or dependency/lifecycle/compatibility constraints when present,\n   assurance evidence owners, and manifest follow-up. Do not add a per-rule\n   checklist.\n7. **Files Changed**: production, tests, docs/config; one-line reason each.\n8. **Verification**: commands, outcomes, and FR-to-implementation/assurance\n   mapping.\n9. **Deviations & Follow-ups**: deviations, limits, or `None`.\n\n## Rules\n\n- Keep `work.md` compact. Escalate if requirements or plan outgrow it.\n- Do not duplicate ADR context or rationale in `work.md`; link the decision.\n- Tests must be able to fail for real behavior.\n- No hollow tests.\n- Do not add a test solely for count, coverage percentage, a private branch, or\n  a helper. Existing evidence or no new test is valid when proportionate and\n  recorded accurately.\n- No new dependency without approval and manifest update.\n- Comment sparingly and with high signal. Write a comment only to explain why:\n  a constraint, trade-off, invariant, side effect, or non-obvious behavior. Do\n  not narrate what the code visibly does.\n"
+    "sha256": "96db65af3d4f455ce1b9fd6e29ea01988ca32b14abd718e017e2ae587c60c7f7",
+    "text": "# Feature Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n## Workflow\n\n1. Read relevant code, tests, docs, existing artifacts, and manifest sections.\n3. Ask only blocking questions. Record local default decisions with reason and\n   provenance.\n4. Identify relevant active ADRs and apply the ADR eligibility check.\n5. Create/update the resolved `work` artifact.\n7. Apply the Engineering Quality authority order and only constraints material\n   to the changed surface. Keep the change bounded and use the smallest\n   compatible repository mechanism, meaning the simplest compatible resulting\n   design rather than the smallest diff; do not add a checklist or methodology.\n   When a structural assessment trigger applies, apply the code-design\n   guidance, show a brief pre-edit chat summary of owner, boundary,\n   dependencies and disposition as visibility rather than an approval request,\n   and record the assessment in `work.md`.\n8. Implement code and proportionate assurance evidence together under the Test\n   Assurance policy (`test-assurance.md`) supplied by the active execution context. Every material claim needs an identifiable\n   existing evidence owner, but Engineering Quality does not select tests.\n9. Run focused affected checks. In orchestrated mode, do not repeat supplied\n   full-scope runner commands; run the manifest's applicable final suite once\n   only when it is absent from that block and record the gap. In standalone mode,\n   run one final applicable suite after the work stabilizes unless the shared\n   deterministic owner establishes a permitted equivalent disposition under Test\n   Assurance. Unsupported evidence retains fresh execution.\n10. Self-review for correctness, applicable Engineering Quality constraints,\n    missing material evidence, ADR conformance, async/concurrency, doc drift,\n    and scope creep.\n11. After code stabilizes, run formatter check/fix if configured. If it\n    rewrites files, rerun affected checks.\n12. Update `work.md` and manifest if stale. Change only the manifest facts this\n    work made stale, under the `project-manifest` writing rules; verification\n    results and delivery narrative stay in `work.md`. Record only material\n    Engineering Quality deviations in the existing **Deviations & Follow-ups**\n    section.\n\n## `work.md`\n\nWrite these sections:\n\n1. `# Feature: <Name>` and `Slug: <slug>`.\n2. **Related artifacts**: include relevant accepted ADRs or `None`.\n3. **Goal**: capability, value, explicit non-goals.\n4. **Requirements**: numbered `FR1`, `FR2`; each concrete and verifiable.\n5. **Assumptions & Decisions**: numbered, tagged `User-confirmed`,\n   `Sensible default`, or `Manifest convention`; exclude ADR-eligible choices.\n   Include one line per applicable security exposure class naming its mechanism\n   and the requirement covering it, or one line stating that none applies.\n6. **Implementation Plan**: ordered bullets naming units, materially changed\n   boundaries or dependency/lifecycle/compatibility constraints when present,\n   assurance evidence owners, any structural assessment record or reuse-search\n   citation, and manifest follow-up. Do not add a per-rule checklist.\n7. **Files Changed**: production, tests, docs/config; one-line reason each.\n8. **Verification**: commands, outcomes, and FR-to-implementation/assurance\n   mapping.\n9. **Deviations & Follow-ups**: deviations, limits, or `None`.\n\n## Rules\n\n- Keep `work.md` compact. Escalate if requirements or plan outgrow it.\n- Do not duplicate ADR context or rationale in `work.md`; link the decision.\n- Tests must be able to fail for real behavior.\n- No hollow tests.\n- Do not add a test solely for count, coverage percentage, a private branch, or\n  a helper. Existing evidence or no new test is valid when proportionate and\n  recorded accurately.\n- No new dependency without approval and manifest update.\n- Comment sparingly and with high signal. Write a comment only to explain why:\n  a constraint, trade-off, invariant, side effect, or non-obvious behavior. Do\n  not narrate what the code visibly does.\n"
   },
   "policies/decision-consultation.md": {
     "sha256": "82a869ef55849063b96742f5a60474bcf54492b737ca2703380d4a53f46f26d5",
@@ -28229,8 +28420,8 @@ var EMBEDDED_PHASE_RESOURCES = {
     "text": "# Security Assurance\n\n- Owner decision: ADR-0027\n- Consumers: `feature-description`, `development-plan`, `feature-review`, `feature`, `quick-fix`; conditional: `architecture-decision`, `code-writing`, `test-writing`, `project-manifest`\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning, implementation (conditional), review, fix, feature, quick-fix.\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Security Assurance\n\nAssess the surface **this change creates or widens**, not the whole system. An\nestablished control the change only uses is not re-litigated.\n\nExposure classes, judged by mechanism rather than by topic word:\n\n1. Untrusted input reaches an interpreter or resource path: a query, filesystem\n   path, template, command, deserializer, or markup renderer.\n2. An identity or access decision: new or changed authentication,\n   authorization, role, tenant, ownership, or capability check.\n3. Secret material: how a credential, token, or key is obtained, stored,\n   transmitted, and kept out of logs and errors.\n4. Personal or regulated data: collection, retention, export, and appearance in\n   logs or error messages.\n5. Cross-principal reachability: one user's or tenant's data reachable by\n   another through identifiers, listings, caches, or shared state.\n6. An outbound request or redirect whose destination an input can influence.\n7. A destructive or irreversible effect: deletion, overwrite, money movement,\n   external publication, or mass mutation.\n\nRules:\n\n- Each applicable class produces at least one requirement written in the same\n  testable form as any other requirement, and the plan names the enforcement\n  point \u2014 the module or boundary where the control is applied.\n- Security requirements are material guarantees under Test Assurance and take\n  their evidence level from it. There is no separate security-test quota.\n- When no class applies, record one line naming that and why. Never write a\n  section of per-class `N/A` entries.\n- These are not evidence: generic security advice, a restatement of a framework\n  or platform default, \"be careful\" prose, and a threat with no mechanism\n  reachable in the current codebase.\n- A security finding must name the exposure class, the reachable mechanism, why\n  current evidence does not cover it, and the observable fix acceptance. A\n  class label alone is not a finding.\n\nDivision of labor with the escalation triggers in the project `AGENTS.md`: a trigger governs work\nwhose topic is security; this exposure review governs work whose topic is not.\nIntroducing or widening a security control is an escalation trigger. Complying\nwith an already established, unchanged control is not, so ordinary work that\nmerely touches an applicable class stays on its normal route.\n"
   },
   "policies/engineering-quality.md": {
-    "sha256": "b87dbd4849192be70dc0305411a4f88f731111ce5c613502492aced5d233b119",
-    "text": "# Engineering Quality\n\n- Owner decision: ADR-0030\n- Consumers: `feature-description`, `architecture-decision`, `development-plan`, `code-writing`, `feature-review`, `feature`, `quick-fix`, `project-manifest`; conditional: None\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning, implementation, review, fix, feature, quick-fix.\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Engineering Quality\n\nThis policy is vendor-neutral. The installed `policies/engineering-quality.md` is only its current storage and\ndelivery surface; the policy does not depend on Claude-specific tools,\npermissions, hooks, commands, sessions, or behavior. Skills and prompts\nreference this section instead of copying the complete rule set. Future Codex\nor other-vendor delivery must preserve these semantics without interpreting the\nfilename as policy authority.\n\nApply the authority order in the project `AGENTS.md` before any generic quality preference. When two\nremedies satisfy the same higher authority, use the smallest compatible\nremediation rather than requiring a preferred pattern.\n\n### EQ-01 \u2014 Local authority and context\n\nFollow approved requirements, accepted ADRs, executable and public contracts,\nmanifest facts, established invariants, and dominant repository conventions.\nDeviate only when the task, an approved decision, or a concrete correctness,\nsecurity, lifecycle, or compatibility need requires it. Generic preference does\nnot override repository authority.\n\nAlways active. An objective conflict with approved authority may be actionable;\na merely different local style is not.\n\n### EQ-02 \u2014 Cohesive responsibilities and explicit boundaries\n\nKeep changed responsibilities together when they share purpose, dependencies,\nlifecycle, and verification needs. Separate them when those concerns materially\ndiffer. Make important boundaries recognizable without arbitrary\nfragmentation.\n\nContextual and advisory unless a concrete consequence independently violates a\nstronger rule. It requires no function or file size, layer, service class, or\ndirectory pattern and never creates a blocker by itself.\n\n### EQ-03 \u2014 Dependency direction and visibility\n\nDo not introduce dependency edges that violate the repository's intended\ndependency direction or unnecessarily couple stable logic to volatile\nimplementation details. Make important runtime dependencies and mutable\ncollaborators visible at an appropriate existing composition or usage boundary.\n\nContextual. It assumes no domain-centric architecture and requires neither\ninterfaces nor a dependency-injection container. A mechanically forbidden edge\nor unapproved dependency may remain actionable under existing repository rules.\n\n### EQ-04 \u2014 Boundary contracts and ingress validation\n\nAt important public, process, network, persistence, filesystem, user-input, or\ninter-module boundaries, make input, output, failure, and compatibility\nsemantics clear using repository-appropriate mechanisms. Validate external or\nuntrusted data at the first boundary where the system assumes it is trustworthy;\nstatic types alone do not validate external bytes.\n\nContextual. A demonstrable contract, correctness, or security consequence may\nbe actionable under existing rules.\n\n### EQ-05 \u2014 Failure semantics and resource lifecycle\n\nPreserve useful failure meaning, original causes, and diagnostic context. Do not\nsilently turn failure into success. For resources with lifecycle semantics,\nidentify ownership and proportionate cleanup behavior for success, failure,\ncancellation, timeout, shutdown, and partial initialization where applicable.\n\nContextual. It requires no universal error hierarchy or resource-management\npattern. Reproducible data loss, leaks, hangs, swallowed failure, or violated\nlifecycle contracts may remain actionable under existing rules.\n\n### EQ-06 \u2014 Proportional design\n\nPrefer existing language, runtime, framework, platform, and project mechanisms\nwhen adequate. Prefer straightforward control and data flow. Add an abstraction\nor dependency only when it provides a concrete benefit such as isolating\nvolatility, enforcing a useful contract, removing meaningful duplication,\nsimplifying usage, or enabling necessary verification.\n\nAlways considered and advisory by default. It is not a ban on abstraction and\nnever creates a blocker by itself.\n\n### EQ-07 \u2014 Bounded change scope\n\nKeep the change within the approved task, plan, or accepted-finding scope. Do\nnot bundle unrelated cleanup, migration, abstraction work, dependency changes,\nor architecture refactoring unless required for correctness or explicitly\napproved.\n\nAlways active. Objective scope expansion remains actionable through existing\napproval, plan, baseline, and accepted-finding enforcement.\n\n### EQ-08 \u2014 Assurance ownership\n\nMaterial claims introduced by a change must have an identifiable,\nproportionate evidence owner. Reuse existing assurance mechanisms rather than\nduplicating them. Test Assurance, Security Assurance, contract verification,\nconfigured checks, or justified inspection may own evidence that compatibility\nis preserved, malformed input is rejected, cancellation cleans up resources,\npersisted data survives migration, or a failure remains observable.\n\nContextual. Engineering Quality detects missing assurance ownership; it does\nnot select tests, create a test quota, or require another test when equivalent\nevidence already exists.\n\n### EQ-09 \u2014 Compatibility\n\nPreserve public APIs, persisted formats, events, protocols, CLI behavior, and\nother externally depended-on semantics unless an approved specification or ADR\nintentionally changes them and defines the relevant migration consequences.\n\nContextual. A high-confidence unapproved breaking change may remain actionable\nunder existing contract, specification, or ADR authority.\n\n### EQ-10 \u2014 Incremental legacy evolution\n\nWhen changing legacy code, prefer a bounded seam, adapter, characterization\nevidence, staged migration, or similarly incremental path when it materially\nreduces risk. Do not demand an incremental technique when a direct local change\nis safer and simpler.\n\nContextual and advisory. It never creates a blocker by itself; a concrete scope\nor compatibility consequence may be reported under the existing authority it\nviolates.\n\n### Finding and shadow semantics\n\nAn actionable Engineering Quality concern must identify a primary rule ID,\nseverity, confidence, exact evidence and location, concrete impact, the smallest\nreasonable remediation, relevant specification, ADR, contract, manifest, or\naccepted-finding authority, a verification method, a stable deduplication\nidentity, and waiver state when applicable. Its identity is the primary rule,\nstable code or contract locus, violated authority, and impact class; wording or\nline-number drift does not create a new concern. Generic design preference\nwithout exact evidence and material impact is not actionable.\n\nIn initial shadow mode, complete the ordinary review first and freeze its\nfindings, severities, and verdict. An ordinary finding that already qualifies\nwithout Engineering Quality may add exactly one primary `EQ-NN` mapping to its\nexisting `violates` list; the mapping cannot create the finding or change its\nseverity or verdict. A genuinely incremental EQ-only candidate may be recorded\nonly as an `EQ-SHADOW:` string in existing free-form `deferredCoverage`. It is\nnot a finding, receives no mandatory human triage, cannot be accepted, never\nenters fixer scope, and cannot affect severity, verdict, completion, or any\ngate. Its suggested severity remains non-authoritative, and its waiver state is\n`not_applicable` because triage does not apply. Ordinary deferred-coverage prose\nremains valid. In reviewer-write mode, copy every structured `EQ-SHADOW:` record\nbyte-for-byte into the canonical Markdown Deferred Coverage section;\nrunner-rendered mode already projects the structured value. This retention rule\ndoes not parse or validate the record. The human-readable shape is an evaluation\nconvention, not a runtime parser or versioned contract.\n\nResolution review is closure-oriented, not discovery-oriented. It first\nverifies every immediately preceding accepted finding ID. A new finding or\nshadow candidate is permitted only when introduced by the fix, newly observable\nbecause the changed evidence surface exposes it, a direct regression of another\napproved contract or established invariant, or a previously unobservable\ncritical correctness, security, or lifecycle issue. Name the new evidence and a\ndistinct deduplication identity. A stylistic opinion, preferred decomposition,\nor alternative design is insufficient. Rejected or deferred findings must not\nreopen against unchanged evidence and authority, including after reviewer\nrotation.\n\n### Enforcement boundaries\n\nThe initial release adds no EQ-native runtime blocker. Existing objective\napproval, contract, scope, dependency, verification, correctness, security,\ntest, lifecycle, compatibility, review, and triage mechanisms retain their\ncurrent enforcement and severity. `EQ-02`, `EQ-06`, and `EQ-10` never create\nblockers by themselves.\n\nAny later blocker-eligibility proposal must require high confidence, exact\ncurrent evidence, current material impact, a violated approved authority,\ncorrectness, security, data-integrity, lifecycle-safety, required-assurance,\nscope, or compatibility invariant, and observable closure. Meeting this\nthreshold does not authorize hard enforcement; a separate approved decision is\nstill required.\n\nEngineering Quality adds no phase, skill, hook, gate, test quota, architecture\nmethodology, static analyzer, or runtime contract.\n"
+    "sha256": "f67052be05d810fbc41bcdd813fb9f47c7d0f96dcba2771cbd2de02249d986a9",
+    "text": "# Engineering Quality\n\n- Owner decision: ADR-0030; ADR-0050 (Structural Assessment Triggers)\n- Consumers: `feature-description`, `architecture-decision`, `development-plan`, `code-writing`, `feature-review`, `feature`, `quick-fix`, `project-manifest`; conditional: None\n- Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)\n- Runner consumers: planning, implementation, review, fix, feature, quick-fix.\n- Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.\n\n## Engineering Quality\n\nThis policy is vendor-neutral. The installed `policies/engineering-quality.md` is only its current storage and\ndelivery surface; the policy does not depend on Claude-specific tools,\npermissions, hooks, commands, sessions, or behavior. Skills and prompts\nreference this section instead of copying the complete rule set. Future Codex\nor other-vendor delivery must preserve these semantics without interpreting the\nfilename as policy authority.\n\nApply the authority order in the project `AGENTS.md` before any generic quality preference. When two\nremedies satisfy the same higher authority, use the smallest compatible\nremediation rather than requiring a preferred pattern. Smallest compatible\nmeans the simplest compatible resulting design, weighing maintenance cost;\ndiff size alone is not the measure.\n\n### EQ-01 \u2014 Local authority and context\n\nFollow approved requirements, accepted ADRs, executable and public contracts,\nmanifest facts, established invariants, and dominant repository conventions.\nDeviate only when the task, an approved decision, or a concrete correctness,\nsecurity, lifecycle, or compatibility need requires it. Generic preference does\nnot override repository authority.\n\nAlways active. An objective conflict with approved authority may be actionable;\na merely different local style is not.\n\n### EQ-02 \u2014 Cohesive responsibilities and explicit boundaries\n\nKeep changed responsibilities together when they share purpose, dependencies,\nlifecycle, and verification needs. Separate them when those concerns materially\ndiffer. Make important boundaries recognizable without arbitrary\nfragmentation.\n\nContextual and advisory unless a concrete consequence independently violates a\nstronger rule. It requires no function or file size, layer, service class, or\ndirectory pattern and never creates a blocker by itself.\n\n### EQ-03 \u2014 Dependency direction and visibility\n\nDo not introduce dependency edges that violate the repository's intended\ndependency direction or unnecessarily couple stable logic to volatile\nimplementation details. Make important runtime dependencies and mutable\ncollaborators visible at an appropriate existing composition or usage boundary.\n\nContextual. It assumes no domain-centric architecture and requires neither\ninterfaces nor a dependency-injection container. A mechanically forbidden edge\nor unapproved dependency may remain actionable under existing repository rules.\n\n### EQ-04 \u2014 Boundary contracts and ingress validation\n\nAt important public, process, network, persistence, filesystem, user-input, or\ninter-module boundaries, make input, output, failure, and compatibility\nsemantics clear using repository-appropriate mechanisms. Validate external or\nuntrusted data at the first boundary where the system assumes it is trustworthy;\nstatic types alone do not validate external bytes.\n\nContextual. A demonstrable contract, correctness, or security consequence may\nbe actionable under existing rules.\n\n### EQ-05 \u2014 Failure semantics and resource lifecycle\n\nPreserve useful failure meaning, original causes, and diagnostic context. Do not\nsilently turn failure into success. For resources with lifecycle semantics,\nidentify ownership and proportionate cleanup behavior for success, failure,\ncancellation, timeout, shutdown, and partial initialization where applicable.\n\nContextual. It requires no universal error hierarchy or resource-management\npattern. Reproducible data loss, leaks, hangs, swallowed failure, or violated\nlifecycle contracts may remain actionable under existing rules.\n\n### EQ-06 \u2014 Proportional design\n\nPrefer existing language, runtime, framework, platform, and project mechanisms\nwhen adequate. Prefer straightforward control and data flow. Add an abstraction\nor dependency only when it provides a concrete benefit such as isolating\nvolatility, enforcing a useful contract, removing meaningful duplication,\nsimplifying usage, or enabling necessary verification.\n\nAlways considered and advisory by default. It is not a ban on abstraction and\nnever creates a blocker by itself.\n\n### EQ-07 \u2014 Bounded change scope\n\nKeep the change within the approved task, plan, or accepted-finding scope. Do\nnot bundle unrelated cleanup, migration, abstraction work, dependency changes,\nor architecture refactoring unless required for correctness or explicitly\napproved. Decomposition recorded in an approved plan or work scope is\nexplicitly approved, and private restructuring within approved behavior,\naffected scope and write authority is not unrelated refactoring.\n\nAlways active. Objective scope expansion remains actionable through existing\napproval, plan, baseline, and accepted-finding enforcement.\n\n### EQ-08 \u2014 Assurance ownership\n\nMaterial claims introduced by a change must have an identifiable,\nproportionate evidence owner. Reuse existing assurance mechanisms rather than\nduplicating them. Test Assurance, Security Assurance, contract verification,\nconfigured checks, or justified inspection may own evidence that compatibility\nis preserved, malformed input is rejected, cancellation cleans up resources,\npersisted data survives migration, or a failure remains observable.\n\nContextual. Engineering Quality detects missing assurance ownership; it does\nnot select tests, create a test quota, or require another test when equivalent\nevidence already exists.\n\n### EQ-09 \u2014 Compatibility\n\nPreserve public APIs, persisted formats, events, protocols, CLI behavior, and\nother externally depended-on semantics unless an approved specification or ADR\nintentionally changes them and defines the relevant migration consequences.\n\nContextual. A high-confidence unapproved breaking change may remain actionable\nunder existing contract, specification, or ADR authority.\n\n### EQ-10 \u2014 Incremental legacy evolution\n\nWhen changing legacy code, prefer a bounded seam, adapter, characterization\nevidence, staged migration, or similarly incremental path when it materially\nreduces risk. Do not demand an incremental technique when a direct local change\nis safer and simpler.\n\nContextual and advisory. It never creates a blocker by itself; a concrete scope\nor compatibility consequence may be reported under the existing authority it\nviolates.\n\n### Finding and shadow semantics\n\nAn actionable Engineering Quality concern must identify a primary rule ID,\nseverity, confidence, exact evidence and location, concrete impact, the smallest\nreasonable remediation, relevant specification, ADR, contract, manifest, or\naccepted-finding authority, a verification method, a stable deduplication\nidentity, and waiver state when applicable. Its identity is the primary rule,\nstable code or contract locus, violated authority, and impact class; wording or\nline-number drift does not create a new concern. Generic design preference\nwithout exact evidence and material impact is not actionable.\n\nIn initial shadow mode, complete the ordinary review first and freeze its\nfindings, severities, and verdict. An ordinary finding that already qualifies\nwithout Engineering Quality may add exactly one primary `EQ-NN` mapping to its\nexisting `violates` list; the mapping cannot create the finding or change its\nseverity or verdict. A genuinely incremental EQ-only candidate may be recorded\nonly as an `EQ-SHADOW:` string in existing free-form `deferredCoverage`. It is\nnot a finding, receives no mandatory human triage, cannot be accepted, never\nenters fixer scope, and cannot affect severity, verdict, completion, or any\ngate. Its suggested severity remains non-authoritative, and its waiver state is\n`not_applicable` because triage does not apply. Ordinary deferred-coverage prose\nremains valid. In reviewer-write mode, copy every structured `EQ-SHADOW:` record\nbyte-for-byte into the canonical Markdown Deferred Coverage section;\nrunner-rendered mode already projects the structured value. This retention rule\ndoes not parse or validate the record. The human-readable shape is an evaluation\nconvention, not a runtime parser or versioned contract.\n\nResolution review is closure-oriented, not discovery-oriented. It first\nverifies every immediately preceding accepted finding ID. A new finding or\nshadow candidate is permitted only when introduced by the fix, newly observable\nbecause the changed evidence surface exposes it, a direct regression of another\napproved contract or established invariant, or a previously unobservable\ncritical correctness, security, or lifecycle issue. Name the new evidence and a\ndistinct deduplication identity. A stylistic opinion, preferred decomposition,\nor alternative design is insufficient. Rejected or deferred findings must not\nreopen against unchanged evidence and authority, including after reviewer\nrotation.\n\n### Enforcement boundaries\n\nThe initial release adds no EQ-native runtime blocker. Existing objective\napproval, contract, scope, dependency, verification, correctness, security,\ntest, lifecycle, compatibility, review, and triage mechanisms retain their\ncurrent enforcement and severity. `EQ-02`, `EQ-06`, and `EQ-10` never create\nblockers by themselves.\n\nAny later blocker-eligibility proposal must require high confidence, exact\ncurrent evidence, current material impact, a violated approved authority,\ncorrectness, security, data-integrity, lifecycle-safety, required-assurance,\nscope, or compatibility invariant, and observable closure. Meeting this\nthreshold does not authorize hard enforcement; a separate approved decision is\nstill required.\n\nEngineering Quality adds no phase, hook, gate, test quota, or runtime contract.\nApart from the ADR-0050 structural assessment triggers below and the shared\n`guidance/code-design.md` method they invoke, it adds no skill, architecture\nmethodology, or static analyzer.\n\n### Structural Assessment Triggers\n\nConsumers link this section and never copy its trigger list.\n\n- Semantic triggers: a change adds a state-machine state or transition, an\n  execution phase, a resource lifecycle, a mutable-state owner or a dependency\n  across subsystem boundaries; adds an independently changing responsibility; or\n  copies or near-duplicates an existing implementation of the same behavior. A\n  responsibility is independent when its reason to change, collaborators,\n  lifecycle or verification materially differs from its proposed host's. These\n  triggers include pure computations and same-subsystem changes.\n- Reuse-search duty: before adding a helper or rule implementation, search for\n  existing owners by behavior and symbol names. Cite matches considered or the\n  bounded search scope with no match in one line of the caller's existing\n  artifact, or in the final chat report when no artifact is otherwise required.\n  This duty alone creates no full assessment, pre-edit summary or new artifact.\n  A match showing copying or semantic near-duplication, an independent\n  responsibility or another trigger requires the full assessment. Similar syntax\n  alone is not semantic duplication, and merely calling an existing helper\n  triggers neither duty.\n- Numeric triggers: changed executable code in a function, class or file exceeds\n  a size, nesting, complexity or member-count threshold adopted in the target\n  project's configuration and executed by its verification. Warning and error\n  signals both require an assessment, even with unchanged ownership and\n  dependencies and without a Banzai adapter. Without an adopted threshold,\n  measurements are advisory for this duty. A missing or failed measurement of an\n  adopted threshold is unknown coverage, never advisory status or a pass. Banzai\n  defines no universal thresholds.\n- Only a non-executable edit that meets no semantic trigger, such as formatting,\n  comments or documentation text, is exempt. Preserving externally observable\n  behavior never waives a trigger.\n- An applicable prior assessment satisfies a triggered duty by reference while\n  the relevant responsibility and dependencies remain unchanged. Reuse never\n  suppresses trigger detection.\n\nWhen a trigger applies, apply the shared method in the installed\n`guidance/code-design.md` before dependent code changes and record the\nassessment in the caller's existing permitted artifact. A trigger requires\nanalysis, not a human gate. Use applicable baseline check evidence before edits\nand the task's authorized verification afterwards. A newly exposed threshold\ncrossing requires assessment and any needed correction before completion; this\ngrants no additional command-execution authority. Triggers do not expand ADR\neligibility or escalation triggers, and existing project hard limits, required\nchecks and approved invariants keep their authority.\n"
   },
   "policies/plan-task-completion.md": {
     "sha256": "f3b9f2c07a7dff175acfa5d8d0b7f9d1456cfc40bbf816dc95441f8d742274ed",
@@ -33238,6 +33429,66 @@ var RunStore = class {
       throw error;
     }
   }
+  resultDigestEvidencePath(runId2, attempt) {
+    return containedEvidencePath(
+      this.runDirectory(runId2),
+      "digests",
+      `${safeEvidenceSegment(attempt.id, "attempt.id", 200)}-${attempt.kind}.json`
+    );
+  }
+  /**
+   * Records what a model-authored digest was compared against when its result
+   * was accepted or rejected. The baseline is established exactly once per
+   * attempt: an existing record is returned unchanged rather than rewritten,
+   * so a later comparison against different bytes cannot silently restate
+   * history. The write itself is atomic, so a restart observes either no
+   * record or a whole one.
+   */
+  async establishResultDigestEvidence(runId2, evidence2) {
+    const parsed = parseResultDigestEvidence(evidence2);
+    if (parsed.runId !== runId2) {
+      throw new BanzaiError(
+        "RESULT_DIGEST_EVIDENCE_INVALID",
+        "Result digest evidence run identity does not match its path."
+      );
+    }
+    const existing = await this.readResultDigestEvidenceIfExists(
+      runId2,
+      parsed.attempt
+    );
+    if (existing !== null) return existing;
+    await this.writeImmutableEvidence(
+      this.resultDigestEvidencePath(runId2, parsed.attempt),
+      Buffer.from(`${JSON.stringify(parsed, null, 2)}
+`),
+      "RESULT_DIGEST_EVIDENCE_CONFLICT"
+    );
+    return parsed;
+  }
+  /** Null means no baseline exists; it is never reconstructed from current bytes. */
+  async readResultDigestEvidenceIfExists(runId2, attempt) {
+    const bytes = await this.readImmutableEvidence(
+      this.resultDigestEvidencePath(runId2, attempt)
+    );
+    if (bytes === null) return null;
+    let decoded;
+    try {
+      decoded = JSON.parse(bytes.toString("utf8"));
+    } catch {
+      throw new BanzaiError(
+        "RESULT_DIGEST_EVIDENCE_INVALID",
+        "Result digest evidence is malformed."
+      );
+    }
+    const parsed = parseResultDigestEvidence(decoded);
+    if (parsed.runId !== runId2 || parsed.attempt.id !== attempt.id || parsed.attempt.kind !== attempt.kind) {
+      throw new BanzaiError(
+        "RESULT_DIGEST_EVIDENCE_INVALID",
+        "Result digest evidence identity does not match its path."
+      );
+    }
+    return parsed;
+  }
   async writeRecoveryAuthorization(runId2, authorization) {
     const parsed = parseRecoveryAuthorization2(authorization);
     if (parsed.runId !== runId2) {
@@ -33525,6 +33776,15 @@ var TERMINAL_INTEGRITY_FAILURE_CODES = /* @__PURE__ */ new Set([
   "TERMINAL_RESULT_CONFLICT",
   "SESSION_ID_CONFLICT"
 ]);
+var DIGEST_REJECTED_FAILURE_CODES = /* @__PURE__ */ new Set([
+  "RESULT_DIGEST_REJECTED",
+  "PLAN_TASK_COMPLETION_INVALID"
+]);
+var DIGEST_UNRESOLVED_BLOCK_PREFIX = "[RESULT_DIGEST_UNRESOLVED]";
+function taskVerificationDigestDetail(error) {
+  const candidate = error;
+  return (candidate.code === "TASK_VERIFICATION_DIGEST_MISMATCH" || candidate.code === "TASK_VERIFICATION_SOURCE_TOO_LARGE") && candidate.detail !== void 0 ? candidate.detail : null;
+}
 function sameObservedInputs(a, b) {
   return digestCanonicalJson4(a.implementationReport) === digestCanonicalJson4(b.implementationReport) && digestCanonicalJson4(a.testReport) === digestCanonicalJson4(b.testReport) && a.workspaceDigest === b.workspaceDigest;
 }
@@ -34923,7 +35183,9 @@ var WorkflowRunner = class {
         const attempt = {
           id: eligibility.attemptId,
           kind: eligibility.phase,
-          mutable: true
+          // Planning attempts are created read-only for repository mutation
+          // accounting; every other recovery source is a mutable phase.
+          mutable: eligibility.phase !== "plan"
         };
         let authorization;
         if (state.recovery?.sourceAttemptId === attempt.id && state.recovery.recoveryAttemptId === null) {
@@ -36383,6 +36645,13 @@ var WorkflowRunner = class {
         };
       }
       if (state.blockedFrom === "verifying") {
+        if (state.blockReason?.startsWith(DIGEST_UNRESOLVED_BLOCK_PREFIX)) {
+          return {
+            eligible: false,
+            reason: "A digest this run's result authored does not match the bytes it names, and no recorded baseline shows those bytes changed after acceptance. Retrying reads the same bytes and fails identically. Inspect the checkout, then cancel the run.",
+            attemptId: null
+          };
+        }
         try {
           if (state.verificationMode === "task") {
             const latest2 = (await readTaskVerificationAttempts(
@@ -36750,6 +37019,180 @@ var WorkflowRunner = class {
       );
     }
   }
+  /**
+   * ADR-0051's digest-rejected source, recognized from durable evidence only:
+   * a failed attempt whose sole recorded failure is a digest rejection at
+   * acceptance, whose terminal checkpoint proves its repository changes are
+   * complete rather than partial, and which no successor has replaced.
+   * Returns null when the source does not apply, leaving every existing
+   * disposition — including the refusal of a failed mutable attempt with
+   * unknown side effects — exactly as it is.
+   */
+  async digestRejectedRecoveryEligibility(state, attempt) {
+    if (attempt.kind !== "plan" && attempt.kind !== "implementation" && attempt.kind !== "fix")
+      return null;
+    const phase = attempt.kind;
+    const expectedBlockedFrom = phase === "plan" ? "planning" : phase === "implementation" ? "implementing" : "fixing";
+    if (state.blockedFrom !== expectedBlockedFrom) return null;
+    let record7;
+    let evidence2;
+    try {
+      record7 = await this.store.readRunAttempt(state.runId, attempt);
+      evidence2 = await this.store.readResultDigestEvidenceIfExists(
+        state.runId,
+        attempt
+      );
+    } catch (error) {
+      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
+        throw error;
+      return recoveryIneligible(
+        error instanceof BanzaiError && error.code === "RESULT_DIGEST_EVIDENCE_INVALID" ? `${error.message} Audit the run before continuing.` : "Digest acceptance evidence is unreadable or inconsistent.",
+        attempt.id,
+        phase
+      );
+    }
+    if (evidence2?.outcome !== "rejected" || record7.status !== "failed" || !DIGEST_REJECTED_FAILURE_CODES.has(record7.failureCode ?? ""))
+      return null;
+    if (state.activeProcess !== null && this.store.processAlive(state.activeProcess.pid)) {
+      return recoveryIneligible(
+        "Recovery is unavailable while the model process is still active.",
+        attempt.id,
+        phase
+      );
+    }
+    try {
+      const checkpoint = await this.store.readTerminalCheckpointIfExists(
+        state.runId,
+        attempt
+      );
+      if (checkpoint === null) {
+        return recoveryIneligible(
+          `The rejected ${phase} result has no terminal checkpoint, so its repository side effects are unknown. Inspect the checkout, then cancel the run.`,
+          attempt.id,
+          phase
+        );
+      }
+      if ((await this.store.readRunAttempts(state.runId)).some(
+        (other) => other.attempt.kind === attempt.kind && other.attempt.id !== attempt.id && Date.parse(other.startedAt) > Date.parse(record7.startedAt)
+      ) || state.recovery?.sourceAttemptId === attempt.id && state.recovery.recoveryAttemptId !== null) {
+        return recoveryIneligible(
+          `A later ${phase} attempt already supersedes this rejected result.`,
+          attempt.id,
+          phase,
+          true
+        );
+      }
+      if (await currentCommit(this.repoRoot) !== state.baseCommit) {
+        return recoveryIneligible(
+          "Recovery is unavailable because checkout HEAD changed.",
+          attempt.id,
+          phase
+        );
+      }
+      const config = await loadConfig(this.repoRoot);
+      assertContractParity();
+      const settings = phase === "plan" ? config.models.planner : config.models.implementer;
+      const vendor = vendorFor(settings.executable) ?? FALLBACK_VENDOR[phase === "plan" ? "planner" : "implementer"];
+      let approvalDigest = null;
+      let workflowDigest = null;
+      if (phase === "plan") {
+        const selection = state.workflowSelection ?? null;
+        workflowDigest = selection?.digest ?? null;
+        const authorized = selection !== null && workflowAuthorizationDigest({
+          runId: state.runId,
+          request: state.request,
+          ...selection
+        }) === selection.digest;
+        if (!authorized) {
+          return recoveryIneligible(
+            "Planning recovery requires the unchanged persisted workflow selection.",
+            attempt.id,
+            phase
+          );
+        }
+      } else if ((state.workflowSelection?.workflow ?? "strict") === "strict" || phase === "fix") {
+        await this.validateApproval(state);
+        approvalDigest = state.planApproval?.digest ?? null;
+      } else {
+        workflowDigest = this.validateWorkflowSelection(state).digest;
+      }
+      const scopeDigest = this.attemptScopeDigest(state, attempt);
+      const configurationDigest2 = digestCanonicalJson4({
+        version: 1,
+        vendor,
+        executableDigest: digestCanonicalJson4(settings.executable),
+        model: settings.model,
+        effort: settings.effort
+      });
+      const snapshot = await workspaceSnapshot(this.repoRoot, {
+        artifactBinding: state.artifactBinding,
+        baseline: state.baseline
+      });
+      if (snapshot.baseCommit !== state.baseCommit) {
+        return recoveryIneligible(
+          "Recovery is unavailable because the workspace base commit changed.",
+          attempt.id,
+          phase
+        );
+      }
+      const counts = await workspaceChangeCounts(this.repoRoot, snapshot);
+      const recoveryIdentity = digestCanonicalJson4({
+        version: 1,
+        sourceKind: "digest_rejected",
+        runId: state.runId,
+        attempt,
+        phase,
+        baseCommit: state.baseCommit,
+        workspaceDigest: snapshot.digest,
+        approvalDigest,
+        workflowDigest,
+        scopeDigest,
+        configurationDigest: configurationDigest2,
+        digestEvidence: digestCanonicalJson4(evidence2)
+      });
+      if (state.recovery?.sourceAttemptId === attempt.id && state.recovery.recoveryAttemptId === null) {
+        const authorization = await this.store.readRecoveryAuthorization(
+          state.runId,
+          state.recovery.authorizationId
+        );
+        if (authorization.attempt.id !== attempt.id || authorization.recoveryIdentity !== recoveryIdentity) {
+          return recoveryIneligible(
+            "Persisted recovery authorization is stale or inconsistent.",
+            attempt.id,
+            phase
+          );
+        }
+      }
+      return {
+        eligible: true,
+        terminalCheckpointPresent: true,
+        reason: `The ${phase} result was refused because ${evidence2.comparisons.filter((comparison) => !comparison.matched).length} digest it authored never matched the bytes it named. Recovery authorizes one linked ${phase} attempt to supply a corrected result; the rejected attempt and its result are retained.`,
+        warning: "The rejected attempt keeps its failed status and its result. Recovery authorizes one new attempt for the same phase and no additional scope; a replacement strict plan still passes the existing approval gate.",
+        sourceKind: "digest_rejected",
+        attemptId: attempt.id,
+        phase,
+        resolvedFindingIds: [],
+        remainingFindingIds: [],
+        prerequisites: [],
+        authorization: approvalDigest === null ? "workflow_selection" : "plan_approval",
+        recoveryIdentity,
+        workspace: { digest: snapshot.digest, ...counts },
+        baseCommit: state.baseCommit,
+        approvalDigest,
+        workflowDigest,
+        scopeDigest,
+        configurationDigest: configurationDigest2
+      };
+    } catch (error) {
+      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
+        throw error;
+      return recoveryIneligible(
+        "Digest-rejected recovery preconditions could not be validated; inspect or cancel the run.",
+        attempt.id,
+        phase
+      );
+    }
+  }
   async recoveryEligibility(state) {
     if (state.status !== "blocked") {
       return recoveryIneligible(
@@ -36757,6 +37200,13 @@ var WorkflowRunner = class {
       );
     }
     const attempt = state.activeAttempt;
+    if (attempt !== null) {
+      const digestRejected = await this.digestRejectedRecoveryEligibility(
+        state,
+        attempt
+      );
+      if (digestRejected !== null) return digestRejected;
+    }
     if (attempt === null && state.blockedFrom === "fixing") {
       return await this.prerequisiteBlockedFixRecoveryEligibility(state);
     }
@@ -36933,7 +37383,8 @@ var WorkflowRunner = class {
   }
   async executeAuthorizedRecovery(state, config, authorization) {
     await this.assertProjectGuidance();
-    await this.preflightVendor("implementer", config.models.implementer);
+    if (authorization.phase !== "plan")
+      await this.preflightVendor("implementer", config.models.implementer);
     const persistedSourceRecord = await this.store.readRunAttempt(
       state.runId,
       authorization.attempt
@@ -36943,12 +37394,19 @@ var WorkflowRunner = class {
       persistedSourceRecord,
       false
     ) : null;
+    const digestRejected = persistedSourceRecord.status === "failed" && DIGEST_REJECTED_FAILURE_CODES.has(
+      persistedSourceRecord.failureCode ?? ""
+    ) && (await this.store.readResultDigestEvidenceIfExists(
+      state.runId,
+      authorization.attempt
+    ))?.outcome === "rejected";
+    const authorizedBlockedFrom = authorization.phase === "plan" ? "planning" : authorization.phase === "implementation" ? "implementing" : "fixing";
     const sourceAlreadyInterrupted = state.recovery?.sourceAttemptId === authorization.attempt.id && state.recovery.recoveryAttemptId === null && state.recovery.stage === "source_interrupted";
     const sourceAlreadyPreserved = state.recovery?.sourceAttemptId === authorization.attempt.id && state.recovery.recoveryAttemptId === null && state.recovery.stage === "source_preserved";
-    const eligibilityState = sourceAlreadyInterrupted ? {
+    const eligibilityState = sourceAlreadyInterrupted || sourceAlreadyPreserved && digestRejected ? {
       ...state,
       status: "blocked",
-      blockedFrom: authorization.phase === "implementation" ? "implementing" : "fixing",
+      blockedFrom: authorizedBlockedFrom,
       activeAttempt: authorization.attempt,
       activeProcess: null
     } : sourceAlreadyPreserved && prerequisiteSource !== null ? {
@@ -36962,7 +37420,7 @@ var WorkflowRunner = class {
     const eligibility = await this.recoveryEligibility(eligibilityState);
     await this.assertProjectGuidance();
     const workspace = eligibility.workspace;
-    const expectedSourceKind = prerequisiteSource === null ? "interrupted" : "prerequisite_blocked_fix";
+    const expectedSourceKind = digestRejected ? "digest_rejected" : prerequisiteSource === null ? "interrupted" : "prerequisite_blocked_fix";
     if (!eligibility.eligible || workspace === null || eligibility.sourceKind !== expectedSourceKind || eligibility.attemptId !== authorization.attempt.id || eligibility.phase !== authorization.phase || eligibility.recoveryIdentity !== authorization.recoveryIdentity || workspace.digest !== authorization.workspaceDigest || eligibility.baseCommit !== authorization.baseCommit || eligibility.approvalDigest !== authorization.approvalDigest || eligibility.workflowDigest !== authorization.workflowDigest || eligibility.scopeDigest !== authorization.scopeDigest || eligibility.configurationDigest !== authorization.configurationDigest) {
       state.recovery = null;
       state.activeAttempt = prerequisiteSource === null ? authorization.attempt : null;
@@ -36983,7 +37441,7 @@ var WorkflowRunner = class {
       );
     }
     const sourceAttempt = authorization.attempt;
-    if (prerequisiteSource === null && !sourceAlreadyInterrupted && state.activeAttempt?.id !== authorization.attempt.id || prerequisiteSource !== null && !sourceAlreadyPreserved && state.activeAttempt !== null) {
+    if (prerequisiteSource === null && !sourceAlreadyInterrupted && !(sourceAlreadyPreserved && digestRejected) && state.activeAttempt?.id !== authorization.attempt.id || prerequisiteSource !== null && !sourceAlreadyPreserved && state.activeAttempt !== null) {
       throw new BanzaiError(
         "RECOVERY_STATE_CHANGED",
         "The recovery source changed before recovery execution."
@@ -36995,8 +37453,9 @@ var WorkflowRunner = class {
       for (const publish2 of pendingTransition) await publish2();
       pendingTransition.length = 0;
     };
+    const preserveSource = prerequisiteSource !== null || digestRejected;
     if (!sourceAlreadyInterrupted && !sourceAlreadyPreserved) {
-      if (prerequisiteSource === null) {
+      if (!preserveSource) {
         if (persistedSourceRecord.schemaVersion === 1)
           persistedSourceRecord.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION2;
         persistedSourceRecord.status = "interrupted";
@@ -37011,15 +37470,12 @@ var WorkflowRunner = class {
       }
       state.activeAttempt = null;
       state.activeProcess = null;
-      transitionState(
-        state,
-        authorization.phase === "implementation" ? "implementing" : "fixing"
-      );
+      transitionState(state, authorizedBlockedFrom);
       state.recovery = {
         authorizationId: authorization.authorizationId,
         sourceAttemptId: sourceAttempt.id,
         recoveryAttemptId: null,
-        stage: prerequisiteSource === null ? "source_interrupted" : "source_preserved"
+        stage: preserveSource ? "source_preserved" : "source_interrupted"
       };
       pendingTransition.push(async () => {
         await this.store.writeState(state);
@@ -37027,7 +37483,7 @@ var WorkflowRunner = class {
       pendingTransition.push(
         async () => await this.store.appendEvent(
           state.runId,
-          prerequisiteSource === null ? "attempt.interrupted" : "attempt.blocked_source_preserved",
+          digestRejected ? "attempt.digest_rejected_source_preserved" : prerequisiteSource === null ? "attempt.interrupted" : "attempt.blocked_source_preserved",
           {
             attemptId: sourceAttempt.id,
             kind: sourceAttempt.kind,
@@ -37037,15 +37493,27 @@ var WorkflowRunner = class {
       );
     }
     this.info(
-      prerequisiteSource === null ? `Recovering interrupted ${authorization.phase} attempt ${sourceAttempt.id} from the authorized workspace` : `Recovering remaining accepted findings from completed blocked fix attempt ${sourceAttempt.id}`
+      digestRejected ? `Recovering digest-rejected ${authorization.phase} attempt ${sourceAttempt.id} with one linked replacement attempt` : prerequisiteSource === null ? `Recovering interrupted ${authorization.phase} attempt ${sourceAttempt.id} from the authorized workspace` : `Recovering remaining accepted findings from completed blocked fix attempt ${sourceAttempt.id}`
     );
     try {
-      return authorization.phase === "implementation" ? await this.executeImplementation(
+      return authorization.phase === "plan" ? await this.executePlan(
+        state,
+        config,
+        persistedSourceRecord,
+        null,
+        commitTransition,
+        authorization
+      ) : authorization.phase === "implementation" ? await this.executeImplementation(
         state,
         config,
         authorization,
         commitTransition
-      ) : await this.executeFix(state, config, authorization, commitTransition);
+      ) : await this.executeFix(
+        state,
+        config,
+        authorization,
+        commitTransition
+      );
     } catch (error) {
       if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
@@ -37111,7 +37579,9 @@ var WorkflowRunner = class {
     if (state.status === "blocked") {
       if (publication?.pending === true && publication.action !== null)
         return `banzai ${publication.action}`;
-      return retry.eligible ? "banzai retry" : recovery.terminalCheckpointPresent === true ? "banzai resume" : recovery.eligible ? "banzai recover" : "banzai cancel";
+      if (recovery.eligible && recovery.sourceKind === "digest_rejected")
+        return "banzai recover";
+      return retry.eligible ? "banzai retry" : recovery.eligible ? "banzai recover" : recovery.terminalCheckpointPresent === true ? "banzai resume" : "banzai cancel";
     }
     if ([
       "created",
@@ -38430,7 +38900,7 @@ var WorkflowRunner = class {
     );
     return selection.workflow === "strict" ? await this.executePlan(state, config) : await this.executeImplementation(state, config);
   }
-  async executePlan(state, config, retrySource = null, checkpointRejection = null, commitTransition) {
+  async executePlan(state, config, retrySource = null, checkpointRejection = null, commitTransition, recovery = null) {
     if (!await hasRunnerWorkOwnership4(this.repoRoot, state.artifactBinding))
       return withRunnerWorkOwnership4(
         this.repoRoot,
@@ -38440,7 +38910,8 @@ var WorkflowRunner = class {
           config,
           retrySource,
           checkpointRejection,
-          commitTransition
+          commitTransition,
+          recovery
         )
       );
     requireState(state, ["planning"], "Planning");
@@ -38530,6 +39001,28 @@ var WorkflowRunner = class {
       artifactPaths: [],
       retryOf: retrySource?.attempt.id ?? null
     };
+    if (recovery !== null) {
+      if (state.recovery?.sourceAttemptId !== recovery.attempt.id || state.recovery.authorizationId !== recovery.authorizationId || state.recovery.recoveryAttemptId !== null || state.recovery.stage !== "source_preserved") {
+        throw new BanzaiError(
+          "RECOVERY_STATE_CHANGED",
+          "Recovery state changed before the new planning attempt could be linked."
+        );
+      }
+      record7.recoveryOf = recovery.attempt.id;
+      record7.recoveryAuthorizationId = recovery.authorizationId;
+      state.recovery = {
+        authorizationId: recovery.authorizationId,
+        sourceAttemptId: recovery.attempt.id,
+        recoveryAttemptId: attempt.id,
+        stage: "attempt_started"
+      };
+      await this.store.writeState(state);
+      await this.store.appendEvent(state.runId, "attempt.recovery_started", {
+        sourceAttemptId: recovery.attempt.id,
+        attemptId: attempt.id,
+        kind: attempt.kind
+      });
+    }
     await this.store.writeRunAttempt(state.runId, record7);
     try {
       const result = await this.activity(
@@ -38608,7 +39101,7 @@ var WorkflowRunner = class {
       const planResult = this.legacyPhaseResult(result.result);
       const applied = { ...result, result: planResult };
       await this.persistAdapterResult(state, record7, applied);
-      await this.validatePlanningResult(state, planResult);
+      await this.validatePlanningResult(state, attempt, planResult);
       if (!await this.completeAttempt(state, record7, applied)) {
         return await this.store.readState(state.runId);
       }
@@ -38841,6 +39334,13 @@ var WorkflowRunner = class {
         );
       }
       const applied = { ...result, result: liteResult };
+      await this.persistAdapterResult(state, record7, applied);
+      await this.establishResultSourceIdentities(
+        state,
+        attempt,
+        liteResult,
+        config
+      );
       if (!await this.completeAttempt(state, record7, applied)) {
         return await this.store.readState(state.runId);
       }
@@ -40260,6 +40760,12 @@ var WorkflowRunner = class {
         "PHASE_RESULT_MISMATCH",
         `Attempt ${record7.attempt.kind} returned phase ${envelope.phase}.`
       );
+    await this.establishResultSourceIdentities(
+      state,
+      record7.attempt,
+      record7.result,
+      config
+    );
     const sessionId = adapterResult.sessionId ?? resumeSessionId;
     if (envelope.outcome !== "completed" || envelope.gate !== null) {
       await this.store.writeRunAttempt(state.runId, record7);
@@ -40303,7 +40809,9 @@ var WorkflowRunner = class {
     const attempt = record7.attempt;
     const settings = config.models.implementer;
     const context = record7.sessionContext ?? sessionContext("implementer", settings);
-    const promotable = record7.status === "started" || record7.status === "failed" && !TERMINAL_INTEGRITY_FAILURE_CODES.has(record7.failureCode ?? "") && record7.failureCode !== "PLAN_TASK_COMPLETION_INVALID";
+    const promotable = record7.status === "started" || record7.status === "failed" && !TERMINAL_INTEGRITY_FAILURE_CODES.has(record7.failureCode ?? "") && record7.failureCode !== "PLAN_TASK_COMPLETION_INVALID" && // A result refused because a digest it authored never matched is a
+    // final input rejection too: replaying it reproduces the rejection.
+    record7.failureCode !== "RESULT_DIGEST_REJECTED";
     if (promotable) {
       const checkpoint = await this.store.readTerminalCheckpointIfExists(
         state.runId,
@@ -40329,6 +40837,12 @@ var WorkflowRunner = class {
       this.validateArtifactRoleReferences(state, checkpoint.envelope);
       const envelope = checkpoint.envelope;
       record7.result = JSON.parse(envelope.original);
+      await this.establishResultSourceIdentities(
+        state,
+        attempt,
+        record7.result,
+        config
+      );
       record7.envelope = envelope;
       record7.sessionId = checkpoint.sessionId;
       record7.usage = checkpoint.usage;
@@ -41045,7 +41559,14 @@ var WorkflowRunner = class {
           );
         return true;
       } catch (error) {
-        blockState(state, errorMessage(error));
+        blockState(
+          state,
+          await this.digestRejectionReason(
+            state,
+            state.taskVerification?.decision.authority.sourceAttemptId ?? null,
+            error
+          )
+        );
         await this.store.writeState(state);
         return false;
       }
@@ -41517,6 +42038,43 @@ var WorkflowRunner = class {
       workId: binding.workId
     };
   }
+  /** The acceptance baseline recorded for one attempt, by identity, or null. */
+  async resultDigestBaseline(state, sourceAttemptId) {
+    if (sourceAttemptId === null) return null;
+    const record7 = (await this.store.readRunAttempts(state.runId)).find(
+      (item) => item.attempt.id === sourceAttemptId
+    );
+    return record7 === void 0 ? null : await this.store.readResultDigestEvidenceIfExists(
+      state.runId,
+      record7.attempt
+    );
+  }
+  /**
+   * ADR-0051: a consumption-time rejection keeps its own authority to refuse
+   * execution and gains only a causal history, stated from the recorded
+   * acceptance baseline. With no record the history is unknown and is never
+   * reconstructed from the bytes that happen to be on disk now. A size
+   * rejection stays a separate cause and asserts no history at all.
+   */
+  async digestRejectionReason(state, sourceAttemptId, error) {
+    const base = errorMessage(error);
+    const detail = taskVerificationDigestDetail(error);
+    if (detail === null) return base;
+    if (detail.observed === null) return base;
+    let baseline;
+    try {
+      baseline = await this.resultDigestBaseline(state, sourceAttemptId);
+    } catch (readError) {
+      return `${base} Its acceptance baseline could not be read, so the causal history is unavailable: ${errorMessage(readError)}`;
+    }
+    const recorded = baseline?.comparisons.find(
+      (comparison) => comparison.checkId === detail.checkId && comparison.path === detail.path && comparison.declared === detail.declared
+    ) ?? null;
+    if (recorded === null) {
+      return `${DIGEST_UNRESOLVED_BLOCK_PREFIX} ${base} This run recorded no acceptance baseline for that digest, so whether it ever matched is unknown.`;
+    }
+    return recorded.matched ? `${base} It matched when the result was accepted, so the source changed after acceptance.` : `${DIGEST_UNRESOLVED_BLOCK_PREFIX} ${base} It did not match when the result was accepted, so it never matched.`;
+  }
   async executeTaskChecks(state, config, sourceAttempt, retryOf) {
     try {
       const source = await this.verificationSourceAttempt(
@@ -41674,8 +42232,12 @@ var WorkflowRunner = class {
       const current = await this.store.readState(state.runId);
       if (current.status === "cancelled") return current;
       state.activeProcess = null;
+      const sourceAttemptId = state.taskVerification?.decision.authority.sourceAttemptId ?? null;
       delete state.taskVerification;
-      blockState(state, errorMessage(error));
+      blockState(
+        state,
+        await this.digestRejectionReason(state, sourceAttemptId, error)
+      );
       await this.store.writeState(state);
       return state;
     }
@@ -42441,7 +43003,140 @@ var WorkflowRunner = class {
       )
     );
   }
-  async validatePlanningResult(state, result) {
+  /**
+   * The check identities whose descriptors draw execution authority from the
+   * approved plan or project policy. A candidate restating one of them leaves
+   * the approved obligation in force, so the restatement's source identities
+   * never take effect and are never compared (ADR-0049 section 2, ADR-0051).
+   */
+  async requiredCheckIds(state, config) {
+    const ids = new Set(
+      (this.taskVerificationPolicy(config)?.required ?? []).map(
+        (check2) => check2.id
+      )
+    );
+    if ((state.workflowSelection?.workflow ?? "strict") !== "strict" || state.planApproval === null)
+      return ids;
+    for (const check2 of parseTaskVerificationObligations(
+      await readFile13(
+        path27.join(this.repoRoot, this.completionPlanPath(state)),
+        "utf8"
+      )
+    ).checks)
+      ids.add(check2.id);
+    return ids;
+  }
+  /**
+   * Establishes the acceptance baseline for one attempt and rejects the result
+   * when any comparison failed. The record is written before the outcome is
+   * decided, so a rejection is durable evidence rather than a lost diagnosis,
+   * and an existing baseline is never restated: the current comparisons decide
+   * acceptance, the recorded ones describe what acceptance observed.
+   */
+  async recordResultDigestEvidence(state, attempt, comparisons) {
+    const rejected = comparisons.filter((comparison) => !comparison.matched);
+    const evidence2 = await this.store.establishResultDigestEvidence(
+      state.runId,
+      {
+        schema: RESULT_DIGEST_EVIDENCE_SCHEMA,
+        schemaVersion: RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION,
+        runId: state.runId,
+        attempt: { id: attempt.id, kind: attempt.kind },
+        outcome: rejected.length > 0 ? "rejected" : "accepted",
+        comparisons
+      }
+    );
+    if (rejected.length > 0) {
+      throw new ResultDigestRejectedError(
+        `The ${attempt.kind} result declared ${rejected.length} digest${rejected.length === 1 ? "" : "s"} that did not match the bytes it named when the result was accepted. ${rejected.map(resultDigestDiagnostic).join(" ")}`,
+        rejected
+      );
+    }
+    return evidence2;
+  }
+  /**
+   * ADR-0051: every model-authored source identity that acts as an execution
+   * precondition is established against the bytes it names at the boundary
+   * where the result is accepted, before any later phase depends on it.
+   */
+  async establishResultSourceIdentities(state, attempt, result, config) {
+    if (state.verificationMode !== "task") return;
+    const candidates = result.schemaVersion === 4 ? result.verificationCandidates ?? null : null;
+    const observe = async (relativePath3) => {
+      try {
+        const file = await taskVerificationPath(this.repoRoot, relativePath3);
+        const size = (await lstat17(file)).size;
+        return size > TASK_VERIFICATION_SOURCE_MAX_BYTES ? { observed: null, size, limit: TASK_VERIFICATION_SOURCE_MAX_BYTES } : {
+          observed: evidenceDigest(await readFile13(file)),
+          size,
+          limit: null
+        };
+      } catch {
+        return { observed: null, size: null, limit: null };
+      }
+    };
+    const comparisons = [];
+    for (const identity of effectiveResultSourceIdentities(
+      candidates,
+      await this.requiredCheckIds(state, config)
+    )) {
+      const { observed: observed3, size, limit } = await observe(identity.path);
+      comparisons.push({
+        role: "precondition",
+        field: identity.field,
+        checkId: identity.checkId,
+        path: identity.path,
+        declared: identity.declared,
+        observed: observed3,
+        size,
+        limit,
+        matched: observed3 === identity.declared
+      });
+    }
+    await this.recordResultDigestEvidence(state, attempt, comparisons);
+  }
+  /**
+   * The plan remainder digest is the one binding role ADR-0051 fixes, and the
+   * detection that establishes it already lives in the shared inventory
+   * parser. This only classifies that existing outcome: an accepted record
+   * becomes the baseline a later reader may cite, and a rejected record is
+   * what makes the attempt recognizable as a digest-rejected result. No strict
+   * plan-task completion ledger is written for a planning attempt.
+   */
+  async establishPlanRemainderDigest(state, attempt, planPath, markdown) {
+    let comparison;
+    try {
+      const obligations = parseTaskVerificationObligations(markdown);
+      comparison = {
+        role: "binding",
+        field: "planRemainderSha256",
+        checkId: null,
+        path: planPath,
+        declared: obligations.planRemainderSha256,
+        observed: obligations.planRemainderSha256,
+        size: null,
+        limit: null,
+        matched: true
+      };
+    } catch (error) {
+      const detail = taskVerificationDigestDetail(error);
+      if (detail === null) throw error;
+      if (detail.role !== "binding") throw error;
+      comparison = {
+        role: "binding",
+        field: detail.field,
+        checkId: null,
+        path: planPath,
+        declared: detail.declared,
+        observed: detail.observed,
+        size: null,
+        limit: null,
+        matched: false
+      };
+    }
+    await this.recordResultDigestEvidence(state, attempt, [comparison]);
+  }
+  async validatePlanningResult(state, attempt, result) {
     if (result.gate !== "plan_approval" || result.artifacts.plan === null)
       return;
     try {
@@ -42451,11 +43146,21 @@ var WorkflowRunner = class {
       );
       parseApprovedPlanTaskIds(markdown);
       if (state.verificationMode === "task")
-        parseTaskVerificationObligations(markdown);
+        await this.establishPlanRemainderDigest(
+          state,
+          attempt,
+          result.artifacts.plan,
+          markdown
+        );
       this.validateRunnerControlTasks(state, markdown);
     } catch (error) {
       if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
+      if (error instanceof ResultDigestRejectedError)
+        throw new PlanTaskCompletionError(
+          "approved_plan_invalid",
+          error.message
+        );
       if (error instanceof PlanTaskCompletionError || error instanceof BanzaiError && error.code === "PLAN_RUNNER_CONTROL_TASK")
         throw error;
       throw new PlanTaskCompletionError(
@@ -42464,7 +43169,7 @@ var WorkflowRunner = class {
       );
     }
   }
-  async validateTerminalCheckpointResult(state, attempt, result) {
+  async validateTerminalCheckpointResult(state, attempt, result, config) {
     await this.validateSavedArtifactScope(state, attempt);
     if (attempt.kind === "selection") {
       return;
@@ -42499,9 +43204,15 @@ var WorkflowRunner = class {
       );
     }
     if (attempt.kind === "plan") {
-      await this.validatePlanningResult(state, phaseResult);
+      await this.validatePlanningResult(state, attempt, phaseResult);
       return;
     }
+    await this.establishResultSourceIdentities(
+      state,
+      attempt,
+      phaseResult,
+      config
+    );
     if (attempt.kind === "fix") {
       if (phaseResult.taskCompletion !== null) {
         if (state.planApproval === null) {
@@ -42602,7 +43313,8 @@ var WorkflowRunner = class {
     await this.validateTerminalCheckpointResult(
       state,
       attempt,
-      checkpoint.result
+      checkpoint.result,
+      config
     );
     if (record7.status === "completed") {
       if (record7.result === null || JSON.stringify(record7.result) !== JSON.stringify(checkpoint.result)) {
@@ -43513,7 +44225,9 @@ function semanticNextAction(status) {
       const publication = status.completionPublication;
       if (publication?.pending === true && publication.action !== null)
         return publication.action;
-      return status.retry.eligible ? "retry" : status.recovery.terminalCheckpointPresent === true ? "resume" : status.recovery.eligible ? "recover" : "cancel";
+      if (status.recovery.eligible && status.recovery.sourceKind === "digest_rejected")
+        return "recover";
+      return status.retry.eligible ? "retry" : status.recovery.eligible ? "recover" : status.recovery.terminalCheckpointPresent === true ? "resume" : "cancel";
     }
     case "created":
     case "selecting":
@@ -47184,6 +47898,7 @@ var release_policy_default = {
       "plugins/banzai/guidance/feature.md",
       "plugins/banzai/guidance/fix.md",
       "plugins/banzai/guidance/manifest.md",
+      "plugins/banzai/guidance/code-design.md",
       "packages/orchestrator/src/phase-resources.ts"
     ]
   },
@@ -49186,20 +49901,26 @@ ${escapeTerminalText(prerequisites)}`
     const invalidCompletion = state.planTaskCompletion?.status === "invalid" ? state.planTaskCompletion : null;
     const isPlanBundleRepair = invalidCompletion !== null && (invalidCompletion.violation === "approved_plan_invalid" || invalidCompletion.violation === "approval_invalid");
     const isCompletionEvidenceRepair = !isPlanBundleRepair && (state.blockedFrom === "implementing" || state.blockedFrom === "verifying" || state.blockedFrom === "fixing") && status.retry.attemptId !== null && invalidCompletion !== null && invalidCompletion.sourceAttemptId === status.retry.attemptId;
-    if (status.retry.eligible) {
+    const isDigestRejectedRepair = status.recovery.eligible && status.recovery.sourceKind === "digest_rejected";
+    if (isDigestRejectedRepair) {
+      choices.push({
+        name: "Authorize a replacement attempt for the rejected result",
+        value: "recover"
+      });
+    } else if (status.retry.eligible) {
       choices.push({
         name: status.retry.attemptId === null ? state.blockedFrom === "reviewing" ? "Retry review checks" : "Retry start checks" : isPlanBundleRepair ? "Rerun planning to correct the approved plan" : isCompletionEvidenceRepair ? "Repair plan-task completion evidence" : state.blockedFrom === "planning" ? "Continue the failed planning attempt" : "Retry the failed read-only attempt",
         value: "retry"
-      });
-    } else if (status.recovery.terminalCheckpointPresent === true) {
-      choices.push({
-        name: "Resume the proven terminal result",
-        value: "resume"
       });
     } else if (status.recovery.eligible) {
       choices.push({
         name: status.recovery.sourceKind === "prerequisite_blocked_fix" ? "Recover the remaining accepted findings" : "Recover from this exact partial workspace",
         value: "recover"
+      });
+    } else if (status.recovery.terminalCheckpointPresent === true) {
+      choices.push({
+        name: "Resume the proven terminal result",
+        value: "resume"
       });
     }
     const restore = await runner.restoreEligibility();
@@ -49245,7 +49966,7 @@ ${escapeTerminalText(prerequisites)}`
       }
       writeLabeled(io, "Recovery warning", status.recovery.warning);
       io.writeLine(`Recovery identity: ${status.recovery.recoveryIdentity}`);
-      const confirmation = status.recovery.sourceKind === "prerequisite_blocked_fix" ? "Confirm the displayed prerequisites are addressed and authorize one new fix attempt for only the remaining accepted findings in this exact workspace?" : "Authorize one new recovery attempt for this exact workspace and accept that repository or external side effects may be partial or duplicated?";
+      const confirmation = status.recovery.sourceKind === "prerequisite_blocked_fix" ? "Confirm the displayed prerequisites are addressed and authorize one new fix attempt for only the remaining accepted findings in this exact workspace?" : status.recovery.sourceKind === "digest_rejected" ? "Authorize one linked attempt to supply a corrected result for the rejected phase, keeping the rejected attempt and its result as evidence?" : "Authorize one new recovery attempt for this exact workspace and accept that repository or external side effects may be partial or duplicated?";
       if (await io.confirm(confirmation, false)) {
         const { attemptId, recoveryIdentity } = status.recovery;
         await runWork(
@@ -51677,7 +52398,7 @@ async function main() {
       throw new BanzaiError("RECOVERY_NOT_ALLOWED", status.recovery.reason);
     }
     const io = new InquirerInteractiveIO();
-    const confirmation = status.recovery.sourceKind === "prerequisite_blocked_fix" ? "Confirm the displayed prerequisites are addressed and authorize one new fix attempt for only the remaining accepted findings in this exact workspace?" : "Authorize one new recovery attempt for this exact workspace and accept that repository or external side effects may be partial or duplicated?";
+    const confirmation = status.recovery.sourceKind === "prerequisite_blocked_fix" ? "Confirm the displayed prerequisites are addressed and authorize one new fix attempt for only the remaining accepted findings in this exact workspace?" : status.recovery.sourceKind === "digest_rejected" ? "Authorize one linked attempt to supply a corrected result for the rejected phase, keeping the rejected attempt and its result as evidence?" : "Authorize one new recovery attempt for this exact workspace and accept that repository or external side effects may be partial or duplicated?";
     if (!await io.confirm(confirmation, false)) {
       return;
     }

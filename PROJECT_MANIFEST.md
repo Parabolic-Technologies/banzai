@@ -75,6 +75,12 @@ installed policy source. These files describe nothing here.
   disposable committed-bundle smoke. It snapshots tracked bytes and modes,
   fails if a component mutates them, and never invokes version synchronization
   or recovery.
+- **Disposable release candidate:** `node packages/orchestrator/scripts/release-candidate-check.mjs`
+  — copies the checkout's tracked and untracked non-ignored files into a
+  temporary candidate outside the repository, links installed dependencies
+  read-only, gives the candidate its own history-free index, and runs the
+  candidate's `release:check` fresh. The real checkout is never staged,
+  committed or written, and the candidate is removed on success and failure.
 - **Version synchronization:** `npm run version:set -- <version>` applies one
   explicit canonical forward SemVer target to nine fields in seven fixed files.
   A same-version bootstrap from six `1.19.0` values and three absent root fields
@@ -374,13 +380,18 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   `assertClaudePermissions`, approval-digest and base-commit validation, attempt
   reconciliation, builder-session selection, full/delta reviewer policy,
   snapshot-v6-bound rendered-review-v7 publication without formatting-only model calls,
-  and recovery source discovery.
+  and recovery source discovery. It establishes every model-authored digest
+  against the bytes it names when the carrying artifact is accepted, records
+  that comparison as durable acceptance evidence, and recognizes a
+  digest-rejected result as one recovery source whose authorized repair
+  outranks replaying the rejected terminal checkpoint.
 - `state-machine.ts` — `transitionState`, `blockState`, `requireState`; the
   only place `RunStatus` changes, so illegal transitions fail closed.
 - `store.ts` — `RunStore`: atomic `state.json`, append-only `events.jsonl`,
   model-attempt records with redacted output, mode-0600 context ledgers,
   attempt-owned review candidates and immutable private review snapshots,
-  verification-ledger leaves, and the
+  write-once `banzai-result-digest-evidence/v1` acceptance baselines under
+  `digests/`, verification-ledger leaves, and the
   single-active-run lock (`releaseHeldRunnerLocksSync` for signal handlers).
   A separate owned short guard serializes state/events and rejects stale terminal
   changes; it is never released by the signal handler or reclaimed automatically.
@@ -413,7 +424,9 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
 - `verification-evidence.ts` — typed facade over the canonical plugin decision and
   evidence-storage owners for task descriptors, inert discovery, execution authority,
   immutable physical provenance and current applicability; runner and standalone
-  helper use the same rules.
+  helper use the same rules. It also exposes the single digest-role rule
+  (`taskVerificationDigestRole`, `comparableTaskVerificationSources`) that
+  acceptance and launch both classify through.
 - `verification.ts` — root project-marker detection, hygiene classification,
   explicit legacy-profile diagnostics and command descriptors. Task discovery and
   policy live in the shared task owner.
@@ -460,7 +473,10 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   cannot authorize or replay workflow work.
 - `validation.ts` — runtime decoders (`parseWorkflowSelectionResult`,
   `parsePhaseResult`, `parseReviewResult`, `parseConfig`) enforcing the
-  invariants JSON Schema cannot express.
+  invariants JSON Schema cannot express, including
+  `effectiveResultSourceIdentities` and `parseResultDigestEvidence`.
+  `banzai-recovery-authorization/v1` keeps its schema identity while accepting a
+  read-only `plan` attempt beside the mutable implementation and fix attempts.
 - `contracts.ts` — re-exports the plugin contract JSON; `assertContractParity`
   fails startup on `CONTRACT_VERSION_MISMATCH` or `SCHEMA_VERSION_MISMATCH`.
 - `configuration-prerequisite.ts` — bounded closed configuration decisions,
@@ -491,7 +507,7 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   resolved to the public repository. Init creates the local guide only when absent,
   under initialization ownership and regular-file/no-symlink checks.
 - `phase-resources.ts` — committed generated raw UTF-8 bodies and SHA-256
-  identities for six phases, nine guidance files, six policies and two hook
+  identities for six phases, ten guidance files, six policies and two hook
   references. Explicit build generates; check-dist only compares.
 - `phase-instructions.ts` — ordered resource delivery and bounded installed
   identity comparison. Only prompts, workflow and doctor consume it. It imports
@@ -550,8 +566,9 @@ Repository release scripts (`packages/orchestrator/scripts/`):
 
 Plugin (`plugins/banzai/`):
 
-- `phases/` and `guidance/` — six runner processes and nine shared portable
-  guidance files outside skill discovery. Standalone skill consumers read
+- `phases/` and `guidance/` — six runner processes and ten shared portable
+  guidance files outside skill discovery. `code-design.md` is authored directly
+  rather than extracted from a skill section. Standalone skill consumers read
   guidance relatively; retained Orchestrated Mode sections are transitional
   source and are not consumed by the runner.
 
@@ -610,7 +627,7 @@ Plugin (`plugins/banzai/`):
   `PROJECT_MANIFEST.md` in the session directory or a parent — and the hook
   stays silent in repositories without that evidence.
 - `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` — plugin manifests,
-  currently version `2.6.1`. The Codex manifest additionally declares the hook
+  currently version `2.6.3`. The Codex manifest additionally declares the hook
   and the store interface metadata.
 - `PROJECT_MANIFEST.md`, `AGENTS.md`, `CLAUDE.md`, and the placeholder
   `documentation/` tree (`README.md`, `decisions/README.md`, `.gitkeep` files) —
@@ -1340,7 +1357,11 @@ status` reports only whether credentials are visible and stored, so a
   opaque content. The policy carries the
   approved threshold for any separately authorized future blocker proposal.
   Release validation protects the exact canonical section and convergence
-  language only. Semantic quality remains reviewer judgment measured by sampled
+  language, and additionally the single `### Structural Assessment Triggers`
+  heading, the ordered four-section `plugins/banzai/guidance/code-design.md`
+  method within its 2,400-byte budget, the five consumer skills' anchors, and
+  its absence from review guidance, `feature-review` and `test-writing`
+  (ADR-0050 stages 1 and 2a). Semantic quality remains reviewer judgment measured by sampled
   evaluation. No runtime contract, validation, state, hook, phase, gate,
   dependency, configuration, analyzer, skill, or test-selection owner changed.
 - Strict completion policy: a passing latest review completes normally. A
@@ -1417,7 +1438,7 @@ status` reports only whether credentials are visible and stored, so a
   source, and the only root Claude settings file is the ignored
   `.claude/settings.local.json`. `plugins/banzai/.claude/settings.json` is
   packaged plugin content, not this repository's configuration.
-- Current Banzai release-train version is `2.6.1`, owned solely by root
+- Current Banzai release-train version is `2.6.3`, owned solely by root
   `package.json.version` and mirrored by four plugin/marketplace fields, the
   orchestrator package, and three `package-lock.json` fields (top-level, root
   package, and workspace package). All nine fields across seven files agree.
@@ -1481,4 +1502,6 @@ restate them here. Paths are relative to `documentation/decisions/`.
 | ADR-0046 | Supervised live end-to-end first task                              | `0046-supervised-live-e2e.md`                                   | Planned     |
 | ADR-0047 | Runner-owned completion projection                                 | `0047-runner-owned-completion-projection.md`                    | Implemented |
 | ADR-0048 | Completion markup and viewer enrichment boundary                   | `0048-completion-markup-and-viewer-enrichment-boundary.md`      | Implemented |
-| ADR-0049 | Task-scoped verification authority                                 | `0049-task-scoped-verification.md`                              | Implemented     |
+| ADR-0049 | Task-scoped verification authority                                 | `0049-task-scoped-verification.md`                              | Implemented |
+| ADR-0050 | Triggered code-design assessment                                   | `0050-triggered-code-design-assessment.md`                      | Planned     |
+| ADR-0051 | Acceptance-time validation of model-authored digests               | `0051-acceptance-time-digest-validation.md`                     | Implemented |

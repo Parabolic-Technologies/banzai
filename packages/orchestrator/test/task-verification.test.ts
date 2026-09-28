@@ -28,8 +28,11 @@ import {
   captureTaskVerificationInputs,
   taskVerificationApplicability,
   authorizeTaskVerification,
+  comparableTaskVerificationSources,
   discoverTaskVerification,
   evidenceDigest,
+  taskVerificationDigestRole,
+  TASK_VERIFICATION_SOURCE_MAX_BYTES,
   parseTaskVerificationCandidates,
   parseTaskVerificationDescriptor,
   parseTaskVerificationObligations,
@@ -242,6 +245,108 @@ test("restating a materialized obligation with captured sources keeps the approv
   );
 });
 
+test("one digest-role rule classifies the plan remainder, supplemental sources and approved obligations", () => {
+  assert.equal(taskVerificationDigestRole("plan-remainder"), "binding");
+  assert.equal(
+    taskVerificationDigestRole("descriptor-source", false),
+    "precondition"
+  );
+  assert.equal(
+    taskVerificationDigestRole("descriptor-source", true),
+    "descriptive"
+  );
+  assert.throws(() => taskVerificationDigestRole("other" as never));
+  const sourced = {
+    ...check,
+    sources: [{ path: "package.json", sha256: evidenceDigest("{}") }]
+  };
+  // The acceptance comparison and the launch comparison read the same rule.
+  assert.deepEqual(comparableTaskVerificationSources(sourced), sourced.sources);
+  assert.deepEqual(comparableTaskVerificationSources(sourced, true), []);
+  assert.deepEqual(comparableTaskVerificationSources(check), []);
+});
+
+test("a rejected plan remainder names the field and both digests without quoting the plan", () => {
+  const plan = planFor([check]).replace(
+    /"planRemainderSha256":"[a-f0-9]{64}"/u,
+    `"planRemainderSha256":"${"a".repeat(64)}"`
+  );
+  assert.throws(
+    () => parseTaskVerificationObligations(plan),
+    (error: unknown) => {
+      const digest = error as { code?: string; detail?: { role?: string } };
+      assert.equal(digest.code, "TASK_VERIFICATION_DIGEST_MISMATCH");
+      assert.equal(digest.detail?.role, "binding");
+      assert.match(
+        (error as Error).message,
+        /planRemainderSha256 does not match the plan bytes outside its inventory: declared [a-f0-9]{64}, observed [a-f0-9]{64}/
+      );
+      assert.doesNotMatch((error as Error).message, /Run fresh verification/);
+      return true;
+    }
+  );
+});
+
+test("an approved obligation executes after its sources changed and after anticipated tooling exists", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "banzai-task-materialize-"));
+  try {
+    const planned = {
+      ...check,
+      sources: [{ path: "package.json", sha256: evidenceDigest("{}") }],
+      materialization: { taskRef: "T001", paths: ["scripts/check.mjs"] }
+    };
+    await writeFile(path.join(root, "package.json"), '{"scripts":{}}');
+    await mkdir(path.join(root, "scripts"));
+    await writeFile(path.join(root, "scripts/check.mjs"), "export {};\n");
+    assert.equal(
+      (
+        await authorizeTaskVerification({
+          repoRoot: root,
+          descriptor: planned,
+          authority,
+          context,
+          required: true
+        })
+      ).descriptor.id,
+      planned.id
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a source above the permitted size is a separate cause from a digest mismatch", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "banzai-task-oversize-"));
+  try {
+    const bytes = Buffer.alloc(TASK_VERIFICATION_SOURCE_MAX_BYTES + 1, 97);
+    await writeFile(path.join(root, "large.txt"), bytes);
+    await assert.rejects(
+      authorizeTaskVerification({
+        repoRoot: root,
+        descriptor: {
+          ...check,
+          sources: [{ path: "large.txt", sha256: evidenceDigest(bytes) }]
+        },
+        authority,
+        context
+      }),
+      (error: unknown) => {
+        assert.equal(
+          (error as { code?: string }).code,
+          "TASK_VERIFICATION_SOURCE_TOO_LARGE"
+        );
+        assert.match(
+          (error as Error).message,
+          /large\.txt is 1048577 bytes, above the 1048576-byte limit/
+        );
+        return true;
+      }
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("execution validation checks actual context, source drift, policy and safe cwd ancestry", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "banzai-task-verification-"));
   try {
@@ -312,7 +417,7 @@ test("execution validation checks actual context, source drift, policy and safe 
         authority,
         context
       }),
-      /source changed/
+      /does not match the identity recorded for check lint: declared [a-f0-9]{64}, observed [a-f0-9]{64}/
     );
     // Approved implementation may keep editing scripts after planning pinned them.
     assert.equal(

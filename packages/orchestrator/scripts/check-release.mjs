@@ -2207,6 +2207,114 @@ async function validateEngineeringQualityPolicy(root) {
  * human authority. Protect the shared policy, prompt, public docs/help, privacy
  * canaries, and version declarations as one release-time consistency surface.
  */
+const CODE_DESIGN_METHOD = "plugins/banzai/guidance/code-design.md";
+const CODE_DESIGN_SECTIONS = [
+  "Ownership Discovery",
+  "Assessment Contract",
+  "Planning Assessment",
+  "Implementation Assessment"
+];
+// ADR-0050 section 2: the method is shared by its consumers and withheld from
+// the audit, so both its shape and its reach are release-enforced.
+const CODE_DESIGN_CONSUMERS = [
+  [
+    "plugins/banzai/skills/development-plan/SKILL.md",
+    ["ownership-discovery", "assessment-contract", "planning-assessment"]
+  ],
+  [
+    "plugins/banzai/skills/code-writing/SKILL.md",
+    ["ownership-discovery", "assessment-contract", "implementation-assessment"]
+  ],
+  [
+    "plugins/banzai/skills/feature/SKILL.md",
+    [
+      "ownership-discovery",
+      "assessment-contract",
+      "planning-assessment",
+      "implementation-assessment"
+    ]
+  ],
+  [
+    "plugins/banzai/skills/quick-fix/SKILL.md",
+    [
+      "ownership-discovery",
+      "assessment-contract",
+      "planning-assessment",
+      "implementation-assessment"
+    ]
+  ],
+  ["plugins/banzai/skills/project-manifest/SKILL.md", ["ownership-discovery"]]
+];
+const CODE_DESIGN_EXCLUDED = [
+  "plugins/banzai/guidance/review.md",
+  "plugins/banzai/skills/feature-review/SKILL.md",
+  "plugins/banzai/skills/test-writing/SKILL.md"
+];
+
+async function validateCodeDesignAssessment(root) {
+  const policyPath = "plugins/banzai/policies/engineering-quality.md";
+  const policyRaw = await readText(root, policyPath);
+  const triggerCount = policyRaw
+    .split("\n")
+    .filter((line) => line === "### Structural Assessment Triggers").length;
+  if (triggerCount !== 1) {
+    fail(
+      "CODE_DESIGN_POLICY_DRIFT",
+      policyPath,
+      `expected exactly one "### Structural Assessment Triggers" heading, found ${triggerCount}`
+    );
+  }
+
+  const method = await readText(
+    root,
+    CODE_DESIGN_METHOD,
+    "MISSING_CODE_DESIGN_METHOD"
+  );
+  const bytes = Buffer.byteLength(method, "utf8");
+  if (bytes > 2400) {
+    fail(
+      "CODE_DESIGN_METHOD_DRIFT",
+      CODE_DESIGN_METHOD,
+      `method budget is 2400 UTF-8 bytes; found ${bytes}`
+    );
+  }
+  const sections = [...method.matchAll(/^## (.+)$/gm)].map((match) =>
+    match[1].trim()
+  );
+  if (
+    sections.length !== CODE_DESIGN_SECTIONS.length ||
+    sections.some((title, index) => title !== CODE_DESIGN_SECTIONS[index])
+  ) {
+    fail(
+      "CODE_DESIGN_METHOD_DRIFT",
+      CODE_DESIGN_METHOD,
+      `expected ordered sections ${CODE_DESIGN_SECTIONS.join(", ")}; found ${sections.join(", ") || "none"}`
+    );
+  }
+
+  for (const [consumerPath, anchors] of CODE_DESIGN_CONSUMERS) {
+    const consumer = flatText(await readText(root, consumerPath));
+    for (const required of anchors) {
+      if (!consumer.includes(`../../guidance/code-design.md#${required}`)) {
+        fail(
+          "CODE_DESIGN_CONSUMER_DRIFT",
+          consumerPath,
+          `missing code-design.md#${required} reference`
+        );
+      }
+    }
+  }
+  for (const excludedPath of CODE_DESIGN_EXCLUDED) {
+    if ((await readText(root, excludedPath)).includes("code-design.md")) {
+      fail(
+        "CODE_DESIGN_CONSUMER_DRIFT",
+        excludedPath,
+        "audit and assurance instructions must not reference code-design.md"
+      );
+    }
+  }
+}
+
 async function validateDecisionConsultationPolicy(root) {
   const requiredFragments = new Map([
     [
@@ -2784,6 +2892,7 @@ async function validateRepository(root) {
     }
   }
 
+  await validateCodeDesignAssessment(root);
   await validateDistributionParity(root);
   await validateCi(root, policy);
   await validateDocumentation(root, policy);

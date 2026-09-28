@@ -13,3 +13,7 @@ the accepted fix makes that evidence stale: return the refreshed structured
 ledger, and leave the report's runner-owned completion section untouched for the
 runner to republish. Report unresolved accepted findings
 honestly; a newly required decision stops dependent work.
+
+Apply the code-design guidance only when an Engineering Quality structural
+assessment trigger or the reuse-search duty applies; the reuse-search duty alone
+uses only its Ownership Discovery section.

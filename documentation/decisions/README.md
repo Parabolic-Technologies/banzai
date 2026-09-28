@@ -56,7 +56,8 @@ plugin and orchestrator source.
 | [0047](./0047-runner-owned-completion-projection.md) | Runner-owned completion projection | Accepted | 2026-09-15 | Private work `runner-owned-completion-projection`; requirements summarized in the ADR |
 | [0048](./0048-completion-markup-and-viewer-enrichment-boundary.md) | Completion markup and viewer enrichment boundary | Accepted | 2026-09-15 | Private work `runner-owned-completion-projection`; narrow amendment to ADR-0047 |
 | [0049](./0049-task-scoped-verification.md) | Task-scoped verification authority | Accepted | 2026-09-17 | Private work `task-scoped-verification`; partial supersession of 0006/0007/0045 and amendments to 0008/0018/0037/0038/0043; implementation Implemented; independent review recorded privately |
-| [0050](./0050-triggered-code-design-assessment.md) | Triggered code-design assessment | Proposed | 2026-09-18 | Research in `documentation/ideas/` (structural debt, composable code design, method budget draft); narrow amendment to ADR-0030 |
+| [0050](./0050-triggered-code-design-assessment.md) | Triggered code-design assessment | Accepted | 2026-09-18 | Research in `documentation/ideas/` (structural debt, composable code design, method budget draft); narrow amendment to ADR-0030 |
+| [0051](./0051-acceptance-time-digest-validation.md) | Acceptance-time validation of model-authored digests | Accepted | 2026-09-21 | Issue 11 in the product repository; private work `model-authored-digest-validation`; amends 0023/0024 by adding one recovery source |
 
 ## File Names
 

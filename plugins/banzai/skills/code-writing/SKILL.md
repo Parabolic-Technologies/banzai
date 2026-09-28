@@ -121,6 +121,18 @@ Caller-specific process and contract details remain here:
    mode, leave the plan unchanged and record completion once in the structured
    ledger, then project the same records into the implementation report.
 
+## Code Design
+
+When an Engineering Quality structural assessment trigger or the
+reuse-search duty applies, read and apply
+[Ownership Discovery](../../guidance/code-design.md#ownership-discovery)
+from this installed skill. When a structural assessment trigger applies, also
+read and apply
+[Assessment Contract](../../guidance/code-design.md#assessment-contract) and
+[Implementation Assessment](../../guidance/code-design.md#implementation-assessment)
+from this installed skill. Stop before affected work if that guidance is
+missing or unreadable.
+
 ## Deviations
 
 Read and apply [Deviations](../../guidance/implementation.md#deviations)

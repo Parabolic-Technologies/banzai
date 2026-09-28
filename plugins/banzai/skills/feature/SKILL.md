@@ -136,6 +136,19 @@ Caller-specific process and contract details remain here:
 13. Report changed paths, verification outcomes, deviations, and follow-ups. The
     stop gate above is the only place this skill waits.
 
+## Code Design
+
+When an Engineering Quality structural assessment trigger or the
+reuse-search duty applies, read and apply
+[Ownership Discovery](../../guidance/code-design.md#ownership-discovery)
+from this installed skill. When a structural assessment trigger applies, also
+read and apply
+[Assessment Contract](../../guidance/code-design.md#assessment-contract),
+[Planning Assessment](../../guidance/code-design.md#planning-assessment) and
+[Implementation Assessment](../../guidance/code-design.md#implementation-assessment)
+from this installed skill. Stop before affected work if that guidance is
+missing or unreadable.
+
 ## `work.md`
 
 Read and apply [work.md](../../guidance/feature.md#workmd)

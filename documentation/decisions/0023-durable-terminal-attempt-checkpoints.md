@@ -439,3 +439,9 @@ Implementation and independent review must confirm:
 - Amended by: ADR 0024 adds a completed prerequisite-blocked strict fix result
   as a second, narrowly bounded source for the same operator-authorized linked
   recovery mechanism. This decision otherwise remains unchanged.
+- Amended by [ADR-0051](./0051-acceptance-time-digest-validation.md), accepted
+  2026-09-21: a digest-rejected result becomes a third, narrowly bounded source
+  for the same operator-authorized linked recovery mechanism. Durable terminal
+  proof stays the precondition for it, and a failed mutable attempt whose
+  repository side effects are unknown or partial is still refused. This decision
+  otherwise remains unchanged.

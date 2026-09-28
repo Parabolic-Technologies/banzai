@@ -194,6 +194,13 @@ Read and apply [Maintenance](../../guidance/manifest.md#maintenance)
 from this installed skill. Stop before affected work if that guidance is missing
 or unreadable.
 
+## Code Design
+
+When recording or reconciling module ownership facts, read and apply
+[Ownership Discovery](../../guidance/code-design.md#ownership-discovery)
+from this installed skill. Stop before affected work if that guidance is
+missing or unreadable.
+
 ## Required Sections
 
 Read and apply [Required Sections](../../guidance/manifest.md#required-sections)

@@ -19,8 +19,9 @@ and policies; entry, host transport and contract mechanics remain with the calle
    authorized by the approved plan, then update the lockfile and manifest.
 8. Apply the Engineering Quality authority order and materially applicable
    constraints. Keep work within approved scope, use the smallest compatible
-   implementation, and reuse repository mechanisms and evidence owners rather
-   than creating an EQ checklist, methodology, or test quota.
+   implementation, meaning the simplest compatible resulting design rather than
+   the smallest diff, and reuse repository mechanisms and evidence owners
+   rather than creating an EQ checklist, methodology, or test quota.
 9. Apply each linked ADR's compliance and confirmation constraints.
 10. Make important implementation dependencies, boundary behavior, failure and
     lifecycle consequences, and compatibility changes explicit when the plan
@@ -93,7 +94,9 @@ Write the resolved `implementationReport` artifact:
    and the material guarantee each automated test can fail to protect;
 8. material Engineering Quality deviations and their authority, impact, and
    evidence owner, or `None`;
-9. notes for assurance.
+9. notes for assurance;
+10. structural assessment records and their verified outcomes for triggered
+    work, or `None`.
 
 Task completion evidence is owned differently by context. In orchestrated
 strict mode, return the structured `taskCompletion` ledger and write only the

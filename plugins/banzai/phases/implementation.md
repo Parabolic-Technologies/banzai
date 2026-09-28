@@ -14,3 +14,7 @@ required; neither report waives missing implementation or assurance evidence.
 Use the supplied verification ownership to distinguish focused feedback from
 runner-owned final verification. Escalate a new material decision before the
 dependent change, preserving already recorded human answers.
+
+Apply the code-design guidance only when an Engineering Quality structural
+assessment trigger or the reuse-search duty applies; the reuse-search duty alone
+uses only its Ownership Discovery section.

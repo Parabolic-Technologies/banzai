@@ -355,6 +355,12 @@ The canonical policy ships in
 Standalone consuming skills explicitly read the installed file on either host; runner phases receive its body inline. Maintainer guidance is in
 [`documentation/engineering-quality.md`](documentation/engineering-quality.md).
 
+Structural assessment triggers direct planning, implementation, feature and
+fix work to one shared code-design method covering ownership discovery, the
+assessment contract and its planning and implementation duties. The assessment
+is recorded in the report the work already writes; review audits that record
+under existing authority and never receives the method itself.
+
 The first release is non-blocking shadow mode for EQ-only concerns. An ordinary
 review finding may receive one EQ classification without changing severity or
 verdict. A genuinely additional candidate is retained only as `EQ-SHADOW:`

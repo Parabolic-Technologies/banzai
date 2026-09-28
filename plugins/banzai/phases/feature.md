@@ -10,3 +10,7 @@ existing trigger requires strict work or an unresolved decision; do not silently
 expand the lite record into an unapproved strict plan. Use the supplied
 verification ownership and exact work role. This route creates no strict task
 completion ledger or additional report obligation.
+
+Apply the code-design guidance only when an Engineering Quality structural
+assessment trigger or the reuse-search duty applies; the reuse-search duty alone
+uses only its Ownership Discovery section.
