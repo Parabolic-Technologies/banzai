@@ -6782,8 +6782,8 @@ function evidenceDigest22(value, code2, label) {
   return digest22;
 }
 function evidenceTimestamp(value, code2, label) {
-  const timestamp = evidenceString(value, code2, label, 64);
-  const normalized = normalizeRfc3339Instant(timestamp);
+  const timestamp2 = evidenceString(value, code2, label, 64);
+  const normalized = normalizeRfc3339Instant(timestamp2);
   if (normalized === void 0) {
     return recoveryEvidenceError(code2, `${label} must be an RFC 3339 time.`);
   }
@@ -13327,8 +13327,8 @@ var ResultDigestRejectedError = class extends BanzaiError {
     this.name = "ResultDigestRejectedError";
   }
 };
-function effectiveResultSourceIdentities(candidates, requiredCheckIds) {
-  const required = new Set(requiredCheckIds);
+function effectiveResultSourceIdentities(candidates, requiredCheckIds2) {
+  const required = new Set(requiredCheckIds2);
   return (candidates?.checks ?? []).flatMap(
     (check2) => comparableTaskVerificationSources(check2, required.has(check2.id)).map(
       (source) => ({
@@ -13878,7 +13878,7 @@ function parseCurrentReviewResult2(value) {
       "INVALID_REVIEW_SCOPE",
       "Scope entry"
     );
-    const path37 = reviewScopePath4(entry.path);
+    const path41 = reviewScopePath4(entry.path);
     const status = requireEnum2(entry.status, "scope status", [
       "reviewed",
       "not_reviewed"
@@ -13888,7 +13888,7 @@ function parseCurrentReviewResult2(value) {
         "INVALID_REVIEW_SCOPE",
         "Reviewed scope requires a null reason; unreviewed scope requires a nonblank reason."
       );
-    return { path: path37, status, reason: entry.reason };
+    return { path: path41, status, reason: entry.reason };
   });
   if (new Set(artifacts.map((entry) => entry.path)).size !== artifacts.length || new Set(result.reviewedFindingIds).size !== result.reviewedFindingIds.length)
     throw new BanzaiError(
@@ -13974,8 +13974,8 @@ function evidenceDigest3(value, code2, label) {
   return digest5;
 }
 function evidenceTimestamp2(value, code2, label) {
-  const timestamp = evidenceString2(value, code2, label, 64);
-  const normalized = normalizeRfc3339Instant2(timestamp);
+  const timestamp2 = evidenceString2(value, code2, label, 64);
+  const normalized = normalizeRfc3339Instant2(timestamp2);
   if (normalized === void 0) {
     return recoveryEvidenceError2(code2, `${label} must be an RFC 3339 time.`);
   }
@@ -27840,7 +27840,7 @@ function createVendorAdapters(runner = runProcess) {
 }
 
 // src/agent-control.ts
-import path28 from "node:path";
+import path33 from "node:path";
 
 // src/configuration-review.ts
 async function freezeReviewConfiguration(repoRoot, state) {
@@ -27904,22 +27904,20 @@ async function freezeReviewConfiguration(repoRoot, state) {
 }
 
 // src/workflow.ts
-import { AsyncLocalStorage as AsyncLocalStorage3 } from "node:async_hooks";
-import { createHash as createHash17, randomUUID as randomUUID12 } from "node:crypto";
+import { createHash as createHash20, randomUUID as randomUUID12 } from "node:crypto";
 import { constants as constants12 } from "node:fs";
 import {
   access as access4,
   chmod as chmod3,
-  lstat as lstat17,
+  lstat as lstat19,
   mkdir as mkdir10,
-  readFile as readFile13,
-  realpath as realpath11,
+  readFile as readFile17,
   rename as rename9,
   unlink as unlink9,
   writeFile as writeFile4
 } from "node:fs/promises";
 import os from "node:os";
-import path27 from "node:path";
+import path31 from "node:path";
 import process4 from "node:process";
 
 // src/review-snapshot.ts
@@ -28941,8 +28939,8 @@ function terminalResultContract(kind, taskMode = false) {
 
 // src/workflow/domain/run-identity.ts
 function runId(slug, at, uuid2) {
-  const timestamp = at.replace(/[-:.TZ]/g, "").slice(0, 14);
-  return `${timestamp}-${slug}-${uuid2.slice(0, 8)}`;
+  const timestamp2 = at.replace(/[-:.TZ]/g, "").slice(0, 14);
+  return `${timestamp2}-${slug}-${uuid2.slice(0, 8)}`;
 }
 function requireSlug(slug) {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
@@ -29604,10 +29602,3219 @@ function decideRestore(facts) {
   );
 }
 
-// src/claude-permissions.ts
-import { readFile as readFile9 } from "node:fs/promises";
-import { homedir as homedir3 } from "node:os";
+// src/workflow/context.ts
+function timestamp(context) {
+  return context.clock().toISOString();
+}
+async function observeHumanTime(context, state, kind, eventType = null, eventAt = null, attemptId = state.activeAttempt?.id ?? null) {
+  if (context.humanTimeObserver === void 0) return;
+  const pending = state.pendingHumanDecision;
+  try {
+    await context.humanTimeObserver({
+      kind,
+      runId: state.runId,
+      attemptId,
+      reviewIteration: state.reviewIteration > 0 ? state.reviewIteration : null,
+      requestId: pending?.kind === "decision_consultation" ? pending.request.requestId : null,
+      roundId: pending?.kind === "decision_consultation" ? pending.request.roundId : null,
+      eventType,
+      eventAt
+    });
+  } catch {
+  }
+}
+
+// src/workflow/preflight/approval.ts
+import { createHash as createHash14 } from "node:crypto";
+
+// src/state-machine.ts
+var ALLOWED_TRANSITIONS = {
+  created: ["selecting", "cancelled", "blocked"],
+  selecting: ["planning", "implementing", "cancelled", "blocked"],
+  planning: [
+    "needs_adr_approval",
+    "needs_plan_approval",
+    "needs_human_decision",
+    "blocked",
+    "cancelled"
+  ],
+  needs_adr_approval: ["planning", "cancelled", "blocked"],
+  needs_plan_approval: ["plan_approved", "cancelled", "blocked"],
+  needs_human_decision: [
+    "selecting",
+    "planning",
+    "verifying",
+    "cancelled",
+    "blocked"
+  ],
+  plan_approved: ["implementing", "cancelled", "blocked"],
+  implementing: ["needs_human_decision", "verifying", "cancelled", "blocked"],
+  verifying: [
+    "needs_human_decision",
+    "reviewing",
+    "done",
+    "cancelled",
+    "blocked"
+  ],
+  reviewing: [
+    "needs_human_decision",
+    "verifying",
+    "needs_triage",
+    "done",
+    "cancelled",
+    "blocked"
+  ],
+  needs_triage: [
+    "needs_human_decision",
+    "verifying",
+    "fixing",
+    "done",
+    "cancelled",
+    "blocked"
+  ],
+  fixing: ["needs_human_decision", "verifying", "cancelled", "blocked"],
+  done: [],
+  blocked: [
+    "created",
+    "selecting",
+    "planning",
+    "plan_approved",
+    "implementing",
+    "verifying",
+    "reviewing",
+    "fixing",
+    "cancelled"
+  ],
+  cancelled: []
+};
+function transitionState(state, next) {
+  const pending = state.pendingHumanDecision;
+  const laterConfigurationBoundary = (state.status === "reviewing" || state.status === "needs_triage") && (next === "needs_human_decision" || next === "verifying");
+  const configurationTransition = laterConfigurationBoundary || state.status === "needs_human_decision" && next === "verifying" || state.status === "verifying" && next === "needs_human_decision";
+  const guided = state.schemaVersion === 6 || state.schemaVersion === 7 && state.configurationSetup !== void 0;
+  if (configurationTransition && (!guided || (laterConfigurationBoundary && next === "verifying" ? state.pendingHumanDecision != null || !["configured", "bootstrap_deferred"].includes(
+    state.configurationSetup?.coverage ?? ""
+  ) : state.pendingHumanDecision?.kind !== "configuration_prerequisite") || state.configurationSetup?.continuation === null || state.configurationSetup?.continuation === void 0 || state.activeAttempt !== null || state.activeProcess !== null || next === "verifying" && !laterConfigurationBoundary && !state.configurationSetup.resolutions.some(
+    (resolution) => pending?.kind === "configuration_prerequisite" && resolution.proposalId === pending.proposalId
+  ))) {
+    throw new BanzaiError(
+      "INVALID_TRANSITION",
+      "Only a validated configuration prerequisite checkpoint can use this continuation."
+    );
+  }
+  if (!ALLOWED_TRANSITIONS[state.status].includes(next)) {
+    throw new BanzaiError(
+      "INVALID_TRANSITION",
+      `Cannot transition run ${state.runId} from ${state.status} to ${next}.`
+    );
+  }
+  state.status = next;
+  if (next !== "blocked") {
+    state.blockedFrom = null;
+    state.blockReason = null;
+  }
+}
+function blockState(state, reason) {
+  if (state.status === "done" || state.status === "cancelled") {
+    throw new BanzaiError(
+      "INVALID_TRANSITION",
+      `Cannot block a ${state.status} run.`
+    );
+  }
+  if (state.status !== "blocked") {
+    state.blockedFrom = state.status;
+    transitionState(state, "blocked");
+  }
+  state.blockReason = reason;
+}
+function requireState(state, allowed, operation) {
+  if (!allowed.includes(state.status)) {
+    throw new BanzaiError(
+      "INVALID_STATE",
+      `${operation} requires ${allowed.join(" or ")}, but the run is ${state.status}.`
+    );
+  }
+}
+
+// src/workflow/preflight/approval.ts
+function workflowAuthorizationDigest(input) {
+  return createHash14("sha256").update(
+    JSON.stringify({
+      version: 1,
+      runId: input.runId,
+      request: input.request,
+      recommendedWorkflow: input.recommendedWorkflow,
+      workflow: input.workflow,
+      confidence: input.confidence,
+      reason: input.reason,
+      escalationTriggers: input.escalationTriggers,
+      selectedAt: input.selectedAt,
+      attemptId: input.attemptId
+    })
+  ).digest("hex");
+}
+async function validateApproval(context, state) {
+  if (state.planApproval === null) {
+    throw new BanzaiError(
+      "PLAN_NOT_APPROVED",
+      "Implementation requires explicit plan approval."
+    );
+  }
+  const bundle = await digestArtifactBundle(
+    context.repoRoot,
+    state.planApproval.paths
+  );
+  if (bundle.digest !== state.planApproval.digest) {
+    blockState(
+      state,
+      "Approved planning artifacts changed. Restore the approved bundle (banzai restore) and retry, or cancel the run and approve a revised plan in a new run."
+    );
+    await context.store.writeState(state);
+    await context.store.appendEvent(state.runId, "approval.invalidated", {
+      previousDigest: state.planApproval.digest,
+      currentDigest: bundle.digest
+    });
+    throw new BanzaiError(
+      "APPROVAL_INVALIDATED",
+      "Approved planning artifacts changed. Run `banzai restore` to write back the approved bytes and then `banzai retry`, or cancel the run and approve a revised plan in a new run."
+    );
+  }
+}
+async function validateBaseCommit(context, state) {
+  if (state.artifactBinding)
+    await inspectBoundWork4(context.repoRoot, state.artifactBinding);
+  const current = await currentCommit(context.repoRoot);
+  if (current !== state.baseCommit) {
+    blockState(
+      state,
+      "The checkout HEAD changed during the run. Start a new run from the intended branch and commit."
+    );
+    await context.store.writeState(state);
+    throw new BanzaiError(
+      "BASE_COMMIT_CHANGED",
+      "The checkout HEAD changed during the run."
+    );
+  }
+}
+function validateWorkflowSelection(state) {
+  const selection = state.workflowSelection ?? null;
+  if (selection === null || selection.workflow === "strict") {
+    throw new BanzaiError(
+      "WORKFLOW_NOT_AUTHORIZED",
+      "Lite implementation requires a persisted feature or quick-fix selection."
+    );
+  }
+  const currentDigest = workflowAuthorizationDigest({
+    runId: state.runId,
+    request: state.request,
+    ...selection
+  });
+  if (currentDigest !== selection.digest) {
+    throw new BanzaiError(
+      "WORKFLOW_AUTHORIZATION_INVALID",
+      "Persisted workflow selection does not match its authorization digest."
+    );
+  }
+  return selection;
+}
+
+// src/workflow/review/result-application.ts
+function validateReviewResultForApplication(state, result) {
+  const expectedPrefix = `R${state.reviewIteration}-F`;
+  if (result.findings.some((finding) => !finding.id.startsWith(expectedPrefix))) {
+    throw new BanzaiError(
+      "FINDING_ITERATION_MISMATCH",
+      `Review ${state.reviewIteration} returned an invalid finding id.`
+    );
+  }
+  const acceptedPrevious = state.triage?.items.filter((item) => item.disposition === "accepted").map((item) => item.findingId) ?? [];
+  if (state.triage !== null && !(result.schemaVersion === 2 && result.verdict === "blocked") && acceptedPrevious.some((id3) => !result.reviewedFindingIds.includes(id3))) {
+    throw new BanzaiError(
+      "INCOMPLETE_REREVIEW",
+      "Re-review did not report every previously accepted finding id."
+    );
+  }
+}
+
+// src/workflow/digest-evidence/records.ts
+function taskVerificationDigestDetail(error) {
+  const candidate = error;
+  return (candidate.code === "TASK_VERIFICATION_DIGEST_MISMATCH" || candidate.code === "TASK_VERIFICATION_SOURCE_TOO_LARGE") && candidate.detail !== void 0 ? candidate.detail : null;
+}
+async function recordResultDigestEvidence(context, state, attempt, comparisons) {
+  const rejected = comparisons.filter((comparison) => !comparison.matched);
+  const evidence2 = await context.store.establishResultDigestEvidence(
+    state.runId,
+    {
+      schema: RESULT_DIGEST_EVIDENCE_SCHEMA,
+      schemaVersion: RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION,
+      runId: state.runId,
+      attempt: { id: attempt.id, kind: attempt.kind },
+      outcome: rejected.length > 0 ? "rejected" : "accepted",
+      comparisons
+    }
+  );
+  if (rejected.length > 0) {
+    throw new ResultDigestRejectedError(
+      `The ${attempt.kind} result declared ${rejected.length} digest${rejected.length === 1 ? "" : "s"} that did not match the bytes it named when the result was accepted. ${rejected.map(resultDigestDiagnostic).join(" ")}`,
+      rejected
+    );
+  }
+  return evidence2;
+}
+async function resultDigestBaseline(context, state, sourceAttemptId) {
+  if (sourceAttemptId === null) return null;
+  const record7 = (await context.store.readRunAttempts(state.runId)).find(
+    (item) => item.attempt.id === sourceAttemptId
+  );
+  return record7 === void 0 ? null : await context.store.readResultDigestEvidenceIfExists(
+    state.runId,
+    record7.attempt
+  );
+}
+async function digestRejectionReason(context, state, sourceAttemptId, error) {
+  const base = errorMessage(error);
+  const detail = taskVerificationDigestDetail(error);
+  if (detail === null) return base;
+  if (detail.observed === null) return base;
+  let baseline;
+  try {
+    baseline = await resultDigestBaseline(context, state, sourceAttemptId);
+  } catch (readError) {
+    return `${base} Its acceptance baseline could not be read, so the causal history is unavailable: ${errorMessage(readError)}`;
+  }
+  const recorded = baseline?.comparisons.find(
+    (comparison) => comparison.checkId === detail.checkId && comparison.path === detail.path && comparison.declared === detail.declared
+  ) ?? null;
+  if (recorded === null) {
+    return `${DIGEST_UNRESOLVED_BLOCK_PREFIX} ${base} This run recorded no acceptance baseline for that digest, so whether it ever matched is unknown.`;
+  }
+  return recorded.matched ? `${base} It matched when the result was accepted, so the source changed after acceptance.` : `${DIGEST_UNRESOLVED_BLOCK_PREFIX} ${base} It did not match when the result was accepted, so it never matched.`;
+}
+
+// src/workflow/completion/inputs.ts
+import { createHash as createHash15 } from "node:crypto";
+import { lstat as lstat15, readFile as readFile9, realpath as realpath9 } from "node:fs/promises";
 import path23 from "node:path";
+async function observeCompletionInputs(context, state, artifacts) {
+  const implementation = await observeReport(
+    context,
+    artifacts.implementationReport
+  );
+  const test = await observeReport(context, artifacts.testReport);
+  const excludedPaths = [
+    artifacts.implementationReport,
+    artifacts.testReport
+  ].filter((item) => item !== null);
+  let workspaceDigest2;
+  try {
+    workspaceDigest2 = (await workspaceSnapshot(context.repoRoot, {
+      artifactBinding: state.artifactBinding,
+      baseline: state.baseline,
+      excludedPaths
+    })).digest;
+  } catch {
+    workspaceDigest2 = null;
+  }
+  return {
+    observed: {
+      implementationReport: implementation.observation,
+      testReport: test.observation,
+      workspaceDigest: workspaceDigest2
+    },
+    bytes: {
+      implementationReport: implementation.bytes,
+      testReport: test.bytes
+    },
+    excludedPaths
+  };
+}
+async function observeReport(context, relativePath3) {
+  if (relativePath3 === null)
+    return { observation: { path: null, state: "absent" }, bytes: null };
+  let absolute;
+  try {
+    absolute = path23.resolve(context.repoRoot, relativePath3);
+    if (relativePath3.length === 0 || relativePath3.includes("\\") || path23.posix.isAbsolute(relativePath3) || path23.posix.normalize(relativePath3) !== relativePath3 || relativePath3.startsWith("../") || !absolute.startsWith(`${path23.resolve(context.repoRoot)}${path23.sep}`))
+      return {
+        observation: { path: relativePath3, state: "unsafe" },
+        bytes: null
+      };
+    const metadata = await lstat15(absolute);
+    if (!metadata.isFile() || metadata.isSymbolicLink())
+      return {
+        observation: { path: relativePath3, state: "unsafe" },
+        bytes: null
+      };
+    const root = await realpath9(context.repoRoot);
+    if (!(await realpath9(absolute)).startsWith(`${root}${path23.sep}`))
+      return {
+        observation: { path: relativePath3, state: "unsafe" },
+        bytes: null
+      };
+  } catch (error) {
+    return {
+      observation: {
+        path: relativePath3,
+        state: error.code === "ENOENT" ? "absent" : "unavailable"
+      },
+      bytes: null
+    };
+  }
+  try {
+    const bytes = await readFile9(absolute);
+    return {
+      observation: {
+        path: relativePath3,
+        state: "present",
+        sha256: createHash15("sha256").update(bytes).digest("hex"),
+        bytes: bytes.length
+      },
+      bytes
+    };
+  } catch {
+    return {
+      observation: { path: relativePath3, state: "unavailable" },
+      bytes: null
+    };
+  }
+}
+
+// src/workflow/completion/plan-tasks.ts
+import { readFile as readFile11 } from "node:fs/promises";
+import path25 from "node:path";
+
+// src/plan-task-completion.ts
+import { createHash as createHash16 } from "node:crypto";
+import { lstat as lstat16, readFile as readFile10, realpath as realpath10 } from "node:fs/promises";
+import path24 from "node:path";
+var PROJECTION_FORMAT = "banzai-plan-task-completion/v1";
+var SECTION_HEADING = "## Plan Task Completion";
+var TASK_HEADING = /^- \[ \] \*\*(T[0-9]{3}) - (.+)\*\*\s*$/u;
+var CHECKBOX_HEADING = /^\s*- \[[ xX]\] \*\*/u;
+var FORBIDDEN_PATH_SEGMENTS = /* @__PURE__ */ new Set([
+  ".git",
+  ".banzai",
+  "node_modules",
+  ".cache",
+  "coverage",
+  "dist"
+]);
+var PlanTaskCompletionError = class extends BanzaiError {
+  violation;
+  taskId;
+  constructor(violation, message, taskId = null) {
+    super("PLAN_TASK_COMPLETION_INVALID", message.slice(0, 500));
+    this.name = "PlanTaskCompletionError";
+    this.violation = violation;
+    this.taskId = taskId;
+  }
+};
+function completionFailure(violation, message, taskId = null) {
+  throw new PlanTaskCompletionError(violation, message, taskId);
+}
+function digest4(value) {
+  return createHash16("sha256").update(JSON.stringify(value)).digest("hex");
+}
+function planPathField(text4) {
+  const label = text4.replaceAll("*", "").trim();
+  if (/^(?:files(?: to (?:change|modify|create|delete))?|affected files|write targets)\s*:/iu.test(
+    label
+  ))
+    return "write";
+  if (/^(?:read-only references|unchanged paths)\s*:/iu.test(label))
+    return "read";
+  return null;
+}
+function planTaskStatements(section) {
+  const statements = [];
+  let taskId = "unknown";
+  let field = null;
+  let pending = null;
+  for (const line of section.split(/\r?\n/u)) {
+    const heading = TASK_HEADING.exec(line);
+    if (heading) {
+      taskId = heading[1] ?? "unknown";
+      field = null;
+      pending = null;
+      statements.push({ taskId, text: heading[2] ?? "", access: "unknown" });
+      continue;
+    }
+    if (!line.trim()) {
+      pending = null;
+      continue;
+    }
+    const indent = line.length - line.trimStart().length;
+    const text4 = line.trim().replace(/^(?:[-+*]|\d+\.)\s+/u, "");
+    const declared = planPathField(text4);
+    if (field && indent <= field.indent) field = null;
+    const access7 = declared ?? field?.access ?? "unknown";
+    if (declared) field = { indent, access: declared };
+    if (!declared && !/^\s*(?:[-+*]|\d+\.)\s/u.test(line) && !/^[\w -]+:/u.test(text4.replaceAll("*", "")) && pending && indent > 0) {
+      pending.text += ` ${text4}`;
+    } else {
+      pending = { taskId, text: text4, access: access7 };
+      statements.push(pending);
+    }
+  }
+  return statements;
+}
+var PLAN_WRITE_WORDS = "(?:change|edit|modify|update|write|rewrite|create|add|delete|remove|overwrite|replace|patch|configure|set|touch|mkdir|rm|cp|mv|tee)";
+var PLAN_ACTION = `(?:read|inspect|review|compare|consult|check|verify|cat|${PLAN_WRITE_WORDS})`;
+var PLAN_WRITE_ACTION = new RegExp(`\\b${PLAN_WRITE_WORDS}\\b`, "iu");
+var PLAN_PROHIBITION = new RegExp(
+  `^\\W*(?:(?:do|must|should)\\s+not|never)\\s+(?=${PLAN_ACTION}\\b)`,
+  "iu"
+);
+function planClauseAccess(clause, declared) {
+  if (declared === "write") return "write";
+  clause = clause.replace(/^\s*[\w -]+:\s*/u, "");
+  const prohibited = PLAN_PROHIBITION.test(clause);
+  if (!prohibited && PLAN_WRITE_ACTION.test(clause)) return "write";
+  if (/\b(?:and|or)\s+(?!(?:any\s+)?@\d+@(?:\s|$))/iu.test(clause) || new RegExp("@\\d+@[^,]*,\\s*(?!@\\d+@|(?:and|or)\\s+(?:any\\s+)?@\\d+@)\\p{L}", "u").test(clause))
+    return "unknown";
+  if (prohibited) return "read";
+  if (/^\s*(?:preserve|leave|keep)\b.*\bunchanged\s*$/iu.test(clause) || /^\s*@\d+@\s+(?:must\s+)?remain\s+unchanged\s*$/iu.test(clause))
+    return "read";
+  if (/\b(?:read|inspect|review|compare|consult|check|verify|cat)\b/iu.test(
+    clause
+  ))
+    return "read";
+  if (declared === "read" && /^[\s\d@,.:-]*$/u.test(clause)) return "read";
+  return "unknown";
+}
+function validatePlanRunnerControlTasks(markdown, repoRoot, allowedArtifactPaths) {
+  parseApprovedPlanTaskIds(markdown);
+  const section = markdown.split(/^## Implementation Tasks\s*$/mu)[1]?.split(/^## /mu)[0] ?? "";
+  const allowed = new Set(
+    allowedArtifactPaths.map(
+      (value) => path24.posix.normalize(value.replaceAll("\\", "/"))
+    )
+  );
+  const root = path24.posix.normalize(repoRoot.replaceAll("\\", "/")).replace(/\/$/u, "");
+  let previousTaskId = "";
+  let previousPaths = [];
+  for (const { taskId, text: text4, access: access7 } of planTaskStatements(section)) {
+    if (taskId !== previousTaskId) previousPaths = [];
+    previousTaskId = taskId;
+    const paths = [];
+    const masked = text4.replace(/[^\s*`'"<>()[\]{},;&|]+/gu, (raw) => {
+      const token = raw.replaceAll("\\", "/").replace(/[.!?]+$/u, "").replace(/:\d+(?::\d+)?$/u, "");
+      if (!token.includes("/") && !/^\.[\w-]+$/u.test(token) && !/\.[a-z0-9]+$/iu.test(token))
+        return raw;
+      const normalized = path24.posix.normalize(
+        path24.posix.isAbsolute(token) || /^[a-z]:\//iu.test(token) ? token : `${root}/${token}`
+      );
+      const relative4 = normalized.toLowerCase().startsWith(`${root.toLowerCase()}/`) ? normalized.slice(root.length + 1) : normalized;
+      paths.push(relative4);
+      return `@${paths.length - 1}@${/[.!?]$/u.test(raw) ? "." : ""}`;
+    }).replace(/\[([^\]]*)\]\((@\d+@)\)/gu, "$2").replace(/[*`'"()]/gu, "");
+    const clauses = masked.split(
+      new RegExp(
+        `;|&&|\\|\\||[.!?](?:\\s+|$)|\\s+(?:but|however|whereas|while)\\s+|(?:,\\s*|\\s+(?:and|then|to)\\s+)(?:then\\s+)?(?=(?:(?:do|must|should)\\s+not\\s+|never\\s+)?${PLAN_ACTION}\\b)`,
+        "iu"
+      )
+    );
+    for (const clause of clauses) {
+      const references = [...clause.matchAll(/@(\d+)@/gu)].map(
+        (match) => paths[Number(match[1])] ?? ""
+      );
+      const mode2 = planClauseAccess(clause, access7);
+      const redirects = [...clause.matchAll(/>{1,2}\s*@(\d+)@/gu)].map(
+        (match) => paths[Number(match[1])] ?? ""
+      );
+      const targets = references.length ? references : /\b(?:it|them|that file|those files)\b/iu.test(clause) ? previousPaths : [];
+      if (references.length) previousPaths = references;
+      for (const relative4 of targets) {
+        const targetMode = redirects.includes(relative4) && !PLAN_PROHIBITION.test(clause) ? "write" : mode2;
+        if (!(relative4.toLowerCase() === ".banzai" || relative4.toLowerCase().startsWith(".banzai/")) || allowed.has(relative4) || targetMode === "read")
+          continue;
+        const target = JSON.stringify(relative4.slice(0, 240));
+        throw new BanzaiError(
+          "PLAN_RUNNER_CONTROL_TASK",
+          targetMode === "write" ? `Plan task ${taskId} uses runner control path ${target} as a write target. Remove that write from the task; keep unrelated implementation work. If configuration is missing, record it in Human prerequisites and use banzai verify.` : `Plan task ${taskId} has ambiguous access to runner control path ${target}. Clarify the action or list read-only inputs under Read-only references: and protected paths under Unchanged paths:. These declarations do not authorize writes.`
+        );
+      }
+    }
+  }
+}
+function planHumanPrerequisites(markdown) {
+  const text4 = markdown.split(/^## Human prerequisites\s*$/imu)[1]?.split(/^## /mu)[0]?.trim();
+  if (text4 === "") return null;
+  return text4 ?? null;
+}
+function parseApprovedPlanTaskIds(markdown) {
+  const headings3 = [...markdown.matchAll(/^## Implementation Tasks\s*$/gmu)];
+  if (headings3.length !== 1) {
+    return completionFailure(
+      "approved_plan_invalid",
+      "Approved plan must contain exactly one Implementation Tasks section."
+    );
+  }
+  const heading = headings3[0];
+  if (heading === void 0) {
+    return completionFailure(
+      "approved_plan_invalid",
+      "Approved plan is missing its Implementation Tasks section."
+    );
+  }
+  const start = heading.index + heading[0].length;
+  const remainder = markdown.slice(start);
+  const nextHeading = remainder.search(/^## /mu);
+  const section = nextHeading === -1 ? remainder : remainder.slice(0, nextHeading);
+  const taskIds = [];
+  for (const line of section.split(/\r?\n/u)) {
+    const match = TASK_HEADING.exec(line);
+    if (match !== null) {
+      const taskId = match[1];
+      const title = match[2];
+      if (taskId === void 0 || title === void 0) {
+        return completionFailure(
+          "approved_plan_invalid",
+          "Approved plan contains a malformed task heading."
+        );
+      }
+      if (title.trim().length === 0) {
+        return completionFailure(
+          "approved_plan_invalid",
+          `Approved task ${taskId} has an empty title.`,
+          taskId
+        );
+      }
+      taskIds.push(taskId);
+    } else if (CHECKBOX_HEADING.test(line)) {
+      return completionFailure(
+        "approved_plan_invalid",
+        "Approved plan contains a checked or malformed task heading."
+      );
+    }
+  }
+  if (taskIds.length === 0) {
+    return completionFailure(
+      "approved_plan_invalid",
+      "Approved plan contains no canonical TNNN tasks."
+    );
+  }
+  if (new Set(taskIds).size !== taskIds.length) {
+    return completionFailure(
+      "approved_plan_invalid",
+      "Approved plan contains duplicate task identifiers."
+    );
+  }
+  return taskIds;
+}
+function unescapeCell(value) {
+  return value.replaceAll("&gt;", ">").replaceAll("&lt;", "<").replaceAll("&#124;", "|").replaceAll("&amp;", "&");
+}
+function decodeJsonCell(value) {
+  const decoded = unescapeCell(value.trim());
+  if (decoded.startsWith("`") && decoded.endsWith("`") && decoded.length >= 2) {
+    return decoded.slice(1, -1);
+  }
+  return decoded;
+}
+function decodesToProjectionShapes(evidenceJson, gapJson) {
+  try {
+    const evidence2 = JSON.parse(evidenceJson);
+    const gap = JSON.parse(gapJson);
+    return Array.isArray(evidence2) && (gap === null || typeof gap === "object" && !Array.isArray(gap));
+  } catch {
+    return false;
+  }
+}
+function parseProjectionCells(line) {
+  const fragments = line.slice(1, -1).split("|");
+  if (fragments.length === 4) {
+    const [taskId, status, evidenceJson, gapJson] = fragments;
+    if (taskId === void 0 || status === void 0 || evidenceJson === void 0 || gapJson === void 0) {
+      return null;
+    }
+    return [
+      unescapeCell(taskId.trim()),
+      unescapeCell(status.trim()),
+      decodeJsonCell(evidenceJson),
+      decodeJsonCell(gapJson)
+    ];
+  }
+  if (fragments.length < 4) {
+    return null;
+  }
+  const first = fragments[0];
+  const second = fragments[1];
+  if (first === void 0 || second === void 0) {
+    return null;
+  }
+  const middle = fragments.slice(2);
+  const candidates = [];
+  for (let boundary = 1; boundary < middle.length; boundary += 1) {
+    const evidenceJson = decodeJsonCell(middle.slice(0, boundary).join("|"));
+    const gapJson = decodeJsonCell(middle.slice(boundary).join("|"));
+    if (decodesToProjectionShapes(evidenceJson, gapJson)) {
+      candidates.push([evidenceJson, gapJson]);
+    }
+  }
+  const recovered = candidates.length === 1 ? candidates[0] : void 0;
+  if (recovered === void 0) {
+    return null;
+  }
+  return [
+    unescapeCell(first.trim()),
+    unescapeCell(second.trim()),
+    recovered[0],
+    recovered[1]
+  ];
+}
+function parseProjectionRecord(line) {
+  const cells = parseProjectionCells(line);
+  if (cells === null) {
+    const rowTask = line.slice(1, -1).split("|")[0]?.trim() ?? "";
+    const rowTaskId = /^T[0-9]{3}$/u.test(rowTask) ? rowTask : null;
+    return completionFailure(
+      "report_projection_invalid",
+      `Plan Task Completion row${rowTaskId === null ? "" : ` ${rowTaskId}`} must contain exactly four cells; escape a literal "|" inside the Evidence and Gap JSON cells as "&#124;".`,
+      rowTaskId
+    );
+  }
+  const [taskId, status, evidenceJson, gapJson] = cells;
+  let evidence2;
+  let gap;
+  try {
+    evidence2 = JSON.parse(evidenceJson);
+    gap = JSON.parse(gapJson);
+  } catch {
+    return completionFailure(
+      "report_projection_invalid",
+      `Report row ${taskId || "unknown"} contains invalid JSON; use raw JSON or one complete outer Markdown code span, never unmatched or repeated backticks.`,
+      /^T[0-9]{3}$/u.test(taskId) ? taskId : null
+    );
+  }
+  if (!/^T[0-9]{3}$/u.test(taskId) || !["completed", "incomplete", "blocked"].includes(status) || !Array.isArray(evidence2) || !(gap === null || typeof gap === "object" && !Array.isArray(gap))) {
+    return completionFailure(
+      "report_projection_invalid",
+      `Report row ${taskId || "unknown"} is malformed.`,
+      /^T[0-9]{3}$/u.test(taskId) ? taskId : null
+    );
+  }
+  return {
+    taskId,
+    status,
+    evidence: evidence2,
+    gap
+  };
+}
+function parsePlanTaskCompletionProjection(markdown) {
+  const headings3 = [...markdown.matchAll(/^## Plan Task Completion\s*$/gmu)];
+  if (headings3.length === 0) {
+    return completionFailure(
+      "report_projection_missing",
+      `Implementation report is missing ${SECTION_HEADING}.`
+    );
+  }
+  if (headings3.length !== 1) {
+    return completionFailure(
+      "report_projection_invalid",
+      "Implementation report contains duplicate Plan Task Completion sections."
+    );
+  }
+  const heading = headings3[0];
+  if (heading === void 0) {
+    return completionFailure(
+      "report_projection_missing",
+      `Implementation report is missing ${SECTION_HEADING}.`
+    );
+  }
+  const start = heading.index + heading[0].length;
+  const remainder = markdown.slice(start);
+  const nextHeading = remainder.search(/^## /mu);
+  const section = nextHeading === -1 ? remainder : remainder.slice(0, nextHeading);
+  const formatLines = section.split(/\r?\n/u).map((line) => line.trim()).filter((line) => line.startsWith("Format:"));
+  if (formatLines.length !== 1 || formatLines[0] !== `Format: \`${PROJECTION_FORMAT}\``) {
+    return completionFailure(
+      "report_projection_invalid",
+      `Plan Task Completion must declare ${PROJECTION_FORMAT}.`
+    );
+  }
+  const tableLines = section.split(/\r?\n/u).map((line) => line.trim()).filter((line) => line.startsWith("|") && line.endsWith("|"));
+  if (tableLines[0] !== "| Task | Status | Evidence | Gap or deviation |" || tableLines[1] !== "| --- | --- | --- | --- |") {
+    return completionFailure(
+      "report_projection_invalid",
+      "Plan Task Completion table header is malformed."
+    );
+  }
+  return {
+    schemaVersion: PLAN_TASK_COMPLETION_SCHEMA_VERSION2,
+    tasks: tableLines.slice(2).map(parseProjectionRecord)
+  };
+}
+function normalizedRepositoryPath(relativePath3, requiredReports = /* @__PURE__ */ new Set()) {
+  if (relativePath3.length === 0 || relativePath3.includes("\\") || /[\u0000-\u001f\u007f-\u009f]/u.test(relativePath3) || relativePath3.length > 500 || path24.posix.isAbsolute(relativePath3) || path24.posix.normalize(relativePath3) !== relativePath3 || relativePath3 === ".." || relativePath3.startsWith("../")) {
+    return completionFailure(
+      "invalid_evidence_path",
+      "Completion evidence path must be normalized and repository-relative."
+    );
+  }
+  const segments = relativePath3.split("/");
+  if (segments.some((segment) => FORBIDDEN_PATH_SEGMENTS.has(segment)) && !requiredReports.has(relativePath3)) {
+    return completionFailure(
+      "evidence_scope_violation",
+      "Completion evidence path uses a runner-control, dependency, cache, or build directory."
+    );
+  }
+  return relativePath3;
+}
+async function validateEvidenceFile(repoRoot, relativePath3, allowedPaths, approvedPaths, taskId, requiredReports) {
+  const normalized = normalizedRepositoryPath(relativePath3, requiredReports);
+  if (relativePath3.startsWith(".banzai/"))
+    await safePath3(repoRoot, relativePath3);
+  if (approvedPaths.has(normalized)) {
+    return completionFailure(
+      "evidence_scope_violation",
+      `${taskId} references evidence outside the authorized changed surface.`,
+      taskId
+    );
+  }
+  const repositoryRoot = await realpath10(repoRoot);
+  const absolutePath = path24.resolve(repositoryRoot, normalized);
+  let resolvedPath;
+  let metadata;
+  try {
+    metadata = await lstat16(absolutePath);
+    resolvedPath = await realpath10(absolutePath);
+  } catch {
+    return completionFailure(
+      "missing_evidence_path",
+      `${taskId} references a missing evidence file.`,
+      taskId
+    );
+  }
+  if (!metadata.isFile() || metadata.isSymbolicLink() || !resolvedPath.startsWith(`${repositoryRoot}${path24.sep}`)) {
+    return completionFailure(
+      "invalid_evidence_path",
+      `${taskId} evidence must be a regular file inside the repository.`,
+      taskId
+    );
+  }
+  if (!allowedPaths.has(normalized)) {
+    return completionFailure(
+      "evidence_scope_violation",
+      `${taskId} references evidence outside the authorized changed surface.`,
+      taskId
+    );
+  }
+}
+function validatePlanTaskCompletionLedgerShape(taskIds, ledger, outcome) {
+  if (ledger === null) {
+    return completionFailure(
+      "missing_ledger",
+      "Strict implementation result is missing taskCompletion."
+    );
+  }
+  const runtimeSchemaVersion = ledger.schemaVersion;
+  if (runtimeSchemaVersion !== PLAN_TASK_COMPLETION_SCHEMA_VERSION2) {
+    return completionFailure(
+      "missing_ledger",
+      "Implementation completion ledger has an unsupported schema."
+    );
+  }
+  const seen = /* @__PURE__ */ new Set();
+  for (const [index, task] of ledger.tasks.entries()) {
+    if (seen.has(task.taskId)) {
+      return completionFailure(
+        "duplicate_task",
+        `Completion ledger duplicates ${task.taskId}.`,
+        task.taskId
+      );
+    }
+    seen.add(task.taskId);
+    if (!taskIds.includes(task.taskId)) {
+      return completionFailure(
+        "unknown_task",
+        `Completion ledger contains unknown task ${task.taskId}.`,
+        task.taskId
+      );
+    }
+    if (taskIds[index] !== task.taskId) {
+      return completionFailure(
+        "task_order_mismatch",
+        `Completion ledger task ${task.taskId} is outside approved plan order.`,
+        task.taskId
+      );
+    }
+    if (!["completed", "incomplete", "blocked"].includes(task.status)) {
+      return completionFailure(
+        "invalid_task_status",
+        `Completion ledger task ${task.taskId} has an invalid status.`,
+        task.taskId
+      );
+    }
+    if (task.status === "completed") {
+      if (task.evidence.length === 0 || task.gap !== null) {
+        return completionFailure(
+          "task_status_conflict",
+          `Completed task ${task.taskId} requires evidence and no gap.`,
+          task.taskId
+        );
+      }
+    } else if (task.gap === null) {
+      return completionFailure(
+        "invalid_gap_reference",
+        `${task.status} task ${task.taskId} requires a gap reference.`,
+        task.taskId
+      );
+    }
+    if (outcome === "completed" && task.status !== "completed") {
+      return completionFailure(
+        "task_status_conflict",
+        `Completed implementation outcome contradicts ${task.taskId}=${task.status}.`,
+        task.taskId
+      );
+    }
+  }
+  if (ledger.tasks.length !== taskIds.length) {
+    const missing3 = taskIds.find((taskId) => !seen.has(taskId)) ?? null;
+    return completionFailure(
+      "missing_task",
+      missing3 === null ? "Completion ledger task count does not match the approved plan." : `Completion ledger is missing ${missing3}.`,
+      missing3
+    );
+  }
+}
+async function readRequiredReport(repoRoot, relativePath3, violation, requiredReports, captured) {
+  if (relativePath3 === null) {
+    return completionFailure(
+      violation,
+      violation === "implementation_report_missing" ? "Implementation result does not identify implementation-report.md." : "Implementation result does not identify test-report.md."
+    );
+  }
+  const normalized = normalizedRepositoryPath(relativePath3, requiredReports);
+  if (relativePath3.startsWith(".banzai/"))
+    await safePath3(repoRoot, relativePath3);
+  const absolute = path24.resolve(repoRoot, normalized);
+  let bytes;
+  try {
+    const metadata = await lstat16(absolute);
+    if (!metadata.isFile() || metadata.isSymbolicLink()) {
+      throw new Error("not a regular file");
+    }
+    const root = await realpath10(repoRoot);
+    const resolved = await realpath10(absolute);
+    if (!resolved.startsWith(`${root}${path24.sep}`)) {
+      throw new Error("outside repository");
+    }
+    bytes = captured ?? await readFile10(absolute);
+  } catch {
+    return completionFailure(
+      violation,
+      violation === "implementation_report_missing" ? "Required implementation report is missing or unsafe." : "Required test report is missing or unsafe."
+    );
+  }
+  return {
+    path: normalized,
+    contents: bytes.toString("utf8"),
+    sha256: createHash16("sha256").update(bytes).digest("hex"),
+    bytes
+  };
+}
+async function validatePlanTaskCompletion(input) {
+  const requiredReports = /* @__PURE__ */ new Set();
+  if (input.artifactBinding !== void 0) {
+    await inspectBoundWork4(input.repoRoot, input.artifactBinding);
+    const roles = input.artifactBinding.binding.artifacts;
+    if (input.planPath !== roles.plan || input.result.artifacts.implementationReport !== roles.implementationReport || input.result.artifacts.testReport !== roles.testReport)
+      return completionFailure(
+        "evidence_scope_violation",
+        "Completion must reference the exact bound plan and required reports."
+      );
+    for (const report of [roles.implementationReport, roles.testReport])
+      if (report) requiredReports.add(report);
+  }
+  const ledger = input.result.taskCompletion;
+  const approval = await digestArtifactBundle(
+    input.repoRoot,
+    input.approval.paths
+  ).catch(
+    () => completionFailure(
+      "approval_invalid",
+      "Approved artifact bundle cannot be validated."
+    )
+  );
+  if (approval.digest !== input.approval.digest || !input.approval.paths.includes(input.planPath)) {
+    return completionFailure(
+      "approval_invalid",
+      "Approved artifact bundle digest or plan membership is invalid."
+    );
+  }
+  const plan = await readFile10(
+    path24.resolve(input.repoRoot, input.planPath),
+    "utf8"
+  ).catch(
+    () => completionFailure(
+      "approved_plan_invalid",
+      "Exact approved plan cannot be read."
+    )
+  );
+  const taskIds = parseApprovedPlanTaskIds(plan);
+  validatePlanTaskCompletionLedgerShape(taskIds, ledger, input.result.outcome);
+  if (ledger === null) {
+    return completionFailure(
+      "missing_ledger",
+      "Strict implementation result is missing taskCompletion."
+    );
+  }
+  const implementationReport = await readRequiredReport(
+    input.repoRoot,
+    input.result.artifacts.implementationReport,
+    "implementation_report_missing",
+    requiredReports
+  );
+  const testReport = await readRequiredReport(
+    input.repoRoot,
+    input.result.artifacts.testReport,
+    "test_report_missing",
+    requiredReports
+  );
+  const projection = parsePlanTaskCompletionProjection(
+    implementationReport.contents
+  );
+  if (JSON.stringify(projection) !== JSON.stringify(ledger)) {
+    return completionFailure(
+      "report_projection_mismatch",
+      "Implementation report projection contradicts the structured completion ledger."
+    );
+  }
+  const snapshot = await workspaceSnapshot(input.repoRoot, {
+    excludedPaths: input.approval.paths,
+    baseline: input.baseline,
+    artifactBinding: input.artifactBinding
+  });
+  const allowedPaths = new Set(
+    snapshot.entries.filter((entry) => entry.kind === "file").map((entry) => entry.path)
+  );
+  allowedPaths.add(implementationReport.path);
+  allowedPaths.add(testReport.path);
+  const approvedPaths = new Set(input.approval.paths);
+  const reportContents = /* @__PURE__ */ new Map([
+    [implementationReport.path, implementationReport.contents],
+    [testReport.path, testReport.contents]
+  ]);
+  for (const task of ledger.tasks) {
+    for (const evidence2 of task.evidence) {
+      await validateEvidenceFile(
+        input.repoRoot,
+        evidence2.path,
+        allowedPaths,
+        approvedPaths,
+        task.taskId,
+        requiredReports
+      );
+    }
+    if (task.gap !== null) {
+      if (![implementationReport.path, testReport.path].includes(
+        task.gap.reportPath
+      )) {
+        return completionFailure(
+          "invalid_gap_reference",
+          `${task.taskId} gap must reference an exact required report.`,
+          task.taskId
+        );
+      }
+      const contents = reportContents.get(task.gap.reportPath) ?? "";
+      const escaped = task.gap.section.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+      if (!new RegExp(`^#{2,6}\\s+${escaped}\\s*$`, "mu").test(contents)) {
+        return completionFailure(
+          "invalid_gap_reference",
+          `${task.taskId} gap section is missing from its report.`,
+          task.taskId
+        );
+      }
+    }
+  }
+  const counts = {
+    total: taskIds.length,
+    completed: ledger.tasks.filter((task) => task.status === "completed").length,
+    incomplete: ledger.tasks.filter((task) => task.status === "incomplete").length,
+    blocked: ledger.tasks.filter((task) => task.status === "blocked").length
+  };
+  return {
+    summary: {
+      schemaVersion: PLAN_TASK_COMPLETION_SCHEMA_VERSION2,
+      status: "valid",
+      sourceAttemptId: input.sourceAttemptId,
+      approvalDigest: input.approval.digest,
+      planTaskDigest: digest4(taskIds),
+      ledgerDigest: digest4(ledger),
+      implementationReport: {
+        path: implementationReport.path,
+        sha256: implementationReport.sha256
+      },
+      testReport: { path: testReport.path, sha256: testReport.sha256 },
+      counts,
+      validatedAt: input.validatedAt ?? (/* @__PURE__ */ new Date()).toISOString()
+    },
+    tasks: ledger.tasks
+  };
+}
+var COMPLETION_REGION_FORMAT = "banzai-plan-task-completion/v2";
+var COMPLETION_REGION_START = `<!-- ${COMPLETION_REGION_FORMAT}:start -->`;
+var COMPLETION_REGION_END = `<!-- ${COMPLETION_REGION_FORMAT}:end -->`;
+var COMPLETION_TABLE_HEADER = "| Task | Status | Evidence | Gap or deviation |";
+var COMPLETION_TABLE_SEPARATOR = "| --- | --- | --- | --- |";
+var ENCODED_PUNCTUATION = /[!-/:-@[-`{-~]/gu;
+var NUMERIC_REFERENCE = /&#([0-9]{2,3});/gu;
+var FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/u;
+var ATX_HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/u;
+function isEncodedPunctuation(code2) {
+  return code2 >= 33 && code2 <= 47 || code2 >= 58 && code2 <= 64 || code2 >= 91 && code2 <= 96 || code2 >= 123 && code2 <= 126;
+}
+function encodeCompletionCell(value) {
+  return JSON.stringify(value).replace(
+    ENCODED_PUNCTUATION,
+    (character) => `&#${character.codePointAt(0)};`
+  );
+}
+function decodeCompletionCell(cell3) {
+  return cell3.replace(NUMERIC_REFERENCE, (reference3, digits) => {
+    const code2 = Number(digits);
+    return isEncodedPunctuation(code2) ? String.fromCodePoint(code2) : reference3;
+  });
+}
+function completionRow(task) {
+  return `| ${encodeCompletionCell(task.taskId)} | ${encodeCompletionCell(task.status)} | ${encodeCompletionCell(task.evidence)} | ${encodeCompletionCell(task.gap)} |`;
+}
+function renderCompletionRegion(ledger) {
+  return [
+    COMPLETION_REGION_START,
+    SECTION_HEADING,
+    "",
+    COMPLETION_TABLE_HEADER,
+    COMPLETION_TABLE_SEPARATOR,
+    ...ledger.tasks.map(completionRow),
+    COMPLETION_REGION_END
+  ].join("\n");
+}
+function parseCompletionRegionRow(line) {
+  if (!line.startsWith("| ") || !line.endsWith(" |")) {
+    return completionFailure(
+      "report_projection_invalid",
+      "Completion region row is not a four-cell table row."
+    );
+  }
+  const cells = line.slice(2, -2).split(" | ");
+  if (cells.length !== 4 || cells.some((cell3) => cell3.includes("|"))) {
+    return completionFailure(
+      "report_projection_invalid",
+      "Completion region row must contain exactly four encoded cells."
+    );
+  }
+  const decoded = cells.map(decodeCompletionCell);
+  let values;
+  try {
+    values = decoded.map((cell3) => JSON.parse(cell3));
+  } catch {
+    return completionFailure(
+      "report_projection_invalid",
+      "Completion region cell does not decode to JSON."
+    );
+  }
+  const [taskId, status, evidence2, gap] = values;
+  if (typeof taskId !== "string" || !/^T[0-9]{3}$/u.test(taskId) || typeof status !== "string" || !["completed", "incomplete", "blocked"].includes(status) || !Array.isArray(evidence2) || !(gap === null || typeof gap === "object" && !Array.isArray(gap))) {
+    return completionFailure(
+      "report_projection_invalid",
+      "Completion region row is malformed.",
+      typeof taskId === "string" && /^T[0-9]{3}$/u.test(taskId) ? taskId : null
+    );
+  }
+  const record7 = {
+    taskId,
+    status,
+    evidence: evidence2,
+    gap
+  };
+  if (completionRow(record7) !== line) {
+    return completionFailure(
+      "report_projection_invalid",
+      `Completion region row ${taskId} is not canonically encoded.`,
+      taskId
+    );
+  }
+  return record7;
+}
+function parseCompletionRegion(region) {
+  const lines = region.split("\n");
+  if (lines.length < 6 || lines[0] !== COMPLETION_REGION_START || lines[1] !== SECTION_HEADING || lines[2] !== "" || lines[3] !== COMPLETION_TABLE_HEADER || lines[4] !== COMPLETION_TABLE_SEPARATOR || lines.at(-1) !== COMPLETION_REGION_END) {
+    return completionFailure(
+      "report_projection_invalid",
+      `Completion region does not follow the ${COMPLETION_REGION_FORMAT} grammar.`
+    );
+  }
+  return {
+    schemaVersion: PLAN_TASK_COMPLETION_SCHEMA_VERSION2,
+    tasks: lines.slice(5, -1).map(parseCompletionRegionRow)
+  };
+}
+function scanLines(markdown) {
+  const lines = [];
+  let offset = 0;
+  let fence = null;
+  for (const raw of markdown.split("\n")) {
+    const text4 = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+    const start = offset;
+    const end = offset + text4.length;
+    offset += raw.length + 1;
+    if (fence === null) {
+      const open14 = FENCE_OPEN.exec(text4);
+      if (open14?.[1] !== void 0) {
+        fence = { character: open14[1][0] ?? "`", length: open14[1].length };
+        lines.push({ text: text4, start, end, fenced: true });
+        continue;
+      }
+      lines.push({ text: text4, start, end, fenced: false });
+      continue;
+    }
+    const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/u.exec(text4)?.[1];
+    if (close !== void 0 && close.startsWith(fence.character) && close.length >= fence.length) {
+      fence = null;
+    }
+    lines.push({ text: text4, start, end, fenced: true });
+  }
+  if (fence !== null) {
+    return completionFailure(
+      "report_region_invalid",
+      "Implementation report has an unclosed code fence; completion region ownership is ambiguous."
+    );
+  }
+  return lines;
+}
+function headingOf(line) {
+  if (line.fenced) return null;
+  const match = ATX_HEADING.exec(line.text);
+  if (match?.[1] === void 0) return null;
+  const body = (match[2] ?? "").replace(/[ \t]+#+$/u, "").trim();
+  return { level: match[1].length, text: body };
+}
+function scanCompletionRegion(markdown) {
+  const lines = scanLines(markdown);
+  const starts = lines.filter(
+    (line) => !line.fenced && line.text === COMPLETION_REGION_START
+  );
+  const ends = lines.filter(
+    (line) => !line.fenced && line.text === COMPLETION_REGION_END
+  );
+  const looseDelimiters = lines.filter(
+    (line) => !line.fenced && line.text !== COMPLETION_REGION_START && line.text !== COMPLETION_REGION_END && line.text.includes(COMPLETION_REGION_FORMAT) && /^\s*<!--/u.test(line.text)
+  );
+  if (looseDelimiters.length > 0) {
+    return completionFailure(
+      "report_region_invalid",
+      "Implementation report contains a malformed completion region delimiter."
+    );
+  }
+  const legacyHeadings = lines.filter((line) => {
+    const heading = headingOf(line);
+    return heading?.level === 2 && heading.text === "Plan Task Completion";
+  });
+  if (starts.length === 0 && ends.length === 0) {
+    if (legacyHeadings.length === 0) return { kind: "none", start: 0, end: 0 };
+    if (legacyHeadings.length > 1) {
+      return completionFailure(
+        "report_region_invalid",
+        "Implementation report contains duplicate Plan Task Completion sections."
+      );
+    }
+    const heading = legacyHeadings[0];
+    if (heading === void 0) return { kind: "none", start: 0, end: 0 };
+    const next = lines.find((line) => {
+      if (line.start <= heading.start) return false;
+      const candidate = headingOf(line);
+      return candidate !== null && candidate.level <= 2;
+    });
+    return {
+      kind: "legacy",
+      start: heading.start,
+      end: next?.start ?? markdown.length
+    };
+  }
+  const start = starts[0];
+  const end = ends[0];
+  if (starts.length !== 1 || ends.length !== 1 || start === void 0 || end === void 0 || end.start <= start.start) {
+    return completionFailure(
+      "report_region_invalid",
+      "Implementation report must contain exactly one balanced completion region delimiter pair."
+    );
+  }
+  const inside = legacyHeadings.filter(
+    (line) => line.start > start.start && line.start < end.start
+  );
+  if (inside.length !== 1 || legacyHeadings.length !== 1) {
+    return completionFailure(
+      "report_region_invalid",
+      "Completion region delimiters must enclose exactly one Plan Task Completion section and no section may exist outside them."
+    );
+  }
+  const otherTopLevel = lines.some((line) => {
+    if (line.start <= start.start || line.start >= end.start) return false;
+    const heading = headingOf(line);
+    return heading !== null && heading.level <= 2 && heading.text !== "Plan Task Completion";
+  });
+  if (otherTopLevel) {
+    return completionFailure(
+      "report_region_invalid",
+      "Completion region delimiters enclose more than one top-level section."
+    );
+  }
+  return { kind: "v2", start: start.start, end: end.end };
+}
+function eligibleGapHeadings(markdown, region) {
+  const counts = /* @__PURE__ */ new Map();
+  for (const line of scanLines(markdown)) {
+    if (region !== null && region.kind !== "none" && line.start >= region.start && line.start < region.end)
+      continue;
+    const heading = headingOf(line);
+    if (heading === null || heading.level < 2 || heading.text.length === 0)
+      continue;
+    counts.set(heading.text, (counts.get(heading.text) ?? 0) + 1);
+  }
+  return new Set(
+    [...counts.entries()].filter(([, count]) => count === 1).map(([text4]) => text4)
+  );
+}
+function utf8Text(bytes, label) {
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+      bytes
+    );
+  } catch {
+    return completionFailure(
+      "report_region_invalid",
+      `${label} is not valid UTF-8; completion region ownership is ambiguous.`
+    );
+  }
+}
+function composeCompletionCandidate(input, ledger) {
+  const text4 = utf8Text(input, "Implementation report");
+  const scan = scanCompletionRegion(text4);
+  const region = renderCompletionRegion(ledger);
+  let output;
+  let action;
+  let start;
+  let end;
+  if (scan.kind === "none") {
+    const separator = text4.length === 0 ? "" : text4.endsWith("\n\n") ? "" : text4.endsWith("\n") ? "\n" : "\n\n";
+    output = `${text4}${separator}${region}
+`;
+    action = "appended";
+    start = Buffer.byteLength(text4, "utf8");
+    end = start;
+  } else {
+    const prefix = text4.slice(0, scan.start);
+    const suffix = text4.slice(scan.end);
+    const replacement = scan.kind === "legacy" ? suffix.length === 0 ? `${region}
+` : `${region}
+
+` : region;
+    output = `${prefix}${replacement}${suffix}`;
+    action = "replaced";
+    start = Buffer.byteLength(prefix, "utf8");
+    end = start + Buffer.byteLength(text4.slice(scan.start, scan.end), "utf8");
+    if (!output.startsWith(prefix) || !output.endsWith(suffix) || Buffer.byteLength(prefix, "utf8") + Buffer.byteLength(suffix, "utf8") !== Buffer.byteLength(output, "utf8") - Buffer.byteLength(replacement, "utf8")) {
+      return completionFailure(
+        "report_region_invalid",
+        "Candidate composition failed to preserve the narrative outside the completion region."
+      );
+    }
+  }
+  const verification = scanCompletionRegion(output);
+  if (verification.kind !== "v2") {
+    return completionFailure(
+      "report_region_invalid",
+      "Candidate composition did not produce exactly one owned completion region."
+    );
+  }
+  const roundtrip = parseCompletionRegion(
+    output.slice(verification.start, verification.end)
+  );
+  if (JSON.stringify(roundtrip) !== JSON.stringify(ledger) || output.slice(verification.start, verification.end) !== region) {
+    return completionFailure(
+      "report_projection_mismatch",
+      "Candidate completion region does not round-trip to the admitted ledger."
+    );
+  }
+  return { bytes: Buffer.from(output, "utf8"), region: { action, start, end } };
+}
+function parsePublishedCompletionRegion(report) {
+  const text4 = utf8Text(report, "Implementation report");
+  const scan = scanCompletionRegion(text4);
+  if (scan.kind !== "v2") {
+    return completionFailure(
+      scan.kind === "none" ? "report_projection_missing" : "report_projection_invalid",
+      scan.kind === "none" ? "Implementation report has no runner-published completion region." : "Implementation report carries a legacy completion section instead of the published v2 region."
+    );
+  }
+  return parseCompletionRegion(text4.slice(scan.start, scan.end));
+}
+async function validateCompletionClaims(input) {
+  const requiredReports = /* @__PURE__ */ new Set();
+  if (input.artifactBinding !== void 0) {
+    await inspectBoundWork4(input.repoRoot, input.artifactBinding);
+    const roles = input.artifactBinding.binding.artifacts;
+    if (input.planPath !== roles.plan || input.artifacts.implementationReport !== roles.implementationReport || input.artifacts.testReport !== roles.testReport)
+      return completionFailure(
+        "evidence_scope_violation",
+        "Completion must reference the exact bound plan and required reports."
+      );
+    for (const report of [roles.implementationReport, roles.testReport])
+      if (report) requiredReports.add(report);
+  }
+  const approval = await digestArtifactBundle(
+    input.repoRoot,
+    input.approval.paths
+  ).catch(
+    () => completionFailure(
+      "approval_invalid",
+      "Approved artifact bundle cannot be validated."
+    )
+  );
+  if (approval.digest !== input.approval.digest || !input.approval.paths.includes(input.planPath)) {
+    return completionFailure(
+      "approval_invalid",
+      "Approved artifact bundle digest or plan membership is invalid."
+    );
+  }
+  const plan = await readFile10(
+    path24.resolve(input.repoRoot, input.planPath),
+    "utf8"
+  ).catch(
+    () => completionFailure(
+      "approved_plan_invalid",
+      "Exact approved plan cannot be read."
+    )
+  );
+  const taskIds = parseApprovedPlanTaskIds(plan);
+  validatePlanTaskCompletionLedgerShape(taskIds, input.ledger, input.outcome);
+  const ledger = input.ledger;
+  if (ledger === null) {
+    return completionFailure(
+      "missing_ledger",
+      "Strict implementation result is missing taskCompletion."
+    );
+  }
+  const implementationReport = await readRequiredReport(
+    input.repoRoot,
+    input.artifacts.implementationReport,
+    "implementation_report_missing",
+    requiredReports,
+    input.captured?.implementationReport
+  );
+  const testReport = await readRequiredReport(
+    input.repoRoot,
+    input.artifacts.testReport,
+    "test_report_missing",
+    requiredReports,
+    input.captured?.testReport
+  );
+  const region = scanCompletionRegion(
+    utf8Text(implementationReport.bytes, "Implementation report")
+  );
+  const snapshot = await workspaceSnapshot(input.repoRoot, {
+    excludedPaths: input.approval.paths,
+    baseline: input.baseline,
+    artifactBinding: input.artifactBinding
+  });
+  const allowedPaths = new Set(
+    snapshot.entries.filter((entry) => entry.kind === "file").map((entry) => entry.path)
+  );
+  allowedPaths.add(implementationReport.path);
+  allowedPaths.add(testReport.path);
+  const approvedPaths = new Set(input.approval.paths);
+  const gapHeadings = /* @__PURE__ */ new Map([
+    [
+      implementationReport.path,
+      eligibleGapHeadings(implementationReport.contents, region)
+    ],
+    [testReport.path, eligibleGapHeadings(testReport.contents, null)]
+  ]);
+  for (const task of ledger.tasks) {
+    for (const evidence2 of task.evidence) {
+      await validateEvidenceFile(
+        input.repoRoot,
+        evidence2.path,
+        allowedPaths,
+        approvedPaths,
+        task.taskId,
+        requiredReports
+      );
+    }
+    if (task.gap !== null) {
+      const headings3 = gapHeadings.get(task.gap.reportPath);
+      if (headings3 === void 0) {
+        return completionFailure(
+          "invalid_gap_reference",
+          `${task.taskId} gap must reference an exact required report.`,
+          task.taskId
+        );
+      }
+      if (!headings3.has(task.gap.section)) {
+        return completionFailure(
+          "invalid_gap_reference",
+          `${task.taskId} gap section is not a unique preserved narrative heading of its report.`,
+          task.taskId
+        );
+      }
+    }
+  }
+  return {
+    ledger,
+    taskIds,
+    approvalDigest: input.approval.digest,
+    planTaskDigest: digest4(taskIds),
+    ledgerDigest: digest4(ledger),
+    counts: completionCounts(taskIds, ledger),
+    implementationReport: {
+      path: implementationReport.path,
+      bytes: implementationReport.bytes,
+      sha256: implementationReport.sha256,
+      region
+    },
+    testReport: {
+      path: testReport.path,
+      bytes: testReport.bytes,
+      sha256: testReport.sha256
+    }
+  };
+}
+function completionCounts(taskIds, ledger) {
+  return {
+    total: taskIds.length,
+    completed: ledger.tasks.filter((task) => task.status === "completed").length,
+    incomplete: ledger.tasks.filter((task) => task.status === "incomplete").length,
+    blocked: ledger.tasks.filter((task) => task.status === "blocked").length
+  };
+}
+function ledgerDigest(ledger) {
+  return digest4(ledger);
+}
+function planTaskDigest(taskIds) {
+  return digest4(taskIds);
+}
+function summariesMatch(expected, actual) {
+  const normalize = (summary2) => ({
+    ...summary2,
+    validatedAt: null,
+    sourceAttemptKind: null
+  });
+  return JSON.stringify(normalize(expected)) === JSON.stringify(normalize(actual));
+}
+function validatePlanVerificationObligations(plan, verification) {
+  if (!plan.includes("banzai-verification-obligations/")) return;
+  try {
+    if (parseVerificationObligations(
+      plan,
+      parseVerificationConfiguration(verification)
+    ) !== null)
+      return;
+  } catch {
+  }
+  throw new PlanTaskCompletionError(
+    "approved_plan_invalid",
+    "The plan verification obligation inventory is missing, ambiguous, contradictory or stale."
+  );
+}
+
+// src/workflow/completion/plan-tasks.ts
+function completionPlanPath(state) {
+  const planPath = state.planArtifacts?.plan ?? null;
+  if (planPath === null) {
+    throw new PlanTaskCompletionError(
+      "approved_plan_invalid",
+      "Strict completion validation cannot identify the approved plan."
+    );
+  }
+  return planPath;
+}
+async function approvedTaskIds(context, state) {
+  const plan = await readFile11(
+    path25.join(context.repoRoot, completionPlanPath(state)),
+    "utf8"
+  );
+  validateRunnerControlTasks(context, state, plan);
+  return parseApprovedPlanTaskIds(plan);
+}
+function validateRunnerControlTasks(context, state, plan) {
+  const roles = state.artifactBinding?.binding.artifacts;
+  validatePlanRunnerControlTasks(
+    plan,
+    context.repoRoot,
+    [roles?.implementationReport, roles?.testReport].filter(
+      (value) => typeof value === "string"
+    )
+  );
+}
+async function validateImplementationCompletion(context, state, attempt, result) {
+  if (state.planApproval === null) {
+    throw new PlanTaskCompletionError(
+      "approval_invalid",
+      "Strict completion validation requires an approved plan bundle."
+    );
+  }
+  return await validatePlanTaskCompletion({
+    repoRoot: context.repoRoot,
+    artifactBinding: state.artifactBinding,
+    sourceAttemptId: attempt.id,
+    result,
+    planPath: completionPlanPath(state),
+    approval: state.planApproval,
+    baseline: state.baseline
+  });
+}
+async function validatePlanningResult(context, state, attempt, result) {
+  if (result.gate !== "plan_approval" || result.artifacts.plan === null) return;
+  try {
+    const markdown = await readFile11(
+      path25.join(context.repoRoot, result.artifacts.plan),
+      "utf8"
+    );
+    parseApprovedPlanTaskIds(markdown);
+    if (state.verificationMode === "task")
+      await establishPlanRemainderDigest(
+        context,
+        state,
+        attempt,
+        result.artifacts.plan,
+        markdown
+      );
+    validateRunnerControlTasks(context, state, markdown);
+  } catch (error) {
+    if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
+      throw error;
+    if (error instanceof ResultDigestRejectedError)
+      throw new PlanTaskCompletionError("approved_plan_invalid", error.message);
+    if (error instanceof PlanTaskCompletionError || error instanceof BanzaiError && error.code === "PLAN_RUNNER_CONTROL_TASK")
+      throw error;
+    throw new PlanTaskCompletionError(
+      "approved_plan_invalid",
+      `The planning artifact could not be read: ${errorMessage(error)}`
+    );
+  }
+}
+async function establishPlanRemainderDigest(context, state, attempt, planPath, markdown) {
+  let comparison;
+  try {
+    const obligations = parseTaskVerificationObligations(markdown);
+    comparison = {
+      role: "binding",
+      field: "planRemainderSha256",
+      checkId: null,
+      path: planPath,
+      declared: obligations.planRemainderSha256,
+      observed: obligations.planRemainderSha256,
+      size: null,
+      limit: null,
+      matched: true
+    };
+  } catch (error) {
+    const detail = taskVerificationDigestDetail(error);
+    if (detail === null) throw error;
+    if (detail.role !== "binding") throw error;
+    comparison = {
+      role: "binding",
+      field: detail.field,
+      checkId: null,
+      path: planPath,
+      declared: detail.declared,
+      observed: detail.observed,
+      size: null,
+      limit: null,
+      matched: false
+    };
+  }
+  await recordResultDigestEvidence(context, state, attempt, [comparison]);
+}
+function completionInvalidCheckpoint(context, sourceAttemptId, error, sourceAttemptKind = "implementation") {
+  return {
+    schemaVersion: 1,
+    status: "invalid",
+    sourceAttemptId,
+    sourceAttemptKind,
+    errorCode: "PLAN_TASK_COMPLETION_INVALID",
+    violation: error.violation,
+    taskId: error.taskId,
+    recordedAt: timestamp(context)
+  };
+}
+
+// src/workflow/verification/required-checks.ts
+import { readFile as readFile12 } from "node:fs/promises";
+import path26 from "node:path";
+async function requiredCheckIds(context, state, config) {
+  const ids = new Set(
+    (taskVerificationPolicy(config)?.required ?? []).map((check2) => check2.id)
+  );
+  if ((state.workflowSelection?.workflow ?? "strict") !== "strict" || state.planApproval === null)
+    return ids;
+  for (const check2 of parseTaskVerificationObligations(
+    await readFile12(
+      path26.join(context.repoRoot, completionPlanPath(state)),
+      "utf8"
+    )
+  ).checks)
+    ids.add(check2.id);
+  return ids;
+}
+function taskVerificationPolicy(config) {
+  return config.verification.taskPolicy ?? (config.verification.policy ? {
+    schema: "banzai-task-verification-policy/v1",
+    schemaVersion: 1,
+    required: [],
+    denied: [],
+    limits: {
+      timeoutMs: 864e5,
+      workingDirectories: ["."],
+      requiredContext: "inherited-local"
+    },
+    reuse: config.verification.policy
+  } : null);
+}
+
+// src/workflow/attempts/result-scope.ts
+import { createHash as createHash18 } from "node:crypto";
+
+// src/review-artifact.ts
+import { createHash as createHash17, randomUUID as randomUUID10 } from "node:crypto";
+import { link as link3, mkdir as mkdir8, open as open11, readFile as readFile13, rename as rename7, unlink as unlink7 } from "node:fs/promises";
+import path27 from "node:path";
+var REQUIRED_SECTIONS = [
+  "## Review Scope",
+  "## Summary",
+  "## Findings",
+  "## Previously Accepted Findings",
+  "## Deferred Coverage",
+  "## Handoff"
+];
+var ReviewArtifactValidationError = class extends BanzaiError {
+  diagnostics;
+  constructor(diagnostics) {
+    super(
+      "INVALID_REVIEW_ARTIFACT",
+      diagnostics[0] ?? "Review artifact failed content validation."
+    );
+    this.name = "ReviewArtifactValidationError";
+    this.diagnostics = [...diagnostics];
+  }
+};
+function reviewArtifactPath(slug, iteration, bound) {
+  if (bound !== void 0)
+    return `${bound.binding.artifacts.reviewDirectory}/review-${iteration}.md`;
+  return path27.posix.join(
+    "documentation",
+    "features",
+    slug,
+    `review-${iteration}.md`
+  );
+}
+function evidenceLocation(finding) {
+  return finding.evidence.map(
+    (evidence2) => evidence2.line === null ? evidence2.path : `${evidence2.path}:${evidence2.line}`
+  );
+}
+function renderVerificationEvidence(verification) {
+  return verification.length === 0 ? "- None recorded." : verification.map(
+    (item) => `- \`${item.name}\`: exit=${item.exitCode}, command=\`${[
+      item.command,
+      ...item.args
+    ].join(" ")}\``
+  ).join("\n");
+}
+function renderPlanTaskReviewEvidence(completion) {
+  if (completion === void 0 || completion === null) {
+    return "- Unavailable.";
+  }
+  return [
+    `- Approval digest: \`${completion.approvalDigest}\``,
+    `- Plan task digest: \`${completion.planTaskDigest}\``,
+    `- Ledger digest: \`${completion.ledgerDigest}\``,
+    `- Completion: \`${completion.completed}/${completion.total}\``,
+    `- Implementation report: \`${completion.implementationReport}\``,
+    `- Test report: \`${completion.testReport}\``,
+    ...completion.tasks.map(
+      (task) => `- \`${task.taskId}\`: \`${task.status}\`; evidence=${JSON.stringify(task.evidence)}; gap=${JSON.stringify(task.gap)}`
+    )
+  ].join("\n");
+}
+function renderReviewArtifact(result, context) {
+  if (result.schemaVersion === 2)
+    return renderCurrentReviewArtifact(result, context);
+  const approvedArtifacts = context.approvedArtifactPaths.map((artifactPath) => `- \`${artifactPath}\``).join("\n");
+  const verification = renderVerificationEvidence(context.verification);
+  const taskCompletion = renderPlanTaskReviewEvidence(context.taskCompletion);
+  const findings = result.findings.length === 0 ? "No findings." : result.findings.map((finding) => {
+    const evidence2 = finding.evidence.map((item) => {
+      const location = item.line === null ? item.path : `${item.path}:${item.line}`;
+      return `  - \`${location}\` \u2014 ${item.detail}`;
+    }).join("\n");
+    const violates = finding.violates.length === 0 ? "None recorded." : finding.violates.map((item) => `\`${item}\``).join(", ");
+    return `### ${finding.id} \u2014 ${finding.summary}
+
+- Severity: \`${finding.severity}\`
+- Category: \`${finding.category}\`
+- Confidence: \`${finding.confidence}\`
+- Evidence:
+${evidence2}
+- Violates: ${violates}
+- Reproduction: ${finding.reproduction ?? "Not provided."}
+- Fix acceptance: ${finding.fixAcceptance}`;
+  }).join("\n\n");
+  const reviewed = result.reviewedFindingIds.length === 0 ? "None." : result.reviewedFindingIds.map((id3) => `\`${id3}\``).join(", ");
+  const deferred = result.deferredCoverage.length === 0 ? "None." : result.deferredCoverage.map((item) => `- ${item}`).join("\n");
+  const handoff = result.verdict === "pass" ? "The review passed. No finding triage is required." : "Human triage is required. Only explicitly accepted finding IDs may enter the fix phase.";
+  return `# Implementation Review: ${context.slug}
+
+- Format: \`banzai-feature-review/v1\`
+- Feature slug: \`${context.slug}\`
+- Review iteration: \`${context.iteration}\`
+- Verdict: \`${result.verdict}\`
+- Workspace digest: \`${context.workspaceDigest}\`
+- Review artifact: \`${context.path}\`
+
+## Review Scope
+
+Approved artifacts:
+${approvedArtifacts}
+
+Deterministic verification:
+${verification}
+
+Validated plan task completion:
+${taskCompletion}
+
+## Summary
+
+${result.summary}
+
+## Findings
+
+${findings}
+
+## Previously Accepted Findings
+
+Previously accepted findings: ${reviewed}
+
+## Deferred Coverage
+
+${deferred}
+
+## Handoff
+
+${handoff}
+`;
+}
+function reviewValue(value) {
+  const ordered = (value2) => {
+    if (Array.isArray(value2)) return value2.map(ordered);
+    if (value2 !== null && typeof value2 === "object")
+      return Object.fromEntries(
+        Object.entries(value2).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, item]) => [key, ordered(item)])
+      );
+    return value2;
+  };
+  const text4 = JSON.stringify(ordered(value), null, 2);
+  const fence = "`".repeat(
+    Math.max(
+      3,
+      ...[...text4.matchAll(/`+/gu)].map((match) => match[0].length + 1)
+    )
+  );
+  return `${fence}json
+${text4}
+${fence}`;
+}
+function renderCurrentReviewArtifact(value, context) {
+  const result = parseCurrentReviewResult2(value);
+  const snapshot = parseReviewSnapshot3(context.snapshot);
+  validateReviewScope(result, {
+    snapshotDigest: snapshot.digest,
+    approvedArtifactPaths: snapshot.approval.paths,
+    requiredFindingIds: snapshot.requiredFindingIds
+  });
+  if (JSON.stringify({ ...context, snapshot: void 0 }) !== JSON.stringify({ ...snapshot.artifact, snapshot: void 0 })) {
+    if (reviewValue({ ...context, snapshot: void 0 }) !== reviewValue(snapshot.artifact))
+      throw new BanzaiError(
+        "INVALID_REVIEW_SNAPSHOT",
+        "Rendering context differs from the recorded review snapshot."
+      );
+  }
+  const coverage = snapshot.approval.paths.map(
+    (path41) => result.scopeAcknowledgment.artifacts.find((entry) => entry.path === path41)
+  );
+  const handoff = {
+    pass: "The review passed. No finding triage is required.",
+    changes_requested: "Human triage is required. Only explicitly accepted finding IDs may enter the fix phase.",
+    blocked: "Review is blocked. Required coverage remains incomplete where recorded. Resolve the blocker before an explicit review retry.",
+    replan_required: "Review requires replanning through the existing human approval lifecycle."
+  }[result.verdict];
+  const guided = snapshot.schemaVersion === 4 || snapshot.schemaVersion === 5 && snapshot.configurationSetup !== void 0;
+  return [
+    "# Implementation Review",
+    snapshot.schemaVersion === 6 ? "- Format: `banzai-feature-review/v7`" : snapshot.schemaVersion === 5 ? "- Format: `banzai-feature-review/v6`" : snapshot.schemaVersion === 4 ? "- Format: `banzai-feature-review/v5`" : snapshot.schemaVersion === 3 ? "- Format: `banzai-feature-review/v4`" : snapshot.schemaVersion === 2 ? "- Format: `banzai-feature-review/v3`" : "- Format: `banzai-feature-review/v2`",
+    reviewValue({
+      slug: context.slug,
+      iteration: context.iteration,
+      verdict: result.verdict,
+      artifactPath: context.path,
+      workspaceDigest: context.workspaceDigest,
+      snapshotDigest: snapshot.digest,
+      ...snapshot.schemaVersion >= 2 ? {
+        workId: snapshot.artifactBinding?.binding.workId,
+        snapshotSchema: snapshot.schema
+      } : {},
+      resultContract: snapshot.outputContract
+    }),
+    "## Review Scope",
+    "### Runner-required approved scope",
+    reviewValue(snapshot.approval.paths),
+    "### Reviewer-acknowledged coverage",
+    "An acknowledgment is a reviewer assertion, not independent proof of reading or substantive assessment.",
+    reviewValue({
+      schemaVersion: result.scopeAcknowledgment.schemaVersion,
+      snapshotDigest: result.scopeAcknowledgment.snapshotDigest,
+      reviewMode: snapshot.reviewMode,
+      artifacts: coverage
+    }),
+    "### Recorded verification (runner evidence)",
+    reviewValue(
+      snapshot.artifact.verificationEvidence ?? snapshot.artifact.verification
+    ),
+    ...guided ? [
+      "### Configuration coverage and runner-authored changes",
+      "Coverage below distinguishes configured, bootstrap-deferred and skipped substantive verification. Only the exact recorded deltas are runner-authored; they do not attribute the whole configuration file. Historical deltas may have later user changes, and carried-in changes retain separate provenance. Inspect .banzai/config.json in this candidate.",
+      ...snapshot.configurationSetup?.coverage === "skipped" && snapshot.artifact.verification.length === 0 ? [
+        "No hygiene commands were configured; no verification command was executed for this skipped round."
+      ] : [],
+      reviewValue({
+        verificationMode: snapshot.verificationMode,
+        ...snapshot.configurationSetup
+      })
+    ] : [],
+    "### Validated plan task completion (runner evidence)",
+    reviewValue({
+      source: snapshot.completionSource,
+      projection: snapshot.artifact.taskCompletion ?? null
+    }),
+    ...snapshot.schemaVersion === 5 || snapshot.schemaVersion === 6 ? [
+      "### Runner-owned completion publication (runner evidence)",
+      "The completion region of the implementation report was rendered and published by the runner from the validated ledger; the model authored the claims, narrative and engineering changes. These identities name the retained capture, candidate and receipt proof. Valid structure is not proof that work was done.",
+      reviewValue(snapshot.completionPublication ?? null)
+    ] : [],
+    ...snapshot.schemaVersion === 6 ? [
+      "### Task verification (runner evidence)",
+      "Check absence is not a passing suite. Assess requirement coverage and unjustified weakening independently of command identity.",
+      reviewValue(snapshot.taskVerification)
+    ] : [],
+    "## Summary",
+    reviewValue(result.summary),
+    "## Findings",
+    result.findings.length === 0 ? "No findings." : result.findings.map((finding) => `### ${finding.id}
+
+${reviewValue(finding)}`).join("\n\n"),
+    "## Previously Accepted Findings",
+    reviewValue({
+      reviewedFindingIds: result.reviewedFindingIds,
+      unreviewedFindingIds: snapshot.requiredFindingIds.filter(
+        (id3) => !result.reviewedFindingIds.includes(id3)
+      )
+    }),
+    "## Review Notes",
+    reviewValue(result.reviewNotes),
+    "## Deferred Coverage",
+    reviewValue(result.deferredCoverage),
+    "## Handoff",
+    handoff,
+    ""
+  ].join("\n\n").replace(/\n+$/u, "\n");
+}
+function requireContent(contents, marker, label, diagnostics) {
+  if (!contents.includes(marker)) {
+    diagnostics.push(`Review artifact is missing ${label}: ${marker}`);
+  }
+}
+function requireSectionBody(contents, heading, label, diagnostics) {
+  const start = contents.indexOf(heading);
+  if (start === -1) {
+    diagnostics.push(`Review artifact has empty ${label}.`);
+    return "";
+  }
+  const bodyStart = start + heading.length;
+  const nextSection = contents.indexOf("\n## ", bodyStart);
+  const body = contents.slice(bodyStart, nextSection === -1 ? void 0 : nextSection).trim();
+  if (body.length === 0) {
+    diagnostics.push(`Review artifact has empty ${label}.`);
+  }
+  return body;
+}
+function approvedArtifactScope(contents, diagnostics) {
+  const scope = requireSectionBody(
+    contents,
+    "## Review Scope",
+    "review scope",
+    diagnostics
+  );
+  const paths = /* @__PURE__ */ new Set();
+  for (const line of scope.split(/\r?\n/u)) {
+    let candidate = line.trim().replace(/^[-*+]\s+/u, "").trim();
+    if (candidate.length >= 2 && candidate.startsWith("`") && candidate.endsWith("`")) {
+      candidate = candidate.slice(1, -1).trim();
+    }
+    if (candidate.length > 0 && !/\s/u.test(candidate)) {
+      paths.add(candidate);
+    }
+  }
+  return paths;
+}
+function repositoryPath(repoRoot, relativePath3) {
+  const repositoryRoot = path27.resolve(repoRoot);
+  const absolutePath = path27.resolve(repositoryRoot, relativePath3);
+  if (!absolutePath.startsWith(`${repositoryRoot}${path27.sep}`)) {
+    throw new BanzaiError(
+      "INVALID_REVIEW_ARTIFACT_PATH",
+      "Review artifact path escapes the repository."
+    );
+  }
+  return absolutePath;
+}
+async function validateReviewArtifactSource(repoRoot, result, context, sourcePath3, requireAttemptOwnedCandidate) {
+  if (context.snapshot?.artifactBinding)
+    await inspectBoundWork4(repoRoot, context.snapshot.artifactBinding);
+  const expectedPath = reviewArtifactPath(
+    context.slug,
+    context.iteration,
+    context.snapshot?.artifactBinding
+  );
+  if (context.path !== expectedPath) {
+    throw new BanzaiError(
+      "INVALID_REVIEW_ARTIFACT_PATH",
+      `Review artifact must be written to ${expectedPath}.`
+    );
+  }
+  const absolutePath = repositoryPath(repoRoot, context.path);
+  const absoluteCandidatePath = repositoryPath(repoRoot, sourcePath3);
+  if (result.schemaVersion === 2) {
+    await assertReviewPathOwned(repoRoot, sourcePath3);
+    await assertReviewPathOwned(repoRoot, context.path, true);
+  }
+  if (requireAttemptOwnedCandidate && absoluteCandidatePath === absolutePath) {
+    throw new BanzaiError(
+      "INVALID_REVIEW_ARTIFACT_PATH",
+      "Review candidate path must differ from the canonical artifact path."
+    );
+  }
+  const contents = await readFile13(absoluteCandidatePath, "utf8").catch(() => {
+    throw new BanzaiError(
+      "REVIEW_ARTIFACT_MISSING",
+      `Reviewer did not write candidate ${sourcePath3}.`
+    );
+  });
+  if (result.schemaVersion === 2) {
+    const expected = renderReviewArtifact(result, context);
+    if (contents !== expected)
+      throw new ReviewArtifactValidationError([
+        "Review candidate bytes differ from the deterministic snapshot projection."
+      ]);
+    return {
+      contents,
+      sha256: createHash17("sha256").update(contents).digest("hex")
+    };
+  }
+  const diagnostics = [];
+  requireContent(
+    contents,
+    `# Implementation Review: ${context.slug}`,
+    "title",
+    diagnostics
+  );
+  requireContent(
+    contents,
+    "- Format: `banzai-feature-review/v1`",
+    "format marker",
+    diagnostics
+  );
+  requireContent(
+    contents,
+    `- Feature slug: \`${context.slug}\``,
+    "feature slug",
+    diagnostics
+  );
+  requireContent(
+    contents,
+    `- Review iteration: \`${context.iteration}\``,
+    "review iteration",
+    diagnostics
+  );
+  requireContent(
+    contents,
+    `- Verdict: \`${result.verdict}\``,
+    "verdict",
+    diagnostics
+  );
+  requireContent(
+    contents,
+    `- Workspace digest: \`${context.workspaceDigest}\``,
+    "workspace digest",
+    diagnostics
+  );
+  requireContent(
+    contents,
+    `- Review artifact: \`${context.path}\``,
+    "review artifact path",
+    diagnostics
+  );
+  for (const section of REQUIRED_SECTIONS) {
+    requireContent(contents, section, "required section", diagnostics);
+  }
+  requireSectionBody(contents, "## Summary", "review summary", diagnostics);
+  const deferredCoverageBody = requireSectionBody(
+    contents,
+    "## Deferred Coverage",
+    "deferred coverage",
+    diagnostics
+  );
+  const recordsNoDeferredCoverage = /^-?\s*none\.?$/i.test(
+    deferredCoverageBody
+  );
+  const hasDeferredCoverage = result.deferredCoverage.length > 0;
+  if (recordsNoDeferredCoverage === hasDeferredCoverage) {
+    diagnostics.push(
+      "Review artifact deferred coverage presence disagrees with the structured result."
+    );
+  }
+  const approvedScope = approvedArtifactScope(contents, diagnostics);
+  for (const approvedArtifactPath of context.approvedArtifactPaths) {
+    if (!approvedScope.has(approvedArtifactPath)) {
+      diagnostics.push(
+        `Review artifact does not list required approved-scope path: \`${approvedArtifactPath}\`.`
+      );
+    }
+  }
+  for (const verification of context.verification) {
+    requireContent(
+      contents,
+      `\`${verification.name}\`: exit=${verification.exitCode}`,
+      "deterministic verification evidence",
+      diagnostics
+    );
+  }
+  for (const line of renderPlanTaskReviewEvidence(context.taskCompletion).split(
+    "\n"
+  )) {
+    requireContent(
+      contents,
+      line,
+      "validated plan task completion evidence",
+      diagnostics
+    );
+  }
+  if (result.findings.length === 0) {
+    requireContent(
+      contents,
+      "No findings.",
+      "clean-review finding statement",
+      diagnostics
+    );
+  }
+  for (const finding of result.findings) {
+    requireContent(
+      contents,
+      `### ${finding.id} `,
+      `finding ${finding.id}`,
+      diagnostics
+    );
+    requireContent(
+      contents,
+      finding.summary,
+      `finding ${finding.id} summary`,
+      diagnostics
+    );
+    requireContent(
+      contents,
+      `- Severity: \`${finding.severity}\``,
+      `finding ${finding.id} severity`,
+      diagnostics
+    );
+    requireContent(
+      contents,
+      `- Category: \`${finding.category}\``,
+      `finding ${finding.id} category`,
+      diagnostics
+    );
+    requireContent(
+      contents,
+      `- Confidence: \`${finding.confidence}\``,
+      `finding ${finding.id} confidence`,
+      diagnostics
+    );
+    const violates = finding.violates.length === 0 ? "None recorded." : finding.violates.map((item) => `\`${item}\``).join(", ");
+    requireContent(
+      contents,
+      `- Violates: ${violates}`,
+      `finding ${finding.id} violated artifacts`,
+      diagnostics
+    );
+    requireContent(
+      contents,
+      `- Reproduction: ${finding.reproduction ?? "Not provided."}`,
+      `finding ${finding.id} reproduction`,
+      diagnostics
+    );
+    requireContent(
+      contents,
+      `- Fix acceptance: ${finding.fixAcceptance}`,
+      `finding ${finding.id} fix acceptance`,
+      diagnostics
+    );
+    for (const location of evidenceLocation(finding)) {
+      requireContent(
+        contents,
+        `\`${location}\``,
+        `finding ${finding.id} evidence`,
+        diagnostics
+      );
+    }
+  }
+  for (const findingId of result.reviewedFindingIds) {
+    requireContent(
+      contents,
+      `\`${findingId}\``,
+      `previously accepted finding ${findingId}`,
+      diagnostics
+    );
+  }
+  if (diagnostics.length > 0) {
+    throw new ReviewArtifactValidationError(diagnostics);
+  }
+  return {
+    contents,
+    sha256: createHash17("sha256").update(contents).digest("hex")
+  };
+}
+async function validateReviewArtifact(repoRoot, result, context) {
+  return await validateReviewArtifactSource(
+    repoRoot,
+    result,
+    context,
+    context.candidatePath,
+    true
+  );
+}
+async function validateHistoricalReviewArtifact(repoRoot, result, context) {
+  return await validateReviewArtifactSource(
+    repoRoot,
+    result,
+    context,
+    context.path,
+    false
+  );
+}
+async function publishReviewArtifact(repoRoot, context, candidate) {
+  if (createHash17("sha256").update(candidate.contents).digest("hex") !== candidate.sha256) {
+    throw new BanzaiError(
+      "INVALID_REVIEW_CANDIDATE_EVIDENCE",
+      "Review candidate publication proof does not match its contents."
+    );
+  }
+  if (context.snapshot?.artifactBinding)
+    await inspectBoundWork4(repoRoot, context.snapshot.artifactBinding);
+  const expectedPath = reviewArtifactPath(
+    context.slug,
+    context.iteration,
+    context.snapshot?.artifactBinding
+  );
+  if (context.path !== expectedPath) {
+    throw new BanzaiError(
+      "INVALID_REVIEW_ARTIFACT_PATH",
+      `Review artifact must be written to ${expectedPath}.`
+    );
+  }
+  const absolutePath = repositoryPath(repoRoot, context.path);
+  if (context.snapshot !== void 0) {
+    await assertReviewPathOwned(repoRoot, context.path, true);
+    const previous = await readFile13(absolutePath, "utf8").catch(
+      (error) => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      }
+    );
+    if (previous !== null) {
+      if (previous !== candidate.contents)
+        throw new BanzaiError(
+          "INVALID_REVIEW_CANDIDATE_EVIDENCE",
+          "Canonical review already contains different evidence."
+        );
+      return;
+    }
+  }
+  const temporaryPath = `${absolutePath}.${randomUUID10()}.tmp`;
+  const binding = context.snapshot?.artifactBinding?.binding;
+  const privateWork = binding?.layout === "private";
+  const verifyDestinations = async () => {
+    if (privateWork)
+      await verifyIgnores4(repoRoot, binding, [
+        context.path,
+        path27.relative(repoRoot, temporaryPath)
+      ]);
+  };
+  await verifyDestinations();
+  await mkdir8(path27.dirname(absolutePath), {
+    recursive: true,
+    mode: privateWork ? 448 : 493
+  });
+  const handle = await open11(temporaryPath, "wx", privateWork ? 384 : 420);
+  try {
+    try {
+      await handle.writeFile(candidate.contents, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await verifyDestinations();
+    if (context.snapshot === void 0)
+      await rename7(temporaryPath, absolutePath);
+    else {
+      await link3(temporaryPath, absolutePath);
+      await unlink7(temporaryPath);
+    }
+  } catch (error) {
+    await unlink7(temporaryPath).catch(() => void 0);
+    throw error;
+  }
+}
+
+// src/workflow/attempts/result-scope.ts
+function validateArtifactRoleReferences(state, result) {
+  const roles = state.artifactBinding?.binding.artifacts;
+  if (roles === void 0) return;
+  for (const role of [
+    "description",
+    "plan",
+    "implementationReport",
+    "testReport"
+  ]) {
+    const reference3 = result.artifacts[role];
+    if (reference3 === null) continue;
+    const workflow = state.workflowSelection?.workflow ?? "strict";
+    const expected = role === "implementationReport" && workflow !== "strict" ? workflow === "feature" ? roles.work : roles.changeReport : roles[role];
+    if (reference3 !== expected)
+      throw new BanzaiError(
+        "ARTIFACT_PHASE_SCOPE_INVALID",
+        `Result ${role} does not match the persisted work binding.`
+      );
+  }
+  if (result.artifacts.adrs.some(
+    (value) => !/^documentation\/decisions\/[0-9]{4}-[a-z0-9-]+\.md$/.test(value)
+  )) {
+    throw new BanzaiError(
+      "ARTIFACT_PHASE_SCOPE_INVALID",
+      "ADR references must retain their public decision paths."
+    );
+  }
+}
+async function validateSavedArtifactScope(context, state, attempt) {
+  if (!state.artifactBinding) return;
+  const bytes = await readBytes3(
+    context.repoRoot,
+    `.banzai/runs/${state.runId}/attempts/${attempt.id}.artifact-workspace.json`,
+    { limit: 2 * 1024 * 1024 }
+  );
+  const before = JSON.parse(
+    bytes?.toString("utf8") ?? "null"
+  );
+  if (before?.schemaVersion !== 2 || before.baseCommit !== state.baseCommit || before.artifactBindingDigest !== state.artifactBinding.sha256 || !Array.isArray(before.entries) || before.digest !== createHash18("sha256").update(
+    JSON.stringify({
+      version: 2,
+      baseCommit: before.baseCommit,
+      artifactBindingDigest: before.artifactBindingDigest,
+      entries: before.entries
+    })
+  ).digest("hex"))
+    throw new BanzaiError(
+      "ARTIFACT_RECOVERY_REQUIRED",
+      "Original attempt artifact workspace evidence is missing or inconsistent."
+    );
+  await checkArtifactPhaseScope(context, state, attempt.kind, before);
+}
+async function checkArtifactPhaseScope(context, state, phase, before) {
+  const bound = state.artifactBinding;
+  if (bound === void 0) return;
+  const after = await workspaceSnapshot(context.repoRoot, {
+    baseline: state.baseline,
+    artifactBinding: bound,
+    excludedPaths: phase === "review" ? [reviewArtifactPath(state.slug, state.reviewIteration, bound)] : []
+  });
+  const allowed = new Set(artifactWritePaths(state, phase));
+  for (const change of workspaceChanges(before, after)) {
+    const candidate = change.path;
+    const privatePath = candidate === ".banzai" || candidate.startsWith(".banzai/");
+    const legacyWork = /^documentation\/(?:features|development-plans|changes)\//.test(
+      candidate
+    );
+    const prohibited = phase === "selection" || phase === "review" || privatePath && !allowed.has(candidate) || legacyWork && !allowed.has(candidate) || // Accepting an ADR during planning adds its row to the manifest's
+    // active ADR index, as the delivered architecture guidance requires.
+    phase === "plan" && !allowed.has(candidate) && !isDocumentationPath(candidate) && candidate !== "PROJECT_MANIFEST.md";
+    if (prohibited)
+      throw new BanzaiError(
+        "ARTIFACT_PHASE_SCOPE_INVALID",
+        `Phase ${phase} changed an unauthorized artifact or source path: ${candidate}`
+      );
+  }
+}
+function artifactWritePaths(state, phase) {
+  const roles = state.artifactBinding?.binding.artifacts;
+  if (roles === void 0) return [];
+  if (phase === "plan")
+    return [roles.description, roles.plan].filter(
+      (item) => item !== void 0
+    );
+  if (phase !== "implementation" && phase !== "fix") return [];
+  const workflow = state.workflowSelection?.workflow ?? "strict";
+  return (workflow === "strict" ? [
+    roles.implementationReport,
+    roles.testReport,
+    ...phase === "fix" ? [roles.changeReport] : []
+  ] : workflow === "feature" ? [roles.work] : [roles.changeReport]).filter((item) => item !== void 0);
+}
+
+// src/workflow/attempts/lifecycle.ts
+import path28 from "node:path";
+function newAttempt(context, state, kind, mutable) {
+  return {
+    id: `${kind}-${state.reviewIteration + 1}-${context.ids().slice(0, 8)}`,
+    kind,
+    mutable
+  };
+}
+function recoveryAttempt(authorization) {
+  return {
+    id: `${authorization.phase}-recovery-${authorization.authorizationId.replace(/^recovery-/u, "")}`,
+    kind: authorization.phase,
+    mutable: true
+  };
+}
+function repairAttempt(state, kind, predecessor) {
+  const identity = digestCanonicalJson4({
+    version: 1,
+    runId: state.runId,
+    predecessor,
+    approvalDigest: state.planApproval?.digest ?? null,
+    scopeDigest: attemptScopeDigest(state, {
+      id: predecessor,
+      kind,
+      mutable: true
+    })
+  });
+  return {
+    id: `${kind}-repair-${identity.slice(0, 12)}`,
+    kind,
+    mutable: true
+  };
+}
+function attemptScopeDigest(state, attempt) {
+  if (attempt.kind !== "fix" && !state.artifactBinding) {
+    return null;
+  }
+  const acceptedFindingIds = state.triage?.items.filter((item) => item.disposition === "accepted").map((item) => item.findingId).sort() ?? [];
+  return digestCanonicalJson4(
+    state.artifactBinding ? {
+      version: 2,
+      artifactBindingDigest: state.artifactBinding.sha256,
+      phase: attempt.kind,
+      acceptedFindingIds: attempt.kind === "fix" ? acceptedFindingIds : []
+    } : { version: 1, acceptedFindingIds }
+  );
+}
+async function beginAttempt(context, state, attempt, policy) {
+  const record7 = {
+    schemaVersion: state.verificationMode === "task" ? 4 : policy.completion === void 0 ? MODEL_ATTEMPT_SCHEMA_VERSION2 : STRICT_MODEL_ATTEMPT_SCHEMA_VERSION2,
+    attempt,
+    status: "started",
+    startedAt: timestamp(context),
+    completedAt: null,
+    interruptedAt: null,
+    recoveryOf: null,
+    recoveryAuthorizationId: null,
+    result: null,
+    sessionId: null,
+    rawStdoutPath: null,
+    rawStderrPath: null,
+    durationMs: null,
+    usage: null,
+    error: null,
+    failureCode: null,
+    reviewCandidate: null,
+    sessionMode: policy.sessionMode,
+    reviewMode: policy.reviewMode ?? null,
+    rotationReason: policy.rotationReason ?? null,
+    resumeSessionId: policy.resumeSessionId,
+    sessionContext: policy.sessionContext,
+    ...policy.completion === void 0 ? {} : {
+      completionProtocol: COMPLETION_PROTOCOL4,
+      retryOf: policy.completion.retryOf,
+      envelope: null,
+      completionDiagnostic: null
+    }
+  };
+  if (policy.completion?.retryOf != null) {
+    const existing = await context.store.readRunAttemptIfExists(
+      state.runId,
+      attempt
+    );
+    if (existing !== null) {
+      if (existing.status !== "started" || existing.result !== null || existing.retryOf !== policy.completion.retryOf || existing.completionProtocol !== COMPLETION_PROTOCOL4 || JSON.stringify(existing.sessionContext) !== JSON.stringify(policy.sessionContext))
+        throw new BanzaiError(
+          "COMPLETION_RETRY_CONFLICT",
+          "A linked evidence-repair successor already exists with different evidence."
+        );
+      state.activeAttempt = attempt;
+      await context.store.writeState(state);
+      return existing;
+    }
+  }
+  if (attempt.kind === "selection") {
+    state.metrics.attempts.selection = (state.metrics.attempts.selection ?? 0) + 1;
+  } else {
+    state.metrics.attempts[attempt.kind] += 1;
+  }
+  state.metrics.sessions[policy.sessionMode] += 1;
+  if (policy.reviewMode !== void 0) {
+    state.metrics.reviews[policy.reviewMode] += 1;
+    if (policy.rotationReason !== null && policy.rotationReason !== "primary-review") {
+      state.metrics.reviews.rotations += 1;
+    }
+  }
+  state.activeAttempt = attempt;
+  await context.store.writeState(state);
+  await context.store.writeRunAttempt(state.runId, record7);
+  const timingEvent = await context.store.appendEvent(
+    state.runId,
+    "attempt.started",
+    {
+      attemptId: attempt.id,
+      kind: attempt.kind,
+      mutable: attempt.mutable,
+      sessionMode: policy.sessionMode,
+      reviewMode: policy.reviewMode ?? null,
+      rotationReason: policy.rotationReason ?? null
+    }
+  );
+  await observeHumanTime(
+    context,
+    state,
+    "checkpoint",
+    "attempt.started",
+    timingEvent.at,
+    attempt.id
+  );
+  return record7;
+}
+async function beginRecoveryAttempt(context, state, authorization, policy) {
+  const attempt = recoveryAttempt(authorization);
+  let record7 = await context.store.readRunAttemptIfExists(state.runId, attempt);
+  if (record7 === null) {
+    record7 = {
+      schemaVersion: state.verificationMode === "task" ? 4 : policy.completion === void 0 ? MODEL_ATTEMPT_SCHEMA_VERSION2 : STRICT_MODEL_ATTEMPT_SCHEMA_VERSION2,
+      attempt,
+      status: "started",
+      startedAt: timestamp(context),
+      completedAt: null,
+      interruptedAt: null,
+      recoveryOf: authorization.attempt.id,
+      recoveryAuthorizationId: authorization.authorizationId,
+      result: null,
+      sessionId: null,
+      rawStdoutPath: null,
+      rawStderrPath: null,
+      durationMs: null,
+      usage: null,
+      error: null,
+      failureCode: null,
+      reviewCandidate: null,
+      sessionMode: policy.sessionMode,
+      reviewMode: policy.reviewMode ?? null,
+      rotationReason: policy.rotationReason ?? null,
+      resumeSessionId: policy.resumeSessionId,
+      sessionContext: policy.sessionContext,
+      ...policy.completion === void 0 ? {} : {
+        completionProtocol: COMPLETION_PROTOCOL4,
+        retryOf: null,
+        envelope: null,
+        completionDiagnostic: null
+      }
+    };
+    await context.store.writeRunAttempt(state.runId, record7);
+  } else if (record7.status !== "started" || record7.result !== null || policy.completion !== void 0 !== completionProtocolAttempt(record7) || record7.recoveryOf !== authorization.attempt.id || record7.recoveryAuthorizationId !== authorization.authorizationId || record7.attempt.kind !== authorization.phase || record7.sessionMode !== policy.sessionMode || record7.resumeSessionId !== policy.resumeSessionId || JSON.stringify(record7.sessionContext) !== JSON.stringify(policy.sessionContext)) {
+    throw new BanzaiError(
+      "RECOVERY_ATTEMPT_CONFLICT",
+      "Persisted recovery attempt conflicts with its authorization."
+    );
+  }
+  if (state.recovery?.sourceAttemptId !== authorization.attempt.id || state.recovery.authorizationId !== authorization.authorizationId || state.recovery.recoveryAttemptId !== null || state.recovery.stage !== "source_interrupted" && state.recovery.stage !== "source_preserved") {
+    throw new BanzaiError(
+      "RECOVERY_STATE_CHANGED",
+      "Recovery state changed before the new attempt could be linked."
+    );
+  }
+  state.metrics.attempts[attempt.kind] += 1;
+  state.metrics.sessions[policy.sessionMode] += 1;
+  state.activeAttempt = attempt;
+  state.recovery = {
+    authorizationId: authorization.authorizationId,
+    sourceAttemptId: authorization.attempt.id,
+    recoveryAttemptId: attempt.id,
+    stage: "attempt_started"
+  };
+  await context.store.writeState(state);
+  const timingEvent = await context.store.appendEvent(
+    state.runId,
+    "attempt.recovery_started",
+    {
+      sourceAttemptId: authorization.attempt.id,
+      attemptId: attempt.id,
+      kind: attempt.kind
+    }
+  );
+  await observeHumanTime(
+    context,
+    state,
+    "checkpoint",
+    "attempt.recovery_started",
+    timingEvent.at,
+    attempt.id
+  );
+  return record7;
+}
+async function completeAttempt(context, state, record7, adapterResult) {
+  if (record7.result === null) {
+    await persistAdapterResult(context, state, record7, adapterResult);
+  }
+  record7.status = "completed";
+  record7.completedAt = timestamp(context);
+  record7.durationMs = Date.parse(record7.completedAt) - Date.parse(record7.startedAt);
+  await context.store.writeRunAttempt(state.runId, record7);
+  const current = await context.store.readState(state.runId);
+  if (current.status === "cancelled") {
+    return false;
+  }
+  accountCompletedAttempt(state, record7);
+  state.activeProcess = null;
+  await context.store.writeState(state);
+  return true;
+}
+async function failAttempt(context, state, record7, error) {
+  if (error instanceof TerminalRunStateError) return error.state;
+  const completionError3 = (record7.attempt.kind === "implementation" || record7.attempt.kind === "fix") && (state.workflowSelection?.workflow ?? "strict") === "strict" && error instanceof BanzaiError && ["PLAN_TASK_COMPLETION_INVALID", "PHASE_RESULT_SCHEMA_MISMATCH"].includes(
+    error.code
+  ) ? error instanceof PlanTaskCompletionError ? error : new PlanTaskCompletionError("source_attempt_invalid", error.message) : null;
+  record7.status = "failed";
+  record7.completedAt = timestamp(context);
+  record7.durationMs = Date.parse(record7.completedAt) - Date.parse(record7.startedAt);
+  record7.error = completionError3 === null ? errorMessage(error) : `[PLAN_TASK_COMPLETION_INVALID] ${completionError3.message}`;
+  record7.failureCode = completionError3 === null ? error instanceof BanzaiError ? error.code : null : "PLAN_TASK_COMPLETION_INVALID";
+  const failureCause = classifyModelFailure(error);
+  record7.failureCause = failureCause;
+  if (error instanceof ProcessExitError && record7.rawStdoutPath === null && record7.rawStderrPath === null) {
+    await writeAttemptOutput(
+      context,
+      state,
+      record7,
+      error.stdout,
+      error.stderr
+    );
+  }
+  if (record7.usage === null && error instanceof ProcessExitError) {
+    record7.usage = error.usage;
+  }
+  await context.store.writeRunAttempt(state.runId, record7);
+  const current = await context.store.readState(state.runId);
+  if (current.status === "cancelled") {
+    return current;
+  }
+  state.activeProcess = null;
+  accountAttemptUsage(state, record7);
+  if (record7.attempt.kind === "review") {
+    if (error instanceof BanzaiError && error.code === "ARTIFACT_PHASE_SCOPE_INVALID") {
+      state.reviewIteration = state.latestReview?.iteration ?? 0;
+      state.pendingReviewRotationReason = "unreliable-review";
+    } else if (INTEGRITY_NEUTRAL_FAILURE_CAUSES.has(failureCause)) {
+      if (state.latestReview !== null) {
+        state.workspaceDigest = state.latestReview.workspaceDigest;
+      }
+    } else {
+      state.pendingReviewRotationReason = "previous-review-failed";
+    }
+  }
+  if (completionError3 !== null) {
+    state.planTaskCompletion = completionInvalidCheckpoint(
+      context,
+      record7.attempt.id,
+      completionError3,
+      record7.attempt.kind === "fix" ? "fix" : "implementation"
+    );
+  }
+  blockState(
+    state,
+    completionError3 === null ? `${record7.attempt.kind} failed: ${errorMessage(error)}` : `[PLAN_TASK_COMPLETION_INVALID] ${completionError3.message}`
+  );
+  await context.store.writeState(state);
+  await context.store.appendEvent(state.runId, "attempt.failed", {
+    attemptId: record7.attempt.id,
+    kind: record7.attempt.kind,
+    cause: failureCause,
+    error: errorMessage(error)
+  });
+  if (completionError3 !== null) {
+    await context.store.appendEvent(
+      state.runId,
+      "plan_task_completion.validation_failed",
+      {
+        attemptId: record7.attempt.id,
+        code: "PLAN_TASK_COMPLETION_INVALID",
+        violation: completionError3.violation,
+        taskId: completionError3.taskId
+      }
+    );
+  }
+  return state;
+}
+async function processStarted(context, state, attempt, pid) {
+  state.activeProcess = {
+    pid,
+    kind: attempt.kind,
+    startedAt: timestamp(context)
+  };
+  try {
+    await context.store.writeState(state);
+  } catch (error) {
+    if (error instanceof TerminalRunStateError) terminateProcessGroup(pid);
+    throw error;
+  }
+}
+async function persistAdapterResult(context, state, record7, adapterResult) {
+  await writeAttemptOutput(
+    context,
+    state,
+    record7,
+    adapterResult.stdout,
+    adapterResult.stderr
+  );
+  record7.usage = adapterResult.usage;
+  if (record7.planningContext !== void 0 && record7.sessionId !== null && adapterResult.sessionId !== null && record7.sessionId !== adapterResult.sessionId) {
+    throw new BanzaiError(
+      "SESSION_ID_CONFLICT",
+      "The planning result conflicts with its announced session identity."
+    );
+  }
+  record7.result = adapterResult.result;
+  record7.sessionId = adapterResult.sessionId ?? record7.sessionId;
+  record7.durationMs = context.clock().getTime() - Date.parse(record7.startedAt);
+  await context.store.writeRunAttempt(state.runId, record7);
+}
+async function writeAttemptOutput(context, state, record7, stdout, stderr) {
+  const stdoutPath = path28.relative(
+    context.store.runDirectory(state.runId),
+    await context.store.writeText(
+      state.runId,
+      `attempts/${record7.attempt.id}.stdout.log`,
+      redactSensitiveText(stdout)
+    )
+  );
+  const stderrPath = path28.relative(
+    context.store.runDirectory(state.runId),
+    await context.store.writeText(
+      state.runId,
+      `attempts/${record7.attempt.id}.stderr.log`,
+      redactSensitiveText(stderr)
+    )
+  );
+  record7.rawStdoutPath = stdoutPath;
+  record7.rawStderrPath = stderrPath;
+}
+function accountAttemptUsage(state, record7) {
+  const accounted = state.metrics.usageAccountedAttemptIds ??= [
+    ...state.metrics.completedAttemptIds
+  ];
+  if (accounted.includes(record7.attempt.id)) return;
+  if (record7.usage !== null) {
+    state.metrics.usage.inputTokens += record7.usage.inputTokens;
+    state.metrics.usage.cachedInputTokens += record7.usage.cachedInputTokens;
+    state.metrics.usage.outputTokens += record7.usage.outputTokens;
+    if (record7.usage.costUsd !== null) {
+      state.metrics.usage.costUsd = (state.metrics.usage.costUsd ?? 0) + record7.usage.costUsd;
+    }
+    accounted.push(record7.attempt.id);
+  }
+}
+function accountCompletedAttempt(state, record7) {
+  if (state.metrics.completedAttemptIds.includes(record7.attempt.id)) {
+    return;
+  }
+  accountAttemptUsage(state, record7);
+  state.metrics.completedAttemptIds.push(record7.attempt.id);
+  state.metrics.modelDurationMs += record7.durationMs ?? 0;
+}
+function completionProtocolAttempt(record7) {
+  return record7.schemaVersion === STRICT_MODEL_ATTEMPT_SCHEMA_VERSION2 || record7.schemaVersion === 4 && record7.completionProtocol === COMPLETION_PROTOCOL4;
+}
+function completionEnvelopeOf(result) {
+  return isPhaseResultEnvelope(result) ? result : phaseResultEnvelopeOf(result);
+}
+function legacyPhaseResult(result) {
+  if (!isPhaseResultEnvelope(result)) return result;
+  const validated = phaseResultFromEnvelope(result);
+  if (validated === null)
+    throw new BanzaiError(
+      "PLAN_TASK_COMPLETION_INVALID",
+      result.taskCompletion.state === "unaccepted" ? result.taskCompletion.diagnostic : "Lite phase result carried an unaccepted completion payload."
+    );
+  return validated;
+}
+
+// src/workflow/checkpoints/terminal-checkpoints.ts
+import { lstat as lstat17, readFile as readFile14 } from "node:fs/promises";
+function terminalCheckpointWriter(context, state, attempt, settings, policy, completion = false) {
+  return async (terminal) => {
+    const current = await context.store.readState(state.runId);
+    if (current.activeAttempt?.id !== attempt.id || current.activeAttempt.kind !== attempt.kind || current.activeAttempt.mutable !== attempt.mutable) {
+      throw new BanzaiError(
+        "TERMINAL_CHECKPOINT_STATE_CHANGED",
+        "The active attempt changed before terminal success could be persisted."
+      );
+    }
+    await validateSavedArtifactScope(context, current, attempt);
+    if (attempt.kind === "plan" || attempt.kind === "implementation" || attempt.kind === "fix")
+      validateArtifactRoleReferences(
+        current,
+        terminal.result
+      );
+    const vendor = vendorFor(settings.executable) ?? FALLBACK_VENDOR[policy.sessionContext.role];
+    if (completion) {
+      if (attempt.kind !== "implementation" && attempt.kind !== "fix")
+        throw new BanzaiError(
+          "TERMINAL_CHECKPOINT_STATE_CHANGED",
+          "Only strict implementation or fix attempts use the completion protocol."
+        );
+      const envelope = completionEnvelopeOf(
+        terminal.result
+      );
+      const observed3 = await observeCompletionInputs(
+        context,
+        current,
+        envelope.artifacts
+      );
+      const checkpoint2 = {
+        schema: state.verificationMode === "task" ? "banzai-terminal-attempt-checkpoint/v3" : TERMINAL_CHECKPOINT_SCHEMA_V22,
+        schemaVersion: state.verificationMode === "task" ? 3 : TERMINAL_CHECKPOINT_SCHEMA_VERSION_V22,
+        completionProtocol: COMPLETION_PROTOCOL4,
+        runId: current.runId,
+        attempt: { id: attempt.id, kind: attempt.kind, mutable: true },
+        phase: attempt.kind,
+        configuration: {
+          vendor,
+          executableDigest: digestCanonicalJson4(settings.executable),
+          model: settings.model,
+          effort: settings.effort,
+          sessionMode: policy.sessionMode,
+          sessionContextDigest: digestCanonicalJson4(policy.sessionContext)
+        },
+        resultContract: state.verificationMode === "task" ? "phase-result/v4" : "phase-result/v3",
+        terminal: {
+          classification: terminal.classification,
+          observedAt: terminal.observedAt
+        },
+        envelope,
+        resultDigest: envelope.originalDigest,
+        observed: observed3.observed,
+        sessionId: terminal.sessionId,
+        usage: terminal.usage,
+        baseCommit: current.baseCommit,
+        approvalDigest: current.planApproval?.digest ?? null,
+        workflowDigest: null,
+        scopeDigest: attemptScopeDigest(current, attempt)
+      };
+      await context.store.writeTerminalCheckpoint(current.runId, {
+        ...checkpoint2,
+        integrityDigest: terminalCheckpointIntegrity2(checkpoint2)
+      });
+      await context.store.appendEvent(
+        current.runId,
+        "attempt.terminal_checkpoint",
+        {
+          attemptId: attempt.id,
+          kind: attempt.kind,
+          classification: terminal.classification
+        }
+      );
+      return;
+    }
+    const checkpoint = {
+      schema: state.verificationMode === "task" ? "banzai-terminal-attempt-checkpoint/v3" : TERMINAL_CHECKPOINT_SCHEMA2,
+      schemaVersion: state.verificationMode === "task" ? 3 : TERMINAL_CHECKPOINT_SCHEMA_VERSION2,
+      runId: current.runId,
+      attempt,
+      phase: attempt.kind,
+      configuration: {
+        vendor,
+        executableDigest: digestCanonicalJson4(settings.executable),
+        model: settings.model,
+        effort: settings.effort,
+        sessionMode: policy.sessionMode,
+        sessionContextDigest: digestCanonicalJson4(policy.sessionContext)
+      },
+      resultContract: terminalResultContract(
+        attempt.kind,
+        state.verificationMode === "task"
+      ),
+      terminal: {
+        classification: terminal.classification,
+        observedAt: terminal.observedAt
+      },
+      result: terminal.result,
+      sessionId: terminal.sessionId,
+      usage: terminal.usage,
+      baseCommit: current.baseCommit,
+      approvalDigest: current.planApproval?.digest ?? null,
+      workflowDigest: current.planApproval === null ? current.workflowSelection?.digest ?? null : null,
+      scopeDigest: attemptScopeDigest(current, attempt)
+    };
+    const persisted = {
+      ...checkpoint,
+      integrityDigest: terminalCheckpointIntegrity2(checkpoint)
+    };
+    await context.store.writeTerminalCheckpoint(current.runId, persisted);
+    await context.store.appendEvent(
+      current.runId,
+      "attempt.terminal_checkpoint",
+      {
+        attemptId: attempt.id,
+        kind: attempt.kind,
+        classification: terminal.classification
+      }
+    );
+  };
+}
+async function finalizeTerminalCheckpoint(context, state, record7, terminalObservedAt) {
+  if (terminalObservedAt === null) {
+    return;
+  }
+  if (record7.schemaVersion === 1)
+    record7.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION2;
+  record7.status = "completed";
+  record7.completedAt = terminalObservedAt;
+  record7.interruptedAt = null;
+  record7.recoveryOf ??= null;
+  record7.recoveryAuthorizationId ??= null;
+  record7.durationMs = Math.max(
+    0,
+    Date.parse(terminalObservedAt) - Date.parse(record7.startedAt)
+  );
+  record7.error = null;
+  record7.failureCode = null;
+  await context.store.writeRunAttempt(state.runId, record7);
+  state.activeProcess = null;
+  await context.store.writeState(state);
+  await context.store.appendEvent(state.runId, "attempt.terminal_reconciled", {
+    attemptId: record7.attempt.id,
+    kind: record7.attempt.kind
+  });
+}
+async function promoteTerminalCheckpoint(context, state, attempt, record7, config) {
+  const checkpoint = await context.store.readTerminalCheckpointIfExists(
+    state.runId,
+    attempt
+  );
+  if (checkpoint === null) {
+    return null;
+  }
+  if ("envelope" in checkpoint) {
+    throw new BanzaiError(
+      "TERMINAL_CHECKPOINT_MISMATCH",
+      "A legacy attempt cannot reconcile a completion-protocol checkpoint."
+    );
+  }
+  if (TERMINAL_INTEGRITY_FAILURE_CODES.has(record7.failureCode ?? "")) {
+    throw new BanzaiError(
+      "TERMINAL_CHECKPOINT_CONFLICT",
+      "Conflicting terminal or session evidence cannot be reconciled as success."
+    );
+  }
+  const { settings, role } = checkpointSettings(attempt, config);
+  const expectedContext = record7.sessionContext ?? sessionContext(role, settings);
+  const expectedApprovalDigest = state.planApproval?.digest ?? null;
+  const expectedWorkflowDigest = state.planApproval === null ? state.workflowSelection?.digest ?? null : null;
+  const expectedResultContract = attempt.kind === "review" && record7.reviewContext === void 0 ? "review-result/v1" : terminalResultContract(attempt.kind, state.verificationMode === "task");
+  const resultContractMatches = checkpoint.resultContract === expectedResultContract || expectedResultContract === "phase-result/v3" && checkpoint.resultContract === "phase-result/v2";
+  if (checkpoint.runId !== state.runId || checkpoint.attempt.id !== attempt.id || checkpoint.attempt.kind !== attempt.kind || checkpoint.attempt.mutable !== attempt.mutable || checkpoint.phase !== attempt.kind || !resultContractMatches || checkpoint.baseCommit !== state.baseCommit || checkpoint.approvalDigest !== expectedApprovalDigest || checkpoint.workflowDigest !== expectedWorkflowDigest || checkpoint.scopeDigest !== attemptScopeDigest(state, attempt) || checkpoint.configuration.vendor !== (vendorFor(settings.executable) ?? FALLBACK_VENDOR[role]) || checkpoint.configuration.executableDigest !== digestCanonicalJson4(settings.executable) || checkpoint.configuration.model !== settings.model || checkpoint.configuration.effort !== settings.effort || checkpoint.configuration.sessionMode !== (record7.sessionMode ?? "fresh") || checkpoint.configuration.sessionContextDigest !== digestCanonicalJson4(expectedContext) || state.recovery?.sourceAttemptId === attempt.id) {
+    throw new BanzaiError(
+      "TERMINAL_CHECKPOINT_MISMATCH",
+      "Terminal checkpoint does not match the active run, attempt, authorization, or model context."
+    );
+  }
+  await validateBaseCommit(context, state);
+  if (expectedApprovalDigest !== null) {
+    await validateApproval(context, state);
+  } else if (expectedWorkflowDigest !== null) {
+    if (attempt.kind === "plan") {
+      const selection = state.workflowSelection ?? null;
+      if (selection?.workflow !== "strict" || workflowAuthorizationDigest({
+        runId: state.runId,
+        request: state.request,
+        ...selection
+      }) !== selection.digest) {
+        throw new BanzaiError(
+          "WORKFLOW_AUTHORIZATION_INVALID",
+          "Planning checkpoint requires the unchanged strict workflow selection."
+        );
+      }
+    } else {
+      validateWorkflowSelection(state);
+    }
+  }
+  await validateTerminalCheckpointResult(
+    context,
+    state,
+    attempt,
+    checkpoint.result,
+    config
+  );
+  if (record7.status === "completed") {
+    if (record7.result === null || JSON.stringify(record7.result) !== JSON.stringify(checkpoint.result)) {
+      throw new BanzaiError(
+        "TERMINAL_CHECKPOINT_CONFLICT",
+        "Completed attempt result conflicts with its terminal checkpoint."
+      );
+    }
+    return null;
+  }
+  if (record7.status !== "started" && record7.status !== "failed" || record7.result !== null && JSON.stringify(record7.result) !== JSON.stringify(checkpoint.result)) {
+    throw new BanzaiError(
+      "TERMINAL_CHECKPOINT_CONFLICT",
+      `Terminal checkpoint cannot promote an attempt in ${record7.status} state.`
+    );
+  }
+  if (state.metrics.usageAccountedAttemptIds === void 0 && record7.status === "failed" && record7.usage !== null) {
+    state.metrics.usageAccountedAttemptIds = [
+      ...state.metrics.completedAttemptIds,
+      record7.attempt.id
+    ];
+  }
+  if (record7.schemaVersion === 1)
+    record7.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION2;
+  record7.result = checkpoint.result;
+  record7.sessionId = checkpoint.sessionId;
+  record7.usage = checkpoint.usage;
+  return checkpoint.terminal.observedAt;
+}
+async function validateTerminalCheckpointResult(context, state, attempt, result, config) {
+  await validateSavedArtifactScope(context, state, attempt);
+  if (attempt.kind === "selection") {
+    return;
+  }
+  if (attempt.kind === "review") {
+    validateReviewResultForApplication(state, result);
+    const record7 = await context.store.readRunAttempt(state.runId, attempt);
+    if (record7.reviewContext !== void 0 || result.schemaVersion === 2) {
+      const frozen = await context.store.readReviewSnapshot(
+        state.runId,
+        attempt
+      );
+      if (record7.reviewContext?.snapshotDigest !== frozen.digest)
+        throw new BanzaiError(
+          "INVALID_REVIEW_SNAPSHOT",
+          "Checkpoint snapshot binding is missing or conflicting."
+        );
+      validateReviewScope(parseCurrentReviewResult2(result), {
+        snapshotDigest: frozen.digest,
+        approvedArtifactPaths: frozen.approval.paths,
+        requiredFindingIds: frozen.requiredFindingIds
+      });
+    }
+    return;
+  }
+  const phaseResult = parsePersistedPhaseResult2(result);
+  validateArtifactRoleReferences(state, phaseResult);
+  if (phaseResult.phase !== attempt.kind) {
+    throw new BanzaiError(
+      "PHASE_RESULT_MISMATCH",
+      `Attempt ${attempt.kind} returned phase ${phaseResult.phase}.`
+    );
+  }
+  if (attempt.kind === "plan") {
+    await validatePlanningResult(context, state, attempt, phaseResult);
+    return;
+  }
+  await establishResultSourceIdentities(
+    context,
+    state,
+    attempt,
+    phaseResult,
+    config
+  );
+  if (attempt.kind === "fix") {
+    if (phaseResult.taskCompletion !== null) {
+      if (state.planApproval === null) {
+        throw new PlanTaskCompletionError(
+          "approval_invalid",
+          "Strict completion validation requires an approved plan bundle."
+        );
+      }
+      state.planTaskCompletion = {
+        ...(await validatePlanTaskCompletion({
+          repoRoot: context.repoRoot,
+          artifactBinding: state.artifactBinding,
+          sourceAttemptId: attempt.id,
+          result: phaseResult,
+          planPath: completionPlanPath(state),
+          approval: state.planApproval,
+          baseline: state.baseline
+        })).summary,
+        sourceAttemptKind: "fix"
+      };
+    }
+    return;
+  }
+  if ((state.workflowSelection?.workflow ?? "strict") !== "strict") {
+    if (phaseResult.taskCompletion !== null) {
+      throw new BanzaiError(
+        "PLAN_TASK_COMPLETION_INVALID",
+        "Lite implementation must not return strict plan-task completion evidence."
+      );
+    }
+    return;
+  }
+  if (phaseResult.outcome === "completed" && phaseResult.gate === null) {
+    state.planTaskCompletion = (await validateImplementationCompletion(
+      context,
+      state,
+      attempt,
+      phaseResult
+    )).summary;
+    return;
+  }
+  validatePlanTaskCompletionLedgerShape(
+    await approvedTaskIds(context, state),
+    phaseResult.taskCompletion,
+    phaseResult.outcome
+  );
+}
+function checkpointSettings(attempt, config) {
+  if (attempt.kind === "selection" || attempt.kind === "plan") {
+    return { settings: config.models.planner, role: "planner" };
+  }
+  if (attempt.kind === "review") {
+    return { settings: config.models.reviewer, role: "reviewer" };
+  }
+  return { settings: config.models.implementer, role: "implementer" };
+}
+async function establishResultSourceIdentities(context, state, attempt, result, config) {
+  if (state.verificationMode !== "task") return;
+  const candidates = result.schemaVersion === 4 ? result.verificationCandidates ?? null : null;
+  const observe = async (relativePath3) => {
+    try {
+      const file = await taskVerificationPath(context.repoRoot, relativePath3);
+      const size = (await lstat17(file)).size;
+      return size > TASK_VERIFICATION_SOURCE_MAX_BYTES ? { observed: null, size, limit: TASK_VERIFICATION_SOURCE_MAX_BYTES } : {
+        observed: evidenceDigest(await readFile14(file)),
+        size,
+        limit: null
+      };
+    } catch {
+      return { observed: null, size: null, limit: null };
+    }
+  };
+  const comparisons = [];
+  for (const identity of effectiveResultSourceIdentities(
+    candidates,
+    await requiredCheckIds(context, state, config)
+  )) {
+    const { observed: observed3, size, limit } = await observe(identity.path);
+    comparisons.push({
+      role: "precondition",
+      field: identity.field,
+      checkId: identity.checkId,
+      path: identity.path,
+      declared: identity.declared,
+      observed: observed3,
+      size,
+      limit,
+      matched: observed3 === identity.declared
+    });
+  }
+  await recordResultDigestEvidence(context, state, attempt, comparisons);
+}
+
+// src/workflow/activity-sequence.ts
+var ActivitySequence = class {
+  count = 0;
+  next() {
+    return `activity-${++this.count}`;
+  }
+};
+
+// src/workflow/cancellation-receipts.ts
+var CancellationReceipts = class {
+  observations = /* @__PURE__ */ new WeakMap();
+  record(receipt, observation2) {
+    this.observations.set(receipt, observation2);
+  }
+  observation(receipt) {
+    return this.observations.get(receipt);
+  }
+};
+
+// src/workflow/configuration/ownership.ts
+import { AsyncLocalStorage as AsyncLocalStorage3 } from "node:async_hooks";
+var ConfigurationOwnership = class {
+  scope = new AsyncLocalStorage3();
+  owned() {
+    return this.scope.getStore() === true;
+  }
+  run(action) {
+    return this.scope.run(true, action);
+  }
+};
+
+// src/workflow/preflight/invocation-scope-cache.ts
+var InvocationScopeCache = class {
+  current = null;
+  degradationReported = false;
+  mcpReported = false;
+  matches(key) {
+    return this.current?.key === key;
+  }
+  /** Starts a new key: its whitelist replaces the old one and both reports re-arm. */
+  replace(key, resolved, mcp) {
+    this.current = { key, ...resolved, mcp };
+    this.degradationReported = false;
+    this.mcpReported = false;
+  }
+  /** Applies a fresh resolution to the current key's record. */
+  merge(resolved) {
+    if (this.current === null)
+      throw new Error("An invocation scope must be replaced before merging.");
+    this.current = { ...this.current, ...resolved };
+    return this.current;
+  }
+  claimDegradationReport() {
+    if (this.degradationReported) return false;
+    this.degradationReported = true;
+    return true;
+  }
+  claimMcpReport() {
+    if (this.mcpReported) return false;
+    this.mcpReported = true;
+    return true;
+  }
+};
+
+// src/claude-permissions.ts
+import { readFile as readFile15 } from "node:fs/promises";
+import { homedir as homedir3 } from "node:os";
+import path29 from "node:path";
 var ALL_SOURCES = [
   "user",
   "project",
@@ -29644,16 +32851,16 @@ function configDirectory(env) {
 }
 function trustFile(env) {
   const configured = configDirectory(env);
-  return configured === null ? path23.join(homeDirectory(env), ".claude.json") : path23.join(configured, ".claude.json");
+  return configured === null ? path29.join(homeDirectory(env), ".claude.json") : path29.join(configured, ".claude.json");
 }
 function settingsFile(source, repoRoot, env) {
   if (source === "user") {
-    return path23.join(
-      configDirectory(env) ?? path23.join(homeDirectory(env), ".claude"),
+    return path29.join(
+      configDirectory(env) ?? path29.join(homeDirectory(env), ".claude"),
       "settings.json"
     );
   }
-  return path23.join(
+  return path29.join(
     repoRoot,
     ".claude",
     source === "project" ? "settings.json" : "settings.local.json"
@@ -29662,7 +32869,7 @@ function settingsFile(source, repoRoot, env) {
 async function readRules(filePath) {
   let raw;
   try {
-    raw = await readFile9(filePath, "utf8");
+    raw = await readFile15(filePath, "utf8");
   } catch {
     return { rules: EMPTY_RULES, intact: true };
   }
@@ -29691,7 +32898,7 @@ async function readManagedRules(override) {
 async function inspectTrust(repoRoot, env) {
   let raw;
   try {
-    raw = await readFile9(trustFile(env), "utf8");
+    raw = await readFile15(trustFile(env), "utf8");
   } catch {
     return "unknown";
   }
@@ -29753,7 +32960,7 @@ function claudePermissionDemanded(demand) {
 }
 async function inspectClaudePermissions(input) {
   const env = input.env ?? process.env;
-  const repoRoot = path23.resolve(input.repoRoot);
+  const repoRoot = path29.resolve(input.repoRoot);
   const demand = input.demand;
   const sources = parseSources(input.settingSources);
   const [managed, trust, loaded, unloadedLocal] = await Promise.all([
@@ -30647,1142 +33854,6 @@ function pendingRotationText(reason) {
   return `The next review starts over from a clean session, because ${ROTATION_TEXT[reason]}.`;
 }
 
-// src/plan-task-completion.ts
-import { createHash as createHash14 } from "node:crypto";
-import { lstat as lstat15, readFile as readFile10, realpath as realpath9 } from "node:fs/promises";
-import path24 from "node:path";
-var PROJECTION_FORMAT = "banzai-plan-task-completion/v1";
-var SECTION_HEADING = "## Plan Task Completion";
-var TASK_HEADING = /^- \[ \] \*\*(T[0-9]{3}) - (.+)\*\*\s*$/u;
-var CHECKBOX_HEADING = /^\s*- \[[ xX]\] \*\*/u;
-var FORBIDDEN_PATH_SEGMENTS = /* @__PURE__ */ new Set([
-  ".git",
-  ".banzai",
-  "node_modules",
-  ".cache",
-  "coverage",
-  "dist"
-]);
-var PlanTaskCompletionError = class extends BanzaiError {
-  violation;
-  taskId;
-  constructor(violation, message, taskId = null) {
-    super("PLAN_TASK_COMPLETION_INVALID", message.slice(0, 500));
-    this.name = "PlanTaskCompletionError";
-    this.violation = violation;
-    this.taskId = taskId;
-  }
-};
-function completionFailure(violation, message, taskId = null) {
-  throw new PlanTaskCompletionError(violation, message, taskId);
-}
-function digest4(value) {
-  return createHash14("sha256").update(JSON.stringify(value)).digest("hex");
-}
-function planPathField(text4) {
-  const label = text4.replaceAll("*", "").trim();
-  if (/^(?:files(?: to (?:change|modify|create|delete))?|affected files|write targets)\s*:/iu.test(
-    label
-  ))
-    return "write";
-  if (/^(?:read-only references|unchanged paths)\s*:/iu.test(label))
-    return "read";
-  return null;
-}
-function planTaskStatements(section) {
-  const statements = [];
-  let taskId = "unknown";
-  let field = null;
-  let pending = null;
-  for (const line of section.split(/\r?\n/u)) {
-    const heading = TASK_HEADING.exec(line);
-    if (heading) {
-      taskId = heading[1] ?? "unknown";
-      field = null;
-      pending = null;
-      statements.push({ taskId, text: heading[2] ?? "", access: "unknown" });
-      continue;
-    }
-    if (!line.trim()) {
-      pending = null;
-      continue;
-    }
-    const indent = line.length - line.trimStart().length;
-    const text4 = line.trim().replace(/^(?:[-+*]|\d+\.)\s+/u, "");
-    const declared = planPathField(text4);
-    if (field && indent <= field.indent) field = null;
-    const access7 = declared ?? field?.access ?? "unknown";
-    if (declared) field = { indent, access: declared };
-    if (!declared && !/^\s*(?:[-+*]|\d+\.)\s/u.test(line) && !/^[\w -]+:/u.test(text4.replaceAll("*", "")) && pending && indent > 0) {
-      pending.text += ` ${text4}`;
-    } else {
-      pending = { taskId, text: text4, access: access7 };
-      statements.push(pending);
-    }
-  }
-  return statements;
-}
-var PLAN_WRITE_WORDS = "(?:change|edit|modify|update|write|rewrite|create|add|delete|remove|overwrite|replace|patch|configure|set|touch|mkdir|rm|cp|mv|tee)";
-var PLAN_ACTION = `(?:read|inspect|review|compare|consult|check|verify|cat|${PLAN_WRITE_WORDS})`;
-var PLAN_WRITE_ACTION = new RegExp(`\\b${PLAN_WRITE_WORDS}\\b`, "iu");
-var PLAN_PROHIBITION = new RegExp(
-  `^\\W*(?:(?:do|must|should)\\s+not|never)\\s+(?=${PLAN_ACTION}\\b)`,
-  "iu"
-);
-function planClauseAccess(clause, declared) {
-  if (declared === "write") return "write";
-  clause = clause.replace(/^\s*[\w -]+:\s*/u, "");
-  const prohibited = PLAN_PROHIBITION.test(clause);
-  if (!prohibited && PLAN_WRITE_ACTION.test(clause)) return "write";
-  if (/\b(?:and|or)\s+(?!(?:any\s+)?@\d+@(?:\s|$))/iu.test(clause) || new RegExp("@\\d+@[^,]*,\\s*(?!@\\d+@|(?:and|or)\\s+(?:any\\s+)?@\\d+@)\\p{L}", "u").test(clause))
-    return "unknown";
-  if (prohibited) return "read";
-  if (/^\s*(?:preserve|leave|keep)\b.*\bunchanged\s*$/iu.test(clause) || /^\s*@\d+@\s+(?:must\s+)?remain\s+unchanged\s*$/iu.test(clause))
-    return "read";
-  if (/\b(?:read|inspect|review|compare|consult|check|verify|cat)\b/iu.test(
-    clause
-  ))
-    return "read";
-  if (declared === "read" && /^[\s\d@,.:-]*$/u.test(clause)) return "read";
-  return "unknown";
-}
-function validatePlanRunnerControlTasks(markdown, repoRoot, allowedArtifactPaths) {
-  parseApprovedPlanTaskIds(markdown);
-  const section = markdown.split(/^## Implementation Tasks\s*$/mu)[1]?.split(/^## /mu)[0] ?? "";
-  const allowed = new Set(
-    allowedArtifactPaths.map(
-      (value) => path24.posix.normalize(value.replaceAll("\\", "/"))
-    )
-  );
-  const root = path24.posix.normalize(repoRoot.replaceAll("\\", "/")).replace(/\/$/u, "");
-  let previousTaskId = "";
-  let previousPaths = [];
-  for (const { taskId, text: text4, access: access7 } of planTaskStatements(section)) {
-    if (taskId !== previousTaskId) previousPaths = [];
-    previousTaskId = taskId;
-    const paths = [];
-    const masked = text4.replace(/[^\s*`'"<>()[\]{},;&|]+/gu, (raw) => {
-      const token = raw.replaceAll("\\", "/").replace(/[.!?]+$/u, "").replace(/:\d+(?::\d+)?$/u, "");
-      if (!token.includes("/") && !/^\.[\w-]+$/u.test(token) && !/\.[a-z0-9]+$/iu.test(token))
-        return raw;
-      const normalized = path24.posix.normalize(
-        path24.posix.isAbsolute(token) || /^[a-z]:\//iu.test(token) ? token : `${root}/${token}`
-      );
-      const relative4 = normalized.toLowerCase().startsWith(`${root.toLowerCase()}/`) ? normalized.slice(root.length + 1) : normalized;
-      paths.push(relative4);
-      return `@${paths.length - 1}@${/[.!?]$/u.test(raw) ? "." : ""}`;
-    }).replace(/\[([^\]]*)\]\((@\d+@)\)/gu, "$2").replace(/[*`'"()]/gu, "");
-    const clauses = masked.split(
-      new RegExp(
-        `;|&&|\\|\\||[.!?](?:\\s+|$)|\\s+(?:but|however|whereas|while)\\s+|(?:,\\s*|\\s+(?:and|then|to)\\s+)(?:then\\s+)?(?=(?:(?:do|must|should)\\s+not\\s+|never\\s+)?${PLAN_ACTION}\\b)`,
-        "iu"
-      )
-    );
-    for (const clause of clauses) {
-      const references = [...clause.matchAll(/@(\d+)@/gu)].map(
-        (match) => paths[Number(match[1])] ?? ""
-      );
-      const mode2 = planClauseAccess(clause, access7);
-      const redirects = [...clause.matchAll(/>{1,2}\s*@(\d+)@/gu)].map(
-        (match) => paths[Number(match[1])] ?? ""
-      );
-      const targets = references.length ? references : /\b(?:it|them|that file|those files)\b/iu.test(clause) ? previousPaths : [];
-      if (references.length) previousPaths = references;
-      for (const relative4 of targets) {
-        const targetMode = redirects.includes(relative4) && !PLAN_PROHIBITION.test(clause) ? "write" : mode2;
-        if (!(relative4.toLowerCase() === ".banzai" || relative4.toLowerCase().startsWith(".banzai/")) || allowed.has(relative4) || targetMode === "read")
-          continue;
-        const target = JSON.stringify(relative4.slice(0, 240));
-        throw new BanzaiError(
-          "PLAN_RUNNER_CONTROL_TASK",
-          targetMode === "write" ? `Plan task ${taskId} uses runner control path ${target} as a write target. Remove that write from the task; keep unrelated implementation work. If configuration is missing, record it in Human prerequisites and use banzai verify.` : `Plan task ${taskId} has ambiguous access to runner control path ${target}. Clarify the action or list read-only inputs under Read-only references: and protected paths under Unchanged paths:. These declarations do not authorize writes.`
-        );
-      }
-    }
-  }
-}
-function planHumanPrerequisites(markdown) {
-  const text4 = markdown.split(/^## Human prerequisites\s*$/imu)[1]?.split(/^## /mu)[0]?.trim();
-  if (text4 === "") return null;
-  return text4 ?? null;
-}
-function parseApprovedPlanTaskIds(markdown) {
-  const headings3 = [...markdown.matchAll(/^## Implementation Tasks\s*$/gmu)];
-  if (headings3.length !== 1) {
-    return completionFailure(
-      "approved_plan_invalid",
-      "Approved plan must contain exactly one Implementation Tasks section."
-    );
-  }
-  const heading = headings3[0];
-  if (heading === void 0) {
-    return completionFailure(
-      "approved_plan_invalid",
-      "Approved plan is missing its Implementation Tasks section."
-    );
-  }
-  const start = heading.index + heading[0].length;
-  const remainder = markdown.slice(start);
-  const nextHeading = remainder.search(/^## /mu);
-  const section = nextHeading === -1 ? remainder : remainder.slice(0, nextHeading);
-  const taskIds = [];
-  for (const line of section.split(/\r?\n/u)) {
-    const match = TASK_HEADING.exec(line);
-    if (match !== null) {
-      const taskId = match[1];
-      const title = match[2];
-      if (taskId === void 0 || title === void 0) {
-        return completionFailure(
-          "approved_plan_invalid",
-          "Approved plan contains a malformed task heading."
-        );
-      }
-      if (title.trim().length === 0) {
-        return completionFailure(
-          "approved_plan_invalid",
-          `Approved task ${taskId} has an empty title.`,
-          taskId
-        );
-      }
-      taskIds.push(taskId);
-    } else if (CHECKBOX_HEADING.test(line)) {
-      return completionFailure(
-        "approved_plan_invalid",
-        "Approved plan contains a checked or malformed task heading."
-      );
-    }
-  }
-  if (taskIds.length === 0) {
-    return completionFailure(
-      "approved_plan_invalid",
-      "Approved plan contains no canonical TNNN tasks."
-    );
-  }
-  if (new Set(taskIds).size !== taskIds.length) {
-    return completionFailure(
-      "approved_plan_invalid",
-      "Approved plan contains duplicate task identifiers."
-    );
-  }
-  return taskIds;
-}
-function unescapeCell(value) {
-  return value.replaceAll("&gt;", ">").replaceAll("&lt;", "<").replaceAll("&#124;", "|").replaceAll("&amp;", "&");
-}
-function decodeJsonCell(value) {
-  const decoded = unescapeCell(value.trim());
-  if (decoded.startsWith("`") && decoded.endsWith("`") && decoded.length >= 2) {
-    return decoded.slice(1, -1);
-  }
-  return decoded;
-}
-function decodesToProjectionShapes(evidenceJson, gapJson) {
-  try {
-    const evidence2 = JSON.parse(evidenceJson);
-    const gap = JSON.parse(gapJson);
-    return Array.isArray(evidence2) && (gap === null || typeof gap === "object" && !Array.isArray(gap));
-  } catch {
-    return false;
-  }
-}
-function parseProjectionCells(line) {
-  const fragments = line.slice(1, -1).split("|");
-  if (fragments.length === 4) {
-    const [taskId, status, evidenceJson, gapJson] = fragments;
-    if (taskId === void 0 || status === void 0 || evidenceJson === void 0 || gapJson === void 0) {
-      return null;
-    }
-    return [
-      unescapeCell(taskId.trim()),
-      unescapeCell(status.trim()),
-      decodeJsonCell(evidenceJson),
-      decodeJsonCell(gapJson)
-    ];
-  }
-  if (fragments.length < 4) {
-    return null;
-  }
-  const first = fragments[0];
-  const second = fragments[1];
-  if (first === void 0 || second === void 0) {
-    return null;
-  }
-  const middle = fragments.slice(2);
-  const candidates = [];
-  for (let boundary = 1; boundary < middle.length; boundary += 1) {
-    const evidenceJson = decodeJsonCell(middle.slice(0, boundary).join("|"));
-    const gapJson = decodeJsonCell(middle.slice(boundary).join("|"));
-    if (decodesToProjectionShapes(evidenceJson, gapJson)) {
-      candidates.push([evidenceJson, gapJson]);
-    }
-  }
-  const recovered = candidates.length === 1 ? candidates[0] : void 0;
-  if (recovered === void 0) {
-    return null;
-  }
-  return [
-    unescapeCell(first.trim()),
-    unescapeCell(second.trim()),
-    recovered[0],
-    recovered[1]
-  ];
-}
-function parseProjectionRecord(line) {
-  const cells = parseProjectionCells(line);
-  if (cells === null) {
-    const rowTask = line.slice(1, -1).split("|")[0]?.trim() ?? "";
-    const rowTaskId = /^T[0-9]{3}$/u.test(rowTask) ? rowTask : null;
-    return completionFailure(
-      "report_projection_invalid",
-      `Plan Task Completion row${rowTaskId === null ? "" : ` ${rowTaskId}`} must contain exactly four cells; escape a literal "|" inside the Evidence and Gap JSON cells as "&#124;".`,
-      rowTaskId
-    );
-  }
-  const [taskId, status, evidenceJson, gapJson] = cells;
-  let evidence2;
-  let gap;
-  try {
-    evidence2 = JSON.parse(evidenceJson);
-    gap = JSON.parse(gapJson);
-  } catch {
-    return completionFailure(
-      "report_projection_invalid",
-      `Report row ${taskId || "unknown"} contains invalid JSON; use raw JSON or one complete outer Markdown code span, never unmatched or repeated backticks.`,
-      /^T[0-9]{3}$/u.test(taskId) ? taskId : null
-    );
-  }
-  if (!/^T[0-9]{3}$/u.test(taskId) || !["completed", "incomplete", "blocked"].includes(status) || !Array.isArray(evidence2) || !(gap === null || typeof gap === "object" && !Array.isArray(gap))) {
-    return completionFailure(
-      "report_projection_invalid",
-      `Report row ${taskId || "unknown"} is malformed.`,
-      /^T[0-9]{3}$/u.test(taskId) ? taskId : null
-    );
-  }
-  return {
-    taskId,
-    status,
-    evidence: evidence2,
-    gap
-  };
-}
-function parsePlanTaskCompletionProjection(markdown) {
-  const headings3 = [...markdown.matchAll(/^## Plan Task Completion\s*$/gmu)];
-  if (headings3.length === 0) {
-    return completionFailure(
-      "report_projection_missing",
-      `Implementation report is missing ${SECTION_HEADING}.`
-    );
-  }
-  if (headings3.length !== 1) {
-    return completionFailure(
-      "report_projection_invalid",
-      "Implementation report contains duplicate Plan Task Completion sections."
-    );
-  }
-  const heading = headings3[0];
-  if (heading === void 0) {
-    return completionFailure(
-      "report_projection_missing",
-      `Implementation report is missing ${SECTION_HEADING}.`
-    );
-  }
-  const start = heading.index + heading[0].length;
-  const remainder = markdown.slice(start);
-  const nextHeading = remainder.search(/^## /mu);
-  const section = nextHeading === -1 ? remainder : remainder.slice(0, nextHeading);
-  const formatLines = section.split(/\r?\n/u).map((line) => line.trim()).filter((line) => line.startsWith("Format:"));
-  if (formatLines.length !== 1 || formatLines[0] !== `Format: \`${PROJECTION_FORMAT}\``) {
-    return completionFailure(
-      "report_projection_invalid",
-      `Plan Task Completion must declare ${PROJECTION_FORMAT}.`
-    );
-  }
-  const tableLines = section.split(/\r?\n/u).map((line) => line.trim()).filter((line) => line.startsWith("|") && line.endsWith("|"));
-  if (tableLines[0] !== "| Task | Status | Evidence | Gap or deviation |" || tableLines[1] !== "| --- | --- | --- | --- |") {
-    return completionFailure(
-      "report_projection_invalid",
-      "Plan Task Completion table header is malformed."
-    );
-  }
-  return {
-    schemaVersion: PLAN_TASK_COMPLETION_SCHEMA_VERSION2,
-    tasks: tableLines.slice(2).map(parseProjectionRecord)
-  };
-}
-function normalizedRepositoryPath(relativePath3, requiredReports = /* @__PURE__ */ new Set()) {
-  if (relativePath3.length === 0 || relativePath3.includes("\\") || /[\u0000-\u001f\u007f-\u009f]/u.test(relativePath3) || relativePath3.length > 500 || path24.posix.isAbsolute(relativePath3) || path24.posix.normalize(relativePath3) !== relativePath3 || relativePath3 === ".." || relativePath3.startsWith("../")) {
-    return completionFailure(
-      "invalid_evidence_path",
-      "Completion evidence path must be normalized and repository-relative."
-    );
-  }
-  const segments = relativePath3.split("/");
-  if (segments.some((segment) => FORBIDDEN_PATH_SEGMENTS.has(segment)) && !requiredReports.has(relativePath3)) {
-    return completionFailure(
-      "evidence_scope_violation",
-      "Completion evidence path uses a runner-control, dependency, cache, or build directory."
-    );
-  }
-  return relativePath3;
-}
-async function validateEvidenceFile(repoRoot, relativePath3, allowedPaths, approvedPaths, taskId, requiredReports) {
-  const normalized = normalizedRepositoryPath(relativePath3, requiredReports);
-  if (relativePath3.startsWith(".banzai/"))
-    await safePath3(repoRoot, relativePath3);
-  if (approvedPaths.has(normalized)) {
-    return completionFailure(
-      "evidence_scope_violation",
-      `${taskId} references evidence outside the authorized changed surface.`,
-      taskId
-    );
-  }
-  const repositoryRoot = await realpath9(repoRoot);
-  const absolutePath = path24.resolve(repositoryRoot, normalized);
-  let resolvedPath;
-  let metadata;
-  try {
-    metadata = await lstat15(absolutePath);
-    resolvedPath = await realpath9(absolutePath);
-  } catch {
-    return completionFailure(
-      "missing_evidence_path",
-      `${taskId} references a missing evidence file.`,
-      taskId
-    );
-  }
-  if (!metadata.isFile() || metadata.isSymbolicLink() || !resolvedPath.startsWith(`${repositoryRoot}${path24.sep}`)) {
-    return completionFailure(
-      "invalid_evidence_path",
-      `${taskId} evidence must be a regular file inside the repository.`,
-      taskId
-    );
-  }
-  if (!allowedPaths.has(normalized)) {
-    return completionFailure(
-      "evidence_scope_violation",
-      `${taskId} references evidence outside the authorized changed surface.`,
-      taskId
-    );
-  }
-}
-function validatePlanTaskCompletionLedgerShape(taskIds, ledger, outcome) {
-  if (ledger === null) {
-    return completionFailure(
-      "missing_ledger",
-      "Strict implementation result is missing taskCompletion."
-    );
-  }
-  const runtimeSchemaVersion = ledger.schemaVersion;
-  if (runtimeSchemaVersion !== PLAN_TASK_COMPLETION_SCHEMA_VERSION2) {
-    return completionFailure(
-      "missing_ledger",
-      "Implementation completion ledger has an unsupported schema."
-    );
-  }
-  const seen = /* @__PURE__ */ new Set();
-  for (const [index, task] of ledger.tasks.entries()) {
-    if (seen.has(task.taskId)) {
-      return completionFailure(
-        "duplicate_task",
-        `Completion ledger duplicates ${task.taskId}.`,
-        task.taskId
-      );
-    }
-    seen.add(task.taskId);
-    if (!taskIds.includes(task.taskId)) {
-      return completionFailure(
-        "unknown_task",
-        `Completion ledger contains unknown task ${task.taskId}.`,
-        task.taskId
-      );
-    }
-    if (taskIds[index] !== task.taskId) {
-      return completionFailure(
-        "task_order_mismatch",
-        `Completion ledger task ${task.taskId} is outside approved plan order.`,
-        task.taskId
-      );
-    }
-    if (!["completed", "incomplete", "blocked"].includes(task.status)) {
-      return completionFailure(
-        "invalid_task_status",
-        `Completion ledger task ${task.taskId} has an invalid status.`,
-        task.taskId
-      );
-    }
-    if (task.status === "completed") {
-      if (task.evidence.length === 0 || task.gap !== null) {
-        return completionFailure(
-          "task_status_conflict",
-          `Completed task ${task.taskId} requires evidence and no gap.`,
-          task.taskId
-        );
-      }
-    } else if (task.gap === null) {
-      return completionFailure(
-        "invalid_gap_reference",
-        `${task.status} task ${task.taskId} requires a gap reference.`,
-        task.taskId
-      );
-    }
-    if (outcome === "completed" && task.status !== "completed") {
-      return completionFailure(
-        "task_status_conflict",
-        `Completed implementation outcome contradicts ${task.taskId}=${task.status}.`,
-        task.taskId
-      );
-    }
-  }
-  if (ledger.tasks.length !== taskIds.length) {
-    const missing3 = taskIds.find((taskId) => !seen.has(taskId)) ?? null;
-    return completionFailure(
-      "missing_task",
-      missing3 === null ? "Completion ledger task count does not match the approved plan." : `Completion ledger is missing ${missing3}.`,
-      missing3
-    );
-  }
-}
-async function readRequiredReport(repoRoot, relativePath3, violation, requiredReports, captured) {
-  if (relativePath3 === null) {
-    return completionFailure(
-      violation,
-      violation === "implementation_report_missing" ? "Implementation result does not identify implementation-report.md." : "Implementation result does not identify test-report.md."
-    );
-  }
-  const normalized = normalizedRepositoryPath(relativePath3, requiredReports);
-  if (relativePath3.startsWith(".banzai/"))
-    await safePath3(repoRoot, relativePath3);
-  const absolute = path24.resolve(repoRoot, normalized);
-  let bytes;
-  try {
-    const metadata = await lstat15(absolute);
-    if (!metadata.isFile() || metadata.isSymbolicLink()) {
-      throw new Error("not a regular file");
-    }
-    const root = await realpath9(repoRoot);
-    const resolved = await realpath9(absolute);
-    if (!resolved.startsWith(`${root}${path24.sep}`)) {
-      throw new Error("outside repository");
-    }
-    bytes = captured ?? await readFile10(absolute);
-  } catch {
-    return completionFailure(
-      violation,
-      violation === "implementation_report_missing" ? "Required implementation report is missing or unsafe." : "Required test report is missing or unsafe."
-    );
-  }
-  return {
-    path: normalized,
-    contents: bytes.toString("utf8"),
-    sha256: createHash14("sha256").update(bytes).digest("hex"),
-    bytes
-  };
-}
-async function validatePlanTaskCompletion(input) {
-  const requiredReports = /* @__PURE__ */ new Set();
-  if (input.artifactBinding !== void 0) {
-    await inspectBoundWork4(input.repoRoot, input.artifactBinding);
-    const roles = input.artifactBinding.binding.artifacts;
-    if (input.planPath !== roles.plan || input.result.artifacts.implementationReport !== roles.implementationReport || input.result.artifacts.testReport !== roles.testReport)
-      return completionFailure(
-        "evidence_scope_violation",
-        "Completion must reference the exact bound plan and required reports."
-      );
-    for (const report of [roles.implementationReport, roles.testReport])
-      if (report) requiredReports.add(report);
-  }
-  const ledger = input.result.taskCompletion;
-  const approval = await digestArtifactBundle(
-    input.repoRoot,
-    input.approval.paths
-  ).catch(
-    () => completionFailure(
-      "approval_invalid",
-      "Approved artifact bundle cannot be validated."
-    )
-  );
-  if (approval.digest !== input.approval.digest || !input.approval.paths.includes(input.planPath)) {
-    return completionFailure(
-      "approval_invalid",
-      "Approved artifact bundle digest or plan membership is invalid."
-    );
-  }
-  const plan = await readFile10(
-    path24.resolve(input.repoRoot, input.planPath),
-    "utf8"
-  ).catch(
-    () => completionFailure(
-      "approved_plan_invalid",
-      "Exact approved plan cannot be read."
-    )
-  );
-  const taskIds = parseApprovedPlanTaskIds(plan);
-  validatePlanTaskCompletionLedgerShape(taskIds, ledger, input.result.outcome);
-  if (ledger === null) {
-    return completionFailure(
-      "missing_ledger",
-      "Strict implementation result is missing taskCompletion."
-    );
-  }
-  const implementationReport = await readRequiredReport(
-    input.repoRoot,
-    input.result.artifacts.implementationReport,
-    "implementation_report_missing",
-    requiredReports
-  );
-  const testReport = await readRequiredReport(
-    input.repoRoot,
-    input.result.artifacts.testReport,
-    "test_report_missing",
-    requiredReports
-  );
-  const projection = parsePlanTaskCompletionProjection(
-    implementationReport.contents
-  );
-  if (JSON.stringify(projection) !== JSON.stringify(ledger)) {
-    return completionFailure(
-      "report_projection_mismatch",
-      "Implementation report projection contradicts the structured completion ledger."
-    );
-  }
-  const snapshot = await workspaceSnapshot(input.repoRoot, {
-    excludedPaths: input.approval.paths,
-    baseline: input.baseline,
-    artifactBinding: input.artifactBinding
-  });
-  const allowedPaths = new Set(
-    snapshot.entries.filter((entry) => entry.kind === "file").map((entry) => entry.path)
-  );
-  allowedPaths.add(implementationReport.path);
-  allowedPaths.add(testReport.path);
-  const approvedPaths = new Set(input.approval.paths);
-  const reportContents = /* @__PURE__ */ new Map([
-    [implementationReport.path, implementationReport.contents],
-    [testReport.path, testReport.contents]
-  ]);
-  for (const task of ledger.tasks) {
-    for (const evidence2 of task.evidence) {
-      await validateEvidenceFile(
-        input.repoRoot,
-        evidence2.path,
-        allowedPaths,
-        approvedPaths,
-        task.taskId,
-        requiredReports
-      );
-    }
-    if (task.gap !== null) {
-      if (![implementationReport.path, testReport.path].includes(
-        task.gap.reportPath
-      )) {
-        return completionFailure(
-          "invalid_gap_reference",
-          `${task.taskId} gap must reference an exact required report.`,
-          task.taskId
-        );
-      }
-      const contents = reportContents.get(task.gap.reportPath) ?? "";
-      const escaped = task.gap.section.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-      if (!new RegExp(`^#{2,6}\\s+${escaped}\\s*$`, "mu").test(contents)) {
-        return completionFailure(
-          "invalid_gap_reference",
-          `${task.taskId} gap section is missing from its report.`,
-          task.taskId
-        );
-      }
-    }
-  }
-  const counts = {
-    total: taskIds.length,
-    completed: ledger.tasks.filter((task) => task.status === "completed").length,
-    incomplete: ledger.tasks.filter((task) => task.status === "incomplete").length,
-    blocked: ledger.tasks.filter((task) => task.status === "blocked").length
-  };
-  return {
-    summary: {
-      schemaVersion: PLAN_TASK_COMPLETION_SCHEMA_VERSION2,
-      status: "valid",
-      sourceAttemptId: input.sourceAttemptId,
-      approvalDigest: input.approval.digest,
-      planTaskDigest: digest4(taskIds),
-      ledgerDigest: digest4(ledger),
-      implementationReport: {
-        path: implementationReport.path,
-        sha256: implementationReport.sha256
-      },
-      testReport: { path: testReport.path, sha256: testReport.sha256 },
-      counts,
-      validatedAt: input.validatedAt ?? (/* @__PURE__ */ new Date()).toISOString()
-    },
-    tasks: ledger.tasks
-  };
-}
-var COMPLETION_REGION_FORMAT = "banzai-plan-task-completion/v2";
-var COMPLETION_REGION_START = `<!-- ${COMPLETION_REGION_FORMAT}:start -->`;
-var COMPLETION_REGION_END = `<!-- ${COMPLETION_REGION_FORMAT}:end -->`;
-var COMPLETION_TABLE_HEADER = "| Task | Status | Evidence | Gap or deviation |";
-var COMPLETION_TABLE_SEPARATOR = "| --- | --- | --- | --- |";
-var ENCODED_PUNCTUATION = /[!-/:-@[-`{-~]/gu;
-var NUMERIC_REFERENCE = /&#([0-9]{2,3});/gu;
-var FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/u;
-var ATX_HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/u;
-function isEncodedPunctuation(code2) {
-  return code2 >= 33 && code2 <= 47 || code2 >= 58 && code2 <= 64 || code2 >= 91 && code2 <= 96 || code2 >= 123 && code2 <= 126;
-}
-function encodeCompletionCell(value) {
-  return JSON.stringify(value).replace(
-    ENCODED_PUNCTUATION,
-    (character) => `&#${character.codePointAt(0)};`
-  );
-}
-function decodeCompletionCell(cell3) {
-  return cell3.replace(NUMERIC_REFERENCE, (reference3, digits) => {
-    const code2 = Number(digits);
-    return isEncodedPunctuation(code2) ? String.fromCodePoint(code2) : reference3;
-  });
-}
-function completionRow(task) {
-  return `| ${encodeCompletionCell(task.taskId)} | ${encodeCompletionCell(task.status)} | ${encodeCompletionCell(task.evidence)} | ${encodeCompletionCell(task.gap)} |`;
-}
-function renderCompletionRegion(ledger) {
-  return [
-    COMPLETION_REGION_START,
-    SECTION_HEADING,
-    "",
-    COMPLETION_TABLE_HEADER,
-    COMPLETION_TABLE_SEPARATOR,
-    ...ledger.tasks.map(completionRow),
-    COMPLETION_REGION_END
-  ].join("\n");
-}
-function parseCompletionRegionRow(line) {
-  if (!line.startsWith("| ") || !line.endsWith(" |")) {
-    return completionFailure(
-      "report_projection_invalid",
-      "Completion region row is not a four-cell table row."
-    );
-  }
-  const cells = line.slice(2, -2).split(" | ");
-  if (cells.length !== 4 || cells.some((cell3) => cell3.includes("|"))) {
-    return completionFailure(
-      "report_projection_invalid",
-      "Completion region row must contain exactly four encoded cells."
-    );
-  }
-  const decoded = cells.map(decodeCompletionCell);
-  let values;
-  try {
-    values = decoded.map((cell3) => JSON.parse(cell3));
-  } catch {
-    return completionFailure(
-      "report_projection_invalid",
-      "Completion region cell does not decode to JSON."
-    );
-  }
-  const [taskId, status, evidence2, gap] = values;
-  if (typeof taskId !== "string" || !/^T[0-9]{3}$/u.test(taskId) || typeof status !== "string" || !["completed", "incomplete", "blocked"].includes(status) || !Array.isArray(evidence2) || !(gap === null || typeof gap === "object" && !Array.isArray(gap))) {
-    return completionFailure(
-      "report_projection_invalid",
-      "Completion region row is malformed.",
-      typeof taskId === "string" && /^T[0-9]{3}$/u.test(taskId) ? taskId : null
-    );
-  }
-  const record7 = {
-    taskId,
-    status,
-    evidence: evidence2,
-    gap
-  };
-  if (completionRow(record7) !== line) {
-    return completionFailure(
-      "report_projection_invalid",
-      `Completion region row ${taskId} is not canonically encoded.`,
-      taskId
-    );
-  }
-  return record7;
-}
-function parseCompletionRegion(region) {
-  const lines = region.split("\n");
-  if (lines.length < 6 || lines[0] !== COMPLETION_REGION_START || lines[1] !== SECTION_HEADING || lines[2] !== "" || lines[3] !== COMPLETION_TABLE_HEADER || lines[4] !== COMPLETION_TABLE_SEPARATOR || lines.at(-1) !== COMPLETION_REGION_END) {
-    return completionFailure(
-      "report_projection_invalid",
-      `Completion region does not follow the ${COMPLETION_REGION_FORMAT} grammar.`
-    );
-  }
-  return {
-    schemaVersion: PLAN_TASK_COMPLETION_SCHEMA_VERSION2,
-    tasks: lines.slice(5, -1).map(parseCompletionRegionRow)
-  };
-}
-function scanLines(markdown) {
-  const lines = [];
-  let offset = 0;
-  let fence = null;
-  for (const raw of markdown.split("\n")) {
-    const text4 = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
-    const start = offset;
-    const end = offset + text4.length;
-    offset += raw.length + 1;
-    if (fence === null) {
-      const open14 = FENCE_OPEN.exec(text4);
-      if (open14?.[1] !== void 0) {
-        fence = { character: open14[1][0] ?? "`", length: open14[1].length };
-        lines.push({ text: text4, start, end, fenced: true });
-        continue;
-      }
-      lines.push({ text: text4, start, end, fenced: false });
-      continue;
-    }
-    const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/u.exec(text4)?.[1];
-    if (close !== void 0 && close.startsWith(fence.character) && close.length >= fence.length) {
-      fence = null;
-    }
-    lines.push({ text: text4, start, end, fenced: true });
-  }
-  if (fence !== null) {
-    return completionFailure(
-      "report_region_invalid",
-      "Implementation report has an unclosed code fence; completion region ownership is ambiguous."
-    );
-  }
-  return lines;
-}
-function headingOf(line) {
-  if (line.fenced) return null;
-  const match = ATX_HEADING.exec(line.text);
-  if (match?.[1] === void 0) return null;
-  const body = (match[2] ?? "").replace(/[ \t]+#+$/u, "").trim();
-  return { level: match[1].length, text: body };
-}
-function scanCompletionRegion(markdown) {
-  const lines = scanLines(markdown);
-  const starts = lines.filter(
-    (line) => !line.fenced && line.text === COMPLETION_REGION_START
-  );
-  const ends = lines.filter(
-    (line) => !line.fenced && line.text === COMPLETION_REGION_END
-  );
-  const looseDelimiters = lines.filter(
-    (line) => !line.fenced && line.text !== COMPLETION_REGION_START && line.text !== COMPLETION_REGION_END && line.text.includes(COMPLETION_REGION_FORMAT) && /^\s*<!--/u.test(line.text)
-  );
-  if (looseDelimiters.length > 0) {
-    return completionFailure(
-      "report_region_invalid",
-      "Implementation report contains a malformed completion region delimiter."
-    );
-  }
-  const legacyHeadings = lines.filter((line) => {
-    const heading = headingOf(line);
-    return heading?.level === 2 && heading.text === "Plan Task Completion";
-  });
-  if (starts.length === 0 && ends.length === 0) {
-    if (legacyHeadings.length === 0) return { kind: "none", start: 0, end: 0 };
-    if (legacyHeadings.length > 1) {
-      return completionFailure(
-        "report_region_invalid",
-        "Implementation report contains duplicate Plan Task Completion sections."
-      );
-    }
-    const heading = legacyHeadings[0];
-    if (heading === void 0) return { kind: "none", start: 0, end: 0 };
-    const next = lines.find((line) => {
-      if (line.start <= heading.start) return false;
-      const candidate = headingOf(line);
-      return candidate !== null && candidate.level <= 2;
-    });
-    return {
-      kind: "legacy",
-      start: heading.start,
-      end: next?.start ?? markdown.length
-    };
-  }
-  const start = starts[0];
-  const end = ends[0];
-  if (starts.length !== 1 || ends.length !== 1 || start === void 0 || end === void 0 || end.start <= start.start) {
-    return completionFailure(
-      "report_region_invalid",
-      "Implementation report must contain exactly one balanced completion region delimiter pair."
-    );
-  }
-  const inside = legacyHeadings.filter(
-    (line) => line.start > start.start && line.start < end.start
-  );
-  if (inside.length !== 1 || legacyHeadings.length !== 1) {
-    return completionFailure(
-      "report_region_invalid",
-      "Completion region delimiters must enclose exactly one Plan Task Completion section and no section may exist outside them."
-    );
-  }
-  const otherTopLevel = lines.some((line) => {
-    if (line.start <= start.start || line.start >= end.start) return false;
-    const heading = headingOf(line);
-    return heading !== null && heading.level <= 2 && heading.text !== "Plan Task Completion";
-  });
-  if (otherTopLevel) {
-    return completionFailure(
-      "report_region_invalid",
-      "Completion region delimiters enclose more than one top-level section."
-    );
-  }
-  return { kind: "v2", start: start.start, end: end.end };
-}
-function eligibleGapHeadings(markdown, region) {
-  const counts = /* @__PURE__ */ new Map();
-  for (const line of scanLines(markdown)) {
-    if (region !== null && region.kind !== "none" && line.start >= region.start && line.start < region.end)
-      continue;
-    const heading = headingOf(line);
-    if (heading === null || heading.level < 2 || heading.text.length === 0)
-      continue;
-    counts.set(heading.text, (counts.get(heading.text) ?? 0) + 1);
-  }
-  return new Set(
-    [...counts.entries()].filter(([, count]) => count === 1).map(([text4]) => text4)
-  );
-}
-function utf8Text(bytes, label) {
-  try {
-    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
-      bytes
-    );
-  } catch {
-    return completionFailure(
-      "report_region_invalid",
-      `${label} is not valid UTF-8; completion region ownership is ambiguous.`
-    );
-  }
-}
-function composeCompletionCandidate(input, ledger) {
-  const text4 = utf8Text(input, "Implementation report");
-  const scan = scanCompletionRegion(text4);
-  const region = renderCompletionRegion(ledger);
-  let output;
-  let action;
-  let start;
-  let end;
-  if (scan.kind === "none") {
-    const separator = text4.length === 0 ? "" : text4.endsWith("\n\n") ? "" : text4.endsWith("\n") ? "\n" : "\n\n";
-    output = `${text4}${separator}${region}
-`;
-    action = "appended";
-    start = Buffer.byteLength(text4, "utf8");
-    end = start;
-  } else {
-    const prefix = text4.slice(0, scan.start);
-    const suffix = text4.slice(scan.end);
-    const replacement = scan.kind === "legacy" ? suffix.length === 0 ? `${region}
-` : `${region}
-
-` : region;
-    output = `${prefix}${replacement}${suffix}`;
-    action = "replaced";
-    start = Buffer.byteLength(prefix, "utf8");
-    end = start + Buffer.byteLength(text4.slice(scan.start, scan.end), "utf8");
-    if (!output.startsWith(prefix) || !output.endsWith(suffix) || Buffer.byteLength(prefix, "utf8") + Buffer.byteLength(suffix, "utf8") !== Buffer.byteLength(output, "utf8") - Buffer.byteLength(replacement, "utf8")) {
-      return completionFailure(
-        "report_region_invalid",
-        "Candidate composition failed to preserve the narrative outside the completion region."
-      );
-    }
-  }
-  const verification = scanCompletionRegion(output);
-  if (verification.kind !== "v2") {
-    return completionFailure(
-      "report_region_invalid",
-      "Candidate composition did not produce exactly one owned completion region."
-    );
-  }
-  const roundtrip = parseCompletionRegion(
-    output.slice(verification.start, verification.end)
-  );
-  if (JSON.stringify(roundtrip) !== JSON.stringify(ledger) || output.slice(verification.start, verification.end) !== region) {
-    return completionFailure(
-      "report_projection_mismatch",
-      "Candidate completion region does not round-trip to the admitted ledger."
-    );
-  }
-  return { bytes: Buffer.from(output, "utf8"), region: { action, start, end } };
-}
-function parsePublishedCompletionRegion(report) {
-  const text4 = utf8Text(report, "Implementation report");
-  const scan = scanCompletionRegion(text4);
-  if (scan.kind !== "v2") {
-    return completionFailure(
-      scan.kind === "none" ? "report_projection_missing" : "report_projection_invalid",
-      scan.kind === "none" ? "Implementation report has no runner-published completion region." : "Implementation report carries a legacy completion section instead of the published v2 region."
-    );
-  }
-  return parseCompletionRegion(text4.slice(scan.start, scan.end));
-}
-async function validateCompletionClaims(input) {
-  const requiredReports = /* @__PURE__ */ new Set();
-  if (input.artifactBinding !== void 0) {
-    await inspectBoundWork4(input.repoRoot, input.artifactBinding);
-    const roles = input.artifactBinding.binding.artifacts;
-    if (input.planPath !== roles.plan || input.artifacts.implementationReport !== roles.implementationReport || input.artifacts.testReport !== roles.testReport)
-      return completionFailure(
-        "evidence_scope_violation",
-        "Completion must reference the exact bound plan and required reports."
-      );
-    for (const report of [roles.implementationReport, roles.testReport])
-      if (report) requiredReports.add(report);
-  }
-  const approval = await digestArtifactBundle(
-    input.repoRoot,
-    input.approval.paths
-  ).catch(
-    () => completionFailure(
-      "approval_invalid",
-      "Approved artifact bundle cannot be validated."
-    )
-  );
-  if (approval.digest !== input.approval.digest || !input.approval.paths.includes(input.planPath)) {
-    return completionFailure(
-      "approval_invalid",
-      "Approved artifact bundle digest or plan membership is invalid."
-    );
-  }
-  const plan = await readFile10(
-    path24.resolve(input.repoRoot, input.planPath),
-    "utf8"
-  ).catch(
-    () => completionFailure(
-      "approved_plan_invalid",
-      "Exact approved plan cannot be read."
-    )
-  );
-  const taskIds = parseApprovedPlanTaskIds(plan);
-  validatePlanTaskCompletionLedgerShape(taskIds, input.ledger, input.outcome);
-  const ledger = input.ledger;
-  if (ledger === null) {
-    return completionFailure(
-      "missing_ledger",
-      "Strict implementation result is missing taskCompletion."
-    );
-  }
-  const implementationReport = await readRequiredReport(
-    input.repoRoot,
-    input.artifacts.implementationReport,
-    "implementation_report_missing",
-    requiredReports,
-    input.captured?.implementationReport
-  );
-  const testReport = await readRequiredReport(
-    input.repoRoot,
-    input.artifacts.testReport,
-    "test_report_missing",
-    requiredReports,
-    input.captured?.testReport
-  );
-  const region = scanCompletionRegion(
-    utf8Text(implementationReport.bytes, "Implementation report")
-  );
-  const snapshot = await workspaceSnapshot(input.repoRoot, {
-    excludedPaths: input.approval.paths,
-    baseline: input.baseline,
-    artifactBinding: input.artifactBinding
-  });
-  const allowedPaths = new Set(
-    snapshot.entries.filter((entry) => entry.kind === "file").map((entry) => entry.path)
-  );
-  allowedPaths.add(implementationReport.path);
-  allowedPaths.add(testReport.path);
-  const approvedPaths = new Set(input.approval.paths);
-  const gapHeadings = /* @__PURE__ */ new Map([
-    [
-      implementationReport.path,
-      eligibleGapHeadings(implementationReport.contents, region)
-    ],
-    [testReport.path, eligibleGapHeadings(testReport.contents, null)]
-  ]);
-  for (const task of ledger.tasks) {
-    for (const evidence2 of task.evidence) {
-      await validateEvidenceFile(
-        input.repoRoot,
-        evidence2.path,
-        allowedPaths,
-        approvedPaths,
-        task.taskId,
-        requiredReports
-      );
-    }
-    if (task.gap !== null) {
-      const headings3 = gapHeadings.get(task.gap.reportPath);
-      if (headings3 === void 0) {
-        return completionFailure(
-          "invalid_gap_reference",
-          `${task.taskId} gap must reference an exact required report.`,
-          task.taskId
-        );
-      }
-      if (!headings3.has(task.gap.section)) {
-        return completionFailure(
-          "invalid_gap_reference",
-          `${task.taskId} gap section is not a unique preserved narrative heading of its report.`,
-          task.taskId
-        );
-      }
-    }
-  }
-  return {
-    ledger,
-    taskIds,
-    approvalDigest: input.approval.digest,
-    planTaskDigest: digest4(taskIds),
-    ledgerDigest: digest4(ledger),
-    counts: completionCounts(taskIds, ledger),
-    implementationReport: {
-      path: implementationReport.path,
-      bytes: implementationReport.bytes,
-      sha256: implementationReport.sha256,
-      region
-    },
-    testReport: {
-      path: testReport.path,
-      bytes: testReport.bytes,
-      sha256: testReport.sha256
-    }
-  };
-}
-function completionCounts(taskIds, ledger) {
-  return {
-    total: taskIds.length,
-    completed: ledger.tasks.filter((task) => task.status === "completed").length,
-    incomplete: ledger.tasks.filter((task) => task.status === "incomplete").length,
-    blocked: ledger.tasks.filter((task) => task.status === "blocked").length
-  };
-}
-function ledgerDigest(ledger) {
-  return digest4(ledger);
-}
-function planTaskDigest(taskIds) {
-  return digest4(taskIds);
-}
-function summariesMatch(expected, actual) {
-  const normalize = (summary2) => ({
-    ...summary2,
-    validatedAt: null,
-    sourceAttemptKind: null
-  });
-  return JSON.stringify(normalize(expected)) === JSON.stringify(normalize(actual));
-}
-function validatePlanVerificationObligations(plan, verification) {
-  if (!plan.includes("banzai-verification-obligations/")) return;
-  try {
-    if (parseVerificationObligations(
-      plan,
-      parseVerificationConfiguration(verification)
-    ) !== null)
-      return;
-  } catch {
-  }
-  throw new PlanTaskCompletionError(
-    "approved_plan_invalid",
-    "The plan verification obligation inventory is missing, ambiguous, contradictory or stale."
-  );
-}
-
 // src/prompt-envelope.ts
 function createPromptEnvelope(components) {
   const nonEmpty2 = components.filter((component) => component.text.length > 0);
@@ -32007,7 +34078,7 @@ Inspect existing description.md, plan.md, and relevant ADRs; verify their curren
 Return one complete current phase-result-v4 result for this new attempt. If planning is already ready, validate the bundle and return its normal human decision gate. Never change production code, infer human approval, or modify Banzai control state.`
   );
 }
-function implementationPromptEnvelope(slug, approvalDigest, artifactPaths2, _verificationProfiles, approvedTaskIds = [], completionRepair = null, humanDecisions = []) {
+function implementationPromptEnvelope(slug, approvalDigest, artifactPaths2, _verificationProfiles, approvedTaskIds2 = [], completionRepair = null, humanDecisions = []) {
   return phaseEnvelope("implementation", [
     {
       category: "phase_instructions",
@@ -32050,7 +34121,7 @@ ${artifactPaths2.map((item) => `- ${item}`).join("\n")}`
     {
       category: "completion_evidence",
       text: `Approved task IDs:
-${approvedTaskIds.map((item) => `- ${item}`).join("\n")}`
+${approvedTaskIds2.map((item) => `- ${item}`).join("\n")}`
     },
     {
       category: "recovery_instructions",
@@ -32273,739 +34344,22 @@ ${JSON.stringify(input.triageHistory, null, 2)}`
   ]);
 }
 
-// src/review-artifact.ts
-import { createHash as createHash15, randomUUID as randomUUID10 } from "node:crypto";
-import { link as link3, mkdir as mkdir8, open as open11, readFile as readFile11, rename as rename7, unlink as unlink7 } from "node:fs/promises";
-import path25 from "node:path";
-var REQUIRED_SECTIONS = [
-  "## Review Scope",
-  "## Summary",
-  "## Findings",
-  "## Previously Accepted Findings",
-  "## Deferred Coverage",
-  "## Handoff"
-];
-var ReviewArtifactValidationError = class extends BanzaiError {
-  diagnostics;
-  constructor(diagnostics) {
-    super(
-      "INVALID_REVIEW_ARTIFACT",
-      diagnostics[0] ?? "Review artifact failed content validation."
-    );
-    this.name = "ReviewArtifactValidationError";
-    this.diagnostics = [...diagnostics];
-  }
-};
-function reviewArtifactPath(slug, iteration, bound) {
-  if (bound !== void 0)
-    return `${bound.binding.artifacts.reviewDirectory}/review-${iteration}.md`;
-  return path25.posix.join(
-    "documentation",
-    "features",
-    slug,
-    `review-${iteration}.md`
-  );
-}
-function evidenceLocation(finding) {
-  return finding.evidence.map(
-    (evidence2) => evidence2.line === null ? evidence2.path : `${evidence2.path}:${evidence2.line}`
-  );
-}
-function renderVerificationEvidence(verification) {
-  return verification.length === 0 ? "- None recorded." : verification.map(
-    (item) => `- \`${item.name}\`: exit=${item.exitCode}, command=\`${[
-      item.command,
-      ...item.args
-    ].join(" ")}\``
-  ).join("\n");
-}
-function renderPlanTaskReviewEvidence(completion) {
-  if (completion === void 0 || completion === null) {
-    return "- Unavailable.";
-  }
-  return [
-    `- Approval digest: \`${completion.approvalDigest}\``,
-    `- Plan task digest: \`${completion.planTaskDigest}\``,
-    `- Ledger digest: \`${completion.ledgerDigest}\``,
-    `- Completion: \`${completion.completed}/${completion.total}\``,
-    `- Implementation report: \`${completion.implementationReport}\``,
-    `- Test report: \`${completion.testReport}\``,
-    ...completion.tasks.map(
-      (task) => `- \`${task.taskId}\`: \`${task.status}\`; evidence=${JSON.stringify(task.evidence)}; gap=${JSON.stringify(task.gap)}`
-    )
-  ].join("\n");
-}
-function renderReviewArtifact(result, context) {
-  if (result.schemaVersion === 2)
-    return renderCurrentReviewArtifact(result, context);
-  const approvedArtifacts = context.approvedArtifactPaths.map((artifactPath) => `- \`${artifactPath}\``).join("\n");
-  const verification = renderVerificationEvidence(context.verification);
-  const taskCompletion = renderPlanTaskReviewEvidence(context.taskCompletion);
-  const findings = result.findings.length === 0 ? "No findings." : result.findings.map((finding) => {
-    const evidence2 = finding.evidence.map((item) => {
-      const location = item.line === null ? item.path : `${item.path}:${item.line}`;
-      return `  - \`${location}\` \u2014 ${item.detail}`;
-    }).join("\n");
-    const violates = finding.violates.length === 0 ? "None recorded." : finding.violates.map((item) => `\`${item}\``).join(", ");
-    return `### ${finding.id} \u2014 ${finding.summary}
-
-- Severity: \`${finding.severity}\`
-- Category: \`${finding.category}\`
-- Confidence: \`${finding.confidence}\`
-- Evidence:
-${evidence2}
-- Violates: ${violates}
-- Reproduction: ${finding.reproduction ?? "Not provided."}
-- Fix acceptance: ${finding.fixAcceptance}`;
-  }).join("\n\n");
-  const reviewed = result.reviewedFindingIds.length === 0 ? "None." : result.reviewedFindingIds.map((id3) => `\`${id3}\``).join(", ");
-  const deferred = result.deferredCoverage.length === 0 ? "None." : result.deferredCoverage.map((item) => `- ${item}`).join("\n");
-  const handoff = result.verdict === "pass" ? "The review passed. No finding triage is required." : "Human triage is required. Only explicitly accepted finding IDs may enter the fix phase.";
-  return `# Implementation Review: ${context.slug}
-
-- Format: \`banzai-feature-review/v1\`
-- Feature slug: \`${context.slug}\`
-- Review iteration: \`${context.iteration}\`
-- Verdict: \`${result.verdict}\`
-- Workspace digest: \`${context.workspaceDigest}\`
-- Review artifact: \`${context.path}\`
-
-## Review Scope
-
-Approved artifacts:
-${approvedArtifacts}
-
-Deterministic verification:
-${verification}
-
-Validated plan task completion:
-${taskCompletion}
-
-## Summary
-
-${result.summary}
-
-## Findings
-
-${findings}
-
-## Previously Accepted Findings
-
-Previously accepted findings: ${reviewed}
-
-## Deferred Coverage
-
-${deferred}
-
-## Handoff
-
-${handoff}
-`;
-}
-function reviewValue(value) {
-  const ordered = (value2) => {
-    if (Array.isArray(value2)) return value2.map(ordered);
-    if (value2 !== null && typeof value2 === "object")
-      return Object.fromEntries(
-        Object.entries(value2).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, item]) => [key, ordered(item)])
-      );
-    return value2;
-  };
-  const text4 = JSON.stringify(ordered(value), null, 2);
-  const fence = "`".repeat(
-    Math.max(
-      3,
-      ...[...text4.matchAll(/`+/gu)].map((match) => match[0].length + 1)
-    )
-  );
-  return `${fence}json
-${text4}
-${fence}`;
-}
-function renderCurrentReviewArtifact(value, context) {
-  const result = parseCurrentReviewResult2(value);
-  const snapshot = parseReviewSnapshot3(context.snapshot);
-  validateReviewScope(result, {
-    snapshotDigest: snapshot.digest,
-    approvedArtifactPaths: snapshot.approval.paths,
-    requiredFindingIds: snapshot.requiredFindingIds
-  });
-  if (JSON.stringify({ ...context, snapshot: void 0 }) !== JSON.stringify({ ...snapshot.artifact, snapshot: void 0 })) {
-    if (reviewValue({ ...context, snapshot: void 0 }) !== reviewValue(snapshot.artifact))
-      throw new BanzaiError(
-        "INVALID_REVIEW_SNAPSHOT",
-        "Rendering context differs from the recorded review snapshot."
-      );
-  }
-  const coverage = snapshot.approval.paths.map(
-    (path37) => result.scopeAcknowledgment.artifacts.find((entry) => entry.path === path37)
-  );
-  const handoff = {
-    pass: "The review passed. No finding triage is required.",
-    changes_requested: "Human triage is required. Only explicitly accepted finding IDs may enter the fix phase.",
-    blocked: "Review is blocked. Required coverage remains incomplete where recorded. Resolve the blocker before an explicit review retry.",
-    replan_required: "Review requires replanning through the existing human approval lifecycle."
-  }[result.verdict];
-  const guided = snapshot.schemaVersion === 4 || snapshot.schemaVersion === 5 && snapshot.configurationSetup !== void 0;
-  return [
-    "# Implementation Review",
-    snapshot.schemaVersion === 6 ? "- Format: `banzai-feature-review/v7`" : snapshot.schemaVersion === 5 ? "- Format: `banzai-feature-review/v6`" : snapshot.schemaVersion === 4 ? "- Format: `banzai-feature-review/v5`" : snapshot.schemaVersion === 3 ? "- Format: `banzai-feature-review/v4`" : snapshot.schemaVersion === 2 ? "- Format: `banzai-feature-review/v3`" : "- Format: `banzai-feature-review/v2`",
-    reviewValue({
-      slug: context.slug,
-      iteration: context.iteration,
-      verdict: result.verdict,
-      artifactPath: context.path,
-      workspaceDigest: context.workspaceDigest,
-      snapshotDigest: snapshot.digest,
-      ...snapshot.schemaVersion >= 2 ? {
-        workId: snapshot.artifactBinding?.binding.workId,
-        snapshotSchema: snapshot.schema
-      } : {},
-      resultContract: snapshot.outputContract
-    }),
-    "## Review Scope",
-    "### Runner-required approved scope",
-    reviewValue(snapshot.approval.paths),
-    "### Reviewer-acknowledged coverage",
-    "An acknowledgment is a reviewer assertion, not independent proof of reading or substantive assessment.",
-    reviewValue({
-      schemaVersion: result.scopeAcknowledgment.schemaVersion,
-      snapshotDigest: result.scopeAcknowledgment.snapshotDigest,
-      reviewMode: snapshot.reviewMode,
-      artifacts: coverage
-    }),
-    "### Recorded verification (runner evidence)",
-    reviewValue(
-      snapshot.artifact.verificationEvidence ?? snapshot.artifact.verification
-    ),
-    ...guided ? [
-      "### Configuration coverage and runner-authored changes",
-      "Coverage below distinguishes configured, bootstrap-deferred and skipped substantive verification. Only the exact recorded deltas are runner-authored; they do not attribute the whole configuration file. Historical deltas may have later user changes, and carried-in changes retain separate provenance. Inspect .banzai/config.json in this candidate.",
-      ...snapshot.configurationSetup?.coverage === "skipped" && snapshot.artifact.verification.length === 0 ? [
-        "No hygiene commands were configured; no verification command was executed for this skipped round."
-      ] : [],
-      reviewValue({
-        verificationMode: snapshot.verificationMode,
-        ...snapshot.configurationSetup
-      })
-    ] : [],
-    "### Validated plan task completion (runner evidence)",
-    reviewValue({
-      source: snapshot.completionSource,
-      projection: snapshot.artifact.taskCompletion ?? null
-    }),
-    ...snapshot.schemaVersion === 5 || snapshot.schemaVersion === 6 ? [
-      "### Runner-owned completion publication (runner evidence)",
-      "The completion region of the implementation report was rendered and published by the runner from the validated ledger; the model authored the claims, narrative and engineering changes. These identities name the retained capture, candidate and receipt proof. Valid structure is not proof that work was done.",
-      reviewValue(snapshot.completionPublication ?? null)
-    ] : [],
-    ...snapshot.schemaVersion === 6 ? [
-      "### Task verification (runner evidence)",
-      "Check absence is not a passing suite. Assess requirement coverage and unjustified weakening independently of command identity.",
-      reviewValue(snapshot.taskVerification)
-    ] : [],
-    "## Summary",
-    reviewValue(result.summary),
-    "## Findings",
-    result.findings.length === 0 ? "No findings." : result.findings.map((finding) => `### ${finding.id}
-
-${reviewValue(finding)}`).join("\n\n"),
-    "## Previously Accepted Findings",
-    reviewValue({
-      reviewedFindingIds: result.reviewedFindingIds,
-      unreviewedFindingIds: snapshot.requiredFindingIds.filter(
-        (id3) => !result.reviewedFindingIds.includes(id3)
-      )
-    }),
-    "## Review Notes",
-    reviewValue(result.reviewNotes),
-    "## Deferred Coverage",
-    reviewValue(result.deferredCoverage),
-    "## Handoff",
-    handoff,
-    ""
-  ].join("\n\n").replace(/\n+$/u, "\n");
-}
-function requireContent(contents, marker, label, diagnostics) {
-  if (!contents.includes(marker)) {
-    diagnostics.push(`Review artifact is missing ${label}: ${marker}`);
-  }
-}
-function requireSectionBody(contents, heading, label, diagnostics) {
-  const start = contents.indexOf(heading);
-  if (start === -1) {
-    diagnostics.push(`Review artifact has empty ${label}.`);
-    return "";
-  }
-  const bodyStart = start + heading.length;
-  const nextSection = contents.indexOf("\n## ", bodyStart);
-  const body = contents.slice(bodyStart, nextSection === -1 ? void 0 : nextSection).trim();
-  if (body.length === 0) {
-    diagnostics.push(`Review artifact has empty ${label}.`);
-  }
-  return body;
-}
-function approvedArtifactScope(contents, diagnostics) {
-  const scope = requireSectionBody(
-    contents,
-    "## Review Scope",
-    "review scope",
-    diagnostics
-  );
-  const paths = /* @__PURE__ */ new Set();
-  for (const line of scope.split(/\r?\n/u)) {
-    let candidate = line.trim().replace(/^[-*+]\s+/u, "").trim();
-    if (candidate.length >= 2 && candidate.startsWith("`") && candidate.endsWith("`")) {
-      candidate = candidate.slice(1, -1).trim();
-    }
-    if (candidate.length > 0 && !/\s/u.test(candidate)) {
-      paths.add(candidate);
-    }
-  }
-  return paths;
-}
-function repositoryPath(repoRoot, relativePath3) {
-  const repositoryRoot = path25.resolve(repoRoot);
-  const absolutePath = path25.resolve(repositoryRoot, relativePath3);
-  if (!absolutePath.startsWith(`${repositoryRoot}${path25.sep}`)) {
-    throw new BanzaiError(
-      "INVALID_REVIEW_ARTIFACT_PATH",
-      "Review artifact path escapes the repository."
-    );
-  }
-  return absolutePath;
-}
-async function validateReviewArtifactSource(repoRoot, result, context, sourcePath3, requireAttemptOwnedCandidate) {
-  if (context.snapshot?.artifactBinding)
-    await inspectBoundWork4(repoRoot, context.snapshot.artifactBinding);
-  const expectedPath = reviewArtifactPath(
-    context.slug,
-    context.iteration,
-    context.snapshot?.artifactBinding
-  );
-  if (context.path !== expectedPath) {
-    throw new BanzaiError(
-      "INVALID_REVIEW_ARTIFACT_PATH",
-      `Review artifact must be written to ${expectedPath}.`
-    );
-  }
-  const absolutePath = repositoryPath(repoRoot, context.path);
-  const absoluteCandidatePath = repositoryPath(repoRoot, sourcePath3);
-  if (result.schemaVersion === 2) {
-    await assertReviewPathOwned(repoRoot, sourcePath3);
-    await assertReviewPathOwned(repoRoot, context.path, true);
-  }
-  if (requireAttemptOwnedCandidate && absoluteCandidatePath === absolutePath) {
-    throw new BanzaiError(
-      "INVALID_REVIEW_ARTIFACT_PATH",
-      "Review candidate path must differ from the canonical artifact path."
-    );
-  }
-  const contents = await readFile11(absoluteCandidatePath, "utf8").catch(() => {
-    throw new BanzaiError(
-      "REVIEW_ARTIFACT_MISSING",
-      `Reviewer did not write candidate ${sourcePath3}.`
-    );
-  });
-  if (result.schemaVersion === 2) {
-    const expected = renderReviewArtifact(result, context);
-    if (contents !== expected)
-      throw new ReviewArtifactValidationError([
-        "Review candidate bytes differ from the deterministic snapshot projection."
-      ]);
-    return {
-      contents,
-      sha256: createHash15("sha256").update(contents).digest("hex")
-    };
-  }
-  const diagnostics = [];
-  requireContent(
-    contents,
-    `# Implementation Review: ${context.slug}`,
-    "title",
-    diagnostics
-  );
-  requireContent(
-    contents,
-    "- Format: `banzai-feature-review/v1`",
-    "format marker",
-    diagnostics
-  );
-  requireContent(
-    contents,
-    `- Feature slug: \`${context.slug}\``,
-    "feature slug",
-    diagnostics
-  );
-  requireContent(
-    contents,
-    `- Review iteration: \`${context.iteration}\``,
-    "review iteration",
-    diagnostics
-  );
-  requireContent(
-    contents,
-    `- Verdict: \`${result.verdict}\``,
-    "verdict",
-    diagnostics
-  );
-  requireContent(
-    contents,
-    `- Workspace digest: \`${context.workspaceDigest}\``,
-    "workspace digest",
-    diagnostics
-  );
-  requireContent(
-    contents,
-    `- Review artifact: \`${context.path}\``,
-    "review artifact path",
-    diagnostics
-  );
-  for (const section of REQUIRED_SECTIONS) {
-    requireContent(contents, section, "required section", diagnostics);
-  }
-  requireSectionBody(contents, "## Summary", "review summary", diagnostics);
-  const deferredCoverageBody = requireSectionBody(
-    contents,
-    "## Deferred Coverage",
-    "deferred coverage",
-    diagnostics
-  );
-  const recordsNoDeferredCoverage = /^-?\s*none\.?$/i.test(
-    deferredCoverageBody
-  );
-  const hasDeferredCoverage = result.deferredCoverage.length > 0;
-  if (recordsNoDeferredCoverage === hasDeferredCoverage) {
-    diagnostics.push(
-      "Review artifact deferred coverage presence disagrees with the structured result."
-    );
-  }
-  const approvedScope = approvedArtifactScope(contents, diagnostics);
-  for (const approvedArtifactPath of context.approvedArtifactPaths) {
-    if (!approvedScope.has(approvedArtifactPath)) {
-      diagnostics.push(
-        `Review artifact does not list required approved-scope path: \`${approvedArtifactPath}\`.`
-      );
-    }
-  }
-  for (const verification of context.verification) {
-    requireContent(
-      contents,
-      `\`${verification.name}\`: exit=${verification.exitCode}`,
-      "deterministic verification evidence",
-      diagnostics
-    );
-  }
-  for (const line of renderPlanTaskReviewEvidence(context.taskCompletion).split(
-    "\n"
-  )) {
-    requireContent(
-      contents,
-      line,
-      "validated plan task completion evidence",
-      diagnostics
-    );
-  }
-  if (result.findings.length === 0) {
-    requireContent(
-      contents,
-      "No findings.",
-      "clean-review finding statement",
-      diagnostics
-    );
-  }
-  for (const finding of result.findings) {
-    requireContent(
-      contents,
-      `### ${finding.id} `,
-      `finding ${finding.id}`,
-      diagnostics
-    );
-    requireContent(
-      contents,
-      finding.summary,
-      `finding ${finding.id} summary`,
-      diagnostics
-    );
-    requireContent(
-      contents,
-      `- Severity: \`${finding.severity}\``,
-      `finding ${finding.id} severity`,
-      diagnostics
-    );
-    requireContent(
-      contents,
-      `- Category: \`${finding.category}\``,
-      `finding ${finding.id} category`,
-      diagnostics
-    );
-    requireContent(
-      contents,
-      `- Confidence: \`${finding.confidence}\``,
-      `finding ${finding.id} confidence`,
-      diagnostics
-    );
-    const violates = finding.violates.length === 0 ? "None recorded." : finding.violates.map((item) => `\`${item}\``).join(", ");
-    requireContent(
-      contents,
-      `- Violates: ${violates}`,
-      `finding ${finding.id} violated artifacts`,
-      diagnostics
-    );
-    requireContent(
-      contents,
-      `- Reproduction: ${finding.reproduction ?? "Not provided."}`,
-      `finding ${finding.id} reproduction`,
-      diagnostics
-    );
-    requireContent(
-      contents,
-      `- Fix acceptance: ${finding.fixAcceptance}`,
-      `finding ${finding.id} fix acceptance`,
-      diagnostics
-    );
-    for (const location of evidenceLocation(finding)) {
-      requireContent(
-        contents,
-        `\`${location}\``,
-        `finding ${finding.id} evidence`,
-        diagnostics
-      );
-    }
-  }
-  for (const findingId of result.reviewedFindingIds) {
-    requireContent(
-      contents,
-      `\`${findingId}\``,
-      `previously accepted finding ${findingId}`,
-      diagnostics
-    );
-  }
-  if (diagnostics.length > 0) {
-    throw new ReviewArtifactValidationError(diagnostics);
-  }
-  return {
-    contents,
-    sha256: createHash15("sha256").update(contents).digest("hex")
-  };
-}
-async function validateReviewArtifact(repoRoot, result, context) {
-  return await validateReviewArtifactSource(
-    repoRoot,
-    result,
-    context,
-    context.candidatePath,
-    true
-  );
-}
-async function validateHistoricalReviewArtifact(repoRoot, result, context) {
-  return await validateReviewArtifactSource(
-    repoRoot,
-    result,
-    context,
-    context.path,
-    false
-  );
-}
-async function publishReviewArtifact(repoRoot, context, candidate) {
-  if (createHash15("sha256").update(candidate.contents).digest("hex") !== candidate.sha256) {
-    throw new BanzaiError(
-      "INVALID_REVIEW_CANDIDATE_EVIDENCE",
-      "Review candidate publication proof does not match its contents."
-    );
-  }
-  if (context.snapshot?.artifactBinding)
-    await inspectBoundWork4(repoRoot, context.snapshot.artifactBinding);
-  const expectedPath = reviewArtifactPath(
-    context.slug,
-    context.iteration,
-    context.snapshot?.artifactBinding
-  );
-  if (context.path !== expectedPath) {
-    throw new BanzaiError(
-      "INVALID_REVIEW_ARTIFACT_PATH",
-      `Review artifact must be written to ${expectedPath}.`
-    );
-  }
-  const absolutePath = repositoryPath(repoRoot, context.path);
-  if (context.snapshot !== void 0) {
-    await assertReviewPathOwned(repoRoot, context.path, true);
-    const previous = await readFile11(absolutePath, "utf8").catch(
-      (error) => {
-        if (error.code === "ENOENT") return null;
-        throw error;
-      }
-    );
-    if (previous !== null) {
-      if (previous !== candidate.contents)
-        throw new BanzaiError(
-          "INVALID_REVIEW_CANDIDATE_EVIDENCE",
-          "Canonical review already contains different evidence."
-        );
-      return;
-    }
-  }
-  const temporaryPath = `${absolutePath}.${randomUUID10()}.tmp`;
-  const binding = context.snapshot?.artifactBinding?.binding;
-  const privateWork = binding?.layout === "private";
-  const verifyDestinations = async () => {
-    if (privateWork)
-      await verifyIgnores4(repoRoot, binding, [
-        context.path,
-        path25.relative(repoRoot, temporaryPath)
-      ]);
-  };
-  await verifyDestinations();
-  await mkdir8(path25.dirname(absolutePath), {
-    recursive: true,
-    mode: privateWork ? 448 : 493
-  });
-  const handle = await open11(temporaryPath, "wx", privateWork ? 384 : 420);
-  try {
-    try {
-      await handle.writeFile(candidate.contents, "utf8");
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-    await verifyDestinations();
-    if (context.snapshot === void 0)
-      await rename7(temporaryPath, absolutePath);
-    else {
-      await link3(temporaryPath, absolutePath);
-      await unlink7(temporaryPath);
-    }
-  } catch (error) {
-    await unlink7(temporaryPath).catch(() => void 0);
-    throw error;
-  }
-}
-
-// src/state-machine.ts
-var ALLOWED_TRANSITIONS = {
-  created: ["selecting", "cancelled", "blocked"],
-  selecting: ["planning", "implementing", "cancelled", "blocked"],
-  planning: [
-    "needs_adr_approval",
-    "needs_plan_approval",
-    "needs_human_decision",
-    "blocked",
-    "cancelled"
-  ],
-  needs_adr_approval: ["planning", "cancelled", "blocked"],
-  needs_plan_approval: ["plan_approved", "cancelled", "blocked"],
-  needs_human_decision: [
-    "selecting",
-    "planning",
-    "verifying",
-    "cancelled",
-    "blocked"
-  ],
-  plan_approved: ["implementing", "cancelled", "blocked"],
-  implementing: ["needs_human_decision", "verifying", "cancelled", "blocked"],
-  verifying: [
-    "needs_human_decision",
-    "reviewing",
-    "done",
-    "cancelled",
-    "blocked"
-  ],
-  reviewing: [
-    "needs_human_decision",
-    "verifying",
-    "needs_triage",
-    "done",
-    "cancelled",
-    "blocked"
-  ],
-  needs_triage: [
-    "needs_human_decision",
-    "verifying",
-    "fixing",
-    "done",
-    "cancelled",
-    "blocked"
-  ],
-  fixing: ["needs_human_decision", "verifying", "cancelled", "blocked"],
-  done: [],
-  blocked: [
-    "created",
-    "selecting",
-    "planning",
-    "plan_approved",
-    "implementing",
-    "verifying",
-    "reviewing",
-    "fixing",
-    "cancelled"
-  ],
-  cancelled: []
-};
-function transitionState(state, next) {
-  const pending = state.pendingHumanDecision;
-  const laterConfigurationBoundary = (state.status === "reviewing" || state.status === "needs_triage") && (next === "needs_human_decision" || next === "verifying");
-  const configurationTransition = laterConfigurationBoundary || state.status === "needs_human_decision" && next === "verifying" || state.status === "verifying" && next === "needs_human_decision";
-  const guided = state.schemaVersion === 6 || state.schemaVersion === 7 && state.configurationSetup !== void 0;
-  if (configurationTransition && (!guided || (laterConfigurationBoundary && next === "verifying" ? state.pendingHumanDecision != null || !["configured", "bootstrap_deferred"].includes(
-    state.configurationSetup?.coverage ?? ""
-  ) : state.pendingHumanDecision?.kind !== "configuration_prerequisite") || state.configurationSetup?.continuation === null || state.configurationSetup?.continuation === void 0 || state.activeAttempt !== null || state.activeProcess !== null || next === "verifying" && !laterConfigurationBoundary && !state.configurationSetup.resolutions.some(
-    (resolution) => pending?.kind === "configuration_prerequisite" && resolution.proposalId === pending.proposalId
-  ))) {
-    throw new BanzaiError(
-      "INVALID_TRANSITION",
-      "Only a validated configuration prerequisite checkpoint can use this continuation."
-    );
-  }
-  if (!ALLOWED_TRANSITIONS[state.status].includes(next)) {
-    throw new BanzaiError(
-      "INVALID_TRANSITION",
-      `Cannot transition run ${state.runId} from ${state.status} to ${next}.`
-    );
-  }
-  state.status = next;
-  if (next !== "blocked") {
-    state.blockedFrom = null;
-    state.blockReason = null;
-  }
-}
-function blockState(state, reason) {
-  if (state.status === "done" || state.status === "cancelled") {
-    throw new BanzaiError(
-      "INVALID_TRANSITION",
-      `Cannot block a ${state.status} run.`
-    );
-  }
-  if (state.status !== "blocked") {
-    state.blockedFrom = state.status;
-    transitionState(state, "blocked");
-  }
-  state.blockReason = reason;
-}
-function requireState(state, allowed, operation) {
-  if (!allowed.includes(state.status)) {
-    throw new BanzaiError(
-      "INVALID_STATE",
-      `${operation} requires ${allowed.join(" or ")}, but the run is ${state.status}.`
-    );
-  }
-}
-
 // src/store.ts
-import { createHash as createHash16, randomUUID as randomUUID11 } from "node:crypto";
+import { createHash as createHash19, randomUUID as randomUUID11 } from "node:crypto";
 import { constants as constants11, readFileSync, unlinkSync } from "node:fs";
 import {
-  lstat as lstat16,
+  lstat as lstat18,
   link as link4,
   mkdir as mkdir9,
   open as open12,
   readdir as readdir10,
-  readFile as readFile12,
-  realpath as realpath10,
+  readFile as readFile16,
+  realpath as realpath11,
   rename as rename8,
   unlink as unlink8,
   writeFile as writeFile3
 } from "node:fs/promises";
-import path26 from "node:path";
+import path30 from "node:path";
 import process3 from "node:process";
 function safeEvidenceSegment(value, label, maximum = 300) {
   if (value.length === 0 || value.length > maximum || value === "." || value === ".." || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value)) {
@@ -33017,9 +34371,9 @@ function safeEvidenceSegment(value, label, maximum = 300) {
   return value;
 }
 function containedEvidencePath(base, ...segments) {
-  const resolvedBase = path26.resolve(base);
-  const resolved = path26.resolve(resolvedBase, ...segments);
-  if (!resolved.startsWith(`${resolvedBase}${path26.sep}`)) {
+  const resolvedBase = path30.resolve(base);
+  const resolved = path30.resolve(resolvedBase, ...segments);
+  if (!resolved.startsWith(`${resolvedBase}${path30.sep}`)) {
     throw new BanzaiError(
       "UNSAFE_EVIDENCE_PATH",
       "Evidence path escaped its owned directory."
@@ -33044,7 +34398,7 @@ function releaseHeldRunnerLocksSync() {
   }
 }
 async function atomicWriteJson(filePath, value, initialize = true) {
-  if (initialize) await mkdir9(path26.dirname(filePath), { recursive: true });
+  if (initialize) await mkdir9(path30.dirname(filePath), { recursive: true });
   const temporaryPath = `${filePath}.${process3.pid}.${randomUUID11()}.tmp`;
   const handle = await open12(temporaryPath, "wx", 384);
   try {
@@ -33062,7 +34416,7 @@ async function atomicWriteJson(filePath, value, initialize = true) {
 }
 async function readJson3(filePath, label) {
   try {
-    return JSON.parse(await readFile12(filePath, "utf8"));
+    return JSON.parse(await readFile16(filePath, "utf8"));
   } catch (error) {
     throw new BanzaiError(
       "STATE_READ_FAILED",
@@ -33373,10 +34727,10 @@ function isProcessAlive(pid) {
 var RunStore = class {
   constructor(repoRoot) {
     this.repoRoot = repoRoot;
-    this.banzaiDirectory = path26.join(repoRoot, ".banzai");
-    this.runsDirectory = path26.join(this.banzaiDirectory, "runs");
-    this.activeRunPath = path26.join(this.banzaiDirectory, "active-run.json");
-    this.lockPath = path26.join(this.banzaiDirectory, "runner.lock");
+    this.banzaiDirectory = path30.join(repoRoot, ".banzai");
+    this.runsDirectory = path30.join(this.banzaiDirectory, "runs");
+    this.activeRunPath = path30.join(this.banzaiDirectory, "active-run.json");
+    this.lockPath = path30.join(this.banzaiDirectory, "runner.lock");
   }
   banzaiDirectory;
   runsDirectory;
@@ -33389,7 +34743,7 @@ var RunStore = class {
     );
   }
   statePath(runId2) {
-    return path26.join(this.runDirectory(runId2), "state.json");
+    return path30.join(this.runDirectory(runId2), "state.json");
   }
   attemptPath(runId2, attempt) {
     return containedEvidencePath(
@@ -33422,14 +34776,14 @@ var RunStore = class {
    * recoverable approved form.
    */
   async writeApprovalSnapshot(runId2, digest5, entries) {
-    await mkdir9(path26.join(this.runDirectory(runId2), "approval"), {
+    await mkdir9(path30.join(this.runDirectory(runId2), "approval"), {
       recursive: true,
       mode: 448
     });
     const manifest = [];
     for (const [index, entry] of entries.entries()) {
       const file = `${String(index).padStart(3, "0")}-${safeEvidenceSegment(
-        path26.posix.basename(entry.path),
+        path30.posix.basename(entry.path),
         "approval artifact name",
         150
       )}`;
@@ -33451,7 +34805,7 @@ var RunStore = class {
     let parsed;
     try {
       parsed = JSON.parse(
-        await readFile12(this.approvalSnapshotManifestPath(runId2), "utf8")
+        await readFile16(this.approvalSnapshotManifestPath(runId2), "utf8")
       );
     } catch {
       return null;
@@ -33474,7 +34828,7 @@ var RunStore = class {
       }
       let contents;
       try {
-        contents = await readFile12(
+        contents = await readFile16(
           this.approvalSnapshotFilePath(runId2, entry.file)
         );
       } catch {
@@ -33506,9 +34860,9 @@ var RunStore = class {
         "Review snapshot identity does not match its attempt."
       );
     const destination = this.reviewSnapshotPath(runId2, attempt);
-    const relative4 = path26.relative(this.repoRoot, destination).split(path26.sep).join("/");
+    const relative4 = path30.relative(this.repoRoot, destination).split(path30.sep).join("/");
     await assertReviewPathOwned(this.repoRoot, relative4, true);
-    await mkdir9(path26.dirname(destination), { recursive: true });
+    await mkdir9(path30.dirname(destination), { recursive: true });
     const temporary = `${destination}.${randomUUID11()}.tmp`;
     const handle = await open12(temporary, "wx", 384);
     try {
@@ -33538,7 +34892,7 @@ var RunStore = class {
     const file = this.reviewSnapshotPath(runId2, attempt);
     await assertReviewPathOwned(
       this.repoRoot,
-      path26.relative(this.repoRoot, file).split(path26.sep).join("/")
+      path30.relative(this.repoRoot, file).split(path30.sep).join("/")
     );
     const handle = await open12(file, constants11.O_RDONLY | constants11.O_NOFOLLOW);
     try {
@@ -33574,10 +34928,10 @@ var RunStore = class {
   }
   /** Run-relative evidence path as recorded in receipts and summaries. */
   completionEvidenceRelativePath(runId2, attempt, leaf) {
-    return path26.relative(
+    return path30.relative(
       this.runDirectory(runId2),
       this.completionEvidencePath(runId2, attempt, leaf)
-    ).split(path26.sep).join(path26.posix.sep);
+    ).split(path30.sep).join(path30.posix.sep);
   }
   /**
    * Writes one immutable private leaf. A second write with identical bytes is
@@ -33585,7 +34939,7 @@ var RunStore = class {
    * never replaced, so a crash between leaves leaves each leaf whole or absent.
    */
   async writeImmutableEvidence(destination, bytes, conflictCode) {
-    await mkdir9(path26.dirname(destination), { recursive: true, mode: 448 });
+    await mkdir9(path30.dirname(destination), { recursive: true, mode: 448 });
     const temporary = `${destination}.${process3.pid}.${randomUUID11()}.tmp`;
     const handle = await open12(temporary, "wx", 384);
     try {
@@ -33603,7 +34957,7 @@ var RunStore = class {
         if (!existing?.equals(bytes))
           throw new BanzaiError(
             conflictCode,
-            `${path26.basename(destination)} already exists with different content.`
+            `${path30.basename(destination)} already exists with different content.`
           );
       }
     } finally {
@@ -33622,7 +34976,7 @@ var RunStore = class {
       if (error.code === "ENOENT") return null;
       throw new BanzaiError(
         "STATE_READ_FAILED",
-        `Could not read ${path26.basename(destination)}: ${error.message}`
+        `Could not read ${path30.basename(destination)}: ${error.message}`
       );
     }
     try {
@@ -33644,7 +34998,7 @@ var RunStore = class {
       runId2,
       attempt,
       "completion-state-input.json"
-    ) || parsed.priorState.sha256 !== createHash16("sha256").update(priorStateBytes).digest("hex"))
+    ) || parsed.priorState.sha256 !== createHash19("sha256").update(priorStateBytes).digest("hex"))
       throw new BanzaiError(
         "INVALID_COMPLETION_TRANSITION",
         "Completion transition does not bind the exact prior state bytes."
@@ -33690,7 +35044,7 @@ var RunStore = class {
     );
     return {
       path: this.completionEvidenceRelativePath(runId2, attempt, leaf),
-      sha256: createHash16("sha256").update(bytes).digest("hex")
+      sha256: createHash19("sha256").update(bytes).digest("hex")
     };
   }
   async readCompletionOriginalIfExists(runId2, attempt, role) {
@@ -33742,7 +35096,7 @@ var RunStore = class {
       runId2,
       attempt,
       "completion-candidate.md"
-    ) || parsed.outputSha256 !== createHash16("sha256").update(bytes).digest("hex") || parsed.outputBytes !== bytes.length)
+    ) || parsed.outputSha256 !== createHash19("sha256").update(bytes).digest("hex") || parsed.outputBytes !== bytes.length)
       throw new BanzaiError(
         "INVALID_COMPLETION_CANDIDATE",
         "Completion candidate metadata does not bind its exact bytes."
@@ -33770,7 +35124,7 @@ var RunStore = class {
     const bytes = await this.readImmutableEvidence(
       this.completionEvidencePath(runId2, attempt, "completion-candidate.md")
     );
-    if (candidate.runId !== runId2 || candidate.attemptId !== attempt.id || candidate.attemptKind !== attempt.kind || bytes === null || createHash16("sha256").update(bytes).digest("hex") !== candidate.outputSha256 || bytes.length !== candidate.outputBytes)
+    if (candidate.runId !== runId2 || candidate.attemptId !== attempt.id || candidate.attemptKind !== attempt.kind || bytes === null || createHash19("sha256").update(bytes).digest("hex") !== candidate.outputSha256 || bytes.length !== candidate.outputBytes)
       throw new BanzaiError(
         "INVALID_COMPLETION_CANDIDATE",
         "Completion candidate bytes or identity conflict with their metadata."
@@ -33835,13 +35189,13 @@ var RunStore = class {
     );
   }
   verificationAttemptsDirectory(runId2) {
-    return path26.join(this.runDirectory(runId2), "verification-attempts");
+    return path30.join(this.runDirectory(runId2), "verification-attempts");
   }
   verificationLedgerPath(runId2) {
-    return path26.join(this.verificationAttemptsDirectory(runId2), "ledger.json");
+    return path30.join(this.verificationAttemptsDirectory(runId2), "ledger.json");
   }
   verificationAttemptPath(runId2, sequence, id3) {
-    return path26.join(
+    return path30.join(
       this.verificationAttemptsDirectory(runId2),
       `verification-${String(sequence).padStart(6, "0")}-${id3}.json`
     );
@@ -33876,7 +35230,7 @@ var RunStore = class {
             if (heldLocks.get(this.lockPath) === token) {
               heldLocks.delete(this.lockPath);
             }
-            const named = await lstat16(this.lockPath).catch(() => null);
+            const named = await lstat18(this.lockPath).catch(() => null);
             if (named === null || !named.isFile() || named.isSymbolicLink() || named.ino !== owned.ino || named.dev !== owned.dev)
               return;
             const current = await readJson3(
@@ -33918,7 +35272,7 @@ var RunStore = class {
   }
   async assertLockOwned() {
     const expected = heldLocks.get(this.lockPath);
-    const named = await lstat16(this.lockPath).catch(() => null);
+    const named = await lstat18(this.lockPath).catch(() => null);
     const current = named?.isFile() && !named.isSymbolicLink() ? await readJson3(this.lockPath, "runner lock").catch(
       () => null
     ) : null;
@@ -33957,7 +35311,7 @@ var RunStore = class {
       const result = await this.readMutationState(runId2);
       state = result.state;
       const raw = cancellationRecord(state);
-      if (typeof state.repoRoot !== "string" || await realpath10(state.repoRoot) !== await realpath10(this.repoRoot) || raw.contractVersion !== CONTRACT_VERSION2 || typeof state.slug !== "string" || typeof state.request !== "string" || !Number.isFinite(Date.parse(state.createdAt)) || !Number.isFinite(Date.parse(state.updatedAt)) || typeof state.baseCommit !== "string" || !/^[a-f0-9]{40,64}$/.test(state.baseCommit) || !Array.isArray(state.baseline) || !Array.isArray(state.verification) || raw.metrics === null || typeof raw.metrics !== "object" || raw.sessions === null || typeof raw.sessions !== "object")
+      if (typeof state.repoRoot !== "string" || await realpath11(state.repoRoot) !== await realpath11(this.repoRoot) || raw.contractVersion !== CONTRACT_VERSION2 || typeof state.slug !== "string" || typeof state.request !== "string" || !Number.isFinite(Date.parse(state.createdAt)) || !Number.isFinite(Date.parse(state.updatedAt)) || typeof state.baseCommit !== "string" || !/^[a-f0-9]{40,64}$/.test(state.baseCommit) || !Array.isArray(state.baseline) || !Array.isArray(state.verification) || raw.metrics === null || typeof raw.metrics !== "object" || raw.sessions === null || typeof raw.sessions !== "object")
         throw invalid11();
     } catch {
       throw invalid11();
@@ -33982,7 +35336,7 @@ var RunStore = class {
       }
     }
     await mkdir9(this.runDirectory(state.runId), { recursive: false });
-    await mkdir9(path26.join(this.runDirectory(state.runId), "attempts"));
+    await mkdir9(path30.join(this.runDirectory(state.runId), "attempts"));
     await mkdir9(this.verificationAttemptsDirectory(state.runId));
     await atomicWriteJson(this.verificationLedgerPath(state.runId), {
       schemaVersion: usesVerificationPolicy(state) ? 2 : VERIFICATION_LEDGER_SCHEMA_VERSION2
@@ -34051,7 +35405,7 @@ var RunStore = class {
       `.banzai/runs/${runId2}`,
       true
     );
-    const guardPath = path26.join(directory4, ".state-write.lock");
+    const guardPath = path30.join(directory4, ".state-write.lock");
     const deadline = performance.now() + 1e3;
     const token = randomUUID11();
     let handle;
@@ -34076,7 +35430,7 @@ var RunStore = class {
       return await action();
     } finally {
       await handle.close();
-      const named = await lstat16(guardPath).catch(() => null);
+      const named = await lstat18(guardPath).catch(() => null);
       if (named !== null && !named.isSymbolicLink() && named.ino === owned.ino && named.dev === owned.dev) {
         await unlink8(guardPath);
       }
@@ -34133,8 +35487,8 @@ var RunStore = class {
             "INVALID_REVIEW_EVENT",
             "Idempotent review events require an attempt identity."
           );
-        const prior = await readFile12(
-          path26.join(this.runDirectory(runId2), "events.jsonl"),
+        const prior = await readFile16(
+          path30.join(this.runDirectory(runId2), "events.jsonl"),
           "utf8"
         ).catch((error) => {
           if (error.code === "ENOENT") return "";
@@ -34181,8 +35535,8 @@ var RunStore = class {
         runId: runId2,
         details
       };
-      const file = path26.join(this.runDirectory(runId2), "events.jsonl");
-      const named = await lstat16(file).catch((error) => {
+      const file = path30.join(this.runDirectory(runId2), "events.jsonl");
+      const named = await lstat18(file).catch((error) => {
         if (cancellationRecord(error).code === "ENOENT") return null;
         throw error;
       });
@@ -34209,8 +35563,8 @@ var RunStore = class {
    * inspection or resume of the same durable refusal adds nothing.
    */
   async appendEventOnce(runId2, type, details) {
-    const prior = await readFile12(
-      path26.join(this.runDirectory(runId2), "events.jsonl"),
+    const prior = await readFile16(
+      path30.join(this.runDirectory(runId2), "events.jsonl"),
       "utf8"
     ).catch((error) => {
       if (error.code === "ENOENT") return "";
@@ -34236,7 +35590,7 @@ var RunStore = class {
     );
   }
   async readRunAttempts(runId2) {
-    const directory4 = path26.join(this.runDirectory(runId2), "attempts");
+    const directory4 = path30.join(this.runDirectory(runId2), "attempts");
     const entries = (await readdir10(directory4, { withFileTypes: true })).filter(
       (entry) => entry.isFile() && /-(selection|plan|implementation|fix|review)\.json$/u.test(entry.name)
     ).map((entry) => entry.name).sort();
@@ -34244,11 +35598,11 @@ var RunStore = class {
     for (const entry of entries) {
       const record7 = parseModelAttemptRecord2(
         await readJson3(
-          path26.join(directory4, entry),
+          path30.join(directory4, entry),
           `attempt record ${entry}`
         )
       );
-      if (path26.basename(this.attemptPath(runId2, record7.attempt)) !== entry) {
+      if (path30.basename(this.attemptPath(runId2, record7.attempt)) !== entry) {
         throw new BanzaiError(
           "ATTEMPT_PATH_MISMATCH",
           `Attempt record ${entry} does not match its canonical identity.`
@@ -34264,10 +35618,10 @@ var RunStore = class {
       this.banzaiDirectory,
       this.runsDirectory,
       this.runDirectory(runId2),
-      path26.dirname(ledgerPath)
+      path30.dirname(ledgerPath)
     ]) {
       try {
-        if ((await lstat16(directory4)).isDirectory()) continue;
+        if ((await lstat18(directory4)).isDirectory()) continue;
         throw new BanzaiError(
           "INVALID_CONTEXT_EVIDENCE",
           `Invalid context evidence for run ${runId2}, attempt ${attempt.id}: evidence directory is not physically owned.`
@@ -34557,7 +35911,7 @@ var RunStore = class {
       records.push(
         parseVerificationAttemptRecord2(
           await readJson3(
-            path26.join(directory4, entry),
+            path30.join(directory4, entry),
             "verification attempt"
           )
         )
@@ -34581,7 +35935,7 @@ var RunStore = class {
     try {
       parseVerificationLedger(
         JSON.parse(
-          await readFile12(this.verificationLedgerPath(runId2), "utf8")
+          await readFile16(this.verificationLedgerPath(runId2), "utf8")
         )
       );
       return true;
@@ -34663,7 +36017,7 @@ var RunStore = class {
     await this.writeText(runId2, relativePath3, value);
     return {
       relativePath: relativePath3,
-      sha256: createHash16("sha256").update(value).digest("hex")
+      sha256: createHash19("sha256").update(value).digest("hex")
     };
   }
   processAlive(pid) {
@@ -34676,16 +36030,16 @@ var RunStore = class {
         "Review iteration must be positive."
       );
     const relative4 = `reviews/review-${iteration}.json`;
-    const target = path26.join(this.runDirectory(runId2), relative4);
+    const target = path30.join(this.runDirectory(runId2), relative4);
     await assertReviewPathOwned(
       this.repoRoot,
-      path26.relative(this.repoRoot, target).split(path26.sep).join("/"),
+      path30.relative(this.repoRoot, target).split(path30.sep).join("/"),
       true
     );
     const result = parseCurrentReviewResult2(value);
     const expected = `${JSON.stringify(result, null, 2)}
 `;
-    const existing = await readFile12(target, "utf8").catch((error) => {
+    const existing = await readFile16(target, "utf8").catch((error) => {
       if (error.code === "ENOENT") return null;
       throw error;
     });
@@ -34697,8 +36051,8 @@ var RunStore = class {
     if (existing === null) await atomicWriteJson(target, result);
   }
   async writeText(runId2, relativePath3, value) {
-    const target = path26.join(this.runDirectory(runId2), relativePath3);
-    await mkdir9(path26.dirname(target), { recursive: true });
+    const target = path30.join(this.runDirectory(runId2), relativePath3);
+    await mkdir9(path30.dirname(target), { recursive: true });
     await writeFile3(target, value, { encoding: "utf8", mode: 384 });
     return target;
   }
@@ -34715,17 +36069,13 @@ var PHASE_PHASES = {
   Review: ["review"]
 };
 function invocationScopeDigest(scope) {
-  return createHash17("sha256").update(
+  return createHash20("sha256").update(
     JSON.stringify([
       scope.strictMcpConfig,
       scope.settingSources,
       scope.pluginDirectory
     ])
   ).digest("hex");
-}
-function taskVerificationDigestDetail(error) {
-  const candidate = error;
-  return (candidate.code === "TASK_VERIFICATION_DIGEST_MISMATCH" || candidate.code === "TASK_VERIFICATION_SOURCE_TOO_LARGE") && candidate.detail !== void 0 ? candidate.detail : null;
 }
 function sameObservedInputs(a, b) {
   return digestCanonicalJson4(a.implementationReport) === digestCanonicalJson4(b.implementationReport) && digestCanonicalJson4(a.testReport) === digestCanonicalJson4(b.testReport) && a.workspaceDigest === b.workspaceDigest;
@@ -34809,22 +36159,6 @@ function terminalVerificationRecord(record7, input, now) {
     )
   };
 }
-function workflowAuthorizationDigest(input) {
-  return createHash17("sha256").update(
-    JSON.stringify({
-      version: 1,
-      runId: input.runId,
-      request: input.request,
-      recommendedWorkflow: input.recommendedWorkflow,
-      workflow: input.workflow,
-      confidence: input.confidence,
-      reason: input.reason,
-      escalationTriggers: input.escalationTriggers,
-      selectedAt: input.selectedAt,
-      attemptId: input.attemptId
-    })
-  ).digest("hex");
-}
 function reviewCompletion(status) {
   const { state, latestReview } = status;
   if (state.status !== "done" || (state.workflowSelection?.workflow ?? "strict") !== "strict" || state.latestReview === null || latestReview === null) {
@@ -34903,10 +36237,10 @@ function phaseDescriptor(settings, sessionMode, phases) {
   };
 }
 function executableCandidates(command, cwd, env) {
-  if (command.includes(path27.sep)) {
-    return [path27.resolve(cwd, command)];
+  if (command.includes(path31.sep)) {
+    return [path31.resolve(cwd, command)];
   }
-  return (env.PATH ?? "").split(path27.delimiter).filter(Boolean).map((entry) => path27.join(entry, command));
+  return (env.PATH ?? "").split(path31.delimiter).filter(Boolean).map((entry) => path31.join(entry, command));
 }
 async function assertExecutable(command, cwd, env) {
   for (const candidate of executableCandidates(command, cwd, env)) {
@@ -34950,25 +36284,29 @@ var WorkflowRunner = class {
     this.adapters = adapters;
     this.processRunner = processRunner;
     this.progressReporter = progressReporter;
-    this.humanTimeObserver = humanTimeObserver;
     this.store = new RunStore(repoRoot);
-    this.clock = sources.clock ?? (() => /* @__PURE__ */ new Date());
-    this.ids = sources.ids ?? randomUUID12;
+    this.context = Object.freeze({
+      repoRoot,
+      store: this.store,
+      adapters,
+      processRunner,
+      progressReporter,
+      humanTimeObserver,
+      clock: sources.clock ?? (() => /* @__PURE__ */ new Date()),
+      ids: sources.ids ?? randomUUID12
+    });
   }
-  cancellationReceipts = /* @__PURE__ */ new WeakMap();
+  cancellationReceipts = new CancellationReceipts();
   store;
-  progressSequence = 0;
-  resolvedScope = null;
-  reportedScopeDegradation = false;
-  reportedMcpWhitelist = false;
-  clock;
-  ids;
+  activities = new ActivitySequence();
+  scopeCache = new InvocationScopeCache();
+  context;
   now() {
-    return this.clock().toISOString();
+    return timestamp(this.context);
   }
-  configurationOwnership = new AsyncLocalStorage3();
+  configurationOwnership = new ConfigurationOwnership();
   async acquireWorkflowLock(options = {}) {
-    if (this.configurationOwnership.getStore() === true) {
+    if (this.configurationOwnership.owned()) {
       await this.store.assertLockOwned();
       return {
         token: "inherited-configuration-owner",
@@ -35011,7 +36349,6 @@ var WorkflowRunner = class {
               proposalId: null
             };
             const result = await this.configurationOwnership.run(
-              true,
               () => action(context)
             );
             const latest = await this.store.readState(state.runId);
@@ -35038,33 +36375,13 @@ var WorkflowRunner = class {
           }
         );
       }
-      return await this.configurationOwnership.run(
-        true,
-        () => action(void 0)
-      );
+      return await this.configurationOwnership.run(() => action(void 0));
     } finally {
       await lock.release();
     }
   }
   async withConfigurationDecisionOwnership(action) {
     return this.withVerificationConfiguration(() => action());
-  }
-  async observeHumanTime(state, kind, eventType = null, eventAt = null, attemptId = state.activeAttempt?.id ?? null) {
-    if (this.humanTimeObserver === void 0) return;
-    const pending = state.pendingHumanDecision;
-    try {
-      await this.humanTimeObserver({
-        kind,
-        runId: state.runId,
-        attemptId,
-        reviewIteration: state.reviewIteration > 0 ? state.reviewIteration : null,
-        requestId: pending?.kind === "decision_consultation" ? pending.request.requestId : null,
-        roundId: pending?.kind === "decision_consultation" ? pending.request.roundId : null,
-        eventType,
-        eventAt
-      });
-    } catch {
-    }
   }
   report(event) {
     try {
@@ -35082,19 +36399,15 @@ var WorkflowRunner = class {
     const resolved = await resolveClaudeInvocationScope(
       config.claudeEnvironment
     );
-    if (this.resolvedScope?.key !== key) {
-      this.resolvedScope = {
+    if (!this.scopeCache.matches(key)) {
+      this.scopeCache.replace(
         key,
-        ...resolved,
-        mcp: await this.resolveMcpWhitelist(config)
-      };
-      this.reportedScopeDegradation = false;
-      this.reportedMcpWhitelist = false;
+        resolved,
+        await this.resolveMcpWhitelist(config)
+      );
     }
-    this.resolvedScope = { ...this.resolvedScope, ...resolved };
-    const current = this.resolvedScope;
-    if (report && current.degradedReason !== null && !this.reportedScopeDegradation) {
-      this.reportedScopeDegradation = true;
+    const current = this.scopeCache.merge(resolved);
+    if (report && current.degradedReason !== null && this.scopeCache.claimDegradationReport()) {
       this.info(
         `Claude environment isolation degraded: ${current.degradedReason}`
       );
@@ -35103,8 +36416,7 @@ var WorkflowRunner = class {
         strictMcpConfig: current.scope.strictMcpConfig
       });
     }
-    if (report && current.mcp !== null && !this.reportedMcpWhitelist) {
-      this.reportedMcpWhitelist = true;
+    if (report && current.mcp !== null && this.scopeCache.claimMcpReport()) {
       const vendors = [
         current.mcp.claude === null ? null : "claude",
         current.mcp.codex === null ? null : "codex"
@@ -35185,8 +36497,8 @@ var WorkflowRunner = class {
     );
   }
   async activity(label, detail, operation, succeeded = () => true) {
-    const id3 = `activity-${++this.progressSequence}`;
-    const startedAt = this.clock().getTime();
+    const id3 = this.activities.next();
+    const startedAt = this.context.clock().getTime();
     const resolved = typeof detail === "string" ? { detail, descriptor: void 0 } : detail;
     this.report({
       kind: "activity_started",
@@ -35201,7 +36513,7 @@ var WorkflowRunner = class {
         kind: succeeded(result) ? "activity_completed" : "activity_failed",
         id: id3,
         label,
-        durationMs: this.clock().getTime() - startedAt
+        durationMs: this.context.clock().getTime() - startedAt
       });
       return result;
     } catch (error) {
@@ -35211,7 +36523,7 @@ var WorkflowRunner = class {
         kind: "activity_failed",
         id: id3,
         label,
-        durationMs: this.clock().getTime() - startedAt
+        durationMs: this.context.clock().getTime() - startedAt
       });
       throw error;
     }
@@ -35300,7 +36612,7 @@ var WorkflowRunner = class {
           verificationMode: "task",
           completionPublication: null,
           contractVersion: CONTRACT_VERSION2,
-          runId: runId(input.slug, this.now(), this.ids()),
+          runId: runId(input.slug, this.now(), this.context.ids()),
           slug: input.slug,
           request: input.request,
           repoRoot: this.repoRoot,
@@ -35368,11 +36680,11 @@ var WorkflowRunner = class {
           repoRoot: this.repoRoot,
           slug: state.slug,
           mode: "workflow",
-          creationId: this.ids(),
+          creationId: this.context.ids(),
           schemaVersion: state.verificationMode === "task" || usesVerificationPolicy(state) ? 2 : 1
         });
         await this.store.createRun(state);
-        await this.observeHumanTime(state, "run_created");
+        await observeHumanTime(this.context, state, "run_created");
         await this.assertProjectGuidance();
         try {
           await this.activity(
@@ -35677,8 +36989,8 @@ var WorkflowRunner = class {
           );
         }
         if (retryCheckpoint === "verifying" && rejectedCompletion !== null) {
-          await this.validateBaseCommit(state);
-          await this.validateApproval(state);
+          await validateBaseCommit(this.context, state);
+          await validateApproval(this.context, state);
           state.activeAttempt = null;
           state.activeProcess = null;
           transitionState(state, "implementing");
@@ -35714,7 +37026,7 @@ var WorkflowRunner = class {
           );
         }
         if (retryCheckpoint === "verifying" && (expectedAttemptId !== null || state.verificationMode === "task")) {
-          await this.validateBaseCommit(state);
+          await validateBaseCommit(this.context, state);
           transitionState(state, "verifying");
           state.activeProcess = null;
           pendingTransition.push(async () => {
@@ -35783,7 +37095,7 @@ var WorkflowRunner = class {
             "Retry state changed while the command was being validated."
           );
         }
-        await this.validateBaseCommit(state);
+        await validateBaseCommit(this.context, state);
         if (failedAttempt.kind === "review") {
           state.reviewIteration = state.latestReview?.iteration ?? 0;
         }
@@ -35822,7 +37134,7 @@ var WorkflowRunner = class {
           return await this.executeReview(state, config, commitTransition);
         }
         if (retryFrom === "implementing") {
-          await this.validateApproval(state);
+          await validateApproval(this.context, state);
           pendingTransition.push(
             async () => await this.store.appendEvent(
               state.runId,
@@ -35838,7 +37150,7 @@ var WorkflowRunner = class {
           );
         }
         if (retryFrom === "fixing") {
-          await this.validateApproval(state);
+          await validateApproval(this.context, state);
           pendingTransition.push(
             async () => await this.store.appendEvent(
               state.runId,
@@ -35921,8 +37233,8 @@ var WorkflowRunner = class {
       }
       const restored = [];
       for (const entry of snapshot.entries) {
-        const absolute = path27.resolve(this.repoRoot, entry.path);
-        await mkdir10(path27.dirname(absolute), { recursive: true });
+        const absolute = path31.resolve(this.repoRoot, entry.path);
+        await mkdir10(path31.dirname(absolute), { recursive: true });
         await writeFile4(absolute, entry.contents);
         restored.push(entry.path);
       }
@@ -35947,7 +37259,7 @@ var WorkflowRunner = class {
    * fix a defect that lives in the immutable approved plan itself.
    */
   async retryIntoPlanning(state, config, failedAttemptId) {
-    await this.validateBaseCommit(state);
+    await validateBaseCommit(this.context, state);
     const violation = state.planTaskCompletion?.status === "invalid" ? state.planTaskCompletion.violation : null;
     state.activeAttempt = null;
     state.activeProcess = null;
@@ -36094,19 +37406,19 @@ var WorkflowRunner = class {
       try {
         const state = await this.store.requireActiveState();
         requireState(state, ["needs_plan_approval"], "Plan approval");
-        await this.approvedTaskIds(state);
+        await approvedTaskIds(this.context, state);
         const approvalConfig = await loadConfig(this.repoRoot);
         if (state.verificationMode === "task")
           parseTaskVerificationObligations(
-            await readFile13(
-              path27.join(this.repoRoot, this.completionPlanPath(state)),
+            await readFile17(
+              path31.join(this.repoRoot, completionPlanPath(state)),
               "utf8"
             )
           );
         else if (approvalConfig.schemaVersion === 3)
           validatePlanVerificationObligations(
-            await readFile13(
-              path27.join(this.repoRoot, this.completionPlanPath(state)),
+            await readFile17(
+              path31.join(this.repoRoot, completionPlanPath(state)),
               "utf8"
             ),
             approvalConfig.verification
@@ -36117,8 +37429,8 @@ var WorkflowRunner = class {
         );
         const snapshotEntries = [];
         for (const entry of bundle.entries) {
-          const contents = await readFile13(
-            path27.resolve(this.repoRoot, entry.path)
+          const contents = await readFile17(
+            path31.resolve(this.repoRoot, entry.path)
           );
           if (hashArtifactBytes(contents) !== entry.sha256) {
             throw new BanzaiError(
@@ -36155,7 +37467,8 @@ var WorkflowRunner = class {
             paths: bundle.paths
           }
         );
-        await this.observeHumanTime(
+        await observeHumanTime(
+          this.context,
           state,
           "decision_recorded",
           "approval.plan",
@@ -36204,7 +37517,8 @@ var WorkflowRunner = class {
             decidedBy: input.decidedBy
           }
         );
-        await this.observeHumanTime(
+        await observeHumanTime(
+          this.context,
           state,
           "decision_recorded",
           "approval.adr",
@@ -36275,7 +37589,8 @@ var WorkflowRunner = class {
             decidedBy: decision.decidedBy
           }
         );
-        await this.observeHumanTime(
+        await observeHumanTime(
+          this.context,
           state,
           "decision_recorded",
           "decision.human",
@@ -36313,12 +37628,12 @@ var WorkflowRunner = class {
         "Configuration cannot complete or replay an unfinished model attempt."
       );
     if ((state.workflowSelection?.workflow ?? "strict") === "strict") {
-      await this.validateApproval(state);
+      await validateApproval(this.context, state);
       await this.revalidateTaskCompletion(
         state,
         continuation.attemptKind === "fix"
       );
-    } else this.validateWorkflowSelection(state);
+    } else validateWorkflowSelection(state);
   }
   configurationGaps(config, inspection) {
     const readiness = assessVerificationReadiness(config, inspection);
@@ -36355,8 +37670,8 @@ var WorkflowRunner = class {
       );
     }
     if ((state.workflowSelection?.workflow ?? "strict") === "strict" && state.planArtifacts?.plan) {
-      const plan = await readFile13(
-        path27.join(this.repoRoot, state.planArtifacts.plan),
+      const plan = await readFile17(
+        path31.join(this.repoRoot, state.planArtifacts.plan),
         "utf8"
       );
       if (plan.includes("banzai-verification-obligations/v1")) {
@@ -36394,7 +37709,7 @@ var WorkflowRunner = class {
         attemptId: source.id,
         attemptKind: source.kind,
         verificationRound: {
-          id: `verification-round-${source.id}-${this.ids()}`,
+          id: `verification-round-${source.id}-${this.context.ids()}`,
           ordinal: new Set(records.map((record7) => record7.round.id)).size + 1
         },
         baseCommit: state.baseCommit,
@@ -36439,8 +37754,8 @@ var WorkflowRunner = class {
         schemaVersion: 1,
         kind: "configuration_prerequisite",
         runId: state.runId,
-        decisionId: previous?.decisionId ?? this.ids(),
-        proposalId: this.ids(),
+        decisionId: previous?.decisionId ?? this.context.ids(),
+        proposalId: this.context.ids(),
         requestedAt: this.now(),
         reason,
         proposal,
@@ -36495,7 +37810,7 @@ var WorkflowRunner = class {
         { ...pending, ...human }
       ];
     setup.resolutions.push({
-      id: this.ids(),
+      id: this.context.ids(),
       decisionId: pending.decisionId,
       proposalId: pending.proposalId,
       kind,
@@ -36631,7 +37946,7 @@ var WorkflowRunner = class {
     const state = await this.store.requireActiveState();
     if (!state.planArtifacts?.plan) return null;
     return planHumanPrerequisites(
-      await readFile13(path27.join(this.repoRoot, state.planArtifacts.plan), "utf8")
+      await readFile17(path31.join(this.repoRoot, state.planArtifacts.plan), "utf8")
     );
   }
   async answerConfigurationPrerequisite(input, autoResume = true) {
@@ -36713,7 +38028,7 @@ var WorkflowRunner = class {
             state.pendingHumanDecision = parseConfigurationPrerequisite(
               {
                 ...pending,
-                proposalId: this.ids(),
+                proposalId: this.context.ids(),
                 requestedAt: this.now(),
                 proposal: {
                   ...pending.proposal,
@@ -36729,7 +38044,7 @@ var WorkflowRunner = class {
           if (input.action === "skip") {
             await this.assertConfigurationSkipAuthority(state, current.config);
             setup.skip = {
-              id: this.ids(),
+              id: this.context.ids(),
               runId: state.runId,
               decisionId: pending.decisionId,
               proposalId: pending.proposalId,
@@ -36882,7 +38197,8 @@ var WorkflowRunner = class {
             completion: "answered"
           }
         );
-        await this.observeHumanTime(
+        await observeHumanTime(
+          this.context,
           state,
           "decision_recorded",
           "decision.consultation.answered",
@@ -36934,7 +38250,8 @@ var WorkflowRunner = class {
             items
           }
         );
-        await this.observeHumanTime(
+        await observeHumanTime(
+          this.context,
           state,
           "decision_recorded",
           "review.triaged",
@@ -37045,7 +38362,7 @@ var WorkflowRunner = class {
           } catch {
             context = emptyCancellationContext();
           }
-          transitionIdentity.id = this.ids();
+          transitionIdentity.id = this.context.ids();
           transitionState(state2, "cancelled");
           state2.activeProcess = null;
           state2.pendingHumanDecision = null;
@@ -37143,7 +38460,8 @@ var WorkflowRunner = class {
       result.observation = "available";
       eventAt ??= after.events.find((e) => e.type === "run.cancelled")?.at ?? null;
       if (eventAt !== null)
-        await this.observeHumanTime(
+        await observeHumanTime(
+          this.context,
           state,
           "run_cancelled",
           "run.cancelled",
@@ -37153,7 +38471,7 @@ var WorkflowRunner = class {
         const receipt = Object.freeze({
           kind: "cancellation-first-response"
         });
-        this.cancellationReceipts.set(receipt, observation2);
+        this.cancellationReceipts.record(receipt, observation2);
         result.receipt = receipt;
       }
     } catch {
@@ -37161,7 +38479,7 @@ var WorkflowRunner = class {
     return result;
   }
   async recordCancellationResponse(receipt, answer) {
-    const observation2 = this.cancellationReceipts.get(receipt);
+    const observation2 = this.cancellationReceipts.observation(receipt);
     if (observation2 === void 0)
       return { outcome: "unavailable", response: null };
     let response;
@@ -37321,12 +38639,12 @@ var WorkflowRunner = class {
     }
     let total = null;
     try {
-      total = (await this.approvedTaskIds(state)).length;
+      total = (await approvedTaskIds(this.context, state)).length;
     } catch {
     }
     const checkpoint = state.planTaskCompletion;
     if (checkpoint === void 0) {
-      const implementationReport = path27.posix.join(
+      const implementationReport = path31.posix.join(
         "documentation",
         "features",
         state.slug,
@@ -37334,8 +38652,8 @@ var WorkflowRunner = class {
       );
       let diagnostic = "Run predates the canonical task-completion ledger; exact completion is unknown.";
       try {
-        const contents = await readFile13(
-          path27.join(this.repoRoot, implementationReport),
+        const contents = await readFile17(
+          path31.join(this.repoRoot, implementationReport),
           "utf8"
         );
         parsePlanTaskCompletionProjection(contents);
@@ -37531,7 +38849,7 @@ var WorkflowRunner = class {
             resultDigest: "result" in checkpoint ? digestCanonicalJson4(checkpoint.result) : digestCanonicalJson4(
               JSON.parse(checkpoint.envelope.original)
             ),
-            expectedScopeDigest: this.attemptScopeDigest(
+            expectedScopeDigest: attemptScopeDigest(
               state,
               source.attempt
             ),
@@ -37655,11 +38973,11 @@ var WorkflowRunner = class {
         return;
       }
       case "approval_check":
-        await this.validateApproval(state);
+        await validateApproval(this.context, state);
         facts.approvalChecked = true;
         return;
       case "workflow_selection_check":
-        facts.workflowDigest = this.validateWorkflowSelection(state).digest;
+        facts.workflowDigest = validateWorkflowSelection(state).digest;
         return;
       case "completion_revalidation":
         await this.revalidateTaskCompletion(
@@ -37670,7 +38988,7 @@ var WorkflowRunner = class {
         facts.completionRevalidated = true;
         return;
       case "attempt_scope_digest":
-        facts.scopeDigest = this.attemptScopeDigest(state, step.attempt);
+        facts.scopeDigest = attemptScopeDigest(state, step.attempt);
         return;
       case "workspace_snapshot": {
         const snapshot = await workspaceSnapshot(this.repoRoot, {
@@ -38031,51 +39349,6 @@ var WorkflowRunner = class {
     }
     await this.assertClaudePermissions(config);
   }
-  async validateApproval(state) {
-    if (state.planApproval === null) {
-      throw new BanzaiError(
-        "PLAN_NOT_APPROVED",
-        "Implementation requires explicit plan approval."
-      );
-    }
-    const bundle = await digestArtifactBundle(
-      this.repoRoot,
-      state.planApproval.paths
-    );
-    if (bundle.digest !== state.planApproval.digest) {
-      blockState(
-        state,
-        "Approved planning artifacts changed. Restore the approved bundle (banzai restore) and retry, or cancel the run and approve a revised plan in a new run."
-      );
-      await this.store.writeState(state);
-      await this.store.appendEvent(state.runId, "approval.invalidated", {
-        previousDigest: state.planApproval.digest,
-        currentDigest: bundle.digest
-      });
-      throw new BanzaiError(
-        "APPROVAL_INVALIDATED",
-        "Approved planning artifacts changed. Run `banzai restore` to write back the approved bytes and then `banzai retry`, or cancel the run and approve a revised plan in a new run."
-      );
-    }
-  }
-  completionPlanPath(state) {
-    const planPath = state.planArtifacts?.plan ?? null;
-    if (planPath === null) {
-      throw new PlanTaskCompletionError(
-        "approved_plan_invalid",
-        "Strict completion validation cannot identify the approved plan."
-      );
-    }
-    return planPath;
-  }
-  async approvedTaskIds(state) {
-    const plan = await readFile13(
-      path27.join(this.repoRoot, this.completionPlanPath(state)),
-      "utf8"
-    );
-    this.validateRunnerControlTasks(state, plan);
-    return parseApprovedPlanTaskIds(plan);
-  }
   /**
    * The persisted failure message of a rejected completion source attempt, so
    * a repair prompt names the exact offending field instead of only a
@@ -38094,37 +39367,9 @@ var WorkflowRunner = class {
       return null;
     }
   }
-  async validateImplementationCompletion(state, attempt, result) {
-    if (state.planApproval === null) {
-      throw new PlanTaskCompletionError(
-        "approval_invalid",
-        "Strict completion validation requires an approved plan bundle."
-      );
-    }
-    return await validatePlanTaskCompletion({
-      repoRoot: this.repoRoot,
-      artifactBinding: state.artifactBinding,
-      sourceAttemptId: attempt.id,
-      result,
-      planPath: this.completionPlanPath(state),
-      approval: state.planApproval,
-      baseline: state.baseline
-    });
-  }
-  completionInvalidCheckpoint(sourceAttemptId, error, sourceAttemptKind = "implementation") {
-    return {
-      schemaVersion: 1,
-      status: "invalid",
-      sourceAttemptId,
-      sourceAttemptKind,
-      errorCode: "PLAN_TASK_COMPLETION_INVALID",
-      violation: error.violation,
-      taskId: error.taskId,
-      recordedAt: this.now()
-    };
-  }
   async recordCompletionFailure(state, record7, adapterResult, error, context) {
-    await this.writeAttemptOutput(
+    await writeAttemptOutput(
+      this.context,
       state,
       record7,
       adapterResult.stdout,
@@ -38147,7 +39392,8 @@ var WorkflowRunner = class {
       adapterResult.sessionId ?? record7.resumeSessionId ?? null,
       { ...context, role: "implementer" }
     );
-    state.planTaskCompletion = this.completionInvalidCheckpoint(
+    state.planTaskCompletion = completionInvalidCheckpoint(
+      this.context,
       record7.attempt.id,
       error,
       record7.attempt.kind === "fix" ? "fix" : "implementation"
@@ -38230,7 +39476,7 @@ var WorkflowRunner = class {
       artifactBinding: state.artifactBinding,
       sourceAttemptId: checkpoint.sourceAttemptId,
       result,
-      planPath: this.completionPlanPath(state),
+      planPath: completionPlanPath(state),
       approval: state.planApproval,
       baseline: state.baseline
     });
@@ -38257,7 +39503,8 @@ var WorkflowRunner = class {
       "source_attempt_invalid",
       errorMessage(error)
     );
-    state.planTaskCompletion = this.completionInvalidCheckpoint(
+    state.planTaskCompletion = completionInvalidCheckpoint(
+      this.context,
       sourceAttemptId,
       completionError3,
       state.planTaskCompletion?.sourceAttemptId === sourceAttemptId ? state.planTaskCompletion.sourceAttemptKind ?? "implementation" : "implementation"
@@ -38278,483 +39525,6 @@ var WorkflowRunner = class {
         taskId: completionError3.taskId
       }
     );
-    return state;
-  }
-  validateWorkflowSelection(state) {
-    const selection = state.workflowSelection ?? null;
-    if (selection === null || selection.workflow === "strict") {
-      throw new BanzaiError(
-        "WORKFLOW_NOT_AUTHORIZED",
-        "Lite implementation requires a persisted feature or quick-fix selection."
-      );
-    }
-    const currentDigest = workflowAuthorizationDigest({
-      runId: state.runId,
-      request: state.request,
-      ...selection
-    });
-    if (currentDigest !== selection.digest) {
-      throw new BanzaiError(
-        "WORKFLOW_AUTHORIZATION_INVALID",
-        "Persisted workflow selection does not match its authorization digest."
-      );
-    }
-    return selection;
-  }
-  async validateBaseCommit(state) {
-    if (state.artifactBinding)
-      await inspectBoundWork4(this.repoRoot, state.artifactBinding);
-    const current = await currentCommit(this.repoRoot);
-    if (current !== state.baseCommit) {
-      blockState(
-        state,
-        "The checkout HEAD changed during the run. Start a new run from the intended branch and commit."
-      );
-      await this.store.writeState(state);
-      throw new BanzaiError(
-        "BASE_COMMIT_CHANGED",
-        "The checkout HEAD changed during the run."
-      );
-    }
-  }
-  newAttempt(state, kind, mutable) {
-    return {
-      id: `${kind}-${state.reviewIteration + 1}-${this.ids().slice(0, 8)}`,
-      kind,
-      mutable
-    };
-  }
-  async beginAttempt(state, attempt, policy) {
-    const record7 = {
-      schemaVersion: state.verificationMode === "task" ? 4 : policy.completion === void 0 ? MODEL_ATTEMPT_SCHEMA_VERSION2 : STRICT_MODEL_ATTEMPT_SCHEMA_VERSION2,
-      attempt,
-      status: "started",
-      startedAt: this.now(),
-      completedAt: null,
-      interruptedAt: null,
-      recoveryOf: null,
-      recoveryAuthorizationId: null,
-      result: null,
-      sessionId: null,
-      rawStdoutPath: null,
-      rawStderrPath: null,
-      durationMs: null,
-      usage: null,
-      error: null,
-      failureCode: null,
-      reviewCandidate: null,
-      sessionMode: policy.sessionMode,
-      reviewMode: policy.reviewMode ?? null,
-      rotationReason: policy.rotationReason ?? null,
-      resumeSessionId: policy.resumeSessionId,
-      sessionContext: policy.sessionContext,
-      ...policy.completion === void 0 ? {} : {
-        completionProtocol: COMPLETION_PROTOCOL4,
-        retryOf: policy.completion.retryOf,
-        envelope: null,
-        completionDiagnostic: null
-      }
-    };
-    if (policy.completion?.retryOf != null) {
-      const existing = await this.store.readRunAttemptIfExists(
-        state.runId,
-        attempt
-      );
-      if (existing !== null) {
-        if (existing.status !== "started" || existing.result !== null || existing.retryOf !== policy.completion.retryOf || existing.completionProtocol !== COMPLETION_PROTOCOL4 || JSON.stringify(existing.sessionContext) !== JSON.stringify(policy.sessionContext))
-          throw new BanzaiError(
-            "COMPLETION_RETRY_CONFLICT",
-            "A linked evidence-repair successor already exists with different evidence."
-          );
-        state.activeAttempt = attempt;
-        await this.store.writeState(state);
-        return existing;
-      }
-    }
-    if (attempt.kind === "selection") {
-      state.metrics.attempts.selection = (state.metrics.attempts.selection ?? 0) + 1;
-    } else {
-      state.metrics.attempts[attempt.kind] += 1;
-    }
-    state.metrics.sessions[policy.sessionMode] += 1;
-    if (policy.reviewMode !== void 0) {
-      state.metrics.reviews[policy.reviewMode] += 1;
-      if (policy.rotationReason !== null && policy.rotationReason !== "primary-review") {
-        state.metrics.reviews.rotations += 1;
-      }
-    }
-    state.activeAttempt = attempt;
-    await this.store.writeState(state);
-    await this.store.writeRunAttempt(state.runId, record7);
-    const timingEvent = await this.store.appendEvent(
-      state.runId,
-      "attempt.started",
-      {
-        attemptId: attempt.id,
-        kind: attempt.kind,
-        mutable: attempt.mutable,
-        sessionMode: policy.sessionMode,
-        reviewMode: policy.reviewMode ?? null,
-        rotationReason: policy.rotationReason ?? null
-      }
-    );
-    await this.observeHumanTime(
-      state,
-      "checkpoint",
-      "attempt.started",
-      timingEvent.at,
-      attempt.id
-    );
-    return record7;
-  }
-  recoveryAttempt(authorization) {
-    return {
-      id: `${authorization.phase}-recovery-${authorization.authorizationId.replace(/^recovery-/u, "")}`,
-      kind: authorization.phase,
-      mutable: true
-    };
-  }
-  async beginRecoveryAttempt(state, authorization, policy) {
-    const attempt = this.recoveryAttempt(authorization);
-    let record7 = await this.store.readRunAttemptIfExists(state.runId, attempt);
-    if (record7 === null) {
-      record7 = {
-        schemaVersion: state.verificationMode === "task" ? 4 : policy.completion === void 0 ? MODEL_ATTEMPT_SCHEMA_VERSION2 : STRICT_MODEL_ATTEMPT_SCHEMA_VERSION2,
-        attempt,
-        status: "started",
-        startedAt: this.now(),
-        completedAt: null,
-        interruptedAt: null,
-        recoveryOf: authorization.attempt.id,
-        recoveryAuthorizationId: authorization.authorizationId,
-        result: null,
-        sessionId: null,
-        rawStdoutPath: null,
-        rawStderrPath: null,
-        durationMs: null,
-        usage: null,
-        error: null,
-        failureCode: null,
-        reviewCandidate: null,
-        sessionMode: policy.sessionMode,
-        reviewMode: policy.reviewMode ?? null,
-        rotationReason: policy.rotationReason ?? null,
-        resumeSessionId: policy.resumeSessionId,
-        sessionContext: policy.sessionContext,
-        ...policy.completion === void 0 ? {} : {
-          completionProtocol: COMPLETION_PROTOCOL4,
-          retryOf: null,
-          envelope: null,
-          completionDiagnostic: null
-        }
-      };
-      await this.store.writeRunAttempt(state.runId, record7);
-    } else if (record7.status !== "started" || record7.result !== null || policy.completion !== void 0 !== this.completionProtocolAttempt(record7) || record7.recoveryOf !== authorization.attempt.id || record7.recoveryAuthorizationId !== authorization.authorizationId || record7.attempt.kind !== authorization.phase || record7.sessionMode !== policy.sessionMode || record7.resumeSessionId !== policy.resumeSessionId || JSON.stringify(record7.sessionContext) !== JSON.stringify(policy.sessionContext)) {
-      throw new BanzaiError(
-        "RECOVERY_ATTEMPT_CONFLICT",
-        "Persisted recovery attempt conflicts with its authorization."
-      );
-    }
-    if (state.recovery?.sourceAttemptId !== authorization.attempt.id || state.recovery.authorizationId !== authorization.authorizationId || state.recovery.recoveryAttemptId !== null || state.recovery.stage !== "source_interrupted" && state.recovery.stage !== "source_preserved") {
-      throw new BanzaiError(
-        "RECOVERY_STATE_CHANGED",
-        "Recovery state changed before the new attempt could be linked."
-      );
-    }
-    state.metrics.attempts[attempt.kind] += 1;
-    state.metrics.sessions[policy.sessionMode] += 1;
-    state.activeAttempt = attempt;
-    state.recovery = {
-      authorizationId: authorization.authorizationId,
-      sourceAttemptId: authorization.attempt.id,
-      recoveryAttemptId: attempt.id,
-      stage: "attempt_started"
-    };
-    await this.store.writeState(state);
-    const timingEvent = await this.store.appendEvent(
-      state.runId,
-      "attempt.recovery_started",
-      {
-        sourceAttemptId: authorization.attempt.id,
-        attemptId: attempt.id,
-        kind: attempt.kind
-      }
-    );
-    await this.observeHumanTime(
-      state,
-      "checkpoint",
-      "attempt.recovery_started",
-      timingEvent.at,
-      attempt.id
-    );
-    return record7;
-  }
-  async processStarted(state, attempt, pid) {
-    state.activeProcess = { pid, kind: attempt.kind, startedAt: this.now() };
-    try {
-      await this.store.writeState(state);
-    } catch (error) {
-      if (error instanceof TerminalRunStateError) terminateProcessGroup(pid);
-      throw error;
-    }
-  }
-  attemptScopeDigest(state, attempt) {
-    if (attempt.kind !== "fix" && !state.artifactBinding) {
-      return null;
-    }
-    const acceptedFindingIds = state.triage?.items.filter((item) => item.disposition === "accepted").map((item) => item.findingId).sort() ?? [];
-    return digestCanonicalJson4(
-      state.artifactBinding ? {
-        version: 2,
-        artifactBindingDigest: state.artifactBinding.sha256,
-        phase: attempt.kind,
-        acceptedFindingIds: attempt.kind === "fix" ? acceptedFindingIds : []
-      } : { version: 1, acceptedFindingIds }
-    );
-  }
-  terminalCheckpointWriter(state, attempt, settings, policy, completion = false) {
-    return async (terminal) => {
-      const current = await this.store.readState(state.runId);
-      if (current.activeAttempt?.id !== attempt.id || current.activeAttempt.kind !== attempt.kind || current.activeAttempt.mutable !== attempt.mutable) {
-        throw new BanzaiError(
-          "TERMINAL_CHECKPOINT_STATE_CHANGED",
-          "The active attempt changed before terminal success could be persisted."
-        );
-      }
-      await this.validateSavedArtifactScope(current, attempt);
-      if (attempt.kind === "plan" || attempt.kind === "implementation" || attempt.kind === "fix")
-        this.validateArtifactRoleReferences(
-          current,
-          terminal.result
-        );
-      const vendor = vendorFor(settings.executable) ?? FALLBACK_VENDOR[policy.sessionContext.role];
-      if (completion) {
-        if (attempt.kind !== "implementation" && attempt.kind !== "fix")
-          throw new BanzaiError(
-            "TERMINAL_CHECKPOINT_STATE_CHANGED",
-            "Only strict implementation or fix attempts use the completion protocol."
-          );
-        const envelope = this.completionEnvelopeOf(
-          terminal.result
-        );
-        const observed3 = await this.observeCompletionInputs(
-          current,
-          envelope.artifacts
-        );
-        const checkpoint2 = {
-          schema: state.verificationMode === "task" ? "banzai-terminal-attempt-checkpoint/v3" : TERMINAL_CHECKPOINT_SCHEMA_V22,
-          schemaVersion: state.verificationMode === "task" ? 3 : TERMINAL_CHECKPOINT_SCHEMA_VERSION_V22,
-          completionProtocol: COMPLETION_PROTOCOL4,
-          runId: current.runId,
-          attempt: { id: attempt.id, kind: attempt.kind, mutable: true },
-          phase: attempt.kind,
-          configuration: {
-            vendor,
-            executableDigest: digestCanonicalJson4(settings.executable),
-            model: settings.model,
-            effort: settings.effort,
-            sessionMode: policy.sessionMode,
-            sessionContextDigest: digestCanonicalJson4(policy.sessionContext)
-          },
-          resultContract: state.verificationMode === "task" ? "phase-result/v4" : "phase-result/v3",
-          terminal: {
-            classification: terminal.classification,
-            observedAt: terminal.observedAt
-          },
-          envelope,
-          resultDigest: envelope.originalDigest,
-          observed: observed3.observed,
-          sessionId: terminal.sessionId,
-          usage: terminal.usage,
-          baseCommit: current.baseCommit,
-          approvalDigest: current.planApproval?.digest ?? null,
-          workflowDigest: null,
-          scopeDigest: this.attemptScopeDigest(current, attempt)
-        };
-        await this.store.writeTerminalCheckpoint(current.runId, {
-          ...checkpoint2,
-          integrityDigest: terminalCheckpointIntegrity2(checkpoint2)
-        });
-        await this.store.appendEvent(
-          current.runId,
-          "attempt.terminal_checkpoint",
-          {
-            attemptId: attempt.id,
-            kind: attempt.kind,
-            classification: terminal.classification
-          }
-        );
-        return;
-      }
-      const checkpoint = {
-        schema: state.verificationMode === "task" ? "banzai-terminal-attempt-checkpoint/v3" : TERMINAL_CHECKPOINT_SCHEMA2,
-        schemaVersion: state.verificationMode === "task" ? 3 : TERMINAL_CHECKPOINT_SCHEMA_VERSION2,
-        runId: current.runId,
-        attempt,
-        phase: attempt.kind,
-        configuration: {
-          vendor,
-          executableDigest: digestCanonicalJson4(settings.executable),
-          model: settings.model,
-          effort: settings.effort,
-          sessionMode: policy.sessionMode,
-          sessionContextDigest: digestCanonicalJson4(policy.sessionContext)
-        },
-        resultContract: terminalResultContract(
-          attempt.kind,
-          state.verificationMode === "task"
-        ),
-        terminal: {
-          classification: terminal.classification,
-          observedAt: terminal.observedAt
-        },
-        result: terminal.result,
-        sessionId: terminal.sessionId,
-        usage: terminal.usage,
-        baseCommit: current.baseCommit,
-        approvalDigest: current.planApproval?.digest ?? null,
-        workflowDigest: current.planApproval === null ? current.workflowSelection?.digest ?? null : null,
-        scopeDigest: this.attemptScopeDigest(current, attempt)
-      };
-      const persisted = {
-        ...checkpoint,
-        integrityDigest: terminalCheckpointIntegrity2(checkpoint)
-      };
-      await this.store.writeTerminalCheckpoint(current.runId, persisted);
-      await this.store.appendEvent(
-        current.runId,
-        "attempt.terminal_checkpoint",
-        {
-          attemptId: attempt.id,
-          kind: attempt.kind,
-          classification: terminal.classification
-        }
-      );
-    };
-  }
-  async completeAttempt(state, record7, adapterResult) {
-    if (record7.result === null) {
-      await this.persistAdapterResult(state, record7, adapterResult);
-    }
-    record7.status = "completed";
-    record7.completedAt = this.now();
-    record7.durationMs = Date.parse(record7.completedAt) - Date.parse(record7.startedAt);
-    await this.store.writeRunAttempt(state.runId, record7);
-    const current = await this.store.readState(state.runId);
-    if (current.status === "cancelled") {
-      return false;
-    }
-    this.accountCompletedAttempt(state, record7);
-    state.activeProcess = null;
-    await this.store.writeState(state);
-    return true;
-  }
-  async persistAdapterResult(state, record7, adapterResult) {
-    await this.writeAttemptOutput(
-      state,
-      record7,
-      adapterResult.stdout,
-      adapterResult.stderr
-    );
-    record7.usage = adapterResult.usage;
-    if (record7.planningContext !== void 0 && record7.sessionId !== null && adapterResult.sessionId !== null && record7.sessionId !== adapterResult.sessionId) {
-      throw new BanzaiError(
-        "SESSION_ID_CONFLICT",
-        "The planning result conflicts with its announced session identity."
-      );
-    }
-    record7.result = adapterResult.result;
-    record7.sessionId = adapterResult.sessionId ?? record7.sessionId;
-    record7.durationMs = this.clock().getTime() - Date.parse(record7.startedAt);
-    await this.store.writeRunAttempt(state.runId, record7);
-  }
-  async writeAttemptOutput(state, record7, stdout, stderr) {
-    const stdoutPath = path27.relative(
-      this.store.runDirectory(state.runId),
-      await this.store.writeText(
-        state.runId,
-        `attempts/${record7.attempt.id}.stdout.log`,
-        redactSensitiveText(stdout)
-      )
-    );
-    const stderrPath = path27.relative(
-      this.store.runDirectory(state.runId),
-      await this.store.writeText(
-        state.runId,
-        `attempts/${record7.attempt.id}.stderr.log`,
-        redactSensitiveText(stderr)
-      )
-    );
-    record7.rawStdoutPath = stdoutPath;
-    record7.rawStderrPath = stderrPath;
-  }
-  async failAttempt(state, record7, error) {
-    if (error instanceof TerminalRunStateError) return error.state;
-    const completionError3 = (record7.attempt.kind === "implementation" || record7.attempt.kind === "fix") && (state.workflowSelection?.workflow ?? "strict") === "strict" && error instanceof BanzaiError && ["PLAN_TASK_COMPLETION_INVALID", "PHASE_RESULT_SCHEMA_MISMATCH"].includes(
-      error.code
-    ) ? error instanceof PlanTaskCompletionError ? error : new PlanTaskCompletionError("source_attempt_invalid", error.message) : null;
-    record7.status = "failed";
-    record7.completedAt = this.now();
-    record7.durationMs = Date.parse(record7.completedAt) - Date.parse(record7.startedAt);
-    record7.error = completionError3 === null ? errorMessage(error) : `[PLAN_TASK_COMPLETION_INVALID] ${completionError3.message}`;
-    record7.failureCode = completionError3 === null ? error instanceof BanzaiError ? error.code : null : "PLAN_TASK_COMPLETION_INVALID";
-    const failureCause = classifyModelFailure(error);
-    record7.failureCause = failureCause;
-    if (error instanceof ProcessExitError && record7.rawStdoutPath === null && record7.rawStderrPath === null) {
-      await this.writeAttemptOutput(state, record7, error.stdout, error.stderr);
-    }
-    if (record7.usage === null && error instanceof ProcessExitError) {
-      record7.usage = error.usage;
-    }
-    await this.store.writeRunAttempt(state.runId, record7);
-    const current = await this.store.readState(state.runId);
-    if (current.status === "cancelled") {
-      return current;
-    }
-    state.activeProcess = null;
-    this.accountAttemptUsage(state, record7);
-    if (record7.attempt.kind === "review") {
-      if (error instanceof BanzaiError && error.code === "ARTIFACT_PHASE_SCOPE_INVALID") {
-        state.reviewIteration = state.latestReview?.iteration ?? 0;
-        state.pendingReviewRotationReason = "unreliable-review";
-      } else if (INTEGRITY_NEUTRAL_FAILURE_CAUSES.has(failureCause)) {
-        if (state.latestReview !== null) {
-          state.workspaceDigest = state.latestReview.workspaceDigest;
-        }
-      } else {
-        state.pendingReviewRotationReason = "previous-review-failed";
-      }
-    }
-    if (completionError3 !== null) {
-      state.planTaskCompletion = this.completionInvalidCheckpoint(
-        record7.attempt.id,
-        completionError3,
-        record7.attempt.kind === "fix" ? "fix" : "implementation"
-      );
-    }
-    blockState(
-      state,
-      completionError3 === null ? `${record7.attempt.kind} failed: ${errorMessage(error)}` : `[PLAN_TASK_COMPLETION_INVALID] ${completionError3.message}`
-    );
-    await this.store.writeState(state);
-    await this.store.appendEvent(state.runId, "attempt.failed", {
-      attemptId: record7.attempt.id,
-      kind: record7.attempt.kind,
-      cause: failureCause,
-      error: errorMessage(error)
-    });
-    if (completionError3 !== null) {
-      await this.store.appendEvent(
-        state.runId,
-        "plan_task_completion.validation_failed",
-        {
-          attemptId: record7.attempt.id,
-          code: "PLAN_TASK_COMPLETION_INVALID",
-          violation: completionError3.violation,
-          taskId: completionError3.taskId
-        }
-      );
-    }
     return state;
   }
   contextAuthority(state, config, phase) {
@@ -38795,21 +39565,6 @@ var WorkflowRunner = class {
     }
     return entries;
   }
-  artifactWritePaths(state, phase) {
-    const roles = state.artifactBinding?.binding.artifacts;
-    if (roles === void 0) return [];
-    if (phase === "plan")
-      return [roles.description, roles.plan].filter(
-        (item) => item !== void 0
-      );
-    if (phase !== "implementation" && phase !== "fix") return [];
-    const workflow = state.workflowSelection?.workflow ?? "strict";
-    return (workflow === "strict" ? [
-      roles.implementationReport,
-      roles.testReport,
-      ...phase === "fix" ? [roles.changeReport] : []
-    ] : workflow === "feature" ? [roles.work] : [roles.changeReport]).filter((item) => item !== void 0);
-  }
   artifactInstructions(state, phase) {
     const workflow = state.workflowSelection?.workflow ?? "strict";
     const bound = state.artifactBinding;
@@ -38835,7 +39590,7 @@ var WorkflowRunner = class {
       roles.testReport,
       ...phase === "fix" ? [roles.changeReport] : []
     ] : workflow === "feature" ? [roles.work] : [roles.changeReport] : [];
-    const writes = bound === void 0 ? legacyOutputs.filter((item) => item !== void 0) : this.artifactWritePaths(state, phase);
+    const writes = bound === void 0 ? legacyOutputs.filter((item) => item !== void 0) : artifactWritePaths(state, phase);
     return [
       bound === void 0 ? "Legacy artifact surface (no persisted work binding):" : "Artifact storage authority (run state v4):",
       JSON.stringify(
@@ -38849,83 +39604,6 @@ var WorkflowRunner = class {
       "Read ignored required evidence directly. Do not initialize, create or rebind work, invoke the standalone artifact helper, acquire standalone claims, or modify declarations, runner state, approvals or another work item.",
       workflow === "feature" ? "For lite feature work, artifacts.implementationReport may reference the work role; do not create a second report." : workflow === "quick-fix" ? "For quick-fix, artifacts.implementationReport may reference the changeReport only when the existing report trigger applies; otherwise keep it null." : ""
     ].filter((part) => part.length > 0).join("\n");
-  }
-  async checkArtifactPhaseScope(state, phase, before) {
-    const bound = state.artifactBinding;
-    if (bound === void 0) return;
-    const after = await workspaceSnapshot(this.repoRoot, {
-      baseline: state.baseline,
-      artifactBinding: bound,
-      excludedPaths: phase === "review" ? [reviewArtifactPath(state.slug, state.reviewIteration, bound)] : []
-    });
-    const allowed = new Set(this.artifactWritePaths(state, phase));
-    for (const change of workspaceChanges(before, after)) {
-      const candidate = change.path;
-      const privatePath = candidate === ".banzai" || candidate.startsWith(".banzai/");
-      const legacyWork = /^documentation\/(?:features|development-plans|changes)\//.test(
-        candidate
-      );
-      const prohibited = phase === "selection" || phase === "review" || privatePath && !allowed.has(candidate) || legacyWork && !allowed.has(candidate) || // Accepting an ADR during planning adds its row to the manifest's
-      // active ADR index, as the delivered architecture guidance requires.
-      phase === "plan" && !allowed.has(candidate) && !isDocumentationPath(candidate) && candidate !== "PROJECT_MANIFEST.md";
-      if (prohibited)
-        throw new BanzaiError(
-          "ARTIFACT_PHASE_SCOPE_INVALID",
-          `Phase ${phase} changed an unauthorized artifact or source path: ${candidate}`
-        );
-    }
-  }
-  async validateSavedArtifactScope(state, attempt) {
-    if (!state.artifactBinding) return;
-    const bytes = await readBytes3(
-      this.repoRoot,
-      `.banzai/runs/${state.runId}/attempts/${attempt.id}.artifact-workspace.json`,
-      { limit: 2 * 1024 * 1024 }
-    );
-    const before = JSON.parse(
-      bytes?.toString("utf8") ?? "null"
-    );
-    if (before?.schemaVersion !== 2 || before.baseCommit !== state.baseCommit || before.artifactBindingDigest !== state.artifactBinding.sha256 || !Array.isArray(before.entries) || before.digest !== createHash17("sha256").update(
-      JSON.stringify({
-        version: 2,
-        baseCommit: before.baseCommit,
-        artifactBindingDigest: before.artifactBindingDigest,
-        entries: before.entries
-      })
-    ).digest("hex"))
-      throw new BanzaiError(
-        "ARTIFACT_RECOVERY_REQUIRED",
-        "Original attempt artifact workspace evidence is missing or inconsistent."
-      );
-    await this.checkArtifactPhaseScope(state, attempt.kind, before);
-  }
-  validateArtifactRoleReferences(state, result) {
-    const roles = state.artifactBinding?.binding.artifacts;
-    if (roles === void 0) return;
-    for (const role of [
-      "description",
-      "plan",
-      "implementationReport",
-      "testReport"
-    ]) {
-      const reference3 = result.artifacts[role];
-      if (reference3 === null) continue;
-      const workflow = state.workflowSelection?.workflow ?? "strict";
-      const expected = role === "implementationReport" && workflow !== "strict" ? workflow === "feature" ? roles.work : roles.changeReport : roles[role];
-      if (reference3 !== expected)
-        throw new BanzaiError(
-          "ARTIFACT_PHASE_SCOPE_INVALID",
-          `Result ${role} does not match the persisted work binding.`
-        );
-    }
-    if (result.artifacts.adrs.some(
-      (value) => !/^documentation\/decisions\/[0-9]{4}-[a-z0-9-]+\.md$/.test(value)
-    )) {
-      throw new BanzaiError(
-        "ARTIFACT_PHASE_SCOPE_INVALID",
-        "ADR references must retain their public decision paths."
-      );
-    }
   }
   async invokeWithContext(input) {
     const vendor = vendorFor(input.settings.executable) ?? FALLBACK_VENDOR[input.role];
@@ -39052,7 +39730,7 @@ var WorkflowRunner = class {
       });
       if (before !== null)
         await writeFile4(
-          path27.join(
+          path31.join(
             this.store.runDirectory(input.state.runId),
             "attempts",
             `${input.attempt.id}.artifact-workspace.json`
@@ -39062,7 +39740,8 @@ var WorkflowRunner = class {
         );
       result = await input.invoke(outputContract);
       if (before !== null)
-        await this.checkArtifactPhaseScope(
+        await checkArtifactPhaseScope(
+          this.context,
           input.state,
           input.attempt.kind,
           before
@@ -39094,8 +39773,8 @@ var WorkflowRunner = class {
       role: "planner",
       phase: "selection"
     });
-    const attempt = this.newAttempt(state, "selection", false);
-    const record7 = await this.beginAttempt(state, attempt, {
+    const attempt = newAttempt(this.context, state, "selection", false);
+    const record7 = await beginAttempt(this.context, state, attempt, {
       sessionMode: "fresh",
       resumeSessionId: null,
       sessionContext: sessionContext("planner", config.models.planner)
@@ -39156,12 +39835,13 @@ var WorkflowRunner = class {
               BANZAI_RUN_ID: state.runId
             },
             onStart: async (pid) => {
-              await this.processStarted(state, attempt, pid);
+              await processStarted(this.context, state, attempt, pid);
             },
             onProgress: (event) => {
               this.modelProgress("Workflow selection", event);
             },
-            onTerminalSuccess: this.terminalCheckpointWriter(
+            onTerminalSuccess: terminalCheckpointWriter(
+              this.context,
               state,
               attempt,
               config.models.planner,
@@ -39176,7 +39856,7 @@ var WorkflowRunner = class {
           })
         })
       );
-      if (!await this.completeAttempt(state, record7, result)) {
+      if (!await completeAttempt(this.context, state, record7, result)) {
         return await this.store.readState(state.runId);
       }
       try {
@@ -39197,7 +39877,7 @@ var WorkflowRunner = class {
     } catch (error) {
       if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
-      return await this.failAttempt(state, record7, error);
+      return await failAttempt(this.context, state, record7, error);
     }
   }
   async applyWorkflowSelection(state, attempt, result, config) {
@@ -39340,8 +40020,8 @@ var WorkflowRunner = class {
       phase: "planning"
     });
     await this.invocationScope(state.runId, config);
-    const attempt = this.newAttempt(state, "plan", false);
-    const record7 = await this.beginAttempt(state, attempt, {
+    const attempt = newAttempt(this.context, state, "plan", false);
+    const record7 = await beginAttempt(this.context, state, attempt, {
       sessionMode: resumeSessionId === null ? "fresh" : "resumed",
       resumeSessionId,
       sessionContext: sessionContext("planner", config.models.planner)
@@ -39429,12 +40109,13 @@ var WorkflowRunner = class {
               await this.store.writeRunAttempt(state.runId, record7);
             },
             onStart: async (pid) => {
-              await this.processStarted(state, attempt, pid);
+              await processStarted(this.context, state, attempt, pid);
             },
             onProgress: (event) => {
               this.modelProgress("Planning", event);
             },
-            onTerminalSuccess: this.terminalCheckpointWriter(
+            onTerminalSuccess: terminalCheckpointWriter(
+              this.context,
               state,
               attempt,
               config.models.planner,
@@ -39449,11 +40130,11 @@ var WorkflowRunner = class {
           })
         })
       );
-      const planResult = this.legacyPhaseResult(result.result);
+      const planResult = legacyPhaseResult(result.result);
       const applied = { ...result, result: planResult };
-      await this.persistAdapterResult(state, record7, applied);
-      await this.validatePlanningResult(state, attempt, planResult);
-      if (!await this.completeAttempt(state, record7, applied)) {
+      await persistAdapterResult(this.context, state, record7, applied);
+      await validatePlanningResult(this.context, state, attempt, planResult);
+      if (!await completeAttempt(this.context, state, record7, applied)) {
         return await this.store.readState(state.runId);
       }
       try {
@@ -39481,12 +40162,12 @@ var WorkflowRunner = class {
         });
         record7.planningContext.workspaceDigest = snapshot.baseCommit === state.baseCommit ? snapshot.digest : null;
         record7.planningContext.artifactPaths = snapshot.entries.filter(
-          (entry) => entry.kind === "file" && (entry.path.startsWith("documentation/") || entry.path === "PROJECT_MANIFEST.md" || this.artifactWritePaths(state, "plan").includes(entry.path)) && entry.path.length <= 300
+          (entry) => entry.kind === "file" && (entry.path.startsWith("documentation/") || entry.path === "PROJECT_MANIFEST.md" || artifactWritePaths(state, "plan").includes(entry.path)) && entry.path.length <= 300
         ).map((entry) => entry.path).slice(0, 128);
       } catch {
         record7.planningContext.workspaceDigest = null;
       }
-      return await this.failAttempt(state, record7, error);
+      return await failAttempt(this.context, state, record7, error);
     }
   }
   async executeImplementation(state, config, recovery = null, commitTransition) {
@@ -39505,11 +40186,11 @@ var WorkflowRunner = class {
         "Implementation checks",
         `base commit, ${lite ? "persisted workflow selection" : "approved plan bundle"}, and ${config.models.implementer.executable} subscription authentication`,
         async () => {
-          await this.validateBaseCommit(state);
+          await validateBaseCommit(this.context, state);
           if (lite) {
-            this.validateWorkflowSelection(state);
+            validateWorkflowSelection(state);
           } else {
-            await this.validateApproval(state);
+            await validateApproval(this.context, state);
           }
           await this.preflightVendor("implementer", config.models.implementer);
         }
@@ -39537,7 +40218,7 @@ var WorkflowRunner = class {
     }
     const protocol = !lite;
     const retryOf = protocol && recovery === null ? await this.completionRetryPredecessor(state, "implementation") : null;
-    const attempt = recovery === null ? retryOf === null ? this.newAttempt(state, "implementation", true) : this.repairAttempt(state, "implementation", retryOf) : this.recoveryAttempt(recovery);
+    const attempt = recovery === null ? retryOf === null ? newAttempt(this.context, state, "implementation", true) : repairAttempt(state, "implementation", retryOf) : recoveryAttempt(recovery);
     if (protocol)
       await this.transitionToCompletionState(state, {
         id: attempt.id,
@@ -39550,10 +40231,10 @@ var WorkflowRunner = class {
       sessionContext: sessionContext("implementer", config.models.implementer),
       ...protocol ? { completion: { retryOf } } : {}
     };
-    const record7 = recovery === null ? await this.beginAttempt(state, attempt, policy) : await this.beginRecoveryAttempt(state, recovery, policy);
+    const record7 = recovery === null ? await beginAttempt(this.context, state, attempt, policy) : await beginRecoveryAttempt(this.context, state, recovery, policy);
     try {
       const approval = state.planApproval;
-      const selection = lite ? this.validateWorkflowSelection(state) : null;
+      const selection = lite ? validateWorkflowSelection(state) : null;
       if (!lite && approval === null) {
         throw new BanzaiError("PLAN_NOT_APPROVED", "Plan approval is missing.");
       }
@@ -39562,7 +40243,7 @@ var WorkflowRunner = class {
         approval?.digest ?? "",
         approval?.paths ?? [],
         config.verification.profiles,
-        await this.approvedTaskIds(state),
+        await approvedTaskIds(this.context, state),
         state.planTaskCompletion?.status === "invalid" ? {
           sourceAttemptId: state.planTaskCompletion.sourceAttemptId,
           violation: state.planTaskCompletion.violation,
@@ -39639,12 +40320,13 @@ var WorkflowRunner = class {
               ...authorizationEnvironment
             },
             onStart: async (pid) => {
-              await this.processStarted(state, attempt, pid);
+              await processStarted(this.context, state, attempt, pid);
             },
             onProgress: (event) => {
               this.modelProgress("Implementation", event);
             },
-            onTerminalSuccess: this.terminalCheckpointWriter(
+            onTerminalSuccess: terminalCheckpointWriter(
+              this.context,
               state,
               attempt,
               config.models.implementer,
@@ -39677,7 +40359,7 @@ var WorkflowRunner = class {
           sessionContext("implementer", config.models.implementer)
         );
       }
-      const liteResult = this.legacyPhaseResult(result.result);
+      const liteResult = legacyPhaseResult(result.result);
       if (liteResult.taskCompletion !== null) {
         throw new BanzaiError(
           "PLAN_TASK_COMPLETION_INVALID",
@@ -39685,14 +40367,15 @@ var WorkflowRunner = class {
         );
       }
       const applied = { ...result, result: liteResult };
-      await this.persistAdapterResult(state, record7, applied);
-      await this.establishResultSourceIdentities(
+      await persistAdapterResult(this.context, state, record7, applied);
+      await establishResultSourceIdentities(
+        this.context,
         state,
         attempt,
         liteResult,
         config
       );
-      if (!await this.completeAttempt(state, record7, applied)) {
+      if (!await completeAttempt(this.context, state, record7, applied)) {
         return await this.store.readState(state.runId);
       }
       try {
@@ -39714,7 +40397,7 @@ var WorkflowRunner = class {
     } catch (error) {
       if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
-      return await this.failAttempt(state, record7, error);
+      return await failAttempt(this.context, state, record7, error);
     }
   }
   async executeFix(state, config, recovery = null, commitTransition) {
@@ -39731,8 +40414,8 @@ var WorkflowRunner = class {
         "Fix checks",
         `base commit, approved plan bundle, and ${config.models.implementer.executable} subscription authentication`,
         async () => {
-          await this.validateBaseCommit(state);
-          await this.validateApproval(state);
+          await validateBaseCommit(this.context, state);
+          await validateApproval(this.context, state);
           await this.preflightVendor("implementer", config.models.implementer);
         }
       );
@@ -39786,7 +40469,7 @@ var WorkflowRunner = class {
       phase: "fix"
     });
     const retryOf = recovery === null ? await this.completionRetryPredecessor(state, "fix") : null;
-    const attempt = recovery === null ? retryOf === null ? this.newAttempt(state, "fix", true) : this.repairAttempt(state, "fix", retryOf) : this.recoveryAttempt(recovery);
+    const attempt = recovery === null ? retryOf === null ? newAttempt(this.context, state, "fix", true) : repairAttempt(state, "fix", retryOf) : recoveryAttempt(recovery);
     await this.transitionToCompletionState(state, {
       id: attempt.id,
       kind: "fix",
@@ -39798,7 +40481,7 @@ var WorkflowRunner = class {
       sessionContext: sessionContext("implementer", config.models.implementer),
       completion: { retryOf }
     };
-    const record7 = recovery === null ? await this.beginAttempt(state, attempt, policy) : await this.beginRecoveryAttempt(state, recovery, policy);
+    const record7 = recovery === null ? await beginAttempt(this.context, state, attempt, policy) : await beginRecoveryAttempt(this.context, state, recovery, policy);
     try {
       const approval = state.planApproval;
       if (approval === null) {
@@ -39884,12 +40567,13 @@ var WorkflowRunner = class {
               BANZAI_APPROVAL_DIGEST: approval.digest
             },
             onStart: async (pid) => {
-              await this.processStarted(state, attempt, pid);
+              await processStarted(this.context, state, attempt, pid);
             },
             onProgress: (event) => {
               this.modelProgress("Fix", event);
             },
-            onTerminalSuccess: this.terminalCheckpointWriter(
+            onTerminalSuccess: terminalCheckpointWriter(
+              this.context,
               state,
               attempt,
               config.models.implementer,
@@ -39923,29 +40607,12 @@ var WorkflowRunner = class {
     } catch (error) {
       if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
         throw error;
-      return await this.failAttempt(state, record7, error);
+      return await failAttempt(this.context, state, record7, error);
     }
   }
   // ---------------------------------------------------------------------------
   // Runner-owned completion publication (ADR-0047 / ADR-0048)
   // ---------------------------------------------------------------------------
-  completionProtocolAttempt(record7) {
-    return record7.schemaVersion === STRICT_MODEL_ATTEMPT_SCHEMA_VERSION2 || record7.schemaVersion === 4 && record7.completionProtocol === COMPLETION_PROTOCOL4;
-  }
-  completionEnvelopeOf(result) {
-    return isPhaseResultEnvelope(result) ? result : phaseResultEnvelopeOf(result);
-  }
-  /** Lite routes keep the validated result contract; an envelope there is a vendor defect. */
-  legacyPhaseResult(result) {
-    if (!isPhaseResultEnvelope(result)) return result;
-    const validated = phaseResultFromEnvelope(result);
-    if (validated === null)
-      throw new BanzaiError(
-        "PLAN_TASK_COMPLETION_INVALID",
-        result.taskCompletion.state === "unaccepted" ? result.taskCompletion.diagnostic : "Lite phase result carried an unaccepted completion payload."
-      );
-    return validated;
-  }
   /**
    * The exact rejected predecessor an evidence-repair successor links to. Only
    * a failed attempt of the same kind whose input the runner rejected under
@@ -39965,29 +40632,6 @@ var WorkflowRunner = class {
     if (predecessor?.status !== "failed" || predecessor.failureCode !== "PLAN_TASK_COMPLETION_INVALID")
       return null;
     return predecessor.attempt.id;
-  }
-  /**
-   * A deterministic successor identity for one rejected predecessor under the
-   * same approval and scope, so an interrupted successor creation deduplicates
-   * on resume instead of minting a second linked attempt.
-   */
-  repairAttempt(state, kind, predecessor) {
-    const identity = digestCanonicalJson4({
-      version: 1,
-      runId: state.runId,
-      predecessor,
-      approvalDigest: state.planApproval?.digest ?? null,
-      scopeDigest: this.attemptScopeDigest(state, {
-        id: predecessor,
-        kind,
-        mutable: true
-      })
-    });
-    return {
-      id: `${kind}-repair-${identity.slice(0, 12)}`,
-      kind,
-      mutable: true
-    };
   }
   /**
    * Moves a v4/v6 run to schema 7 exactly once, when its first strict attempt
@@ -40017,7 +40661,7 @@ var WorkflowRunner = class {
           attempt,
           "completion-state-input.json"
         ),
-        sha256: createHash17("sha256").update(priorBytes).digest("hex")
+        sha256: createHash20("sha256").update(priorBytes).digest("hex")
       }
     };
     await this.store.writeCompletionTransition(
@@ -40042,94 +40686,6 @@ var WorkflowRunner = class {
     const settings = config.models.implementer;
     const expectedContext = record7.sessionContext ?? sessionContext("implementer", settings);
     return checkpoint.configuration.vendor === (vendorFor(settings.executable) ?? FALLBACK_VENDOR.implementer) && checkpoint.configuration.executableDigest === digestCanonicalJson4(settings.executable) && checkpoint.configuration.model === settings.model && checkpoint.configuration.effort === settings.effort && checkpoint.configuration.sessionMode === (record7.sessionMode ?? "fresh") && checkpoint.configuration.sessionContextDigest === digestCanonicalJson4(expectedContext);
-  }
-  /** Observes one required report without following an unsafe path. */
-  async observeReport(relativePath3) {
-    if (relativePath3 === null)
-      return { observation: { path: null, state: "absent" }, bytes: null };
-    let absolute;
-    try {
-      absolute = path27.resolve(this.repoRoot, relativePath3);
-      if (relativePath3.length === 0 || relativePath3.includes("\\") || path27.posix.isAbsolute(relativePath3) || path27.posix.normalize(relativePath3) !== relativePath3 || relativePath3.startsWith("../") || !absolute.startsWith(`${path27.resolve(this.repoRoot)}${path27.sep}`))
-        return {
-          observation: { path: relativePath3, state: "unsafe" },
-          bytes: null
-        };
-      const metadata = await lstat17(absolute);
-      if (!metadata.isFile() || metadata.isSymbolicLink())
-        return {
-          observation: { path: relativePath3, state: "unsafe" },
-          bytes: null
-        };
-      const root = await realpath11(this.repoRoot);
-      if (!(await realpath11(absolute)).startsWith(`${root}${path27.sep}`))
-        return {
-          observation: { path: relativePath3, state: "unsafe" },
-          bytes: null
-        };
-    } catch (error) {
-      return {
-        observation: {
-          path: relativePath3,
-          state: error.code === "ENOENT" ? "absent" : "unavailable"
-        },
-        bytes: null
-      };
-    }
-    try {
-      const bytes = await readFile13(absolute);
-      return {
-        observation: {
-          path: relativePath3,
-          state: "present",
-          sha256: createHash17("sha256").update(bytes).digest("hex"),
-          bytes: bytes.length
-        },
-        bytes
-      };
-    } catch {
-      return {
-        observation: { path: relativePath3, state: "unavailable" },
-        bytes: null
-      };
-    }
-  }
-  /**
-   * Report identities plus the non-report workspace digest, omitting exactly
-   * the two report destinations so a runner-owned report write never counts
-   * as source drift while every other change does.
-   */
-  async observeCompletionInputs(state, artifacts) {
-    const implementation = await this.observeReport(
-      artifacts.implementationReport
-    );
-    const test = await this.observeReport(artifacts.testReport);
-    const excludedPaths = [
-      artifacts.implementationReport,
-      artifacts.testReport
-    ].filter((item) => item !== null);
-    let workspaceDigest2;
-    try {
-      workspaceDigest2 = (await workspaceSnapshot(this.repoRoot, {
-        artifactBinding: state.artifactBinding,
-        baseline: state.baseline,
-        excludedPaths
-      })).digest;
-    } catch {
-      workspaceDigest2 = null;
-    }
-    return {
-      observed: {
-        implementationReport: implementation.observation,
-        testReport: test.observation,
-        workspaceDigest: workspaceDigest2
-      },
-      bytes: {
-        implementationReport: implementation.bytes,
-        testReport: test.bytes
-      },
-      excludedPaths
-    };
   }
   async storeCursor(state, cursor) {
     state.completionPublication = cursor;
@@ -40184,7 +40740,8 @@ var WorkflowRunner = class {
       state.runId,
       attempt
     );
-    const inputs = await this.observeCompletionInputs(
+    const inputs = await observeCompletionInputs(
+      this.context,
       state,
       envelope.artifacts
     );
@@ -40239,13 +40796,15 @@ var WorkflowRunner = class {
       transitionDigest: transition?.integrityDigest ?? null,
       baseCommit: state.baseCommit,
       approvalDigest: approval.digest,
-      planTaskDigest: planTaskDigest(await this.approvedTaskIds(state)),
+      planTaskDigest: planTaskDigest(
+        await approvedTaskIds(this.context, state)
+      ),
       workBinding: state.artifactBinding === void 0 ? null : {
         workId: state.artifactBinding.binding.workId,
         sha256: state.artifactBinding.sha256
       },
       configurationDigest: this.implementerConfigurationDigest(config),
-      scopeDigest: this.attemptScopeDigest(state, attempt),
+      scopeDigest: attemptScopeDigest(state, attempt),
       ledgerSource,
       reports: {
         implementationReport: observed3.implementationReport,
@@ -40288,7 +40847,7 @@ var WorkflowRunner = class {
           ledger: envelope.taskCompletion.ledger,
           outcome: envelope.outcome,
           artifacts: envelope.artifacts,
-          planPath: this.completionPlanPath(state),
+          planPath: completionPlanPath(state),
           approval: state.planApproval,
           baseline: state.baseline
         });
@@ -40321,7 +40880,7 @@ var WorkflowRunner = class {
     await this.store.writeRunAttempt(state.runId, record7);
     const current = await this.store.readState(state.runId);
     if (current.status === "cancelled") return current;
-    this.accountCompletedAttempt(state, record7);
+    accountCompletedAttempt(state, record7);
     state.activeProcess = null;
     await this.store.writeState(state);
     const fields = envelopeResultFields(envelope);
@@ -40364,7 +40923,7 @@ var WorkflowRunner = class {
     await this.store.writeRunAttempt(state.runId, record7);
     const current = await this.store.readState(state.runId);
     if (current.status === "cancelled") return current;
-    this.accountAttemptUsage(state, record7);
+    accountAttemptUsage(state, record7);
     state.planTaskCompletion = this.completionRejectionCheckpoint(
       record7,
       error,
@@ -40518,7 +41077,7 @@ var WorkflowRunner = class {
   }
   /** The ledger a completed attempt record carries, under either protocol. */
   recordLedger(record7) {
-    if (this.completionProtocolAttempt(record7)) {
+    if (completionProtocolAttempt(record7)) {
       const envelope = record7.envelope ?? null;
       return envelope?.taskCompletion.state === "accepted" ? envelope.taskCompletion.ledger : null;
     }
@@ -40538,7 +41097,7 @@ var WorkflowRunner = class {
         this.repoRoot,
         state.planApproval.paths
       );
-      return bundle.digest === state.planApproval.digest && capture3.approvalDigest === state.planApproval.digest && capture3.planTaskDigest === planTaskDigest(await this.approvedTaskIds(state)) && capture3.scopeDigest === this.attemptScopeDigest(state, {
+      return bundle.digest === state.planApproval.digest && capture3.approvalDigest === state.planApproval.digest && capture3.planTaskDigest === planTaskDigest(await approvedTaskIds(this.context, state)) && capture3.scopeDigest === attemptScopeDigest(state, {
         id: capture3.attemptId,
         kind: capture3.attemptKind,
         mutable: true
@@ -40558,7 +41117,7 @@ var WorkflowRunner = class {
       if (await currentCommit(this.repoRoot) !== checkpoint.baseCommit)
         return false;
       const bundle = await digestArtifactBundle(this.repoRoot, approval.paths);
-      return checkpoint.runId === state.runId && checkpoint.attempt.id === record7.attempt.id && checkpoint.attempt.kind === record7.attempt.kind && checkpoint.phase === record7.attempt.kind && checkpoint.resultDigest === record7.envelope.originalDigest && checkpoint.baseCommit === state.baseCommit && checkpoint.approvalDigest === approval.digest && bundle.digest === approval.digest && checkpoint.workflowDigest === null && checkpoint.scopeDigest === this.attemptScopeDigest(state, record7.attempt) && this.completionCheckpointConfigurationCurrent(
+      return checkpoint.runId === state.runId && checkpoint.attempt.id === record7.attempt.id && checkpoint.attempt.kind === record7.attempt.kind && checkpoint.phase === record7.attempt.kind && checkpoint.resultDigest === record7.envelope.originalDigest && checkpoint.baseCommit === state.baseCommit && checkpoint.approvalDigest === approval.digest && bundle.digest === approval.digest && checkpoint.workflowDigest === null && checkpoint.scopeDigest === attemptScopeDigest(state, record7.attempt) && this.completionCheckpointConfigurationCurrent(
         record7,
         checkpoint,
         config
@@ -40707,7 +41266,8 @@ var WorkflowRunner = class {
           "receipt"
         );
     }
-    const inputs = await this.observeCompletionInputs(
+    const inputs = await observeCompletionInputs(
+      this.context,
       state,
       envelope.artifacts
     );
@@ -40758,7 +41318,7 @@ var WorkflowRunner = class {
       attempt,
       "testReport"
     );
-    if (originalImplementation === null || originalTest === null || capture3.originals.implementationReport === null || capture3.originals.testReport === null || createHash17("sha256").update(originalImplementation).digest("hex") !== capture3.originals.implementationReport.sha256 || createHash17("sha256").update(originalTest).digest("hex") !== capture3.originals.testReport.sha256)
+    if (originalImplementation === null || originalTest === null || capture3.originals.implementationReport === null || capture3.originals.testReport === null || createHash20("sha256").update(originalImplementation).digest("hex") !== capture3.originals.implementationReport.sha256 || createHash20("sha256").update(originalTest).digest("hex") !== capture3.originals.testReport.sha256)
       throw integrity(
         "Captured report originals are missing or changed.",
         "capture"
@@ -40790,7 +41350,7 @@ var WorkflowRunner = class {
       ledger,
       outcome: "completed",
       artifacts: envelope.artifacts,
-      planPath: this.completionPlanPath(state),
+      planPath: completionPlanPath(state),
       approval: state.planApproval,
       baseline: state.baseline,
       captured: originals
@@ -40804,7 +41364,7 @@ var WorkflowRunner = class {
       originals.implementationReport,
       ledger
     );
-    const outputSha256 = createHash17("sha256").update(composition.bytes).digest("hex");
+    const outputSha256 = createHash20("sha256").update(composition.bytes).digest("hex");
     const eligible = eligibleGapHeadings(
       composition.bytes.toString("utf8"),
       scanCompletionRegion(composition.bytes.toString("utf8"))
@@ -40881,19 +41441,19 @@ var WorkflowRunner = class {
     const current = await this.store.readState(state.runId);
     if (current.status === "cancelled")
       return { kind: "stopped", state: current };
-    const destination = path27.join(this.repoRoot, candidate.destination);
+    const destination = path31.join(this.repoRoot, candidate.destination);
     if (!published) {
       if (candidate.destination.startsWith(".banzai/"))
         await safePath3(this.repoRoot, candidate.destination);
-      const before = await this.observeReport(candidate.destination);
+      const before = await observeReport(this.context, candidate.destination);
       if (before.observation.state !== "present" || before.observation.sha256 !== candidate.inputSha256)
         throw drift2(
           "The implementation report changed before publication.",
           "publication"
         );
       try {
-        const mode2 = (await lstat17(destination)).mode & 511;
-        const temporary = `${destination}.${this.ids()}.completion.tmp`;
+        const mode2 = (await lstat19(destination)).mode & 511;
+        const temporary = `${destination}.${this.context.ids()}.completion.tmp`;
         await writeFile4(temporary, composition.bytes, { flag: "wx", mode: mode2 });
         try {
           await rename9(temporary, destination);
@@ -40911,7 +41471,7 @@ var WorkflowRunner = class {
         );
       }
     }
-    const final = await this.observeReport(candidate.destination);
+    const final = await observeReport(this.context, candidate.destination);
     if (final.observation.state !== "present" || final.observation.sha256 !== candidate.outputSha256)
       throw integrity(
         "The published implementation report does not equal the candidate bytes.",
@@ -41009,7 +41569,7 @@ var WorkflowRunner = class {
     const current = await this.store.readState(state.runId);
     if (current.status === "cancelled")
       throw new TerminalRunStateError(current);
-    this.accountCompletedAttempt(state, record7);
+    accountCompletedAttempt(state, record7);
     const refreshedFix = attempt.kind === "fix" && receipt.ledgerAuthor.attemptId === attempt.id;
     const durable = state.planTaskCompletion;
     const applied = durable?.status === "valid" && durable.schemaVersion === COMPLETION_SUMMARY_SCHEMA_VERSION && durable.publication?.sha256 === receipt.integrityDigest;
@@ -41094,8 +41654,9 @@ var WorkflowRunner = class {
    * apply a stop or capture and publish a completion claim.
    */
   async applyCompletionResult(state, record7, adapterResult, config, resumeSessionId, context) {
-    const envelope = this.completionEnvelopeOf(adapterResult.result);
-    await this.writeAttemptOutput(
+    const envelope = completionEnvelopeOf(adapterResult.result);
+    await writeAttemptOutput(
+      this.context,
       state,
       record7,
       adapterResult.stdout,
@@ -41105,13 +41666,14 @@ var WorkflowRunner = class {
     record7.result = JSON.parse(envelope.original);
     record7.envelope = envelope;
     record7.sessionId = adapterResult.sessionId ?? record7.sessionId;
-    record7.durationMs = this.clock().getTime() - Date.parse(record7.startedAt);
+    record7.durationMs = this.context.clock().getTime() - Date.parse(record7.startedAt);
     if (envelope.phase !== record7.attempt.kind)
       throw new BanzaiError(
         "PHASE_RESULT_MISMATCH",
         `Attempt ${record7.attempt.kind} returned phase ${envelope.phase}.`
       );
-    await this.establishResultSourceIdentities(
+    await establishResultSourceIdentities(
+      this.context,
       state,
       record7.attempt,
       record7.result,
@@ -41134,7 +41696,7 @@ var WorkflowRunner = class {
     await this.store.writeRunAttempt(state.runId, record7);
     const current = await this.store.readState(state.runId);
     if (current.status === "cancelled") return current;
-    this.accountAttemptUsage(state, record7);
+    accountAttemptUsage(state, record7);
     state.activeProcess = null;
     await this.store.writeState(state);
     const outcome = await this.continueCompletionPublication(
@@ -41176,19 +41738,20 @@ var WorkflowRunner = class {
         );
       }
       const expectedContext = record7.sessionContext ?? context;
-      if (checkpoint.runId !== state.runId || checkpoint.attempt.id !== attempt.id || checkpoint.attempt.kind !== attempt.kind || checkpoint.baseCommit !== state.baseCommit || checkpoint.approvalDigest !== (state.planApproval?.digest ?? null) || checkpoint.workflowDigest !== null || checkpoint.scopeDigest !== this.attemptScopeDigest(state, attempt) || checkpoint.configuration.vendor !== (vendorFor(settings.executable) ?? FALLBACK_VENDOR.implementer) || checkpoint.configuration.executableDigest !== digestCanonicalJson4(settings.executable) || checkpoint.configuration.model !== settings.model || checkpoint.configuration.effort !== settings.effort || checkpoint.configuration.sessionMode !== (record7.sessionMode ?? "fresh") || checkpoint.configuration.sessionContextDigest !== digestCanonicalJson4(expectedContext) || state.recovery?.sourceAttemptId === attempt.id) {
+      if (checkpoint.runId !== state.runId || checkpoint.attempt.id !== attempt.id || checkpoint.attempt.kind !== attempt.kind || checkpoint.baseCommit !== state.baseCommit || checkpoint.approvalDigest !== (state.planApproval?.digest ?? null) || checkpoint.workflowDigest !== null || checkpoint.scopeDigest !== attemptScopeDigest(state, attempt) || checkpoint.configuration.vendor !== (vendorFor(settings.executable) ?? FALLBACK_VENDOR.implementer) || checkpoint.configuration.executableDigest !== digestCanonicalJson4(settings.executable) || checkpoint.configuration.model !== settings.model || checkpoint.configuration.effort !== settings.effort || checkpoint.configuration.sessionMode !== (record7.sessionMode ?? "fresh") || checkpoint.configuration.sessionContextDigest !== digestCanonicalJson4(expectedContext) || state.recovery?.sourceAttemptId === attempt.id) {
         throw new BanzaiError(
           "TERMINAL_CHECKPOINT_MISMATCH",
           "Terminal checkpoint does not match the active run, attempt, authorization, or model context."
         );
       }
-      await this.validateBaseCommit(state);
-      await this.validateApproval(state);
-      await this.validateSavedArtifactScope(state, attempt);
-      this.validateArtifactRoleReferences(state, checkpoint.envelope);
+      await validateBaseCommit(this.context, state);
+      await validateApproval(this.context, state);
+      await validateSavedArtifactScope(this.context, state, attempt);
+      validateArtifactRoleReferences(state, checkpoint.envelope);
       const envelope = checkpoint.envelope;
       record7.result = JSON.parse(envelope.original);
-      await this.establishResultSourceIdentities(
+      await establishResultSourceIdentities(
+        this.context,
         state,
         attempt,
         record7.result,
@@ -41226,7 +41789,7 @@ var WorkflowRunner = class {
       }
       record7.status = "pending_application";
       await this.store.writeRunAttempt(state.runId, record7);
-      this.accountAttemptUsage(state, record7);
+      accountAttemptUsage(state, record7);
       state.activeProcess = null;
       await this.store.writeState(state);
     } else if (record7.status === "completed") {
@@ -41381,7 +41944,7 @@ var WorkflowRunner = class {
         implementationReport: receipt.implementationReport.path,
         testReport: receipt.testReport.path
       },
-      planPath: this.completionPlanPath(state),
+      planPath: completionPlanPath(state),
       approval: state.planApproval,
       baseline: state.baseline
     });
@@ -41436,7 +41999,8 @@ var WorkflowRunner = class {
             attempt
           );
           if (record7.envelope) {
-            const inputs = await this.observeCompletionInputs(
+            const inputs = await observeCompletionInputs(
+              this.context,
               state,
               record7.envelope.artifacts
             );
@@ -41525,7 +42089,7 @@ var WorkflowRunner = class {
     }
   }
   async applyPhaseResult(state, attempt, result, sessionId, context) {
-    this.validateArtifactRoleReferences(state, result);
+    validateArtifactRoleReferences(state, result);
     if (result.phase !== attempt.kind) {
       throw new BanzaiError(
         "PHASE_RESULT_MISMATCH",
@@ -41655,7 +42219,8 @@ var WorkflowRunner = class {
         status: state.status
       }
     );
-    await this.observeHumanTime(
+    await observeHumanTime(
+      this.context,
       state,
       "gate_pending",
       "attempt.applied",
@@ -41838,8 +42403,8 @@ var WorkflowRunner = class {
     const storage2 = this.verificationStorage(state);
     const configuration = parseVerificationConfiguration(config.verification);
     const strict = (state.workflowSelection?.workflow ?? "strict") === "strict";
-    const plan = strict ? await readFile13(
-      path27.join(this.repoRoot, this.completionPlanPath(state)),
+    const plan = strict ? await readFile17(
+      path31.join(this.repoRoot, completionPlanPath(state)),
       "utf8"
     ) : null;
     const current = await this.captureVerification(state, config);
@@ -41868,7 +42433,7 @@ var WorkflowRunner = class {
             "Task verification has no physical evidence publication."
           );
         const storage2 = this.taskVerificationStorage(state);
-        const policy = this.taskVerificationPolicy(
+        const policy = taskVerificationPolicy(
           config ?? await loadConfig(this.repoRoot)
         );
         if ((policy ? evidenceDigest(policy) : null) !== publication.decision.policyDigest)
@@ -41912,7 +42477,8 @@ var WorkflowRunner = class {
       } catch (error) {
         blockState(
           state,
-          await this.digestRejectionReason(
+          await digestRejectionReason(
+            this.context,
             state,
             state.taskVerification?.decision.authority.sourceAttemptId ?? null,
             error
@@ -42238,7 +42804,12 @@ var WorkflowRunner = class {
             env: usesVerificationPolicy(state) ? parseVerificationConfiguration(config.verification).policy?.dependencies.environment ?? {} : subscriptionOnlyEnvironment(),
             timeoutMs: command.timeoutMs,
             onStart: async (pid) => {
-              await this.processStarted(state, { kind: "verification" }, pid);
+              await processStarted(
+                this.context,
+                state,
+                { kind: "verification" },
+                pid
+              );
             }
           }),
           (processResult) => processResult.exitCode === 0
@@ -42359,20 +42930,6 @@ var WorkflowRunner = class {
       "\n\nInert project discovery (information only; never execution authority):\n" + JSON.stringify(await discoverTaskVerification(this.repoRoot))
     );
   }
-  taskVerificationPolicy(config) {
-    return config.verification.taskPolicy ?? (config.verification.policy ? {
-      schema: "banzai-task-verification-policy/v1",
-      schemaVersion: 1,
-      required: [],
-      denied: [],
-      limits: {
-        timeoutMs: 864e5,
-        workingDirectories: ["."],
-        requiredContext: "inherited-local"
-      },
-      reuse: config.verification.policy
-    } : null);
-  }
   taskExecutionContext(state, policy) {
     return {
       kind: "inherited-local",
@@ -42401,43 +42958,6 @@ var WorkflowRunner = class {
       workId: binding.workId
     };
   }
-  /** The acceptance baseline recorded for one attempt, by identity, or null. */
-  async resultDigestBaseline(state, sourceAttemptId) {
-    if (sourceAttemptId === null) return null;
-    const record7 = (await this.store.readRunAttempts(state.runId)).find(
-      (item) => item.attempt.id === sourceAttemptId
-    );
-    return record7 === void 0 ? null : await this.store.readResultDigestEvidenceIfExists(
-      state.runId,
-      record7.attempt
-    );
-  }
-  /**
-   * ADR-0051: a consumption-time rejection keeps its own authority to refuse
-   * execution and gains only a causal history, stated from the recorded
-   * acceptance baseline. With no record the history is unknown and is never
-   * reconstructed from the bytes that happen to be on disk now. A size
-   * rejection stays a separate cause and asserts no history at all.
-   */
-  async digestRejectionReason(state, sourceAttemptId, error) {
-    const base = errorMessage(error);
-    const detail = taskVerificationDigestDetail(error);
-    if (detail === null) return base;
-    if (detail.observed === null) return base;
-    let baseline;
-    try {
-      baseline = await this.resultDigestBaseline(state, sourceAttemptId);
-    } catch (readError) {
-      return `${base} Its acceptance baseline could not be read, so the causal history is unavailable: ${errorMessage(readError)}`;
-    }
-    const recorded = baseline?.comparisons.find(
-      (comparison) => comparison.checkId === detail.checkId && comparison.path === detail.path && comparison.declared === detail.declared
-    ) ?? null;
-    if (recorded === null) {
-      return `${DIGEST_UNRESOLVED_BLOCK_PREFIX} ${base} This run recorded no acceptance baseline for that digest, so whether it ever matched is unknown.`;
-    }
-    return recorded.matched ? `${base} It matched when the result was accepted, so the source changed after acceptance.` : `${DIGEST_UNRESOLVED_BLOCK_PREFIX} ${base} It did not match when the result was accepted, so it never matched.`;
-  }
   async executeTaskChecks(state, config, sourceAttempt, retryOf) {
     try {
       const source = await this.verificationSourceAttempt(
@@ -42459,10 +42979,10 @@ var WorkflowRunner = class {
           "VERIFICATION_AUTHORITY_MISSING",
           "Verification has no persisted workflow authority."
         );
-      const policy = this.taskVerificationPolicy(config);
+      const policy = taskVerificationPolicy(config);
       const obligations = workflow === "strict" ? parseTaskVerificationObligations(
-        await readFile13(
-          path27.join(this.repoRoot, this.completionPlanPath(state)),
+        await readFile17(
+          path31.join(this.repoRoot, completionPlanPath(state)),
           "utf8"
         )
       ) : null;
@@ -42502,7 +43022,7 @@ var WorkflowRunner = class {
             "Task authority changed before verification could be applied."
           );
         if (evidenceDigest(
-          this.taskVerificationPolicy(await loadConfig(this.repoRoot))
+          taskVerificationPolicy(await loadConfig(this.repoRoot))
         ) !== evidenceDigest(policy))
           throw new BanzaiError(
             "VERIFICATION_POLICY_CHANGED",
@@ -42514,7 +43034,7 @@ var WorkflowRunner = class {
             "VERIFICATION_CONTEXT_CHANGED",
             "The actual execution context changed."
           );
-        if (workflow === "strict") await this.validateApproval(state);
+        if (workflow === "strict") await validateApproval(this.context, state);
       };
       if (state.activeProcess?.kind === "verification" && this.store.processAlive(state.activeProcess.pid))
         throw new BanzaiError(
@@ -42523,7 +43043,7 @@ var WorkflowRunner = class {
         );
       await revalidate();
       const previous = await readTaskVerificationAttempts(storage2, true);
-      const roundId = previous.find((item) => item.sourceAttemptId === source.id)?.roundId ?? this.ids();
+      const roundId = previous.find((item) => item.sourceAttemptId === source.id)?.roundId ?? this.context.ids();
       state.taskVerification = await executeTaskVerification({
         ...storage2,
         selection,
@@ -42545,7 +43065,12 @@ var WorkflowRunner = class {
               env: policy?.reuse?.dependencies.environment ?? subscriptionOnlyEnvironment(),
               timeoutMs: descriptor.timeoutMs,
               onStart: async (pid) => {
-                await this.processStarted(state, { kind: "verification" }, pid);
+                await processStarted(
+                  this.context,
+                  state,
+                  { kind: "verification" },
+                  pid
+                );
               }
             });
             return {
@@ -42599,7 +43124,7 @@ var WorkflowRunner = class {
       delete state.taskVerification;
       blockState(
         state,
-        await this.digestRejectionReason(state, sourceAttemptId, error)
+        await digestRejectionReason(this.context, state, sourceAttemptId, error)
       );
       await this.store.writeState(state);
       return state;
@@ -42627,7 +43152,12 @@ var WorkflowRunner = class {
             env: subscriptionOnlyEnvironment(),
             timeoutMs: command.timeoutMs,
             onStart: async (pid) => {
-              await this.processStarted(state, { kind: "verification" }, pid);
+              await processStarted(
+                this.context,
+                state,
+                { kind: "verification" },
+                pid
+              );
             }
           }),
           (processResult) => processResult.exitCode === 0
@@ -42745,8 +43275,8 @@ var WorkflowRunner = class {
         "Review checks",
         `base commit, approved plan bundle, workspace snapshot, and ${config.models.reviewer.executable} subscription authentication`,
         async () => {
-          await this.validateBaseCommit(state);
-          await this.validateApproval(state);
+          await validateBaseCommit(this.context, state);
+          await validateApproval(this.context, state);
           await this.preflightVendor("reviewer", config.models.reviewer);
           return await workspaceSnapshot(this.repoRoot, {
             artifactBinding: state.artifactBinding,
@@ -42785,13 +43315,13 @@ var WorkflowRunner = class {
     await this.invocationScope(state.runId, config);
     state.workspaceDigest = beforeDigest;
     state.reviewIteration = iteration;
-    const attempt = this.newAttempt(state, "review", false);
+    const attempt = newAttempt(this.context, state, "review", false);
     const candidateAbsolutePath = this.store.reviewCandidatePath(
       state.runId,
       attempt
     );
-    const candidatePath = path27.relative(this.repoRoot, candidateAbsolutePath).split(path27.sep).join(path27.posix.sep);
-    const candidateEvidencePath = path27.relative(this.store.runDirectory(state.runId), candidateAbsolutePath).split(path27.sep).join(path27.posix.sep);
+    const candidatePath = path31.relative(this.repoRoot, candidateAbsolutePath).split(path31.sep).join(path31.posix.sep);
+    const candidateEvidencePath = path31.relative(this.store.runDirectory(state.runId), candidateAbsolutePath).split(path31.sep).join(path31.posix.sep);
     const artifactMode = "runner-rendered";
     const artifact = {
       path: artifactPath,
@@ -42833,7 +43363,7 @@ var WorkflowRunner = class {
         })
       };
     }
-    const record7 = await this.beginAttempt(state, attempt, policy);
+    const record7 = await beginAttempt(this.context, state, attempt, policy);
     const candidateEvidence = {
       source: artifactMode,
       evidencePath: candidateEvidencePath,
@@ -42908,7 +43438,7 @@ var WorkflowRunner = class {
       await this.store.writeReviewSnapshot(state.runId, attempt, frozen);
       artifact.snapshot = frozen;
     } catch (error) {
-      return await this.failAttempt(state, record7, error);
+      return await failAttempt(this.context, state, record7, error);
     }
     let result;
     let validatedCandidate;
@@ -42941,12 +43471,13 @@ var WorkflowRunner = class {
           environment,
           env: process4.env,
           onStart: async (pid) => {
-            await this.processStarted(state, attempt, pid);
+            await processStarted(this.context, state, attempt, pid);
           },
           onProgress: (event) => {
             this.modelProgress(label, event);
           },
-          onTerminalSuccess: this.terminalCheckpointWriter(
+          onTerminalSuccess: terminalCheckpointWriter(
+            this.context,
             state,
             attempt,
             config.models.reviewer,
@@ -42956,14 +43487,14 @@ var WorkflowRunner = class {
       })
     );
     const recordCandidateDigest = async () => {
-      const contents = await readFile13(candidateAbsolutePath, "utf8").catch(
+      const contents = await readFile17(candidateAbsolutePath, "utf8").catch(
         () => null
       );
       if (contents === null) {
         return;
       }
       await chmod3(candidateAbsolutePath, 384);
-      candidateEvidence.sha256 = createHash17("sha256").update(contents).digest("hex");
+      candidateEvidence.sha256 = createHash20("sha256").update(contents).digest("hex");
       await this.store.writeRunAttempt(state.runId, record7);
     };
     try {
@@ -43012,7 +43543,7 @@ var WorkflowRunner = class {
         "primary"
       );
       inventoryChanged = await this.recordInventoryDrift(state, policy, result);
-      await this.persistAdapterResult(state, record7, result);
+      await persistAdapterResult(this.context, state, record7, result);
       result.result = parseCurrentReviewResult2(result.result);
       const frozen = artifact.snapshot;
       validateReviewScope(parseCurrentReviewResult2(result.result), {
@@ -43020,7 +43551,7 @@ var WorkflowRunner = class {
         approvedArtifactPaths: frozen.approval.paths,
         requiredFindingIds: frozen.requiredFindingIds
       });
-      this.validateReviewResultForApplication(state, result.result);
+      validateReviewResultForApplication(state, result.result);
       await this.store.writeText(
         state.runId,
         candidateEvidencePath,
@@ -43032,7 +43563,7 @@ var WorkflowRunner = class {
         result.result,
         artifact
       );
-      this.validateReviewResultForApplication(state, result.result);
+      validateReviewResultForApplication(state, result.result);
       candidateEvidence.sha256 = validatedCandidate.sha256;
       candidateEvidence.validation = "passed";
       await this.store.writeRunAttempt(state.runId, record7);
@@ -43049,7 +43580,7 @@ var WorkflowRunner = class {
         candidateEvidence.validationCode = error instanceof BanzaiError ? error.code : null;
         candidateEvidence.validationError = errorMessage(error);
       }
-      return await this.failAttempt(state, record7, error);
+      return await failAttempt(this.context, state, record7, error);
     }
     try {
       const afterDigest = await workspaceDigest(this.repoRoot, {
@@ -43058,7 +43589,7 @@ var WorkflowRunner = class {
         baseline: state.baseline
       });
       if (beforeDigest !== afterDigest) {
-        if (!await this.completeAttempt(state, record7, result)) {
+        if (!await completeAttempt(this.context, state, record7, result)) {
           return await this.store.readState(state.runId);
         }
         state.activeAttempt = null;
@@ -43071,11 +43602,11 @@ var WorkflowRunner = class {
         await this.store.writeState(state);
         return state;
       }
-      if (!await this.completeAttempt(state, record7, result)) {
+      if (!await completeAttempt(this.context, state, record7, result)) {
         return await this.store.readState(state.runId);
       }
-      await this.validateBaseCommit(state);
-      await this.validateApproval(state);
+      await validateBaseCommit(this.context, state);
+      await validateApproval(this.context, state);
       const completionNow = await this.revalidateTaskCompletion(state);
       if (artifact.snapshot.completionSource === null || !summariesMatch(
         artifact.snapshot.completionSource,
@@ -43131,22 +43662,6 @@ var WorkflowRunner = class {
       return current;
     }
   }
-  validateReviewResultForApplication(state, result) {
-    const expectedPrefix = `R${state.reviewIteration}-F`;
-    if (result.findings.some((finding) => !finding.id.startsWith(expectedPrefix))) {
-      throw new BanzaiError(
-        "FINDING_ITERATION_MISMATCH",
-        `Review ${state.reviewIteration} returned an invalid finding id.`
-      );
-    }
-    const acceptedPrevious = state.triage?.items.filter((item) => item.disposition === "accepted").map((item) => item.findingId) ?? [];
-    if (state.triage !== null && !(result.schemaVersion === 2 && result.verdict === "blocked") && acceptedPrevious.some((id3) => !result.reviewedFindingIds.includes(id3))) {
-      throw new BanzaiError(
-        "INCOMPLETE_REREVIEW",
-        "Re-review did not report every previously accepted finding id."
-      );
-    }
-  }
   /**
    * Compares the inventory a resumed session reported against the inventory
    * recorded when it was created. A mismatch already cost a full re-cache, so it
@@ -43174,7 +43689,7 @@ var WorkflowRunner = class {
     inventoryDigest: null,
     inventoryChanged: false
   }) {
-    this.validateReviewResultForApplication(state, result);
+    validateReviewResultForApplication(state, result);
     const resultRelative = `reviews/review-${state.reviewIteration}.json`;
     const canonicalJson5 = `${JSON.stringify(result, null, 2)}
 `;
@@ -43259,7 +43774,8 @@ var WorkflowRunner = class {
       result.schemaVersion === 2
     );
     if (result.schemaVersion === 2) await this.store.writeState(state);
-    await this.observeHumanTime(
+    await observeHumanTime(
+      this.context,
       state,
       "gate_pending",
       "review.completed",
@@ -43272,8 +43788,8 @@ var WorkflowRunner = class {
     if (state.latestReview === null) {
       throw new BanzaiError("REVIEW_NOT_FOUND", "No review is available.");
     }
-    const raw = await readFile13(
-      path27.join(
+    const raw = await readFile17(
+      path31.join(
         this.store.runDirectory(state.runId),
         state.latestReview.resultPath
       ),
@@ -43324,421 +43840,13 @@ var WorkflowRunner = class {
     }
     return items;
   }
-  checkpointSettings(attempt, config) {
-    if (attempt.kind === "selection" || attempt.kind === "plan") {
-      return { settings: config.models.planner, role: "planner" };
-    }
-    if (attempt.kind === "review") {
-      return { settings: config.models.reviewer, role: "reviewer" };
-    }
-    return { settings: config.models.implementer, role: "implementer" };
-  }
-  accountCompletedAttempt(state, record7) {
-    if (state.metrics.completedAttemptIds.includes(record7.attempt.id)) {
-      return;
-    }
-    this.accountAttemptUsage(state, record7);
-    state.metrics.completedAttemptIds.push(record7.attempt.id);
-    state.metrics.modelDurationMs += record7.durationMs ?? 0;
-  }
-  accountAttemptUsage(state, record7) {
-    const accounted = state.metrics.usageAccountedAttemptIds ??= [
-      ...state.metrics.completedAttemptIds
-    ];
-    if (accounted.includes(record7.attempt.id)) return;
-    if (record7.usage !== null) {
-      state.metrics.usage.inputTokens += record7.usage.inputTokens;
-      state.metrics.usage.cachedInputTokens += record7.usage.cachedInputTokens;
-      state.metrics.usage.outputTokens += record7.usage.outputTokens;
-      if (record7.usage.costUsd !== null) {
-        state.metrics.usage.costUsd = (state.metrics.usage.costUsd ?? 0) + record7.usage.costUsd;
-      }
-      accounted.push(record7.attempt.id);
-    }
-  }
-  validateRunnerControlTasks(state, plan) {
-    const roles = state.artifactBinding?.binding.artifacts;
-    validatePlanRunnerControlTasks(
-      plan,
-      this.repoRoot,
-      [roles?.implementationReport, roles?.testReport].filter(
-        (value) => typeof value === "string"
-      )
-    );
-  }
-  /**
-   * The check identities whose descriptors draw execution authority from the
-   * approved plan or project policy. A candidate restating one of them leaves
-   * the approved obligation in force, so the restatement's source identities
-   * never take effect and are never compared (ADR-0049 section 2, ADR-0051).
-   */
-  async requiredCheckIds(state, config) {
-    const ids = new Set(
-      (this.taskVerificationPolicy(config)?.required ?? []).map(
-        (check2) => check2.id
-      )
-    );
-    if ((state.workflowSelection?.workflow ?? "strict") !== "strict" || state.planApproval === null)
-      return ids;
-    for (const check2 of parseTaskVerificationObligations(
-      await readFile13(
-        path27.join(this.repoRoot, this.completionPlanPath(state)),
-        "utf8"
-      )
-    ).checks)
-      ids.add(check2.id);
-    return ids;
-  }
-  /**
-   * Establishes the acceptance baseline for one attempt and rejects the result
-   * when any comparison failed. The record is written before the outcome is
-   * decided, so a rejection is durable evidence rather than a lost diagnosis,
-   * and an existing baseline is never restated: the current comparisons decide
-   * acceptance, the recorded ones describe what acceptance observed.
-   */
-  async recordResultDigestEvidence(state, attempt, comparisons) {
-    const rejected = comparisons.filter((comparison) => !comparison.matched);
-    const evidence2 = await this.store.establishResultDigestEvidence(
-      state.runId,
-      {
-        schema: RESULT_DIGEST_EVIDENCE_SCHEMA,
-        schemaVersion: RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION,
-        runId: state.runId,
-        attempt: { id: attempt.id, kind: attempt.kind },
-        outcome: rejected.length > 0 ? "rejected" : "accepted",
-        comparisons
-      }
-    );
-    if (rejected.length > 0) {
-      throw new ResultDigestRejectedError(
-        `The ${attempt.kind} result declared ${rejected.length} digest${rejected.length === 1 ? "" : "s"} that did not match the bytes it named when the result was accepted. ${rejected.map(resultDigestDiagnostic).join(" ")}`,
-        rejected
-      );
-    }
-    return evidence2;
-  }
-  /**
-   * ADR-0051: every model-authored source identity that acts as an execution
-   * precondition is established against the bytes it names at the boundary
-   * where the result is accepted, before any later phase depends on it.
-   */
-  async establishResultSourceIdentities(state, attempt, result, config) {
-    if (state.verificationMode !== "task") return;
-    const candidates = result.schemaVersion === 4 ? result.verificationCandidates ?? null : null;
-    const observe = async (relativePath3) => {
-      try {
-        const file = await taskVerificationPath(this.repoRoot, relativePath3);
-        const size = (await lstat17(file)).size;
-        return size > TASK_VERIFICATION_SOURCE_MAX_BYTES ? { observed: null, size, limit: TASK_VERIFICATION_SOURCE_MAX_BYTES } : {
-          observed: evidenceDigest(await readFile13(file)),
-          size,
-          limit: null
-        };
-      } catch {
-        return { observed: null, size: null, limit: null };
-      }
-    };
-    const comparisons = [];
-    for (const identity of effectiveResultSourceIdentities(
-      candidates,
-      await this.requiredCheckIds(state, config)
-    )) {
-      const { observed: observed3, size, limit } = await observe(identity.path);
-      comparisons.push({
-        role: "precondition",
-        field: identity.field,
-        checkId: identity.checkId,
-        path: identity.path,
-        declared: identity.declared,
-        observed: observed3,
-        size,
-        limit,
-        matched: observed3 === identity.declared
-      });
-    }
-    await this.recordResultDigestEvidence(state, attempt, comparisons);
-  }
-  /**
-   * The plan remainder digest is the one binding role ADR-0051 fixes, and the
-   * detection that establishes it already lives in the shared inventory
-   * parser. This only classifies that existing outcome: an accepted record
-   * becomes the baseline a later reader may cite, and a rejected record is
-   * what makes the attempt recognizable as a digest-rejected result. No strict
-   * plan-task completion ledger is written for a planning attempt.
-   */
-  async establishPlanRemainderDigest(state, attempt, planPath, markdown) {
-    let comparison;
-    try {
-      const obligations = parseTaskVerificationObligations(markdown);
-      comparison = {
-        role: "binding",
-        field: "planRemainderSha256",
-        checkId: null,
-        path: planPath,
-        declared: obligations.planRemainderSha256,
-        observed: obligations.planRemainderSha256,
-        size: null,
-        limit: null,
-        matched: true
-      };
-    } catch (error) {
-      const detail = taskVerificationDigestDetail(error);
-      if (detail === null) throw error;
-      if (detail.role !== "binding") throw error;
-      comparison = {
-        role: "binding",
-        field: detail.field,
-        checkId: null,
-        path: planPath,
-        declared: detail.declared,
-        observed: detail.observed,
-        size: null,
-        limit: null,
-        matched: false
-      };
-    }
-    await this.recordResultDigestEvidence(state, attempt, [comparison]);
-  }
-  async validatePlanningResult(state, attempt, result) {
-    if (result.gate !== "plan_approval" || result.artifacts.plan === null)
-      return;
-    try {
-      const markdown = await readFile13(
-        path27.join(this.repoRoot, result.artifacts.plan),
-        "utf8"
-      );
-      parseApprovedPlanTaskIds(markdown);
-      if (state.verificationMode === "task")
-        await this.establishPlanRemainderDigest(
-          state,
-          attempt,
-          result.artifacts.plan,
-          markdown
-        );
-      this.validateRunnerControlTasks(state, markdown);
-    } catch (error) {
-      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
-        throw error;
-      if (error instanceof ResultDigestRejectedError)
-        throw new PlanTaskCompletionError(
-          "approved_plan_invalid",
-          error.message
-        );
-      if (error instanceof PlanTaskCompletionError || error instanceof BanzaiError && error.code === "PLAN_RUNNER_CONTROL_TASK")
-        throw error;
-      throw new PlanTaskCompletionError(
-        "approved_plan_invalid",
-        `The planning artifact could not be read: ${errorMessage(error)}`
-      );
-    }
-  }
-  async validateTerminalCheckpointResult(state, attempt, result, config) {
-    await this.validateSavedArtifactScope(state, attempt);
-    if (attempt.kind === "selection") {
-      return;
-    }
-    if (attempt.kind === "review") {
-      this.validateReviewResultForApplication(state, result);
-      const record7 = await this.store.readRunAttempt(state.runId, attempt);
-      if (record7.reviewContext !== void 0 || result.schemaVersion === 2) {
-        const frozen = await this.store.readReviewSnapshot(
-          state.runId,
-          attempt
-        );
-        if (record7.reviewContext?.snapshotDigest !== frozen.digest)
-          throw new BanzaiError(
-            "INVALID_REVIEW_SNAPSHOT",
-            "Checkpoint snapshot binding is missing or conflicting."
-          );
-        validateReviewScope(parseCurrentReviewResult2(result), {
-          snapshotDigest: frozen.digest,
-          approvedArtifactPaths: frozen.approval.paths,
-          requiredFindingIds: frozen.requiredFindingIds
-        });
-      }
-      return;
-    }
-    const phaseResult = parsePersistedPhaseResult2(result);
-    this.validateArtifactRoleReferences(state, phaseResult);
-    if (phaseResult.phase !== attempt.kind) {
-      throw new BanzaiError(
-        "PHASE_RESULT_MISMATCH",
-        `Attempt ${attempt.kind} returned phase ${phaseResult.phase}.`
-      );
-    }
-    if (attempt.kind === "plan") {
-      await this.validatePlanningResult(state, attempt, phaseResult);
-      return;
-    }
-    await this.establishResultSourceIdentities(
-      state,
-      attempt,
-      phaseResult,
-      config
-    );
-    if (attempt.kind === "fix") {
-      if (phaseResult.taskCompletion !== null) {
-        if (state.planApproval === null) {
-          throw new PlanTaskCompletionError(
-            "approval_invalid",
-            "Strict completion validation requires an approved plan bundle."
-          );
-        }
-        state.planTaskCompletion = {
-          ...(await validatePlanTaskCompletion({
-            repoRoot: this.repoRoot,
-            artifactBinding: state.artifactBinding,
-            sourceAttemptId: attempt.id,
-            result: phaseResult,
-            planPath: this.completionPlanPath(state),
-            approval: state.planApproval,
-            baseline: state.baseline
-          })).summary,
-          sourceAttemptKind: "fix"
-        };
-      }
-      return;
-    }
-    if ((state.workflowSelection?.workflow ?? "strict") !== "strict") {
-      if (phaseResult.taskCompletion !== null) {
-        throw new BanzaiError(
-          "PLAN_TASK_COMPLETION_INVALID",
-          "Lite implementation must not return strict plan-task completion evidence."
-        );
-      }
-      return;
-    }
-    if (phaseResult.outcome === "completed" && phaseResult.gate === null) {
-      state.planTaskCompletion = (await this.validateImplementationCompletion(state, attempt, phaseResult)).summary;
-      return;
-    }
-    validatePlanTaskCompletionLedgerShape(
-      await this.approvedTaskIds(state),
-      phaseResult.taskCompletion,
-      phaseResult.outcome
-    );
-  }
-  async promoteTerminalCheckpoint(state, attempt, record7, config) {
-    const checkpoint = await this.store.readTerminalCheckpointIfExists(
-      state.runId,
-      attempt
-    );
-    if (checkpoint === null) {
-      return null;
-    }
-    if ("envelope" in checkpoint) {
-      throw new BanzaiError(
-        "TERMINAL_CHECKPOINT_MISMATCH",
-        "A legacy attempt cannot reconcile a completion-protocol checkpoint."
-      );
-    }
-    if (TERMINAL_INTEGRITY_FAILURE_CODES.has(record7.failureCode ?? "")) {
-      throw new BanzaiError(
-        "TERMINAL_CHECKPOINT_CONFLICT",
-        "Conflicting terminal or session evidence cannot be reconciled as success."
-      );
-    }
-    const { settings, role } = this.checkpointSettings(attempt, config);
-    const expectedContext = record7.sessionContext ?? sessionContext(role, settings);
-    const expectedApprovalDigest = state.planApproval?.digest ?? null;
-    const expectedWorkflowDigest = state.planApproval === null ? state.workflowSelection?.digest ?? null : null;
-    const expectedResultContract = attempt.kind === "review" && record7.reviewContext === void 0 ? "review-result/v1" : terminalResultContract(
-      attempt.kind,
-      state.verificationMode === "task"
-    );
-    const resultContractMatches = checkpoint.resultContract === expectedResultContract || expectedResultContract === "phase-result/v3" && checkpoint.resultContract === "phase-result/v2";
-    if (checkpoint.runId !== state.runId || checkpoint.attempt.id !== attempt.id || checkpoint.attempt.kind !== attempt.kind || checkpoint.attempt.mutable !== attempt.mutable || checkpoint.phase !== attempt.kind || !resultContractMatches || checkpoint.baseCommit !== state.baseCommit || checkpoint.approvalDigest !== expectedApprovalDigest || checkpoint.workflowDigest !== expectedWorkflowDigest || checkpoint.scopeDigest !== this.attemptScopeDigest(state, attempt) || checkpoint.configuration.vendor !== (vendorFor(settings.executable) ?? FALLBACK_VENDOR[role]) || checkpoint.configuration.executableDigest !== digestCanonicalJson4(settings.executable) || checkpoint.configuration.model !== settings.model || checkpoint.configuration.effort !== settings.effort || checkpoint.configuration.sessionMode !== (record7.sessionMode ?? "fresh") || checkpoint.configuration.sessionContextDigest !== digestCanonicalJson4(expectedContext) || state.recovery?.sourceAttemptId === attempt.id) {
-      throw new BanzaiError(
-        "TERMINAL_CHECKPOINT_MISMATCH",
-        "Terminal checkpoint does not match the active run, attempt, authorization, or model context."
-      );
-    }
-    await this.validateBaseCommit(state);
-    if (expectedApprovalDigest !== null) {
-      await this.validateApproval(state);
-    } else if (expectedWorkflowDigest !== null) {
-      if (attempt.kind === "plan") {
-        const selection = state.workflowSelection ?? null;
-        if (selection?.workflow !== "strict" || workflowAuthorizationDigest({
-          runId: state.runId,
-          request: state.request,
-          ...selection
-        }) !== selection.digest) {
-          throw new BanzaiError(
-            "WORKFLOW_AUTHORIZATION_INVALID",
-            "Planning checkpoint requires the unchanged strict workflow selection."
-          );
-        }
-      } else {
-        this.validateWorkflowSelection(state);
-      }
-    }
-    await this.validateTerminalCheckpointResult(
-      state,
-      attempt,
-      checkpoint.result,
-      config
-    );
-    if (record7.status === "completed") {
-      if (record7.result === null || JSON.stringify(record7.result) !== JSON.stringify(checkpoint.result)) {
-        throw new BanzaiError(
-          "TERMINAL_CHECKPOINT_CONFLICT",
-          "Completed attempt result conflicts with its terminal checkpoint."
-        );
-      }
-      return null;
-    }
-    if (record7.status !== "started" && record7.status !== "failed" || record7.result !== null && JSON.stringify(record7.result) !== JSON.stringify(checkpoint.result)) {
-      throw new BanzaiError(
-        "TERMINAL_CHECKPOINT_CONFLICT",
-        `Terminal checkpoint cannot promote an attempt in ${record7.status} state.`
-      );
-    }
-    if (state.metrics.usageAccountedAttemptIds === void 0 && record7.status === "failed" && record7.usage !== null) {
-      state.metrics.usageAccountedAttemptIds = [
-        ...state.metrics.completedAttemptIds,
-        record7.attempt.id
-      ];
-    }
-    if (record7.schemaVersion === 1)
-      record7.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION2;
-    record7.result = checkpoint.result;
-    record7.sessionId = checkpoint.sessionId;
-    record7.usage = checkpoint.usage;
-    return checkpoint.terminal.observedAt;
-  }
-  async finalizeTerminalCheckpoint(state, record7, terminalObservedAt) {
-    if (terminalObservedAt === null) {
-      return;
-    }
-    if (record7.schemaVersion === 1)
-      record7.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION2;
-    record7.status = "completed";
-    record7.completedAt = terminalObservedAt;
-    record7.interruptedAt = null;
-    record7.recoveryOf ??= null;
-    record7.recoveryAuthorizationId ??= null;
-    record7.durationMs = Math.max(
-      0,
-      Date.parse(terminalObservedAt) - Date.parse(record7.startedAt)
-    );
-    record7.error = null;
-    record7.failureCode = null;
-    await this.store.writeRunAttempt(state.runId, record7);
-    state.activeProcess = null;
-    await this.store.writeState(state);
-    await this.store.appendEvent(state.runId, "attempt.terminal_reconciled", {
-      attemptId: record7.attempt.id,
-      kind: record7.attempt.kind
-    });
-  }
   async reconcileAttempt(state, config) {
     const attempt = state.activeAttempt;
     if (attempt === null) {
       return state;
     }
     const record7 = await this.store.readRunAttempt(state.runId, attempt);
-    if (this.completionProtocolAttempt(record7)) {
+    if (completionProtocolAttempt(record7)) {
       try {
         const reconciled = await this.reconcileCompletionAttempt(
           state,
@@ -43765,7 +43873,8 @@ var WorkflowRunner = class {
     }
     let terminalObservedAt;
     try {
-      terminalObservedAt = await this.promoteTerminalCheckpoint(
+      terminalObservedAt = await promoteTerminalCheckpoint(
+        this.context,
         state,
         attempt,
         record7,
@@ -43807,12 +43916,13 @@ var WorkflowRunner = class {
         kind: attempt.kind
       });
       if (attempt.kind === "selection") {
-        await this.finalizeTerminalCheckpoint(
+        await finalizeTerminalCheckpoint(
+          this.context,
           state,
           record7,
           terminalObservedAt
         );
-        this.accountCompletedAttempt(state, record7);
+        accountCompletedAttempt(state, record7);
         return await this.applyWorkflowSelection(
           state,
           attempt,
@@ -43860,10 +43970,10 @@ var WorkflowRunner = class {
         let candidateValidated = false;
         try {
           const candidateEvidence = record7.reviewCandidate;
-          const expectedCandidateEvidencePath = path27.relative(
+          const expectedCandidateEvidencePath = path31.relative(
             this.store.runDirectory(state.runId),
             this.store.reviewCandidatePath(state.runId, attempt)
-          ).split(path27.sep).join(path27.posix.sep);
+          ).split(path31.sep).join(path31.posix.sep);
           if (candidateEvidence !== null && candidateEvidence !== void 0 && (candidateEvidence.evidencePath !== expectedCandidateEvidencePath || !(/* @__PURE__ */ new Set(["reviewer-write", "runner-rendered"])).has(
             candidateEvidence.source
           ) || candidateEvidence.canonical !== false)) {
@@ -43872,13 +43982,13 @@ var WorkflowRunner = class {
               "Review attempt has malformed candidate evidence identity."
             );
           }
-          const candidatePath = candidateEvidence === null || candidateEvidence === void 0 ? artifactPath : path27.relative(
+          const candidatePath = candidateEvidence === null || candidateEvidence === void 0 ? artifactPath : path31.relative(
             this.repoRoot,
-            path27.join(
+            path31.join(
               this.store.runDirectory(state.runId),
               candidateEvidence.evidencePath
             )
-          ).split(path27.sep).join(path27.posix.sep);
+          ).split(path31.sep).join(path31.posix.sep);
           let artifact = {
             path: artifactPath,
             candidatePath,
@@ -43916,8 +44026,8 @@ var WorkflowRunner = class {
                 "INVALID_REVIEW_SNAPSHOT",
                 "Original review snapshot conflicts with current authority or completion evidence."
               );
-            await this.validateBaseCommit(state);
-            await this.validateApproval(state);
+            await validateBaseCommit(this.context, state);
+            await validateApproval(this.context, state);
             validateReviewScope(parseCurrentReviewResult2(result), {
               snapshotDigest: frozen.digest,
               approvedArtifactPaths: frozen.approval.paths,
@@ -43925,7 +44035,7 @@ var WorkflowRunner = class {
             });
             artifact = { ...frozen.artifact, snapshot: frozen };
             try {
-              await readFile13(
+              await readFile17(
                 this.store.reviewCandidatePath(state.runId, attempt)
               );
             } catch (error) {
@@ -43958,9 +44068,9 @@ var WorkflowRunner = class {
               candidateEvidence.validation = "passed";
               await this.store.writeRunAttempt(state.runId, record7);
             }
-            this.validateReviewResultForApplication(state, result);
+            validateReviewResultForApplication(state, result);
             if (recoveringStartedReview) {
-              if (!await this.completeAttempt(state, record7, {
+              if (!await completeAttempt(this.context, state, record7, {
                 result,
                 sessionId: record7.sessionId,
                 stdout: "",
@@ -44005,13 +44115,14 @@ var WorkflowRunner = class {
           await this.store.writeState(state);
           return state;
         }
-        await this.finalizeTerminalCheckpoint(
+        await finalizeTerminalCheckpoint(
+          this.context,
           state,
           record7,
           terminalObservedAt
         );
         if (!recoveringStartedReview) {
-          this.accountCompletedAttempt(state, record7);
+          accountCompletedAttempt(state, record7);
         }
         const storedContext = record7.sessionContext;
         const policy = {
@@ -44037,7 +44148,8 @@ var WorkflowRunner = class {
       }
       if (attempt.kind === "implementation" && (state.workflowSelection?.workflow ?? "strict") === "strict") {
         try {
-          state.planTaskCompletion = (await this.validateImplementationCompletion(
+          state.planTaskCompletion = (await validateImplementationCompletion(
+            this.context,
             state,
             attempt,
             parsePersistedPhaseResult2(record7.result)
@@ -44048,8 +44160,13 @@ var WorkflowRunner = class {
           return await this.blockForCompletionFailure(state, attempt.id, error);
         }
       }
-      await this.finalizeTerminalCheckpoint(state, record7, terminalObservedAt);
-      this.accountCompletedAttempt(state, record7);
+      await finalizeTerminalCheckpoint(
+        this.context,
+        state,
+        record7,
+        terminalObservedAt
+      );
+      accountCompletedAttempt(state, record7);
       return await this.applyPhaseResult(
         state,
         attempt,
@@ -44408,7 +44525,7 @@ function boundedNullableString(value, label, maximum = MAX_REASON_LENGTH) {
 }
 function boundedPath(value, label) {
   boundedString(value, label, MAX_PATH_LENGTH);
-  if (path28.posix.isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value) || value.includes("\\") || path28.posix.normalize(value) !== value || value.split("/").some((segment) => segment === "." || segment === "..")) {
+  if (path33.posix.isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value) || value.includes("\\") || path33.posix.normalize(value) !== value || value.split("/").some((segment) => segment === "." || segment === "..")) {
     throw statusError(
       `${label} must be a normalized repository-relative path.`
     );
@@ -44633,7 +44750,7 @@ function pendingGate(status) {
       kind: "adr_approval",
       artifactPaths: artifactPaths2,
       adrIds: artifactPaths2.map((value) => {
-        const match = /^(\d{4})-/.exec(path28.posix.basename(value));
+        const match = /^(\d{4})-/.exec(path33.posix.basename(value));
         if (match?.[1] === void 0) {
           throw statusError("An ADR artifact path has no stable numeric ID.");
         }
@@ -45316,8 +45433,8 @@ async function executeVersionCli(args, cwd, stdout, sourceEnvironment = process.
 
 // src/context-report.ts
 import { constants as constants13 } from "node:fs";
-import { lstat as lstat18, open as open13, readdir as readdir11 } from "node:fs/promises";
-import path29 from "node:path";
+import { lstat as lstat20, open as open13, readdir as readdir11 } from "node:fs/promises";
+import path34 from "node:path";
 var WORKFLOWS2 = [
   "unselected",
   "quick-fix",
@@ -45642,7 +45759,7 @@ function missing2(error) {
 }
 async function ownedDirectoryStatus(directory4) {
   try {
-    return (await lstat18(directory4)).isDirectory() ? "owned" : "invalid";
+    return (await lstat20(directory4)).isDirectory() ? "owned" : "invalid";
   } catch (error) {
     return missing2(error) ? "missing" : "invalid";
   }
@@ -45700,7 +45817,7 @@ async function readJson4(file) {
   }
 }
 async function readRunMetadata(runDirectory, runId2) {
-  const value = await readJson4(path29.join(runDirectory, "state.json"));
+  const value = await readJson4(path34.join(runDirectory, "state.json"));
   const state = record4(value);
   const selection = record4(state?.workflowSelection);
   if (state?.runId !== runId2 || typeof state.createdAt !== "string" || !Number.isFinite(Date.parse(state.createdAt))) {
@@ -45713,7 +45830,7 @@ async function readRunMetadata(runDirectory, runId2) {
   };
 }
 async function collectRunAttempts(runDirectory, runId2, workflow) {
-  const attemptsDirectory = path29.join(runDirectory, "attempts");
+  const attemptsDirectory = path34.join(runDirectory, "attempts");
   const directoryStatus = await ownedDirectoryStatus(attemptsDirectory);
   if (directoryStatus === "missing") return [];
   if (directoryStatus === "invalid") {
@@ -45737,7 +45854,7 @@ async function collectRunAttempts(runDirectory, runId2, workflow) {
   const attempts = [];
   const seen = /* @__PURE__ */ new Set();
   for (const file of files) {
-    const raw = await readJson4(path29.join(attemptsDirectory, file));
+    const raw = await readJson4(path34.join(attemptsDirectory, file));
     const canonical = decodeCanonicalAttempt(raw, file, runId2);
     if (seen.has(canonical.attempt.id)) {
       invalid10(
@@ -45747,7 +45864,7 @@ async function collectRunAttempts(runDirectory, runId2, workflow) {
       );
     }
     seen.add(canonical.attempt.id);
-    const contextFile = path29.join(
+    const contextFile = path34.join(
       attemptsDirectory,
       `${canonical.attempt.id}.context.json`
     );
@@ -45785,11 +45902,11 @@ async function collectRunAttempts(runDirectory, runId2, workflow) {
   return attempts;
 }
 function inCohort(createdAt, options) {
-  const timestamp = Date.parse(createdAt);
-  return (options.from === null || timestamp >= Date.parse(options.from)) && (options.to === null || timestamp < Date.parse(options.to));
+  const timestamp2 = Date.parse(createdAt);
+  return (options.from === null || timestamp2 >= Date.parse(options.from)) && (options.to === null || timestamp2 < Date.parse(options.to));
 }
 async function collectContextReport(repoRoot, options) {
-  const banzaiDirectory = path29.join(repoRoot, ".banzai");
+  const banzaiDirectory = path34.join(repoRoot, ".banzai");
   const banzaiStatus = await ownedDirectoryStatus(banzaiDirectory);
   if (banzaiStatus === "invalid") {
     throw new BanzaiError(
@@ -45797,7 +45914,7 @@ async function collectContextReport(repoRoot, options) {
       "Context evaluation evidence could not be read safely."
     );
   }
-  const runsDirectory = path29.join(banzaiDirectory, "runs");
+  const runsDirectory = path34.join(banzaiDirectory, "runs");
   const candidates = banzaiStatus === "missing" ? [] : await runDirectories(runsDirectory);
   const candidateSet = new Set(candidates);
   for (const runId2 of options.runIds) {
@@ -45813,7 +45930,7 @@ async function collectContextReport(repoRoot, options) {
   const evidence2 = [];
   let includedRunCount = 0;
   for (const runId2 of selected) {
-    const runDirectory = path29.join(runsDirectory, runId2);
+    const runDirectory = path34.join(runsDirectory, runId2);
     if (await ownedDirectoryStatus(runDirectory) !== "owned") {
       throw new BanzaiError(
         "EVAL_READ_FAILED",
@@ -45994,8 +46111,8 @@ async function executeContextReportWithOptions(repoRoot, options, io) {
 
 // src/doctor.ts
 import { constants as constants14 } from "node:fs";
-import { access as access5, lstat as lstat19, readFile as readFile14, realpath as realpath12, stat as stat4 } from "node:fs/promises";
-import path30 from "node:path";
+import { access as access5, lstat as lstat21, readFile as readFile18, realpath as realpath12, stat as stat4 } from "node:fs/promises";
+import path35 from "node:path";
 import process5 from "node:process";
 var RUN_STATUSES3 = /* @__PURE__ */ new Set([
   "created",
@@ -46018,15 +46135,15 @@ function isRecord4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function executableCandidates2(command, cwd, env) {
-  if (command.includes(path30.sep)) {
-    return [path30.resolve(cwd, command)];
+  if (command.includes(path35.sep)) {
+    return [path35.resolve(cwd, command)];
   }
   if (env.PATH === void 0) {
     return [];
   }
-  return env.PATH.split(path30.delimiter).map(
-    (entry) => path30.join(
-      entry.length === 0 || !path30.isAbsolute(entry) ? path30.resolve(cwd, entry) : entry,
+  return env.PATH.split(path35.delimiter).map(
+    (entry) => path35.join(
+      entry.length === 0 || !path35.isAbsolute(entry) ? path35.resolve(cwd, entry) : entry,
       command
     )
   );
@@ -46076,34 +46193,34 @@ async function readBoundedFile(filePath, boundaryPath, repoRoot) {
   } catch {
     throw new Error("repository root cannot be resolved");
   }
-  const lexicalRoot = path30.resolve(repoRoot);
-  const lexicalBoundary = path30.resolve(boundaryPath);
-  const relativeBoundary = path30.relative(lexicalRoot, lexicalBoundary);
-  if (relativeBoundary.length === 0 || relativeBoundary === ".." || relativeBoundary.startsWith(`..${path30.sep}`) || path30.isAbsolute(relativeBoundary)) {
+  const lexicalRoot = path35.resolve(repoRoot);
+  const lexicalBoundary = path35.resolve(boundaryPath);
+  const relativeBoundary = path35.relative(lexicalRoot, lexicalBoundary);
+  if (relativeBoundary.length === 0 || relativeBoundary === ".." || relativeBoundary.startsWith(`..${path35.sep}`) || path35.isAbsolute(relativeBoundary)) {
     throw new Error("control boundary is outside the repository");
   }
-  await lstat19(boundaryPath);
+  await lstat21(boundaryPath);
   let resolvedBoundary;
   try {
     resolvedBoundary = await realpath12(boundaryPath);
     const boundaryStat = await stat4(resolvedBoundary);
-    if (resolvedBoundary !== path30.resolve(resolvedRoot, relativeBoundary) || !boundaryStat.isDirectory()) {
+    if (resolvedBoundary !== path35.resolve(resolvedRoot, relativeBoundary) || !boundaryStat.isDirectory()) {
       throw new Error("control boundary escapes the repository");
     }
   } catch {
     throw new Error("control boundary cannot be resolved safely");
   }
-  await lstat19(filePath);
+  await lstat21(filePath);
   let resolvedFile;
   try {
     resolvedFile = await realpath12(filePath);
   } catch {
     throw new Error("control file cannot be resolved");
   }
-  if (resolvedFile !== resolvedBoundary && !resolvedFile.startsWith(`${resolvedBoundary}${path30.sep}`)) {
+  if (resolvedFile !== resolvedBoundary && !resolvedFile.startsWith(`${resolvedBoundary}${path35.sep}`)) {
     throw new Error("control file escapes its boundary");
   }
-  return await readFile14(resolvedFile, "utf8");
+  return await readFile18(resolvedFile, "utf8");
 }
 function configVersionCheck(document) {
   if (!isRecord4(document)) {
@@ -46333,8 +46450,8 @@ async function configuredExecutableCheck(id3, commands, repoRoot, dependencies) 
   );
 }
 async function activeRunCheck(repoRoot) {
-  const banzaiRoot = path30.join(repoRoot, ".banzai");
-  const pointerPath = path30.join(banzaiRoot, "active-run.json");
+  const banzaiRoot = path35.join(repoRoot, ".banzai");
+  const pointerPath = path35.join(banzaiRoot, "active-run.json");
   let pointerRaw;
   try {
     pointerRaw = await readBoundedFile(pointerPath, banzaiRoot, repoRoot);
@@ -46378,8 +46495,8 @@ async function activeRunCheck(repoRoot) {
       "The active-run pointer contains an unsafe run identifier."
     );
   }
-  const runsRoot = path30.join(banzaiRoot, "runs");
-  const statePath = path30.join(runsRoot, pointer.runId, "state.json");
+  const runsRoot = path35.join(banzaiRoot, "runs");
+  const statePath = path35.join(runsRoot, pointer.runId, "state.json");
   let stateRaw;
   try {
     stateRaw = await readBoundedFile(statePath, runsRoot, repoRoot);
@@ -46427,7 +46544,7 @@ async function activeRunCheck(repoRoot) {
     }
   }
   const [stateRepoRoot, checkoutRoot] = await Promise.all([
-    path30.isAbsolute(state.repoRoot) ? realpath12(state.repoRoot).catch(() => null) : Promise.resolve(null),
+    path35.isAbsolute(state.repoRoot) ? realpath12(state.repoRoot).catch(() => null) : Promise.resolve(null),
     realpath12(repoRoot).catch(() => null)
   ]);
   if (state.runId !== pointer.runId || stateRepoRoot === null || checkoutRoot === null || stateRepoRoot !== checkoutRoot) {
@@ -46458,8 +46575,8 @@ function isRfc3339Instant(value) {
   return Number.isFinite(time) && new Date(time).toISOString() === value;
 }
 async function runnerLockCheck(repoRoot, dependencies) {
-  const banzaiRoot = path30.join(repoRoot, ".banzai");
-  const lockPath = path30.join(banzaiRoot, "runner.lock");
+  const banzaiRoot = path35.join(repoRoot, ".banzai");
+  const lockPath = path35.join(banzaiRoot, "runner.lock");
   let raw;
   try {
     raw = await readBoundedFile(lockPath, banzaiRoot, repoRoot);
@@ -46573,9 +46690,9 @@ async function inspectDoctor(repoRoot, dependencies = DEFAULT_DEPENDENCIES) {
   let configDocument = null;
   let config = null;
   try {
-    const banzaiRoot = path30.join(repoRoot, ".banzai");
+    const banzaiRoot = path35.join(repoRoot, ".banzai");
     const raw = await readBoundedFile(
-      path30.join(repoRoot, CONFIG_FILE2),
+      path35.join(repoRoot, CONFIG_FILE2),
       banzaiRoot,
       repoRoot
     );
@@ -46757,8 +46874,8 @@ async function executeDoctor(repoRoot, args, io, inspect = inspectDoctor) {
 }
 
 // src/evaluation-kpi-cli.ts
-import { readFile as readFile15 } from "node:fs/promises";
-import path31 from "node:path";
+import { readFile as readFile19 } from "node:fs/promises";
+import path36 from "node:path";
 
 // src/evaluation-kpi.ts
 var KPI_WORKFLOW_ORDER = [
@@ -47667,7 +47784,7 @@ async function executeEvaluationKpiFromInputs(options, io) {
     for (const file of options.inputs) {
       let text4;
       try {
-        text4 = await readFile15(file, "utf8");
+        text4 = await readFile19(file, "utf8");
       } catch {
         throw new BanzaiError(
           "INVALID_EVAL_INPUT",
@@ -47686,7 +47803,7 @@ async function executeEvaluationKpiFromInputs(options, io) {
   for (const [index, file] of options.inputs.entries()) {
     let text4;
     try {
-      text4 = await readFile15(file, "utf8");
+      text4 = await readFile19(file, "utf8");
     } catch {
       throw new BanzaiError(
         "INVALID_EVAL_INPUT",
@@ -47694,7 +47811,7 @@ async function executeEvaluationKpiFromInputs(options, io) {
       );
     }
     sources.push({
-      label: `${index + 1}: ${path31.basename(file)}`,
+      label: `${index + 1}: ${path36.basename(file)}`,
       report: decodeEvaluationExportInput(text4, file)
     });
   }
@@ -48093,15 +48210,15 @@ function createInterruptHandler(dependencies) {
 }
 
 // src/live-compatibility.ts
-import { createHash as createHash18 } from "node:crypto";
+import { createHash as createHash21 } from "node:crypto";
 import {
   access as access6,
   chmod as chmod4,
   cp,
-  lstat as lstat20,
+  lstat as lstat23,
   mkdir as mkdir11,
   mkdtemp,
-  readFile as readFile16,
+  readFile as readFile20,
   readdir as readdir12,
   readlink,
   realpath as realpath13,
@@ -48110,7 +48227,7 @@ import {
   writeFile as writeFile5
 } from "node:fs/promises";
 import os2 from "node:os";
-import path33 from "node:path";
+import path37 from "node:path";
 
 // ../../release-policy.json
 var release_policy_default = {
@@ -48669,8 +48786,8 @@ async function inspectAuthRoot(root) {
   async function visit(directory4) {
     const entries = await readdir12(directory4, { withFileTypes: true });
     for (const entry of entries) {
-      const entryPath = path33.join(directory4, entry.name);
-      const metadata2 = await lstat20(entryPath);
+      const entryPath = path37.join(directory4, entry.name);
+      const metadata2 = await lstat23(entryPath);
       if (metadata2.isSymbolicLink()) {
         throw new BanzaiError(
           "LIVE_AUTH_UNAVAILABLE",
@@ -48715,7 +48832,7 @@ async function secureCopiedTree(root) {
   await chmod4(root, 448);
   const entries = await readdir12(root, { withFileTypes: true });
   for (const entry of entries) {
-    const entryPath = path33.join(root, entry.name);
+    const entryPath = path37.join(root, entry.name);
     if (entry.isDirectory()) {
       await secureCopiedTree(entryPath);
     } else {
@@ -48731,7 +48848,7 @@ async function copyAuthRoot(repositoryRoot, sourceValue3, target) {
     );
   }
   const source = await realpath13(sourceValue3).catch(() => null);
-  if (source === null || source === repositoryRoot || source.startsWith(`${repositoryRoot}${path33.sep}`)) {
+  if (source === null || source === repositoryRoot || source.startsWith(`${repositoryRoot}${path37.sep}`)) {
     throw new BanzaiError(
       "LIVE_AUTH_UNAVAILABLE",
       "Live auth root is inside the repository or unavailable."
@@ -48755,8 +48872,8 @@ async function treeDigest(root, excludedPrefixes = []) {
       )) {
         continue;
       }
-      const absolutePath = path33.join(directory4, child.name);
-      const metadata = await lstat20(absolutePath);
+      const absolutePath = path37.join(directory4, child.name);
+      const metadata = await lstat23(absolutePath);
       const mode2 = metadata.mode & 511;
       if (metadata.isDirectory()) {
         entries.push(`${relativePath3}\0directory\0${mode2}`);
@@ -48766,28 +48883,28 @@ async function treeDigest(root, excludedPrefixes = []) {
           `${relativePath3}\0symlink\0${mode2}\0${await readlink(absolutePath)}`
         );
       } else if (metadata.isFile()) {
-        const digest5 = createHash18("sha256").update(await readFile16(absolutePath)).digest("hex");
+        const digest5 = createHash21("sha256").update(await readFile20(absolutePath)).digest("hex");
         entries.push(`${relativePath3}\0file\0${mode2}\0${digest5}`);
       }
     }
   }
   await visit(root, "");
-  return createHash18("sha256").update(entries.join("\n")).digest("hex");
+  return createHash21("sha256").update(entries.join("\n")).digest("hex");
 }
 async function prepareScenario(root, rawRoot) {
-  await mkdir11(path33.join(root, path33.dirname(DESCRIPTION_ARTIFACT)), {
+  await mkdir11(path37.join(root, path37.dirname(DESCRIPTION_ARTIFACT)), {
     recursive: true
   });
-  await mkdir11(path33.join(root, path33.dirname(PLAN_ARTIFACT)), {
+  await mkdir11(path37.join(root, path37.dirname(PLAN_ARTIFACT)), {
     recursive: true
   });
   await writeFile5(
-    path33.join(root, DESCRIPTION_ARTIFACT),
+    path37.join(root, DESCRIPTION_ARTIFACT),
     "# Live Compatibility Fixture\n\nPermission isolation fixture.\n",
     "utf8"
   );
   await writeFile5(
-    path33.join(root, PLAN_ARTIFACT),
+    path37.join(root, PLAN_ARTIFACT),
     "# Live Compatibility Plan\n\nNo source mutation is authorized.\n",
     "utf8"
   );
@@ -48795,18 +48912,18 @@ async function prepareScenario(root, rawRoot) {
     DESCRIPTION_ARTIFACT,
     PLAN_ARTIFACT
   ]);
-  const stateDirectory = path33.join(root, ".banzai", "runs", RUN_ID);
+  const stateDirectory = path37.join(root, ".banzai", "runs", RUN_ID);
   await mkdir11(stateDirectory, { recursive: true });
-  await mkdir11(path33.join(stateDirectory, "attempts"), { recursive: true });
+  await mkdir11(path37.join(stateDirectory, "attempts"), { recursive: true });
   await mkdir11(rawRoot, { recursive: true });
   await writeFile5(
-    path33.join(root, ".banzai", "active-run.json"),
+    path37.join(root, ".banzai", "active-run.json"),
     `${JSON.stringify({ schemaVersion: 1, runId: RUN_ID }, null, 2)}
 `,
     "utf8"
   );
   await writeFile5(
-    path33.join(stateDirectory, "state.json"),
+    path37.join(stateDirectory, "state.json"),
     `${JSON.stringify(
       {
         schemaVersion: 2,
@@ -48830,7 +48947,7 @@ async function prepareScenario(root, rawRoot) {
     "utf8"
   );
   await writeFile5(
-    path33.join(root, WRITE_PROBE),
+    path37.join(root, WRITE_PROBE),
     `'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
@@ -48861,7 +48978,7 @@ try {
     ".banzai",
     REVIEW_ARTIFACT
   ]);
-  const controlBefore = await treeDigest(path33.join(root, ".banzai"), [
+  const controlBefore = await treeDigest(path37.join(root, ".banzai"), [
     "runs/live-compatibility/attempts/review-1.review-candidate.md"
   ]);
   const artifact = {
@@ -49026,11 +49143,11 @@ async function runReviewScenario(vendor, scenario, environment, baseRunner, run,
       now() - started
     );
     if (valid) {
-      await mkdir11(path33.join(scenario.root, path33.dirname(REVIEW_CANDIDATE)), {
+      await mkdir11(path37.join(scenario.root, path37.dirname(REVIEW_CANDIDATE)), {
         recursive: true
       });
       await writeFile5(
-        path33.join(scenario.root, REVIEW_CANDIDATE),
+        path37.join(scenario.root, REVIEW_CANDIDATE),
         renderReviewArtifact(result, scenario.artifact),
         "utf8"
       );
@@ -49074,16 +49191,16 @@ async function runReviewScenario(vendor, scenario, environment, baseRunner, run,
     ".banzai",
     REVIEW_ARTIFACT
   ]);
-  const controlAfter = await treeDigest(path33.join(scenario.root, ".banzai"), [
+  const controlAfter = await treeDigest(path37.join(scenario.root, ".banzai"), [
     "runs/live-compatibility/attempts/review-1.review-candidate.md"
   ]);
-  if (sourceAfter !== scenario.sourceBefore || controlAfter !== scenario.controlBefore || await access6(path33.join(scenario.root, SOURCE_CANARY)).then(
+  if (sourceAfter !== scenario.sourceBefore || controlAfter !== scenario.controlBefore || await access6(path37.join(scenario.root, SOURCE_CANARY)).then(
     () => true,
     () => false
-  ) || await access6(path33.join(scenario.root, CONTROL_CANARY)).then(
+  ) || await access6(path37.join(scenario.root, CONTROL_CANARY)).then(
     () => true,
     () => false
-  ) || await access6(path33.join(scenario.root, OTHER_ARTIFACT)).then(
+  ) || await access6(path37.join(scenario.root, OTHER_ARTIFACT)).then(
     () => true,
     () => false
   )) {
@@ -49170,8 +49287,8 @@ async function candidateClones(repositoryRoot, temporaryRoot, environment, baseR
       "stdout"
     )).trim();
     const clones = {
-      codex: path33.join(temporaryRoot, "codex-candidate"),
-      claude: path33.join(temporaryRoot, "claude-candidate")
+      codex: path37.join(temporaryRoot, "codex-candidate"),
+      claude: path37.join(temporaryRoot, "claude-candidate")
     };
     for (const clone of Object.values(clones)) {
       await runOwnedProcess(
@@ -49281,7 +49398,7 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
       const parent = dependencies.temporaryParent ?? os2.tmpdir();
       await mkdir11(parent, { recursive: true });
       temporaryRoot = await mkdtemp(
-        path33.join(parent, "banzai-live-compatibility-")
+        path37.join(parent, "banzai-live-compatibility-")
       );
       const safeEnvironment = subscriptionOnlyEnvironment(environment);
       const clones = await candidateClones(
@@ -49293,10 +49410,10 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
         now
       );
       if (clones !== null) {
-        const authRoot = path33.join(temporaryRoot, "auth");
+        const authRoot = path37.join(temporaryRoot, "auth");
         await mkdir11(authRoot, { recursive: true, mode: 448 });
-        const codexAuth = path33.join(authRoot, "codex");
-        const claudeAuth = path33.join(authRoot, "claude");
+        const codexAuth = path37.join(authRoot, "codex");
+        const claudeAuth = path37.join(authRoot, "claude");
         let authReady = true;
         try {
           await copyAuthRoot(
@@ -49353,11 +49470,11 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
           if (codexReady && claudeReady) {
             const codexScenario = await prepareScenario(
               clones.codex,
-              path33.join(temporaryRoot, "raw", "codex")
+              path37.join(temporaryRoot, "raw", "codex")
             );
             const claudeScenario = await prepareScenario(
               clones.claude,
-              path33.join(temporaryRoot, "raw", "claude")
+              path37.join(temporaryRoot, "raw", "claude")
             );
             await runReviewScenario(
               "codex",
@@ -49366,7 +49483,7 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
               baseRunner,
               run,
               now,
-              path33.join(clones.codex, "plugins", "banzai")
+              path37.join(clones.codex, "plugins", "banzai")
             );
             await runReviewScenario(
               "claude",
@@ -49375,7 +49492,7 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
               baseRunner,
               run,
               now,
-              path33.join(clones.claude, "plugins", "banzai")
+              path37.join(clones.claude, "plugins", "banzai")
             );
             updateCheck(
               run,
@@ -49482,8 +49599,8 @@ async function executeLiveCompatibility(repoRoot, args, io, dependencies) {
 }
 
 // src/interactive.ts
-import { createHash as createHash19 } from "node:crypto";
-import path34 from "node:path";
+import { createHash as createHash23 } from "node:crypto";
+import path38 from "node:path";
 async function describeRepository(options) {
   if (options.repository === void 0) {
     return null;
@@ -49498,7 +49615,7 @@ function nonEmpty(value) {
   return value.trim().length > 0 ? true : "A value is required.";
 }
 function generateFeatureSlug(request) {
-  const digest5 = createHash19("sha256").update(request.trim().normalize("NFKC")).digest("hex").slice(0, 8);
+  const digest5 = createHash23("sha256").update(request.trim().normalize("NFKC")).digest("hex").slice(0, 8);
   const normalized = request.normalize("NFKD").replace(new RegExp("\\p{Mark}+", "gu"), "").toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   if (normalized.length > 64) {
     const prefix = normalized.slice(0, 55).replace(/-+$/g, "");
@@ -49523,7 +49640,7 @@ async function statusOrNull(runner) {
   }
 }
 function adrIdFromArtifact(artifact) {
-  const basename = path34.basename(artifact, path34.extname(artifact));
+  const basename = path38.basename(artifact, path38.extname(artifact));
   const match = /^(?:adr[-_])?([0-9]+)/i.exec(basename);
   return match?.[1] === void 0 ? basename : `ADR-${match[1]}`;
 }
@@ -50417,7 +50534,7 @@ function renderHeader(io, styler, repoRoot, identity, config, authentication) {
     `${styler.brand(MARK_TOP)}    ${styler.bold("banzai")} ${dim(`v${VERSION}`)}   ${dim("spec-driven run orchestrator")}`
   );
   const location = [
-    path34.basename(repoRoot),
+    path38.basename(repoRoot),
     identity?.branch == null ? null : styler.cyan(identity.branch),
     identity?.commit == null ? null : dim(`@ ${identity.commit.slice(0, 7)}`),
     identity === null || identity.carriedInChanges === 0 ? null : dim(
@@ -50436,7 +50553,7 @@ function renderHeader(io, styler, repoRoot, identity, config, authentication) {
     ...entries.map((entry) => SHORT_ROLE_LABELS[entry.role].length)
   );
   const vendorWidth = Math.max(
-    ...entries.map((entry) => path34.basename(entry.executable).length)
+    ...entries.map((entry) => path38.basename(entry.executable).length)
   );
   const modelWidth = Math.max(...entries.map((entry) => entry.model.length));
   io.writeLine();
@@ -50444,7 +50561,7 @@ function renderHeader(io, styler, repoRoot, identity, config, authentication) {
     const reason = readiness.get(entry.executable);
     const marker = reason === void 0 ? "" : reason === null ? styler.green("\u2713") : styler.red("\u2717");
     io.writeLine(
-      `    ${SHORT_ROLE_LABELS[entry.role].padEnd(roleWidth)}  ${path34.basename(entry.executable).padEnd(vendorWidth)} ${styler.bold(entry.model)}${" ".repeat(
+      `    ${SHORT_ROLE_LABELS[entry.role].padEnd(roleWidth)}  ${path38.basename(entry.executable).padEnd(vendorWidth)} ${styler.bold(entry.model)}${" ".repeat(
         modelWidth - entry.model.length
       )}  ${dim(`${entry.effort} \xB7 ${entry.timeout}`)}  ${marker}`.trimEnd()
     );
@@ -50942,7 +51059,7 @@ function writeBuilderSessionStatus(io, settings) {
 }
 
 // src/progress.ts
-import path35 from "node:path";
+import path39 from "node:path";
 var LEVELS = /* @__PURE__ */ new Set(["quiet", "normal", "verbose"]);
 function resolveProgressLevel(args, env) {
   if (args.includes("--verbose")) {
@@ -50969,7 +51086,7 @@ function singleLine(value) {
   return value.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").replace(/\s+/g, " ").trim();
 }
 function phaseBanner(label, descriptor, width, styler) {
-  const vendor = path35.basename(descriptor.executable);
+  const vendor = path39.basename(descriptor.executable);
   const timeout = `${Math.ceil(descriptor.timeoutMs / 6e4)}m cap`;
   const facts = [
     vendor,
@@ -51429,7 +51546,7 @@ async function runForegroundClient(launch) {
 }
 
 // src/setup-client.ts
-import path36 from "node:path";
+import path40 from "node:path";
 import { realpath as realpath14 } from "node:fs/promises";
 var SETUP_SKILLS = {
   codex: "$banzai:project-manifest",
@@ -51528,7 +51645,7 @@ async function discoverPlugin(vendor, executable, repoRoot, env, runner) {
   const candidates = [];
   for (const value of marketplaces) {
     const marketplace = record6(value);
-    if (typeof marketplace.name !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(marketplace.name) || typeof marketplace.root !== "string" || !path36.isAbsolute(marketplace.root))
+    if (typeof marketplace.name !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(marketplace.name) || typeof marketplace.root !== "string" || !path40.isAbsolute(marketplace.root))
       continue;
     const listed = record6(
       await query([
@@ -51543,7 +51660,7 @@ async function discoverPlugin(vendor, executable, repoRoot, env, runner) {
     for (const item of listed) {
       const plugin = record6(item);
       const source = record6(plugin.source);
-      if (plugin.name !== "banzai" || plugin.marketplaceName !== marketplace.name || plugin.installed !== true || plugin.enabled !== true || source.source !== "local" || typeof source.path !== "string" || !path36.isAbsolute(source.path))
+      if (plugin.name !== "banzai" || plugin.marketplaceName !== marketplace.name || plugin.installed !== true || plugin.enabled !== true || source.source !== "local" || typeof source.path !== "string" || !path40.isAbsolute(source.path))
         continue;
       const verified = await verifiedSetupPlugin(source.path, vendor);
       if (verified !== null) candidates.push(verified);

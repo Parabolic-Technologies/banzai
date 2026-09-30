@@ -13,17 +13,14 @@ import path from "node:path";
 import test from "node:test";
 import { digestArtifactBundle, workspaceSnapshot } from "../src/git.js";
 import { createWork } from "../src/artifact-storage.js";
-import { createVendorAdapters } from "../src/adapters.js";
+import { checkArtifactPhaseScope } from "../src/workflow/attempts/result-scope.js";
 import { randomUUID } from "node:crypto";
 import {
   CONTRACT_VERSION,
   RUN_STATE_SCHEMA_VERSION,
   type RunState
 } from "../src/types.js";
-import {
-  WorkflowRunner,
-  workflowAuthorizationDigest
-} from "../src/workflow.js";
+import { workflowAuthorizationDigest } from "../src/workflow.js";
 import { createTestRepository, evaluationStateFixture } from "./helpers.js";
 
 const hookPath = path.resolve(
@@ -697,15 +694,6 @@ for (const artifactLayout of ["private", "legacy"] as const)
         path.join(root, ".banzai/active-run.json"),
         JSON.stringify({ schemaVersion: 1, runId })
       );
-      const runner = new WorkflowRunner(
-        root,
-        createVendorAdapters(async () => {
-          throw new Error("Grant-boundary tests must not invoke a vendor.");
-        })
-      );
-      const phaseBoundary = runner as unknown as {
-        checkArtifactPhaseScope: WorkflowRunner["checkArtifactPhaseScope"];
-      };
       for (const workflow of ["strict", "feature", "quick-fix"] as const) {
         for (const phase of [
           "selection",
@@ -817,7 +805,8 @@ for (const artifactLayout of ["private", "legacy"] as const)
               await mkdir(path.dirname(absolute), { recursive: true });
               await writeFile(absolute, "changed artifact\n");
               // Exercise the post-model filesystem enforcement, not just its grant list.
-              const check = phaseBoundary.checkArtifactPhaseScope(
+              const check = checkArtifactPhaseScope(
+                { repoRoot: root },
                 state,
                 phase,
                 before
@@ -872,15 +861,6 @@ test("strict planning may record an accepted ADR in the manifest index under hoo
       path.join(root, ".banzai/runs", runId, "state.json"),
       JSON.stringify(state)
     );
-    const runner = new WorkflowRunner(
-      root,
-      createVendorAdapters(async () => {
-        throw new Error("Grant-boundary tests must not invoke a vendor.");
-      })
-    );
-    const phaseBoundary = runner as unknown as {
-      checkArtifactPhaseScope: WorkflowRunner["checkArtifactPhaseScope"];
-    };
     // Accepting an ADR during planning updates its public record, the decision
     // index and the manifest's active ADR index; source stays out of scope.
     for (const [target, decision] of [
@@ -897,7 +877,8 @@ test("strict planning may record an accepted ADR in the manifest index under hoo
       const absolute = path.join(root, target);
       await mkdir(path.dirname(absolute), { recursive: true });
       await writeFile(absolute, "changed by planning\n");
-      const check = phaseBoundary.checkArtifactPhaseScope(
+      const check = checkArtifactPhaseScope(
+        { repoRoot: root },
         state,
         "plan",
         before

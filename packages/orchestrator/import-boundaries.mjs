@@ -935,11 +935,52 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       permission("./workflow/domain/routing.js", ADR_0052),
       permission("./workflow/domain/run-identity.js", ADR_0052),
       permission("./workflow/domain/sessions.js", ADR_0052),
-      permission("./workflow/domain/verification-attempts.js", ADR_0052)
+      permission("./workflow/domain/verification-attempts.js", ADR_0052),
+      permission("./workflow/context.js", ADR_0052),
+      permission("./workflow/activity-sequence.js", ADR_0052),
+      permission("./workflow/cancellation-receipts.js", ADR_0052),
+      permission("./workflow/configuration/ownership.js", ADR_0052),
+      permission("./workflow/preflight/invocation-scope-cache.js", ADR_0052),
+      permission("./workflow/preflight/approval.js", ADR_0052),
+      permission("./workflow/review/result-application.js", ADR_0052),
+      permission("./workflow/digest-evidence/records.js", ADR_0052),
+      permission("./workflow/completion/inputs.js", ADR_0052),
+      permission("./workflow/completion/plan-tasks.js", ADR_0052),
+      permission("./workflow/verification/required-checks.js", ADR_0052),
+      permission("./workflow/attempts/result-scope.js", ADR_0052),
+      permission("./workflow/attempts/lifecycle.js", ADR_0052),
+      permission("./workflow/checkpoints/terminal-checkpoints.js", ADR_0052)
     ],
     [
       permission("./human-time.js", ADR_0034),
       permission("./workflow/ports.js", ADR_0052)
+    ]
+  ),
+  boundary("src/workflow/activity-sequence.ts", "workflow-activity-sequence", [
+    ADR_0052
+  ]),
+  boundary(
+    "src/workflow/cancellation-receipts.ts",
+    "workflow-cancellation-receipts",
+    [ADR_0052],
+    [],
+    [permission("../cancellation.js", ADR_0052)]
+  ),
+  boundary(
+    "src/workflow/configuration/ownership.ts",
+    "workflow-configuration-ownership",
+    [ADR_0052]
+  ),
+  boundary(
+    "src/workflow/context.ts",
+    "workflow-context",
+    [ADR_0052],
+    [],
+    [
+      permission("../human-time.js", ADR_0052),
+      permission("../store.js", ADR_0052),
+      permission("../types.js", ADR_0052),
+      permission("./ports.js", ADR_0052)
     ]
   ),
   boundary(
@@ -1048,6 +1089,149 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
     [permission("../../errors.js", ADR_0052)],
     [permission("../../types.js", ADR_0052)],
     DOMAIN
+  ),
+  boundary(
+    "src/workflow/preflight/invocation-scope-cache.ts",
+    "workflow-invocation-scope-cache",
+    [ADR_0052],
+    [],
+    [
+      permission("../../adapters.js", ADR_0052),
+      permission("../../types.js", ADR_0052)
+    ]
+  ),
+  boundary(
+    "src/workflow/preflight/approval.ts",
+    "workflow-preflight-approval",
+    [ADR_0052],
+    [
+      permission("../../artifact-storage.js", ADR_0052),
+      permission("../../errors.js", ADR_0052),
+      permission("../../git.js", ADR_0052),
+      permission("../../state-machine.js", ADR_0052)
+    ],
+    [
+      permission("../../types.js", ADR_0052),
+      permission("../context.js", ADR_0052)
+    ]
+  ),
+  boundary(
+    "src/workflow/review/result-application.ts",
+    "workflow-review-result-application",
+    [ADR_0052],
+    [permission("../../errors.js", ADR_0052)],
+    [permission("../../types.js", ADR_0052)]
+  ),
+  boundary(
+    "src/workflow/digest-evidence/records.ts",
+    "workflow-digest-evidence-records",
+    [ADR_0052],
+    [
+      permission("../../errors.js", ADR_0052),
+      permission("../../types.js", ADR_0052),
+      permission("../../validation.js", ADR_0052),
+      permission("../domain/failure-classes.js", ADR_0052)
+    ],
+    [
+      permission("../../verification-evidence.js", ADR_0052),
+      permission("../context.js", ADR_0052)
+    ]
+  ),
+  boundary(
+    "src/workflow/completion/inputs.ts",
+    "workflow-completion-inputs",
+    [ADR_0052],
+    [permission("../../git.js", ADR_0052)],
+    [
+      permission("../../types.js", ADR_0052),
+      permission("../context.js", ADR_0052)
+    ]
+  ),
+  boundary(
+    "src/workflow/completion/plan-tasks.ts",
+    "workflow-completion-plan-tasks",
+    [ADR_0052],
+    [
+      permission("../../errors.js", ADR_0052),
+      permission("../../plan-task-completion.js", ADR_0052),
+      permission("../../validation.js", ADR_0052),
+      permission("../../verification-evidence.js", ADR_0052),
+      permission("../context.js", ADR_0052),
+      permission("../digest-evidence/records.js", ADR_0052)
+    ],
+    [permission("../../types.js", ADR_0052)]
+  ),
+  boundary(
+    "src/workflow/verification/required-checks.ts",
+    "workflow-verification-required-checks",
+    [ADR_0052],
+    [
+      permission("../../verification-evidence.js", ADR_0052),
+      permission("../completion/plan-tasks.js", ADR_0052)
+    ],
+    [
+      permission("../../types.js", ADR_0052),
+      permission("../context.js", ADR_0052)
+    ]
+  ),
+  boundary(
+    "src/workflow/attempts/result-scope.ts",
+    "workflow-attempts-result-scope",
+    [ADR_0052],
+    [
+      permission("../../artifact-storage.js", ADR_0052),
+      permission("../../errors.js", ADR_0052),
+      permission("../../git.js", ADR_0052),
+      permission("../../review-artifact.js", ADR_0052),
+      permission("../domain/artifact-scope.js", ADR_0052)
+    ],
+    [
+      permission("../../types.js", ADR_0052),
+      permission("../context.js", ADR_0052)
+    ]
+  ),
+  boundary(
+    "src/workflow/attempts/lifecycle.ts",
+    "workflow-attempts-lifecycle",
+    [ADR_0052],
+    [
+      permission("../../adapters.js", ADR_0052),
+      permission("../../errors.js", ADR_0052),
+      permission("../../plan-task-completion.js", ADR_0052),
+      permission("../../process.js", ADR_0052),
+      permission("../../state-machine.js", ADR_0052),
+      permission("../../types.js", ADR_0052),
+      permission("../../validation.js", ADR_0052),
+      permission("../completion/plan-tasks.js", ADR_0052),
+      permission("../context.js", ADR_0052),
+      permission("../domain/failure-classes.js", ADR_0052)
+    ],
+    []
+  ),
+  boundary(
+    "src/workflow/checkpoints/terminal-checkpoints.ts",
+    "workflow-checkpoints-terminal-checkpoints",
+    [ADR_0052],
+    [
+      permission("../../errors.js", ADR_0052),
+      permission("../../models.js", ADR_0052),
+      permission("../../plan-task-completion.js", ADR_0052),
+      permission("../../types.js", ADR_0052),
+      permission("../../validation.js", ADR_0052),
+      permission("../../verification-evidence.js", ADR_0052),
+      permission("../attempts/lifecycle.js", ADR_0052),
+      permission("../attempts/result-scope.js", ADR_0052),
+      permission("../completion/inputs.js", ADR_0052),
+      permission("../completion/plan-tasks.js", ADR_0052),
+      permission("../digest-evidence/records.js", ADR_0052),
+      permission("../domain/failure-classes.js", ADR_0052),
+      permission("../domain/routing.js", ADR_0052),
+      permission("../domain/sessions.js", ADR_0052),
+      permission("../preflight/approval.js", ADR_0052),
+      permission("../review/result-application.js", ADR_0052),
+      permission("../verification/required-checks.js", ADR_0052)
+    ],
+    [permission("../context.js", ADR_0052)]
   ),
   boundary(
     "src/workflow/ports.ts",
@@ -1321,6 +1505,7 @@ export function validateImportBoundaryPolicy(entries, sourceModules) {
     if (!byImporter.has(importer)) fail("importer_missing", importer);
   }
   validateDomainEdges(byImporter);
+  validateWorkflowFacadeEdges(byImporter);
   return byImporter;
 }
 
@@ -1349,6 +1534,18 @@ function validateDomainEdges(byImporter) {
           fail("domain_dependency_invalid", entry.importer, item.target);
         }
       }
+    }
+  }
+}
+
+// ADR-0052 section 2: modules inside the workflow area never reach back into
+// the facade that delegates to them.
+function validateWorkflowFacadeEdges(byImporter) {
+  for (const entry of byImporter.values()) {
+    if (!entry.importer.startsWith("src/workflow/")) continue;
+    for (const item of [...entry.runtime, ...entry.typeOnly]) {
+      if (targetModule(entry.importer, item.target) === "src/workflow.ts")
+        fail("workflow_facade_edge", entry.importer, item.target);
     }
   }
 }

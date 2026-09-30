@@ -2349,6 +2349,33 @@ test("preflight checks each configured vendor once, including the implementer", 
   }
 });
 
+test("each runner numbers its progress activities from one", async () => {
+  const repositories = [
+    await createTestRepository(),
+    await createTestRepository()
+  ];
+  try {
+    const firstIds: string[] = [];
+    for (const repository of repositories) {
+      const ids: string[] = [];
+      const runner = new WorkflowRunner(
+        repository.root,
+        new FakeAdapters(),
+        undefined,
+        (event) => {
+          if (event.kind === "activity_started") ids.push(event.id);
+        }
+      );
+      await runner.start({ slug: "progress-example", request: "Plan it." });
+      firstIds.push(ids[0] ?? "none");
+      assert.ok(ids.length > 1, JSON.stringify(ids));
+    }
+    assert.deepEqual(firstIds, ["activity-1", "activity-1"]);
+  } finally {
+    for (const repository of repositories) await repository.dispose();
+  }
+});
+
 test("workflow reports preflight and model phase progress", async () => {
   const repository = await createTestRepository();
   try {
@@ -11664,6 +11691,54 @@ test("characterization: a blocked run is cancelled", async () => {
   }
 });
 
+test("characterization: a checkpointed implementation failure is reconciled on resume", async () => {
+  const repository = await createTestRepository();
+  const trace = recordPersistence();
+  try {
+    const adapters = new FakeAdapters();
+    adapters.failImplementationAfterTerminalCheckpoint = true;
+    adapters.reviewResults.push(passingReview());
+    const runner = new WorkflowRunner(repository.root, adapters);
+    await runner.start({ slug: "example", request: "Implement it." });
+    const blocked = await runner.approvePlan("human");
+    assert.equal(blocked.status, "blocked", blocked.blockReason ?? "");
+    assert.equal(blocked.activeAttempt?.kind, "implementation");
+    const done = await runner.resume();
+    assert.equal(done.status, "done", done.blockReason ?? "");
+    await assertTraceComplete(trace, runner.store, done.runId);
+    await assertTrace(
+      trace,
+      repository.root,
+      TRACE_IMPLEMENTATION_CHECKPOINT_RESUME
+    );
+  } finally {
+    trace.stop();
+    await repository.dispose();
+  }
+});
+
+test("characterization: a checkpointed review failure is reconciled on resume", async () => {
+  const repository = await createTestRepository();
+  const trace = recordPersistence();
+  try {
+    const adapters = new FakeAdapters();
+    adapters.failReviewAfterTerminalCheckpoint = true;
+    adapters.reviewResults.push(passingReview());
+    const runner = new WorkflowRunner(repository.root, adapters);
+    await runner.start({ slug: "example", request: "Implement it." });
+    const blocked = await runner.approvePlan("human");
+    assert.equal(blocked.status, "blocked", blocked.blockReason ?? "");
+    assert.equal(blocked.activeAttempt?.kind, "review");
+    const done = await runner.resume();
+    assert.equal(done.status, "done", done.blockReason ?? "");
+    await assertTraceComplete(trace, runner.store, done.runId);
+    await assertTrace(trace, repository.root, TRACE_REVIEW_CHECKPOINT_RESUME);
+  } finally {
+    trace.stop();
+    await repository.dispose();
+  }
+});
+
 const TRACE_LITE: readonly string[] = [
   "state created",
   "event run.created",
@@ -11985,6 +12060,89 @@ const TRACE_STATUS_APPROVAL_BLOCK: readonly string[] = [
   "event attempt.failed",
   "state blocked <- implementing: Approved planning artifacts changed. Restore the approved bundle (banzai restore) and retry, or cancel the run and approve a revised plan in a new run.",
   "event approval.invalidated"
+];
+const TRACE_IMPLEMENTATION_CHECKPOINT_RESUME: readonly string[] = [
+  "state created",
+  "event run.created",
+  "state selecting",
+  "state selecting",
+  "event attempt.started",
+  "state selecting",
+  "state planning",
+  "event workflow.selected",
+  "state planning",
+  "event attempt.started",
+  "state planning",
+  "state needs_plan_approval",
+  "event attempt.applied",
+  "state plan_approved",
+  "event approval.plan",
+  "state implementing",
+  "state implementing",
+  "event attempt.started",
+  "event attempt.terminal_checkpoint",
+  "state blocked <- implementing: implementation failed: parent interrupted after terminal checkpoint",
+  "event attempt.failed",
+  "event attempt.terminal_reconciled",
+  "state blocked <- implementing: implementation failed: parent interrupted after terminal checkpoint",
+  "state implementing",
+  "state implementing",
+  "state implementing",
+  "event completion.publication_applied",
+  "state implementing",
+  "state verifying",
+  "event attempt.applied",
+  "state verifying",
+  "state verifying",
+  "state reviewing",
+  "state reviewing",
+  "event attempt.started",
+  "event attempt.terminal_checkpoint",
+  "state reviewing",
+  "event review.completed",
+  "state done"
+];
+const TRACE_REVIEW_CHECKPOINT_RESUME: readonly string[] = [
+  "state created",
+  "event run.created",
+  "state selecting",
+  "state selecting",
+  "event attempt.started",
+  "state selecting",
+  "state planning",
+  "event workflow.selected",
+  "state planning",
+  "event attempt.started",
+  "state planning",
+  "state needs_plan_approval",
+  "event attempt.applied",
+  "state plan_approved",
+  "event approval.plan",
+  "state implementing",
+  "state implementing",
+  "event attempt.started",
+  "event attempt.terminal_checkpoint",
+  "state implementing",
+  "state implementing",
+  "state implementing",
+  "state implementing",
+  "event completion.publication_applied",
+  "state implementing",
+  "state verifying",
+  "event attempt.applied",
+  "state verifying",
+  "state verifying",
+  "state reviewing",
+  "state reviewing",
+  "event attempt.started",
+  "event attempt.terminal_checkpoint",
+  "state blocked <- reviewing: review failed: parent interrupted after review terminal checkpoint",
+  "event attempt.failed",
+  "event attempt.reconciled",
+  "state reviewing",
+  "event attempt.terminal_reconciled",
+  "event review.completed",
+  "state done"
 ];
 const TRACE_CANCEL: readonly string[] = [
   "state created",

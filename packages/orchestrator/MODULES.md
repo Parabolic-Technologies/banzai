@@ -252,7 +252,7 @@ is a navigational reference and is updated with the module it describes.
   including `assertClaudePermissions`, which ends a run before its first phase
   when the settings a Claude session loads deny a tool the phase must call and
   `--permission-mode dontAsk` leaves nothing able to approve it,
-  approval-digest validation, base-commit validation, attempt reconciliation,
+  attempt reconciliation,
   compatible builder-session selection, bounded full/delta reviewer policy,
   and direct terminal completion after complete zero-accepted triage.
   For new strict implementation and fix attempts it owns the
@@ -358,9 +358,67 @@ is a navigational reference and is updated with the module it describes.
   identity the rule assembles, and performs the approval check's block and
   event and completion revalidation's refresh at their existing points.
 
+  The constructor builds one frozen `RunnerContext` from its arguments and
+  sources; the context shares the public `store` and `adapters` instances, so
+  a patch on either reaches capability code. The runner keeps its mutable
+  state in four per-instance owners and calls capability modules for
+  approval, base-commit and selection validation, the attempt lifecycle,
+  terminal checkpoints, digest evidence and completion inputs. It keeps attempt
+  reconciliation and result application, calling the moved operations from
+  there. Only `now()` remains as a runner-side helper over the context.
+
 - `workflow/ports.ts` — type-only ADR-0052 process-boundary ports: `Clock`
   (`() => Date`), `IdSource` (RFC 4122 version 4 UUID text) and
   `RunnerSources`. It is a domain module and `workflow.ts` re-exports it.
+- `workflow/context.ts` — `RunnerContext`, the frozen record of the runner's
+  immutable collaborators (repository root, store, adapters, process runner,
+  progress reporter, optional human-time observer, clock, identifier source);
+  `timestamp`, the ISO-8601 UTC text of one clock reading; and
+  `observeHumanTime`, which never lets an observer failure change a decision.
+  It imports its collaborator types only.
+- `workflow/activity-sequence.ts` — `ActivitySequence`, the per-runner
+  `activity-<n>` identifiers, starting at 1 for each runner.
+- `workflow/cancellation-receipts.ts` — `CancellationReceipts`, the weakly held
+  first-response observation behind each receipt a runner issued.
+- `workflow/configuration/ownership.ts` — `ConfigurationOwnership`, the
+  async-local marker of work inside an owned configuration action; a workflow
+  lock requested there inherits the held lock.
+- `workflow/preflight/invocation-scope-cache.ts` — `InvocationScopeCache`, the
+  resolved scope record per Claude environment key: a key change replaces it
+  with a freshly resolved MCP whitelist and re-arms both reports, a fresh
+  resolution merges into it, and the degradation and whitelist reports are
+  each claimed once per key.
+- `workflow/preflight/approval.ts` — `validateApproval` (blocks, persists and
+  appends `approval.invalidated` when the approved bundle changed),
+  `validateBaseCommit` (blocks and persists when HEAD moved),
+  `validateWorkflowSelection` and `workflowAuthorizationDigest`, which
+  `workflow.ts` re-exports.
+- `workflow/review/result-application.ts` — `validateReviewResultForApplication`:
+  finding identifiers of the current iteration and a complete re-review of the
+  previously accepted findings.
+- `workflow/digest-evidence/records.ts` — records result-digest evidence and
+  rejects a result whose authored digest disagrees, reads the accepted
+  baseline, and derives the digest rejection reason text.
+- `workflow/completion/inputs.ts` — observes the implementation and test report
+  identities and the workspace that completion capture and terminal proof
+  record.
+- `workflow/completion/plan-tasks.ts` — the approved plan path and task
+  identifiers, runner control-task and planning-result validation (including
+  the plan remainder digest), implementation-completion validation and the
+  completion-invalid checkpoint.
+- `workflow/verification/required-checks.ts` — the required task-check
+  identifiers of the approved inventory and the task verification policy.
+- `workflow/attempts/lifecycle.ts` — `AttemptPolicy`, attempt, recovery and
+  completion-repair identities, attempt scope digests, starting, completing and
+  failing attempts, recovery attempts, process start, adapter-result and
+  redacted output persistence, usage accounting and result-envelope helpers.
+- `workflow/attempts/result-scope.ts` — a result's artifact role references,
+  the saved artifact workspace evidence and the phase write scope.
+- `workflow/checkpoints/terminal-checkpoints.ts` — terminal checkpoint writing
+  (including completion-protocol proof), finalization, promotion and result
+  validation, checkpoint model settings and result-source identity evidence.
+  It is the one capability module with several edges: attempts, completion,
+  verification, review, preflight and digest evidence.
 - `workflow/domain/failure-classes.ts` — ADR-0052 domain module holding the
   model-failure cause and failure-code sets, the `[RESULT_DIGEST_UNRESOLVED]`
   block-reason prefix and the read-only-attempt retry predicate that retry,

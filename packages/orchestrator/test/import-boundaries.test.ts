@@ -708,6 +708,37 @@ test("import_boundaries_domain_policy_rejects_non_domain_edges", () => {
   );
 });
 
+test("import_boundaries_workflow_modules_cannot_reach_the_facade", async () => {
+  const modules = [...discoverProductionModules(SOURCE_ROOT)];
+  validateImportBoundaryPolicy(mutablePolicy(), modules);
+  for (const [importer, field, target] of [
+    ["src/workflow/context.ts", "runtime", "../workflow.js"],
+    ["src/workflow/configuration/ownership.ts", "typeOnly", "../../workflow.js"]
+  ] as const) {
+    const policy = mutablePolicy();
+    const entry = policy.find((candidate) => candidate.importer === importer);
+    assert.ok(entry);
+    entry[field] = [...entry[field], { target, authority: "ADR-0052" }];
+    const error = policyError(
+      () => validateImportBoundaryPolicy(policy, modules),
+      "workflow_facade_edge"
+    );
+    assert.equal(error.issue.importer, importer);
+  }
+  const messages = boundaryMessages(
+    await lintSource(
+      "src/workflow/context.ts",
+      'import { WorkflowRunner } from "../workflow.js";\nexport const runner = WorkflowRunner;'
+    )
+  );
+  assert.ok(
+    messages.some((message) =>
+      message.message.includes("src/workflow/context.ts")
+    ),
+    JSON.stringify(messages)
+  );
+});
+
 test("import_boundaries_classification_is_explicit_and_closed", () => {
   const modules = [...discoverProductionModules(SOURCE_ROOT)];
 

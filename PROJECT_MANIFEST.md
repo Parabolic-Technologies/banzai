@@ -212,6 +212,25 @@ setup reuses the existing runner lock without stale ownership reclamation.
     `approval.invalidated`, including when `status` calls it without the run
     lock. Completion revalidation may write a refreshed plan-task-completion
     summary.
+- ADR-0052 runner context and capability slices:
+  - **Context.** `WorkflowRunner` builds one frozen `RunnerContext` with its
+    immutable collaborators: repository root, run store, vendor adapters,
+    process runner, progress reporter, human-time observer, clock and
+    identifier source. The context shares the runner's public `store` and
+    `adapters` instances. Capability code receives the context and never the
+    runner.
+  - **Mutable state.** Each piece of runner state has one per-instance owner
+    that exposes operations: the activity sequence, the cancellation receipts,
+    configuration ownership and the invocation-scope cache.
+  - **Capability slices.** The attempt lifecycle, terminal checkpoints, digest
+    evidence and the leaf validations they call live in `src/workflow/`
+    capability modules; attempt reconciliation and result application stay
+    in the runner. Edges between capability modules are explicit and acyclic:
+    checkpoints depend on attempts, completion, verification, review,
+    preflight and digest evidence; attempts and verification depend on
+    completion; completion depends on digest evidence.
+  - **Facade edge.** The import-boundary policy rejects any `src/workflow/**`
+    entry that permits `src/workflow.ts` (`workflow_facade_edge`).
 - Concurrency: one Node process using `async`/`await`. Each model phase and each
   verification command is a child process with its own timeout and
   process-group termination; verification commands run sequentially, while the
@@ -321,11 +340,15 @@ setup reuses the existing runner lock without stale ownership reclamation.
   - `.banzai/runs/` — local, ignored orchestrator run state.
 - Source/test layout: `src/` holds one module per responsibility. ADR-0052
   capability areas are introduced as subdirectories; `src/workflow/` currently
-  holds the runner ports and the workflow domain beside the `src/workflow.ts`
-  facade. `test/<path>.test.ts` normally mirrors `src/<path>.ts`. Cross-module
-  contract tests such as `test/review-result-v2.test.ts` and shared fixture
-  modules such as `test/helpers.ts`, `test/review-fixtures.ts` and
-  `test/characterization-trace.ts` are supported layout exceptions.
+  holds the runner ports, context and state owners, the workflow domain and
+  the `attempts/`, `checkpoints/`, `completion/`, `configuration/`,
+  `digest-evidence/`, `preflight/`, `review/` and `verification/` capability
+  modules beside the `src/workflow.ts` facade. `test/<path>.test.ts` normally
+  mirrors `src/<path>.ts`. Cross-module contract tests such as
+  `test/review-result-v2.test.ts` and shared fixture modules such as
+  `test/helpers.ts`, `test/review-fixtures.ts`,
+  `test/characterization-trace.ts` and `test/workflow/context-fixture.ts` are
+  supported layout exceptions.
   `test/hook.test.ts` covers the plugin hook outside the workspace.
 - `.gitignore` ignores `dist/` globally and then re-includes exactly
   `packages/orchestrator/dist/banzai.mjs` and `.../banzai.mjs.map`; it also
@@ -404,9 +427,9 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   `recover`, `approvePlan`, `decideAdr`, `answerHumanDecision`, `triage`,
   `cancel`, `recordCancellationResponse`, `status`, and the private phase executors (selection, planning,
   implementation, verification, review, fixes). Owns preflight including
-  `assertClaudePermissions`, approval-digest and base-commit validation, attempt
-  reconciliation, builder-session selection, full/delta reviewer policy,
-  snapshot-v6-bound rendered-review-v7 publication without formatting-only model calls,
+  `assertClaudePermissions`, attempt reconciliation, builder-session
+  selection, full/delta reviewer policy, snapshot-v6-bound rendered-review-v7
+  publication without formatting-only model calls,
   and recovery source discovery. It establishes every model-authored digest
   against the bytes it names when the carrying artifact is accepted, records
   that comparison as durable acceptance evidence, and recognizes a
@@ -415,9 +438,36 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   `sources` constructor argument (`{ clock?, ids? }`) supplies the time and
   UUIDs from which every runner-generated timestamp, duration and identifier
   derives. The defaults are the system clock and `randomUUID`, and each
-  identifier keeps its derived shape.
+  identifier keeps its derived shape. Approval-digest and base-commit
+  validation, the attempt lifecycle, terminal checkpoints and digest evidence
+  are delegated to `src/workflow/` capability modules.
 - `workflow/ports.ts` — the type-only `Clock`, `IdSource` and `RunnerSources`
   process-boundary ports, re-exported from `workflow.ts`.
+- `workflow/context.ts` — `RunnerContext`, the frozen collaborator record, with
+  the timestamp helper and human-time observation.
+- `workflow/activity-sequence.ts`, `cancellation-receipts.ts`,
+  `configuration/ownership.ts` and `preflight/invocation-scope-cache.ts` — the
+  per-runner owners of the activity sequence, cancellation receipts,
+  configuration ownership and the invocation-scope cache.
+- `workflow/attempts/lifecycle.ts` and `result-scope.ts` — attempt identities,
+  start, completion, failure, adapter-result and output persistence and usage
+  accounting, and the artifact role and phase-scope checks of a result.
+- `workflow/checkpoints/terminal-checkpoints.ts` — terminal checkpoint writing,
+  finalization, promotion and result validation, and result-source identity
+  evidence.
+- `workflow/digest-evidence/records.ts` — result-digest evidence records, their
+  baseline and the rejection reason text.
+- `workflow/completion/inputs.ts` and `plan-tasks.ts` — completion input
+  observation, the approved plan path and task identifiers, runner
+  control-task and planning-result validation, implementation-completion
+  validation and the completion-invalid checkpoint.
+- `workflow/preflight/approval.ts` — plan-approval, base-commit and
+  workflow-selection validation and `workflowAuthorizationDigest`, which
+  `workflow.ts` re-exports.
+- `workflow/review/result-application.ts` and
+  `workflow/verification/required-checks.ts` — review-result validation for
+  application, and the required task-check identifiers and verification
+  policy.
 - `workflow/domain/failure-classes.ts` — the model-failure cause and
   failure-code sets, and the `[RESULT_DIGEST_UNRESOLVED]` block-reason prefix,
   that retry, recovery and reconciliation read. It also holds the
@@ -1038,15 +1088,17 @@ attempt, approval marker or transcript.
   `test/helpers.ts` supplies temp git repositories, config fixtures,
   `commitAll` and byte-level tree snapshots. `test/characterization-trace.ts`
   records one ordered entry per persisted `state.json` write and appended
-  `events.jsonl` line. `test/hook.test.ts` covers
+  `events.jsonl` line. `test/workflow/context-fixture.ts` supplies a runner
+  context whose store records calls and rejects unexpected ones. `test/hook.test.ts` covers
   `plugins/banzai/hooks/spec-gate.cjs`; script-level integration tests cover
   release transactions, validation, the gate and committed smoke.
 - Characterization (ADR-0052): test cases named `characterization: ` in
   `workflow.test.ts` and `result-digest.test.ts` assert the ordered persisted
-  state and event traces of ten representative run flows. The flows are lite
-  and strict completion, a fix cycle, task-check retry, interrupted,
+  state and event traces of twelve representative run flows. The flows are
+  lite and strict completion, a fix cycle, task-check retry, interrupted,
   prerequisite-blocked and digest-rejected recovery, approval restore, the
-  `status` approval block, and cancellation. Identifiers, timestamps, digests
+  `status` approval block, cancellation, and an implementation or review
+  failure after its terminal checkpoint reconciled by `resume`. Identifiers, timestamps, digests
   and repository paths are normalized. The expected traces were recorded from
   the pre-decomposition source, and behavior-preserving refactors must leave
   them unchanged.
