@@ -15,6 +15,7 @@ const ADR_0042 = "ADR-0042";
 const ADR_0043 = "ADR-0043";
 const ADR_0045 = "ADR-0045";
 const ADR_0049 = "ADR-0049";
+const ADR_0052 = "ADR-0052";
 const POLICY_ADR_AUTHORITIES = new Set([
   ADR_0026,
   ADR_0028,
@@ -26,7 +27,8 @@ const POLICY_ADR_AUTHORITIES = new Set([
   ADR_0042,
   ADR_0043,
   ADR_0045,
-  ADR_0049
+  ADR_0049,
+  ADR_0052
 ]);
 const POLICY_ERROR_CODE = "IMPORT_BOUNDARY_POLICY_INVALID";
 const IMPORTER_PATTERN =
@@ -36,14 +38,56 @@ const MANIFEST_AUTHORITY_PATTERN = /^PROJECT_MANIFEST\.md §(?:[1-9]|10)$/;
 const TARGET_EXTENSION_PATTERN = /\.(?:js|json)$/;
 const TARGET_META_PATTERN = /[\\*?[\]{}()|^$#]/;
 
+// ADR-0052 domain modules hold pure decisions: they depend only on other
+// domain modules and the shared errors and types, and lint rejects effects.
+const STANDARD = "standard";
+const DOMAIN = "domain";
+const CLASSIFICATIONS = new Set([STANDARD, DOMAIN]);
+const DOMAIN_RUNTIME_SHARED = new Set(["src/errors.ts"]);
+const DOMAIN_TYPE_ONLY_SHARED = new Set(["src/errors.ts", "src/types.ts"]);
+const DOMAIN_EFFECTFUL_BUILTINS = [
+  "fs",
+  "fs/promises",
+  "child_process",
+  "net",
+  "http",
+  "https",
+  "http2",
+  "dgram",
+  "dns",
+  "dns/promises",
+  "tls",
+  "os",
+  "process",
+  "worker_threads",
+  "cluster"
+];
+// `globalThis` and `global` would reach every restricted global, clock and
+// random-value API through a qualified name, so domain modules use neither.
+const DOMAIN_RESTRICTED_GLOBALS = [
+  "process",
+  "crypto",
+  "performance",
+  "globalThis",
+  "global"
+];
+
 const permission = (target, authority) => ({ target, authority });
 const boundary = (
   importer,
   name,
   authorities,
   runtime = [],
-  typeOnly = []
-) => ({ importer, boundary: name, authorities, runtime, typeOnly });
+  typeOnly = [],
+  classification = STANDARD
+) => ({
+  importer,
+  boundary: name,
+  classification,
+  authorities,
+  runtime,
+  typeOnly
+});
 
 /**
  * Executable projection of PROJECT_MANIFEST.md and accepted ADR boundaries.
@@ -755,9 +799,10 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/state-machine.ts",
     "state-machine",
-    [MANIFEST_MODULES, MANIFEST_ARCHITECTURE],
+    [MANIFEST_MODULES, MANIFEST_ARCHITECTURE, ADR_0052],
     [permission("./errors.js", MANIFEST_ARCHITECTURE)],
-    [permission("./types.js", MANIFEST_ARCHITECTURE)]
+    [permission("./types.js", MANIFEST_ARCHITECTURE)],
+    DOMAIN
   ),
   boundary(
     "src/store.ts",
@@ -835,6 +880,7 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
     "src/workflow.ts",
     "workflow-runner",
     [
+      ADR_0052,
       ADR_0045,
       MANIFEST_ARCHITECTURE,
       MANIFEST_MODULES,
@@ -876,9 +922,140 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       permission("./types.js", MANIFEST_ARCHITECTURE),
       permission("./validation.js", MANIFEST_ARCHITECTURE),
       permission("./verification.js", MANIFEST_ARCHITECTURE),
-      permission("./vocabulary.js", MANIFEST_MODULES)
+      permission("./vocabulary.js", MANIFEST_MODULES),
+      permission("./workflow/domain/failure-classes.js", ADR_0052),
+      permission("./workflow/domain/retry-eligibility.js", ADR_0052),
+      permission("./workflow/domain/next-action.js", ADR_0052),
+      permission("./workflow/domain/restore-eligibility.js", ADR_0052),
+      permission("./workflow/domain/recovery-eligibility.js", ADR_0052),
+      permission("./workflow/domain/digest-rejected-recovery.js", ADR_0052),
+      permission("./workflow/domain/prerequisite-blocked-fix.js", ADR_0052),
+      permission("./workflow/domain/artifact-scope.js", ADR_0052),
+      permission("./workflow/domain/human-decisions.js", ADR_0052),
+      permission("./workflow/domain/routing.js", ADR_0052),
+      permission("./workflow/domain/run-identity.js", ADR_0052),
+      permission("./workflow/domain/sessions.js", ADR_0052),
+      permission("./workflow/domain/verification-attempts.js", ADR_0052)
     ],
-    [permission("./human-time.js", ADR_0034)]
+    [
+      permission("./human-time.js", ADR_0034),
+      permission("./workflow/ports.js", ADR_0052)
+    ]
+  ),
+  boundary(
+    "src/workflow/domain/artifact-scope.ts",
+    "workflow-artifact-scope",
+    [ADR_0052],
+    [permission("../../errors.js", ADR_0052)],
+    [permission("../../types.js", ADR_0052)],
+    DOMAIN
+  ),
+  boundary(
+    "src/workflow/domain/digest-rejected-recovery.ts",
+    "workflow-digest-rejected-recovery",
+    [ADR_0052],
+    [
+      permission("./failure-classes.js", ADR_0052),
+      permission("./recovery-eligibility.js", ADR_0052)
+    ],
+    [permission("../../types.js", ADR_0052)],
+    DOMAIN
+  ),
+  boundary(
+    "src/workflow/domain/failure-classes.ts",
+    "workflow-failure-classes",
+    [ADR_0052],
+    [permission("../../errors.js", ADR_0052)],
+    [permission("../../types.js", ADR_0052)],
+    DOMAIN
+  ),
+  boundary(
+    "src/workflow/domain/human-decisions.ts",
+    "workflow-human-decisions",
+    [ADR_0052],
+    [permission("../../errors.js", ADR_0052)],
+    [permission("../../types.js", ADR_0052)],
+    DOMAIN
+  ),
+  boundary(
+    "src/workflow/domain/next-action.ts",
+    "workflow-next-action",
+    [ADR_0052],
+    [],
+    [permission("../../types.js", ADR_0052)],
+    DOMAIN
+  ),
+  boundary(
+    "src/workflow/domain/prerequisite-blocked-fix.ts",
+    "workflow-prerequisite-blocked-fix",
+    [ADR_0052],
+    [permission("./recovery-eligibility.js", ADR_0052)],
+    [permission("../../types.js", ADR_0052)],
+    DOMAIN
+  ),
+  boundary(
+    "src/workflow/domain/recovery-eligibility.ts",
+    "workflow-recovery-eligibility",
+    [ADR_0052],
+    [permission("./failure-classes.js", ADR_0052)],
+    [permission("../../types.js", ADR_0052)],
+    DOMAIN
+  ),
+  boundary(
+    "src/workflow/domain/restore-eligibility.ts",
+    "workflow-restore-eligibility",
+    [ADR_0052],
+    [],
+    [permission("../../types.js", ADR_0052)],
+    DOMAIN
+  ),
+  boundary(
+    "src/workflow/domain/retry-eligibility.ts",
+    "workflow-retry-eligibility",
+    [ADR_0052],
+    [permission("./failure-classes.js", ADR_0052)],
+    [permission("../../types.js", ADR_0052)],
+    DOMAIN
+  ),
+  boundary(
+    "src/workflow/domain/routing.ts",
+    "workflow-routing",
+    [ADR_0052],
+    [],
+    [permission("../../types.js", ADR_0052)],
+    DOMAIN
+  ),
+  boundary(
+    "src/workflow/domain/run-identity.ts",
+    "workflow-run-identity",
+    [ADR_0052],
+    [permission("../../errors.js", ADR_0052)],
+    [],
+    DOMAIN
+  ),
+  boundary(
+    "src/workflow/domain/sessions.ts",
+    "workflow-sessions",
+    [ADR_0052],
+    [],
+    [permission("../../types.js", ADR_0052)],
+    DOMAIN
+  ),
+  boundary(
+    "src/workflow/domain/verification-attempts.ts",
+    "workflow-verification-attempts",
+    [ADR_0052],
+    [permission("../../errors.js", ADR_0052)],
+    [permission("../../types.js", ADR_0052)],
+    DOMAIN
+  ),
+  boundary(
+    "src/workflow/ports.ts",
+    "workflow-ports",
+    [ADR_0052],
+    [],
+    [],
+    DOMAIN
   )
 ];
 
@@ -1000,15 +1177,12 @@ function validatePermissionList(
       fail("permission_duplicate", importer, item.target);
     }
     targets.add(item.target);
-    if (item.target.endsWith(".js")) {
-      const resolved = path.posix.normalize(
-        path.posix.join(path.posix.dirname(importer), item.target)
-      );
-      const targetModule = `${resolved.slice(0, -3)}.ts`;
-      if (!resolved.startsWith("src/") || !sourceModules.has(targetModule)) {
+    const target = targetModule(importer, item.target);
+    if (target !== null) {
+      if (!target.startsWith("src/") || !sourceModules.has(target)) {
         fail("source_target_missing", importer, item.target);
       }
-      if (targetModule === importer) {
+      if (target === importer) {
         fail("self_dependency", importer, item.target);
       }
     }
@@ -1076,7 +1250,14 @@ export function validateImportBoundaryPolicy(entries, sourceModules) {
     }
     assertClosedKeys(
       entry,
-      ["importer", "boundary", "authorities", "runtime", "typeOnly"],
+      [
+        "importer",
+        "boundary",
+        "classification",
+        "authorities",
+        "runtime",
+        "typeOnly"
+      ],
       "policy_entry_invalid",
       entry.importer
     );
@@ -1091,6 +1272,9 @@ export function validateImportBoundaryPolicy(entries, sourceModules) {
       !BOUNDARY_PATTERN.test(entry.boundary)
     ) {
       fail("boundary_invalid", importer);
+    }
+    if (!CLASSIFICATIONS.has(entry.classification)) {
+      fail("classification_invalid", importer);
     }
     if (!Array.isArray(entry.authorities) || entry.authorities.length === 0) {
       fail("authorities_invalid", importer);
@@ -1121,9 +1305,13 @@ export function validateImportBoundaryPolicy(entries, sourceModules) {
         fail("permission_overlap", importer, target);
       }
     }
+    if (entry.classification === DOMAIN && !authorities.has(ADR_0052)) {
+      fail("domain_authority_missing", importer);
+    }
     byImporter.set(importer, {
       importer,
       boundary: entry.boundary,
+      classification: entry.classification,
       authorities: [...authorities],
       runtime: entry.runtime.map((item) => ({ ...item })),
       typeOnly: entry.typeOnly.map((item) => ({ ...item }))
@@ -1132,7 +1320,37 @@ export function validateImportBoundaryPolicy(entries, sourceModules) {
   for (const importer of [...sourceSet].sort()) {
     if (!byImporter.has(importer)) fail("importer_missing", importer);
   }
+  validateDomainEdges(byImporter);
   return byImporter;
+}
+
+function targetModule(importer, target) {
+  if (!target.endsWith(".js")) return null;
+  const resolved = path.posix.normalize(
+    path.posix.join(path.posix.dirname(importer), target)
+  );
+  return `${resolved.slice(0, -3)}.ts`;
+}
+
+function validateDomainEdges(byImporter) {
+  for (const entry of byImporter.values()) {
+    if (entry.classification !== DOMAIN) continue;
+    for (const [field, shared] of [
+      ["runtime", DOMAIN_RUNTIME_SHARED],
+      ["typeOnly", DOMAIN_TYPE_ONLY_SHARED]
+    ]) {
+      for (const item of entry[field]) {
+        const target = targetModule(entry.importer, item.target);
+        if (
+          target === null ||
+          (!shared.has(target) &&
+            byImporter.get(target)?.classification !== DOMAIN)
+        ) {
+          fail("domain_dependency_invalid", entry.importer, item.target);
+        }
+      }
+    }
+  }
 }
 
 function escapeRegExp(value) {
@@ -1185,6 +1403,21 @@ export function createImportBoundaryConfigs(validatedPolicy) {
         "/",
         "\\/"
       );
+      const domain = entry.classification === DOMAIN;
+      if (domain) {
+        const effectMessage = restrictionMessage(entry, "Effectful built-in");
+        for (const name of DOMAIN_EFFECTFUL_BUILTINS) {
+          paths.push({ name, message: effectMessage });
+          paths.push({ name: `node:${name}`, message: effectMessage });
+        }
+        for (const name of ["crypto", "node:crypto"]) {
+          paths.push({
+            name,
+            allowImportNames: ["createHash"],
+            message: restrictionMessage(entry, "Random-value")
+          });
+        }
+      }
       const syntaxRestrictions = [
         {
           selector:
@@ -1269,8 +1502,42 @@ export function createImportBoundaryConfigs(validatedPolicy) {
               ]
             }
           ],
-          "no-restricted-syntax": ["error", ...syntaxRestrictions]
+          "no-restricted-syntax": [
+            "error",
+            ...syntaxRestrictions,
+            ...(domain ? domainSyntaxRestrictions(entry) : [])
+          ],
+          ...(domain
+            ? {
+                "no-restricted-globals": [
+                  "error",
+                  ...DOMAIN_RESTRICTED_GLOBALS.map((name) => ({
+                    name,
+                    message: restrictionMessage(entry, "Ambient runtime")
+                  }))
+                ]
+              }
+            : {})
         }
       };
     });
+}
+
+function domainSyntaxRestrictions(entry) {
+  const clockMessage = restrictionMessage(entry, "Ambient clock");
+  return [
+    {
+      selector: 'MemberExpression[object.name="Date"][property.name="now"]',
+      message: clockMessage
+    },
+    {
+      selector: 'NewExpression[callee.name="Date"][arguments.length=0]',
+      message: clockMessage
+    },
+    { selector: 'CallExpression[callee.name="Date"]', message: clockMessage },
+    {
+      selector: 'MemberExpression[object.name="Math"][property.name="random"]',
+      message: restrictionMessage(entry, "Random-value")
+    }
+  ];
 }

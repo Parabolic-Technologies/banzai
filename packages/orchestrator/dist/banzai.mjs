@@ -28620,6 +28620,990 @@ function phaseInstructionParts(phase) {
   ];
 }
 
+// src/workflow/domain/failure-classes.ts
+var INTEGRITY_NEUTRAL_FAILURE_CAUSES = /* @__PURE__ */ new Set([
+  "capacity",
+  "timeout",
+  "process_start",
+  "transport"
+]);
+var PLAN_BUNDLE_COMPLETION_VIOLATIONS = /* @__PURE__ */ new Set([
+  "approved_plan_invalid",
+  "approval_invalid"
+]);
+var RECOVERABLE_MUTABLE_FAILURE_CAUSES = /* @__PURE__ */ new Set([
+  "capacity",
+  "timeout",
+  "transport"
+]);
+var PLANNING_REPAIR_FAILURE_CODES = /* @__PURE__ */ new Set([
+  "INVALID_RESULT",
+  "MODEL_RESULT_INVALID",
+  "CODEX_RESULT_MISSING",
+  "PHASE_RESULT_SCHEMA_MISMATCH",
+  "PLAN_TASK_COMPLETION_INVALID"
+]);
+var TERMINAL_INTEGRITY_FAILURE_CODES = /* @__PURE__ */ new Set([
+  "TERMINAL_RESULT_CONFLICT",
+  "SESSION_ID_CONFLICT"
+]);
+var DIGEST_REJECTED_FAILURE_CODES = /* @__PURE__ */ new Set([
+  "RESULT_DIGEST_REJECTED",
+  "PLAN_TASK_COMPLETION_INVALID"
+]);
+var DIGEST_UNRESOLVED_BLOCK_PREFIX = "[RESULT_DIGEST_UNRESOLVED]";
+function isRetryableInterruptedAttempt(attempt, record7) {
+  return !attempt.mutable && record7.status === "started" && (attempt.kind === "selection" || attempt.kind === "review");
+}
+function checkFailureReason(error) {
+  return error instanceof BanzaiError ? `[${error.code}] ${error.message}` : errorMessage(error);
+}
+
+// src/workflow/domain/retry-eligibility.ts
+var decided = (eligible, reason, attemptId) => ({
+  kind: "decided",
+  eligibility: { eligible, reason, attemptId }
+});
+var needs = (evidence2) => ({ kind: "needs", evidence: evidence2 });
+var malformedVerification = () => decided(
+  false,
+  "Verification evidence is malformed or conflicting. Audit the run before continuing.",
+  null
+);
+function decideRetry(facts) {
+  const { state } = facts;
+  if (state.status !== "blocked") {
+    return decided(
+      false,
+      `Retry requires a blocked run, but the run is ${state.status}.`,
+      null
+    );
+  }
+  if (state.activeProcess !== null) {
+    return decided(
+      false,
+      "Retry is unavailable while a model process is still active.",
+      state.activeAttempt?.id ?? null
+    );
+  }
+  const attempt = state.activeAttempt;
+  if (attempt === null) return decideWithoutAttempt(facts);
+  if (facts.attemptRecord === void 0)
+    return { kind: "needs", evidence: "attempt_record", attempt };
+  return decideWithAttempt(state, attempt, facts.attemptRecord);
+}
+function decideWithoutAttempt(facts) {
+  const { state } = facts;
+  if (state.blockedFrom === "created") {
+    return decided(
+      true,
+      "Startup checks can be retried after resolving the reported prerequisite.",
+      null
+    );
+  }
+  if (state.blockedFrom === "reviewing") {
+    return decided(
+      true,
+      "Review checks can be retried after resolving the reported prerequisite.",
+      null
+    );
+  }
+  if (state.blockedFrom === "verifying" && state.planTaskCompletion?.status === "invalid") {
+    return decided(
+      true,
+      PLAN_BUNDLE_COMPLETION_VIOLATIONS.has(state.planTaskCompletion.violation) ? "The approved plan bundle is invalid; retry reruns planning for a corrected bundle and a new approval." : `Completion evidence rejected at revalidation can be repaired with a new implementation attempt.`,
+      state.planTaskCompletion.sourceAttemptId
+    );
+  }
+  if (state.blockedFrom === "verifying") {
+    if (state.blockReason?.startsWith(DIGEST_UNRESOLVED_BLOCK_PREFIX)) {
+      return decided(
+        false,
+        "A digest this run's result authored does not match the bytes it names, and no recorded baseline shows those bytes changed after acceptance. Retrying reads the same bytes and fails identically. Inspect the checkout, then cancel the run.",
+        null
+      );
+    }
+    if (state.verificationMode === "task") {
+      const evidence2 = facts.taskVerification;
+      if (evidence2 === void 0) return needs("task_verification_attempts");
+      if (!evidence2.readable) return malformedVerification();
+      const latest = evidence2.latest;
+      const unresolved = latest?.status === "started";
+      const unsuccessful = latest?.status === "failed" || latest?.status === "interrupted";
+      return decided(
+        true,
+        unresolved ? "Retry reconciles the unresolved physical attempt before running eligible checks." : unsuccessful ? "The unsuccessful task check can be retried explicitly." : "Verification prerequisites can be retried without replaying implementation.",
+        unsuccessful ? latest.id : null
+      );
+    }
+    const ledger = facts.legacyLedger;
+    if (ledger === void 0) return needs("legacy_ledger_support");
+    if (!ledger.readable) return malformedVerification();
+    if (!ledger.supported) {
+      return decided(
+        false,
+        "Legacy verification evidence has no retryable durable attempt identity. Inspect the checkout, then cancel the run.",
+        null
+      );
+    }
+    const legacy = facts.legacyVerification;
+    if (legacy === void 0) return needs("legacy_verification_attempts");
+    if (!legacy.readable) return malformedVerification();
+    if (legacy.latest?.status === "failed") {
+      return decided(
+        true,
+        `Failed verification attempt ${legacy.latest.id} can be retried explicitly.`,
+        legacy.latest.id
+      );
+    }
+  }
+  const approvalInvalidated = state.blockReason?.startsWith("Approved planning artifacts changed") === true;
+  if (approvalInvalidated && state.blockedFrom === "fixing") {
+    return decided(
+      true,
+      "Fix checks can be retried after resolving the reported prerequisite.",
+      null
+    );
+  }
+  if (approvalInvalidated && (state.blockedFrom === "implementing" || state.blockedFrom === "plan_approved")) {
+    return decided(
+      true,
+      "Implementation checks can be retried after resolving the reported prerequisite.",
+      null
+    );
+  }
+  return decided(
+    false,
+    "This blocked state is not tied to a failed attempt. Resolve it manually or cancel the run.",
+    null
+  );
+}
+function decideWithAttempt(state, attempt, record7) {
+  if (record7.status === "failed" && record7.failureCode === "CONTEXT_BUDGET_EXCEEDED") {
+    const expectedStatus2 = attempt.kind === "selection" ? "selecting" : attempt.kind === "plan" ? "planning" : attempt.kind === "implementation" ? "implementing" : attempt.kind === "fix" ? "fixing" : "reviewing";
+    if (state.blockedFrom === expectedStatus2) {
+      return decided(
+        true,
+        `Context-budget-blocked ${attempt.kind} attempt ${attempt.id} can be retried explicitly after policy or authorized input changes because no vendor process started.`,
+        attempt.id
+      );
+    }
+  }
+  if (attempt.mutable) {
+    const checkpoint = state.planTaskCompletion;
+    if (record7.status === "pending_application") {
+      return decided(
+        false,
+        "Completion publication for this attempt is pending; use banzai resume to reconcile it without another model call, or cancel the run.",
+        attempt.id
+      );
+    }
+    if ((attempt.kind === "implementation" && state.blockedFrom === "implementing" || attempt.kind === "fix" && state.blockedFrom === "fixing") && record7.status === "failed" && // The runner itself classified this failure as completion evidence
+    // when it wrote the invalid checkpoint: a result rejected by ledger
+    // validation keeps its decoded evidence, and a result whose decode
+    // failed on a completion field keeps only the diagnostic — the repair
+    // replaces the whole result either way, so neither is a dead end.
+    record7.failureCode === "PLAN_TASK_COMPLETION_INVALID" && checkpoint?.status === "invalid" && checkpoint.sourceAttemptId === attempt.id) {
+      return decided(
+        true,
+        PLAN_BUNDLE_COMPLETION_VIOLATIONS.has(checkpoint.violation) ? "The approved plan bundle is invalid; retry reruns planning for a corrected bundle and a new approval." : `Completion evidence for ${attempt.kind} attempt ${attempt.id} can be repaired with a new attempt.`,
+        attempt.id
+      );
+    }
+    return decided(
+      false,
+      "Failed mutable attempts cannot be retried because their repository side effects may be incomplete. Inspect the checkout, then cancel the run.",
+      attempt.id
+    );
+  }
+  const isRetryableInterruption = isRetryableInterruptedAttempt(
+    attempt,
+    record7
+  );
+  if (record7.status !== "failed" && !isRetryableInterruption) {
+    return decided(
+      false,
+      record7.status === "started" ? "Interrupted attempts cannot be retried automatically. Inspect the checkout, then cancel the run." : `Attempt ${attempt.id} is ${record7.status}, not failed.`,
+      attempt.id
+    );
+  }
+  const expectedStatus = attempt.kind === "selection" ? "selecting" : attempt.kind === "plan" ? "planning" : attempt.kind === "implementation" ? "implementing" : attempt.kind === "review" ? "reviewing" : null;
+  if (expectedStatus === null || state.blockedFrom !== expectedStatus) {
+    return decided(
+      false,
+      `The failed ${attempt.kind} attempt is inconsistent with blockedFrom=${state.blockedFrom ?? "null"}.`,
+      attempt.id
+    );
+  }
+  return decided(
+    true,
+    record7.status === "started" ? `Interrupted ${attempt.kind} attempt ${attempt.id} can be retried explicitly because it was read-only.` : `Failed ${attempt.kind} attempt ${attempt.id} can be retried explicitly.`,
+    attempt.id
+  );
+}
+
+// src/workflow/domain/next-action.ts
+function nextAction(state, retry, recovery, publication = null) {
+  if (state.status === "needs_adr_approval") {
+    return "banzai approve adr";
+  }
+  if (state.status === "needs_plan_approval") {
+    return "banzai approve plan";
+  }
+  if (state.status === "needs_human_decision") {
+    return "banzai";
+  }
+  if (state.status === "needs_triage") {
+    return "banzai triage";
+  }
+  if (state.status === "blocked") {
+    if (publication?.pending === true && publication.action !== null)
+      return `banzai ${publication.action}`;
+    if (recovery.eligible && recovery.sourceKind === "digest_rejected")
+      return "banzai recover";
+    return retry.eligible ? "banzai retry" : recovery.eligible ? "banzai recover" : recovery.terminalCheckpointPresent === true ? "banzai resume" : "banzai cancel";
+  }
+  if ([
+    "created",
+    "selecting",
+    "planning",
+    "plan_approved",
+    "implementing",
+    "verifying",
+    "reviewing",
+    "fixing"
+  ].includes(state.status)) {
+    return "banzai resume";
+  }
+  return null;
+}
+
+// src/workflow/domain/artifact-scope.ts
+function artifactPaths(state) {
+  const artifacts = state.planArtifacts;
+  if (artifacts?.description === null || artifacts?.plan === null || artifacts === null) {
+    throw new BanzaiError(
+      "INCOMPLETE_PLAN",
+      "Planning must produce description and plan artifact paths before approval."
+    );
+  }
+  return [artifacts.description, ...artifacts.adrs, artifacts.plan];
+}
+function isDocumentationPath(relativePath3) {
+  const normalized = relativePath3.replaceAll("\\", "/");
+  return normalized === "documentation" || normalized.startsWith("documentation/");
+}
+
+// src/workflow/domain/human-decisions.ts
+function humanDecisionQuestions(pending, liteWorkflow) {
+  if (pending.kind === "configuration_prerequisite") return [];
+  if (pending.kind === "decision_consultation") {
+    return pending.request.decisions.map((decision) => decision.question);
+  }
+  if (pending.questions.length > 0) {
+    return [...pending.questions];
+  }
+  return [
+    liteWorkflow ? "What decision should workflow reselection apply?" : "What decision or approval should planning apply?"
+  ];
+}
+var UNSAFE_HUMAN_DECISION_CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u;
+function decisionText(value, label, maximum, allowNewlines = false) {
+  if (typeof value !== "string" || value.length === 0 || value.length > maximum || value.trim().length === 0 || UNSAFE_HUMAN_DECISION_CONTROL.test(value) || !allowNewlines && /[\r\n]/u.test(value)) {
+    throw new BanzaiError(
+      "INVALID_DECISION",
+      `${label} must be a bounded non-empty safe string.`
+    );
+  }
+  return value;
+}
+function decisionIdentifier(value, label, maximum = 128) {
+  const identifier4 = decisionText(value, label, maximum);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(identifier4)) {
+    throw new BanzaiError(
+      "INVALID_DECISION",
+      `${label} must be a canonical identifier.`
+    );
+  }
+  return identifier4;
+}
+
+// src/workflow/domain/routing.ts
+function effectiveWorkflow(result) {
+  if (result.recommendedWorkflow !== "strict" && result.confidence === "high" && result.escalationTriggers.length === 0) {
+    return result.recommendedWorkflow;
+  }
+  return "strict";
+}
+function terminalResultContract(kind, taskMode = false) {
+  return kind === "selection" ? "workflow-selection/v1" : kind === "review" ? "review-result/v2" : taskMode ? "phase-result/v4" : "phase-result/v3";
+}
+
+// src/workflow/domain/run-identity.ts
+function runId(slug, at, uuid2) {
+  const timestamp = at.replace(/[-:.TZ]/g, "").slice(0, 14);
+  return `${timestamp}-${slug}-${uuid2.slice(0, 8)}`;
+}
+function requireSlug(slug) {
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+    throw new BanzaiError(
+      "INVALID_SLUG",
+      "Feature slug must be lowercase kebab-case."
+    );
+  }
+}
+
+// src/workflow/domain/sessions.ts
+function sessionContext(role, settings) {
+  return {
+    role,
+    executable: settings.executable,
+    model: settings.model,
+    effort: settings.effort
+  };
+}
+function sessionBinding(id3, context) {
+  return id3 === null ? null : { id: id3, ...context };
+}
+
+// src/workflow/domain/verification-attempts.ts
+function verificationFailureCategory(error) {
+  if (error instanceof BanzaiError) {
+    if (error.code === "PROCESS_START_FAILED") {
+      return "process_start";
+    }
+    if (error.code === "PROCESS_TIMEOUT") {
+      return "timeout";
+    }
+    if (error.code === "PROCESS_OUTPUT_LIMIT") {
+      return "output_limit";
+    }
+  }
+  return "runner_failure";
+}
+function verificationCommandMatches(record7, descriptor) {
+  return record7.command.profileId === descriptor.profileId && record7.command.projectType === descriptor.projectType && record7.command.profileOrdinal === descriptor.profileOrdinal && record7.command.commandOrdinal === descriptor.commandOrdinal && record7.command.configurationDigest === descriptor.configurationDigest;
+}
+
+// src/workflow/domain/recovery-eligibility.ts
+var RECOVERY_WARNING = "Repository and external side effects may be partial or duplicated. Recovery authorizes new work from this exact checkout; it does not mark the interrupted attempt completed.";
+function recoveryIneligible(reason, attemptId = null, phase = null, terminalCheckpointPresent = false) {
+  return {
+    eligible: false,
+    terminalCheckpointPresent,
+    reason,
+    warning: RECOVERY_WARNING,
+    sourceKind: null,
+    attemptId,
+    phase,
+    resolvedFindingIds: [],
+    remainingFindingIds: [],
+    prerequisites: [],
+    authorization: null,
+    recoveryIdentity: null,
+    workspace: null,
+    baseCommit: null,
+    approvalDigest: null,
+    workflowDigest: null,
+    scopeDigest: null,
+    configurationDigest: null
+  };
+}
+function decideRecoveryWorkspace(facts, state, identity) {
+  const workspace = facts.workspace;
+  if (workspace === void 0)
+    return { kind: "needs", evidence: "workspace_snapshot" };
+  if (workspace.baseCommit !== state.baseCommit)
+    return {
+      kind: "ineligible",
+      reason: "Recovery is unavailable because the workspace base commit changed."
+    };
+  const counts = facts.counts;
+  if (counts === void 0)
+    return {
+      kind: "needs",
+      evidence: "workspace_counts",
+      identity: { ...identity, workspaceDigest: workspace.digest }
+    };
+  if (state.recovery?.sourceAttemptId === identity.attempt.id && state.recovery.recoveryAttemptId === null) {
+    const authorization = facts.authorization;
+    if (authorization === void 0)
+      return {
+        kind: "needs",
+        evidence: "recovery_authorization",
+        authorizationId: state.recovery.authorizationId
+      };
+    if (authorization.attemptId !== identity.attempt.id || authorization.recoveryIdentity !== counts.recoveryIdentity)
+      return {
+        kind: "ineligible",
+        reason: "Persisted recovery authorization is stale or inconsistent."
+      };
+  }
+  return {
+    kind: "ready",
+    workspace: {
+      digest: workspace.digest,
+      added: counts.added,
+      modified: counts.modified,
+      deleted: counts.deleted,
+      total: counts.total
+    },
+    recoveryIdentity: counts.recoveryIdentity
+  };
+}
+var decided2 = (eligibility) => ({
+  kind: "decided",
+  eligibility
+});
+function decideRecovery(facts) {
+  const { state } = facts;
+  if (state.status !== "blocked") {
+    return decided2(
+      recoveryIneligible(
+        `Recovery requires a blocked run, but the run is ${state.status}.`
+      )
+    );
+  }
+  const attempt = state.activeAttempt;
+  if (attempt !== null) {
+    if (facts.digestRejected === void 0)
+      return { kind: "needs", evidence: "digest_rejected_source", attempt };
+    if (facts.digestRejected !== null) return decided2(facts.digestRejected);
+  }
+  if (attempt === null && state.blockedFrom === "fixing") {
+    if (facts.prerequisiteBlockedFix === void 0)
+      return { kind: "needs", evidence: "prerequisite_blocked_fix_source" };
+    return decided2(facts.prerequisiteBlockedFix);
+  }
+  if (attempt === null || !attempt.mutable || attempt.kind !== "implementation" && attempt.kind !== "fix") {
+    return decided2(
+      recoveryIneligible(
+        "Recovery requires an interrupted mutable implementation or fix attempt.",
+        attempt?.id ?? null
+      )
+    );
+  }
+  return decideInterrupted(facts, attempt, attempt.kind);
+}
+function decideInterrupted(facts, attempt, phase) {
+  const { state } = facts;
+  const ineligible = (reason, terminalCheckpointPresent = false) => decided2(
+    recoveryIneligible(reason, attempt.id, phase, terminalCheckpointPresent)
+  );
+  const expectedBlockedFrom = phase === "implementation" ? "implementing" : "fixing";
+  if (state.blockedFrom !== expectedBlockedFrom) {
+    return ineligible(
+      `The interrupted ${phase} attempt is inconsistent with blockedFrom=${state.blockedFrom ?? "null"}.`
+    );
+  }
+  if (state.activeProcess !== null) {
+    if (facts.processAlive === void 0)
+      return {
+        kind: "needs",
+        evidence: "process_liveness",
+        pid: state.activeProcess.pid
+      };
+    if (facts.processAlive)
+      return ineligible(
+        "Recovery is unavailable while the model process is still active."
+      );
+  }
+  const read = facts.attemptRecord;
+  if (read === void 0)
+    return { kind: "needs", evidence: "attempt_record", attempt };
+  if (!read.readable)
+    return ineligible(
+      "Recovery attempt evidence is unreadable or inconsistent."
+    );
+  const record7 = read.record;
+  const checkpoint = facts.terminalCheckpoint;
+  if (checkpoint === void 0)
+    return { kind: "needs", evidence: "terminal_checkpoint", attempt };
+  if (!checkpoint.readable)
+    return ineligible(
+      "Terminal checkpoint evidence is malformed or conflicting; inspect or cancel the run."
+    );
+  if (checkpoint.present) {
+    const completionEvidenceRejected = record7.status === "failed" && record7.result !== null && record7.failureCode === "PLAN_TASK_COMPLETION_INVALID" && state.planTaskCompletion?.status === "invalid" && state.planTaskCompletion.sourceAttemptId === attempt.id;
+    return ineligible(
+      completionEvidenceRejected ? "The terminal checkpoint result was rejected by completion validation; use banzai retry to repair its evidence." : "A terminal checkpoint exists; use banzai resume so Banzai can reconcile proven completion.",
+      true
+    );
+  }
+  const recoverableFailedAttempt = record7.status === "failed" && record7.failureCause !== null && record7.failureCause !== void 0 && RECOVERABLE_MUTABLE_FAILURE_CAUSES.has(record7.failureCause);
+  if (record7.status !== "started" && record7.status !== "interrupted" && !recoverableFailedAttempt || record7.result !== null) {
+    return ineligible(
+      `Attempt ${attempt.id} is not an uncompleted interruption.`
+    );
+  }
+  if (state.recovery?.sourceAttemptId === attempt.id && state.recovery.recoveryAttemptId !== null) {
+    return ineligible(
+      "A later recovery attempt already supersedes this interruption."
+    );
+  }
+  return decideInterruptedPreconditions(facts, attempt, phase);
+}
+function decideInterruptedPreconditions(facts, attempt, phase) {
+  const { state } = facts;
+  const ineligible = (reason) => decided2(recoveryIneligible(reason, attempt.id, phase));
+  if (facts.preconditionsFailed === true)
+    return ineligible(
+      "Recovery preconditions could not be validated; inspect or cancel the run."
+    );
+  if (facts.headCommit === void 0)
+    return { kind: "needs", evidence: "head_commit" };
+  if (facts.headCommit !== state.baseCommit)
+    return ineligible("Recovery is unavailable because checkout HEAD changed.");
+  if (facts.configurationDigest === void 0)
+    return { kind: "needs", evidence: "configuration", role: "implementer" };
+  const route = state.workflowSelection?.workflow ?? "strict";
+  const approvalRoute = route === "strict" || phase === "fix";
+  if (approvalRoute && facts.approvalChecked !== true)
+    return { kind: "needs", evidence: "approval_check" };
+  if (!approvalRoute && facts.workflowDigest === void 0)
+    return { kind: "needs", evidence: "workflow_selection_check" };
+  const approvalDigest = approvalRoute ? state.planApproval?.digest ?? null : null;
+  const workflowDigest = approvalRoute ? null : facts.workflowDigest ?? null;
+  if (phase === "fix") {
+    if (facts.completionRevalidated !== true)
+      return {
+        kind: "needs",
+        evidence: "completion_revalidation",
+        allowReportRefresh: false,
+        persistReportRefresh: true
+      };
+    if (!state.triage?.items.some((item) => item.disposition === "accepted"))
+      return ineligible(
+        "Fix recovery requires a non-empty current accepted-finding scope."
+      );
+  }
+  const scopeDigest = facts.scopeDigest;
+  if (scopeDigest === void 0)
+    return { kind: "needs", evidence: "attempt_scope_digest", attempt };
+  const tail = decideRecoveryWorkspace(facts, state, {
+    version: 1,
+    runId: state.runId,
+    attempt,
+    phase,
+    baseCommit: state.baseCommit,
+    approvalDigest,
+    workflowDigest,
+    scopeDigest,
+    configurationDigest: facts.configurationDigest
+  });
+  if (tail.kind === "needs") return tail;
+  if (tail.kind === "ineligible") return ineligible(tail.reason);
+  return decided2({
+    eligible: true,
+    reason: `Interrupted ${phase} attempt ${attempt.id} may be recovered only with current explicit authorization.`,
+    warning: RECOVERY_WARNING,
+    sourceKind: "interrupted",
+    attemptId: attempt.id,
+    phase,
+    resolvedFindingIds: [],
+    remainingFindingIds: [],
+    prerequisites: [],
+    authorization: approvalDigest === null ? "workflow_selection" : "plan_approval",
+    recoveryIdentity: tail.recoveryIdentity,
+    workspace: tail.workspace,
+    baseCommit: state.baseCommit,
+    approvalDigest,
+    workflowDigest,
+    scopeDigest,
+    configurationDigest: facts.configurationDigest
+  });
+}
+
+// src/workflow/domain/digest-rejected-recovery.ts
+var decided3 = (eligibility) => ({ kind: "decided", eligibility });
+function decideDigestRejected(facts) {
+  const { state, attempt } = facts;
+  if (attempt.kind !== "plan" && attempt.kind !== "implementation" && attempt.kind !== "fix")
+    return decided3(null);
+  const phase = attempt.kind;
+  const expectedBlockedFrom = phase === "plan" ? "planning" : phase === "implementation" ? "implementing" : "fixing";
+  if (state.blockedFrom !== expectedBlockedFrom) return decided3(null);
+  const ineligible = (reason, terminalCheckpointPresent = false) => decided3(
+    recoveryIneligible(reason, attempt.id, phase, terminalCheckpointPresent)
+  );
+  const source = facts.source;
+  if (source === void 0) return { kind: "needs", evidence: "digest_source" };
+  if (!source.readable)
+    return ineligible(
+      source.invalidEvidenceMessage === null ? "Digest acceptance evidence is unreadable or inconsistent." : `${source.invalidEvidenceMessage} Audit the run before continuing.`
+    );
+  const { record: record7, evidence: evidence2 } = source;
+  if (evidence2?.outcome !== "rejected" || record7.status !== "failed" || !DIGEST_REJECTED_FAILURE_CODES.has(record7.failureCode ?? ""))
+    return decided3(null);
+  if (state.activeProcess !== null) {
+    if (facts.processAlive === void 0)
+      return {
+        kind: "needs",
+        evidence: "process_liveness",
+        pid: state.activeProcess.pid
+      };
+    if (facts.processAlive)
+      return ineligible(
+        "Recovery is unavailable while the model process is still active."
+      );
+  }
+  if (facts.preconditionsFailed === true)
+    return ineligible(
+      "Digest-rejected recovery preconditions could not be validated; inspect or cancel the run."
+    );
+  if (facts.terminalCheckpointPresent === void 0)
+    return { kind: "needs", evidence: "terminal_checkpoint" };
+  if (!facts.terminalCheckpointPresent)
+    return ineligible(
+      `The rejected ${phase} result has no terminal checkpoint, so its repository side effects are unknown. Inspect the checkout, then cancel the run.`
+    );
+  const attempts = facts.attempts;
+  if (attempts === void 0)
+    return { kind: "needs", evidence: "attempt_history" };
+  if (attempts.some(
+    (other) => other.attempt.kind === attempt.kind && other.attempt.id !== attempt.id && Date.parse(other.startedAt) > Date.parse(record7.startedAt)
+  ) || state.recovery?.sourceAttemptId === attempt.id && state.recovery.recoveryAttemptId !== null)
+    return ineligible(
+      `A later ${phase} attempt already supersedes this rejected result.`,
+      true
+    );
+  if (facts.headCommit === void 0)
+    return { kind: "needs", evidence: "head_commit" };
+  if (facts.headCommit !== state.baseCommit)
+    return ineligible("Recovery is unavailable because checkout HEAD changed.");
+  if (facts.configurationDigest === void 0)
+    return {
+      kind: "needs",
+      evidence: "configuration",
+      role: phase === "plan" ? "planner" : "implementer"
+    };
+  let approvalDigest = null;
+  let workflowDigest = null;
+  if (phase === "plan") {
+    const selection = state.workflowSelection ?? null;
+    workflowDigest = selection?.digest ?? null;
+    if (selection !== null && facts.workflowSelectionAuthorized === void 0)
+      return { kind: "needs", evidence: "workflow_authorization", selection };
+    if (selection === null || facts.workflowSelectionAuthorized !== true)
+      return ineligible(
+        "Planning recovery requires the unchanged persisted workflow selection."
+      );
+  } else if ((state.workflowSelection?.workflow ?? "strict") === "strict" || phase === "fix") {
+    if (facts.approvalChecked !== true)
+      return { kind: "needs", evidence: "approval_check" };
+    approvalDigest = state.planApproval?.digest ?? null;
+  } else {
+    if (facts.workflowDigest === void 0)
+      return { kind: "needs", evidence: "workflow_selection_check" };
+    workflowDigest = facts.workflowDigest;
+  }
+  const scopeDigest = facts.scopeDigest;
+  if (scopeDigest === void 0)
+    return { kind: "needs", evidence: "attempt_scope_digest", attempt };
+  const evidenceDigest4 = facts.evidenceDigest;
+  if (evidenceDigest4 === void 0)
+    return {
+      kind: "needs",
+      evidence: "evidence_digest",
+      digestEvidence: evidence2
+    };
+  const tail = decideRecoveryWorkspace(facts, state, {
+    version: 1,
+    sourceKind: "digest_rejected",
+    runId: state.runId,
+    attempt,
+    phase,
+    baseCommit: state.baseCommit,
+    approvalDigest,
+    workflowDigest,
+    scopeDigest,
+    configurationDigest: facts.configurationDigest,
+    digestEvidence: evidenceDigest4
+  });
+  if (tail.kind === "needs") return tail;
+  if (tail.kind === "ineligible") return ineligible(tail.reason);
+  return decided3({
+    eligible: true,
+    terminalCheckpointPresent: true,
+    reason: `The ${phase} result was refused because ${evidence2.comparisons.filter((comparison) => !comparison.matched).length} digest it authored never matched the bytes it named. Recovery authorizes one linked ${phase} attempt to supply a corrected result; the rejected attempt and its result are retained.`,
+    warning: "The rejected attempt keeps its failed status and its result. Recovery authorizes one new attempt for the same phase and no additional scope; a replacement strict plan still passes the existing approval gate.",
+    sourceKind: "digest_rejected",
+    attemptId: attempt.id,
+    phase,
+    resolvedFindingIds: [],
+    remainingFindingIds: [],
+    prerequisites: [],
+    authorization: approvalDigest === null ? "workflow_selection" : "plan_approval",
+    recoveryIdentity: tail.recoveryIdentity,
+    workspace: tail.workspace,
+    baseCommit: state.baseCommit,
+    approvalDigest,
+    workflowDigest,
+    scopeDigest,
+    configurationDigest: facts.configurationDigest
+  });
+}
+
+// src/workflow/domain/prerequisite-blocked-fix.ts
+function decidePrerequisiteScope(facts) {
+  const { state, record: record7 } = facts;
+  const attempt = record7.attempt;
+  if (attempt.kind !== "fix" || !attempt.mutable || record7.status !== "completed" || record7.result === null || (record7.recoveryOf ?? null) !== null || (record7.recoveryAuthorizationId ?? null) !== null) {
+    return {
+      kind: "invalid",
+      code: "RECOVERY_SOURCE_INVALID",
+      message: "Prerequisite recovery requires an unrecovered completed fix attempt."
+    };
+  }
+  const result = facts.result;
+  if (result === void 0)
+    return { kind: "needs", evidence: "phase_result", raw: record7.result };
+  if (result.phase !== "fix" || result.outcome !== "blocked" || result.gate !== null || result.taskCompletion !== null || facts.requirePersistedBlock && result.summary !== state.blockReason) {
+    return {
+      kind: "invalid",
+      code: "RECOVERY_SOURCE_INVALID",
+      message: "The completed fix result does not match the current prerequisite block."
+    };
+  }
+  if ((state.workflowSelection?.workflow ?? "strict") !== "strict" || state.latestReview === null || state.triage === null || state.reviewIteration !== state.latestReview.iteration || state.triage.reviewIteration !== state.latestReview.iteration) {
+    return {
+      kind: "invalid",
+      code: "RECOVERY_SCOPE_INVALID",
+      message: "Prerequisite recovery requires one current strict review and triage."
+    };
+  }
+  const review = facts.review;
+  if (review === void 0) return { kind: "needs", evidence: "latest_review" };
+  const reviewFindingIds = review.findings.map((finding) => finding.id);
+  const reviewFindingIdSet = new Set(reviewFindingIds);
+  const triagedIds = state.triage.items.map((item) => item.findingId);
+  if (new Set(triagedIds).size !== triagedIds.length || triagedIds.length !== reviewFindingIds.length || triagedIds.some((id3) => !reviewFindingIdSet.has(id3))) {
+    return {
+      kind: "invalid",
+      code: "RECOVERY_SCOPE_INVALID",
+      message: "Current triage does not exactly cover the current review."
+    };
+  }
+  const acceptedFindingIds = state.triage.items.filter((item) => item.disposition === "accepted").map((item) => item.findingId).sort();
+  const acceptedFindingIdSet = new Set(acceptedFindingIds);
+  const resolvedFindingIds = [...result.resolvedFindingIds].sort();
+  if (acceptedFindingIds.length === 0 || resolvedFindingIds.length === 0 || new Set(resolvedFindingIds).size !== resolvedFindingIds.length || resolvedFindingIds.some((id3) => !acceptedFindingIdSet.has(id3))) {
+    return {
+      kind: "invalid",
+      code: "RECOVERY_SCOPE_INVALID",
+      message: "The blocked fix result does not prove valid partial accepted-finding progress."
+    };
+  }
+  const resolvedFindingIdSet = new Set(resolvedFindingIds);
+  const remainingFindingIds = acceptedFindingIds.filter(
+    (id3) => !resolvedFindingIdSet.has(id3)
+  );
+  const prerequisites = [...result.questions, ...result.requestedVerification].map((item) => item.trim()).filter((item) => {
+    const referencedFindingIds = review.findings.filter((finding) => {
+      const escaped = finding.id.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+      return new RegExp(
+        `(^|[^A-Za-z0-9_:-])${escaped}($|[^A-Za-z0-9_:-])`,
+        "u"
+      ).test(item) || finding.evidence.some((evidence2) => item.includes(evidence2.path));
+    }).map((finding) => finding.id);
+    return referencedFindingIds.length === 0 || referencedFindingIds.every(
+      (findingId) => remainingFindingIds.includes(findingId)
+    );
+  });
+  if (remainingFindingIds.length === 0 || prerequisites.length === 0 || prerequisites.some((item) => item.length === 0)) {
+    return {
+      kind: "invalid",
+      code: "RECOVERY_SCOPE_INVALID",
+      message: "The blocked fix result has no remaining accepted scope or concrete prerequisite."
+    };
+  }
+  return {
+    kind: "scoped",
+    scope: {
+      attempt: { id: attempt.id, kind: "fix", mutable: true },
+      reviewIteration: state.latestReview.iteration,
+      acceptedFindingIds,
+      resolvedFindingIds,
+      remainingFindingIds,
+      prerequisites
+    },
+    result,
+    review
+  };
+}
+function decidePrerequisiteSource(facts) {
+  const { state, records } = facts;
+  if (records === void 0)
+    return { kind: "needs", evidence: "attempt_records" };
+  const candidates = facts.candidates;
+  if (candidates === void 0)
+    return {
+      kind: "needs",
+      evidence: "candidate_scopes",
+      records: records.filter(
+        (record7) => record7.attempt.kind === "fix" && record7.status === "completed" && record7.result !== null
+      )
+    };
+  const source = candidates.length === 1 ? candidates[0] : void 0;
+  if (source === void 0)
+    return {
+      kind: "invalid",
+      code: "RECOVERY_SOURCE_AMBIGUOUS",
+      message: candidates.length === 0 ? "No exact completed prerequisite-blocked fix source is available." : "Multiple completed blocked fix attempts match the current review; recovery is ambiguous."
+    };
+  const descendants2 = records.filter(
+    (record7) => (record7.recoveryOf ?? null) === source.attempt.id
+  );
+  const descendant = descendants2[0];
+  const preparedDescendant = descendants2.length === 1 && descendant !== void 0 && state.recovery?.sourceAttemptId === source.attempt.id && state.recovery.recoveryAttemptId === null && state.recovery.stage === "source_preserved" && descendant.attempt.id === `fix-recovery-${state.recovery.authorizationId.replace(/^recovery-/u, "")}` && descendant.status === "started" && descendant.result === null && descendant.recoveryAuthorizationId === state.recovery.authorizationId;
+  if (descendants2.length > 0 && !preparedDescendant)
+    return {
+      kind: "invalid",
+      code: "RECOVERY_ALREADY_STARTED",
+      message: "A recovery descendant already exists for the completed blocked fix source."
+    };
+  if (state.recovery !== void 0 && state.recovery !== null && (state.recovery.sourceAttemptId !== source.attempt.id || state.recovery.recoveryAttemptId !== null))
+    return {
+      kind: "invalid",
+      code: "RECOVERY_STATE_CHANGED",
+      message: "Persisted recovery state does not match the completed blocked fix source."
+    };
+  const checkpoint = facts.checkpoint;
+  if (checkpoint === void 0)
+    return { kind: "needs", evidence: "terminal_checkpoint", source };
+  if (checkpoint !== null && (checkpoint.baseCommit !== state.baseCommit || checkpoint.approvalDigest !== state.planApproval?.digest || checkpoint.scopeDigest !== checkpoint.expectedScopeDigest || checkpoint.resultDigest !== checkpoint.sourceResultDigest))
+    return {
+      kind: "invalid",
+      code: "INVALID_TERMINAL_CHECKPOINT",
+      message: "The completed blocked source conflicts with its terminal checkpoint."
+    };
+  return { kind: "decided", source };
+}
+var PRECONDITION_REASON = "Prerequisite recovery requires a completed blocked fix with no active attempt or process.";
+function decidePrerequisiteBlockedFix(facts) {
+  const { state } = facts;
+  const decided5 = (eligibility) => ({ kind: "decided", eligibility });
+  if (state.blockedFrom !== "fixing" || state.activeAttempt !== null)
+    return decided5(recoveryIneligible(PRECONDITION_REASON, null, "fix"));
+  if (state.activeProcess !== null) {
+    if (facts.processAlive === void 0)
+      return {
+        kind: "needs",
+        evidence: "process_liveness",
+        pid: state.activeProcess.pid
+      };
+    if (facts.processAlive)
+      return decided5(recoveryIneligible(PRECONDITION_REASON, null, "fix"));
+  }
+  if (facts.preconditionFailure !== void 0)
+    return decided5(
+      recoveryIneligible(
+        facts.preconditionFailure.message ?? "Prerequisite recovery preconditions could not be validated; inspect or cancel the run.",
+        state.recovery?.sourceAttemptId ?? null,
+        "fix"
+      )
+    );
+  if (facts.headCommit === void 0)
+    return { kind: "needs", evidence: "head_commit" };
+  if (facts.headCommit !== state.baseCommit)
+    return decided5(
+      recoveryIneligible(
+        "Recovery is unavailable because checkout HEAD changed.",
+        null,
+        "fix"
+      )
+    );
+  if (facts.approvalChecked !== true)
+    return { kind: "needs", evidence: "approval_check" };
+  if (facts.completionRevalidated !== true)
+    return {
+      kind: "needs",
+      evidence: "completion_revalidation",
+      allowReportRefresh: true,
+      persistReportRefresh: false
+    };
+  const source = facts.source;
+  if (source === void 0)
+    return { kind: "needs", evidence: "prerequisite_source" };
+  if (facts.configurationDigest === void 0)
+    return { kind: "needs", evidence: "configuration", role: "implementer" };
+  const approvalDigest = state.planApproval?.digest ?? null;
+  const tail = decideRecoveryWorkspace(facts, state, {
+    version: 2,
+    sourceKind: "prerequisite_blocked_fix",
+    runId: state.runId,
+    attempt: source.attempt,
+    phase: "fix",
+    baseCommit: state.baseCommit,
+    approvalDigest,
+    workflowDigest: null,
+    scopeDigest: source.scopeDigest,
+    configurationDigest: facts.configurationDigest
+  });
+  if (tail.kind === "needs") return tail;
+  if (tail.kind === "ineligible")
+    return decided5(recoveryIneligible(tail.reason, source.attempt.id, "fix"));
+  return decided5({
+    eligible: true,
+    reason: `Completed blocked fix attempt ${source.attempt.id} may be recovered for remaining accepted findings ${source.remainingFindingIds.join(", ")} after ${source.prerequisites.length} operator prerequisite${source.prerequisites.length === 1 ? "" : "s"}.`,
+    warning: "The source attempt remains completed and blocked. Recovery authorizes one new fix attempt for the exact remaining accepted scope after the displayed prerequisites are addressed.",
+    sourceKind: "prerequisite_blocked_fix",
+    attemptId: source.attempt.id,
+    phase: "fix",
+    resolvedFindingIds: source.resolvedFindingIds,
+    remainingFindingIds: source.remainingFindingIds,
+    prerequisites: source.prerequisites,
+    authorization: "plan_approval",
+    recoveryIdentity: tail.recoveryIdentity,
+    workspace: tail.workspace,
+    baseCommit: state.baseCommit,
+    approvalDigest,
+    workflowDigest: null,
+    scopeDigest: source.scopeDigest,
+    configurationDigest: facts.configurationDigest
+  });
+}
+
+// src/workflow/domain/restore-eligibility.ts
+var decided4 = (eligible, reason) => ({
+  kind: "decided",
+  eligibility: { eligible, reason }
+});
+function decideRestore(facts) {
+  const approval = facts.state.planApproval;
+  if (approval === null) {
+    return decided4(false, "The run has no recorded plan approval.");
+  }
+  const snapshot = facts.snapshot;
+  if (snapshot === void 0)
+    return { kind: "needs", evidence: "approval_snapshot" };
+  if (!snapshot.present) {
+    return decided4(
+      false,
+      "This run predates approval snapshots; restore the approved bytes manually or cancel the run."
+    );
+  }
+  const verified = snapshot.digest === approval.digest && snapshot.entriesDigest === approval.digest && snapshot.contentsMatchEntries && JSON.stringify([...snapshot.paths].sort()) === JSON.stringify([...approval.paths].sort());
+  if (!verified) {
+    return decided4(
+      false,
+      "The stored approval snapshot does not verify against the recorded approval digest."
+    );
+  }
+  if (facts.currentBundleDigest === void 0)
+    return { kind: "needs", evidence: "current_bundle", paths: approval.paths };
+  if (facts.currentBundleDigest === approval.digest) {
+    return decided4(
+      false,
+      "The approved planning artifacts already match the recorded approval."
+    );
+  }
+  return decided4(
+    true,
+    "The approved planning artifacts diverged from the recorded approval and can be restored from the snapshot."
+  );
+}
+
 // src/claude-permissions.ts
 import { readFile as readFile9 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
@@ -33730,17 +34714,6 @@ var PHASE_PHASES = {
   Fix: ["fix"],
   Review: ["review"]
 };
-function sessionContext(role, settings) {
-  return {
-    role,
-    executable: settings.executable,
-    model: settings.model,
-    effort: settings.effort
-  };
-}
-function sessionBinding(id3, context) {
-  return id3 === null ? null : { id: id3, ...context };
-}
 function invocationScopeDigest(scope) {
   return createHash17("sha256").update(
     JSON.stringify([
@@ -33750,37 +34723,6 @@ function invocationScopeDigest(scope) {
     ])
   ).digest("hex");
 }
-var INTEGRITY_NEUTRAL_FAILURE_CAUSES = /* @__PURE__ */ new Set([
-  "capacity",
-  "timeout",
-  "process_start",
-  "transport"
-]);
-var PLAN_BUNDLE_COMPLETION_VIOLATIONS = /* @__PURE__ */ new Set([
-  "approved_plan_invalid",
-  "approval_invalid"
-]);
-var RECOVERABLE_MUTABLE_FAILURE_CAUSES = /* @__PURE__ */ new Set([
-  "capacity",
-  "timeout",
-  "transport"
-]);
-var PLANNING_REPAIR_FAILURE_CODES = /* @__PURE__ */ new Set([
-  "INVALID_RESULT",
-  "MODEL_RESULT_INVALID",
-  "CODEX_RESULT_MISSING",
-  "PHASE_RESULT_SCHEMA_MISMATCH",
-  "PLAN_TASK_COMPLETION_INVALID"
-]);
-var TERMINAL_INTEGRITY_FAILURE_CODES = /* @__PURE__ */ new Set([
-  "TERMINAL_RESULT_CONFLICT",
-  "SESSION_ID_CONFLICT"
-]);
-var DIGEST_REJECTED_FAILURE_CODES = /* @__PURE__ */ new Set([
-  "RESULT_DIGEST_REJECTED",
-  "PLAN_TASK_COMPLETION_INVALID"
-]);
-var DIGEST_UNRESOLVED_BLOCK_PREFIX = "[RESULT_DIGEST_UNRESOLVED]";
 function taskVerificationDigestDetail(error) {
   const candidate = error;
   return (candidate.code === "TASK_VERIFICATION_DIGEST_MISMATCH" || candidate.code === "TASK_VERIFICATION_SOURCE_TOO_LARGE") && candidate.detail !== void 0 ? candidate.detail : null;
@@ -33854,33 +34796,7 @@ function reviewExecutionPolicy(state, settings, currentInvocationDigest = null) 
     sessionContext: context
   };
 }
-function effectiveWorkflow(result) {
-  if (result.recommendedWorkflow !== "strict" && result.confidence === "high" && result.escalationTriggers.length === 0) {
-    return result.recommendedWorkflow;
-  }
-  return "strict";
-}
-function isRetryableInterruptedAttempt(attempt, record7) {
-  return !attempt.mutable && record7.status === "started" && (attempt.kind === "selection" || attempt.kind === "review");
-}
-function verificationFailureCategory(error) {
-  if (error instanceof BanzaiError) {
-    if (error.code === "PROCESS_START_FAILED") {
-      return "process_start";
-    }
-    if (error.code === "PROCESS_TIMEOUT") {
-      return "timeout";
-    }
-    if (error.code === "PROCESS_OUTPUT_LIMIT") {
-      return "output_limit";
-    }
-  }
-  return "runner_failure";
-}
-function verificationCommandMatches(record7, descriptor) {
-  return record7.command.profileId === descriptor.profileId && record7.command.projectType === descriptor.projectType && record7.command.profileOrdinal === descriptor.profileOrdinal && record7.command.commandOrdinal === descriptor.commandOrdinal && record7.command.configurationDigest === descriptor.configurationDigest;
-}
-function terminalVerificationRecord(record7, input) {
+function terminalVerificationRecord(record7, input, now) {
   const candidateCompletedAt = input.completedAt ?? now();
   const completedAt = Date.parse(candidateCompletedAt) >= Date.parse(record7.startedAt) ? candidateCompletedAt : now();
   return {
@@ -33908,38 +34824,6 @@ function workflowAuthorizationDigest(input) {
       attemptId: input.attemptId
     })
   ).digest("hex");
-}
-function humanDecisionQuestions(pending, liteWorkflow) {
-  if (pending.kind === "configuration_prerequisite") return [];
-  if (pending.kind === "decision_consultation") {
-    return pending.request.decisions.map((decision) => decision.question);
-  }
-  if (pending.questions.length > 0) {
-    return [...pending.questions];
-  }
-  return [
-    liteWorkflow ? "What decision should workflow reselection apply?" : "What decision or approval should planning apply?"
-  ];
-}
-var UNSAFE_HUMAN_DECISION_CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u;
-function decisionText(value, label, maximum, allowNewlines = false) {
-  if (typeof value !== "string" || value.length === 0 || value.length > maximum || value.trim().length === 0 || UNSAFE_HUMAN_DECISION_CONTROL.test(value) || !allowNewlines && /[\r\n]/u.test(value)) {
-    throw new BanzaiError(
-      "INVALID_DECISION",
-      `${label} must be a bounded non-empty safe string.`
-    );
-  }
-  return value;
-}
-function decisionIdentifier(value, label, maximum = 128) {
-  const identifier4 = decisionText(value, label, maximum);
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(identifier4)) {
-    throw new BanzaiError(
-      "INVALID_DECISION",
-      `${label} must be a canonical identifier.`
-    );
-  }
-  return identifier4;
 }
 function reviewCompletion(status) {
   const { state, latestReview } = status;
@@ -33992,39 +34876,6 @@ function reviewStatusLines(status) {
   }
   return lines;
 }
-var RECOVERY_WARNING = "Repository and external side effects may be partial or duplicated. Recovery authorizes new work from this exact checkout; it does not mark the interrupted attempt completed.";
-function recoveryIneligible(reason, attemptId = null, phase = null, terminalCheckpointPresent = false) {
-  return {
-    eligible: false,
-    terminalCheckpointPresent,
-    reason,
-    warning: RECOVERY_WARNING,
-    sourceKind: null,
-    attemptId,
-    phase,
-    resolvedFindingIds: [],
-    remainingFindingIds: [],
-    prerequisites: [],
-    authorization: null,
-    recoveryIdentity: null,
-    workspace: null,
-    baseCommit: null,
-    approvalDigest: null,
-    workflowDigest: null,
-    scopeDigest: null,
-    configurationDigest: null
-  };
-}
-function now() {
-  return (/* @__PURE__ */ new Date()).toISOString();
-}
-function runId(slug) {
-  const timestamp = now().replace(/[-:.TZ]/g, "").slice(0, 14);
-  return `${timestamp}-${slug}-${randomUUID12().slice(0, 8)}`;
-}
-function terminalResultContract(kind, taskMode = false) {
-  return kind === "selection" ? "workflow-selection/v1" : kind === "review" ? "review-result/v2" : taskMode ? "phase-result/v4" : "phase-result/v3";
-}
 function commandDisplay(command, args) {
   return [command, ...args].map((part) => /[\s"'\\]/.test(part) ? JSON.stringify(part) : part).join(" ");
 }
@@ -34050,31 +34901,6 @@ function phaseDescriptor(settings, sessionMode, phases) {
     timeoutMs: settings.timeoutMs,
     phases
   };
-}
-function requireSlug(slug) {
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
-    throw new BanzaiError(
-      "INVALID_SLUG",
-      "Feature slug must be lowercase kebab-case."
-    );
-  }
-}
-function checkFailureReason(error) {
-  return error instanceof BanzaiError ? `[${error.code}] ${error.message}` : errorMessage(error);
-}
-function artifactPaths(state) {
-  const artifacts = state.planArtifacts;
-  if (artifacts?.description === null || artifacts?.plan === null || artifacts === null) {
-    throw new BanzaiError(
-      "INCOMPLETE_PLAN",
-      "Planning must produce description and plan artifact paths before approval."
-    );
-  }
-  return [artifacts.description, ...artifacts.adrs, artifacts.plan];
-}
-function isDocumentationPath(relativePath3) {
-  const normalized = relativePath3.replaceAll("\\", "/");
-  return normalized === "documentation" || normalized.startsWith("documentation/");
 }
 function executableCandidates(command, cwd, env) {
   if (command.includes(path27.sep)) {
@@ -34110,15 +34936,24 @@ function validateNodeVersion() {
     );
   }
 }
+async function readableVerification(read) {
+  try {
+    return { readable: true, ...await read() };
+  } catch {
+    return { readable: false };
+  }
+}
 var WorkflowRunner = class {
   constructor(repoRoot, adapters, processRunner = runProcess, progressReporter = () => {
-  }, humanTimeObserver) {
+  }, humanTimeObserver, sources = {}) {
     this.repoRoot = repoRoot;
     this.adapters = adapters;
     this.processRunner = processRunner;
     this.progressReporter = progressReporter;
     this.humanTimeObserver = humanTimeObserver;
     this.store = new RunStore(repoRoot);
+    this.clock = sources.clock ?? (() => /* @__PURE__ */ new Date());
+    this.ids = sources.ids ?? randomUUID12;
   }
   cancellationReceipts = /* @__PURE__ */ new WeakMap();
   store;
@@ -34126,6 +34961,11 @@ var WorkflowRunner = class {
   resolvedScope = null;
   reportedScopeDegradation = false;
   reportedMcpWhitelist = false;
+  clock;
+  ids;
+  now() {
+    return this.clock().toISOString();
+  }
   configurationOwnership = new AsyncLocalStorage3();
   async acquireWorkflowLock(options = {}) {
     if (this.configurationOwnership.getStore() === true) {
@@ -34346,7 +35186,7 @@ var WorkflowRunner = class {
   }
   async activity(label, detail, operation, succeeded = () => true) {
     const id3 = `activity-${++this.progressSequence}`;
-    const startedAt = Date.now();
+    const startedAt = this.clock().getTime();
     const resolved = typeof detail === "string" ? { detail, descriptor: void 0 } : detail;
     this.report({
       kind: "activity_started",
@@ -34361,7 +35201,7 @@ var WorkflowRunner = class {
         kind: succeeded(result) ? "activity_completed" : "activity_failed",
         id: id3,
         label,
-        durationMs: Date.now() - startedAt
+        durationMs: this.clock().getTime() - startedAt
       });
       return result;
     } catch (error) {
@@ -34371,7 +35211,7 @@ var WorkflowRunner = class {
         kind: "activity_failed",
         id: id3,
         label,
-        durationMs: Date.now() - startedAt
+        durationMs: this.clock().getTime() - startedAt
       });
       throw error;
     }
@@ -34454,13 +35294,13 @@ var WorkflowRunner = class {
         this.info(`Preparing run ${input.slug} in ${this.repoRoot}`);
         const config = await loadConfig(this.repoRoot);
         const baseCommit = await currentCommit(this.repoRoot);
-        const createdAt = now();
+        const createdAt = this.now();
         const state = {
           schemaVersion: 8,
           verificationMode: "task",
           completionPublication: null,
           contractVersion: CONTRACT_VERSION2,
-          runId: runId(input.slug),
+          runId: runId(input.slug, this.now(), this.ids()),
           slug: input.slug,
           request: input.request,
           repoRoot: this.repoRoot,
@@ -34528,7 +35368,7 @@ var WorkflowRunner = class {
           repoRoot: this.repoRoot,
           slug: state.slug,
           mode: "workflow",
-          creationId: randomUUID12(),
+          creationId: this.ids(),
           schemaVersion: state.verificationMode === "task" || usesVerificationPolicy(state) ? 2 : 1
         });
         await this.store.createRun(state);
@@ -35030,48 +35870,33 @@ var WorkflowRunner = class {
     return await this.restoreEligibilityFor(state);
   }
   async restoreEligibilityFor(state) {
-    const approval = state.planApproval;
-    if (approval === null) {
-      return {
-        eligible: false,
-        reason: "The run has no recorded plan approval."
-      };
+    const facts = { state };
+    for (; ; ) {
+      const step = decideRestore(facts);
+      if (step.kind === "decided") return step.eligibility;
+      if (step.evidence === "approval_snapshot") {
+        const snapshot = await this.store.readApprovalSnapshot(state.runId);
+        facts.snapshot = snapshot === null ? { present: false } : {
+          present: true,
+          digest: snapshot.digest,
+          entriesDigest: digestArtifactEntries3(
+            snapshot.entries.map((entry) => ({
+              path: entry.path,
+              sha256: entry.sha256
+            }))
+          ),
+          contentsMatchEntries: snapshot.entries.every(
+            (entry) => hashArtifactBytes(entry.contents) === entry.sha256
+          ),
+          paths: snapshot.entries.map((entry) => entry.path)
+        };
+      } else {
+        facts.currentBundleDigest = await digestArtifactBundle(
+          this.repoRoot,
+          step.paths
+        ).then((bundle) => bundle.digest).catch(() => null);
+      }
     }
-    const snapshot = await this.store.readApprovalSnapshot(state.runId);
-    if (snapshot === null) {
-      return {
-        eligible: false,
-        reason: "This run predates approval snapshots; restore the approved bytes manually or cancel the run."
-      };
-    }
-    const verified = snapshot.digest === approval.digest && digestArtifactEntries3(
-      snapshot.entries.map((entry) => ({
-        path: entry.path,
-        sha256: entry.sha256
-      }))
-    ) === approval.digest && snapshot.entries.every(
-      (entry) => hashArtifactBytes(entry.contents) === entry.sha256
-    ) && JSON.stringify(snapshot.entries.map((entry) => entry.path).sort()) === JSON.stringify([...approval.paths].sort());
-    if (!verified) {
-      return {
-        eligible: false,
-        reason: "The stored approval snapshot does not verify against the recorded approval digest."
-      };
-    }
-    const current = await digestArtifactBundle(
-      this.repoRoot,
-      approval.paths
-    ).catch(() => null);
-    if (current !== null && current.digest === approval.digest) {
-      return {
-        eligible: false,
-        reason: "The approved planning artifacts already match the recorded approval."
-      };
-    }
-    return {
-      eligible: true,
-      reason: "The approved planning artifacts diverged from the recorded approval and can be restored from the snapshot."
-    };
   }
   /**
    * Rewrites the approved artifact paths with the exact bytes the human
@@ -35210,7 +36035,7 @@ var WorkflowRunner = class {
             scopeDigest: eligibility.scopeDigest,
             configurationDigest: eligibility.configurationDigest,
             decidedBy: input.decidedBy,
-            decidedAt: now(),
+            decidedAt: this.now(),
             unknownSideEffectsAccepted: true
           };
           const existing = await this.store.readRecoveryAuthorizationIfExists(
@@ -35310,7 +36135,7 @@ var WorkflowRunner = class {
         state.planApproval = {
           kind: "plan",
           digest: bundle.digest,
-          approvedAt: now(),
+          approvedAt: this.now(),
           approvedBy,
           paths: bundle.paths
         };
@@ -35365,7 +36190,7 @@ var WorkflowRunner = class {
           id: input.id,
           decision: input.decision,
           note: input.note,
-          decidedAt: now(),
+          decidedAt: this.now(),
           decidedBy: input.decidedBy
         });
         transitionState(state, "planning");
@@ -35425,7 +36250,7 @@ var WorkflowRunner = class {
         const decision = {
           ...pending,
           answers: [...input.answers],
-          decidedAt: now(),
+          decidedAt: this.now(),
           decidedBy: input.decidedBy
         };
         state.humanDecisions = [...state.humanDecisions ?? [], decision];
@@ -35569,7 +36394,7 @@ var WorkflowRunner = class {
         attemptId: source.id,
         attemptKind: source.kind,
         verificationRound: {
-          id: `verification-round-${source.id}-${randomUUID12()}`,
+          id: `verification-round-${source.id}-${this.ids()}`,
           ordinal: new Set(records.map((record7) => record7.round.id)).size + 1
         },
         baseCommit: state.baseCommit,
@@ -35614,9 +36439,9 @@ var WorkflowRunner = class {
         schemaVersion: 1,
         kind: "configuration_prerequisite",
         runId: state.runId,
-        decisionId: previous?.decisionId ?? randomUUID12(),
-        proposalId: randomUUID12(),
-        requestedAt: now(),
+        decisionId: previous?.decisionId ?? this.ids(),
+        proposalId: this.ids(),
+        requestedAt: this.now(),
         reason,
         proposal,
         options: CONFIGURATION_ACTIONS,
@@ -35670,11 +36495,11 @@ var WorkflowRunner = class {
         { ...pending, ...human }
       ];
     setup.resolutions.push({
-      id: randomUUID12(),
+      id: this.ids(),
       decisionId: pending.decisionId,
       proposalId: pending.proposalId,
       kind,
-      at: now(),
+      at: this.now(),
       configSha256: current.sha256,
       sourceSha256: inspection.sourceSha256,
       operationId: operation?.operationId ?? null,
@@ -35832,7 +36657,7 @@ var WorkflowRunner = class {
           const human = {
             action: input.action,
             decidedBy: input.decidedBy,
-            decidedAt: now()
+            decidedAt: this.now()
           };
           if (input.action === "cancel") {
             const result = await this.cancel(
@@ -35888,8 +36713,8 @@ var WorkflowRunner = class {
             state.pendingHumanDecision = parseConfigurationPrerequisite(
               {
                 ...pending,
-                proposalId: randomUUID12(),
-                requestedAt: now(),
+                proposalId: this.ids(),
+                requestedAt: this.now(),
                 proposal: {
                   ...pending.proposal,
                   profile,
@@ -35904,7 +36729,7 @@ var WorkflowRunner = class {
           if (input.action === "skip") {
             await this.assertConfigurationSkipAuthority(state, current.config);
             setup.skip = {
-              id: randomUUID12(),
+              id: this.ids(),
               runId: state.runId,
               decisionId: pending.decisionId,
               proposalId: pending.proposalId,
@@ -36027,7 +36852,7 @@ var WorkflowRunner = class {
           input.answers,
           pending.request
         );
-        const decidedAt = now();
+        const decidedAt = this.now();
         const decision = {
           ...pending,
           runId: state.runId,
@@ -36085,7 +36910,7 @@ var WorkflowRunner = class {
         const items = this.validateTriage(review.findings, input);
         const triage = {
           reviewIteration: state.reviewIteration,
-          decidedAt: now(),
+          decidedAt: this.now(),
           decidedBy: input.decidedBy,
           items
         };
@@ -36204,7 +37029,7 @@ var WorkflowRunner = class {
               configurationDecision
             ];
           }
-          const at = now();
+          const at = this.now();
           if (state2.activeProcess != null)
             stopRequest = terminateProcessGroup(state2.activeProcess.pid);
           try {
@@ -36220,7 +37045,7 @@ var WorkflowRunner = class {
           } catch {
             context = emptyCancellationContext();
           }
-          transitionIdentity.id = randomUUID12();
+          transitionIdentity.id = this.ids();
           transitionState(state2, "cancelled");
           state2.activeProcess = null;
           state2.pendingHumanDecision = null;
@@ -36341,7 +37166,7 @@ var WorkflowRunner = class {
       return { outcome: "unavailable", response: null };
     let response;
     try {
-      response = cancellationResponse(answer, now());
+      response = cancellationResponse(answer, this.now());
     } catch {
       return { outcome: "unavailable", response: null };
     }
@@ -36478,12 +37303,7 @@ var WorkflowRunner = class {
       latestReview,
       retry,
       recovery,
-      nextAction: this.nextAction(
-        state,
-        retry,
-        recovery,
-        completionPublication2
-      ),
+      nextAction: nextAction(state, retry, recovery, completionPublication2),
       taskCompletion,
       completionPublication: completionPublication2,
       ...configurationPrerequisite ? { configurationPrerequisite } : {}
@@ -36605,780 +37425,345 @@ var WorkflowRunner = class {
     }
   }
   async retryEligibility(state) {
-    if (state.status !== "blocked") {
-      return {
-        eligible: false,
-        reason: `Retry requires a blocked run, but the run is ${state.status}.`,
-        attemptId: null
-      };
-    }
-    if (state.activeProcess !== null) {
-      return {
-        eligible: false,
-        reason: "Retry is unavailable while a model process is still active.",
-        attemptId: state.activeAttempt?.id ?? null
-      };
-    }
-    const attempt = state.activeAttempt;
-    if (attempt === null) {
-      if (state.blockedFrom === "created") {
-        return {
-          eligible: true,
-          reason: "Startup checks can be retried after resolving the reported prerequisite.",
-          attemptId: null
-        };
-      }
-      if (state.blockedFrom === "reviewing") {
-        return {
-          eligible: true,
-          reason: "Review checks can be retried after resolving the reported prerequisite.",
-          attemptId: null
-        };
-      }
-      if (state.blockedFrom === "verifying" && state.planTaskCompletion?.status === "invalid") {
-        return {
-          eligible: true,
-          reason: PLAN_BUNDLE_COMPLETION_VIOLATIONS.has(
-            state.planTaskCompletion.violation
-          ) ? "The approved plan bundle is invalid; retry reruns planning for a corrected bundle and a new approval." : `Completion evidence rejected at revalidation can be repaired with a new implementation attempt.`,
-          attemptId: state.planTaskCompletion.sourceAttemptId
-        };
-      }
-      if (state.blockedFrom === "verifying") {
-        if (state.blockReason?.startsWith(DIGEST_UNRESOLVED_BLOCK_PREFIX)) {
-          return {
-            eligible: false,
-            reason: "A digest this run's result authored does not match the bytes it names, and no recorded baseline shows those bytes changed after acceptance. Retrying reads the same bytes and fails identically. Inspect the checkout, then cancel the run.",
-            attemptId: null
-          };
-        }
-        try {
-          if (state.verificationMode === "task") {
-            const latest2 = (await readTaskVerificationAttempts(
+    const facts = { state };
+    for (; ; ) {
+      const step = decideRetry(facts);
+      if (step.kind === "decided") return step.eligibility;
+      switch (step.evidence) {
+        case "task_verification_attempts":
+          facts.taskVerification = await readableVerification(async () => ({
+            latest: (await readTaskVerificationAttempts(
               this.taskVerificationStorage(state)
-            )).at(-1);
-            const unresolved = latest2?.status === "started";
-            const unsuccessful = latest2?.status === "failed" || latest2?.status === "interrupted";
-            return {
-              eligible: true,
-              reason: unresolved ? "Retry reconciles the unresolved physical attempt before running eligible checks." : unsuccessful ? "The unsuccessful task check can be retried explicitly." : "Verification prerequisites can be retried without replaying implementation.",
-              attemptId: unsuccessful ? latest2.id : null
-            };
-          }
-          if (!await this.store.verificationLedgerSupported(state.runId)) {
-            return {
-              eligible: false,
-              reason: "Legacy verification evidence has no retryable durable attempt identity. Inspect the checkout, then cancel the run.",
-              attemptId: null
-            };
-          }
-          const latest = (await this.store.readVerificationAttempts(state.runId)).at(-1);
-          if (latest?.status === "failed") {
-            return {
-              eligible: true,
-              reason: `Failed verification attempt ${latest.id} can be retried explicitly.`,
-              attemptId: latest.id
-            };
-          }
-        } catch {
-          return {
-            eligible: false,
-            reason: "Verification evidence is malformed or conflicting. Audit the run before continuing.",
-            attemptId: null
-          };
-        }
-      }
-      const approvalInvalidated = state.blockReason?.startsWith("Approved planning artifacts changed") === true;
-      if (approvalInvalidated && state.blockedFrom === "fixing") {
-        return {
-          eligible: true,
-          reason: "Fix checks can be retried after resolving the reported prerequisite.",
-          attemptId: null
-        };
-      }
-      if (approvalInvalidated && (state.blockedFrom === "implementing" || state.blockedFrom === "plan_approved")) {
-        return {
-          eligible: true,
-          reason: "Implementation checks can be retried after resolving the reported prerequisite.",
-          attemptId: null
-        };
-      }
-      return {
-        eligible: false,
-        reason: "This blocked state is not tied to a failed attempt. Resolve it manually or cancel the run.",
-        attemptId: null
-      };
-    }
-    const record7 = await this.store.readRunAttempt(state.runId, attempt);
-    if (record7.status === "failed" && record7.failureCode === "CONTEXT_BUDGET_EXCEEDED") {
-      const expectedStatus2 = attempt.kind === "selection" ? "selecting" : attempt.kind === "plan" ? "planning" : attempt.kind === "implementation" ? "implementing" : attempt.kind === "fix" ? "fixing" : "reviewing";
-      if (state.blockedFrom === expectedStatus2) {
-        return {
-          eligible: true,
-          reason: `Context-budget-blocked ${attempt.kind} attempt ${attempt.id} can be retried explicitly after policy or authorized input changes because no vendor process started.`,
-          attemptId: attempt.id
-        };
+            )).at(-1) ?? null
+          }));
+          break;
+        case "legacy_ledger_support":
+          facts.legacyLedger = await readableVerification(async () => ({
+            supported: await this.store.verificationLedgerSupported(state.runId)
+          }));
+          break;
+        case "legacy_verification_attempts":
+          facts.legacyVerification = await readableVerification(async () => ({
+            latest: (await this.store.readVerificationAttempts(state.runId)).at(-1) ?? null
+          }));
+          break;
+        case "attempt_record":
+          facts.attemptRecord = await this.store.readRunAttempt(
+            state.runId,
+            step.attempt
+          );
+          break;
       }
     }
-    if (attempt.mutable) {
-      const checkpoint = state.planTaskCompletion;
-      if (record7.status === "pending_application") {
-        return {
-          eligible: false,
-          reason: "Completion publication for this attempt is pending; use banzai resume to reconcile it without another model call, or cancel the run.",
-          attemptId: attempt.id
-        };
-      }
-      if ((attempt.kind === "implementation" && state.blockedFrom === "implementing" || attempt.kind === "fix" && state.blockedFrom === "fixing") && record7.status === "failed" && // The runner itself classified this failure as completion evidence
-      // when it wrote the invalid checkpoint: a result rejected by ledger
-      // validation keeps its decoded evidence, and a result whose decode
-      // failed on a completion field keeps only the diagnostic — the repair
-      // replaces the whole result either way, so neither is a dead end.
-      record7.failureCode === "PLAN_TASK_COMPLETION_INVALID" && checkpoint?.status === "invalid" && checkpoint.sourceAttemptId === attempt.id) {
-        return {
-          eligible: true,
-          reason: PLAN_BUNDLE_COMPLETION_VIOLATIONS.has(checkpoint.violation) ? "The approved plan bundle is invalid; retry reruns planning for a corrected bundle and a new approval." : `Completion evidence for ${attempt.kind} attempt ${attempt.id} can be repaired with a new attempt.`,
-          attemptId: attempt.id
-        };
-      }
-      return {
-        eligible: false,
-        reason: "Failed mutable attempts cannot be retried because their repository side effects may be incomplete. Inspect the checkout, then cancel the run.",
-        attemptId: attempt.id
-      };
-    }
-    const isRetryableInterruption = isRetryableInterruptedAttempt(
-      attempt,
-      record7
-    );
-    if (record7.status !== "failed" && !isRetryableInterruption) {
-      return {
-        eligible: false,
-        reason: record7.status === "started" ? "Interrupted attempts cannot be retried automatically. Inspect the checkout, then cancel the run." : `Attempt ${attempt.id} is ${record7.status}, not failed.`,
-        attemptId: attempt.id
-      };
-    }
-    const expectedStatus = attempt.kind === "selection" ? "selecting" : attempt.kind === "plan" ? "planning" : attempt.kind === "implementation" ? "implementing" : attempt.kind === "review" ? "reviewing" : null;
-    if (expectedStatus === null || state.blockedFrom !== expectedStatus) {
-      return {
-        eligible: false,
-        reason: `The failed ${attempt.kind} attempt is inconsistent with blockedFrom=${state.blockedFrom ?? "null"}.`,
-        attemptId: attempt.id
-      };
-    }
-    return {
-      eligible: true,
-      reason: record7.status === "started" ? `Interrupted ${attempt.kind} attempt ${attempt.id} can be retried explicitly because it was read-only.` : `Failed ${attempt.kind} attempt ${attempt.id} can be retried explicitly.`,
-      attemptId: attempt.id
-    };
   }
   async prerequisiteBlockedFixScope(state, record7, requirePersistedBlock) {
-    const attempt = record7.attempt;
-    if (attempt.kind !== "fix" || !attempt.mutable || record7.status !== "completed" || record7.result === null || (record7.recoveryOf ?? null) !== null || (record7.recoveryAuthorizationId ?? null) !== null) {
-      throw new BanzaiError(
-        "RECOVERY_SOURCE_INVALID",
-        "Prerequisite recovery requires an unrecovered completed fix attempt."
-      );
-    }
-    const result = parsePersistedPhaseResult2(record7.result);
-    if (result.phase !== "fix" || result.outcome !== "blocked" || result.gate !== null || result.taskCompletion !== null || requirePersistedBlock && result.summary !== state.blockReason) {
-      throw new BanzaiError(
-        "RECOVERY_SOURCE_INVALID",
-        "The completed fix result does not match the current prerequisite block."
-      );
-    }
-    if ((state.workflowSelection?.workflow ?? "strict") !== "strict" || state.latestReview === null || state.triage === null || state.reviewIteration !== state.latestReview.iteration || state.triage.reviewIteration !== state.latestReview.iteration) {
-      throw new BanzaiError(
-        "RECOVERY_SCOPE_INVALID",
-        "Prerequisite recovery requires one current strict review and triage."
-      );
-    }
-    const review = await this.readLatestReview(state);
-    const reviewFindingIds = review.findings.map((finding) => finding.id);
-    const reviewFindingIdSet = new Set(reviewFindingIds);
-    const triagedIds = state.triage.items.map((item) => item.findingId);
-    if (new Set(triagedIds).size !== triagedIds.length || triagedIds.length !== reviewFindingIds.length || triagedIds.some((id3) => !reviewFindingIdSet.has(id3))) {
-      throw new BanzaiError(
-        "RECOVERY_SCOPE_INVALID",
-        "Current triage does not exactly cover the current review."
-      );
-    }
-    const acceptedFindingIds = state.triage.items.filter((item) => item.disposition === "accepted").map((item) => item.findingId).sort();
-    const acceptedFindingIdSet = new Set(acceptedFindingIds);
-    const resolvedFindingIds = [...result.resolvedFindingIds].sort();
-    if (acceptedFindingIds.length === 0 || resolvedFindingIds.length === 0 || new Set(resolvedFindingIds).size !== resolvedFindingIds.length || resolvedFindingIds.some((id3) => !acceptedFindingIdSet.has(id3))) {
-      throw new BanzaiError(
-        "RECOVERY_SCOPE_INVALID",
-        "The blocked fix result does not prove valid partial accepted-finding progress."
-      );
-    }
-    const resolvedFindingIdSet = new Set(resolvedFindingIds);
-    const remainingFindingIds = acceptedFindingIds.filter(
-      (id3) => !resolvedFindingIdSet.has(id3)
-    );
-    const prerequisites = [...result.questions, ...result.requestedVerification].map((item) => item.trim()).filter((item) => {
-      const referencedFindingIds = review.findings.filter((finding) => {
-        const escaped = finding.id.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-        return new RegExp(
-          `(^|[^A-Za-z0-9_:-])${escaped}($|[^A-Za-z0-9_:-])`,
-          "u"
-        ).test(item) || finding.evidence.some((evidence2) => item.includes(evidence2.path));
-      }).map((finding) => finding.id);
-      return referencedFindingIds.length === 0 || referencedFindingIds.every(
-        (findingId) => remainingFindingIds.includes(findingId)
-      );
-    });
-    if (remainingFindingIds.length === 0 || prerequisites.length === 0 || prerequisites.some((item) => item.length === 0)) {
-      throw new BanzaiError(
-        "RECOVERY_SCOPE_INVALID",
-        "The blocked fix result has no remaining accepted scope or concrete prerequisite."
-      );
-    }
-    const sourceAttempt = {
-      id: attempt.id,
-      kind: "fix",
-      mutable: true
+    const facts = {
+      state,
+      record: record7,
+      requirePersistedBlock
     };
-    const typedRecord = record7;
-    const reviewDigest = digestCanonicalJson4(review);
-    const scopeDigest = digestCanonicalJson4({
-      version: 2,
-      sourceKind: "prerequisite_blocked_fix",
-      reviewIteration: state.latestReview.iteration,
-      reviewDigest,
-      acceptedFindingIds,
-      sourceAttempt,
-      sourceResultDigest: digestCanonicalJson4(result),
-      resolvedFindingIds,
-      remainingFindingIds
-    });
-    return {
-      attempt: sourceAttempt,
-      record: typedRecord,
-      result,
-      reviewDigest,
-      acceptedFindingIds,
-      resolvedFindingIds,
-      remainingFindingIds,
-      prerequisites,
-      scopeDigest
-    };
+    for (; ; ) {
+      const step = decidePrerequisiteScope(facts);
+      if (step.kind === "invalid")
+        throw new BanzaiError(step.code, step.message);
+      if (step.kind === "scoped") {
+        const { scope, result, review } = step;
+        const reviewDigest = digestCanonicalJson4(review);
+        return {
+          ...scope,
+          record: record7,
+          result,
+          reviewDigest,
+          scopeDigest: digestCanonicalJson4({
+            version: 2,
+            sourceKind: "prerequisite_blocked_fix",
+            reviewIteration: scope.reviewIteration,
+            reviewDigest,
+            acceptedFindingIds: scope.acceptedFindingIds,
+            sourceAttempt: scope.attempt,
+            sourceResultDigest: digestCanonicalJson4(result),
+            resolvedFindingIds: scope.resolvedFindingIds,
+            remainingFindingIds: scope.remainingFindingIds
+          })
+        };
+      }
+      if (step.evidence === "phase_result")
+        facts.result = parsePersistedPhaseResult2(step.raw);
+      else facts.review = await this.readLatestReview(state);
+    }
   }
   async prerequisiteBlockedFixSource(state) {
-    const records = await this.store.readRunAttempts(state.runId);
-    const candidates = [];
-    for (const record7 of records) {
-      if (record7.attempt.kind !== "fix" || record7.status !== "completed" || record7.result === null) {
+    const facts = {
+      state
+    };
+    for (; ; ) {
+      const step = decidePrerequisiteSource(facts);
+      if (step.kind === "decided") return step.source;
+      if (step.kind === "invalid")
+        throw new BanzaiError(step.code, step.message);
+      switch (step.evidence) {
+        case "attempt_records":
+          facts.records = await this.store.readRunAttempts(state.runId);
+          break;
+        case "candidate_scopes": {
+          const candidates = [];
+          for (const record7 of step.records) {
+            try {
+              candidates.push(
+                await this.prerequisiteBlockedFixScope(state, record7, true)
+              );
+            } catch {
+            }
+          }
+          facts.candidates = candidates;
+          break;
+        }
+        case "terminal_checkpoint": {
+          const { source } = step;
+          const checkpoint = await this.store.readTerminalCheckpointIfExists(
+            state.runId,
+            source.attempt
+          );
+          facts.checkpoint = checkpoint === null ? null : {
+            baseCommit: checkpoint.baseCommit,
+            approvalDigest: checkpoint.approvalDigest,
+            scopeDigest: checkpoint.scopeDigest,
+            resultDigest: "result" in checkpoint ? digestCanonicalJson4(checkpoint.result) : digestCanonicalJson4(
+              JSON.parse(checkpoint.envelope.original)
+            ),
+            expectedScopeDigest: this.attemptScopeDigest(
+              state,
+              source.attempt
+            ),
+            sourceResultDigest: digestCanonicalJson4(source.result)
+          };
+          break;
+        }
+      }
+    }
+  }
+  async prerequisiteBlockedFixRecoveryEligibility(state) {
+    const facts = { state };
+    const workspace = {};
+    for (; ; ) {
+      const step = decidePrerequisiteBlockedFix(facts);
+      if (step.kind === "decided") return step.eligibility;
+      if (step.evidence === "process_liveness") {
+        facts.processAlive = this.store.processAlive(step.pid);
         continue;
       }
       try {
-        candidates.push(
-          await this.prerequisiteBlockedFixScope(state, record7, true)
-        );
-      } catch {
+        if (step.evidence === "prerequisite_source")
+          facts.source = await this.prerequisiteBlockedFixSource(state);
+        else
+          await this.gatherRecoveryPrecondition(state, step, facts, workspace);
+      } catch (error) {
+        if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
+          throw error;
+        facts.preconditionFailure = {
+          message: error instanceof BanzaiError ? error.message : null
+        };
       }
     }
-    if (candidates.length !== 1) {
-      throw new BanzaiError(
-        "RECOVERY_SOURCE_AMBIGUOUS",
-        candidates.length === 0 ? "No exact completed prerequisite-blocked fix source is available." : "Multiple completed blocked fix attempts match the current review; recovery is ambiguous."
-      );
-    }
-    const source = candidates[0];
-    if (source === void 0) {
-      throw new BanzaiError(
-        "RECOVERY_SOURCE_AMBIGUOUS",
-        "No exact completed prerequisite-blocked fix source is available."
-      );
-    }
-    const descendants2 = records.filter(
-      (record7) => (record7.recoveryOf ?? null) === source.attempt.id
-    );
-    const descendant = descendants2[0];
-    const preparedDescendant = descendants2.length === 1 && descendant !== void 0 && state.recovery?.sourceAttemptId === source.attempt.id && state.recovery.recoveryAttemptId === null && state.recovery.stage === "source_preserved" && descendant.attempt.id === `fix-recovery-${state.recovery.authorizationId.replace(/^recovery-/u, "")}` && descendant.status === "started" && descendant.result === null && descendant.recoveryAuthorizationId === state.recovery.authorizationId;
-    if (descendants2.length > 0 && !preparedDescendant) {
-      throw new BanzaiError(
-        "RECOVERY_ALREADY_STARTED",
-        "A recovery descendant already exists for the completed blocked fix source."
-      );
-    }
-    if (state.recovery !== void 0 && state.recovery !== null && (state.recovery.sourceAttemptId !== source.attempt.id || state.recovery.recoveryAttemptId !== null)) {
-      throw new BanzaiError(
-        "RECOVERY_STATE_CHANGED",
-        "Persisted recovery state does not match the completed blocked fix source."
-      );
-    }
-    const checkpoint = await this.store.readTerminalCheckpointIfExists(
-      state.runId,
-      source.attempt
-    );
-    if (checkpoint !== null && (checkpoint.baseCommit !== state.baseCommit || checkpoint.approvalDigest !== state.planApproval?.digest || checkpoint.scopeDigest !== this.attemptScopeDigest(state, source.attempt) || ("result" in checkpoint ? digestCanonicalJson4(checkpoint.result) : digestCanonicalJson4(
-      JSON.parse(checkpoint.envelope.original)
-    )) !== digestCanonicalJson4(source.result))) {
-      throw new BanzaiError(
-        "INVALID_TERMINAL_CHECKPOINT",
-        "The completed blocked source conflicts with its terminal checkpoint."
-      );
-    }
-    return source;
   }
-  async prerequisiteBlockedFixRecoveryEligibility(state) {
-    if (state.blockedFrom !== "fixing" || state.activeAttempt !== null || state.activeProcess !== null && this.store.processAlive(state.activeProcess.pid)) {
-      return recoveryIneligible(
-        "Prerequisite recovery requires a completed blocked fix with no active attempt or process.",
-        null,
-        "fix"
-      );
-    }
-    try {
-      if (await currentCommit(this.repoRoot) !== state.baseCommit) {
-        return recoveryIneligible(
-          "Recovery is unavailable because checkout HEAD changed.",
-          null,
-          "fix"
-        );
-      }
-      await this.validateApproval(state);
-      await this.revalidateTaskCompletion(state, true, false);
-      const source = await this.prerequisiteBlockedFixSource(state);
-      const config = await loadConfig(this.repoRoot);
-      assertContractParity();
-      const settings = config.models.implementer;
-      const vendor = vendorFor(settings.executable) ?? FALLBACK_VENDOR.implementer;
-      const configurationDigest2 = digestCanonicalJson4({
-        version: 1,
-        vendor,
-        executableDigest: digestCanonicalJson4(settings.executable),
-        model: settings.model,
-        effort: settings.effort
-      });
-      const snapshot = await workspaceSnapshot(this.repoRoot, {
-        artifactBinding: state.artifactBinding,
-        baseline: state.baseline
-      });
-      if (snapshot.baseCommit !== state.baseCommit) {
-        return recoveryIneligible(
-          "Recovery is unavailable because the workspace base commit changed.",
-          source.attempt.id,
-          "fix"
-        );
-      }
-      const counts = await workspaceChangeCounts(this.repoRoot, snapshot);
-      const recoveryIdentity = digestCanonicalJson4({
-        version: 2,
-        sourceKind: "prerequisite_blocked_fix",
-        runId: state.runId,
-        attempt: source.attempt,
-        phase: "fix",
-        baseCommit: state.baseCommit,
-        workspaceDigest: snapshot.digest,
-        approvalDigest: state.planApproval?.digest ?? null,
-        workflowDigest: null,
-        scopeDigest: source.scopeDigest,
-        configurationDigest: configurationDigest2
-      });
-      if (state.recovery?.sourceAttemptId === source.attempt.id && state.recovery.recoveryAttemptId === null) {
-        const authorization = await this.store.readRecoveryAuthorization(
-          state.runId,
-          state.recovery.authorizationId
-        );
-        if (authorization.attempt.id !== source.attempt.id || authorization.recoveryIdentity !== recoveryIdentity) {
-          return recoveryIneligible(
-            "Persisted recovery authorization is stale or inconsistent.",
-            source.attempt.id,
-            "fix"
+  /** ADR-0051's digest-rejected source; the rule documents its evidence. */
+  async digestRejectedRecoveryEligibility(state, attempt) {
+    const facts = { state, attempt };
+    const workspace = {};
+    for (; ; ) {
+      const step = decideDigestRejected(facts);
+      if (step.kind === "decided") return step.eligibility;
+      if (step.evidence === "digest_source") {
+        try {
+          const record7 = await this.store.readRunAttempt(state.runId, attempt);
+          const evidence2 = await this.store.readResultDigestEvidenceIfExists(
+            state.runId,
+            attempt
           );
+          facts.source = { readable: true, record: record7, evidence: evidence2 };
+        } catch (error) {
+          if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
+            throw error;
+          facts.source = {
+            readable: false,
+            invalidEvidenceMessage: error instanceof BanzaiError && error.code === "RESULT_DIGEST_EVIDENCE_INVALID" ? error.message : null
+          };
         }
+        continue;
       }
-      return {
-        eligible: true,
-        reason: `Completed blocked fix attempt ${source.attempt.id} may be recovered for remaining accepted findings ${source.remainingFindingIds.join(", ")} after ${source.prerequisites.length} operator prerequisite${source.prerequisites.length === 1 ? "" : "s"}.`,
-        warning: "The source attempt remains completed and blocked. Recovery authorizes one new fix attempt for the exact remaining accepted scope after the displayed prerequisites are addressed.",
-        sourceKind: "prerequisite_blocked_fix",
-        attemptId: source.attempt.id,
-        phase: "fix",
-        resolvedFindingIds: source.resolvedFindingIds,
-        remainingFindingIds: source.remainingFindingIds,
-        prerequisites: source.prerequisites,
-        authorization: "plan_approval",
-        recoveryIdentity,
-        workspace: { digest: snapshot.digest, ...counts },
-        baseCommit: state.baseCommit,
-        approvalDigest: state.planApproval?.digest ?? null,
-        workflowDigest: null,
-        scopeDigest: source.scopeDigest,
-        configurationDigest: configurationDigest2
-      };
-    } catch (error) {
-      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
-        throw error;
-      return recoveryIneligible(
-        error instanceof BanzaiError ? error.message : "Prerequisite recovery preconditions could not be validated; inspect or cancel the run.",
-        state.recovery?.sourceAttemptId ?? null,
-        "fix"
-      );
+      if (step.evidence === "process_liveness") {
+        facts.processAlive = this.store.processAlive(step.pid);
+        continue;
+      }
+      try {
+        switch (step.evidence) {
+          case "terminal_checkpoint":
+            facts.terminalCheckpointPresent = await this.store.readTerminalCheckpointIfExists(
+              state.runId,
+              attempt
+            ) !== null;
+            break;
+          case "attempt_history":
+            facts.attempts = await this.store.readRunAttempts(state.runId);
+            break;
+          case "workflow_authorization":
+            facts.workflowSelectionAuthorized = workflowAuthorizationDigest({
+              runId: state.runId,
+              request: state.request,
+              ...step.selection
+            }) === step.selection.digest;
+            break;
+          case "evidence_digest":
+            facts.evidenceDigest = digestCanonicalJson4(step.digestEvidence);
+            break;
+          default:
+            await this.gatherRecoveryPrecondition(
+              state,
+              step,
+              facts,
+              workspace
+            );
+        }
+      } catch (error) {
+        if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
+          throw error;
+        facts.preconditionsFailed = true;
+      }
     }
   }
   /**
-   * ADR-0051's digest-rejected source, recognized from durable evidence only:
-   * a failed attempt whose sole recorded failure is a digest rejection at
-   * acceptance, whose terminal checkpoint proves its repository changes are
-   * complete rather than partial, and which no successor has replaced.
-   * Returns null when the source does not apply, leaving every existing
-   * disposition — including the refusal of a failed mutable attempt with
-   * unknown side effects — exactly as it is.
+   * Gathers one precondition every recovery source reads the same way. Each
+   * source keeps its own baseline error scope around the call.
    */
-  async digestRejectedRecoveryEligibility(state, attempt) {
-    if (attempt.kind !== "plan" && attempt.kind !== "implementation" && attempt.kind !== "fix")
-      return null;
-    const phase = attempt.kind;
-    const expectedBlockedFrom = phase === "plan" ? "planning" : phase === "implementation" ? "implementing" : "fixing";
-    if (state.blockedFrom !== expectedBlockedFrom) return null;
-    let record7;
-    let evidence2;
-    try {
-      record7 = await this.store.readRunAttempt(state.runId, attempt);
-      evidence2 = await this.store.readResultDigestEvidenceIfExists(
-        state.runId,
-        attempt
-      );
-    } catch (error) {
-      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
-        throw error;
-      return recoveryIneligible(
-        error instanceof BanzaiError && error.code === "RESULT_DIGEST_EVIDENCE_INVALID" ? `${error.message} Audit the run before continuing.` : "Digest acceptance evidence is unreadable or inconsistent.",
-        attempt.id,
-        phase
-      );
-    }
-    if (evidence2?.outcome !== "rejected" || record7.status !== "failed" || !DIGEST_REJECTED_FAILURE_CODES.has(record7.failureCode ?? ""))
-      return null;
-    if (state.activeProcess !== null && this.store.processAlive(state.activeProcess.pid)) {
-      return recoveryIneligible(
-        "Recovery is unavailable while the model process is still active.",
-        attempt.id,
-        phase
-      );
-    }
-    try {
-      const checkpoint = await this.store.readTerminalCheckpointIfExists(
-        state.runId,
-        attempt
-      );
-      if (checkpoint === null) {
-        return recoveryIneligible(
-          `The rejected ${phase} result has no terminal checkpoint, so its repository side effects are unknown. Inspect the checkout, then cancel the run.`,
-          attempt.id,
-          phase
-        );
+  async gatherRecoveryPrecondition(state, step, facts, workspace) {
+    switch (step.evidence) {
+      case "head_commit":
+        facts.headCommit = await currentCommit(this.repoRoot);
+        return;
+      case "configuration": {
+        const config = await loadConfig(this.repoRoot);
+        assertContractParity();
+        const settings = config.models[step.role];
+        const vendor = vendorFor(settings.executable) ?? FALLBACK_VENDOR[step.role];
+        facts.configurationDigest = digestCanonicalJson4({
+          version: 1,
+          vendor,
+          executableDigest: digestCanonicalJson4(settings.executable),
+          model: settings.model,
+          effort: settings.effort
+        });
+        return;
       }
-      if ((await this.store.readRunAttempts(state.runId)).some(
-        (other) => other.attempt.kind === attempt.kind && other.attempt.id !== attempt.id && Date.parse(other.startedAt) > Date.parse(record7.startedAt)
-      ) || state.recovery?.sourceAttemptId === attempt.id && state.recovery.recoveryAttemptId !== null) {
-        return recoveryIneligible(
-          `A later ${phase} attempt already supersedes this rejected result.`,
-          attempt.id,
-          phase,
-          true
-        );
-      }
-      if (await currentCommit(this.repoRoot) !== state.baseCommit) {
-        return recoveryIneligible(
-          "Recovery is unavailable because checkout HEAD changed.",
-          attempt.id,
-          phase
-        );
-      }
-      const config = await loadConfig(this.repoRoot);
-      assertContractParity();
-      const settings = phase === "plan" ? config.models.planner : config.models.implementer;
-      const vendor = vendorFor(settings.executable) ?? FALLBACK_VENDOR[phase === "plan" ? "planner" : "implementer"];
-      let approvalDigest = null;
-      let workflowDigest = null;
-      if (phase === "plan") {
-        const selection = state.workflowSelection ?? null;
-        workflowDigest = selection?.digest ?? null;
-        const authorized = selection !== null && workflowAuthorizationDigest({
-          runId: state.runId,
-          request: state.request,
-          ...selection
-        }) === selection.digest;
-        if (!authorized) {
-          return recoveryIneligible(
-            "Planning recovery requires the unchanged persisted workflow selection.",
-            attempt.id,
-            phase
-          );
-        }
-      } else if ((state.workflowSelection?.workflow ?? "strict") === "strict" || phase === "fix") {
+      case "approval_check":
         await this.validateApproval(state);
-        approvalDigest = state.planApproval?.digest ?? null;
-      } else {
-        workflowDigest = this.validateWorkflowSelection(state).digest;
-      }
-      const scopeDigest = this.attemptScopeDigest(state, attempt);
-      const configurationDigest2 = digestCanonicalJson4({
-        version: 1,
-        vendor,
-        executableDigest: digestCanonicalJson4(settings.executable),
-        model: settings.model,
-        effort: settings.effort
-      });
-      const snapshot = await workspaceSnapshot(this.repoRoot, {
-        artifactBinding: state.artifactBinding,
-        baseline: state.baseline
-      });
-      if (snapshot.baseCommit !== state.baseCommit) {
-        return recoveryIneligible(
-          "Recovery is unavailable because the workspace base commit changed.",
-          attempt.id,
-          phase
+        facts.approvalChecked = true;
+        return;
+      case "workflow_selection_check":
+        facts.workflowDigest = this.validateWorkflowSelection(state).digest;
+        return;
+      case "completion_revalidation":
+        await this.revalidateTaskCompletion(
+          state,
+          step.allowReportRefresh,
+          step.persistReportRefresh
         );
+        facts.completionRevalidated = true;
+        return;
+      case "attempt_scope_digest":
+        facts.scopeDigest = this.attemptScopeDigest(state, step.attempt);
+        return;
+      case "workspace_snapshot": {
+        const snapshot = await workspaceSnapshot(this.repoRoot, {
+          artifactBinding: state.artifactBinding,
+          baseline: state.baseline
+        });
+        workspace.snapshot = snapshot;
+        facts.workspace = {
+          baseCommit: snapshot.baseCommit,
+          digest: snapshot.digest
+        };
+        return;
       }
-      const counts = await workspaceChangeCounts(this.repoRoot, snapshot);
-      const recoveryIdentity = digestCanonicalJson4({
-        version: 1,
-        sourceKind: "digest_rejected",
-        runId: state.runId,
-        attempt,
-        phase,
-        baseCommit: state.baseCommit,
-        workspaceDigest: snapshot.digest,
-        approvalDigest,
-        workflowDigest,
-        scopeDigest,
-        configurationDigest: configurationDigest2,
-        digestEvidence: digestCanonicalJson4(evidence2)
-      });
-      if (state.recovery?.sourceAttemptId === attempt.id && state.recovery.recoveryAttemptId === null) {
+      case "workspace_counts": {
+        if (workspace.snapshot === void 0)
+          throw new Error("Workspace counts require a workspace snapshot.");
+        const counts = await workspaceChangeCounts(
+          this.repoRoot,
+          workspace.snapshot
+        );
+        facts.counts = {
+          ...counts,
+          recoveryIdentity: digestCanonicalJson4(step.identity)
+        };
+        return;
+      }
+      case "recovery_authorization": {
         const authorization = await this.store.readRecoveryAuthorization(
           state.runId,
-          state.recovery.authorizationId
+          step.authorizationId
         );
-        if (authorization.attempt.id !== attempt.id || authorization.recoveryIdentity !== recoveryIdentity) {
-          return recoveryIneligible(
-            "Persisted recovery authorization is stale or inconsistent.",
-            attempt.id,
-            phase
-          );
-        }
+        facts.authorization = {
+          attemptId: authorization.attempt.id,
+          recoveryIdentity: authorization.recoveryIdentity
+        };
+        return;
       }
-      return {
-        eligible: true,
-        terminalCheckpointPresent: true,
-        reason: `The ${phase} result was refused because ${evidence2.comparisons.filter((comparison) => !comparison.matched).length} digest it authored never matched the bytes it named. Recovery authorizes one linked ${phase} attempt to supply a corrected result; the rejected attempt and its result are retained.`,
-        warning: "The rejected attempt keeps its failed status and its result. Recovery authorizes one new attempt for the same phase and no additional scope; a replacement strict plan still passes the existing approval gate.",
-        sourceKind: "digest_rejected",
-        attemptId: attempt.id,
-        phase,
-        resolvedFindingIds: [],
-        remainingFindingIds: [],
-        prerequisites: [],
-        authorization: approvalDigest === null ? "workflow_selection" : "plan_approval",
-        recoveryIdentity,
-        workspace: { digest: snapshot.digest, ...counts },
-        baseCommit: state.baseCommit,
-        approvalDigest,
-        workflowDigest,
-        scopeDigest,
-        configurationDigest: configurationDigest2
-      };
-    } catch (error) {
-      if (error instanceof TerminalRunStateError || error instanceof ProjectSetupRequiredError || error instanceof InstructionResourceMismatchError)
-        throw error;
-      return recoveryIneligible(
-        "Digest-rejected recovery preconditions could not be validated; inspect or cancel the run.",
-        attempt.id,
-        phase
-      );
     }
   }
   async recoveryEligibility(state) {
-    if (state.status !== "blocked") {
-      return recoveryIneligible(
-        `Recovery requires a blocked run, but the run is ${state.status}.`
-      );
-    }
-    const attempt = state.activeAttempt;
-    if (attempt !== null) {
-      const digestRejected = await this.digestRejectedRecoveryEligibility(
-        state,
-        attempt
-      );
-      if (digestRejected !== null) return digestRejected;
-    }
-    if (attempt === null && state.blockedFrom === "fixing") {
-      return await this.prerequisiteBlockedFixRecoveryEligibility(state);
-    }
-    if (attempt === null || !attempt.mutable || attempt.kind !== "implementation" && attempt.kind !== "fix") {
-      return recoveryIneligible(
-        "Recovery requires an interrupted mutable implementation or fix attempt.",
-        attempt?.id ?? null
-      );
-    }
-    const phase = attempt.kind;
-    const expectedBlockedFrom = phase === "implementation" ? "implementing" : "fixing";
-    if (state.blockedFrom !== expectedBlockedFrom) {
-      return recoveryIneligible(
-        `The interrupted ${phase} attempt is inconsistent with blockedFrom=${state.blockedFrom ?? "null"}.`,
-        attempt.id,
-        phase
-      );
-    }
-    if (state.activeProcess !== null && this.store.processAlive(state.activeProcess.pid)) {
-      return recoveryIneligible(
-        "Recovery is unavailable while the model process is still active.",
-        attempt.id,
-        phase
-      );
-    }
-    let record7;
-    try {
-      record7 = await this.store.readRunAttempt(state.runId, attempt);
-    } catch {
-      return recoveryIneligible(
-        "Recovery attempt evidence is unreadable or inconsistent.",
-        attempt.id,
-        phase
-      );
-    }
-    try {
-      const checkpoint = await this.store.readTerminalCheckpointIfExists(
-        state.runId,
-        attempt
-      );
-      if (checkpoint !== null) {
-        const completionEvidenceRejected = record7.status === "failed" && record7.result !== null && record7.failureCode === "PLAN_TASK_COMPLETION_INVALID" && state.planTaskCompletion?.status === "invalid" && state.planTaskCompletion.sourceAttemptId === attempt.id;
-        return recoveryIneligible(
-          completionEvidenceRejected ? "The terminal checkpoint result was rejected by completion validation; use banzai retry to repair its evidence." : "A terminal checkpoint exists; use banzai resume so Banzai can reconcile proven completion.",
-          attempt.id,
-          phase,
-          true
-        );
-      }
-    } catch {
-      return recoveryIneligible(
-        "Terminal checkpoint evidence is malformed or conflicting; inspect or cancel the run.",
-        attempt.id,
-        phase
-      );
-    }
-    const recoverableFailedAttempt = record7.status === "failed" && record7.failureCause !== null && record7.failureCause !== void 0 && RECOVERABLE_MUTABLE_FAILURE_CAUSES.has(record7.failureCause);
-    if (record7.status !== "started" && record7.status !== "interrupted" && !recoverableFailedAttempt || record7.result !== null) {
-      return recoveryIneligible(
-        `Attempt ${attempt.id} is not an uncompleted interruption.`,
-        attempt.id,
-        phase
-      );
-    }
-    if (state.recovery?.sourceAttemptId === attempt.id && state.recovery.recoveryAttemptId !== null) {
-      return recoveryIneligible(
-        "A later recovery attempt already supersedes this interruption.",
-        attempt.id,
-        phase
-      );
-    }
-    try {
-      if (await currentCommit(this.repoRoot) !== state.baseCommit) {
-        return recoveryIneligible(
-          "Recovery is unavailable because checkout HEAD changed.",
-          attempt.id,
-          phase
-        );
-      }
-      const config = await loadConfig(this.repoRoot);
-      assertContractParity();
-      const settings = config.models.implementer;
-      const vendor = vendorFor(settings.executable) ?? FALLBACK_VENDOR.implementer;
-      const route = state.workflowSelection?.workflow ?? "strict";
-      let approvalDigest = null;
-      let workflowDigest = null;
-      if (route === "strict" || phase === "fix") {
-        await this.validateApproval(state);
-        approvalDigest = state.planApproval?.digest ?? null;
-      } else {
-        workflowDigest = this.validateWorkflowSelection(state).digest;
-      }
-      if (phase === "fix") {
-        await this.revalidateTaskCompletion(state);
-        if (!state.triage?.items.some((item) => item.disposition === "accepted")) {
-          return recoveryIneligible(
-            "Fix recovery requires a non-empty current accepted-finding scope.",
-            attempt.id,
-            phase
+    const facts = { state };
+    const workspace = {};
+    for (; ; ) {
+      const step = decideRecovery(facts);
+      if (step.kind === "decided") return step.eligibility;
+      switch (step.evidence) {
+        case "digest_rejected_source":
+          facts.digestRejected = await this.digestRejectedRecoveryEligibility(
+            state,
+            step.attempt
           );
-        }
+          break;
+        case "prerequisite_blocked_fix_source":
+          facts.prerequisiteBlockedFix = await this.prerequisiteBlockedFixRecoveryEligibility(state);
+          break;
+        case "process_liveness":
+          facts.processAlive = this.store.processAlive(step.pid);
+          break;
+        case "attempt_record":
+          try {
+            facts.attemptRecord = {
+              readable: true,
+              record: await this.store.readRunAttempt(state.runId, step.attempt)
+            };
+          } catch {
+            facts.attemptRecord = { readable: false };
+          }
+          break;
+        case "terminal_checkpoint":
+          try {
+            facts.terminalCheckpoint = {
+              readable: true,
+              present: await this.store.readTerminalCheckpointIfExists(
+                state.runId,
+                step.attempt
+              ) !== null
+            };
+          } catch {
+            facts.terminalCheckpoint = { readable: false };
+          }
+          break;
+        default:
+          try {
+            await this.gatherRecoveryPrecondition(
+              state,
+              step,
+              facts,
+              workspace
+            );
+          } catch {
+            facts.preconditionsFailed = true;
+          }
       }
-      const scopeDigest = this.attemptScopeDigest(state, attempt);
-      const configurationDigest2 = digestCanonicalJson4({
-        version: 1,
-        vendor,
-        executableDigest: digestCanonicalJson4(settings.executable),
-        model: settings.model,
-        effort: settings.effort
-      });
-      const snapshot = await workspaceSnapshot(this.repoRoot, {
-        artifactBinding: state.artifactBinding,
-        baseline: state.baseline
-      });
-      if (snapshot.baseCommit !== state.baseCommit) {
-        return recoveryIneligible(
-          "Recovery is unavailable because the workspace base commit changed.",
-          attempt.id,
-          phase
-        );
-      }
-      const counts = await workspaceChangeCounts(this.repoRoot, snapshot);
-      const recoveryIdentity = digestCanonicalJson4({
-        version: 1,
-        runId: state.runId,
-        attempt,
-        phase,
-        baseCommit: state.baseCommit,
-        workspaceDigest: snapshot.digest,
-        approvalDigest,
-        workflowDigest,
-        scopeDigest,
-        configurationDigest: configurationDigest2
-      });
-      if (state.recovery?.sourceAttemptId === attempt.id && state.recovery.recoveryAttemptId === null) {
-        const authorization = await this.store.readRecoveryAuthorization(
-          state.runId,
-          state.recovery.authorizationId
-        );
-        if (authorization.attempt.id !== attempt.id || authorization.recoveryIdentity !== recoveryIdentity) {
-          return recoveryIneligible(
-            "Persisted recovery authorization is stale or inconsistent.",
-            attempt.id,
-            phase
-          );
-        }
-      }
-      return {
-        eligible: true,
-        reason: `Interrupted ${phase} attempt ${attempt.id} may be recovered only with current explicit authorization.`,
-        warning: RECOVERY_WARNING,
-        sourceKind: "interrupted",
-        attemptId: attempt.id,
-        phase,
-        resolvedFindingIds: [],
-        remainingFindingIds: [],
-        prerequisites: [],
-        authorization: approvalDigest === null ? "workflow_selection" : "plan_approval",
-        recoveryIdentity,
-        workspace: { digest: snapshot.digest, ...counts },
-        baseCommit: state.baseCommit,
-        approvalDigest,
-        workflowDigest,
-        scopeDigest,
-        configurationDigest: configurationDigest2
-      };
-    } catch {
-      return recoveryIneligible(
-        "Recovery preconditions could not be validated; inspect or cancel the run.",
-        attempt.id,
-        phase
-      );
     }
   }
   async executeAuthorizedRecovery(state, config, authorization) {
@@ -37460,7 +37845,7 @@ var WorkflowRunner = class {
           persistedSourceRecord.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION2;
         persistedSourceRecord.status = "interrupted";
         persistedSourceRecord.completedAt = null;
-        persistedSourceRecord.interruptedAt ??= now();
+        persistedSourceRecord.interruptedAt ??= this.now();
         persistedSourceRecord.durationMs = null;
         persistedSourceRecord.recoveryOf ??= null;
         persistedSourceRecord.recoveryAuthorizationId ??= null;
@@ -37562,40 +37947,6 @@ var WorkflowRunner = class {
       { attemptId, reason }
     );
     return state;
-  }
-  nextAction(state, retry, recovery, publication = null) {
-    if (state.status === "needs_adr_approval") {
-      return "banzai approve adr";
-    }
-    if (state.status === "needs_plan_approval") {
-      return "banzai approve plan";
-    }
-    if (state.status === "needs_human_decision") {
-      return "banzai";
-    }
-    if (state.status === "needs_triage") {
-      return "banzai triage";
-    }
-    if (state.status === "blocked") {
-      if (publication?.pending === true && publication.action !== null)
-        return `banzai ${publication.action}`;
-      if (recovery.eligible && recovery.sourceKind === "digest_rejected")
-        return "banzai recover";
-      return retry.eligible ? "banzai retry" : recovery.eligible ? "banzai recover" : recovery.terminalCheckpointPresent === true ? "banzai resume" : "banzai cancel";
-    }
-    if ([
-      "created",
-      "selecting",
-      "planning",
-      "plan_approved",
-      "implementing",
-      "verifying",
-      "reviewing",
-      "fixing"
-    ].includes(state.status)) {
-      return "banzai resume";
-    }
-    return null;
   }
   /**
    * Runs the subscription check that belongs to the configured executable. An
@@ -37769,7 +38120,7 @@ var WorkflowRunner = class {
       errorCode: "PLAN_TASK_COMPLETION_INVALID",
       violation: error.violation,
       taskId: error.taskId,
-      recordedAt: now()
+      recordedAt: this.now()
     };
   }
   async recordCompletionFailure(state, record7, adapterResult, error, context) {
@@ -37780,7 +38131,7 @@ var WorkflowRunner = class {
       adapterResult.stderr
     );
     record7.status = "failed";
-    record7.completedAt = now();
+    record7.completedAt = this.now();
     record7.result = adapterResult.result;
     record7.sessionId = adapterResult.sessionId;
     record7.durationMs = Date.parse(record7.completedAt) - Date.parse(record7.startedAt);
@@ -37968,7 +38319,7 @@ var WorkflowRunner = class {
   }
   newAttempt(state, kind, mutable) {
     return {
-      id: `${kind}-${state.reviewIteration + 1}-${randomUUID12().slice(0, 8)}`,
+      id: `${kind}-${state.reviewIteration + 1}-${this.ids().slice(0, 8)}`,
       kind,
       mutable
     };
@@ -37978,7 +38329,7 @@ var WorkflowRunner = class {
       schemaVersion: state.verificationMode === "task" ? 4 : policy.completion === void 0 ? MODEL_ATTEMPT_SCHEMA_VERSION2 : STRICT_MODEL_ATTEMPT_SCHEMA_VERSION2,
       attempt,
       status: "started",
-      startedAt: now(),
+      startedAt: this.now(),
       completedAt: null,
       interruptedAt: null,
       recoveryOf: null,
@@ -38071,7 +38422,7 @@ var WorkflowRunner = class {
         schemaVersion: state.verificationMode === "task" ? 4 : policy.completion === void 0 ? MODEL_ATTEMPT_SCHEMA_VERSION2 : STRICT_MODEL_ATTEMPT_SCHEMA_VERSION2,
         attempt,
         status: "started",
-        startedAt: now(),
+        startedAt: this.now(),
         completedAt: null,
         interruptedAt: null,
         recoveryOf: authorization.attempt.id,
@@ -38139,7 +38490,7 @@ var WorkflowRunner = class {
     return record7;
   }
   async processStarted(state, attempt, pid) {
-    state.activeProcess = { pid, kind: attempt.kind, startedAt: now() };
+    state.activeProcess = { pid, kind: attempt.kind, startedAt: this.now() };
     try {
       await this.store.writeState(state);
     } catch (error) {
@@ -38286,7 +38637,7 @@ var WorkflowRunner = class {
       await this.persistAdapterResult(state, record7, adapterResult);
     }
     record7.status = "completed";
-    record7.completedAt = now();
+    record7.completedAt = this.now();
     record7.durationMs = Date.parse(record7.completedAt) - Date.parse(record7.startedAt);
     await this.store.writeRunAttempt(state.runId, record7);
     const current = await this.store.readState(state.runId);
@@ -38314,7 +38665,7 @@ var WorkflowRunner = class {
     }
     record7.result = adapterResult.result;
     record7.sessionId = adapterResult.sessionId ?? record7.sessionId;
-    record7.durationMs = Date.now() - Date.parse(record7.startedAt);
+    record7.durationMs = this.clock().getTime() - Date.parse(record7.startedAt);
     await this.store.writeRunAttempt(state.runId, record7);
   }
   async writeAttemptOutput(state, record7, stdout, stderr) {
@@ -38343,7 +38694,7 @@ var WorkflowRunner = class {
       error.code
     ) ? error instanceof PlanTaskCompletionError ? error : new PlanTaskCompletionError("source_attempt_invalid", error.message) : null;
     record7.status = "failed";
-    record7.completedAt = now();
+    record7.completedAt = this.now();
     record7.durationMs = Date.parse(record7.completedAt) - Date.parse(record7.startedAt);
     record7.error = completionError3 === null ? errorMessage(error) : `[PLAN_TASK_COMPLETION_INVALID] ${completionError3.message}`;
     record7.failureCode = completionError3 === null ? error instanceof BanzaiError ? error.code : null : "PLAN_TASK_COMPLETION_INVALID";
@@ -38592,7 +38943,7 @@ var WorkflowRunner = class {
     const enforced = preCallBudgets.find(
       (evaluation) => evaluation.result === "enforced_exceeded"
     );
-    const measuredAt = now();
+    const measuredAt = this.now();
     const started = await this.store.beginContextInvocation(
       input.state.runId,
       input.attempt,
@@ -38604,7 +38955,7 @@ var WorkflowRunner = class {
         vendor,
         sessionMode: input.sessionMode,
         measuredAt,
-        completedAt: enforced === void 0 ? null : now(),
+        completedAt: enforced === void 0 ? null : this.now(),
         outcome: enforced === void 0 ? "pending" : "budget_exceeded",
         runnerPayload,
         authority: this.contextAuthority(
@@ -38656,7 +39007,7 @@ var WorkflowRunner = class {
         input.attempt,
         started.ordinal,
         {
-          completedAt: now(),
+          completedAt: this.now(),
           outcome,
           sessionInventory: inventory === null ? emptyContextInventory() : {
             toolCount: available(inventory.toolCount),
@@ -38851,7 +39202,7 @@ var WorkflowRunner = class {
   }
   async applyWorkflowSelection(state, attempt, result, config) {
     const workflow = effectiveWorkflow(result);
-    const selectedAt = now();
+    const selectedAt = this.now();
     const fallbackReasons = [];
     if (result.recommendedWorkflow !== "strict" && workflow === "strict") {
       if (result.confidence !== "high") {
@@ -39965,7 +40316,7 @@ var WorkflowRunner = class {
       this.info(`Stop-result capture unavailable: ${errorMessage(error)}`);
     }
     record7.status = "completed";
-    record7.completedAt ??= now();
+    record7.completedAt ??= this.now();
     record7.durationMs ??= Date.parse(record7.completedAt) - Date.parse(record7.startedAt);
     await this.store.writeRunAttempt(state.runId, record7);
     const current = await this.store.readState(state.runId);
@@ -39994,7 +40345,7 @@ var WorkflowRunner = class {
       errorCode: "PLAN_TASK_COMPLETION_INVALID",
       violation: error.violation,
       taskId: error.taskId,
-      recordedAt: now(),
+      recordedAt: this.now(),
       completionProtocol: COMPLETION_PROTOCOL4,
       diagnostic: error.message.slice(0, 500),
       rejectedResultDigest: capture3?.resultDigest ?? record7.envelope?.originalDigest ?? null
@@ -40006,7 +40357,7 @@ var WorkflowRunner = class {
    */
   async rejectCompletionInput(state, record7, error, capture3) {
     record7.status = "failed";
-    record7.completedAt ??= now();
+    record7.completedAt ??= this.now();
     record7.durationMs ??= Date.parse(record7.completedAt) - Date.parse(record7.startedAt);
     record7.error = `[PLAN_TASK_COMPLETION_INVALID] ${error.message}`;
     record7.failureCode = "PLAN_TASK_COMPLETION_INVALID";
@@ -40542,7 +40893,7 @@ var WorkflowRunner = class {
         );
       try {
         const mode2 = (await lstat17(destination)).mode & 511;
-        const temporary = `${destination}.${randomUUID12()}.completion.tmp`;
+        const temporary = `${destination}.${this.ids()}.completion.tmp`;
         await writeFile4(temporary, composition.bytes, { flag: "wx", mode: mode2 });
         try {
           await rename9(temporary, destination);
@@ -40644,7 +40995,7 @@ var WorkflowRunner = class {
     );
     if (record7.status !== "completed") {
       record7.status = "completed";
-      record7.completedAt ??= now();
+      record7.completedAt ??= this.now();
       record7.durationMs ??= Date.parse(record7.completedAt) - Date.parse(record7.startedAt);
       record7.error = null;
       record7.failureCode = null;
@@ -40674,7 +41025,7 @@ var WorkflowRunner = class {
         implementationReport: receipt.implementationReport,
         testReport: receipt.testReport,
         counts: claims.counts,
-        validatedAt: now(),
+        validatedAt: this.now(),
         completionProtocol: COMPLETION_PROTOCOL4,
         publisherAttemptId: attempt.id,
         publication: {
@@ -40754,7 +41105,7 @@ var WorkflowRunner = class {
     record7.result = JSON.parse(envelope.original);
     record7.envelope = envelope;
     record7.sessionId = adapterResult.sessionId ?? record7.sessionId;
-    record7.durationMs = Date.now() - Date.parse(record7.startedAt);
+    record7.durationMs = this.clock().getTime() - Date.parse(record7.startedAt);
     if (envelope.phase !== record7.attempt.kind)
       throw new BanzaiError(
         "PHASE_RESULT_MISMATCH",
@@ -40779,7 +41130,7 @@ var WorkflowRunner = class {
       );
     }
     record7.status = "pending_application";
-    record7.completedAt = now();
+    record7.completedAt = this.now();
     await this.store.writeRunAttempt(state.runId, record7);
     const current = await this.store.readState(state.runId);
     if (current.status === "cancelled") return current;
@@ -41225,7 +41576,7 @@ var WorkflowRunner = class {
           gate: "decision_consultation",
           summary: result.summary,
           request,
-          requestedAt: now()
+          requestedAt: this.now()
         };
         transitionState(state, "needs_human_decision");
       } else if (result.gate === "escalation") {
@@ -41235,7 +41586,7 @@ var WorkflowRunner = class {
           gate: result.gate,
           summary: result.summary,
           questions: result.questions,
-          requestedAt: now()
+          requestedAt: this.now()
         };
         transitionState(state, "needs_human_decision");
       } else {
@@ -41278,7 +41629,7 @@ var WorkflowRunner = class {
           gate: result.gate,
           summary: result.summary,
           questions: result.questions,
-          requestedAt: now()
+          requestedAt: this.now()
         };
         transitionState(state, "needs_human_decision");
       } else if (result.outcome !== "completed" || result.gate !== null) {
@@ -41814,15 +42165,19 @@ var WorkflowRunner = class {
           await this.store.writeState(state);
           return state;
         }
-        const interrupted = terminalVerificationRecord(started, {
-          status: "interrupted",
-          completedAt: now(),
-          exitCode: null,
-          signal: null,
-          failureCategory: "runner_failure",
-          stdout: null,
-          stderr: null
-        });
+        const interrupted = terminalVerificationRecord(
+          started,
+          {
+            status: "interrupted",
+            completedAt: this.now(),
+            exitCode: null,
+            signal: null,
+            failureCategory: "runner_failure",
+            stdout: null,
+            stderr: null
+          },
+          () => this.now()
+        );
         await this.store.finishVerificationAttempt(state.runId, interrupted);
         await this.store.appendEvent(state.runId, "verification.interrupted", {
           attemptId: interrupted.id,
@@ -41846,7 +42201,7 @@ var WorkflowRunner = class {
       const record7 = await this.store.beginVerificationAttempt(state.runId, {
         round,
         descriptor,
-        startedAt: now(),
+        startedAt: this.now(),
         retryOf: retryingFailed ? failed.id : null,
         restartOf
       });
@@ -41891,15 +42246,19 @@ var WorkflowRunner = class {
       } catch (error) {
         const current2 = await this.store.readState(state.runId);
         const interrupted = current2.status === "cancelled";
-        const terminal2 = terminalVerificationRecord(record7, {
-          status: interrupted ? "interrupted" : "failed",
-          completedAt: now(),
-          exitCode: null,
-          signal: null,
-          failureCategory: verificationFailureCategory(error),
-          stdout: null,
-          stderr: null
-        });
+        const terminal2 = terminalVerificationRecord(
+          record7,
+          {
+            status: interrupted ? "interrupted" : "failed",
+            completedAt: this.now(),
+            exitCode: null,
+            signal: null,
+            failureCategory: verificationFailureCategory(error),
+            stdout: null,
+            stderr: null
+          },
+          () => this.now()
+        );
         await this.store.finishVerificationAttempt(state.runId, terminal2);
         if (evidenceBefore)
           await persistVerificationOriginFinish(
@@ -41931,15 +42290,19 @@ var WorkflowRunner = class {
         `verification/${logStem}.stderr.log`,
         redactSensitiveText(result.stderr)
       );
-      const terminal = terminalVerificationRecord(record7, {
-        status: result.exitCode === 0 ? "completed" : "failed",
-        completedAt: result.completedAt,
-        exitCode: result.exitCode,
-        signal: result.signal,
-        failureCategory: result.exitCode === 0 ? null : "command_exit",
-        stdout: stdoutEvidence,
-        stderr: stderrEvidence
-      });
+      const terminal = terminalVerificationRecord(
+        record7,
+        {
+          status: result.exitCode === 0 ? "completed" : "failed",
+          completedAt: result.completedAt,
+          exitCode: result.exitCode,
+          signal: result.signal,
+          failureCategory: result.exitCode === 0 ? null : "command_exit",
+          stdout: stdoutEvidence,
+          stderr: stderrEvidence
+        },
+        () => this.now()
+      );
       await this.store.finishVerificationAttempt(state.runId, terminal);
       if (evidenceBefore)
         await persistVerificationOriginFinish(
@@ -42160,7 +42523,7 @@ var WorkflowRunner = class {
         );
       await revalidate();
       const previous = await readTaskVerificationAttempts(storage2, true);
-      const roundId = previous.find((item) => item.sourceAttemptId === source.id)?.roundId ?? randomUUID12();
+      const roundId = previous.find((item) => item.sourceAttemptId === source.id)?.roundId ?? this.ids();
       state.taskVerification = await executeTaskVerification({
         ...storage2,
         selection,
@@ -42196,7 +42559,7 @@ var WorkflowRunner = class {
               stderr: "Process could not be started.",
               exitCode: null,
               signal: null,
-              completedAt: now()
+              completedAt: this.now()
             };
             return {
               ...observed3,
@@ -42250,7 +42613,7 @@ var WorkflowRunner = class {
       if (command === void 0) {
         continue;
       }
-      const startedAt = now();
+      const startedAt = this.now();
       state.metrics.attempts.verification += 1;
       let result;
       try {
@@ -48568,8 +48931,8 @@ function reviewSettings(vendor) {
 function validProbeResult(result) {
   return result.verdict === "pass" && result.findings.length === 0 && result.reviewedFindingIds.length === 0 && result.deferredCoverage.length === 0;
 }
-async function runReviewScenario(vendor, scenario, environment, baseRunner, run, now2, pluginDirectory) {
-  const started = now2();
+async function runReviewScenario(vendor, scenario, environment, baseRunner, run, now, pluginDirectory) {
+  const started = now();
   const observed3 = observation();
   const runner = wrapRunner(baseRunner, run, vendor, observed3);
   const adapters = createVendorAdapters(runner);
@@ -48579,7 +48942,7 @@ async function runReviewScenario(vendor, scenario, environment, baseRunner, run,
       "bounds.enforced",
       "fail",
       "INVOCATION_LIMIT",
-      now2() - started
+      now() - started
     );
     return;
   }
@@ -48621,7 +48984,7 @@ async function runReviewScenario(vendor, scenario, environment, baseRunner, run,
       `${vendor}.structured_result`,
       "fail",
       "MODEL_INVOCATION_FAILED",
-      now2() - started
+      now() - started
     );
   }
   const restricted = observed3.inventoryObserved && !observed3.inventoryInvalid;
@@ -48641,7 +49004,7 @@ async function runReviewScenario(vendor, scenario, environment, baseRunner, run,
       id3,
       passed ? "pass" : "fail",
       passed ? vendor === "claude" ? "CAPABILITY_EXCLUDED" : "OK" : "DENIAL_NOT_OBSERVED",
-      now2() - started
+      now() - started
     );
   }
   if (result !== null) {
@@ -48660,7 +49023,7 @@ async function runReviewScenario(vendor, scenario, environment, baseRunner, run,
       `${vendor}.structured_result`,
       valid ? "pass" : "fail",
       valid ? "OK" : "INVALID_STRUCTURED_RESULT",
-      now2() - started
+      now() - started
     );
     if (valid) {
       await mkdir11(path33.join(scenario.root, path33.dirname(REVIEW_CANDIDATE)), {
@@ -48693,7 +49056,7 @@ async function runReviewScenario(vendor, scenario, environment, baseRunner, run,
           `${vendor}.runner_artifact`,
           "pass",
           "OK",
-          now2() - started
+          now() - started
         );
       }
     } catch {
@@ -48702,7 +49065,7 @@ async function runReviewScenario(vendor, scenario, environment, baseRunner, run,
         `${vendor}.runner_artifact`,
         "fail",
         "INVALID_REVIEW_ARTIFACT",
-        now2() - started
+        now() - started
       );
     }
   }
@@ -48741,8 +49104,8 @@ function unavailableCode(error) {
   }
   return "PREFLIGHT_UNAVAILABLE";
 }
-async function preflightVendor(vendor, environment, baseRunner, run, now2) {
-  const started = now2();
+async function preflightVendor(vendor, environment, baseRunner, run, now) {
+  const started = now();
   const settings = reviewSettings(vendor);
   const runner = wrapRunner(baseRunner, run, null, null);
   try {
@@ -48765,7 +49128,7 @@ async function preflightVendor(vendor, environment, baseRunner, run, now2) {
     } else {
       await adapters.preflightClaude(settings, environment);
     }
-    updateCheck(run, `preflight.${vendor}`, "pass", "OK", now2() - started);
+    updateCheck(run, `preflight.${vendor}`, "pass", "OK", now() - started);
     return true;
   } catch (error) {
     updateCheck(
@@ -48773,13 +49136,13 @@ async function preflightVendor(vendor, environment, baseRunner, run, now2) {
       `preflight.${vendor}`,
       "unavailable",
       unavailableCode(error),
-      now2() - started
+      now() - started
     );
     return false;
   }
 }
-async function candidateClones(repositoryRoot, temporaryRoot, environment, baseRunner, run, now2) {
-  const started = now2();
+async function candidateClones(repositoryRoot, temporaryRoot, environment, baseRunner, run, now) {
+  const started = now();
   const runner = wrapRunner(baseRunner, run, null, null);
   try {
     const status = await runOwnedProcess(
@@ -48843,7 +49206,7 @@ async function candidateClones(repositoryRoot, temporaryRoot, environment, baseR
         );
       }
     }
-    updateCheck(run, "candidate.exact", "pass", "OK", now2() - started);
+    updateCheck(run, "candidate.exact", "pass", "OK", now() - started);
     return clones;
   } catch {
     updateCheck(
@@ -48851,7 +49214,7 @@ async function candidateClones(repositoryRoot, temporaryRoot, environment, baseR
       "candidate.exact",
       "fail",
       "CANDIDATE_UNAVAILABLE",
-      now2() - started
+      now() - started
     );
     return null;
   }
@@ -48866,8 +49229,8 @@ function summaryStatus(checks) {
   return checks.every((check2) => check2.status === "pass") ? "pass" : "unavailable";
 }
 async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
-  const now2 = dependencies.now ?? Date.now;
-  const started = now2();
+  const now = dependencies.now ?? Date.now;
+  const started = now();
   const environment = dependencies.environment ?? process.env;
   const baseRunner = dependencies.processRunner ?? runProcess;
   const processGroupTerminator = dependencies.processGroupTerminator ?? terminateProcessGroup2;
@@ -48927,7 +49290,7 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
         safeEnvironment,
         baseRunner,
         run,
-        now2
+        now
       );
       if (clones !== null) {
         const authRoot = path33.join(temporaryRoot, "auth");
@@ -48978,14 +49341,14 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
             liveEnvironment,
             baseRunner,
             run,
-            now2
+            now
           );
           const claudeReady = await preflightVendor(
             "claude",
             liveEnvironment,
             baseRunner,
             run,
-            now2
+            now
           );
           if (codexReady && claudeReady) {
             const codexScenario = await prepareScenario(
@@ -49002,7 +49365,7 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
               liveEnvironment,
               baseRunner,
               run,
-              now2,
+              now,
               path33.join(clones.codex, "plugins", "banzai")
             );
             await runReviewScenario(
@@ -49011,7 +49374,7 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
               liveEnvironment,
               baseRunner,
               run,
-              now2,
+              now,
               path33.join(clones.claude, "plugins", "banzai")
             );
             updateCheck(
@@ -49019,7 +49382,7 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
               "workspace.unchanged",
               run.workspaceUnchanged ? "pass" : "fail",
               run.workspaceUnchanged ? "OK" : "FORBIDDEN_MUTATION",
-              now2() - started
+              now() - started
             );
           }
         }
@@ -49032,7 +49395,7 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
         "bounds.enforced",
         "fail",
         "LIVE_EXECUTION_FAILED",
-        now2() - started
+        now() - started
       );
     }
   } finally {
@@ -49042,14 +49405,14 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
     for (const pid of run.activePids) {
       processGroupTerminator(pid);
     }
-    const withinBounds = !run.interrupted && !run.deadlineExceeded && run.invocationCount <= release_policy_default.live.maxInvocations && now2() - started <= release_policy_default.live.totalTimeoutMs;
+    const withinBounds = !run.interrupted && !run.deadlineExceeded && run.invocationCount <= release_policy_default.live.maxInvocations && now() - started <= release_policy_default.live.totalTimeoutMs;
     if (run.checks.get("bounds.enforced")?.status === "not_run") {
       updateCheck(
         run,
         "bounds.enforced",
         withinBounds ? "pass" : "fail",
         withinBounds ? "OK" : "BOUND_EXCEEDED",
-        now2() - started
+        now() - started
       );
     }
     let cleanupPassed = true;
@@ -49071,7 +49434,7 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
       "cleanup.complete",
       cleanupPassed ? "pass" : "fail",
       cleanupPassed ? "OK" : "CLEANUP_FAILED",
-      now2() - started
+      now() - started
     );
   }
   const checks = CHECK_IDS.map((id3) => {
@@ -49087,7 +49450,7 @@ async function runLiveCompatibility(repositoryRoot, dependencies = {}) {
     status: summaryStatus(checks),
     cliVersions: run.cliVersions,
     checks,
-    durationMs: Math.max(0, Math.round(now2() - started)),
+    durationMs: Math.max(0, Math.round(now() - started)),
     invocationCount: run.invocationCount
   };
 }
@@ -51694,7 +52057,7 @@ function printFinding(finding) {
   }
 }
 function printState(status, metrics = false) {
-  const { state, nextAction } = status;
+  const { state, nextAction: nextAction2 } = status;
   console.log(`Run: ${state.runId}`);
   console.log(`Feature: ${state.slug}`);
   const gloss = runStatusGloss(state.status);
@@ -51785,15 +52148,15 @@ function printState(status, metrics = false) {
       pendingRotationText(state.pendingReviewRotationReason)
     );
   }
-  if (nextAction === "banzai retry") {
+  if (nextAction2 === "banzai retry") {
     console.log(
       state.blockedFrom === "created" ? "Next: resolve the startup prerequisite, then run `banzai retry`." : "Next: resolve the external failure, then run `banzai retry`."
     );
-  } else if (nextAction === "banzai recover") {
+  } else if (nextAction2 === "banzai recover") {
     console.log(
       "Next: inspect the exact checkout and warning above, then run `banzai recover` in a terminal."
     );
-  } else if (nextAction === "banzai cancel") {
+  } else if (nextAction2 === "banzai cancel") {
     console.log(
       "Next: inspect the checkout and attempt logs, then run `banzai cancel`."
     );
@@ -51811,8 +52174,8 @@ function printState(status, metrics = false) {
     );
   } else if (state.status === "needs_triage") {
     console.log("Next: triage every finding with `banzai triage ...`.");
-  } else if (nextAction !== null) {
-    console.log(`Next: run \`${nextAction}\`.`);
+  } else if (nextAction2 !== null) {
+    console.log(`Next: run \`${nextAction2}\`.`);
   }
   if (metrics) {
     console.log(

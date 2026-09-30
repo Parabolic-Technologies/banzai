@@ -187,6 +187,31 @@ setup reuses the existing runner lock without stale ownership reclamation.
   Missing/stale modules, forbidden static edges, alternate local loaders, and
   inline-disable attempts fail `npm run lint`; test and tool files remain
   outside the production layer map.
+- ADR-0052 domain modules hold pure workflow decisions. Every policy entry is
+  classified as `standard` or `domain`, and a domain entry must cite ADR-0052.
+  The domain modules are `src/state-machine.ts`, `src/workflow/ports.ts` and
+  `src/workflow/domain/*.ts`.
+  - **Imports.** A domain module imports only other domain modules and `errors`
+    at runtime, and additionally `types` type-only.
+  - **Lint.** Lint rejects the following in a domain module:
+    - effectful Node built-ins, including their subpaths such as
+      `dns/promises`: filesystem, child process, network, process,
+      operating-system and worker modules;
+    - any `crypto` import other than `createHash`;
+    - the `process`, `crypto`, `performance`, `globalThis` and `global`
+      globals, so no qualified form reaches a restricted API;
+    - ambient clock reads and `Math.random`.
+  - **Eligibility.** Retry, recovery, restore and next-action decisions are
+    staged pure rules. A rule receives plain facts and returns either a final
+    result or the next evidence the runner must gather. `WorkflowRunner`
+    gathers that evidence in the order the pre-decomposition source read it,
+    keeps each evidence source's error scope, and computes every digest and
+    recovery identity a rule asks for.
+  - **Eligibility effects.** The runner keeps two effects at their existing
+    points. The approval check persists its block and appends
+    `approval.invalidated`, including when `status` calls it without the run
+    lock. Completion revalidation may write a refreshed plan-task-completion
+    summary.
 - Concurrency: one Node process using `async`/`await`. Each model phase and each
   verification command is a child process with its own timeout and
   process-group termination; verification commands run sequentially, while the
@@ -294,12 +319,14 @@ setup reuses the existing runner lock without stale ownership reclamation.
   - `.banzai/artifacts.json` — shared declaration selecting the private layout.
   - `.banzai/work/<uuid>/` — local, ignored internal work artifacts.
   - `.banzai/runs/` — local, ignored orchestrator run state.
-- Source/test layout: `src/` is flat, one module per responsibility;
-  `test/<module>.test.ts` normally mirrors `src/<module>.ts`. Cross-module
+- Source/test layout: `src/` holds one module per responsibility. ADR-0052
+  capability areas are introduced as subdirectories; `src/workflow/` currently
+  holds the runner ports and the workflow domain beside the `src/workflow.ts`
+  facade. `test/<path>.test.ts` normally mirrors `src/<path>.ts`. Cross-module
   contract tests such as `test/review-result-v2.test.ts` and shared fixture
-  modules such as `test/helpers.ts` and `test/review-fixtures.ts` are supported
-  layout exceptions. `test/hook.test.ts` covers the plugin hook outside the
-  workspace.
+  modules such as `test/helpers.ts`, `test/review-fixtures.ts` and
+  `test/characterization-trace.ts` are supported layout exceptions.
+  `test/hook.test.ts` covers the plugin hook outside the workspace.
 - `.gitignore` ignores `dist/` globally and then re-includes exactly
   `packages/orchestrator/dist/banzai.mjs` and `.../banzai.mjs.map`; it also
   ignores `.claude/settings.local.json`,
@@ -384,9 +411,39 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   against the bytes it names when the carrying artifact is accepted, records
   that comparison as durable acceptance evidence, and recognizes a
   digest-rejected result as one recovery source whose authorized repair
-  outranks replaying the rejected terminal checkpoint.
+  outranks replaying the rejected terminal checkpoint. An optional trailing
+  `sources` constructor argument (`{ clock?, ids? }`) supplies the time and
+  UUIDs from which every runner-generated timestamp, duration and identifier
+  derives. The defaults are the system clock and `randomUUID`, and each
+  identifier keeps its derived shape.
+- `workflow/ports.ts` — the type-only `Clock`, `IdSource` and `RunnerSources`
+  process-boundary ports, re-exported from `workflow.ts`.
+- `workflow/domain/failure-classes.ts` — the model-failure cause and
+  failure-code sets, and the `[RESULT_DIGEST_UNRESOLVED]` block-reason prefix,
+  that retry, recovery and reconciliation read. It also holds the
+  read-only-attempt retry predicate and the check-failure block reason.
+- `workflow/domain/sessions.ts`, `human-decisions.ts`, `run-identity.ts`,
+  `artifact-scope.ts`, `verification-attempts.ts` and `routing.ts` — the pure
+  helpers `workflow.ts` shares. They cover session bindings, human-decision
+  validation, run identifiers and slugs, approved artifact paths, verification
+  failure categories and command matching, workflow routing and terminal
+  result contracts. `humanDecisionQuestions` is re-exported from
+  `workflow.ts`.
+- `workflow/domain/retry-eligibility.ts`, `next-action.ts` and
+  `restore-eligibility.ts` — the retry and restore rules and next-action
+  selection. `RetryEligibility` is re-exported from `workflow.ts`.
+- `workflow/domain/recovery-eligibility.ts` — the recovery dispatch across the
+  digest-rejected, prerequisite-blocked fix and interrupted sources, the
+  interrupted-source rule, and the precondition, workspace and identity tail
+  every source shares. `RecoveryEligibility` is re-exported from
+  `workflow.ts`.
+- `workflow/domain/digest-rejected-recovery.ts` and
+  `prerequisite-blocked-fix.ts` — the two remaining recovery sources. The
+  latter also owns the remaining-scope and source-selection rules that fix
+  execution and recovery execution share.
 - `state-machine.ts` — `transitionState`, `blockState`, `requireState`; the
-  only place `RunStatus` changes, so illegal transitions fail closed.
+  only place `RunStatus` changes, so illegal transitions fail closed. It is an
+  ADR-0052 domain module.
 - `store.ts` — `RunStore`: atomic `state.json`, append-only `events.jsonl`,
   model-attempt records with redacted output, mode-0600 context ledgers,
   attempt-owned review candidates and immutable private review snapshots,
@@ -979,9 +1036,20 @@ attempt, approval marker or transcript.
   supported exceptions: `review-result-v2.test.ts` covers the v2 result,
   snapshot, renderer and store boundary with `review-fixtures.ts`;
   `test/helpers.ts` supplies temp git repositories, config fixtures,
-  `commitAll` and byte-level tree snapshots. `test/hook.test.ts` covers
+  `commitAll` and byte-level tree snapshots. `test/characterization-trace.ts`
+  records one ordered entry per persisted `state.json` write and appended
+  `events.jsonl` line. `test/hook.test.ts` covers
   `plugins/banzai/hooks/spec-gate.cjs`; script-level integration tests cover
   release transactions, validation, the gate and committed smoke.
+- Characterization (ADR-0052): test cases named `characterization: ` in
+  `workflow.test.ts` and `result-digest.test.ts` assert the ordered persisted
+  state and event traces of ten representative run flows. The flows are lite
+  and strict completion, a fix cycle, task-check retry, interrupted,
+  prerequisite-blocked and digest-rejected recovery, approval restore, the
+  `status` approval block, and cancellation. Identifiers, timestamps, digests
+  and repository paths are normalized. The expected traces were recorded from
+  the pre-decomposition source, and behavior-preserving refactors must leave
+  them unchanged.
 - Import pattern: production code is imported with NodeNext ESM specifiers —
   `import { … } from "../src/<module>.js"` — and type-only imports are marked
   `type` because `verbatimModuleSyntax` is on.
@@ -1062,10 +1130,11 @@ attempts without another model call`.
   `verbatimModuleSyntax`, `forceConsistentCasingInFileNames`, `module` and
   `moduleResolution` `NodeNext`. Relative imports carry the `.js` extension;
   type-only imports are explicit.
-- File/module organization: one responsibility per `src` module, flat, no
-  barrel files. Shared types live only in `types.ts`; every `RunStatus` change
-  goes through `state-machine.ts`; the prompt library is confined to
-  `inquirer-io.ts`.
+- File/module organization: one responsibility per `src` module, no barrel
+  files, and ADR-0052 capability areas as subdirectories, currently only
+  `src/workflow/`. Shared types live in `types.ts`, while a module's own ports
+  live with that module. Every `RunStatus` change goes through
+  `state-machine.ts`, and the prompt library is confined to `inquirer-io.ts`.
 - Error handling: throw `BanzaiError` (or `ProcessExitError`) with a stable
   upper-snake-case code and a message that names the resolution. Decode all
   external JSON through `validation.ts` before use. Fail closed on
@@ -1505,3 +1574,4 @@ restate them here. Paths are relative to `documentation/decisions/`.
 | ADR-0049 | Task-scoped verification authority                                 | `0049-task-scoped-verification.md`                              | Implemented |
 | ADR-0050 | Triggered code-design assessment                                   | `0050-triggered-code-design-assessment.md`                      | Planned     |
 | ADR-0051 | Acceptance-time validation of model-authored digests               | `0051-acceptance-time-digest-validation.md`                     | Implemented |
+| ADR-0052 | Capability-slice architecture and WorkflowRunner decomposition     | `0052-orchestrator-capability-slice-architecture.md`            | Planned     |
