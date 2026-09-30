@@ -348,7 +348,11 @@ setup reuses the existing runner lock without stale ownership reclamation.
   `test/review-result-v2.test.ts` and shared fixture modules such as
   `test/helpers.ts`, `test/review-fixtures.ts`,
   `test/characterization-trace.ts` and `test/workflow/context-fixture.ts` are
-  supported layout exceptions.
+  supported layout exceptions. So are the facade-level `WorkflowRunner`
+  tests: `test/workflow.test.ts` and its `test/workflow-<area>.test.ts`
+  siblings (`review`, `recovery`, `completion`, `publication`, `project` and
+  `eligibility`), split by runner capability so the test runner executes them
+  in parallel, with their shared doubles in `test/workflow-fixtures.ts`.
   `test/hook.test.ts` covers the plugin hook outside the workspace.
 - `.gitignore` ignores `dist/` globally and then re-includes exactly
   `packages/orchestrator/dist/banzai.mjs` and `.../banzai.mjs.map`; it also
@@ -1089,7 +1093,10 @@ attempt, approval marker or transcript.
   `commitAll` and byte-level tree snapshots. `test/characterization-trace.ts`
   records one ordered entry per persisted `state.json` write and appended
   `events.jsonl` line. `test/workflow/context-fixture.ts` supplies a runner
-  context whose store records calls and rejects unexpected ones. `test/hook.test.ts` covers
+  context whose store records calls and rejects unexpected ones.
+  `test/workflow.test.ts` and the `test/workflow-<area>.test.ts` files drive
+  `WorkflowRunner` through its public API; `test/workflow-fixtures.ts` holds
+  their shared fake adapters and phase-result builders. `test/hook.test.ts` covers
   `plugins/banzai/hooks/spec-gate.cjs`; script-level integration tests cover
   release transactions, validation, the gate and committed smoke.
 - Characterization (ADR-0052): test cases named `characterization: ` in
@@ -1101,7 +1108,10 @@ attempt, approval marker or transcript.
   failure after its terminal checkpoint reconciled by `resume`. Identifiers, timestamps, digests
   and repository paths are normalized. The expected traces were recorded from
   the pre-decomposition source, and behavior-preserving refactors must leave
-  them unchanged.
+  them unchanged. Test cases named `eligibility baseline: ` in
+  `workflow-eligibility.test.ts` and `result-digest.test.ts` likewise fix the
+  retry, recovery, restore and next-action eligibility that the public runner
+  reports for arranged run states, and the state persisted afterwards.
 - Import pattern: production code is imported with NodeNext ESM specifiers —
   `import { … } from "../src/<module>.js"` — and type-only imports are marked
   `type` because `verbatimModuleSyntax` is on.
