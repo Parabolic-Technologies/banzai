@@ -290,5 +290,10 @@ Implementation and review must confirm all of the following:
   boundaries and exact additional consumer edges. Preserve the explicit map;
   no wildcard or arbitrary Markdown import permission is added. Implementation
   of this amendment is Planned.
+- Narrowly amended by
+  [ADR-0052](./0052-orchestrator-capability-slice-architecture.md), accepted
+  2026-09-28: adds one restriction class for domain modules. The exact
+  per-module model, authority citation and fail-closed coverage are unchanged.
+  Implementation of this amendment is Planned.
 - Supersedes: None
 - Superseded by: None

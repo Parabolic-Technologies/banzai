@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { builtinModules } from "node:module";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -512,4 +513,273 @@ test("import_boundaries_formatter_is_deterministic_and_path_safe", async () => {
     new RegExp(PACKAGE_ROOT.replaceAll("/", "\\/"))
   );
   assert.doesNotMatch(firstOutput, /void loadConfig/);
+});
+
+const DOMAIN_IMPORTER = "src/state-machine.ts";
+const PURITY_RULES = new Set([
+  "no-restricted-imports",
+  "no-restricted-syntax",
+  "no-restricted-globals"
+]);
+
+function purityMessages(
+  result: EslintLintResult
+): EslintLintResult["messages"] {
+  return result.messages.filter(
+    (message) =>
+      message.ruleId !== null &&
+      PURITY_RULES.has(message.ruleId) &&
+      message.severity === 2
+  );
+}
+
+test("import_boundaries_domain_modules_reject_effectful_forms", async () => {
+  const cases: [string, string][] = [
+    [
+      'import { readFile } from "node:fs/promises";\nexport const read = readFile;',
+      "Effectful built-in"
+    ],
+    [
+      'import { readFileSync } from "fs";\nexport const read = readFileSync;',
+      "Effectful built-in"
+    ],
+    [
+      'import { spawn } from "node:child_process";\nexport const run = spawn;',
+      "Effectful built-in"
+    ],
+    [
+      'import { platform } from "node:os";\nexport const host = platform;',
+      "Effectful built-in"
+    ],
+    [
+      'import { randomUUID } from "node:crypto";\nexport const id = randomUUID;',
+      "Random-value"
+    ],
+    [
+      'import * as crypto from "node:crypto";\nexport const hash = crypto.createHash;',
+      "Random-value"
+    ],
+    ["export const now = (): number => Date.now();", "Ambient clock"],
+    ["export const now = (): Date => new Date();", "Ambient clock"],
+    ["export const now = (): string => Date();", "Ambient clock"],
+    ["export const pick = (): number => Math.random();", "Random-value"],
+    [
+      "export const home = (): string | undefined => process.env.HOME;",
+      "Ambient runtime"
+    ],
+    ["export const mark = (): number => performance.now();", "Ambient runtime"],
+    ["export const id = (): string => crypto.randomUUID();", "Ambient runtime"],
+    [
+      "export const now = (): number => globalThis.Date.now();",
+      "Ambient runtime"
+    ],
+    [
+      "export const pick = (): number => globalThis.Math.random();",
+      "Ambient runtime"
+    ],
+    [
+      "export const home = (): string | undefined => global.process.env.HOME;",
+      "Ambient runtime"
+    ],
+    [
+      'import { resolve4 } from "node:dns/promises";\nexport const resolve = resolve4;',
+      "Effectful built-in"
+    ]
+  ];
+  for (const [source, kind] of cases) {
+    const messages = purityMessages(await lintSource(DOMAIN_IMPORTER, source));
+    assert.ok(
+      messages.some(
+        (message) =>
+          message.message.includes(kind) &&
+          message.message.includes(DOMAIN_IMPORTER) &&
+          message.message.includes("state-machine")
+      ),
+      `${source}\n${JSON.stringify(messages)}`
+    );
+  }
+});
+
+test("import_boundaries_domain_modules_reject_every_effectful_builtin_subpath", async () => {
+  // A newer Node release can add a subpath such as `dns/promises`; the explicit
+  // policy list must grow with it rather than let the subpath through.
+  const roots = new Set([
+    "fs",
+    "child_process",
+    "net",
+    "http",
+    "https",
+    "http2",
+    "dgram",
+    "dns",
+    "tls",
+    "os",
+    "process",
+    "worker_threads",
+    "cluster"
+  ]);
+  const names = builtinModules
+    .map((name) => name.replace(/^node:/u, ""))
+    .filter((name) => roots.has(name.split("/")[0] ?? ""));
+  assert.ok(names.includes("dns/promises"), JSON.stringify(names));
+  for (const name of new Set(names))
+    for (const specifier of [name, `node:${name}`]) {
+      const messages = purityMessages(
+        await lintSource(
+          DOMAIN_IMPORTER,
+          `import * as effect from ${JSON.stringify(specifier)};\nexport const value = effect;`
+        )
+      );
+      assert.ok(
+        messages.some((message) =>
+          message.message.includes("Effectful built-in")
+        ),
+        `${specifier}\n${JSON.stringify(messages)}`
+      );
+    }
+});
+
+test("import_boundaries_domain_modules_keep_deterministic_hashing", async () => {
+  const result = await lintSource(
+    DOMAIN_IMPORTER,
+    'import { createHash } from "node:crypto";\nexport const digest = (value: string): string =>\n  createHash("sha256").update(value).digest("hex");\nexport const at = (value: string): Date => new Date(value);\nexport const parse = (value: string): number => Date.parse(value);'
+  );
+  assert.deepEqual(purityMessages(result), []);
+});
+
+test("import_boundaries_domain_local_edge_and_builtin_fail_together", async () => {
+  const messages = purityMessages(
+    await lintSource(
+      DOMAIN_IMPORTER,
+      'import { loadConfig } from "./config.js";\nimport { readFile } from "node:fs/promises";\nexport const load = [loadConfig, readFile];'
+    )
+  );
+  assert.ok(
+    messages.some(
+      (message) =>
+        message.message.includes("'./config.js'") &&
+        message.message.includes("Runtime dependency")
+    ),
+    JSON.stringify(messages)
+  );
+  assert.ok(
+    messages.some((message) => message.message.includes("Effectful built-in")),
+    JSON.stringify(messages)
+  );
+});
+
+test("import_boundaries_domain_policy_rejects_non_domain_edges", () => {
+  const modules = [...discoverProductionModules(SOURCE_ROOT)];
+  const domainEntry = (policy: ImportBoundaryEntry[], importer: string) => {
+    const entry = policy.find((candidate) => candidate.importer === importer);
+    assert.ok(entry);
+    assert.equal(entry.classification, "domain");
+    return entry;
+  };
+
+  const runtimeEdge = mutablePolicy();
+  const runtimeEntry = domainEntry(runtimeEdge, DOMAIN_IMPORTER);
+  runtimeEntry.runtime = [
+    ...runtimeEntry.runtime,
+    { target: "./config.js", authority: "PROJECT_MANIFEST.md §3" }
+  ];
+  policyError(
+    () => validateImportBoundaryPolicy(runtimeEdge, modules),
+    "domain_dependency_invalid"
+  );
+
+  const typeEdge = mutablePolicy();
+  const typeEntry = domainEntry(typeEdge, DOMAIN_IMPORTER);
+  typeEntry.typeOnly = [
+    ...typeEntry.typeOnly,
+    { target: "./adapters.js", authority: "PROJECT_MANIFEST.md §3" }
+  ];
+  policyError(
+    () => validateImportBoundaryPolicy(typeEdge, modules),
+    "domain_dependency_invalid"
+  );
+
+  const missingAuthority = mutablePolicy();
+  const portsEntry = domainEntry(missingAuthority, "src/workflow/ports.ts");
+  portsEntry.authorities = ["PROJECT_MANIFEST.md §5"];
+  policyError(
+    () => validateImportBoundaryPolicy(missingAuthority, modules),
+    "domain_authority_missing"
+  );
+});
+
+test("import_boundaries_workflow_modules_cannot_reach_the_facade", async () => {
+  const modules = [...discoverProductionModules(SOURCE_ROOT)];
+  validateImportBoundaryPolicy(mutablePolicy(), modules);
+  for (const [importer, field, target] of [
+    ["src/workflow/context.ts", "runtime", "../workflow.js"],
+    ["src/workflow/configuration/ownership.ts", "typeOnly", "../../workflow.js"]
+  ] as const) {
+    const policy = mutablePolicy();
+    const entry = policy.find((candidate) => candidate.importer === importer);
+    assert.ok(entry);
+    entry[field] = [...entry[field], { target, authority: "ADR-0052" }];
+    const error = policyError(
+      () => validateImportBoundaryPolicy(policy, modules),
+      "workflow_facade_edge"
+    );
+    assert.equal(error.issue.importer, importer);
+  }
+  const messages = boundaryMessages(
+    await lintSource(
+      "src/workflow/context.ts",
+      'import { WorkflowRunner } from "../workflow.js";\nexport const runner = WorkflowRunner;'
+    )
+  );
+  assert.ok(
+    messages.some((message) =>
+      message.message.includes("src/workflow/context.ts")
+    ),
+    JSON.stringify(messages)
+  );
+});
+
+test("import_boundaries_classification_is_explicit_and_closed", () => {
+  const modules = [...discoverProductionModules(SOURCE_ROOT)];
+
+  const missing = mutablePolicy();
+  delete (first(missing) as Partial<ImportBoundaryEntry>).classification;
+  policyError(
+    () => validateImportBoundaryPolicy(missing, modules),
+    "policy_entry_invalid"
+  );
+
+  const unknown = mutablePolicy();
+  (first(unknown) as { classification: string }).classification = "core";
+  policyError(
+    () => validateImportBoundaryPolicy(unknown, modules),
+    "classification_invalid"
+  );
+
+  const duplicate = mutablePolicy();
+  const domain = duplicate.find((entry) => entry.importer === DOMAIN_IMPORTER);
+  assert.ok(domain);
+  duplicate.push({ ...structuredClone(domain), classification: "standard" });
+  policyError(
+    () => validateImportBoundaryPolicy(duplicate, modules),
+    "importer_duplicate"
+  );
+
+  const configs = createImportBoundaryConfigs(
+    validateImportBoundaryPolicy(ORCHESTRATOR_IMPORT_BOUNDARIES, modules)
+  );
+  const rulesFor = (importer: string) =>
+    record(
+      record(
+        configs.find(
+          (config) =>
+            JSON.stringify(record(config).files) === JSON.stringify([importer])
+        )
+      ).rules
+    );
+  assert.equal(
+    ruleSeverity({ rules: rulesFor(DOMAIN_IMPORTER) }, "no-restricted-globals"),
+    "error"
+  );
+  assert.equal(rulesFor("src/workflow.ts")["no-restricted-globals"], undefined);
 });

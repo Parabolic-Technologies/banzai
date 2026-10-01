@@ -14,9 +14,12 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { DEFAULT_CONFIG } from "../src/config.js";
 import { ADOPTED_AGENTS, POPULATED_MANIFEST } from "./adoption-fixtures.js";
-import { monochromeEnv, snapshotTree } from "./helpers.js";
+import {
+  monochromeEnv,
+  reviewerOnlyClaudeConfig,
+  snapshotTree
+} from "./helpers.js";
 
 interface PtyResult {
   exitCode: number;
@@ -155,9 +158,11 @@ if(data.toString().includes('a')||data.toString().includes('q')) process.exit(0)
   };
   const configure = async () => {
     await mkdir(path.join(root, ".banzai"), { recursive: true });
+    // The recommended setup client follows the planning vendor, and these
+    // flows are written against a Codex planner.
     await writeFile(
       path.join(root, ".banzai/config.json"),
-      JSON.stringify(DEFAULT_CONFIG)
+      JSON.stringify(reviewerOnlyClaudeConfig())
     );
   };
   return {

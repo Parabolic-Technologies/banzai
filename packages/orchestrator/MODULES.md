@@ -252,7 +252,7 @@ is a navigational reference and is updated with the module it describes.
   including `assertClaudePermissions`, which ends a run before its first phase
   when the settings a Claude session loads deny a tool the phase must call and
   `--permission-mode dontAsk` leaves nothing able to approve it,
-  approval-digest validation, base-commit validation, attempt reconciliation,
+  attempt reconciliation,
   compatible builder-session selection, bounded full/delta reviewer policy,
   and direct terminal completion after complete zero-accepted triage.
   For new strict implementation and fix attempts it owns the
@@ -331,12 +331,196 @@ is a navigational reference and is updated with the module it describes.
   including strict-selection and plan-task validation; known terminal/session
   conflicts cannot be promoted. Rejected checkpoints on otherwise retryable
   failed planning attempts force a fresh continuation instead of a retry loop.
+  Every timestamp, duration and identifier the runner generates derives from
+  the optional trailing `sources` constructor argument, whose defaults are the
+  system clock and `randomUUID`. Each identifier keeps its baseline
+  derivation:
+  - the run identifier and attempt identifiers take the first 8 UUID
+    characters;
+  - legacy verification rounds keep their `verification-round-<attempt id>-`
+    prefix;
+  - every other identity takes the full UUID.
+
+  `WorkflowRunner` remains the facade while ADR-0052 moves its internals;
+  every name it exports stays importable from `workflow.js`.
+
+  Retry, recovery and restore eligibility run as shells over the staged rules
+  in `workflow/domain/`. Each shell loops until its rule decides, gathering
+  only the evidence the rule names, in the pre-decomposition order. Around each
+  read it keeps that source's original error scope:
+  - interrupted-source preconditions fail as one unvalidated precondition;
+  - digest-rejected and prerequisite-blocked preconditions rethrow terminal-run,
+    project-setup and instruction-mismatch errors;
+  - a prerequisite-blocked failure otherwise reports a Banzai error's own
+    message.
+
+  The shell computes every digest a rule asks for, including the recovery
+  identity the rule assembles, and performs the approval check's block and
+  event and completion revalidation's refresh at their existing points.
+
+  The constructor builds one frozen `RunnerContext` from its arguments and
+  sources; the context shares the public `store` and `adapters` instances, so
+  a patch on either reaches capability code. The runner keeps its mutable
+  state in four per-instance owners and calls capability modules for
+  approval, base-commit and selection validation, the attempt lifecycle,
+  terminal checkpoints, digest evidence, completion capture, refusal,
+  publication and revalidation, verification evidence and rounds, and
+  preflight check-failure recording. It keeps attempt reconciliation, every
+  application of a phase result to the run, the task-completion and
+  completion-publication status projections, and the phase executors,
+  including verification execution and applicability, calling the moved
+  operations from there. Only `now()` remains as a runner-side helper over the
+  context.
+
+- `workflow/ports.ts` — type-only ADR-0052 process-boundary ports: `Clock`
+  (`() => Date`), `IdSource` (RFC 4122 version 4 UUID text) and
+  `RunnerSources`. It is a domain module and `workflow.ts` re-exports it.
+- `workflow/context.ts` — `RunnerContext`, the frozen record of the runner's
+  immutable collaborators (repository root, store, adapters, process runner,
+  progress reporter, optional human-time observer, clock, identifier source);
+  `timestamp`, the ISO-8601 UTC text of one clock reading; and
+  `observeHumanTime`, which never lets an observer failure change a decision.
+  It imports its collaborator types only.
+- `workflow/activity-sequence.ts` — `ActivitySequence`, the per-runner
+  `activity-<n>` identifiers, starting at 1 for each runner.
+- `workflow/cancellation-receipts.ts` — `CancellationReceipts`, the weakly held
+  first-response observation behind each receipt a runner issued.
+- `workflow/configuration/ownership.ts` — `ConfigurationOwnership`, the
+  async-local marker of work inside an owned configuration action; a workflow
+  lock requested there inherits the held lock.
+- `workflow/preflight/invocation-scope-cache.ts` — `InvocationScopeCache`, the
+  resolved scope record per Claude environment key: a key change replaces it
+  with a freshly resolved MCP whitelist and re-arms both reports, a fresh
+  resolution merges into it, and the degradation and whitelist reports are
+  each claimed once per key.
+- `workflow/preflight/approval.ts` — `validateApproval` (blocks, persists and
+  appends `approval.invalidated` when the approved bundle changed),
+  `validateBaseCommit` (blocks and persists when HEAD moved),
+  `validateWorkflowSelection` and `workflowAuthorizationDigest`, which
+  `workflow.ts` re-exports.
+- `workflow/review/result-application.ts` — `validateReviewResultForApplication`:
+  finding identifiers of the current iteration and a complete re-review of the
+  previously accepted findings.
+- `workflow/digest-evidence/records.ts` — records result-digest evidence and
+  rejects a result whose authored digest disagrees, reads the accepted
+  baseline, and derives the digest rejection reason text.
+- `workflow/completion/inputs.ts` — observes the implementation and test report
+  identities and the workspace that completion capture and terminal proof
+  record, and compares two observations exactly (`sameObservedInputs`).
+- `workflow/completion/plan-tasks.ts` — the approved plan path and task
+  identifiers, runner control-task and planning-result validation (including
+  the plan remainder digest), implementation-completion validation and the
+  completion-invalid checkpoint.
+- `workflow/completion/refusal.ts` — `CompletionRefusal`, the ADR-0047
+  publication refusal whose closed code and stage are persisted with operator
+  guidance; rejecting a captured completion input with its repair checkpoint
+  (`plan_task_completion.validation_failed`, `completion.input_rejected`); and
+  refusing a publication with its `completion.publication_refused` event.
+- `workflow/completion/capture.ts` — the transition into the runner-owned
+  completion state (`COMPLETION_STATE_UNSUPPORTED` for an older run state), the
+  implementer-configuration digest and checkpoint-configuration check,
+  completion input capture, and the repair diagnostic and retry predecessor of
+  a completion attempt.
+- `workflow/completion/publication.ts` — publication continuation (capture,
+  then rejection, refusal or publication), candidate publication through the
+  completion cursor, ledger derivation and recording, the publication and
+  checkpoint authority checks, the application of a publication to its attempt
+  record, and reading a frozen publication. It ends where the runner applies
+  the phase result to the run. It depends on attempts and on the other
+  completion modules.
+- `workflow/completion/revalidation.ts` — revalidation of task completion and
+  of a published completion region, and the block a completion failure
+  records.
+- `workflow/verification/required-checks.ts` — the required task-check
+  identifiers of the approved inventory and the task verification policy.
+- `workflow/verification/evidence.ts` — verification and task-verification
+  evidence storage, the verification authority digest, verification input
+  capture, decision preparation and the task execution context.
+- `workflow/verification/rounds.ts` — verification round identity
+  (`VERIFICATION_ATTEMPT_CONFLICT`) and reconciliation of the run's retained
+  verification results (`VERIFICATION_CONFIGURATION_CHANGED` when an open
+  round's commands changed).
+- `workflow/preflight/check-failures.ts` — records a failed start, review check
+  or verification-retry preflight as a block, with `run.start_failed`,
+  `review.checks_failed` or `verification.retry_preflight_failed`.
+- `workflow/attempts/lifecycle.ts` — `AttemptPolicy`, attempt, recovery and
+  completion-repair identities, attempt scope digests, starting, completing and
+  failing attempts, recovery attempts, process start, adapter-result and
+  redacted output persistence, usage accounting and result-envelope helpers.
+- `workflow/attempts/result-scope.ts` — a result's artifact role references,
+  the saved artifact workspace evidence and the phase write scope.
+- `workflow/checkpoints/terminal-checkpoints.ts` — terminal checkpoint writing
+  (including completion-protocol proof), finalization, promotion and result
+  validation, checkpoint model settings and result-source identity evidence.
+  It depends on attempts, completion, verification, review, preflight and
+  digest evidence.
+- `workflow/domain/failure-classes.ts` — ADR-0052 domain module holding the
+  model-failure cause and failure-code sets, the `[RESULT_DIGEST_UNRESOLVED]`
+  block-reason prefix and the read-only-attempt retry predicate that retry,
+  recovery and reconciliation read. It also derives the block reason of a
+  failed start, review or retry check (`checkFailureReason`), keeping a Banzai
+  error's code. It imports `errors` at runtime and `types` type-only.
+- `workflow/domain/sessions.ts` — `sessionContext` and `sessionBinding`, the
+  configured identity a model session binds to.
+- `workflow/domain/human-decisions.ts` — `humanDecisionQuestions`, which
+  `workflow.ts` re-exports, and the `decisionText` and `decisionIdentifier`
+  validators for human-decision input (`INVALID_DECISION`).
+- `workflow/domain/run-identity.ts` — `runId`, the run identifier derived from
+  the slug, creation time and UUID, and `requireSlug` (`INVALID_SLUG`).
+- `workflow/domain/artifact-scope.ts` — `artifactPaths`, the approved planning
+  bundle in description, ADR, plan order (`INCOMPLETE_PLAN`), and
+  `isDocumentationPath`.
+- `workflow/domain/verification-attempts.ts` — `verificationFailureCategory`,
+  which maps process errors to a persisted failure category, and
+  `verificationCommandMatches`, which matches a record to its exact command
+  descriptor.
+- `workflow/domain/routing.ts` — `effectiveWorkflow`, the route a selection
+  result authorizes, and `terminalResultContract`, the result contract a
+  terminal checkpoint records for an attempt kind.
+- `workflow/domain/retry-eligibility.ts` — ADR-0052 domain rule `decideRetry`.
+  It stages retry eligibility over task-verification attempts, the legacy
+  ledger and attempt records, and names the evidence it needs next.
+  `RetryEligibility` moves here and `workflow.ts` re-exports it.
+- `workflow/domain/next-action.ts` — `nextAction`, the next-action text for a
+  status from its retry, recovery and publication outcomes. It reads no
+  evidence.
+- `workflow/domain/restore-eligibility.ts` — `decideRestore` over the approval
+  snapshot facts (presence, digests, content match and paths) and the current
+  bundle.
+- `workflow/domain/recovery-eligibility.ts` — `decideRecovery`, which consults
+  the digest-rejected source, then the prerequisite-blocked fix source, then
+  the interrupted-attempt rule. It also defines:
+  - `RecoveryEligibility`, which `workflow.ts` re-exports, and
+    `recoveryIneligible`;
+  - the shared precondition steps (HEAD, configuration by role, approval or
+    selection check, completion revalidation, attempt scope digest);
+  - `decideRecoveryWorkspace`, the shared tail: the workspace snapshot and base
+    commit, change counts with the recovery identity, then any persisted
+    authorization.
+- `workflow/domain/digest-rejected-recovery.ts` — `decideDigestRejected`, the
+  ADR-0051 source. It decides null when the source does not apply, and
+  otherwise stages the digest-evidence read, liveness, terminal checkpoint,
+  supersession, HEAD, configuration, selection or approval check, scope and
+  evidence digests, then the shared tail.
+- `workflow/domain/prerequisite-blocked-fix.ts` — three rules:
+  - `decidePrerequisiteScope` derives the exact remaining accepted scope and
+    concrete prerequisites of one completed blocked fix. Source selection,
+    recovery execution and fix execution all use it.
+  - `decidePrerequisiteSource` selects the single exact candidate and rejects
+    started descendants, mismatched recovery state and conflicting terminal
+    checkpoints.
+  - `decidePrerequisiteBlockedFix` decides the source's eligibility.
+
+  Rejections carry the baseline error code and message for the shell to throw.
+
 - `verification.ts` — root project-marker detection, exact repository-hygiene
   classification, explicit-profile readiness assessment, deterministic
   profile-major command descriptors and configuration digests, and flattening
   shared by doctor and workflow execution.
 - `state-machine.ts` — `transitionState`, `blockState`, `requireState`; the only
-  place `RunStatus` changes, so illegal transitions fail closed.
+  place `RunStatus` changes, so illegal transitions fail closed. It is
+  classified in place as an ADR-0052 domain module: it imports `errors` at
+  runtime and `types` type-only, and lint rejects effects in it.
 - `store.ts` — `RunStore`. Atomically replaces `state.json`, appends
   `events.jsonl`, writes model-attempt records and redacted output, atomically
   begins and finishes strict mode-0600 `<attempt-id>.context.json` ledgers while
@@ -482,8 +666,9 @@ is a navigational reference and is updated with the module it describes.
 - `models.ts` — hand-maintained catalog: `SELECTABLE_MODELS`, supported-model
   identity, model standings, `modelAdvisories`, `vendorFor`, `vendorUsage`, and
   role labels. It is the source of truth for supported identities and for the
-  model and effort levels the menus offer. The Codex choices include
-  `gpt-6-astra` with `low`, `medium`, `high`, `xhigh`, `max`, and `ultra` effort.
+  model and effort levels the menus offer. The Codex choices `gpt-6.1-sol`,
+  `gpt-6-astra`, and `gpt-6-sol` offer `low`, `medium`, `high`, `xhigh`, `max`,
+  and `ultra` effort; `claude-sonnet-4-6` offers no `xhigh`.
 - `model-selection.ts` — `selectModelSettings`; the per-role model and effort
   dialog, filtered to the levels the chosen model accepts. Its implementation
   menu recommends the effective planning executable, model, and effort as one

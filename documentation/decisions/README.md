@@ -58,6 +58,7 @@ plugin and orchestrator source.
 | [0049](./0049-task-scoped-verification.md) | Task-scoped verification authority | Accepted | 2026-09-17 | Private work `task-scoped-verification`; partial supersession of 0006/0007/0045 and amendments to 0008/0018/0037/0038/0043; implementation Implemented; independent review recorded privately |
 | [0050](./0050-triggered-code-design-assessment.md) | Triggered code-design assessment | Accepted | 2026-09-18 | Research in `documentation/ideas/` (structural debt, composable code design, method budget draft); narrow amendment to ADR-0030 |
 | [0051](./0051-acceptance-time-digest-validation.md) | Acceptance-time validation of model-authored digests | Accepted | 2026-09-21 | Issue 11 in the product repository; private work `model-authored-digest-validation`; amends 0023/0024 by adding one recovery source |
+| [0052](./0052-orchestrator-capability-slice-architecture.md) | Orchestrator capability-slice architecture and WorkflowRunner decomposition | Accepted | 2026-09-28 | Standalone owner request; review-1 F1/F2 accepted and resolved in rework 1; narrow amendments to 0028/0029; implementation Planned |
 
 ## File Names
 

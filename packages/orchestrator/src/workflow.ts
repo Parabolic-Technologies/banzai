@@ -1,5 +1,4 @@
 import { freezeReviewConfiguration } from "./configuration-review.js";
-import { AsyncLocalStorage } from "node:async_hooks";
 import {
   discoverTaskVerification,
   executeTaskVerification,
@@ -9,15 +8,9 @@ import {
   authorizeTaskVerification,
   parseTaskVerificationObligations,
   selectTaskVerification,
-  taskVerificationPath,
-  TASK_VERIFICATION_SOURCE_MAX_BYTES,
-  captureVerificationInputs,
-  decideVerification,
   evidenceDigest,
   parseVerificationConfiguration,
   parseVerificationObligations,
-  sameVerificationCapture,
-  persistVerificationDecision,
   persistVerificationOriginStart,
   persistVerificationOriginFinish,
   readVerificationOrigins,
@@ -25,12 +18,8 @@ import {
   persistVerificationApplicability
 } from "./verification-evidence.js";
 import type {
-  TaskVerificationContext,
   TaskVerificationAuthority,
-  TaskVerificationDigestDetail,
-  TaskVerificationPolicy,
-  VerificationCapture,
-  VerificationStorage
+  VerificationCapture
 } from "./verification-evidence.js";
 import {
   hasRunnerWorkOwnership,
@@ -38,30 +27,15 @@ import {
   createWork,
   artifactRoles,
   inspectBoundWork,
-  readBytes as readArtifactBytes,
-  ownsArtifact,
-  safePath
+  ownsArtifact
 } from "./artifact-storage.js";
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import {
-  access,
-  chmod,
-  lstat,
-  mkdir,
-  readFile,
-  realpath,
-  rename,
-  unlink,
-  writeFile
-} from "node:fs/promises";
+import { access, chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import {
-  classifyModelFailure,
-  resolveClaudeInvocationScope
-} from "./adapters.js";
+import { resolveClaudeInvocationScope } from "./adapters.js";
 import {
   sealReviewSnapshot,
   reviewApprovedArtifacts
@@ -73,6 +47,164 @@ import {
   instructionPhasesForRole
 } from "./phase-instructions.js";
 import type { InstructionPhase, InstructionParity } from "./types.js";
+import {
+  DIGEST_REJECTED_FAILURE_CODES,
+  isRetryableInterruptedAttempt,
+  PLAN_BUNDLE_COMPLETION_VIOLATIONS,
+  PLANNING_REPAIR_FAILURE_CODES,
+  RECOVERABLE_MUTABLE_FAILURE_CAUSES,
+  TERMINAL_INTEGRITY_FAILURE_CODES
+} from "./workflow/domain/failure-classes.js";
+import {
+  decideRetry,
+  type RetryEligibility,
+  type RetryFacts,
+  type VerificationEvidence
+} from "./workflow/domain/retry-eligibility.js";
+import { nextAction } from "./workflow/domain/next-action.js";
+import {
+  artifactPaths,
+  isDocumentationPath
+} from "./workflow/domain/artifact-scope.js";
+import {
+  decisionIdentifier,
+  decisionText
+} from "./workflow/domain/human-decisions.js";
+import { effectiveWorkflow } from "./workflow/domain/routing.js";
+import { requireSlug, runId } from "./workflow/domain/run-identity.js";
+import { sessionBinding, sessionContext } from "./workflow/domain/sessions.js";
+import {
+  verificationCommandMatches,
+  verificationFailureCategory
+} from "./workflow/domain/verification-attempts.js";
+
+export { humanDecisionQuestions } from "./workflow/domain/human-decisions.js";
+import {
+  decideRecovery,
+  type RecoveryEligibility,
+  type RecoveryFacts,
+  type RecoveryPreconditionFacts,
+  type RecoveryPreconditionStep
+} from "./workflow/domain/recovery-eligibility.js";
+import {
+  decideDigestRejected,
+  type DigestRejectedFacts
+} from "./workflow/domain/digest-rejected-recovery.js";
+import {
+  decidePrerequisiteBlockedFix,
+  decidePrerequisiteScope,
+  decidePrerequisiteSource,
+  type PrerequisiteBlockedFixFacts,
+  type PrerequisiteScope,
+  type PrerequisiteScopeFacts,
+  type PrerequisiteSourceFacts
+} from "./workflow/domain/prerequisite-blocked-fix.js";
+import {
+  decideRestore,
+  type RestoreEligibility,
+  type RestoreFacts
+} from "./workflow/domain/restore-eligibility.js";
+import type { RunnerSources } from "./workflow/ports.js";
+import {
+  observeHumanTime,
+  timestamp,
+  type RunnerContext
+} from "./workflow/context.js";
+import {
+  validateApproval,
+  validateBaseCommit,
+  validateWorkflowSelection,
+  workflowAuthorizationDigest
+} from "./workflow/preflight/approval.js";
+import { validateReviewResultForApplication } from "./workflow/review/result-application.js";
+import { digestRejectionReason } from "./workflow/digest-evidence/records.js";
+export { workflowAuthorizationDigest } from "./workflow/preflight/approval.js";
+import {
+  observeCompletionInputs,
+  sameObservedInputs
+} from "./workflow/completion/inputs.js";
+import {
+  approvedTaskIds,
+  completionPlanPath,
+  validateImplementationCompletion,
+  validatePlanningResult
+} from "./workflow/completion/plan-tasks.js";
+import { taskVerificationPolicy } from "./workflow/verification/required-checks.js";
+import {
+  artifactWritePaths,
+  checkArtifactPhaseScope,
+  validateArtifactRoleReferences,
+  validateSavedArtifactScope
+} from "./workflow/attempts/result-scope.js";
+import {
+  accountAttemptUsage,
+  accountCompletedAttempt,
+  attemptScopeDigest,
+  beginAttempt,
+  beginRecoveryAttempt,
+  completeAttempt,
+  completionEnvelopeOf,
+  completionProtocolAttempt,
+  failAttempt,
+  legacyPhaseResult,
+  newAttempt,
+  persistAdapterResult,
+  processStarted,
+  recoveryAttempt,
+  repairAttempt,
+  writeAttemptOutput,
+  type AttemptPolicy
+} from "./workflow/attempts/lifecycle.js";
+import {
+  establishResultSourceIdentities,
+  finalizeTerminalCheckpoint,
+  promoteTerminalCheckpoint,
+  terminalCheckpointWriter
+} from "./workflow/checkpoints/terminal-checkpoints.js";
+import {
+  appendCompletionPublicationRefusalEvent,
+  refuseCompletionPublication,
+  CompletionRefusal
+} from "./workflow/completion/refusal.js";
+import {
+  captureCompletionInput,
+  completionRepairDiagnostic,
+  completionRetryPredecessor,
+  transitionToCompletionState
+} from "./workflow/completion/capture.js";
+import {
+  completionAuthorityCurrent,
+  completionCheckpointAuthorityCurrent,
+  continueCompletionPublication,
+  frozenCompletionPublication
+} from "./workflow/completion/publication.js";
+import {
+  blockForCompletionFailure,
+  revalidateTaskCompletion
+} from "./workflow/completion/revalidation.js";
+import {
+  captureVerification,
+  prepareVerificationDecision,
+  taskExecutionContext,
+  taskVerificationStorage,
+  verificationAuthority,
+  verificationStorage
+} from "./workflow/verification/evidence.js";
+import {
+  reconcileVerificationState,
+  verificationRound
+} from "./workflow/verification/rounds.js";
+import {
+  recordReviewCheckFailure,
+  recordStartFailure,
+  recordVerificationRetryCheckFailure
+} from "./workflow/preflight/check-failures.js";
+import { ActivitySequence } from "./workflow/activity-sequence.js";
+import { CancellationReceipts } from "./workflow/cancellation-receipts.js";
+import { ConfigurationOwnership } from "./workflow/configuration/ownership.js";
+import { InvocationScopeCache } from "./workflow/preflight/invocation-scope-cache.js";
+
+export type { Clock, IdSource, RunnerSources } from "./workflow/ports.js";
 import { assertContractParity } from "./contracts.js";
 import {
   claudePermissionDemand,
@@ -148,7 +280,6 @@ import type {
   CancelRunInput,
   CancellationAnswer,
   CancellationContext,
-  CancellationObservation,
   CancellationReceipt,
   CancellationResponseResult,
   CancellationResult,
@@ -163,23 +294,12 @@ import {
 import type { CancellationContextLinks } from "./cancellation-evidence.js";
 import { reviewVerdictText } from "./vocabulary.js";
 import {
-  parseApprovedPlanTaskIds,
-  validatePlanRunnerControlTasks,
   planHumanPrerequisites,
   validatePlanVerificationObligations,
   parsePlanTaskCompletionProjection,
   PlanTaskCompletionError,
   summariesMatch,
-  validatePlanTaskCompletionLedgerShape,
-  validatePlanTaskCompletion,
   validateCompletionClaims,
-  composeCompletionCandidate,
-  eligibleGapHeadings,
-  scanCompletionRegion,
-  parsePublishedCompletionRegion,
-  ledgerDigest,
-  planTaskDigest,
-  type ValidatedCompletionClaims,
   type ValidatedPlanTaskCompletion
 } from "./plan-task-completion.js";
 import {
@@ -234,62 +354,30 @@ import {
 } from "./review-artifact.js";
 import { blockState, requireState, transitionState } from "./state-machine.js";
 import { RunStore } from "./store.js";
-import type {
-  HumanTimeBoundary,
-  HumanTimeEventType,
-  HumanTimeObserver
-} from "./human-time.js";
+import type { HumanTimeObserver } from "./human-time.js";
 import {
-  COMPLETION_CANDIDATE_SCHEMA,
-  COMPLETION_CAPTURE_SCHEMA,
   COMPLETION_PROTOCOL,
-  COMPLETION_PUBLICATION_SCHEMA,
-  COMPLETION_RECORD_SCHEMA_VERSION,
-  COMPLETION_SUMMARY_SCHEMA_VERSION,
-  COMPLETION_TRANSITION_SCHEMA,
   CONTRACT_VERSION,
   MODEL_ATTEMPT_SCHEMA_VERSION,
   RECOVERY_AUTHORIZATION_SCHEMA,
   RECOVERY_AUTHORIZATION_SCHEMA_VERSION,
-  RESULT_DIGEST_EVIDENCE_SCHEMA,
-  RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION,
-  STRICT_MODEL_ATTEMPT_SCHEMA_VERSION,
-  TERMINAL_CHECKPOINT_SCHEMA,
-  TERMINAL_CHECKPOINT_SCHEMA_V2,
-  TERMINAL_CHECKPOINT_SCHEMA_VERSION,
-  TERMINAL_CHECKPOINT_SCHEMA_VERSION_V2,
   sessionBindingMatches,
-  type AdapterTerminalSuccess,
   type AdapterResult,
   type AdrDecision,
   type AttemptRecord,
   type AttemptReference,
   type ClaudeInvocationScope,
-  type CompletionCandidate,
-  type CompletionCapture,
   type CompletionDiagnostic,
-  type CompletionObservedInputs,
   type CompletionPublication,
-  type CompletionPublicationCursor,
   type CompletionPublicationRefusalCode,
   type CompletionPublicationStage,
-  type CompletionReportObservation,
-  type CompletionTransition,
-  type PhaseArtifacts,
   type PhaseResultEnvelope,
-  type PlanTaskCompletionLedger,
-  type ReviewCompletionPublication,
-  type TerminalAttemptCheckpointV2,
-  type ValidPlanTaskCompletionSummary,
   type ContextAuthorityEntry,
   type ContextMetric,
   type DecisionConsultationAnswer,
   type FindingDisposition,
-  type ModelFailureCause,
-  type HumanDecisionRequest,
   type HumanDecisionRecord,
   type ModelProgressEvent,
-  type ModelSessionBinding,
   type ModelSettings,
   type McpWhitelist,
   type ModelUsage,
@@ -299,7 +387,6 @@ import {
   type PhaseDescriptor,
   type PhaseResult,
   type PersistedPhaseResult,
-  type PlanTaskCompletionViolation,
   type ProcessRunner,
   type ProgressEvent,
   type ProgressReporter,
@@ -312,43 +399,26 @@ import {
   type ReviewRotationReason,
   type ReviewResult,
   type RecoveryAuthorization,
-  type ResultDigestComparison,
-  type ResultDigestEvidence,
   type ReviewerSessionBinding,
   type RunState,
   type SessionInventory,
   type SessionContext,
   type SessionMode,
-  type TerminalAttemptCheckpoint,
-  type TerminalCheckpointResult,
-  type TerminalResultContract,
   type TriageItem,
   type TriageRecord,
   type VendorAdapters,
-  type VerificationAttemptFailureCategory,
   type VerificationAttemptRecord,
-  type VerificationCommandDescriptor,
-  type VerificationResult,
-  type WorkflowRoute,
   type WorkflowSelectionRecord,
   type WorkflowSelectionResult
 } from "./types.js";
 import {
-  completionRecordIntegrity,
   digestCanonicalJson,
-  effectiveResultSourceIdentities,
-  ResultDigestRejectedError,
-  resultDigestDiagnostic,
-  isPhaseResultEnvelope,
   envelopeResultFields,
-  phaseResultFromEnvelope,
   parseDecisionConsultationAnswers,
   parsePersistedPhaseResult,
   parseReviewResult,
   parseCurrentReviewResult,
-  phaseResultEnvelopeOf,
-  validateReviewScope,
-  terminalCheckpointIntegrity
+  validateReviewScope
 } from "./validation.js";
 import {
   describeVerificationCommands,
@@ -371,39 +441,10 @@ const PHASE_PHASES = {
   Review: ["review"]
 } as const;
 
-interface AttemptPolicy {
-  sessionMode: SessionMode;
-  resumeSessionId: string | null;
-  sessionContext: SessionContext;
-  reviewMode?: ReviewMode;
-  rotationReason?: ReviewRotationReason | null;
-  /** Present for strict implementation/fix attempts under the completion protocol. */
-  completion?: { retryOf: string | null };
-}
-
 interface ReviewExecutionPolicy extends AttemptPolicy {
   sessionContext: SessionContext & { role: "reviewer" };
   reviewMode: ReviewMode;
   rotationReason: ReviewRotationReason | null;
-}
-
-function sessionContext(
-  role: SessionContext["role"],
-  settings: ModelSettings
-): SessionContext {
-  return {
-    role,
-    executable: settings.executable,
-    model: settings.model,
-    effort: settings.effort
-  };
-}
-
-function sessionBinding(
-  id: string | null,
-  context: SessionContext
-): ModelSessionBinding | null {
-  return id === null ? null : { id, ...context };
 }
 
 /**
@@ -421,122 +462,6 @@ export function invocationScopeDigest(scope: ClaudeInvocationScope): string {
       ])
     )
     .digest("hex");
-}
-
-/**
- * Causes that say nothing about review integrity. A transient vendor condition
- * must not discard a reviewer session and promote its retry to a full
- * from-scratch audit.
- */
-const INTEGRITY_NEUTRAL_FAILURE_CAUSES = new Set<ModelFailureCause>([
-  "capacity",
-  "timeout",
-  "process_start",
-  "transport"
-]);
-
-/**
- * Completion violations whose defect lives in the approved plan bundle rather
- * than in the attempt's evidence. A fresh implementation attempt can never
- * repair these — the plan is immutable while approved — so their retry reruns
- * planning for a corrected bundle and a new approval instead of looping a
- * completion-evidence repair that must fail identically every time.
- */
-const PLAN_BUNDLE_COMPLETION_VIOLATIONS = new Set<PlanTaskCompletionViolation>([
-  "approved_plan_invalid",
-  "approval_invalid"
-]);
-
-/**
- * Failures that can terminate an already-running mutable model after it has
- * changed the checkout but before a terminal result reaches Banzai. They need
- * the same explicit, snapshot-bound recovery path as a parent interruption.
- * Process-start failures are excluded because no mutable child ran, while an
- * unclassified failure remains fail-closed because its integrity is unknown.
- */
-const RECOVERABLE_MUTABLE_FAILURE_CAUSES = new Set<ModelFailureCause>([
-  "capacity",
-  "timeout",
-  "transport"
-]);
-
-const PLANNING_REPAIR_FAILURE_CODES = new Set([
-  "INVALID_RESULT",
-  "MODEL_RESULT_INVALID",
-  "CODEX_RESULT_MISSING",
-  "PHASE_RESULT_SCHEMA_MISMATCH",
-  "PLAN_TASK_COMPLETION_INVALID"
-]);
-
-const TERMINAL_INTEGRITY_FAILURE_CODES = new Set([
-  "TERMINAL_RESULT_CONFLICT",
-  "SESSION_ID_CONFLICT"
-]);
-
-/**
- * Failure codes an attempt may carry when a digest it authored disagreed with
- * the bytes it named. `PLAN_TASK_COMPLETION_INVALID` is a long-standing
- * completion-validation code produced elsewhere too, so membership here is
- * never sufficient: `digestRejectedRecoveryEligibility` admits an attempt only
- * together with a rejected digest record attributed to that exact attempt.
- * Dropping that conjunct would widen recovery authority.
- */
-const DIGEST_REJECTED_FAILURE_CODES = new Set([
-  "RESULT_DIGEST_REJECTED",
-  "PLAN_TASK_COMPLETION_INVALID"
-]);
-
-/**
- * Marks a consumption-time digest rejection that no command can clear: the
- * bytes disagree and no recorded baseline establishes a target to restore
- * them to. Read back by retry eligibility exactly as the approval-invalidation
- * reason is, so the run never advertises an action that must fail identically.
- */
-const DIGEST_UNRESOLVED_BLOCK_PREFIX = "[RESULT_DIGEST_UNRESOLVED]";
-
-/** The structured facts a shared-library digest failure carries, if any. */
-function taskVerificationDigestDetail(
-  error: unknown
-): TaskVerificationDigestDetail | null {
-  const candidate = error as {
-    code?: unknown;
-    detail?: TaskVerificationDigestDetail;
-  };
-  return (candidate.code === "TASK_VERIFICATION_DIGEST_MISMATCH" ||
-    candidate.code === "TASK_VERIFICATION_SOURCE_TOO_LARGE") &&
-    candidate.detail !== undefined
-    ? candidate.detail
-    : null;
-}
-
-/** Exact identity equality for the report and workspace inputs of one capture. */
-function sameObservedInputs(
-  a: CompletionObservedInputs,
-  b: CompletionObservedInputs
-): boolean {
-  return (
-    digestCanonicalJson(a.implementationReport) ===
-      digestCanonicalJson(b.implementationReport) &&
-    digestCanonicalJson(a.testReport) === digestCanonicalJson(b.testReport) &&
-    a.workspaceDigest === b.workspaceDigest
-  );
-}
-
-/**
- * A publication refusal under the completion protocol (ADR-0047 section 4).
- * The closed code and stage are persisted; the remedy is operator guidance
- * and never carries model text or raw error output.
- */
-class CompletionRefusal extends Error {
-  constructor(
-    readonly code: CompletionPublicationRefusalCode,
-    readonly stage: CompletionPublicationStage,
-    readonly proofDigest: string | null,
-    readonly remedy: string
-  ) {
-    super(`${code} at ${stage}`);
-    this.name = "CompletionRefusal";
-  }
 }
 
 export function reviewExecutionPolicy(
@@ -615,63 +540,6 @@ export function reviewExecutionPolicy(
   };
 }
 
-/**
- * Accumulates the usage of two turns that belong to one attempt, so a repair
- * turn's cost is attributed rather than replacing the turn it repaired.
- */
-
-function effectiveWorkflow(result: WorkflowSelectionResult): WorkflowRoute {
-  if (
-    result.recommendedWorkflow !== "strict" &&
-    result.confidence === "high" &&
-    result.escalationTriggers.length === 0
-  ) {
-    return result.recommendedWorkflow;
-  }
-  return "strict";
-}
-
-function isRetryableInterruptedAttempt(
-  attempt: AttemptReference,
-  record: AttemptRecord
-): boolean {
-  return (
-    !attempt.mutable &&
-    record.status === "started" &&
-    (attempt.kind === "selection" || attempt.kind === "review")
-  );
-}
-
-function verificationFailureCategory(
-  error: unknown
-): VerificationAttemptFailureCategory {
-  if (error instanceof BanzaiError) {
-    if (error.code === "PROCESS_START_FAILED") {
-      return "process_start";
-    }
-    if (error.code === "PROCESS_TIMEOUT") {
-      return "timeout";
-    }
-    if (error.code === "PROCESS_OUTPUT_LIMIT") {
-      return "output_limit";
-    }
-  }
-  return "runner_failure";
-}
-
-function verificationCommandMatches(
-  record: VerificationAttemptRecord,
-  descriptor: VerificationCommandDescriptor
-): boolean {
-  return (
-    record.command.profileId === descriptor.profileId &&
-    record.command.projectType === descriptor.projectType &&
-    record.command.profileOrdinal === descriptor.profileOrdinal &&
-    record.command.commandOrdinal === descriptor.commandOrdinal &&
-    record.command.configurationDigest === descriptor.configurationDigest
-  );
-}
-
 function terminalVerificationRecord(
   record: VerificationAttemptRecord,
   input: Pick<
@@ -683,7 +551,8 @@ function terminalVerificationRecord(
     | "failureCategory"
     | "stdout"
     | "stderr"
-  >
+  >,
+  now: () => string
 ): VerificationAttemptRecord {
   const candidateCompletedAt = input.completedAt ?? now();
   const completedAt =
@@ -699,35 +568,6 @@ function terminalVerificationRecord(
       Date.parse(completedAt) - Date.parse(record.startedAt)
     )
   };
-}
-
-export function workflowAuthorizationDigest(input: {
-  runId: string;
-  request: string;
-  recommendedWorkflow: WorkflowRoute;
-  workflow: WorkflowRoute;
-  confidence: WorkflowSelectionResult["confidence"];
-  reason: string;
-  escalationTriggers: string[];
-  selectedAt: string;
-  attemptId: string;
-}): string {
-  return createHash("sha256")
-    .update(
-      JSON.stringify({
-        version: 1,
-        runId: input.runId,
-        request: input.request,
-        recommendedWorkflow: input.recommendedWorkflow,
-        workflow: input.workflow,
-        confidence: input.confidence,
-        reason: input.reason,
-        escalationTriggers: input.escalationTriggers,
-        selectedAt: input.selectedAt,
-        attemptId: input.attemptId
-      })
-    )
-    .digest("hex");
 }
 
 export interface StartRunInput {
@@ -763,64 +603,6 @@ export interface ConfigurationDecisionInput {
   action: ConfigurationAction;
   profile?: unknown;
   decidedBy: string;
-}
-
-export function humanDecisionQuestions(
-  pending: HumanDecisionRequest,
-  liteWorkflow: boolean
-): string[] {
-  if (pending.kind === "configuration_prerequisite") return [];
-  if (pending.kind === "decision_consultation") {
-    return pending.request.decisions.map((decision) => decision.question);
-  }
-  if (pending.questions.length > 0) {
-    return [...pending.questions];
-  }
-  return [
-    liteWorkflow
-      ? "What decision should workflow reselection apply?"
-      : "What decision or approval should planning apply?"
-  ];
-}
-
-const UNSAFE_HUMAN_DECISION_CONTROL =
-  /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u;
-
-function decisionText(
-  value: unknown,
-  label: string,
-  maximum: number,
-  allowNewlines = false
-): string {
-  if (
-    typeof value !== "string" ||
-    value.length === 0 ||
-    value.length > maximum ||
-    value.trim().length === 0 ||
-    UNSAFE_HUMAN_DECISION_CONTROL.test(value) ||
-    (!allowNewlines && /[\r\n]/u.test(value))
-  ) {
-    throw new BanzaiError(
-      "INVALID_DECISION",
-      `${label} must be a bounded non-empty safe string.`
-    );
-  }
-  return value;
-}
-
-function decisionIdentifier(
-  value: unknown,
-  label: string,
-  maximum = 128
-): string {
-  const identifier = decisionText(value, label, maximum);
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(identifier)) {
-    throw new BanzaiError(
-      "INVALID_DECISION",
-      `${label} must be a canonical identifier.`
-    );
-  }
-  return identifier;
 }
 
 export interface WorkflowStatus {
@@ -952,49 +734,19 @@ interface ActivityDetail {
   descriptor: PhaseDescriptor | undefined;
 }
 
-export interface RetryEligibility {
-  eligible: boolean;
-  reason: string;
-  attemptId: string | null;
+export type { RetryEligibility } from "./workflow/domain/retry-eligibility.js";
+
+export type { RecoveryEligibility } from "./workflow/domain/recovery-eligibility.js";
+
+/** The snapshot a recovery shell keeps for the change counts that follow it. */
+interface RecoveryWorkspaceSnapshot {
+  snapshot?: WorkspaceSnapshot;
 }
 
-export interface RecoveryEligibility {
-  eligible: boolean;
-  terminalCheckpointPresent?: boolean;
-  reason: string;
-  warning: string;
-  sourceKind:
-    "interrupted" | "prerequisite_blocked_fix" | "digest_rejected" | null;
-  attemptId: string | null;
-  phase: "plan" | "implementation" | "fix" | null;
-  resolvedFindingIds: string[];
-  remainingFindingIds: string[];
-  prerequisites: string[];
-  authorization: "plan_approval" | "workflow_selection" | null;
-  recoveryIdentity: string | null;
-  workspace: {
-    digest: string;
-    added: number;
-    modified: number;
-    deleted: number;
-    total: number;
-  } | null;
-  baseCommit: string | null;
-  approvalDigest: string | null;
-  workflowDigest: string | null;
-  scopeDigest: string | null;
-  configurationDigest: string | null;
-}
-
-interface PrerequisiteBlockedFixScope {
-  attempt: AttemptReference & { kind: "fix"; mutable: true };
+interface PrerequisiteBlockedFixScope extends PrerequisiteScope {
   record: AttemptRecord<PersistedPhaseResult>;
   result: PersistedPhaseResult;
   reviewDigest: string;
-  acceptedFindingIds: string[];
-  resolvedFindingIds: string[];
-  remainingFindingIds: string[];
-  prerequisites: string[];
   scopeDigest: string;
 }
 
@@ -1003,61 +755,6 @@ export interface RecoverInput {
   recoveryIdentity: string;
   unknownSideEffectsAccepted: true;
   decidedBy: string;
-}
-
-const RECOVERY_WARNING =
-  "Repository and external side effects may be partial or duplicated. Recovery authorizes new work from this exact checkout; it does not mark the interrupted attempt completed.";
-
-function recoveryIneligible(
-  reason: string,
-  attemptId: string | null = null,
-  phase: RecoveryEligibility["phase"] = null,
-  terminalCheckpointPresent = false
-): RecoveryEligibility {
-  return {
-    eligible: false,
-    terminalCheckpointPresent,
-    reason,
-    warning: RECOVERY_WARNING,
-    sourceKind: null,
-    attemptId,
-    phase,
-    resolvedFindingIds: [],
-    remainingFindingIds: [],
-    prerequisites: [],
-    authorization: null,
-    recoveryIdentity: null,
-    workspace: null,
-    baseCommit: null,
-    approvalDigest: null,
-    workflowDigest: null,
-    scopeDigest: null,
-    configurationDigest: null
-  };
-}
-
-function now(): string {
-  return new Date().toISOString();
-}
-
-function runId(slug: string): string {
-  const timestamp = now()
-    .replace(/[-:.TZ]/g, "")
-    .slice(0, 14);
-  return `${timestamp}-${slug}-${randomUUID().slice(0, 8)}`;
-}
-
-function terminalResultContract(
-  kind: AttemptReference["kind"],
-  taskMode = false
-): TerminalResultContract {
-  return kind === "selection"
-    ? "workflow-selection/v1"
-    : kind === "review"
-      ? "review-result/v2"
-      : taskMode
-        ? "phase-result/v4"
-        : "phase-result/v3";
 }
 
 function commandDisplay(command: string, args: string[]): string {
@@ -1104,43 +801,6 @@ function phaseDescriptor(
     timeoutMs: settings.timeoutMs,
     phases
   };
-}
-
-function requireSlug(slug: string): void {
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
-    throw new BanzaiError(
-      "INVALID_SLUG",
-      "Feature slug must be lowercase kebab-case."
-    );
-  }
-}
-
-function checkFailureReason(error: unknown): string {
-  return error instanceof BanzaiError
-    ? `[${error.code}] ${error.message}`
-    : errorMessage(error);
-}
-
-function artifactPaths(state: RunState): string[] {
-  const artifacts = state.planArtifacts;
-  if (
-    artifacts?.description === null ||
-    artifacts?.plan === null ||
-    artifacts === null
-  ) {
-    throw new BanzaiError(
-      "INCOMPLETE_PLAN",
-      "Planning must produce description and plan artifact paths before approval."
-    );
-  }
-  return [artifacts.description, ...artifacts.adrs, artifacts.plan];
-}
-
-function isDocumentationPath(relativePath: string): boolean {
-  const normalized = relativePath.replaceAll("\\", "/");
-  return (
-    normalized === "documentation" || normalized.startsWith("documentation/")
-  );
 }
 
 function executableCandidates(
@@ -1192,36 +852,55 @@ function validateNodeVersion(): void {
   }
 }
 
+/** A failed verification evidence read is a retry decision input. */
+async function readableVerification<T extends object>(
+  read: () => Promise<T>
+): Promise<VerificationEvidence<T>> {
+  try {
+    return { readable: true, ...(await read()) };
+  } catch {
+    return { readable: false };
+  }
+}
+
 export class WorkflowRunner {
-  private readonly cancellationReceipts = new WeakMap<
-    CancellationReceipt,
-    CancellationObservation
-  >();
+  private readonly cancellationReceipts = new CancellationReceipts();
   readonly store: RunStore;
-  private progressSequence = 0;
-  private resolvedScope: {
-    key: string;
-    scope: ClaudeInvocationScope;
-    degradedReason: string | null;
-    mcp: McpWhitelist | null;
-  } | null = null;
-  private reportedScopeDegradation = false;
-  private reportedMcpWhitelist = false;
+  private readonly activities = new ActivitySequence();
+  private readonly scopeCache = new InvocationScopeCache();
+  private readonly context: RunnerContext;
 
   constructor(
     readonly repoRoot: string,
     readonly adapters: VendorAdapters,
     readonly processRunner: ProcessRunner = runProcess,
     readonly progressReporter: ProgressReporter = () => {},
-    private readonly humanTimeObserver?: HumanTimeObserver
+    humanTimeObserver?: HumanTimeObserver,
+    sources: RunnerSources = {}
   ) {
     this.store = new RunStore(repoRoot);
+    // The context shares the public store and adapters instances, so a patch
+    // applied to either reaches capability code too.
+    this.context = Object.freeze({
+      repoRoot,
+      store: this.store,
+      adapters,
+      processRunner,
+      progressReporter,
+      humanTimeObserver,
+      clock: sources.clock ?? (() => new Date()),
+      ids: sources.ids ?? randomUUID
+    });
   }
 
-  private readonly configurationOwnership = new AsyncLocalStorage<boolean>();
+  private now(): string {
+    return timestamp(this.context);
+  }
+
+  private readonly configurationOwnership = new ConfigurationOwnership();
 
   private async acquireWorkflowLock(options: { reclaimStale?: boolean } = {}) {
-    if (this.configurationOwnership.getStore() === true) {
+    if (this.configurationOwnership.owned()) {
       await this.store.assertLockOwned();
       return {
         token: "inherited-configuration-owner",
@@ -1273,7 +952,7 @@ export class WorkflowRunner {
               decisionId: null,
               proposalId: null
             };
-            const result = await this.configurationOwnership.run(true, () =>
+            const result = await this.configurationOwnership.run(() =>
               action(context)
             );
             const latest = await this.store.readState(state.runId);
@@ -1308,9 +987,7 @@ export class WorkflowRunner {
           }
         );
       }
-      return await this.configurationOwnership.run(true, () =>
-        action(undefined)
-      );
+      return await this.configurationOwnership.run(() => action(undefined));
     } finally {
       await lock.release();
     }
@@ -1320,38 +997,6 @@ export class WorkflowRunner {
     action: () => Promise<T>
   ): Promise<T> {
     return this.withVerificationConfiguration(() => action());
-  }
-
-  private async observeHumanTime(
-    state: RunState,
-    kind: HumanTimeBoundary["kind"],
-    eventType: HumanTimeEventType | null = null,
-    eventAt: string | null = null,
-    attemptId: string | null = state.activeAttempt?.id ?? null
-  ): Promise<void> {
-    if (this.humanTimeObserver === undefined) return;
-    const pending = state.pendingHumanDecision;
-    try {
-      await this.humanTimeObserver({
-        kind,
-        runId: state.runId,
-        attemptId,
-        reviewIteration:
-          state.reviewIteration > 0 ? state.reviewIteration : null,
-        requestId:
-          pending?.kind === "decision_consultation"
-            ? pending.request.requestId
-            : null,
-        roundId:
-          pending?.kind === "decision_consultation"
-            ? pending.request.roundId
-            : null,
-        eventType,
-        eventAt
-      });
-    } catch {
-      // Optional observation cannot change a durable decision or continuation.
-    }
   }
 
   private report(event: ProgressEvent): void {
@@ -1376,23 +1021,19 @@ export class WorkflowRunner {
     const resolved = await resolveClaudeInvocationScope(
       config.claudeEnvironment
     );
-    if (this.resolvedScope?.key !== key) {
-      this.resolvedScope = {
+    if (!this.scopeCache.matches(key)) {
+      this.scopeCache.replace(
         key,
-        ...resolved,
-        mcp: await this.resolveMcpWhitelist(config)
-      };
-      this.reportedScopeDegradation = false;
-      this.reportedMcpWhitelist = false;
+        resolved,
+        await this.resolveMcpWhitelist(config)
+      );
     }
-    this.resolvedScope = { ...this.resolvedScope, ...resolved };
-    const current = this.resolvedScope;
+    const current = this.scopeCache.merge(resolved);
     if (
       report &&
       current.degradedReason !== null &&
-      !this.reportedScopeDegradation
+      this.scopeCache.claimDegradationReport()
     ) {
-      this.reportedScopeDegradation = true;
       this.info(
         `Claude environment isolation degraded: ${current.degradedReason}`
       );
@@ -1401,8 +1042,7 @@ export class WorkflowRunner {
         strictMcpConfig: current.scope.strictMcpConfig
       });
     }
-    if (report && current.mcp !== null && !this.reportedMcpWhitelist) {
-      this.reportedMcpWhitelist = true;
+    if (report && current.mcp !== null && this.scopeCache.claimMcpReport()) {
       const vendors = [
         current.mcp.claude === null ? null : "claude",
         current.mcp.codex === null ? null : "codex"
@@ -1515,8 +1155,8 @@ export class WorkflowRunner {
     operation: () => Promise<T>,
     succeeded: (result: T) => boolean = () => true
   ): Promise<T> {
-    const id = `activity-${++this.progressSequence}`;
-    const startedAt = Date.now();
+    const id = this.activities.next();
+    const startedAt = this.context.clock().getTime();
     const resolved: ActivityDetail =
       typeof detail === "string" ? { detail, descriptor: undefined } : detail;
     this.report({
@@ -1532,7 +1172,7 @@ export class WorkflowRunner {
         kind: succeeded(result) ? "activity_completed" : "activity_failed",
         id,
         label,
-        durationMs: Date.now() - startedAt
+        durationMs: this.context.clock().getTime() - startedAt
       });
       return result;
     } catch (error) {
@@ -1546,7 +1186,7 @@ export class WorkflowRunner {
         kind: "activity_failed",
         id,
         label,
-        durationMs: Date.now() - startedAt
+        durationMs: this.context.clock().getTime() - startedAt
       });
       throw error;
     }
@@ -1617,26 +1257,6 @@ export class WorkflowRunner {
       throw new InstructionResourceMismatchError(diagnostic);
   }
 
-  private async assertVerificationPreflight(
-    config: OrchestratorConfig,
-    report: boolean
-  ): Promise<void> {
-    if (config.schemaVersion === 1) return;
-    const readiness = assessVerificationReadiness(
-      config,
-      await inspectVerificationProject(this.repoRoot)
-    );
-    if (readiness.uncoveredTypes.length > 0)
-      throw new BanzaiError(
-        "VERIFICATION_SETUP_REQUIRED",
-        `Substantive verification coverage is missing. ${readiness.uncoveredTypes.map((type) => `Fix: banzai verify add ${type} — documentation/verification-examples.md`).join(" ")}`
-      );
-    if (report && readiness.bootstrapEffective)
-      this.info(
-        "Bootstrap mode: substantive verification coverage is deferred until project markers are created."
-      );
-  }
-
   async start(input: StartRunInput): Promise<RunState> {
     try {
       requireSlug(input.slug);
@@ -1657,13 +1277,13 @@ export class WorkflowRunner {
         this.info(`Preparing run ${input.slug} in ${this.repoRoot}`);
         const config = await loadConfig(this.repoRoot);
         const baseCommit = await currentCommit(this.repoRoot);
-        const createdAt = now();
+        const createdAt = this.now();
         const state: RunState = {
           schemaVersion: 8,
           verificationMode: "task",
           completionPublication: null,
           contractVersion: CONTRACT_VERSION,
-          runId: runId(input.slug),
+          runId: runId(input.slug, this.now(), this.context.ids()),
           slug: input.slug,
           request: input.request,
           repoRoot: this.repoRoot,
@@ -1731,14 +1351,14 @@ export class WorkflowRunner {
           repoRoot: this.repoRoot,
           slug: state.slug,
           mode: "workflow",
-          creationId: randomUUID(),
+          creationId: this.context.ids(),
           schemaVersion:
             state.verificationMode === "task" || usesVerificationPolicy(state)
               ? 2
               : 1
         });
         await this.store.createRun(state);
-        await this.observeHumanTime(state, "run_created");
+        await observeHumanTime(this.context, state, "run_created");
         await this.assertProjectGuidance();
         try {
           await this.activity(
@@ -1764,7 +1384,7 @@ export class WorkflowRunner {
             error instanceof InstructionResourceMismatchError
           )
             throw error;
-          return await this.recordStartFailure(state, error);
+          return await recordStartFailure(this.context, state, error);
         }
         transitionState(state, "selecting");
         await this.store.writeState(state);
@@ -1990,10 +1610,10 @@ export class WorkflowRunner {
             );
           }
           if (retryCheckpoint === "created") {
-            return await this.recordStartFailure(state, error);
+            return await recordStartFailure(this.context, state, error);
           }
           if (retryCheckpoint === "reviewing") {
-            return await this.recordReviewCheckFailure(state, error);
+            return await recordReviewCheckFailure(this.context, state, error);
           }
           if (
             retryCheckpoint === "verifying" &&
@@ -2007,7 +1627,8 @@ export class WorkflowRunner {
             retryCheckpoint === "verifying" &&
             (expectedAttemptId !== null || state.verificationMode === "task")
           ) {
-            return await this.recordVerificationRetryCheckFailure(
+            return await recordVerificationRetryCheckFailure(
+              this.context,
               state,
               expectedAttemptId,
               error
@@ -2067,7 +1688,7 @@ export class WorkflowRunner {
               error instanceof InstructionResourceMismatchError
             )
               throw error;
-            return await this.recordStartFailure(state, error);
+            return await recordStartFailure(this.context, state, error);
           }
           transitionState(state, "created");
           pendingTransition.push(
@@ -2124,8 +1745,8 @@ export class WorkflowRunner {
           );
         }
         if (retryCheckpoint === "verifying" && rejectedCompletion !== null) {
-          await this.validateBaseCommit(state);
-          await this.validateApproval(state);
+          await validateBaseCommit(this.context, state);
+          await validateApproval(this.context, state);
           state.activeAttempt = null;
           state.activeProcess = null;
           transitionState(state, "implementing");
@@ -2166,7 +1787,7 @@ export class WorkflowRunner {
           retryCheckpoint === "verifying" &&
           (expectedAttemptId !== null || state.verificationMode === "task")
         ) {
-          await this.validateBaseCommit(state);
+          await validateBaseCommit(this.context, state);
           transitionState(state, "verifying");
           state.activeProcess = null;
           pendingTransition.push(async () => {
@@ -2244,7 +1865,7 @@ export class WorkflowRunner {
           );
         }
 
-        await this.validateBaseCommit(state);
+        await validateBaseCommit(this.context, state);
 
         if (failedAttempt.kind === "review") {
           state.reviewIteration = state.latestReview?.iteration ?? 0;
@@ -2291,7 +1912,7 @@ export class WorkflowRunner {
           return await this.executeReview(state, config, commitTransition);
         }
         if (retryFrom === "implementing") {
-          await this.validateApproval(state);
+          await validateApproval(this.context, state);
           pendingTransition.push(
             async () =>
               await this.store.appendEvent(
@@ -2311,7 +1932,7 @@ export class WorkflowRunner {
           // Reachable only through the completion-evidence repair eligibility: a
           // fix whose refreshed ledger was rejected reruns with the same triage
           // scope and the persisted rejection diagnostic.
-          await this.validateApproval(state);
+          await validateApproval(this.context, state);
           pendingTransition.push(
             async () =>
               await this.store.appendEvent(
@@ -2340,65 +1961,46 @@ export class WorkflowRunner {
    * snapshot: an approval exists, the snapshot verifies byte-for-byte against
    * its recorded digest, and the on-disk bundle currently diverges from it.
    */
-  async restoreEligibility(): Promise<{ eligible: boolean; reason: string }> {
+  async restoreEligibility(): Promise<RestoreEligibility> {
     const state = await this.store.requireActiveState();
     return await this.restoreEligibilityFor(state);
   }
 
   private async restoreEligibilityFor(
     state: RunState
-  ): Promise<{ eligible: boolean; reason: string }> {
-    const approval = state.planApproval;
-    if (approval === null) {
-      return {
-        eligible: false,
-        reason: "The run has no recorded plan approval."
-      };
+  ): Promise<RestoreEligibility> {
+    const facts: RestoreFacts = { state };
+    for (;;) {
+      const step = decideRestore(facts);
+      if (step.kind === "decided") return step.eligibility;
+      if (step.evidence === "approval_snapshot") {
+        const snapshot = await this.store.readApprovalSnapshot(state.runId);
+        facts.snapshot =
+          snapshot === null
+            ? { present: false }
+            : {
+                present: true,
+                digest: snapshot.digest,
+                entriesDigest: digestArtifactEntries(
+                  snapshot.entries.map((entry) => ({
+                    path: entry.path,
+                    sha256: entry.sha256
+                  }))
+                ),
+                contentsMatchEntries: snapshot.entries.every(
+                  (entry) => hashArtifactBytes(entry.contents) === entry.sha256
+                ),
+                paths: snapshot.entries.map((entry) => entry.path)
+              };
+      } else {
+        facts.currentBundleDigest = await digestArtifactBundle(
+          this.repoRoot,
+          step.paths
+        )
+          .then((bundle) => bundle.digest)
+          .catch(() => null);
+      }
     }
-    const snapshot = await this.store.readApprovalSnapshot(state.runId);
-    if (snapshot === null) {
-      return {
-        eligible: false,
-        reason:
-          "This run predates approval snapshots; restore the approved bytes manually or cancel the run."
-      };
-    }
-    const verified =
-      snapshot.digest === approval.digest &&
-      digestArtifactEntries(
-        snapshot.entries.map((entry) => ({
-          path: entry.path,
-          sha256: entry.sha256
-        }))
-      ) === approval.digest &&
-      snapshot.entries.every(
-        (entry) => hashArtifactBytes(entry.contents) === entry.sha256
-      ) &&
-      JSON.stringify(snapshot.entries.map((entry) => entry.path).sort()) ===
-        JSON.stringify([...approval.paths].sort());
-    if (!verified) {
-      return {
-        eligible: false,
-        reason:
-          "The stored approval snapshot does not verify against the recorded approval digest."
-      };
-    }
-    const current = await digestArtifactBundle(
-      this.repoRoot,
-      approval.paths
-    ).catch(() => null);
-    if (current !== null && current.digest === approval.digest) {
-      return {
-        eligible: false,
-        reason:
-          "The approved planning artifacts already match the recorded approval."
-      };
-    }
-    return {
-      eligible: true,
-      reason:
-        "The approved planning artifacts diverged from the recorded approval and can be restored from the snapshot."
-    };
   }
 
   /**
@@ -2455,7 +2057,7 @@ export class WorkflowRunner {
     config: OrchestratorConfig,
     failedAttemptId: string
   ): Promise<RunState> {
-    await this.validateBaseCommit(state);
+    await validateBaseCommit(this.context, state);
     const violation =
       state.planTaskCompletion?.status === "invalid"
         ? state.planTaskCompletion.violation
@@ -2567,7 +2169,7 @@ export class WorkflowRunner {
             scopeDigest: eligibility.scopeDigest,
             configurationDigest: eligibility.configurationDigest,
             decidedBy: input.decidedBy,
-            decidedAt: now(),
+            decidedAt: this.now(),
             unknownSideEffectsAccepted: true
           };
           const existing = await this.store.readRecoveryAuthorizationIfExists(
@@ -2641,19 +2243,19 @@ export class WorkflowRunner {
         // Approval binds whatever bytes exist right now, so the canonical task
         // grammar is checked against those exact bytes: an on-disk edit between
         // the gate and the approval cannot smuggle in a malformed heading.
-        await this.approvedTaskIds(state);
+        await approvedTaskIds(this.context, state);
         const approvalConfig = await loadConfig(this.repoRoot);
         if (state.verificationMode === "task")
           parseTaskVerificationObligations(
             await readFile(
-              path.join(this.repoRoot, this.completionPlanPath(state)),
+              path.join(this.repoRoot, completionPlanPath(state)),
               "utf8"
             )
           );
         else if (approvalConfig.schemaVersion === 3)
           validatePlanVerificationObligations(
             await readFile(
-              path.join(this.repoRoot, this.completionPlanPath(state)),
+              path.join(this.repoRoot, completionPlanPath(state)),
               "utf8"
             ),
             approvalConfig.verification
@@ -2689,7 +2291,7 @@ export class WorkflowRunner {
         state.planApproval = {
           kind: "plan",
           digest: bundle.digest,
-          approvedAt: now(),
+          approvedAt: this.now(),
           approvedBy,
           paths: bundle.paths
         };
@@ -2709,7 +2311,8 @@ export class WorkflowRunner {
             paths: bundle.paths
           }
         );
-        await this.observeHumanTime(
+        await observeHumanTime(
+          this.context,
           state,
           "decision_recorded",
           "approval.plan",
@@ -2751,7 +2354,7 @@ export class WorkflowRunner {
           id: input.id,
           decision: input.decision,
           note: input.note,
-          decidedAt: now(),
+          decidedAt: this.now(),
           decidedBy: input.decidedBy
         });
         transitionState(state, "planning");
@@ -2765,7 +2368,8 @@ export class WorkflowRunner {
             decidedBy: input.decidedBy
           }
         );
-        await this.observeHumanTime(
+        await observeHumanTime(
+          this.context,
           state,
           "decision_recorded",
           "approval.adr",
@@ -2818,7 +2422,7 @@ export class WorkflowRunner {
         const decision: HumanDecisionRecord = {
           ...pending,
           answers: [...input.answers],
-          decidedAt: now(),
+          decidedAt: this.now(),
           decidedBy: input.decidedBy
         };
         state.humanDecisions = [...(state.humanDecisions ?? []), decision];
@@ -2846,7 +2450,8 @@ export class WorkflowRunner {
             decidedBy: decision.decidedBy
           }
         );
-        await this.observeHumanTime(
+        await observeHumanTime(
+          this.context,
           state,
           "decision_recorded",
           "decision.human",
@@ -2905,12 +2510,13 @@ export class WorkflowRunner {
         "Configuration cannot complete or replay an unfinished model attempt."
       );
     if ((state.workflowSelection?.workflow ?? "strict") === "strict") {
-      await this.validateApproval(state);
-      await this.revalidateTaskCompletion(
+      await validateApproval(this.context, state);
+      await revalidateTaskCompletion(
+        this.context,
         state,
         continuation.attemptKind === "fix"
       );
-    } else this.validateWorkflowSelection(state);
+    } else validateWorkflowSelection(state);
   }
 
   private configurationGaps(
@@ -3044,7 +2650,7 @@ export class WorkflowRunner {
         attemptId: source.id,
         attemptKind: source.kind,
         verificationRound: {
-          id: `verification-round-${source.id}-${randomUUID()}`,
+          id: `verification-round-${source.id}-${this.context.ids()}`,
           ordinal: new Set(records.map((record) => record.round.id)).size + 1
         },
         baseCommit: state.baseCommit,
@@ -3095,9 +2701,9 @@ export class WorkflowRunner {
         schemaVersion: 1,
         kind: "configuration_prerequisite",
         runId: state.runId,
-        decisionId: previous?.decisionId ?? randomUUID(),
-        proposalId: randomUUID(),
-        requestedAt: now(),
+        decisionId: previous?.decisionId ?? this.context.ids(),
+        proposalId: this.context.ids(),
+        requestedAt: this.now(),
         reason,
         proposal,
         options: CONFIGURATION_ACTIONS,
@@ -3169,11 +2775,11 @@ export class WorkflowRunner {
         { ...pending, ...human }
       ];
     setup.resolutions.push({
-      id: randomUUID(),
+      id: this.context.ids(),
       decisionId: pending.decisionId,
       proposalId: pending.proposalId,
       kind,
-      at: now(),
+      at: this.now(),
       configSha256: current.sha256,
       sourceSha256: inspection.sourceSha256,
       operationId: operation?.operationId ?? null,
@@ -3378,7 +2984,7 @@ export class WorkflowRunner {
           const human = {
             action: input.action,
             decidedBy: input.decidedBy,
-            decidedAt: now()
+            decidedAt: this.now()
           };
           if (input.action === "cancel") {
             const result = await this.cancel(
@@ -3439,8 +3045,8 @@ export class WorkflowRunner {
             state.pendingHumanDecision = parseConfigurationPrerequisite(
               {
                 ...pending,
-                proposalId: randomUUID(),
-                requestedAt: now(),
+                proposalId: this.context.ids(),
+                requestedAt: this.now(),
                 proposal: {
                   ...pending.proposal,
                   profile,
@@ -3455,7 +3061,7 @@ export class WorkflowRunner {
           if (input.action === "skip") {
             await this.assertConfigurationSkipAuthority(state, current.config);
             setup.skip = {
-              id: randomUUID(),
+              id: this.context.ids(),
               runId: state.runId,
               decisionId: pending.decisionId,
               proposalId: pending.proposalId,
@@ -3596,7 +3202,7 @@ export class WorkflowRunner {
           input.answers,
           pending.request
         );
-        const decidedAt = now();
+        const decidedAt = this.now();
         const decision: HumanDecisionRecord = {
           ...pending,
           runId: state.runId,
@@ -3626,7 +3232,8 @@ export class WorkflowRunner {
             completion: "answered"
           }
         );
-        await this.observeHumanTime(
+        await observeHumanTime(
+          this.context,
           state,
           "decision_recorded",
           "decision.consultation.answered",
@@ -3655,7 +3262,7 @@ export class WorkflowRunner {
         const items = this.validateTriage(review.findings, input);
         const triage: TriageRecord = {
           reviewIteration: state.reviewIteration,
-          decidedAt: now(),
+          decidedAt: this.now(),
           decidedBy: input.decidedBy,
           items
         };
@@ -3679,7 +3286,8 @@ export class WorkflowRunner {
             items
           }
         );
-        await this.observeHumanTime(
+        await observeHumanTime(
+          this.context,
           state,
           "decision_recorded",
           "review.triaged",
@@ -3700,7 +3308,7 @@ export class WorkflowRunner {
         }
         if (accepted.length === 0) {
           try {
-            await this.revalidateTaskCompletion(state);
+            await revalidateTaskCompletion(this.context, state);
           } catch (error) {
             if (
               error instanceof TerminalRunStateError ||
@@ -3708,7 +3316,8 @@ export class WorkflowRunner {
               error instanceof InstructionResourceMismatchError
             )
               throw error;
-            return await this.blockForCompletionFailure(
+            return await blockForCompletionFailure(
+              this.context,
               state,
               state.planTaskCompletion?.sourceAttemptId ?? "legacy",
               error
@@ -3800,7 +3409,7 @@ export class WorkflowRunner {
               configurationDecision
             ];
           }
-          const at = now();
+          const at = this.now();
           if (state.activeProcess != null)
             stopRequest = terminateProcessGroup(state.activeProcess.pid);
           try {
@@ -3819,7 +3428,7 @@ export class WorkflowRunner {
           } catch {
             context = emptyCancellationContext();
           }
-          transitionIdentity.id = randomUUID();
+          transitionIdentity.id = this.context.ids();
           transitionState(state, "cancelled");
           state.activeProcess = null;
           state.pendingHumanDecision = null;
@@ -3938,7 +3547,8 @@ export class WorkflowRunner {
       eventAt ??=
         after.events.find((e) => e.type === "run.cancelled")?.at ?? null;
       if (eventAt !== null)
-        await this.observeHumanTime(
+        await observeHumanTime(
+          this.context,
           state,
           "run_cancelled",
           "run.cancelled",
@@ -3951,7 +3561,7 @@ export class WorkflowRunner {
         const receipt: CancellationReceipt = Object.freeze({
           kind: "cancellation-first-response"
         });
-        this.cancellationReceipts.set(receipt, observation);
+        this.cancellationReceipts.record(receipt, observation);
         result.receipt = receipt;
       }
     } catch {
@@ -3964,12 +3574,12 @@ export class WorkflowRunner {
     receipt: CancellationReceipt,
     answer: CancellationAnswer
   ): Promise<CancellationResponseResult> {
-    const observation = this.cancellationReceipts.get(receipt);
+    const observation = this.cancellationReceipts.observation(receipt);
     if (observation === undefined)
       return { outcome: "unavailable", response: null };
     let response;
     try {
-      response = cancellationResponse(answer, now());
+      response = cancellationResponse(answer, this.now());
     } catch {
       return { outcome: "unavailable", response: null };
     }
@@ -4143,12 +3753,7 @@ export class WorkflowRunner {
       latestReview,
       retry,
       recovery,
-      nextAction: this.nextAction(
-        state,
-        retry,
-        recovery,
-        completionPublication
-      ),
+      nextAction: nextAction(state, retry, recovery, completionPublication),
       taskCompletion,
       completionPublication,
       ...(configurationPrerequisite ? { configurationPrerequisite } : {})
@@ -4169,7 +3774,7 @@ export class WorkflowRunner {
     }
     let total: number | null = null;
     try {
-      total = (await this.approvedTaskIds(state)).length;
+      total = (await approvedTaskIds(this.context, state)).length;
     } catch {
       // A bounded diagnostic below owns the observable invalid evidence.
     }
@@ -4251,7 +3856,8 @@ export class WorkflowRunner {
         state.status === "blocked" &&
         state.blockedFrom === "fixing" &&
         state.activeAttempt === null;
-      const validated = await this.revalidateTaskCompletion(
+      const validated = await revalidateTaskCompletion(
+        this.context,
         state,
         allowBlockedFixReportRefresh,
         false
@@ -4294,247 +3900,41 @@ export class WorkflowRunner {
   }
 
   private async retryEligibility(state: RunState): Promise<RetryEligibility> {
-    if (state.status !== "blocked") {
-      return {
-        eligible: false,
-        reason: `Retry requires a blocked run, but the run is ${state.status}.`,
-        attemptId: null
-      };
-    }
-    if (state.activeProcess !== null) {
-      return {
-        eligible: false,
-        reason: "Retry is unavailable while a model process is still active.",
-        attemptId: state.activeAttempt?.id ?? null
-      };
-    }
-    const attempt = state.activeAttempt;
-    if (attempt === null) {
-      if (state.blockedFrom === "created") {
-        return {
-          eligible: true,
-          reason:
-            "Startup checks can be retried after resolving the reported prerequisite.",
-          attemptId: null
-        };
-      }
-      if (state.blockedFrom === "reviewing") {
-        return {
-          eligible: true,
-          reason:
-            "Review checks can be retried after resolving the reported prerequisite.",
-          attemptId: null
-        };
-      }
-      if (
-        state.blockedFrom === "verifying" &&
-        state.planTaskCompletion?.status === "invalid"
-      ) {
-        // Completion revalidation rejected the evidence before verification
-        // commands ran — for example a fix attempt edited the frozen Plan
-        // Task Completion projection. The already-authorized completion
-        // repair applies; there is no failed verification attempt to retry.
-        return {
-          eligible: true,
-          reason: PLAN_BUNDLE_COMPLETION_VIOLATIONS.has(
-            state.planTaskCompletion.violation
-          )
-            ? "The approved plan bundle is invalid; retry reruns planning for a corrected bundle and a new approval."
-            : `Completion evidence rejected at revalidation can be repaired with a new implementation attempt.`,
-          attemptId: state.planTaskCompletion.sourceAttemptId
-        };
-      }
-      if (state.blockedFrom === "verifying") {
-        if (state.blockReason?.startsWith(DIGEST_UNRESOLVED_BLOCK_PREFIX)) {
-          return {
-            eligible: false,
-            reason:
-              "A digest this run's result authored does not match the bytes it names, and no recorded baseline shows those bytes changed after acceptance. Retrying reads the same bytes and fails identically. Inspect the checkout, then cancel the run.",
-            attemptId: null
-          };
-        }
-        try {
-          if (state.verificationMode === "task") {
-            const latest = (
-              await readTaskVerificationAttempts(
-                this.taskVerificationStorage(state)
-              )
-            ).at(-1);
-            const unresolved = latest?.status === "started";
-            const unsuccessful =
-              latest?.status === "failed" || latest?.status === "interrupted";
-            return {
-              eligible: true,
-              reason: unresolved
-                ? "Retry reconciles the unresolved physical attempt before running eligible checks."
-                : unsuccessful
-                  ? "The unsuccessful task check can be retried explicitly."
-                  : "Verification prerequisites can be retried without replaying implementation.",
-              attemptId: unsuccessful ? latest.id : null
-            };
-          }
-          if (!(await this.store.verificationLedgerSupported(state.runId))) {
-            return {
-              eligible: false,
-              reason:
-                "Legacy verification evidence has no retryable durable attempt identity. Inspect the checkout, then cancel the run.",
-              attemptId: null
-            };
-          }
-          const latest = (
-            await this.store.readVerificationAttempts(state.runId)
-          ).at(-1);
-          if (latest?.status === "failed") {
-            return {
-              eligible: true,
-              reason: `Failed verification attempt ${latest.id} can be retried explicitly.`,
-              attemptId: latest.id
-            };
-          }
-        } catch {
-          return {
-            eligible: false,
-            reason:
-              "Verification evidence is malformed or conflicting. Audit the run before continuing.",
-            attemptId: null
-          };
-        }
-      }
-      // Pre-attempt checks block only through validateApproval, whose block
-      // reason is the runner's own text; every other blocked-from-fixing state
-      // without an attempt (a completed prerequisite-blocked fix) belongs to
-      // the recovery path and must not gain a retry here.
-      const approvalInvalidated =
-        state.blockReason?.startsWith("Approved planning artifacts changed") ===
-        true;
-      if (approvalInvalidated && state.blockedFrom === "fixing") {
-        return {
-          eligible: true,
-          reason:
-            "Fix checks can be retried after resolving the reported prerequisite.",
-          attemptId: null
-        };
-      }
-      if (
-        approvalInvalidated &&
-        (state.blockedFrom === "implementing" ||
-          state.blockedFrom === "plan_approved")
-      ) {
-        return {
-          eligible: true,
-          reason:
-            "Implementation checks can be retried after resolving the reported prerequisite.",
-          attemptId: null
-        };
-      }
-      return {
-        eligible: false,
-        reason:
-          "This blocked state is not tied to a failed attempt. Resolve it manually or cancel the run.",
-        attemptId: null
-      };
-    }
-    const record = await this.store.readRunAttempt(state.runId, attempt);
-    if (
-      record.status === "failed" &&
-      record.failureCode === "CONTEXT_BUDGET_EXCEEDED"
-    ) {
-      const expectedStatus =
-        attempt.kind === "selection"
-          ? "selecting"
-          : attempt.kind === "plan"
-            ? "planning"
-            : attempt.kind === "implementation"
-              ? "implementing"
-              : attempt.kind === "fix"
-                ? "fixing"
-                : "reviewing";
-      if (state.blockedFrom === expectedStatus) {
-        return {
-          eligible: true,
-          reason: `Context-budget-blocked ${attempt.kind} attempt ${attempt.id} can be retried explicitly after policy or authorized input changes because no vendor process started.`,
-          attemptId: attempt.id
-        };
+    const facts: RetryFacts = { state };
+    for (;;) {
+      const step = decideRetry(facts);
+      if (step.kind === "decided") return step.eligibility;
+      switch (step.evidence) {
+        case "task_verification_attempts":
+          facts.taskVerification = await readableVerification(async () => ({
+            latest:
+              (
+                await readTaskVerificationAttempts(
+                  taskVerificationStorage(this.context, state)
+                )
+              ).at(-1) ?? null
+          }));
+          break;
+        case "legacy_ledger_support":
+          facts.legacyLedger = await readableVerification(async () => ({
+            supported: await this.store.verificationLedgerSupported(state.runId)
+          }));
+          break;
+        case "legacy_verification_attempts":
+          facts.legacyVerification = await readableVerification(async () => ({
+            latest:
+              (await this.store.readVerificationAttempts(state.runId)).at(-1) ??
+              null
+          }));
+          break;
+        case "attempt_record":
+          facts.attemptRecord = await this.store.readRunAttempt(
+            state.runId,
+            step.attempt
+          );
+          break;
       }
     }
-    if (attempt.mutable) {
-      const checkpoint = state.planTaskCompletion;
-      if (record.status === "pending_application") {
-        return {
-          eligible: false,
-          reason:
-            "Completion publication for this attempt is pending; use banzai resume to reconcile it without another model call, or cancel the run.",
-          attemptId: attempt.id
-        };
-      }
-      if (
-        ((attempt.kind === "implementation" &&
-          state.blockedFrom === "implementing") ||
-          (attempt.kind === "fix" && state.blockedFrom === "fixing")) &&
-        record.status === "failed" &&
-        // The runner itself classified this failure as completion evidence
-        // when it wrote the invalid checkpoint: a result rejected by ledger
-        // validation keeps its decoded evidence, and a result whose decode
-        // failed on a completion field keeps only the diagnostic — the repair
-        // replaces the whole result either way, so neither is a dead end.
-        record.failureCode === "PLAN_TASK_COMPLETION_INVALID" &&
-        checkpoint?.status === "invalid" &&
-        checkpoint.sourceAttemptId === attempt.id
-      ) {
-        return {
-          eligible: true,
-          reason: PLAN_BUNDLE_COMPLETION_VIOLATIONS.has(checkpoint.violation)
-            ? "The approved plan bundle is invalid; retry reruns planning for a corrected bundle and a new approval."
-            : `Completion evidence for ${attempt.kind} attempt ${attempt.id} can be repaired with a new attempt.`,
-          attemptId: attempt.id
-        };
-      }
-      return {
-        eligible: false,
-        reason:
-          "Failed mutable attempts cannot be retried because their repository side effects may be incomplete. Inspect the checkout, then cancel the run.",
-        attemptId: attempt.id
-      };
-    }
-    const isRetryableInterruption = isRetryableInterruptedAttempt(
-      attempt,
-      record
-    );
-    if (record.status !== "failed" && !isRetryableInterruption) {
-      return {
-        eligible: false,
-        reason:
-          record.status === "started"
-            ? "Interrupted attempts cannot be retried automatically. Inspect the checkout, then cancel the run."
-            : `Attempt ${attempt.id} is ${record.status}, not failed.`,
-        attemptId: attempt.id
-      };
-    }
-    const expectedStatus =
-      attempt.kind === "selection"
-        ? "selecting"
-        : attempt.kind === "plan"
-          ? "planning"
-          : attempt.kind === "implementation"
-            ? "implementing"
-            : attempt.kind === "review"
-              ? "reviewing"
-              : null;
-    if (expectedStatus === null || state.blockedFrom !== expectedStatus) {
-      return {
-        eligible: false,
-        reason: `The failed ${attempt.kind} attempt is inconsistent with blockedFrom=${state.blockedFrom ?? "null"}.`,
-        attemptId: attempt.id
-      };
-    }
-    return {
-      eligible: true,
-      reason:
-        record.status === "started"
-          ? `Interrupted ${attempt.kind} attempt ${attempt.id} can be retried explicitly because it was read-only.`
-          : `Failed ${attempt.kind} attempt ${attempt.id} can be retried explicitly.`,
-      attemptId: attempt.id
-    };
   }
 
   private async prerequisiteBlockedFixScope(
@@ -4542,812 +3942,366 @@ export class WorkflowRunner {
     record: AttemptRecord,
     requirePersistedBlock: boolean
   ): Promise<PrerequisiteBlockedFixScope> {
-    const attempt = record.attempt;
-    if (
-      attempt.kind !== "fix" ||
-      !attempt.mutable ||
-      record.status !== "completed" ||
-      record.result === null ||
-      (record.recoveryOf ?? null) !== null ||
-      (record.recoveryAuthorizationId ?? null) !== null
-    ) {
-      throw new BanzaiError(
-        "RECOVERY_SOURCE_INVALID",
-        "Prerequisite recovery requires an unrecovered completed fix attempt."
-      );
-    }
-    const result = parsePersistedPhaseResult(record.result);
-    if (
-      result.phase !== "fix" ||
-      result.outcome !== "blocked" ||
-      result.gate !== null ||
-      result.taskCompletion !== null ||
-      (requirePersistedBlock && result.summary !== state.blockReason)
-    ) {
-      throw new BanzaiError(
-        "RECOVERY_SOURCE_INVALID",
-        "The completed fix result does not match the current prerequisite block."
-      );
-    }
-    if (
-      (state.workflowSelection?.workflow ?? "strict") !== "strict" ||
-      state.latestReview === null ||
-      state.triage === null ||
-      state.reviewIteration !== state.latestReview.iteration ||
-      state.triage.reviewIteration !== state.latestReview.iteration
-    ) {
-      throw new BanzaiError(
-        "RECOVERY_SCOPE_INVALID",
-        "Prerequisite recovery requires one current strict review and triage."
-      );
-    }
-    const review = await this.readLatestReview(state);
-    const reviewFindingIds = review.findings.map((finding) => finding.id);
-    const reviewFindingIdSet = new Set(reviewFindingIds);
-    const triagedIds = state.triage.items.map((item) => item.findingId);
-    if (
-      new Set(triagedIds).size !== triagedIds.length ||
-      triagedIds.length !== reviewFindingIds.length ||
-      triagedIds.some((id) => !reviewFindingIdSet.has(id))
-    ) {
-      throw new BanzaiError(
-        "RECOVERY_SCOPE_INVALID",
-        "Current triage does not exactly cover the current review."
-      );
-    }
-    const acceptedFindingIds = state.triage.items
-      .filter((item) => item.disposition === "accepted")
-      .map((item) => item.findingId)
-      .sort();
-    const acceptedFindingIdSet = new Set(acceptedFindingIds);
-    const resolvedFindingIds = [...result.resolvedFindingIds].sort();
-    if (
-      acceptedFindingIds.length === 0 ||
-      resolvedFindingIds.length === 0 ||
-      new Set(resolvedFindingIds).size !== resolvedFindingIds.length ||
-      resolvedFindingIds.some((id) => !acceptedFindingIdSet.has(id))
-    ) {
-      throw new BanzaiError(
-        "RECOVERY_SCOPE_INVALID",
-        "The blocked fix result does not prove valid partial accepted-finding progress."
-      );
-    }
-    const resolvedFindingIdSet = new Set(resolvedFindingIds);
-    const remainingFindingIds = acceptedFindingIds.filter(
-      (id) => !resolvedFindingIdSet.has(id)
-    );
-    const prerequisites = [...result.questions, ...result.requestedVerification]
-      .map((item) => item.trim())
-      .filter((item) => {
-        const referencedFindingIds = review.findings
-          .filter((finding) => {
-            const escaped = finding.id.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-            return (
-              new RegExp(
-                `(^|[^A-Za-z0-9_:-])${escaped}($|[^A-Za-z0-9_:-])`,
-                "u"
-              ).test(item) ||
-              finding.evidence.some((evidence) => item.includes(evidence.path))
-            );
+    const facts: PrerequisiteScopeFacts = {
+      state,
+      record,
+      requirePersistedBlock
+    };
+    for (;;) {
+      const step = decidePrerequisiteScope(facts);
+      if (step.kind === "invalid")
+        throw new BanzaiError(step.code, step.message);
+      if (step.kind === "scoped") {
+        const { scope, result, review } = step;
+        const reviewDigest = digestCanonicalJson(review);
+        return {
+          ...scope,
+          record: record as AttemptRecord<PhaseResult>,
+          result,
+          reviewDigest,
+          scopeDigest: digestCanonicalJson({
+            version: 2,
+            sourceKind: "prerequisite_blocked_fix",
+            reviewIteration: scope.reviewIteration,
+            reviewDigest,
+            acceptedFindingIds: scope.acceptedFindingIds,
+            sourceAttempt: scope.attempt,
+            sourceResultDigest: digestCanonicalJson(result),
+            resolvedFindingIds: scope.resolvedFindingIds,
+            remainingFindingIds: scope.remainingFindingIds
           })
-          .map((finding) => finding.id);
-        return (
-          referencedFindingIds.length === 0 ||
-          referencedFindingIds.every((findingId) =>
-            remainingFindingIds.includes(findingId)
-          )
-        );
-      });
-    if (
-      remainingFindingIds.length === 0 ||
-      prerequisites.length === 0 ||
-      prerequisites.some((item) => item.length === 0)
-    ) {
-      throw new BanzaiError(
-        "RECOVERY_SCOPE_INVALID",
-        "The blocked fix result has no remaining accepted scope or concrete prerequisite."
-      );
+        };
+      }
+      if (step.evidence === "phase_result")
+        facts.result = parsePersistedPhaseResult(step.raw);
+      else facts.review = await this.readLatestReview(state);
     }
-    const sourceAttempt = {
-      id: attempt.id,
-      kind: "fix" as const,
-      mutable: true as const
-    };
-    const typedRecord = record as AttemptRecord<PhaseResult>;
-    const reviewDigest = digestCanonicalJson(review);
-    const scopeDigest = digestCanonicalJson({
-      version: 2,
-      sourceKind: "prerequisite_blocked_fix",
-      reviewIteration: state.latestReview.iteration,
-      reviewDigest,
-      acceptedFindingIds,
-      sourceAttempt,
-      sourceResultDigest: digestCanonicalJson(result),
-      resolvedFindingIds,
-      remainingFindingIds
-    });
-    return {
-      attempt: sourceAttempt,
-      record: typedRecord,
-      result,
-      reviewDigest,
-      acceptedFindingIds,
-      resolvedFindingIds,
-      remainingFindingIds,
-      prerequisites,
-      scopeDigest
-    };
   }
 
   private async prerequisiteBlockedFixSource(
     state: RunState
   ): Promise<PrerequisiteBlockedFixScope> {
-    const records = await this.store.readRunAttempts(state.runId);
-    const candidates: PrerequisiteBlockedFixScope[] = [];
-    for (const record of records) {
-      if (
-        record.attempt.kind !== "fix" ||
-        record.status !== "completed" ||
-        record.result === null
-      ) {
-        continue;
+    const facts: PrerequisiteSourceFacts<PrerequisiteBlockedFixScope> = {
+      state
+    };
+    for (;;) {
+      const step = decidePrerequisiteSource(facts);
+      if (step.kind === "decided") return step.source;
+      if (step.kind === "invalid")
+        throw new BanzaiError(step.code, step.message);
+      switch (step.evidence) {
+        case "attempt_records":
+          facts.records = await this.store.readRunAttempts(state.runId);
+          break;
+        case "candidate_scopes": {
+          const candidates: PrerequisiteBlockedFixScope[] = [];
+          for (const record of step.records) {
+            try {
+              candidates.push(
+                await this.prerequisiteBlockedFixScope(state, record, true)
+              );
+            } catch {
+              // Only an exact current completed-blocked result is a
+              // candidate; the rule counts the scopes that survive.
+            }
+          }
+          facts.candidates = candidates;
+          break;
+        }
+        case "terminal_checkpoint": {
+          const { source } = step;
+          const checkpoint = await this.store.readTerminalCheckpointIfExists(
+            state.runId,
+            source.attempt
+          );
+          // The reader has already proven a retained original parses, so
+          // these digests are safe to take before the rule compares them.
+          facts.checkpoint =
+            checkpoint === null
+              ? null
+              : {
+                  baseCommit: checkpoint.baseCommit,
+                  approvalDigest: checkpoint.approvalDigest,
+                  scopeDigest: checkpoint.scopeDigest,
+                  resultDigest:
+                    "result" in checkpoint
+                      ? digestCanonicalJson(checkpoint.result)
+                      : digestCanonicalJson(
+                          JSON.parse(checkpoint.envelope.original) as unknown
+                        ),
+                  expectedScopeDigest: attemptScopeDigest(
+                    state,
+                    source.attempt
+                  ),
+                  sourceResultDigest: digestCanonicalJson(source.result)
+                };
+          break;
+        }
       }
-      try {
-        candidates.push(
-          await this.prerequisiteBlockedFixScope(state, record, true)
-        );
-      } catch {
-        // Only an exact current completed-blocked result is a candidate. A
-        // malformed or historical record cannot be used to reconstruct scope.
-      }
     }
-    if (candidates.length !== 1) {
-      throw new BanzaiError(
-        "RECOVERY_SOURCE_AMBIGUOUS",
-        candidates.length === 0
-          ? "No exact completed prerequisite-blocked fix source is available."
-          : "Multiple completed blocked fix attempts match the current review; recovery is ambiguous."
-      );
-    }
-    const source = candidates[0];
-    if (source === undefined) {
-      throw new BanzaiError(
-        "RECOVERY_SOURCE_AMBIGUOUS",
-        "No exact completed prerequisite-blocked fix source is available."
-      );
-    }
-    const descendants = records.filter(
-      (record) => (record.recoveryOf ?? null) === source.attempt.id
-    );
-    const descendant = descendants[0];
-    const preparedDescendant =
-      descendants.length === 1 &&
-      descendant !== undefined &&
-      state.recovery?.sourceAttemptId === source.attempt.id &&
-      state.recovery.recoveryAttemptId === null &&
-      state.recovery.stage === "source_preserved" &&
-      descendant.attempt.id ===
-        `fix-recovery-${state.recovery.authorizationId.replace(/^recovery-/u, "")}` &&
-      descendant.status === "started" &&
-      descendant.result === null &&
-      descendant.recoveryAuthorizationId === state.recovery.authorizationId;
-    if (descendants.length > 0 && !preparedDescendant) {
-      throw new BanzaiError(
-        "RECOVERY_ALREADY_STARTED",
-        "A recovery descendant already exists for the completed blocked fix source."
-      );
-    }
-    if (
-      state.recovery !== undefined &&
-      state.recovery !== null &&
-      (state.recovery.sourceAttemptId !== source.attempt.id ||
-        state.recovery.recoveryAttemptId !== null)
-    ) {
-      throw new BanzaiError(
-        "RECOVERY_STATE_CHANGED",
-        "Persisted recovery state does not match the completed blocked fix source."
-      );
-    }
-    const checkpoint = await this.store.readTerminalCheckpointIfExists(
-      state.runId,
-      source.attempt
-    );
-    if (
-      checkpoint !== null &&
-      (checkpoint.baseCommit !== state.baseCommit ||
-        checkpoint.approvalDigest !== state.planApproval?.digest ||
-        checkpoint.scopeDigest !==
-          this.attemptScopeDigest(state, source.attempt) ||
-        ("result" in checkpoint
-          ? digestCanonicalJson(checkpoint.result)
-          : digestCanonicalJson(
-              JSON.parse(checkpoint.envelope.original) as unknown
-            )) !== digestCanonicalJson(source.result))
-    ) {
-      throw new BanzaiError(
-        "INVALID_TERMINAL_CHECKPOINT",
-        "The completed blocked source conflicts with its terminal checkpoint."
-      );
-    }
-    return source;
   }
 
   private async prerequisiteBlockedFixRecoveryEligibility(
     state: RunState
   ): Promise<RecoveryEligibility> {
-    if (
-      state.blockedFrom !== "fixing" ||
-      state.activeAttempt !== null ||
-      (state.activeProcess !== null &&
-        this.store.processAlive(state.activeProcess.pid))
-    ) {
-      return recoveryIneligible(
-        "Prerequisite recovery requires a completed blocked fix with no active attempt or process.",
-        null,
-        "fix"
-      );
-    }
-    try {
-      if ((await currentCommit(this.repoRoot)) !== state.baseCommit) {
-        return recoveryIneligible(
-          "Recovery is unavailable because checkout HEAD changed.",
-          null,
-          "fix"
-        );
+    const facts: PrerequisiteBlockedFixFacts = { state };
+    const workspace: RecoveryWorkspaceSnapshot = {};
+    for (;;) {
+      const step = decidePrerequisiteBlockedFix(facts);
+      if (step.kind === "decided") return step.eligibility;
+      if (step.evidence === "process_liveness") {
+        facts.processAlive = this.store.processAlive(step.pid);
+        continue;
       }
-      await this.validateApproval(state);
-      await this.revalidateTaskCompletion(state, true, false);
-      const source = await this.prerequisiteBlockedFixSource(state);
-      const config = await loadConfig(this.repoRoot);
-      assertContractParity();
-      const settings = config.models.implementer;
-      const vendor =
-        vendorFor(settings.executable) ?? FALLBACK_VENDOR.implementer;
-      const configurationDigest = digestCanonicalJson({
-        version: 1,
-        vendor,
-        executableDigest: digestCanonicalJson(settings.executable),
-        model: settings.model,
-        effort: settings.effort
-      });
-      const snapshot = await workspaceSnapshot(this.repoRoot, {
-        artifactBinding: state.artifactBinding,
-        baseline: state.baseline
-      });
-      if (snapshot.baseCommit !== state.baseCommit) {
-        return recoveryIneligible(
-          "Recovery is unavailable because the workspace base commit changed.",
-          source.attempt.id,
-          "fix"
-        );
-      }
-      const counts = await workspaceChangeCounts(this.repoRoot, snapshot);
-      const recoveryIdentity = digestCanonicalJson({
-        version: 2,
-        sourceKind: "prerequisite_blocked_fix",
-        runId: state.runId,
-        attempt: source.attempt,
-        phase: "fix",
-        baseCommit: state.baseCommit,
-        workspaceDigest: snapshot.digest,
-        approvalDigest: state.planApproval?.digest ?? null,
-        workflowDigest: null,
-        scopeDigest: source.scopeDigest,
-        configurationDigest
-      });
-      if (
-        state.recovery?.sourceAttemptId === source.attempt.id &&
-        state.recovery.recoveryAttemptId === null
-      ) {
-        const authorization = await this.store.readRecoveryAuthorization(
-          state.runId,
-          state.recovery.authorizationId
-        );
+      try {
+        if (step.evidence === "prerequisite_source")
+          facts.source = await this.prerequisiteBlockedFixSource(state);
+        else
+          await this.gatherRecoveryPrecondition(state, step, facts, workspace);
+      } catch (error) {
         if (
-          authorization.attempt.id !== source.attempt.id ||
-          authorization.recoveryIdentity !== recoveryIdentity
-        ) {
-          return recoveryIneligible(
-            "Persisted recovery authorization is stale or inconsistent.",
-            source.attempt.id,
-            "fix"
-          );
-        }
+          error instanceof TerminalRunStateError ||
+          error instanceof ProjectSetupRequiredError ||
+          error instanceof InstructionResourceMismatchError
+        )
+          throw error;
+        facts.preconditionFailure = {
+          message: error instanceof BanzaiError ? error.message : null
+        };
       }
-      return {
-        eligible: true,
-        reason: `Completed blocked fix attempt ${source.attempt.id} may be recovered for remaining accepted findings ${source.remainingFindingIds.join(", ")} after ${source.prerequisites.length} operator prerequisite${source.prerequisites.length === 1 ? "" : "s"}.`,
-        warning:
-          "The source attempt remains completed and blocked. Recovery authorizes one new fix attempt for the exact remaining accepted scope after the displayed prerequisites are addressed.",
-        sourceKind: "prerequisite_blocked_fix",
-        attemptId: source.attempt.id,
-        phase: "fix",
-        resolvedFindingIds: source.resolvedFindingIds,
-        remainingFindingIds: source.remainingFindingIds,
-        prerequisites: source.prerequisites,
-        authorization: "plan_approval",
-        recoveryIdentity,
-        workspace: { digest: snapshot.digest, ...counts },
-        baseCommit: state.baseCommit,
-        approvalDigest: state.planApproval?.digest ?? null,
-        workflowDigest: null,
-        scopeDigest: source.scopeDigest,
-        configurationDigest
-      };
-    } catch (error) {
-      if (
-        error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError ||
-        error instanceof InstructionResourceMismatchError
-      )
-        throw error;
-      return recoveryIneligible(
-        error instanceof BanzaiError
-          ? error.message
-          : "Prerequisite recovery preconditions could not be validated; inspect or cancel the run.",
-        state.recovery?.sourceAttemptId ?? null,
-        "fix"
-      );
     }
   }
 
-  /**
-   * ADR-0051's digest-rejected source, recognized from durable evidence only:
-   * a failed attempt whose sole recorded failure is a digest rejection at
-   * acceptance, whose terminal checkpoint proves its repository changes are
-   * complete rather than partial, and which no successor has replaced.
-   * Returns null when the source does not apply, leaving every existing
-   * disposition — including the refusal of a failed mutable attempt with
-   * unknown side effects — exactly as it is.
-   */
+  /** ADR-0051's digest-rejected source; the rule documents its evidence. */
   private async digestRejectedRecoveryEligibility(
     state: RunState,
     attempt: AttemptReference
   ): Promise<RecoveryEligibility | null> {
-    if (
-      attempt.kind !== "plan" &&
-      attempt.kind !== "implementation" &&
-      attempt.kind !== "fix"
-    )
-      return null;
-    const phase = attempt.kind;
-    const expectedBlockedFrom =
-      phase === "plan"
-        ? "planning"
-        : phase === "implementation"
-          ? "implementing"
-          : "fixing";
-    if (state.blockedFrom !== expectedBlockedFrom) return null;
-    let record: AttemptRecord;
-    let evidence: ResultDigestEvidence | null;
-    try {
-      record = await this.store.readRunAttempt(state.runId, attempt);
-      evidence = await this.store.readResultDigestEvidenceIfExists(
-        state.runId,
-        attempt
-      );
-    } catch (error) {
-      if (
-        error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError ||
-        error instanceof InstructionResourceMismatchError
-      )
-        throw error;
-      return recoveryIneligible(
-        error instanceof BanzaiError &&
-          error.code === "RESULT_DIGEST_EVIDENCE_INVALID"
-          ? `${error.message} Audit the run before continuing.`
-          : "Digest acceptance evidence is unreadable or inconsistent.",
-        attempt.id,
-        phase
-      );
-    }
-    // Absent evidence is never reconstructed from current bytes: a run blocked
-    // before acceptance-time comparison existed has no baseline at all.
-    if (
-      evidence?.outcome !== "rejected" ||
-      record.status !== "failed" ||
-      !DIGEST_REJECTED_FAILURE_CODES.has(record.failureCode ?? "")
-    )
-      return null;
-    if (
-      state.activeProcess !== null &&
-      this.store.processAlive(state.activeProcess.pid)
-    ) {
-      return recoveryIneligible(
-        "Recovery is unavailable while the model process is still active.",
-        attempt.id,
-        phase
-      );
-    }
-    try {
-      // A terminal checkpoint is what proves the attempt finished its work, so
-      // its repository changes are known rather than partial.
-      const checkpoint = await this.store.readTerminalCheckpointIfExists(
-        state.runId,
-        attempt
-      );
-      if (checkpoint === null) {
-        return recoveryIneligible(
-          `The rejected ${phase} result has no terminal checkpoint, so its repository side effects are unknown. Inspect the checkout, then cancel the run.`,
-          attempt.id,
-          phase
-        );
-      }
-      if (
-        (await this.store.readRunAttempts(state.runId)).some(
-          (other) =>
-            other.attempt.kind === attempt.kind &&
-            other.attempt.id !== attempt.id &&
-            Date.parse(other.startedAt) > Date.parse(record.startedAt)
-        ) ||
-        (state.recovery?.sourceAttemptId === attempt.id &&
-          state.recovery.recoveryAttemptId !== null)
-      ) {
-        return recoveryIneligible(
-          `A later ${phase} attempt already supersedes this rejected result.`,
-          attempt.id,
-          phase,
-          true
-        );
-      }
-      if ((await currentCommit(this.repoRoot)) !== state.baseCommit) {
-        return recoveryIneligible(
-          "Recovery is unavailable because checkout HEAD changed.",
-          attempt.id,
-          phase
-        );
-      }
-      const config = await loadConfig(this.repoRoot);
-      assertContractParity();
-      const settings =
-        phase === "plan" ? config.models.planner : config.models.implementer;
-      const vendor =
-        vendorFor(settings.executable) ??
-        FALLBACK_VENDOR[phase === "plan" ? "planner" : "implementer"];
-      let approvalDigest: string | null = null;
-      let workflowDigest: string | null = null;
-      if (phase === "plan") {
-        const selection = state.workflowSelection ?? null;
-        workflowDigest = selection?.digest ?? null;
-        const authorized =
-          selection !== null &&
-          workflowAuthorizationDigest({
-            runId: state.runId,
-            request: state.request,
-            ...selection
-          }) === selection.digest;
-        if (!authorized) {
-          return recoveryIneligible(
-            "Planning recovery requires the unchanged persisted workflow selection.",
-            attempt.id,
-            phase
+    const facts: DigestRejectedFacts = { state, attempt };
+    const workspace: RecoveryWorkspaceSnapshot = {};
+    for (;;) {
+      const step = decideDigestRejected(facts);
+      if (step.kind === "decided") return step.eligibility;
+      if (step.evidence === "digest_source") {
+        try {
+          const record = await this.store.readRunAttempt(state.runId, attempt);
+          const evidence = await this.store.readResultDigestEvidenceIfExists(
+            state.runId,
+            attempt
           );
+          facts.source = { readable: true, record, evidence };
+        } catch (error) {
+          if (
+            error instanceof TerminalRunStateError ||
+            error instanceof ProjectSetupRequiredError ||
+            error instanceof InstructionResourceMismatchError
+          )
+            throw error;
+          facts.source = {
+            readable: false,
+            invalidEvidenceMessage:
+              error instanceof BanzaiError &&
+              error.code === "RESULT_DIGEST_EVIDENCE_INVALID"
+                ? error.message
+                : null
+          };
         }
-      } else if (
-        (state.workflowSelection?.workflow ?? "strict") === "strict" ||
-        phase === "fix"
-      ) {
-        await this.validateApproval(state);
-        approvalDigest = state.planApproval?.digest ?? null;
-      } else {
-        workflowDigest = this.validateWorkflowSelection(state).digest;
+        continue;
       }
-      const scopeDigest = this.attemptScopeDigest(state, attempt);
-      const configurationDigest = digestCanonicalJson({
-        version: 1,
-        vendor,
-        executableDigest: digestCanonicalJson(settings.executable),
-        model: settings.model,
-        effort: settings.effort
-      });
-      const snapshot = await workspaceSnapshot(this.repoRoot, {
-        artifactBinding: state.artifactBinding,
-        baseline: state.baseline
-      });
-      if (snapshot.baseCommit !== state.baseCommit) {
-        return recoveryIneligible(
-          "Recovery is unavailable because the workspace base commit changed.",
-          attempt.id,
-          phase
+      if (step.evidence === "process_liveness") {
+        facts.processAlive = this.store.processAlive(step.pid);
+        continue;
+      }
+      try {
+        switch (step.evidence) {
+          case "terminal_checkpoint":
+            facts.terminalCheckpointPresent =
+              (await this.store.readTerminalCheckpointIfExists(
+                state.runId,
+                attempt
+              )) !== null;
+            break;
+          case "attempt_history":
+            facts.attempts = await this.store.readRunAttempts(state.runId);
+            break;
+          case "workflow_authorization":
+            facts.workflowSelectionAuthorized =
+              workflowAuthorizationDigest({
+                runId: state.runId,
+                request: state.request,
+                ...step.selection
+              }) === step.selection.digest;
+            break;
+          case "evidence_digest":
+            facts.evidenceDigest = digestCanonicalJson(step.digestEvidence);
+            break;
+          default:
+            await this.gatherRecoveryPrecondition(
+              state,
+              step,
+              facts,
+              workspace
+            );
+        }
+      } catch (error) {
+        if (
+          error instanceof TerminalRunStateError ||
+          error instanceof ProjectSetupRequiredError ||
+          error instanceof InstructionResourceMismatchError
+        )
+          throw error;
+        facts.preconditionsFailed = true;
+      }
+    }
+  }
+
+  /**
+   * Gathers one precondition every recovery source reads the same way. Each
+   * source keeps its own baseline error scope around the call.
+   */
+  private async gatherRecoveryPrecondition(
+    state: RunState,
+    step: RecoveryPreconditionStep,
+    facts: RecoveryPreconditionFacts,
+    workspace: RecoveryWorkspaceSnapshot
+  ): Promise<void> {
+    switch (step.evidence) {
+      case "head_commit":
+        facts.headCommit = await currentCommit(this.repoRoot);
+        return;
+      case "configuration": {
+        const config = await loadConfig(this.repoRoot);
+        assertContractParity();
+        const settings = config.models[step.role];
+        const vendor =
+          vendorFor(settings.executable) ?? FALLBACK_VENDOR[step.role];
+        facts.configurationDigest = digestCanonicalJson({
+          version: 1,
+          vendor,
+          executableDigest: digestCanonicalJson(settings.executable),
+          model: settings.model,
+          effort: settings.effort
+        });
+        return;
+      }
+      case "approval_check":
+        await validateApproval(this.context, state);
+        facts.approvalChecked = true;
+        return;
+      case "workflow_selection_check":
+        facts.workflowDigest = validateWorkflowSelection(state).digest;
+        return;
+      case "completion_revalidation":
+        await revalidateTaskCompletion(
+          this.context,
+          state,
+          step.allowReportRefresh,
+          step.persistReportRefresh
         );
+        facts.completionRevalidated = true;
+        return;
+      case "attempt_scope_digest":
+        facts.scopeDigest = attemptScopeDigest(state, step.attempt);
+        return;
+      case "workspace_snapshot": {
+        const snapshot = await workspaceSnapshot(this.repoRoot, {
+          artifactBinding: state.artifactBinding,
+          baseline: state.baseline
+        });
+        workspace.snapshot = snapshot;
+        facts.workspace = {
+          baseCommit: snapshot.baseCommit,
+          digest: snapshot.digest
+        };
+        return;
       }
-      const counts = await workspaceChangeCounts(this.repoRoot, snapshot);
-      const recoveryIdentity = digestCanonicalJson({
-        version: 1,
-        sourceKind: "digest_rejected",
-        runId: state.runId,
-        attempt,
-        phase,
-        baseCommit: state.baseCommit,
-        workspaceDigest: snapshot.digest,
-        approvalDigest,
-        workflowDigest,
-        scopeDigest,
-        configurationDigest,
-        digestEvidence: digestCanonicalJson(evidence)
-      });
-      if (
-        state.recovery?.sourceAttemptId === attempt.id &&
-        state.recovery.recoveryAttemptId === null
-      ) {
+      case "workspace_counts": {
+        if (workspace.snapshot === undefined)
+          throw new Error("Workspace counts require a workspace snapshot.");
+        const counts = await workspaceChangeCounts(
+          this.repoRoot,
+          workspace.snapshot
+        );
+        facts.counts = {
+          ...counts,
+          recoveryIdentity: digestCanonicalJson(step.identity)
+        };
+        return;
+      }
+      case "recovery_authorization": {
         const authorization = await this.store.readRecoveryAuthorization(
           state.runId,
-          state.recovery.authorizationId
+          step.authorizationId
         );
-        if (
-          authorization.attempt.id !== attempt.id ||
-          authorization.recoveryIdentity !== recoveryIdentity
-        ) {
-          return recoveryIneligible(
-            "Persisted recovery authorization is stale or inconsistent.",
-            attempt.id,
-            phase
-          );
-        }
+        facts.authorization = {
+          attemptId: authorization.attempt.id,
+          recoveryIdentity: authorization.recoveryIdentity
+        };
+        return;
       }
-      return {
-        eligible: true,
-        terminalCheckpointPresent: true,
-        reason: `The ${phase} result was refused because ${evidence.comparisons.filter((comparison) => !comparison.matched).length} digest it authored never matched the bytes it named. Recovery authorizes one linked ${phase} attempt to supply a corrected result; the rejected attempt and its result are retained.`,
-        warning:
-          "The rejected attempt keeps its failed status and its result. Recovery authorizes one new attempt for the same phase and no additional scope; a replacement strict plan still passes the existing approval gate.",
-        sourceKind: "digest_rejected",
-        attemptId: attempt.id,
-        phase,
-        resolvedFindingIds: [],
-        remainingFindingIds: [],
-        prerequisites: [],
-        authorization:
-          approvalDigest === null ? "workflow_selection" : "plan_approval",
-        recoveryIdentity,
-        workspace: { digest: snapshot.digest, ...counts },
-        baseCommit: state.baseCommit,
-        approvalDigest,
-        workflowDigest,
-        scopeDigest,
-        configurationDigest
-      };
-    } catch (error) {
-      if (
-        error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError ||
-        error instanceof InstructionResourceMismatchError
-      )
-        throw error;
-      return recoveryIneligible(
-        "Digest-rejected recovery preconditions could not be validated; inspect or cancel the run.",
-        attempt.id,
-        phase
-      );
     }
   }
 
   private async recoveryEligibility(
     state: RunState
   ): Promise<RecoveryEligibility> {
-    if (state.status !== "blocked") {
-      return recoveryIneligible(
-        `Recovery requires a blocked run, but the run is ${state.status}.`
-      );
-    }
-    const attempt = state.activeAttempt;
-    if (attempt !== null) {
-      const digestRejected = await this.digestRejectedRecoveryEligibility(
-        state,
-        attempt
-      );
-      if (digestRejected !== null) return digestRejected;
-    }
-    if (attempt === null && state.blockedFrom === "fixing") {
-      return await this.prerequisiteBlockedFixRecoveryEligibility(state);
-    }
-    if (
-      attempt === null ||
-      !attempt.mutable ||
-      (attempt.kind !== "implementation" && attempt.kind !== "fix")
-    ) {
-      return recoveryIneligible(
-        "Recovery requires an interrupted mutable implementation or fix attempt.",
-        attempt?.id ?? null
-      );
-    }
-    const phase = attempt.kind;
-    const expectedBlockedFrom =
-      phase === "implementation" ? "implementing" : "fixing";
-    if (state.blockedFrom !== expectedBlockedFrom) {
-      return recoveryIneligible(
-        `The interrupted ${phase} attempt is inconsistent with blockedFrom=${state.blockedFrom ?? "null"}.`,
-        attempt.id,
-        phase
-      );
-    }
-    if (
-      state.activeProcess !== null &&
-      this.store.processAlive(state.activeProcess.pid)
-    ) {
-      return recoveryIneligible(
-        "Recovery is unavailable while the model process is still active.",
-        attempt.id,
-        phase
-      );
-    }
-    let record: AttemptRecord;
-    try {
-      record = await this.store.readRunAttempt(state.runId, attempt);
-    } catch {
-      return recoveryIneligible(
-        "Recovery attempt evidence is unreadable or inconsistent.",
-        attempt.id,
-        phase
-      );
-    }
-    try {
-      const checkpoint = await this.store.readTerminalCheckpointIfExists(
-        state.runId,
-        attempt
-      );
-      if (checkpoint !== null) {
-        const completionEvidenceRejected =
-          record.status === "failed" &&
-          record.result !== null &&
-          record.failureCode === "PLAN_TASK_COMPLETION_INVALID" &&
-          state.planTaskCompletion?.status === "invalid" &&
-          state.planTaskCompletion.sourceAttemptId === attempt.id;
-        return recoveryIneligible(
-          completionEvidenceRejected
-            ? "The terminal checkpoint result was rejected by completion validation; use banzai retry to repair its evidence."
-            : "A terminal checkpoint exists; use banzai resume so Banzai can reconcile proven completion.",
-          attempt.id,
-          phase,
-          true
-        );
-      }
-    } catch {
-      return recoveryIneligible(
-        "Terminal checkpoint evidence is malformed or conflicting; inspect or cancel the run.",
-        attempt.id,
-        phase
-      );
-    }
-    const recoverableFailedAttempt =
-      record.status === "failed" &&
-      record.failureCause !== null &&
-      record.failureCause !== undefined &&
-      RECOVERABLE_MUTABLE_FAILURE_CAUSES.has(record.failureCause);
-    if (
-      (record.status !== "started" &&
-        record.status !== "interrupted" &&
-        !recoverableFailedAttempt) ||
-      record.result !== null
-    ) {
-      return recoveryIneligible(
-        `Attempt ${attempt.id} is not an uncompleted interruption.`,
-        attempt.id,
-        phase
-      );
-    }
-    if (
-      state.recovery?.sourceAttemptId === attempt.id &&
-      state.recovery.recoveryAttemptId !== null
-    ) {
-      return recoveryIneligible(
-        "A later recovery attempt already supersedes this interruption.",
-        attempt.id,
-        phase
-      );
-    }
-    try {
-      if ((await currentCommit(this.repoRoot)) !== state.baseCommit) {
-        return recoveryIneligible(
-          "Recovery is unavailable because checkout HEAD changed.",
-          attempt.id,
-          phase
-        );
-      }
-      const config = await loadConfig(this.repoRoot);
-      assertContractParity();
-      const settings = config.models.implementer;
-      const vendor =
-        vendorFor(settings.executable) ?? FALLBACK_VENDOR.implementer;
-      const route = state.workflowSelection?.workflow ?? "strict";
-      let approvalDigest: string | null = null;
-      let workflowDigest: string | null = null;
-      if (route === "strict" || phase === "fix") {
-        await this.validateApproval(state);
-        approvalDigest = state.planApproval?.digest ?? null;
-      } else {
-        workflowDigest = this.validateWorkflowSelection(state).digest;
-      }
-      if (phase === "fix") {
-        await this.revalidateTaskCompletion(state);
-        if (
-          !state.triage?.items.some((item) => item.disposition === "accepted")
-        ) {
-          return recoveryIneligible(
-            "Fix recovery requires a non-empty current accepted-finding scope.",
-            attempt.id,
-            phase
+    const facts: RecoveryFacts = { state };
+    const workspace: RecoveryWorkspaceSnapshot = {};
+    for (;;) {
+      const step = decideRecovery(facts);
+      if (step.kind === "decided") return step.eligibility;
+      switch (step.evidence) {
+        case "digest_rejected_source":
+          facts.digestRejected = await this.digestRejectedRecoveryEligibility(
+            state,
+            step.attempt
           );
-        }
+          break;
+        case "prerequisite_blocked_fix_source":
+          facts.prerequisiteBlockedFix =
+            await this.prerequisiteBlockedFixRecoveryEligibility(state);
+          break;
+        case "process_liveness":
+          facts.processAlive = this.store.processAlive(step.pid);
+          break;
+        case "attempt_record":
+          try {
+            facts.attemptRecord = {
+              readable: true,
+              record: await this.store.readRunAttempt(state.runId, step.attempt)
+            };
+          } catch {
+            facts.attemptRecord = { readable: false };
+          }
+          break;
+        case "terminal_checkpoint":
+          try {
+            facts.terminalCheckpoint = {
+              readable: true,
+              present:
+                (await this.store.readTerminalCheckpointIfExists(
+                  state.runId,
+                  step.attempt
+                )) !== null
+            };
+          } catch {
+            facts.terminalCheckpoint = { readable: false };
+          }
+          break;
+        default:
+          // The precondition region fails as one unvalidated precondition,
+          // exactly as the single try block it replaces did.
+          try {
+            await this.gatherRecoveryPrecondition(
+              state,
+              step,
+              facts,
+              workspace
+            );
+          } catch {
+            facts.preconditionsFailed = true;
+          }
       }
-      const scopeDigest = this.attemptScopeDigest(state, attempt);
-      const configurationDigest = digestCanonicalJson({
-        version: 1,
-        vendor,
-        executableDigest: digestCanonicalJson(settings.executable),
-        model: settings.model,
-        effort: settings.effort
-      });
-      const snapshot = await workspaceSnapshot(this.repoRoot, {
-        artifactBinding: state.artifactBinding,
-        baseline: state.baseline
-      });
-      if (snapshot.baseCommit !== state.baseCommit) {
-        return recoveryIneligible(
-          "Recovery is unavailable because the workspace base commit changed.",
-          attempt.id,
-          phase
-        );
-      }
-      const counts = await workspaceChangeCounts(this.repoRoot, snapshot);
-      const recoveryIdentity = digestCanonicalJson({
-        version: 1,
-        runId: state.runId,
-        attempt,
-        phase,
-        baseCommit: state.baseCommit,
-        workspaceDigest: snapshot.digest,
-        approvalDigest,
-        workflowDigest,
-        scopeDigest,
-        configurationDigest
-      });
-      if (
-        state.recovery?.sourceAttemptId === attempt.id &&
-        state.recovery.recoveryAttemptId === null
-      ) {
-        const authorization = await this.store.readRecoveryAuthorization(
-          state.runId,
-          state.recovery.authorizationId
-        );
-        if (
-          authorization.attempt.id !== attempt.id ||
-          authorization.recoveryIdentity !== recoveryIdentity
-        ) {
-          return recoveryIneligible(
-            "Persisted recovery authorization is stale or inconsistent.",
-            attempt.id,
-            phase
-          );
-        }
-      }
-      return {
-        eligible: true,
-        reason: `Interrupted ${phase} attempt ${attempt.id} may be recovered only with current explicit authorization.`,
-        warning: RECOVERY_WARNING,
-        sourceKind: "interrupted",
-        attemptId: attempt.id,
-        phase,
-        resolvedFindingIds: [],
-        remainingFindingIds: [],
-        prerequisites: [],
-        authorization:
-          approvalDigest === null ? "workflow_selection" : "plan_approval",
-        recoveryIdentity,
-        workspace: { digest: snapshot.digest, ...counts },
-        baseCommit: state.baseCommit,
-        approvalDigest,
-        workflowDigest,
-        scopeDigest,
-        configurationDigest
-      };
-    } catch {
-      return recoveryIneligible(
-        "Recovery preconditions could not be validated; inspect or cancel the run.",
-        attempt.id,
-        phase
-      );
     }
   }
 
@@ -5496,7 +4450,7 @@ export class WorkflowRunner {
           persistedSourceRecord.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION;
         persistedSourceRecord.status = "interrupted";
         persistedSourceRecord.completedAt = null;
-        persistedSourceRecord.interruptedAt ??= now();
+        persistedSourceRecord.interruptedAt ??= this.now();
         persistedSourceRecord.durationMs = null;
         persistedSourceRecord.recoveryOf ??= null;
         persistedSourceRecord.recoveryAuthorizationId ??= null;
@@ -5584,106 +4538,6 @@ export class WorkflowRunner {
       }
       throw error;
     }
-  }
-
-  private async recordStartFailure(
-    state: RunState,
-    error: unknown
-  ): Promise<RunState> {
-    const reason = checkFailureReason(error);
-    blockState(state, reason);
-    state.activeAttempt = null;
-    state.activeProcess = null;
-    await this.store.writeState(state);
-    await this.store.appendEvent(state.runId, "run.start_failed", {
-      reason
-    });
-    return state;
-  }
-
-  private async recordReviewCheckFailure(
-    state: RunState,
-    error: unknown
-  ): Promise<RunState> {
-    const reason = checkFailureReason(error);
-    state.pendingReviewRotationReason = "unreliable-review";
-    blockState(state, reason);
-    state.activeAttempt = null;
-    state.activeProcess = null;
-    await this.store.writeState(state);
-    await this.store.appendEvent(state.runId, "review.checks_failed", {
-      reason
-    });
-    return state;
-  }
-
-  private async recordVerificationRetryCheckFailure(
-    state: RunState,
-    attemptId: string | null,
-    error: unknown
-  ): Promise<RunState> {
-    const reason = checkFailureReason(error);
-    blockState(state, reason);
-    state.activeAttempt = null;
-    state.activeProcess = null;
-    await this.store.writeState(state);
-    await this.store.appendEvent(
-      state.runId,
-      "verification.retry_preflight_failed",
-      { attemptId, reason }
-    );
-    return state;
-  }
-
-  private nextAction(
-    state: RunState,
-    retry: RetryEligibility,
-    recovery: RecoveryEligibility,
-    publication: WorkflowStatus["completionPublication"] = null
-  ): string | null {
-    if (state.status === "needs_adr_approval") {
-      return "banzai approve adr";
-    }
-    if (state.status === "needs_plan_approval") {
-      return "banzai approve plan";
-    }
-    if (state.status === "needs_human_decision") {
-      return "banzai";
-    }
-    if (state.status === "needs_triage") {
-      return "banzai triage";
-    }
-    if (state.status === "blocked") {
-      if (publication?.pending === true && publication.action !== null)
-        return `banzai ${publication.action}`;
-      // A digest-rejected result is repaired through its authorized recovery.
-      // Replaying its terminal evidence reproduces the same rejection, so
-      // eligibility outranks the mere presence of a terminal checkpoint.
-      if (recovery.eligible && recovery.sourceKind === "digest_rejected")
-        return "banzai recover";
-      return retry.eligible
-        ? "banzai retry"
-        : recovery.eligible
-          ? "banzai recover"
-          : recovery.terminalCheckpointPresent === true
-            ? "banzai resume"
-            : "banzai cancel";
-    }
-    if (
-      [
-        "created",
-        "selecting",
-        "planning",
-        "plan_approved",
-        "implementing",
-        "verifying",
-        "reviewing",
-        "fixing"
-      ].includes(state.status)
-    ) {
-      return "banzai resume";
-    }
-    return null;
   }
 
   /**
@@ -5783,985 +4637,6 @@ export class WorkflowRunner {
     await this.assertClaudePermissions(config);
   }
 
-  private async validateApproval(state: RunState): Promise<void> {
-    if (state.planApproval === null) {
-      throw new BanzaiError(
-        "PLAN_NOT_APPROVED",
-        "Implementation requires explicit plan approval."
-      );
-    }
-    const bundle = await digestArtifactBundle(
-      this.repoRoot,
-      state.planApproval.paths
-    );
-    if (bundle.digest !== state.planApproval.digest) {
-      blockState(
-        state,
-        "Approved planning artifacts changed. Restore the approved bundle (banzai restore) and retry, or cancel the run and approve a revised plan in a new run."
-      );
-      await this.store.writeState(state);
-      await this.store.appendEvent(state.runId, "approval.invalidated", {
-        previousDigest: state.planApproval.digest,
-        currentDigest: bundle.digest
-      });
-      throw new BanzaiError(
-        "APPROVAL_INVALIDATED",
-        "Approved planning artifacts changed. Run `banzai restore` to write back the approved bytes and then `banzai retry`, or cancel the run and approve a revised plan in a new run."
-      );
-    }
-  }
-
-  private completionPlanPath(state: RunState): string {
-    const planPath = state.planArtifacts?.plan ?? null;
-    if (planPath === null) {
-      throw new PlanTaskCompletionError(
-        "approved_plan_invalid",
-        "Strict completion validation cannot identify the approved plan."
-      );
-    }
-    return planPath;
-  }
-
-  private async approvedTaskIds(state: RunState): Promise<string[]> {
-    const plan = await readFile(
-      path.join(this.repoRoot, this.completionPlanPath(state)),
-      "utf8"
-    );
-    this.validateRunnerControlTasks(state, plan);
-    return parseApprovedPlanTaskIds(plan);
-  }
-
-  /**
-   * The persisted failure message of a rejected completion source attempt, so
-   * a repair prompt names the exact offending field instead of only a
-   * violation class. A missing or unreadable record degrades to null; the
-   * repair stays available without it.
-   */
-  private async completionRepairDiagnostic(
-    state: RunState,
-    sourceAttemptId: string,
-    sourceAttemptKind: "implementation" | "fix" = "implementation"
-  ): Promise<string | null> {
-    try {
-      const record = await this.store.readRunAttempt(state.runId, {
-        id: sourceAttemptId,
-        kind: sourceAttemptKind,
-        mutable: true
-      });
-      return record.error;
-    } catch {
-      return null;
-    }
-  }
-
-  private async validateImplementationCompletion(
-    state: RunState,
-    attempt: AttemptReference,
-    result: PersistedPhaseResult
-  ): Promise<ValidatedPlanTaskCompletion> {
-    if (state.planApproval === null) {
-      throw new PlanTaskCompletionError(
-        "approval_invalid",
-        "Strict completion validation requires an approved plan bundle."
-      );
-    }
-    return await validatePlanTaskCompletion({
-      repoRoot: this.repoRoot,
-      artifactBinding: state.artifactBinding,
-      sourceAttemptId: attempt.id,
-      result,
-      planPath: this.completionPlanPath(state),
-      approval: state.planApproval,
-      baseline: state.baseline
-    });
-  }
-
-  private completionInvalidCheckpoint(
-    sourceAttemptId: string,
-    error: PlanTaskCompletionError,
-    sourceAttemptKind: "implementation" | "fix" = "implementation"
-  ): NonNullable<RunState["planTaskCompletion"]> {
-    return {
-      schemaVersion: 1,
-      status: "invalid",
-      sourceAttemptId,
-      sourceAttemptKind,
-      errorCode: "PLAN_TASK_COMPLETION_INVALID",
-      violation: error.violation,
-      taskId: error.taskId,
-      recordedAt: now()
-    };
-  }
-
-  private async recordCompletionFailure(
-    state: RunState,
-    record: AttemptRecord,
-    adapterResult: AdapterResult<PhaseResult>,
-    error: PlanTaskCompletionError,
-    context: SessionContext
-  ): Promise<RunState> {
-    await this.writeAttemptOutput(
-      state,
-      record,
-      adapterResult.stdout,
-      adapterResult.stderr
-    );
-    record.status = "failed";
-    record.completedAt = now();
-    record.result = adapterResult.result;
-    record.sessionId = adapterResult.sessionId;
-    record.durationMs =
-      Date.parse(record.completedAt) - Date.parse(record.startedAt);
-    record.usage = adapterResult.usage;
-    record.error = `[PLAN_TASK_COMPLETION_INVALID] ${error.message}`;
-    record.failureCode = "PLAN_TASK_COMPLETION_INVALID";
-    await this.store.writeRunAttempt(state.runId, record);
-    const current = await this.store.readState(state.runId);
-    if (current.status === "cancelled") {
-      return current;
-    }
-    state.sessions.implementer = sessionBinding(
-      adapterResult.sessionId ?? record.resumeSessionId ?? null,
-      { ...context, role: "implementer" }
-    );
-    state.planTaskCompletion = this.completionInvalidCheckpoint(
-      record.attempt.id,
-      error,
-      record.attempt.kind === "fix" ? "fix" : "implementation"
-    );
-    state.activeProcess = null;
-    // The attempt ran a full model turn before its ledger was rejected, so the
-    // same rule as every other failure applies: failed usage counts toward
-    // consumption but never toward completion. Omitting it here made a blocked
-    // run report the token total it had before the phase ever started.
-    if (record.usage !== null) {
-      state.metrics.usage.inputTokens += record.usage.inputTokens;
-      state.metrics.usage.cachedInputTokens += record.usage.cachedInputTokens;
-      state.metrics.usage.outputTokens += record.usage.outputTokens;
-      if (record.usage.costUsd !== null) {
-        state.metrics.usage.costUsd =
-          (state.metrics.usage.costUsd ?? 0) + record.usage.costUsd;
-      }
-    }
-    blockState(state, `[PLAN_TASK_COMPLETION_INVALID] ${error.message}`);
-    await this.store.writeState(state);
-    await this.store.appendEvent(state.runId, "attempt.failed", {
-      attemptId: record.attempt.id,
-      kind: record.attempt.kind,
-      error: `[PLAN_TASK_COMPLETION_INVALID] ${error.message}`
-    });
-    await this.store.appendEvent(
-      state.runId,
-      "plan_task_completion.validation_failed",
-      {
-        attemptId: record.attempt.id,
-        code: "PLAN_TASK_COMPLETION_INVALID",
-        violation: error.violation,
-        taskId: error.taskId
-      }
-    );
-    return state;
-  }
-
-  private async revalidateTaskCompletion(
-    state: RunState,
-    allowReportRefresh = false,
-    persistReportRefresh = true
-  ): Promise<ValidatedPlanTaskCompletion> {
-    const checkpoint = state.planTaskCompletion;
-    if (checkpoint === undefined || checkpoint === null) {
-      throw new PlanTaskCompletionError(
-        "missing_ledger",
-        "Run has no canonical plan-task completion checkpoint."
-      );
-    }
-    if (checkpoint.status !== "valid") {
-      throw new PlanTaskCompletionError(
-        checkpoint.violation,
-        "Run has an invalid plan-task completion checkpoint.",
-        checkpoint.taskId
-      );
-    }
-    if (checkpoint.schemaVersion === COMPLETION_SUMMARY_SCHEMA_VERSION) {
-      // Runner-published completion is revalidated strictly read-only at every
-      // downstream boundary; legacy refresh semantics never apply to it.
-      return await this.revalidatePublishedCompletion(state, checkpoint);
-    }
-    const attempt = {
-      id: checkpoint.sourceAttemptId,
-      kind: checkpoint.sourceAttemptKind ?? ("implementation" as const),
-      mutable: true
-    };
-    const record = await this.store
-      .readRunAttempt(state.runId, attempt)
-      .catch(() => null);
-    if (record?.status !== "completed" || record.result === null) {
-      throw new PlanTaskCompletionError(
-        "source_attempt_invalid",
-        "Canonical completion source attempt is missing or not completed."
-      );
-    }
-    let result: PersistedPhaseResult;
-    try {
-      result = parsePersistedPhaseResult(record.result);
-    } catch {
-      throw new PlanTaskCompletionError(
-        "source_attempt_invalid",
-        "Canonical completion source attempt result is malformed."
-      );
-    }
-    if (state.planApproval === null) {
-      throw new PlanTaskCompletionError(
-        "approval_invalid",
-        "Canonical completion source has no plan approval."
-      );
-    }
-    const validated = await validatePlanTaskCompletion({
-      repoRoot: this.repoRoot,
-      artifactBinding: state.artifactBinding,
-      sourceAttemptId: checkpoint.sourceAttemptId,
-      result,
-      planPath: this.completionPlanPath(state),
-      approval: state.planApproval,
-      baseline: state.baseline
-    });
-    if (!summariesMatch(checkpoint, validated.summary)) {
-      const sameCanonicalSource =
-        checkpoint.sourceAttemptId === validated.summary.sourceAttemptId &&
-        checkpoint.approvalDigest === validated.summary.approvalDigest &&
-        checkpoint.planTaskDigest === validated.summary.planTaskDigest &&
-        checkpoint.ledgerDigest === validated.summary.ledgerDigest;
-      if (!allowReportRefresh || !sameCanonicalSource) {
-        throw new PlanTaskCompletionError(
-          "summary_mismatch",
-          "Persisted plan-task completion summary is stale or contradictory."
-        );
-      }
-      if (persistReportRefresh) {
-        // The refreshed summary keeps the checkpoint's provenance: the fresh
-        // validation cannot know which phase authored the ledger.
-        state.planTaskCompletion =
-          checkpoint.sourceAttemptKind === undefined
-            ? validated.summary
-            : {
-                ...validated.summary,
-                sourceAttemptKind: checkpoint.sourceAttemptKind
-              };
-        await this.store.writeState(state);
-      }
-    }
-    return validated;
-  }
-
-  private async blockForCompletionFailure(
-    state: RunState,
-    sourceAttemptId: string,
-    error: unknown
-  ): Promise<RunState> {
-    const completionError =
-      error instanceof PlanTaskCompletionError
-        ? error
-        : new PlanTaskCompletionError(
-            "source_attempt_invalid",
-            errorMessage(error)
-          );
-    state.planTaskCompletion = this.completionInvalidCheckpoint(
-      sourceAttemptId,
-      completionError,
-      state.planTaskCompletion?.sourceAttemptId === sourceAttemptId
-        ? (state.planTaskCompletion.sourceAttemptKind ?? "implementation")
-        : "implementation"
-    );
-    state.activeProcess = null;
-    blockState(
-      state,
-      `[PLAN_TASK_COMPLETION_INVALID] ${completionError.message}`
-    );
-    await this.store.writeState(state);
-    await this.store.appendEvent(
-      state.runId,
-      "plan_task_completion.validation_failed",
-      {
-        attemptId: sourceAttemptId,
-        code: "PLAN_TASK_COMPLETION_INVALID",
-        violation: completionError.violation,
-        taskId: completionError.taskId
-      }
-    );
-    return state;
-  }
-
-  private validateWorkflowSelection(
-    state: RunState
-  ): WorkflowSelectionRecord & {
-    workflow: Exclude<WorkflowRoute, "strict">;
-  } {
-    const selection = state.workflowSelection ?? null;
-    if (selection === null || selection.workflow === "strict") {
-      throw new BanzaiError(
-        "WORKFLOW_NOT_AUTHORIZED",
-        "Lite implementation requires a persisted feature or quick-fix selection."
-      );
-    }
-    const currentDigest = workflowAuthorizationDigest({
-      runId: state.runId,
-      request: state.request,
-      ...selection
-    });
-    if (currentDigest !== selection.digest) {
-      throw new BanzaiError(
-        "WORKFLOW_AUTHORIZATION_INVALID",
-        "Persisted workflow selection does not match its authorization digest."
-      );
-    }
-    return selection as WorkflowSelectionRecord & {
-      workflow: Exclude<WorkflowRoute, "strict">;
-    };
-  }
-
-  private async validateBaseCommit(state: RunState): Promise<void> {
-    if (state.artifactBinding)
-      await inspectBoundWork(this.repoRoot, state.artifactBinding);
-    const current = await currentCommit(this.repoRoot);
-    if (current !== state.baseCommit) {
-      blockState(
-        state,
-        "The checkout HEAD changed during the run. Start a new run from the intended branch and commit."
-      );
-      await this.store.writeState(state);
-      throw new BanzaiError(
-        "BASE_COMMIT_CHANGED",
-        "The checkout HEAD changed during the run."
-      );
-    }
-  }
-
-  private newAttempt(
-    state: RunState,
-    kind: AttemptReference["kind"],
-    mutable: boolean
-  ): AttemptReference {
-    return {
-      id: `${kind}-${state.reviewIteration + 1}-${randomUUID().slice(0, 8)}`,
-      kind,
-      mutable
-    };
-  }
-
-  private async beginAttempt(
-    state: RunState,
-    attempt: AttemptReference,
-    policy: AttemptPolicy
-  ): Promise<AttemptRecord> {
-    const record: AttemptRecord = {
-      schemaVersion:
-        state.verificationMode === "task"
-          ? 4
-          : policy.completion === undefined
-            ? MODEL_ATTEMPT_SCHEMA_VERSION
-            : STRICT_MODEL_ATTEMPT_SCHEMA_VERSION,
-      attempt,
-      status: "started",
-      startedAt: now(),
-      completedAt: null,
-      interruptedAt: null,
-      recoveryOf: null,
-      recoveryAuthorizationId: null,
-      result: null,
-      sessionId: null,
-      rawStdoutPath: null,
-      rawStderrPath: null,
-      durationMs: null,
-      usage: null,
-      error: null,
-      failureCode: null,
-      reviewCandidate: null,
-      sessionMode: policy.sessionMode,
-      reviewMode: policy.reviewMode ?? null,
-      rotationReason: policy.rotationReason ?? null,
-      resumeSessionId: policy.resumeSessionId,
-      sessionContext: policy.sessionContext,
-      ...(policy.completion === undefined
-        ? {}
-        : {
-            completionProtocol: COMPLETION_PROTOCOL,
-            retryOf: policy.completion.retryOf,
-            envelope: null,
-            completionDiagnostic: null
-          })
-    };
-    if (policy.completion?.retryOf != null) {
-      // Deterministic successor identity: an interrupted creation of the same
-      // linked evidence-repair successor reuses its record instead of minting
-      // a second one under the same predecessor and authority.
-      const existing = await this.store.readRunAttemptIfExists(
-        state.runId,
-        attempt
-      );
-      if (existing !== null) {
-        if (
-          existing.status !== "started" ||
-          existing.result !== null ||
-          existing.retryOf !== policy.completion.retryOf ||
-          existing.completionProtocol !== COMPLETION_PROTOCOL ||
-          JSON.stringify(existing.sessionContext) !==
-            JSON.stringify(policy.sessionContext)
-        )
-          throw new BanzaiError(
-            "COMPLETION_RETRY_CONFLICT",
-            "A linked evidence-repair successor already exists with different evidence."
-          );
-        state.activeAttempt = attempt;
-        await this.store.writeState(state);
-        return existing;
-      }
-    }
-    if (attempt.kind === "selection") {
-      state.metrics.attempts.selection =
-        (state.metrics.attempts.selection ?? 0) + 1;
-    } else {
-      state.metrics.attempts[attempt.kind] += 1;
-    }
-    state.metrics.sessions[policy.sessionMode] += 1;
-    if (policy.reviewMode !== undefined) {
-      state.metrics.reviews[policy.reviewMode] += 1;
-      if (
-        policy.rotationReason !== null &&
-        policy.rotationReason !== "primary-review"
-      ) {
-        state.metrics.reviews.rotations += 1;
-      }
-    }
-    state.activeAttempt = attempt;
-    await this.store.writeState(state);
-    await this.store.writeRunAttempt(state.runId, record);
-    const timingEvent = await this.store.appendEvent(
-      state.runId,
-      "attempt.started",
-      {
-        attemptId: attempt.id,
-        kind: attempt.kind,
-        mutable: attempt.mutable,
-        sessionMode: policy.sessionMode,
-        reviewMode: policy.reviewMode ?? null,
-        rotationReason: policy.rotationReason ?? null
-      }
-    );
-    await this.observeHumanTime(
-      state,
-      "checkpoint",
-      "attempt.started",
-      timingEvent.at,
-      attempt.id
-    );
-    return record;
-  }
-
-  private recoveryAttempt(
-    authorization: RecoveryAuthorization
-  ): AttemptReference {
-    return {
-      id: `${authorization.phase}-recovery-${authorization.authorizationId.replace(/^recovery-/u, "")}`,
-      kind: authorization.phase,
-      mutable: true
-    };
-  }
-
-  private async beginRecoveryAttempt(
-    state: RunState,
-    authorization: RecoveryAuthorization,
-    policy: AttemptPolicy
-  ): Promise<AttemptRecord> {
-    const attempt = this.recoveryAttempt(authorization);
-    let record = await this.store.readRunAttemptIfExists(state.runId, attempt);
-    if (record === null) {
-      record = {
-        schemaVersion:
-          state.verificationMode === "task"
-            ? 4
-            : policy.completion === undefined
-              ? MODEL_ATTEMPT_SCHEMA_VERSION
-              : STRICT_MODEL_ATTEMPT_SCHEMA_VERSION,
-        attempt,
-        status: "started",
-        startedAt: now(),
-        completedAt: null,
-        interruptedAt: null,
-        recoveryOf: authorization.attempt.id,
-        recoveryAuthorizationId: authorization.authorizationId,
-        result: null,
-        sessionId: null,
-        rawStdoutPath: null,
-        rawStderrPath: null,
-        durationMs: null,
-        usage: null,
-        error: null,
-        failureCode: null,
-        reviewCandidate: null,
-        sessionMode: policy.sessionMode,
-        reviewMode: policy.reviewMode ?? null,
-        rotationReason: policy.rotationReason ?? null,
-        resumeSessionId: policy.resumeSessionId,
-        sessionContext: policy.sessionContext,
-        ...(policy.completion === undefined
-          ? {}
-          : {
-              completionProtocol: COMPLETION_PROTOCOL,
-              retryOf: null,
-              envelope: null,
-              completionDiagnostic: null
-            })
-      };
-      await this.store.writeRunAttempt(state.runId, record);
-    } else if (
-      record.status !== "started" ||
-      record.result !== null ||
-      (policy.completion !== undefined) !==
-        this.completionProtocolAttempt(record) ||
-      record.recoveryOf !== authorization.attempt.id ||
-      record.recoveryAuthorizationId !== authorization.authorizationId ||
-      record.attempt.kind !== authorization.phase ||
-      record.sessionMode !== policy.sessionMode ||
-      record.resumeSessionId !== policy.resumeSessionId ||
-      JSON.stringify(record.sessionContext) !==
-        JSON.stringify(policy.sessionContext)
-    ) {
-      throw new BanzaiError(
-        "RECOVERY_ATTEMPT_CONFLICT",
-        "Persisted recovery attempt conflicts with its authorization."
-      );
-    }
-    if (
-      state.recovery?.sourceAttemptId !== authorization.attempt.id ||
-      state.recovery.authorizationId !== authorization.authorizationId ||
-      state.recovery.recoveryAttemptId !== null ||
-      (state.recovery.stage !== "source_interrupted" &&
-        state.recovery.stage !== "source_preserved")
-    ) {
-      throw new BanzaiError(
-        "RECOVERY_STATE_CHANGED",
-        "Recovery state changed before the new attempt could be linked."
-      );
-    }
-    state.metrics.attempts[attempt.kind] += 1;
-    state.metrics.sessions[policy.sessionMode] += 1;
-    state.activeAttempt = attempt;
-    state.recovery = {
-      authorizationId: authorization.authorizationId,
-      sourceAttemptId: authorization.attempt.id,
-      recoveryAttemptId: attempt.id,
-      stage: "attempt_started"
-    };
-    await this.store.writeState(state);
-    const timingEvent = await this.store.appendEvent(
-      state.runId,
-      "attempt.recovery_started",
-      {
-        sourceAttemptId: authorization.attempt.id,
-        attemptId: attempt.id,
-        kind: attempt.kind
-      }
-    );
-    await this.observeHumanTime(
-      state,
-      "checkpoint",
-      "attempt.recovery_started",
-      timingEvent.at,
-      attempt.id
-    );
-    return record;
-  }
-
-  private async processStarted(
-    state: RunState,
-    attempt: Pick<AttemptReference, "kind"> | { kind: "verification" },
-    pid: number
-  ): Promise<void> {
-    state.activeProcess = { pid, kind: attempt.kind, startedAt: now() };
-    try {
-      await this.store.writeState(state);
-    } catch (error) {
-      if (error instanceof TerminalRunStateError) terminateProcessGroup(pid);
-      throw error;
-    }
-  }
-
-  private attemptScopeDigest(
-    state: RunState,
-    attempt: AttemptReference
-  ): string | null {
-    if (attempt.kind !== "fix" && !state.artifactBinding) {
-      return null;
-    }
-    const acceptedFindingIds =
-      state.triage?.items
-        .filter((item) => item.disposition === "accepted")
-        .map((item) => item.findingId)
-        .sort() ?? [];
-    return digestCanonicalJson(
-      state.artifactBinding
-        ? {
-            version: 2,
-            artifactBindingDigest: state.artifactBinding.sha256,
-            phase: attempt.kind,
-            acceptedFindingIds: attempt.kind === "fix" ? acceptedFindingIds : []
-          }
-        : { version: 1, acceptedFindingIds }
-    );
-  }
-
-  private terminalCheckpointWriter<
-    T extends TerminalCheckpointResult | PhaseResultEnvelope
-  >(
-    state: RunState,
-    attempt: AttemptReference,
-    settings: ModelSettings,
-    policy: Pick<AttemptPolicy, "sessionMode" | "sessionContext">,
-    completion = false
-  ): (terminal: AdapterTerminalSuccess<T>) => Promise<void> {
-    return async (terminal) => {
-      const current = await this.store.readState(state.runId);
-      if (
-        current.activeAttempt?.id !== attempt.id ||
-        current.activeAttempt.kind !== attempt.kind ||
-        current.activeAttempt.mutable !== attempt.mutable
-      ) {
-        throw new BanzaiError(
-          "TERMINAL_CHECKPOINT_STATE_CHANGED",
-          "The active attempt changed before terminal success could be persisted."
-        );
-      }
-      await this.validateSavedArtifactScope(current, attempt);
-      if (
-        attempt.kind === "plan" ||
-        attempt.kind === "implementation" ||
-        attempt.kind === "fix"
-      )
-        this.validateArtifactRoleReferences(
-          current,
-          terminal.result as PersistedPhaseResult
-        );
-      const vendor =
-        vendorFor(settings.executable) ??
-        FALLBACK_VENDOR[policy.sessionContext.role];
-      if (completion) {
-        // ADR-0047 terminal proof: the exact original result, its safe
-        // envelope and the report/workspace identities observed right now.
-        if (attempt.kind !== "implementation" && attempt.kind !== "fix")
-          throw new BanzaiError(
-            "TERMINAL_CHECKPOINT_STATE_CHANGED",
-            "Only strict implementation or fix attempts use the completion protocol."
-          );
-        const envelope = this.completionEnvelopeOf(
-          terminal.result as PhaseResult | PhaseResultEnvelope
-        );
-        const observed = await this.observeCompletionInputs(
-          current,
-          envelope.artifacts
-        );
-        const checkpoint: Omit<TerminalAttemptCheckpointV2, "integrityDigest"> =
-          {
-            schema:
-              state.verificationMode === "task"
-                ? "banzai-terminal-attempt-checkpoint/v3"
-                : TERMINAL_CHECKPOINT_SCHEMA_V2,
-            schemaVersion:
-              state.verificationMode === "task"
-                ? 3
-                : TERMINAL_CHECKPOINT_SCHEMA_VERSION_V2,
-            completionProtocol: COMPLETION_PROTOCOL,
-            runId: current.runId,
-            attempt: { id: attempt.id, kind: attempt.kind, mutable: true },
-            phase: attempt.kind,
-            configuration: {
-              vendor,
-              executableDigest: digestCanonicalJson(settings.executable),
-              model: settings.model,
-              effort: settings.effort,
-              sessionMode: policy.sessionMode,
-              sessionContextDigest: digestCanonicalJson(policy.sessionContext)
-            },
-            resultContract:
-              state.verificationMode === "task"
-                ? "phase-result/v4"
-                : "phase-result/v3",
-            terminal: {
-              classification: terminal.classification,
-              observedAt: terminal.observedAt
-            },
-            envelope,
-            resultDigest: envelope.originalDigest,
-            observed: observed.observed,
-            sessionId: terminal.sessionId,
-            usage: terminal.usage,
-            baseCommit: current.baseCommit,
-            approvalDigest: current.planApproval?.digest ?? null,
-            workflowDigest: null,
-            scopeDigest: this.attemptScopeDigest(current, attempt)
-          };
-        await this.store.writeTerminalCheckpoint(current.runId, {
-          ...checkpoint,
-          integrityDigest: terminalCheckpointIntegrity(checkpoint)
-        });
-        await this.store.appendEvent(
-          current.runId,
-          "attempt.terminal_checkpoint",
-          {
-            attemptId: attempt.id,
-            kind: attempt.kind,
-            classification: terminal.classification
-          }
-        );
-        return;
-      }
-      const checkpoint: Omit<TerminalAttemptCheckpoint, "integrityDigest"> = {
-        schema:
-          state.verificationMode === "task"
-            ? "banzai-terminal-attempt-checkpoint/v3"
-            : TERMINAL_CHECKPOINT_SCHEMA,
-        schemaVersion:
-          state.verificationMode === "task"
-            ? 3
-            : TERMINAL_CHECKPOINT_SCHEMA_VERSION,
-        runId: current.runId,
-        attempt,
-        phase: attempt.kind,
-        configuration: {
-          vendor,
-          executableDigest: digestCanonicalJson(settings.executable),
-          model: settings.model,
-          effort: settings.effort,
-          sessionMode: policy.sessionMode,
-          sessionContextDigest: digestCanonicalJson(policy.sessionContext)
-        },
-        resultContract: terminalResultContract(
-          attempt.kind,
-          state.verificationMode === "task"
-        ),
-        terminal: {
-          classification: terminal.classification,
-          observedAt: terminal.observedAt
-        },
-        result: terminal.result as TerminalCheckpointResult,
-        sessionId: terminal.sessionId,
-        usage: terminal.usage,
-        baseCommit: current.baseCommit,
-        approvalDigest: current.planApproval?.digest ?? null,
-        workflowDigest:
-          current.planApproval === null
-            ? (current.workflowSelection?.digest ?? null)
-            : null,
-        scopeDigest: this.attemptScopeDigest(current, attempt)
-      };
-      const persisted: TerminalAttemptCheckpoint = {
-        ...checkpoint,
-        integrityDigest: terminalCheckpointIntegrity(checkpoint)
-      };
-      await this.store.writeTerminalCheckpoint(current.runId, persisted);
-      await this.store.appendEvent(
-        current.runId,
-        "attempt.terminal_checkpoint",
-        {
-          attemptId: attempt.id,
-          kind: attempt.kind,
-          classification: terminal.classification
-        }
-      );
-    };
-  }
-
-  private async completeAttempt<
-    T extends WorkflowSelectionResult | PhaseResult | ReviewResult
-  >(
-    state: RunState,
-    record: AttemptRecord,
-    adapterResult: AdapterResult<T>
-  ): Promise<boolean> {
-    if (record.result === null) {
-      await this.persistAdapterResult(state, record, adapterResult);
-    }
-    record.status = "completed";
-    record.completedAt = now();
-    record.durationMs =
-      Date.parse(record.completedAt) - Date.parse(record.startedAt);
-    await this.store.writeRunAttempt(state.runId, record);
-    const current = await this.store.readState(state.runId);
-    if (current.status === "cancelled") {
-      return false;
-    }
-    this.accountCompletedAttempt(state, record);
-    state.activeProcess = null;
-    await this.store.writeState(state);
-    return true;
-  }
-
-  private async persistAdapterResult<
-    T extends WorkflowSelectionResult | PhaseResult | ReviewResult
-  >(
-    state: RunState,
-    record: AttemptRecord,
-    adapterResult: AdapterResult<T>
-  ): Promise<void> {
-    await this.writeAttemptOutput(
-      state,
-      record,
-      adapterResult.stdout,
-      adapterResult.stderr
-    );
-    record.usage = adapterResult.usage;
-    if (
-      record.planningContext !== undefined &&
-      record.sessionId !== null &&
-      adapterResult.sessionId !== null &&
-      record.sessionId !== adapterResult.sessionId
-    ) {
-      throw new BanzaiError(
-        "SESSION_ID_CONFLICT",
-        "The planning result conflicts with its announced session identity."
-      );
-    }
-    record.result = adapterResult.result;
-    record.sessionId = adapterResult.sessionId ?? record.sessionId;
-    record.durationMs = Date.now() - Date.parse(record.startedAt);
-    await this.store.writeRunAttempt(state.runId, record);
-  }
-
-  private async writeAttemptOutput(
-    state: RunState,
-    record: AttemptRecord,
-    stdout: string,
-    stderr: string
-  ): Promise<void> {
-    const stdoutPath = path.relative(
-      this.store.runDirectory(state.runId),
-      await this.store.writeText(
-        state.runId,
-        `attempts/${record.attempt.id}.stdout.log`,
-        redactSensitiveText(stdout)
-      )
-    );
-    const stderrPath = path.relative(
-      this.store.runDirectory(state.runId),
-      await this.store.writeText(
-        state.runId,
-        `attempts/${record.attempt.id}.stderr.log`,
-        redactSensitiveText(stderr)
-      )
-    );
-    record.rawStdoutPath = stdoutPath;
-    record.rawStderrPath = stderrPath;
-  }
-
-  private async failAttempt(
-    state: RunState,
-    record: AttemptRecord,
-    error: unknown
-  ): Promise<RunState> {
-    if (error instanceof TerminalRunStateError) return error.state;
-    const completionError =
-      (record.attempt.kind === "implementation" ||
-        record.attempt.kind === "fix") &&
-      (state.workflowSelection?.workflow ?? "strict") === "strict" &&
-      error instanceof BanzaiError &&
-      ["PLAN_TASK_COMPLETION_INVALID", "PHASE_RESULT_SCHEMA_MISMATCH"].includes(
-        error.code
-      )
-        ? error instanceof PlanTaskCompletionError
-          ? error
-          : new PlanTaskCompletionError("source_attempt_invalid", error.message)
-        : null;
-    record.status = "failed";
-    record.completedAt = now();
-    record.durationMs =
-      Date.parse(record.completedAt) - Date.parse(record.startedAt);
-    record.error =
-      completionError === null
-        ? errorMessage(error)
-        : `[PLAN_TASK_COMPLETION_INVALID] ${completionError.message}`;
-    record.failureCode =
-      completionError === null
-        ? error instanceof BanzaiError
-          ? error.code
-          : null
-        : "PLAN_TASK_COMPLETION_INVALID";
-    const failureCause = classifyModelFailure(error);
-    record.failureCause = failureCause;
-    if (
-      error instanceof ProcessExitError &&
-      record.rawStdoutPath === null &&
-      record.rawStderrPath === null
-    ) {
-      await this.writeAttemptOutput(state, record, error.stdout, error.stderr);
-    }
-    // A process that failed still spent what its own stream reports. Dropping it
-    // makes every later cost measurement a fiction.
-    if (record.usage === null && error instanceof ProcessExitError) {
-      record.usage = error.usage;
-    }
-    await this.store.writeRunAttempt(state.runId, record);
-    const current = await this.store.readState(state.runId);
-    if (current.status === "cancelled") {
-      return current;
-    }
-    state.activeProcess = null;
-    // Failed usage counts toward consumption but never toward completion:
-    // `completedAttemptIds` stays untouched, so no verdict, review, or finding
-    // metric can be derived from it.
-    this.accountAttemptUsage(state, record);
-    if (record.attempt.kind === "review") {
-      if (
-        error instanceof BanzaiError &&
-        error.code === "ARTIFACT_PHASE_SCOPE_INVALID"
-      ) {
-        state.reviewIteration = state.latestReview?.iteration ?? 0;
-        state.pendingReviewRotationReason = "unreliable-review";
-      } else if (INTEGRITY_NEUTRAL_FAILURE_CAUSES.has(failureCause)) {
-        // `executeReview` advanced the reviewed-workspace digest before starting
-        // the process. Leaving it advanced would make the retry fail the
-        // policy's `unreliable-review` check and rotate anyway, so preserving
-        // continuity means putting it back to the last review that succeeded.
-        if (state.latestReview !== null) {
-          state.workspaceDigest = state.latestReview.workspaceDigest;
-        }
-      } else {
-        state.pendingReviewRotationReason = "previous-review-failed";
-      }
-    }
-    if (completionError !== null) {
-      state.planTaskCompletion = this.completionInvalidCheckpoint(
-        record.attempt.id,
-        completionError,
-        record.attempt.kind === "fix" ? "fix" : "implementation"
-      );
-    }
-    blockState(
-      state,
-      completionError === null
-        ? `${record.attempt.kind} failed: ${errorMessage(error)}`
-        : `[PLAN_TASK_COMPLETION_INVALID] ${completionError.message}`
-    );
-    await this.store.writeState(state);
-    await this.store.appendEvent(state.runId, "attempt.failed", {
-      attemptId: record.attempt.id,
-      kind: record.attempt.kind,
-      cause: failureCause,
-      error: errorMessage(error)
-    });
-    if (completionError !== null) {
-      await this.store.appendEvent(
-        state.runId,
-        "plan_task_completion.validation_failed",
-        {
-          attemptId: record.attempt.id,
-          code: "PLAN_TASK_COMPLETION_INVALID",
-          violation: completionError.violation,
-          taskId: completionError.taskId
-        }
-      );
-    }
-    return state;
-  }
-
   private contextAuthority(
     state: RunState,
     config: OrchestratorConfig,
@@ -6804,31 +4679,6 @@ export class WorkflowRunner {
       });
     }
     return entries;
-  }
-
-  private artifactWritePaths(
-    state: RunState,
-    phase: AttemptReference["kind"]
-  ): string[] {
-    const roles = state.artifactBinding?.binding.artifacts;
-    if (roles === undefined) return [];
-    if (phase === "plan")
-      return [roles.description, roles.plan].filter(
-        (item): item is string => item !== undefined
-      );
-    if (phase !== "implementation" && phase !== "fix") return [];
-    const workflow = state.workflowSelection?.workflow ?? "strict";
-    return (
-      workflow === "strict"
-        ? [
-            roles.implementationReport,
-            roles.testReport,
-            ...(phase === "fix" ? [roles.changeReport] : [])
-          ]
-        : workflow === "feature"
-          ? [roles.work]
-          : [roles.changeReport]
-    ).filter((item): item is string => item !== undefined);
   }
 
   private artifactInstructions(
@@ -6875,7 +4725,7 @@ export class WorkflowRunner {
     const writes =
       bound === undefined
         ? legacyOutputs.filter((item): item is string => item !== undefined)
-        : this.artifactWritePaths(state, phase);
+        : artifactWritePaths(state, phase);
     return [
       bound === undefined
         ? "Legacy artifact surface (no persisted work binding):"
@@ -6901,126 +4751,6 @@ export class WorkflowRunner {
     ]
       .filter((part) => part.length > 0)
       .join("\n");
-  }
-
-  private async checkArtifactPhaseScope(
-    state: RunState,
-    phase: AttemptReference["kind"],
-    before: Awaited<ReturnType<typeof workspaceSnapshot>>
-  ): Promise<void> {
-    const bound = state.artifactBinding;
-    if (bound === undefined) return;
-    const after = await workspaceSnapshot(this.repoRoot, {
-      baseline: state.baseline,
-      artifactBinding: bound,
-      excludedPaths:
-        phase === "review"
-          ? [reviewArtifactPath(state.slug, state.reviewIteration, bound)]
-          : []
-    });
-    const allowed = new Set(this.artifactWritePaths(state, phase));
-    for (const change of workspaceChanges(before, after)) {
-      const candidate = change.path;
-      const privatePath =
-        candidate === ".banzai" || candidate.startsWith(".banzai/");
-      const legacyWork =
-        /^documentation\/(?:features|development-plans|changes)\//.test(
-          candidate
-        );
-      const prohibited =
-        phase === "selection" ||
-        phase === "review" ||
-        (privatePath && !allowed.has(candidate)) ||
-        (legacyWork && !allowed.has(candidate)) ||
-        // Accepting an ADR during planning adds its row to the manifest's
-        // active ADR index, as the delivered architecture guidance requires.
-        (phase === "plan" &&
-          !allowed.has(candidate) &&
-          !isDocumentationPath(candidate) &&
-          candidate !== "PROJECT_MANIFEST.md");
-      if (prohibited)
-        throw new BanzaiError(
-          "ARTIFACT_PHASE_SCOPE_INVALID",
-          `Phase ${phase} changed an unauthorized artifact or source path: ${candidate}`
-        );
-    }
-  }
-
-  private async validateSavedArtifactScope(
-    state: RunState,
-    attempt: AttemptReference
-  ): Promise<void> {
-    if (!state.artifactBinding) return;
-    const bytes = await readArtifactBytes(
-      this.repoRoot,
-      `.banzai/runs/${state.runId}/attempts/${attempt.id}.artifact-workspace.json`,
-      { limit: 2 * 1024 * 1024 }
-    );
-    const before = JSON.parse(
-      bytes?.toString("utf8") ?? "null"
-    ) as WorkspaceSnapshot | null;
-    if (
-      before?.schemaVersion !== 2 ||
-      before.baseCommit !== state.baseCommit ||
-      before.artifactBindingDigest !== state.artifactBinding.sha256 ||
-      !Array.isArray(before.entries) ||
-      before.digest !==
-        createHash("sha256")
-          .update(
-            JSON.stringify({
-              version: 2,
-              baseCommit: before.baseCommit,
-              artifactBindingDigest: before.artifactBindingDigest,
-              entries: before.entries
-            })
-          )
-          .digest("hex")
-    )
-      throw new BanzaiError(
-        "ARTIFACT_RECOVERY_REQUIRED",
-        "Original attempt artifact workspace evidence is missing or inconsistent."
-      );
-    await this.checkArtifactPhaseScope(state, attempt.kind, before);
-  }
-
-  private validateArtifactRoleReferences(
-    state: RunState,
-    result: Pick<PersistedPhaseResult, "artifacts">
-  ): void {
-    const roles = state.artifactBinding?.binding.artifacts;
-    if (roles === undefined) return;
-    for (const role of [
-      "description",
-      "plan",
-      "implementationReport",
-      "testReport"
-    ] as const) {
-      const reference = result.artifacts[role];
-      if (reference === null) continue;
-      const workflow = state.workflowSelection?.workflow ?? "strict";
-      const expected =
-        role === "implementationReport" && workflow !== "strict"
-          ? workflow === "feature"
-            ? roles.work
-            : roles.changeReport
-          : roles[role];
-      if (reference !== expected)
-        throw new BanzaiError(
-          "ARTIFACT_PHASE_SCOPE_INVALID",
-          `Result ${role} does not match the persisted work binding.`
-        );
-    }
-    if (
-      result.artifacts.adrs.some(
-        (value) =>
-          !/^documentation\/decisions\/[0-9]{4}-[a-z0-9-]+\.md$/.test(value)
-      )
-    ) {
-      throw new BanzaiError(
-        "ARTIFACT_PHASE_SCOPE_INVALID",
-        "ADR references must retain their public decision paths."
-      );
-    }
   }
 
   private async invokeWithContext<T>(input: {
@@ -7053,7 +4783,7 @@ export class WorkflowRunner {
     const enforced = preCallBudgets.find(
       (evaluation) => evaluation.result === "enforced_exceeded"
     );
-    const measuredAt = now();
+    const measuredAt = this.now();
     const started = await this.store.beginContextInvocation(
       input.state.runId,
       input.attempt,
@@ -7065,7 +4795,7 @@ export class WorkflowRunner {
         vendor,
         sessionMode: input.sessionMode,
         measuredAt,
-        completedAt: enforced === undefined ? null : now(),
+        completedAt: enforced === undefined ? null : this.now(),
         outcome: enforced === undefined ? "pending" : "budget_exceeded",
         runnerPayload,
         authority: this.contextAuthority(
@@ -7125,7 +4855,7 @@ export class WorkflowRunner {
         input.attempt,
         started.ordinal,
         {
-          completedAt: now(),
+          completedAt: this.now(),
           outcome,
           sessionInventory:
             inventory === null
@@ -7213,7 +4943,8 @@ export class WorkflowRunner {
         );
       result = await input.invoke(outputContract);
       if (before !== null)
-        await this.checkArtifactPhaseScope(
+        await checkArtifactPhaseScope(
+          this.context,
           input.state,
           input.attempt.kind,
           before
@@ -7261,8 +4992,8 @@ export class WorkflowRunner {
       role: "planner",
       phase: "selection"
     });
-    const attempt = this.newAttempt(state, "selection", false);
-    const record = await this.beginAttempt(state, attempt, {
+    const attempt = newAttempt(this.context, state, "selection", false);
+    const record = await beginAttempt(this.context, state, attempt, {
       sessionMode: "fresh",
       resumeSessionId: null,
       sessionContext: sessionContext("planner", config.models.planner)
@@ -7328,12 +5059,13 @@ export class WorkflowRunner {
                   BANZAI_RUN_ID: state.runId
                 },
                 onStart: async (pid) => {
-                  await this.processStarted(state, attempt, pid);
+                  await processStarted(this.context, state, attempt, pid);
                 },
                 onProgress: (event) => {
                   this.modelProgress("Workflow selection", event);
                 },
-                onTerminalSuccess: this.terminalCheckpointWriter(
+                onTerminalSuccess: terminalCheckpointWriter(
+                  this.context,
                   state,
                   attempt,
                   config.models.planner,
@@ -7348,7 +5080,7 @@ export class WorkflowRunner {
               })
           })
       );
-      if (!(await this.completeAttempt(state, record, result))) {
+      if (!(await completeAttempt(this.context, state, record, result))) {
         return await this.store.readState(state.runId);
       }
       try {
@@ -7377,7 +5109,7 @@ export class WorkflowRunner {
         error instanceof InstructionResourceMismatchError
       )
         throw error;
-      return await this.failAttempt(state, record, error);
+      return await failAttempt(this.context, state, record, error);
     }
   }
 
@@ -7388,7 +5120,7 @@ export class WorkflowRunner {
     config: OrchestratorConfig
   ): Promise<RunState> {
     const workflow = effectiveWorkflow(result);
-    const selectedAt = now();
+    const selectedAt = this.now();
     const fallbackReasons: string[] = [];
     if (result.recommendedWorkflow !== "strict" && workflow === "strict") {
       if (result.confidence !== "high") {
@@ -7565,8 +5297,8 @@ export class WorkflowRunner {
       phase: "planning"
     });
     await this.invocationScope(state.runId, config);
-    const attempt = this.newAttempt(state, "plan", false);
-    const record = await this.beginAttempt(state, attempt, {
+    const attempt = newAttempt(this.context, state, "plan", false);
+    const record = await beginAttempt(this.context, state, attempt, {
       sessionMode: resumeSessionId === null ? "fresh" : "resumed",
       resumeSessionId,
       sessionContext: sessionContext("planner", config.models.planner)
@@ -7675,12 +5407,13 @@ export class WorkflowRunner {
                   await this.store.writeRunAttempt(state.runId, record);
                 },
                 onStart: async (pid) => {
-                  await this.processStarted(state, attempt, pid);
+                  await processStarted(this.context, state, attempt, pid);
                 },
                 onProgress: (event) => {
                   this.modelProgress("Planning", event);
                 },
-                onTerminalSuccess: this.terminalCheckpointWriter(
+                onTerminalSuccess: terminalCheckpointWriter(
+                  this.context,
                   state,
                   attempt,
                   config.models.planner,
@@ -7695,15 +5428,15 @@ export class WorkflowRunner {
               })
           })
       );
-      const planResult = this.legacyPhaseResult(result.result);
+      const planResult = legacyPhaseResult(result.result);
       const applied = { ...result, result: planResult };
-      await this.persistAdapterResult(state, record, applied);
+      await persistAdapterResult(this.context, state, record, applied);
       // A malformed Implementation Tasks heading fails the attempt here,
       // before it completes, so the failure stays retryable and the plan
       // stays the planner's to fix — never discovered post-approval on an
       // immutable bundle where only rerunning planning could correct it.
-      await this.validatePlanningResult(state, attempt, planResult);
-      if (!(await this.completeAttempt(state, record, applied))) {
+      await validatePlanningResult(this.context, state, attempt, planResult);
+      if (!(await completeAttempt(this.context, state, record, applied))) {
         return await this.store.readState(state.runId);
       }
       try {
@@ -7747,7 +5480,7 @@ export class WorkflowRunner {
               entry.kind === "file" &&
               (entry.path.startsWith("documentation/") ||
                 entry.path === "PROJECT_MANIFEST.md" ||
-                this.artifactWritePaths(state, "plan").includes(entry.path)) &&
+                artifactWritePaths(state, "plan").includes(entry.path)) &&
               entry.path.length <= 300
           )
           .map((entry) => entry.path)
@@ -7755,7 +5488,7 @@ export class WorkflowRunner {
       } catch {
         record.planningContext.workspaceDigest = null;
       }
-      return await this.failAttempt(state, record, error);
+      return await failAttempt(this.context, state, record, error);
     }
   }
 
@@ -7778,11 +5511,11 @@ export class WorkflowRunner {
         "Implementation checks",
         `base commit, ${lite ? "persisted workflow selection" : "approved plan bundle"}, and ${config.models.implementer.executable} subscription authentication`,
         async () => {
-          await this.validateBaseCommit(state);
+          await validateBaseCommit(this.context, state);
           if (lite) {
-            this.validateWorkflowSelection(state);
+            validateWorkflowSelection(state);
           } else {
-            await this.validateApproval(state);
+            await validateApproval(this.context, state);
           }
           await this.preflightVendor("implementer", config.models.implementer);
         }
@@ -7821,16 +5554,20 @@ export class WorkflowRunner {
     const protocol = !lite;
     const retryOf =
       protocol && recovery === null
-        ? await this.completionRetryPredecessor(state, "implementation")
+        ? await completionRetryPredecessor(
+            this.context,
+            state,
+            "implementation"
+          )
         : null;
     const attempt =
       recovery === null
         ? retryOf === null
-          ? this.newAttempt(state, "implementation", true)
-          : this.repairAttempt(state, "implementation", retryOf)
-        : this.recoveryAttempt(recovery);
+          ? newAttempt(this.context, state, "implementation", true)
+          : repairAttempt(state, "implementation", retryOf)
+        : recoveryAttempt(recovery);
     if (protocol)
-      await this.transitionToCompletionState(state, {
+      await transitionToCompletionState(this.context, state, {
         id: attempt.id,
         kind: "implementation",
         mutable: true
@@ -7843,11 +5580,11 @@ export class WorkflowRunner {
     };
     const record =
       recovery === null
-        ? await this.beginAttempt(state, attempt, policy)
-        : await this.beginRecoveryAttempt(state, recovery, policy);
+        ? await beginAttempt(this.context, state, attempt, policy)
+        : await beginRecoveryAttempt(this.context, state, recovery, policy);
     try {
       const approval = state.planApproval;
-      const selection = lite ? this.validateWorkflowSelection(state) : null;
+      const selection = lite ? validateWorkflowSelection(state) : null;
       if (!lite && approval === null) {
         throw new BanzaiError("PLAN_NOT_APPROVED", "Plan approval is missing.");
       }
@@ -7858,13 +5595,14 @@ export class WorkflowRunner {
               approval?.digest ?? "",
               approval?.paths ?? [],
               config.verification.profiles,
-              await this.approvedTaskIds(state),
+              await approvedTaskIds(this.context, state),
               state.planTaskCompletion?.status === "invalid"
                 ? {
                     sourceAttemptId: state.planTaskCompletion.sourceAttemptId,
                     violation: state.planTaskCompletion.violation,
                     taskId: state.planTaskCompletion.taskId,
-                    diagnostic: await this.completionRepairDiagnostic(
+                    diagnostic: await completionRepairDiagnostic(
+                      this.context,
                       state,
                       state.planTaskCompletion.sourceAttemptId,
                       state.planTaskCompletion.sourceAttemptKind ??
@@ -7957,12 +5695,13 @@ export class WorkflowRunner {
                   ...authorizationEnvironment
                 },
                 onStart: async (pid) => {
-                  await this.processStarted(state, attempt, pid);
+                  await processStarted(this.context, state, attempt, pid);
                 },
                 onProgress: (event) => {
                   this.modelProgress("Implementation", event);
                 },
-                onTerminalSuccess: this.terminalCheckpointWriter(
+                onTerminalSuccess: terminalCheckpointWriter(
+                  this.context,
                   state,
                   attempt,
                   config.models.implementer,
@@ -7995,7 +5734,7 @@ export class WorkflowRunner {
           sessionContext("implementer", config.models.implementer)
         );
       }
-      const liteResult = this.legacyPhaseResult(result.result);
+      const liteResult = legacyPhaseResult(result.result);
       if (liteResult.taskCompletion !== null) {
         throw new BanzaiError(
           "PLAN_TASK_COMPLETION_INVALID",
@@ -8005,16 +5744,17 @@ export class WorkflowRunner {
       const applied = { ...result, result: liteResult };
       // The result is persisted first so a rejection below keeps it readable
       // as the evidence its repair replaces.
-      await this.persistAdapterResult(state, record, applied);
+      await persistAdapterResult(this.context, state, record, applied);
       // ADR-0051: a source identity this result pins is established against the
       // bytes it names here, before verification or any later phase reads it.
-      await this.establishResultSourceIdentities(
+      await establishResultSourceIdentities(
+        this.context,
         state,
         attempt,
         liteResult,
         config
       );
-      if (!(await this.completeAttempt(state, record, applied))) {
+      if (!(await completeAttempt(this.context, state, record, applied))) {
         return await this.store.readState(state.runId);
       }
       try {
@@ -8044,7 +5784,7 @@ export class WorkflowRunner {
         error instanceof InstructionResourceMismatchError
       )
         throw error;
-      return await this.failAttempt(state, record, error);
+      return await failAttempt(this.context, state, record, error);
     }
   }
 
@@ -8065,8 +5805,8 @@ export class WorkflowRunner {
         "Fix checks",
         `base commit, approved plan bundle, and ${config.models.implementer.executable} subscription authentication`,
         async () => {
-          await this.validateBaseCommit(state);
-          await this.validateApproval(state);
+          await validateBaseCommit(this.context, state);
+          await validateApproval(this.context, state);
           await this.preflightVendor("implementer", config.models.implementer);
         }
       );
@@ -8127,15 +5867,15 @@ export class WorkflowRunner {
     // and recovery descendants, is created under the completion protocol.
     const retryOf =
       recovery === null
-        ? await this.completionRetryPredecessor(state, "fix")
+        ? await completionRetryPredecessor(this.context, state, "fix")
         : null;
     const attempt =
       recovery === null
         ? retryOf === null
-          ? this.newAttempt(state, "fix", true)
-          : this.repairAttempt(state, "fix", retryOf)
-        : this.recoveryAttempt(recovery);
-    await this.transitionToCompletionState(state, {
+          ? newAttempt(this.context, state, "fix", true)
+          : repairAttempt(state, "fix", retryOf)
+        : recoveryAttempt(recovery);
+    await transitionToCompletionState(this.context, state, {
       id: attempt.id,
       kind: "fix",
       mutable: true
@@ -8148,8 +5888,8 @@ export class WorkflowRunner {
     };
     const record =
       recovery === null
-        ? await this.beginAttempt(state, attempt, policy)
-        : await this.beginRecoveryAttempt(state, recovery, policy);
+        ? await beginAttempt(this.context, state, attempt, policy)
+        : await beginRecoveryAttempt(this.context, state, recovery, policy);
     try {
       const approval = state.planApproval;
       if (approval === null) {
@@ -8166,7 +5906,8 @@ export class WorkflowRunner {
               sourceAttemptId: state.planTaskCompletion.sourceAttemptId,
               violation: state.planTaskCompletion.violation,
               taskId: state.planTaskCompletion.taskId,
-              diagnostic: await this.completionRepairDiagnostic(
+              diagnostic: await completionRepairDiagnostic(
+                this.context,
                 state,
                 state.planTaskCompletion.sourceAttemptId,
                 "fix"
@@ -8253,12 +5994,13 @@ export class WorkflowRunner {
                   BANZAI_APPROVAL_DIGEST: approval.digest
                 },
                 onStart: async (pid) => {
-                  await this.processStarted(state, attempt, pid);
+                  await processStarted(this.context, state, attempt, pid);
                 },
                 onProgress: (event) => {
                   this.modelProgress("Fix", event);
                 },
-                onTerminalSuccess: this.terminalCheckpointWriter(
+                onTerminalSuccess: terminalCheckpointWriter(
+                  this.context,
                   state,
                   attempt,
                   config.models.implementer,
@@ -8300,463 +6042,13 @@ export class WorkflowRunner {
         error instanceof InstructionResourceMismatchError
       )
         throw error;
-      return await this.failAttempt(state, record, error);
+      return await failAttempt(this.context, state, record, error);
     }
   }
 
   // ---------------------------------------------------------------------------
   // Runner-owned completion publication (ADR-0047 / ADR-0048)
   // ---------------------------------------------------------------------------
-
-  private completionProtocolAttempt(record: AttemptRecord): boolean {
-    return (
-      record.schemaVersion === STRICT_MODEL_ATTEMPT_SCHEMA_VERSION ||
-      (record.schemaVersion === 4 &&
-        record.completionProtocol === COMPLETION_PROTOCOL)
-    );
-  }
-
-  private completionEnvelopeOf(
-    result: PhaseResult | PhaseResultEnvelope
-  ): PhaseResultEnvelope {
-    return isPhaseResultEnvelope(result)
-      ? result
-      : phaseResultEnvelopeOf(result);
-  }
-
-  /** Lite routes keep the validated result contract; an envelope there is a vendor defect. */
-  private legacyPhaseResult(
-    result: PhaseResult | PhaseResultEnvelope
-  ): PhaseResult {
-    if (!isPhaseResultEnvelope(result)) return result;
-    const validated = phaseResultFromEnvelope(result);
-    if (validated === null)
-      throw new BanzaiError(
-        "PLAN_TASK_COMPLETION_INVALID",
-        result.taskCompletion.state === "unaccepted"
-          ? result.taskCompletion.diagnostic
-          : "Lite phase result carried an unaccepted completion payload."
-      );
-    return validated;
-  }
-
-  /**
-   * The exact rejected predecessor an evidence-repair successor links to. Only
-   * a failed attempt of the same kind whose input the runner rejected under
-   * PLAN_TASK_COMPLETION_INVALID is a predecessor; a canonical source rejected
-   * at revalidation has no failed predecessor and links to nothing.
-   */
-  private async completionRetryPredecessor(
-    state: RunState,
-    kind: "implementation" | "fix"
-  ): Promise<string | null> {
-    const checkpoint = state.planTaskCompletion;
-    if (checkpoint?.status !== "invalid") return null;
-    if ((checkpoint.sourceAttemptKind ?? "implementation") !== kind)
-      return null;
-    const predecessor = await this.store.readRunAttemptIfExists(state.runId, {
-      id: checkpoint.sourceAttemptId,
-      kind,
-      mutable: true
-    });
-    if (
-      predecessor?.status !== "failed" ||
-      predecessor.failureCode !== "PLAN_TASK_COMPLETION_INVALID"
-    )
-      return null;
-    return predecessor.attempt.id;
-  }
-
-  /**
-   * A deterministic successor identity for one rejected predecessor under the
-   * same approval and scope, so an interrupted successor creation deduplicates
-   * on resume instead of minting a second linked attempt.
-   */
-  private repairAttempt(
-    state: RunState,
-    kind: "implementation" | "fix",
-    predecessor: string
-  ): AttemptReference {
-    const identity = digestCanonicalJson({
-      version: 1,
-      runId: state.runId,
-      predecessor,
-      approvalDigest: state.planApproval?.digest ?? null,
-      scopeDigest: this.attemptScopeDigest(state, {
-        id: predecessor,
-        kind,
-        mutable: true
-      })
-    });
-    return {
-      id: `${kind}-repair-${identity.slice(0, 12)}`,
-      kind,
-      mutable: true
-    };
-  }
-
-  /**
-   * Moves a v4/v6 run to schema 7 exactly once, when its first strict attempt
-   * under the completion protocol is created. The exact prior state bytes are
-   * retained as attempt-owned transition evidence before the new state exists,
-   * and the run keeps its binding, verification mode and configuration setup.
-   */
-  private async transitionToCompletionState(
-    state: RunState,
-    attempt: AttemptReference & { kind: "implementation" | "fix" }
-  ): Promise<void> {
-    if (state.schemaVersion === 7 || state.schemaVersion === 8) return;
-    if (
-      state.schemaVersion !== 3 &&
-      state.schemaVersion !== 4 &&
-      state.schemaVersion !== 6
-    )
-      throw new BanzaiError(
-        "COMPLETION_STATE_UNSUPPORTED",
-        `Run state v${state.schemaVersion} cannot host a runner-owned completion attempt. Cancel this run and start a new one.`
-      );
-    const priorBytes = await this.store.readStateBytes(state.runId);
-    const transition: Omit<CompletionTransition, "integrityDigest"> = {
-      schema: COMPLETION_TRANSITION_SCHEMA,
-      schemaVersion: COMPLETION_RECORD_SCHEMA_VERSION,
-      runId: state.runId,
-      attemptId: attempt.id,
-      attemptKind: attempt.kind,
-      completionProtocol: COMPLETION_PROTOCOL,
-      priorState: {
-        schemaVersion: state.schemaVersion,
-        path: this.store.completionEvidenceRelativePath(
-          state.runId,
-          attempt,
-          "completion-state-input.json"
-        ),
-        sha256: createHash("sha256").update(priorBytes).digest("hex")
-      }
-    };
-    await this.store.writeCompletionTransition(
-      state.runId,
-      { ...transition, integrityDigest: completionRecordIntegrity(transition) },
-      priorBytes
-    );
-    state.schemaVersion = 7;
-    state.completionPublication = null;
-  }
-
-  private implementerConfigurationDigest(config: OrchestratorConfig): string {
-    const settings = config.models.implementer;
-    return digestCanonicalJson({
-      version: 1,
-      vendor: vendorFor(settings.executable) ?? FALLBACK_VENDOR.implementer,
-      executableDigest: digestCanonicalJson(settings.executable),
-      model: settings.model,
-      effort: settings.effort
-    });
-  }
-
-  private completionCheckpointConfigurationCurrent(
-    record: AttemptRecord,
-    checkpoint: TerminalAttemptCheckpointV2,
-    config: OrchestratorConfig
-  ): boolean {
-    const settings = config.models.implementer;
-    const expectedContext =
-      record.sessionContext ?? sessionContext("implementer", settings);
-    return (
-      checkpoint.configuration.vendor ===
-        (vendorFor(settings.executable) ?? FALLBACK_VENDOR.implementer) &&
-      checkpoint.configuration.executableDigest ===
-        digestCanonicalJson(settings.executable) &&
-      checkpoint.configuration.model === settings.model &&
-      checkpoint.configuration.effort === settings.effort &&
-      checkpoint.configuration.sessionMode ===
-        (record.sessionMode ?? "fresh") &&
-      checkpoint.configuration.sessionContextDigest ===
-        digestCanonicalJson(expectedContext)
-    );
-  }
-
-  /** Observes one required report without following an unsafe path. */
-  private async observeReport(relativePath: string | null): Promise<{
-    observation: CompletionReportObservation;
-    bytes: Buffer | null;
-  }> {
-    if (relativePath === null)
-      return { observation: { path: null, state: "absent" }, bytes: null };
-    let absolute: string;
-    try {
-      absolute = path.resolve(this.repoRoot, relativePath);
-      if (
-        relativePath.length === 0 ||
-        relativePath.includes("\\") ||
-        path.posix.isAbsolute(relativePath) ||
-        path.posix.normalize(relativePath) !== relativePath ||
-        relativePath.startsWith("../") ||
-        !absolute.startsWith(`${path.resolve(this.repoRoot)}${path.sep}`)
-      )
-        return {
-          observation: { path: relativePath, state: "unsafe" },
-          bytes: null
-        };
-      const metadata = await lstat(absolute);
-      if (!metadata.isFile() || metadata.isSymbolicLink())
-        return {
-          observation: { path: relativePath, state: "unsafe" },
-          bytes: null
-        };
-      const root = await realpath(this.repoRoot);
-      if (!(await realpath(absolute)).startsWith(`${root}${path.sep}`))
-        return {
-          observation: { path: relativePath, state: "unsafe" },
-          bytes: null
-        };
-    } catch (error) {
-      return {
-        observation: {
-          path: relativePath,
-          state:
-            (error as NodeJS.ErrnoException).code === "ENOENT"
-              ? "absent"
-              : "unavailable"
-        },
-        bytes: null
-      };
-    }
-    try {
-      const bytes = await readFile(absolute);
-      return {
-        observation: {
-          path: relativePath,
-          state: "present",
-          sha256: createHash("sha256").update(bytes).digest("hex"),
-          bytes: bytes.length
-        },
-        bytes
-      };
-    } catch {
-      return {
-        observation: { path: relativePath, state: "unavailable" },
-        bytes: null
-      };
-    }
-  }
-
-  /**
-   * Report identities plus the non-report workspace digest, omitting exactly
-   * the two report destinations so a runner-owned report write never counts
-   * as source drift while every other change does.
-   */
-  private async observeCompletionInputs(
-    state: RunState,
-    artifacts: Pick<PhaseArtifacts, "implementationReport" | "testReport">
-  ): Promise<{
-    observed: CompletionObservedInputs;
-    bytes: { implementationReport: Buffer | null; testReport: Buffer | null };
-    excludedPaths: string[];
-  }> {
-    const implementation = await this.observeReport(
-      artifacts.implementationReport
-    );
-    const test = await this.observeReport(artifacts.testReport);
-    const excludedPaths = [
-      artifacts.implementationReport,
-      artifacts.testReport
-    ].filter((item): item is string => item !== null);
-    let workspaceDigest: string | null;
-    try {
-      workspaceDigest = (
-        await workspaceSnapshot(this.repoRoot, {
-          artifactBinding: state.artifactBinding,
-          baseline: state.baseline,
-          excludedPaths
-        })
-      ).digest;
-    } catch {
-      workspaceDigest = null;
-    }
-    return {
-      observed: {
-        implementationReport: implementation.observation,
-        testReport: test.observation,
-        workspaceDigest
-      },
-      bytes: {
-        implementationReport: implementation.bytes,
-        testReport: test.bytes
-      },
-      excludedPaths
-    };
-  }
-
-  private async storeCursor(
-    state: RunState,
-    cursor: CompletionPublicationCursor
-  ): Promise<void> {
-    state.completionPublication = cursor;
-    try {
-      await this.store.writeState(state);
-    } catch (error) {
-      if (error instanceof TerminalRunStateError) throw error;
-      throw new CompletionRefusal(
-        "COMPLETION_PUBLICATION_IO",
-        cursor.stage,
-        cursor.receiptDigest ??
-          cursor.candidateDigest ??
-          cursor.captureDigest ??
-          null,
-        "Retry with banzai resume once storage is available, or cancel."
-      );
-    }
-  }
-
-  /**
-   * Capture: retain the original decoded result, terminal identity, authority
-   * identities and byte-identical report originals before any validation. A
-   * missing input identity is recorded as absent or unavailable, never inferred.
-   */
-  private async captureCompletionInput(
-    state: RunState,
-    record: AttemptRecord,
-    envelope: PhaseResultEnvelope,
-    config: OrchestratorConfig,
-    outcome: "completed" | "stop"
-  ): Promise<CompletionCapture> {
-    const attempt = record.attempt as AttemptReference & {
-      kind: "implementation" | "fix";
-    };
-    const approval = state.planApproval;
-    if (approval === null)
-      throw new BanzaiError("PLAN_NOT_APPROVED", "Plan approval is missing.");
-    const checkpoint = await this.store.readTerminalCheckpointIfExists(
-      state.runId,
-      attempt
-    );
-    if (!checkpoint || !("envelope" in checkpoint))
-      throw new CompletionRefusal(
-        "COMPLETION_PUBLICATION_INTEGRITY",
-        "capture",
-        checkpoint?.integrityDigest ?? null,
-        "The exact terminal input observation is unavailable; cancel the run unless intact proof can be reproduced by a corrected runner."
-      );
-    if (checkpoint.observed.workspaceDigest === null)
-      throw new CompletionRefusal(
-        "COMPLETION_PUBLICATION_INTEGRITY",
-        "capture",
-        checkpoint.integrityDigest,
-        "The terminal checkpoint did not prove the non-report workspace identity; cancel the run unless intact proof can be reproduced by a corrected runner."
-      );
-    if (
-      !this.completionCheckpointConfigurationCurrent(record, checkpoint, config)
-    )
-      throw new CompletionRefusal(
-        "COMPLETION_PUBLICATION_DRIFT",
-        "capture",
-        checkpoint.integrityDigest,
-        "The implementer configuration or session context changed after the model returned. Restore the exact recorded authority, then run banzai resume; otherwise cancel."
-      );
-    const transition = await this.store.readCompletionTransitionIfExists(
-      state.runId,
-      attempt
-    );
-    const inputs = await this.observeCompletionInputs(
-      state,
-      envelope.artifacts
-    );
-    // ADR-0047 section 4: the capture baseline is the input the runner observed
-    // when the vendor returned, never a second read of files that may have
-    // changed after it. A restart before the manifest or an original was
-    // durable must prove those exact identities again; anything else is drift
-    // with an explicit restore-then-resume route, never an adopted new input.
-    const proven = checkpoint.observed;
-    if (!sameObservedInputs(inputs.observed, proven))
-      throw new CompletionRefusal(
-        "COMPLETION_PUBLICATION_DRIFT",
-        "capture",
-        checkpoint.integrityDigest,
-        "A required report or the non-report workspace changed after the model returned. Restore the exact recorded input and matching authority, then run banzai resume; otherwise cancel."
-      );
-    const observed = proven;
-    const originals: CompletionCapture["originals"] = {
-      implementationReport: null,
-      testReport: null
-    };
-    if (inputs.bytes.implementationReport !== null)
-      originals.implementationReport = await this.store.writeCompletionOriginal(
-        state.runId,
-        attempt,
-        "implementationReport",
-        inputs.bytes.implementationReport
-      );
-    if (inputs.bytes.testReport !== null)
-      originals.testReport = await this.store.writeCompletionOriginal(
-        state.runId,
-        attempt,
-        "testReport",
-        inputs.bytes.testReport
-      );
-    const accepted =
-      envelope.taskCompletion.state === "accepted"
-        ? envelope.taskCompletion.ledger
-        : null;
-    const prior = state.planTaskCompletion;
-    const ledgerSource: CompletionCapture["ledgerSource"] =
-      accepted !== null
-        ? {
-            attemptId: attempt.id,
-            attemptKind: attempt.kind,
-            ledgerDigest: ledgerDigest(accepted)
-          }
-        : attempt.kind === "fix" &&
-            envelope.taskCompletion.state === "accepted" &&
-            prior?.status === "valid"
-          ? {
-              attemptId: prior.sourceAttemptId,
-              attemptKind: prior.sourceAttemptKind ?? "implementation",
-              ledgerDigest: prior.ledgerDigest
-            }
-          : null;
-    const capture: Omit<CompletionCapture, "integrityDigest"> = {
-      schema: COMPLETION_CAPTURE_SCHEMA,
-      schemaVersion: COMPLETION_RECORD_SCHEMA_VERSION,
-      runId: state.runId,
-      attemptId: attempt.id,
-      attemptKind: attempt.kind,
-      completionProtocol: COMPLETION_PROTOCOL,
-      outcome,
-      resultDigest: envelope.originalDigest,
-      terminalIntegrityDigest: checkpoint.integrityDigest,
-      transitionDigest: transition?.integrityDigest ?? null,
-      baseCommit: state.baseCommit,
-      approvalDigest: approval.digest,
-      planTaskDigest: planTaskDigest(await this.approvedTaskIds(state)),
-      workBinding:
-        state.artifactBinding === undefined
-          ? null
-          : {
-              workId: state.artifactBinding.binding.workId,
-              sha256: state.artifactBinding.sha256
-            },
-      configurationDigest: this.implementerConfigurationDigest(config),
-      scopeDigest: this.attemptScopeDigest(state, attempt),
-      ledgerSource,
-      reports: {
-        implementationReport: observed.implementationReport,
-        testReport: observed.testReport
-      },
-      originals,
-      workspace: {
-        digest: observed.workspaceDigest ?? "0".repeat(64),
-        excludedPaths: inputs.excludedPaths
-      },
-      // Identity-bearing time comes from durable terminal proof, not retry time.
-      capturedAt: checkpoint.terminal.observedAt
-    };
-    const sealed: CompletionCapture = {
-      ...capture,
-      integrityDigest: completionRecordIntegrity(capture)
-    };
-    await this.store.writeCompletionCapture(state.runId, sealed);
-    return sealed;
-  }
 
   /**
    * A stop result (blocked or escalation) is applied as the model reported
@@ -8787,7 +6079,7 @@ export class WorkflowRunner {
           ledger: envelope.taskCompletion.ledger,
           outcome: envelope.outcome,
           artifacts: envelope.artifacts,
-          planPath: this.completionPlanPath(state),
+          planPath: completionPlanPath(state),
           approval: state.planApproval,
           baseline: state.baseline
         });
@@ -8811,7 +6103,8 @@ export class WorkflowRunner {
     }
     record.completionDiagnostic = diagnostic;
     try {
-      await this.captureCompletionInput(
+      await captureCompletionInput(
+        this.context,
         state,
         record,
         envelope,
@@ -8824,13 +6117,13 @@ export class WorkflowRunner {
       this.info(`Stop-result capture unavailable: ${errorMessage(error)}`);
     }
     record.status = "completed";
-    record.completedAt ??= now();
+    record.completedAt ??= this.now();
     record.durationMs ??=
       Date.parse(record.completedAt) - Date.parse(record.startedAt);
     await this.store.writeRunAttempt(state.runId, record);
     const current = await this.store.readState(state.runId);
     if (current.status === "cancelled") return current;
-    this.accountCompletedAttempt(state, record);
+    accountCompletedAttempt(state, record);
     state.activeProcess = null;
     await this.store.writeState(state);
     const fields = envelopeResultFields(envelope);
@@ -8849,964 +6142,6 @@ export class WorkflowRunner {
     );
   }
 
-  private completionRejectionCheckpoint(
-    record: AttemptRecord,
-    error: PlanTaskCompletionError,
-    capture: CompletionCapture | null
-  ): NonNullable<RunState["planTaskCompletion"]> {
-    return {
-      schemaVersion: COMPLETION_SUMMARY_SCHEMA_VERSION,
-      status: "invalid",
-      sourceAttemptId: record.attempt.id,
-      sourceAttemptKind:
-        record.attempt.kind === "fix" ? "fix" : "implementation",
-      errorCode: "PLAN_TASK_COMPLETION_INVALID",
-      violation: error.violation,
-      taskId: error.taskId,
-      recordedAt: now(),
-      completionProtocol: COMPLETION_PROTOCOL,
-      diagnostic: error.message.slice(0, 500),
-      rejectedResultDigest:
-        capture?.resultDigest ?? record.envelope?.originalDigest ?? null
-    };
-  }
-
-  /**
-   * Final input rejection: the attempt fails, the rejected result, input and
-   * prior canonical source stay intact, and retry creates one linked successor.
-   */
-  private async rejectCompletionInput(
-    state: RunState,
-    record: AttemptRecord,
-    error: PlanTaskCompletionError,
-    capture: CompletionCapture | null
-  ): Promise<RunState> {
-    record.status = "failed";
-    record.completedAt ??= now();
-    record.durationMs ??=
-      Date.parse(record.completedAt) - Date.parse(record.startedAt);
-    record.error = `[PLAN_TASK_COMPLETION_INVALID] ${error.message}`;
-    record.failureCode = "PLAN_TASK_COMPLETION_INVALID";
-    await this.store.writeRunAttempt(state.runId, record);
-    const current = await this.store.readState(state.runId);
-    if (current.status === "cancelled") return current;
-    this.accountAttemptUsage(state, record);
-    state.planTaskCompletion = this.completionRejectionCheckpoint(
-      record,
-      error,
-      capture
-    );
-    state.completionPublication = {
-      attemptId: record.attempt.id,
-      attemptKind: record.attempt.kind === "fix" ? "fix" : "implementation",
-      stage: "validate",
-      captureDigest: capture?.integrityDigest ?? null,
-      candidateDigest: null,
-      receiptDigest: null,
-      refusal: null
-    };
-    state.activeProcess = null;
-    blockState(state, `[PLAN_TASK_COMPLETION_INVALID] ${error.message}`);
-    await this.store.writeState(state);
-    await this.store.appendEvent(state.runId, "attempt.failed", {
-      attemptId: record.attempt.id,
-      kind: record.attempt.kind,
-      error: `[PLAN_TASK_COMPLETION_INVALID] ${error.message}`
-    });
-    await this.store.appendEvent(
-      state.runId,
-      "plan_task_completion.validation_failed",
-      {
-        attemptId: record.attempt.id,
-        code: "PLAN_TASK_COMPLETION_INVALID",
-        violation: error.violation,
-        taskId: error.taskId
-      }
-    );
-    await this.store.appendEventOnce(state.runId, "completion.input_rejected", {
-      attemptId: record.attempt.id,
-      attemptKind: record.attempt.kind,
-      stage: "validate",
-      proofDigest: capture?.integrityDigest ?? null,
-      code: "PLAN_TASK_COMPLETION_INVALID",
-      violation: error.violation,
-      taskId: error.taskId
-    });
-    return state;
-  }
-
-  /**
-   * Publication refusal: the attempt stays pending_application with a closed
-   * code, stage and last durable proof digest. No model text or raw error
-   * enters the block reason; resume reconciles or cancel exits.
-   */
-  private async appendCompletionPublicationRefusalEvent(
-    state: RunState,
-    record: AttemptRecord,
-    refusal: NonNullable<CompletionPublicationCursor["refusal"]>
-  ): Promise<boolean> {
-    try {
-      await this.store.appendEventOnce(
-        state.runId,
-        "completion.publication_refused",
-        {
-          attemptId: record.attempt.id,
-          attemptKind: record.attempt.kind === "fix" ? "fix" : "implementation",
-          stage: refusal.stage,
-          proofDigest: refusal.proofDigest,
-          code: refusal.code,
-          violation: null,
-          taskId: null
-        }
-      );
-      return true;
-    } catch (error) {
-      if (error instanceof TerminalRunStateError) throw error;
-      return false;
-    }
-  }
-
-  private async refuseCompletionPublication(
-    state: RunState,
-    record: AttemptRecord,
-    refusal: CompletionRefusal
-  ): Promise<RunState> {
-    const attemptKind =
-      record.attempt.kind === "fix" ? "fix" : "implementation";
-    const cursor = state.completionPublication;
-    const persistedRefusal: NonNullable<
-      CompletionPublicationCursor["refusal"]
-    > = {
-      code: refusal.code,
-      stage: refusal.stage,
-      proofDigest: refusal.proofDigest
-    };
-    const applyRefusalState = (): void => {
-      state.completionPublication = {
-        attemptId: record.attempt.id,
-        attemptKind,
-        stage: refusal.stage,
-        captureDigest:
-          cursor?.attemptId === record.attempt.id ? cursor.captureDigest : null,
-        candidateDigest:
-          cursor?.attemptId === record.attempt.id
-            ? cursor.candidateDigest
-            : null,
-        receiptDigest:
-          cursor?.attemptId === record.attempt.id ? cursor.receiptDigest : null,
-        refusal: persistedRefusal
-      };
-      state.activeProcess = null;
-      blockState(
-        state,
-        `[${refusal.code}] Completion publication for ${attemptKind} attempt ${record.attempt.id} stopped at stage ${refusal.stage}. ${refusal.remedy}`
-      );
-    };
-
-    try {
-      if (record.status !== "pending_application") {
-        record.status = "pending_application";
-        await this.store.writeRunAttempt(state.runId, record);
-      }
-      const current = await this.store.readState(state.runId);
-      if (current.status === "cancelled") return current;
-    } catch (error) {
-      if (error instanceof TerminalRunStateError) throw error;
-      applyRefusalState();
-      return state;
-    }
-
-    applyRefusalState();
-    try {
-      await this.store.writeState(state);
-    } catch (error) {
-      if (error instanceof TerminalRunStateError) throw error;
-      return state;
-    }
-    await this.appendCompletionPublicationRefusalEvent(
-      state,
-      record,
-      persistedRefusal
-    );
-    return state;
-  }
-
-  /** Resolves the canonical ledger a capture names; null-ledger fixes reuse the prior author. */
-  private async completionLedgerFor(
-    state: RunState,
-    record: AttemptRecord,
-    envelope: PhaseResultEnvelope,
-    capture: CompletionCapture
-  ): Promise<PlanTaskCompletionLedger> {
-    const source = capture.ledgerSource;
-    if (source === null || envelope.taskCompletion.state !== "accepted")
-      throw new PlanTaskCompletionError(
-        envelope.taskCompletion.state === "unaccepted"
-          ? "source_attempt_invalid"
-          : "missing_ledger",
-        envelope.taskCompletion.state === "unaccepted"
-          ? envelope.taskCompletion.diagnostic
-          : record.attempt.kind === "fix"
-            ? "Completed fix has no canonical ledger source to republish."
-            : "Strict implementation result is missing taskCompletion."
-      );
-    if (source.attemptId === record.attempt.id) {
-      const ledger = envelope.taskCompletion.ledger;
-      if (ledger === null || ledgerDigest(ledger) !== source.ledgerDigest)
-        throw new CompletionRefusal(
-          "COMPLETION_PUBLICATION_INTEGRITY",
-          "validate",
-          capture.integrityDigest,
-          "The captured ledger does not match its recorded identity."
-        );
-      return ledger;
-    }
-    const author = await this.store.readRunAttemptIfExists(state.runId, {
-      id: source.attemptId,
-      kind: source.attemptKind,
-      mutable: true
-    });
-    const ledger = author === null ? null : this.recordLedger(author);
-    if (
-      author?.status !== "completed" ||
-      ledger === null ||
-      ledgerDigest(ledger) !== source.ledgerDigest
-    )
-      throw new PlanTaskCompletionError(
-        "source_attempt_invalid",
-        "Canonical completion source attempt is missing, incomplete or changed."
-      );
-    return ledger;
-  }
-
-  /** The ledger a completed attempt record carries, under either protocol. */
-  private recordLedger(record: AttemptRecord): PlanTaskCompletionLedger | null {
-    if (this.completionProtocolAttempt(record)) {
-      const envelope = record.envelope ?? null;
-      return envelope?.taskCompletion.state === "accepted"
-        ? envelope.taskCompletion.ledger
-        : null;
-    }
-    if (record.result === null) return null;
-    try {
-      return parsePersistedPhaseResult(record.result).taskCompletion;
-    } catch {
-      return null;
-    }
-  }
-
-  private async completionAuthorityCurrent(
-    state: RunState,
-    capture: CompletionCapture,
-    config: OrchestratorConfig
-  ): Promise<boolean> {
-    if (state.planApproval === null) return false;
-    try {
-      if ((await currentCommit(this.repoRoot)) !== capture.baseCommit)
-        return false;
-      const bundle = await digestArtifactBundle(
-        this.repoRoot,
-        state.planApproval.paths
-      );
-      return (
-        bundle.digest === state.planApproval.digest &&
-        capture.approvalDigest === state.planApproval.digest &&
-        capture.planTaskDigest ===
-          planTaskDigest(await this.approvedTaskIds(state)) &&
-        capture.scopeDigest ===
-          this.attemptScopeDigest(state, {
-            id: capture.attemptId,
-            kind: capture.attemptKind,
-            mutable: true
-          }) &&
-        (capture.workBinding?.sha256 ?? null) ===
-          (state.artifactBinding?.sha256 ?? null) &&
-        // The implementer configuration that produced this result is part of
-        // the recorded authority: `.banzai/config.json` is excluded from the
-        // non-report workspace digest, so nothing else would detect its drift.
-        capture.configurationDigest ===
-          this.implementerConfigurationDigest(config)
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  /** Read-only authority check while a capture manifest is still incomplete. */
-  private async completionCheckpointAuthorityCurrent(
-    state: RunState,
-    record: AttemptRecord,
-    checkpoint: TerminalAttemptCheckpointV2,
-    config: OrchestratorConfig
-  ): Promise<boolean> {
-    const approval = state.planApproval;
-    if (approval === null || record.envelope == null) return false;
-    try {
-      if ((await currentCommit(this.repoRoot)) !== checkpoint.baseCommit)
-        return false;
-      const bundle = await digestArtifactBundle(this.repoRoot, approval.paths);
-      return (
-        checkpoint.runId === state.runId &&
-        checkpoint.attempt.id === record.attempt.id &&
-        checkpoint.attempt.kind === record.attempt.kind &&
-        checkpoint.phase === record.attempt.kind &&
-        checkpoint.resultDigest === record.envelope.originalDigest &&
-        checkpoint.baseCommit === state.baseCommit &&
-        checkpoint.approvalDigest === approval.digest &&
-        bundle.digest === approval.digest &&
-        checkpoint.workflowDigest === null &&
-        checkpoint.scopeDigest ===
-          this.attemptScopeDigest(state, record.attempt) &&
-        this.completionCheckpointConfigurationCurrent(
-          record,
-          checkpoint,
-          config
-        )
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Deterministic continuation from the last durable stage: validate, render,
-   * persist the candidate, conditionally replace only the exact implementation
-   * report, write the receipt and apply once. Every re-entry recognizes its
-   * interruption boundary from retained proof and never invokes a model.
-   */
-  private async continueCompletionPublication(
-    state: RunState,
-    record: AttemptRecord,
-    config: OrchestratorConfig
-  ): Promise<
-    | { kind: "applied"; result: PhaseResult }
-    | { kind: "stopped"; state: RunState }
-  > {
-    const attempt = record.attempt as AttemptReference & {
-      kind: "implementation" | "fix";
-    };
-    const envelope = record.envelope ?? null;
-    if (envelope === null)
-      return {
-        kind: "stopped",
-        state: await this.refuseCompletionPublication(
-          state,
-          record,
-          new CompletionRefusal(
-            "COMPLETION_PUBLICATION_INTEGRITY",
-            "capture",
-            null,
-            "The captured envelope is missing; cancel the run."
-          )
-        )
-      };
-    let capture: CompletionCapture;
-    try {
-      const retainedCapture = await this.store.readCompletionCaptureIfExists(
-        state.runId,
-        attempt
-      );
-      if (retainedCapture === null) {
-        const [retainedCandidate, retainedReceipt] = await Promise.all([
-          this.store.readCompletionCandidateIfExists(state.runId, attempt),
-          this.store.readCompletionPublicationIfExists(state.runId, attempt)
-        ]);
-        if (retainedCandidate !== null || retainedReceipt !== null)
-          throw new CompletionRefusal(
-            "COMPLETION_PUBLICATION_INTEGRITY",
-            "capture",
-            retainedReceipt?.captureDigest ??
-              retainedCandidate?.candidate.captureDigest ??
-              null,
-            "Later publication evidence exists without its capture manifest; cancel the run unless intact proof can be reproduced by a corrected runner."
-          );
-      }
-      capture =
-        retainedCapture ??
-        (await this.captureCompletionInput(
-          state,
-          record,
-          envelope,
-          config,
-          "completed"
-        ));
-      if (
-        state.completionPublication?.attemptId !== attempt.id ||
-        state.completionPublication.captureDigest !== capture.integrityDigest
-      )
-        await this.storeCursor(state, {
-          attemptId: attempt.id,
-          attemptKind: attempt.kind,
-          stage: "capture",
-          captureDigest: capture.integrityDigest,
-          candidateDigest: null,
-          receiptDigest: null,
-          refusal: null
-        });
-    } catch (error) {
-      if (error instanceof TerminalRunStateError) throw error;
-      // A capture-stage refusal already names its closed class, stage and
-      // proof; it is never reclassified as transient storage failure.
-      if (error instanceof CompletionRefusal)
-        return {
-          kind: "stopped",
-          state: await this.refuseCompletionPublication(state, record, error)
-        };
-      const conflicting =
-        error instanceof BanzaiError &&
-        (error.code.startsWith("INVALID_COMPLETION") ||
-          error.code === "COMPLETION_CAPTURE_CONFLICT");
-      return {
-        kind: "stopped",
-        state: await this.refuseCompletionPublication(
-          state,
-          record,
-          new CompletionRefusal(
-            conflicting
-              ? "COMPLETION_PUBLICATION_INTEGRITY"
-              : "COMPLETION_PUBLICATION_IO",
-            "capture",
-            null,
-            conflicting
-              ? "Retained capture evidence is corrupt or conflicts with the recorded input; cancel the run."
-              : "Retry with banzai resume once storage is available, or cancel."
-          )
-        )
-      };
-    }
-    try {
-      return await this.publishCapturedCompletion(
-        state,
-        record,
-        envelope,
-        capture,
-        config
-      );
-    } catch (error) {
-      if (
-        error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError ||
-        error instanceof InstructionResourceMismatchError
-      )
-        throw error;
-      if (error instanceof PlanTaskCompletionError)
-        return {
-          kind: "stopped",
-          state: await this.rejectCompletionInput(state, record, error, capture)
-        };
-      if (error instanceof CompletionRefusal)
-        return {
-          kind: "stopped",
-          state: await this.refuseCompletionPublication(state, record, error)
-        };
-      throw error;
-    }
-  }
-
-  private async publishCapturedCompletion(
-    state: RunState,
-    record: AttemptRecord,
-    envelope: PhaseResultEnvelope,
-    capture: CompletionCapture,
-    config: OrchestratorConfig
-  ): Promise<
-    | { kind: "applied"; result: PhaseResult }
-    | { kind: "stopped"; state: RunState }
-  > {
-    const attempt = record.attempt as AttemptReference & {
-      kind: "implementation" | "fix";
-    };
-    const proof = capture.integrityDigest;
-    const drift = (message: string, stage: CompletionPublicationStage) =>
-      new CompletionRefusal(
-        "COMPLETION_PUBLICATION_DRIFT",
-        stage,
-        proof,
-        `${message} Restore the exact recorded input or proven output and matching authority, then run banzai resume; otherwise cancel.`
-      );
-    const integrity = (message: string, stage: CompletionPublicationStage) =>
-      new CompletionRefusal(
-        "COMPLETION_PUBLICATION_INTEGRITY",
-        stage,
-        proof,
-        `${message} Cancel the run unless intact proof can be reproduced by a corrected runner.`
-      );
-    const receipt = await this.store.readCompletionPublicationIfExists(
-      state.runId,
-      attempt
-    );
-    const existingCandidate = await this.store.readCompletionCandidateIfExists(
-      state.runId,
-      attempt
-    );
-    if (
-      existingCandidate !== null &&
-      existingCandidate.candidate.captureDigest !== proof
-    )
-      throw integrity(
-        "The retained candidate belongs to a different capture.",
-        "candidate"
-      );
-    if (receipt !== null) {
-      if (
-        receipt.captureDigest !== proof ||
-        receipt.candidateDigest !== existingCandidate?.candidate.integrityDigest
-      )
-        throw integrity(
-          "The retained receipt does not bind this capture and candidate.",
-          "receipt"
-        );
-    }
-    // Drift before validation: every later step assumes the captured inputs.
-    const inputs = await this.observeCompletionInputs(
-      state,
-      envelope.artifacts
-    );
-    const currentImplementation = inputs.observed.implementationReport;
-    const currentTest = inputs.observed.testReport;
-    const capturedImplementation = capture.reports.implementationReport;
-    const capturedTest = capture.reports.testReport;
-    const published =
-      existingCandidate !== null &&
-      currentImplementation.state === "present" &&
-      currentImplementation.sha256 === existingCandidate.candidate.outputSha256;
-    if (
-      !published &&
-      (capturedImplementation.state !== "present" ||
-        currentImplementation.state !== "present" ||
-        currentImplementation.sha256 !== capturedImplementation.sha256)
-    ) {
-      if (capturedImplementation.state === "present")
-        throw drift(
-          "The implementation report no longer equals its captured input.",
-          "publication"
-        );
-      throw new PlanTaskCompletionError(
-        "implementation_report_missing",
-        "Required implementation report was absent, unsafe or unavailable when the model returned."
-      );
-    }
-    if (
-      capturedTest.state !== "present" ||
-      currentTest.state !== "present" ||
-      currentTest.sha256 !== capturedTest.sha256
-    ) {
-      if (capturedTest.state === "present")
-        throw drift(
-          "The test report no longer equals its captured input.",
-          "publication"
-        );
-      throw new PlanTaskCompletionError(
-        "test_report_missing",
-        "Required test report was absent, unsafe or unavailable when the model returned."
-      );
-    }
-    if (
-      inputs.observed.workspaceDigest === null ||
-      inputs.observed.workspaceDigest !== capture.workspace.digest
-    )
-      throw drift(
-        "The non-report workspace changed since capture.",
-        "publication"
-      );
-    if (!(await this.completionAuthorityCurrent(state, capture, config)))
-      throw drift(
-        "Base commit, approval, plan tasks, scope, work binding or implementer configuration changed since capture.",
-        "publication"
-      );
-    const originalImplementation =
-      await this.store.readCompletionOriginalIfExists(
-        state.runId,
-        attempt,
-        "implementationReport"
-      );
-    const originalTest = await this.store.readCompletionOriginalIfExists(
-      state.runId,
-      attempt,
-      "testReport"
-    );
-    if (
-      originalImplementation === null ||
-      originalTest === null ||
-      capture.originals.implementationReport === null ||
-      capture.originals.testReport === null ||
-      createHash("sha256").update(originalImplementation).digest("hex") !==
-        capture.originals.implementationReport.sha256 ||
-      createHash("sha256").update(originalTest).digest("hex") !==
-        capture.originals.testReport.sha256
-    )
-      throw integrity(
-        "Captured report originals are missing or changed.",
-        "capture"
-      );
-    const originals = {
-      implementationReport: originalImplementation,
-      testReport: originalTest
-    };
-    const inputSha256 =
-      capturedImplementation.state === "present"
-        ? capturedImplementation.sha256
-        : (existingCandidate?.candidate.inputSha256 ?? null);
-    if (inputSha256 === null)
-      throw integrity(
-        "The captured implementation report identity is missing.",
-        "capture"
-      );
-    if (state.planApproval === null)
-      throw new PlanTaskCompletionError(
-        "approval_invalid",
-        "Strict completion validation requires an approved plan bundle."
-      );
-    // Validate: claims, evidence, authority, report roles and preserved gaps.
-    const ledger = await this.completionLedgerFor(
-      state,
-      record,
-      envelope,
-      capture
-    );
-    const claims = await validateCompletionClaims({
-      repoRoot: this.repoRoot,
-      artifactBinding: state.artifactBinding,
-      ledger,
-      outcome: "completed",
-      artifacts: envelope.artifacts,
-      planPath: this.completionPlanPath(state),
-      approval: state.planApproval,
-      baseline: state.baseline,
-      captured: originals
-    });
-    if (claims.testReport.sha256 !== capturedTest.sha256)
-      throw integrity(
-        "Captured test report identity conflicts with validation.",
-        "validate"
-      );
-    // Render: deterministic candidate from the admitted ledger and preserved narrative.
-    const composition = composeCompletionCandidate(
-      originals.implementationReport,
-      ledger
-    );
-    const outputSha256 = createHash("sha256")
-      .update(composition.bytes)
-      .digest("hex");
-    const eligible = eligibleGapHeadings(
-      composition.bytes.toString("utf8"),
-      scanCompletionRegion(composition.bytes.toString("utf8"))
-    );
-    for (const task of ledger.tasks) {
-      if (
-        task.gap !== null &&
-        task.gap.reportPath === claims.implementationReport.path &&
-        !eligible.has(task.gap.section)
-      )
-        throw new PlanTaskCompletionError(
-          "invalid_gap_reference",
-          `${task.taskId} gap section is not a unique preserved heading of the final candidate.`,
-          task.taskId
-        );
-    }
-    let candidate: CompletionCandidate;
-    if (existingCandidate !== null) {
-      if (
-        existingCandidate.candidate.outputSha256 !== outputSha256 ||
-        existingCandidate.candidate.ledgerDigest !== claims.ledgerDigest
-      )
-        throw integrity(
-          "The retained candidate differs from the deterministic rendering.",
-          "candidate"
-        );
-      candidate = existingCandidate.candidate;
-    } else {
-      const metadata: Omit<CompletionCandidate, "integrityDigest"> = {
-        schema: COMPLETION_CANDIDATE_SCHEMA,
-        schemaVersion: COMPLETION_RECORD_SCHEMA_VERSION,
-        runId: state.runId,
-        attemptId: attempt.id,
-        attemptKind: attempt.kind,
-        completionProtocol: COMPLETION_PROTOCOL,
-        captureDigest: proof,
-        ledgerDigest: claims.ledgerDigest,
-        destination: claims.implementationReport.path,
-        inputSha256,
-        candidatePath: this.store.completionEvidenceRelativePath(
-          state.runId,
-          attempt,
-          "completion-candidate.md"
-        ),
-        outputSha256,
-        outputBytes: composition.bytes.length,
-        testReportSha256: capturedTest.sha256,
-        region: composition.region,
-        preservation: "verified",
-        roundtrip: "verified"
-      };
-      candidate = {
-        ...metadata,
-        integrityDigest: completionRecordIntegrity(metadata)
-      };
-      try {
-        await this.store.writeCompletionCandidate(
-          state.runId,
-          candidate,
-          composition.bytes
-        );
-      } catch (error) {
-        if (error instanceof TerminalRunStateError) throw error;
-        throw new CompletionRefusal(
-          "COMPLETION_PUBLICATION_IO",
-          "candidate",
-          proof,
-          "Retry with banzai resume once storage is available, or cancel."
-        );
-      }
-    }
-    await this.storeCursor(state, {
-      attemptId: attempt.id,
-      attemptKind: attempt.kind,
-      stage: "candidate",
-      captureDigest: proof,
-      candidateDigest: candidate.integrityDigest,
-      receiptDigest: receipt?.integrityDigest ?? null,
-      refusal: null
-    });
-    // Publish: recheck cancellation and destination ownership, then replace
-    // only the exact implementation report with a same-directory rename.
-    const current = await this.store.readState(state.runId);
-    if (current.status === "cancelled")
-      return { kind: "stopped", state: current };
-    const destination = path.join(this.repoRoot, candidate.destination);
-    if (!published) {
-      if (candidate.destination.startsWith(".banzai/"))
-        await safePath(this.repoRoot, candidate.destination);
-      const before = await this.observeReport(candidate.destination);
-      if (
-        before.observation.state !== "present" ||
-        before.observation.sha256 !== candidate.inputSha256
-      )
-        throw drift(
-          "The implementation report changed before publication.",
-          "publication"
-        );
-      try {
-        const mode = (await lstat(destination)).mode & 0o777;
-        const temporary = `${destination}.${randomUUID()}.completion.tmp`;
-        await writeFile(temporary, composition.bytes, { flag: "wx", mode });
-        try {
-          await rename(temporary, destination);
-        } catch (error) {
-          await unlink(temporary).catch(() => undefined);
-          throw error;
-        }
-      } catch (error) {
-        if (error instanceof TerminalRunStateError) throw error;
-        throw new CompletionRefusal(
-          "COMPLETION_PUBLICATION_IO",
-          "publication",
-          candidate.integrityDigest,
-          "Retry with banzai resume once storage is available, or cancel."
-        );
-      }
-    }
-    const final = await this.observeReport(candidate.destination);
-    if (
-      final.observation.state !== "present" ||
-      final.observation.sha256 !== candidate.outputSha256
-    )
-      throw integrity(
-        "The published implementation report does not equal the candidate bytes.",
-        "publication"
-      );
-    // Receipt: immutable, bound to capture, candidate and terminal proof.
-    let sealedReceipt: CompletionPublication;
-    if (receipt !== null) {
-      sealedReceipt = receipt;
-    } else {
-      const ledgerAuthor = capture.ledgerSource ?? {
-        attemptId: attempt.id,
-        attemptKind: attempt.kind,
-        ledgerDigest: claims.ledgerDigest
-      };
-      const body: Omit<CompletionPublication, "integrityDigest"> = {
-        schema: COMPLETION_PUBLICATION_SCHEMA,
-        schemaVersion: COMPLETION_RECORD_SCHEMA_VERSION,
-        runId: state.runId,
-        attemptId: attempt.id,
-        attemptKind: attempt.kind,
-        completionProtocol: COMPLETION_PROTOCOL,
-        captureDigest: proof,
-        candidateDigest: candidate.integrityDigest,
-        terminalIntegrityDigest: capture.terminalIntegrityDigest,
-        authority: {
-          baseCommit: capture.baseCommit,
-          approvalDigest: capture.approvalDigest,
-          planTaskDigest: capture.planTaskDigest,
-          scopeDigest: capture.scopeDigest,
-          workBindingSha256: capture.workBinding?.sha256 ?? null,
-          configurationDigest: capture.configurationDigest
-        },
-        ledgerAuthor,
-        publisher: { attemptId: attempt.id, attemptKind: attempt.kind },
-        implementationReport: {
-          path: candidate.destination,
-          sha256: candidate.outputSha256
-        },
-        testReport: {
-          path: claims.testReport.path,
-          sha256: capturedTest.sha256
-        },
-        // Receipt identity remains stable when publication resumes later.
-        publishedAt: capture.capturedAt
-      };
-      sealedReceipt = {
-        ...body,
-        integrityDigest: completionRecordIntegrity(body)
-      };
-      try {
-        await this.store.writeCompletionPublication(state.runId, sealedReceipt);
-      } catch (error) {
-        if (error instanceof TerminalRunStateError) throw error;
-        throw new CompletionRefusal(
-          "COMPLETION_PUBLICATION_IO",
-          "receipt",
-          candidate.integrityDigest,
-          "Retry with banzai resume once storage is available, or cancel."
-        );
-      }
-    }
-    // Apply once: attempt completion, canonical summary, cursor and events.
-    return {
-      kind: "applied",
-      result: await this.applyCompletionPublication(
-        state,
-        record,
-        envelope,
-        ledger,
-        claims,
-        sealedReceipt
-      )
-    };
-  }
-
-  private async applyCompletionPublication(
-    state: RunState,
-    record: AttemptRecord,
-    envelope: PhaseResultEnvelope,
-    ledger: PlanTaskCompletionLedger,
-    claims: ValidatedCompletionClaims,
-    receipt: CompletionPublication
-  ): Promise<PhaseResult> {
-    const attempt = record.attempt as AttemptReference & {
-      kind: "implementation" | "fix";
-    };
-    const io = (stage: CompletionPublicationStage) =>
-      new CompletionRefusal(
-        "COMPLETION_PUBLICATION_IO",
-        stage,
-        receipt.integrityDigest,
-        "Retry with banzai resume once storage is available, or cancel."
-      );
-    if (record.status !== "completed") {
-      record.status = "completed";
-      record.completedAt ??= now();
-      record.durationMs ??=
-        Date.parse(record.completedAt) - Date.parse(record.startedAt);
-      record.error = null;
-      record.failureCode = null;
-      try {
-        await this.store.writeRunAttempt(state.runId, record);
-      } catch (error) {
-        if (error instanceof TerminalRunStateError) throw error;
-        throw io("attempt");
-      }
-    }
-    const current = await this.store.readState(state.runId);
-    if (current.status === "cancelled")
-      throw new TerminalRunStateError(current);
-    this.accountCompletedAttempt(state, record);
-    const refreshedFix =
-      attempt.kind === "fix" && receipt.ledgerAuthor.attemptId === attempt.id;
-    const durable = state.planTaskCompletion;
-    // Re-entry after an interrupted application completes the missing writes
-    // without restamping a summary this exact receipt already established.
-    const applied =
-      durable?.status === "valid" &&
-      durable.schemaVersion === COMPLETION_SUMMARY_SCHEMA_VERSION &&
-      durable.publication?.sha256 === receipt.integrityDigest;
-    if (!applied)
-      state.planTaskCompletion = {
-        schemaVersion: COMPLETION_SUMMARY_SCHEMA_VERSION,
-        status: "valid",
-        sourceAttemptId: receipt.ledgerAuthor.attemptId,
-        sourceAttemptKind: receipt.ledgerAuthor.attemptKind,
-        approvalDigest: claims.approvalDigest,
-        planTaskDigest: claims.planTaskDigest,
-        ledgerDigest: claims.ledgerDigest,
-        implementationReport: receipt.implementationReport,
-        testReport: receipt.testReport,
-        counts: claims.counts,
-        validatedAt: now(),
-        completionProtocol: COMPLETION_PROTOCOL,
-        publisherAttemptId: attempt.id,
-        publication: {
-          path: this.store.completionEvidenceRelativePath(
-            state.runId,
-            attempt,
-            "completion-publication.json"
-          ),
-          sha256: receipt.integrityDigest
-        }
-      };
-    state.completionPublication = {
-      attemptId: attempt.id,
-      attemptKind: attempt.kind,
-      stage: "state",
-      captureDigest: receipt.captureDigest,
-      candidateDigest: receipt.candidateDigest,
-      receiptDigest: receipt.integrityDigest,
-      refusal: null
-    };
-    state.activeProcess = null;
-    try {
-      await this.store.writeState(state);
-    } catch (error) {
-      if (error instanceof TerminalRunStateError) throw error;
-      throw io("state");
-    }
-    try {
-      await this.store.appendEventOnce(
-        state.runId,
-        "completion.publication_applied",
-        {
-          attemptId: attempt.id,
-          attemptKind: attempt.kind,
-          stage: "event",
-          proofDigest: receipt.integrityDigest,
-          code: null,
-          violation: null,
-          taskId: null
-        }
-      );
-      if (refreshedFix)
-        await this.store.appendEventOnce(
-          state.runId,
-          "plan_task_completion.refreshed",
-          {
-            attemptId: attempt.id,
-            ledgerDigest: claims.ledgerDigest
-          }
-        );
-    } catch (error) {
-      if (error instanceof TerminalRunStateError) throw error;
-      throw io("event");
-    }
-    if (state.completionPublication.stage !== "event") {
-      await this.storeCursor(state, {
-        ...state.completionPublication,
-        stage: "event"
-      });
-    }
-    return { ...envelopeResultFields(envelope), taskCompletion: ledger };
-  }
-
   /**
    * Live route for a strict attempt under the completion protocol after the
    * vendor returned: persist the original result and envelope, then either
@@ -9820,8 +6155,9 @@ export class WorkflowRunner {
     resumeSessionId: string | null,
     context: SessionContext
   ): Promise<RunState> {
-    const envelope = this.completionEnvelopeOf(adapterResult.result);
-    await this.writeAttemptOutput(
+    const envelope = completionEnvelopeOf(adapterResult.result);
+    await writeAttemptOutput(
+      this.context,
       state,
       record,
       adapterResult.stdout,
@@ -9831,13 +6167,15 @@ export class WorkflowRunner {
     record.result = JSON.parse(envelope.original) as PersistedPhaseResult;
     record.envelope = envelope;
     record.sessionId = adapterResult.sessionId ?? record.sessionId;
-    record.durationMs = Date.now() - Date.parse(record.startedAt);
+    record.durationMs =
+      this.context.clock().getTime() - Date.parse(record.startedAt);
     if (envelope.phase !== record.attempt.kind)
       throw new BanzaiError(
         "PHASE_RESULT_MISMATCH",
         `Attempt ${record.attempt.kind} returned phase ${envelope.phase}.`
       );
-    await this.establishResultSourceIdentities(
+    await establishResultSourceIdentities(
+      this.context,
       state,
       record.attempt,
       record.result,
@@ -9856,14 +6194,15 @@ export class WorkflowRunner {
       );
     }
     record.status = "pending_application";
-    record.completedAt = now();
+    record.completedAt = this.now();
     await this.store.writeRunAttempt(state.runId, record);
     const current = await this.store.readState(state.runId);
     if (current.status === "cancelled") return current;
-    this.accountAttemptUsage(state, record);
+    accountAttemptUsage(state, record);
     state.activeProcess = null;
     await this.store.writeState(state);
-    const outcome = await this.continueCompletionPublication(
+    const outcome = await continueCompletionPublication(
+      this.context,
       state,
       record,
       config
@@ -9925,7 +6264,7 @@ export class WorkflowRunner {
         checkpoint.baseCommit !== state.baseCommit ||
         checkpoint.approvalDigest !== (state.planApproval?.digest ?? null) ||
         checkpoint.workflowDigest !== null ||
-        checkpoint.scopeDigest !== this.attemptScopeDigest(state, attempt) ||
+        checkpoint.scopeDigest !== attemptScopeDigest(state, attempt) ||
         checkpoint.configuration.vendor !==
           (vendorFor(settings.executable) ?? FALLBACK_VENDOR.implementer) ||
         checkpoint.configuration.executableDigest !==
@@ -9943,13 +6282,14 @@ export class WorkflowRunner {
           "Terminal checkpoint does not match the active run, attempt, authorization, or model context."
         );
       }
-      await this.validateBaseCommit(state);
-      await this.validateApproval(state);
-      await this.validateSavedArtifactScope(state, attempt);
-      this.validateArtifactRoleReferences(state, checkpoint.envelope);
+      await validateBaseCommit(this.context, state);
+      await validateApproval(this.context, state);
+      await validateSavedArtifactScope(this.context, state, attempt);
+      validateArtifactRoleReferences(state, checkpoint.envelope);
       const envelope = checkpoint.envelope;
       record.result = JSON.parse(envelope.original) as PersistedPhaseResult;
-      await this.establishResultSourceIdentities(
+      await establishResultSourceIdentities(
+        this.context,
         state,
         attempt,
         record.result,
@@ -9988,7 +6328,7 @@ export class WorkflowRunner {
       }
       record.status = "pending_application";
       await this.store.writeRunAttempt(state.runId, record);
-      this.accountAttemptUsage(state, record);
+      accountAttemptUsage(state, record);
       state.activeProcess = null;
       await this.store.writeState(state);
     } else if (record.status === "completed") {
@@ -10000,7 +6340,8 @@ export class WorkflowRunner {
       // would reject this attempt's v2 proof as a legacy mismatch.
       const decoded = record.envelope ?? null;
       if (decoded === null)
-        return await this.refuseCompletionPublication(
+        return await refuseCompletionPublication(
+          this.context,
           state,
           record,
           new CompletionRefusal(
@@ -10030,7 +6371,8 @@ export class WorkflowRunner {
         applied = null;
       }
       if (applied === null)
-        return await this.refuseCompletionPublication(
+        return await refuseCompletionPublication(
+          this.context,
           state,
           record,
           new CompletionRefusal(
@@ -10049,7 +6391,8 @@ export class WorkflowRunner {
         : null;
     if (
       durableRefusal !== null &&
-      !(await this.appendCompletionPublicationRefusalEvent(
+      !(await appendCompletionPublicationRefusalEvent(
+        this.context,
         state,
         record,
         durableRefusal
@@ -10066,7 +6409,8 @@ export class WorkflowRunner {
         );
       transitionState(state, from);
     }
-    const outcome = await this.continueCompletionPublication(
+    const outcome = await continueCompletionPublication(
+      this.context,
       state,
       record,
       config
@@ -10079,146 +6423,6 @@ export class WorkflowRunner {
       record.sessionId ?? record.resumeSessionId ?? null,
       context
     );
-  }
-
-  /**
-   * Read-only revalidation of a runner-published completion: canonical source,
-   * receipt, final report hashes, task set, evidence paths and authority. No
-   * report write, receipt creation or digest refresh happens here.
-   */
-  /** Receipt, capture and candidate identities frozen into a v5 review snapshot. */
-  private async frozenCompletionPublication(
-    state: RunState,
-    summary: ValidPlanTaskCompletionSummary
-  ): Promise<ReviewCompletionPublication | null> {
-    if (
-      summary.schemaVersion !== COMPLETION_SUMMARY_SCHEMA_VERSION ||
-      summary.publisherAttemptId === undefined ||
-      summary.publication === undefined
-    )
-      return null;
-    const receipt = await this.store.readCompletionPublicationIfExists(
-      state.runId,
-      { id: summary.publisherAttemptId }
-    );
-    if (receipt?.integrityDigest !== summary.publication.sha256)
-      throw new BanzaiError(
-        "INVALID_REVIEW_SNAPSHOT",
-        "The published completion receipt is missing or conflicts with the canonical summary."
-      );
-    return {
-      completionProtocol: COMPLETION_PROTOCOL,
-      publisherAttemptId: summary.publisherAttemptId,
-      receiptPath: summary.publication.path,
-      receiptDigest: receipt.integrityDigest,
-      captureDigest: receipt.captureDigest,
-      candidateDigest: receipt.candidateDigest
-    };
-  }
-
-  private async revalidatePublishedCompletion(
-    state: RunState,
-    checkpoint: ValidPlanTaskCompletionSummary
-  ): Promise<ValidatedPlanTaskCompletion> {
-    if (
-      checkpoint.publisherAttemptId === undefined ||
-      checkpoint.publication === undefined
-    )
-      throw new PlanTaskCompletionError(
-        "summary_mismatch",
-        "Published completion summary is missing its publisher identities."
-      );
-    const receipt = await this.store
-      .readCompletionPublicationIfExists(state.runId, {
-        id: checkpoint.publisherAttemptId
-      })
-      .catch(() => null);
-    if (
-      receipt?.integrityDigest !== checkpoint.publication.sha256 ||
-      receipt.ledgerAuthor.attemptId !== checkpoint.sourceAttemptId ||
-      receipt.ledgerAuthor.attemptKind !==
-        (checkpoint.sourceAttemptKind ?? "implementation") ||
-      receipt.ledgerAuthor.ledgerDigest !== checkpoint.ledgerDigest ||
-      receipt.authority.approvalDigest !== checkpoint.approvalDigest ||
-      receipt.authority.planTaskDigest !== checkpoint.planTaskDigest ||
-      receipt.implementationReport.sha256 !==
-        checkpoint.implementationReport.sha256 ||
-      receipt.testReport.sha256 !== checkpoint.testReport.sha256
-    )
-      throw new PlanTaskCompletionError(
-        "summary_mismatch",
-        "Publication receipt is missing or conflicts with the canonical completion summary."
-      );
-    // Edited or unreadable author evidence is an invalid canonical source,
-    // never a reason to trust the summary or to fail with a raw reader error.
-    const author = await this.store
-      .readRunAttemptIfExists(state.runId, {
-        id: receipt.ledgerAuthor.attemptId,
-        kind: receipt.ledgerAuthor.attemptKind,
-        mutable: true
-      })
-      .catch(() => null);
-    const ledger = author === null ? null : this.recordLedger(author);
-    if (author?.status !== "completed" || ledger === null)
-      throw new PlanTaskCompletionError(
-        "source_attempt_invalid",
-        "Canonical completion source attempt is missing, malformed or not completed."
-      );
-    if (ledgerDigest(ledger) !== receipt.ledgerAuthor.ledgerDigest)
-      throw new PlanTaskCompletionError(
-        "summary_mismatch",
-        "Canonical ledger no longer matches its published identity."
-      );
-    if (state.planApproval === null)
-      throw new PlanTaskCompletionError(
-        "approval_invalid",
-        "Canonical completion source has no plan approval."
-      );
-    if (state.planApproval.digest !== receipt.authority.approvalDigest)
-      throw new PlanTaskCompletionError(
-        "approval_invalid",
-        "Published completion was authorized under a different approval."
-      );
-    const claims = await validateCompletionClaims({
-      repoRoot: this.repoRoot,
-      artifactBinding: state.artifactBinding,
-      ledger,
-      outcome: "completed",
-      artifacts: {
-        implementationReport: receipt.implementationReport.path,
-        testReport: receipt.testReport.path
-      },
-      planPath: this.completionPlanPath(state),
-      approval: state.planApproval,
-      baseline: state.baseline
-    });
-    if (
-      claims.implementationReport.sha256 !==
-        receipt.implementationReport.sha256 ||
-      claims.testReport.sha256 !== receipt.testReport.sha256
-    )
-      throw new PlanTaskCompletionError(
-        "summary_mismatch",
-        "A published report changed after publication; restore the exact published bytes or start a new attempt."
-      );
-    const published = parsePublishedCompletionRegion(
-      claims.implementationReport.bytes
-    );
-    if (JSON.stringify(published) !== JSON.stringify(ledger))
-      throw new PlanTaskCompletionError(
-        "report_projection_mismatch",
-        "Published completion region contradicts the canonical ledger."
-      );
-    if (
-      claims.planTaskDigest !== checkpoint.planTaskDigest ||
-      claims.ledgerDigest !== checkpoint.ledgerDigest ||
-      JSON.stringify(claims.counts) !== JSON.stringify(checkpoint.counts)
-    )
-      throw new PlanTaskCompletionError(
-        "summary_mismatch",
-        "Persisted plan-task completion summary is stale or contradictory."
-      );
-    return { summary: checkpoint, tasks: ledger.tasks };
   }
 
   /**
@@ -10256,7 +6460,8 @@ export class WorkflowRunner {
             attempt
           );
           if (record.envelope) {
-            const inputs = await this.observeCompletionInputs(
+            const inputs = await observeCompletionInputs(
+              this.context,
               state,
               record.envelope.artifacts
             );
@@ -10273,7 +6478,8 @@ export class WorkflowRunner {
                 "envelope" in checkpoint &&
                 checkpoint.observed.workspaceDigest !== null &&
                 sameObservedInputs(inputs.observed, checkpoint.observed) &&
-                (await this.completionCheckpointAuthorityCurrent(
+                (await completionCheckpointAuthorityCurrent(
+                  this.context,
                   state,
                   record,
                   checkpoint,
@@ -10294,7 +6500,12 @@ export class WorkflowRunner {
                     implementation.sha256 ===
                       candidate.candidate.outputSha256)) &&
                 inputs.observed.workspaceDigest === capture.workspace.digest &&
-                (await this.completionAuthorityCurrent(state, capture, config));
+                (await completionAuthorityCurrent(
+                  this.context,
+                  state,
+                  capture,
+                  config
+                ));
             }
             if (restored) action = "resume";
           }
@@ -10376,7 +6587,7 @@ export class WorkflowRunner {
     sessionId: string | null,
     context: SessionContext
   ): Promise<RunState> {
-    this.validateArtifactRoleReferences(state, result);
+    validateArtifactRoleReferences(state, result);
     if (result.phase !== attempt.kind) {
       throw new BanzaiError(
         "PHASE_RESULT_MISMATCH",
@@ -10432,7 +6643,7 @@ export class WorkflowRunner {
           gate: "decision_consultation",
           summary: result.summary,
           request,
-          requestedAt: now()
+          requestedAt: this.now()
         };
         transitionState(state, "needs_human_decision");
       } else if (result.gate === "escalation") {
@@ -10442,7 +6653,7 @@ export class WorkflowRunner {
           gate: result.gate,
           summary: result.summary,
           questions: result.questions,
-          requestedAt: now()
+          requestedAt: this.now()
         };
         transitionState(state, "needs_human_decision");
       } else {
@@ -10496,7 +6707,7 @@ export class WorkflowRunner {
           gate: result.gate,
           summary: result.summary,
           questions: result.questions,
-          requestedAt: now()
+          requestedAt: this.now()
         };
         transitionState(state, "needs_human_decision");
       } else if (result.outcome !== "completed" || result.gate !== null) {
@@ -10522,7 +6733,8 @@ export class WorkflowRunner {
         status: state.status
       }
     );
-    await this.observeHumanTime(
+    await observeHumanTime(
+      this.context,
       state,
       "gate_pending",
       "attempt.applied",
@@ -10610,185 +6822,6 @@ export class WorkflowRunner {
     );
   }
 
-  private verificationRound(
-    records: readonly VerificationAttemptRecord[],
-    sourceAttempt: AttemptReference & { kind: "implementation" | "fix" }
-  ): VerificationAttemptRecord["round"] {
-    const existing = records.find(
-      (record) => record.round.sourceAttemptId === sourceAttempt.id
-    );
-    if (existing !== undefined) {
-      if (existing.round.sourceAttemptKind !== sourceAttempt.kind) {
-        throw new BanzaiError(
-          "VERIFICATION_ATTEMPT_CONFLICT",
-          "Verification round source identity has conflicting kinds."
-        );
-      }
-      return existing.round;
-    }
-    const roundIds = new Set(records.map((record) => record.round.id));
-    return {
-      id: `verification-round-${sourceAttempt.id}`,
-      ordinal: roundIds.size + 1,
-      sourcePhase: sourceAttempt.kind,
-      sourceAttemptId: sourceAttempt.id,
-      sourceAttemptKind: sourceAttempt.kind
-    };
-  }
-
-  private reconcileVerificationState(
-    state: RunState,
-    records: readonly VerificationAttemptRecord[],
-    round: VerificationAttemptRecord["round"],
-    descriptors: readonly VerificationCommandDescriptor[]
-  ): void {
-    const byIdentity = new Map(
-      descriptors.map((descriptor) => [
-        `${descriptor.profileOrdinal}:${descriptor.commandOrdinal}`,
-        descriptor
-      ])
-    );
-    const roundRecords = records.filter((item) => item.round.id === round.id);
-    for (const record of roundRecords) {
-      const descriptor = byIdentity.get(
-        `${record.command.profileOrdinal}:${record.command.commandOrdinal}`
-      );
-      if (
-        descriptor === undefined ||
-        !verificationCommandMatches(record, descriptor)
-      ) {
-        throw new BanzaiError(
-          "VERIFICATION_CONFIGURATION_CHANGED",
-          "Configured verification commands changed during an open verification round."
-        );
-      }
-    }
-    const retained: VerificationResult[] = [];
-    for (const descriptor of descriptors) {
-      const record = roundRecords
-        .filter(
-          (item) =>
-            item.command.profileOrdinal === descriptor.profileOrdinal &&
-            item.command.commandOrdinal === descriptor.commandOrdinal &&
-            (item.status === "completed" || item.status === "failed") &&
-            item.exitCode !== null &&
-            item.completedAt !== null &&
-            item.stdout !== null &&
-            item.stderr !== null
-        )
-        .at(-1);
-      if (record === undefined) {
-        continue;
-      }
-      if (
-        record.exitCode === null ||
-        record.completedAt === null ||
-        record.stdout === null ||
-        record.stderr === null
-      ) {
-        continue;
-      }
-      retained.push({
-        name: descriptor.command.name,
-        command: descriptor.command.command,
-        args: descriptor.command.args,
-        exitCode: record.exitCode,
-        signal: record.signal,
-        stdoutPath: record.stdout.relativePath,
-        stderrPath: record.stderr.relativePath,
-        startedAt: record.startedAt,
-        completedAt: record.completedAt
-      });
-    }
-    state.metrics.attempts.verification = records.length;
-    state.verification = retained;
-  }
-
-  private verificationStorage(state: RunState): VerificationStorage {
-    if (!usesVerificationPolicy(state) || !state.artifactBinding)
-      throw new BanzaiError(
-        "VERIFICATION_EVIDENCE_INVALID",
-        "Verification applicability requires its original work binding."
-      );
-    return {
-      repoRoot: this.repoRoot,
-      workId: state.artifactBinding.binding.workId,
-      directory: `.banzai/runs/${state.runId}/verification`
-    };
-  }
-
-  private verificationAuthority(state: RunState): string {
-    return evidenceDigest({
-      binding: state.artifactBinding?.sha256,
-      approval: state.planApproval?.digest ?? null,
-      workflow: state.workflowSelection
-    });
-  }
-
-  private async captureVerification(
-    state: RunState,
-    config: OrchestratorConfig
-  ): Promise<VerificationCapture> {
-    if (config.schemaVersion !== 3 || !config.verification.policy)
-      throw new BanzaiError(
-        "VERIFICATION_CONFIGURATION_CHANGED",
-        "Verification-enabled runs require their explicit project policy."
-      );
-    const configuration = parseVerificationConfiguration(config.verification);
-    const input = {
-      repoRoot: this.repoRoot,
-      configuration,
-      workId: this.verificationStorage(state).workId,
-      evidenceDirectories: [
-        `.banzai/runs/${state.runId}`,
-        ".banzai/runner.lock"
-      ]
-    };
-    const before = await captureVerificationInputs(input);
-    const after = await captureVerificationInputs(input);
-    return sameVerificationCapture(before, after) ||
-      (!before.complete && !after.complete)
-      ? after
-      : {
-          complete: false,
-          reason: "inputs_unavailable",
-          candidateDigest: null,
-          checks: []
-        };
-  }
-
-  private async prepareVerificationDecision(
-    state: RunState,
-    config: OrchestratorConfig,
-    round: VerificationAttemptRecord["round"],
-    records: VerificationAttemptRecord[]
-  ): Promise<VerificationCapture> {
-    const storage = this.verificationStorage(state);
-    const configuration = parseVerificationConfiguration(config.verification);
-    const strict = (state.workflowSelection?.workflow ?? "strict") === "strict";
-    const plan = strict
-      ? await readFile(
-          path.join(this.repoRoot, this.completionPlanPath(state)),
-          "utf8"
-        )
-      : null;
-    const current = await this.captureVerification(state, config);
-    const origins = await readVerificationOrigins(storage, records);
-    const decision = decideVerification({
-      workId: storage.workId,
-      roundId: round.id,
-      configuration,
-      authorityDigest: this.verificationAuthority(state),
-      strict,
-      obligations: parseVerificationObligations(plan, configuration),
-      capture: current,
-      origins
-    });
-    await persistVerificationDecision(storage, decision);
-    state.verificationEvidence = { decision, applicability: null };
-    return current;
-  }
-
   private async requireVerificationApplicability(
     state: RunState,
     config?: OrchestratorConfig
@@ -10801,8 +6834,8 @@ export class WorkflowRunner {
             "VERIFICATION_EVIDENCE_INVALID",
             "Task verification has no physical evidence publication."
           );
-        const storage = this.taskVerificationStorage(state);
-        const policy = this.taskVerificationPolicy(
+        const storage = taskVerificationStorage(this.context, state);
+        const policy = taskVerificationPolicy(
           config ?? (await loadConfig(this.repoRoot))
         );
         if (
@@ -10813,7 +6846,11 @@ export class WorkflowRunner {
             "VERIFICATION_POLICY_CHANGED",
             "Verification policy changed after execution."
           );
-        const expectedContext = this.taskExecutionContext(state, policy);
+        const expectedContext = taskExecutionContext(
+          this.context,
+          state,
+          policy
+        );
         const authority = publication.decision.authority;
         if (
           authority.workId !== storage.workId ||
@@ -10855,7 +6892,8 @@ export class WorkflowRunner {
       } catch (error) {
         blockState(
           state,
-          await this.digestRejectionReason(
+          await digestRejectionReason(
+            this.context,
             state,
             state.taskVerification?.decision.authority.sourceAttemptId ?? null,
             error
@@ -10901,7 +6939,7 @@ export class WorkflowRunner {
       const descriptors = describeVerificationCommands(current).filter((item) =>
         isRepositoryHygieneCommand(item.command)
       );
-      this.reconcileVerificationState(
+      reconcileVerificationState(
         state,
         records,
         {
@@ -10970,8 +7008,7 @@ export class WorkflowRunner {
         currentConfig.verification
       );
       if (
-        evidence?.decision.authorityDigest !==
-          this.verificationAuthority(state) ||
+        evidence?.decision.authorityDigest !== verificationAuthority(state) ||
         evidence.decision.configurationDigest !==
           evidenceDigest({ schema: 3, verification: configuration })
       )
@@ -10979,12 +7016,16 @@ export class WorkflowRunner {
           "VERIFICATION_EVIDENCE_INVALID",
           "Verification authority changed or evidence is missing."
         );
-      const storage = this.verificationStorage(state);
+      const storage = verificationStorage(this.context, state);
       const origins = await readVerificationOrigins(
         storage,
         await this.store.readVerificationAttempts(state.runId)
       );
-      const current = await this.captureVerification(state, currentConfig);
+      const current = await captureVerification(
+        this.context,
+        state,
+        currentConfig
+      );
       const applicability = verificationApplicability(
         evidence.decision,
         origins,
@@ -11026,7 +7067,8 @@ export class WorkflowRunner {
     await this.beforeModelAttempt(commitTransition);
     if ((state.workflowSelection?.workflow ?? "strict") === "strict") {
       try {
-        await this.revalidateTaskCompletion(
+        await revalidateTaskCompletion(
+          this.context,
           state,
           sourceAttempt?.kind === "fix"
         );
@@ -11037,7 +7079,8 @@ export class WorkflowRunner {
           error instanceof InstructionResourceMismatchError
         )
           throw error;
-        return await this.blockForCompletionFailure(
+        return await blockForCompletionFailure(
+          this.context,
           state,
           state.planTaskCompletion?.sourceAttemptId ??
             sourceAttempt?.id ??
@@ -11071,7 +7114,7 @@ export class WorkflowRunner {
           sourceAttemptId: continuation.attemptId,
           sourceAttemptKind: continuation.attemptKind
         }
-      : this.verificationRound(records, source);
+      : verificationRound(records, source);
     const skipped =
       hasConfigurationSetup(state) &&
       state.configurationSetup?.coverage === "skipped";
@@ -11081,7 +7124,8 @@ export class WorkflowRunner {
     let evidenceBefore: VerificationCapture | null = null;
     if (usesVerificationPolicy(state) && !skipped) {
       try {
-        evidenceBefore = await this.prepareVerificationDecision(
+        evidenceBefore = await prepareVerificationDecision(
+          this.context,
           state,
           config,
           round,
@@ -11110,7 +7154,7 @@ export class WorkflowRunner {
       return state;
     }
     try {
-      this.reconcileVerificationState(state, records, round, descriptors);
+      reconcileVerificationState(state, records, round, descriptors);
     } catch (error) {
       if (
         error instanceof TerminalRunStateError ||
@@ -11179,15 +7223,19 @@ export class WorkflowRunner {
           await this.store.writeState(state);
           return state;
         }
-        const interrupted = terminalVerificationRecord(started, {
-          status: "interrupted",
-          completedAt: now(),
-          exitCode: null,
-          signal: null,
-          failureCategory: "runner_failure",
-          stdout: null,
-          stderr: null
-        });
+        const interrupted = terminalVerificationRecord(
+          started,
+          {
+            status: "interrupted",
+            completedAt: this.now(),
+            exitCode: null,
+            signal: null,
+            failureCategory: "runner_failure",
+            stdout: null,
+            stderr: null
+          },
+          () => this.now()
+        );
         await this.store.finishVerificationAttempt(state.runId, interrupted);
         await this.store.appendEvent(state.runId, "verification.interrupted", {
           attemptId: interrupted.id,
@@ -11197,12 +7245,16 @@ export class WorkflowRunner {
         restartOf = interrupted.id;
         state.activeProcess = null;
         records = await this.store.readVerificationAttempts(state.runId);
-        this.reconcileVerificationState(state, records, round, descriptors);
+        reconcileVerificationState(state, records, round, descriptors);
         await this.store.writeState(state);
       }
 
       if (usesVerificationPolicy(state) && !skipped) {
-        const latestCapture = await this.captureVerification(state, config);
+        const latestCapture = await captureVerification(
+          this.context,
+          state,
+          config
+        );
         if (latestCapture.candidateDigest !== evidenceBefore?.candidateDigest) {
           blockState(state, "Verification inputs changed before invocation.");
           await this.store.writeState(state);
@@ -11212,13 +7264,13 @@ export class WorkflowRunner {
       const record = await this.store.beginVerificationAttempt(state.runId, {
         round,
         descriptor,
-        startedAt: now(),
+        startedAt: this.now(),
         retryOf: retryingFailed ? failed.id : null,
         restartOf
       });
       if (evidenceBefore && state.verificationEvidence)
         await persistVerificationOriginStart(
-          this.verificationStorage(state),
+          verificationStorage(this.context, state),
           record,
           state.verificationEvidence.decision,
           evidenceBefore
@@ -11253,7 +7305,12 @@ export class WorkflowRunner {
                 : subscriptionOnlyEnvironment(),
               timeoutMs: command.timeoutMs,
               onStart: async (pid) => {
-                await this.processStarted(state, { kind: "verification" }, pid);
+                await processStarted(
+                  this.context,
+                  state,
+                  { kind: "verification" },
+                  pid
+                );
               }
             }),
           (processResult) => processResult.exitCode === 0
@@ -11261,27 +7318,31 @@ export class WorkflowRunner {
       } catch (error) {
         const current = await this.store.readState(state.runId);
         const interrupted = current.status === "cancelled";
-        const terminal = terminalVerificationRecord(record, {
-          status: interrupted ? "interrupted" : "failed",
-          completedAt: now(),
-          exitCode: null,
-          signal: null,
-          failureCategory: verificationFailureCategory(error),
-          stdout: null,
-          stderr: null
-        });
+        const terminal = terminalVerificationRecord(
+          record,
+          {
+            status: interrupted ? "interrupted" : "failed",
+            completedAt: this.now(),
+            exitCode: null,
+            signal: null,
+            failureCategory: verificationFailureCategory(error),
+            stdout: null,
+            stderr: null
+          },
+          () => this.now()
+        );
         await this.store.finishVerificationAttempt(state.runId, terminal);
         if (evidenceBefore)
           await persistVerificationOriginFinish(
-            this.verificationStorage(state),
+            verificationStorage(this.context, state),
             terminal,
-            await this.captureVerification(state, config)
+            await captureVerification(this.context, state, config)
           );
         if (current.status === "cancelled") {
           return current;
         }
         records = await this.store.readVerificationAttempts(state.runId);
-        this.reconcileVerificationState(state, records, round, descriptors);
+        reconcileVerificationState(state, records, round, descriptors);
         state.activeProcess = null;
         blockState(
           state,
@@ -11301,28 +7362,32 @@ export class WorkflowRunner {
         `verification/${logStem}.stderr.log`,
         redactSensitiveText(result.stderr)
       );
-      const terminal = terminalVerificationRecord(record, {
-        status: result.exitCode === 0 ? "completed" : "failed",
-        completedAt: result.completedAt,
-        exitCode: result.exitCode,
-        signal: result.signal,
-        failureCategory: result.exitCode === 0 ? null : "command_exit",
-        stdout: stdoutEvidence,
-        stderr: stderrEvidence
-      });
+      const terminal = terminalVerificationRecord(
+        record,
+        {
+          status: result.exitCode === 0 ? "completed" : "failed",
+          completedAt: result.completedAt,
+          exitCode: result.exitCode,
+          signal: result.signal,
+          failureCategory: result.exitCode === 0 ? null : "command_exit",
+          stdout: stdoutEvidence,
+          stderr: stderrEvidence
+        },
+        () => this.now()
+      );
       await this.store.finishVerificationAttempt(state.runId, terminal);
       if (evidenceBefore)
         await persistVerificationOriginFinish(
-          this.verificationStorage(state),
+          verificationStorage(this.context, state),
           terminal,
-          await this.captureVerification(state, config)
+          await captureVerification(this.context, state, config)
         );
       const current = await this.store.readState(state.runId);
       if (current.status === "cancelled") {
         return current;
       }
       records = await this.store.readVerificationAttempts(state.runId);
-      this.reconcileVerificationState(state, records, round, descriptors);
+      reconcileVerificationState(state, records, round, descriptors);
       state.activeProcess = null;
       await this.store.writeState(state);
       await this.store.appendEvent(state.runId, "verification.completed", {
@@ -11372,125 +7437,6 @@ export class WorkflowRunner {
     );
   }
 
-  private taskVerificationPolicy(
-    config: OrchestratorConfig
-  ): TaskVerificationPolicy | null {
-    return (
-      config.verification.taskPolicy ??
-      (config.verification.policy
-        ? {
-            schema: "banzai-task-verification-policy/v1",
-            schemaVersion: 1,
-            required: [],
-            denied: [],
-            limits: {
-              timeoutMs: 86400000,
-              workingDirectories: ["."],
-              requiredContext: "inherited-local"
-            },
-            reuse: config.verification.policy
-          }
-        : null)
-    );
-  }
-
-  private taskExecutionContext(
-    state: RunState,
-    policy: TaskVerificationPolicy | null
-  ): TaskVerificationContext {
-    return {
-      kind: "inherited-local",
-      invocationDigest: evidenceDigest({
-        runId: state.runId,
-        repoRoot: this.repoRoot,
-        request: evidenceDigest(state.request),
-        workflowDigest: state.workflowSelection?.digest,
-        environment: evidenceDigest(
-          policy?.reuse?.dependencies.environment ??
-            subscriptionOnlyEnvironment()
-        )
-      }),
-      restrictions: []
-    };
-  }
-
-  private taskVerificationStorage(state: RunState): VerificationStorage {
-    const binding = state.artifactBinding?.binding;
-    if (
-      binding?.schemaVersion !== 2 ||
-      !binding.artifacts.verificationDirectory
-    )
-      throw new BanzaiError(
-        "VERIFICATION_EVIDENCE_INVALID",
-        "Task verification requires its original evidence binding."
-      );
-    return {
-      repoRoot: this.repoRoot,
-      directory: binding.artifacts.verificationDirectory,
-      workId: binding.workId
-    };
-  }
-
-  /** The acceptance baseline recorded for one attempt, by identity, or null. */
-  private async resultDigestBaseline(
-    state: RunState,
-    sourceAttemptId: string | null
-  ): Promise<ResultDigestEvidence | null> {
-    if (sourceAttemptId === null) return null;
-    const record = (await this.store.readRunAttempts(state.runId)).find(
-      (item) => item.attempt.id === sourceAttemptId
-    );
-    return record === undefined
-      ? null
-      : await this.store.readResultDigestEvidenceIfExists(
-          state.runId,
-          record.attempt
-        );
-  }
-
-  /**
-   * ADR-0051: a consumption-time rejection keeps its own authority to refuse
-   * execution and gains only a causal history, stated from the recorded
-   * acceptance baseline. With no record the history is unknown and is never
-   * reconstructed from the bytes that happen to be on disk now. A size
-   * rejection stays a separate cause and asserts no history at all.
-   */
-  private async digestRejectionReason(
-    state: RunState,
-    sourceAttemptId: string | null,
-    error: unknown
-  ): Promise<string> {
-    const base = errorMessage(error);
-    const detail = taskVerificationDigestDetail(error);
-    if (detail === null) return base;
-    // A size rejection is a separate cause and asserts no causal history.
-    if (detail.observed === null) return base;
-    let baseline: ResultDigestEvidence | null;
-    try {
-      baseline = await this.resultDigestBaseline(state, sourceAttemptId);
-    } catch (readError) {
-      return `${base} Its acceptance baseline could not be read, so the causal history is unavailable: ${errorMessage(readError)}`;
-    }
-    // Only a comparison of this exact identity establishes a cause. A baseline
-    // that never covered it — the selection classified it differently then —
-    // leaves the history unknown exactly as an absent record does.
-    const recorded =
-      baseline?.comparisons.find(
-        (comparison) =>
-          comparison.checkId === detail.checkId &&
-          comparison.path === detail.path &&
-          comparison.declared === detail.declared
-      ) ?? null;
-    if (recorded === null) {
-      return `${DIGEST_UNRESOLVED_BLOCK_PREFIX} ${base} This run recorded no acceptance baseline for that digest, so whether it ever matched is unknown.`;
-    }
-    // Only a recorded match makes the bytes restorable to a known target, so
-    // only that case leaves an action an operator can actually take.
-    return recorded.matched
-      ? `${base} It matched when the result was accepted, so the source changed after acceptance.`
-      : `${DIGEST_UNRESOLVED_BLOCK_PREFIX} ${base} It did not match when the result was accepted, so it never matched.`;
-  }
-
   private async executeTaskChecks(
     state: RunState,
     config: OrchestratorConfig,
@@ -11510,19 +7456,19 @@ export class WorkflowRunner {
           "PHASE_RESULT_SCHEMA_MISMATCH",
           "Task verification requires phase-result v4 from its completed source attempt."
         );
-      const storage = this.taskVerificationStorage(state);
+      const storage = taskVerificationStorage(this.context, state);
       const workflow = state.workflowSelection?.workflow;
       if (!workflow || !state.workflowSelection?.digest)
         throw new BanzaiError(
           "VERIFICATION_AUTHORITY_MISSING",
           "Verification has no persisted workflow authority."
         );
-      const policy = this.taskVerificationPolicy(config);
+      const policy = taskVerificationPolicy(config);
       const obligations =
         workflow === "strict"
           ? parseTaskVerificationObligations(
               await readFile(
-                path.join(this.repoRoot, this.completionPlanPath(state)),
+                path.join(this.repoRoot, completionPlanPath(state)),
                 "utf8"
               )
             )
@@ -11551,7 +7497,7 @@ export class WorkflowRunner {
           "VERIFICATION_SELECTION_MISSING",
           "An empty task selection requires its actual assurance rationale."
         );
-      const context = this.taskExecutionContext(state, policy);
+      const context = taskExecutionContext(this.context, state, policy);
       const authority: TaskVerificationAuthority = {
         workId: storage.workId,
         sourceAttemptId: source.id,
@@ -11577,20 +7523,24 @@ export class WorkflowRunner {
           );
         if (
           evidenceDigest(
-            this.taskVerificationPolicy(await loadConfig(this.repoRoot))
+            taskVerificationPolicy(await loadConfig(this.repoRoot))
           ) !== evidenceDigest(policy)
         )
           throw new BanzaiError(
             "VERIFICATION_POLICY_CHANGED",
             "Project verification policy changed."
           );
-        const currentContext = this.taskExecutionContext(state, policy);
+        const currentContext = taskExecutionContext(
+          this.context,
+          state,
+          policy
+        );
         if (evidenceDigest(currentContext) !== authority.contextDigest)
           throw new BanzaiError(
             "VERIFICATION_CONTEXT_CHANGED",
             "The actual execution context changed."
           );
-        if (workflow === "strict") await this.validateApproval(state);
+        if (workflow === "strict") await validateApproval(this.context, state);
       };
       if (
         state.activeProcess?.kind === "verification" &&
@@ -11604,7 +7554,7 @@ export class WorkflowRunner {
       const previous = await readTaskVerificationAttempts(storage, true);
       const roundId =
         previous.find((item) => item.sourceAttemptId === source.id)?.roundId ??
-        randomUUID();
+        this.context.ids();
       state.taskVerification = await executeTaskVerification({
         ...storage,
         selection,
@@ -11628,7 +7578,12 @@ export class WorkflowRunner {
                 subscriptionOnlyEnvironment(),
               timeoutMs: descriptor.timeoutMs,
               onStart: async (pid) => {
-                await this.processStarted(state, { kind: "verification" }, pid);
+                await processStarted(
+                  this.context,
+                  state,
+                  { kind: "verification" },
+                  pid
+                );
               }
             });
             return {
@@ -11652,7 +7607,7 @@ export class WorkflowRunner {
                     stderr: "Process could not be started.",
                     exitCode: null,
                     signal: null,
-                    completedAt: now()
+                    completedAt: this.now()
                   };
             return {
               ...observed,
@@ -11707,7 +7662,7 @@ export class WorkflowRunner {
       delete state.taskVerification;
       blockState(
         state,
-        await this.digestRejectionReason(state, sourceAttemptId, error)
+        await digestRejectionReason(this.context, state, sourceAttemptId, error)
       );
       await this.store.writeState(state);
       return state;
@@ -11725,7 +7680,7 @@ export class WorkflowRunner {
       if (command === undefined) {
         continue;
       }
-      const startedAt = now();
+      const startedAt = this.now();
       state.metrics.attempts.verification += 1;
       let result;
       try {
@@ -11740,7 +7695,12 @@ export class WorkflowRunner {
               env: subscriptionOnlyEnvironment(),
               timeoutMs: command.timeoutMs,
               onStart: async (pid) => {
-                await this.processStarted(state, { kind: "verification" }, pid);
+                await processStarted(
+                  this.context,
+                  state,
+                  { kind: "verification" },
+                  pid
+                );
               }
             }),
           (processResult) => processResult.exitCode === 0
@@ -11846,7 +7806,7 @@ export class WorkflowRunner {
     await this.assertProjectGuidance();
     let validatedCompletion: ValidatedPlanTaskCompletion;
     try {
-      validatedCompletion = await this.revalidateTaskCompletion(state);
+      validatedCompletion = await revalidateTaskCompletion(this.context, state);
     } catch (error) {
       if (
         error instanceof TerminalRunStateError ||
@@ -11854,7 +7814,8 @@ export class WorkflowRunner {
         error instanceof InstructionResourceMismatchError
       )
         throw error;
-      return await this.blockForCompletionFailure(
+      return await blockForCompletionFailure(
+        this.context,
         state,
         state.planTaskCompletion?.sourceAttemptId ?? "legacy",
         error
@@ -11872,8 +7833,8 @@ export class WorkflowRunner {
         "Review checks",
         `base commit, approved plan bundle, workspace snapshot, and ${config.models.reviewer.executable} subscription authentication`,
         async () => {
-          await this.validateBaseCommit(state);
-          await this.validateApproval(state);
+          await validateBaseCommit(this.context, state);
+          await validateApproval(this.context, state);
           await this.preflightVendor("reviewer", config.models.reviewer);
           return await workspaceSnapshot(this.repoRoot, {
             artifactBinding: state.artifactBinding,
@@ -11893,7 +7854,7 @@ export class WorkflowRunner {
       if (current.status === "cancelled") {
         return current;
       }
-      return await this.recordReviewCheckFailure(state, error);
+      return await recordReviewCheckFailure(this.context, state, error);
     }
     const beforeDigest = snapshot.digest;
     const reviewerVendor = vendorFor(config.models.reviewer.executable);
@@ -11920,7 +7881,7 @@ export class WorkflowRunner {
     await this.invocationScope(state.runId, config);
     state.workspaceDigest = beforeDigest;
     state.reviewIteration = iteration;
-    const attempt = this.newAttempt(state, "review", false);
+    const attempt = newAttempt(this.context, state, "review", false);
     const candidateAbsolutePath = this.store.reviewCandidatePath(
       state.runId,
       attempt
@@ -11961,7 +7922,7 @@ export class WorkflowRunner {
     ) {
       const attempts = await this.store.readVerificationAttempts(state.runId);
       const origins = await readVerificationOrigins(
-        this.verificationStorage(state),
+        verificationStorage(this.context, state),
         attempts
       );
       artifact.verificationEvidence = {
@@ -11979,7 +7940,7 @@ export class WorkflowRunner {
         })
       };
     }
-    const record = await this.beginAttempt(state, attempt, policy);
+    const record = await beginAttempt(this.context, state, attempt, policy);
     const candidateEvidence: ReviewCandidateEvidence = {
       source: artifactMode,
       evidencePath: candidateEvidencePath,
@@ -12040,7 +8001,8 @@ export class WorkflowRunner {
           : {}),
         ...(state.schemaVersion === 7 || state.schemaVersion === 8
           ? {
-              completionPublication: await this.frozenCompletionPublication(
+              completionPublication: await frozenCompletionPublication(
+                this.context,
                 state,
                 validatedCompletion.summary
               )
@@ -12091,7 +8053,7 @@ export class WorkflowRunner {
       await this.store.writeReviewSnapshot(state.runId, attempt, frozen);
       artifact.snapshot = frozen;
     } catch (error) {
-      return await this.failAttempt(state, record, error);
+      return await failAttempt(this.context, state, record, error);
     }
     let result: AdapterResult<ReviewResult>;
     let validatedCandidate: ValidatedReviewCandidate;
@@ -12133,12 +8095,13 @@ export class WorkflowRunner {
                 environment,
                 env: process.env,
                 onStart: async (pid) => {
-                  await this.processStarted(state, attempt, pid);
+                  await processStarted(this.context, state, attempt, pid);
                 },
                 onProgress: (event) => {
                   this.modelProgress(label, event);
                 },
-                onTerminalSuccess: this.terminalCheckpointWriter(
+                onTerminalSuccess: terminalCheckpointWriter(
+                  this.context,
                   state,
                   attempt,
                   config.models.reviewer,
@@ -12206,7 +8169,7 @@ export class WorkflowRunner {
         "primary"
       );
       inventoryChanged = await this.recordInventoryDrift(state, policy, result);
-      await this.persistAdapterResult(state, record, result);
+      await persistAdapterResult(this.context, state, record, result);
       result.result = parseCurrentReviewResult(result.result);
       const frozen = artifact.snapshot;
       validateReviewScope(parseCurrentReviewResult(result.result), {
@@ -12214,7 +8177,7 @@ export class WorkflowRunner {
         approvedArtifactPaths: frozen.approval.paths,
         requiredFindingIds: frozen.requiredFindingIds
       });
-      this.validateReviewResultForApplication(state, result.result);
+      validateReviewResultForApplication(state, result.result);
       await this.store.writeText(
         state.runId,
         candidateEvidencePath,
@@ -12226,7 +8189,7 @@ export class WorkflowRunner {
         result.result,
         artifact
       );
-      this.validateReviewResultForApplication(state, result.result);
+      validateReviewResultForApplication(state, result.result);
       candidateEvidence.sha256 = validatedCandidate.sha256;
       candidateEvidence.validation = "passed";
       await this.store.writeRunAttempt(state.runId, record);
@@ -12249,7 +8212,7 @@ export class WorkflowRunner {
           error instanceof BanzaiError ? error.code : null;
         candidateEvidence.validationError = errorMessage(error);
       }
-      return await this.failAttempt(state, record, error);
+      return await failAttempt(this.context, state, record, error);
     }
     try {
       const afterDigest = await workspaceDigest(this.repoRoot, {
@@ -12258,7 +8221,7 @@ export class WorkflowRunner {
         baseline: state.baseline
       });
       if (beforeDigest !== afterDigest) {
-        if (!(await this.completeAttempt(state, record, result))) {
+        if (!(await completeAttempt(this.context, state, record, result))) {
           return await this.store.readState(state.runId);
         }
         state.activeAttempt = null;
@@ -12271,12 +8234,12 @@ export class WorkflowRunner {
         await this.store.writeState(state);
         return state;
       }
-      if (!(await this.completeAttempt(state, record, result))) {
+      if (!(await completeAttempt(this.context, state, record, result))) {
         return await this.store.readState(state.runId);
       }
-      await this.validateBaseCommit(state);
-      await this.validateApproval(state);
-      const completionNow = await this.revalidateTaskCompletion(state);
+      await validateBaseCommit(this.context, state);
+      await validateApproval(this.context, state);
+      const completionNow = await revalidateTaskCompletion(this.context, state);
       if (
         artifact.snapshot.completionSource === null ||
         !summariesMatch(
@@ -12321,7 +8284,8 @@ export class WorkflowRunner {
       });
       await this.store.writeRunAttempt(state.runId, record);
       if (error instanceof PlanTaskCompletionError) {
-        return await this.blockForCompletionFailure(
+        return await blockForCompletionFailure(
+          this.context,
           await this.store.readState(state.runId),
           state.planTaskCompletion?.sourceAttemptId ?? attempt.id,
           error
@@ -12342,35 +8306,6 @@ export class WorkflowRunner {
       blockState(current, errorMessage(error));
       await this.store.writeState(current);
       return current;
-    }
-  }
-
-  private validateReviewResultForApplication(
-    state: RunState,
-    result: ReviewResult
-  ): void {
-    const expectedPrefix = `R${state.reviewIteration}-F`;
-    if (
-      result.findings.some((finding) => !finding.id.startsWith(expectedPrefix))
-    ) {
-      throw new BanzaiError(
-        "FINDING_ITERATION_MISMATCH",
-        `Review ${state.reviewIteration} returned an invalid finding id.`
-      );
-    }
-    const acceptedPrevious =
-      state.triage?.items
-        .filter((item) => item.disposition === "accepted")
-        .map((item) => item.findingId) ?? [];
-    if (
-      state.triage !== null &&
-      !(result.schemaVersion === 2 && result.verdict === "blocked") &&
-      acceptedPrevious.some((id) => !result.reviewedFindingIds.includes(id))
-    ) {
-      throw new BanzaiError(
-        "INCOMPLETE_REREVIEW",
-        "Re-review did not report every previously accepted finding id."
-      );
     }
   }
 
@@ -12423,7 +8358,7 @@ export class WorkflowRunner {
       inventoryChanged: false
     }
   ): Promise<RunState> {
-    this.validateReviewResultForApplication(state, result);
+    validateReviewResultForApplication(state, result);
     const resultRelative = `reviews/review-${state.reviewIteration}.json`;
     const canonicalJson = `${JSON.stringify(result, null, 2)}\n`;
     if (result.schemaVersion === 2)
@@ -12500,7 +8435,7 @@ export class WorkflowRunner {
     if (result.verdict === "pass") {
       if (!(await this.requireVerificationApplicability(state))) return state;
       try {
-        await this.revalidateTaskCompletion(state);
+        await revalidateTaskCompletion(this.context, state);
       } catch (error) {
         if (
           error instanceof TerminalRunStateError ||
@@ -12508,7 +8443,8 @@ export class WorkflowRunner {
           error instanceof InstructionResourceMismatchError
         )
           throw error;
-        return await this.blockForCompletionFailure(
+        return await blockForCompletionFailure(
+          this.context,
           state,
           state.planTaskCompletion?.sourceAttemptId ?? "legacy",
           error
@@ -12539,7 +8475,8 @@ export class WorkflowRunner {
       result.schemaVersion === 2
     );
     if (result.schemaVersion === 2) await this.store.writeState(state);
-    await this.observeHumanTime(
+    await observeHumanTime(
+      this.context,
       state,
       "gate_pending",
       "review.completed",
@@ -12616,555 +8553,6 @@ export class WorkflowRunner {
     return items;
   }
 
-  private checkpointSettings(
-    attempt: AttemptReference,
-    config: OrchestratorConfig
-  ): { settings: ModelSettings; role: SessionContext["role"] } {
-    if (attempt.kind === "selection" || attempt.kind === "plan") {
-      return { settings: config.models.planner, role: "planner" };
-    }
-    if (attempt.kind === "review") {
-      return { settings: config.models.reviewer, role: "reviewer" };
-    }
-    return { settings: config.models.implementer, role: "implementer" };
-  }
-
-  private accountCompletedAttempt(
-    state: RunState,
-    record: AttemptRecord
-  ): void {
-    if (state.metrics.completedAttemptIds.includes(record.attempt.id)) {
-      return;
-    }
-    this.accountAttemptUsage(state, record);
-    state.metrics.completedAttemptIds.push(record.attempt.id);
-    state.metrics.modelDurationMs += record.durationMs ?? 0;
-  }
-
-  private accountAttemptUsage(state: RunState, record: AttemptRecord): void {
-    const accounted = (state.metrics.usageAccountedAttemptIds ??= [
-      ...state.metrics.completedAttemptIds
-    ]);
-    if (accounted.includes(record.attempt.id)) return;
-    if (record.usage !== null) {
-      state.metrics.usage.inputTokens += record.usage.inputTokens;
-      state.metrics.usage.cachedInputTokens += record.usage.cachedInputTokens;
-      state.metrics.usage.outputTokens += record.usage.outputTokens;
-      if (record.usage.costUsd !== null) {
-        state.metrics.usage.costUsd =
-          (state.metrics.usage.costUsd ?? 0) + record.usage.costUsd;
-      }
-      accounted.push(record.attempt.id);
-    }
-  }
-
-  private validateRunnerControlTasks(state: RunState, plan: string): void {
-    const roles = state.artifactBinding?.binding.artifacts;
-    validatePlanRunnerControlTasks(
-      plan,
-      this.repoRoot,
-      [roles?.implementationReport, roles?.testReport].filter(
-        (value): value is string => typeof value === "string"
-      )
-    );
-  }
-
-  /**
-   * The check identities whose descriptors draw execution authority from the
-   * approved plan or project policy. A candidate restating one of them leaves
-   * the approved obligation in force, so the restatement's source identities
-   * never take effect and are never compared (ADR-0049 section 2, ADR-0051).
-   */
-  private async requiredCheckIds(
-    state: RunState,
-    config: OrchestratorConfig
-  ): Promise<Set<string>> {
-    const ids = new Set(
-      (this.taskVerificationPolicy(config)?.required ?? []).map(
-        (check) => check.id
-      )
-    );
-    if (
-      (state.workflowSelection?.workflow ?? "strict") !== "strict" ||
-      state.planApproval === null
-    )
-      return ids;
-    for (const check of parseTaskVerificationObligations(
-      await readFile(
-        path.join(this.repoRoot, this.completionPlanPath(state)),
-        "utf8"
-      )
-    ).checks)
-      ids.add(check.id);
-    return ids;
-  }
-
-  /**
-   * Establishes the acceptance baseline for one attempt and rejects the result
-   * when any comparison failed. The record is written before the outcome is
-   * decided, so a rejection is durable evidence rather than a lost diagnosis,
-   * and an existing baseline is never restated: the current comparisons decide
-   * acceptance, the recorded ones describe what acceptance observed.
-   */
-  private async recordResultDigestEvidence(
-    state: RunState,
-    attempt: AttemptReference,
-    comparisons: ResultDigestComparison[]
-  ): Promise<ResultDigestEvidence> {
-    const rejected = comparisons.filter((comparison) => !comparison.matched);
-    const evidence = await this.store.establishResultDigestEvidence(
-      state.runId,
-      {
-        schema: RESULT_DIGEST_EVIDENCE_SCHEMA,
-        schemaVersion: RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION,
-        runId: state.runId,
-        attempt: { id: attempt.id, kind: attempt.kind },
-        outcome: rejected.length > 0 ? "rejected" : "accepted",
-        comparisons
-      }
-    );
-    if (rejected.length > 0) {
-      throw new ResultDigestRejectedError(
-        `The ${attempt.kind} result declared ${rejected.length} digest${rejected.length === 1 ? "" : "s"} that did not match the bytes it named when the result was accepted. ${rejected
-          .map(resultDigestDiagnostic)
-          .join(" ")}`,
-        rejected
-      );
-    }
-    return evidence;
-  }
-
-  /**
-   * ADR-0051: every model-authored source identity that acts as an execution
-   * precondition is established against the bytes it names at the boundary
-   * where the result is accepted, before any later phase depends on it.
-   */
-  private async establishResultSourceIdentities(
-    state: RunState,
-    attempt: AttemptReference,
-    result: PhaseResult | PersistedPhaseResult,
-    config: OrchestratorConfig
-  ): Promise<void> {
-    if (state.verificationMode !== "task") return;
-    const candidates =
-      result.schemaVersion === 4
-        ? (result.verificationCandidates ?? null)
-        : null;
-    const observe = async (
-      relativePath: string
-    ): Promise<{
-      observed: string | null;
-      size: number | null;
-      limit: number | null;
-    }> => {
-      try {
-        const file = await taskVerificationPath(this.repoRoot, relativePath);
-        const size = (await lstat(file)).size;
-        // A source above the bound is a distinct outcome, never a mismatch:
-        // its bytes are not read at all, so no digest can be observed. The
-        // bound travels with that outcome so the rejection can name it.
-        return size > TASK_VERIFICATION_SOURCE_MAX_BYTES
-          ? { observed: null, size, limit: TASK_VERIFICATION_SOURCE_MAX_BYTES }
-          : {
-              observed: evidenceDigest(await readFile(file)),
-              size,
-              limit: null
-            };
-      } catch {
-        // An unresolvable or unsafe source asserts neither cause.
-        return { observed: null, size: null, limit: null };
-      }
-    };
-    const comparisons: ResultDigestComparison[] = [];
-    for (const identity of effectiveResultSourceIdentities(
-      candidates,
-      await this.requiredCheckIds(state, config)
-    )) {
-      const { observed, size, limit } = await observe(identity.path);
-      comparisons.push({
-        role: "precondition",
-        field: identity.field,
-        checkId: identity.checkId,
-        path: identity.path,
-        declared: identity.declared,
-        observed,
-        size,
-        limit,
-        matched: observed === identity.declared
-      });
-    }
-    await this.recordResultDigestEvidence(state, attempt, comparisons);
-  }
-
-  /**
-   * The plan remainder digest is the one binding role ADR-0051 fixes, and the
-   * detection that establishes it already lives in the shared inventory
-   * parser. This only classifies that existing outcome: an accepted record
-   * becomes the baseline a later reader may cite, and a rejected record is
-   * what makes the attempt recognizable as a digest-rejected result. No strict
-   * plan-task completion ledger is written for a planning attempt.
-   */
-  private async establishPlanRemainderDigest(
-    state: RunState,
-    attempt: AttemptReference,
-    planPath: string,
-    markdown: string
-  ): Promise<void> {
-    let comparison: ResultDigestComparison;
-    try {
-      const obligations = parseTaskVerificationObligations(markdown);
-      comparison = {
-        role: "binding",
-        field: "planRemainderSha256",
-        checkId: null,
-        path: planPath,
-        declared: obligations.planRemainderSha256,
-        observed: obligations.planRemainderSha256,
-        size: null,
-        limit: null,
-        matched: true
-      };
-    } catch (error) {
-      const detail = taskVerificationDigestDetail(error);
-      if (detail === null) throw error;
-      if (detail.role !== "binding") throw error;
-      comparison = {
-        role: "binding",
-        field: detail.field,
-        checkId: null,
-        path: planPath,
-        declared: detail.declared,
-        observed: detail.observed,
-        size: null,
-        limit: null,
-        matched: false
-      };
-    }
-    await this.recordResultDigestEvidence(state, attempt, [comparison]);
-  }
-
-  private async validatePlanningResult(
-    state: RunState,
-    attempt: AttemptReference,
-    result: PersistedPhaseResult
-  ): Promise<void> {
-    if (result.gate !== "plan_approval" || result.artifacts.plan === null)
-      return;
-    try {
-      const markdown = await readFile(
-        path.join(this.repoRoot, result.artifacts.plan),
-        "utf8"
-      );
-      parseApprovedPlanTaskIds(markdown);
-      if (state.verificationMode === "task")
-        await this.establishPlanRemainderDigest(
-          state,
-          attempt,
-          result.artifacts.plan,
-          markdown
-        );
-      this.validateRunnerControlTasks(state, markdown);
-    } catch (error) {
-      if (
-        error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError ||
-        error instanceof InstructionResourceMismatchError
-      )
-        throw error;
-      // A rejected remainder digest is a defective planning result, not an
-      // unreadable artifact: it keeps the approved_plan_invalid semantics that
-      // rerun planning, and says exactly which digest disagreed.
-      if (error instanceof ResultDigestRejectedError)
-        throw new PlanTaskCompletionError(
-          "approved_plan_invalid",
-          error.message
-        );
-      if (
-        error instanceof PlanTaskCompletionError ||
-        (error instanceof BanzaiError &&
-          error.code === "PLAN_RUNNER_CONTROL_TASK")
-      )
-        throw error;
-      throw new PlanTaskCompletionError(
-        "approved_plan_invalid",
-        `The planning artifact could not be read: ${errorMessage(error)}`
-      );
-    }
-  }
-
-  private async validateTerminalCheckpointResult(
-    state: RunState,
-    attempt: AttemptReference,
-    result: TerminalCheckpointResult,
-    config: OrchestratorConfig
-  ): Promise<void> {
-    await this.validateSavedArtifactScope(state, attempt);
-    if (attempt.kind === "selection") {
-      return;
-    }
-    if (attempt.kind === "review") {
-      this.validateReviewResultForApplication(state, result as ReviewResult);
-      const record = await this.store.readRunAttempt(state.runId, attempt);
-      if (
-        record.reviewContext !== undefined ||
-        (result as ReviewResult).schemaVersion === 2
-      ) {
-        const frozen = await this.store.readReviewSnapshot(
-          state.runId,
-          attempt
-        );
-        if (record.reviewContext?.snapshotDigest !== frozen.digest)
-          throw new BanzaiError(
-            "INVALID_REVIEW_SNAPSHOT",
-            "Checkpoint snapshot binding is missing or conflicting."
-          );
-        validateReviewScope(parseCurrentReviewResult(result), {
-          snapshotDigest: frozen.digest,
-          approvedArtifactPaths: frozen.approval.paths,
-          requiredFindingIds: frozen.requiredFindingIds
-        });
-      }
-      return;
-    }
-    const phaseResult = parsePersistedPhaseResult(result);
-    this.validateArtifactRoleReferences(state, phaseResult);
-    if (phaseResult.phase !== attempt.kind) {
-      throw new BanzaiError(
-        "PHASE_RESULT_MISMATCH",
-        `Attempt ${attempt.kind} returned phase ${phaseResult.phase}.`
-      );
-    }
-    if (attempt.kind === "plan") {
-      await this.validatePlanningResult(state, attempt, phaseResult);
-      return;
-    }
-    await this.establishResultSourceIdentities(
-      state,
-      attempt,
-      phaseResult,
-      config
-    );
-    if (attempt.kind === "fix") {
-      if (phaseResult.taskCompletion !== null) {
-        // ADR 0025: a fix may refresh the canonical ledger. The reconciled
-        // result is validated exactly like the live path validates it, and the
-        // checkpoint records the fix attempt as the canonical source.
-        if (state.planApproval === null) {
-          throw new PlanTaskCompletionError(
-            "approval_invalid",
-            "Strict completion validation requires an approved plan bundle."
-          );
-        }
-        state.planTaskCompletion = {
-          ...(
-            await validatePlanTaskCompletion({
-              repoRoot: this.repoRoot,
-              artifactBinding: state.artifactBinding,
-              sourceAttemptId: attempt.id,
-              result: phaseResult,
-              planPath: this.completionPlanPath(state),
-              approval: state.planApproval,
-              baseline: state.baseline
-            })
-          ).summary,
-          sourceAttemptKind: "fix"
-        };
-      }
-      return;
-    }
-    if ((state.workflowSelection?.workflow ?? "strict") !== "strict") {
-      if (phaseResult.taskCompletion !== null) {
-        throw new BanzaiError(
-          "PLAN_TASK_COMPLETION_INVALID",
-          "Lite implementation must not return strict plan-task completion evidence."
-        );
-      }
-      return;
-    }
-    if (phaseResult.outcome === "completed" && phaseResult.gate === null) {
-      state.planTaskCompletion = (
-        await this.validateImplementationCompletion(state, attempt, phaseResult)
-      ).summary;
-      return;
-    }
-    validatePlanTaskCompletionLedgerShape(
-      await this.approvedTaskIds(state),
-      phaseResult.taskCompletion,
-      phaseResult.outcome
-    );
-  }
-
-  private async promoteTerminalCheckpoint(
-    state: RunState,
-    attempt: AttemptReference,
-    record: AttemptRecord,
-    config: OrchestratorConfig
-  ): Promise<string | null> {
-    const checkpoint = await this.store.readTerminalCheckpointIfExists(
-      state.runId,
-      attempt
-    );
-    if (checkpoint === null) {
-      return null;
-    }
-    if ("envelope" in checkpoint) {
-      throw new BanzaiError(
-        "TERMINAL_CHECKPOINT_MISMATCH",
-        "A legacy attempt cannot reconcile a completion-protocol checkpoint."
-      );
-    }
-    if (TERMINAL_INTEGRITY_FAILURE_CODES.has(record.failureCode ?? "")) {
-      throw new BanzaiError(
-        "TERMINAL_CHECKPOINT_CONFLICT",
-        "Conflicting terminal or session evidence cannot be reconciled as success."
-      );
-    }
-    const { settings, role } = this.checkpointSettings(attempt, config);
-    const expectedContext =
-      record.sessionContext ?? sessionContext(role, settings);
-    const expectedApprovalDigest = state.planApproval?.digest ?? null;
-    const expectedWorkflowDigest =
-      state.planApproval === null
-        ? (state.workflowSelection?.digest ?? null)
-        : null;
-    const expectedResultContract =
-      attempt.kind === "review" && record.reviewContext === undefined
-        ? "review-result/v1"
-        : terminalResultContract(
-            attempt.kind,
-            state.verificationMode === "task"
-          );
-    const resultContractMatches =
-      checkpoint.resultContract === expectedResultContract ||
-      (expectedResultContract === "phase-result/v3" &&
-        checkpoint.resultContract === "phase-result/v2");
-    if (
-      checkpoint.runId !== state.runId ||
-      checkpoint.attempt.id !== attempt.id ||
-      checkpoint.attempt.kind !== attempt.kind ||
-      checkpoint.attempt.mutable !== attempt.mutable ||
-      checkpoint.phase !== attempt.kind ||
-      !resultContractMatches ||
-      checkpoint.baseCommit !== state.baseCommit ||
-      checkpoint.approvalDigest !== expectedApprovalDigest ||
-      checkpoint.workflowDigest !== expectedWorkflowDigest ||
-      checkpoint.scopeDigest !== this.attemptScopeDigest(state, attempt) ||
-      checkpoint.configuration.vendor !==
-        (vendorFor(settings.executable) ?? FALLBACK_VENDOR[role]) ||
-      checkpoint.configuration.executableDigest !==
-        digestCanonicalJson(settings.executable) ||
-      checkpoint.configuration.model !== settings.model ||
-      checkpoint.configuration.effort !== settings.effort ||
-      checkpoint.configuration.sessionMode !==
-        (record.sessionMode ?? "fresh") ||
-      checkpoint.configuration.sessionContextDigest !==
-        digestCanonicalJson(expectedContext) ||
-      state.recovery?.sourceAttemptId === attempt.id
-    ) {
-      throw new BanzaiError(
-        "TERMINAL_CHECKPOINT_MISMATCH",
-        "Terminal checkpoint does not match the active run, attempt, authorization, or model context."
-      );
-    }
-    await this.validateBaseCommit(state);
-    if (expectedApprovalDigest !== null) {
-      await this.validateApproval(state);
-    } else if (expectedWorkflowDigest !== null) {
-      if (attempt.kind === "plan") {
-        const selection = state.workflowSelection ?? null;
-        if (
-          selection?.workflow !== "strict" ||
-          workflowAuthorizationDigest({
-            runId: state.runId,
-            request: state.request,
-            ...selection
-          }) !== selection.digest
-        ) {
-          throw new BanzaiError(
-            "WORKFLOW_AUTHORIZATION_INVALID",
-            "Planning checkpoint requires the unchanged strict workflow selection."
-          );
-        }
-      } else {
-        this.validateWorkflowSelection(state);
-      }
-    }
-    await this.validateTerminalCheckpointResult(
-      state,
-      attempt,
-      checkpoint.result,
-      config
-    );
-    if (record.status === "completed") {
-      if (
-        record.result === null ||
-        JSON.stringify(record.result) !== JSON.stringify(checkpoint.result)
-      ) {
-        throw new BanzaiError(
-          "TERMINAL_CHECKPOINT_CONFLICT",
-          "Completed attempt result conflicts with its terminal checkpoint."
-        );
-      }
-      return null;
-    }
-    if (
-      (record.status !== "started" && record.status !== "failed") ||
-      (record.result !== null &&
-        JSON.stringify(record.result) !== JSON.stringify(checkpoint.result))
-    ) {
-      throw new BanzaiError(
-        "TERMINAL_CHECKPOINT_CONFLICT",
-        `Terminal checkpoint cannot promote an attempt in ${record.status} state.`
-      );
-    }
-    if (
-      state.metrics.usageAccountedAttemptIds === undefined &&
-      record.status === "failed" &&
-      record.usage !== null
-    ) {
-      state.metrics.usageAccountedAttemptIds = [
-        ...state.metrics.completedAttemptIds,
-        record.attempt.id
-      ];
-    }
-    if (record.schemaVersion === 1)
-      record.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION;
-    record.result = checkpoint.result;
-    record.sessionId = checkpoint.sessionId;
-    record.usage = checkpoint.usage;
-    return checkpoint.terminal.observedAt;
-  }
-
-  private async finalizeTerminalCheckpoint(
-    state: RunState,
-    record: AttemptRecord,
-    terminalObservedAt: string | null
-  ): Promise<void> {
-    if (terminalObservedAt === null) {
-      return;
-    }
-    if (record.schemaVersion === 1)
-      record.schemaVersion = MODEL_ATTEMPT_SCHEMA_VERSION;
-    record.status = "completed";
-    record.completedAt = terminalObservedAt;
-    record.interruptedAt = null;
-    record.recoveryOf ??= null;
-    record.recoveryAuthorizationId ??= null;
-    record.durationMs = Math.max(
-      0,
-      Date.parse(terminalObservedAt) - Date.parse(record.startedAt)
-    );
-    record.error = null;
-    record.failureCode = null;
-    await this.store.writeRunAttempt(state.runId, record);
-    state.activeProcess = null;
-    await this.store.writeState(state);
-    await this.store.appendEvent(state.runId, "attempt.terminal_reconciled", {
-      attemptId: record.attempt.id,
-      kind: record.attempt.kind
-    });
-  }
-
   private async reconcileAttempt(
     state: RunState,
     config: OrchestratorConfig
@@ -13174,7 +8562,7 @@ export class WorkflowRunner {
       return state;
     }
     const record = await this.store.readRunAttempt(state.runId, attempt);
-    if (this.completionProtocolAttempt(record)) {
+    if (completionProtocolAttempt(record)) {
       try {
         const reconciled = await this.reconcileCompletionAttempt(
           state,
@@ -13205,7 +8593,8 @@ export class WorkflowRunner {
     }
     let terminalObservedAt: string | null;
     try {
-      terminalObservedAt = await this.promoteTerminalCheckpoint(
+      terminalObservedAt = await promoteTerminalCheckpoint(
+        this.context,
         state,
         attempt,
         record,
@@ -13260,12 +8649,13 @@ export class WorkflowRunner {
         kind: attempt.kind
       });
       if (attempt.kind === "selection") {
-        await this.finalizeTerminalCheckpoint(
+        await finalizeTerminalCheckpoint(
+          this.context,
           state,
           record,
           terminalObservedAt
         );
-        this.accountCompletedAttempt(state, record);
+        accountCompletedAttempt(state, record);
         return await this.applyWorkflowSelection(
           state,
           attempt,
@@ -13282,7 +8672,10 @@ export class WorkflowRunner {
           transitionState(state, "reviewing");
         let validatedCompletion: ValidatedPlanTaskCompletion;
         try {
-          validatedCompletion = await this.revalidateTaskCompletion(state);
+          validatedCompletion = await revalidateTaskCompletion(
+            this.context,
+            state
+          );
         } catch (error) {
           if (
             error instanceof TerminalRunStateError ||
@@ -13290,7 +8683,8 @@ export class WorkflowRunner {
             error instanceof InstructionResourceMismatchError
           )
             throw error;
-          return await this.blockForCompletionFailure(
+          return await blockForCompletionFailure(
+            this.context,
             state,
             state.planTaskCompletion?.sourceAttemptId ?? "legacy",
             error
@@ -13415,8 +8809,8 @@ export class WorkflowRunner {
                 "INVALID_REVIEW_SNAPSHOT",
                 "Original review snapshot conflicts with current authority or completion evidence."
               );
-            await this.validateBaseCommit(state);
-            await this.validateApproval(state);
+            await validateBaseCommit(this.context, state);
+            await validateApproval(this.context, state);
             validateReviewScope(parseCurrentReviewResult(result), {
               snapshotDigest: frozen.digest,
               approvedArtifactPaths: frozen.approval.paths,
@@ -13469,10 +8863,10 @@ export class WorkflowRunner {
               candidateEvidence.validation = "passed";
               await this.store.writeRunAttempt(state.runId, record);
             }
-            this.validateReviewResultForApplication(state, result);
+            validateReviewResultForApplication(state, result);
             if (recoveringStartedReview) {
               if (
-                !(await this.completeAttempt(state, record, {
+                !(await completeAttempt(this.context, state, record, {
                   result,
                   sessionId: record.sessionId,
                   stdout: "",
@@ -13530,13 +8924,14 @@ export class WorkflowRunner {
           await this.store.writeState(state);
           return state;
         }
-        await this.finalizeTerminalCheckpoint(
+        await finalizeTerminalCheckpoint(
+          this.context,
           state,
           record,
           terminalObservedAt
         );
         if (!recoveringStartedReview) {
-          this.accountCompletedAttempt(state, record);
+          accountCompletedAttempt(state, record);
         }
         const storedContext = record.sessionContext;
         const policy: ReviewExecutionPolicy = {
@@ -13570,7 +8965,8 @@ export class WorkflowRunner {
       ) {
         try {
           state.planTaskCompletion = (
-            await this.validateImplementationCompletion(
+            await validateImplementationCompletion(
+              this.context,
               state,
               attempt,
               parsePersistedPhaseResult(record.result)
@@ -13583,11 +8979,21 @@ export class WorkflowRunner {
             error instanceof InstructionResourceMismatchError
           )
             throw error;
-          return await this.blockForCompletionFailure(state, attempt.id, error);
+          return await blockForCompletionFailure(
+            this.context,
+            state,
+            attempt.id,
+            error
+          );
         }
       }
-      await this.finalizeTerminalCheckpoint(state, record, terminalObservedAt);
-      this.accountCompletedAttempt(state, record);
+      await finalizeTerminalCheckpoint(
+        this.context,
+        state,
+        record,
+        terminalObservedAt
+      );
+      accountCompletedAttempt(state, record);
       return await this.applyPhaseResult(
         state,
         attempt,

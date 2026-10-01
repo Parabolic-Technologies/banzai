@@ -187,6 +187,62 @@ setup reuses the existing runner lock without stale ownership reclamation.
   Missing/stale modules, forbidden static edges, alternate local loaders, and
   inline-disable attempts fail `npm run lint`; test and tool files remain
   outside the production layer map.
+- ADR-0052 domain modules hold pure workflow decisions. Every policy entry is
+  classified as `standard` or `domain`, and a domain entry must cite ADR-0052.
+  The domain modules are `src/state-machine.ts`, `src/workflow/ports.ts` and
+  `src/workflow/domain/*.ts`.
+  - **Imports.** A domain module imports only other domain modules and `errors`
+    at runtime, and additionally `types` type-only.
+  - **Lint.** Lint rejects the following in a domain module:
+    - effectful Node built-ins, including their subpaths such as
+      `dns/promises`: filesystem, child process, network, process,
+      operating-system and worker modules;
+    - any `crypto` import other than `createHash`;
+    - the `process`, `crypto`, `performance`, `globalThis` and `global`
+      globals, so no qualified form reaches a restricted API;
+    - ambient clock reads and `Math.random`.
+  - **Eligibility.** Retry, recovery, restore and next-action decisions are
+    staged pure rules. A rule receives plain facts and returns either a final
+    result or the next evidence the runner must gather. `WorkflowRunner`
+    gathers that evidence in the order the pre-decomposition source read it,
+    keeps each evidence source's error scope, and computes every digest and
+    recovery identity a rule asks for.
+  - **Eligibility effects.** The runner keeps two effects at their existing
+    points. The approval check persists its block and appends
+    `approval.invalidated`, including when `status` calls it without the run
+    lock. Completion revalidation may write a refreshed plan-task-completion
+    summary.
+- ADR-0052 runner context and capability slices:
+  - **Context.** `WorkflowRunner` builds one frozen `RunnerContext` with its
+    immutable collaborators: repository root, run store, vendor adapters,
+    process runner, progress reporter, human-time observer, clock and
+    identifier source. The context shares the runner's public `store` and
+    `adapters` instances. Capability code receives the context and never the
+    runner.
+  - **Mutable state.** Each piece of runner state has one per-instance owner
+    that exposes operations: the activity sequence, the cancellation receipts,
+    configuration ownership and the invocation-scope cache.
+  - **Capability slices.** These live in `src/workflow/` capability modules:
+    - the attempt lifecycle, terminal checkpoints and digest evidence;
+    - the runner-owned completion protocol up to the phase result: capture,
+      rejection, refusal, publication and revalidation;
+    - the verification evidence and round operations;
+    - preflight check-failure recording;
+    - the leaf validations these call.
+
+    Attempt reconciliation, every application of a phase result to the run,
+    the status projections and the phase executors stay in the runner.
+
+    Edges between capability modules are named per work item. Checkpoints
+    depend on attempts, completion, verification, review, preflight and digest
+    evidence. The attempt lifecycle depends on the completion plan-task
+    module, and completion capture, refusal and publication depend on the
+    attempt lifecycle. Verification depends on completion, and completion
+    depends on digest evidence. The module graph is acyclic, although attempts
+    and completion depend on each other at directory level.
+
+  - **Facade edge.** The import-boundary policy rejects any `src/workflow/**`
+    entry that permits `src/workflow.ts` (`workflow_facade_edge`).
 - Concurrency: one Node process using `async`/`await`. Each model phase and each
   verification command is a child process with its own timeout and
   process-group termination; verification commands run sequentially, while the
@@ -294,12 +350,22 @@ setup reuses the existing runner lock without stale ownership reclamation.
   - `.banzai/artifacts.json` — shared declaration selecting the private layout.
   - `.banzai/work/<uuid>/` — local, ignored internal work artifacts.
   - `.banzai/runs/` — local, ignored orchestrator run state.
-- Source/test layout: `src/` is flat, one module per responsibility;
-  `test/<module>.test.ts` normally mirrors `src/<module>.ts`. Cross-module
-  contract tests such as `test/review-result-v2.test.ts` and shared fixture
-  modules such as `test/helpers.ts` and `test/review-fixtures.ts` are supported
-  layout exceptions. `test/hook.test.ts` covers the plugin hook outside the
-  workspace.
+- Source/test layout: `src/` holds one module per responsibility. ADR-0052
+  capability areas are introduced as subdirectories; `src/workflow/` currently
+  holds the runner ports, context and state owners, the workflow domain and
+  the `attempts/`, `checkpoints/`, `completion/`, `configuration/`,
+  `digest-evidence/`, `preflight/`, `review/` and `verification/` capability
+  modules beside the `src/workflow.ts` facade. `test/<path>.test.ts` normally
+  mirrors `src/<path>.ts`. Cross-module contract tests such as
+  `test/review-result-v2.test.ts` and shared fixture modules such as
+  `test/helpers.ts`, `test/review-fixtures.ts`,
+  `test/characterization-trace.ts` and `test/workflow/context-fixture.ts` are
+  supported layout exceptions. So are the facade-level `WorkflowRunner`
+  tests: `test/workflow.test.ts` and its `test/workflow-<area>.test.ts`
+  siblings (`review`, `recovery`, `completion`, `publication`, `project` and
+  `eligibility`), split by runner capability so the test runner executes them
+  in parallel, with their shared doubles in `test/workflow-fixtures.ts`.
+  `test/hook.test.ts` covers the plugin hook outside the workspace.
 - `.gitignore` ignores `dist/` globally and then re-includes exactly
   `packages/orchestrator/dist/banzai.mjs` and `.../banzai.mjs.map`; it also
   ignores `.claude/settings.local.json`,
@@ -377,16 +443,96 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   `recover`, `approvePlan`, `decideAdr`, `answerHumanDecision`, `triage`,
   `cancel`, `recordCancellationResponse`, `status`, and the private phase executors (selection, planning,
   implementation, verification, review, fixes). Owns preflight including
-  `assertClaudePermissions`, approval-digest and base-commit validation, attempt
-  reconciliation, builder-session selection, full/delta reviewer policy,
-  snapshot-v6-bound rendered-review-v7 publication without formatting-only model calls,
+  `assertClaudePermissions`, attempt reconciliation, builder-session
+  selection, full/delta reviewer policy, snapshot-v6-bound rendered-review-v7
+  publication without formatting-only model calls,
   and recovery source discovery. It establishes every model-authored digest
   against the bytes it names when the carrying artifact is accepted, records
   that comparison as durable acceptance evidence, and recognizes a
   digest-rejected result as one recovery source whose authorized repair
-  outranks replaying the rejected terminal checkpoint.
+  outranks replaying the rejected terminal checkpoint. An optional trailing
+  `sources` constructor argument (`{ clock?, ids? }`) supplies the time and
+  UUIDs from which every runner-generated timestamp, duration and identifier
+  derives. The defaults are the system clock and `randomUUID`, and each
+  identifier keeps its derived shape. The runner delegates to
+  `src/workflow/` capability modules:
+  - approval-digest and base-commit validation;
+  - the attempt lifecycle, terminal checkpoints and digest evidence;
+  - completion capture, refusal, publication and revalidation;
+  - verification evidence and rounds;
+  - preflight check-failure recording.
+
+  It keeps attempt reconciliation, phase-result application, the status
+  projections and the phase executors.
+
+- `workflow/ports.ts` — the type-only `Clock`, `IdSource` and `RunnerSources`
+  process-boundary ports, re-exported from `workflow.ts`.
+- `workflow/context.ts` — `RunnerContext`, the frozen collaborator record, with
+  the timestamp helper and human-time observation.
+- `workflow/activity-sequence.ts`, `cancellation-receipts.ts`,
+  `configuration/ownership.ts` and `preflight/invocation-scope-cache.ts` — the
+  per-runner owners of the activity sequence, cancellation receipts,
+  configuration ownership and the invocation-scope cache.
+- `workflow/attempts/lifecycle.ts` and `result-scope.ts` — attempt identities,
+  start, completion, failure, adapter-result and output persistence and usage
+  accounting, and the artifact role and phase-scope checks of a result.
+- `workflow/checkpoints/terminal-checkpoints.ts` — terminal checkpoint writing,
+  finalization, promotion and result validation, and result-source identity
+  evidence.
+- `workflow/digest-evidence/records.ts` — result-digest evidence records, their
+  baseline and the rejection reason text.
+- `workflow/completion/inputs.ts` and `plan-tasks.ts` — completion input
+  observation and comparison, the approved plan path and task identifiers,
+  runner control-task and planning-result validation,
+  implementation-completion validation and the completion-invalid checkpoint.
+- `workflow/completion/refusal.ts`, `capture.ts`, `publication.ts` and
+  `revalidation.ts` — the ADR-0047 completion protocol up to the phase result:
+  - the publication refusal error, and input rejection with its repair
+    checkpoint;
+  - the completion-state transition and input capture;
+  - publication continuation, candidate publication, ledger derivation, the
+    authority checks and the application of a publication to its attempt
+    record;
+  - revalidation of task completion and published completion, and the
+    completion-failure block.
+- `workflow/verification/evidence.ts` and `rounds.ts` — verification evidence
+  storage, authority, input capture, decision preparation and the task
+  execution context, and round identity and retained-result reconciliation.
+- `workflow/preflight/check-failures.ts` — records a failed start, review check
+  or verification-retry preflight as a block.
+- `workflow/preflight/approval.ts` — plan-approval, base-commit and
+  workflow-selection validation and `workflowAuthorizationDigest`, which
+  `workflow.ts` re-exports.
+- `workflow/review/result-application.ts` and
+  `workflow/verification/required-checks.ts` — review-result validation for
+  application, and the required task-check identifiers and verification
+  policy.
+- `workflow/domain/failure-classes.ts` — the model-failure cause and
+  failure-code sets, and the `[RESULT_DIGEST_UNRESOLVED]` block-reason prefix,
+  that retry, recovery and reconciliation read. It also holds the
+  read-only-attempt retry predicate and the check-failure block reason.
+- `workflow/domain/sessions.ts`, `human-decisions.ts`, `run-identity.ts`,
+  `artifact-scope.ts`, `verification-attempts.ts` and `routing.ts` — the pure
+  helpers `workflow.ts` shares. They cover session bindings, human-decision
+  validation, run identifiers and slugs, approved artifact paths, verification
+  failure categories and command matching, workflow routing and terminal
+  result contracts. `humanDecisionQuestions` is re-exported from
+  `workflow.ts`.
+- `workflow/domain/retry-eligibility.ts`, `next-action.ts` and
+  `restore-eligibility.ts` — the retry and restore rules and next-action
+  selection. `RetryEligibility` is re-exported from `workflow.ts`.
+- `workflow/domain/recovery-eligibility.ts` — the recovery dispatch across the
+  digest-rejected, prerequisite-blocked fix and interrupted sources, the
+  interrupted-source rule, and the precondition, workspace and identity tail
+  every source shares. `RecoveryEligibility` is re-exported from
+  `workflow.ts`.
+- `workflow/domain/digest-rejected-recovery.ts` and
+  `prerequisite-blocked-fix.ts` — the two remaining recovery sources. The
+  latter also owns the remaining-scope and source-selection rules that fix
+  execution and recovery execution share.
 - `state-machine.ts` — `transitionState`, `blockState`, `requireState`; the
-  only place `RunStatus` changes, so illegal transitions fail closed.
+  only place `RunStatus` changes, so illegal transitions fail closed. It is an
+  ADR-0052 domain module.
 - `store.ts` — `RunStore`: atomic `state.json`, append-only `events.jsonl`,
   model-attempt records with redacted output, mode-0600 context ledgers,
   attempt-owned review candidates and immutable private review snapshots,
@@ -627,7 +773,7 @@ Plugin (`plugins/banzai/`):
   `PROJECT_MANIFEST.md` in the session directory or a parent — and the hook
   stays silent in repositories without that evidence.
 - `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` — plugin manifests,
-  currently version `2.6.3`. The Codex manifest additionally declares the hook
+  currently version `2.6.4`. The Codex manifest additionally declares the hook
   and the store interface metadata.
 - `PROJECT_MANIFEST.md`, `AGENTS.md`, `CLAUDE.md`, and the placeholder
   `documentation/` tree (`README.md`, `decisions/README.md`, `.gitkeep` files) —
@@ -667,8 +813,8 @@ attempt, approval marker or transcript.
   deny checks and constrain timeout/cwd/context. Profiles and bootstrap are
   rejected in schema 4; explicit legacy profile utilities remain scoped to old
   config formats and do not control new tasks. `DEFAULT_TASK_CONFIG` selects
-  Codex `gpt-5.6-sol` for planning/implementation and Claude `claude-opus-5` for
-  review, with `xhigh` effort. Each workflow action reloads configuration.
+  Claude `claude-opus-5-5` for planning/implementation and Codex `gpt-6.1-sol`
+  for review, with `xhigh` effort. Each workflow action reloads configuration.
 - Task verification: inert project discovery supplies evidence, never permission.
   Strict plans carry self-contained remainder-bound obligations v2 inside the
   approved bundle; phase-result v4 supplies separate additional candidates.
@@ -979,9 +1125,38 @@ attempt, approval marker or transcript.
   supported exceptions: `review-result-v2.test.ts` covers the v2 result,
   snapshot, renderer and store boundary with `review-fixtures.ts`;
   `test/helpers.ts` supplies temp git repositories, config fixtures,
-  `commitAll` and byte-level tree snapshots. `test/hook.test.ts` covers
+  `commitAll` and byte-level tree snapshots. `test/characterization-trace.ts`
+  records one ordered entry per persisted `state.json` write and appended
+  `events.jsonl` line. `test/workflow/context-fixture.ts` supplies a runner
+  context whose store records calls and rejects unexpected ones.
+  `test/workflow.test.ts` and the `test/workflow-<area>.test.ts` files drive
+  `WorkflowRunner` through its public API; `test/workflow-fixtures.ts` holds
+  their shared fake adapters and phase-result builders. `test/hook.test.ts` covers
   `plugins/banzai/hooks/spec-gate.cjs`; script-level integration tests cover
   release transactions, validation, the gate and committed smoke.
+- Characterization (ADR-0052): test cases named `characterization: ` in
+  `workflow.test.ts` and `result-digest.test.ts` assert the ordered persisted
+  state and event traces of fourteen representative run flows:
+  - lite and strict completion;
+  - a fix cycle;
+  - task-check retry;
+  - interrupted, prerequisite-blocked and digest-rejected recovery;
+  - approval restore;
+  - the `status` approval block;
+  - cancellation;
+  - an implementation or review failure after its terminal checkpoint,
+    reconciled by `resume`;
+  - an incomplete completion claim repaired by one linked attempt;
+  - a completion publication failure published on `resume`.
+
+  Identifiers, timestamps, digests and repository paths are normalized. The
+  expected traces were recorded from the pre-decomposition source, and
+  behavior-preserving refactors must leave them unchanged. Test cases named
+  `eligibility baseline: ` in `workflow-eligibility.test.ts` and
+  `result-digest.test.ts` likewise fix the retry, recovery, restore and
+  next-action eligibility that the public runner reports for arranged run
+  states, and the state persisted afterwards.
+
 - Import pattern: production code is imported with NodeNext ESM specifiers —
   `import { … } from "../src/<module>.js"` — and type-only imports are marked
   `type` because `verbatimModuleSyntax` is on.
@@ -1062,10 +1237,11 @@ attempts without another model call`.
   `verbatimModuleSyntax`, `forceConsistentCasingInFileNames`, `module` and
   `moduleResolution` `NodeNext`. Relative imports carry the `.js` extension;
   type-only imports are explicit.
-- File/module organization: one responsibility per `src` module, flat, no
-  barrel files. Shared types live only in `types.ts`; every `RunStatus` change
-  goes through `state-machine.ts`; the prompt library is confined to
-  `inquirer-io.ts`.
+- File/module organization: one responsibility per `src` module, no barrel
+  files, and ADR-0052 capability areas as subdirectories, currently only
+  `src/workflow/`. Shared types live in `types.ts`, while a module's own ports
+  live with that module. Every `RunStatus` change goes through
+  `state-machine.ts`, and the prompt library is confined to `inquirer-io.ts`.
 - Error handling: throw `BanzaiError` (or `ProcessExitError`) with a stable
   upper-snake-case code and a message that names the resolution. Decode all
   external JSON through `validation.ts` before use. Fail closed on
@@ -1438,7 +1614,7 @@ status` reports only whether credentials are visible and stored, so a
   source, and the only root Claude settings file is the ignored
   `.claude/settings.local.json`. `plugins/banzai/.claude/settings.json` is
   packaged plugin content, not this repository's configuration.
-- Current Banzai release-train version is `2.6.3`, owned solely by root
+- Current Banzai release-train version is `2.6.4`, owned solely by root
   `package.json.version` and mirrored by four plugin/marketplace fields, the
   orchestrator package, and three `package-lock.json` fields (top-level, root
   package, and workspace package). All nine fields across seven files agree.
@@ -1505,3 +1681,4 @@ restate them here. Paths are relative to `documentation/decisions/`.
 | ADR-0049 | Task-scoped verification authority                                 | `0049-task-scoped-verification.md`                              | Implemented |
 | ADR-0050 | Triggered code-design assessment                                   | `0050-triggered-code-design-assessment.md`                      | Planned     |
 | ADR-0051 | Acceptance-time validation of model-authored digests               | `0051-acceptance-time-digest-validation.md`                     | Implemented |
+| ADR-0052 | Capability-slice architecture and WorkflowRunner decomposition     | `0052-orchestrator-capability-slice-architecture.md`            | Planned     |

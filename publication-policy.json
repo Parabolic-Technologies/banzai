@@ -394,6 +394,11 @@
       "sha256": null
     },
     {
+      "path": "documentation/decisions/0052-orchestrator-capability-slice-architecture.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
       "path": "documentation/decisions/README.md",
       "classification": "maintainer",
       "sha256": null

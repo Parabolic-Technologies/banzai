@@ -20,13 +20,14 @@ import {
   vendorUsage
 } from "../src/models.js";
 import type { OrchestratorConfig } from "../src/types.js";
+import { reviewerOnlyClaudeConfig } from "./helpers.js";
 
 function configWith(models: {
   planner?: string;
   implementer?: string;
   reviewer?: string;
 }): OrchestratorConfig {
-  const config = structuredClone(DEFAULT_CONFIG);
+  const config = reviewerOnlyClaudeConfig();
   config.models.planner.model = models.planner ?? config.models.planner.model;
   config.models.implementer.model =
     models.implementer ?? config.models.implementer.model;
@@ -37,7 +38,18 @@ function configWith(models: {
 
 test("the shipped default configuration uses only current models", () => {
   assert.deepEqual(modelAdvisories(DEFAULT_CONFIG), []);
-  assert.equal(DEFAULT_CONFIG.models.reviewer.model, "claude-opus-5");
+  assert.deepEqual(
+    configuredModels(DEFAULT_CONFIG).map((entry) => [
+      entry.executable,
+      entry.model,
+      entry.effort
+    ]),
+    [
+      ["claude", "claude-opus-5-5", "xhigh"],
+      ["claude", "claude-opus-5-5", "xhigh"],
+      ["codex", "gpt-6.1-sol", "xhigh"]
+    ]
+  );
 });
 
 test("superseded, deprecated, and retired models each report a replacement", () => {
@@ -55,43 +67,51 @@ test("superseded, deprecated, and retired models each report a replacement", () 
     {
       role: "reviewer",
       label: "Review",
-      replacement: "claude-opus-5",
+      replacement: "claude-opus-5-5",
       standing: "superseded"
     }
   );
   assert.equal(
     superseded[0]?.detail,
-    "claude-opus-4-7 is superseded by claude-opus-5."
+    "claude-opus-4-7 is superseded by claude-opus-5-5."
   );
 
   const deprecated = modelAdvisories(
-    configWith({ reviewer: "claude-opus-4-1" })
+    configWith({ reviewer: "claude-sonnet-4-5" })
   );
   assert.equal(deprecated[0]?.standing, "deprecated");
-  assert.match(deprecated[0].detail, /retires 2026-08-05/);
-
-  const retired = modelAdvisories(
-    configWith({ reviewer: "claude-3-5-sonnet-20241022" })
+  assert.equal(
+    deprecated[0].detail,
+    "claude-sonnet-4-5 is deprecated and retires 2026-11-30; claude-sonnet-5-5 replaces it."
   );
+
+  const retired = modelAdvisories(configWith({ reviewer: "claude-opus-4-1" }));
   assert.equal(retired[0]?.standing, "retired");
-  assert.equal(retired[0].replacement, "claude-sonnet-5");
+  assert.equal(
+    retired[0].detail,
+    "claude-opus-4-1 was retired 2026-08-05; claude-opus-5-5 replaces it."
+  );
 
   const incompatibleCodex = modelAdvisories(configWith({ planner: "gpt-5" }));
   assert.equal(incompatibleCodex.length, 1);
   const [codexAdvisory] = incompatibleCodex;
   assert.ok(codexAdvisory);
-  assert.equal(codexAdvisory.replacement, "gpt-5.5");
-  assert.equal(codexAdvisory.detail, "gpt-5 is superseded by gpt-5.5.");
+  assert.equal(codexAdvisory.replacement, "gpt-6.1-sol");
+  assert.equal(codexAdvisory.detail, "gpt-5 is superseded by gpt-6.1-sol.");
+
+  const retiringCodex = modelAdvisories(configWith({ planner: "gpt-5.5" }));
+  assert.equal(retiringCodex[0]?.standing, "deprecated");
+  assert.equal(
+    retiringCodex[0].detail,
+    "gpt-5.5 is deprecated and retires 2026-10-14; gpt-6.1-sol replaces it."
+  );
 });
 
 test("supported models, tier aliases, and unknown identifiers raise no advisory", () => {
   for (const model of [
-    "claude-opus-5",
-    "claude-opus-4-8",
+    "claude-opus-5-5",
+    "claude-sonnet-5-5",
     "claude-fable-5-1",
-    "claude-fable-5",
-    "claude-sonnet-5",
-    "claude-sonnet-4-6",
     "claude-haiku-4-5",
     "opus",
     "sonnet",
@@ -105,23 +125,21 @@ test("supported models, tier aliases, and unknown identifiers raise no advisory"
   }
 });
 
-test("previous-generation selectable models raise no advisory", () => {
-  const config = configWith({
-    planner: "gpt-5.5",
-    reviewer: "claude-opus-4-8"
-  });
-  config.models.implementer = {
-    executable: "claude",
-    model: "claude-sonnet-4-6",
-    effort: "xhigh",
-    timeoutMs: config.models.implementer.timeoutMs
-  };
-
-  assert.deepEqual(modelAdvisories(config), []);
+test("every selectable model raises no advisory", () => {
+  for (const model of SELECTABLE_MODELS) {
+    const config = configWith({});
+    config.models.reviewer.executable = model.executable;
+    config.models.reviewer.model = model.id;
+    assert.deepEqual(
+      modelAdvisories(config),
+      [],
+      `${model.id} is offered, so it must not be reported as stale`
+    );
+  }
 });
 
 test("advisories cover every role and preserve role order", () => {
-  // The default planner and implementer run on codex. A Claude identifier under
+  // The fixture planner and implementer run on codex. A Claude identifier under
   // the codex executable is unknown to the codex catalog, so it raises nothing.
   assert.deepEqual(
     modelAdvisories(
@@ -133,7 +151,7 @@ test("advisories cover every role and preserve role order", () => {
     []
   );
 
-  const claudeEverywhere = structuredClone(DEFAULT_CONFIG);
+  const claudeEverywhere = configWith({ reviewer: "claude-opus-4-7" });
   claudeEverywhere.models.planner = {
     executable: "claude",
     model: "claude-opus-4-6",
@@ -146,22 +164,21 @@ test("advisories cover every role and preserve role order", () => {
     effort: "xhigh",
     timeoutMs: 60_000
   };
-  claudeEverywhere.models.reviewer.model = "claude-opus-4-7";
   assert.deepEqual(
     modelAdvisories(claudeEverywhere).map((advisory) => [
       advisory.role,
       advisory.replacement
     ]),
     [
-      ["planner", "claude-opus-5"],
-      ["implementer", "claude-sonnet-5"],
-      ["reviewer", "claude-opus-5"]
+      ["planner", "claude-opus-5-5"],
+      ["implementer", "claude-sonnet-5-5"],
+      ["reviewer", "claude-opus-5-5"]
     ]
   );
 });
 
 test("vendor usage groups roles by the executable that runs them", () => {
-  const usage = vendorUsage(DEFAULT_CONFIG);
+  const usage = vendorUsage(configWith({}));
   assert.deepEqual(
     usage.map((entry) => [entry.executable, entry.vendor, entry.roles]),
     [
@@ -176,11 +193,11 @@ test("vendor usage groups roles by the executable that runs them", () => {
 });
 
 test("vendor usage reports Claude for every role that runs it", () => {
-  const config = structuredClone(DEFAULT_CONFIG);
+  const config = configWith({});
   config.models.planner.executable = "claude";
-  config.models.planner.model = "claude-opus-5";
+  config.models.planner.model = "claude-opus-5-5";
   config.models.implementer.executable = "claude";
-  config.models.implementer.model = "claude-opus-5";
+  config.models.implementer.model = "claude-opus-5-5";
 
   const usage = vendorUsage(config);
   assert.equal(usage.length, 1);
@@ -193,7 +210,7 @@ test("vendor usage reports Claude for every role that runs it", () => {
 });
 
 test("vendor usage keeps distinct executables separate and flags unknown ones", () => {
-  const config = structuredClone(DEFAULT_CONFIG);
+  const config = configWith({});
   config.models.planner.executable = "/opt/bin/claude";
   config.models.implementer.executable = "custom-runner";
 
@@ -216,7 +233,7 @@ test("every phase offers both vendors", () => {
 });
 
 test("configured models expose the role summary the interface renders", () => {
-  const entries = configuredModels(DEFAULT_CONFIG);
+  const entries = configuredModels(configWith({}));
   assert.deepEqual(
     entries.map((entry) => [entry.label, entry.executable, entry.timeout]),
     [

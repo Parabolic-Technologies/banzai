@@ -6,6 +6,7 @@ export interface ImportBoundaryPermission {
 export interface ImportBoundaryEntry {
   importer: `src/${string}.ts`;
   boundary: string;
+  classification: "standard" | "domain";
   authorities: readonly string[];
   runtime: readonly ImportBoundaryPermission[];
   typeOnly: readonly ImportBoundaryPermission[];

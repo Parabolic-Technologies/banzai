@@ -10,8 +10,8 @@ import {
   inspectClaudePermissions,
   type ClaudePermissionDemand
 } from "../src/claude-permissions.js";
-import { DEFAULT_CONFIG } from "../src/config.js";
 import type { OrchestratorConfig } from "../src/types.js";
+import { reviewerOnlyClaudeConfig } from "./helpers.js";
 
 const PLANNING: ClaudePermissionDemand = {
   planningWrites: true,
@@ -79,7 +79,7 @@ async function fixture(): Promise<Fixture> {
 function configWith(
   models: Partial<Record<"planner" | "implementer" | "reviewer", string>>
 ): OrchestratorConfig {
-  const config = structuredClone(DEFAULT_CONFIG);
+  const config = reviewerOnlyClaudeConfig();
   for (const [role, executable] of Object.entries(models)) {
     config.models[role as "planner"].executable = executable;
   }

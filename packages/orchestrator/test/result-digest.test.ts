@@ -14,12 +14,20 @@ import {
   parseTaskVerificationCandidates
 } from "../src/verification-evidence.js";
 import type {
+  AttemptReference,
   PhaseResult,
   ResultDigestEvidence,
   RunState,
   VendorAdapters
 } from "../src/types.js";
-import { createTestRepository } from "./helpers.js";
+import { commitAll, createTestRepository } from "./helpers.js";
+import {
+  assertTrace,
+  assertTraceComplete,
+  observeEligibility,
+  recordPersistence,
+  rewriteRunState
+} from "./characterization-trace.js";
 
 const SECRET = "private-source-canary";
 const checkSource = (exitCode = 0) =>
@@ -892,3 +900,781 @@ test("an unrelated failure gains no digest repair and keeps its existing refusal
     await repository.dispose();
   }
 });
+
+test("characterization: a digest-rejected result is repaired by authorized recovery", async () => {
+  const f = await fixture(["mismatch", "match"]);
+  const trace = recordPersistence();
+  try {
+    const blocked = await f.runner.start({
+      slug: "repair",
+      request: "Verify local behavior."
+    });
+    assert.equal(blocked.status, "blocked");
+    const rejectedAttempt = blocked.activeAttempt;
+    assert.ok(rejectedAttempt);
+    const status = await f.runner.status();
+    assert.equal(status.recovery.sourceKind, "digest_rejected");
+    assert.ok(status.recovery.recoveryIdentity);
+    const done = await f.runner.recover({
+      attemptId: rejectedAttempt.id,
+      recoveryIdentity: status.recovery.recoveryIdentity,
+      unknownSideEffectsAccepted: true,
+      decidedBy: "tests"
+    });
+    assert.equal(done.status, "done", done.blockReason ?? undefined);
+    await assertTraceComplete(trace, f.runner.store, done.runId);
+    await assertTrace(trace, f.repository.root, TRACE_DIGEST_REJECTED_RECOVERY);
+  } finally {
+    trace.stop();
+    await f.repository.dispose();
+  }
+});
+
+const TRACE_DIGEST_REJECTED_RECOVERY: readonly string[] = [
+  "state created",
+  "event run.created",
+  "state selecting",
+  "state selecting",
+  "event attempt.started",
+  "state selecting",
+  "state implementing",
+  "event workflow.selected",
+  "state implementing",
+  "event attempt.started",
+  "event attempt.terminal_checkpoint",
+  "state blocked <- implementing: implementation failed: The implementation result declared 1 digest that did not match the bytes it named when the result was accepted. verificationCandidates.checks[check].sources[check.cjs].sha256 at check.cjs declared <sha256> but the bytes hash to <sha256>.",
+  "event attempt.failed",
+  "state blocked <- implementing: implementation failed: The implementation result declared 1 digest that did not match the bytes it named when the result was accepted. verificationCandidates.checks[check].sources[check.cjs].sha256 at check.cjs declared <sha256> but the bytes hash to <sha256>.",
+  "event recovery.authorized",
+  "state implementing",
+  "event attempt.digest_rejected_source_preserved",
+  "state implementing",
+  "event attempt.recovery_started",
+  "event attempt.terminal_checkpoint",
+  "state implementing",
+  "state verifying",
+  "event attempt.applied",
+  "state verifying",
+  "state verifying",
+  "state done",
+  "event run.completed"
+];
+
+type DigestFixture = Awaited<ReturnType<typeof fixture>>;
+
+async function blockedDigestRejection(f: DigestFixture) {
+  const blocked = await f.runner.start({
+    slug: "repair",
+    request: "Verify local behavior."
+  });
+  assert.equal(blocked.status, "blocked", "fixture must block");
+  return { blocked, attempt: requiredAttempt(blocked.activeAttempt) };
+}
+
+function requiredAttempt<T>(value: T | null | undefined): T {
+  assert.ok(value !== null && value !== undefined);
+  return value;
+}
+
+async function authorizeDigestRecovery(f: DigestFixture): Promise<void> {
+  const status = await f.runner.status();
+  assert.equal(status.recovery.eligible, true, status.recovery.reason);
+  await f.runner.recover(
+    {
+      attemptId: requiredAttempt(status.recovery.attemptId),
+      recoveryIdentity: requiredAttempt(status.recovery.recoveryIdentity),
+      unknownSideEffectsAccepted: true,
+      decidedBy: "tests"
+    },
+    false
+  );
+}
+
+const DIGEST_SCENARIOS: {
+  name: string;
+  arrange: () => Promise<{
+    root: string;
+    runner: WorkflowRunner;
+    runId: string;
+    dispose: () => Promise<void>;
+  }>;
+}[] = [
+  ...(
+    [
+      ["digest-rejected implementation", async () => {}],
+      [
+        "digest-rejected implementation without a terminal checkpoint",
+        async (f: DigestFixture, runId: string, attempt: AttemptReference) => {
+          await rm(f.store.terminalCheckpointPath(runId, attempt));
+        }
+      ],
+      [
+        "digest-rejected implementation with a live process",
+        (f: DigestFixture, runId: string) =>
+          rewriteRunState(f.store, runId, (state) => {
+            state.activeProcess = {
+              pid: process.pid,
+              kind: "implementation",
+              startedAt: "2026-07-01T00:00:00.000Z"
+            };
+          })
+      ],
+      [
+        "digest-rejected implementation after HEAD moved",
+        async (f: DigestFixture) => {
+          await writeFile(
+            path.join(f.repository.root, "unrelated.txt"),
+            "moved HEAD\n"
+          );
+          await commitAll(f.repository.root, "move HEAD");
+        }
+      ],
+      [
+        "digest-rejected implementation with malformed digest evidence",
+        (f: DigestFixture, runId: string, attempt: AttemptReference) =>
+          writeFile(f.store.resultDigestEvidencePath(runId, attempt), "{")
+      ],
+      [
+        "digest-rejected implementation with malformed digest evidence and a malformed terminal checkpoint",
+        async (f: DigestFixture, runId: string, attempt: AttemptReference) => {
+          await writeFile(
+            f.store.resultDigestEvidencePath(runId, attempt),
+            "{"
+          );
+          await writeFile(f.store.terminalCheckpointPath(runId, attempt), "{");
+        }
+      ],
+      [
+        "digest-rejected implementation with an unreadable earlier attempt record",
+        async (f: DigestFixture, runId: string, attempt: AttemptReference) => {
+          const earlier = (await f.store.readRunAttempts(runId)).find(
+            (record) => record.attempt.id !== attempt.id
+          );
+          await writeFile(
+            f.store.attemptPath(runId, requiredAttempt(earlier).attempt),
+            "{"
+          );
+        }
+      ],
+      [
+        "digest-rejected implementation with unreadable configuration",
+        (f: DigestFixture) =>
+          writeFile(path.join(f.repository.root, ".banzai", "config.json"), "{")
+      ],
+      [
+        "digest-rejected implementation superseded by a recovery attempt",
+        async (f: DigestFixture, runId: string) => {
+          await authorizeDigestRecovery(f);
+          await rewriteRunState(f.store, runId, (state) => {
+            requiredAttempt(state.recovery).recoveryAttemptId =
+              "implementation-recovery-fixture";
+          });
+        }
+      ],
+      [
+        "authorized digest-rejected implementation",
+        (f: DigestFixture) => authorizeDigestRecovery(f)
+      ],
+      [
+        "authorized digest-rejected implementation after workspace drift",
+        async (f: DigestFixture) => {
+          await authorizeDigestRecovery(f);
+          await writeFile(path.join(f.repository.root, "drift.txt"), "drift\n");
+        }
+      ]
+    ] as const
+  ).map(([name, mutate]) => ({
+    name,
+    arrange: async () => {
+      const f = await fixture(["mismatch", "match"]);
+      try {
+        const { blocked, attempt } = await blockedDigestRejection(f);
+        await mutate(f, blocked.runId, attempt);
+        return {
+          root: f.repository.root,
+          runner: f.runner,
+          runId: blocked.runId,
+          dispose: () => f.repository.dispose()
+        };
+      } catch (error) {
+        await f.repository.dispose();
+        throw error;
+      }
+    }
+  })),
+  ...(
+    [
+      ["digest-rejected plan", async () => {}],
+      [
+        "digest-rejected plan with a changed workflow selection",
+        (store: RunStore, runId: string) =>
+          rewriteRunState(store, runId, (state) => {
+            requiredAttempt(state.workflowSelection).digest = "0".repeat(64);
+          })
+      ]
+    ] as const
+  ).map(([name, mutate]) => ({
+    name,
+    arrange: async () => {
+      const f = await strictFixture(["fabricated", "correct"]);
+      try {
+        const blocked = await f.runner.start({
+          slug: "plan-repair",
+          request: "Plan it."
+        });
+        assert.equal(blocked.status, "blocked", "fixture must block");
+        await mutate(f.runner.store, blocked.runId);
+        return {
+          root: f.repository.root,
+          runner: f.runner,
+          runId: blocked.runId,
+          dispose: () => f.repository.dispose()
+        };
+      } catch (error) {
+        await f.repository.dispose();
+        throw error;
+      }
+    }
+  }))
+];
+
+for (const scenario of DIGEST_SCENARIOS)
+  test(`eligibility baseline: ${scenario.name}`, async () => {
+    const arrangement = await scenario.arrange();
+    try {
+      assert.deepEqual(
+        await observeEligibility(
+          arrangement.runner,
+          arrangement.root,
+          arrangement.runId
+        ),
+        DIGEST_ELIGIBILITY_BASELINE[scenario.name]
+      );
+    } finally {
+      await arrangement.dispose();
+    }
+  });
+
+const DIGEST_ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
+  "digest-rejected implementation": {
+    observed: {
+      retry: {
+        eligible: false,
+        reason:
+          "Failed mutable attempts cannot be retried because their repository side effects may be incomplete. Inspect the checkout, then cancel the run.",
+        attemptId: "implementation-1-<id>"
+      },
+      recovery: {
+        eligible: true,
+        terminalCheckpointPresent: true,
+        reason:
+          "The implementation result was refused because 1 digest it authored never matched the bytes it named. Recovery authorizes one linked implementation attempt to supply a corrected result; the rejected attempt and its result are retained.",
+        warning:
+          "The rejected attempt keeps its failed status and its result. Recovery authorizes one new attempt for the same phase and no additional scope; a replacement strict plan still passes the existing approval gate.",
+        sourceKind: "digest_rejected",
+        attemptId: "implementation-1-<id>",
+        phase: "implementation",
+        resolvedFindingIds: [],
+        remainingFindingIds: [],
+        prerequisites: [],
+        authorization: "workflow_selection",
+        recoveryIdentity: "<sha256>",
+        workspace: {
+          digest: "<sha256>",
+          added: 2,
+          modified: 0,
+          deleted: 0,
+          total: 2
+        },
+        baseCommit: "<commit>",
+        approvalDigest: null,
+        workflowDigest: "<sha256>",
+        scopeDigest: "<sha256>",
+        configurationDigest: "<sha256>"
+      },
+      nextAction: "banzai recover"
+    },
+    persisted: {
+      status: "blocked",
+      blockedFrom: "implementing",
+      blockReason:
+        "implementation failed: The implementation result declared 1 digest that did not match the bytes it named when the result was accepted. verificationCandidates.checks[check].sources[check.cjs].sha256 at check.cjs declared <sha256> but the bytes hash to <sha256>."
+    }
+  },
+  "digest-rejected implementation without a terminal checkpoint": {
+    observed: {
+      retry: {
+        eligible: false,
+        reason:
+          "Failed mutable attempts cannot be retried because their repository side effects may be incomplete. Inspect the checkout, then cancel the run.",
+        attemptId: "implementation-1-<id>"
+      },
+      recovery: {
+        eligible: false,
+        terminalCheckpointPresent: false,
+        reason:
+          "The rejected implementation result has no terminal checkpoint, so its repository side effects are unknown. Inspect the checkout, then cancel the run.",
+        warning:
+          "Repository and external side effects may be partial or duplicated. Recovery authorizes new work from this exact checkout; it does not mark the interrupted attempt completed.",
+        sourceKind: null,
+        attemptId: "implementation-1-<id>",
+        phase: "implementation",
+        resolvedFindingIds: [],
+        remainingFindingIds: [],
+        prerequisites: [],
+        authorization: null,
+        recoveryIdentity: null,
+        workspace: null,
+        baseCommit: null,
+        approvalDigest: null,
+        workflowDigest: null,
+        scopeDigest: null,
+        configurationDigest: null
+      },
+      nextAction: "banzai cancel"
+    },
+    persisted: {
+      status: "blocked",
+      blockedFrom: "implementing",
+      blockReason:
+        "implementation failed: The implementation result declared 1 digest that did not match the bytes it named when the result was accepted. verificationCandidates.checks[check].sources[check.cjs].sha256 at check.cjs declared <sha256> but the bytes hash to <sha256>."
+    }
+  },
+  "digest-rejected implementation with a live process": {
+    observed: {
+      retry: {
+        eligible: false,
+        reason: "Retry is unavailable while a model process is still active.",
+        attemptId: "implementation-1-<id>"
+      },
+      recovery: {
+        eligible: false,
+        terminalCheckpointPresent: false,
+        reason:
+          "Recovery is unavailable while the model process is still active.",
+        warning:
+          "Repository and external side effects may be partial or duplicated. Recovery authorizes new work from this exact checkout; it does not mark the interrupted attempt completed.",
+        sourceKind: null,
+        attemptId: "implementation-1-<id>",
+        phase: "implementation",
+        resolvedFindingIds: [],
+        remainingFindingIds: [],
+        prerequisites: [],
+        authorization: null,
+        recoveryIdentity: null,
+        workspace: null,
+        baseCommit: null,
+        approvalDigest: null,
+        workflowDigest: null,
+        scopeDigest: null,
+        configurationDigest: null
+      },
+      nextAction: "banzai cancel"
+    },
+    persisted: {
+      status: "blocked",
+      blockedFrom: "implementing",
+      blockReason:
+        "implementation failed: The implementation result declared 1 digest that did not match the bytes it named when the result was accepted. verificationCandidates.checks[check].sources[check.cjs].sha256 at check.cjs declared <sha256> but the bytes hash to <sha256>."
+    }
+  },
+  "digest-rejected implementation after HEAD moved": {
+    observed: {
+      retry: {
+        eligible: false,
+        reason:
+          "Failed mutable attempts cannot be retried because their repository side effects may be incomplete. Inspect the checkout, then cancel the run.",
+        attemptId: "implementation-1-<id>"
+      },
+      recovery: {
+        eligible: false,
+        terminalCheckpointPresent: false,
+        reason: "Recovery is unavailable because checkout HEAD changed.",
+        warning:
+          "Repository and external side effects may be partial or duplicated. Recovery authorizes new work from this exact checkout; it does not mark the interrupted attempt completed.",
+        sourceKind: null,
+        attemptId: "implementation-1-<id>",
+        phase: "implementation",
+        resolvedFindingIds: [],
+        remainingFindingIds: [],
+        prerequisites: [],
+        authorization: null,
+        recoveryIdentity: null,
+        workspace: null,
+        baseCommit: null,
+        approvalDigest: null,
+        workflowDigest: null,
+        scopeDigest: null,
+        configurationDigest: null
+      },
+      nextAction: "banzai cancel"
+    },
+    persisted: {
+      status: "blocked",
+      blockedFrom: "implementing",
+      blockReason:
+        "implementation failed: The implementation result declared 1 digest that did not match the bytes it named when the result was accepted. verificationCandidates.checks[check].sources[check.cjs].sha256 at check.cjs declared <sha256> but the bytes hash to <sha256>."
+    }
+  },
+  "digest-rejected implementation with malformed digest evidence": {
+    observed: {
+      retry: {
+        eligible: false,
+        reason:
+          "Failed mutable attempts cannot be retried because their repository side effects may be incomplete. Inspect the checkout, then cancel the run.",
+        attemptId: "implementation-1-<id>"
+      },
+      recovery: {
+        eligible: false,
+        terminalCheckpointPresent: false,
+        reason:
+          "Result digest evidence is malformed. Audit the run before continuing.",
+        warning:
+          "Repository and external side effects may be partial or duplicated. Recovery authorizes new work from this exact checkout; it does not mark the interrupted attempt completed.",
+        sourceKind: null,
+        attemptId: "implementation-1-<id>",
+        phase: "implementation",
+        resolvedFindingIds: [],
+        remainingFindingIds: [],
+        prerequisites: [],
+        authorization: null,
+        recoveryIdentity: null,
+        workspace: null,
+        baseCommit: null,
+        approvalDigest: null,
+        workflowDigest: null,
+        scopeDigest: null,
+        configurationDigest: null
+      },
+      nextAction: "banzai cancel"
+    },
+    persisted: {
+      status: "blocked",
+      blockedFrom: "implementing",
+      blockReason:
+        "implementation failed: The implementation result declared 1 digest that did not match the bytes it named when the result was accepted. verificationCandidates.checks[check].sources[check.cjs].sha256 at check.cjs declared <sha256> but the bytes hash to <sha256>."
+    }
+  },
+  "digest-rejected implementation with unreadable configuration": {
+    observed: {
+      retry: {
+        eligible: false,
+        reason:
+          "Failed mutable attempts cannot be retried because their repository side effects may be incomplete. Inspect the checkout, then cancel the run.",
+        attemptId: "implementation-1-<id>"
+      },
+      recovery: {
+        eligible: false,
+        terminalCheckpointPresent: false,
+        reason:
+          "Digest-rejected recovery preconditions could not be validated; inspect or cancel the run.",
+        warning:
+          "Repository and external side effects may be partial or duplicated. Recovery authorizes new work from this exact checkout; it does not mark the interrupted attempt completed.",
+        sourceKind: null,
+        attemptId: "implementation-1-<id>",
+        phase: "implementation",
+        resolvedFindingIds: [],
+        remainingFindingIds: [],
+        prerequisites: [],
+        authorization: null,
+        recoveryIdentity: null,
+        workspace: null,
+        baseCommit: null,
+        approvalDigest: null,
+        workflowDigest: null,
+        scopeDigest: null,
+        configurationDigest: null
+      },
+      nextAction: "banzai cancel"
+    },
+    persisted: {
+      status: "blocked",
+      blockedFrom: "implementing",
+      blockReason:
+        "implementation failed: The implementation result declared 1 digest that did not match the bytes it named when the result was accepted. verificationCandidates.checks[check].sources[check.cjs].sha256 at check.cjs declared <sha256> but the bytes hash to <sha256>."
+    }
+  },
+  "digest-rejected implementation superseded by a recovery attempt": {
+    observed: {
+      retry: {
+        eligible: false,
+        reason:
+          "Failed mutable attempts cannot be retried because their repository side effects may be incomplete. Inspect the checkout, then cancel the run.",
+        attemptId: "implementation-1-<id>"
+      },
+      recovery: {
+        eligible: false,
+        terminalCheckpointPresent: true,
+        reason:
+          "A later implementation attempt already supersedes this rejected result.",
+        warning:
+          "Repository and external side effects may be partial or duplicated. Recovery authorizes new work from this exact checkout; it does not mark the interrupted attempt completed.",
+        sourceKind: null,
+        attemptId: "implementation-1-<id>",
+        phase: "implementation",
+        resolvedFindingIds: [],
+        remainingFindingIds: [],
+        prerequisites: [],
+        authorization: null,
+        recoveryIdentity: null,
+        workspace: null,
+        baseCommit: null,
+        approvalDigest: null,
+        workflowDigest: null,
+        scopeDigest: null,
+        configurationDigest: null
+      },
+      nextAction: "banzai resume"
+    },
+    persisted: {
+      status: "blocked",
+      blockedFrom: "implementing",
+      blockReason:
+        "implementation failed: The implementation result declared 1 digest that did not match the bytes it named when the result was accepted. verificationCandidates.checks[check].sources[check.cjs].sha256 at check.cjs declared <sha256> but the bytes hash to <sha256>."
+    }
+  },
+  "authorized digest-rejected implementation": {
+    observed: {
+      retry: {
+        eligible: false,
+        reason:
+          "Failed mutable attempts cannot be retried because their repository side effects may be incomplete. Inspect the checkout, then cancel the run.",
+        attemptId: "implementation-1-<id>"
+      },
+      recovery: {
+        eligible: true,
+        terminalCheckpointPresent: true,
+        reason:
+          "The implementation result was refused because 1 digest it authored never matched the bytes it named. Recovery authorizes one linked implementation attempt to supply a corrected result; the rejected attempt and its result are retained.",
+        warning:
+          "The rejected attempt keeps its failed status and its result. Recovery authorizes one new attempt for the same phase and no additional scope; a replacement strict plan still passes the existing approval gate.",
+        sourceKind: "digest_rejected",
+        attemptId: "implementation-1-<id>",
+        phase: "implementation",
+        resolvedFindingIds: [],
+        remainingFindingIds: [],
+        prerequisites: [],
+        authorization: "workflow_selection",
+        recoveryIdentity: "<sha256>",
+        workspace: {
+          digest: "<sha256>",
+          added: 2,
+          modified: 0,
+          deleted: 0,
+          total: 2
+        },
+        baseCommit: "<commit>",
+        approvalDigest: null,
+        workflowDigest: "<sha256>",
+        scopeDigest: "<sha256>",
+        configurationDigest: "<sha256>"
+      },
+      nextAction: "banzai recover"
+    },
+    persisted: {
+      status: "blocked",
+      blockedFrom: "implementing",
+      blockReason:
+        "implementation failed: The implementation result declared 1 digest that did not match the bytes it named when the result was accepted. verificationCandidates.checks[check].sources[check.cjs].sha256 at check.cjs declared <sha256> but the bytes hash to <sha256>."
+    }
+  },
+  "authorized digest-rejected implementation after workspace drift": {
+    observed: {
+      retry: {
+        eligible: false,
+        reason:
+          "Failed mutable attempts cannot be retried because their repository side effects may be incomplete. Inspect the checkout, then cancel the run.",
+        attemptId: "implementation-1-<id>"
+      },
+      recovery: {
+        eligible: false,
+        terminalCheckpointPresent: false,
+        reason: "Persisted recovery authorization is stale or inconsistent.",
+        warning:
+          "Repository and external side effects may be partial or duplicated. Recovery authorizes new work from this exact checkout; it does not mark the interrupted attempt completed.",
+        sourceKind: null,
+        attemptId: "implementation-1-<id>",
+        phase: "implementation",
+        resolvedFindingIds: [],
+        remainingFindingIds: [],
+        prerequisites: [],
+        authorization: null,
+        recoveryIdentity: null,
+        workspace: null,
+        baseCommit: null,
+        approvalDigest: null,
+        workflowDigest: null,
+        scopeDigest: null,
+        configurationDigest: null
+      },
+      nextAction: "banzai cancel"
+    },
+    persisted: {
+      status: "blocked",
+      blockedFrom: "implementing",
+      blockReason:
+        "implementation failed: The implementation result declared 1 digest that did not match the bytes it named when the result was accepted. verificationCandidates.checks[check].sources[check.cjs].sha256 at check.cjs declared <sha256> but the bytes hash to <sha256>."
+    }
+  },
+  "digest-rejected plan": {
+    observed: {
+      retry: {
+        eligible: true,
+        reason: "Failed plan attempt plan-1-<id> can be retried explicitly.",
+        attemptId: "plan-1-<id>"
+      },
+      recovery: {
+        eligible: true,
+        terminalCheckpointPresent: true,
+        reason:
+          "The plan result was refused because 1 digest it authored never matched the bytes it named. Recovery authorizes one linked plan attempt to supply a corrected result; the rejected attempt and its result are retained.",
+        warning:
+          "The rejected attempt keeps its failed status and its result. Recovery authorizes one new attempt for the same phase and no additional scope; a replacement strict plan still passes the existing approval gate.",
+        sourceKind: "digest_rejected",
+        attemptId: "plan-1-<id>",
+        phase: "plan",
+        resolvedFindingIds: [],
+        remainingFindingIds: [],
+        prerequisites: [],
+        authorization: "workflow_selection",
+        recoveryIdentity: "<sha256>",
+        workspace: {
+          digest: "<sha256>",
+          added: 2,
+          modified: 0,
+          deleted: 0,
+          total: 2
+        },
+        baseCommit: "<commit>",
+        approvalDigest: null,
+        workflowDigest: "<sha256>",
+        scopeDigest: "<sha256>",
+        configurationDigest: "<sha256>"
+      },
+      nextAction: "banzai recover"
+    },
+    persisted: {
+      status: "blocked",
+      blockedFrom: "planning",
+      blockReason:
+        "plan failed: The plan result declared 1 digest that did not match the bytes it named when the result was accepted. planRemainderSha256 at .banzai/work/<uuid>/plan.md declared <sha256> but the bytes hash to <sha256>."
+    }
+  },
+  "digest-rejected plan with a changed workflow selection": {
+    observed: {
+      retry: {
+        eligible: true,
+        reason: "Failed plan attempt plan-1-<id> can be retried explicitly.",
+        attemptId: "plan-1-<id>"
+      },
+      recovery: {
+        eligible: false,
+        terminalCheckpointPresent: false,
+        reason:
+          "Planning recovery requires the unchanged persisted workflow selection.",
+        warning:
+          "Repository and external side effects may be partial or duplicated. Recovery authorizes new work from this exact checkout; it does not mark the interrupted attempt completed.",
+        sourceKind: null,
+        attemptId: "plan-1-<id>",
+        phase: "plan",
+        resolvedFindingIds: [],
+        remainingFindingIds: [],
+        prerequisites: [],
+        authorization: null,
+        recoveryIdentity: null,
+        workspace: null,
+        baseCommit: null,
+        approvalDigest: null,
+        workflowDigest: null,
+        scopeDigest: null,
+        configurationDigest: null
+      },
+      nextAction: "banzai retry"
+    },
+    persisted: {
+      status: "blocked",
+      blockedFrom: "planning",
+      blockReason:
+        "plan failed: The plan result declared 1 digest that did not match the bytes it named when the result was accepted. planRemainderSha256 at .banzai/work/<uuid>/plan.md declared <sha256> but the bytes hash to <sha256>."
+    }
+  },
+  "digest-rejected implementation with malformed digest evidence and a malformed terminal checkpoint":
+    {
+      observed: {
+        retry: {
+          eligible: false,
+          reason:
+            "Failed mutable attempts cannot be retried because their repository side effects may be incomplete. Inspect the checkout, then cancel the run.",
+          attemptId: "implementation-1-<id>"
+        },
+        recovery: {
+          eligible: false,
+          terminalCheckpointPresent: false,
+          reason:
+            "Result digest evidence is malformed. Audit the run before continuing.",
+          warning:
+            "Repository and external side effects may be partial or duplicated. Recovery authorizes new work from this exact checkout; it does not mark the interrupted attempt completed.",
+          sourceKind: null,
+          attemptId: "implementation-1-<id>",
+          phase: "implementation",
+          resolvedFindingIds: [],
+          remainingFindingIds: [],
+          prerequisites: [],
+          authorization: null,
+          recoveryIdentity: null,
+          workspace: null,
+          baseCommit: null,
+          approvalDigest: null,
+          workflowDigest: null,
+          scopeDigest: null,
+          configurationDigest: null
+        },
+        nextAction: "banzai cancel"
+      },
+      persisted: {
+        status: "blocked",
+        blockedFrom: "implementing",
+        blockReason:
+          "implementation failed: The implementation result declared 1 digest that did not match the bytes it named when the result was accepted. verificationCandidates.checks[check].sources[check.cjs].sha256 at check.cjs declared <sha256> but the bytes hash to <sha256>."
+      }
+    },
+  "digest-rejected implementation with an unreadable earlier attempt record": {
+    observed: {
+      retry: {
+        eligible: false,
+        reason:
+          "Failed mutable attempts cannot be retried because their repository side effects may be incomplete. Inspect the checkout, then cancel the run.",
+        attemptId: "implementation-1-<id>"
+      },
+      recovery: {
+        eligible: false,
+        terminalCheckpointPresent: false,
+        reason:
+          "Digest-rejected recovery preconditions could not be validated; inspect or cancel the run.",
+        warning:
+          "Repository and external side effects may be partial or duplicated. Recovery authorizes new work from this exact checkout; it does not mark the interrupted attempt completed.",
+        sourceKind: null,
+        attemptId: "implementation-1-<id>",
+        phase: "implementation",
+        resolvedFindingIds: [],
+        remainingFindingIds: [],
+        prerequisites: [],
+        authorization: null,
+        recoveryIdentity: null,
+        workspace: null,
+        baseCommit: null,
+        approvalDigest: null,
+        workflowDigest: null,
+        scopeDigest: null,
+        configurationDigest: null
+      },
+      nextAction: "banzai cancel"
+    },
+    persisted: {
+      status: "blocked",
+      blockedFrom: "implementing",
+      blockReason:
+        "implementation failed: The implementation result declared 1 digest that did not match the bytes it named when the result was accepted. verificationCandidates.checks[check].sources[check.cjs].sha256 at check.cjs declared <sha256> but the bytes hash to <sha256>."
+    }
+  }
+};

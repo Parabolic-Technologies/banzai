@@ -367,5 +367,9 @@ Implementation and review must confirm all of the following:
 
 ## Lifecycle Links
 
+- Narrowly amended by
+  [ADR-0052](./0052-orchestrator-capability-slice-architecture.md), accepted
+  2026-09-28: lifts the deferral of broad `WorkflowRunner` decomposition in
+  Risks and follow-ups. Context accounting and budget decisions are unchanged.
 - Supersedes: None
 - Superseded by: None
