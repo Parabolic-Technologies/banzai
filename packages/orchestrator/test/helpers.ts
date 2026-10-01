@@ -12,6 +12,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { DEFAULT_CONFIG } from "../src/config.js";
 import type {
+  OrchestratorConfig,
   VerificationAttemptRecord,
   VerificationAttemptStatus
 } from "../src/types.js";
@@ -19,6 +20,21 @@ import type {
 import { writeAdoptedGuidance } from "./adoption-fixtures.js";
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Codex plans and implements and Claude only reviews. Tests of vendor-dependent
+ * behavior pin this layout so they do not follow the shipped defaults.
+ */
+export function reviewerOnlyClaudeConfig(): OrchestratorConfig {
+  const config = structuredClone(DEFAULT_CONFIG);
+  config.models.planner.executable = "codex";
+  config.models.planner.model = "gpt-6.1-sol";
+  config.models.implementer.executable = "codex";
+  config.models.implementer.model = "gpt-6.1-sol";
+  config.models.reviewer.executable = "claude";
+  config.models.reviewer.model = "claude-opus-5-5";
+  return config;
+}
 
 export interface TreeSnapshotEntry {
   path: string;

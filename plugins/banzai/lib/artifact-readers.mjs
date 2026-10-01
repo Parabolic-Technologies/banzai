@@ -3534,16 +3534,17 @@ function deprecated(replacement, date) {
 function retired(replacement, date) {
   return { replacement, standing: "retired", date };
 }
-var OPUS = "claude-opus-5";
-var SONNET = "claude-sonnet-5";
+var OPUS = "claude-opus-5-5";
+var SONNET = "claude-sonnet-5-5";
 var HAIKU = "claude-haiku-4-5";
 var CLAUDE_CATALOG = {
   supported: /* @__PURE__ */ new Set([
     "claude-fable-5-1",
     "claude-fable-5",
-    "claude-mythos-5",
     OPUS,
     SONNET,
+    "claude-opus-5",
+    "claude-sonnet-5",
     "claude-opus-4-8",
     "claude-sonnet-4-6",
     HAIKU,
@@ -3559,33 +3560,41 @@ var CLAUDE_CATALOG = {
     ["claude-opus-4-6", superseded(OPUS)],
     ["claude-opus-4-5", superseded(OPUS)],
     ["claude-opus-4-5-20251101", superseded(OPUS)],
-    ["claude-opus-4-1", deprecated(OPUS, "2026-08-05")],
-    ["claude-opus-4-1-20250805", deprecated(OPUS, "2026-08-05")],
-    ["claude-opus-4-0", deprecated(OPUS, "2026-06-15")],
-    ["claude-opus-4-20250514", deprecated(OPUS, "2026-06-15")],
+    ["claude-opus-4-1", retired(OPUS, "2026-08-05")],
+    ["claude-opus-4-1-20250805", retired(OPUS, "2026-08-05")],
+    ["claude-opus-4-0", retired(OPUS, "2026-06-15")],
+    ["claude-opus-4-20250514", retired(OPUS, "2026-06-15")],
     ["claude-3-opus-20240229", retired(OPUS, "2026-01-05")],
-    ["claude-mythos-preview", superseded("claude-fable-5")],
-    ["claude-sonnet-4-5", superseded(SONNET)],
-    ["claude-sonnet-4-5-20250929", superseded(SONNET)],
-    ["claude-sonnet-4-0", deprecated(SONNET, "2026-06-15")],
-    ["claude-sonnet-4-20250514", deprecated(SONNET, "2026-06-15")],
+    ["claude-mythos-preview", superseded("claude-fable-5-1")],
+    ["claude-sonnet-4-5", deprecated(SONNET, "2026-11-30")],
+    ["claude-sonnet-4-5-20250929", deprecated(SONNET, "2026-11-30")],
+    ["claude-sonnet-4-0", retired(SONNET, "2026-06-15")],
+    ["claude-sonnet-4-20250514", retired(SONNET, "2026-06-15")],
     ["claude-3-7-sonnet-20250219", retired(SONNET, "2026-02-19")],
     ["claude-3-5-sonnet-20241022", retired(SONNET, "2025-10-28")],
     ["claude-3-5-sonnet-20240620", retired(SONNET, "2025-10-28")],
     ["claude-3-sonnet-20240229", retired(SONNET, "2025-07-21")],
     ["claude-3-5-haiku-20241022", retired(HAIKU, "2026-02-19")],
-    ["claude-3-haiku-20240307", deprecated(HAIKU, "2026-04-19")]
+    ["claude-3-haiku-20240307", retired(HAIKU, "2026-04-20")]
   ])
 };
+var CODEX_SOL = "gpt-6.1-sol";
 var CODEX_CATALOG = {
   supported: /* @__PURE__ */ new Set([
+    CODEX_SOL,
     "gpt-6-astra",
+    "gpt-6-sol",
+    "gpt-6-luna",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
-    "gpt-5.6-luna",
-    "gpt-5.5"
+    "gpt-5.6-luna"
   ]),
-  replacements: /* @__PURE__ */ new Map([["gpt-5", superseded("gpt-5.5")]])
+  replacements: /* @__PURE__ */ new Map([
+    ["gpt-5.5", deprecated(CODEX_SOL, "2026-10-14")],
+    ["gpt-5.4", retired(CODEX_SOL, "2026-08-31")],
+    ["gpt-5.4-mini", retired("gpt-6-luna", "2026-08-31")],
+    ["gpt-5", superseded(CODEX_SOL)]
+  ])
 };
 var FULL_EFFORTS = [
   "low",
@@ -7278,20 +7287,20 @@ var DEFAULT_CONFIG = {
   contractVersion: CONTRACT_VERSION,
   models: {
     planner: {
-      executable: "codex",
-      model: "gpt-5.6-sol",
+      executable: "claude",
+      model: "claude-opus-5-5",
       effort: "xhigh",
       timeoutMs: 30 * 60 * 1e3
     },
     implementer: {
-      executable: "codex",
-      model: "gpt-5.6-sol",
+      executable: "claude",
+      model: "claude-opus-5-5",
       effort: "xhigh",
       timeoutMs: 60 * 60 * 1e3
     },
     reviewer: {
-      executable: "claude",
-      model: "claude-opus-5",
+      executable: "codex",
+      model: "gpt-6.1-sol",
       effort: "xhigh",
       timeoutMs: 30 * 60 * 1e3
     }

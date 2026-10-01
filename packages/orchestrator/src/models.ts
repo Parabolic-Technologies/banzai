@@ -40,8 +40,8 @@ function retired(replacement: string, date: string): CatalogEntry {
   return { replacement, standing: "retired", date };
 }
 
-const OPUS = "claude-opus-5";
-const SONNET = "claude-sonnet-5";
+const OPUS = "claude-opus-5-5";
+const SONNET = "claude-sonnet-5-5";
 const HAIKU = "claude-haiku-4-5";
 
 // Maintained by hand from the published Claude model catalog. The runner is
@@ -51,9 +51,10 @@ const CLAUDE_CATALOG: VendorCatalog = {
   supported: new Set([
     "claude-fable-5-1",
     "claude-fable-5",
-    "claude-mythos-5",
     OPUS,
     SONNET,
+    "claude-opus-5",
+    "claude-sonnet-5",
     "claude-opus-4-8",
     "claude-sonnet-4-6",
     HAIKU,
@@ -69,37 +70,46 @@ const CLAUDE_CATALOG: VendorCatalog = {
     ["claude-opus-4-6", superseded(OPUS)],
     ["claude-opus-4-5", superseded(OPUS)],
     ["claude-opus-4-5-20251101", superseded(OPUS)],
-    ["claude-opus-4-1", deprecated(OPUS, "2026-08-05")],
-    ["claude-opus-4-1-20250805", deprecated(OPUS, "2026-08-05")],
-    ["claude-opus-4-0", deprecated(OPUS, "2026-06-15")],
-    ["claude-opus-4-20250514", deprecated(OPUS, "2026-06-15")],
+    ["claude-opus-4-1", retired(OPUS, "2026-08-05")],
+    ["claude-opus-4-1-20250805", retired(OPUS, "2026-08-05")],
+    ["claude-opus-4-0", retired(OPUS, "2026-06-15")],
+    ["claude-opus-4-20250514", retired(OPUS, "2026-06-15")],
     ["claude-3-opus-20240229", retired(OPUS, "2026-01-05")],
-    ["claude-mythos-preview", superseded("claude-fable-5")],
-    ["claude-sonnet-4-5", superseded(SONNET)],
-    ["claude-sonnet-4-5-20250929", superseded(SONNET)],
-    ["claude-sonnet-4-0", deprecated(SONNET, "2026-06-15")],
-    ["claude-sonnet-4-20250514", deprecated(SONNET, "2026-06-15")],
+    ["claude-mythos-preview", superseded("claude-fable-5-1")],
+    ["claude-sonnet-4-5", deprecated(SONNET, "2026-11-30")],
+    ["claude-sonnet-4-5-20250929", deprecated(SONNET, "2026-11-30")],
+    ["claude-sonnet-4-0", retired(SONNET, "2026-06-15")],
+    ["claude-sonnet-4-20250514", retired(SONNET, "2026-06-15")],
     ["claude-3-7-sonnet-20250219", retired(SONNET, "2026-02-19")],
     ["claude-3-5-sonnet-20241022", retired(SONNET, "2025-10-28")],
     ["claude-3-5-sonnet-20240620", retired(SONNET, "2025-10-28")],
     ["claude-3-sonnet-20240229", retired(SONNET, "2025-07-21")],
     ["claude-3-5-haiku-20241022", retired(HAIKU, "2026-02-19")],
-    ["claude-3-haiku-20240307", deprecated(HAIKU, "2026-04-19")]
+    ["claude-3-haiku-20240307", retired(HAIKU, "2026-04-20")]
   ])
 };
+
+const CODEX_SOL = "gpt-6.1-sol";
 
 // Codex model identifiers are tracked only as far as this repository can state
 // them as fact. Unknown identifiers produce no advisory, so an unlisted newer
 // Codex model is never reported as stale.
 const CODEX_CATALOG: VendorCatalog = {
   supported: new Set([
+    CODEX_SOL,
     "gpt-6-astra",
+    "gpt-6-sol",
+    "gpt-6-luna",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
-    "gpt-5.6-luna",
-    "gpt-5.5"
+    "gpt-5.6-luna"
   ]),
-  replacements: new Map([["gpt-5", superseded("gpt-5.5")]])
+  replacements: new Map([
+    ["gpt-5.5", deprecated(CODEX_SOL, "2026-10-14")],
+    ["gpt-5.4", retired(CODEX_SOL, "2026-08-31")],
+    ["gpt-5.4-mini", retired("gpt-6-luna", "2026-08-31")],
+    ["gpt-5", superseded(CODEX_SOL)]
+  ])
 };
 
 const CATALOGS: ReadonlyMap<string, VendorCatalog> = new Map([
@@ -140,12 +150,13 @@ const FULL_EFFORTS: readonly Effort[] = [
 
 const CODEX_EFFORTS: readonly Effort[] = [...FULL_EFFORTS, "ultra"];
 
-const GPT_5_5_EFFORTS: readonly Effort[] = ["low", "medium", "high", "xhigh"];
+// The 4.6 generation predates `xhigh`.
+const CLAUDE_4_6_EFFORTS: readonly Effort[] = ["low", "medium", "high", "max"];
 
 /**
  * The models offered by `banzai model`. Includes the current generation and
- * deliberate previous-generation choices. Older releases still load from a
- * hand-edited config, but are not presented as a choice.
+ * deliberate earlier-generation choices. Other supported releases still load
+ * from a hand-edited config, but are not presented as a choice.
  *
  * Claude entries come from the published Claude model catalog. Codex entries and
  * their reasoning levels come from the Codex CLI's model metadata or published
@@ -153,11 +164,11 @@ const GPT_5_5_EFFORTS: readonly Effort[] = ["low", "medium", "high", "xhigh"];
  */
 export const SELECTABLE_MODELS: readonly SelectableModel[] = [
   {
-    id: "claude-opus-5",
-    label: "Claude Opus 5",
+    id: "claude-opus-5-5",
+    label: "Claude Opus 5.5",
     vendor: "claude",
     executable: "claude",
-    description: "Complex agentic coding and long-horizon work.",
+    description: "Long-running agentic coding and knowledge work.",
     efforts: FULL_EFFORTS
   },
   {
@@ -166,6 +177,22 @@ export const SELECTABLE_MODELS: readonly SelectableModel[] = [
     vendor: "claude",
     executable: "claude",
     description: "Most capable model for demanding long-horizon agentic work.",
+    efforts: FULL_EFFORTS
+  },
+  {
+    id: "claude-sonnet-5-5",
+    label: "Claude Sonnet 5.5",
+    vendor: "claude",
+    executable: "claude",
+    description: "Best combination of speed and intelligence.",
+    efforts: FULL_EFFORTS
+  },
+  {
+    id: "claude-opus-5",
+    label: "Claude Opus 5",
+    vendor: "claude",
+    executable: "claude",
+    description: "Previous-generation Opus for complex agentic coding.",
     efforts: FULL_EFFORTS
   },
   {
@@ -181,7 +208,7 @@ export const SELECTABLE_MODELS: readonly SelectableModel[] = [
     label: "Claude Sonnet 5",
     vendor: "claude",
     executable: "claude",
-    description: "Near-Opus coding quality at lower cost and latency.",
+    description: "Previous-generation Sonnet with near-Opus coding quality.",
     efforts: FULL_EFFORTS
   },
   {
@@ -189,7 +216,7 @@ export const SELECTABLE_MODELS: readonly SelectableModel[] = [
     label: "Claude Opus 4.8",
     vendor: "claude",
     executable: "claude",
-    description: "Previous-generation Opus for complex agentic work.",
+    description: "Older-generation Opus for complex agentic work.",
     efforts: FULL_EFFORTS
   },
   {
@@ -197,8 +224,16 @@ export const SELECTABLE_MODELS: readonly SelectableModel[] = [
     label: "Claude Sonnet 4.6",
     vendor: "claude",
     executable: "claude",
-    description: "Previous-generation Sonnet balancing intelligence and speed.",
-    efforts: FULL_EFFORTS
+    description: "Older-generation Sonnet balancing intelligence and speed.",
+    efforts: CLAUDE_4_6_EFFORTS
+  },
+  {
+    id: "gpt-6.1-sol",
+    label: "GPT-6.1-Sol",
+    vendor: "codex",
+    executable: "codex",
+    description: "Latest workhorse model for coding and everyday work.",
+    efforts: CODEX_EFFORTS
   },
   {
     id: "gpt-6-astra",
@@ -209,11 +244,27 @@ export const SELECTABLE_MODELS: readonly SelectableModel[] = [
     efforts: CODEX_EFFORTS
   },
   {
+    id: "gpt-6-sol",
+    label: "GPT-6-Sol",
+    vendor: "codex",
+    executable: "codex",
+    description: "Previous-generation workhorse model.",
+    efforts: CODEX_EFFORTS
+  },
+  {
+    id: "gpt-6-luna",
+    label: "GPT-6-Luna",
+    vendor: "codex",
+    executable: "codex",
+    description: "Fast and affordable model for easier tasks.",
+    efforts: FULL_EFFORTS
+  },
+  {
     id: "gpt-5.6-sol",
     label: "GPT-5.6-Sol",
     vendor: "codex",
     executable: "codex",
-    description: "Reliable agentic workhorse for everyday tasks.",
+    description: "Older-generation workhorse model.",
     efforts: CODEX_EFFORTS
   },
   {
@@ -221,7 +272,7 @@ export const SELECTABLE_MODELS: readonly SelectableModel[] = [
     label: "GPT-5.6-Terra",
     vendor: "codex",
     executable: "codex",
-    description: "Balanced agentic coding model for everyday work.",
+    description: "Older balanced model for straightforward work.",
     efforts: CODEX_EFFORTS
   },
   {
@@ -229,17 +280,8 @@ export const SELECTABLE_MODELS: readonly SelectableModel[] = [
     label: "GPT-5.6-Luna",
     vendor: "codex",
     executable: "codex",
-    description: "Fast and affordable agentic coding model.",
+    description: "Older fast and efficient model.",
     efforts: FULL_EFFORTS
-  },
-  {
-    id: "gpt-5.5",
-    label: "GPT-5.5",
-    vendor: "codex",
-    executable: "codex",
-    description:
-      "Previous-generation frontier model for complex coding and research.",
-    efforts: GPT_5_5_EFFORTS
   }
 ];
 

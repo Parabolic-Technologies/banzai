@@ -18,20 +18,20 @@ export const DEFAULT_CONFIG: OrchestratorConfig = {
   contractVersion: CONTRACT_VERSION,
   models: {
     planner: {
-      executable: "codex",
-      model: "gpt-5.6-sol",
+      executable: "claude",
+      model: "claude-opus-5-5",
       effort: "xhigh",
       timeoutMs: 30 * 60 * 1000
     },
     implementer: {
-      executable: "codex",
-      model: "gpt-5.6-sol",
+      executable: "claude",
+      model: "claude-opus-5-5",
       effort: "xhigh",
       timeoutMs: 60 * 60 * 1000
     },
     reviewer: {
-      executable: "claude",
-      model: "claude-opus-5",
+      executable: "codex",
+      model: "gpt-6.1-sol",
       effort: "xhigh",
       timeoutMs: 30 * 60 * 1000
     }

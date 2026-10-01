@@ -14,6 +14,7 @@ import type { InteractiveChoice, InteractiveIO } from "../src/interactive.js";
 import { selectModelSettings } from "../src/model-selection.js";
 import { SELECTABLE_MODELS } from "../src/models.js";
 import type { OrchestratorConfig } from "../src/types.js";
+import { reviewerOnlyClaudeConfig } from "./helpers.js";
 
 class FakeIO implements InteractiveIO {
   readonly lines: string[] = [];
@@ -54,24 +55,28 @@ class FakeIO implements InteractiveIO {
 }
 
 function baseConfig(): OrchestratorConfig {
-  return structuredClone(DEFAULT_CONFIG);
+  return reviewerOnlyClaudeConfig();
 }
 
-test("the picker offers current and previous-generation models from both vendors", () => {
+test("the picker offers current and earlier-generation models from both vendors", () => {
   assert.deepEqual(
     SELECTABLE_MODELS.map((model) => model.id),
     [
-      "claude-opus-5",
+      "claude-opus-5-5",
       "claude-fable-5-1",
+      "claude-sonnet-5-5",
+      "claude-opus-5",
       "claude-fable-5",
       "claude-sonnet-5",
       "claude-opus-4-8",
       "claude-sonnet-4-6",
+      "gpt-6.1-sol",
       "gpt-6-astra",
+      "gpt-6-sol",
+      "gpt-6-luna",
       "gpt-5.6-sol",
       "gpt-5.6-terra",
-      "gpt-5.6-luna",
-      "gpt-5.5"
+      "gpt-5.6-luna"
     ]
   );
   for (const model of SELECTABLE_MODELS) {
@@ -93,7 +98,7 @@ test("keeping every phase produces no update", async () => {
   );
   assert.equal(
     io.choiceNames[1]?.[0],
-    "Keep gpt-5.6-sol (effort=xhigh) - matches Planning"
+    "Keep gpt-6.1-sol (effort=xhigh) - matches Planning"
   );
   assert.match(
     io.choiceDescriptions[1]?.[0] ?? "",
@@ -133,7 +138,7 @@ test("choosing a model and effort per phase returns the vendor executable", asyn
   assert.ok(
     io.lines.some((line) =>
       line.includes(
-        "Planning: codex gpt-5.6-sol effort=xhigh -> codex gpt-5.6-terra effort=high"
+        "Planning: codex gpt-6.1-sol effort=xhigh -> codex gpt-5.6-terra effort=high"
       )
     )
   );
@@ -188,7 +193,7 @@ test("implementation can adopt pending planning settings in one recommended choi
 });
 
 test("reselecting the configured model and effort is not a change", async () => {
-  const io = new FakeIO(["__keep__", "gpt-5.6-sol", "xhigh", "__keep__"]);
+  const io = new FakeIO(["__keep__", "gpt-6.1-sol", "xhigh", "__keep__"]);
 
   const updates = await selectModelSettings(io, baseConfig());
 
@@ -201,13 +206,13 @@ test("reselecting the configured model and effort is not a change", async () => 
 
 test("effort choices are limited to what each model accepts", async () => {
   const io = new FakeIO(
-    ["gpt-6-astra", "ultra", "gpt-5.6-luna", "high", "claude-opus-5", "xhigh"],
+    ["gpt-6-sol", "ultra", "gpt-6-luna", "high", "claude-sonnet-5-5", "xhigh"],
     [true]
   );
 
   await selectModelSettings(io, baseConfig());
 
-  // Astra supports Codex's ultra tier; Luna and every Claude model do not.
+  // GPT-6-Sol supports Codex's ultra tier; GPT-6-Luna and every Claude model do not.
   assert.deepEqual(io.choiceValues[1], [
     "low",
     "medium",
@@ -232,22 +237,28 @@ test("effort choices are limited to what each model accepts", async () => {
   ]);
 });
 
-test("previous-generation models use their supported effort subsets", async () => {
+test("earlier-generation models use their supported effort subsets", async () => {
   const io = new FakeIO(
     [
-      "gpt-5.5",
-      "xhigh",
+      "gpt-5.6-luna",
+      "max",
       "claude-opus-4-8",
       "max",
       "claude-sonnet-4-6",
-      "xhigh"
+      "high"
     ],
     [true]
   );
 
   const updates = await selectModelSettings(io, baseConfig());
 
-  assert.deepEqual(io.choiceValues[1], ["low", "medium", "high", "xhigh"]);
+  assert.deepEqual(io.choiceValues[1], [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ]);
   assert.deepEqual(io.choiceValues[3], [
     "low",
     "medium",
@@ -255,19 +266,14 @@ test("previous-generation models use their supported effort subsets", async () =
     "xhigh",
     "max"
   ]);
-  assert.deepEqual(io.choiceValues[5], [
-    "low",
-    "medium",
-    "high",
-    "xhigh",
-    "max"
-  ]);
+  // The 4.6 generation predates xhigh.
+  assert.deepEqual(io.choiceValues[5], ["low", "medium", "high", "max"]);
   assert.deepEqual(updates, [
     {
       role: "planner",
-      model: "gpt-5.5",
+      model: "gpt-5.6-luna",
       executable: "codex",
-      effort: "xhigh"
+      effort: "max"
     },
     {
       role: "implementer",
@@ -279,7 +285,7 @@ test("previous-generation models use their supported effort subsets", async () =
       role: "reviewer",
       model: "claude-sonnet-4-6",
       executable: "claude",
-      effort: "xhigh"
+      effort: "high"
     }
   ]);
 });
@@ -321,7 +327,7 @@ test("a selected model and effort are written to the configuration", async () =>
       },
       {
         role: "planner",
-        model: "gpt-5.5",
+        model: "gpt-6-luna",
         executable: "codex",
         effort: "xhigh"
       },
@@ -336,7 +342,7 @@ test("a selected model and effort are written to the configuration", async () =>
     const updated = await loadConfig(root);
     assert.equal(updated.models.reviewer.model, "claude-opus-4-8");
     assert.equal(updated.models.reviewer.effort, "max");
-    assert.equal(updated.models.planner.model, "gpt-5.5");
+    assert.equal(updated.models.planner.model, "gpt-6-luna");
     assert.equal(updated.models.planner.effort, "xhigh");
     assert.equal(updated.models.implementer.model, "claude-sonnet-4-6");
     assert.equal(updated.models.implementer.effort, "medium");

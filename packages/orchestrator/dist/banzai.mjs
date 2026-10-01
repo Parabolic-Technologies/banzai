@@ -5677,16 +5677,17 @@ function deprecated(replacement, date) {
 function retired(replacement, date) {
   return { replacement, standing: "retired", date };
 }
-var OPUS = "claude-opus-5";
-var SONNET = "claude-sonnet-5";
+var OPUS = "claude-opus-5-5";
+var SONNET = "claude-sonnet-5-5";
 var HAIKU = "claude-haiku-4-5";
 var CLAUDE_CATALOG = {
   supported: /* @__PURE__ */ new Set([
     "claude-fable-5-1",
     "claude-fable-5",
-    "claude-mythos-5",
     OPUS,
     SONNET,
+    "claude-opus-5",
+    "claude-sonnet-5",
     "claude-opus-4-8",
     "claude-sonnet-4-6",
     HAIKU,
@@ -5702,33 +5703,41 @@ var CLAUDE_CATALOG = {
     ["claude-opus-4-6", superseded(OPUS)],
     ["claude-opus-4-5", superseded(OPUS)],
     ["claude-opus-4-5-20251101", superseded(OPUS)],
-    ["claude-opus-4-1", deprecated(OPUS, "2026-08-05")],
-    ["claude-opus-4-1-20250805", deprecated(OPUS, "2026-08-05")],
-    ["claude-opus-4-0", deprecated(OPUS, "2026-06-15")],
-    ["claude-opus-4-20250514", deprecated(OPUS, "2026-06-15")],
+    ["claude-opus-4-1", retired(OPUS, "2026-08-05")],
+    ["claude-opus-4-1-20250805", retired(OPUS, "2026-08-05")],
+    ["claude-opus-4-0", retired(OPUS, "2026-06-15")],
+    ["claude-opus-4-20250514", retired(OPUS, "2026-06-15")],
     ["claude-3-opus-20240229", retired(OPUS, "2026-01-05")],
-    ["claude-mythos-preview", superseded("claude-fable-5")],
-    ["claude-sonnet-4-5", superseded(SONNET)],
-    ["claude-sonnet-4-5-20250929", superseded(SONNET)],
-    ["claude-sonnet-4-0", deprecated(SONNET, "2026-06-15")],
-    ["claude-sonnet-4-20250514", deprecated(SONNET, "2026-06-15")],
+    ["claude-mythos-preview", superseded("claude-fable-5-1")],
+    ["claude-sonnet-4-5", deprecated(SONNET, "2026-11-30")],
+    ["claude-sonnet-4-5-20250929", deprecated(SONNET, "2026-11-30")],
+    ["claude-sonnet-4-0", retired(SONNET, "2026-06-15")],
+    ["claude-sonnet-4-20250514", retired(SONNET, "2026-06-15")],
     ["claude-3-7-sonnet-20250219", retired(SONNET, "2026-02-19")],
     ["claude-3-5-sonnet-20241022", retired(SONNET, "2025-10-28")],
     ["claude-3-5-sonnet-20240620", retired(SONNET, "2025-10-28")],
     ["claude-3-sonnet-20240229", retired(SONNET, "2025-07-21")],
     ["claude-3-5-haiku-20241022", retired(HAIKU, "2026-02-19")],
-    ["claude-3-haiku-20240307", deprecated(HAIKU, "2026-04-19")]
+    ["claude-3-haiku-20240307", retired(HAIKU, "2026-04-20")]
   ])
 };
+var CODEX_SOL = "gpt-6.1-sol";
 var CODEX_CATALOG = {
   supported: /* @__PURE__ */ new Set([
+    CODEX_SOL,
     "gpt-6-astra",
+    "gpt-6-sol",
+    "gpt-6-luna",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
-    "gpt-5.6-luna",
-    "gpt-5.5"
+    "gpt-5.6-luna"
   ]),
-  replacements: /* @__PURE__ */ new Map([["gpt-5", superseded("gpt-5.5")]])
+  replacements: /* @__PURE__ */ new Map([
+    ["gpt-5.5", deprecated(CODEX_SOL, "2026-10-14")],
+    ["gpt-5.4", retired(CODEX_SOL, "2026-08-31")],
+    ["gpt-5.4-mini", retired("gpt-6-luna", "2026-08-31")],
+    ["gpt-5", superseded(CODEX_SOL)]
+  ])
 };
 var FULL_EFFORTS = [
   "low",
@@ -9241,20 +9250,20 @@ var DEFAULT_CONFIG = {
   contractVersion: CONTRACT_VERSION,
   models: {
     planner: {
-      executable: "codex",
-      model: "gpt-5.6-sol",
+      executable: "claude",
+      model: "claude-opus-5-5",
       effort: "xhigh",
       timeoutMs: 30 * 60 * 1e3
     },
     implementer: {
-      executable: "codex",
-      model: "gpt-5.6-sol",
+      executable: "claude",
+      model: "claude-opus-5-5",
       effort: "xhigh",
       timeoutMs: 60 * 60 * 1e3
     },
     reviewer: {
-      executable: "claude",
-      model: "claude-opus-5",
+      executable: "codex",
+      model: "gpt-6.1-sol",
       effort: "xhigh",
       timeoutMs: 30 * 60 * 1e3
     }
@@ -12449,16 +12458,17 @@ function deprecated2(replacement, date) {
 function retired2(replacement, date) {
   return { replacement, standing: "retired", date };
 }
-var OPUS2 = "claude-opus-5";
-var SONNET2 = "claude-sonnet-5";
+var OPUS2 = "claude-opus-5-5";
+var SONNET2 = "claude-sonnet-5-5";
 var HAIKU2 = "claude-haiku-4-5";
 var CLAUDE_CATALOG2 = {
   supported: /* @__PURE__ */ new Set([
     "claude-fable-5-1",
     "claude-fable-5",
-    "claude-mythos-5",
     OPUS2,
     SONNET2,
+    "claude-opus-5",
+    "claude-sonnet-5",
     "claude-opus-4-8",
     "claude-sonnet-4-6",
     HAIKU2,
@@ -12474,33 +12484,41 @@ var CLAUDE_CATALOG2 = {
     ["claude-opus-4-6", superseded2(OPUS2)],
     ["claude-opus-4-5", superseded2(OPUS2)],
     ["claude-opus-4-5-20251101", superseded2(OPUS2)],
-    ["claude-opus-4-1", deprecated2(OPUS2, "2026-08-05")],
-    ["claude-opus-4-1-20250805", deprecated2(OPUS2, "2026-08-05")],
-    ["claude-opus-4-0", deprecated2(OPUS2, "2026-06-15")],
-    ["claude-opus-4-20250514", deprecated2(OPUS2, "2026-06-15")],
+    ["claude-opus-4-1", retired2(OPUS2, "2026-08-05")],
+    ["claude-opus-4-1-20250805", retired2(OPUS2, "2026-08-05")],
+    ["claude-opus-4-0", retired2(OPUS2, "2026-06-15")],
+    ["claude-opus-4-20250514", retired2(OPUS2, "2026-06-15")],
     ["claude-3-opus-20240229", retired2(OPUS2, "2026-01-05")],
-    ["claude-mythos-preview", superseded2("claude-fable-5")],
-    ["claude-sonnet-4-5", superseded2(SONNET2)],
-    ["claude-sonnet-4-5-20250929", superseded2(SONNET2)],
-    ["claude-sonnet-4-0", deprecated2(SONNET2, "2026-06-15")],
-    ["claude-sonnet-4-20250514", deprecated2(SONNET2, "2026-06-15")],
+    ["claude-mythos-preview", superseded2("claude-fable-5-1")],
+    ["claude-sonnet-4-5", deprecated2(SONNET2, "2026-11-30")],
+    ["claude-sonnet-4-5-20250929", deprecated2(SONNET2, "2026-11-30")],
+    ["claude-sonnet-4-0", retired2(SONNET2, "2026-06-15")],
+    ["claude-sonnet-4-20250514", retired2(SONNET2, "2026-06-15")],
     ["claude-3-7-sonnet-20250219", retired2(SONNET2, "2026-02-19")],
     ["claude-3-5-sonnet-20241022", retired2(SONNET2, "2025-10-28")],
     ["claude-3-5-sonnet-20240620", retired2(SONNET2, "2025-10-28")],
     ["claude-3-sonnet-20240229", retired2(SONNET2, "2025-07-21")],
     ["claude-3-5-haiku-20241022", retired2(HAIKU2, "2026-02-19")],
-    ["claude-3-haiku-20240307", deprecated2(HAIKU2, "2026-04-19")]
+    ["claude-3-haiku-20240307", retired2(HAIKU2, "2026-04-20")]
   ])
 };
+var CODEX_SOL2 = "gpt-6.1-sol";
 var CODEX_CATALOG2 = {
   supported: /* @__PURE__ */ new Set([
+    CODEX_SOL2,
     "gpt-6-astra",
+    "gpt-6-sol",
+    "gpt-6-luna",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
-    "gpt-5.6-luna",
-    "gpt-5.5"
+    "gpt-5.6-luna"
   ]),
-  replacements: /* @__PURE__ */ new Map([["gpt-5", superseded2("gpt-5.5")]])
+  replacements: /* @__PURE__ */ new Map([
+    ["gpt-5.5", deprecated2(CODEX_SOL2, "2026-10-14")],
+    ["gpt-5.4", retired2(CODEX_SOL2, "2026-08-31")],
+    ["gpt-5.4-mini", retired2("gpt-6-luna", "2026-08-31")],
+    ["gpt-5", superseded2(CODEX_SOL2)]
+  ])
 };
 var CATALOGS = /* @__PURE__ */ new Map([
   ["claude", CLAUDE_CATALOG2],
@@ -12514,14 +12532,14 @@ var FULL_EFFORTS2 = [
   "max"
 ];
 var CODEX_EFFORTS2 = [...FULL_EFFORTS2, "ultra"];
-var GPT_5_5_EFFORTS = ["low", "medium", "high", "xhigh"];
+var CLAUDE_4_6_EFFORTS = ["low", "medium", "high", "max"];
 var SELECTABLE_MODELS = [
   {
-    id: "claude-opus-5",
-    label: "Claude Opus 5",
+    id: "claude-opus-5-5",
+    label: "Claude Opus 5.5",
     vendor: "claude",
     executable: "claude",
-    description: "Complex agentic coding and long-horizon work.",
+    description: "Long-running agentic coding and knowledge work.",
     efforts: FULL_EFFORTS2
   },
   {
@@ -12530,6 +12548,22 @@ var SELECTABLE_MODELS = [
     vendor: "claude",
     executable: "claude",
     description: "Most capable model for demanding long-horizon agentic work.",
+    efforts: FULL_EFFORTS2
+  },
+  {
+    id: "claude-sonnet-5-5",
+    label: "Claude Sonnet 5.5",
+    vendor: "claude",
+    executable: "claude",
+    description: "Best combination of speed and intelligence.",
+    efforts: FULL_EFFORTS2
+  },
+  {
+    id: "claude-opus-5",
+    label: "Claude Opus 5",
+    vendor: "claude",
+    executable: "claude",
+    description: "Previous-generation Opus for complex agentic coding.",
     efforts: FULL_EFFORTS2
   },
   {
@@ -12545,7 +12579,7 @@ var SELECTABLE_MODELS = [
     label: "Claude Sonnet 5",
     vendor: "claude",
     executable: "claude",
-    description: "Near-Opus coding quality at lower cost and latency.",
+    description: "Previous-generation Sonnet with near-Opus coding quality.",
     efforts: FULL_EFFORTS2
   },
   {
@@ -12553,7 +12587,7 @@ var SELECTABLE_MODELS = [
     label: "Claude Opus 4.8",
     vendor: "claude",
     executable: "claude",
-    description: "Previous-generation Opus for complex agentic work.",
+    description: "Older-generation Opus for complex agentic work.",
     efforts: FULL_EFFORTS2
   },
   {
@@ -12561,8 +12595,16 @@ var SELECTABLE_MODELS = [
     label: "Claude Sonnet 4.6",
     vendor: "claude",
     executable: "claude",
-    description: "Previous-generation Sonnet balancing intelligence and speed.",
-    efforts: FULL_EFFORTS2
+    description: "Older-generation Sonnet balancing intelligence and speed.",
+    efforts: CLAUDE_4_6_EFFORTS
+  },
+  {
+    id: "gpt-6.1-sol",
+    label: "GPT-6.1-Sol",
+    vendor: "codex",
+    executable: "codex",
+    description: "Latest workhorse model for coding and everyday work.",
+    efforts: CODEX_EFFORTS2
   },
   {
     id: "gpt-6-astra",
@@ -12573,11 +12615,27 @@ var SELECTABLE_MODELS = [
     efforts: CODEX_EFFORTS2
   },
   {
+    id: "gpt-6-sol",
+    label: "GPT-6-Sol",
+    vendor: "codex",
+    executable: "codex",
+    description: "Previous-generation workhorse model.",
+    efforts: CODEX_EFFORTS2
+  },
+  {
+    id: "gpt-6-luna",
+    label: "GPT-6-Luna",
+    vendor: "codex",
+    executable: "codex",
+    description: "Fast and affordable model for easier tasks.",
+    efforts: FULL_EFFORTS2
+  },
+  {
     id: "gpt-5.6-sol",
     label: "GPT-5.6-Sol",
     vendor: "codex",
     executable: "codex",
-    description: "Reliable agentic workhorse for everyday tasks.",
+    description: "Older-generation workhorse model.",
     efforts: CODEX_EFFORTS2
   },
   {
@@ -12585,7 +12643,7 @@ var SELECTABLE_MODELS = [
     label: "GPT-5.6-Terra",
     vendor: "codex",
     executable: "codex",
-    description: "Balanced agentic coding model for everyday work.",
+    description: "Older balanced model for straightforward work.",
     efforts: CODEX_EFFORTS2
   },
   {
@@ -12593,16 +12651,8 @@ var SELECTABLE_MODELS = [
     label: "GPT-5.6-Luna",
     vendor: "codex",
     executable: "codex",
-    description: "Fast and affordable agentic coding model.",
+    description: "Older fast and efficient model.",
     efforts: FULL_EFFORTS2
-  },
-  {
-    id: "gpt-5.5",
-    label: "GPT-5.5",
-    vendor: "codex",
-    executable: "codex",
-    description: "Previous-generation frontier model for complex coding and research.",
-    efforts: GPT_5_5_EFFORTS
   }
 ];
 function selectableModel(id3) {
@@ -17172,20 +17222,20 @@ var DEFAULT_CONFIG2 = {
   contractVersion: CONTRACT_VERSION2,
   models: {
     planner: {
-      executable: "codex",
-      model: "gpt-5.6-sol",
+      executable: "claude",
+      model: "claude-opus-5-5",
       effort: "xhigh",
       timeoutMs: 30 * 60 * 1e3
     },
     implementer: {
-      executable: "codex",
-      model: "gpt-5.6-sol",
+      executable: "claude",
+      model: "claude-opus-5-5",
       effort: "xhigh",
       timeoutMs: 60 * 60 * 1e3
     },
     reviewer: {
-      executable: "claude",
-      model: "claude-opus-5",
+      executable: "codex",
+      model: "gpt-6.1-sol",
       effort: "xhigh",
       timeoutMs: 30 * 60 * 1e3
     }
@@ -24310,7 +24360,7 @@ import process7 from "node:process";
 // package.json
 var package_default = {
   name: "@parabolic-technologies/banzai",
-  version: "2.6.3",
+  version: "2.6.4",
   private: false,
   description: "Spec-driven AI development CLI for Codex and Claude Code, with human approvals and independent review for complex changes.",
   keywords: [

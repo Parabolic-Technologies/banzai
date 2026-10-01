@@ -773,7 +773,7 @@ Plugin (`plugins/banzai/`):
   `PROJECT_MANIFEST.md` in the session directory or a parent — and the hook
   stays silent in repositories without that evidence.
 - `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` — plugin manifests,
-  currently version `2.6.3`. The Codex manifest additionally declares the hook
+  currently version `2.6.4`. The Codex manifest additionally declares the hook
   and the store interface metadata.
 - `PROJECT_MANIFEST.md`, `AGENTS.md`, `CLAUDE.md`, and the placeholder
   `documentation/` tree (`README.md`, `decisions/README.md`, `.gitkeep` files) —
@@ -813,8 +813,8 @@ attempt, approval marker or transcript.
   deny checks and constrain timeout/cwd/context. Profiles and bootstrap are
   rejected in schema 4; explicit legacy profile utilities remain scoped to old
   config formats and do not control new tasks. `DEFAULT_TASK_CONFIG` selects
-  Codex `gpt-5.6-sol` for planning/implementation and Claude `claude-opus-5` for
-  review, with `xhigh` effort. Each workflow action reloads configuration.
+  Claude `claude-opus-5-5` for planning/implementation and Codex `gpt-6.1-sol`
+  for review, with `xhigh` effort. Each workflow action reloads configuration.
 - Task verification: inert project discovery supplies evidence, never permission.
   Strict plans carry self-contained remainder-bound obligations v2 inside the
   approved bundle; phase-result v4 supplies separate additional candidates.
@@ -1614,7 +1614,7 @@ status` reports only whether credentials are visible and stored, so a
   source, and the only root Claude settings file is the ignored
   `.claude/settings.local.json`. `plugins/banzai/.claude/settings.json` is
   packaged plugin content, not this repository's configuration.
-- Current Banzai release-train version is `2.6.3`, owned solely by root
+- Current Banzai release-train version is `2.6.4`, owned solely by root
   `package.json.version` and mirrored by four plugin/marketplace fields, the
   orchestrator package, and three `package-lock.json` fields (top-level, root
   package, and workspace package). All nine fields across seven files agree.

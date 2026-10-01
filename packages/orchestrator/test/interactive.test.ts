@@ -37,6 +37,7 @@ import type {
   CancellationResponseResult,
   CancellationResult
 } from "../src/cancellation.js";
+import { reviewerOnlyClaudeConfig } from "./helpers.js";
 
 function runState(
   status: RunState["status"],
@@ -417,7 +418,7 @@ class FakeModelConfiguration implements ModelConfigurationGateway {
 }
 
 function configWithReviewer(model: string): OrchestratorConfig {
-  const config = structuredClone(DEFAULT_CONFIG);
+  const config = reviewerOnlyClaudeConfig();
   config.models.reviewer.model = model;
   return config;
 }
@@ -444,16 +445,16 @@ test("startup checks every configured vendor once and reports it ready", async (
     auth
   });
 
-  // codex runs planning and implementation; it is checked once, not twice.
-  assert.deepEqual(auth.checked, ["codex", "claude"]);
+  // claude runs planning and implementation; it is checked once, not twice.
+  assert.deepEqual(auth.checked, ["claude", "codex"]);
   // Every phase row carries its own readiness marker, so a shared vendor is
   // reported against each role that runs it.
   assert.deepEqual(
     io.lines.filter((line) => line.startsWith("    ")),
     [
-      "    plan    codex  gpt-5.6-sol    xhigh · 30m  ✓",
-      "    impl    codex  gpt-5.6-sol    xhigh · 60m  ✓",
-      "    review  claude claude-opus-5  xhigh · 30m  ✓"
+      "    plan    claude claude-opus-5-5  xhigh · 30m  ✓",
+      "    impl    claude claude-opus-5-5  xhigh · 60m  ✓",
+      "    review  codex  gpt-6.1-sol      xhigh · 30m  ✓"
     ]
   );
   // A ready launch spends no lines explaining authentication.
@@ -492,13 +493,13 @@ test("an expired Claude session is reported at startup, before any phase runs", 
 
   await runInteractive(runner, io, {
     decidedBy: "human",
-    models: new FakeModelConfiguration(DEFAULT_CONFIG),
+    models: new FakeModelConfiguration(reviewerOnlyClaudeConfig()),
     auth
   });
 
   assert.ok(
     io.lines.some(
-      (line) => line === "    review  claude claude-opus-5  xhigh · 30m  ✗"
+      (line) => line === "    review  claude claude-opus-5-5  xhigh · 30m  ✗"
     )
   );
   // The reason wraps to the terminal, so assert against the joined notice.
@@ -519,11 +520,11 @@ test("an expired Claude session is reported at startup, before any phase runs", 
 });
 
 test("Claude is checked whenever any role runs it, not only review", async () => {
-  const config = structuredClone(DEFAULT_CONFIG);
+  const config = reviewerOnlyClaudeConfig();
   config.models.planner.executable = "claude";
-  config.models.planner.model = "claude-opus-5";
+  config.models.planner.model = "claude-opus-5-5";
   config.models.implementer.executable = "claude";
-  config.models.implementer.model = "claude-opus-5";
+  config.models.implementer.model = "claude-opus-5-5";
   const auth = new FakeAuthentication({ claude: "session expired" });
   const runner = new FakeRunner([null]);
   const io = new FakeIO(["exit"]);
@@ -604,16 +605,14 @@ test("interactive startup shows the models for each phase", async () => {
     )
   );
   assert.ok(
-    io.lines.some((line) =>
-      /^ {4}plan {4}codex {2}\S+ {4}xhigh · 30m/.test(line)
-    )
+    io.lines.some((line) => /^ {4}plan {4}claude \S+ {2}xhigh · 30m/.test(line))
   );
   assert.ok(
-    io.lines.some((line) => /^ {4}impl {4}codex .+xhigh · 60m/.test(line))
+    io.lines.some((line) => /^ {4}impl {4}claude .+xhigh · 60m/.test(line))
   );
   assert.ok(
     io.lines.some(
-      (line) => line.includes("review") && line.includes("claude-opus-5")
+      (line) => line.includes("review") && line.includes("gpt-6.1-sol")
     )
   );
   assert.ok(io.lines.includes("No configured model needs a known update."));
@@ -633,11 +632,11 @@ test("interactive startup offers to update a superseded model", async () => {
   });
 
   assert.deepEqual(configuration.applied, [
-    [{ role: "reviewer", model: "claude-opus-5" }]
+    [{ role: "reviewer", model: "claude-opus-5-5" }]
   ]);
   assert.ok(
     io.lines.some((line) =>
-      line.includes("claude-opus-4-7 is superseded by claude-opus-5.")
+      line.includes("claude-opus-4-7 is superseded by claude-opus-5-5.")
     )
   );
   assert.ok(
@@ -680,7 +679,7 @@ test("declining the write confirmation leaves the configuration untouched", asyn
 });
 
 test("per-model selection updates only the confirmed roles", async () => {
-  const config = structuredClone(DEFAULT_CONFIG);
+  const config = reviewerOnlyClaudeConfig();
   config.models.planner = {
     executable: "claude",
     model: "claude-opus-4-6",
@@ -698,7 +697,7 @@ test("per-model selection updates only the confirmed roles", async () => {
   });
 
   assert.deepEqual(configuration.applied, [
-    [{ role: "reviewer", model: "claude-opus-5" }]
+    [{ role: "reviewer", model: "claude-opus-5-5" }]
   ]);
 });
 

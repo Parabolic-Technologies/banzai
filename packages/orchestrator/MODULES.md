@@ -666,8 +666,9 @@ is a navigational reference and is updated with the module it describes.
 - `models.ts` — hand-maintained catalog: `SELECTABLE_MODELS`, supported-model
   identity, model standings, `modelAdvisories`, `vendorFor`, `vendorUsage`, and
   role labels. It is the source of truth for supported identities and for the
-  model and effort levels the menus offer. The Codex choices include
-  `gpt-6-astra` with `low`, `medium`, `high`, `xhigh`, `max`, and `ultra` effort.
+  model and effort levels the menus offer. The Codex choices `gpt-6.1-sol`,
+  `gpt-6-astra`, and `gpt-6-sol` offer `low`, `medium`, `high`, `xhigh`, `max`,
+  and `ultra` effort; `claude-sonnet-4-6` offers no `xhigh`.
 - `model-selection.ts` — `selectModelSettings`; the per-role model and effort
   dialog, filtered to the levels the chosen model accepts. Its implementation
   menu recommends the effective planning executable, model, and effort as one

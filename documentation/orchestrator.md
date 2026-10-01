@@ -681,8 +681,8 @@ categories. The schema diagnostic reports the file's actual config version.
 with no remedies; pinned Claude can be `verified`, `mismatch`, or bounded
 `failure`. A mismatch fails readiness. Ambient or unresolved scope is
 `unverifiable` with an ambient remedy only. Rebuild/update remedies apply only
-to mismatch or bounded failure. Default Codex planner/implementer and pinned
-Claude reviewer produce no parity warning when resources match. Historical
+to mismatch or bounded failure. The default pinned Claude planner/implementer
+and Codex reviewer produce no parity warning when resources match. Historical
 v1-v3 reports retain their identities; consumers must negotiate v5.
 
 Doctor also emits an `authentication.models` advisory: it does not invoke a
@@ -1066,24 +1066,29 @@ then an effort level for each. The planning model also performs read-only
 workflow selection:
 
 ```text
-Planning: codex gpt-5.6-sol effort=xhigh
+Planning: claude claude-opus-5-5 effort=xhigh
 ? Planning model
-    Keep gpt-5.6-sol (effort=xhigh)
-    Claude Opus 5 (claude-opus-5)      Complex agentic coding and long-horizon work.
-    Claude Fable 5.1 (claude-fable-5-1)  Most capable model for demanding long-horizon agentic work.
-    Claude Fable 5 (claude-fable-5)    Previous-generation Fable for demanding agentic work.
-    Claude Sonnet 5 (claude-sonnet-5)  Near-Opus coding quality at lower cost and latency.
-    Claude Opus 4.8 (claude-opus-4-8)  Previous-generation Opus for complex agentic work.
-    Claude Sonnet 4.6 (claude-sonnet-4-6)  Previous-generation Sonnet balancing intelligence and speed.
-    GPT-6-Astra (gpt-6-astra)          Most capable model for complex, demanding work.
-  > GPT-5.6-Sol (gpt-5.6-sol)          Reliable agentic workhorse for everyday tasks.
-    GPT-5.6-Terra (gpt-5.6-terra)      Balanced agentic coding model for everyday work.
-    GPT-5.6-Luna (gpt-5.6-luna)        Fast and affordable agentic coding model.
-    GPT-5.5 (gpt-5.5)                  Previous-generation frontier model for complex coding and research.
+    Keep claude-opus-5-5 (effort=xhigh)
+    Claude Opus 5.5 (claude-opus-5-5)      Long-running agentic coding and knowledge work.
+    Claude Fable 5.1 (claude-fable-5-1)    Most capable model for demanding long-horizon agentic work.
+    Claude Sonnet 5.5 (claude-sonnet-5-5)  Best combination of speed and intelligence.
+    Claude Opus 5 (claude-opus-5)          Previous-generation Opus for complex agentic coding.
+    Claude Fable 5 (claude-fable-5)        Previous-generation Fable for demanding agentic work.
+    Claude Sonnet 5 (claude-sonnet-5)      Previous-generation Sonnet with near-Opus coding quality.
+    Claude Opus 4.8 (claude-opus-4-8)      Older-generation Opus for complex agentic work.
+    Claude Sonnet 4.6 (claude-sonnet-4-6)  Older-generation Sonnet balancing intelligence and speed.
+  > GPT-6.1-Sol (gpt-6.1-sol)              Latest workhorse model for coding and everyday work.
+    GPT-6-Astra (gpt-6-astra)              Most capable model for complex, demanding work.
+    GPT-6-Sol (gpt-6-sol)                  Previous-generation workhorse model.
+    GPT-6-Luna (gpt-6-luna)                Fast and affordable model for easier tasks.
+    GPT-5.6-Sol (gpt-5.6-sol)              Older-generation workhorse model.
+    GPT-5.6-Terra (gpt-5.6-terra)          Older balanced model for straightforward work.
+    GPT-5.6-Luna (gpt-5.6-luna)            Older fast and efficient model.
 ```
 
 Every phase runs on either vendor, so each menu lists both Claude and GPT models.
-GPT-6-Astra supports `low`, `medium`, `high`, `xhigh`, `max`, and `ultra` effort.
+GPT-6.1-Sol, GPT-6-Astra, and GPT-6-Sol support `low`, `medium`, `high`,
+`xhigh`, `max`, and `ultra` effort.
 The adapter picks its argument shape from the configured executable: `codex exec`
 with a schema file and a sandbox, or `claude -p` with an inline schema and a tool
 allow-list. A phase that writes gets edit and shell tools or `workspace-write`;
@@ -1096,7 +1101,7 @@ selection exactly, including executable, model, and effort. A planning change
 made earlier in the same dialog is used immediately:
 
 ```text
-Implementation: codex gpt-5.6-sol effort=xhigh
+Implementation: claude claude-opus-5-5 effort=xhigh
 Planning selection: claude claude-fable-5-1 effort=max
 ? Implementation model
   > Match Planning: Claude Fable 5.1 (claude-fable-5-1), effort=max - recommended
@@ -1109,17 +1114,21 @@ different executable, model, or effort remains allowed, and the summary says
 that implementation will start fresh from approved artifacts. Lite routes do
 not inherit the planner session, and the reviewer remains independent.
 
-The picker offers the current generation plus deliberate previous-generation
-choices: Claude Fable 5, Claude Opus 4.8, Claude Sonnet 4.6, and GPT-5.5. Older
-identifiers still load from a hand-edited config but are not presented as
-choices.
+The picker offers the current generation plus deliberate earlier-generation
+choices: Claude Opus 5, Claude Fable 5, Claude Sonnet 5, Claude Opus 4.8, Claude
+Sonnet 4.6, GPT-6-Sol, and the GPT-5.6 family. Other supported identifiers still
+load from a hand-edited config but are not presented as choices. GPT-5.5 is no
+longer offered: it retires from Codex on 2026-10-14, and a configuration that
+still names it receives an update offer for GPT-6.1-Sol.
 
 The effort menu is filtered to the levels the chosen model accepts. For
 implementation, the planning effort is recommended when the executable and
 model match; otherwise the picker preselects the phase's current level when the
-model supports it, or `xhigh`. Codex's `ultra` tier appears for GPT-5.6-Sol and
-GPT-5.6-Terra, which support it, and not for GPT-5.6-Luna or any Claude model,
-which do not. GPT-5.5 offers `low`, `medium`, `high`, and `xhigh`.
+model supports it, or `xhigh`, or the model's highest level when it has no
+`xhigh`. Codex's `ultra` tier appears for GPT-6.1-Sol, GPT-6-Astra, GPT-6-Sol,
+GPT-5.6-Sol, and GPT-5.6-Terra, which support it, and not for GPT-6-Luna,
+GPT-5.6-Luna, or any Claude model, which do not. Claude Sonnet 4.6 predates
+`xhigh` and offers `low`, `medium`, `high`, and `max`.
 
 Nothing is written until the dialog shows a before-and-after summary and the
 change is confirmed. Only `executable`, `model`, and `effort` are rewritten;
@@ -1159,9 +1168,9 @@ subscription authentication for every vendor the configuration actually uses:
 ▄▟    banzai v1.19.1   spec-driven run orchestrator
   ▛▀  my-project · main · @ 90d9fb2 · 3 carried-in changes
 
-    plan    codex  gpt-5.6-sol    xhigh · 30m  ✓
-    impl    codex  gpt-5.6-sol    xhigh · 60m  ✓
-    review  claude claude-opus-5  xhigh · 30m  ✓
+    plan    claude claude-opus-5-5  xhigh · 30m  ✓
+    impl    claude claude-opus-5-5  xhigh · 60m  ✓
+    review  codex  gpt-6.1-sol      xhigh · 30m  ✓
 
 No configured model needs a known update.
 ```
@@ -1176,13 +1185,13 @@ every phase row it blocks and is named once, with the reason and the phases it
 would have run:
 
 ```text
-    plan    codex  gpt-5.6-sol    xhigh · 30m  ✓
-    impl    codex  gpt-5.6-sol    xhigh · 60m  ✓
-    review  claude claude-opus-5  xhigh · 30m  ✗
+    plan    claude claude-opus-5-5  xhigh · 30m  ✗
+    impl    claude claude-opus-5-5  xhigh · 60m  ✗
+    review  codex  gpt-6.1-sol      xhigh · 30m  ✓
 
-│ claude (Review): Claude subscription authentication is unavailable. Run
-│ `claude auth login`; API-key and third-party provider authentication are not
-│ accepted.
+│ claude (Planning, Implementation): Claude subscription authentication is
+│ unavailable. Run `claude auth login`; API-key and third-party provider
+│ authentication are not accepted.
 │ Every phase re-checks this; resolve it before starting a run.
 ```
 
@@ -1228,7 +1237,7 @@ replacement and offers to write it to `.banzai/config.json`:
 
 ```text
 Newer models are available:
-  Review: claude-opus-4-7 is superseded by claude-opus-5.
+  Review: claude-opus-4-7 is superseded by claude-opus-5-5.
 ```
 
 The dialog offers updating every reported model, choosing them one at a time, or
@@ -1242,7 +1251,7 @@ Three cases produce no offer:
 
 - an unrecognized model identifier, so a model newer than this catalog is never
   reported as stale;
-- a supported previous-generation choice from `banzai model`;
+- a supported earlier-generation choice from `banzai model`;
 - a Claude Code tier alias such as `opus` or `sonnet`, which already resolves to
   the current model of its tier;
 - an active run. Banzai reports the models and the available updates, then defers
@@ -1465,7 +1474,7 @@ consecutive actions is closed with its count:
 [banzai] Preparing run sc-12345-example-task in /path/to/project
 [banzai] START Preflight - Node, contracts, executables, verification commands, and subscription authentication
 [banzai] DONE Preflight (2.1s)
-── Planning ──────────── codex · gpt-5.6-sol · xhigh · fresh · 30m cap ──
+── Planning ─────── claude · claude-opus-5-5 · xhigh · fresh · 30m cap ──
 [banzai] · banzai:feature-description
 [banzai] ·  0.3s command: git diff --stat
 [banzai] ·  0.2s command: rg -n "resolveScope" src

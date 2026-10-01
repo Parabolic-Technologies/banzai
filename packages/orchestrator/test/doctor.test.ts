@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import type { ClaudePermissionAudit } from "../src/claude-permissions.js";
-import { CONFIG_FILE, DEFAULT_CONFIG } from "../src/config.js";
+import { CONFIG_FILE } from "../src/config.js";
 import { renderDoctorJson, renderDoctorText } from "../src/doctor-cli.js";
 import {
   inspectDoctor,
@@ -25,7 +25,7 @@ import type {
   OrchestratorConfig,
   VerificationProjectType
 } from "../src/types.js";
-import { snapshotTree } from "./helpers.js";
+import { reviewerOnlyClaudeConfig, snapshotTree } from "./helpers.js";
 import { writeAdoptedGuidance } from "./adoption-fixtures.js";
 import { ADOPTED_AGENTS } from "./adoption-fixtures.js";
 
@@ -58,7 +58,7 @@ test("task readiness is independent of empty, mixed or stale legacy profile cove
   ]) {
     const repository = await temporaryRoot();
     try {
-      await writeConfig(repository.root, DEFAULT_CONFIG);
+      await writeConfig(repository.root, reviewerOnlyClaudeConfig());
       if (metadata !== null)
         await writeFile(path.join(repository.root, "package.json"), metadata);
       const before = await snapshotTree(repository.root);
@@ -92,7 +92,7 @@ test("doctor adoption classifications remain independent of verification and exp
     await t.test(classification, async () => {
       const repository = await temporaryRoot();
       try {
-        await writeConfig(repository.root, DEFAULT_CONFIG);
+        await writeConfig(repository.root, reviewerOnlyClaudeConfig());
         if (classification === "setup_required")
           await writeFile(
             path.join(repository.root, "AGENTS.md"),
@@ -179,7 +179,7 @@ function dependencies(options?: {
 function substantiveConfig(
   projectType: VerificationProjectType = "node"
 ): OrchestratorConfig {
-  const config = structuredClone(DEFAULT_CONFIG);
+  const config = reviewerOnlyClaudeConfig();
   config.verification.profiles.push({
     id: projectType,
     projectType,
@@ -317,14 +317,14 @@ test("distinguishes missing malformed unsupported invalid and legacy config", as
     assert.equal(checkStatus(malformed, "config.version"), "skipped");
 
     await writeConfig(repository.root, {
-      ...structuredClone(DEFAULT_CONFIG),
+      ...reviewerOnlyClaudeConfig(),
       schemaVersion: 99
     });
     const unsupported = await inspectDoctor(repository.root, dependencies());
     assert.equal(checkStatus(unsupported, "config.valid"), "fail");
     assert.equal(checkStatus(unsupported, "config.version"), "fail");
 
-    const optedIn = structuredClone(DEFAULT_CONFIG);
+    const optedIn = reviewerOnlyClaudeConfig();
     optedIn.schemaVersion = 3;
     for (const profile of optedIn.verification.profiles)
       for (const [index, command] of profile.commands.entries())
@@ -334,7 +334,7 @@ test("distinguishes missing malformed unsupported invalid and legacy config", as
     assert.equal(checkStatus(supported, "config.version"), "pass");
     assert.equal(checkStatus(supported, "config.valid"), "pass");
 
-    const invalid = structuredClone(DEFAULT_CONFIG);
+    const invalid = reviewerOnlyClaudeConfig();
     const invalidProfile = invalid.verification.profiles[0];
     assert.ok(invalidProfile);
     invalidProfile.commands = [];
@@ -348,7 +348,7 @@ test("distinguishes missing malformed unsupported invalid and legacy config", as
     assert.equal(checkStatus(invalidProfiles, "verification.task"), "skipped");
 
     const legacy = {
-      ...structuredClone(DEFAULT_CONFIG),
+      ...reviewerOnlyClaudeConfig(),
       schemaVersion: 1,
       verification: [
         {
@@ -444,8 +444,8 @@ test("reports Claude permission readiness only for the roles that depend on it",
     advisories
   });
   try {
-    // The default reviewer-only Claude configuration depends on no ambient
-    // rule, so the check stays out of readiness entirely.
+    // A reviewer-only Claude configuration depends on no ambient rule, so the
+    // check stays out of readiness entirely.
     await writeConfig(repository.root, substantiveConfig("custom"));
     const reviewerOnly = await inspectDoctor(
       repository.root,
@@ -460,7 +460,7 @@ test("reports Claude permission readiness only for the roles that depend on it",
 
     const planning = substantiveConfig("custom");
     planning.models.planner.executable = "claude";
-    planning.models.planner.model = "claude-opus-5";
+    planning.models.planner.model = "claude-opus-5-5";
     await writeConfig(repository.root, planning);
 
     const granted = await inspectDoctor(
