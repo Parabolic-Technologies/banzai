@@ -3576,6 +3576,14 @@ var CLAUDE_CATALOG = {
     ["claude-3-sonnet-20240229", retired(SONNET, "2025-07-21")],
     ["claude-3-5-haiku-20241022", retired(HAIKU, "2026-02-19")],
     ["claude-3-haiku-20240307", retired(HAIKU, "2026-04-20")]
+  ]),
+  // From Claude Code's model configuration documentation. An older client
+  // refuses these models itself, before any request; tier aliases need no
+  // entry because they resolve to a model the installed client serves.
+  cliMinimums: /* @__PURE__ */ new Map([
+    [OPUS, "2.1.280"],
+    [SONNET, "2.1.284"],
+    ["claude-fable-5-1", "2.1.257"]
   ])
 };
 var CODEX_SOL = "gpt-6.1-sol";
@@ -3594,6 +3602,14 @@ var CODEX_CATALOG = {
     ["gpt-5.4", retired(CODEX_SOL, "2026-08-31")],
     ["gpt-5.4-mini", retired("gpt-6-luna", "2026-08-31")],
     ["gpt-5", superseded(CODEX_SOL)]
+  ]),
+  // The first stable Codex CLI release whose bundled model catalog carries the
+  // model, from the Codex CLI release notes.
+  cliMinimums: /* @__PURE__ */ new Map([
+    [CODEX_SOL, "0.159.1"],
+    ["gpt-6-sol", "0.156.1"],
+    ["gpt-6-luna", "0.156.1"],
+    ["gpt-6-astra", "0.153.1"]
   ])
 };
 var FULL_EFFORTS = [

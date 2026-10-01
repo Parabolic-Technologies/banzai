@@ -60,7 +60,8 @@ is a navigational reference and is updated with the module it describes.
   `createInterruptHandler` to the progress reporter, `shutdownActiveProcesses`,
   `forceTerminateActiveProcesses`, and `releaseHeldRunnerLocksSync`, and
   restores the terminal an interrupted prompt left in raw mode with the cursor
-  hidden.
+  hidden. `init` and a completed `setup` end with the blocking reasons and
+  remediation of the shared Claude permission audit, and write no grant.
 - `version-cli.ts` — early, repository-independent `--version` / `-v` and
   `--plugin-version` / `-pv` commands, also accepting em-dash long aliases.
   Reads the package mirror or bounded local client inventories, including
@@ -100,7 +101,8 @@ is a navigational reference and is updated with the module it describes.
 - `setup-client.ts` — supported local client/plugin discovery and revalidation,
   selected subscription auth, existing Claude/MCP scope and explicit skill
   argv. It strips inherited workflow authority and API keys without weakening
-  host nesting restrictions or client permission prompts.
+  host nesting restrictions or client permission prompts. Its launch passes no
+  model, so preflight applies only the vendor-wide CLI minimum.
 - `foreground-client.ts` — inherited TTY child lifecycle with no captured
   transcript; direct argv, terminal restoration, owned-child signal handling
   and bounded shutdown.
@@ -123,24 +125,30 @@ is a navigational reference and is updated with the module it describes.
   environments through the filesystem-only `claude.environment` check without
   exposing plugin paths or resolution errors. Its `claude.permissions` check
   reports whether the settings a spawned Claude session loads still grant the
-  tools its phases call, and is skipped whenever no configured role depends on
-  those rules. It never constructs `RunStore`,
+  tools its phases call, carries the shared remediation as its fix, and is
+  skipped whenever no configured role depends on those rules. It never constructs `RunStore`,
   vendor adapters, or `WorkflowRunner`. Its advisory
   `authentication.models` check explicitly separates executable availability
-  from authentication readiness without calling a vendor.
+  from authentication readiness and unchecked CLI versions without calling a
+  vendor.
 - `claude-permissions.ts` — offline audit of the permission rules a spawned
   Claude session will honor. `claudePermissionDemand(config)` reads which roles
-  actually depend on them: a Claude planner writes artifacts no runner
-  authorization covers, a Claude planner or implementer runs shell commands, and
-  a Claude reviewer depends on neither because it uses read-only tools and
-  returns structured findings for runner-owned artifact rendering.
+  actually depend on them: a Claude planner or implementer writes files the
+  spec-gate hook grants (ADR-0041) and runs shell commands, and a Claude
+  reviewer depends on neither because it uses read-only tools and returns
+  structured findings for runner-owned artifact rendering.
   `inspectClaudePermissions()` reads the
   exact sources the resolved scope loads, plus administrator policy settings and
   Claude Code's workspace trust record, which voids every repository-scoped
-  allow rule of an untrusted checkout. A missing `Write` grant blocks; a
-  refusing `deny` or unanswerable `ask` rule blocks; path-scoped, `Edit`, and
-  `Bash` gaps are advisories. `claudePermissionRemediation()` owns the single
-  remediation both the runner and doctor repeat.
+  allow rule of an untrusted checkout but none of its deny or ask rules. A
+  refusing `deny` or unanswerable `ask` rule naming `Write` or `Edit` blocks,
+  because no hook allow overrides it; a missing `Write` or `Edit` grant does
+  not. `Bash` gaps and ignored repository allow rules
+  (`repositoryRulesIgnored`) are advisories. `claudePermissionRemediation()` owns the single
+  remediation the runner, doctor, `init` and `setup` repeat.
+  `inspectConfiguredClaudePermissions()` composes demand, the injected scope
+  resolution and the audit for doctor and the CLI; an unresolvable scope is
+  `unresolved`, not a permission finding.
 - `evaluation-cli.ts` — strict parser and injected stdout/stderr composition for
   `banzai eval export`; the branch runs before adapters or `WorkflowRunner` are
   constructed.
@@ -553,7 +561,10 @@ is a navigational reference and is updated with the module it describes.
   (`buildCodexArguments`, `buildClaudeArguments`,
   `buildClaudeSelectionArguments`, `buildClaudePhaseArguments`) and the minimum
   CLI versions `MINIMUM_CODEX_VERSION = "0.145.0"` and
-  `MINIMUM_CLAUDE_VERSION = "2.1.218"`. Adapter requests consume the exact
+  `MINIMUM_CLAUDE_VERSION = "2.1.218"`. Preflight takes a
+  `VendorPreflightTarget` and, after the vendor-wide minimum, applies
+  `modelCliMinimum()` for the target's model (`null` skips it), failing with
+  `CLI_TOO_OLD` before authentication. Adapter requests consume the exact
   prompt envelope and output-contract bytes already measured by the workflow;
   structured usage, turn count, and privacy-safe inventory evidence survive
   success, typed process failure, durable-observer failure, timeout, and
@@ -664,8 +675,9 @@ is a navigational reference and is updated with the module it describes.
   while enforcement is restricted to exact pre-call runner-payload bytes and
   ships with no universal numerical maximum.
 - `models.ts` — hand-maintained catalog: `SELECTABLE_MODELS`, supported-model
-  identity, model standings, `modelAdvisories`, `vendorFor`, `vendorUsage`, and
-  role labels. It is the source of truth for supported identities and for the
+  identity, model standings, `modelAdvisories`, `modelCliMinimum` (the first
+  CLI release that serves a model newer than the vendor-wide minimum),
+  `vendorFor`, `vendorUsage`, and role labels. It is the source of truth for supported identities and for the
   model and effort levels the menus offer. The Codex choices `gpt-6.1-sol`,
   `gpt-6-astra`, and `gpt-6-sol` offer `low`, `medium`, `high`, `xhigh`, `max`,
   and `ultra` effort; `claude-sonnet-4-6` offers no `xhigh`.

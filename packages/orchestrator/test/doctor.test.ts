@@ -264,6 +264,10 @@ function checkStatus(report: DoctorReport, id: string): string | undefined {
   return report.checks.find((item) => item.id === id)?.status;
 }
 
+function checkFixes(report: DoctorReport, id: string): unknown {
+  return report.checks.find((item) => item.id === id)?.fixes;
+}
+
 test("reports a deterministic ready Node project without mutating it", async () => {
   const repository = await temporaryRoot();
   try {
@@ -434,12 +438,14 @@ test("reports Claude permission readiness only for the roles that depend on it",
   const repository = await temporaryRoot();
   const audit = (
     blocking: string[],
-    advisories: string[]
+    advisories: string[],
+    tools: ClaudePermissionAudit["tools"] = []
   ): ClaudePermissionAudit => ({
-    demand: { planningWrites: true, shellCommands: true },
+    demand: { fileWrites: true, shellCommands: true },
     sources: ["project"],
     trust: "trusted",
-    tools: [],
+    tools,
+    repositoryRulesIgnored: false,
     blocking,
     advisories
   });
@@ -483,6 +489,8 @@ test("reports Claude permission readiness only for the roles that depend on it",
     );
     assert.equal(checkStatus(degraded, "claude.permissions"), "warning");
     assert.equal(degraded.ready, true);
+    // Bash grants are the operator's per-command choice, so no fix names one.
+    assert.deepEqual(checkFixes(degraded, "claude.permissions"), []);
 
     const blocked = await inspectDoctor(
       repository.root,
@@ -491,15 +499,34 @@ test("reports Claude permission readiness only for the roles that depend on it",
           assert.equal(input.repoRoot, repository.root);
           assert.equal(input.settingSources, "project");
           assert.deepEqual(input.demand, {
-            planningWrites: true,
+            fileWrites: true,
             shellCommands: true
           });
-          return audit(["No loaded permission rule grants Write."], []);
+          return audit(
+            ["A deny or ask rule refuses Write."],
+            [],
+            [
+              { tool: "Write", grant: "denied" },
+              { tool: "Edit", grant: "missing" },
+              { tool: "Bash", grant: "missing" }
+            ]
+          );
         }
       })
     );
     assert.equal(checkStatus(blocked, "claude.permissions"), "fail");
     assert.equal(blocked.ready, false);
+    assert.deepEqual(checkFixes(blocked, "claude.permissions"), [
+      {
+        action:
+          'Remove the deny or ask rules naming "Write" from the settings Claude loads; a rule in administrator policy settings needs your administrator.',
+        documentation: "documentation/orchestrator.md#claude-tool-permissions"
+      }
+    ]);
+    assert.match(
+      renderDoctorText(blocked),
+      /Fix: Remove the deny or ask rules/
+    );
     assert.equal(JSON.stringify(blocked).includes(repository.root), false);
 
     // An environment that cannot be resolved is the environment check's

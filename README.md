@@ -96,7 +96,8 @@ create that commit before starting a task.
 For the orchestrator, you need:
 
 - Node.js **22.20.0+ within major 22**, or **24.11.1+ within major 24**;
-- Git, **Codex CLI 0.145.0+**, and **Claude Code 2.1.218+**;
+- Git, **Codex CLI 0.159.1+**, and **Claude Code 2.1.280+** for the default
+  models; older models need at least Codex CLI 0.145.0 and Claude Code 2.1.218;
 - subscription authentication in both model clients;
 - the Banzai plugin installed in both clients as shown below.
 

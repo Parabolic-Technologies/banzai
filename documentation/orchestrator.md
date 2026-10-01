@@ -85,7 +85,8 @@ metadata does not imply shared installation or publication.
 
 - macOS or Linux with Node.js 22.20.0+ within major 22 or Node.js 24.11.1+
   within major 24;
-- local `codex` 0.145.0+ and `claude` 2.1.218+ executables;
+- local `codex` 0.145.0+ and `claude` 2.1.218+ executables, or the newer
+  release a configured model needs (see [Model Configuration](#model-configuration));
 - individual-subscription authentication only;
 - one active run in the current checkout;
 - no API keys, direct vendor APIs, worktrees, branch switching, stash, reset,
@@ -686,8 +687,8 @@ and Codex reviewer produce no parity warning when resources match. Historical
 v1-v3 reports retain their identities; consumers must negotiate v5.
 
 Doctor also emits an `authentication.models` advisory: it does not invoke a
-vendor, so authentication readiness is not checked and executable availability
-is not authentication proof. This warning leaves `ready` and exit semantics
+vendor, so neither authentication readiness nor the installed vendor CLI
+versions are checked, and executable availability is not authentication proof. This warning leaves `ready` and exit semantics
 unchanged. Startup and phase preflight remain authoritative.
 
 Project detection is root-only and uses these markers:
@@ -1268,6 +1269,35 @@ retired.
 
 `banzai init` and non-interactive commands do not run this check.
 
+Some models need a newer vendor CLI than the minimums in
+[Boundaries](#boundaries). The catalog records the first release that serves
+each of them:
+
+| Model                     | Minimum CLI         |
+| ------------------------- | ------------------- |
+| `claude-opus-5-5`         | Claude Code 2.1.280 |
+| `claude-sonnet-5-5`       | Claude Code 2.1.284 |
+| `claude-fable-5-1`        | Claude Code 2.1.257 |
+| `gpt-6.1-sol`             | Codex CLI 0.159.1   |
+| `gpt-6-sol`, `gpt-6-luna` | Codex CLI 0.156.1   |
+| `gpt-6-astra`             | Codex CLI 0.153.1   |
+
+The vendor preflight of a role that runs one of these models fails with
+`CLI_TOO_OLD` before authentication is checked or the model is called, naming
+the model and the release it needs: update the CLI, or choose another model with
+`banzai model`. The launch header and run start check each executable once,
+against the first role that uses it; every phase checks its own model again
+before its call. Tier aliases, models without an entry, and unrecognized
+identifiers need only the vendor minimum. `banzai setup` launches its client
+without a model, so it needs only the vendor minimum, and `banzai doctor` does
+not check CLI versions.
+
+Claude entries come from Claude Code's model configuration documentation, which
+states that an older client refuses the model before sending a request. Codex
+entries are the first stable release whose bundled model catalog carries the
+model, from the Codex CLI release notes. Record a new entry with the catalog
+change that adds the model.
+
 Bare `banzai` in a non-TTY environment prints help instead of waiting for
 input. Existing subcommands remain the authoritative non-interactive interface
 for scripts, CI, direct recovery, and explicit slug overrides:
@@ -1385,24 +1415,27 @@ and does not invoke Claude.
 Every Claude phase is spawned with `--permission-mode dontAsk`, which answers a
 permission prompt with a denial instead of a human. Three surfaces can still
 grant a call, and only three: the enforcement hook, which allows exactly the
-approved bundle while a phase carries runner identity; an `--allowedTools`
-entry, which a run spends on the Serena whitelist alone; and the permission
-rules of the settings files the session loads.
+writes the run authorizes for the current phase; an `--allowedTools` entry,
+which a run spends on the Serena whitelist alone; and the permission rules of
+the settings files the session loads.
 
-Planning phases carry no runner identity — that is what stops a planner from
-writing code — so the hook defers their documentation writes to the ordinary
-permission flow, and under `dontAsk` that flow is the third surface or nothing.
-A checkout that never granted `Write` therefore denies the description, plan,
-and decision artifacts the phase exists to produce, after the model has already
-been paid for. Shell commands are never hook-granted in any phase, so a Claude
-planner or implementer runs only the commands a rule already names.
+Planning and implementation phases carry runner identity, so the hook allows
+their authorized writes — the exact planning artifacts and public
+documentation while planning, the approved scope while implementing — and its
+allow skips the prompt that `dontAsk` would deny. A Claude planner or
+implementer therefore needs no `Write` or `Edit` grant. No hook decision
+overrides a deny or ask rule, though: a rule refusing `Write` or `Edit` denies
+every write the hook authorized. Shell commands are never hook-granted in any
+phase, so a Claude planner or implementer runs only the commands a loaded allow
+rule names.
 
 Startup preflight audits this before the first phase and ends the run with one
-remediation when a `Write` grant is missing or refused. `banzai doctor` reports
-the same audit as `claude.permissions`; both skip it when no configured role
-depends on those rules — a Claude reviewer does not: it uses read-only tools
-and returns structured findings. The runner renders and publishes the review
-artifact; the reviewer receives neither write nor shell tools.
+remediation when a deny or ask rule refuses `Write` or `Edit`. `banzai doctor`
+reports the same audit as `claude.permissions`, with that remediation as its
+fix; both skip it when no configured role depends on those rules — a Claude
+reviewer does not: it uses read-only tools and returns structured findings. The
+runner renders and publishes the review artifact; the reviewer receives neither
+write nor shell tools.
 
 What the audit reads is exactly what the session will honor:
 
@@ -1410,23 +1443,35 @@ What the audit reads is exactly what the session will honor:
   only, so grants belong in the tracked `.claude/settings.json`;
   `.claude/settings.local.json` is never loaded for a scoped run;
 - administrator policy settings, which apply whatever `--setting-sources` names;
-- Claude Code's workspace trust record. An untrusted checkout has its repository
-  permission rules ignored with a warning rather than an error, so it looks
-  exactly like a checkout whose rules were never written. Run `claude` once in
-  the checkout and accept the trust prompt.
+- Claude Code's workspace trust record. An untrusted checkout has its
+  repository allow rules ignored with a warning rather than an error, so they
+  look exactly like rules that were never written. Run `claude` once in the
+  checkout and accept the trust prompt. Deny and ask rules apply either way.
 
-A minimal grant for a repository whose planner or implementer runs Claude:
+Grant the shell commands your phases need, for example:
 
 ```json
 {
   "permissions": {
-    "allow": ["Write", "Edit", "Bash(mkdir:*)", "Bash(git status:*)"]
+    "allow": ["Bash(mkdir:*)", "Bash(git status:*)"]
   }
 }
 ```
 
-`Edit`, `Bash`, and path-scoped grants are reported as advisories rather than
-blocks: the run continues, and the phase keeps only what the rules named.
+Missing or scoped `Bash` grants are reported as advisories rather than blocks:
+the run continues, and the phase runs only the commands the rules named.
+
+`banzai init` and a completed `banzai setup` run the same read-only audit and,
+when a refusing rule would stop the first run, print its reasons and
+remediation:
+
+```text
+Claude permissions: A deny or ask rule refuses Write. No hook decision overrides it and `--permission-mode dontAsk` cannot escalate it to a human, so Claude planning and implementation writes are denied.
+Fix it before the first run: remove the deny or ask rules naming "Write" from the settings Claude loads; a rule in administrator policy settings needs your administrator.
+```
+
+Neither command writes a permission rule: what Claude may do in a tracked,
+shared settings file stays the operator's decision.
 
 ### Serena MCP Whitelist
 

@@ -678,7 +678,7 @@ async function strictFixture(
   const queue = [...pins];
   let planAttempts = 0;
   let implementerPreflights = 0;
-  const refuseUnavailable = async (settings: { model: string }) => {
+  const refuseUnavailable = async (settings: { model: string | null }) => {
     if (settings.model !== UNAVAILABLE_IMPLEMENTER_MODEL) return;
     implementerPreflights++;
     throw new Error("Vendor subscription authentication is unavailable.");

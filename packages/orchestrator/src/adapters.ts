@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { BanzaiError, errorMessage, ProcessExitError } from "./errors.js";
 import { formatUsage } from "./format.js";
-import { vendorFor, type Vendor } from "./models.js";
+import { modelCliMinimum, vendorFor, type Vendor } from "./models.js";
 import {
   redactSensitiveText,
   runProcess,
@@ -38,6 +38,7 @@ import type {
   ReviewResult,
   SessionInventory,
   VendorAdapters,
+  VendorPreflightTarget,
   WorkflowSelectionAdapterRequest
 } from "./types.js";
 import { resolveSerenaWhitelist, serenaAllowedTools } from "./mcp.js";
@@ -1115,12 +1116,12 @@ async function requireCodexStateWriteAccess(
 
 async function requireVersion(
   runner: ProcessRunner,
-  settings: ModelSettings,
-  minimum: string,
+  vendor: Vendor,
+  target: VendorPreflightTarget,
   sourceEnvironment: NodeJS.ProcessEnv = process.env
 ): Promise<void> {
   const result = await runner({
-    command: settings.executable,
+    command: target.executable,
     args: ["--version"],
     cwd: process.cwd(),
     env: subscriptionOnlyEnvironment(sourceEnvironment),
@@ -1129,17 +1130,27 @@ async function requireVersion(
   if (result.exitCode !== 0) {
     throw new BanzaiError(
       "CLI_UNAVAILABLE",
-      `${settings.executable} --version failed: ${result.stderr.trim()}`
+      `${target.executable} --version failed: ${result.stderr.trim()}`
     );
   }
   const actual = parseVersion(
     result.stdout || result.stderr,
-    settings.executable
+    target.executable
   );
+  const minimum =
+    vendor === "claude" ? MINIMUM_CLAUDE_VERSION : MINIMUM_CODEX_VERSION;
   if (!versionAtLeast(actual, minimum)) {
     throw new BanzaiError(
       "CLI_TOO_OLD",
-      `${settings.executable} ${actual} is older than required ${minimum}.`
+      `${target.executable} ${actual} is older than required ${minimum}.`
+    );
+  }
+  const modelMinimum =
+    target.model === null ? null : modelCliMinimum(vendor, target.model);
+  if (modelMinimum !== null && !versionAtLeast(actual, modelMinimum)) {
+    throw new BanzaiError(
+      "CLI_TOO_OLD",
+      `${target.executable} ${actual} cannot run ${target.model}, which requires ${modelMinimum} or newer. Update ${target.executable}, or choose another model with \`banzai model\`.`
     );
   }
 }
@@ -1799,18 +1810,13 @@ export function createVendorAdapters(
       });
     },
     async preflightCodex(
-      settings,
+      target,
       sourceEnvironment = process.env
     ): Promise<void> {
       await requireCodexStateWriteAccess(sourceEnvironment);
-      await requireVersion(
-        runner,
-        settings,
-        MINIMUM_CODEX_VERSION,
-        sourceEnvironment
-      );
+      await requireVersion(runner, "codex", target, sourceEnvironment);
       const result = await runner({
-        command: settings.executable,
+        command: target.executable,
         args: ["login", "status"],
         cwd: process.cwd(),
         env: subscriptionOnlyEnvironment(sourceEnvironment),
@@ -1828,17 +1834,12 @@ export function createVendorAdapters(
     },
 
     async preflightClaude(
-      settings,
+      target,
       sourceEnvironment = process.env
     ): Promise<void> {
-      await requireVersion(
-        runner,
-        settings,
-        MINIMUM_CLAUDE_VERSION,
-        sourceEnvironment
-      );
+      await requireVersion(runner, "claude", target, sourceEnvironment);
       const result = await runner({
-        command: settings.executable,
+        command: target.executable,
         args: ["auth", "status", "--json"],
         cwd: process.cwd(),
         env: subscriptionOnlyEnvironment(sourceEnvironment),
