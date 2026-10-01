@@ -28,6 +28,7 @@ import { BanzaiError, ProcessExitError } from "../src/errors.js";
 import { parsePublishedCompletionRegion } from "../src/plan-task-completion.js";
 import {
   CONTRACT_VERSION,
+  PLAN_TASK_COMPLETION_SCHEMA_VERSION,
   type AdapterResult,
   type PhaseAdapterRequest,
   type PhaseResult,
@@ -2550,6 +2551,83 @@ test("characterization: a checkpointed review failure is reconciled on resume", 
   }
 });
 
+test("characterization: an incomplete completion claim is repaired by one linked attempt", async () => {
+  const repository = await createTestRepository();
+  const trace = recordPersistence();
+  try {
+    const adapters = new FakeAdapters();
+    adapters.implementationResults.push(
+      phaseResult("implementation", {
+        taskCompletion: {
+          schemaVersion: PLAN_TASK_COMPLETION_SCHEMA_VERSION,
+          tasks: [
+            {
+              taskId: "T001",
+              status: "incomplete",
+              evidence: [],
+              gap: {
+                reportPath:
+                  "documentation/features/example/implementation-report.md",
+                section: "Plan Task Completion",
+                detail: "Still open."
+              }
+            }
+          ]
+        }
+      }),
+      phaseResult("implementation")
+    );
+    adapters.reviewResults.push(passingReview());
+    const runner = new WorkflowRunner(repository.root, adapters);
+    await runner.start({ slug: "example", request: "Implement it." });
+    const blocked = await runner.approvePlan("human");
+    assert.equal(blocked.status, "blocked", blocked.blockReason ?? "");
+    assert.match(
+      blocked.blockReason ?? "",
+      /^\[PLAN_TASK_COMPLETION_INVALID\]/
+    );
+    const done = await runner.retry();
+    assert.equal(done.status, "done", done.blockReason ?? "");
+    await assertTraceComplete(trace, runner.store, done.runId);
+    await assertTrace(trace, repository.root, TRACE_COMPLETION_REPAIR);
+  } finally {
+    trace.stop();
+    await repository.dispose();
+  }
+});
+
+test("characterization: a completion publication failure is published on resume", async () => {
+  const repository = await createTestRepository();
+  const trace = recordPersistence();
+  try {
+    const adapters = new FakeAdapters();
+    adapters.reviewResults.push(passingReview());
+    const runner = new WorkflowRunner(repository.root, adapters);
+    const writeCandidate = runner.store.writeCompletionCandidate.bind(
+      runner.store
+    );
+    let injected = 0;
+    runner.store.writeCompletionCandidate = async (runId, candidate, bytes) => {
+      if (injected === 0) {
+        injected += 1;
+        throw new Error("ENOSPC: injected candidate write failure");
+      }
+      await writeCandidate(runId, candidate, bytes);
+    };
+    await runner.start({ slug: "example", request: "Implement it." });
+    const blocked = await runner.approvePlan("human");
+    assert.equal(blocked.status, "blocked", blocked.blockReason ?? "");
+    assert.match(blocked.blockReason ?? "", /^\[COMPLETION_PUBLICATION_IO\]/);
+    const done = await runner.resume();
+    assert.equal(done.status, "done", done.blockReason ?? "");
+    await assertTraceComplete(trace, runner.store, done.runId);
+    await assertTrace(trace, repository.root, TRACE_PUBLICATION_RESUME);
+  } finally {
+    trace.stop();
+    await repository.dispose();
+  }
+});
+
 const TRACE_LITE: readonly string[] = [
   "state created",
   "event run.created",
@@ -2961,6 +3039,98 @@ const TRACE_REVIEW_CHECKPOINT_RESUME: readonly string[] = [
   "event attempt.reconciled",
   "state reviewing",
   "event attempt.terminal_reconciled",
+  "event review.completed",
+  "state done"
+];
+
+const TRACE_COMPLETION_REPAIR: readonly string[] = [
+  "state created",
+  "event run.created",
+  "state selecting",
+  "state selecting",
+  "event attempt.started",
+  "state selecting",
+  "state planning",
+  "event workflow.selected",
+  "state planning",
+  "event attempt.started",
+  "state planning",
+  "state needs_plan_approval",
+  "event attempt.applied",
+  "state plan_approved",
+  "event approval.plan",
+  "state implementing",
+  "state implementing",
+  "event attempt.started",
+  "event attempt.terminal_checkpoint",
+  "state implementing",
+  "state implementing",
+  "state blocked <- implementing: [PLAN_TASK_COMPLETION_INVALID] Completed implementation outcome contradicts T001=incomplete.",
+  "event attempt.failed",
+  "event plan_task_completion.validation_failed",
+  "event completion.input_rejected",
+  "state implementing",
+  "event attempt.retry_requested",
+  "event plan_task_completion.retry_requested",
+  "state implementing",
+  "event attempt.started",
+  "event attempt.terminal_checkpoint",
+  "state implementing",
+  "state implementing",
+  "state implementing",
+  "state implementing",
+  "event completion.publication_applied",
+  "state implementing",
+  "state verifying",
+  "event attempt.applied",
+  "state verifying",
+  "state verifying",
+  "state reviewing",
+  "state reviewing",
+  "event attempt.started",
+  "event attempt.terminal_checkpoint",
+  "state reviewing",
+  "event review.completed",
+  "state done"
+];
+
+const TRACE_PUBLICATION_RESUME: readonly string[] = [
+  "state created",
+  "event run.created",
+  "state selecting",
+  "state selecting",
+  "event attempt.started",
+  "state selecting",
+  "state planning",
+  "event workflow.selected",
+  "state planning",
+  "event attempt.started",
+  "state planning",
+  "state needs_plan_approval",
+  "event attempt.applied",
+  "state plan_approved",
+  "event approval.plan",
+  "state implementing",
+  "state implementing",
+  "event attempt.started",
+  "event attempt.terminal_checkpoint",
+  "state implementing",
+  "state implementing",
+  "state blocked <- implementing: [COMPLETION_PUBLICATION_IO] Completion publication for implementation attempt implementation-1-<id> stopped at stage candidate. Retry with banzai resume once storage is available, or cancel.",
+  "event completion.publication_refused",
+  "state implementing",
+  "state implementing",
+  "event completion.publication_applied",
+  "state implementing",
+  "state verifying",
+  "event attempt.applied",
+  "state verifying",
+  "state verifying",
+  "state reviewing",
+  "state reviewing",
+  "event attempt.started",
+  "event attempt.terminal_checkpoint",
+  "state reviewing",
   "event review.completed",
   "state done"
 ];

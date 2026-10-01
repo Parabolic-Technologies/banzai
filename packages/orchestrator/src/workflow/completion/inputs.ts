@@ -9,6 +9,7 @@ import type {
   RunState
 } from "../../types.js";
 import type { RunnerContext } from "../context.js";
+import { digestCanonicalJson } from "../../validation.js";
 
 /**
  * Report identities plus the non-report workspace digest, omitting exactly
@@ -125,4 +126,17 @@ export async function observeReport(
       bytes: null
     };
   }
+}
+
+/** Exact identity equality for the report and workspace inputs of one capture. */
+export function sameObservedInputs(
+  a: CompletionObservedInputs,
+  b: CompletionObservedInputs
+): boolean {
+  return (
+    digestCanonicalJson(a.implementationReport) ===
+      digestCanonicalJson(b.implementationReport) &&
+    digestCanonicalJson(a.testReport) === digestCanonicalJson(b.testReport) &&
+    a.workspaceDigest === b.workspaceDigest
+  );
 }

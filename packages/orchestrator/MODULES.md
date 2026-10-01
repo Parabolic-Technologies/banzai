@@ -363,9 +363,14 @@ is a navigational reference and is updated with the module it describes.
   a patch on either reaches capability code. The runner keeps its mutable
   state in four per-instance owners and calls capability modules for
   approval, base-commit and selection validation, the attempt lifecycle,
-  terminal checkpoints, digest evidence and completion inputs. It keeps attempt
-  reconciliation and result application, calling the moved operations from
-  there. Only `now()` remains as a runner-side helper over the context.
+  terminal checkpoints, digest evidence, completion capture, refusal,
+  publication and revalidation, verification evidence and rounds, and
+  preflight check-failure recording. It keeps attempt reconciliation, every
+  application of a phase result to the run, the task-completion and
+  completion-publication status projections, and the phase executors,
+  including verification execution and applicability, calling the moved
+  operations from there. Only `now()` remains as a runner-side helper over the
+  context.
 
 - `workflow/ports.ts` — type-only ADR-0052 process-boundary ports: `Clock`
   (`() => Date`), `IdSource` (RFC 4122 version 4 UUID text) and
@@ -401,13 +406,43 @@ is a navigational reference and is updated with the module it describes.
   baseline, and derives the digest rejection reason text.
 - `workflow/completion/inputs.ts` — observes the implementation and test report
   identities and the workspace that completion capture and terminal proof
-  record.
+  record, and compares two observations exactly (`sameObservedInputs`).
 - `workflow/completion/plan-tasks.ts` — the approved plan path and task
   identifiers, runner control-task and planning-result validation (including
   the plan remainder digest), implementation-completion validation and the
   completion-invalid checkpoint.
+- `workflow/completion/refusal.ts` — `CompletionRefusal`, the ADR-0047
+  publication refusal whose closed code and stage are persisted with operator
+  guidance; rejecting a captured completion input with its repair checkpoint
+  (`plan_task_completion.validation_failed`, `completion.input_rejected`); and
+  refusing a publication with its `completion.publication_refused` event.
+- `workflow/completion/capture.ts` — the transition into the runner-owned
+  completion state (`COMPLETION_STATE_UNSUPPORTED` for an older run state), the
+  implementer-configuration digest and checkpoint-configuration check,
+  completion input capture, and the repair diagnostic and retry predecessor of
+  a completion attempt.
+- `workflow/completion/publication.ts` — publication continuation (capture,
+  then rejection, refusal or publication), candidate publication through the
+  completion cursor, ledger derivation and recording, the publication and
+  checkpoint authority checks, the application of a publication to its attempt
+  record, and reading a frozen publication. It ends where the runner applies
+  the phase result to the run. It depends on attempts and on the other
+  completion modules.
+- `workflow/completion/revalidation.ts` — revalidation of task completion and
+  of a published completion region, and the block a completion failure
+  records.
 - `workflow/verification/required-checks.ts` — the required task-check
   identifiers of the approved inventory and the task verification policy.
+- `workflow/verification/evidence.ts` — verification and task-verification
+  evidence storage, the verification authority digest, verification input
+  capture, decision preparation and the task execution context.
+- `workflow/verification/rounds.ts` — verification round identity
+  (`VERIFICATION_ATTEMPT_CONFLICT`) and reconciliation of the run's retained
+  verification results (`VERIFICATION_CONFIGURATION_CHANGED` when an open
+  round's commands changed).
+- `workflow/preflight/check-failures.ts` — records a failed start, review check
+  or verification-retry preflight as a block, with `run.start_failed`,
+  `review.checks_failed` or `verification.retry_preflight_failed`.
 - `workflow/attempts/lifecycle.ts` — `AttemptPolicy`, attempt, recovery and
   completion-repair identities, attempt scope digests, starting, completing and
   failing attempts, recovery attempts, process start, adapter-result and
@@ -417,8 +452,8 @@ is a navigational reference and is updated with the module it describes.
 - `workflow/checkpoints/terminal-checkpoints.ts` — terminal checkpoint writing
   (including completion-protocol proof), finalization, promotion and result
   validation, checkpoint model settings and result-source identity evidence.
-  It is the one capability module with several edges: attempts, completion,
-  verification, review, preflight and digest evidence.
+  It depends on attempts, completion, verification, review, preflight and
+  digest evidence.
 - `workflow/domain/failure-classes.ts` — ADR-0052 domain module holding the
   model-failure cause and failure-code sets, the `[RESULT_DIGEST_UNRESOLVED]`
   block-reason prefix and the read-only-attempt retry predicate that retry,

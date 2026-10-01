@@ -949,7 +949,14 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       permission("./workflow/verification/required-checks.js", ADR_0052),
       permission("./workflow/attempts/result-scope.js", ADR_0052),
       permission("./workflow/attempts/lifecycle.js", ADR_0052),
-      permission("./workflow/checkpoints/terminal-checkpoints.js", ADR_0052)
+      permission("./workflow/checkpoints/terminal-checkpoints.js", ADR_0052),
+      permission("./workflow/completion/refusal.js", ADR_0052),
+      permission("./workflow/completion/capture.js", ADR_0052),
+      permission("./workflow/completion/publication.js", ADR_0052),
+      permission("./workflow/completion/revalidation.js", ADR_0052),
+      permission("./workflow/verification/evidence.js", ADR_0052),
+      permission("./workflow/verification/rounds.js", ADR_0052),
+      permission("./workflow/preflight/check-failures.js", ADR_0052)
     ],
     [
       permission("./human-time.js", ADR_0034),
@@ -1141,7 +1148,10 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
     "src/workflow/completion/inputs.ts",
     "workflow-completion-inputs",
     [ADR_0052],
-    [permission("../../git.js", ADR_0052)],
+    [
+      permission("../../git.js", ADR_0052),
+      permission("../../validation.js", ADR_0052)
+    ],
     [
       permission("../../types.js", ADR_0052),
       permission("../context.js", ADR_0052)
@@ -1232,6 +1242,112 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       permission("../verification/required-checks.js", ADR_0052)
     ],
     [permission("../context.js", ADR_0052)]
+  ),
+  boundary(
+    "src/workflow/completion/refusal.ts",
+    "workflow-completion-refusal",
+    [ADR_0052],
+    [
+      permission("../../errors.js", ADR_0052),
+      permission("../../plan-task-completion.js", ADR_0052),
+      permission("../../state-machine.js", ADR_0052),
+      permission("../../types.js", ADR_0052),
+      permission("../attempts/lifecycle.js", ADR_0052),
+      permission("../context.js", ADR_0052)
+    ],
+    []
+  ),
+  boundary(
+    "src/workflow/completion/capture.ts",
+    "workflow-completion-capture",
+    [ADR_0052],
+    [
+      permission("../../errors.js", ADR_0052),
+      permission("../../models.js", ADR_0052),
+      permission("../../plan-task-completion.js", ADR_0052),
+      permission("../../types.js", ADR_0052),
+      permission("../../validation.js", ADR_0052),
+      permission("../attempts/lifecycle.js", ADR_0052),
+      permission("../domain/sessions.js", ADR_0052),
+      permission("./inputs.js", ADR_0052),
+      permission("./plan-tasks.js", ADR_0052),
+      permission("./refusal.js", ADR_0052)
+    ],
+    [permission("../context.js", ADR_0052)]
+  ),
+  boundary(
+    "src/workflow/completion/publication.ts",
+    "workflow-completion-publication",
+    [ADR_0052],
+    [
+      permission("../../artifact-storage.js", ADR_0052),
+      permission("../../errors.js", ADR_0052),
+      permission("../../git.js", ADR_0052),
+      permission("../../plan-task-completion.js", ADR_0052),
+      permission("../../types.js", ADR_0052),
+      permission("../../validation.js", ADR_0052),
+      permission("../attempts/lifecycle.js", ADR_0052),
+      permission("../context.js", ADR_0052),
+      permission("./capture.js", ADR_0052),
+      permission("./inputs.js", ADR_0052),
+      permission("./plan-tasks.js", ADR_0052),
+      permission("./refusal.js", ADR_0052)
+    ],
+    []
+  ),
+  boundary(
+    "src/workflow/completion/revalidation.ts",
+    "workflow-completion-revalidation",
+    [ADR_0052],
+    [
+      permission("../../errors.js", ADR_0052),
+      permission("../../plan-task-completion.js", ADR_0052),
+      permission("../../state-machine.js", ADR_0052),
+      permission("../../types.js", ADR_0052),
+      permission("../../validation.js", ADR_0052),
+      permission("./plan-tasks.js", ADR_0052),
+      permission("./publication.js", ADR_0052)
+    ],
+    [permission("../context.js", ADR_0052)]
+  ),
+  boundary(
+    "src/workflow/verification/evidence.ts",
+    "workflow-verification-evidence",
+    [ADR_0052],
+    [
+      permission("../../errors.js", ADR_0052),
+      permission("../../process.js", ADR_0052),
+      permission("../../verification-evidence.js", ADR_0052),
+      permission("../../verification.js", ADR_0052),
+      permission("../completion/plan-tasks.js", ADR_0052)
+    ],
+    [
+      permission("../../types.js", ADR_0052),
+      permission("../context.js", ADR_0052)
+    ]
+  ),
+  boundary(
+    "src/workflow/verification/rounds.ts",
+    "workflow-verification-rounds",
+    [ADR_0052],
+    [
+      permission("../../errors.js", ADR_0052),
+      permission("../domain/verification-attempts.js", ADR_0052)
+    ],
+    [permission("../../types.js", ADR_0052)]
+  ),
+  boundary(
+    "src/workflow/preflight/check-failures.ts",
+    "workflow-preflight-check-failures",
+    [ADR_0052],
+    [
+      permission("../../state-machine.js", ADR_0052),
+      permission("../domain/failure-classes.js", ADR_0052)
+    ],
+    [
+      permission("../../types.js", ADR_0052),
+      permission("../context.js", ADR_0052)
+    ]
   ),
   boundary(
     "src/workflow/ports.ts",

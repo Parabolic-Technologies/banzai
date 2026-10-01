@@ -222,13 +222,25 @@ setup reuses the existing runner lock without stale ownership reclamation.
   - **Mutable state.** Each piece of runner state has one per-instance owner
     that exposes operations: the activity sequence, the cancellation receipts,
     configuration ownership and the invocation-scope cache.
-  - **Capability slices.** The attempt lifecycle, terminal checkpoints, digest
-    evidence and the leaf validations they call live in `src/workflow/`
-    capability modules; attempt reconciliation and result application stay
-    in the runner. Edges between capability modules are explicit and acyclic:
-    checkpoints depend on attempts, completion, verification, review,
-    preflight and digest evidence; attempts and verification depend on
-    completion; completion depends on digest evidence.
+  - **Capability slices.** These live in `src/workflow/` capability modules:
+    - the attempt lifecycle, terminal checkpoints and digest evidence;
+    - the runner-owned completion protocol up to the phase result: capture,
+      rejection, refusal, publication and revalidation;
+    - the verification evidence and round operations;
+    - preflight check-failure recording;
+    - the leaf validations these call.
+
+    Attempt reconciliation, every application of a phase result to the run,
+    the status projections and the phase executors stay in the runner.
+
+    Edges between capability modules are named per work item. Checkpoints
+    depend on attempts, completion, verification, review, preflight and digest
+    evidence. The attempt lifecycle depends on the completion plan-task
+    module, and completion capture, refusal and publication depend on the
+    attempt lifecycle. Verification depends on completion, and completion
+    depends on digest evidence. The module graph is acyclic, although attempts
+    and completion depend on each other at directory level.
+
   - **Facade edge.** The import-boundary policy rejects any `src/workflow/**`
     entry that permits `src/workflow.ts` (`workflow_facade_edge`).
 - Concurrency: one Node process using `async`/`await`. Each model phase and each
@@ -442,9 +454,17 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   `sources` constructor argument (`{ clock?, ids? }`) supplies the time and
   UUIDs from which every runner-generated timestamp, duration and identifier
   derives. The defaults are the system clock and `randomUUID`, and each
-  identifier keeps its derived shape. Approval-digest and base-commit
-  validation, the attempt lifecycle, terminal checkpoints and digest evidence
-  are delegated to `src/workflow/` capability modules.
+  identifier keeps its derived shape. The runner delegates to
+  `src/workflow/` capability modules:
+  - approval-digest and base-commit validation;
+  - the attempt lifecycle, terminal checkpoints and digest evidence;
+  - completion capture, refusal, publication and revalidation;
+  - verification evidence and rounds;
+  - preflight check-failure recording.
+
+  It keeps attempt reconciliation, phase-result application, the status
+  projections and the phase executors.
+
 - `workflow/ports.ts` — the type-only `Clock`, `IdSource` and `RunnerSources`
   process-boundary ports, re-exported from `workflow.ts`.
 - `workflow/context.ts` — `RunnerContext`, the frozen collaborator record, with
@@ -462,9 +482,24 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
 - `workflow/digest-evidence/records.ts` — result-digest evidence records, their
   baseline and the rejection reason text.
 - `workflow/completion/inputs.ts` and `plan-tasks.ts` — completion input
-  observation, the approved plan path and task identifiers, runner
-  control-task and planning-result validation, implementation-completion
-  validation and the completion-invalid checkpoint.
+  observation and comparison, the approved plan path and task identifiers,
+  runner control-task and planning-result validation,
+  implementation-completion validation and the completion-invalid checkpoint.
+- `workflow/completion/refusal.ts`, `capture.ts`, `publication.ts` and
+  `revalidation.ts` — the ADR-0047 completion protocol up to the phase result:
+  - the publication refusal error, and input rejection with its repair
+    checkpoint;
+  - the completion-state transition and input capture;
+  - publication continuation, candidate publication, ledger derivation, the
+    authority checks and the application of a publication to its attempt
+    record;
+  - revalidation of task completion and published completion, and the
+    completion-failure block.
+- `workflow/verification/evidence.ts` and `rounds.ts` — verification evidence
+  storage, authority, input capture, decision preparation and the task
+  execution context, and round identity and retained-result reconciliation.
+- `workflow/preflight/check-failures.ts` — records a failed start, review check
+  or verification-retry preflight as a block.
 - `workflow/preflight/approval.ts` — plan-approval, base-commit and
   workflow-selection validation and `workflowAuthorizationDigest`, which
   `workflow.ts` re-exports.
@@ -1101,17 +1136,27 @@ attempt, approval marker or transcript.
   release transactions, validation, the gate and committed smoke.
 - Characterization (ADR-0052): test cases named `characterization: ` in
   `workflow.test.ts` and `result-digest.test.ts` assert the ordered persisted
-  state and event traces of twelve representative run flows. The flows are
-  lite and strict completion, a fix cycle, task-check retry, interrupted,
-  prerequisite-blocked and digest-rejected recovery, approval restore, the
-  `status` approval block, cancellation, and an implementation or review
-  failure after its terminal checkpoint reconciled by `resume`. Identifiers, timestamps, digests
-  and repository paths are normalized. The expected traces were recorded from
-  the pre-decomposition source, and behavior-preserving refactors must leave
-  them unchanged. Test cases named `eligibility baseline: ` in
-  `workflow-eligibility.test.ts` and `result-digest.test.ts` likewise fix the
-  retry, recovery, restore and next-action eligibility that the public runner
-  reports for arranged run states, and the state persisted afterwards.
+  state and event traces of fourteen representative run flows:
+  - lite and strict completion;
+  - a fix cycle;
+  - task-check retry;
+  - interrupted, prerequisite-blocked and digest-rejected recovery;
+  - approval restore;
+  - the `status` approval block;
+  - cancellation;
+  - an implementation or review failure after its terminal checkpoint,
+    reconciled by `resume`;
+  - an incomplete completion claim repaired by one linked attempt;
+  - a completion publication failure published on `resume`.
+
+  Identifiers, timestamps, digests and repository paths are normalized. The
+  expected traces were recorded from the pre-decomposition source, and
+  behavior-preserving refactors must leave them unchanged. Test cases named
+  `eligibility baseline: ` in `workflow-eligibility.test.ts` and
+  `result-digest.test.ts` likewise fix the retry, recovery, restore and
+  next-action eligibility that the public runner reports for arranged run
+  states, and the state persisted afterwards.
+
 - Import pattern: production code is imported with NodeNext ESM specifiers —
   `import { … } from "../src/<module>.js"` — and type-only imports are marked
   `type` because `verbatimModuleSyntax` is on.
