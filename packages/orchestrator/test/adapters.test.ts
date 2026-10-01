@@ -1070,6 +1070,82 @@ test("preflight accepts subscription auth and rejects Claude API auth", async ()
   );
 });
 
+test("preflight refuses a CLI older than the configured model's release before checking authentication", async () => {
+  for (const fixture of [
+    {
+      vendor: "claude",
+      model: "claude-opus-5-5",
+      version: (value: string) => `${value} (Claude Code)\n`,
+      vendorMinimum: "2.1.218",
+      belowVendorMinimum: "2.1.217",
+      tooOld: "2.1.279",
+      required: "2.1.280"
+    },
+    {
+      vendor: "codex",
+      model: "gpt-6.1-sol",
+      version: (value: string) => `codex-cli ${value}\n`,
+      vendorMinimum: "0.145.0",
+      belowVendorMinimum: "0.144.9",
+      tooOld: "0.159.0",
+      required: "0.159.1"
+    }
+  ] as const) {
+    const calls: string[][] = [];
+    const preflight = async (
+      installed: string,
+      model: string | null
+    ): Promise<void> => {
+      const adapters = createVendorAdapters(async (spec) => {
+        calls.push(spec.args);
+        if (spec.args[0] === "--version") {
+          return successful(fixture.version(installed));
+        }
+        if (spec.args[0] === "login") {
+          return successful("Logged in using ChatGPT\n");
+        }
+        return successful(
+          JSON.stringify({
+            loggedIn: true,
+            authMethod: "oauth",
+            apiProvider: "firstParty"
+          })
+        );
+      });
+      const target = { executable: fixture.vendor, model };
+      const env = { CODEX_HOME: tmpdir(), PATH: process.env.PATH };
+      await (fixture.vendor === "claude"
+        ? adapters.preflightClaude(target, env)
+        : adapters.preflightCodex(target, env));
+    };
+
+    await assert.rejects(
+      preflight(fixture.tooOld, fixture.model),
+      (error: unknown) => {
+        assert.ok(error instanceof BanzaiError);
+        assert.equal(error.code, "CLI_TOO_OLD");
+        assert.equal(
+          error.message,
+          `${fixture.vendor} ${fixture.tooOld} cannot run ${fixture.model}, which requires ${fixture.required} or newer. Update ${fixture.vendor}, or choose another model with \`banzai model\`.`
+        );
+        return true;
+      }
+    );
+    assert.deepEqual(calls, [["--version"]], fixture.vendor);
+    await assert.rejects(
+      preflight(fixture.belowVendorMinimum, fixture.model),
+      new RegExp(`is older than required ${fixture.vendorMinimum}\\.$`)
+    );
+
+    calls.length = 0;
+    await preflight(fixture.required, fixture.model);
+    assert.equal(calls.length, 2, fixture.vendor);
+    // A launch that leaves model choice to the client needs only the
+    // vendor-wide minimum.
+    await preflight(fixture.vendorMinimum, null);
+  }
+});
+
 test("redaction removes credential-shaped values", () => {
   const redacted = redactSensitiveText(
     '{"api_key":"secret-value"} sk-ant-abcdefghijklmnop'

@@ -405,6 +405,7 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       permission("./adapters.js", MANIFEST_ARCHITECTURE),
       permission("./agent-control-cli.js", MANIFEST_MODULES),
       permission("./ansi.js", MANIFEST_MODULES),
+      permission("./claude-permissions.js", MANIFEST_MODULES),
       permission("./cli-routing.js", MANIFEST_MODULES),
       permission("./version-cli.js", MANIFEST_MODULES),
       permission("./config.js", MANIFEST_MODULES),

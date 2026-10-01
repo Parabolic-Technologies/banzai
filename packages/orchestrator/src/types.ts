@@ -2418,13 +2418,22 @@ export interface ReviewAdapterRequest {
   };
 }
 
+/**
+ * What a vendor preflight checks: the executable, and the model the invocation
+ * will request, or `null` for a launch that leaves model choice to the client.
+ */
+export interface VendorPreflightTarget {
+  executable: string;
+  model: string | null;
+}
+
 export interface VendorAdapters {
   preflightCodex(
-    settings: ModelSettings,
+    target: VendorPreflightTarget,
     env?: NodeJS.ProcessEnv
   ): Promise<void>;
   preflightClaude(
-    settings: ModelSettings,
+    target: VendorPreflightTarget,
     env?: NodeJS.ProcessEnv
   ): Promise<void>;
   runSelection(

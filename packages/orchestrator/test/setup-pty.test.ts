@@ -5,6 +5,7 @@ import {
   cp,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   realpath,
   rm,
@@ -224,8 +225,11 @@ test("setup PTY fresh and repeated init preserve default wording and offer manua
         result.output,
         /What should Banzai implement|GIT_INITIAL_COMMIT_REQUIRED/
       );
+      // The hook grants a fresh project's writes, so nothing stops its first run.
+      assert.doesNotMatch(result.output, /Claude permissions:/);
     }
     await assert.rejects(readFile(host.capture), /ENOENT/);
+    await assert.rejects(readdir(path.join(host.root, ".claude")), /ENOENT/);
   } finally {
     await host.dispose();
   }
@@ -266,6 +270,7 @@ test("setup PTY independently packaged CLI transfers each explicit skill with TT
           /Project guidance ready\s+PROJECT_MANIFEST\.md\s+Present\s+AGENTS\.md\s+Present\s+CLAUDE\.md\s+Missing \(optional\)/
         );
         assert.doesNotMatch(result.output, /What should Banzai implement/);
+        assert.doesNotMatch(result.output, /Claude permissions:/);
         const captured = JSON.parse(
           await readFile(host.capture, "utf8")
         ) as StubCapture;
@@ -364,6 +369,12 @@ test("setup CLI non-TTY init creates local verification guidance without launchi
   delete host.env.BANZAI_APPROVAL_DIGEST;
   delete host.env.BANZAI_WORKFLOW_DIGEST;
   try {
+    // A refusing rule is the one permission gap that stops the first run, so
+    // init names it and leaves the operator's settings untouched.
+    const settings = path.join(host.root, ".claude/settings.json");
+    const refusal = `${JSON.stringify({ permissions: { deny: ["Write"] } })}\n`;
+    await mkdir(path.dirname(settings));
+    await writeFile(settings, refusal);
     for (const args of [[], ["setup"], ["init"]]) {
       const result = spawnSync(process.execPath, [host.cli, ...args], {
         cwd: host.root,
@@ -399,6 +410,11 @@ test("setup CLI non-TTY init creates local verification guidance without launchi
           )
         );
         assert.match(guide, /without verification profiles/);
+        assert.match(
+          result.stdout,
+          /Claude permissions: A deny or ask rule refuses Write\.[^\n]*\nFix it before the first run: remove the deny or ask rules naming "Write"[^\n]*\.\nRun banzai doctor/
+        );
+        assert.equal(await readFile(settings, "utf8"), refusal);
         await writeFile(
           guidePath,
           "# Project-specific checks\r\nKeep my edits.\r\n"

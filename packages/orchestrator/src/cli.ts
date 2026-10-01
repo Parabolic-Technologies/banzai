@@ -19,7 +19,14 @@ import {
 import { HumanTimeStore } from "./human-time-store.js";
 import process from "node:process";
 import packageManifest from "../package.json" with { type: "json" };
-import { createVendorAdapters } from "./adapters.js";
+import {
+  createVendorAdapters,
+  resolveClaudeInvocationScope
+} from "./adapters.js";
+import {
+  claudePermissionRemediation,
+  inspectConfiguredClaudePermissions
+} from "./claude-permissions.js";
 import {
   executeAgentControlCapabilities,
   executeAgentControlCommand,
@@ -128,6 +135,32 @@ function authenticationGateway(
       }
     }
   };
+}
+
+/**
+ * Names the Claude permission gap that would stop the first planning phase
+ * while the operator is still setting the project up. It only reads: granting
+ * the rule stays the operator's decision.
+ */
+async function reportClaudePermissionGaps(
+  repoRoot: string,
+  config: OrchestratorConfig
+): Promise<void> {
+  const permissions = await inspectConfiguredClaudePermissions(
+    repoRoot,
+    config,
+    { resolveScope: resolveClaudeInvocationScope }
+  );
+  if (
+    permissions.state !== "audited" ||
+    permissions.audit.blocking.length === 0
+  ) {
+    return;
+  }
+  console.log(`Claude permissions: ${permissions.audit.blocking.join(" ")}`);
+  console.log(
+    `Fix it before the first run: ${claudePermissionRemediation(permissions.audit)}.`
+  );
 }
 
 function modelConfigurationGateway(
@@ -805,6 +838,7 @@ async function main(): Promise<void> {
     console.log(
       "Verification follows each task; no profile setup is required."
     );
+    await reportClaudePermissionGaps(repoRoot, config);
     console.log(
       "Run banzai doctor, then review and commit your files before starting a task."
     );
@@ -843,11 +877,14 @@ async function main(): Promise<void> {
         "TTY_REQUIRED",
         `banzai setup requires terminal input and output. Open your client in this project and explicitly invoke banzai:project-manifest, or rerun banzai setup in a terminal. ${SETUP_PLUGIN_PREREQUISITE}`
       );
+    const config = await loadConfig(repoRoot);
     process.exitCode = await runProjectSetup(
       repoRoot,
-      await loadConfig(repoRoot),
+      config,
       new InquirerInteractiveIO()
     );
+    if (process.exitCode === 0)
+      await reportClaudePermissionGaps(repoRoot, config);
     return;
   }
   if (mode === "interactive") {

@@ -315,9 +315,11 @@ export async function prepareSetupLaunch(
     );
   const env = setupEnvironment(sourceEnvironment);
   const adapters = dependencies.adapters ?? createVendorAdapters(runner);
-  if (client.vendor === "codex")
-    await adapters.preflightCodex(fresh.settings, env);
-  else await adapters.preflightClaude(fresh.settings, env);
+  // The setup session passes no `--model`, so no configured model's CLI floor
+  // applies to it.
+  const target = { executable: fresh.settings.executable, model: null };
+  if (client.vendor === "codex") await adapters.preflightCodex(target, env);
+  else await adapters.preflightClaude(target, env);
   const mcp = await resolveSerenaWhitelist({
     repoRoot,
     codexExecutable:

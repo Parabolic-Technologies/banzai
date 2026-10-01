@@ -5719,6 +5719,14 @@ var CLAUDE_CATALOG = {
     ["claude-3-sonnet-20240229", retired(SONNET, "2025-07-21")],
     ["claude-3-5-haiku-20241022", retired(HAIKU, "2026-02-19")],
     ["claude-3-haiku-20240307", retired(HAIKU, "2026-04-20")]
+  ]),
+  // From Claude Code's model configuration documentation. An older client
+  // refuses these models itself, before any request; tier aliases need no
+  // entry because they resolve to a model the installed client serves.
+  cliMinimums: /* @__PURE__ */ new Map([
+    [OPUS, "2.1.280"],
+    [SONNET, "2.1.284"],
+    ["claude-fable-5-1", "2.1.257"]
   ])
 };
 var CODEX_SOL = "gpt-6.1-sol";
@@ -5737,6 +5745,14 @@ var CODEX_CATALOG = {
     ["gpt-5.4", retired(CODEX_SOL, "2026-08-31")],
     ["gpt-5.4-mini", retired("gpt-6-luna", "2026-08-31")],
     ["gpt-5", superseded(CODEX_SOL)]
+  ]),
+  // The first stable Codex CLI release whose bundled model catalog carries the
+  // model, from the Codex CLI release notes.
+  cliMinimums: /* @__PURE__ */ new Map([
+    [CODEX_SOL, "0.159.1"],
+    ["gpt-6-sol", "0.156.1"],
+    ["gpt-6-luna", "0.156.1"],
+    ["gpt-6-astra", "0.153.1"]
   ])
 };
 var FULL_EFFORTS = [
@@ -12500,6 +12516,14 @@ var CLAUDE_CATALOG2 = {
     ["claude-3-sonnet-20240229", retired2(SONNET2, "2025-07-21")],
     ["claude-3-5-haiku-20241022", retired2(HAIKU2, "2026-02-19")],
     ["claude-3-haiku-20240307", retired2(HAIKU2, "2026-04-20")]
+  ]),
+  // From Claude Code's model configuration documentation. An older client
+  // refuses these models itself, before any request; tier aliases need no
+  // entry because they resolve to a model the installed client serves.
+  cliMinimums: /* @__PURE__ */ new Map([
+    [OPUS2, "2.1.280"],
+    [SONNET2, "2.1.284"],
+    ["claude-fable-5-1", "2.1.257"]
   ])
 };
 var CODEX_SOL2 = "gpt-6.1-sol";
@@ -12518,6 +12542,14 @@ var CODEX_CATALOG2 = {
     ["gpt-5.4", retired2(CODEX_SOL2, "2026-08-31")],
     ["gpt-5.4-mini", retired2("gpt-6-luna", "2026-08-31")],
     ["gpt-5", superseded2(CODEX_SOL2)]
+  ]),
+  // The first stable Codex CLI release whose bundled model catalog carries the
+  // model, from the Codex CLI release notes.
+  cliMinimums: /* @__PURE__ */ new Map([
+    [CODEX_SOL2, "0.159.1"],
+    ["gpt-6-sol", "0.156.1"],
+    ["gpt-6-luna", "0.156.1"],
+    ["gpt-6-astra", "0.153.1"]
   ])
 };
 var CATALOGS = /* @__PURE__ */ new Map([
@@ -12660,6 +12692,9 @@ function selectableModel(id3) {
 }
 function isCatalogSupportedModel(vendor, id3) {
   return CATALOGS.get(vendor)?.supported.has(id3) ?? false;
+}
+function modelCliMinimum(vendor, model) {
+  return CATALOGS.get(vendor)?.cliMinimums.get(model) ?? null;
 }
 var FALLBACK_VENDOR = {
   planner: "codex",
@@ -24360,7 +24395,7 @@ import process7 from "node:process";
 // package.json
 var package_default = {
   name: "@parabolic-technologies/banzai",
-  version: "2.6.4",
+  version: "2.6.5",
   private: false,
   description: "Spec-driven AI development CLI for Codex and Claude Code, with human approvals and independent review for complex changes.",
   keywords: [
@@ -27028,9 +27063,9 @@ async function requireCodexStateWriteAccess(sourceEnvironment) {
     );
   }
 }
-async function requireVersion(runner, settings, minimum, sourceEnvironment = process.env) {
+async function requireVersion(runner, vendor, target, sourceEnvironment = process.env) {
   const result = await runner({
-    command: settings.executable,
+    command: target.executable,
     args: ["--version"],
     cwd: process.cwd(),
     env: subscriptionOnlyEnvironment(sourceEnvironment),
@@ -27039,17 +27074,25 @@ async function requireVersion(runner, settings, minimum, sourceEnvironment = pro
   if (result.exitCode !== 0) {
     throw new BanzaiError(
       "CLI_UNAVAILABLE",
-      `${settings.executable} --version failed: ${result.stderr.trim()}`
+      `${target.executable} --version failed: ${result.stderr.trim()}`
     );
   }
   const actual = parseVersion(
     result.stdout || result.stderr,
-    settings.executable
+    target.executable
   );
+  const minimum = vendor === "claude" ? MINIMUM_CLAUDE_VERSION : MINIMUM_CODEX_VERSION;
   if (!versionAtLeast(actual, minimum)) {
     throw new BanzaiError(
       "CLI_TOO_OLD",
-      `${settings.executable} ${actual} is older than required ${minimum}.`
+      `${target.executable} ${actual} is older than required ${minimum}.`
+    );
+  }
+  const modelMinimum = target.model === null ? null : modelCliMinimum(vendor, target.model);
+  if (modelMinimum !== null && !versionAtLeast(actual, modelMinimum)) {
+    throw new BanzaiError(
+      "CLI_TOO_OLD",
+      `${target.executable} ${actual} cannot run ${target.model}, which requires ${modelMinimum} or newer. Update ${target.executable}, or choose another model with \`banzai model\`.`
     );
   }
 }
@@ -27527,16 +27570,11 @@ function createVendorAdapters(runner = runProcess) {
         runner
       });
     },
-    async preflightCodex(settings, sourceEnvironment = process.env) {
+    async preflightCodex(target, sourceEnvironment = process.env) {
       await requireCodexStateWriteAccess(sourceEnvironment);
-      await requireVersion(
-        runner,
-        settings,
-        MINIMUM_CODEX_VERSION,
-        sourceEnvironment
-      );
+      await requireVersion(runner, "codex", target, sourceEnvironment);
       const result = await runner({
-        command: settings.executable,
+        command: target.executable,
         args: ["login", "status"],
         cwd: process.cwd(),
         env: subscriptionOnlyEnvironment(sourceEnvironment),
@@ -27549,15 +27587,10 @@ function createVendorAdapters(runner = runProcess) {
         );
       }
     },
-    async preflightClaude(settings, sourceEnvironment = process.env) {
-      await requireVersion(
-        runner,
-        settings,
-        MINIMUM_CLAUDE_VERSION,
-        sourceEnvironment
-      );
+    async preflightClaude(target, sourceEnvironment = process.env) {
+      await requireVersion(runner, "claude", target, sourceEnvironment);
       const result = await runner({
-        command: settings.executable,
+        command: target.executable,
         args: ["auth", "status", "--json"],
         cwd: process.cwd(),
         env: subscriptionOnlyEnvironment(sourceEnvironment),
@@ -27889,6 +27922,270 @@ function createVendorAdapters(runner = runProcess) {
   };
 }
 
+// src/claude-permissions.ts
+import { readFile as readFile7 } from "node:fs/promises";
+import { homedir as homedir3 } from "node:os";
+import path19 from "node:path";
+var ALL_SOURCES = [
+  "user",
+  "project",
+  "local"
+];
+var MANAGED_SETTINGS_FILES = {
+  darwin: "/Library/Application Support/ClaudeCode/managed-settings.json",
+  linux: "/etc/claude-code/managed-settings.json"
+};
+var EMPTY_RULES = { allow: [], deny: [], ask: [] };
+function isRecord3(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function stringArray2(value) {
+  return Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : [];
+}
+function ruleTool(rule) {
+  const open14 = rule.indexOf("(");
+  return (open14 === -1 ? rule : rule.slice(0, open14)).trim();
+}
+function namesTool(rule, tool) {
+  return ruleTool(rule) === tool;
+}
+function isUnscoped(rule) {
+  return !rule.includes("(");
+}
+function homeDirectory(env) {
+  const configured = env.HOME;
+  return configured === void 0 || configured.length === 0 ? homedir3() : configured;
+}
+function configDirectory(env) {
+  const configured = env.CLAUDE_CONFIG_DIR;
+  return configured === void 0 || configured.length === 0 ? null : configured;
+}
+function trustFile(env) {
+  const configured = configDirectory(env);
+  return configured === null ? path19.join(homeDirectory(env), ".claude.json") : path19.join(configured, ".claude.json");
+}
+function settingsFile(source, repoRoot, env) {
+  if (source === "user") {
+    return path19.join(
+      configDirectory(env) ?? path19.join(homeDirectory(env), ".claude"),
+      "settings.json"
+    );
+  }
+  return path19.join(
+    repoRoot,
+    ".claude",
+    source === "project" ? "settings.json" : "settings.local.json"
+  );
+}
+async function readRules(filePath) {
+  let raw;
+  try {
+    raw = await readFile7(filePath, "utf8");
+  } catch {
+    return { rules: EMPTY_RULES, intact: true };
+  }
+  try {
+    const document = JSON.parse(raw);
+    const permissions = isRecord3(document) ? document.permissions : void 0;
+    if (!isRecord3(permissions)) {
+      return { rules: EMPTY_RULES, intact: true };
+    }
+    return {
+      rules: {
+        allow: stringArray2(permissions.allow),
+        deny: stringArray2(permissions.deny),
+        ask: stringArray2(permissions.ask)
+      },
+      intact: true
+    };
+  } catch {
+    return { rules: EMPTY_RULES, intact: false };
+  }
+}
+async function readManagedRules(override) {
+  const file = override === void 0 ? MANAGED_SETTINGS_FILES[process.platform] : override;
+  return file === void 0 || file === null ? { rules: EMPTY_RULES, intact: true } : await readRules(file);
+}
+async function inspectTrust(repoRoot, env) {
+  let raw;
+  try {
+    raw = await readFile7(trustFile(env), "utf8");
+  } catch {
+    return "unknown";
+  }
+  try {
+    const document = JSON.parse(raw);
+    const projects = isRecord3(document) ? document.projects : void 0;
+    if (!isRecord3(projects)) {
+      return "untrusted";
+    }
+    const entry = projects[repoRoot];
+    return isRecord3(entry) && entry.hasTrustDialogAccepted === true ? "trusted" : "untrusted";
+  } catch {
+    return "unknown";
+  }
+}
+function resolveGrant(tool, refusing, granting) {
+  for (const set of refusing) {
+    const refused = [...set.deny, ...set.ask];
+    if (refused.some((rule) => namesTool(rule, tool) && isUnscoped(rule))) {
+      return "denied";
+    }
+  }
+  let scoped = false;
+  for (const set of granting) {
+    for (const rule of set.allow) {
+      if (!namesTool(rule, tool)) {
+        continue;
+      }
+      if (isUnscoped(rule)) {
+        return "granted";
+      }
+      scoped = true;
+    }
+  }
+  return scoped ? "scoped" : "missing";
+}
+function parseSources(settingSources) {
+  if (settingSources === null) {
+    return [...ALL_SOURCES];
+  }
+  const named = new Set(
+    settingSources.split(",").map((entry) => entry.trim()).filter((entry) => entry.length > 0)
+  );
+  return ALL_SOURCES.filter((source) => named.has(source));
+}
+function claudePermissionDemand(config) {
+  const claudeRoles = new Set(
+    MODEL_ROLES.filter(
+      (role) => (vendorFor(config.models[role].executable) ?? FALLBACK_VENDOR[role]) === "claude"
+    )
+  );
+  const builds = claudeRoles.has("planner") || claudeRoles.has("implementer");
+  return { fileWrites: builds, shellCommands: builds };
+}
+function claudePermissionDemanded(demand) {
+  return demand.fileWrites || demand.shellCommands;
+}
+async function inspectConfiguredClaudePermissions(repoRoot, config, dependencies) {
+  const demand = claudePermissionDemand(config);
+  if (!claudePermissionDemanded(demand)) {
+    return { state: "not_demanded" };
+  }
+  let settingSources;
+  try {
+    settingSources = (await dependencies.resolveScope(config.claudeEnvironment)).scope.settingSources;
+  } catch {
+    return { state: "unresolved" };
+  }
+  const audit = await (dependencies.inspect ?? inspectClaudePermissions)({
+    repoRoot,
+    demand,
+    settingSources
+  });
+  return { state: "audited", audit };
+}
+async function inspectClaudePermissions(input) {
+  const env = input.env ?? process.env;
+  const repoRoot = path19.resolve(input.repoRoot);
+  const demand = input.demand;
+  const sources = parseSources(input.settingSources);
+  const [managed, trust, loaded, unloadedLocal] = await Promise.all([
+    readManagedRules(input.managedSettingsFile),
+    inspectTrust(repoRoot, env),
+    Promise.all(
+      sources.map(async (source) => ({
+        source,
+        ...await readRules(settingsFile(source, repoRoot, env))
+      }))
+    ),
+    sources.includes("local") ? Promise.resolve(null) : readRules(settingsFile("local", repoRoot, env))
+  ]);
+  const honored = loaded.filter(
+    (entry) => entry.source === "user" || trust !== "untrusted"
+  );
+  const granting = [managed.rules, ...honored.map((entry) => entry.rules)];
+  const refusing = [managed.rules, ...loaded.map((entry) => entry.rules)];
+  const audited = [
+    ...demand.fileWrites ? ["Write", "Edit"] : [],
+    ...demand.shellCommands ? ["Bash"] : []
+  ];
+  const tools = audited.map((tool) => ({
+    tool,
+    grant: resolveGrant(tool, refusing, granting)
+  }));
+  const grantOf = (tool) => tools.find((entry) => entry.tool === tool)?.grant ?? null;
+  const repositoryRulesIgnored = trust === "untrusted" && loaded.some(
+    (entry) => entry.source !== "user" && entry.rules.allow.length > 0
+  );
+  const blocking = [];
+  const advisories = [];
+  const refused = tools.filter((entry) => entry.tool !== "Bash" && entry.grant === "denied").map((entry) => entry.tool);
+  if (refused.length > 0) {
+    blocking.push(
+      `A deny or ask rule refuses ${refused.join(" and ")}. No hook decision overrides it and \`--permission-mode dontAsk\` cannot escalate it to a human, so Claude planning and implementation writes are denied.`
+    );
+  }
+  const bash = grantOf("Bash");
+  if (bash === "missing" || bash === "denied") {
+    advisories.push(
+      "No loaded permission rule grants Bash, so every command a phase runs is denied."
+    );
+  } else if (bash === "scoped") {
+    advisories.push(
+      "Bash is granted only for the commands its scoped rules name; anything else a phase runs is denied."
+    );
+  }
+  if (repositoryRulesIgnored) {
+    advisories.push(
+      "Claude Code has not been trusted in this checkout, so it ignores the repository's own allow rules."
+    );
+  }
+  if (bash !== null && bash !== "granted" && unloadedLocal !== null && unloadedLocal.rules.allow.length > 0) {
+    advisories.push(
+      "Local settings hold allow rules the scoped invocation does not load; repository grants belong in the tracked project settings."
+    );
+  }
+  if (trust === "unknown") {
+    advisories.push(
+      "Claude Code's workspace trust record could not be read, so repository rules were treated as honored."
+    );
+  }
+  if (!managed.intact || loaded.some((entry) => !entry.intact)) {
+    advisories.push(
+      "A settings file could not be parsed, so its permission rules were treated as absent."
+    );
+  }
+  return {
+    demand,
+    sources,
+    trust,
+    tools,
+    repositoryRulesIgnored,
+    blocking,
+    advisories
+  };
+}
+function claudePermissionRemediation(audit) {
+  const steps = [];
+  const refused = audit.tools.filter(
+    (entry) => entry.tool !== "Bash" && entry.grant === "denied"
+  );
+  if (refused.length > 0) {
+    steps.push(
+      `remove the deny or ask rules naming ${refused.map((entry) => `"${entry.tool}"`).join(
+        " and "
+      )} from the settings Claude loads; a rule in administrator policy settings needs your administrator`
+    );
+  }
+  if (audit.repositoryRulesIgnored) {
+    steps.push(
+      "run `claude` once in this checkout and accept the trust prompt so its repository allow rules apply"
+    );
+  }
+  return steps.join("; ");
+}
+
 // src/agent-control.ts
 import path35 from "node:path";
 
@@ -27962,13 +28259,13 @@ import path34 from "node:path";
 import process4 from "node:process";
 
 // src/review-snapshot.ts
-import { lstat as lstat13, readFile as readFile8 } from "node:fs/promises";
-import path20 from "node:path";
+import { lstat as lstat13, readFile as readFile9 } from "node:fs/promises";
+import path21 from "node:path";
 
 // src/git.ts
 import { createHash as createHash12 } from "node:crypto";
-import { lstat as lstat12, readFile as readFile7 } from "node:fs/promises";
-import path19 from "node:path";
+import { lstat as lstat12, readFile as readFile8 } from "node:fs/promises";
+import path20 from "node:path";
 var GIT_TIMEOUT_MS = 2 * 60 * 1e3;
 async function runGit(repoRoot, args) {
   return await runProcess({
@@ -28040,15 +28337,15 @@ async function currentBranch(repoRoot) {
   return branch.length === 0 || branch === "HEAD" ? null : branch;
 }
 function resolveRepositoryPath(repoRoot, relativePath3) {
-  if (relativePath3.length === 0 || path19.isAbsolute(relativePath3)) {
+  if (relativePath3.length === 0 || path20.isAbsolute(relativePath3)) {
     throw new BanzaiError(
       "INVALID_ARTIFACT_PATH",
       `Artifact path must be repository-relative: ${relativePath3}`
     );
   }
-  const normalizedRoot = path19.resolve(repoRoot);
-  const candidate = path19.resolve(normalizedRoot, relativePath3);
-  if (!candidate.startsWith(`${normalizedRoot}${path19.sep}`)) {
+  const normalizedRoot = path20.resolve(repoRoot);
+  const candidate = path20.resolve(normalizedRoot, relativePath3);
+  if (!candidate.startsWith(`${normalizedRoot}${path20.sep}`)) {
     throw new BanzaiError(
       "INVALID_ARTIFACT_PATH",
       `Artifact path escapes the repository: ${relativePath3}`
@@ -28065,7 +28362,7 @@ async function hashFile(repoRoot, relativePath3) {
       `Required artifact does not exist as a file: ${relativePath3}`
     );
   }
-  const contents = await readFile7(absolutePath);
+  const contents = await readFile8(absolutePath);
   if (metadata.isSymbolicLink()) {
     return createHash12("sha256").update("symlink").update("\0").update(contents).digest("hex");
   }
@@ -28244,10 +28541,10 @@ function sealReviewSnapshot3(value) {
 }
 async function assertReviewPathOwned(repoRoot, relativePath3, allowMissing = false) {
   reviewScopePath4(relativePath3);
-  let current = path20.resolve(repoRoot);
+  let current = path21.resolve(repoRoot);
   const segments = relativePath3.split("/");
   for (const [index, part] of segments.entries()) {
-    current = path20.join(current, part);
+    current = path21.join(current, part);
     let stat6;
     try {
       stat6 = await lstat13(current);
@@ -28266,7 +28563,7 @@ async function reviewApprovedArtifacts(repoRoot, paths) {
       await assertReviewPathOwned(repoRoot, relative4);
       return {
         path: relative4,
-        sha256: hashArtifactBytes(await readFile8(path20.join(repoRoot, relative4)))
+        sha256: hashArtifactBytes(await readFile9(path21.join(repoRoot, relative4)))
       };
     })
   );
@@ -28276,7 +28573,7 @@ async function reviewApprovedArtifacts(repoRoot, paths) {
 import { createHash as createHash13 } from "node:crypto";
 import { constants as constants10 } from "node:fs";
 import { lstat as lstat14, open as open10, realpath as realpath8 } from "node:fs/promises";
-import path21 from "node:path";
+import path23 from "node:path";
 
 // src/phase-resources.ts
 var PHASE_RESOURCE_DEFINITIONS = {
@@ -28523,7 +28820,7 @@ async function installedDigest(directory4, id3) {
   const root = await realpath8(directory4);
   let target = root;
   for (const part of id3.split("/")) {
-    target = path21.join(target, part);
+    target = path23.join(target, part);
     const entry = await lstat14(target);
     if (entry.isSymbolicLink()) throw new Error("Unsafe instruction resource");
   }
@@ -29935,8 +30232,8 @@ async function digestRejectionReason(context, state, sourceAttemptId, error) {
 
 // src/workflow/completion/inputs.ts
 import { createHash as createHash15 } from "node:crypto";
-import { lstat as lstat15, readFile as readFile9, realpath as realpath9 } from "node:fs/promises";
-import path23 from "node:path";
+import { lstat as lstat15, readFile as readFile10, realpath as realpath9 } from "node:fs/promises";
+import path24 from "node:path";
 async function observeCompletionInputs(context, state, artifacts) {
   const implementation = await observeReport(
     context,
@@ -29975,8 +30272,8 @@ async function observeReport(context, relativePath3) {
     return { observation: { path: null, state: "absent" }, bytes: null };
   let absolute;
   try {
-    absolute = path23.resolve(context.repoRoot, relativePath3);
-    if (relativePath3.length === 0 || relativePath3.includes("\\") || path23.posix.isAbsolute(relativePath3) || path23.posix.normalize(relativePath3) !== relativePath3 || relativePath3.startsWith("../") || !absolute.startsWith(`${path23.resolve(context.repoRoot)}${path23.sep}`))
+    absolute = path24.resolve(context.repoRoot, relativePath3);
+    if (relativePath3.length === 0 || relativePath3.includes("\\") || path24.posix.isAbsolute(relativePath3) || path24.posix.normalize(relativePath3) !== relativePath3 || relativePath3.startsWith("../") || !absolute.startsWith(`${path24.resolve(context.repoRoot)}${path24.sep}`))
       return {
         observation: { path: relativePath3, state: "unsafe" },
         bytes: null
@@ -29988,7 +30285,7 @@ async function observeReport(context, relativePath3) {
         bytes: null
       };
     const root = await realpath9(context.repoRoot);
-    if (!(await realpath9(absolute)).startsWith(`${root}${path23.sep}`))
+    if (!(await realpath9(absolute)).startsWith(`${root}${path24.sep}`))
       return {
         observation: { path: relativePath3, state: "unsafe" },
         bytes: null
@@ -30003,7 +30300,7 @@ async function observeReport(context, relativePath3) {
     };
   }
   try {
-    const bytes = await readFile9(absolute);
+    const bytes = await readFile10(absolute);
     return {
       observation: {
         path: relativePath3,
@@ -30025,13 +30322,13 @@ function sameObservedInputs(a, b) {
 }
 
 // src/workflow/completion/plan-tasks.ts
-import { readFile as readFile11 } from "node:fs/promises";
-import path25 from "node:path";
+import { readFile as readFile12 } from "node:fs/promises";
+import path26 from "node:path";
 
 // src/plan-task-completion.ts
 import { createHash as createHash16 } from "node:crypto";
-import { lstat as lstat16, readFile as readFile10, realpath as realpath10 } from "node:fs/promises";
-import path24 from "node:path";
+import { lstat as lstat16, readFile as readFile11, realpath as realpath10 } from "node:fs/promises";
+import path25 from "node:path";
 var PROJECTION_FORMAT = "banzai-plan-task-completion/v1";
 var SECTION_HEADING = "## Plan Task Completion";
 var TASK_HEADING = /^- \[ \] \*\*(T[0-9]{3}) - (.+)\*\*\s*$/u;
@@ -30132,10 +30429,10 @@ function validatePlanRunnerControlTasks(markdown, repoRoot, allowedArtifactPaths
   const section = markdown.split(/^## Implementation Tasks\s*$/mu)[1]?.split(/^## /mu)[0] ?? "";
   const allowed = new Set(
     allowedArtifactPaths.map(
-      (value) => path24.posix.normalize(value.replaceAll("\\", "/"))
+      (value) => path25.posix.normalize(value.replaceAll("\\", "/"))
     )
   );
-  const root = path24.posix.normalize(repoRoot.replaceAll("\\", "/")).replace(/\/$/u, "");
+  const root = path25.posix.normalize(repoRoot.replaceAll("\\", "/")).replace(/\/$/u, "");
   let previousTaskId = "";
   let previousPaths = [];
   for (const { taskId, text: text4, access: access7 } of planTaskStatements(section)) {
@@ -30146,8 +30443,8 @@ function validatePlanRunnerControlTasks(markdown, repoRoot, allowedArtifactPaths
       const token = raw.replaceAll("\\", "/").replace(/[.!?]+$/u, "").replace(/:\d+(?::\d+)?$/u, "");
       if (!token.includes("/") && !/^\.[\w-]+$/u.test(token) && !/\.[a-z0-9]+$/iu.test(token))
         return raw;
-      const normalized = path24.posix.normalize(
-        path24.posix.isAbsolute(token) || /^[a-z]:\//iu.test(token) ? token : `${root}/${token}`
+      const normalized = path25.posix.normalize(
+        path25.posix.isAbsolute(token) || /^[a-z]:\//iu.test(token) ? token : `${root}/${token}`
       );
       const relative4 = normalized.toLowerCase().startsWith(`${root.toLowerCase()}/`) ? normalized.slice(root.length + 1) : normalized;
       paths.push(relative4);
@@ -30391,7 +30688,7 @@ function parsePlanTaskCompletionProjection(markdown) {
   };
 }
 function normalizedRepositoryPath(relativePath3, requiredReports = /* @__PURE__ */ new Set()) {
-  if (relativePath3.length === 0 || relativePath3.includes("\\") || /[\u0000-\u001f\u007f-\u009f]/u.test(relativePath3) || relativePath3.length > 500 || path24.posix.isAbsolute(relativePath3) || path24.posix.normalize(relativePath3) !== relativePath3 || relativePath3 === ".." || relativePath3.startsWith("../")) {
+  if (relativePath3.length === 0 || relativePath3.includes("\\") || /[\u0000-\u001f\u007f-\u009f]/u.test(relativePath3) || relativePath3.length > 500 || path25.posix.isAbsolute(relativePath3) || path25.posix.normalize(relativePath3) !== relativePath3 || relativePath3 === ".." || relativePath3.startsWith("../")) {
     return completionFailure(
       "invalid_evidence_path",
       "Completion evidence path must be normalized and repository-relative."
@@ -30418,7 +30715,7 @@ async function validateEvidenceFile(repoRoot, relativePath3, allowedPaths, appro
     );
   }
   const repositoryRoot = await realpath10(repoRoot);
-  const absolutePath = path24.resolve(repositoryRoot, normalized);
+  const absolutePath = path25.resolve(repositoryRoot, normalized);
   let resolvedPath;
   let metadata;
   try {
@@ -30431,7 +30728,7 @@ async function validateEvidenceFile(repoRoot, relativePath3, allowedPaths, appro
       taskId
     );
   }
-  if (!metadata.isFile() || metadata.isSymbolicLink() || !resolvedPath.startsWith(`${repositoryRoot}${path24.sep}`)) {
+  if (!metadata.isFile() || metadata.isSymbolicLink() || !resolvedPath.startsWith(`${repositoryRoot}${path25.sep}`)) {
     return completionFailure(
       "invalid_evidence_path",
       `${taskId} evidence must be a regular file inside the repository.`,
@@ -30533,7 +30830,7 @@ async function readRequiredReport(repoRoot, relativePath3, violation, requiredRe
   const normalized = normalizedRepositoryPath(relativePath3, requiredReports);
   if (relativePath3.startsWith(".banzai/"))
     await safePath3(repoRoot, relativePath3);
-  const absolute = path24.resolve(repoRoot, normalized);
+  const absolute = path25.resolve(repoRoot, normalized);
   let bytes;
   try {
     const metadata = await lstat16(absolute);
@@ -30542,10 +30839,10 @@ async function readRequiredReport(repoRoot, relativePath3, violation, requiredRe
     }
     const root = await realpath10(repoRoot);
     const resolved = await realpath10(absolute);
-    if (!resolved.startsWith(`${root}${path24.sep}`)) {
+    if (!resolved.startsWith(`${root}${path25.sep}`)) {
       throw new Error("outside repository");
     }
-    bytes = captured ?? await readFile10(absolute);
+    bytes = captured ?? await readFile11(absolute);
   } catch {
     return completionFailure(
       violation,
@@ -30588,8 +30885,8 @@ async function validatePlanTaskCompletion(input) {
       "Approved artifact bundle digest or plan membership is invalid."
     );
   }
-  const plan = await readFile10(
-    path24.resolve(input.repoRoot, input.planPath),
+  const plan = await readFile11(
+    path25.resolve(input.repoRoot, input.planPath),
     "utf8"
   ).catch(
     () => completionFailure(
@@ -31024,8 +31321,8 @@ async function validateCompletionClaims(input) {
       "Approved artifact bundle digest or plan membership is invalid."
     );
   }
-  const plan = await readFile10(
-    path24.resolve(input.repoRoot, input.planPath),
+  const plan = await readFile11(
+    path25.resolve(input.repoRoot, input.planPath),
     "utf8"
   ).catch(
     () => completionFailure(
@@ -31176,8 +31473,8 @@ function completionPlanPath(state) {
   return planPath;
 }
 async function approvedTaskIds(context, state) {
-  const plan = await readFile11(
-    path25.join(context.repoRoot, completionPlanPath(state)),
+  const plan = await readFile12(
+    path26.join(context.repoRoot, completionPlanPath(state)),
     "utf8"
   );
   validateRunnerControlTasks(context, state, plan);
@@ -31213,8 +31510,8 @@ async function validateImplementationCompletion(context, state, attempt, result)
 async function validatePlanningResult(context, state, attempt, result) {
   if (result.gate !== "plan_approval" || result.artifacts.plan === null) return;
   try {
-    const markdown = await readFile11(
-      path25.join(context.repoRoot, result.artifacts.plan),
+    const markdown = await readFile12(
+      path26.join(context.repoRoot, result.artifacts.plan),
       "utf8"
     );
     parseApprovedPlanTaskIds(markdown);
@@ -31287,8 +31584,8 @@ function completionInvalidCheckpoint(context, sourceAttemptId, error, sourceAtte
 }
 
 // src/workflow/verification/required-checks.ts
-import { readFile as readFile12 } from "node:fs/promises";
-import path26 from "node:path";
+import { readFile as readFile13 } from "node:fs/promises";
+import path27 from "node:path";
 async function requiredCheckIds(context, state, config) {
   const ids = new Set(
     (taskVerificationPolicy(config)?.required ?? []).map((check2) => check2.id)
@@ -31296,8 +31593,8 @@ async function requiredCheckIds(context, state, config) {
   if ((state.workflowSelection?.workflow ?? "strict") !== "strict" || state.planApproval === null)
     return ids;
   for (const check2 of parseTaskVerificationObligations(
-    await readFile12(
-      path26.join(context.repoRoot, completionPlanPath(state)),
+    await readFile13(
+      path27.join(context.repoRoot, completionPlanPath(state)),
       "utf8"
     )
   ).checks)
@@ -31324,8 +31621,8 @@ import { createHash as createHash18 } from "node:crypto";
 
 // src/review-artifact.ts
 import { createHash as createHash17, randomUUID as randomUUID10 } from "node:crypto";
-import { link as link3, mkdir as mkdir8, open as open11, readFile as readFile13, rename as rename7, unlink as unlink7 } from "node:fs/promises";
-import path27 from "node:path";
+import { link as link3, mkdir as mkdir8, open as open11, readFile as readFile14, rename as rename7, unlink as unlink7 } from "node:fs/promises";
+import path28 from "node:path";
 var REQUIRED_SECTIONS = [
   "## Review Scope",
   "## Summary",
@@ -31348,7 +31645,7 @@ var ReviewArtifactValidationError = class extends BanzaiError {
 function reviewArtifactPath(slug, iteration, bound) {
   if (bound !== void 0)
     return `${bound.binding.artifacts.reviewDirectory}/review-${iteration}.md`;
-  return path27.posix.join(
+  return path28.posix.join(
     "documentation",
     "features",
     slug,
@@ -31614,9 +31911,9 @@ function approvedArtifactScope(contents, diagnostics) {
   return paths;
 }
 function repositoryPath(repoRoot, relativePath3) {
-  const repositoryRoot = path27.resolve(repoRoot);
-  const absolutePath = path27.resolve(repositoryRoot, relativePath3);
-  if (!absolutePath.startsWith(`${repositoryRoot}${path27.sep}`)) {
+  const repositoryRoot = path28.resolve(repoRoot);
+  const absolutePath = path28.resolve(repositoryRoot, relativePath3);
+  if (!absolutePath.startsWith(`${repositoryRoot}${path28.sep}`)) {
     throw new BanzaiError(
       "INVALID_REVIEW_ARTIFACT_PATH",
       "Review artifact path escapes the repository."
@@ -31650,7 +31947,7 @@ async function validateReviewArtifactSource(repoRoot, result, context, sourcePat
       "Review candidate path must differ from the canonical artifact path."
     );
   }
-  const contents = await readFile13(absoluteCandidatePath, "utf8").catch(() => {
+  const contents = await readFile14(absoluteCandidatePath, "utf8").catch(() => {
     throw new BanzaiError(
       "REVIEW_ARTIFACT_MISSING",
       `Reviewer did not write candidate ${sourcePath3}.`
@@ -31879,7 +32176,7 @@ async function publishReviewArtifact(repoRoot, context, candidate) {
   const absolutePath = repositoryPath(repoRoot, context.path);
   if (context.snapshot !== void 0) {
     await assertReviewPathOwned(repoRoot, context.path, true);
-    const previous = await readFile13(absolutePath, "utf8").catch(
+    const previous = await readFile14(absolutePath, "utf8").catch(
       (error) => {
         if (error.code === "ENOENT") return null;
         throw error;
@@ -31901,11 +32198,11 @@ async function publishReviewArtifact(repoRoot, context, candidate) {
     if (privateWork)
       await verifyIgnores4(repoRoot, binding, [
         context.path,
-        path27.relative(repoRoot, temporaryPath)
+        path28.relative(repoRoot, temporaryPath)
       ]);
   };
   await verifyDestinations();
-  await mkdir8(path27.dirname(absolutePath), {
+  await mkdir8(path28.dirname(absolutePath), {
     recursive: true,
     mode: privateWork ? 448 : 493
   });
@@ -32025,7 +32322,7 @@ function artifactWritePaths(state, phase) {
 }
 
 // src/workflow/attempts/lifecycle.ts
-import path28 from "node:path";
+import path29 from "node:path";
 function newAttempt(context, state, kind, mutable) {
   return {
     id: `${kind}-${state.reviewIteration + 1}-${context.ids().slice(0, 8)}`,
@@ -32359,7 +32656,7 @@ async function persistAdapterResult(context, state, record7, adapterResult) {
   await context.store.writeRunAttempt(state.runId, record7);
 }
 async function writeAttemptOutput(context, state, record7, stdout, stderr) {
-  const stdoutPath = path28.relative(
+  const stdoutPath = path29.relative(
     context.store.runDirectory(state.runId),
     await context.store.writeText(
       state.runId,
@@ -32367,7 +32664,7 @@ async function writeAttemptOutput(context, state, record7, stdout, stderr) {
       redactSensitiveText(stdout)
     )
   );
-  const stderrPath = path28.relative(
+  const stderrPath = path29.relative(
     context.store.runDirectory(state.runId),
     await context.store.writeText(
       state.runId,
@@ -32419,7 +32716,7 @@ function legacyPhaseResult(result) {
 }
 
 // src/workflow/checkpoints/terminal-checkpoints.ts
-import { lstat as lstat17, readFile as readFile14 } from "node:fs/promises";
+import { lstat as lstat17, readFile as readFile15 } from "node:fs/promises";
 function terminalCheckpointWriter(context, state, attempt, settings, policy, completion = false) {
   return async (terminal) => {
     const current = await context.store.readState(state.runId);
@@ -32762,7 +33059,7 @@ async function establishResultSourceIdentities(context, state, attempt, result, 
       const file = await taskVerificationPath(context.repoRoot, relativePath3);
       const size = (await lstat17(file)).size;
       return size > TASK_VERIFICATION_SOURCE_MAX_BYTES ? { observed: null, size, limit: TASK_VERIFICATION_SOURCE_MAX_BYTES } : {
-        observed: evidenceDigest(await readFile14(file)),
+        observed: evidenceDigest(await readFile15(file)),
         size,
         limit: null
       };
@@ -33144,7 +33441,7 @@ async function completionRepairDiagnostic(context, state, sourceAttemptId, sourc
 // src/workflow/completion/publication.ts
 import { createHash as createHash20 } from "node:crypto";
 import { lstat as lstat18, rename as rename8, unlink as unlink8, writeFile as writeFile3 } from "node:fs/promises";
-import path29 from "node:path";
+import path30 from "node:path";
 async function storeCursor(context, state, cursor) {
   state.completionPublication = cursor;
   try {
@@ -33555,7 +33852,7 @@ async function publishCapturedCompletion(context, state, record7, envelope, capt
   const current = await context.store.readState(state.runId);
   if (current.status === "cancelled")
     return { kind: "stopped", state: current };
-  const destination = path29.join(context.repoRoot, candidate.destination);
+  const destination = path30.join(context.repoRoot, candidate.destination);
   if (!published) {
     if (candidate.destination.startsWith(".banzai/"))
       await safePath3(context.repoRoot, candidate.destination);
@@ -33964,8 +34261,8 @@ async function blockForCompletionFailure(context, state, sourceAttemptId, error)
 }
 
 // src/workflow/verification/evidence.ts
-import { readFile as readFile15 } from "node:fs/promises";
-import path30 from "node:path";
+import { readFile as readFile16 } from "node:fs/promises";
+import path31 from "node:path";
 function verificationStorage(context, state) {
   if (!usesVerificationPolicy(state) || !state.artifactBinding)
     throw new BanzaiError(
@@ -34011,8 +34308,8 @@ async function prepareVerificationDecision(context, state, config, round, record
   const storage2 = verificationStorage(context, state);
   const configuration = parseVerificationConfiguration(config.verification);
   const strict = (state.workflowSelection?.workflow ?? "strict") === "strict";
-  const plan = strict ? await readFile15(
-    path30.join(context.repoRoot, completionPlanPath(state)),
+  const plan = strict ? await readFile16(
+    path31.join(context.repoRoot, completionPlanPath(state)),
     "utf8"
   ) : null;
   const current = await captureVerification(context, state, config);
@@ -34230,261 +34527,6 @@ var InvocationScopeCache = class {
     return true;
   }
 };
-
-// src/claude-permissions.ts
-import { readFile as readFile16 } from "node:fs/promises";
-import { homedir as homedir3 } from "node:os";
-import path31 from "node:path";
-var ALL_SOURCES = [
-  "user",
-  "project",
-  "local"
-];
-var MANAGED_SETTINGS_FILES = {
-  darwin: "/Library/Application Support/ClaudeCode/managed-settings.json",
-  linux: "/etc/claude-code/managed-settings.json"
-};
-var EMPTY_RULES = { allow: [], deny: [], ask: [] };
-function isRecord3(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function stringArray2(value) {
-  return Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : [];
-}
-function ruleTool(rule) {
-  const open14 = rule.indexOf("(");
-  return (open14 === -1 ? rule : rule.slice(0, open14)).trim();
-}
-function namesTool(rule, tool) {
-  return ruleTool(rule) === tool;
-}
-function isUnscoped(rule) {
-  return !rule.includes("(");
-}
-function homeDirectory(env) {
-  const configured = env.HOME;
-  return configured === void 0 || configured.length === 0 ? homedir3() : configured;
-}
-function configDirectory(env) {
-  const configured = env.CLAUDE_CONFIG_DIR;
-  return configured === void 0 || configured.length === 0 ? null : configured;
-}
-function trustFile(env) {
-  const configured = configDirectory(env);
-  return configured === null ? path31.join(homeDirectory(env), ".claude.json") : path31.join(configured, ".claude.json");
-}
-function settingsFile(source, repoRoot, env) {
-  if (source === "user") {
-    return path31.join(
-      configDirectory(env) ?? path31.join(homeDirectory(env), ".claude"),
-      "settings.json"
-    );
-  }
-  return path31.join(
-    repoRoot,
-    ".claude",
-    source === "project" ? "settings.json" : "settings.local.json"
-  );
-}
-async function readRules(filePath) {
-  let raw;
-  try {
-    raw = await readFile16(filePath, "utf8");
-  } catch {
-    return { rules: EMPTY_RULES, intact: true };
-  }
-  try {
-    const document = JSON.parse(raw);
-    const permissions = isRecord3(document) ? document.permissions : void 0;
-    if (!isRecord3(permissions)) {
-      return { rules: EMPTY_RULES, intact: true };
-    }
-    return {
-      rules: {
-        allow: stringArray2(permissions.allow),
-        deny: stringArray2(permissions.deny),
-        ask: stringArray2(permissions.ask)
-      },
-      intact: true
-    };
-  } catch {
-    return { rules: EMPTY_RULES, intact: false };
-  }
-}
-async function readManagedRules(override) {
-  const file = override === void 0 ? MANAGED_SETTINGS_FILES[process.platform] : override;
-  return file === void 0 || file === null ? { rules: EMPTY_RULES, intact: true } : await readRules(file);
-}
-async function inspectTrust(repoRoot, env) {
-  let raw;
-  try {
-    raw = await readFile16(trustFile(env), "utf8");
-  } catch {
-    return "unknown";
-  }
-  try {
-    const document = JSON.parse(raw);
-    const projects = isRecord3(document) ? document.projects : void 0;
-    if (!isRecord3(projects)) {
-      return "untrusted";
-    }
-    const entry = projects[repoRoot];
-    return isRecord3(entry) && entry.hasTrustDialogAccepted === true ? "trusted" : "untrusted";
-  } catch {
-    return "unknown";
-  }
-}
-function resolveGrant(tool, sets) {
-  for (const set of sets) {
-    const refused = [...set.deny, ...set.ask];
-    if (refused.some((rule) => namesTool(rule, tool) && isUnscoped(rule))) {
-      return "denied";
-    }
-  }
-  let scoped = false;
-  for (const set of sets) {
-    for (const rule of set.allow) {
-      if (!namesTool(rule, tool)) {
-        continue;
-      }
-      if (isUnscoped(rule)) {
-        return "granted";
-      }
-      scoped = true;
-    }
-  }
-  return scoped ? "scoped" : "missing";
-}
-function parseSources(settingSources) {
-  if (settingSources === null) {
-    return [...ALL_SOURCES];
-  }
-  const named = new Set(
-    settingSources.split(",").map((entry) => entry.trim()).filter((entry) => entry.length > 0)
-  );
-  return ALL_SOURCES.filter((source) => named.has(source));
-}
-function claudePermissionDemand(config) {
-  const claudeRoles = new Set(
-    MODEL_ROLES.filter(
-      (role) => (vendorFor(config.models[role].executable) ?? FALLBACK_VENDOR[role]) === "claude"
-    )
-  );
-  return {
-    planningWrites: claudeRoles.has("planner"),
-    shellCommands: claudeRoles.has("planner") || claudeRoles.has("implementer")
-  };
-}
-function claudePermissionDemanded(demand) {
-  return demand.planningWrites || demand.shellCommands;
-}
-async function inspectClaudePermissions(input) {
-  const env = input.env ?? process.env;
-  const repoRoot = path31.resolve(input.repoRoot);
-  const demand = input.demand;
-  const sources = parseSources(input.settingSources);
-  const [managed, trust, loaded, unloadedLocal] = await Promise.all([
-    readManagedRules(input.managedSettingsFile),
-    inspectTrust(repoRoot, env),
-    Promise.all(
-      sources.map(async (source) => ({
-        source,
-        ...await readRules(settingsFile(source, repoRoot, env))
-      }))
-    ),
-    sources.includes("local") ? Promise.resolve(null) : readRules(settingsFile("local", repoRoot, env))
-  ]);
-  const honored = loaded.filter(
-    (entry) => entry.source === "user" || trust !== "untrusted"
-  );
-  const sets = [managed.rules, ...honored.map((entry) => entry.rules)];
-  const audited = [
-    ...demand.planningWrites ? ["Write", "Edit"] : [],
-    ...demand.shellCommands ? ["Bash"] : []
-  ];
-  const tools = audited.map((tool) => ({
-    tool,
-    grant: resolveGrant(tool, sets)
-  }));
-  const grantOf = (tool) => tools.find((entry) => entry.tool === tool)?.grant ?? null;
-  const blocking = [];
-  const advisories = [];
-  const write = grantOf("Write");
-  if (write === "denied") {
-    blocking.push(
-      "A deny or ask rule refuses Write, and `--permission-mode dontAsk` cannot escalate either one to a human."
-    );
-  }
-  if (write === "missing") {
-    blocking.push(
-      "No loaded permission rule grants Write, so a Claude planning phase is denied the description, plan, and decision artifacts it exists to produce."
-    );
-  }
-  if ((write === "missing" || write === "denied") && trust === "untrusted" && sources.some((source) => source !== "user")) {
-    blocking.push(
-      "Claude Code has not been trusted in this checkout, so it ignores the repository's own permission rules."
-    );
-  }
-  if ((write === "missing" || write === "denied") && unloadedLocal !== null && unloadedLocal.rules.allow.length > 0) {
-    advisories.push(
-      "Local settings hold allow rules the scoped invocation does not load; repository grants belong in the tracked project settings."
-    );
-  }
-  if (write === "scoped") {
-    advisories.push(
-      "Every rule granting Write is path-scoped, so a planning artifact outside those paths is still denied."
-    );
-  }
-  const edit = grantOf("Edit");
-  if (edit === "missing" || edit === "denied") {
-    advisories.push(
-      "No loaded permission rule grants Edit, so a planning phase can create artifacts but not revise them."
-    );
-  }
-  const bash = grantOf("Bash");
-  if (bash === "missing" || bash === "denied") {
-    advisories.push(
-      "No loaded permission rule grants Bash, so every command a phase runs is denied."
-    );
-  } else if (bash === "scoped") {
-    advisories.push(
-      "Bash is granted only for the commands its scoped rules name; anything else a phase runs is denied."
-    );
-  }
-  if (trust === "unknown") {
-    advisories.push(
-      "Claude Code's workspace trust record could not be read, so repository rules were treated as honored."
-    );
-  }
-  if (!managed.intact || loaded.some((entry) => !entry.intact)) {
-    advisories.push(
-      "A settings file could not be parsed, so its permission rules were treated as absent."
-    );
-  }
-  return { demand, sources, trust, tools, blocking, advisories };
-}
-function claudePermissionRemediation(audit) {
-  const steps = [];
-  if (audit.trust === "untrusted" && audit.sources.includes("project")) {
-    steps.push(
-      "run `claude` once in this checkout and accept the trust prompt"
-    );
-  }
-  const unresolved = audit.tools.filter(
-    (entry) => entry.tool !== "Bash" && (entry.grant === "missing" || entry.grant === "denied")
-  );
-  if (unresolved.length > 0) {
-    steps.push(
-      `add ${unresolved.map((entry) => `"${entry.tool}"`).join(" and ")} to \`permissions.allow\` in \`.claude/settings.json\``
-    );
-    if (!audit.sources.includes("local")) {
-      steps.push(
-        "keep the grants there rather than in local settings, the one repository source a scoped invocation never loads"
-      );
-    }
-  }
-  return steps.join("; ");
-}
 
 // src/context-accounting.ts
 var PHASES = [
@@ -46368,8 +46410,15 @@ async function claudePermissionsCheck(repoRoot, config, dependencies) {
       "Claude permission inspection requires a valid configuration."
     );
   }
-  const demand = claudePermissionDemand(config);
-  if (!claudePermissionDemanded(demand)) {
+  const permissions = await inspectConfiguredClaudePermissions(
+    repoRoot,
+    config,
+    {
+      resolveScope: async (settings) => await (dependencies.resolveClaudeInvocationScope ?? resolveClaudeInvocationScope)(settings),
+      inspect: async (input) => await (dependencies.inspectClaudePermissions ?? inspectClaudePermissions)(input)
+    }
+  );
+  if (permissions.state === "not_demanded") {
     return check(
       "claude.permissions",
       "config",
@@ -46377,11 +46426,7 @@ async function claudePermissionsCheck(repoRoot, config, dependencies) {
       "No configured role runs a Claude phase that depends on repository permission rules."
     );
   }
-  let settingSources;
-  try {
-    const resolved = await (dependencies.resolveClaudeInvocationScope ?? resolveClaudeInvocationScope)(config.claudeEnvironment);
-    settingSources = resolved.scope.settingSources;
-  } catch {
+  if (permissions.state === "unresolved") {
     return check(
       "claude.permissions",
       "config",
@@ -46389,13 +46434,21 @@ async function claudePermissionsCheck(repoRoot, config, dependencies) {
       "Claude permission inspection requires a verifiable invocation environment."
     );
   }
-  const audit = await (dependencies.inspectClaudePermissions ?? inspectClaudePermissions)({ repoRoot, demand, settingSources });
+  const audit = permissions.audit;
+  const remediation = claudePermissionRemediation(audit);
+  const fixes = remediation.length === 0 ? [] : [
+    {
+      action: `${remediation.charAt(0).toUpperCase()}${remediation.slice(1)}.`,
+      documentation: "documentation/orchestrator.md#claude-tool-permissions"
+    }
+  ];
   if (audit.blocking.length > 0) {
     return check(
       "claude.permissions",
       "config",
       "fail",
-      audit.blocking.join(" ")
+      audit.blocking.join(" "),
+      fixes
     );
   }
   if (audit.advisories.length > 0) {
@@ -46403,7 +46456,8 @@ async function claudePermissionsCheck(repoRoot, config, dependencies) {
       "claude.permissions",
       "config",
       "warning",
-      audit.advisories.join(" ")
+      audit.advisories.join(" "),
+      fixes
     );
   }
   return check(
@@ -46810,7 +46864,7 @@ async function inspectDoctor(repoRoot, dependencies = DEFAULT_DEPENDENCIES) {
       "authentication.models",
       "executables",
       "warning",
-      "Model authentication readiness was not checked. Doctor is offline and executable availability is not authentication proof; startup preflight remains authoritative. Run Banzai from a regular terminal, restore vendor login, or use the vendor-supported setup-token flow when unattended authentication is required."
+      "Model authentication readiness and vendor CLI versions were not checked. Doctor is offline and executable availability is not authentication proof; startup preflight remains authoritative. Run Banzai from a regular terminal, restore vendor login, or use the vendor-supported setup-token flow when unattended authentication is required."
     ),
     await activeRunCheck(repoRoot),
     await runnerLockCheck(repoRoot, dependencies)
@@ -51746,9 +51800,9 @@ async function prepareSetupLaunch(client, repoRoot, config, sourceEnvironment = 
     );
   const env = setupEnvironment(sourceEnvironment);
   const adapters = dependencies.adapters ?? createVendorAdapters(runner);
-  if (client.vendor === "codex")
-    await adapters.preflightCodex(fresh.settings, env);
-  else await adapters.preflightClaude(fresh.settings, env);
+  const target = { executable: fresh.settings.executable, model: null };
+  if (client.vendor === "codex") await adapters.preflightCodex(target, env);
+  else await adapters.preflightClaude(target, env);
   const mcp = await resolveSerenaWhitelist({
     repoRoot,
     codexExecutable: client.vendor === "codex" ? fresh.settings.executable : null,
@@ -52042,6 +52096,20 @@ function authenticationGateway(adapters) {
       }
     }
   };
+}
+async function reportClaudePermissionGaps(repoRoot, config) {
+  const permissions = await inspectConfiguredClaudePermissions(
+    repoRoot,
+    config,
+    { resolveScope: resolveClaudeInvocationScope }
+  );
+  if (permissions.state !== "audited" || permissions.audit.blocking.length === 0) {
+    return;
+  }
+  console.log(`Claude permissions: ${permissions.audit.blocking.join(" ")}`);
+  console.log(
+    `Fix it before the first run: ${claudePermissionRemediation(permissions.audit)}.`
+  );
 }
 function modelConfigurationGateway(repoRoot) {
   return {
@@ -52610,6 +52678,7 @@ async function main() {
     console.log(
       "Verification follows each task; no profile setup is required."
     );
+    await reportClaudePermissionGaps(repoRoot, config);
     console.log(
       "Run banzai doctor, then review and commit your files before starting a task."
     );
@@ -52645,11 +52714,14 @@ async function main() {
         "TTY_REQUIRED",
         `banzai setup requires terminal input and output. Open your client in this project and explicitly invoke banzai:project-manifest, or rerun banzai setup in a terminal. ${SETUP_PLUGIN_PREREQUISITE}`
       );
+    const config = await loadConfig(repoRoot);
     process7.exitCode = await runProjectSetup(
       repoRoot,
-      await loadConfig(repoRoot),
+      config,
       new InquirerInteractiveIO()
     );
+    if (process7.exitCode === 0)
+      await reportClaudePermissionGaps(repoRoot, config);
     return;
   }
   if (mode2 === "interactive") {

@@ -15,6 +15,7 @@ import {
   configuredModels,
   describeRoles,
   modelAdvisories,
+  modelCliMinimum,
   SELECTABLE_MODELS,
   vendorFor,
   vendorUsage
@@ -123,6 +124,30 @@ test("supported models, tier aliases, and unknown identifiers raise no advisory"
       `${model} must not be reported as stale`
     );
   }
+});
+
+test("models newer than the vendor CLI minimum name the release that first serves them", () => {
+  assert.deepEqual(
+    SELECTABLE_MODELS.flatMap((model) => {
+      const minimum = modelCliMinimum(model.vendor, model.id);
+      return minimum === null ? [] : [[model.id, minimum]];
+    }),
+    [
+      ["claude-opus-5-5", "2.1.280"],
+      ["claude-fable-5-1", "2.1.257"],
+      ["claude-sonnet-5-5", "2.1.284"],
+      ["gpt-6.1-sol", "0.159.1"],
+      ["gpt-6-astra", "0.153.1"],
+      ["gpt-6-sol", "0.156.1"],
+      ["gpt-6-luna", "0.156.1"]
+    ]
+  );
+  // Tier aliases resolve to a model the installed client already serves, and
+  // an unknown identifier carries no claim about the release it needs.
+  for (const model of ["opus", "sonnet", "default", "claude-later-model"]) {
+    assert.equal(modelCliMinimum("claude", model), null, model);
+  }
+  assert.equal(modelCliMinimum("codex", "claude-opus-5-5"), null);
 });
 
 test("every selectable model raises no advisory", () => {

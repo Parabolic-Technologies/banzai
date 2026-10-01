@@ -26,6 +26,11 @@ interface CatalogEntry {
 interface VendorCatalog {
   supported: ReadonlySet<string>;
   replacements: ReadonlyMap<string, CatalogEntry>;
+  /**
+   * The first CLI release that serves a model, recorded only where it is newer
+   * than the vendor-wide minimum the adapters enforce.
+   */
+  cliMinimums: ReadonlyMap<string, string>;
 }
 
 function superseded(replacement: string): CatalogEntry {
@@ -86,6 +91,14 @@ const CLAUDE_CATALOG: VendorCatalog = {
     ["claude-3-sonnet-20240229", retired(SONNET, "2025-07-21")],
     ["claude-3-5-haiku-20241022", retired(HAIKU, "2026-02-19")],
     ["claude-3-haiku-20240307", retired(HAIKU, "2026-04-20")]
+  ]),
+  // From Claude Code's model configuration documentation. An older client
+  // refuses these models itself, before any request; tier aliases need no
+  // entry because they resolve to a model the installed client serves.
+  cliMinimums: new Map([
+    [OPUS, "2.1.280"],
+    [SONNET, "2.1.284"],
+    ["claude-fable-5-1", "2.1.257"]
   ])
 };
 
@@ -109,6 +122,14 @@ const CODEX_CATALOG: VendorCatalog = {
     ["gpt-5.4", retired(CODEX_SOL, "2026-08-31")],
     ["gpt-5.4-mini", retired("gpt-6-luna", "2026-08-31")],
     ["gpt-5", superseded(CODEX_SOL)]
+  ]),
+  // The first stable Codex CLI release whose bundled model catalog carries the
+  // model, from the Codex CLI release notes.
+  cliMinimums: new Map([
+    [CODEX_SOL, "0.159.1"],
+    ["gpt-6-sol", "0.156.1"],
+    ["gpt-6-luna", "0.156.1"],
+    ["gpt-6-astra", "0.153.1"]
   ])
 };
 
@@ -291,6 +312,14 @@ export function selectableModel(id: string): SelectableModel | null {
 
 export function isCatalogSupportedModel(vendor: Vendor, id: string): boolean {
   return CATALOGS.get(vendor)?.supported.has(id) ?? false;
+}
+
+/**
+ * The oldest `vendor` CLI release that can run `model`, or `null` when the
+ * vendor-wide minimum is enough.
+ */
+export function modelCliMinimum(vendor: Vendor, model: string): string | null {
+  return CATALOGS.get(vendor)?.cliMinimums.get(model) ?? null;
 }
 
 /**

@@ -557,7 +557,8 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   constraints and exact bound report writes (ADR-0045).
 - `adapters.ts` — `createVendorAdapters` and the Codex/Claude argument
   builders; `MINIMUM_CODEX_VERSION = "0.145.0"`,
-  `MINIMUM_CLAUDE_VERSION = "2.1.218"`. Decodes vendor streams into typed
+  `MINIMUM_CLAUDE_VERSION = "2.1.218"`, then the configured model's catalog
+  minimum, before authentication (`CLI_TOO_OLD`). Decodes vendor streams into typed
   results, usage, session inventory, and closed failure causes;
   `normalizedUsage` reconciles vendor cache accounting; `summarizeCommand`
   elides credential-shaped tokens for progress display; owns
@@ -577,8 +578,10 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   explicit legacy-profile diagnostics and command descriptors. Task discovery and
   policy live in the shared task owner.
 - `claude-permissions.ts` — offline audit of the permission rules a spawned
-  Claude session honors: a missing or refused `Write` blocks; `Edit`, `Bash`,
-  and path-scoped gaps are advisories.
+  Claude session honors: a deny or ask rule refusing `Write` or `Edit` blocks,
+  because the hook grants every authorized write; `Bash` gaps and repository
+  allow rules an untrusted checkout ignores are advisories. Doctor, `init` and `setup` share its
+  configured-role composition; `workflow*` keeps its own copy.
 - `project-adoption.ts` — bounded read-only instruction-layout, manifest and
   exact plugin/source-workspace identity inspection shared by CLI, doctor and
   workflow. It imports no mutable or vendor boundary.
@@ -586,7 +589,9 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   runner ownership; unfinished or corrupt runs cannot launch setup.
 - `setup-client.ts` / `foreground-client.ts` — locally verified explicit
   project-manifest invocation, selected subscription authentication, filtered
-  environment, foreground terminal ownership and bounded child cleanup.
+  environment, foreground terminal ownership and bounded child cleanup. The
+  setup launch passes no model, so its preflight applies only the vendor-wide
+  CLI minimum.
 - `doctor-cli.ts` / `doctor.ts` — read-only fixed-order `banzai-doctor/v5`
   readiness checks; constructs no `RunStore`, adapters, or `WorkflowRunner`.
 - `live-compatibility-cli.ts` / `live-compatibility.ts` — the protected,
@@ -642,7 +647,8 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   `initializeConfig`, and byte-preserving `applyModelUpdates`; context policy
   defaults to `{ mode: "observe", limits: [] }`.
 - `models.ts` / `model-selection.ts` — the hand-maintained model catalog
-  (`SELECTABLE_MODELS`, standings, advisories, effort levels) and the per-role
+  (`SELECTABLE_MODELS`, standings, advisories, effort levels, and the first
+  CLI release that serves a model newer than the vendor-wide minimum) and the per-role
   model/effort dialog. Fresh initialization labels presets as `Use default`;
   existing configurations retain `Keep`.
 - `git.ts` — repository discovery, commit/branch, `digestArtifactBundle`,
@@ -773,7 +779,7 @@ Plugin (`plugins/banzai/`):
   `PROJECT_MANIFEST.md` in the session directory or a parent — and the hook
   stays silent in repositories without that evidence.
 - `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` — plugin manifests,
-  currently version `2.6.4`. The Codex manifest additionally declares the hook
+  currently version `2.6.5`. The Codex manifest additionally declares the hook
   and the store interface metadata.
 - `PROJECT_MANIFEST.md`, `AGENTS.md`, `CLAUDE.md`, and the placeholder
   `documentation/` tree (`README.md`, `decisions/README.md`, `.gitkeep` files) —
@@ -1103,7 +1109,8 @@ attempt, approval marker or transcript.
 - Everything else uses Node built-ins. The test runner is `node --test`; no test
   framework is installed.
 - External executables required at run time, not installed by npm: `codex`
-  `0.145.0+`, `claude` `2.1.218+`, and `git`.
+  `0.145.0+`, `claude` `2.1.218+`, and `git`. The default models need `codex`
+  `0.159.1+` and `claude` `2.1.280+`.
 - Policy: any new runtime or dev dependency requires explicit user approval and
   a manifest update. Pre-existing dependencies need no retroactive approval.
 
@@ -1302,7 +1309,13 @@ Current constraints:
 - Minimum versions and platforms: supported Node.js 22 from 22.20.0 and Node.js
   24 from 24.11.1, excluding Node 23 and 25; macOS or Linux; `codex` `0.145.0+`;
   `claude` `2.1.218+`. Node 26.7.0 is advisory forward evidence only. A lower
-  live CLI version produces unavailable evidence before a model call.
+  live CLI version produces unavailable evidence before a model call. A model
+  the catalog records as first served by a newer CLI release
+  (`claude-opus-5-5` 2.1.280, `claude-sonnet-5-5` 2.1.284, `claude-fable-5-1`
+  2.1.257, `gpt-6.1-sol` 0.159.1, `gpt-6-sol`/`gpt-6-luna` 0.156.1,
+  `gpt-6-astra` 0.153.1) fails vendor preflight with `CLI_TOO_OLD` before
+  authentication or a model call. Doctor does not check CLI versions
+  (ADR-0008); the live-compatibility minimums are unchanged.
 - Authentication: individual subscription only. API keys and third-party
   provider authentication are rejected, and API-key environment variables are
   stripped from every child process. `CLAUDE_CODE_OAUTH_TOKEN` remains available
@@ -1317,15 +1330,21 @@ status` reports only whether credentials are visible and stored, so a
   present-but-unrefreshable session passes the startup check and fails when a
   phase calls the model.
 - Claude tool permissions: Claude phases run with `--permission-mode dontAsk`,
-  so only three surfaces can grant a call — the spec-gate hook's approved
-  bundle, an `--allowedTools` entry, and the permission rules of the loaded
-  settings sources. Planning phases carry no runner identity by design, so their
-  artifact writes depend on the third surface alone, and shell commands are
-  never hook-granted in any phase. Startup preflight audits exactly the sources
-  the resolved scope loads, honors administrator policy settings, and treats an
-  untrusted checkout as having no repository rules at all. A missing or refused
-  `Write` grant ends the run before its first phase with one remediation;
-  `Edit`, `Bash`, and path-scoped gaps are reported and the run continues.
+  so only three surfaces can grant a call — the spec-gate hook, an
+  `--allowedTools` entry, and the permission rules of the loaded settings
+  sources. Bound planning and implementation phases carry runner identity, so
+  the hook's allow grants their authorized writes (ADR-0041) without any
+  `Write` or `Edit` rule; no hook decision overrides a deny or ask rule, and
+  shell commands are never hook-granted in any phase. Startup preflight audits
+  exactly the sources the resolved scope loads, honors administrator policy
+  settings, ignores an untrusted checkout's repository allow rules, and still
+  applies its deny and ask rules. A deny or ask rule refusing `Write` or `Edit`
+  ends the run before its first phase with one remediation; `Bash` gaps and
+  ignored repository allow rules are reported and the run continues. Doctor
+  attaches that remediation as the `claude.permissions` fix, and `init` and a
+  completed `setup` print the blocking reasons and remediation. No command
+  writes a permission rule. A run created before work bindings plans without
+  runner identity and is no longer audited for a planning `Write` grant.
 - Codex host state: every Codex preflight requires non-mutating write-access
   evidence for the effective `CODEX_HOME` before spawning the CLI. A denied
   directory under `CODEX_SANDBOX` is a host-permission prerequisite, not proof
@@ -1336,7 +1355,9 @@ status` reports only whether credentials are visible and stored, so a
   permissions.
 - Model currency is a source fact in `packages/orchestrator/src/models.ts`,
   updated by hand when a model ships, is deprecated, or is retired. An
-  unrecognized identifier is never reported as stale.
+  unrecognized identifier is never reported as stale. Per-model CLI minimums
+  come from Claude Code's model configuration documentation and from the first
+  stable Codex CLI release whose bundled catalog carries the model.
 - Interactive setup: `banzai setup` requires a TTY and existing config. TTY
   `init` offers setup after model selection, and new-task entry offers it before
   task input. Both TTY and non-TTY `init` create
@@ -1614,7 +1635,7 @@ status` reports only whether credentials are visible and stored, so a
   source, and the only root Claude settings file is the ignored
   `.claude/settings.local.json`. `plugins/banzai/.claude/settings.json` is
   packaged plugin content, not this repository's configuration.
-- Current Banzai release-train version is `2.6.4`, owned solely by root
+- Current Banzai release-train version is `2.6.5`, owned solely by root
   `package.json.version` and mirrored by four plugin/marketplace fields, the
   orchestrator package, and three `package-lock.json` fields (top-level, root
   package, and workspace package). All nine fields across seven files agree.

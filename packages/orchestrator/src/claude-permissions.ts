@@ -2,7 +2,11 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { FALLBACK_VENDOR, MODEL_ROLES, vendorFor } from "./models.js";
-import type { OrchestratorConfig } from "./types.js";
+import type {
+  ClaudeEnvironmentSettings,
+  ClaudeInvocationScope,
+  OrchestratorConfig
+} from "./types.js";
 
 /**
  * Claude subprocess permission readiness.
@@ -10,21 +14,21 @@ import type { OrchestratorConfig } from "./types.js";
  * Every Banzai Claude invocation runs with `--permission-mode dontAsk`, which
  * answers a permission prompt with a denial instead of a human. Only three
  * surfaces can still grant a call: the spec-gate hook, which allows exactly the
- * approved bundle while a phase carries runner identity; an `--allowedTools`
- * entry, which the run spends on the Serena whitelist alone; and the permission
- * rules of the settings files the session loads.
+ * writes the bound run authorizes for the current phase (ADR-0041); an
+ * `--allowedTools` entry, which the run spends on the Serena whitelist alone;
+ * and the permission rules of the settings files the session loads.
  *
- * Planning phases deliberately carry no runner identity — that is what keeps a
- * planner from writing code — so the hook defers their documentation writes to
- * the ordinary permission flow, and under `dontAsk` that flow is the third
- * surface or nothing. A checkout that never granted `Write` therefore denies
- * every artifact the phase exists to produce, after the model has already been
- * paid for. Shell commands are never hook-granted in any phase, so a Claude
- * planner or implementer keeps only the commands a scoped rule already names.
+ * File writes therefore need no ambient grant: planning and implementation
+ * phases carry runner identity, and the hook's allow skips the prompt that
+ * `dontAsk` would deny. No hook decision overrides a deny or ask rule, though,
+ * so a rule refusing `Write` or `Edit` still denies every write the hook
+ * authorized. Shell commands are never hook-granted in any phase, so a Claude
+ * planner or implementer keeps only the commands a loaded allow rule names.
  *
  * Both preconditions are readable offline: which settings sources the resolved
  * invocation scope loads, and Claude Code's workspace trust record, which makes
- * it ignore every repository-scoped allow rule of an untrusted checkout.
+ * it ignore every repository-scoped allow rule of an untrusted checkout. Deny
+ * and ask rules only restrict, so trust never suspends them.
  */
 
 export type ClaudeSettingSource = "user" | "project" | "local";
@@ -37,10 +41,14 @@ export interface ClaudeToolPermission {
   grant: ClaudeToolGrant;
 }
 
-/** Which ambient grants the configured roles actually depend on. */
+/** Which permission rules the configured roles actually depend on. */
 export interface ClaudePermissionDemand {
-  /** A Claude planner writes artifacts no runner authorization covers. */
-  planningWrites: boolean;
+  /**
+   * A Claude planner or implementer writes files. The hook grants each write,
+   * so only a rule refusing one matters. A run created before work bindings
+   * plans without runner identity and would still need an ambient grant.
+   */
+  fileWrites: boolean;
   /** A Claude planner or implementer runs shell commands. */
   shellCommands: boolean;
 }
@@ -51,6 +59,8 @@ export interface ClaudePermissionAudit {
   sources: ClaudeSettingSource[];
   trust: ClaudeTrustState;
   tools: ClaudeToolPermission[];
+  /** An untrusted checkout holds repository allow rules Claude Code ignores. */
+  repositoryRulesIgnored: boolean;
   /** Fixed reasons a writing phase cannot produce its artifacts. */
   blocking: string[];
   /** Fixed reasons a phase runs degraded rather than blocked. */
@@ -242,9 +252,10 @@ async function inspectTrust(
 
 function resolveGrant(
   tool: ClaudePermissionTool,
-  sets: readonly RuleSet[]
+  refusing: readonly RuleSet[],
+  granting: readonly RuleSet[]
 ): ClaudeToolGrant {
-  for (const set of sets) {
+  for (const set of refusing) {
     // `dontAsk` turns an ask rule into a denial: nothing can answer it.
     const refused = [...set.deny, ...set.ask];
     if (refused.some((rule) => namesTool(rule, tool) && isUnscoped(rule))) {
@@ -252,7 +263,7 @@ function resolveGrant(
     }
   }
   let scoped = false;
-  for (const set of sets) {
+  for (const set of granting) {
     for (const rule of set.allow) {
       if (!namesTool(rule, tool)) {
         continue;
@@ -280,9 +291,9 @@ function parseSources(settingSources: string | null): ClaudeSettingSource[] {
 }
 
 /**
- * Reads the configuration for the roles whose Claude phases depend on ambient
- * permission rules. A Claude reviewer needs none: its one write is the review
- * candidate the hook authorizes, and its shell access is already denied.
+ * Reads the configuration for the roles whose Claude phases depend on
+ * permission rules. A Claude reviewer depends on none: it receives neither
+ * write nor shell tools.
  */
 export function claudePermissionDemand(
   config: OrchestratorConfig
@@ -296,16 +307,59 @@ export function claudePermissionDemand(
         "claude"
     )
   );
-  return {
-    planningWrites: claudeRoles.has("planner"),
-    shellCommands: claudeRoles.has("planner") || claudeRoles.has("implementer")
-  };
+  const builds = claudeRoles.has("planner") || claudeRoles.has("implementer");
+  return { fileWrites: builds, shellCommands: builds };
 }
 
 export function claudePermissionDemanded(
   demand: ClaudePermissionDemand
 ): boolean {
-  return demand.planningWrites || demand.shellCommands;
+  return demand.fileWrites || demand.shellCommands;
+}
+
+export type ConfiguredClaudePermissions =
+  | { state: "not_demanded" }
+  | { state: "unresolved" }
+  | { state: "audited"; audit: ClaudePermissionAudit };
+
+export interface ConfiguredClaudePermissionDependencies {
+  /**
+   * Resolves the configured invocation scope. Injected so this module stays
+   * free of the adapters that own scope resolution.
+   */
+  resolveScope(
+    settings: ClaudeEnvironmentSettings
+  ): Promise<{ scope: Pick<ClaudeInvocationScope, "settingSources"> }>;
+  inspect?(input: ClaudePermissionInput): Promise<ClaudePermissionAudit>;
+}
+
+/**
+ * Audits the configured roles against the setting sources their resolved scope
+ * loads. A scope that cannot be resolved is the environment's failure to
+ * report, so it yields `unresolved` rather than a permission finding.
+ */
+export async function inspectConfiguredClaudePermissions(
+  repoRoot: string,
+  config: OrchestratorConfig,
+  dependencies: ConfiguredClaudePermissionDependencies
+): Promise<ConfiguredClaudePermissions> {
+  const demand = claudePermissionDemand(config);
+  if (!claudePermissionDemanded(demand)) {
+    return { state: "not_demanded" };
+  }
+  let settingSources: string | null;
+  try {
+    settingSources = (await dependencies.resolveScope(config.claudeEnvironment))
+      .scope.settingSources;
+  } catch {
+    return { state: "unresolved" };
+  }
+  const audit = await (dependencies.inspect ?? inspectClaudePermissions)({
+    repoRoot,
+    demand,
+    settingSources
+  });
+  return { state: "audited", audit };
 }
 
 export async function inspectClaudePermissions(
@@ -334,58 +388,34 @@ export async function inspectClaudePermissions(
   const honored = loaded.filter(
     (entry) => entry.source === "user" || trust !== "untrusted"
   );
-  const sets = [managed.rules, ...honored.map((entry) => entry.rules)];
+  const granting = [managed.rules, ...honored.map((entry) => entry.rules)];
+  // Claude Code applies a repository's deny and ask rules before the checkout
+  // is trusted, because they only restrict.
+  const refusing = [managed.rules, ...loaded.map((entry) => entry.rules)];
   const audited: ClaudePermissionTool[] = [
-    ...(demand.planningWrites ? (["Write", "Edit"] as const) : []),
+    ...(demand.fileWrites ? (["Write", "Edit"] as const) : []),
     ...(demand.shellCommands ? (["Bash"] as const) : [])
   ];
   const tools = audited.map((tool) => ({
     tool,
-    grant: resolveGrant(tool, sets)
+    grant: resolveGrant(tool, refusing, granting)
   }));
   const grantOf = (tool: ClaudePermissionTool): ClaudeToolGrant | null =>
     tools.find((entry) => entry.tool === tool)?.grant ?? null;
+  const repositoryRulesIgnored =
+    trust === "untrusted" &&
+    loaded.some(
+      (entry) => entry.source !== "user" && entry.rules.allow.length > 0
+    );
 
   const blocking: string[] = [];
   const advisories: string[] = [];
-  const write = grantOf("Write");
-  if (write === "denied") {
+  const refused = tools
+    .filter((entry) => entry.tool !== "Bash" && entry.grant === "denied")
+    .map((entry) => entry.tool);
+  if (refused.length > 0) {
     blocking.push(
-      "A deny or ask rule refuses Write, and `--permission-mode dontAsk` cannot escalate either one to a human."
-    );
-  }
-  if (write === "missing") {
-    blocking.push(
-      "No loaded permission rule grants Write, so a Claude planning phase is denied the description, plan, and decision artifacts it exists to produce."
-    );
-  }
-  if (
-    (write === "missing" || write === "denied") &&
-    trust === "untrusted" &&
-    sources.some((source) => source !== "user")
-  ) {
-    blocking.push(
-      "Claude Code has not been trusted in this checkout, so it ignores the repository's own permission rules."
-    );
-  }
-  if (
-    (write === "missing" || write === "denied") &&
-    unloadedLocal !== null &&
-    unloadedLocal.rules.allow.length > 0
-  ) {
-    advisories.push(
-      "Local settings hold allow rules the scoped invocation does not load; repository grants belong in the tracked project settings."
-    );
-  }
-  if (write === "scoped") {
-    advisories.push(
-      "Every rule granting Write is path-scoped, so a planning artifact outside those paths is still denied."
-    );
-  }
-  const edit = grantOf("Edit");
-  if (edit === "missing" || edit === "denied") {
-    advisories.push(
-      "No loaded permission rule grants Edit, so a planning phase can create artifacts but not revise them."
+      `A deny or ask rule refuses ${refused.join(" and ")}. No hook decision overrides it and \`--permission-mode dontAsk\` cannot escalate it to a human, so Claude planning and implementation writes are denied.`
     );
   }
   const bash = grantOf("Bash");
@@ -398,6 +428,21 @@ export async function inspectClaudePermissions(
       "Bash is granted only for the commands its scoped rules name; anything else a phase runs is denied."
     );
   }
+  if (repositoryRulesIgnored) {
+    advisories.push(
+      "Claude Code has not been trusted in this checkout, so it ignores the repository's own allow rules."
+    );
+  }
+  if (
+    bash !== null &&
+    bash !== "granted" &&
+    unloadedLocal !== null &&
+    unloadedLocal.rules.allow.length > 0
+  ) {
+    advisories.push(
+      "Local settings hold allow rules the scoped invocation does not load; repository grants belong in the tracked project settings."
+    );
+  }
   if (trust === "unknown") {
     advisories.push(
       "Claude Code's workspace trust record could not be read, so repository rules were treated as honored."
@@ -408,7 +453,15 @@ export async function inspectClaudePermissions(
       "A settings file could not be parsed, so its permission rules were treated as absent."
     );
   }
-  return { demand, sources, trust, tools, blocking, advisories };
+  return {
+    demand,
+    sources,
+    trust,
+    tools,
+    repositoryRulesIgnored,
+    blocking,
+    advisories
+  };
 }
 
 /**
@@ -419,27 +472,22 @@ export function claudePermissionRemediation(
   audit: ClaudePermissionAudit
 ): string {
   const steps: string[] = [];
-  if (audit.trust === "untrusted" && audit.sources.includes("project")) {
+  const refused = audit.tools.filter(
+    (entry) => entry.tool !== "Bash" && entry.grant === "denied"
+  );
+  if (refused.length > 0) {
     steps.push(
-      "run `claude` once in this checkout and accept the trust prompt"
+      `remove the deny or ask rules naming ${refused
+        .map((entry) => `"${entry.tool}"`)
+        .join(
+          " and "
+        )} from the settings Claude loads; a rule in administrator policy settings needs your administrator`
     );
   }
-  const unresolved = audit.tools.filter(
-    (entry) =>
-      entry.tool !== "Bash" &&
-      (entry.grant === "missing" || entry.grant === "denied")
-  );
-  if (unresolved.length > 0) {
+  if (audit.repositoryRulesIgnored) {
     steps.push(
-      `add ${unresolved
-        .map((entry) => `"${entry.tool}"`)
-        .join(" and ")} to \`permissions.allow\` in \`.claude/settings.json\``
+      "run `claude` once in this checkout and accept the trust prompt so its repository allow rules apply"
     );
-    if (!audit.sources.includes("local")) {
-      steps.push(
-        "keep the grants there rather than in local settings, the one repository source a scoped invocation never loads"
-      );
-    }
   }
   return steps.join("; ");
 }

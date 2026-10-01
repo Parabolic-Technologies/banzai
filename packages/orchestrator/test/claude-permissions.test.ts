@@ -13,8 +13,8 @@ import {
 import type { OrchestratorConfig } from "../src/types.js";
 import { reviewerOnlyClaudeConfig } from "./helpers.js";
 
-const PLANNING: ClaudePermissionDemand = {
-  planningWrites: true,
+const BUILDER: ClaudePermissionDemand = {
+  fileWrites: true,
   shellCommands: true
 };
 
@@ -86,50 +86,41 @@ function configWith(
   return config;
 }
 
-test("demand follows the roles whose phases depend on ambient rules", () => {
-  // The reviewer writes only the candidate the spec-gate hook authorizes and
-  // is denied Bash outright, so a Claude reviewer demands nothing.
+test("demand follows the roles whose phases depend on permission rules", () => {
+  // The reviewer receives neither write nor shell tools, so a Claude reviewer
+  // demands nothing.
   const reviewerOnly = claudePermissionDemand(
     configWith({ planner: "codex", implementer: "codex", reviewer: "claude" })
   );
-  assert.deepEqual(reviewerOnly, {
-    planningWrites: false,
-    shellCommands: false
-  });
+  assert.deepEqual(reviewerOnly, { fileWrites: false, shellCommands: false });
   assert.equal(claudePermissionDemanded(reviewerOnly), false);
 
-  const implementerOnly = claudePermissionDemand(
-    configWith({ planner: "codex", implementer: "claude" })
-  );
-  assert.deepEqual(implementerOnly, {
-    planningWrites: false,
-    shellCommands: true
-  });
-  assert.equal(claudePermissionDemanded(implementerOnly), true);
-
-  const planner = claudePermissionDemand(
-    configWith({ planner: "claude", implementer: "claude" })
-  );
-  assert.deepEqual(planner, { planningWrites: true, shellCommands: true });
+  for (const models of [
+    { planner: "codex", implementer: "claude" },
+    { planner: "claude", implementer: "codex" },
+    { planner: "claude", implementer: "claude" }
+  ]) {
+    assert.deepEqual(claudePermissionDemand(configWith(models)), BUILDER);
+  }
 
   // An unrecognized executable is attributed the way the vendor preflight
   // attributes it, so a wrapper cannot silently drop the audit.
   assert.deepEqual(
     claudePermissionDemand(configWith({ planner: "planner-wrapper" })),
-    { planningWrites: false, shellCommands: false }
+    { fileWrites: false, shellCommands: false }
   );
 });
 
-test("a trusted checkout without a Write rule blocks with one remediation", async () => {
+test("a checkout with no Write or Edit rule does not block, because the hook grants writes", async () => {
   const repository = await fixture();
   try {
     await repository.trust(true);
     await repository.writeProject({ allow: ["Bash(git status:*)"] });
-    await repository.writeLocal({ allow: ["Write", "Edit"] });
+    await repository.writeLocal({ allow: ["Bash"] });
 
     const audit = await inspectClaudePermissions({
       repoRoot: repository.repoRoot,
-      demand: PLANNING,
+      demand: BUILDER,
       settingSources: "project",
       env: repository.env,
       managedSettingsFile: repository.managed
@@ -142,21 +133,15 @@ test("a trusted checkout without a Write rule blocks with one remediation", asyn
       { tool: "Edit", grant: "missing" },
       { tool: "Bash", grant: "scoped" }
     ]);
-    assert.equal(audit.blocking.length, 1);
-    assert.match(
-      audit.blocking[0] ?? "",
-      /No loaded permission rule grants Write/
-    );
-    // The grants exist, in the one repository source a scoped run never loads.
+    assert.deepEqual(audit.blocking, []);
+    // The broader Bash grant exists, in the one repository source a scoped
+    // run never loads.
     assert.ok(
       audit.advisories.some((advisory) =>
         advisory.includes("Local settings hold")
       )
     );
-    const remediation = claudePermissionRemediation(audit);
-    assert.match(remediation, /"Write" and "Edit"/);
-    assert.match(remediation, /\.claude\/settings\.json/);
-    assert.doesNotMatch(remediation, /trust prompt/);
+    assert.equal(claudePermissionRemediation(audit), "");
   } finally {
     await repository.dispose();
   }
@@ -166,55 +151,50 @@ test("granted rules report a clean audit and demand-scoped tools", async () => {
   const repository = await fixture();
   try {
     await repository.trust(true);
-    await repository.writeProject({
-      allow: ["Write", "Edit", "Bash", "Bash(git status:*)"]
-    });
+    await repository.writeProject({ allow: ["Bash", "Bash(git status:*)"] });
 
-    const planning = await inspectClaudePermissions({
+    const builder = await inspectClaudePermissions({
       repoRoot: repository.repoRoot,
-      demand: PLANNING,
+      demand: BUILDER,
       settingSources: "project",
       env: repository.env,
       managedSettingsFile: repository.managed
     });
-    assert.deepEqual(planning.blocking, []);
-    assert.deepEqual(planning.advisories, []);
-    assert.equal(claudePermissionRemediation(planning), "");
+    assert.deepEqual(builder.blocking, []);
+    assert.deepEqual(builder.advisories, []);
+    assert.equal(claudePermissionRemediation(builder), "");
 
-    // An implementation-only demand never audits the planning writes the hook
-    // already authorizes for it.
-    const implementation = await inspectClaudePermissions({
+    const shellOnly = await inspectClaudePermissions({
       repoRoot: repository.repoRoot,
-      demand: { planningWrites: false, shellCommands: true },
+      demand: { fileWrites: false, shellCommands: true },
       settingSources: "project",
       env: repository.env,
       managedSettingsFile: repository.managed
     });
-    assert.deepEqual(implementation.tools, [
-      { tool: "Bash", grant: "granted" }
-    ]);
+    assert.deepEqual(shellOnly.tools, [{ tool: "Bash", grant: "granted" }]);
   } finally {
     await repository.dispose();
   }
 });
 
-test("an untrusted checkout drops repository rules and names the trust gate", async () => {
+test("an untrusted checkout ignores repository allow rules but not its refusals", async () => {
   const repository = await fixture();
   try {
     await repository.trust(false);
-    await repository.writeProject({ allow: ["Write", "Edit", "Bash"] });
+    await repository.writeProject({ allow: ["Bash"] });
 
     const untrusted = await inspectClaudePermissions({
       repoRoot: repository.repoRoot,
-      demand: PLANNING,
+      demand: BUILDER,
       settingSources: "project",
       env: repository.env,
       managedSettingsFile: repository.managed
     });
     assert.equal(untrusted.trust, "untrusted");
-    assert.equal(untrusted.blocking.length, 2);
+    assert.equal(untrusted.repositoryRulesIgnored, true);
+    assert.deepEqual(untrusted.blocking, []);
     assert.ok(
-      untrusted.blocking.some((reason) =>
+      untrusted.advisories.some((reason) =>
         reason.includes("has not been trusted")
       )
     );
@@ -223,11 +203,25 @@ test("an untrusted checkout drops repository rules and names the trust gate", as
       /accept the trust prompt/
     );
 
+    // Claude Code enforces a repository deny rule before the checkout is
+    // trusted, so the audit must not drop it with the allow rules.
+    await repository.writeProject({ deny: ["Edit"] });
+    const refusing = await inspectClaudePermissions({
+      repoRoot: repository.repoRoot,
+      demand: BUILDER,
+      settingSources: "project",
+      env: repository.env,
+      managedSettingsFile: repository.managed
+    });
+    assert.equal(refusing.repositoryRulesIgnored, false);
+    assert.equal(refusing.blocking.length, 1);
+    assert.match(refusing.blocking[0] ?? "", /refuses Edit/);
+
     // A checkout Claude has never opened has no record at all.
     await repository.trust(null);
     const absent = await inspectClaudePermissions({
       repoRoot: repository.repoRoot,
-      demand: PLANNING,
+      demand: BUILDER,
       settingSources: "project",
       env: repository.env,
       managedSettingsFile: repository.managed
@@ -238,7 +232,7 @@ test("an untrusted checkout drops repository rules and names the trust gate", as
   }
 });
 
-test("refusals, scoped grants, policy grants, and unreadable files are separated", async () => {
+test("refusals block, while path-scoped rules, policy rules, and unreadable files do not", async () => {
   const repository = await fixture();
   try {
     await repository.trust(true);
@@ -248,61 +242,65 @@ test("refusals, scoped grants, policy grants, and unreadable files are separated
     });
     const refused = await inspectClaudePermissions({
       repoRoot: repository.repoRoot,
-      demand: PLANNING,
+      demand: BUILDER,
       settingSources: "project",
       env: repository.env,
       managedSettingsFile: repository.managed
     });
-    // `dontAsk` cannot answer an ask rule, so it denies like a deny rule.
+    // `dontAsk` cannot answer an ask rule, and no hook allow overrides one.
     assert.deepEqual(refused.tools, [
       { tool: "Write", grant: "granted" },
       { tool: "Edit", grant: "denied" },
       { tool: "Bash", grant: "scoped" }
     ]);
-    assert.deepEqual(refused.blocking, []);
-    assert.ok(
-      refused.advisories.some((entry) => entry.includes("grants Edit"))
+    assert.equal(refused.blocking.length, 1);
+    assert.match(refused.blocking[0] ?? "", /refuses Edit\./);
+    assert.match(
+      claudePermissionRemediation(refused),
+      /^remove the deny or ask rules naming "Edit"/
     );
 
+    // Claude Code never consults a path-scoped Write rule, and the hook grants
+    // the write either way.
     await repository.writeProject({ allow: ["Write(documentation/**)"] });
     const scoped = await inspectClaudePermissions({
       repoRoot: repository.repoRoot,
-      demand: PLANNING,
+      demand: BUILDER,
       settingSources: "project",
       env: repository.env,
       managedSettingsFile: repository.managed
     });
     assert.deepEqual(scoped.blocking, []);
-    assert.ok(
-      scoped.advisories.some((entry) => entry.includes("path-scoped")),
-      "a path-scoped Write is a caveat, not a block"
-    );
 
     // Administrator policy applies whatever --setting-sources names.
     await repository.writeProject({ allow: [] });
     await writeFile(
       repository.managed,
-      `${JSON.stringify({ permissions: { allow: ["Write", "Edit"] } })}\n`,
+      `${JSON.stringify({ permissions: { deny: ["Write"] } })}\n`,
       "utf8"
     );
     const managed = await inspectClaudePermissions({
       repoRoot: repository.repoRoot,
-      demand: PLANNING,
+      demand: BUILDER,
       settingSources: "project",
       env: repository.env,
       managedSettingsFile: repository.managed
     });
-    assert.deepEqual(managed.blocking, []);
+    assert.match(managed.blocking[0] ?? "", /refuses Write\./);
+    assert.match(
+      claudePermissionRemediation(managed),
+      /administrator policy settings/
+    );
 
     await writeFile(repository.managed, "{ not json\n", "utf8");
     const malformed = await inspectClaudePermissions({
       repoRoot: repository.repoRoot,
-      demand: PLANNING,
+      demand: BUILDER,
       settingSources: "project",
       env: repository.env,
       managedSettingsFile: repository.managed
     });
-    assert.equal(malformed.blocking.length, 1);
+    assert.deepEqual(malformed.blocking, []);
     assert.ok(
       malformed.advisories.some((entry) =>
         entry.includes("could not be parsed")
@@ -317,38 +315,42 @@ test("ambient discovery loads user and local rules the scoped run never sees", a
   const repository = await fixture();
   try {
     await repository.trust(true);
-    await repository.writeUser({ allow: ["Write", "Edit", "Bash"] });
+    await repository.writeUser({ allow: ["Bash"], deny: ["Edit"] });
 
     const ambient = await inspectClaudePermissions({
       repoRoot: repository.repoRoot,
-      demand: PLANNING,
+      demand: BUILDER,
       settingSources: null,
       env: repository.env,
       managedSettingsFile: repository.managed
     });
     assert.deepEqual(ambient.sources, ["user", "project", "local"]);
-    assert.deepEqual(ambient.blocking, []);
+    assert.equal(ambient.blocking.length, 1);
     assert.deepEqual(ambient.advisories, []);
 
+    // A scoped run loads neither the user grant nor the user refusal.
     const scoped = await inspectClaudePermissions({
       repoRoot: repository.repoRoot,
-      demand: PLANNING,
+      demand: BUILDER,
       settingSources: "project",
       env: repository.env,
       managedSettingsFile: repository.managed
     });
-    assert.equal(scoped.blocking.length, 1);
+    assert.deepEqual(scoped.blocking, []);
+    assert.ok(scoped.advisories.some((entry) => entry.includes("grants Bash")));
 
     // A user grant survives an untrusted checkout; only repository rules fall.
+    await repository.writeUser({ allow: ["Bash"] });
     await repository.trust(false);
     const untrustedAmbient = await inspectClaudePermissions({
       repoRoot: repository.repoRoot,
-      demand: PLANNING,
+      demand: BUILDER,
       settingSources: null,
       env: repository.env,
       managedSettingsFile: repository.managed
     });
     assert.deepEqual(untrustedAmbient.blocking, []);
+    assert.deepEqual(untrustedAmbient.advisories, []);
   } finally {
     await repository.dispose();
   }

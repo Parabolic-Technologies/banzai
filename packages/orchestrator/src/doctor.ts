@@ -11,9 +11,9 @@ import {
   type ResolvedClaudeInvocationScope
 } from "./adapters.js";
 import {
-  claudePermissionDemand,
-  claudePermissionDemanded,
+  claudePermissionRemediation,
   inspectClaudePermissions,
+  inspectConfiguredClaudePermissions,
   type ClaudePermissionAudit,
   type ClaudePermissionInput
 } from "./claude-permissions.js";
@@ -450,8 +450,22 @@ async function claudePermissionsCheck(
       "Claude permission inspection requires a valid configuration."
     );
   }
-  const demand = claudePermissionDemand(config);
-  if (!claudePermissionDemanded(demand)) {
+  const permissions = await inspectConfiguredClaudePermissions(
+    repoRoot,
+    config,
+    {
+      resolveScope: async (settings) =>
+        await (
+          dependencies.resolveClaudeInvocationScope ??
+          resolveClaudeInvocationScope
+        )(settings),
+      inspect: async (input) =>
+        await (
+          dependencies.inspectClaudePermissions ?? inspectClaudePermissions
+        )(input)
+    }
+  );
+  if (permissions.state === "not_demanded") {
     return check(
       "claude.permissions",
       "config",
@@ -459,13 +473,7 @@ async function claudePermissionsCheck(
       "No configured role runs a Claude phase that depends on repository permission rules."
     );
   }
-  let settingSources: string | null;
-  try {
-    const resolved = await (
-      dependencies.resolveClaudeInvocationScope ?? resolveClaudeInvocationScope
-    )(config.claudeEnvironment);
-    settingSources = resolved.scope.settingSources;
-  } catch {
+  if (permissions.state === "unresolved") {
     return check(
       "claude.permissions",
       "config",
@@ -473,15 +481,25 @@ async function claudePermissionsCheck(
       "Claude permission inspection requires a verifiable invocation environment."
     );
   }
-  const audit = await (
-    dependencies.inspectClaudePermissions ?? inspectClaudePermissions
-  )({ repoRoot, demand, settingSources });
+  const audit = permissions.audit;
+  const remediation = claudePermissionRemediation(audit);
+  const fixes: DoctorFix[] =
+    remediation.length === 0
+      ? []
+      : [
+          {
+            action: `${remediation.charAt(0).toUpperCase()}${remediation.slice(1)}.`,
+            documentation:
+              "documentation/orchestrator.md#claude-tool-permissions"
+          }
+        ];
   if (audit.blocking.length > 0) {
     return check(
       "claude.permissions",
       "config",
       "fail",
-      audit.blocking.join(" ")
+      audit.blocking.join(" "),
+      fixes
     );
   }
   if (audit.advisories.length > 0) {
@@ -489,7 +507,8 @@ async function claudePermissionsCheck(
       "claude.permissions",
       "config",
       "warning",
-      audit.advisories.join(" ")
+      audit.advisories.join(" "),
+      fixes
     );
   }
   return check(
@@ -983,7 +1002,7 @@ export async function inspectDoctor(
       "authentication.models",
       "executables",
       "warning",
-      "Model authentication readiness was not checked. Doctor is offline and executable availability is not authentication proof; startup preflight remains authoritative. Run Banzai from a regular terminal, restore vendor login, or use the vendor-supported setup-token flow when unattended authentication is required."
+      "Model authentication readiness and vendor CLI versions were not checked. Doctor is offline and executable availability is not authentication proof; startup preflight remains authoritative. Run Banzai from a regular terminal, restore vendor login, or use the vendor-supported setup-token flow when unattended authentication is required."
     ),
     await activeRunCheck(repoRoot),
     await runnerLockCheck(repoRoot, dependencies)
