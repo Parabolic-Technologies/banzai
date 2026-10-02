@@ -305,11 +305,29 @@ before installation: the gate verifies tracked-file immutability with Git,
 and the container runs as root while the runner owns the checkout directory,
 which Git otherwise rejects as dubious ownership.
 
-The workflow is [`.github/workflows/ci.yml`](https://github.com/Parabolic-Technologies/banzai/blob/main/.github/workflows/ci.yml).
-Configure branch protection or rulesets to require `release_check_node_22` and
-`release_check_node_24` after GitHub has reported those checks. Workflow YAML
-does not configure repository merge rules. Validate workflow syntax locally
-with `actionlint`; `.github/actionlint.yaml` declares the custom runner label.
+The workflow is [`.github/workflows/ci.yml`](https://github.com/Parabolic-Technologies/banzai/blob/main/.github/workflows/ci.yml)
+([ADR-0053](decisions/0053-single-pull-request-ci-gate-and-publish-evidence-reuse.md)).
+The supported lanes run on pull requests and manual dispatch; the Node 26 lane
+runs on a weekly schedule and manual dispatch, never on pull requests. A push
+to `main` or `dev` starts no hosted run, and a newer push to a pull request
+cancels that pull request's in-progress run. After `release:check` passes, each
+supported lane records the tree it verified as a 30-day
+`release-evidence-<lane>-attempt-<attempt>-tree-<tree>` artifact.
+
+Publication through `.github/workflows/publish.yml` reuses that evidence only
+when the release tag is a merge commit whose tree equals its second parent's,
+and a successful pull-request run of this repository's `ci.yml` for that parent
+has both supported lanes' evidence for the tag's tree in its latest attempt.
+Otherwise both supported lanes run the complete `release:check` on the tag
+before anything is published. The `release_evidence` job summary states which
+path ran. `npm run release:validate` owns the layout of both workflows.
+
+Where the GitHub plan offers branch protection or rulesets, require
+`release_check_node_22` and `release_check_node_24` after GitHub has reported
+those checks; this private repository on GitHub Free has neither, so the
+publication gate is the mechanical release enforcement. Workflow YAML does not
+configure repository merge rules. Validate workflow syntax locally with
+`actionlint`; `.github/actionlint.yaml` declares the custom runner label.
 
 To enable the manual live job, provision an isolated Linux runner labeled
 `banzai-live` with supported Codex/Claude CLIs and the subscription-auth roots
@@ -321,7 +339,7 @@ that machine. Keep the live job disabled if that protected runner boundary is
 unavailable. Once provisioned, set repository variable
 `BANZAI_LIVE_COMPATIBILITY` to `1`, select **Run workflow** on a protected ref,
 and enable the `live_compatibility` input. The job requires all three conditions
-and is skipped on push and pull request events. Node setup disables automatic
+and is skipped on pull request and schedule events. Node setup disables automatic
 npm caching, checkout disables persisted credentials, and no artifact upload
 is configured. GitHub runner provisioning and authenticated live execution
 require their own evidence.

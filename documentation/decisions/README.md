@@ -59,6 +59,7 @@ plugin and orchestrator source.
 | [0050](./0050-triggered-code-design-assessment.md) | Triggered code-design assessment | Accepted | 2026-09-18 | Research in `documentation/ideas/` (structural debt, composable code design, method budget draft); narrow amendment to ADR-0030 |
 | [0051](./0051-acceptance-time-digest-validation.md) | Acceptance-time validation of model-authored digests | Accepted | 2026-09-21 | Issue 11 in the product repository; private work `model-authored-digest-validation`; amends 0023/0024 by adding one recovery source |
 | [0052](./0052-orchestrator-capability-slice-architecture.md) | Orchestrator capability-slice architecture and WorkflowRunner decomposition | Accepted | 2026-09-28 | Standalone owner request; review-1 F1/F2 accepted and resolved in rework 1; narrow amendments to 0028/0029; implementation Planned |
+| [0053](./0053-single-pull-request-ci-gate-and-publish-evidence-reuse.md) | Single pull-request CI gate and publish-time evidence reuse | Accepted | 2026-10-01 | Standalone owner request; review-1 F1/F2 accepted and resolved in rework 1; partial supersession of 0039 and amendments to 0009/0010; implementation Planned |
 
 ## File Names
 

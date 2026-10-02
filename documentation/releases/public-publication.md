@@ -34,20 +34,34 @@ corrected after both versions were published.
    changed, then run `npm ci` and `npm run release:check`.
 2. Push `dev`, open the pull request to `main`, and wait for
    `release_check_node_22` and `release_check_node_24` on the exact candidate.
-   Pushing `dev` alone starts no hosted run; the pull request and the merge to
-   `main` do.
-3. Merge to `main`, create tag `v<version>` on the merge commit, push the tag,
-   and create the GitHub Release from the notes.
+   Each required lane records the tree it verified as a
+   `release-evidence-<lane>-attempt-<attempt>-tree-<tree>` artifact. Only the
+   pull request starts a hosted run: pushing `dev` or merging to `main` does
+   not, and a newer push to the pull request cancels its older run.
+3. Merge to `main` with a merge commit, create tag `v<version>` on that merge
+   commit, push the tag, and create the GitHub Release from the notes. A squash
+   or rebase merge is allowed but cannot reuse the pull-request evidence.
 4. Confirm the repository is public. The npm README loads its illustration and
    logos from `raw.githubusercontent.com` and links GitHub paths; both return
    404 while the repository is private.
 5. Publishing the GitHub Release (not a draft, not a pre-release) triggers
-   `.github/workflows/publish.yml`. The job checks out the release tag,
-   requires the tag to equal `v` plus the root `package.json` version, runs
-   `npm ci` and `npm run release:check`, skips a version already on the
-   registry, publishes only the CLI workspace through npm trusted publishing
-   (OIDC, no stored token), and records npm acceptance or the existing-version
-   skip in the job summary. A failed `npm publish` fails the job. A successful
+   `.github/workflows/publish.yml`
+   ([ADR-0053](../decisions/0053-single-pull-request-ci-gate-and-publish-evidence-reuse.md)).
+   First, `release_evidence` checks whether the tag is bound to the
+   pull-request evidence: a merge commit whose tree equals its second parent's,
+   a successful `pull_request` run of `ci.yml` for that parent, and both
+   required lanes of its latest attempt recording the tag's tree. Its summary
+   says `Release evidence reused` with the CI run and attempt, or
+   `Release evidence not bound` with the reason. When evidence is not bound,
+   `release_check_node_22` and `release_check_node_24` run the complete
+   `npm run release:check` on the tag in the exact supported images, and
+   nothing is published unless both pass. Then `publish_npm` checks out the
+   release tag, requires the tag to equal `v` plus the root `package.json`
+   version, runs `npm ci`, `npm run release:validate` and
+   `npm run publication:check`, skips a version already on the registry,
+   publishes only the CLI workspace through npm trusted publishing (OIDC, no
+   stored token), and records npm acceptance or the existing-version skip in
+   the job summary. A failed `npm publish` fails the job. A successful
    job does not verify registry availability or `dist-tags.latest`:
    npm scans packages before making them available, so the job does not wait
    for registry processing. See [npm's publish-time scanning notice](https://github.blog/changelog/2026-07-28-npm-publish-time-malware-scanning-and-dual-use-metadata/).
@@ -62,7 +76,7 @@ corrected after both versions were published.
    environment `npm`. Under Allowed actions, enable **Allow `npm publish`**:
    the default grants only `npm stage publish`, and the workflow's direct
    publish then fails with `403 OIDC permission denied for this action`
-   after `release:check` has already passed on the tag. On GitHub, Settings,
+   after the release gate has already passed. On GitHub, Settings,
    then Environments, then `npm` can add required reviewers and restrict
    deployments to `v*` tags.
 
