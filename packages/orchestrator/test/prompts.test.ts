@@ -950,6 +950,8 @@ test("planning prompt makes consultation evidence-first, bounded, and non-author
   assert.match(prompt, /gate=decision_consultation/);
   assert.match(prompt, /questions=\[\]/);
   assert.match(prompt, /1-3 sequential decision cards/);
+  assert.match(prompt, /summary is one plain line of at most 1000 characters/);
+  assert.match(prompt, /Every card string is also one plain line/);
   assert.match(prompt, /stop before authoring a Proposed ADR or plan/);
   assert.match(prompt, /Do not repeat an answered decisionId/);
   assert.match(

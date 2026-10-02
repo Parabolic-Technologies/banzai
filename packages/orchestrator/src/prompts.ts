@@ -231,6 +231,10 @@ still genuinely unresolved and blocks sound requirements, an ADR, or the plan,
 stop before authoring a Proposed ADR or plan that selects an option. Return
 outcome=needs_human_decision, gate=decision_consultation, questions=[], and one
 closed decisionConsultation request containing 1-3 sequential decision cards.
+Its summary is one plain line of at most 1000 characters naming the pending
+decisions; the cards carry the detail. Every card string is also one plain line
+within its schema maxLength: put separate points in separate benefits, costs,
+risks, consequences, or evidence entries instead of line breaks or lists.
 Each card must have a fresh stable decisionId, a precise question and why,
 affected requirement IDs, repository-relative evidence, an accountable owner,
 the supported responseMode, explicit options with consequences when the mode is

@@ -241,6 +241,27 @@ function consultationString(
   return value;
 }
 
+// Consultation prose renders as terminal lines, yet planners wrap it in
+// paragraphs and lists. Layout whitespace collapses before the shared check,
+// so every other control character still fails closed and the length bound
+// applies to the collapsed text. Identifiers, paths and requirement references
+// never pass through here: rewriting them would silently change what they name.
+function consultationProse(
+  value: unknown,
+  label: string,
+  maximum: number
+): string {
+  return consultationString(
+    typeof value === "string"
+      ? value
+          .replace(/[ \t\n\r]*[\t\n\r][ \t\n\r]*/gu, " ")
+          .replace(/^ +| +$/gu, "")
+      : value,
+    label,
+    maximum
+  );
+}
+
 function consultationIdentifier(value: unknown, label: string): string {
   const identifier = consultationString(value, label, 128);
   if (
@@ -257,13 +278,14 @@ function consultationStrings(
   value: unknown,
   label: string,
   maximumItems: number,
-  maximumLength: number
+  maximumLength: number,
+  decodeItem: (value: unknown, label: string, maximum: number) => string
 ): string[] {
   if (!Array.isArray(value) || value.length > maximumItems) {
     return consultationError(`${label} must be a bounded string array.`);
   }
   const strings = value.map((item, index) =>
-    consultationString(item, `${label}[${index}]`, maximumLength)
+    decodeItem(item, `${label}[${index}]`, maximumLength)
   );
   if (new Set(strings).size !== strings.length) {
     return consultationError(`${label} must not contain duplicates.`);
@@ -303,15 +325,34 @@ function parseConsultationOption(
   ]);
   return {
     optionId: consultationIdentifier(record.optionId, `${label}.optionId`),
-    title: consultationString(record.title, `${label}.title`, 160),
-    benefits: consultationStrings(record.benefits, `${label}.benefits`, 8, 500),
-    costs: consultationStrings(record.costs, `${label}.costs`, 8, 500),
-    risks: consultationStrings(record.risks, `${label}.risks`, 8, 500),
+    title: consultationProse(record.title, `${label}.title`, 160),
+    benefits: consultationStrings(
+      record.benefits,
+      `${label}.benefits`,
+      8,
+      500,
+      consultationProse
+    ),
+    costs: consultationStrings(
+      record.costs,
+      `${label}.costs`,
+      8,
+      500,
+      consultationProse
+    ),
+    risks: consultationStrings(
+      record.risks,
+      `${label}.risks`,
+      8,
+      500,
+      consultationProse
+    ),
     consequences: consultationStrings(
       record.consequences,
       `${label}.consequences`,
       8,
-      500
+      500,
+      consultationProse
     )
   };
 }
@@ -369,7 +410,7 @@ function parseConsultationCard(
     return {
       path: consultationPath(evidenceRecord.path, `${evidenceLabel}.path`),
       line,
-      detail: consultationString(
+      detail: consultationProse(
         evidenceRecord.detail,
         `${evidenceLabel}.detail`,
         500
@@ -415,7 +456,7 @@ function parseConsultationCard(
     }
     recommendation = {
       optionId,
-      rationale: consultationString(
+      rationale: consultationProse(
         recommendationRecord.rationale,
         `${label}.recommendation.rationale`,
         1000
@@ -431,7 +472,8 @@ function parseConsultationCard(
     record.affectedRequirements,
     `${label}.affectedRequirements`,
     16,
-    120
+    120,
+    consultationString
   );
   if (affectedRequirements.length === 0) {
     return consultationError(
@@ -443,9 +485,9 @@ function parseConsultationCard(
       record.decisionId,
       `${label}.decisionId`
     ),
-    title: consultationString(record.title, `${label}.title`, 160),
-    question: consultationString(record.question, `${label}.question`, 1000),
-    why: consultationString(record.why, `${label}.why`, 1200),
+    title: consultationProse(record.title, `${label}.title`, 160),
+    question: consultationProse(record.question, `${label}.question`, 1000),
+    why: consultationProse(record.why, `${label}.why`, 1200),
     affectedRequirements,
     evidence,
     decisionOwner: "human",
@@ -834,7 +876,7 @@ function parsePhaseResultFields(
   );
   const summary =
     gate === "decision_consultation"
-      ? consultationString(record.summary, "summary", 1_000)
+      ? consultationProse(record.summary, "summary", 1_000)
       : requireString(record.summary, "summary");
   if (
     gate === "decision_consultation"

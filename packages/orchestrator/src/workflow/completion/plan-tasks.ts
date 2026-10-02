@@ -22,7 +22,7 @@ import type {
 } from "../../types.js";
 import { ResultDigestRejectedError } from "../../validation.js";
 import { parseTaskVerificationObligations } from "../../verification-evidence.js";
-import { type RunnerContext, timestamp } from "../context.js";
+import type { RunnerContext } from "../context.js";
 import {
   recordResultDigestEvidence,
   taskVerificationDigestDetail
@@ -182,22 +182,4 @@ export async function establishPlanRemainderDigest(
     };
   }
   await recordResultDigestEvidence(context, state, attempt, [comparison]);
-}
-
-export function completionInvalidCheckpoint(
-  context: RunnerContext,
-  sourceAttemptId: string,
-  error: PlanTaskCompletionError,
-  sourceAttemptKind: "implementation" | "fix" = "implementation"
-): NonNullable<RunState["planTaskCompletion"]> {
-  return {
-    schemaVersion: 1,
-    status: "invalid",
-    sourceAttemptId,
-    sourceAttemptKind,
-    errorCode: "PLAN_TASK_COMPLETION_INVALID",
-    violation: error.violation,
-    taskId: error.taskId,
-    recordedAt: timestamp(context)
-  };
 }

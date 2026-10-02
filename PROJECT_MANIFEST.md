@@ -233,16 +233,24 @@ setup reuses the existing runner lock without stale ownership reclamation.
     Attempt reconciliation, every application of a phase result to the run,
     the status projections and the phase executors stay in the runner.
 
-    Edges between capability modules are named per work item. Checkpoints
-    depend on attempts, completion, verification, review, preflight and digest
-    evidence. The attempt lifecycle depends on the completion plan-task
-    module, and completion capture, refusal and publication depend on the
-    attempt lifecycle. Verification depends on completion, and completion
-    depends on digest evidence. The module graph is acyclic, although attempts
-    and completion depend on each other at directory level.
+    Edges between capability modules are named per work item. Each directory
+    directly under `src/workflow/` is one slice; root-level `src/workflow/*.ts`
+    modules are not slices. The slice graph and the module graph are both
+    acyclic, and the slices are layered, bottom to top:
+    1. `domain`;
+    2. `attempts`, `digest-evidence`, `preflight` and `review`, which do not
+       depend on one another;
+    3. `completion`, which depends on attempts and digest evidence;
+    4. `verification`, which depends on completion;
+    5. `checkpoints`, which depends on all of the above.
+
+    `configuration` holds the configuration-ownership owner and has no slice
+    edges.
 
   - **Facade edge.** The import-boundary policy rejects any `src/workflow/**`
     entry that permits `src/workflow.ts` (`workflow_facade_edge`).
+  - **Slice cycle.** The policy also rejects permitted edges that make the
+    slice graph cyclic (`workflow_slice_cycle`), naming one edge on the cycle.
 - Concurrency: one Node process using `async`/`await`. Each model phase and each
   verification command is a child process with its own timeout and
   process-group termination; verification commands run sequentially, while the
@@ -483,8 +491,8 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   baseline and the rejection reason text.
 - `workflow/completion/inputs.ts` and `plan-tasks.ts` — completion input
   observation and comparison, the approved plan path and task identifiers,
-  runner control-task and planning-result validation,
-  implementation-completion validation and the completion-invalid checkpoint.
+  runner control-task and planning-result validation, and
+  implementation-completion validation.
 - `workflow/completion/refusal.ts`, `capture.ts`, `publication.ts` and
   `revalidation.ts` — the ADR-0047 completion protocol up to the phase result:
   - the publication refusal error, and input rejection with its repair
@@ -518,6 +526,9 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   failure categories and command matching, workflow routing and terminal
   result contracts. `humanDecisionQuestions` is re-exported from
   `workflow.ts`.
+- `workflow/domain/completion-checkpoint.ts` — the completion-invalid
+  `planTaskCompletion` record, built from explicit facts. The attempt lifecycle
+  and completion revalidation supply the recording time.
 - `workflow/domain/retry-eligibility.ts`, `next-action.ts` and
   `restore-eligibility.ts` — the retry and restore rules and next-action
   selection. `RetryEligibility` is re-exported from `workflow.ts`.
@@ -1196,7 +1207,7 @@ attempts without another model call`.
   outcome is valid when added automation is not proportionate. Missing
   load-bearing contract or safety evidence remains actionable.
 - Required suite: `npm run test` must pass completely; typecheck must be
-  clean, lint must report 0 errors (7 known warnings, section 10), and
+  clean, lint must report 0 errors (advisory warnings, section 10), and
   `npm run build:check` must confirm committed `dist/` parity.
   Per-change test counts and covered guarantees are recorded in each feature's
   `test-report.md` / `implementation-report.md`, not here.
@@ -1239,6 +1250,9 @@ attempts without another model call`.
   policy projected by `eslint.config.mjs`; inline lint configuration is disabled
   for production source. Rule deviations belong in the flat config rather than
   scattered `eslint-disable` comments.
+- ESLint reports `complexity` above 15 and `no-nested-ternary` as warnings
+  across production TypeScript, tests, and linted ESM tooling. These warnings
+  remain visible without failing `npm run lint` or `npm run verify`.
 - TypeScript idioms enforced by `tsconfig.json`: `strict`,
   `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`,
   `verbatimModuleSyntax`, `forceConsistentCasingInFileNames`, `module` and
@@ -1623,7 +1637,7 @@ status` reports only whether credentials are visible and stored, so a
   reuse of `check-dist.mjs` omits that script's dependency-requiring CLI smoke;
   ordinary `npm run build:check` and `npm run smoke:committed` retain their full
   smoke semantics.
-- Lint debt: 7 `@typescript-eslint/no-base-to-string` warnings in
+- Vendor JSON lint debt: 7 `@typescript-eslint/no-base-to-string` warnings in
   `src/adapters.ts`, where `String(<unknown> ?? "")` coerces untrusted vendor
   JSON before comparing it to a literal. The rule is set to `warn` so the count
   stays visible without blocking `verify`. Behaviour is correct today — a

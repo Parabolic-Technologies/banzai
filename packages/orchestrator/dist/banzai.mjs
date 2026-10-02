@@ -5897,6 +5897,13 @@ function consultationString(value, label, maximum) {
   }
   return value;
 }
+function consultationProse(value, label, maximum) {
+  return consultationString(
+    typeof value === "string" ? value.replace(/[ \t\n\r]*[\t\n\r][ \t\n\r]*/gu, " ").replace(/^ +| +$/gu, "") : value,
+    label,
+    maximum
+  );
+}
 function consultationIdentifier(value, label) {
   const identifier22 = consultationString(value, label, 128);
   if (identifier22 === "." || identifier22 === ".." || !CONSULTATION_ID_PATTERN.test(identifier22)) {
@@ -5904,12 +5911,12 @@ function consultationIdentifier(value, label) {
   }
   return identifier22;
 }
-function consultationStrings(value, label, maximumItems, maximumLength) {
+function consultationStrings(value, label, maximumItems, maximumLength, decodeItem) {
   if (!Array.isArray(value) || value.length > maximumItems) {
     return consultationError(`${label} must be a bounded string array.`);
   }
   const strings = value.map(
-    (item, index) => consultationString(item, `${label}[${index}]`, maximumLength)
+    (item, index) => decodeItem(item, `${label}[${index}]`, maximumLength)
   );
   if (new Set(strings).size !== strings.length) {
     return consultationError(`${label} must not contain duplicates.`);
@@ -5939,15 +5946,34 @@ function parseConsultationOption(value, label) {
   ]);
   return {
     optionId: consultationIdentifier(record7.optionId, `${label}.optionId`),
-    title: consultationString(record7.title, `${label}.title`, 160),
-    benefits: consultationStrings(record7.benefits, `${label}.benefits`, 8, 500),
-    costs: consultationStrings(record7.costs, `${label}.costs`, 8, 500),
-    risks: consultationStrings(record7.risks, `${label}.risks`, 8, 500),
+    title: consultationProse(record7.title, `${label}.title`, 160),
+    benefits: consultationStrings(
+      record7.benefits,
+      `${label}.benefits`,
+      8,
+      500,
+      consultationProse
+    ),
+    costs: consultationStrings(
+      record7.costs,
+      `${label}.costs`,
+      8,
+      500,
+      consultationProse
+    ),
+    risks: consultationStrings(
+      record7.risks,
+      `${label}.risks`,
+      8,
+      500,
+      consultationProse
+    ),
     consequences: consultationStrings(
       record7.consequences,
       `${label}.consequences`,
       8,
-      500
+      500,
+      consultationProse
     )
   };
 }
@@ -5991,7 +6017,7 @@ function parseConsultationCard(value, index) {
     return {
       path: consultationPath(evidenceRecord.path, `${evidenceLabel}.path`),
       line,
-      detail: consultationString(
+      detail: consultationProse(
         evidenceRecord.detail,
         `${evidenceLabel}.detail`,
         500
@@ -6035,7 +6061,7 @@ function parseConsultationCard(value, index) {
     }
     recommendation = {
       optionId,
-      rationale: consultationString(
+      rationale: consultationProse(
         recommendationRecord.rationale,
         `${label}.recommendation.rationale`,
         1e3
@@ -6051,7 +6077,8 @@ function parseConsultationCard(value, index) {
     record7.affectedRequirements,
     `${label}.affectedRequirements`,
     16,
-    120
+    120,
+    consultationString
   );
   if (affectedRequirements.length === 0) {
     return consultationError(
@@ -6063,9 +6090,9 @@ function parseConsultationCard(value, index) {
       record7.decisionId,
       `${label}.decisionId`
     ),
-    title: consultationString(record7.title, `${label}.title`, 160),
-    question: consultationString(record7.question, `${label}.question`, 1e3),
-    why: consultationString(record7.why, `${label}.why`, 1200),
+    title: consultationProse(record7.title, `${label}.title`, 160),
+    question: consultationProse(record7.question, `${label}.question`, 1e3),
+    why: consultationProse(record7.why, `${label}.why`, 1200),
     affectedRequirements,
     evidence: evidence2,
     decisionOwner: "human",
@@ -6296,7 +6323,7 @@ function parsePhaseResultFields(record7) {
   const decisionConsultation = parseDecisionConsultation(
     record7.decisionConsultation
   );
-  const summary2 = gate === "decision_consultation" ? consultationString(record7.summary, "summary", 1e3) : requireString(record7.summary, "summary");
+  const summary2 = gate === "decision_consultation" ? consultationProse(record7.summary, "summary", 1e3) : requireString(record7.summary, "summary");
   if (gate === "decision_consultation" ? phase !== "plan" || outcome !== "needs_human_decision" || decisionConsultation === null || questions.length !== 0 : decisionConsultation !== null) {
     throw new BanzaiError2(
       "INVALID_RESULT",
@@ -12887,6 +12914,13 @@ function consultationString2(value, label, maximum) {
   }
   return value;
 }
+function consultationProse2(value, label, maximum) {
+  return consultationString2(
+    typeof value === "string" ? value.replace(/[ \t\n\r]*[\t\n\r][ \t\n\r]*/gu, " ").replace(/^ +| +$/gu, "") : value,
+    label,
+    maximum
+  );
+}
 function consultationIdentifier2(value, label) {
   const identifier4 = consultationString2(value, label, 128);
   if (identifier4 === "." || identifier4 === ".." || !CONSULTATION_ID_PATTERN2.test(identifier4)) {
@@ -12894,12 +12928,12 @@ function consultationIdentifier2(value, label) {
   }
   return identifier4;
 }
-function consultationStrings2(value, label, maximumItems, maximumLength) {
+function consultationStrings2(value, label, maximumItems, maximumLength, decodeItem) {
   if (!Array.isArray(value) || value.length > maximumItems) {
     return consultationError2(`${label} must be a bounded string array.`);
   }
   const strings = value.map(
-    (item, index) => consultationString2(item, `${label}[${index}]`, maximumLength)
+    (item, index) => decodeItem(item, `${label}[${index}]`, maximumLength)
   );
   if (new Set(strings).size !== strings.length) {
     return consultationError2(`${label} must not contain duplicates.`);
@@ -12929,15 +12963,34 @@ function parseConsultationOption2(value, label) {
   ]);
   return {
     optionId: consultationIdentifier2(record7.optionId, `${label}.optionId`),
-    title: consultationString2(record7.title, `${label}.title`, 160),
-    benefits: consultationStrings2(record7.benefits, `${label}.benefits`, 8, 500),
-    costs: consultationStrings2(record7.costs, `${label}.costs`, 8, 500),
-    risks: consultationStrings2(record7.risks, `${label}.risks`, 8, 500),
+    title: consultationProse2(record7.title, `${label}.title`, 160),
+    benefits: consultationStrings2(
+      record7.benefits,
+      `${label}.benefits`,
+      8,
+      500,
+      consultationProse2
+    ),
+    costs: consultationStrings2(
+      record7.costs,
+      `${label}.costs`,
+      8,
+      500,
+      consultationProse2
+    ),
+    risks: consultationStrings2(
+      record7.risks,
+      `${label}.risks`,
+      8,
+      500,
+      consultationProse2
+    ),
     consequences: consultationStrings2(
       record7.consequences,
       `${label}.consequences`,
       8,
-      500
+      500,
+      consultationProse2
     )
   };
 }
@@ -12981,7 +13034,7 @@ function parseConsultationCard2(value, index) {
     return {
       path: consultationPath2(evidenceRecord.path, `${evidenceLabel}.path`),
       line,
-      detail: consultationString2(
+      detail: consultationProse2(
         evidenceRecord.detail,
         `${evidenceLabel}.detail`,
         500
@@ -13025,7 +13078,7 @@ function parseConsultationCard2(value, index) {
     }
     recommendation = {
       optionId,
-      rationale: consultationString2(
+      rationale: consultationProse2(
         recommendationRecord.rationale,
         `${label}.recommendation.rationale`,
         1e3
@@ -13041,7 +13094,8 @@ function parseConsultationCard2(value, index) {
     record7.affectedRequirements,
     `${label}.affectedRequirements`,
     16,
-    120
+    120,
+    consultationString2
   );
   if (affectedRequirements.length === 0) {
     return consultationError2(
@@ -13053,9 +13107,9 @@ function parseConsultationCard2(value, index) {
       record7.decisionId,
       `${label}.decisionId`
     ),
-    title: consultationString2(record7.title, `${label}.title`, 160),
-    question: consultationString2(record7.question, `${label}.question`, 1e3),
-    why: consultationString2(record7.why, `${label}.why`, 1200),
+    title: consultationProse2(record7.title, `${label}.title`, 160),
+    question: consultationProse2(record7.question, `${label}.question`, 1e3),
+    why: consultationProse2(record7.why, `${label}.why`, 1200),
     affectedRequirements,
     evidence: evidence2,
     decisionOwner: "human",
@@ -13372,7 +13426,7 @@ function parsePhaseResultFields2(record7) {
   const decisionConsultation = parseDecisionConsultation2(
     record7.decisionConsultation
   );
-  const summary2 = gate === "decision_consultation" ? consultationString2(record7.summary, "summary", 1e3) : requireString2(record7.summary, "summary");
+  const summary2 = gate === "decision_consultation" ? consultationProse2(record7.summary, "summary", 1e3) : requireString2(record7.summary, "summary");
   if (gate === "decision_consultation" ? phase !== "plan" || outcome !== "needs_human_decision" || decisionConsultation === null || questions.length !== 0 : decisionConsultation !== null) {
     throw new BanzaiError(
       "INVALID_RESULT",
@@ -24395,7 +24449,7 @@ import process7 from "node:process";
 // package.json
 var package_default = {
   name: "@parabolic-technologies/banzai",
-  version: "2.6.5",
+  version: "2.6.6",
   private: false,
   description: "Spec-driven AI development CLI for Codex and Claude Code, with human approvals and independent review for complex changes.",
   keywords: [
@@ -24530,6 +24584,7 @@ var phase_result_schema_default = {
     },
     summary: {
       type: "string",
+      description: "With gate decision_consultation, one plain line of at most 1000 characters without control characters; the decision cards carry the detail.",
       minLength: 1
     },
     artifacts: {
@@ -24687,6 +24742,7 @@ var phase_result_schema_default = {
         },
         {
           type: "object",
+          description: "Every string in this request is one plain line without control characters within its maxLength; use separate array entries instead of line breaks.",
           additionalProperties: false,
           properties: {
             schema: {
@@ -31570,18 +31626,6 @@ async function establishPlanRemainderDigest(context, state, attempt, planPath, m
   }
   await recordResultDigestEvidence(context, state, attempt, [comparison]);
 }
-function completionInvalidCheckpoint(context, sourceAttemptId, error, sourceAttemptKind = "implementation") {
-  return {
-    schemaVersion: 1,
-    status: "invalid",
-    sourceAttemptId,
-    sourceAttemptKind,
-    errorCode: "PLAN_TASK_COMPLETION_INVALID",
-    violation: error.violation,
-    taskId: error.taskId,
-    recordedAt: timestamp(context)
-  };
-}
 
 // src/workflow/verification/required-checks.ts
 import { readFile as readFile13 } from "node:fs/promises";
@@ -32323,6 +32367,22 @@ function artifactWritePaths(state, phase) {
 
 // src/workflow/attempts/lifecycle.ts
 import path29 from "node:path";
+
+// src/workflow/domain/completion-checkpoint.ts
+function completionInvalidCheckpoint(facts) {
+  return {
+    schemaVersion: 1,
+    status: "invalid",
+    sourceAttemptId: facts.sourceAttemptId,
+    sourceAttemptKind: facts.sourceAttemptKind,
+    errorCode: "PLAN_TASK_COMPLETION_INVALID",
+    violation: facts.violation,
+    taskId: facts.taskId,
+    recordedAt: facts.recordedAt
+  };
+}
+
+// src/workflow/attempts/lifecycle.ts
 function newAttempt(context, state, kind, mutable) {
   return {
     id: `${kind}-${state.reviewIteration + 1}-${context.ids().slice(0, 8)}`,
@@ -32590,12 +32650,13 @@ async function failAttempt(context, state, record7, error) {
     }
   }
   if (completionError3 !== null) {
-    state.planTaskCompletion = completionInvalidCheckpoint(
-      context,
-      record7.attempt.id,
-      completionError3,
-      record7.attempt.kind === "fix" ? "fix" : "implementation"
-    );
+    state.planTaskCompletion = completionInvalidCheckpoint({
+      sourceAttemptId: record7.attempt.id,
+      sourceAttemptKind: record7.attempt.kind === "fix" ? "fix" : "implementation",
+      violation: completionError3.violation,
+      taskId: completionError3.taskId,
+      recordedAt: timestamp(context)
+    });
   }
   blockState(
     state,
@@ -34235,12 +34296,13 @@ async function blockForCompletionFailure(context, state, sourceAttemptId, error)
     "source_attempt_invalid",
     errorMessage(error)
   );
-  state.planTaskCompletion = completionInvalidCheckpoint(
-    context,
+  state.planTaskCompletion = completionInvalidCheckpoint({
     sourceAttemptId,
-    completionError3,
-    state.planTaskCompletion?.sourceAttemptId === sourceAttemptId ? state.planTaskCompletion.sourceAttemptKind ?? "implementation" : "implementation"
-  );
+    sourceAttemptKind: state.planTaskCompletion?.sourceAttemptId === sourceAttemptId ? state.planTaskCompletion.sourceAttemptKind ?? "implementation" : "implementation",
+    violation: completionError3.violation,
+    taskId: completionError3.taskId,
+    recordedAt: timestamp(context)
+  });
   state.activeProcess = null;
   blockState(
     state,
@@ -35483,6 +35545,10 @@ still genuinely unresolved and blocks sound requirements, an ADR, or the plan,
 stop before authoring a Proposed ADR or plan that selects an option. Return
 outcome=needs_human_decision, gate=decision_consultation, questions=[], and one
 closed decisionConsultation request containing 1-3 sequential decision cards.
+Its summary is one plain line of at most 1000 characters naming the pending
+decisions; the cards carry the detail. Every card string is also one plain line
+within its schema maxLength: put separate points in separate benefits, costs,
+risks, consequences, or evidence entries instead of line breaks or lists.
 Each card must have a fresh stable decisionId, a precise question and why,
 affected requirement IDs, repository-relative evidence, an accountable owner,
 the supported responseMode, explicit options with consequences when the mode is

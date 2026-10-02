@@ -739,6 +739,61 @@ test("import_boundaries_workflow_modules_cannot_reach_the_facade", async () => {
   );
 });
 
+test("import_boundaries_workflow_slices_form_an_acyclic_graph", () => {
+  const modules = [...discoverProductionModules(SOURCE_ROOT)];
+  assert.doesNotThrow(() =>
+    validateImportBoundaryPolicy(mutablePolicy(), modules)
+  );
+});
+
+test("import_boundaries_workflow_slice_cycle_fails_closed", () => {
+  const modules = [...discoverProductionModules(SOURCE_ROOT)];
+  for (const [importer, field, target] of [
+    [
+      "src/workflow/review/result-application.ts",
+      "runtime",
+      "../checkpoints/terminal-checkpoints.js"
+    ],
+    [
+      "src/workflow/verification/rounds.ts",
+      "typeOnly",
+      "../checkpoints/terminal-checkpoints.js"
+    ]
+  ] as const) {
+    const policy = mutablePolicy();
+    const entry = policy.find((candidate) => candidate.importer === importer);
+    assert.ok(entry);
+    entry[field] = [...entry[field], { target, authority: "ADR-0052" }];
+    const error = policyError(
+      () => validateImportBoundaryPolicy(policy, modules),
+      "workflow_slice_cycle"
+    );
+    assert.equal(error.issue.importer, importer);
+    assert.equal(error.issue.target, target);
+  }
+
+  // The attempts -> completion edge that the domain checkpoint builder removed.
+  const policy = mutablePolicy();
+  const lifecycle = policy.find(
+    (candidate) => candidate.importer === "src/workflow/attempts/lifecycle.ts"
+  );
+  assert.ok(lifecycle);
+  lifecycle.runtime = [
+    ...lifecycle.runtime,
+    { target: "../completion/plan-tasks.js", authority: "ADR-0052" }
+  ];
+  const { issue } = policyError(
+    () => validateImportBoundaryPolicy(policy, modules),
+    "workflow_slice_cycle"
+  );
+  assert.ok(issue.importer !== undefined && issue.target !== undefined);
+  const slices = [
+    issue.importer,
+    path.posix.join(path.posix.dirname(issue.importer), issue.target)
+  ].map((module) => module.split("/")[2]);
+  assert.deepEqual(slices.sort(), ["attempts", "completion"]);
+});
+
 test("import_boundaries_classification_is_explicit_and_closed", () => {
   const modules = [...discoverProductionModules(SOURCE_ROOT)];
 

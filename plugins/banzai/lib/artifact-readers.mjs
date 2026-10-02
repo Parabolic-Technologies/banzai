@@ -3758,6 +3758,13 @@ function consultationString(value, label, maximum) {
   }
   return value;
 }
+function consultationProse(value, label, maximum) {
+  return consultationString(
+    typeof value === "string" ? value.replace(/[ \t\n\r]*[\t\n\r][ \t\n\r]*/gu, " ").replace(/^ +| +$/gu, "") : value,
+    label,
+    maximum
+  );
+}
 function consultationIdentifier(value, label) {
   const identifier2 = consultationString(value, label, 128);
   if (identifier2 === "." || identifier2 === ".." || !CONSULTATION_ID_PATTERN.test(identifier2)) {
@@ -3765,12 +3772,12 @@ function consultationIdentifier(value, label) {
   }
   return identifier2;
 }
-function consultationStrings(value, label, maximumItems, maximumLength) {
+function consultationStrings(value, label, maximumItems, maximumLength, decodeItem) {
   if (!Array.isArray(value) || value.length > maximumItems) {
     return consultationError(`${label} must be a bounded string array.`);
   }
   const strings = value.map(
-    (item, index) => consultationString(item, `${label}[${index}]`, maximumLength)
+    (item, index) => decodeItem(item, `${label}[${index}]`, maximumLength)
   );
   if (new Set(strings).size !== strings.length) {
     return consultationError(`${label} must not contain duplicates.`);
@@ -3800,15 +3807,34 @@ function parseConsultationOption(value, label) {
   ]);
   return {
     optionId: consultationIdentifier(record.optionId, `${label}.optionId`),
-    title: consultationString(record.title, `${label}.title`, 160),
-    benefits: consultationStrings(record.benefits, `${label}.benefits`, 8, 500),
-    costs: consultationStrings(record.costs, `${label}.costs`, 8, 500),
-    risks: consultationStrings(record.risks, `${label}.risks`, 8, 500),
+    title: consultationProse(record.title, `${label}.title`, 160),
+    benefits: consultationStrings(
+      record.benefits,
+      `${label}.benefits`,
+      8,
+      500,
+      consultationProse
+    ),
+    costs: consultationStrings(
+      record.costs,
+      `${label}.costs`,
+      8,
+      500,
+      consultationProse
+    ),
+    risks: consultationStrings(
+      record.risks,
+      `${label}.risks`,
+      8,
+      500,
+      consultationProse
+    ),
     consequences: consultationStrings(
       record.consequences,
       `${label}.consequences`,
       8,
-      500
+      500,
+      consultationProse
     )
   };
 }
@@ -3852,7 +3878,7 @@ function parseConsultationCard(value, index) {
     return {
       path: consultationPath(evidenceRecord.path, `${evidenceLabel}.path`),
       line,
-      detail: consultationString(
+      detail: consultationProse(
         evidenceRecord.detail,
         `${evidenceLabel}.detail`,
         500
@@ -3896,7 +3922,7 @@ function parseConsultationCard(value, index) {
     }
     recommendation = {
       optionId,
-      rationale: consultationString(
+      rationale: consultationProse(
         recommendationRecord.rationale,
         `${label}.recommendation.rationale`,
         1e3
@@ -3912,7 +3938,8 @@ function parseConsultationCard(value, index) {
     record.affectedRequirements,
     `${label}.affectedRequirements`,
     16,
-    120
+    120,
+    consultationString
   );
   if (affectedRequirements.length === 0) {
     return consultationError(
@@ -3924,9 +3951,9 @@ function parseConsultationCard(value, index) {
       record.decisionId,
       `${label}.decisionId`
     ),
-    title: consultationString(record.title, `${label}.title`, 160),
-    question: consultationString(record.question, `${label}.question`, 1e3),
-    why: consultationString(record.why, `${label}.why`, 1200),
+    title: consultationProse(record.title, `${label}.title`, 160),
+    question: consultationProse(record.question, `${label}.question`, 1e3),
+    why: consultationProse(record.why, `${label}.why`, 1200),
     affectedRequirements,
     evidence,
     decisionOwner: "human",
@@ -4157,7 +4184,7 @@ function parsePhaseResultFields(record) {
   const decisionConsultation = parseDecisionConsultation(
     record.decisionConsultation
   );
-  const summary = gate === "decision_consultation" ? consultationString(record.summary, "summary", 1e3) : requireString(record.summary, "summary");
+  const summary = gate === "decision_consultation" ? consultationProse(record.summary, "summary", 1e3) : requireString(record.summary, "summary");
   if (gate === "decision_consultation" ? phase !== "plan" || outcome !== "needs_human_decision" || decisionConsultation === null || questions.length !== 0 : decisionConsultation !== null) {
     throw new BanzaiError(
       "INVALID_RESULT",

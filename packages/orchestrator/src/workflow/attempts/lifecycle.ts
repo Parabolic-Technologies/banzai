@@ -33,8 +33,8 @@ import {
   phaseResultEnvelopeOf,
   phaseResultFromEnvelope
 } from "../../validation.js";
-import { completionInvalidCheckpoint } from "../completion/plan-tasks.js";
 import { observeHumanTime, type RunnerContext, timestamp } from "../context.js";
+import { completionInvalidCheckpoint } from "../domain/completion-checkpoint.js";
 import { INTEGRITY_NEUTRAL_FAILURE_CAUSES } from "../domain/failure-classes.js";
 
 export interface AttemptPolicy {
@@ -448,12 +448,14 @@ export async function failAttempt(
     }
   }
   if (completionError !== null) {
-    state.planTaskCompletion = completionInvalidCheckpoint(
-      context,
-      record.attempt.id,
-      completionError,
-      record.attempt.kind === "fix" ? "fix" : "implementation"
-    );
+    state.planTaskCompletion = completionInvalidCheckpoint({
+      sourceAttemptId: record.attempt.id,
+      sourceAttemptKind:
+        record.attempt.kind === "fix" ? "fix" : "implementation",
+      violation: completionError.violation,
+      taskId: completionError.taskId,
+      recordedAt: timestamp(context)
+    });
   }
   blockState(
     state,

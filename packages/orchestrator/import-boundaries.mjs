@@ -1000,6 +1000,14 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
     DOMAIN
   ),
   boundary(
+    "src/workflow/domain/completion-checkpoint.ts",
+    "workflow-completion-checkpoint",
+    [ADR_0052],
+    [],
+    [permission("../../types.js", ADR_0052)],
+    DOMAIN
+  ),
+  boundary(
     "src/workflow/domain/digest-rejected-recovery.ts",
     "workflow-digest-rejected-recovery",
     [ADR_0052],
@@ -1167,10 +1175,12 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       permission("../../plan-task-completion.js", ADR_0052),
       permission("../../validation.js", ADR_0052),
       permission("../../verification-evidence.js", ADR_0052),
-      permission("../context.js", ADR_0052),
       permission("../digest-evidence/records.js", ADR_0052)
     ],
-    [permission("../../types.js", ADR_0052)]
+    [
+      permission("../../types.js", ADR_0052),
+      permission("../context.js", ADR_0052)
+    ]
   ),
   boundary(
     "src/workflow/verification/required-checks.ts",
@@ -1213,8 +1223,8 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       permission("../../state-machine.js", ADR_0052),
       permission("../../types.js", ADR_0052),
       permission("../../validation.js", ADR_0052),
-      permission("../completion/plan-tasks.js", ADR_0052),
       permission("../context.js", ADR_0052),
+      permission("../domain/completion-checkpoint.js", ADR_0052),
       permission("../domain/failure-classes.js", ADR_0052)
     ],
     []
@@ -1306,10 +1316,12 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       permission("../../state-machine.js", ADR_0052),
       permission("../../types.js", ADR_0052),
       permission("../../validation.js", ADR_0052),
+      permission("../context.js", ADR_0052),
+      permission("../domain/completion-checkpoint.js", ADR_0052),
       permission("./plan-tasks.js", ADR_0052),
       permission("./publication.js", ADR_0052)
     ],
-    [permission("../context.js", ADR_0052)]
+    []
   ),
   boundary(
     "src/workflow/verification/evidence.ts",
@@ -1623,6 +1635,7 @@ export function validateImportBoundaryPolicy(entries, sourceModules) {
   }
   validateDomainEdges(byImporter);
   validateWorkflowFacadeEdges(byImporter);
+  validateWorkflowSliceGraph(byImporter);
   return byImporter;
 }
 
@@ -1664,6 +1677,50 @@ function validateWorkflowFacadeEdges(byImporter) {
       if (targetModule(entry.importer, item.target) === "src/workflow.ts")
         fail("workflow_facade_edge", entry.importer, item.target);
     }
+  }
+}
+
+function workflowSlice(module) {
+  const match = /^src\/workflow\/([^/]+)\//.exec(module);
+  return match === null ? null : match[1];
+}
+
+// ADR-0052 section 2: each directory directly under src/workflow/ is one
+// capability slice, and the slices depend on one another without a cycle.
+// Root-level src/workflow/*.ts modules are not slices.
+function validateWorkflowSliceGraph(byImporter) {
+  const edges = new Map();
+  for (const importer of [...byImporter.keys()].sort()) {
+    const from = workflowSlice(importer);
+    if (from === null) continue;
+    const entry = byImporter.get(importer);
+    const targets = [...entry.runtime, ...entry.typeOnly]
+      .map((item) => item.target)
+      .sort();
+    for (const target of targets) {
+      const module = targetModule(importer, target);
+      const to = module === null ? null : workflowSlice(module);
+      if (to === null || to === from) continue;
+      if (!edges.has(from)) edges.set(from, new Map());
+      if (!edges.get(from).has(to))
+        edges.get(from).set(to, { importer, target });
+    }
+  }
+  const visited = new Map();
+  const visit = (slice) => {
+    visited.set(slice, "open");
+    const next = edges.get(slice) ?? new Map();
+    for (const to of [...next.keys()].sort()) {
+      if (visited.get(to) === "open") {
+        const edge = next.get(to);
+        fail("workflow_slice_cycle", edge.importer, edge.target);
+      }
+      if (!visited.has(to)) visit(to);
+    }
+    visited.set(slice, "closed");
+  };
+  for (const slice of [...edges.keys()].sort()) {
+    if (!visited.has(slice)) visit(slice);
   }
 }
 
