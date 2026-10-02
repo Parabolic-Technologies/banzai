@@ -146,8 +146,9 @@ Version authority: `package.json#/version`; 9 fields in 7 files.
 
 Live vendor-permission evidence is a separate manual, protected-ref-only path;
 deterministic tests are never labeled as proof of hosted permission behavior.
-The [GitHub Actions workflow](.github/workflows/ci.yml) runs on pushes to
-`main`, on pull requests, and on manual dispatch; a push to `dev` starts no
+The [GitHub Actions workflow](.github/workflows/ci.yml) runs the required
+supported lanes on pull requests and on manual dispatch, and the advisory Node
+26 lane weekly and on manual dispatch. A push to `main` or `dev` starts no
 hosted run, so run `npm run release:check` locally or dispatch the workflow
 by hand. Each lane uses a fresh checkout with read-only
 repository permissions and no persisted checkout credentials. Release owners

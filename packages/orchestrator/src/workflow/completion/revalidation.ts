@@ -16,11 +16,9 @@ import {
   type ValidPlanTaskCompletionSummary
 } from "../../types.js";
 import { parsePersistedPhaseResult } from "../../validation.js";
-import type { RunnerContext } from "../context.js";
-import {
-  completionInvalidCheckpoint,
-  completionPlanPath
-} from "./plan-tasks.js";
+import { type RunnerContext, timestamp } from "../context.js";
+import { completionInvalidCheckpoint } from "../domain/completion-checkpoint.js";
+import { completionPlanPath } from "./plan-tasks.js";
 import { recordLedger } from "./publication.js";
 
 export async function revalidateTaskCompletion(
@@ -233,14 +231,16 @@ export async function blockForCompletionFailure(
           "source_attempt_invalid",
           errorMessage(error)
         );
-  state.planTaskCompletion = completionInvalidCheckpoint(
-    context,
+  state.planTaskCompletion = completionInvalidCheckpoint({
     sourceAttemptId,
-    completionError,
-    state.planTaskCompletion?.sourceAttemptId === sourceAttemptId
-      ? (state.planTaskCompletion.sourceAttemptKind ?? "implementation")
-      : "implementation"
-  );
+    sourceAttemptKind:
+      state.planTaskCompletion?.sourceAttemptId === sourceAttemptId
+        ? (state.planTaskCompletion.sourceAttemptKind ?? "implementation")
+        : "implementation",
+    violation: completionError.violation,
+    taskId: completionError.taskId,
+    recordedAt: timestamp(context)
+  });
   state.activeProcess = null;
   blockState(
     state,

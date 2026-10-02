@@ -550,6 +550,135 @@ test("decision consultation validates one bounded planning-only request", () => 
   );
 });
 
+test("decision consultation summary collapses layout whitespace and keeps its other bounds", () => {
+  const consultationPhase = (summary: string) =>
+    phase({
+      gate: "decision_consultation",
+      summary,
+      decisionConsultation: consultation()
+    });
+
+  // Planners naturally return paragraphs and Markdown lists here.
+  assert.equal(
+    parsePhaseResult(
+      consultationPhase(
+        "Drafted description.md.\n\nTwo choices remain:\n- **Retirement:** when plaintext stops.  \r\n-\tExternal readers.\n"
+      )
+    ).summary,
+    "Drafted description.md. Two choices remain: - **Retirement:** when plaintext stops. - External readers."
+  );
+  assert.equal(
+    parsePhaseResult(consultationPhase(`${"x".repeat(998)}\n\n\n y`)).summary,
+    `${"x".repeat(998)} y`
+  );
+
+  for (const summary of [
+    "\n\t\r\n",
+    "Line one\n\u000bLine two",
+    "Line one\nHidden‮",
+    `${"x".repeat(999)}\ny`
+  ]) {
+    assert.throws(
+      () => parsePhaseResult(consultationPhase(summary)),
+      /summary must be a bounded safe single-line string/
+    );
+  }
+
+  assert.equal(
+    parsePhaseResult(phase({ summary: "Plan is ready.\n\nReview T001." }))
+      .summary,
+    "Plan is ready.\n\nReview T001."
+  );
+});
+
+test("decision consultation card prose collapses layout whitespace while references stay exact", () => {
+  const cardPhase = (overrides: Record<string, unknown>) =>
+    phase({
+      gate: "decision_consultation",
+      decisionConsultation: consultation({
+        decisions: [consultationCard(overrides)]
+      })
+    });
+  const baseCard = consultationCard();
+  const [reuse, external] = baseCard.options;
+
+  const card = parsePhaseResult(
+    cardPhase({
+      title: "Storage\nmodel",
+      question: "Which storage model\nshould the feature use?",
+      why: "Old instances read plaintext.\n\n- Rollback stays safe.\r\n",
+      evidence: [
+        {
+          path: "packages/orchestrator/src/store.ts",
+          line: 120,
+          detail: "The runner already owns\n\tdurable JSON state."
+        }
+      ],
+      options: [
+        {
+          ...reuse,
+          title: "Reuse\nthe store",
+          benefits: ["Preserves one\nstate authority.", "No new service."],
+          consequences: ["\n- No new service is introduced.\n"]
+        },
+        external
+      ],
+      recommendation: {
+        optionId: "reuse-store",
+        rationale: "It satisfies the requirement.\n\nIt keeps one authority."
+      }
+    })
+  ).decisionConsultation?.decisions[0];
+  assert.ok(card);
+  assert.equal(card.title, "Storage model");
+  assert.equal(card.question, "Which storage model should the feature use?");
+  assert.equal(
+    card.why,
+    "Old instances read plaintext. - Rollback stays safe."
+  );
+  assert.equal(
+    card.evidence[0]?.detail,
+    "The runner already owns durable JSON state."
+  );
+  const [reuseOption] = card.options;
+  assert.ok(reuseOption);
+  assert.equal(reuseOption.title, "Reuse the store");
+  assert.deepEqual(reuseOption.benefits, [
+    "Preserves one state authority.",
+    "No new service."
+  ]);
+  assert.deepEqual(reuseOption.consequences, [
+    "- No new service is introduced."
+  ]);
+  assert.equal(
+    card.recommendation?.rationale,
+    "It satisfies the requirement. It keeps one authority."
+  );
+
+  for (const overrides of [
+    { why: "Line one\n\u000bLine two" },
+    { question: "Hidden\n‮" },
+    { affectedRequirements: ["FR\n4"] },
+    {
+      evidence: [
+        {
+          path: "packages/orchestrator/src/store\n.ts",
+          line: 1,
+          detail: "Paths are never rewritten."
+        }
+      ]
+    },
+    {
+      options: [
+        { ...reuse, benefits: ["Fast rollout.", "Fast\nrollout."] },
+        external
+      ]
+    }
+  ]) {
+    assert.throws(() => parsePhaseResult(cardPhase(overrides)), BanzaiError);
+  }
+});
+
 test("persisted phase results retain truthful v1 and v2 evidence", () => {
   const current = phase({ phase: "fix", outcome: "blocked", gate: null });
   const {

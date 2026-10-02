@@ -246,5 +246,10 @@ Implementation and review must confirm:
 
 ## Lifecycle Links
 
+- Amended by
+  [ADR-0053](./0053-single-pull-request-ci-gate-and-publish-evidence-reuse.md),
+  accepted 2026-10-01: the advisory forward lane runs on a weekly schedule and
+  on manual dispatch instead of on every pull request. Supported and forward
+  pins are unchanged. Implementation of this amendment is Planned.
 - Supersedes: None
 - Superseded by: None

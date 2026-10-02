@@ -1,5 +1,6 @@
 import { readdir, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { availableParallelism } from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { build } from "esbuild";
@@ -119,8 +120,11 @@ try {
     .sort()
     .map((entry) => path.join(outputRoot, entry));
 
+  // Node defaults to availableParallelism() - 1 concurrent files, which is one
+  // on two-CPU hosted runners and serializes the whole suite there.
   const testArguments = [
     "--test",
+    `--test-concurrency=${Math.max(2, availableParallelism() - 1)}`,
     "--test-reporter=spec",
     ...(pattern === null ? [] : [`--test-name-pattern=${pattern}`]),
     ...testFiles

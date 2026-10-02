@@ -15,7 +15,11 @@ those actions.
 - [ ] Record intended plugin and orchestrator delivery scope separately; a
       shared source version does not imply that both components will be
       installed or published.
-- [ ] Confirm every required GitHub Actions result belongs to the exact candidate.
+- [ ] Confirm every required GitHub Actions result belongs to the exact candidate:
+      the pull-request run of the candidate head, whose required lanes recorded
+      the candidate tree (ADR-0053). Merge with a merge commit so publication
+      can reuse that evidence; a squash or rebase merge makes publication
+      re-run both supported lanes.
 - [ ] Confirm `documentation/releases/<version>.md` describes content,
       requirements, installation, and migration only. It must not call a tag,
       GitHub Release, or npm version intended, pending, or not yet claimed, and
@@ -123,9 +127,13 @@ Apply this section when the release includes npm distribution of
       so the registry `gitHead` equals the tag; a branch tip with an identical
       tree records a different commit.
 - [ ] Publishing the GitHub Release is the explicit publication authorization:
-      `publish.yml` publishes only the CLI workspace after `release:check` on
-      the tag. Its summary records npm acceptance or an existing-version skip;
-      it does not wait for registry processing or verify availability. Record
+      `publish.yml` publishes only the CLI workspace after either bound
+      pull-request evidence or a complete `release:check` on the tag in both
+      supported lanes. Record which path ran: the `release_evidence` summary
+      names the reused CI run and attempt (`Release evidence reused`) or the
+      reason for the fallback (`Release evidence not bound`). The publishing
+      job's summary records npm acceptance or an existing-version skip; it does
+      not wait for registry processing or verify availability. Record
       registry metadata, artifact integrity, and a fresh registry-install smoke
       as separate delivery evidence once npm processing completes.
 - [ ] After npm processing completes, verify the published version from the registry document itself
@@ -143,19 +151,26 @@ for the initial release order and operator commands.
 
 ## Required and Advisory CI
 
-- [ ] Configure branch protection or rulesets to require the two supported
-      GitHub checks after their first hosted run; YAML alone does not enforce
-      merge protection.
-- [ ] `release_check_node_22` passed at Node 22.20.0.
-- [ ] `release_check_node_24` passed at Node 24.11.1.
+- [ ] Where the GitHub plan offers branch protection or rulesets, require the
+      two supported GitHub checks after their first hosted run; YAML alone does
+      not enforce merge protection. GitHub Free offers neither for this private
+      repository, so the merge rule below is applied by the release owner and
+      the publication gate is its mechanical enforcement.
+- [ ] `release_check_node_22` passed at Node 22.20.0 on the pull request.
+- [ ] `release_check_node_24` passed at Node 24.11.1 on the pull request.
 - [ ] Required product failures are fixed and rerun.
 - [ ] Required environment failures are classified and rerun; evidence remains
       unsatisfied until pass.
-- [ ] Record `forward_compatibility_node_26` as pass or fail.
+- [ ] Record the latest `forward_compatibility_node_26` result as pass or fail
+      with its commit. It runs on the weekly schedule and on manual dispatch,
+      never on pull requests; dispatch the workflow for a candidate-specific
+      result.
 - [ ] Confirm no default/fork job invoked Codex, Claude, auth, or a paid model.
 
 Repository policy permits merge only with both required supported-lane passes.
-The advisory lanes are not dependencies of required jobs.
+The advisory lanes are not dependencies of required jobs. CI runs on pull
+requests, manual dispatch and the weekly schedule; a push to `main` or `dev`
+starts no hosted run, and a newer push to a pull request cancels its older run.
 
 ## Live Compatibility Evidence
 

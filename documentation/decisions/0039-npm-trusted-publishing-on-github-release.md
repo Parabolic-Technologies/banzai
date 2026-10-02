@@ -130,5 +130,12 @@ Negative:
 
 ## Lifecycle Links
 
+- Partially superseded by
+  [ADR-0053](./0053-single-pull-request-ci-gate-and-publish-evidence-reuse.md),
+  accepted 2026-10-01: the unconditional `release:check` on the release tag is
+  replaced by bound pull-request evidence or a two-lane fallback. The release
+  trigger, `npm` environment, OIDC trusted publishing, tag and npm version
+  checks and skip-existing behavior are unchanged. Implementation of this
+  supersession is Planned.
 - Supersedes: none.
-- Superseded by: none.
+- Superseded by: none in full.

@@ -417,8 +417,7 @@ is a navigational reference and is updated with the module it describes.
   record, and compares two observations exactly (`sameObservedInputs`).
 - `workflow/completion/plan-tasks.ts` — the approved plan path and task
   identifiers, runner control-task and planning-result validation (including
-  the plan remainder digest), implementation-completion validation and the
-  completion-invalid checkpoint.
+  the plan remainder digest), and implementation-completion validation.
 - `workflow/completion/refusal.ts` — `CompletionRefusal`, the ADR-0047
   publication refusal whose closed code and stage are persisted with operator
   guidance; rejecting a captured completion input with its repair checkpoint
@@ -485,6 +484,12 @@ is a navigational reference and is updated with the module it describes.
 - `workflow/domain/routing.ts` — `effectiveWorkflow`, the route a selection
   result authorizes, and `terminalResultContract`, the result contract a
   terminal checkpoint records for an attempt kind.
+- `workflow/domain/completion-checkpoint.ts` — `completionInvalidCheckpoint`,
+  the persisted `planTaskCompletion` record that marks a completion claim
+  invalid (`PLAN_TASK_COMPLETION_INVALID`). It takes explicit facts: the source
+  attempt identifier and kind, the violation, the task and the recording time.
+  The attempt lifecycle and completion revalidation read the clock and pass
+  the time, and the record keeps its persisted field order.
 - `workflow/domain/retry-eligibility.ts` — ADR-0052 domain rule `decideRetry`.
   It stages retry eligibility over task-verification attempts, the legacy
   ledger and attempt records, and names the evidence it needs next.

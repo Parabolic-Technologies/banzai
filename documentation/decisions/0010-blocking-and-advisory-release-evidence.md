@@ -288,5 +288,11 @@ Implementation and review must confirm:
 
 ## Lifecycle Links
 
+- Amended by
+  [ADR-0053](./0053-single-pull-request-ci-gate-and-publish-evidence-reuse.md),
+  accepted 2026-10-01: required evidence is bound to the published tree, every
+  publication path proves both supported lanes, and merge policy applies
+  without GitHub enforcement. Required and advisory classification is
+  unchanged. Implementation of this amendment is Planned.
 - Supersedes: None
 - Superseded by: None

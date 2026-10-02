@@ -46,6 +46,7 @@
     },
     "summary": {
       "type": "string",
+      "description": "With gate decision_consultation, one plain line of at most 1000 characters without control characters; the decision cards carry the detail.",
       "minLength": 1
     },
     "artifacts": {
@@ -203,6 +204,7 @@
         },
         {
           "type": "object",
+          "description": "Every string in this request is one plain line without control characters within its maxLength; use separate array entries instead of line breaks.",
           "additionalProperties": false,
           "properties": {
             "schema": {

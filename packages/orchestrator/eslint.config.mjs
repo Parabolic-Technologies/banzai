@@ -27,6 +27,12 @@ export default tseslint.config(
     ignores: ["dist/", ".test-dist/", ".dist-check-*/"]
   },
   {
+    rules: {
+      complexity: ["warn", 15],
+      "no-nested-ternary": "warn"
+    }
+  },
+  {
     files: ["src/**/*.ts", "test/**/*.ts", "import-boundaries.d.mts"],
     extends: [
       js.configs.recommended,
