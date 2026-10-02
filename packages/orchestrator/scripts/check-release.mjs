@@ -1118,6 +1118,7 @@ async function validateHookRuntimeVersion(root, releaseVersion) {
 }
 
 const ciWorkflow = ".github/workflows/ci.yml";
+const ciSchedule = "17 5 * * 1";
 
 function jobBlock(source, job) {
   const escaped = job.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1139,6 +1140,42 @@ function requireJobText(block, expected, job, label) {
   }
 }
 
+// ADR-0053: each deterministic lane must be exactly its approved job. Any
+// added line, in any YAML spelling of a key (a quoted or escaped `if`, for
+// example), could change when the lane runs or skip its gate, so the lane is
+// compared as whole text instead of matching keys by pattern.
+function ciLaneDefinition(lane) {
+  return [
+    lane.required === true
+      ? "    if: github.event_name != 'schedule'"
+      : "    if: github.event_name != 'pull_request'",
+    "    runs-on: ubuntu-24.04",
+    `    container: ${lane.image}`,
+    ...(lane.required === true ? [] : ["    continue-on-error: true"]),
+    "    steps:",
+    "      - uses: actions/checkout@v6",
+    "        with:",
+    "          persist-credentials: false",
+    "      - run: git --version",
+    "      - run: python3 --version",
+    '      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"',
+    "      - run: npm ci",
+    "      - run: npm run release:check",
+    ...(lane.required === true
+      ? [
+          "      - id: release_evidence",
+          "        run: node packages/orchestrator/scripts/release-evidence.mjs record",
+          "      - uses: actions/upload-artifact@v7",
+          "        with:",
+          "          name: ${{ steps.release_evidence.outputs.name }}",
+          "          path: ${{ steps.release_evidence.outputs.path }}",
+          "          if-no-files-found: error",
+          "          retention-days: 30"
+        ]
+      : [])
+  ].join("\n");
+}
+
 async function validateCi(root, policy) {
   if (policy.ci.workflow !== ciWorkflow) {
     fail("CI_POLICY_DRIFT", "release-policy.json", "unexpected CI workflow");
@@ -1146,15 +1183,15 @@ async function validateCi(root, policy) {
   const source = await readText(root, ciWorkflow);
   const triggerBlock = [
     "on:",
-    "  push:",
-    "    branches: [main]",
     "  pull_request:",
     "  workflow_dispatch:",
     "    inputs:",
     `      ${policy.ci.liveInput}:`,
     "        description: Run live vendor compatibility on the dedicated protected runner",
     "        type: boolean",
-    "        default: false"
+    "        default: false",
+    "  schedule:",
+    `    - cron: "${ciSchedule}"`
   ].join("\n");
   if (
     source
@@ -1164,14 +1201,25 @@ async function validateCi(root, policy) {
     fail(
       "CI_POLICY_DRIFT",
       ciWorkflow,
-      "expected main-only push, pull_request and opt-in manual triggers"
+      "expected pull_request, opt-in manual and weekly schedule triggers"
     );
   }
+  // ADR-0053: a newer push cancels only the older run of the same pull
+  // request; every other run gets a group of its own.
   requireJobText(
     source,
-    "permissions:\n  contents: read\n\njobs:",
+    [
+      "permissions:",
+      "  contents: read",
+      "",
+      "concurrency:",
+      "  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}",
+      "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
+      "",
+      "jobs:"
+    ].join("\n"),
     "workflow",
-    "read-only permissions"
+    "read-only permissions and pull-request-only cancellation"
   );
 
   const lanes = [...policy.node.supported, policy.node.forward];
@@ -1236,12 +1284,8 @@ async function validateCi(root, policy) {
       lane.job,
       "release gate"
     );
-    if (/^\s+(?:if|needs):/m.test(block)) {
-      fail(
-        "CI_POLICY_DRIFT",
-        ciWorkflow,
-        `${lane.job} must run independently and unconditionally`
-      );
+    if (/^\s+needs:/m.test(block)) {
+      fail("CI_POLICY_DRIFT", ciWorkflow, `${lane.job} must run independently`);
     }
     if (lane.required === true && /continue-on-error:/.test(block)) {
       fail("CI_POLICY_DRIFT", ciWorkflow, `${lane.job} must be required`);
@@ -1266,6 +1310,14 @@ async function validateCi(root, policy) {
         "CI_CACHE_BOUNDARY",
         ciWorkflow,
         `${lane.job} must not cache outputs`
+      );
+    }
+    // Checked last so the boundary checks above keep their specific codes.
+    if (block.trimEnd() !== ciLaneDefinition(lane)) {
+      fail(
+        "CI_POLICY_DRIFT",
+        ciWorkflow,
+        `${lane.job} differs from its approved job definition`
       );
     }
   }
@@ -1333,6 +1385,175 @@ async function validateCi(root, policy) {
     ".gitlab-ci.yml",
     "GitHub Actions replaces GitLab CI"
   );
+}
+
+const publishWorkflow = ".github/workflows/publish.yml";
+const evidenceJob = "release_evidence";
+const publishJob = "publish_npm";
+const releaseGuard =
+  "github.event.release.draft == false && github.event.release.prerelease == false";
+
+// ADR-0053: publication either reuses bound pull-request evidence or runs the
+// complete gate on both supported lanes, and only the publishing job can mint
+// an OIDC token. Any added line, in any YAML spelling of a key (a quoted or
+// escaped `if`, for example), could weaken that, so the validator owns the
+// whole file as exact text instead of matching keys by pattern.
+function publishDefinition(policy) {
+  const lanes = policy.node.supported;
+  const node = `          node-version: ${lanes.at(-1).version}`;
+  const evidence = [
+    "name: Publish",
+    "",
+    "on:",
+    "  release:",
+    "    types: [published]",
+    "",
+    "permissions:",
+    "  contents: read",
+    "",
+    "jobs:",
+    "  release_evidence:",
+    `    if: ${releaseGuard}`,
+    "    runs-on: ubuntu-24.04",
+    "    timeout-minutes: 10",
+    "    permissions:",
+    "      contents: read",
+    "      actions: read",
+    "    outputs:",
+    "      bound: ${{ steps.evidence.outputs.bound }}",
+    "    steps:",
+    "      - uses: actions/checkout@v6",
+    "        with:",
+    "          ref: ${{ github.event.release.tag_name }}",
+    "          fetch-depth: 2",
+    "          persist-credentials: false",
+    "      - uses: actions/setup-node@v6",
+    "        with:",
+    node,
+    "          package-manager-cache: false",
+    "      - id: evidence",
+    "        env:",
+    "          GITHUB_TOKEN: ${{ github.token }}",
+    "        run: node packages/orchestrator/scripts/release-evidence.mjs verify"
+  ];
+  const fallback = (lane) => [
+    `  ${lane.job}:`,
+    `    needs: ${evidenceJob}`,
+    "    if: >-",
+    "      !cancelled() &&",
+    `      ${releaseGuard} &&`,
+    `      needs.${evidenceJob}.outputs.bound != 'true'`,
+    "    runs-on: ubuntu-24.04",
+    `    container: ${lane.image}`,
+    "    timeout-minutes: 60",
+    "    permissions:",
+    "      contents: read",
+    "    steps:",
+    "      - uses: actions/checkout@v6",
+    "        with:",
+    "          ref: ${{ github.event.release.tag_name }}",
+    "          persist-credentials: false",
+    "      - run: git --version",
+    '      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"',
+    "      - run: npm ci",
+    "      - run: npm run release:check",
+    ""
+  ];
+  const lanesPassed = lanes
+    .map((lane) => `needs.${lane.job}.result == 'success'`)
+    .join(" && ");
+  const publish = [
+    `  ${publishJob}:`,
+    `    needs: [${[evidenceJob, ...lanes.map((lane) => lane.job)].join(", ")}]`,
+    "    if: >-",
+    "      !cancelled() &&",
+    `      ${releaseGuard} &&`,
+    `      ((needs.${evidenceJob}.result == 'success' && needs.${evidenceJob}.outputs.bound == 'true') ||`,
+    `      (${lanesPassed}))`,
+    "    runs-on: ubuntu-24.04",
+    "    environment: npm",
+    "    timeout-minutes: 30",
+    "    permissions:",
+    "      contents: read",
+    "      id-token: write",
+    "    env:",
+    '      PACKAGE: "@parabolic-technologies/banzai"',
+    "      RELEASE_TAG: ${{ github.event.release.tag_name }}",
+    "    steps:",
+    "      - uses: actions/checkout@v6",
+    "        with:",
+    "          ref: ${{ github.event.release.tag_name }}",
+    "          persist-credentials: false",
+    "      - uses: actions/setup-node@v6",
+    "        with:",
+    node,
+    "          registry-url: https://registry.npmjs.org",
+    "          package-manager-cache: false",
+    "      - name: Confirm the release tag matches the source version and npm supports trusted publishing",
+    "        run: |",
+    '          version="$(node -p "require(\'./package.json\').version")"',
+    '          if [ "$RELEASE_TAG" != "v$version" ]; then',
+    '            echo "release tag $RELEASE_TAG does not match package version $version" >&2',
+    "            exit 1",
+    "          fi",
+    "          node - \"$(npm --version)\" <<'CHECK'",
+    '          const [major, minor, patch] = process.argv[2].split(".").map(Number);',
+    "          const supported = major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1)));",
+    "          if (!supported) {",
+    "            console.error(`npm ${process.argv[2]} is older than 11.5.1, which trusted publishing requires`);",
+    "            process.exit(1);",
+    "          }",
+    "          CHECK",
+    "      - run: git --version",
+    "      - run: npm ci",
+    "      - run: npm run release:validate",
+    "      - run: npm run publication:check",
+    "      - name: Skip versions that already exist on the registry",
+    "        id: registry",
+    "        run: |",
+    '          version="$(node -p "require(\'./package.json\').version")"',
+    '          if npm view "$PACKAGE@$version" version --registry https://registry.npmjs.org/ >/dev/null 2>&1; then',
+    '            echo "published=true" >> "$GITHUB_OUTPUT"',
+    '            echo "$PACKAGE@$version already exists on the registry; the publish step is skipped"',
+    "          else",
+    '            echo "published=false" >> "$GITHUB_OUTPUT"',
+    "          fi",
+    "      - name: Publish the CLI workspace through npm trusted publishing",
+    "        if: steps.registry.outputs.published == 'false'",
+    '        run: npm publish --ignore-scripts --workspace "$PACKAGE" --access public --registry https://registry.npmjs.org/',
+    "      - name: Record npm publication outcome",
+    "        env:",
+    "          ALREADY_PUBLISHED: ${{ steps.registry.outputs.published }}",
+    "        run: |",
+    '          version="$(node -p "require(\'./package.json\').version")"',
+    "          {",
+    '            echo "## $PACKAGE@$version"',
+    '            if [ "$ALREADY_PUBLISHED" = "true" ]; then',
+    '              echo "Version already exists on npm; publication was skipped."',
+    "            else",
+    '              echo "Package accepted by npm. Availability may be delayed by registry processing."',
+    "            fi",
+    '          } >> "$GITHUB_STEP_SUMMARY"',
+    ""
+  ];
+  return [...evidence, "", ...lanes.flatMap(fallback), ...publish].join("\n");
+}
+
+async function validatePublish(root, policy) {
+  const source = await readText(root, publishWorkflow);
+  const expected = publishDefinition(policy);
+  if (source !== expected) {
+    const actual = source.split("\n");
+    const lines = expected.split("\n");
+    const index = lines.findIndex(
+      (line, position) => actual[position] !== line
+    );
+    fail(
+      "PUBLISH_POLICY_DRIFT",
+      publishWorkflow,
+      `differs from the approved publication workflow at line ${(index === -1 ? lines.length : index) + 1}`
+    );
+  }
 }
 
 function renderPolicyBlock(policy) {
@@ -2895,6 +3116,7 @@ async function validateRepository(root) {
   await validateCodeDesignAssessment(root);
   await validateDistributionParity(root);
   await validateCi(root, policy);
+  await validatePublish(root, policy);
   await validateDocumentation(root, policy);
 }
 

@@ -8,8 +8,79 @@ permissions:
   contents: read
 
 jobs:
-  publish_npm:
+  release_evidence:
     if: github.event.release.draft == false && github.event.release.prerelease == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      bound: ${{ steps.evidence.outputs.bound }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.11.1
+          package-manager-cache: false
+      - id: evidence
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node packages/orchestrator/scripts/release-evidence.mjs verify
+
+  release_check_node_22:
+    needs: release_evidence
+    if: >-
+      !cancelled() &&
+      github.event.release.draft == false && github.event.release.prerelease == false &&
+      needs.release_evidence.outputs.bound != 'true'
+    runs-on: ubuntu-24.04
+    container: node:22.20.0-bookworm
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+      - run: git --version
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: npm ci
+      - run: npm run release:check
+
+  release_check_node_24:
+    needs: release_evidence
+    if: >-
+      !cancelled() &&
+      github.event.release.draft == false && github.event.release.prerelease == false &&
+      needs.release_evidence.outputs.bound != 'true'
+    runs-on: ubuntu-24.04
+    container: node:24.11.1-bookworm
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+      - run: git --version
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: npm ci
+      - run: npm run release:check
+
+  publish_npm:
+    needs: [release_evidence, release_check_node_22, release_check_node_24]
+    if: >-
+      !cancelled() &&
+      github.event.release.draft == false && github.event.release.prerelease == false &&
+      ((needs.release_evidence.result == 'success' && needs.release_evidence.outputs.bound == 'true') ||
+      (needs.release_check_node_22.result == 'success' && needs.release_check_node_24.result == 'success'))
     runs-on: ubuntu-24.04
     environment: npm
     timeout-minutes: 30
@@ -46,7 +117,8 @@ jobs:
           CHECK
       - run: git --version
       - run: npm ci
-      - run: npm run release:check
+      - run: npm run release:validate
+      - run: npm run publication:check
       - name: Skip versions that already exist on the registry
         id: registry
         run: |

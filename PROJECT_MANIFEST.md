@@ -63,7 +63,10 @@ installed policy source. These files describe nothing here.
   on success and failure.
 - **Typecheck:** `npm run typecheck` — `tsc --project tsconfig.json --noEmit`.
 - **Test runner:** `npm run test` — esbuild bundles selected `test/**/*.test.ts`
-  into `.test-dist/`, runs `node --test`, then removes the directory.
+  into `.test-dist/`, runs `node --test` with at most
+  `max(2, os.availableParallelism() - 1)` concurrent test files, then removes
+  the directory. The floor of two keeps two-CPU hosted runners from running the
+  suite one file at a time.
   `node packages/orchestrator/scripts/test.mjs --pattern <regex>` provides the
   same cleanup boundary for focused local evidence. Repeatable `--file <relative.test.ts>`
   selects exact test-root files before bundling; omission selects the complete suite.
@@ -112,10 +115,17 @@ installed policy source. These files describe nothing here.
   `npm run format` (`prettier --write .`), configured by
   `packages/orchestrator/.prettierrc.json` and `.prettierignore`. Run these only
   after code stabilizes, during final review, and never through `rtk`.
-- **CI:** `.github/workflows/ci.yml` runs the complete repository-owned
-  `release:check` after `npm ci` on pushes to `main`, on pull requests, and on
-  manual dispatch; a push to `dev` or any other branch starts no hosted run.
-  Required exact Node 22.20.0 and 24.11.1 lanes and advisory exact Node 26.7.0
+- **CI:** `.github/workflows/ci.yml` (ADR-0053) runs the complete
+  repository-owned `release:check` after `npm ci`. The required exact Node
+  22.20.0 and 24.11.1 lanes run on pull requests and manual dispatch; the
+  advisory exact Node 26.7.0 lane runs on a weekly schedule (Mondays 05:17 UTC)
+  and manual dispatch. A push to `main`, `dev` or any other branch starts no
+  hosted run. A newer push to a pull request cancels that pull request's
+  in-progress run; runs of other events are never cancelled. After its
+  `release:check` passes, each required lane runs
+  `scripts/release-evidence.mjs record` and uploads a 30-day artifact named
+  `release-evidence-<lane>-attempt-<attempt>-tree-<tree>`, which names the Git
+  tree it verified. All deterministic lanes
   use official Git-capable Bookworm containers on `ubuntu-24.04`, with
   `git --version` and a Git `safe.directory` entry for `$GITHUB_WORKSPACE`
   before installation: the container runs as root while the runner-created
@@ -127,19 +137,33 @@ installed policy source. These files describe nothing here.
   `live_compatibility` input, `github.ref_protected`, repository variable
   `BANZAI_LIVE_COMPATIBILITY=1`, and a dedicated self-hosted Linux runner labeled
   `banzai-live`. It disables automatic npm caching and retains no artifact.
-  `.github/workflows/publish.yml` (ADR-0039) runs on published,
-  non-draft, non-prerelease GitHub Releases in the `npm` environment: it
-  checks out the release tag, requires the tag to equal `v` plus the root
-  version and npm 11.5.1+, runs `npm ci` and `release:check`, skips versions
-  already on the registry, publishes only the CLI workspace through npm
-  trusted publishing with `id-token: write` and no stored registry token,
-  then records npm acceptance or the existing-version skip in the job summary.
-  It does not wait for registry processing or verify availability;
+  `.github/workflows/publish.yml` (ADR-0039 as partially superseded by
+  ADR-0053) runs on published, non-draft, non-prerelease GitHub Releases. Its
+  `release_evidence` job (`actions: read`) runs
+  `scripts/release-evidence.mjs verify`. Evidence is bound only when the tag is
+  a merge commit whose tree equals its second parent's, GitHub identifies a
+  successful `pull_request` run of this repository's `ci.yml` for that parent,
+  and both required lanes of its latest attempt succeeded and recorded the
+  tag's tree. When it is not bound, `release_check_node_22` and
+  `release_check_node_24` run the complete `release:check` on the tag in the
+  exact supported images. `publish_npm`, the only job with `id-token: write`,
+  runs in the `npm` environment when the evidence is bound or both fallback
+  lanes passed: it checks out the release tag, requires the tag to equal `v`
+  plus the root version and npm 11.5.1+, runs `npm ci`, `release:validate` and
+  `publication:check`, skips versions already on the registry, publishes only
+  the CLI workspace through npm trusted publishing with no stored registry
+  token, then records npm acceptance or the existing-version skip in the job
+  summary. The evidence job's summary names the reused run and attempt or the
+  reason for the fallback. Squash or rebase merges always take the fallback.
+  The workflow does not wait for registry processing or verify availability;
   registry metadata and install checks are separate delivery evidence in the
   release checklist.
-  The release validator checks the owned workflow layout and rejects the old
-  `.gitlab-ci.yml`; unrelated GitHub metadata is permitted. Hosted runs,
-  branch protection, and protected runner provisioning require separate evidence.
+  The release validator owns the layout of both workflows and rejects the old
+  `.gitlab-ci.yml`; unrelated GitHub metadata is permitted. The repository is
+  private on GitHub Free, which offers no branch protection, rulesets or
+  required checks, so the merge rule is repository policy and the publication
+  gate is its mechanical release enforcement. Hosted runs and protected runner
+  provisioning require separate evidence.
 - **Development remote:** `git@github.com:Parabolic-Technologies/banzai.git`;
   default branch `main`, with `dev` retained as the documented development
   convention. Public package/plugin metadata and installation docs target
@@ -699,7 +723,8 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
 Repository release scripts (`packages/orchestrator/scripts/`):
 
 - `check-release.mjs` — read-only release validation: policy, Node/CI/docs
-  consistency, plugin and marketplace JSON, nine-way version parity, hook and
+  consistency, the owned `ci.yml` (`CI_POLICY_DRIFT`) and `publish.yml`
+  (`PUBLISH_POLICY_DRIFT`) layouts, plugin and marketplace JSON, nine-way version parity, hook and
   contract identities, whitespace-normalized policy-section drift checks,
   instruction-layout structure and consumer-matrix validation, scoped
   references and migration/legacy-release pins,
@@ -714,6 +739,12 @@ Repository release scripts (`packages/orchestrator/scripts/`):
 - `release-check.mjs` — composes `verify`, `format:check`, release validation,
   and committed smoke with tracked-tree mutation detection; never runs version
   synchronization or recovery.
+- `release-evidence.mjs` — ADR-0053 release evidence. `record` names the tree a
+  required CI lane verified, its run attempt and lane, and refuses a dirty
+  tracked checkout. `verify` binds a release tag to that evidence through
+  read-only GitHub Actions API metadata (repository, `ci.yml` path, event,
+  head, attempt, jobs and artifacts) and writes `bound=true|false` plus a job
+  summary; every error or ambiguity is unbound, and the token is never printed.
 - `release-version.mjs`, `version-set.mjs`, `version-recover.mjs` — the
   explicit nine-field/seven-file version transaction with durable journal,
   cleanup guard, authenticated restoration, and legacy format-1 recovery.
@@ -1717,3 +1748,4 @@ restate them here. Paths are relative to `documentation/decisions/`.
 | ADR-0050 | Triggered code-design assessment                                   | `0050-triggered-code-design-assessment.md`                      | Planned     |
 | ADR-0051 | Acceptance-time validation of model-authored digests               | `0051-acceptance-time-digest-validation.md`                     | Implemented |
 | ADR-0052 | Capability-slice architecture and WorkflowRunner decomposition     | `0052-orchestrator-capability-slice-architecture.md`            | Planned     |
+| ADR-0053 | Single pull-request CI gate and publish-time evidence reuse        | `0053-single-pull-request-ci-gate-and-publish-evidence-reuse.md` | Implemented |

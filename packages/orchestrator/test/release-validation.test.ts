@@ -101,6 +101,7 @@ type VersionSurface = (typeof VERSION_SURFACES)[number];
 const FIXTURE_PATHS = [
   "release-policy.json",
   ".github/workflows/ci.yml",
+  ".github/workflows/publish.yml",
   "package.json",
   "package-lock.json",
   "README.md",
@@ -1770,8 +1771,8 @@ test("default CI lanes reject vendor calls and live CI requires explicit opt-in"
     await writeFile(
       ciPath,
       accepted.replace(
-        "      - run: npm run release:check",
-        "      - run: npm run release:check\n      - run: codex --version"
+        "      - run: npm ci",
+        "      - run: npm ci\n      - run: codex --version"
       ),
       "utf8"
     );
@@ -1799,11 +1800,53 @@ test("release validation rejects weakened GitHub CI evidence and live isolation"
     const ciPath = path.join(root, ".github/workflows/ci.yml");
     const accepted = await readFile(ciPath, "utf8");
     for (const [before, after, code] of [
-      ["  push:\n", "", "CI_POLICY_DRIFT"],
-      ["    branches: [main]\n", "", "CI_POLICY_DRIFT"],
       [
-        "    branches: [main]\n",
-        "    branches: [main, dev]\n",
+        "  pull_request:\n",
+        "  push:\n    branches: [main]\n  pull_request:\n",
+        "CI_POLICY_DRIFT"
+      ],
+      [
+        '    - cron: "17 5 * * 1"',
+        '    - cron: "17 5 * * *"',
+        "CI_POLICY_DRIFT"
+      ],
+      ['  schedule:\n    - cron: "17 5 * * 1"\n', "", "CI_POLICY_DRIFT"],
+      [
+        "concurrency:\n  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}\n  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n\n",
+        "",
+        "CI_POLICY_DRIFT"
+      ],
+      [
+        "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
+        "  cancel-in-progress: true",
+        "CI_POLICY_DRIFT"
+      ],
+      [
+        "    if: github.event_name != 'schedule'\n",
+        "    if: always()\n",
+        "CI_POLICY_DRIFT"
+      ],
+      // A more-indented line continues the plain-scalar condition.
+      [
+        "    if: github.event_name != 'schedule'\n",
+        "    if: github.event_name != 'schedule'\n      || true\n",
+        "CI_POLICY_DRIFT"
+      ],
+      [
+        "      - run: npm run release:check\n",
+        "      - run: npm run release:check\n        if: false\n",
+        "CI_POLICY_DRIFT"
+      ],
+      // A quoted key is the same condition in another YAML spelling (review-3 F1).
+      [
+        "      - run: npm run release:check\n",
+        "      - run: npm run release:check\n        \"if\": github.event_name != 'pull_request'\n",
+        "CI_POLICY_DRIFT"
+      ],
+      ["      - uses: actions/upload-artifact@v7\n", "", "CI_POLICY_DRIFT"],
+      [
+        "    if: github.event_name != 'pull_request'",
+        "    if: github.event_name != 'schedule'",
         "CI_POLICY_DRIFT"
       ],
       ["  pull_request:\n", "  pull_request_target:\n", "CI_POLICY_DRIFT"],
@@ -1851,8 +1894,8 @@ test("release validation rejects weakened GitHub CI evidence and live isolation"
         "CI_LIVE_RETENTION"
       ],
       [
-        "      - run: npm run release:check",
-        "      - run: npm run release:check\n      - uses: actions/cache@v4",
+        "      - run: npm ci",
+        "      - run: npm ci\n      - uses: actions/cache@v4",
         "CI_CACHE_BOUNDARY"
       ],
       ["  release_check_node_22:\n", "  unexpected_job:\n", "CI_POLICY_DRIFT"],
@@ -1873,6 +1916,106 @@ test("release validation rejects weakened GitHub CI evidence and live isolation"
       const result = validate(root);
       assert.equal(result.status, 1, `accepted CI mutation: ${after}`);
       assert.match(result.stderr, new RegExp(`^${code} `));
+    }
+  });
+});
+
+test("release validation rejects a weakened publication gate", async () => {
+  await withFixture(async (root) => {
+    const publishPath = path.join(root, ".github/workflows/publish.yml");
+    const accepted = await readFile(publishPath, "utf8");
+    for (const [before, after] of [
+      ["    types: [published]", "    types: [published, created]"],
+      [
+        "      - id: evidence\n        env:\n          GITHUB_TOKEN: ${{ github.token }}\n        run: node packages/orchestrator/scripts/release-evidence.mjs verify\n",
+        ""
+      ],
+      ["          fetch-depth: 2\n", ""],
+      ["      - run: npm run release:check", "      - run: npm test"],
+      [
+        "    container: node:22.20.0-bookworm",
+        "    container: node:24.11.1-bookworm"
+      ],
+      ["  release_check_node_22:\n", "  release_check_node_20:\n"],
+      [
+        "  release_check_node_22:\n",
+        "  release_check_node_22:\n    continue-on-error: true\n"
+      ],
+      [
+        "      (needs.release_check_node_22.result == 'success' && needs.release_check_node_24.result == 'success'))",
+        "      (needs.release_check_node_24.result == 'success'))"
+      ],
+      // Appended disjunctions, also after a blank line inside the folded
+      // scalar, would admit publication without any gate (review-2 F1).
+      [
+        "      (needs.release_check_node_22.result == 'success' && needs.release_check_node_24.result == 'success'))\n",
+        "      (needs.release_check_node_22.result == 'success' && needs.release_check_node_24.result == 'success'))\n      || true\n"
+      ],
+      [
+        "      (needs.release_check_node_22.result == 'success' && needs.release_check_node_24.result == 'success'))\n",
+        "      (needs.release_check_node_22.result == 'success' && needs.release_check_node_24.result == 'success'))\n\n      || true\n"
+      ],
+      // A step condition would let a fallback lane succeed without its gate.
+      [
+        "      - run: npm run release:check\n",
+        "      - run: npm run release:check\n        if: false\n"
+      ],
+      [
+        "      - run: npm run release:check\n\n  publish_npm:\n",
+        "      - run: npm run release:check\n        if: false\n\n  publish_npm:\n"
+      ],
+      // Other YAML spellings of the same key, including one actionlint
+      // accepts, must not slip past either (review-3 F1).
+      [
+        "      - run: npm run release:check\n",
+        "      - run: npm run release:check\n        \"if\": github.event_name != 'release'\n"
+      ],
+      [
+        "      - run: npm run release:check\n\n  publish_npm:\n",
+        "      - run: npm run release:check\n        \"if\": github.event_name != 'release'\n\n  publish_npm:\n"
+      ],
+      [
+        "      - run: npm run release:check\n",
+        "      - run: npm run release:check\n        'if': false\n"
+      ],
+      [
+        "      - run: npm run release:check\n\n  publish_npm:\n",
+        "      - run: npm run release:check\n        if : false\n\n  publish_npm:\n"
+      ],
+      [
+        "      - run: npm run release:check\n",
+        '      - run: npm run release:check\n        "\\u0069f": false\n'
+      ],
+      ["      !cancelled() &&\n", "      always() &&\n"],
+      [
+        "      contents: read\n      actions: read\n",
+        "      contents: read\n      actions: read\n      id-token: write\n"
+      ],
+      [
+        "      contents: read\n      id-token: write\n",
+        "      contents: read\n      actions: read\n      id-token: write\n"
+      ],
+      ["      actions: read\n", "      actions: write\n"],
+      ["  contents: read\n\njobs:", "  contents: write\n\njobs:"],
+      [
+        "    if: github.event.release.draft == false && github.event.release.prerelease == false\n",
+        ""
+      ],
+      ["      - run: npm run publication:check\n", ""],
+      [
+        "      - run: npm run release:validate\n      - run: npm run publication:check\n",
+        "      - run: npm run publication:check\n      - run: npm run release:validate\n"
+      ]
+    ]) {
+      assert.ok(before !== undefined && after !== undefined);
+      assert.ok(
+        accepted.includes(before),
+        `fixture fragment missing: ${before}`
+      );
+      await writeFile(publishPath, accepted.replace(before, after), "utf8");
+      const result = validate(root);
+      assert.equal(result.status, 1, `accepted publish mutation: ${after}`);
+      assert.match(result.stderr, /^PUBLISH_POLICY_DRIFT /);
     }
   });
 });
