@@ -232,9 +232,16 @@ function hasCode(code: string): (error: unknown) => boolean {
 
 test("agent control capabilities declare the exact offline v5 operation set", () => {
   const capabilities = agentControlCapabilities();
-  assert.equal(capabilities.schema, "banzai-agent-capabilities/v6");
-  assert.equal(capabilities.schemaVersion, 6);
-  assert.equal(capabilities.controlContractVersion, "6.0.0");
+  assert.equal(capabilities.schema, "banzai-agent-capabilities/v7");
+  assert.equal(capabilities.schemaVersion, 7);
+  assert.deepEqual(capabilities.workDocuments, {
+    directoryPattern: "documentation/work/<slug>/",
+    bindingSchemas: ["banzai-work-binding/v3"],
+    workspaceSnapshotVersion: 3,
+    verificationRequestSchemas: ["banzai-verification-request/v3"]
+  });
+  assert.equal(Object.hasOwn(capabilities, "artifactStorage"), false);
+  assert.equal(capabilities.controlContractVersion, "7.0.0");
   assert.deepEqual(capabilities.completionPublication, {
     protocol: "banzai-completion-protocol/v1",
     stages: [

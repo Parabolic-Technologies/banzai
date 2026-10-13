@@ -1155,6 +1155,7 @@ for (const scenario of DIGEST_SCENARIOS)
     }
   });
 
+// Workspace v3 observes missing selected documents and excludes executor evidence.
 const DIGEST_ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
   "digest-rejected implementation": {
     observed: {
@@ -1183,8 +1184,8 @@ const DIGEST_ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
           digest: "<sha256>",
           added: 2,
           modified: 0,
-          deleted: 0,
-          total: 2
+          deleted: 5,
+          total: 7
         },
         baseCommit: "<commit>",
         approvalDigest: null,
@@ -1460,8 +1461,8 @@ const DIGEST_ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
           digest: "<sha256>",
           added: 2,
           modified: 0,
-          deleted: 0,
-          total: 2
+          deleted: 5,
+          total: 7
         },
         baseCommit: "<commit>",
         approvalDigest: null,
@@ -1542,8 +1543,8 @@ const DIGEST_ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
           digest: "<sha256>",
           added: 2,
           modified: 0,
-          deleted: 0,
-          total: 2
+          deleted: 4,
+          total: 6
         },
         baseCommit: "<commit>",
         approvalDigest: null,
@@ -1557,7 +1558,7 @@ const DIGEST_ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
       status: "blocked",
       blockedFrom: "planning",
       blockReason:
-        "plan failed: The plan result declared 1 digest that did not match the bytes it named when the result was accepted. planRemainderSha256 at .banzai/work/<uuid>/plan.md declared <sha256> but the bytes hash to <sha256>."
+        "plan failed: The plan result declared 1 digest that did not match the bytes it named when the result was accepted. planRemainderSha256 at documentation/work/plan-repair/plan.md declared <sha256> but the bytes hash to <sha256>."
     }
   },
   "digest-rejected plan with a changed workflow selection": {
@@ -1595,7 +1596,7 @@ const DIGEST_ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
       status: "blocked",
       blockedFrom: "planning",
       blockReason:
-        "plan failed: The plan result declared 1 digest that did not match the bytes it named when the result was accepted. planRemainderSha256 at .banzai/work/<uuid>/plan.md declared <sha256> but the bytes hash to <sha256>."
+        "plan failed: The plan result declared 1 digest that did not match the bytes it named when the result was accepted. planRemainderSha256 at documentation/work/plan-repair/plan.md declared <sha256> but the bytes hash to <sha256>."
     }
   },
   "digest-rejected implementation with malformed digest evidence and a malformed terminal checkpoint":

@@ -1,6 +1,9 @@
 # Artifact Policy Migration Roadmap
 
-Status: Operational roadmap; local implementation approved and verification in progress.
+Status: Historical ADR-0041 roadmap; its private work-layout direction is
+partially superseded by accepted [ADR-0054](decisions/0054-git-visible-work-artifacts.md).
+New work follows [Work Documents](artifact-storage.md). This retained roadmap
+does not authorize document migration, archive restoration or history rewriting.
 Last aligned with the Accepted ADR: 2026-09-11.
 
 Accepted policy: [ADR 0041](decisions/0041-artifact-retention-and-publication-boundary.md).

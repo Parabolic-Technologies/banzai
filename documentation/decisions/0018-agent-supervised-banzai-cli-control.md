@@ -382,6 +382,12 @@ Implementation and review must confirm:
 
 ## Lifecycle Links
 
+- Amended by
+  [ADR-0055](./0055-planning-gate-rework-and-independent-planning-review.md),
+  accepted 2026-10-13: a major control revision adds closed gate-decision and
+  planning-review triage documents under the existing revision rules. Preserve
+  runner authority and supervisor non-inference. Implementation is Planned.
+
 - Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted
   2026-09-14: runner-originated configuration decisions, control v4 and bounded
   current-proposal disclosure. Preserve other human decisions and supervisor

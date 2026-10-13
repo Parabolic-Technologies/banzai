@@ -1,0 +1,110 @@
+--- a/.git/hooks/banzai-publication/pre-push.mjs
++++ b/.git/hooks/banzai-publication/pre-push.mjs
+@@ -82,18 +82,12 @@
+ }
+ 
+ function validateTree(files) {
+-  let policy, declaration;
++  let policy;
+   try {
+     policy = parsePublicationPolicy(JSON.parse(files.get("publication-policy.json")?.toString("utf8")));
+   } catch { fail("A valid publication-policy.json is required in every outgoing commit."); }
+   if (policy.mode !== "clean" || policy.entries.some((entry) => entry.classification === "historical-exposure"))
+     fail("Every outgoing commit must use clean publication mode without historical exceptions.");
+-  try {
+-    declaration = JSON.parse(files.get(".banzai/artifacts.json")?.toString("utf8"));
+-  } catch { fail("A private .banzai/artifacts.json declaration is required in every outgoing commit."); }
+-  if (declaration?.schema !== "banzai-artifact-layout/v1" || declaration.schemaVersion !== 1 ||
+-      declaration.layout !== "private" || Object.keys(declaration).length !== 3)
+-    fail("The outgoing artifact declaration must retain the supported private layout.");
+   for (const name of files.keys()) {
+     if ((name.startsWith(".banzai/") && name !== ".banzai/artifacts.json") ||
+         /^documentation\/(features|development-plans|changes)\//.test(name))
+--- a/.git/hooks/banzai-publication/publication-check.mjs
++++ b/.git/hooks/banzai-publication/publication-check.mjs
+@@ -8,7 +8,7 @@
+ const execute = promisify(execFile);
+ const HASH = /^[0-9a-f]{64}$/u;
+ const privatePath =
+-  /(?:^|\/)\.banzai\/(?:work|runs|preparation)(?:\/|$)|(?:^|\/)\.banzai\/archive-manifest\.json$|(?:^|\/)(?:\.banzai-version-set|\.banzai-archive-[^/]+|\.banzai-restore-[^/]+)(?:\/|$)/u;
++  /(?:^|\/)\.banzai\/(?:work|runs|preparation|verification|execution-locks)(?:\/|$)|(?:^|\/)\.banzai\/archive-manifest\.json$|(?:^|\/)(?:\.banzai-version-set|\.banzai-archive-[^/]+|\.banzai-restore-[^/]+)(?:\/|$)/u;
+ const secretPath =
+   /(?:^|\/)(?:\.ssh|\.aws|\.gnupg|auth\.json|credentials(?:\.json)?|\.env(?:\.[^/]+)?)(?:\/|$)|\.(?:pem|key|p12|pfx)$/iu;
+ const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
+@@ -93,6 +93,18 @@
+ }
+ function scanContents(name, bytes) {
+   const text = bytes.toString("utf8");
++  if (
++    /^plugins\/banzai\/(?:phases|guidance|policies)\//.test(name) &&
++    (/"schema"\s*:\s*"banzai-(?:work-binding|artifact-archive)\/v1"/.test(
++      text
++    ) ||
++      /(?:\/Users\/|\/home\/)[^\s"']+/.test(text))
++  )
++    fail(
++      "PUBLICATION_PRIVATE_CONTENT",
++      name,
++      "Instruction resources contain private work or host identity."
++    );
+   // Purposefully bounded signals, not a claim of exhaustive secret detection.
+   if (/-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----/u.test(text))
+     fail(
+@@ -100,23 +112,25 @@
+       name,
+       "Private-key content requires owner handling."
+     );
+-  if (name.endsWith(".json")) {
++  if (name.endsWith(".json") || /^documentation\/work\//u.test(name)) {
++    const candidates = [text, ...[...text.matchAll(/^```(?:json)?[ \t]*\r?\n([\s\S]*?)^```[ \t]*$/gmu)].map((match) => match[1])];
++    for (const candidate of candidates) {
+     let value;
+     try {
+-      value = JSON.parse(text);
++      value = JSON.parse(candidate);
+     } catch {
+       /* Other format checks own malformed source JSON. */
+     }
+     if (
+-      ["banzai-artifact-archive/v1", "banzai-work-binding/v1"].includes(
+-        value?.schema
+-      )
++      /^banzai-(?:artifact-archive|work-binding|standalone-verification|verification-(?:decision|applicability|origin-start|origin-finish))\/v\d+$/u.test(value?.schema) ||
++      value && typeof value === "object" && ("runId" in value && "repoRoot" in value || "token" in value && "pid" in value && "directory" in value)
+     )
+       fail(
+         "PUBLICATION_PRIVATE_CONTENT",
+         name,
+         "An archive or private work instance cannot enter a payload."
+       );
++    }
+   }
+   if (name.endsWith(".map")) {
+     let map;
+@@ -140,7 +154,7 @@
+       if (
+         typeof source !== "string" ||
+         privatePath.test(source) ||
+-        /(?:^|\/)documentation\/(?:features|development-plans|changes)\//u.test(
++        /(?:^|\/)documentation\/(?:work|features|development-plans|changes)\//u.test(
+           source
+         ) ||
+         secretPath.test(source)
+@@ -170,6 +184,8 @@
+   let historicalExposure = 0;
+   for (const [original, bytes] of files) {
+     let name = original;
++    if (distribution !== "source" && /(?:^|\/)documentation\/work\/(?!\.gitkeep$)/u.test(name))
++      fail("PUBLICATION_PACKAGE_INVALID", name, "Source-project work documents are excluded from package payloads.");
+     if (distribution === "npm") {
+       if (!name.startsWith("package/"))
+         fail(
+@@ -228,7 +244,7 @@
+       (name.startsWith("documentation/") ||
+         name.startsWith("plugins/banzai/") ||
+         /\.(?:md|svg|png|jpg|webp)$/iu.test(name)) &&
+-      !entry
++      !entry && !(distribution === "source" && /^documentation\/work\/[a-z0-9]+(?:-[a-z0-9]+)*\//u.test(name))
+     )
+       fail(
+         "PUBLICATION_UNCLASSIFIED",

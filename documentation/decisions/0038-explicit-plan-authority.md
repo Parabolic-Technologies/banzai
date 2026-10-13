@@ -245,6 +245,10 @@ live host delivery and vendor behavior remain unverified without separate work.
 
 ## Lifecycle Links
 
+- Amended by [ADR-0054](./0054-git-visible-work-artifacts.md), accepted
+  2026-10-13: new plans use the tracked work directory. Approval authority and
+  immutable approved bytes remain. Implementation is Planned.
+
 - Supersedes: None in full.
 - Amends ADR-0036 only for the plan-policy section and read-trigger extension
   specified above. On acceptance, add reciprocal lifecycle metadata without

@@ -18,7 +18,6 @@ packages/orchestrator/.dist-check-*/
 
 # Local execution evidence and credentials do not belong in source releases.
 /.banzai/*
-!/.banzai/artifacts.json
 .banzai/runs/
 .banzai/active-run.json
 .banzai/runner.lock

@@ -44,12 +44,20 @@ Evaluate them as product source intended to guide agents after installation.
 
 ## Local Work Artifacts
 
-This source checkout declares the private layout in `.banzai/artifacts.json`.
-Resolve new internal work through the installed plugin's artifact-storage policy
-and helper. Keep descriptions, plans, reports and reviews in ignored
-`.banzai/work/<work-id>/`; orchestrator execution evidence stays in ignored
-`.banzai/runs/<run-id>/`. Public product guides, ADRs and the project manifest keep
-their maintained repository paths. Do not create new workflow evidence under
-`documentation/features/`, `documentation/development-plans/` or
-`documentation/changes/`. Preserved older work remains historical evidence under
-its original private archive identity; it is not an active workflow in this snapshot.
+New work uses `documentation/work/<slug>/` with sibling requirements, plans,
+required reports and numbered reviews. Read and edit these Markdown files
+with ordinary file tools and keep them eligible for Git review. Select an exact
+existing directory or document when continuing work; resolve ambiguous or
+colliding selections before writing. No artifact-layout declaration or
+registration is required.
+
+Existing work documents, ignored private records, archives and references stay
+at their current paths, including explicitly requested follow-up reports and
+reviews. Do not migrate, rename, copy into Git, recursively unignore or delete
+existing evidence.
+
+Raw execution records, logs, candidates, verification evidence and locks stay
+ignored beneath project-local `.banzai/`. ADRs, maintained product guides and the
+project manifest retain their maintained repository paths. Source-project work
+documents are excluded from plugin/npm payloads. Git visibility grants no
+approval, staging, commit or push authority.

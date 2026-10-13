@@ -515,6 +515,12 @@ Implementation and independent review must confirm:
 
 ## Lifecycle Links
 
+- Narrowly amended by
+  [ADR-0055](./0055-planning-gate-rework-and-independent-planning-review.md),
+  accepted 2026-10-13: adds the `planning_review_triage` pending kind beside
+  consultation and reuses its inert-text and card conventions. Consultation
+  semantics are unchanged. Implementation is Planned.
+
 - Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted
   2026-09-14: a separate runner configuration decision and control v4, with
   existing consultation/escalation meanings and human provenance preserved.

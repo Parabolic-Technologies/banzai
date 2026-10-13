@@ -97,7 +97,7 @@ test("a Codex reviewer gets its artifact rendered by the runner", async () => {
       completed.latestReview.artifactPath
     );
     const rendered = await readFile(artifact, "utf8");
-    assert.match(rendered, /banzai-feature-review\/v7/);
+    assert.match(rendered, /banzai-feature-review\/v8/);
     assert.match(rendered, /pass/);
   } finally {
     await repository.dispose();
@@ -1261,7 +1261,7 @@ test("review rendering failures retain primary evidence and make zero formatting
           readFile(
             await boundFixturePath(
               repository.root,
-              "documentation/features/example/review-1.md"
+              "documentation/work/example/review-1.md"
             )
           ),
           /ENOENT/
@@ -1298,7 +1298,7 @@ test("retry reruns a failed review in a fresh attempt", async () => {
         repository.root,
         await boundFixturePath(
           repository.root,
-          "documentation/features/example/review-1.md"
+          "documentation/work/example/review-1.md"
         )
       )
     );
@@ -1388,7 +1388,7 @@ test("invalid review candidate retains diagnostic evidence and retry publishes w
         repository.root,
         await boundFixturePath(
           repository.root,
-          "documentation/features/example/review-2.md"
+          "documentation/work/example/review-2.md"
         )
       ),
       sha256: failedRecord.reviewCandidate.sha256,
@@ -1433,7 +1433,7 @@ test("invalid review candidate retains diagnostic evidence and retry publishes w
       readFile(
         await boundFixturePath(
           repository.root,
-          "documentation/features/example/review-2.md"
+          "documentation/work/example/review-2.md"
         ),
         "utf8"
       ),
@@ -1667,7 +1667,7 @@ test("review v2 publication and application interruptions reconcile exactly once
       await runner.start({ slug: "example", request: "Implement it." });
       const artifact = await boundFixturePath(
         repository.root,
-        "documentation/features/example/review-1.md"
+        "documentation/work/example/review-1.md"
       );
       let injected = false;
       const write = runner.store.writeText.bind(runner.store);
@@ -1830,7 +1830,7 @@ test("review v2 truthful layout blockers publish incomplete coverage without com
     const contents = await readFile(
       await boundFixturePath(
         repository.root,
-        "documentation/features/example/review-1.md"
+        "documentation/work/example/review-1.md"
       ),
       "utf8"
     );
@@ -1890,7 +1890,7 @@ test("review v2 retains schema-valid rejected scope and terminal proof before co
       readFile(
         await boundFixturePath(
           repository.root,
-          "documentation/features/example/review-1.md"
+          "documentation/work/example/review-1.md"
         )
       ),
       /ENOENT/

@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { projectAgentControlStatus } from "../src/agent-control.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { TerminalRunStateError } from "../src/errors.js";
@@ -34,10 +34,6 @@ import {
 const NARRATIVE_REPORT =
   "# Implementation Report\n\n## Narrative\n\nThe fixture was implemented.\n";
 
-const artifactsCommandPath = path.resolve(
-  "../../plugins/banzai/scripts/artifacts.cjs"
-);
-
 async function completionEventCount(
   runner: WorkflowRunner,
   runId: string,
@@ -64,7 +60,7 @@ test("a narrative-only implementation is published once by the runner with attem
     await runner.start({ slug: "example", request: "Implement it." });
     const done = await runner.approvePlan("human");
     assert.equal(done.status, "done", done.blockReason ?? "");
-    assert.equal(done.schemaVersion, 8);
+    assert.equal(done.schemaVersion, 9);
     assert.equal(done.metrics.attempts.implementation, 1);
     assert.ok(
       adapters.phasePrompts.every((prompt) => !/repair retry/i.test(prompt))
@@ -85,7 +81,7 @@ test("a narrative-only implementation is published once by the runner with attem
     assert.ok(ledger);
     const reportPath = await boundFixturePath(
       repository.root,
-      "documentation/features/example/implementation-report.md"
+      "documentation/work/example/implementation-report.md"
     );
     const report = await readFile(reportPath);
     const text = report.toString("utf8");
@@ -172,8 +168,8 @@ test("a narrative-only implementation is published once by the runner with attem
     assert.equal(record.retryOf, null);
     assert.equal(record.envelope?.originalDigest, capture.resultDigest);
 
-    // The independent review froze the publication identities (snapshot v5,
-    // rendered v6) instead of re-reading mutable report text.
+    // The independent review freezes publication identities in snapshot v7
+    // and publishes only a safe verification summary in rendered review v8.
     const review = (await runner.store.readRunAttempts(done.runId)).find(
       (item) => item.attempt.kind === "review"
     );
@@ -182,7 +178,7 @@ test("a narrative-only implementation is published once by the runner with attem
       done.runId,
       review.attempt
     );
-    assert.equal(frozen.schemaVersion, 6);
+    assert.equal(frozen.schemaVersion, 7);
     assert.equal(
       frozen.completionPublication?.receiptDigest,
       receipt.integrityDigest
@@ -190,11 +186,15 @@ test("a narrative-only implementation is published once by the runner with attem
     const artifact = await readFile(
       await boundFixturePath(
         repository.root,
-        "documentation/features/example/review-1.md"
+        "documentation/work/example/review-1.md"
       ),
       "utf8"
     );
-    assert.match(artifact, /banzai-feature-review\/v7/);
+    assert.match(artifact, /banzai-feature-review\/v8/);
+    assert.match(artifact, /Task verification \(runner evidence\)/);
+    assert.match(artifact, /"dispositions"/);
+    assert.match(artifact, /"references"/);
+    assert.ok(!artifact.includes(repository.root));
     assert.match(artifact, /Runner-owned completion publication/);
     assert.ok(artifact.includes(receipt.integrityDigest));
   } finally {
@@ -269,7 +269,7 @@ for (const boundary of ["capture-manifest", "between-originals"] as const)
         boundary === "capture-manifest"
           ? await boundFixturePath(
               repository.root,
-              "documentation/features/example/implementation-report.md"
+              "documentation/work/example/implementation-report.md"
             )
           : path.join(repository.root, "src/example.txt");
       const original = await readFile(target);
@@ -1187,7 +1187,7 @@ test("a receipt write failure after report replacement reconciles the proven byt
     assert.ok(attempt?.kind === "implementation");
     const reportPath = await boundFixturePath(
       repository.root,
-      "documentation/features/example/implementation-report.md"
+      "documentation/work/example/implementation-report.md"
     );
     const published = await readFile(reportPath);
     const candidate = await runner.store.readCompletionCandidateIfExists(
@@ -1449,7 +1449,7 @@ test("a blocked implementation whose gap targets the runner-owned section keeps 
               evidence: [],
               gap: {
                 reportPath:
-                  "documentation/features/example/implementation-report.md",
+                  "documentation/work/example/implementation-report.md",
                 section: "Plan Task Completion",
                 detail: "Blocked until the credential exists."
               }
@@ -1508,7 +1508,7 @@ test("a blocked implementation whose gap targets the runner-owned section keeps 
         await readFile(
           await boundFixturePath(
             repository.root,
-            "documentation/features/example/implementation-report.md"
+            "documentation/work/example/implementation-report.md"
           ),
           "utf8"
         )
@@ -1535,7 +1535,7 @@ test("a completed claim with an incomplete task is rejected before any publicati
               evidence: [],
               gap: {
                 reportPath:
-                  "documentation/features/example/implementation-report.md",
+                  "documentation/work/example/implementation-report.md",
                 section: "Plan Task Completion",
                 detail: "Still open."
               }
@@ -1602,89 +1602,6 @@ test("a completed claim with an incomplete task is rejected before any publicati
       "failed",
       "the rejected source is retained unchanged"
     );
-  } finally {
-    await repository.dispose();
-  }
-});
-
-test("archive closure carries the runner-owned completion proof and fails when the receipt is missing", async () => {
-  const repository = await createTestRepository({ artifactLayout: "private" });
-  try {
-    const root = await realpath(repository.root);
-    const adapters = new FakeAdapters();
-    adapters.reviewResults.push(passingReview());
-    const runner = new WorkflowRunner(repository.root, adapters);
-    await runner.start({ slug: "example", request: "Implement it." });
-    const done = await runner.approvePlan("human");
-    assert.equal(done.status, "done", done.blockReason ?? "");
-    assert.ok(done.artifactBinding);
-    const workPath = `.banzai/work/${done.artifactBinding.binding.workId}`;
-    const completion = done.planTaskCompletion;
-    assert.ok(completion?.status === "valid" && completion.publication);
-    const invoke = async (
-      operation: string,
-      fields: Record<string, unknown>
-    ) => {
-      const requestFile = path.join(root, "archive-request.json");
-      await writeFile(
-        requestFile,
-        JSON.stringify({
-          schema: "banzai-artifact-request/v1",
-          schemaVersion: 1,
-          repoRoot: root,
-          ...fields
-        })
-      );
-      const child = spawnSync(
-        process.execPath,
-        [artifactsCommandPath, operation, "--json", requestFile],
-        { encoding: "utf8" }
-      );
-      return JSON.parse(child.stdout) as {
-        ok: boolean;
-        result?: unknown;
-        error?: { code: string; message: string };
-      };
-    };
-    const archive = async (destination: string) => {
-      const inventoried = await invoke("inventory", {
-        workPaths: [workPath],
-        runIds: [done.runId]
-      });
-      if (!inventoried.ok) return inventoried;
-      const inventoryFile = path.join(root, "reviewed-inventory.json");
-      await writeFile(
-        inventoryFile,
-        JSON.stringify((inventoried.result as { inventory: unknown }).inventory)
-      );
-      return await invoke("export", { inventoryFile, destination });
-    };
-    const first = path.join(root, "archive-one");
-    const exported = await archive(first);
-    assert.equal(exported.ok, true, JSON.stringify(exported.error));
-    const verified = await invoke("verify", { bundlePath: first });
-    assert.equal(verified.ok, true, JSON.stringify(verified.error));
-    const manifest = JSON.parse(
-      await readFile(path.join(first, "manifest.json"), "utf8")
-    ) as { entries: { path: string }[] };
-    const receiptPath = `.banzai/runs/${done.runId}/${completion.publication.path}`;
-    assert.ok(manifest.entries.some((entry) => entry.path === receiptPath));
-    for (const leaf of [
-      "completion-input.json",
-      "completion-candidate.json",
-      "completion-candidate.md",
-      "implementation-input.md"
-    ])
-      assert.ok(
-        manifest.entries.some((entry) => entry.path.endsWith(`.${leaf}`)),
-        leaf
-      );
-
-    // Removing the receipt breaks completion closure even for a partial archive.
-    await rm(path.join(root, receiptPath));
-    const broken = await archive(path.join(root, "archive-two"));
-    assert.equal(broken.ok, false);
-    assert.equal(broken.error?.code, "ARTIFACT_EVIDENCE_INCOMPLETE");
   } finally {
     await repository.dispose();
   }

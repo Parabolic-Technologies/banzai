@@ -187,7 +187,7 @@ function git(root, args) {
 }
 
 /** Captures actual bytes, including ignored installed inputs. Every refusal is fresh. */
-export async function captureVerificationInputs({ repoRoot, configuration, workId, evidenceDirectories = [] }) {
+export async function captureVerificationInputs({ repoRoot, configuration, workId, evidenceDirectories = [], sourceExclusions = [] }) {
   const config = parseVerificationConfiguration(configuration);
   const policy = config.policy;
   const unavailable = (reason) => ({ complete: false, reason, candidateDigest: null, checks: [] });
@@ -196,12 +196,13 @@ export async function captureVerificationInputs({ repoRoot, configuration, workI
   if (!/^[a-f0-9-]{36}$/u.test(workId)) invalid("Invalid verification work identity.");
   // Owners supply only their exact machine directories. Reports remain inputs
   // unless an explicit reviewed dependency exclusion says otherwise.
-  if (evidenceDirectories.some((directory) => directory !== ".banzai/runner.lock" && !/^\.banzai\/(?:work\/[a-f0-9-]{36}|runs\/[a-z0-9][a-z0-9.-]{0,199})(?:\/verification)?$/u.test(directory))) invalid("Invalid verification evidence boundary.");
+  if (evidenceDirectories.some((directory) => directory !== ".banzai/runner.lock" && !/^\.banzai\/(?:(?:work\/[a-f0-9-]{36}|runs\/[a-z0-9][a-z0-9.-]{0,199})(?:\/verification)?|verification\/[a-f0-9]{64})$/u.test(directory))) invalid("Invalid verification evidence boundary.");
   try {
     const root = await realpath(repoRoot);
     const repository = await lstat(root);
     const repositoryIdentity = { root, device: repository.dev, inode: repository.ino };
-    const excludes = [...policy.dependencies.exclude, ...evidenceDirectories];
+    if (sourceExclusions.some(file => !/^documentation\/work\/[a-z0-9]+(?:-[a-z0-9]+)*\/review-[1-9]\d*\.md$/u.test(file))) invalid("Invalid canonical review boundary.");
+    const excludes = [...policy.dependencies.exclude, ...evidenceDirectories, ...sourceExclusions];
     const excluded = (file) => excludes.some((exclude) => file === exclude || file.startsWith(exclude + "/"));
     const budget = { files: 0, bytes: 0 };
     const entries = [];

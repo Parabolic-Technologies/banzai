@@ -16,6 +16,7 @@ const ADR_0043 = "ADR-0043";
 const ADR_0045 = "ADR-0045";
 const ADR_0049 = "ADR-0049";
 const ADR_0052 = "ADR-0052";
+const ADR_0054 = "ADR-0054";
 const POLICY_ADR_AUTHORITIES = new Set([
   ADR_0026,
   ADR_0028,
@@ -28,7 +29,8 @@ const POLICY_ADR_AUTHORITIES = new Set([
   ADR_0043,
   ADR_0045,
   ADR_0049,
-  ADR_0052
+  ADR_0052,
+  ADR_0054
 ]);
 const POLICY_ERROR_CODE = "IMPORT_BOUNDARY_POLICY_INVALID";
 const IMPORTER_PATTERN =
@@ -95,6 +97,24 @@ const boundary = (
  * broaden it.
  */
 export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
+  boundary(
+    "src/work-documents.ts",
+    "work-document-execution-authority",
+    [ADR_0054],
+    [
+      permission("../../../plugins/banzai/lib/work-documents.mjs", ADR_0054),
+      permission(
+        "../../../plugins/banzai/lib/execution-ownership.mjs",
+        ADR_0054
+      )
+    ]
+  ),
+  boundary(
+    "src/project-files.ts",
+    "contained-project-files",
+    [ADR_0054],
+    [permission("../../../plugins/banzai/lib/project-files.mjs", ADR_0054)]
+  ),
   boundary(
     "src/version-cli.ts",
     "local-version-discovery",
@@ -165,9 +185,10 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/verification-config.ts",
     "verification-config-transaction",
-    [ADR_0045, ADR_0041],
+    [ADR_0054, ADR_0045, ADR_0041],
     [
-      permission("./artifact-storage.js", ADR_0041),
+      permission("./project-files.js", ADR_0054),
+      permission("./work-documents.js", ADR_0054),
       permission("./config.js", ADR_0045),
       permission("./cancellation-evidence.js", ADR_0045),
       permission("./configuration-prerequisite.js", ADR_0045),
@@ -219,12 +240,6 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
     [permission("./types.js", ADR_0042)]
   ),
   boundary(
-    "src/artifact-storage.ts",
-    "shared-artifact-storage",
-    [ADR_0041],
-    [permission("../../../plugins/banzai/lib/artifact-storage.mjs", ADR_0041)]
-  ),
-  boundary(
     "src/setup-client.ts",
     "interactive-vendor-launch",
     [ADR_0040],
@@ -248,9 +263,9 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/project-setup.ts",
     "project-setup-coordination",
-    [ADR_0040, ADR_0041],
+    [ADR_0054, ADR_0040, ADR_0041],
     [
-      permission("./artifact-storage.js", ADR_0041),
+      permission("./work-documents.js", ADR_0054),
       permission("./errors.js", ADR_0040),
       permission("./store.js", ADR_0040),
       permission("./models.js", ADR_0040),
@@ -266,15 +281,16 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/project-adoption.ts",
     "project-adoption-inspection",
-    [ADR_0040, ADR_0041],
-    [permission("./artifact-storage.js", ADR_0041)]
+    [ADR_0054, ADR_0040, ADR_0041],
+    [permission("../../../plugins/banzai/lib/project-adoption.mjs", ADR_0054)]
   ),
   boundary(
     "src/review-snapshot.ts",
     "review-snapshot",
-    [MANIFEST_MODULES, ADR_0041],
+    [ADR_0054, MANIFEST_MODULES, ADR_0041],
     [
-      permission("./artifact-storage.js", ADR_0041),
+      permission("../../../plugins/banzai/lib/review-snapshot.mjs", ADR_0054),
+      permission("./project-files.js", ADR_0054),
       permission("./git.js", MANIFEST_MODULES),
       permission("./validation.js", MANIFEST_MODULES),
       permission("./errors.js", MANIFEST_MODULES)
@@ -384,6 +400,7 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
     "src/cli.ts",
     "cli-composition-root",
     [
+      ADR_0054,
       ADR_0045,
       MANIFEST_ARCHITECTURE,
       MANIFEST_MODULES,
@@ -397,7 +414,8 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       permission("./verification-cli.js", ADR_0045),
       permission("./verification.js", ADR_0045),
       permission("./verification-ui.js", ADR_0045),
-      permission("./artifact-storage.js", ADR_0041),
+      permission("./project-files.js", ADR_0054),
+      permission("./work-documents.js", ADR_0054),
       permission("./project-adoption.js", ADR_0040),
       permission("./project-setup.js", ADR_0040),
       permission("./cancellation-cli.js", ADR_0035),
@@ -533,6 +551,7 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
     "src/doctor.ts",
     "doctor-diagnostics",
     [
+      ADR_0054,
       ADR_0045,
       MANIFEST_ARCHITECTURE,
       MANIFEST_MODULES,
@@ -543,7 +562,7 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
     [
       permission("./configuration-prerequisite.js", ADR_0045),
       permission("./phase-instructions.js", ADR_0042),
-      permission("./artifact-storage.js", ADR_0041),
+      permission("./work-documents.js", ADR_0054),
       permission("./project-adoption.js", ADR_0040),
       permission("./adapters.js", MANIFEST_MODULES),
       permission("./claude-permissions.js", MANIFEST_MODULES),
@@ -609,9 +628,10 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/evaluation.ts",
     "evaluation-export",
-    [MANIFEST_MODULES, MANIFEST_ARCHITECTURE, ADR_0041, ADR_0043],
+    [ADR_0054, MANIFEST_MODULES, MANIFEST_ARCHITECTURE, ADR_0041, ADR_0043],
     [
-      permission("./artifact-storage.js", ADR_0041),
+      permission("./project-files.js", ADR_0054),
+      permission("./work-documents.js", ADR_0054),
       permission("./verification-evidence.js", ADR_0043),
       permission("./errors.js", MANIFEST_ARCHITECTURE),
       permission("./types.js", MANIFEST_ARCHITECTURE),
@@ -622,9 +642,9 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/git.ts",
     "git-gateway",
-    [MANIFEST_ARCHITECTURE, MANIFEST_MODULES, ADR_0041],
+    [ADR_0054, MANIFEST_ARCHITECTURE, MANIFEST_MODULES, ADR_0041],
     [
-      permission("./artifact-storage.js", ADR_0041),
+      permission("./work-documents.js", ADR_0054),
       permission("./errors.js", MANIFEST_ARCHITECTURE),
       permission("./process.js", MANIFEST_ARCHITECTURE)
     ]
@@ -739,10 +759,11 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/plan-task-completion.ts",
     "plan-task-completion",
-    [MANIFEST_MODULES, MANIFEST_ARCHITECTURE, ADR_0041, ADR_0043],
+    [ADR_0054, MANIFEST_MODULES, MANIFEST_ARCHITECTURE, ADR_0041, ADR_0043],
     [
       permission("./verification-evidence.js", ADR_0043),
-      permission("./artifact-storage.js", ADR_0041),
+      permission("./work-documents.js", ADR_0054),
+      permission("./project-files.js", ADR_0054),
       permission("./errors.js", MANIFEST_ARCHITECTURE),
       permission("./git.js", MANIFEST_MODULES),
       permission("./types.js", MANIFEST_ARCHITECTURE)
@@ -788,9 +809,10 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/review-artifact.ts",
     "review-artifact",
-    [MANIFEST_MODULES, MANIFEST_ARCHITECTURE, ADR_0041],
+    [ADR_0054, MANIFEST_MODULES, MANIFEST_ARCHITECTURE, ADR_0041],
     [
-      permission("./artifact-storage.js", ADR_0041),
+      permission("./project-files.js", ADR_0054),
+      permission("./work-documents.js", ADR_0054),
       permission("./validation.js", MANIFEST_MODULES),
       permission("./review-snapshot.js", MANIFEST_MODULES),
       permission("./errors.js", MANIFEST_ARCHITECTURE)
@@ -809,6 +831,7 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
     "src/store.ts",
     "run-store",
     [
+      ADR_0054,
       ADR_0045,
       MANIFEST_MODULES,
       MANIFEST_ARCHITECTURE,
@@ -818,10 +841,11 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       ADR_0043
     ],
     [
+      permission("./project-files.js", ADR_0054),
       permission("./configuration-prerequisite.js", ADR_0045),
       permission("./verification.js", ADR_0045),
       permission("./verification-evidence.js", ADR_0043),
-      permission("./artifact-storage.js", ADR_0041),
+      permission("./work-documents.js", ADR_0054),
       permission("./review-snapshot.js", MANIFEST_MODULES),
       permission("./cancellation.js", ADR_0035),
       permission("./cancellation-evidence.js", ADR_0035),
@@ -841,13 +865,13 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/types.ts",
     "foundational-types",
-    [ADR_0045, MANIFEST_ARCHITECTURE, ADR_0041, ADR_0043],
+    [ADR_0054, ADR_0045, MANIFEST_ARCHITECTURE, ADR_0041, ADR_0043],
     [],
     [
       permission("./configuration-prerequisite.js", ADR_0045),
       permission("./configuration-review.js", ADR_0045),
       permission("./git.js", MANIFEST_ARCHITECTURE),
-      permission("./artifact-storage.js", ADR_0041),
+      permission("./work-documents.js", ADR_0054),
       permission("./verification-evidence.js", ADR_0043)
     ]
   ),
@@ -881,6 +905,7 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
     "src/workflow.ts",
     "workflow-runner",
     [
+      ADR_0054,
       ADR_0052,
       ADR_0045,
       MANIFEST_ARCHITECTURE,
@@ -894,12 +919,13 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       ADR_0042
     ],
     [
+      permission("./project-files.js", ADR_0054),
       permission("./configuration-prerequisite.js", ADR_0045),
       permission("./configuration-review.js", ADR_0045),
       permission("./verification-config.js", ADR_0045),
       permission("./verification-evidence.js", ADR_0043),
       permission("./phase-instructions.js", ADR_0042),
-      permission("./artifact-storage.js", ADR_0041),
+      permission("./work-documents.js", ADR_0054),
       permission("./project-adoption.js", ADR_0040),
       permission("./review-snapshot.js", MANIFEST_MODULES),
       permission("./cancellation.js", ADR_0035),
@@ -1119,9 +1145,9 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/workflow/preflight/approval.ts",
     "workflow-preflight-approval",
-    [ADR_0052],
+    [ADR_0054, ADR_0052],
     [
-      permission("../../artifact-storage.js", ADR_0052),
+      permission("../../work-documents.js", ADR_0054),
       permission("../../errors.js", ADR_0052),
       permission("../../git.js", ADR_0052),
       permission("../../state-machine.js", ADR_0052)
@@ -1198,9 +1224,9 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/workflow/attempts/result-scope.ts",
     "workflow-attempts-result-scope",
-    [ADR_0052],
+    [ADR_0054, ADR_0052],
     [
-      permission("../../artifact-storage.js", ADR_0052),
+      permission("../../project-files.js", ADR_0054),
       permission("../../errors.js", ADR_0052),
       permission("../../git.js", ADR_0052),
       permission("../../review-artifact.js", ADR_0052),
@@ -1289,9 +1315,9 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/workflow/completion/publication.ts",
     "workflow-completion-publication",
-    [ADR_0052],
+    [ADR_0054, ADR_0052],
     [
-      permission("../../artifact-storage.js", ADR_0052),
+      permission("../../project-files.js", ADR_0054),
       permission("../../errors.js", ADR_0052),
       permission("../../git.js", ADR_0052),
       permission("../../plan-task-completion.js", ADR_0052),
@@ -1418,7 +1444,11 @@ function validTargetShape(target) {
     (!target.startsWith("./") && !target.startsWith("../")) ||
     (!TARGET_EXTENSION_PATTERN.test(target) &&
       ![
-        "../../../plugins/banzai/lib/artifact-storage.mjs",
+        "../../../plugins/banzai/lib/work-documents.mjs",
+        "../../../plugins/banzai/lib/execution-ownership.mjs",
+        "../../../plugins/banzai/lib/project-files.mjs",
+        "../../../plugins/banzai/lib/project-adoption.mjs",
+        "../../../plugins/banzai/lib/review-snapshot.mjs",
         "../../../plugins/banzai/lib/verification-evidence.mjs",
         "../../../plugins/banzai/lib/verification-store.mjs",
         "../../../plugins/banzai/lib/task-verification.mjs",

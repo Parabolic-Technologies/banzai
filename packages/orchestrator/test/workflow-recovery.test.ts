@@ -255,7 +255,7 @@ test("resume republishes a proven fix checkpoint's refreshed ledger without anot
     const report = await readFile(
       await boundFixturePath(
         repository.root,
-        "documentation/features/example/implementation-report.md"
+        "documentation/work/example/implementation-report.md"
       )
     );
     assert.deepEqual(parsePublishedCompletionRegion(report), refreshed);

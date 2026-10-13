@@ -3,7 +3,8 @@ import {
   parseVerificationDecision,
   parseVerificationApplicability
 } from "./verification-evidence.js";
-import { parseBinding } from "./artifact-storage.js";
+import { parseBinding } from "./work-documents.js";
+import { verifyExecutionIgnore } from "./project-files.js";
 import {
   validateConfigurationStateEnvelope,
   CONFIGURATION_ACTIONS,
@@ -177,12 +178,18 @@ export interface RunEvent {
 }
 
 async function atomicWriteJson(
+  repoRoot: string,
   filePath: string,
   value: unknown,
-  initialize = true
+  initialize = true,
+  temporaryDirectory = path.dirname(filePath)
 ): Promise<void> {
   if (initialize) await mkdir(path.dirname(filePath), { recursive: true });
-  const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  const temporaryPath = path.join(
+    temporaryDirectory,
+    `${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`
+  );
+  await verifyPrivatePaths(repoRoot, filePath, temporaryPath);
   const handle = await open(temporaryPath, "wx", 0o600);
   try {
     try {
@@ -194,6 +201,25 @@ async function atomicWriteJson(
     await rename(temporaryPath, filePath);
   } finally {
     await unlink(temporaryPath).catch(() => undefined);
+  }
+}
+
+async function verifyPrivatePaths(
+  repoRoot: string,
+  ...files: string[]
+): Promise<void> {
+  const canonicalRoot = await realpath(repoRoot);
+  for (const file of files) {
+    const relative = path.relative(repoRoot, file);
+    await verifyExecutionIgnore(
+      canonicalRoot,
+      (relative.startsWith(`..${path.sep}`)
+        ? path.relative(canonicalRoot, file)
+        : relative
+      )
+        .split(path.sep)
+        .join("/")
+    );
   }
 }
 
@@ -435,7 +461,7 @@ function validateDecisionState(state: RunState): RunState {
 function normalizeRunState(
   state: RunState | LegacyRunStateV2 | LegacyRunState
 ): RunState {
-  if (![1, 2, 3, 4, 5, 6, 7, 8].includes(state.schemaVersion)) {
+  if (![1, 2, 3, 4, 5, 6, 7, 8, 9].includes(state.schemaVersion)) {
     throw new BanzaiError(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Unsupported persisted run state version."
@@ -447,7 +473,11 @@ function normalizeRunState(
       "Legacy run state cannot acquire private binding semantics."
     );
   }
-  if (state.schemaVersion === 7 || state.schemaVersion === 8) {
+  if (
+    state.schemaVersion === 7 ||
+    state.schemaVersion === 8 ||
+    state.schemaVersion === 9
+  ) {
     // Only the completion cursor is new. Everything else must remain one of
     // the combinations a v4 or v6 bootstrap could have produced.
     if (!Object.hasOwn(state, "completionPublication"))
@@ -489,6 +519,7 @@ function normalizeRunState(
     state.schemaVersion === 5 ||
     state.schemaVersion === 6 ||
     state.schemaVersion === 8 ||
+    state.schemaVersion === 9 ||
     (state.schemaVersion === 7 && state.artifactBinding !== undefined)
   ) {
     if (
@@ -521,7 +552,7 @@ function normalizeRunState(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Run state v4 retains binding v1 semantics."
     );
-  if (state.schemaVersion === 8) {
+  if (state.schemaVersion === 8 || state.schemaVersion === 9) {
     if (state.taskVerification !== undefined) {
       const publication = parseTaskVerificationPublication(
         state.taskVerification
@@ -532,7 +563,11 @@ function normalizeRunState(
     if (
       state.verificationMode !== "task" ||
       "configurationSetup" in state ||
-      state.artifactBinding?.binding.schemaVersion !== 2 ||
+      state.artifactBinding?.binding.schemaVersion !==
+        (state.schemaVersion === 9 ? 3 : 2) ||
+      (state.schemaVersion === 9 &&
+        state.artifactBinding.binding.artifacts.verificationDirectory !==
+          `.banzai/runs/${state.runId}/verification`) ||
       "verificationEvidence" in state
     )
       return decisionStateError();
@@ -579,7 +614,8 @@ function normalizeRunState(
     state.schemaVersion === 5 ||
     state.schemaVersion === 6 ||
     state.schemaVersion === 7 ||
-    state.schemaVersion === 8
+    state.schemaVersion === 8 ||
+    state.schemaVersion === 9
   ) {
     const recovery = state.recovery ?? null;
     if (recovery !== null && recovery.stage === undefined) {
@@ -743,6 +779,10 @@ export class RunStore {
         "approval artifact name",
         150
       )}`;
+      await verifyPrivatePaths(
+        this.repoRoot,
+        this.approvalSnapshotFilePath(runId, file)
+      );
       await writeFile(
         this.approvalSnapshotFilePath(runId, file),
         entry.contents,
@@ -750,11 +790,15 @@ export class RunStore {
       );
       manifest.push({ path: entry.path, file, sha256: entry.sha256 });
     }
-    await atomicWriteJson(this.approvalSnapshotManifestPath(runId), {
-      schemaVersion: 1,
-      digest,
-      entries: manifest
-    });
+    await atomicWriteJson(
+      this.repoRoot,
+      this.approvalSnapshotManifestPath(runId),
+      {
+        schemaVersion: 1,
+        digest,
+        entries: manifest
+      }
+    );
   }
 
   /** Null when the run predates approval snapshots or the snapshot is unreadable. */
@@ -855,6 +899,7 @@ export class RunStore {
     await assertReviewPathOwned(this.repoRoot, relative, true);
     await mkdir(path.dirname(destination), { recursive: true });
     const temporary = `${destination}.${randomUUID()}.tmp`;
+    await verifyPrivatePaths(this.repoRoot, destination, temporary);
     const handle = await open(temporary, "wx", 0o600);
     try {
       try {
@@ -962,6 +1007,7 @@ export class RunStore {
   ): Promise<void> {
     await mkdir(path.dirname(destination), { recursive: true, mode: 0o700 });
     const temporary = `${destination}.${process.pid}.${randomUUID()}.tmp`;
+    await verifyPrivatePaths(this.repoRoot, destination, temporary);
     const handle = await open(temporary, "wx", 0o600);
     try {
       try {
@@ -1329,6 +1375,7 @@ export class RunStore {
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
+        await verifyPrivatePaths(this.repoRoot, this.lockPath);
         const handle = await open(this.lockPath, "wx", 0o600);
         const owned = await handle.stat();
         try {
@@ -1489,18 +1536,34 @@ export class RunStore {
     await mkdir(this.runDirectory(state.runId), { recursive: false });
     await mkdir(path.join(this.runDirectory(state.runId), "attempts"));
     await mkdir(this.verificationAttemptsDirectory(state.runId));
-    await atomicWriteJson(this.verificationLedgerPath(state.runId), {
-      schemaVersion: usesVerificationPolicy(state)
-        ? 2
-        : VERIFICATION_LEDGER_SCHEMA_VERSION
-    });
+    await atomicWriteJson(
+      this.repoRoot,
+      this.verificationLedgerPath(state.runId),
+      {
+        schemaVersion: usesVerificationPolicy(state)
+          ? 2
+          : VERIFICATION_LEDGER_SCHEMA_VERSION
+      }
+    );
     await this.withStateMutation(state.runId, async () => {
-      await atomicWriteJson(this.statePath(state.runId), state, false);
+      await atomicWriteJson(
+        this.repoRoot,
+        this.statePath(state.runId),
+        state,
+        false
+      );
     });
-    await atomicWriteJson(this.activeRunPath, {
-      schemaVersion: 1,
-      runId: state.runId
-    });
+    // The pointer's exact ignore rule does not cover sibling temporary files.
+    await atomicWriteJson(
+      this.repoRoot,
+      this.activeRunPath,
+      {
+        schemaVersion: 1,
+        runId: state.runId
+      },
+      true,
+      this.runsDirectory
+    );
     await this.appendEvent(state.runId, "run.created", {
       slug: state.slug,
       baseCommit: state.baseCommit
@@ -1560,7 +1623,12 @@ export class RunStore {
         );
       }
       state.updatedAt = new Date().toISOString();
-      await atomicWriteJson(this.statePath(state.runId), state, false);
+      await atomicWriteJson(
+        this.repoRoot,
+        this.statePath(state.runId),
+        state,
+        false
+      );
     });
   }
 
@@ -1574,6 +1642,7 @@ export class RunStore {
       true
     );
     const guardPath = path.join(directory, ".state-write.lock");
+    await verifyPrivatePaths(this.repoRoot, guardPath);
     const deadline = performance.now() + 1000;
     const token = randomUUID();
     let handle;
@@ -1626,7 +1695,7 @@ export class RunStore {
       if (
         raw.runId !== runId ||
         !CANCELLATION_STATUSES.includes(raw.status as RunState["status"]) ||
-        ![1, 2, 3, 4, 5, 6, 7, 8].includes(raw.schemaVersion as number)
+        ![1, 2, 3, 4, 5, 6, 7, 8, 9].includes(raw.schemaVersion as number)
       )
         throw new Error();
     } catch {
@@ -1661,7 +1730,7 @@ export class RunStore {
           "Cancellation must be terminal."
         );
       state.updatedAt = new Date().toISOString();
-      await atomicWriteJson(this.statePath(runId), state, false);
+      await atomicWriteJson(this.repoRoot, this.statePath(runId), state, false);
       return { state, outcome: "cancelled" };
     });
   }
@@ -1761,6 +1830,7 @@ export class RunStore {
         details
       };
       const file = path.join(this.runDirectory(runId), "events.jsonl");
+      await verifyPrivatePaths(this.repoRoot, file);
       const named = await lstat(file).catch((error: unknown) => {
         if (cancellationRecord(error).code === "ENOENT") return null;
         throw error;
@@ -1818,7 +1888,11 @@ export class RunStore {
 
   async writeRunAttempt(runId: string, record: AttemptRecord): Promise<void> {
     parseModelAttemptRecord(record);
-    await atomicWriteJson(this.attemptPath(runId, record.attempt), record);
+    await atomicWriteJson(
+      this.repoRoot,
+      this.attemptPath(runId, record.attempt),
+      record
+    );
   }
 
   async readRunAttempt(
@@ -1949,7 +2023,11 @@ export class RunStore {
       invocations: [...(existing?.invocations ?? []), entry]
     };
     decodeContextAttemptLedger(ledger, runId, attempt.id);
-    await atomicWriteJson(this.contextLedgerPath(runId, attempt), ledger);
+    await atomicWriteJson(
+      this.repoRoot,
+      this.contextLedgerPath(runId, attempt),
+      ledger
+    );
     return entry;
   }
 
@@ -1979,7 +2057,11 @@ export class RunStore {
     const finished = { ...current, ...evidence };
     ledger.invocations[ordinal - 1] = finished;
     decodeContextAttemptLedger(ledger, runId, attempt.id);
-    await atomicWriteJson(this.contextLedgerPath(runId, attempt), ledger);
+    await atomicWriteJson(
+      this.repoRoot,
+      this.contextLedgerPath(runId, attempt),
+      ledger
+    );
     return finished;
   }
 
@@ -2019,7 +2101,7 @@ export class RunStore {
         throw error;
       }
     }
-    await atomicWriteJson(checkpointPath, parsed);
+    await atomicWriteJson(this.repoRoot, checkpointPath, parsed);
   }
 
   async readTerminalCheckpointIfExists(
@@ -2172,7 +2254,7 @@ export class RunStore {
         throw error;
       }
     }
-    await atomicWriteJson(authorizationPath, parsed);
+    await atomicWriteJson(this.repoRoot, authorizationPath, parsed);
   }
 
   async readRecoveryAuthorization(
@@ -2336,6 +2418,7 @@ export class RunStore {
     };
     parseVerificationAttemptRecord(record);
     await atomicWriteJson(
+      this.repoRoot,
       this.verificationAttemptPath(runId, record.sequence, record.id),
       record
     );
@@ -2376,7 +2459,7 @@ export class RunStore {
         "Verification attempt identity changed before completion."
       );
     }
-    await atomicWriteJson(filePath, parsed);
+    await atomicWriteJson(this.repoRoot, filePath, parsed);
   }
 
   async writeVerificationLog(
@@ -2423,7 +2506,7 @@ export class RunStore {
         "INVALID_REVIEW_CANDIDATE_EVIDENCE",
         "Canonical review JSON contains conflicting evidence."
       );
-    if (existing === null) await atomicWriteJson(target, result);
+    if (existing === null) await atomicWriteJson(this.repoRoot, target, result);
   }
 
   async writeText(
@@ -2432,6 +2515,7 @@ export class RunStore {
     value: string
   ): Promise<string> {
     const target = path.join(this.runDirectory(runId), relativePath);
+    await verifyPrivatePaths(this.repoRoot, target);
     await mkdir(path.dirname(target), { recursive: true });
     await writeFile(target, value, { encoding: "utf8", mode: 0o600 });
     return target;

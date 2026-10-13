@@ -354,7 +354,7 @@ test("shipped workflow preserves five gates and scopes retained configuration fo
   assert.match(feature, /cannot use the planning-only consultation gate/);
 
   const assertSupervisorSafety = (source: string): void => {
-    assert.match(source, /exact supported v6 declaration/i);
+    assert.match(source, /exact supported v7 declaration/i);
     assert.match(source, /answer_consultation/);
     assert.match(
       source,
@@ -373,8 +373,8 @@ test("shipped workflow preserves five gates and scopes retained configuration fo
     );
   });
 
-  assert.match(protocol, /banzai-agent-capabilities\/v6/);
-  assert.match(protocol, /controlContractVersion: "6\.0\.0"/);
+  assert.match(protocol, /banzai-agent-capabilities\/v7/);
+  assert.match(protocol, /controlContractVersion: "7\.0\.0"/);
   assert.match(protocol, /banzai-agent-status\/v5/);
   assert.match(protocol, /answer_escalation/);
   assert.match(protocol, /answer_consultation/);

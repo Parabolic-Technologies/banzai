@@ -346,7 +346,7 @@ test("capabilities and no-active-run status emit one canonical JSON document", a
   assert.equal(capabilityOutput.length, 1);
   assert.equal(
     (JSON.parse(capabilityOutput[0] ?? "") as { schema: string }).schema,
-    "banzai-agent-capabilities/v6"
+    "banzai-agent-capabilities/v7"
   );
 
   const runner = new FakeRunner();

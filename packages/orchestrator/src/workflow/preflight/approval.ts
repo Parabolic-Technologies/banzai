@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { inspectBoundWork } from "../../artifact-storage.js";
+import { inspectBoundWork } from "../../work-documents.js";
 import { BanzaiError } from "../../errors.js";
 import { currentCommit, digestArtifactBundle } from "../../git.js";
 import { blockState } from "../../state-machine.js";

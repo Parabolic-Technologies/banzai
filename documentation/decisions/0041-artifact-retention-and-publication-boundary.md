@@ -450,6 +450,12 @@ No exact final file-count target replaces classification and dependency review.
 
 ## Lifecycle Links
 
+- Partially superseded by [ADR-0054](./0054-git-visible-work-artifacts.md),
+  accepted 2026-10-13: new work uses Git-visible documents with fixed paths;
+  layout selection, the mandatory standalone storage protocol and private
+  archival requirements for new documents are retired. Historical custody,
+  execution-state privacy and workflow authority remain. Implementation is Planned.
+
 - Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted
   2026-09-14: state-6/binding-mode compatibility and private runner config
   transaction evidence. Preserve historical bindings and exact model-writable

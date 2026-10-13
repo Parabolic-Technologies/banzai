@@ -511,6 +511,11 @@ Resolution review of this rework and implementation evidence remain pending.
 
 ## Lifecycle Links
 
+- Amended by [ADR-0054](./0054-git-visible-work-artifacts.md), accepted
+  2026-10-13: new human-facing completion reports use the tracked work directory.
+  Runner-owned publication, receipts and completion authority remain.
+  Implementation is Planned.
+
 - Supersedes: None in full.
 - Accepted narrow amendments: ADR-0017, ADR-0023, ADR-0025, ADR-0042 and ADR-0043,
   with narrowed clauses and preserved authority in section 7. Reciprocal

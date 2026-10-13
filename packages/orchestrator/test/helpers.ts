@@ -475,18 +475,17 @@ export async function createTestRepository(
   );
   await writeFile(
     path.join(root, ".gitignore"),
-    ".banzai/runs/\n.banzai/active-run.json\n.banzai/runner.lock\n.banzai/work/\n.banzai/.artifact-init.lock\n",
+    ".banzai/runs/\n.banzai/active-run.json\n.banzai/runner.lock\n.banzai/work/\n.banzai/.artifact-init.lock\n.banzai/verification/\n.banzai/execution-locks/\n",
     "utf8"
   );
-  // Existing suites characterize the established documentation layout. New-storage
-  // fixtures opt into first-use discovery or private storage explicitly.
-  if (options.artifactLayout !== null)
+  // Only explicitly selected historical fixtures carry a layout declaration.
+  if (options.artifactLayout !== undefined && options.artifactLayout !== null)
     await writeFile(
       path.join(root, ".banzai/artifacts.json"),
       JSON.stringify({
         schema: "banzai-artifact-layout/v1",
         schemaVersion: 1,
-        layout: options.artifactLayout ?? "legacy"
+        layout: options.artifactLayout
       }) + "\n"
     );
   await writeAdoptedGuidance(root);
@@ -506,4 +505,16 @@ export function requiredFixture<T>(value: T | null | undefined): T {
   if (value === undefined || value === null)
     throw new Error("Required fixture value is missing.");
   return value;
+}
+
+export async function createTestWork(input: {
+  repoRoot: string;
+  slug: string;
+  mode: "strict" | "lite" | "fix" | "workflow";
+  creationId?: string;
+  runId?: string;
+}) {
+  const { createExecutionBinding } =
+    await import("../../../plugins/banzai/lib/work-documents.mjs");
+  return createExecutionBinding({ ...input, runId: input.runId ?? input.slug });
 }

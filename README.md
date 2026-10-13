@@ -232,7 +232,7 @@ mutable work. Interrupted implementation is never silently retried. Details:
 
 To supervise a run from a chat agent, explicitly invoke `/banzai:orchestrate`
 (Claude Code) or `$banzai:orchestrate` (Codex); the skill can never select
-itself. Compatible supervisors require control contract `6.0.0`; see
+itself. Compatible supervisors require control contract `7.0.0`; see
 [agent control](documentation/orchestrator.md#agent-control) for exact schemas
 and compatibility checks.
 
@@ -310,7 +310,7 @@ smallest workflow that matches the risk:
 
 | Situation                                 | Skill                   | Primary artifact                                               |
 | ----------------------------------------- | ----------------------- | -------------------------------------------------------------- |
-| Ordinary new capability                   | `feature`               | `.banzai/work/<uuid>/work.md`                                  |
+| Ordinary new capability                   | `feature`               | `documentation/work/<slug>/work.md`                                  |
 | Bug, polish, refactor, review cleanup     | `quick-fix`             | Change report only when needed                                 |
 | Significant architecture choice           | `architecture-decision` | `documentation/decisions/NNNN-<slug>.md`                       |
 | Formal requirements or escalation trigger | Strict workflow         | Description, decisions, plan, implementation and test evidence |
@@ -327,16 +327,14 @@ Artifacts land in a common layout:
 
 ```text
 documentation/
-├── features/<slug>/
-│   └── {work,description,implementation-report,test-report,review-<iteration>}.md
-├── development-plans/<slug>/plan.md
-├── decisions/{README.md,NNNN-<slug>.md}
-└── changes/<name>.md
+├── work/<slug>/
+│   └── {work,description,plan,implementation-report,test-report,change-report,review-N}.md
+└── decisions/{README.md,NNNN-<slug>.md}
 ```
 
 Lite work normally needs only `work.md`. Accepted ADR bodies are immutable;
 changed decisions use a linked superseding ADR. Each `review-<iteration>.md` is
-self-contained: the runner renders and publishes `banzai-feature-review/v7` for
+self-contained: the runner renders and publishes `banzai-feature-review/v8` for
 read-only orchestrated reviewers; standalone reviewers own durable
 `banzai-feature-review/v1` Markdown. A human or another model can continue the
 review from either artifact without a copied transcript.
@@ -406,7 +404,7 @@ See [NOTICE](NOTICE), [third-party information](THIRD_PARTY_NOTICES.md),
 Using Banzai does not require open-sourcing your own project. Community
 participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-Work artifacts default to [local private storage](documentation/artifact-storage.md) after normal project setup. Shared ADRs and current product guides remain public; existing work retains explicit legacy paths.
+New human-reviewed work documents use [documentation/work/<slug>/](documentation/artifact-storage.md) and appear in ordinary Git changes. Existing documents stay at their known paths. Raw execution evidence remains ignored beneath `.banzai/`.
 
 New tasks start without profile setup. Strict mandatory checks belong to the
 approved plan; lite uses the delegated request and actual execution permissions.

@@ -45,7 +45,7 @@ const path = require('path');
 // RUN_STATE_SCHEMA_VERSION. Codex and Claude Code refresh an installed plugin
 // cache only on a version change, so a newer state means this hook is stale,
 // not that the run is legacy.
-const NEWEST_RUN_STATE_SCHEMA = 8;
+const NEWEST_RUN_STATE_SCHEMA = 9;
 
 function deferAndExit() {
   // No stdout + exit 0 => Claude Code falls through to normal permission flow.
@@ -178,24 +178,22 @@ if (targets.length === 0) {
   deferAndExit();
 }
 
-// Private documents are classified through the installed shared resolver. A
-// directory prefix alone never turns control files or a different work into docs.
+// Explicit old standalone document paths stay usable without registering work.
 if (!runnerMode && targets.some(target => /(?:^|\/)\.banzai\/work\//.test(target))) {
   try {
-    const storage = await import('../lib/artifact-storage.mjs');
-    const root = await storage.projectRoot(cwd);
+    const files = await import('../lib/project-files.mjs');
+    const root = await files.projectRoot(cwd);
     const documents = await Promise.all(targets.map(async target => {
       const relative = path.relative(root, path.resolve(cwd, target));
       if (isDocArtifact(relative)) return true;
-      const match = relative.match(/^\.banzai\/work\/([0-9a-f-]{36})\//);
-      if (!match) return false;
-      const selected = await storage.inspectArtifacts({repoRoot: root, workId: match[1]});
-      await storage.safePath(root, relative, {missing: true});
-      return selected.work !== null && storage.ownsArtifact(selected.work.binding, relative);
+      if (!/^\.banzai\/work\/[0-9a-f-]{36}\/(?:description|plan|implementation-report|test-report|work|change-report|review-[1-9]\d*)\.md$/.test(relative)) return false;
+      await files.safePath(root, relative, {missing: true});
+      return true;
     }));
     if (documents.every(Boolean)) deferAndExit();
+    runnerDecision('deny', 'banzai spec-gate: only explicitly selected historical documents are authorable; execution state is private.');
   } catch (_) {
-    runnerDecision('deny', 'banzai spec-gate: private work identity could not be validated; inspect artifact storage before writing.');
+    runnerDecision('deny', 'banzai spec-gate: the explicit historical document path is unsafe or unavailable.');
   }
 }
 
@@ -294,11 +292,13 @@ if (runnerMode) {
     }
     const controlRoot = path.join(projectRoot, '.banzai');
     let privateWrites = new Set();
-    if (state.schemaVersion === 8 || state.schemaVersion === 4 || state.schemaVersion === 5 || state.schemaVersion === 6 || (state.schemaVersion === 7 && state.artifactBinding !== undefined)) {
-      const storage = await import('../lib/artifact-storage.mjs');
+    if (state.schemaVersion === 9 || state.schemaVersion === 8 || state.schemaVersion === 4 || state.schemaVersion === 5 || state.schemaVersion === 6 || (state.schemaVersion === 7 && state.artifactBinding !== undefined)) {
+      const storage = await import('../lib/work-documents.mjs');
+      const files = await import('../lib/project-files.mjs');
       const bound = await storage.inspectBoundWork(projectRoot, state.artifactBinding);
-      if ((state.schemaVersion === 5 || state.schemaVersion === 8) && bound.binding.schemaVersion !== 2) throw new Error('verification-enabled state requires its original v2 binding');
-      if (state.schemaVersion === 6 || state.schemaVersion === 7 || state.schemaVersion === 8) {
+      if (state.schemaVersion !== 9 || bound.binding.schemaVersion !== 3) throw new Error('historical run execution is unsupported; preserve its documents and start new work');
+      if (bound.binding.artifacts.verificationDirectory !== `.banzai/runs/${state.runId}/verification`) throw new Error('verification role belongs to another run');
+      if (state.schemaVersion >= 6) {
         const readers = await import('../lib/artifact-readers.mjs');
         readers.validateConfigurationStateEnvelope(state);
       }
@@ -310,8 +310,8 @@ if (runnerMode) {
         ['implementation', 'fix'].includes(phase) ? workflow === 'feature' ? [roles.work] : workflow === 'quick-fix' ? [roles.changeReport] : [roles.implementationReport, roles.testReport, ...(phase === 'fix' ? [roles.changeReport] : [])] : []);
       for (const target of targets) {
         const relative = path.relative(projectRoot, path.resolve(projectRoot, target));
-        await storage.safePath(projectRoot, relative, {missing: true});
-        if (bound.binding.layout === 'private' && /^documentation\/(?:features|development-plans|changes)\//.test(relative)) throw new Error('work artifacts must use the persisted private binding');
+        await files.safePath(projectRoot, relative, {missing: true});
+        if (/^documentation\/(?:work|features|development-plans|changes)\//.test(relative) && !privateWrites.has(relative)) throw new Error('work document is outside exact phase write grants');
       }
       if (phase === 'plan' && state.status === 'planning' && targets.every(target => {
         const relative = path.relative(projectRoot, path.resolve(projectRoot, target));
@@ -321,7 +321,7 @@ if (runnerMode) {
       if (typeof state.schemaVersion === 'number' && state.schemaVersion > NEWEST_RUN_STATE_SCHEMA) {
         throw new Error(`run state schema ${state.schemaVersion} is newer than this installed Banzai hook supports (up to ${NEWEST_RUN_STATE_SCHEMA}); update the Banzai plugin installed for this model client to the banzai CLI release (compare \`banzai --version\` with \`banzai --plugin-version\`)`);
       }
-      throw new Error('legacy run cannot carry private artifact authority');
+      throw new Error('historical run cannot acquire new work document authority');
     }
     if (state.status === 'reviewing' || state.activeAttempt?.kind === 'review') {
       throw new Error('orchestrated reviewers are read-only; the runner owns review artifacts');

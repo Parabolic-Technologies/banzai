@@ -1,12 +1,13 @@
 import {
   inspectBoundWork,
-  verifyIgnores,
+  verifyDocumentVisibility,
   type ArtifactBoundWork
-} from "./artifact-storage.js";
+} from "./work-documents.js";
 import { createHash, randomUUID } from "node:crypto";
 import { link, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import path from "node:path";
 import { BanzaiError } from "./errors.js";
+import { verifyExecutionIgnore } from "./project-files.js";
 import {
   assertReviewPathOwned,
   parseReviewSnapshot
@@ -16,6 +17,7 @@ import type {
   ReviewArtifactContext,
   ReviewFinding,
   ReviewResult,
+  ReviewSnapshot,
   VerificationResult
 } from "./types.js";
 
@@ -27,6 +29,32 @@ const REQUIRED_SECTIONS = [
   "## Deferred Coverage",
   "## Handoff"
 ] as const;
+
+function verificationSummary(publication: ReviewSnapshot["taskVerification"]) {
+  if (!publication) return null;
+  return {
+    checks: publication.decision.checks,
+    complete: publication.applicability.complete,
+    outcome: publication.applicability.outcome,
+    absenceReason: publication.applicability.absenceReason,
+    dispositions: publication.applicability.dispositions,
+    attempts: publication.attempts.map((attempt) => ({
+      id: attempt.id,
+      checkId: attempt.checkId,
+      status: attempt.status,
+      startedAt: attempt.startedAt,
+      completedAt: attempt.completedAt,
+      durationMs: attempt.durationMs,
+      exitCode: attempt.exitCode,
+      signal: attempt.signal,
+      failureCategory: attempt.failureCategory,
+      retryOf: attempt.retryOf,
+      stdout: attempt.stdout,
+      stderr: attempt.stderr
+    })),
+    references: publication.references
+  };
+}
 
 export interface ValidatedReviewCandidate {
   contents: string;
@@ -264,17 +292,19 @@ function renderCurrentReviewArtifact(
     (snapshot.schemaVersion === 5 && snapshot.configurationSetup !== undefined);
   return [
     "# Implementation Review",
-    snapshot.schemaVersion === 6
-      ? "- Format: `banzai-feature-review/v7`"
-      : snapshot.schemaVersion === 5
-        ? "- Format: `banzai-feature-review/v6`"
-        : snapshot.schemaVersion === 4
-          ? "- Format: `banzai-feature-review/v5`"
-          : snapshot.schemaVersion === 3
-            ? "- Format: `banzai-feature-review/v4`"
-            : snapshot.schemaVersion === 2
-              ? "- Format: `banzai-feature-review/v3`"
-              : "- Format: `banzai-feature-review/v2`",
+    snapshot.schemaVersion === 7
+      ? "- Format: `banzai-feature-review/v8`"
+      : snapshot.schemaVersion === 6
+        ? "- Format: `banzai-feature-review/v7`"
+        : snapshot.schemaVersion === 5
+          ? "- Format: `banzai-feature-review/v6`"
+          : snapshot.schemaVersion === 4
+            ? "- Format: `banzai-feature-review/v5`"
+            : snapshot.schemaVersion === 3
+              ? "- Format: `banzai-feature-review/v4`"
+              : snapshot.schemaVersion === 2
+                ? "- Format: `banzai-feature-review/v3`"
+                : "- Format: `banzai-feature-review/v2`",
     reviewValue({
       slug: context.slug,
       iteration: context.iteration,
@@ -326,18 +356,22 @@ function renderCurrentReviewArtifact(
       source: snapshot.completionSource,
       projection: snapshot.artifact.taskCompletion ?? null
     }),
-    ...(snapshot.schemaVersion === 5 || snapshot.schemaVersion === 6
+    ...(snapshot.schemaVersion >= 5
       ? [
           "### Runner-owned completion publication (runner evidence)",
           "The completion region of the implementation report was rendered and published by the runner from the validated ledger; the model authored the claims, narrative and engineering changes. These identities name the retained capture, candidate and receipt proof. Valid structure is not proof that work was done.",
           reviewValue(snapshot.completionPublication ?? null)
         ]
       : []),
-    ...(snapshot.schemaVersion === 6
+    ...(snapshot.schemaVersion === 6 || snapshot.schemaVersion === 7
       ? [
           "### Task verification (runner evidence)",
           "Check absence is not a passing suite. Assess requirement coverage and unjustified weakening independently of command identity.",
-          reviewValue(snapshot.taskVerification)
+          reviewValue(
+            snapshot.schemaVersion === 7
+              ? verificationSummary(snapshot.taskVerification)
+              : snapshot.taskVerification
+          )
         ]
       : []),
     "## Summary",
@@ -752,22 +786,35 @@ export async function publishReviewArtifact(
       return;
     }
   }
-  const temporaryPath = `${absolutePath}.${randomUUID()}.tmp`;
+  const temporaryPath =
+    context.snapshot?.artifactBinding?.binding.schemaVersion === 3
+      ? path.join(
+          repoRoot,
+          `${context.candidatePath}.${randomUUID()}.publication.tmp`
+        )
+      : `${absolutePath}.${randomUUID()}.tmp`;
   const binding = context.snapshot?.artifactBinding?.binding;
-  const privateWork = binding?.layout === "private";
   const verifyDestinations = async () => {
-    if (privateWork)
-      await verifyIgnores(repoRoot, binding, [
-        context.path,
-        path.relative(repoRoot, temporaryPath)
+    if (binding?.schemaVersion === 3)
+      await verifyDocumentVisibility(repoRoot, binding.artifacts, [
+        context.path
       ]);
   };
   await verifyDestinations();
   await mkdir(path.dirname(absolutePath), {
     recursive: true,
-    mode: privateWork ? 0o700 : 0o755
+    mode: 0o755
   });
-  const handle = await open(temporaryPath, "wx", privateWork ? 0o600 : 0o644);
+  if (context.snapshot?.artifactBinding?.binding.schemaVersion === 3) {
+    const relative = path
+      .relative(repoRoot, temporaryPath)
+      .split(path.sep)
+      .join("/");
+    await assertReviewPathOwned(repoRoot, relative, true);
+    await verifyExecutionIgnore(repoRoot, relative);
+  }
+  await mkdir(path.dirname(temporaryPath), { recursive: true, mode: 0o700 });
+  const handle = await open(temporaryPath, "wx", 0o644);
   try {
     try {
       await handle.writeFile(candidate.contents, "utf8");

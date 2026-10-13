@@ -2,7 +2,7 @@
 
 Assess the supplied approved scope, current source and frozen evidence in an
 independent source-read-only context. Apply the audit guidance and inspect every
-required artifact directly, including ignored bound work. A supplied path or
+required artifact directly, at its exact supplied path. A supplied path or
 digest does not prove that its content was assessed.
 
 Use the supplied full or resolution-review scope and authoritative finding

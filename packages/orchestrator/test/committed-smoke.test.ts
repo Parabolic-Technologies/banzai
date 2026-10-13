@@ -79,9 +79,15 @@ if (command === "help") {
 } else if (command === "control capabilities") {
   if (variant === "mutation") await writeFile(path.join(process.cwd(), "mutated.txt"), "mutated\\n");
   process.stdout.write(variant === "malformed-capabilities" ? "{bad\\n" : JSON.stringify({
-    schema: variant === "incompatible-capabilities" ? "banzai-agent-capabilities/v1" : "banzai-agent-capabilities/v6",
-    schemaVersion: variant === "incompatible-capabilities" ? 1 : 6,
-    controlContractVersion: "6.0.0",
+    schema: variant === "incompatible-capabilities" ? "banzai-agent-capabilities/v1" : "banzai-agent-capabilities/v7",
+    schemaVersion: variant === "incompatible-capabilities" ? 1 : 7,
+    controlContractVersion: "7.0.0",
+    workDocuments: {
+      directoryPattern: "documentation/work/<slug>/",
+      bindingSchemas: ["banzai-work-binding/v3"],
+      workspaceSnapshotVersion: 3,
+      verificationRequestSchemas: ["banzai-verification-request/v3"]
+    },
     orchestratorVersion: variant === "capability-version-mismatch" ? "0.0.0" : version,
     umbrellaContractVersion: "1.0.0",
     operations: {

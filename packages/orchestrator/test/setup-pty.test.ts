@@ -308,7 +308,7 @@ test("setup PTY independently packaged CLI transfers each explicit skill with TT
           (await snapshotTree(path.join(host.root, ".banzai"))).map(
             (entry) => entry.path
           ),
-          ["artifacts.json", "config.json"]
+          ["config.json"]
         );
         assert.equal(host.run(["setup"], []).exitCode, 0);
       } finally {

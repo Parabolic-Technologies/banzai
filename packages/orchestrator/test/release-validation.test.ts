@@ -134,6 +134,7 @@ const FIXTURE_PATHS = [
   "documentation/decisions/0048-completion-markup-and-viewer-enrichment-boundary.md",
   "documentation/decisions/0049-task-scoped-verification.md",
   "documentation/decisions/0050-triggered-code-design-assessment.md",
+  "documentation/decisions/0054-git-visible-work-artifacts.md",
   "packages/orchestrator/scripts/check-dist.mjs",
   "packages/orchestrator/scripts/release-version.mjs",
   "packages/orchestrator/scripts/smoke-committed.mjs",
@@ -979,14 +980,14 @@ for (const relativePath of [
   });
 }
 
-test("release validation protects run-state v3-v8 and agent-control 6.0 identities", async () => {
+test("release validation protects run-state v3-v9 and agent-control 7.0 identities", async () => {
   await withFixture(async (root) => {
     const typesPath = path.join(root, "packages/orchestrator/src/types.ts");
     const accepted = await readFile(typesPath, "utf8");
     await writeFile(
       typesPath,
       accepted.replace(
-        "schemaVersion: 3 | 4 | 5 | 6 | 7 | 8;",
+        "schemaVersion: 3 | 4 | 5 | 6 | 7 | 8 | 9;",
         "schemaVersion: 2;"
       ),
       "utf8"
@@ -1033,7 +1034,7 @@ for (const [relativePath, fragment] of [
   ],
   [
     "plugins/banzai/skills/orchestrate/SKILL.md",
-    "exact supported v6 declaration"
+    "exact supported v7 declaration"
   ],
   ["plugins/banzai/skills/orchestrate/SKILL.md", "banzai-agent-answer/v2"],
   [
@@ -1054,11 +1055,11 @@ for (const [relativePath, fragment] of [
   ],
   [
     "plugins/banzai/skills/orchestrate/references/control-protocol.md",
-    "banzai-agent-capabilities/v6"
+    "banzai-agent-capabilities/v7"
   ],
   [
     "plugins/banzai/skills/orchestrate/references/control-protocol.md",
-    'controlContractVersion: "6.0.0"'
+    'controlContractVersion: "7.0.0"'
   ],
   [
     "plugins/banzai/skills/orchestrate/references/control-protocol.md",
@@ -2885,5 +2886,40 @@ test("runner-owned completion annotations admit only the accepted reciprocal ima
     await validateGuidanceExtraction(root);
     const proposal = await describeGuidanceTransition(root);
     assert.match(proposal.predecessorSha256, /^[a-f0-9]{64}$/u);
+  });
+});
+
+test("ADR-0054 lifecycle images require acceptance and reject arbitrary authority edits", async () => {
+  await withFixture(async (root) => {
+    await validateGuidanceExtraction(root);
+    const authority = path.join(
+      root,
+      "documentation/decisions/0049-task-scoped-verification.md"
+    );
+    const original = await readFile(authority, "utf8");
+    for (const changed of [
+      original.replace(
+        "- Amended by [ADR-0054]",
+        "- Broadly amended by [ADR-0054]"
+      ),
+      original + "\nUnaccepted body change.\n"
+    ]) {
+      assert.notEqual(changed, original);
+      await writeFile(authority, changed);
+      await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    }
+    await writeFile(authority, original);
+    const decision = path.join(
+      root,
+      "documentation/decisions/0054-git-visible-work-artifacts.md"
+    );
+    const accepted = await readFile(decision, "utf8");
+    await writeFile(
+      decision,
+      accepted.replace("- Status: Accepted", "- Status: Proposed")
+    );
+    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    await writeFile(decision, accepted);
+    await validateGuidanceExtraction(root);
   });
 });

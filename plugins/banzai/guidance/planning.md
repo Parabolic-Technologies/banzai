@@ -51,8 +51,8 @@ ambiguous reuse commitments preserve fresh execution.
 
 ## Rules
 
-- Runner control paths under `.banzai/` are outside model write scope except exact
-  private artifact roles bound for the intended implementation/fix phase.
+- Runner control paths under `.banzai/` are outside model write scope.
+  Work documents use only the exact roles granted for the intended phase.
   Put actual owner-only requirements in **Human prerequisites** and show that
   section with plan approval. Missing tests or tooling belong to the approved
   task scope, not a profile-setup gate. Do not plan runner-configuration JSON

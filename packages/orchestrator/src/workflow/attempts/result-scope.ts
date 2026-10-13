@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readBytes as readArtifactBytes } from "../../artifact-storage.js";
+import { readBytes as readArtifactBytes } from "../../project-files.js";
 import { BanzaiError } from "../../errors.js";
 import {
   workspaceChanges,
@@ -70,7 +70,7 @@ export async function validateSavedArtifactScope(
     bytes?.toString("utf8") ?? "null"
   ) as WorkspaceSnapshot | null;
   if (
-    before?.schemaVersion !== 2 ||
+    before?.schemaVersion !== (state.schemaVersion === 9 ? 3 : 2) ||
     before.baseCommit !== state.baseCommit ||
     before.artifactBindingDigest !== state.artifactBinding.sha256 ||
     !Array.isArray(before.entries) ||
@@ -78,7 +78,7 @@ export async function validateSavedArtifactScope(
       createHash("sha256")
         .update(
           JSON.stringify({
-            version: 2,
+            version: state.schemaVersion === 9 ? 3 : 2,
             baseCommit: before.baseCommit,
             artifactBindingDigest: before.artifactBindingDigest,
             entries: before.entries
@@ -115,7 +115,7 @@ export async function checkArtifactPhaseScope(
     const privatePath =
       candidate === ".banzai" || candidate.startsWith(".banzai/");
     const legacyWork =
-      /^documentation\/(?:features|development-plans|changes)\//.test(
+      /^documentation\/(?:work|features|development-plans|changes)\//.test(
         candidate
       );
     const prohibited =

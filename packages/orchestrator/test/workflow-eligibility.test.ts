@@ -1259,6 +1259,7 @@ for (const name of [
     }
   });
 
+// Workspace v3 observes missing selected documents and excludes executor evidence.
 const ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
   "awaiting plan approval": {
     observed: {
@@ -2428,8 +2429,8 @@ const ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
           digest: "<sha256>",
           added: 3,
           modified: 0,
-          deleted: 0,
-          total: 3
+          deleted: 4,
+          total: 7
         },
         baseCommit: "<commit>",
         approvalDigest: "<sha256>",
@@ -2672,8 +2673,8 @@ const ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
           digest: "<sha256>",
           added: 3,
           modified: 0,
-          deleted: 0,
-          total: 3
+          deleted: 4,
+          total: 7
         },
         baseCommit: "<commit>",
         approvalDigest: "<sha256>",
@@ -2907,8 +2908,8 @@ const ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
           digest: "<sha256>",
           added: 1,
           modified: 0,
-          deleted: 0,
-          total: 1
+          deleted: 6,
+          total: 7
         },
         baseCommit: "<commit>",
         approvalDigest: null,
@@ -2948,10 +2949,10 @@ const ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
         recoveryIdentity: "<sha256>",
         workspace: {
           digest: "<sha256>",
-          added: 15,
+          added: 6,
           modified: 0,
-          deleted: 0,
-          total: 15
+          deleted: 2,
+          total: 8
         },
         baseCommit: "<commit>",
         approvalDigest: "<sha256>",
@@ -3032,10 +3033,10 @@ const ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
         recoveryIdentity: "<sha256>",
         workspace: {
           digest: "<sha256>",
-          added: 15,
+          added: 6,
           modified: 0,
-          deleted: 0,
-          total: 15
+          deleted: 2,
+          total: 8
         },
         baseCommit: "<commit>",
         approvalDigest: "<sha256>",
@@ -3342,10 +3343,10 @@ const ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
         recoveryIdentity: "<sha256>",
         workspace: {
           digest: "<sha256>",
-          added: 15,
+          added: 6,
           modified: 0,
-          deleted: 0,
-          total: 15
+          deleted: 2,
+          total: 8
         },
         baseCommit: "<commit>",
         approvalDigest: "<sha256>",
@@ -3863,8 +3864,8 @@ const ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
           digest: "<sha256>",
           added: 3,
           modified: 0,
-          deleted: 0,
-          total: 3
+          deleted: 4,
+          total: 7
         },
         baseCommit: "<commit>",
         approvalDigest: "<sha256>",

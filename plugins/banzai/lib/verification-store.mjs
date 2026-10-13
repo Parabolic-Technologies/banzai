@@ -1,7 +1,7 @@
 // Bound evidence storage shared by the runner and plugin-only helper.
 import path from "node:path";
 import { readdir } from "node:fs/promises";
-import { safePath, readBytes, readJson, makeDirectories, publishNew } from "./artifact-storage.mjs";
+import { safePath, readBytes, readJson, makeDirectories, publishNew, verifyExecutionIgnore } from "./project-files.mjs";
 import { parseVerificationAttemptRecord } from "./artifact-readers.mjs";
 import { evidenceDigest, parseVerificationDecision, sameVerificationCapture, VerificationEvidenceError } from "./verification-evidence.mjs";
 
@@ -54,6 +54,7 @@ export async function publishVerificationEvidence(input, relative, value) {
   if (!/^(?:decisions\/[a-f0-9]{64}|origins\/verification-[a-f0-9-]{36}\.(?:start|finish)|applications\/[a-f0-9]{64})\.json$/u.test(relative)) invalid("Invalid verification evidence path.");
   const bytes = JSON.stringify(value, null, 2) + "\n";
   const target = `${base}/${relative}`;
+  await verifyExecutionIgnore(input.repoRoot, target);
   await makeDirectories(input.repoRoot, path.posix.dirname(target));
   const existing = await readBytes(input.repoRoot, target, { optional: true, limit: 16 * 1024 * 1024 });
   if (existing !== null) {

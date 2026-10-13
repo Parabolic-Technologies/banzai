@@ -2,42 +2,14 @@ import { parseTaskVerificationObligations, parseTaskVerificationPolicy, selectTa
 import { executeTaskVerification, captureTaskVerificationInputs, readTaskVerificationAttempts, taskVerificationApplicability, parseTaskVerificationDecision } from "./task-verification-store.mjs";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { rename, readdir } from "node:fs/promises";
 import path from "node:path";
-import { acquireWork, releaseWork, inspectArtifacts, readJson, readBytes, safePath, makeDirectories, publishNew, exactObject } from "./artifact-storage.mjs";
-import { parseVerificationAttemptRecord } from "./artifact-readers.mjs";
-import { captureVerificationInputs, decideVerification, evidenceDigest, parseVerificationConfiguration, parseVerificationObligations, sameVerificationCapture, VerificationEvidenceError } from "./verification-evidence.mjs";
-import { persistVerificationDecision, persistVerificationOriginStart, persistVerificationOriginFinish, readVerificationOrigins, verificationApplicability, persistVerificationApplicability } from "./verification-store.mjs";
-
+import { realpath } from "node:fs/promises";
+import { projectRoot, relativePath, readJson, readBytes, safePath, makeDirectories, publishNew, exactObject } from "./project-files.mjs";
+import { executionKey, withExecutionOwnership, verifyExecutionIgnore } from "./execution-ownership.mjs";
+import { evidenceDigest, VerificationEvidenceError } from "./verification-evidence.mjs";
 const fail = (message) => { throw new VerificationEvidenceError(message); };
 const redact = (value) => value.replace(/("(?:api[_-]?key|access[_-]?token|auth[_-]?token|password)"\s*:\s*")[^"]+(")/giu, "$1[REDACTED]$2")
   .replace(/\b(?:sk|sk-ant|sess)-[A-Za-z0-9_-]{12,}\b/gu, "[REDACTED]");
-
-async function readAttempts(root, directory) {
-  const relative = `${directory}/attempts`;
-  const target = await safePath(root, relative, { directory: true, missing: true });
-  let entries;
-  try { entries = await readdir(target); } catch (error) { if (error.code === "ENOENT") return []; throw error; }
-  if (entries.length > 10000) fail("Verification attempt inventory exceeds its bound.");
-  const records = [];
-  for (const entry of entries.sort()) {
-    if (!/^verification-\d{6}-verification-[a-f0-9-]{36}\.json$/u.test(entry)) fail("Unknown physical verification evidence.");
-    const record = parseVerificationAttemptRecord(await readJson(root, `${relative}/${entry}`));
-    if (entry !== `verification-${String(record.sequence).padStart(6, "0")}-${record.id}.json`) fail("Physical verification filename mismatch.");
-    records.push(record);
-  }
-  return records;
-}
-
-async function replaceStarted(root, relative, before, terminal) {
-  parseVerificationAttemptRecord(terminal);
-  const existing = await readJson(root, relative);
-  if (JSON.stringify(existing) !== JSON.stringify(before) || existing.status !== "started") fail("Verification attempt changed before completion.");
-  const temporary = `${relative}.${randomUUID()}.tmp`;
-  await publishNew(root, temporary, JSON.stringify(terminal, null, 2) + "\n");
-  await safePath(root, relative);
-  await rename(path.join(root, temporary), path.join(root, relative));
-}
 
 async function invoke(command, root, environment) {
   return new Promise((resolve) => {
@@ -60,130 +32,38 @@ async function invoke(command, root, environment) {
   });
 }
 
-/** A closed request selects configured identities, never arbitrary commands. */
+/** Direct document selection carries skill authority; it never creates runner approval. */
 export async function verificationOperation(operation, request) {
-  if (request?.schemaVersion === 2) return taskVerificationOperation(operation, request);
-  if (!["inspect", "decide", "execute"].includes(operation)) fail("Unsupported verification operation.");
-  exactObject(request, ["schema", "schemaVersion", "repoRoot", "workPath", "roundId"], operation === "execute" ? ["checkId", "retryOf"] : []);
-  if (request.schema !== "banzai-verification-request/v1" || request.schemaVersion !== 1 || !/^[a-f0-9-]{36}$/u.test(request.roundId)) fail("Unsupported verification request identity.");
-  if (operation === "execute" && typeof request.checkId !== "string") fail("Execution requires one configured check ID.");
-  const inspection = await inspectArtifacts({ repoRoot: request.repoRoot, workPath: request.workPath });
-  const binding = inspection.work?.binding;
-  const root = inspection.projectRoot;
-  const rawConfig = await readJson(root, ".banzai/config.json", true);
-  if (!binding || binding.schemaVersion !== 2 || rawConfig?.schemaVersion !== 3 || !rawConfig.verification?.policy)
-    return { supported: false, reason: "Use the existing fresh verification workflow; explicit binding v2 and config 3 policy are required." };
-  const configuration = parseVerificationConfiguration(rawConfig.verification);
-  const storage = { repoRoot: root, directory: binding.artifacts.verificationDirectory, workId: binding.workId };
-  const planBytes = binding.artifacts.plan ? await readBytes(root, binding.artifacts.plan, { optional: true, limit: 16 * 1024 * 1024 }) : null;
-  const authorityArtifacts = [];
-  for (const role of ["description", "plan", "work", "changeReport"]) {
-    const relative = binding.artifacts[role];
-    if (relative) {
-      const bytes = await readBytes(root, relative, { optional: true, limit: 16 * 1024 * 1024 });
-      authorityArtifacts.push({ role, sha256: bytes === null ? null : evidenceDigest(bytes) });
-    }
+  if (request?.schema !== "banzai-verification-request/v3" || request.schemaVersion !== 3) {
+    const error = new VerificationEvidenceError("Legacy executable requests are unsupported. Use verification request v3 with documentPath and workflow; leave historical documents unchanged.");
+    error.code = "VERIFICATION_REQUEST_UNSUPPORTED";
+    throw error;
   }
-  const authorityDigest = evidenceDigest({ binding: inspection.work.sha256, configuration, artifacts: authorityArtifacts });
-  const assertAuthority = async () => {
-    const selected = await inspectArtifacts({ repoRoot: root, workPath: request.workPath });
-    const currentConfig = await readJson(root, ".banzai/config.json");
-    if (selected.work?.sha256 !== inspection.work.sha256 || JSON.stringify(currentConfig) !== JSON.stringify(rawConfig)) fail("Verification authority changed during execution.");
-    for (const item of authorityArtifacts) {
-      const bytes = await readBytes(root, binding.artifacts[item.role], { optional: true, limit: 16 * 1024 * 1024 });
-      if ((bytes === null ? null : evidenceDigest(bytes)) !== item.sha256) fail("Bound verification authority changed during execution.");
-    }
-  };
-  const strict = binding.mode === "strict" || binding.mode === "workflow";
-  const obligations = parseVerificationObligations(planBytes?.toString("utf8") ?? null, configuration);
-  const capture = () => captureVerificationInputs({ repoRoot: root, configuration, workId: binding.workId, evidenceDirectories: [storage.directory] });
-  const snapshot = async () => {
-    const first = await capture(); const second = await capture();
-    return sameVerificationCapture(first, second) || !first.complete && !second.complete ? second : { complete: false, reason: "inputs_unavailable", candidateDigest: null, checks: [] };
-  };
-  const inspect = async () => {
-    const attempts = await readAttempts(root, storage.directory);
-    const origins = await readVerificationOrigins(storage, attempts);
-    const current = await snapshot();
-    const decision = decideVerification({ workId: binding.workId, roundId: request.roundId, configuration, authorityDigest, strict, obligations, capture: current, origins });
-    return { attempts, origins, current, decision };
-  };
-  if (operation !== "execute") {
-    const data = await inspect();
-    return { supported: true, decision: data.decision, applicability: verificationApplicability(data.decision, data.origins, data.current), physicalAttempts: data.attempts.length };
-  }
-  const claim = await acquireWork({ repoRoot: root, workPath: request.workPath, ownerId: "verification-helper" });
-  try {
-    await assertAuthority();
-    await makeDirectories(root, `${storage.directory}/attempts`);
-    const marker = `${storage.directory}/ledger.json`;
-    const ledger = await readJson(root, marker, true);
-    if (ledger === null) await publishNew(root, marker, '{"schemaVersion":2}\n');
-    else if (JSON.stringify(ledger) !== '{"schemaVersion":2}') fail("Unsupported verification ledger.");
-    let { attempts, origins, current, decision } = await inspect();
-    const action = decision.actions.find((item) => item.checkId === request.checkId);
-    if (!action) fail("Unknown configured verification check.");
-    await persistVerificationDecision(storage, decision);
-    const previous = attempts.filter((attempt) => attempt.round.id === request.roundId && attempt.command.profileOrdinal === action.identity.profileOrdinal && attempt.command.commandOrdinal === action.identity.commandOrdinal).at(-1);
-    const already = verificationApplicability(decision, origins, current).dispositions.find((item) => item.checkId === action.checkId)?.kind === "executed";
-    if (action.action === "execute" && !already) {
-      if (previous && !(previous.status === "failed" && previous.id === request.retryOf)) fail("This round retains an attempt requiring explicit failure retry or owner recovery.");
-      if (request.retryOf !== undefined && previous?.id !== request.retryOf) fail("Verification retry does not match this check and round.");
-      const latest = await snapshot();
-      await assertAuthority();
-      if (latest.candidateDigest !== current.candidateDigest) fail("Verification source changed before invocation.");
-      const command = configuration.profiles[action.identity.profileOrdinal - 1].commands[action.identity.commandOrdinal - 1];
-      const record = { schemaVersion: 1, id: `verification-${randomUUID()}`, sequence: (attempts.at(-1)?.sequence ?? 0) + 1,
-        round: { id: request.roundId, ordinal: new Set(attempts.map((item) => item.round.id).concat(request.roundId)).size,
-          sourcePhase: "implementation", sourceAttemptId: request.roundId, sourceAttemptKind: "implementation" },
-        command: { profileId: configuration.profiles[action.identity.profileOrdinal - 1].id,
-          projectType: configuration.profiles[action.identity.profileOrdinal - 1].projectType,
-          profileOrdinal: action.identity.profileOrdinal, commandOrdinal: action.identity.commandOrdinal, configurationDigest: action.identity.configurationDigest },
-        status: "started", startedAt: new Date().toISOString(), completedAt: null, durationMs: null, exitCode: null, signal: null,
-        failureCategory: null, retryOf: request.retryOf ?? null, restartOf: null, stdout: null, stderr: null };
-      parseVerificationAttemptRecord(record);
-      const relative = `${storage.directory}/attempts/verification-${String(record.sequence).padStart(6, "0")}-${record.id}.json`;
-      await publishNew(root, relative, JSON.stringify(record, null, 2) + "\n");
-      await persistVerificationOriginStart(storage, record, decision, current);
-      const result = await invoke(command, root, configuration.policy.dependencies.environment);
-      const logs = {};
-      for (const stream of ["stdout", "stderr"]) {
-        const log = `verification/${record.id}.${stream}.log`;
-        await publishNew(root, `${path.posix.dirname(storage.directory)}/${log}`, result[stream]);
-        logs[stream] = { relativePath: log, sha256: evidenceDigest(result[stream]) };
-      }
-      const terminal = { ...record, status: result.status, completedAt: result.completedAt,
-        durationMs: Math.max(0, Date.parse(result.completedAt) - Date.parse(record.startedAt)), exitCode: result.exitCode,
-        signal: result.signal, failureCategory: result.failureCategory, ...logs };
-      await replaceStarted(root, relative, record, terminal);
-      await persistVerificationOriginFinish(storage, terminal, await snapshot());
-      attempts = await readAttempts(root, storage.directory);
-      origins = await readVerificationOrigins(storage, attempts);
-      current = await snapshot();
-    }
-    await assertAuthority();
-    const applicability = verificationApplicability(decision, origins, current);
-    await persistVerificationApplicability(storage, applicability);
-    return { supported: true, decision, applicability, physicalAttempts: attempts.length };
-  } finally {
-    await releaseWork({ repoRoot: root, workPath: request.workPath, token: claim.token });
-  }
-}
-
-/** Standalone execution uses the caller's existing skill/task authority, never a runner approval receipt. */
-async function taskVerificationOperation(operation, request) {
   if (!["inspect", "decide", "execute"].includes(operation)) fail("Unsupported task verification operation.");
-  exactObject(request, ["schema", "schemaVersion", "repoRoot", "workPath", "roundId"], operation === "execute" ? ["retryOf"] : []);
-  if (request.schema !== "banzai-verification-request/v2" || !/^[a-f0-9-]{36}$/u.test(request.roundId)) fail("Unsupported task verification request.");
-  const inspection = await inspectArtifacts({ repoRoot: request.repoRoot, workPath: request.workPath });
-  const binding = inspection.work?.binding;
-  if (binding?.schemaVersion !== 2) fail("Task verification requires new private work binding v2.");
-  const root = inspection.projectRoot;
-  const strict = binding.mode === "strict" || binding.mode === "workflow";
-  const document = strict ? binding.artifacts.plan : binding.artifacts.work ?? binding.artifacts.changeReport;
-  if (!document) fail("Task authority document is missing.");
+  exactObject(request, ["schema", "schemaVersion", "repoRoot", "documentPath", "workflow", "roundId"], operation === "execute" ? ["retryOf"] : []);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(request.roundId) || !["strict", "feature", "quick-fix"].includes(request.workflow)) fail("Unsupported task verification identity or workflow.");
+  const root = await projectRoot(request.repoRoot);
+  const document = relativePath(request.documentPath);
+  const name = path.posix.basename(document);
+  if (!(document.startsWith("documentation/") || /^\.banzai\/work\/[0-9a-f-]{36}\//u.test(document)) ||
+      (request.workflow === "strict" ? name !== "plan.md" : request.workflow === "feature" ? name !== "work.md" : !name.endsWith(".md")))
+    fail("Select the exact task plan, work or change document for this workflow.");
+  const directory = path.relative(root, await realpath(await safePath(root, path.posix.dirname(document), { directory: true }))).split(path.sep).join("/");
+  const evidenceDirectory = `.banzai/verification/${executionKey(directory)}`;
+  const marker = `${evidenceDirectory}/identity.json`;
   const bytes = await readBytes(root, document, { limit: 16 * 1024 * 1024 });
+  if (!/^```banzai-verification-obligations\/v2\r?$/mu.test(bytes.toString("utf8")))
+    return { supported: false, reason: "The selected document has no supported task inventory. Keep applicable checks fresh under the calling skill; do not rewrite historical authority." };
   const obligations = parseTaskVerificationObligations(bytes.toString("utf8"));
+  const strict = request.workflow === "strict";
+  const inspectIdentity = async () => {
+    const identity = await readJson(root, marker, true);
+    if (identity !== null) {
+      exactObject(identity, ["schema", "schemaVersion", "workId", "directory"]);
+      if (identity.schema !== "banzai-standalone-verification/v1" || identity.schemaVersion !== 1 || identity.directory !== directory || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(identity.workId)) fail("Invalid standalone verification identity.");
+    }
+    return identity;
+  };
   const rawConfig = await readJson(root, ".banzai/config.json", true);
   let policy = null;
   try {
@@ -197,25 +77,36 @@ async function taskVerificationOperation(operation, request) {
     throw error;
   }
   const selection = selectTaskVerification({ required: strict ? obligations.checks : [], candidates: strict ? { checks: [], absenceReason: obligations.absenceReason ?? "Required plan checks." } : {checks: obligations.checks, absenceReason: obligations.absenceReason}, policy });
-  const storage = { repoRoot: root, directory: binding.artifacts.verificationDirectory, workId: binding.workId };
+  const run = async () => {
+    if (operation === "execute") await verifyExecutionIgnore(root, marker);
+    let identity = await inspectIdentity();
+    if (identity === null) {
+      if (operation !== "execute") return { supported: true, authorityKind: "standalone-skill", evidence: "unavailable", decision: null, applicability: null, physicalAttempts: 0 };
+      await verifyExecutionIgnore(root, marker);
+      await makeDirectories(root, evidenceDirectory);
+      identity = { schema: "banzai-standalone-verification/v1", schemaVersion: 1, workId: randomUUID(), directory };
+      await publishNew(root, marker, JSON.stringify(identity) + "\n");
+    }
+    const selectionDigest = evidenceDigest({ document, workflow: request.workflow, identity });
+  const storage = { repoRoot: root, directory: evidenceDirectory, workId: identity.workId };
   const environment = policy?.reuse?.dependencies.environment ?? Object.fromEntries(Object.entries(process.env).filter(([key, value]) => value !== undefined && !/(?:API_KEY|ACCESS_TOKEN|AUTH_TOKEN|PASSWORD|SECRET)/iu.test(key)));
-  const context = { kind: "inherited-local", invocationDigest: evidenceDigest({ owner: "standalone-skill", binding: inspection.work.sha256, authority: evidenceDigest(bytes), environment: evidenceDigest(environment) }), restrictions: [] };
-  const authority = { workId: binding.workId, sourceAttemptId: request.roundId, workflow: strict ? "strict" : binding.mode === "fix" ? "quick-fix" : "feature", taskDigest: evidenceDigest(bytes), selectionDigest: inspection.work.sha256, approvalDigest: strict ? evidenceDigest(bytes) : null, contextDigest: evidenceDigest(context) };
+  const context = { kind: "inherited-local", invocationDigest: evidenceDigest({ owner: "standalone-skill", binding: selectionDigest, authority: evidenceDigest(bytes), environment: evidenceDigest(environment) }), restrictions: [] };
+  const authority = { workId: identity.workId, sourceAttemptId: request.roundId, workflow: request.workflow, taskDigest: evidenceDigest(bytes), selectionDigest: selectionDigest, approvalDigest: strict ? evidenceDigest(bytes) : null, contextDigest: evidenceDigest(context) };
   const revalidate = async () => {
-    const current = await inspectArtifacts({ repoRoot: root, workPath: request.workPath });
-    if (current.work?.sha256 !== inspection.work.sha256 || evidenceDigest(await readBytes(root, document, { limit: 16 * 1024 * 1024 })) !== authority.taskDigest || JSON.stringify(await readJson(root, ".banzai/config.json", true)) !== JSON.stringify(rawConfig)) fail("Standalone task authority changed.");
+    if (operation === "execute") await verifyExecutionIgnore(root, marker);
+    if (JSON.stringify(await inspectIdentity()) !== JSON.stringify(identity)) fail("Standalone execution identity changed.");
+    if (evidenceDigest(await readBytes(root, document, { limit: 16 * 1024 * 1024 })) !== authority.taskDigest || JSON.stringify(await readJson(root, ".banzai/config.json", true)) !== JSON.stringify(rawConfig)) fail("Standalone task authority changed.");
   };
   if (operation !== "execute") {
     await revalidate();
     const before = await captureTaskVerificationInputs(storage, selection.checks.map(item => item.descriptor), policy);
-    const body = { schema: "banzai-verification-decision/v2", schemaVersion: 2, workId: binding.workId, roundId: request.roundId, sourceAttemptId: authority.sourceAttemptId, authority, context, policyDigest: policy ? evidenceDigest(policy) : null, ...selection, before };
+    const body = { schema: "banzai-verification-decision/v2", schemaVersion: 2, workId: identity.workId, roundId: request.roundId, sourceAttemptId: authority.sourceAttemptId, authority, context, policyDigest: policy ? evidenceDigest(policy) : null, ...selection, before };
     const decision = parseTaskVerificationDecision({ ...body, sha256: evidenceDigest(body) });
     const attempts = await readTaskVerificationAttempts(storage);
     return { supported: true, authorityKind: "standalone-skill", decision, applicability: await taskVerificationApplicability(storage, decision, attempts, before), physicalAttempts: attempts.length };
   }
-  const claim = await acquireWork({ repoRoot: root, workPath: request.workPath, ownerId: "task-verification-helper" });
-  try {
     const publication = await executeTaskVerification({ ...storage, selection, authority, context, policy, roundId: request.roundId, retryOf: request.retryOf, revalidate, invoke: (descriptor, cwd) => invoke(descriptor, cwd, environment) });
     return { supported: true, authorityKind: "standalone-skill", ...publication, physicalAttempts: publication.attempts.length };
-  } finally { await releaseWork({ repoRoot: root, workPath: request.workPath, token: claim.token }); }
+  };
+  return operation === "execute" ? withExecutionOwnership(root, directory, run) : run();
 }

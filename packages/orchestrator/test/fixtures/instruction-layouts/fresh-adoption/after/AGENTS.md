@@ -19,7 +19,10 @@ approved change that intentionally changes behavior.
 `PROJECT_MANIFEST.md` owns current implemented project facts: stack, commands,
 architecture, conventions, dependencies, and active ADR links. Accepted ADRs
 own architectural intent, rationale, consequences, and decision history.
-Feature artifacts own requirements, execution plans, and verification evidence.
+Work documents own requirements, execution plans, and human-reviewed reports.
+New work uses `documentation/work/<slug>/` with sibling Markdown files; explicit
+existing work retains its known paths. Raw execution evidence stays ignored
+under `.banzai/`. No document migration or layout registration is required.
 This file owns process. Do not choose between a current manifest fact and
 accepted ADR intent; report the current/target difference and stop unless an
 approved plan reconciles it.

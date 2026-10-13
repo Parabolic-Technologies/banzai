@@ -31,7 +31,7 @@ For other guides, see the [documentation index](README.md).
 
 ## Task verification
 
-New tasks use task-scoped verification and private work binding v2. They do not
+New tasks use task-scoped verification and tracked-document binding v3. They do not
 require profiles, bootstrap, project-type coverage, or a verification setup gate.
 Strict checks belong to the approved plan; lite checks use the delegated task and
 current process permissions. Optional project policy may add requirements and
@@ -530,8 +530,8 @@ reviewer phases never invoke it.
 
 `banzai control capabilities` is valid outside a Git repository and performs no
 repository discovery, adapter construction, vendor/authentication call, lock,
-recovery, or write. It emits canonical `banzai-agent-capabilities/v6` JSON with
-schema version 6, control contract `6.0.0`, the package-derived Banzai
+recovery, or write. It emits canonical `banzai-agent-capabilities/v7` JSON with
+schema version 7, control contract `7.0.0`, the package-derived Banzai
 release-train version, umbrella contract, the exact supported non-TTY operation
 set, and an ordered `inputSchemas` list per operation. It also declares the
 runner-owned completion publication protocol (`banzai-completion-protocol/v1`),
@@ -1030,8 +1030,9 @@ Markdown artifact:
 <bound reviewDirectory>/review-<iteration>.md
 ```
 
-Private bindings use `.banzai/work/<work-id>/` as `reviewDirectory`. Legacy
-bindings and runs without a binding retain `documentation/features/<slug>/`.
+New binding v3 uses `documentation/work/<slug>/` as `reviewDirectory`.
+Historical documents retain their known paths; read-only decoding grants no
+historical execution or migration authority.
 
 Each physical attempt owns
 `.banzai/runs/<run-id>/attempts/<attempt-id>.review-candidate.md` and a private,
@@ -1681,7 +1682,7 @@ approved `TNNN` order. Under `banzai-completion-protocol/v1` (ADR-0047) the
 model returns that ledger plus report narrative and never authors the
 **Plan Task Completion** table. New strict implementation and fix attempts are
 recorded with attempt schema 4 and the persisted protocol marker. Their
-terminal proof uses `banzai-terminal-attempt-checkpoint/v3` directly in state 8,
+terminal proof uses `banzai-terminal-attempt-checkpoint/v3` directly in state 9,
 without a legacy transition record. After the vendor returns
 a completed result, the attempt becomes `pending_application` and the runner
 captures the report and workspace identities that the terminal checkpoint
@@ -1903,9 +1904,10 @@ terminal checkpoints, recovery authorizations, or failed structured results as
 review verdicts or completion evidence.
 New model attempts use schema version 4 with phase-result 4. Strict implementation
 and fix retain the existing completion protocol and nullable `retryOf` linkage.
-New runs start at schema version 8 with immutable private binding v2 and task
-verification. Historical run continuation is outside the current transition.
-State 8 carries the completion publication cursor from creation.
+New runs start at schema version 9 with binding v3 to Git-visible work documents
+and task verification evidence under the ignored run root. Historical run
+continuation is outside the current transition. State 9 carries the completion
+publication cursor from creation.
 Tagged pending consultations, exact keyed decision history and recovery lineage
 retain their existing meanings. The `source_preserved` stage keeps a completed
 blocked source immutable while one linked attempt is prepared. Checkpoints and recovery
@@ -1967,23 +1969,30 @@ mutation while reviewing or while a review attempt is active, before workflow
 write grants. Standalone session behavior remains separate when runner variables
 are absent.
 
-## Artifact storage commands
+## Work documents
 
-`banzai artifacts` and the plugin-only helper share the [artifact storage](artifact-storage.md) request/result contract. [Offline archive operations](artifact-archive.md) preserve original evidence. The [publication boundary](publication-boundary.md) governs indexed and distribution bytes.
+New work groups its human-reviewed documents under `documentation/work/<slug>/`.
+Standalone skills use ordinary file tools with explicit document selection;
+layout declarations and artifact registration are unnecessary. New runner state
+9 persists binding v3 in its own state and workspace v3 accounts for selected
+tracked documents. Existing standalone continuation uses known locations without
+migration. See [work documents](artifact-storage.md), the
+[historical archive guide](artifact-archive.md) and
+[publication boundary](publication-boundary.md).
 
 ## Proportionate verification and focused closure
 
-New task runs use private binding 2 and verification ledger 3. Immutable physical
+New task runs use tracked-document binding 3 and private verification ledger 3. Immutable physical
 start/finish records link exact descriptors and observed inputs to current
 applicability. Reuse requires explicit complete dependency declarations and a
 compatible direct successful origin. Missing proof runs fresh; required failures
 block completion. Release gates always run fresh.
 
-Review snapshot 6 and rendered artifact 7 freeze task checks and completion
+Review snapshot 7 and rendered artifact 8 freeze task checks and completion
 publication. Review-result 2 is unchanged. The independent reviewer assesses
 whether checks cover requirements and were unjustifiably weakened. Frozen
-export formats report unsupported task evidence as partial; archive restore
-requires complete interpreted closure. Historical formats retain their meanings.
+export formats report unsupported task evidence as partial. Historical archive
+tooling is retained in its original source revision. Historical formats retain their meanings.
 
 For an accepted-finding closure, keep unaffected report text and add one bounded
 record: accepted ID, changed scope, decision, executed/reused/historical/pending

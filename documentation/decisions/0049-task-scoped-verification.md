@@ -411,6 +411,12 @@ authorized by proposing or accepting this ADR alone.
 
 ## Lifecycle Links
 
+- Amended by [ADR-0054](./0054-git-visible-work-artifacts.md), accepted
+  2026-10-13: new task verification consumes explicitly selected tracked
+  documents without requiring private document storage or binding v2.
+  Verification authority and the exclusion of historical-run migration remain.
+  Implementation is Planned.
+
 Supersedes: None while Proposed. If accepted, this decision supersedes the
 following provisions for the new task-verification path only:
 

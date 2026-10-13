@@ -47,7 +47,7 @@ export function parseVerificationPolicy(value: unknown): VerificationPolicy;
 export function parseVerificationConfiguration(value: unknown): EvidenceConfiguration;
 export function parseVerificationObligations(plan: string | null, configuration: EvidenceConfiguration): VerificationObligations | null;
 export function verificationIdentities(configuration: EvidenceConfiguration, authority: string): VerificationIdentity[];
-export function captureVerificationInputs(input: { repoRoot: string; configuration: EvidenceConfiguration; workId: string; evidenceDirectories?: string[] }): Promise<VerificationCapture>;
+export function captureVerificationInputs(input: { repoRoot: string; configuration: EvidenceConfiguration; workId: string; evidenceDirectories?: string[]; sourceExclusions?: string[] }): Promise<VerificationCapture>;
 export function sameVerificationCapture(left: VerificationCapture, right: VerificationCapture): boolean;
 export function decideVerification(input: { workId: string; roundId: string; configuration: EvidenceConfiguration; authorityDigest: string;
   strict: boolean; obligations: VerificationObligations | null; capture: VerificationCapture; origins: VerificationOrigin[] }): VerificationDecision;

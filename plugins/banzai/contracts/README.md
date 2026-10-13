@@ -42,11 +42,11 @@ Acknowledgment is a reviewer assertion, not independent proof of reading or
 substantive assessment. Blocked reviews may truthfully report partial or zero
 coverage and partial accepted-ID assessment without findings or a gate.
 
-New runs use state schema 8. Historical formats remain readable; old-run
+New runs use state schema 9. Historical formats remain readable; old-run
 continuation and migration are not supported. The runner freezes
-`banzai-review-snapshot/v6` evidence before invocation,
+`banzai-review-snapshot/v7` evidence before invocation,
 retains the result and diagnostics, validates scope, renders one attempt-owned
-`banzai-feature-review/v7` candidate, validates it and current integrity, then
+`banzai-feature-review/v8` candidate, validates it and current integrity, then
 atomically publishes its exact bytes. Required scope and reviewer coverage are
 separate. Lossless fenced JSON values preserve multiline prose and opaque
 `EQ-SHADOW:` entries; recorded verification and completion come only from the
@@ -62,7 +62,7 @@ coverage. Historical snapshot and rendered-review formats retain their original
 readers; recognizing them does not enable old-run continuation or migration.
 
 New task verification has no configuration prerequisite gate. Agent control
-6.0.0 declares capabilities v6 and status v5, including bounded task verification
+7.0.0 declares capabilities v7 and status v5, including bounded task verification
 outcomes and the retained runner-owned completion publication protocol. Its
 stages, closed refusal codes and `pending_application` attempt status keep their
 meaning. Existing escalation/consultation answer v1/v2 inputs retain their
@@ -100,3 +100,11 @@ requires all properties, and unsupported schema-only uniqueness keywords are
 omitted. The orchestrator's runtime validators continue to enforce non-empty
 values, identifier patterns, positive integers, uniqueness, and
 cross-field invariants after decoding.
+
+New work binding v3 records fixed `documentation/work/<slug>/` roles in runner
+state without a layout selector or registered work file. Workspace v3 includes
+exact selected documents as well as Git changes. Capabilities v7 expose the
+`workDocuments` directory pattern, binding-v3/workspace-v3 support and verification
+request v3. Standalone request v3 selects `documentPath` and `workflow`; its
+response envelope remains v2. Retained binding-v1/v2 decoders preserve history
+without authorizing execution. Existing documents and archives are not migrated.

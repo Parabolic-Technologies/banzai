@@ -26,7 +26,8 @@ model CLI sandbox settings do not sandbox verification subprocesses.
 ## Evidence and completion
 
 The runner retains immutable decisions, physical starts and terminal results,
-logs and observed inputs under the bound private work. This is execution history,
+logs and observed inputs under ignored `.banzai/runs/<run-id>/` for the runner
+or `.banzai/verification/` for standalone checks. This is execution history,
 not a second configuration to maintain. Passed, failed, not-run, unavailable,
 interrupted and absent remain distinct. An absent unnecessary check permits
 progress; a missing mandatory check prevents confirmed completion. Independent
@@ -44,7 +45,9 @@ Unknown inputs or a later failed/incomplete attempt cannot count as reusable suc
 
 ## Transition
 
-New work uses private binding v2 and task verification. Existing runs are not
+New work keeps documents in `documentation/work/<slug>/`; the runner records
+binding v3 in its ignored state, and standalone verification selects the exact
+document through request v3 without registering Markdown. Existing runs are not
 migration or continuation targets for this change; start a new task. Retained
 historical files are not rewritten or used as new approval authority. Legacy
 profile utilities do not control new-task verification.

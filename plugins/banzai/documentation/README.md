@@ -5,17 +5,17 @@ Workflow artifact tree.
 Lite feature:
 
 ```text
-features/<slug>/work.md
+work/<slug>/work.md
 ```
 
 Strict feature:
 
 ```text
-features/<slug>/description.md
-development-plans/<slug>/plan.md
-features/<slug>/implementation-report.md
-features/<slug>/test-report.md
-features/<slug>/review-<iteration>.md
+work/<slug>/description.md
+work/<slug>/plan.md
+work/<slug>/implementation-report.md
+work/<slug>/test-report.md
+work/<slug>/review-<iteration>.md
 ```
 
 Architecture decisions:
@@ -28,7 +28,7 @@ decisions/NNNN-<slug>.md
 Quick-fix report:
 
 ```text
-changes/<name>.md
+work/<slug>/change-report.md
 ```
 
 Optional local orchestrator machine contracts are shipped separately from
@@ -46,10 +46,10 @@ Rules:
 
 - Use short kebab-case slugs/names.
 - Link related artifacts at the top.
-- Create `changes/<name>.md` only when `quick-fix` requires an audit trail.
+- Create `work/<slug>/change-report.md` only when `quick-fix` requires an audit trail.
 - Each review lands at the next `review-<iteration>.md`. Both orchestrated
   reviewers are read-only; the runner renders, validates and publishes
-  `banzai-feature-review/v7`. Standalone `feature-review` owns a durable
+  `banzai-feature-review/v8`. Standalone `feature-review` owns a durable
   `banzai-feature-review/v1` Markdown artifact without the runner.
 - Keep ADRs in the central decision log and link them from affected feature
   artifacts and the manifest's active decision index. Accepted ADR bodies are
@@ -74,3 +74,7 @@ Rules:
   **Plan Task Completion Evidence**.
 - A terminal run may retain a `changes_requested` review when human triage
   accepts no findings; never rewrite a review artifact as a pass.
+
+New work uses one flat `work/<slug>/` directory visible in ordinary Git changes.
+Existing work remains at its known paths, including subsequent reports/reviews.
+No document migration, layout declaration or registration is required.

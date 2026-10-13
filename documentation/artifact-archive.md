@@ -1,5 +1,17 @@
 # Local Artifact Archives
 
+> Historical tooling: ADR-0054 retires the artifact/archive command surface.
+> The procedures below describe earlier releases and do not apply to new work.
+> Current work documents use ordinary Git history. Existing bundles and their
+> references stay unchanged; no migration or restore operation runs on upgrade.
+
+The complete earlier tool source remains in Git commit `ead9f32` (including
+`plugins/banzai/scripts/artifacts.cjs` and its shared modules). Retain that readable
+source and existing archive bytes until an explicit owner custody decision. Use
+historical tooling only as an explicitly selected custody action; it does not
+authorize resuming a historical run.
+
+
 Use `banzai artifacts <operation> --json <request-file>` or the plugin's standalone
 helper. The common request fields are `schema: "banzai-artifact-request/v1"`,
 `schemaVersion: 1` and the physical absolute `repoRoot`.

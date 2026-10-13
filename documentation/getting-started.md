@@ -173,8 +173,8 @@ For your first completed task, check that:
 - any strict-workflow decisions and review results match the actions you
   approved.
 
-New feature artifacts live under `.banzai/work/<uuid>/`; existing legacy work
-retains its documentation paths. See [artifact storage](artifact-storage.md). Local run
+New work documents live together under `documentation/work/<slug>/` and remain
+visible in Git. Explicit existing work retains its known paths without migration. See [artifact storage](artifact-storage.md). Local run
 state and retained verification evidence live under `.banzai/runs/<run-id>/`.
 Follow the paths reported by your run; not every route creates the same files.
 Use your project's normal review and commit process for the resulting change.

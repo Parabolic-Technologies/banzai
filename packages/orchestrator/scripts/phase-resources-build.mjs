@@ -677,6 +677,38 @@ const TASK_AUTHORITY_AMENDMENTS = new Map([
   ]
 ]);
 
+// Exact reciprocal lifecycle annotations accepted with ADR-0054.
+const WORK_DOCUMENT_AUTHORITY_AMENDMENTS = new Map([
+  [
+    "e8f0796f45e423d978b9b4f8a299d95bbb9f15f7a2c992281aff02302ddea8bf",
+    "556af87f754c5db5232fe832dd6bce9bd259d3eae90f1681def4e775de2c7419"
+  ],
+  [
+    "dc5e1eb32158174796dd654e24e60156cba7f603534426caa8dfdd68cf689aa9",
+    "fd0bdc4a1ce6334938c362d03b59d25cb2d735a99c928abd377012cde3ec9b1a"
+  ],
+  [
+    "fe32c4281eb0f73883fc0119afa572ee5421bff7a40bb31792f3138edec07286",
+    "622434dc957c3133c8f04efdbe592cce44354c57af6f61b76ec65b31ff591a33"
+  ],
+  [
+    "e62a7e5a54598449976d93de8fc4edfa0b01f8862c88b7ae1597a2110b572ad6",
+    "f8f41b51d48f853c72e559cbd01af2bb3dfab32dcd6cc515dad220f6733f54da"
+  ],
+  [
+    "9d9ca06a9333d6f7e23e724a8f5d824dc5cb018bec53e2262844dec9ea34a41f",
+    "226a33362a540bd8b2c593fcd27f39dafba8e509f64f3bc2bcecb6f36c8fdc1c"
+  ],
+  [
+    "f6bf4e47abc11858f7a1d276329ecff1a7dd969fd39782ead340764ae66f4095",
+    "009f34425eeb8b8edbe89f117adc4509095129763bec7bd1e4dc4229b73d2ad3"
+  ],
+  [
+    "282717e36e60da2523d269918e4c8bcad455ac7c0f4ee6bb96734641d7c4c284",
+    "cfe5f7988d28830cbe5fddd8d36661805e5e32ebc2660e9abee6f348a76c243e"
+  ]
+]);
+
 const RETAINED_AUTHORITY_AMENDMENTS = [
   {
     decision: "documentation/decisions/0045-guided-verification-setup.md",
@@ -690,6 +722,10 @@ const RETAINED_AUTHORITY_AMENDMENTS = [
   {
     decision: "documentation/decisions/0049-task-scoped-verification.md",
     images: TASK_AUTHORITY_AMENDMENTS
+  },
+  {
+    decision: "documentation/decisions/0054-git-visible-work-artifacts.md",
+    images: WORK_DOCUMENT_AUTHORITY_AMENDMENTS
   }
 ];
 
@@ -785,17 +821,37 @@ async function applyTransition(root, original, previous, transition) {
     ...Object.keys(rootExpectations(original)),
     ...rawResourceKeys(original)
   ]);
+  const workDocumentTransition = transition.authorities.every(
+    (authority) =>
+      authority.path ===
+      "documentation/decisions/0054-git-visible-work-artifacts.md"
+  );
   const next = { ...previous };
   let last = null;
   for (const change of transition.changes) {
     closed(change, ["key", "before", "after"], "change");
     if (
       !allowed.has(change.key) ||
+      (workDocumentTransition &&
+        !(
+          /^plugins\/banzai\/skills\/(?:architecture-decision|code-writing|development-plan|feature-description|feature-review|feature-status|feature|project-manifest|quick-fix|test-writing)\/SKILL\.md(?:#(?:skeleton|orchestrated|section:Rules))?$/u.test(
+            change.key
+          ) ||
+          [
+            "plugins/banzai/policies/artifact-storage.md",
+            "plugins/banzai/guidance/planning.md#section:Rules",
+            "plugins/banzai/phases/planning.md",
+            "plugins/banzai/phases/review.md",
+            "plugins/banzai/hooks/spec-gate.cjs",
+            "plugins/banzai/skills/orchestrate/SKILL.md"
+          ].includes(change.key)
+        )) ||
       (change.key.endsWith("#orchestrated") &&
-        !transition.authorities.some(
-          (authority) =>
-            authority.path ===
-            "documentation/decisions/0049-task-scoped-verification.md"
+        !transition.authorities.some((authority) =>
+          [
+            "documentation/decisions/0049-task-scoped-verification.md",
+            "documentation/decisions/0054-git-visible-work-artifacts.md"
+          ].includes(authority.path)
         )) ||
       (last !== null && last.localeCompare(change.key, "en") >= 0) ||
       !SHA256.test(change.after) ||
@@ -808,7 +864,8 @@ async function applyTransition(root, original, previous, transition) {
         !transition.authorities.some((authority) =>
           [
             "documentation/decisions/0045-guided-verification-setup.md",
-            "documentation/decisions/0049-task-scoped-verification.md"
+            "documentation/decisions/0049-task-scoped-verification.md",
+            "documentation/decisions/0054-git-visible-work-artifacts.md"
           ].includes(authority.path)
         ))
     )

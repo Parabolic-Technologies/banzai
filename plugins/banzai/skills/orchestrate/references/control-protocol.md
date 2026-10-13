@@ -13,11 +13,15 @@ banzai control capabilities
 
 Require one clean JSON document with:
 
-- `schema: "banzai-agent-capabilities/v6"`
-- `schemaVersion: 6`
-- `controlContractVersion: "6.0.0"`
+- `schema: "banzai-agent-capabilities/v7"`
+- `schemaVersion: 7`
+- `controlContractVersion: "7.0.0"`
 - non-empty `orchestratorVersion`
 - `umbrellaContractVersion: "1.0.0"`
+- `workDocuments.directoryPattern: "documentation/work/<slug>/"`,
+  `bindingSchemas: ["banzai-work-binding/v3"]`, `workspaceSnapshotVersion: 3`,
+  and `verificationRequestSchemas: ["banzai-verification-request/v3"]`;
+  no `artifactStorage` layout or declaration capability
 - exactly these supported, non-TTY operations: `status`, `start`, `answer`,
   `approveAdr`, `approveVerification`, `approvePlan`, `triage`, `resume`, `retry`, `recover`, and
   `cancel`
@@ -318,8 +322,20 @@ human stdout. Ignore that prose as state and query versioned control status.
 - Successful report/export generation can still describe partial historical
   evidence.
 
-## Artifact storage capability
+## Work document capability
 
-Current capabilities v6/control 6.0.0 advertise the declarationSchemas and bindingSchemas arrays, layouts and privateWorkspaceSnapshotVersion: 2 in `artifactStorage`. Require this capability before supervising private work. A v2/control 2.0.0 consumer is legacy-only and must not infer private storage support. Require declarationSchemas `["banzai-artifact-layout/v1"]`, bindingSchemas `["banzai-work-binding/v1", "banzai-work-binding/v2"]` and layouts `["legacy", "private"]`. Request v1, recovery v1, escalation answer v1 and consultation answer v2 retain their original meanings; status v5 and configuration answer v3 are required for the new kind. Never create or edit run work bindings through supervisor tools; the runner persists their authority.
+Current capabilities v7/control 7.0.0 expose `workDocuments` with
+`directoryPattern: "documentation/work/<slug>/"`,
+`bindingSchemas: ["banzai-work-binding/v3"]`, `workspaceSnapshotVersion: 3`
+and `verificationRequestSchemas: ["banzai-verification-request/v3"]`.
+Require that exact capability before supervising new work; infer no support from
+an older capability or a historical reader. New state v9 binds tracked documents
+without a layout declaration. The runner alone persists execution authority;
+supervisor tools never create or edit work bindings. Request v1, recovery v1,
+escalation answer v1, consultation answer v2, status v5 and configuration answer
+v3 retain their meanings. Existing documents stay at their known locations.
 
-New task runs expose bounded `taskVerification` status: outcome, completeness, absence rationale and check dispositions. Never request profiles or infer a pass from an empty legacy verification array. Configuration-prerequisite inputs above apply only to retained historical formats.
+New task runs expose bounded `taskVerification` status: outcome, completeness,
+absence rationale and check dispositions. Never request profiles or infer a pass
+from an empty legacy verification array. Configuration-prerequisite inputs above
+apply only to retained historical formats.

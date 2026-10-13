@@ -1,10 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readdir, rename, unlink } from "node:fs/promises";
-import {
-  safePath,
-  readBytes,
-  hasRunnerWorkOwnership
-} from "./artifact-storage.js";
+import { safePath, readBytes } from "./project-files.js";
+import { hasRunnerWorkOwnership } from "./work-documents.js";
 import {
   CONFIG_FILE,
   editVerificationConfigBytes,

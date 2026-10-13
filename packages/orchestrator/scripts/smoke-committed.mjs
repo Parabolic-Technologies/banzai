@@ -577,8 +577,8 @@ async function runSmoke(options) {
     );
     requireIdentity(
       capabilities,
-      "banzai-agent-capabilities/v6",
-      6,
+      "banzai-agent-capabilities/v7",
+      7,
       "agent control capabilities"
     );
     if (capabilities.orchestratorVersion !== expectedVersion) {
@@ -588,7 +588,15 @@ async function runSmoke(options) {
       );
     }
     if (
-      capabilities.controlContractVersion !== "6.0.0" ||
+      capabilities.controlContractVersion !== "7.0.0" ||
+      Object.hasOwn(capabilities, "artifactStorage") ||
+      capabilities.workDocuments?.directoryPattern !==
+        "documentation/work/<slug>/" ||
+      JSON.stringify(capabilities.workDocuments?.bindingSchemas) !==
+        JSON.stringify(["banzai-work-binding/v3"]) ||
+      capabilities.workDocuments?.workspaceSnapshotVersion !== 3 ||
+      JSON.stringify(capabilities.workDocuments?.verificationRequestSchemas) !==
+        JSON.stringify(["banzai-verification-request/v3"]) ||
       capabilities.operations?.status?.supported !== true ||
       JSON.stringify(
         capabilities.operations?.approveVerification?.inputSchemas

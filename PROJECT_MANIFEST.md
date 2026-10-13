@@ -38,8 +38,8 @@ installed policy source. These files describe nothing here.
 
 ## 2. Platform & Tooling
 
-- **Language:** TypeScript `^5.9.0` for the orchestrator; CommonJS entry points for the plugin hook and artifact helper, with shared
-  builtin-only ESM storage, archive, adoption and verification modules under `plugins/banzai/lib/`. Skills and
+- **Language:** TypeScript `^5.9.0` for the orchestrator; CommonJS entry points for the plugin hook and verification helper, with shared
+  builtin-only ESM work-document, filesystem, execution-ownership, adoption and verification modules under `plugins/banzai/lib/`. Skills and
   artifacts are Markdown; machine contracts are JSON Schema.
 - **Runtime / target:** Node.js `>=22.20.0 <23 || >=24.11.1 <25`
   (`engines.node` in both package manifests and both lockfile mirrors);
@@ -379,8 +379,14 @@ setup reuses the existing runner lock without stale ownership reclamation.
   - `assets/` — project logo under `assets/logo/` (SVG mark and lockups,
     PNG avatar and social-preview exports, `README.md` usage notes).
   - `.serena/project.yml` — tracked Serena project configuration.
-  - `.banzai/artifacts.json` — shared declaration selecting the private layout.
-  - `.banzai/work/<uuid>/` — local, ignored internal work artifacts.
+  - `documentation/work/<slug>/` — one flat, Git-visible directory per new work
+    item, with sibling requirements, plans, required reports and numbered reviews.
+    Placement is fixed; no layout declaration, registration or storage command
+    is required. See [Work Documents](documentation/artifact-storage.md).
+  - `.banzai/work/` — ignored historical work documents; explicit standalone
+    continuation retains their known paths without migration.
+  - `.banzai/verification/` and `.banzai/execution-locks/` — ignored standalone
+    execution evidence and per-directory executor ownership.
   - `.banzai/runs/` — local, ignored orchestrator run state.
 - Source/test layout: `src/` holds one module per responsibility. ADR-0052
   capability areas are introduced as subdirectories; `src/workflow/` currently
@@ -406,12 +412,21 @@ setup reuses the existing runner lock without stale ownership reclamation.
   certificate containers, and the fixed checkout-local
   `.banzai-version-set/` transaction boundary plus its `.guard` and `.guard.tmp`
   cleanup evidence.
-- `.gitignore` excludes local `.banzai` contents while keeping
-  `.banzai/artifacts.json` eligible for tracking. Legacy workflow directories
+- `.gitignore` excludes local `.banzai` contents. New
+  `documentation/work/` documents remain Git-visible; legacy workflow directories
   `documentation/features/`, `documentation/development-plans/` and
-  `documentation/changes/` are also ignored. `publication-policy.json` selects
-  `clean` mode with no historical exposure exceptions; publication checks
-  reject excluded evidence even when force-added.
+  `documentation/changes/` remain ignored.
+- `publication-policy.json` selects `clean` mode with no historical exposure
+  exceptions. New work documents need no per-file inventory entry for source
+  trees or source archives and are excluded from plugin/npm payloads.
+  Publication checks reject excluded evidence even when force-added; see
+  [Publication Boundary](documentation/publication-boundary.md).
+- The installed checkout-local `.git/hooks/pre-push` delegates to the frozen
+  `.git/hooks/banzai-publication/pre-push.mjs`. It accepts new work documents
+  without an artifact-layout declaration or per-file inventory entries and
+  checks outgoing Git history for private evidence. Tracked source changes do
+  not update the installed copy; see
+  [Local Pre-push Delivery](documentation/work/git-visible-work-artifacts/local-hook-delivery.md).
 
 ## 5. Key Modules & Components
 
@@ -422,15 +437,17 @@ entries for the modules a change touches, then the source and
 
 Orchestrator (`packages/orchestrator/src/`):
 
-- `artifact-storage.ts` — typed facade over the plugin's canonical builtin-only
-  storage, archive and adoption implementation. The build also generates plugin
-  `lib/artifact-readers.mjs` from the existing persisted readers; `build:check`
-  enforces exact generated parity. The plugin helper and CLI share
-  declaration/binding rules, first-use exclusions, claims and offline requests.
-  Private work is `.banzai/work/<uuid>/`; explicit legacy bindings retain earlier
-  documentation paths. Read-only discovery does not initialize storage. Recognized
-  unbound standalone legacy work uses content-bound explicit registration; selected
-  effective ignores and exclusive runner/standalone work claims guard writes.
+- `work-documents.ts` — typed projection of shared fixed document roles, binding
+  v3 validation and selected-document inventory. New runner work creates an
+  execution binding in state, never a standalone registration file. Exact
+  execution ownership lives in plugin `lib/execution-ownership.mjs`; ordinary
+  Markdown authoring has no claim protocol. Historical binding decoding has its
+  own read-only owner, `lib/work-binding-history.mjs`.
+- `project-files.ts` — typed projection of bounded contained filesystem access,
+  regular-file/ancestor checks and create-only publication from shared
+  `lib/project-files.mjs`. Adoption and shared review readers are imported from
+  their dedicated owners. Generated `lib/artifact-readers.mjs` remains consumed
+  by the hook and review/configuration readers, with exact build parity.
 
 - `cli.ts` — command surface and non-TTY output: `banzai`, `interactive`,
   `doctor [--json]`, `model`, `init`, `run`, `status [--json|--metrics]`,
@@ -449,7 +466,7 @@ Orchestrator (`packages/orchestrator/src/`):
   absent or unreadable plugin versions are explicit, never source-version guesses.
 - `agent-control-cli.ts` / `agent-control.ts` — non-TTY control grammar over
   closed direct-stdin JSON (64 KiB, validated before mutation); current
-  `banzai-agent-capabilities/v6`, `banzai-agent-status/v5`,
+  `banzai-agent-capabilities/v7`, `banzai-agent-status/v5`,
   configuration `banzai-agent-answer/v3`; preserved consultation
   `banzai-agent-answer/v2`, `banzai-agent-request/v1`, escalation
   `banzai-agent-answer/v1`, `banzai-agent-recovery/v1`. Every mutation
@@ -476,7 +493,7 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   `cancel`, `recordCancellationResponse`, `status`, and the private phase executors (selection, planning,
   implementation, verification, review, fixes). Owns preflight including
   `assertClaudePermissions`, attempt reconciliation, builder-session
-  selection, full/delta reviewer policy, snapshot-v6-bound rendered-review-v7
+  selection, full/delta reviewer policy, snapshot-v7-bound rendered-review-v8
   publication without formatting-only model calls,
   and recovery source discovery. It establishes every model-authored digest
   against the bytes it names when the carrying artifact is accepted, records
@@ -704,15 +721,15 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   per route), and `serenaGuidance`. Strict planning, implementation, review and
   accepted-finding fixes inline the applicable shared guidance and policies while preserving
   approved scope, legacy directives and required evidence.
-- `review-artifact.ts` — deterministic `banzai-feature-review/v7` rendering for
+- `review-artifact.ts` — deterministic `banzai-feature-review/v8` rendering for
   task snapshots, retaining historical renderers,
   exact snapshot/result validation and atomic publication of validated bytes;
   legacy v1 rendering and diagnostics remain readable.
-- `review-snapshot.ts` — `banzai-review-snapshot/v6` frozen task checks, physical origins and completion identities
+- `review-snapshot.ts` — `banzai-review-snapshot/v7` frozen task checks, physical origins and completion identities
   with historical readers,
   full/delta anchors, recorded evidence, digest validation and owned paths.
 - `types.ts` — all shared types, `CONTRACT_VERSION = "1.0.0"`, phase-result
-  schema v4 and state schema v8 with explicit historical readers, attempt
+  schema v4 and state schema v9 with explicit historical readers, attempt
   schema v4 under `banzai-completion-protocol/v1`, terminal checkpoint v3, the
   completion capture/transition/candidate/publication record identities, and the independent
   agent-control, context, and checkpoint/recovery contract identities; no
@@ -821,7 +838,7 @@ Plugin (`plugins/banzai/`):
   `PROJECT_MANIFEST.md` in the session directory or a parent — and the hook
   stays silent in repositories without that evidence.
 - `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` — plugin manifests,
-  currently version `2.6.5`. The Codex manifest additionally declares the hook
+  currently version `2.7.0`. The Codex manifest additionally declares the hook
   and the store interface metadata.
 - `PROJECT_MANIFEST.md`, `AGENTS.md`, `CLAUDE.md`, and the placeholder
   `documentation/` tree (`README.md`, `decisions/README.md`, `.gitkeep` files) —
@@ -836,16 +853,16 @@ Plugin (`plugins/banzai/`):
   Report duties, conditional changeReport triggers, approval immutability,
   standalone role readers and runner-only review rendering remain unchanged.
 
-New runs use state v8 with task verification and immutable private binding v2,
-including projects whose stored layout default is legacy. No profile/bootstrap
-readiness gate runs. Strict implementation grants the bound implementation and
-test reports; strict fix also grants the bound change report. Lite routes retain
-their existing work/change-report grants. Workspace v2 binds the selected ignored
-work. Historical runs are not migration or continuation targets for ADR-0049;
-retained readers preserve their original meanings. Archive v1 can retain new
-bytes but reports unsupported task evidence as incomplete and refuses restore.
-Doctor v5 checks bound state v8 read-only. External client installation remains
-separate delivery evidence.
+New runs use state v9 with task verification and immutable tracked-document
+binding v3. New documents share `documentation/work/<slug>/`, independent of
+existing declaration contents. No profile/bootstrap or storage initialization
+readiness gate runs. Strict implementation grants only its implementation/test
+reports; strict fix also grants its conditional change report. Lite routes keep
+work/change-report grants. Workspace v3 contains sorted unique Git changes plus
+exact selected documents, including unchanged approved files. Machine evidence
+stays under the run root. Historical runs remain read-only evidence without
+migration or new execution authority. Doctor v5 checks state v9 without repair.
+External hook/client installation remains separate delivery evidence.
 
 Project guidance is inspected before new-run creation and authentication, then
 rechecked under ownership. Continuations inspect instruction layout before
@@ -871,7 +888,9 @@ attempt, approval marker or transcript.
   owner validates descriptors, source/materialization paths, policy and actual
   context before direct executable/argv invocation. Missing optional tooling
   creates no configuration gate; mandatory failure prevents completion.
-- Physical task evidence: binding v2 reserves a private verification directory.
+- Physical task evidence: binding v3 reserves the runner verification directory.
+  Standalone request v3 consumes an exact document and stores private records
+  under `.banzai/verification/<directory-key>/`, without document registration.
   Ledger 3 retains immutable decision v2, physical start/finish v2, origin v2 and
   applicability v2 records. Direct command descriptors, cwd, actual context and
   observed inputs remain linked by hashes; hashes establish identity, not test
@@ -879,7 +898,10 @@ attempt, approval marker or transcript.
   recovery, and retained terminal results are reconciled without duplicate
   execution. Equivalent evidence requires declared complete dependencies and
   matching direct origins; release checks stay fresh. Standalone helper request
-  v2 uses bound task documents and exclusive work ownership; inspect is read-only.
+  v3 uses explicit document/workflow selection and exclusive execution ownership;
+  inspect/decide allocate nothing. Only exact runner-published review paths are
+  excluded from task input observation; their separate snapshot/publication
+  checks retain authority while other tracked documents remain observed.
 - Run state: `.banzai/runs/<run-id>/state.json` is atomically replaced;
   `events.jsonl` is an append-only summary without transcripts; `attempts/`
   holds current task-mode model-attempt v4 records, structured results, redacted CLI output,
@@ -948,8 +970,9 @@ attempt, approval marker or transcript.
   completion claim.
 - Authorization data: a plan-approval digest binds the exact description,
   accepted ADRs, and plan; a workflow digest binds a persisted lite selection; a
-  workspace digest detects source drift during review. Baseline-identical paths
-  and the intended canonical review artifact are excluded from that digest.
+  workspace digest detects source drift during review. Baseline-identical source paths
+  and the intended canonical review artifact are excluded from that digest;
+  selected work documents remain inventoried even when baseline-identical.
   Recovery binds either the active interrupted mutable attempt or one exact
   completed prerequisite-blocked fix, the current workspace snapshot, base,
   approval/workflow, accepted-finding scope, and implementer configuration into
@@ -971,7 +994,7 @@ attempt, approval marker or transcript.
   `banzai status --json`.
 - Agent control: `banzai control capabilities` is offline and can run outside a
   Git checkout; it declares the exact independently versioned non-TTY operation
-  set under control contract `6.0.0`, including keyed consultation answers and
+  set under control contract `7.0.0`, including keyed consultation answers and
   explicit `recover` with the
   closed `banzai-agent-recovery/v1` input. `banzai control status` exposes one
   bounded public projection derived from runner state rather than human
@@ -1160,8 +1183,8 @@ attempt, approval marker or transcript.
 
 - Instruction assurance covers exact raw embedding and normalized extraction,
   phase/category byte accounting, per-call parity refusal and preserved
-  continuation authority, doctor v5, standalone binding readers, and actual
-  archive/bundle/map identity and privacy boundaries. Deterministic fixtures do
+  continuation authority, doctor v5, explicit standalone document verification, and actual
+  source/plugin/npm archive, bundle and map identity/privacy boundaries. Deterministic fixtures do
   not establish installed-client compatibility or model compliance.
 
 - Framework: the Node.js built-in test runner (`node --test`) with
@@ -1388,8 +1411,7 @@ status` reports only whether credentials are visible and stored, so a
   ignored repository allow rules are reported and the run continues. Doctor
   attaches that remediation as the `claude.permissions` fix, and `init` and a
   completed `setup` print the blocking reasons and remediation. No command
-  writes a permission rule. A run created before work bindings plans without
-  runner identity and is no longer audited for a planning `Write` grant.
+  writes a permission rule. Historical binding readers confer no new execution or migration authority.
 - Codex host state: every Codex preflight requires non-mutating write-access
   evidence for the effective `CODEX_HOME` before spawning the CLI. A denied
   directory under `CODEX_SANDBOX` is a host-permission prerequisite, not proof
@@ -1546,18 +1568,19 @@ status` reports only whether credentials are visible and stored, so a
   runs remain read-only evidence with legacy/unknown completion where applicable;
   their readers do not authorize continuation or migration. Standalone work without
   external evidence still uses mutable plan checkboxes.
-- Current bootstrap: every new route begins at state 8 with private binding 2
+- Current bootstrap: every new route begins at state 9 with document binding 3
   and a nullable completion cursor. Strict completion uses the existing protocol
-  directly, without a legacy state-transition record. Snapshot 6/rendered review
-  7 freeze task verification and completion receipt identities. Independent
+  directly, without a legacy state-transition record. Snapshot 7/rendered review
+  8 freeze task verification and completion receipt identities. Independent
   review assesses requirement coverage and unjustified weakening of checks.
   Historical snapshot/phase/result readers retain their original semantics.
 - Agent-control schemas are independently identified as current
-  `banzai-agent-capabilities/v6`, `banzai-agent-status/v5`, and
+  `banzai-agent-capabilities/v7`, `banzai-agent-status/v5`, and
   `banzai-agent-answer/v3` for configuration, plus preserved consultation
   `banzai-agent-answer/v2`, `banzai-agent-request/v1`,
   escalation `banzai-agent-answer/v1`, and `banzai-agent-recovery/v1`, with
-  control contract version `6.0.0`. Capabilities v6 declare task verification and the completion
+  control contract version `7.0.0`. Capabilities v7 declare `workDocuments` with the fixed directory pattern,
+  binding v3, workspace v3 and verification request v3, plus task verification and the completion
   publication protocol, stages, refusal codes and the `pending_application`
   attempt status; status v5 includes bounded task dispositions and completion publication state.
   Compatibility is the exact capability declaration, not the
@@ -1693,7 +1716,7 @@ Decision index:
 The canonical decision log, including rejected and superseded decisions, is
 `documentation/decisions/README.md`. This index lists only active accepted
 ADRs with their implementation state. ADR rationale, consequences, and
-implementation history stay in the ADR bodies and private work records;
+implementation history stays in ADR bodies and existing work records;
 see `documentation/historical-references.md` for archived references. Do not
 restate them here. Paths are relative to `documentation/decisions/`.
 
@@ -1749,3 +1772,5 @@ restate them here. Paths are relative to `documentation/decisions/`.
 | ADR-0051 | Acceptance-time validation of model-authored digests               | `0051-acceptance-time-digest-validation.md`                     | Implemented |
 | ADR-0052 | Capability-slice architecture and WorkflowRunner decomposition     | `0052-orchestrator-capability-slice-architecture.md`            | Planned     |
 | ADR-0053 | Single pull-request CI gate and publish-time evidence reuse        | `0053-single-pull-request-ci-gate-and-publish-evidence-reuse.md` | Implemented |
+| ADR-0054 | Git-visible work artifacts                                        | `0054-git-visible-work-artifacts.md`                          | Implemented     |
+| ADR-0055 | Planning gate rework and independent planning review              | `0055-planning-gate-rework-and-independent-planning-review.md` | Planned     |

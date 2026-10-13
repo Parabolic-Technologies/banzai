@@ -24,12 +24,13 @@ import type {
 import {
   hasRunnerWorkOwnership,
   withRunnerWorkOwnership,
-  createWork,
-  artifactRoles,
+  createExecutionBinding,
+  ensureExecutionIgnores,
   inspectBoundWork,
   ownsArtifact
-} from "./artifact-storage.js";
+} from "./work-documents.js";
 import { createHash, randomUUID } from "node:crypto";
+import { verifyExecutionIgnore } from "./project-files.js";
 import { constants } from "node:fs";
 import { access, chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -1279,7 +1280,7 @@ export class WorkflowRunner {
         const baseCommit = await currentCommit(this.repoRoot);
         const createdAt = this.now();
         const state: RunState = {
-          schemaVersion: 8,
+          schemaVersion: 9,
           verificationMode: "task",
           completionPublication: null,
           contractVersion: CONTRACT_VERSION,
@@ -1347,16 +1348,16 @@ export class WorkflowRunner {
             );
           }
         }
-        state.artifactBinding = await createWork({
+        state.artifactBinding = await createExecutionBinding({
           repoRoot: this.repoRoot,
           slug: state.slug,
           mode: "workflow",
           creationId: this.context.ids(),
-          schemaVersion:
-            state.verificationMode === "task" || usesVerificationPolicy(state)
-              ? 2
-              : 1
+          runId: state.runId,
+          sourceCommit: state.baseCommit,
+          createdAt: state.createdAt
         });
+        await ensureExecutionIgnores(this.repoRoot);
         await this.store.createRun(state);
         await observeHumanTime(this.context, state, "run_created");
         await this.assertProjectGuidance();
@@ -4687,62 +4688,21 @@ export class WorkflowRunner {
   ): string {
     const workflow = state.workflowSelection?.workflow ?? "strict";
     const bound = state.artifactBinding;
-    const roles =
-      bound === undefined
-        ? artifactRoles(state.runId, state.slug, "workflow", "legacy")
-        : bound.binding.artifacts;
-    if (bound === undefined) {
-      requireSlug(state.slug);
-      for (const role of [
-        "description",
-        "plan",
-        "implementationReport",
-        "testReport"
-      ] as const) {
-        const recorded = state.planArtifacts?.[role];
-        if (recorded) roles[role] = recorded;
-      }
-      if (state.planTaskCompletion?.status === "valid") {
-        roles.implementationReport =
-          state.planTaskCompletion.implementationReport.path;
-        roles.testReport = state.planTaskCompletion.testReport.path;
-      }
-    }
-    const legacyOutputs =
-      phase === "plan"
-        ? [roles.description, roles.plan]
-        : phase === "implementation" || phase === "fix"
-          ? workflow === "strict"
-            ? [
-                roles.implementationReport,
-                roles.testReport,
-                ...(phase === "fix" ? [roles.changeReport] : [])
-              ]
-            : workflow === "feature"
-              ? [roles.work]
-              : [roles.changeReport]
-          : [];
-    const writes =
-      bound === undefined
-        ? legacyOutputs.filter((item): item is string => item !== undefined)
-        : artifactWritePaths(state, phase);
+    if (bound?.binding.schemaVersion !== 3)
+      throw new BanzaiError(
+        "ARTIFACT_VERSION_UNSUPPORTED",
+        "Historical runs cannot acquire new document authority. Start new work without migrating existing documents."
+      );
+    const writes = artifactWritePaths(state, phase);
     return [
-      bound === undefined
-        ? "Legacy artifact surface (no persisted work binding):"
-        : "Artifact storage authority (run state v4):",
-      JSON.stringify(
-        bound ?? { runId: state.runId, slug: state.slug, artifacts: roles },
-        null,
-        2
-      ),
-      "Use these exact artifact role paths. Public ADRs, product documentation and the project manifest keep their existing repository paths.",
-      bound === undefined
-        ? `Required work output paths in this legacy phase: ${JSON.stringify(writes)}. Existing legacy scope and approved-byte validation remain authoritative; these destinations create no new binding or permission.`
-        : `Artifact writes allowed in this phase: ${JSON.stringify(writes)}.`,
+      "Work document authority (run state v9):",
+      JSON.stringify(bound, null, 2),
+      "Use these exact document role paths. ADRs, product documentation and the project manifest keep their existing repository paths.",
+      `Artifact writes allowed in this phase: ${JSON.stringify(writes)}.`,
       phase === "review" || phase === "selection"
         ? "Model artifact write set: []. Every role is read-only, including canonical reviews and attempt-owned candidates."
         : "Other artifact roles are read-only; their presence does not grant writes.",
-      "Read ignored required evidence directly. Do not initialize, create or rebind work, invoke the standalone artifact helper, acquire standalone claims, or modify declarations, runner state, approvals or another work item.",
+      "Read required evidence at its supplied path. Do not rebind work, invoke standalone verification, or modify runner state, approvals or another work item.",
       workflow === "feature"
         ? "For lite feature work, artifacts.implementationReport may reference the work role; do not create a second report."
         : workflow === "quick-fix"
@@ -4931,7 +4891,11 @@ export class WorkflowRunner {
                     ]
                   : []
             });
-      if (before !== null)
+      if (before !== null) {
+        await verifyExecutionIgnore(
+          this.repoRoot,
+          `.banzai/runs/${input.state.runId}/attempts/${input.attempt.id}.artifact-workspace.json`
+        );
         await writeFile(
           path.join(
             this.store.runDirectory(input.state.runId),
@@ -4941,6 +4905,7 @@ export class WorkflowRunner {
           JSON.stringify(before) + "\n",
           { flag: "wx", mode: 0o600 }
         );
+      }
       result = await input.invoke(outputContract);
       if (before !== null)
         await checkArtifactPhaseScope(
@@ -7961,29 +7926,33 @@ export class WorkflowRunner {
         );
       const frozen = sealReviewSnapshot({
         schema:
-          state.schemaVersion === 8
-            ? "banzai-review-snapshot/v6"
-            : state.schemaVersion === 7
-              ? "banzai-review-snapshot/v5"
-              : state.schemaVersion === 6
-                ? "banzai-review-snapshot/v4"
-                : state.schemaVersion === 5
-                  ? "banzai-review-snapshot/v3"
-                  : state.artifactBinding
-                    ? "banzai-review-snapshot/v2"
-                    : "banzai-review-snapshot/v1",
+          state.schemaVersion === 9
+            ? "banzai-review-snapshot/v7"
+            : state.schemaVersion === 8
+              ? "banzai-review-snapshot/v6"
+              : state.schemaVersion === 7
+                ? "banzai-review-snapshot/v5"
+                : state.schemaVersion === 6
+                  ? "banzai-review-snapshot/v4"
+                  : state.schemaVersion === 5
+                    ? "banzai-review-snapshot/v3"
+                    : state.artifactBinding
+                      ? "banzai-review-snapshot/v2"
+                      : "banzai-review-snapshot/v1",
         schemaVersion:
-          state.schemaVersion === 8
-            ? 6
-            : state.schemaVersion === 7
-              ? 5
-              : state.schemaVersion === 6
-                ? 4
-                : state.schemaVersion === 5
-                  ? 3
-                  : state.artifactBinding
-                    ? 2
-                    : 1,
+          state.schemaVersion === 9
+            ? 7
+            : state.schemaVersion === 8
+              ? 6
+              : state.schemaVersion === 7
+                ? 5
+                : state.schemaVersion === 6
+                  ? 4
+                  : state.schemaVersion === 5
+                    ? 3
+                    : state.artifactBinding
+                      ? 2
+                      : 1,
         ...(hasConfigurationSetup(state)
           ? {
               verificationMode: state.verificationMode ?? "ordered",
@@ -7993,13 +7962,13 @@ export class WorkflowRunner {
               )
             }
           : {}),
-        ...(state.schemaVersion === 8
+        ...(state.schemaVersion >= 8
           ? {
               verificationMode: "task" as const,
               taskVerification: state.taskVerification
             }
           : {}),
-        ...(state.schemaVersion === 7 || state.schemaVersion === 8
+        ...(state.schemaVersion >= 7
           ? {
               completionPublication: await frozenCompletionPublication(
                 this.context,

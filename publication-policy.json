@@ -404,6 +404,16 @@
       "sha256": null
     },
     {
+      "path": "documentation/decisions/0054-git-visible-work-artifacts.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
       "path": "documentation/decisions/README.md",
       "classification": "maintainer",
       "sha256": null
@@ -779,82 +789,17 @@
       "sha256": null
     },
     {
-      "path": "plugins/banzai/contracts/artifacts/v1/acquire-request.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/contracts/artifacts/v1/archive.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/contracts/artifacts/v1/create-request.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/contracts/artifacts/v1/export-request.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/contracts/artifacts/v1/initialize-request.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/contracts/artifacts/v1/inspect-request.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/contracts/artifacts/v1/inventory-request.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/contracts/artifacts/v1/layout.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/contracts/artifacts/v1/release-request.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/contracts/artifacts/v1/restore-request.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/contracts/artifacts/v1/result.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/contracts/artifacts/v1/verify-request.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
       "path": "plugins/banzai/contracts/artifacts/v1/work-binding.schema.json",
       "classification": "product",
       "sha256": null
     },
     {
-      "path": "plugins/banzai/contracts/artifacts/v1/write-request.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/contracts/artifacts/v2/create-request.schema.json",
-      "classification": "product",
-      "sha256": null
-    },
-    {
       "path": "plugins/banzai/contracts/artifacts/v2/work-binding.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/artifacts/v3/work-binding.schema.json",
       "classification": "product",
       "sha256": null
     },
@@ -939,12 +884,17 @@
       "sha256": null
     },
     {
-      "path": "plugins/banzai/documentation/README.md",
+      "path": "plugins/banzai/contracts/verification/v3/execute-request.schema.json",
       "classification": "product",
       "sha256": null
     },
     {
-      "path": "plugins/banzai/documentation/changes/.gitkeep",
+      "path": "plugins/banzai/contracts/verification/v3/inspect-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/documentation/README.md",
       "classification": "product",
       "sha256": null
     },
@@ -954,12 +904,7 @@
       "sha256": null
     },
     {
-      "path": "plugins/banzai/documentation/development-plans/.gitkeep",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/documentation/features/.gitkeep",
+      "path": "plugins/banzai/documentation/work/.gitkeep",
       "classification": "product",
       "sha256": null
     },
@@ -1029,27 +974,42 @@
       "sha256": null
     },
     {
-      "path": "plugins/banzai/lib/artifact-archive.mjs",
-      "classification": "product",
-      "sha256": null
-    },
-    {
       "path": "plugins/banzai/lib/artifact-readers.mjs",
       "classification": "product",
       "sha256": null
     },
     {
-      "path": "plugins/banzai/lib/artifact-storage.d.mts",
+      "path": "plugins/banzai/lib/execution-ownership.d.mts",
       "classification": "product",
       "sha256": null
     },
     {
-      "path": "plugins/banzai/lib/artifact-storage.mjs",
+      "path": "plugins/banzai/lib/execution-ownership.mjs",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/lib/project-adoption.d.mts",
       "classification": "product",
       "sha256": null
     },
     {
       "path": "plugins/banzai/lib/project-adoption.mjs",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/lib/project-files.d.mts",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/lib/project-files.mjs",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/lib/review-snapshot.d.mts",
       "classification": "product",
       "sha256": null
     },
@@ -1105,6 +1065,21 @@
     },
     {
       "path": "plugins/banzai/lib/verification-store.mjs",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/lib/work-binding-history.mjs",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/lib/work-documents.d.mts",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/lib/work-documents.mjs",
       "classification": "product",
       "sha256": null
     },
@@ -1165,11 +1140,6 @@
     },
     {
       "path": "plugins/banzai/policies/test-assurance.md",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/scripts/artifacts.cjs",
       "classification": "product",
       "sha256": null
     },

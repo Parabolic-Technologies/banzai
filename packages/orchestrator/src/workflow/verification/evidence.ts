@@ -117,14 +117,38 @@ export function taskVerificationStorage(
   state: RunState
 ): VerificationStorage {
   const binding = state.artifactBinding?.binding;
-  if (binding?.schemaVersion !== 2 || !binding.artifacts.verificationDirectory)
+  if (
+    binding?.schemaVersion !== (state.schemaVersion === 9 ? 3 : 2) ||
+    !binding.artifacts.verificationDirectory
+  )
     throw new BanzaiError(
       "VERIFICATION_EVIDENCE_INVALID",
       "Task verification requires its original evidence binding."
     );
+  if (
+    binding.schemaVersion === 3 &&
+    (!Number.isSafeInteger(state.reviewIteration) ||
+      state.reviewIteration < 0 ||
+      state.reviewIteration > 1000)
+  )
+    throw new BanzaiError(
+      "VERIFICATION_EVIDENCE_INVALID",
+      "Review iteration is outside the supported evidence bound."
+    );
   return {
     repoRoot: context.repoRoot,
     directory: binding.artifacts.verificationDirectory,
+    // Canonical reviews are runner output after verification. Their own frozen
+    // snapshot/receipt checks protect them; exclude only these exact paths here.
+    ...(binding.schemaVersion === 3
+      ? {
+          excludedSourcePaths: Array.from(
+            { length: state.reviewIteration + 1 },
+            (_, index) =>
+              `${binding.artifacts.reviewDirectory}/review-${index + 1}.md`
+          )
+        }
+      : {}),
     workId: binding.workId
   };
 }

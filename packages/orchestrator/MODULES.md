@@ -9,12 +9,17 @@ is a navigational reference and is updated with the module it describes.
 
 ## Source modules (`src/`)
 
-- `artifact-storage.ts` — typed facade for canonical plugin ESM storage/adoption
-  and archive operations. No runner configuration or CLI installation is needed
-  by the standalone helper. Claims exclude overlapping standalone/runner phase
-  writers for one work; explicit legacy registration preserves original roles. Workflow grants remain
-  runner-owned. New state v8 holds private binding v2 bytes and SHA-256; workspace v2
-  hashes the selected ignored work. Historical states/digests retain old meaning.
+- `work-documents.ts` — typed projection of fixed tracked document roles and
+  binding-v3 validation. Runner state v9 persists the execution binding directly;
+  workspace v3 inventories selected documents once, including unchanged approved
+  bytes. `lib/work-binding-history.mjs` decodes retained v1/v2 evidence read-only.
+  `lib/execution-ownership.mjs` coordinates actual runner/verification execution
+  by the selected document directory; ordinary Markdown editing has no claims.
+- `project-files.ts` — typed projection of the shared contained-filesystem owner,
+  preserving bounded regular reads, ancestor-symlink rejection and atomic/create-only
+  writes. Its shared Git exclusion check protects concrete private evidence leaves
+  and temporaries and respects already tracked files. Adoption and review decoding
+  use their dedicated shared modules.
 
 - `cancellation.ts` — closed observation v1 reasons, response/provenance table,
   pre-transition context and reconciliation; separate report v1 types (ADR-0035).
@@ -73,7 +78,7 @@ is a navigational reference and is updated with the module it describes.
   Capability discovery runs before Git discovery or runner construction;
   status, start, answer, and recover reuse the current `WorkflowRunner`, and
   mutations emit a fresh authoritative status projection.
-- `agent-control.ts` — closed current `banzai-agent-capabilities/v6`
+- `agent-control.ts` — closed current `banzai-agent-capabilities/v7`
   (declaring the completion publication protocol, stages, refusal codes and
   `pending_application` and task verification), `banzai-agent-status/v5` (bounded
   task applicability and completion publication state), and configuration `banzai-agent-answer/v3` contracts;
@@ -546,7 +551,9 @@ is a navigational reference and is updated with the module it describes.
   writes the immutable attempt-owned completion transition, original report,
   capture, candidate and publication records (`wx` temp plus link),
   appends deduplicated events through `appendEventOnce`, and enforces the
-  single-active-run lock. Locks this process holds are tracked module-wide, so
+  single-active-run lock. Private writes validate each actual destination and
+  temporary against effective Git exclusions; the active pointer's temporary
+  lives in the ignored runs directory. Locks this process holds are tracked module-wide, so
   `releaseHeldRunnerLocksSync` can drop them from a signal handler, where the
   `try/finally` that normally releases never runs; a lock file whose token is
   no longer ours belongs to another runner and is left as found. It normalizes
@@ -831,8 +838,8 @@ is a navigational reference and is updated with the module it describes.
   fresh-input remainder, and an optional turn count. It reads no
   process state, so both surfaces are testable against an explicit width.
 - `types.ts` — all shared types, `CONTRACT_VERSION = "1.0.0"`, phase-result
-  schema v4 and state schema v8 with explicit historical readers, independent
-  agent-control schema and `6.0.0` contract identities, independent
+  schema v4 and state schema v9 with explicit historical readers, independent
+  agent-control schema and `7.0.0` contract identities, independent
   `banzai-context-attempt/v1` and `banzai-context-report/v1` identities,
   model-attempt v4 and retained v1-v3 readers under
   `banzai-completion-protocol/v1`, terminal-checkpoint v1-v3, the completion
@@ -925,22 +932,18 @@ cancellation and restore retain their existing contracts.
 `publication-check.mjs` inspects indexed or selected Git-tree bytes and actual tar
 payloads using `publication-policy.json`. Exact historical exceptions are allowed
 only in the declared transition mode; clean mode rejects them. npm has an exact
-payload list; plugin/documentation resources need classification; source-map
+payload list; other plugin/documentation resources need classification; the fixed source
+work subtree is eligible without per-file entries and excluded from packages; source-map
 identities and embedded source bytes are inspected. The release gate runs the
 index check without mutating tracked files or refreshing historical exceptions.
 
-The build ships existing `validation.ts` persisted readers as generated plugin
-`lib/artifact-readers.mjs`, checked byte-for-byte by `build:check`. The plugin
-archive library exports content-addressed regular-file bundles with
-source identities, original modes, hashes and required dependency closure. A fresh
-restoration publishes a verified directory atomically and never restores an active
-pointer. Existing destinations support only identical inactive no-op verification.
-Inventory selects `workPaths`/`runIds`; export validates fixed `inventoryFile`
-bytes. `bundlePath` verification/restore preserve explicit pins and owner policy,
-required Markdown authority closure and a private restored manifest receipt.
-Managed work/run/control destination ancestry is rejected before staging.
-Doctor's read-only active-state check admits state v8 and retained older shapes,
-and validates binding identity without authorizing historical continuation.
+The build ships existing persisted readers as generated plugin
+`lib/artifact-readers.mjs`, checked byte-for-byte by `build:check`. The hook and
+shared review/configuration readers still consume them. Generic artifact
+initialization, registration, writing and archive operations are retired. Their
+complete historical tool source remains in Git; existing archive bytes and
+references are preserved without migration. Doctor's read-only active-state check
+admits state v9 and reports historical execution incompatibility without repair.
 
 ## Runner instruction generation and parity
 
@@ -1019,7 +1022,7 @@ Lite checks derive authority from the user request and persisted workflow
 selection, with inherited-local permissions. Optional schema-4 project policy
 constrains checks; metadata never grants execution permission.
 
-State 8 uses private binding 2 and ledger 3. The runner or standalone helper owns
+State 9 uses tracked-document binding 3 and private ledger 3. The runner or standalone helper owns
 immutable decision, physical start/finish, origin and applicability records.
 Actual launch context, safe source paths and authority are checked before launch
 and application. Unknown input captures cannot establish unchanged evidence.
@@ -1028,22 +1031,23 @@ without inventing exit codes and repairs missing origins from retained physical
 bytes; terminal success is not re-executed. Equivalent evidence requires complete
 policy-declared inputs/toolchain/environment and a direct compatible successful
 origin. Changes outside declared explanatory regions and release gates stay
-fresh. Helper request v2 accepts bound task identities, not arbitrary argv, and
-its inspect path writes nothing. Legacy helper v1 remains explicitly legacy.
+fresh. Helper request v3 accepts exact document/workflow selection, never arbitrary
+argv. Inspect/decide allocate nothing; execute keeps metadata under ignored
+`.banzai/verification/`. Legacy executable requests are refused.
 
-Review snapshot 6/rendered review 7 freeze task checks, required/supplemental
+Review snapshot 7/rendered review 8 freeze task checks, required/supplemental
 status, physical evidence, applicability and completion publication. Review-result
 2 is unchanged. The independent reviewer checks requirement coverage and
 unjustified weakening; a command hash cannot certify semantic adequacy.
 Frozen evaluation/KPI/context/archive formats do not reinterpret task evidence
 as legacy profile passes: unsupported evidence remains partial, with no exact
-completion/KPI claim. Archive restore requires full interpreted closure.
+completion/KPI claim. Historical archive tooling remains in its original Git revision.
 Human-time's bounded state/attempt projection accepts current versions while
 keeping its report schema unchanged.
 
-No historical-run migration or binding v3 is introduced. Start a new task;
-retained artifacts keep their original identity. `doctor` v5 and control
-capabilities v6/status v5 expose task verification without requiring profile
+No historical-run migration is introduced. New binding v3 has explicit new
+semantics; retained v1/v2 artifacts keep their original identity. `doctor` v5 and control
+capabilities v7/status v5 expose task verification without requiring profile
 coverage. Current init emits schema 4 without a verification wizard. The test
 driver's exact file selection, process groups and cleanup are unchanged.
 

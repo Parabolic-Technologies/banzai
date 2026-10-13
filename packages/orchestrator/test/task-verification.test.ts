@@ -1,4 +1,4 @@
-import { createWork } from "../src/artifact-storage.js";
+import { createTestWork as createWork } from "./helpers.js";
 import { WorkflowRunner } from "../src/workflow.js";
 import { createTestRepository } from "./helpers.js";
 import type {
@@ -497,9 +497,7 @@ test("discovery reads root and selected nested scripts inertly and distinguishes
 });
 
 test("real executor publishes private descriptor references and refuses denied launches", async () => {
-  const root = await realpath(
-    await mkdtemp(path.join(tmpdir(), "banzai-task-executor-"))
-  );
+  const { root } = await createTestRepository({ artifactLayout: null });
   const workId = randomUUID();
   const storage = {
     repoRoot: root,
@@ -580,7 +578,7 @@ test("real executor publishes private descriptor references and refuses denied l
       JSON.parse(
         await readFile(path.join(root, attempt.stdout.relativePath), "utf8")
       ),
-      { cwd: root, args: ["literal $HOME; touch sentinel"] }
+      { cwd: await realpath(root), args: ["literal $HOME; touch sentinel"] }
     );
     await executeTaskVerification(input);
     assert.equal(launches, 1);
@@ -599,9 +597,7 @@ test("real executor publishes private descriptor references and refuses denied l
 });
 
 test("a check writing non-ignored output names the paths; ignored output passes", async () => {
-  const root = await realpath(
-    await mkdtemp(path.join(tmpdir(), "banzai-task-output-"))
-  );
+  const { root } = await createTestRepository({ artifactLayout: null });
   const workId = randomUUID();
   const storage = {
     repoRoot: root,
@@ -659,7 +655,7 @@ test("a check writing non-ignored output names the paths; ignored output passes"
       executeTaskVerification(round()),
       /Check "build" changed observed project files: "build\/out\.js" \(added\)\. Keep generated output Git-ignored/
     );
-    await writeFile(path.join(root, ".gitignore"), "build/\n");
+    await writeFile(path.join(root, ".gitignore"), ".banzai/work/\nbuild/\n");
     const passed = await executeTaskVerification(round());
     assert.equal(passed.applicability.dispositions[0]?.kind, "passed");
   } finally {
@@ -797,7 +793,7 @@ for (const lintFails of [false, true])
         lintFails ? "blocked" : "done",
         state.blockReason ?? undefined
       );
-      assert.equal(state.schemaVersion, 8);
+      assert.equal(state.schemaVersion, 9);
       assert.equal(state.verificationMode, "task");
       assert.equal(Object.hasOwn(state, "configurationSetup"), false);
       assert.equal(phases, 1);
@@ -814,7 +810,7 @@ for (const lintFails of [false, true])
   });
 
 test("failed task checks require exact retry and do not reuse older success", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "banzai-task-retry-"));
+  const { root } = await createTestRepository({ artifactLayout: null });
   const workId = randomUUID();
   const roundId = randomUUID();
   const storage = {
@@ -823,7 +819,7 @@ test("failed task checks require exact retry and do not reuse older success", as
     workId
   };
   const native = { ...check, command: "node", args: ["check.cjs"] };
-  await mkdir(path.join(root, ".banzai"));
+  await mkdir(path.join(root, ".banzai"), { recursive: true });
   await writeFile(
     path.join(root, "check.cjs"),
     "process.exit(require('node:fs').existsSync('.banzai/ready') ? 0 : 7)"
@@ -887,10 +883,9 @@ test("standalone task helper executes bound descriptors without profile setup an
       repoRoot: repository.root,
       slug: "helper-task",
       mode: "lite",
-      creationId: randomUUID(),
-      schemaVersion: 2
+      creationId: randomUUID()
     });
-    const workPath = `.banzai/work/${work.binding.workId}/work.json`;
+
     const document = work.binding.artifacts.work;
     assert.ok(document);
     await writeFile(
@@ -906,10 +901,11 @@ test("standalone task helper executes bound descriptors without profile setup an
       planFor([{ ...check, command: "node", args: ["helper-check.cjs"] }])
     );
     const request = {
-      schema: "banzai-verification-request/v2",
-      schemaVersion: 2,
+      schema: "banzai-verification-request/v3",
+      schemaVersion: 3,
       repoRoot: repository.root,
-      workPath,
+      documentPath: document,
+      workflow: "feature",
       roundId: randomUUID()
     };
     const requestPath = path.join(temp, "request.json");
@@ -948,7 +944,7 @@ test("standalone task helper executes bound descriptors without profile setup an
     const inspected = await invoke("inspect");
     assert.equal(inspected.schemaVersion, 2);
     assert.equal(inspected.result.physicalAttempts, 0);
-    assert.equal(inspected.result.applicability.complete, false);
+    assert.equal(inspected.result.applicability, null);
     const executed = await invoke("execute");
     assert.equal(executed.result.authorityKind, "standalone-skill");
     assert.equal(executed.result.applicability.complete, true);
@@ -961,9 +957,7 @@ test("standalone task helper executes bound descriptors without profile setup an
 });
 
 test("interrupted task execution requires owner recovery and preserves physical uncertainty", async () => {
-  const root = await realpath(
-    await mkdtemp(path.join(tmpdir(), "banzai-task-recovery-"))
-  );
+  const { root } = await createTestRepository({ artifactLayout: null });
   const workId = randomUUID();
   const storage = {
     repoRoot: root,

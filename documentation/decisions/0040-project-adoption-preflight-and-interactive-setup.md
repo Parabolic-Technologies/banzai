@@ -461,6 +461,11 @@ ledger.
 
 ## Lifecycle Links
 
+- Amended by [ADR-0054](./0054-git-visible-work-artifacts.md), accepted
+  2026-10-13: new-work initialization uses the fixed tracked document convention
+  without artifact-layout setup. Existing project guidance prerequisites and
+  read-only behavior remain. Implementation is Planned.
+
 - Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted
   2026-09-14: save guided verification before optional client setup, permit
   bounded verify repair of a paused pending run, and emit doctor v4. General

@@ -31,9 +31,9 @@ import {
 import { WorkflowRunner } from "../src/workflow.js";
 import { createTestRepository } from "./helpers.js";
 
-export const descriptionPath = "documentation/features/example/description.md";
+export const descriptionPath = "documentation/work/example/description.md";
 
-export const planPath = "documentation/development-plans/example/plan.md";
+export const planPath = "documentation/work/example/plan.md";
 
 // Resolve the fixture's old role labels against the run's actual private binding.
 export async function boundFixturePath(
@@ -84,11 +84,9 @@ export function phaseResult(
       implementationReport:
         phase === "plan"
           ? null
-          : "documentation/features/example/implementation-report.md",
+          : "documentation/work/example/implementation-report.md",
       testReport:
-        phase === "plan"
-          ? null
-          : "documentation/features/example/test-report.md"
+        phase === "plan" ? null : "documentation/work/example/test-report.md"
     },
     taskCompletion:
       phase === "implementation"
@@ -386,9 +384,8 @@ export class FakeAdapters implements VendorAdapters {
     ) as RunState;
     const roles = state.artifactBinding?.binding.artifacts;
     const descriptionPath =
-      roles?.description ?? "documentation/features/example/description.md";
-    const planPath =
-      roles?.plan ?? "documentation/development-plans/example/plan.md";
+      roles?.description ?? "documentation/work/example/description.md";
+    const planPath = roles?.plan ?? "documentation/work/example/plan.md";
     const fixtureChecks = this.fixtureTaskChecks
       ? (
           JSON.parse(
@@ -430,16 +427,13 @@ export class FakeAdapters implements VendorAdapters {
       }
       if (!roles) return result;
       const mapping = new Map<string, string | null>([
-        ["documentation/features/example/description.md", descriptionPath],
-        ["documentation/development-plans/example/plan.md", planPath],
+        ["documentation/work/example/description.md", descriptionPath],
+        ["documentation/work/example/plan.md", planPath],
         [
-          "documentation/features/example/implementation-report.md",
+          "documentation/work/example/implementation-report.md",
           roles.implementationReport ?? null
         ],
-        [
-          "documentation/features/example/test-report.md",
-          roles.testReport ?? null
-        ]
+        ["documentation/work/example/test-report.md", roles.testReport ?? null]
       ]);
       for (const key of [
         "description",
@@ -577,7 +571,7 @@ export class FakeAdapters implements VendorAdapters {
             ? roles?.implementationReport
             : state.workflowSelection?.workflow === "quick-fix"
               ? roles?.changeReport
-              : roles?.work) ?? "documentation/features/example/work.md"
+              : roles?.work) ?? "documentation/work/example/work.md"
         );
         await mkdir(path.dirname(workPath), { recursive: true });
         await writeFile(workPath, "# Work\n\nEscalation found.\n", "utf8");

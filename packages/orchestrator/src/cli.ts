@@ -110,7 +110,8 @@ import {
   type WorkflowStatus
 } from "./workflow.js";
 
-import { artifactCommand, safePath } from "./artifact-storage.js";
+import { safePath } from "./project-files.js";
+import { ensureExecutionIgnores } from "./work-documents.js";
 import { VERIFICATION_EXAMPLES } from "./init-resources.js";
 
 function authenticationGateway(
@@ -207,7 +208,6 @@ const HELP = `Banzai v${packageManifest.version} local cross-vendor workflow run
 Usage:
   banzai --version | -v
   banzai --plugin-version | -pv
-  banzai artifacts <inspect|initialize|create|acquire|write|release|inventory|export|verify|restore> --json <request-file>
   banzai
   banzai interactive
   banzai init
@@ -605,12 +605,6 @@ async function main(): Promise<void> {
     )
   )
     return;
-  if (invocation[0] === "artifacts") {
-    const response = await artifactCommand(invocation.slice(1));
-    process.stdout.write(`${JSON.stringify(response)}\n`);
-    process.exitCode = response.ok ? 0 : 1;
-    return;
-  }
   const progressLevel = resolveProgressLevel(invocation, process.env);
   const metrics = invocation.includes("--metrics");
   const args = stripGlobalFlags(invocation);
@@ -757,6 +751,7 @@ async function main(): Promise<void> {
       { missing: true }
     );
     const initStore = new RunStore(repoRoot);
+    const executionIgnoresUpdated = await ensureExecutionIgnores(repoRoot);
     const initLock = await initStore.acquireLock({ reclaimStale: false });
     let result;
     let examplesCreated = false;
@@ -804,7 +799,7 @@ async function main(): Promise<void> {
         : "Kept existing .banzai/config.json."
     );
     console.log(
-      result.gitignoreUpdated
+      result.gitignoreUpdated || executionIgnoresUpdated
         ? "Updated .gitignore for local run state."
         : ".gitignore already covers local run state."
     );

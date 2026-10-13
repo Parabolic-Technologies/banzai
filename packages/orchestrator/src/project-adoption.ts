@@ -6,9 +6,9 @@ export {
   SCAFFOLD_MARKER,
   GUIDANCE_MAX_BYTES,
   adoptionDiagnostic
-} from "./artifact-storage.js";
+} from "../../../plugins/banzai/lib/project-adoption.mjs";
 export type {
   AdoptionClassification,
   AdoptionIssue,
   ProjectAdoption
-} from "./artifact-storage.js";
+} from "../../../plugins/banzai/lib/project-adoption.mjs";

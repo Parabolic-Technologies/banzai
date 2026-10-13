@@ -6,38 +6,37 @@
     "schema",
     "schemaVersion",
     "repoRoot",
-    "slug",
-    "mode",
-    "creationId"
+    "roundId",
+    "documentPath",
+    "workflow"
   ],
   "properties": {
     "schema": {
-      "const": "banzai-artifact-request/v2"
+      "const": "banzai-verification-request/v3"
     },
     "schemaVersion": {
-      "const": 2
+      "const": 3
     },
     "repoRoot": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 500
     },
-    "slug": {
+    "roundId": {
+      "type": "string",
+      "pattern": "^[a-f0-9-]{36}$"
+    },
+    "documentPath": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 100,
-      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+      "maxLength": 500
     },
-    "mode": {
+    "workflow": {
       "enum": [
         "strict",
-        "lite",
-        "fix",
-        "workflow"
+        "feature",
+        "quick-fix"
       ]
-    },
-    "creationId": {
-      "type": "string",
-      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     }
   }
 }

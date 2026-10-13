@@ -1,8 +1,7 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile, appendFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, rm, writeFile, appendFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import {
@@ -27,11 +26,12 @@ import { CONTRACT_VERSION } from "../src/types.js";
 import {
   evaluationAttemptFixture,
   evaluationStateFixture,
-  snapshotTree
+  snapshotTree,
+  createTestRepository
 } from "./helpers.js";
 
 async function fixture(status: RunState["status"] = "planning") {
-  const root = await mkdtemp(path.join(tmpdir(), "banzai-cancellation-"));
+  const { root } = await createTestRepository({ artifactLayout: null });
   const boundaries: string[] = [];
   const runner = new WorkflowRunner(
     root,

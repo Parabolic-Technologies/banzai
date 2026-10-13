@@ -9,7 +9,7 @@ import type {
   VerificationDecision,
   VerificationApplicability
 } from "./verification-evidence.js";
-import type { ArtifactBoundWork } from "./artifact-storage.js";
+import type { ArtifactBoundWork } from "./work-documents.js";
 import type {
   ConfigurationAction,
   ConfigurationPrerequisiteRequest,
@@ -76,7 +76,7 @@ export const COMPLETION_PUBLICATION_SCHEMA =
   "banzai-completion-publication/v1" as const;
 export const COMPLETION_RECORD_SCHEMA_VERSION = 1 as const;
 export const COMPLETION_SUMMARY_SCHEMA_VERSION = 2 as const;
-export const RUN_STATE_SCHEMA_VERSION = 8 as const;
+export const RUN_STATE_SCHEMA_VERSION = 9 as const;
 export const COMPLETION_PUBLICATION_STAGES = [
   "capture",
   "validate",
@@ -103,15 +103,15 @@ export const RECOVERY_AUTHORIZATION_SCHEMA_VERSION = 1 as const;
 export const RESULT_DIGEST_EVIDENCE_SCHEMA =
   "banzai-result-digest-evidence/v1" as const;
 export const RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION = 1 as const;
-export const AGENT_CONTROL_CONTRACT_VERSION = "6.0.0" as const;
-export const AGENT_CAPABILITIES_SCHEMA_VERSION = 6 as const;
+export const AGENT_CONTROL_CONTRACT_VERSION = "7.0.0" as const;
+export const AGENT_CAPABILITIES_SCHEMA_VERSION = 7 as const;
 export const AGENT_STATUS_SCHEMA_VERSION = 5 as const;
 export const AGENT_ANSWER_SCHEMA_VERSION = 2 as const;
 export const AGENT_REQUEST_SCHEMA_VERSION = 1 as const;
 export const AGENT_RECOVERY_SCHEMA_VERSION = 1 as const;
 export const LEGACY_AGENT_CONTROL_SCHEMA_VERSION = 1 as const;
 export const AGENT_CAPABILITIES_SCHEMA =
-  "banzai-agent-capabilities/v6" as const;
+  "banzai-agent-capabilities/v7" as const;
 export const AGENT_STATUS_SCHEMA = "banzai-agent-status/v5" as const;
 export const AGENT_REQUEST_SCHEMA = "banzai-agent-request/v1" as const;
 export const AGENT_ANSWER_SCHEMA = "banzai-agent-answer/v2" as const;
@@ -154,11 +154,11 @@ export interface AgentControlCapabilitiesV5 {
   controlContractVersion: typeof AGENT_CONTROL_CONTRACT_VERSION;
   orchestratorVersion: string;
   umbrellaContractVersion: typeof CONTRACT_VERSION;
-  artifactStorage: {
-    declarationSchemas: ["banzai-artifact-layout/v1"];
-    bindingSchemas: ["banzai-work-binding/v1", "banzai-work-binding/v2"];
-    privateWorkspaceSnapshotVersion: 2;
-    layouts: readonly ["legacy", "private"];
+  workDocuments: {
+    directoryPattern: "documentation/work/<slug>/";
+    bindingSchemas: ["banzai-work-binding/v3"];
+    workspaceSnapshotVersion: 3;
+    verificationRequestSchemas: ["banzai-verification-request/v3"];
   };
   configurationPrerequisite: {
     kind: "configuration_prerequisite";
@@ -724,8 +724,9 @@ export interface ReviewSnapshot {
     | "banzai-review-snapshot/v3"
     | "banzai-review-snapshot/v4"
     | "banzai-review-snapshot/v5"
-    | "banzai-review-snapshot/v6";
-  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6;
+    | "banzai-review-snapshot/v6"
+    | "banzai-review-snapshot/v7";
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7;
   verificationMode?: "ordered" | "policy" | "task";
   taskVerification?: TaskVerificationPublication;
   configurationSetup?: ReviewConfigurationSetup;
@@ -1460,7 +1461,7 @@ export interface RunState {
    * the completion protocol is created; new runs still bootstrap at 4 or 6 and
    * keep their configuration/binding combination unchanged across the move.
    */
-  schemaVersion: 3 | 4 | 5 | 6 | 7 | 8;
+  schemaVersion: 3 | 4 | 5 | 6 | 7 | 8 | 9;
   verificationMode?: "ordered" | "policy" | "task";
   taskVerification?: TaskVerificationPublication;
   configurationSetup?: ConfigurationSetupState;

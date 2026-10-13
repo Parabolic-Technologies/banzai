@@ -400,11 +400,11 @@ export function agentControlCapabilities(): AgentControlCapabilitiesV5 {
     controlContractVersion: AGENT_CONTROL_CONTRACT_VERSION,
     orchestratorVersion: packageManifest.version,
     umbrellaContractVersion: CONTRACT_VERSION,
-    artifactStorage: {
-      declarationSchemas: ["banzai-artifact-layout/v1"],
-      bindingSchemas: ["banzai-work-binding/v1", "banzai-work-binding/v2"],
-      privateWorkspaceSnapshotVersion: 2,
-      layouts: ["legacy", "private"]
+    workDocuments: {
+      directoryPattern: "documentation/work/<slug>/",
+      bindingSchemas: ["banzai-work-binding/v3"],
+      workspaceSnapshotVersion: 3,
+      verificationRequestSchemas: ["banzai-verification-request/v3"]
     },
     configurationPrerequisite: {
       kind: "configuration_prerequisite",

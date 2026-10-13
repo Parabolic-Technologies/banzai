@@ -17,7 +17,7 @@ This phase writes planning artifacts and applicable decision documentation; it
 does not implement production code or tests.
 
 Runner control files are outside model write scope. Never plan writes to paths under
-`.banzai/` except the exact private artifact roles bound for the intended phase.
+`.banzai/` without any model write grant.
 Read-only fact checks and explicit constraints preserving those paths are valid
 task context; they grant no write authority.
 Record actual owner-only requirements in **Human prerequisites**. Missing tests

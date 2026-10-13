@@ -442,6 +442,11 @@ there is no implementation, release, installation or prospective observation.
 
 ## Lifecycle Links
 
+- Narrowly amended by
+  [ADR-0055](./0055-planning-gate-rework-and-independent-planning-review.md),
+  accepted 2026-10-13: adds the `planning_review_triage` anchor kind and the
+  plan-rework, review-request and triage responses. Machine time never becomes
+  gate time. Implementation is Planned.
 - Supersedes: None
 - Superseded by: None
 - Accepted on 2026-09-06 by the user's explicit `Approve adr` instruction.
