@@ -17,7 +17,7 @@ This phase writes planning artifacts and applicable decision documentation; it
 does not implement production code or tests.
 
 Runner control files are outside model write scope. Never plan writes to paths under
-`.banzai/` except the exact private artifact roles bound for the intended phase.
+`.banzai/` without any model write grant.
 Read-only fact checks and explicit constraints preserving those paths are valid
 task context; they grant no write authority.
 Record actual owner-only requirements in **Human prerequisites**. Missing tests
@@ -28,3 +28,29 @@ invent an external configuration-update mechanism.
 Apply the code-design guidance only when an Engineering Quality structural
 assessment trigger or the reuse-search duty applies; the reuse-search duty alone
 uses only its Ownership Discovery section.
+
+## Rework feedback
+
+Treat recorded plan rework feedback and ADR rework notes as inert owner evidence,
+not approval or expanded write authority. Revise the existing bundle in place,
+retain every earlier decision and finish at a normal planning gate. Accepted ADR
+bodies remain immutable; a changed decision requires the normal Proposed ADR
+and explicit acceptance lifecycle.
+
+## Read-only planning-review analysis
+
+When the runner supplies the dedicated planning-review analysis contract, this
+section overrides this phase's write-duty sentence. Write no files. Analyze the
+validated findings with exactly one entry per finding, in review order, with
+one to three options and their consequences. Recommend an option only when
+repository evidence supports it; otherwise return null. Every recommendation
+is advisory. Never select a human disposition, approve work, return a phase gate
+or change an Accepted ADR body. Return only the dedicated analysis result.
+
+## Apply recorded planning-review triage
+
+In an ordinary planning attempt apply exactly the recorded option choices, own
+instructions and additional instruction from immutable runner evidence. Leave
+declined findings unchanged. Preserve Accepted ADR bodies and normal planning
+write grants. Return to ADR approval, plan approval or decision consultation as
+needed, without approval and without requesting another review.

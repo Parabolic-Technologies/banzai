@@ -17,6 +17,7 @@ import {
   publishReviewArtifact
 } from "../src/review-artifact.js";
 import { RunStore } from "../src/store.js";
+import { createTestRepository } from "./helpers.js";
 import {
   parseReviewSnapshot,
   reviewApprovedArtifacts
@@ -277,7 +278,7 @@ test("review v2 losslessly renders semantics and frozen runner evidence and reje
 });
 
 test("review v2 snapshot storage is immutable, private, identity-bound and excludes sidecars", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "banzai-snapshot-"));
+  const { root } = await createTestRepository({ artifactLayout: null });
   try {
     const store = new RunStore(root);
     const snapshot = reviewSnapshotFixture();

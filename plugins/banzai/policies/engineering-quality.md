@@ -3,7 +3,7 @@
 - Owner decision: ADR-0030; ADR-0050 (Structural Assessment Triggers)
 - Consumers: `feature-description`, `architecture-decision`, `development-plan`, `code-writing`, `feature-review`, `feature`, `quick-fix`, `project-manifest`; conditional: None
 - Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)
-- Runner consumers: planning, implementation, review, fix, feature, quick-fix.
+- Runner consumers: planning, implementation, review, fix, feature, quick-fix, planning-review.
 - Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.
 
 ## Engineering Quality

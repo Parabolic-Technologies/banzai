@@ -3,6 +3,8 @@ import {
   taskPhaseResultSchema,
   legacyReviewResultSchema,
   reviewResultSchema,
+  planningReviewResultSchema,
+  planningReviewAnalysisSchema,
   workflowSelectionSchema
 } from "./contracts.js";
 import type {
@@ -17,11 +19,26 @@ export function claudeJsonSchema(schema: object): Record<string, unknown> {
 }
 
 function schemaFor(identity: OutputContractIdentity): object {
-  if (identity === "workflow-selection/v1") return workflowSelectionSchema;
-  if (identity === "phase-result/v4") return taskPhaseResultSchema;
-  if (identity === "phase-result/v3") return legacyPhaseResultV3Schema;
-  if (identity === "review-result/v1") return legacyReviewResultSchema;
-  return reviewResultSchema;
+  switch (identity) {
+    case "workflow-selection/v1":
+      return workflowSelectionSchema;
+    case "phase-result/v4":
+      return taskPhaseResultSchema;
+    case "phase-result/v3":
+      return legacyPhaseResultV3Schema;
+    case "review-result/v1":
+      return legacyReviewResultSchema;
+    case "review-result/v2":
+      return reviewResultSchema;
+    case "planning-review-result/v1":
+      return planningReviewResultSchema;
+    case "planning-review-analysis/v1":
+      return planningReviewAnalysisSchema;
+    default: {
+      const unmapped: never = identity;
+      throw new Error(`Unknown output contract: ${String(unmapped)}`);
+    }
+  }
 }
 
 export function resolveOutputContract(

@@ -60,20 +60,12 @@
       "plugins/banzai/contracts/v2/phase-result.schema.json",
       "plugins/banzai/contracts/v2/review-result.schema.json",
       "plugins/banzai/contracts/v3/phase-result.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/acquire-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/archive.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/create-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/export-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/initialize-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/inspect-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/inventory-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/layout.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/release-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/restore-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/result.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/verify-request.schema.json",
       "plugins/banzai/contracts/artifacts/v1/work-binding.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/write-request.schema.json"
+      "plugins/banzai/contracts/artifacts/v3/work-binding.schema.json",
+      "plugins/banzai/contracts/verification/v3/inspect-request.schema.json",
+      "plugins/banzai/contracts/verification/v3/execute-request.schema.json",
+      "plugins/banzai/contracts/v1/planning-review-result.schema.json",
+      "plugins/banzai/contracts/v1/planning-review-analysis.schema.json"
     ],
     "requiredPaths": [
       "plugins/banzai/hooks/spec-gate.cjs",
@@ -111,25 +103,9 @@
       "plugins/banzai/policies/plan-task-completion.md",
       "plugins/banzai/skills/project-manifest/references/layout-migration.md",
       "plugins/banzai/policies/artifact-storage.md",
-      "plugins/banzai/lib/artifact-storage.mjs",
-      "plugins/banzai/scripts/artifacts.cjs",
-      "plugins/banzai/lib/artifact-archive.mjs",
       "plugins/banzai/lib/project-adoption.mjs",
       "plugins/banzai/lib/review-snapshot.mjs",
-      "plugins/banzai/contracts/artifacts/v1/acquire-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/archive.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/create-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/export-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/initialize-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/inspect-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/inventory-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/layout.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/release-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/restore-request.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/result.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/verify-request.schema.json",
       "plugins/banzai/contracts/artifacts/v1/work-binding.schema.json",
-      "plugins/banzai/contracts/artifacts/v1/write-request.schema.json",
       "plugins/banzai/lib/artifact-readers.mjs",
       "plugins/banzai/phases/planning.md",
       "plugins/banzai/phases/implementation.md",
@@ -147,7 +123,22 @@
       "plugins/banzai/guidance/fix.md",
       "plugins/banzai/guidance/manifest.md",
       "plugins/banzai/guidance/code-design.md",
-      "packages/orchestrator/src/phase-resources.ts"
+      "packages/orchestrator/src/phase-resources.ts",
+      "plugins/banzai/lib/work-documents.mjs",
+      "plugins/banzai/lib/work-documents.d.mts",
+      "plugins/banzai/lib/work-binding-history.mjs",
+      "plugins/banzai/lib/project-files.mjs",
+      "plugins/banzai/lib/project-files.d.mts",
+      "plugins/banzai/lib/execution-ownership.mjs",
+      "plugins/banzai/lib/execution-ownership.d.mts",
+      "plugins/banzai/lib/project-adoption.d.mts",
+      "plugins/banzai/lib/review-snapshot.d.mts",
+      "plugins/banzai/contracts/artifacts/v3/work-binding.schema.json",
+      "plugins/banzai/contracts/verification/v3/inspect-request.schema.json",
+      "plugins/banzai/contracts/verification/v3/execute-request.schema.json",
+      "plugins/banzai/contracts/v1/planning-review-result.schema.json",
+      "plugins/banzai/contracts/v1/planning-review-analysis.schema.json",
+      "plugins/banzai/phases/planning-review.md"
     ]
   },
   "contracts": {
@@ -183,29 +174,43 @@
       ]
     },
     "state": {
-      "currentSchemaVersion": 7,
+      "currentSchemaVersion": 10,
       "legacySchemaVersions": [
         1,
         2,
         3,
         4,
         5,
-        6
+        6,
+        7,
+        8,
+        9
       ]
     },
     "agentControl": {
-      "contractVersion": "6.0.0",
-      "capabilities": "banzai-agent-capabilities/v6",
-      "status": "banzai-agent-status/v5",
+      "contractVersion": "8.0.0",
+      "capabilities": "banzai-agent-capabilities/v8",
+      "status": "banzai-agent-status/v6",
       "request": "banzai-agent-request/v1",
       "answer": "banzai-agent-answer/v2",
       "legacyAnswer": "banzai-agent-answer/v1",
       "recovery": "banzai-agent-recovery/v1",
-      "configurationAnswer": "banzai-agent-answer/v3"
+      "configurationAnswer": "banzai-agent-answer/v3",
+      "gateDecision": "banzai-agent-gate-decision/v1",
+      "planningTriageAnswer": "banzai-agent-answer/v4"
     },
     "evaluation": {
       "export": "banzai-evaluation-export/v1",
       "kpi": "banzai-evaluation-kpi/v1"
+    },
+    "planningReview": {
+      "resultPath": "plugins/banzai/contracts/v1/planning-review-result.schema.json",
+      "resultSchema": "banzai-planning-review-result/v1",
+      "resultSchemaVersion": 1,
+      "analysisPath": "plugins/banzai/contracts/v1/planning-review-analysis.schema.json",
+      "analysisSchema": "banzai-planning-review-analysis/v1",
+      "analysisSchemaVersion": 1,
+      "artifactFormat": "banzai-planning-review/v1"
     }
   },
   "orchestrator": {

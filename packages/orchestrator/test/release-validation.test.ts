@@ -134,6 +134,8 @@ const FIXTURE_PATHS = [
   "documentation/decisions/0048-completion-markup-and-viewer-enrichment-boundary.md",
   "documentation/decisions/0049-task-scoped-verification.md",
   "documentation/decisions/0050-triggered-code-design-assessment.md",
+  "documentation/decisions/0054-git-visible-work-artifacts.md",
+  "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md",
   "packages/orchestrator/scripts/check-dist.mjs",
   "packages/orchestrator/scripts/release-version.mjs",
   "packages/orchestrator/scripts/smoke-committed.mjs",
@@ -979,14 +981,14 @@ for (const relativePath of [
   });
 }
 
-test("release validation protects run-state v3-v8 and agent-control 6.0 identities", async () => {
+test("release validation protects run-state v3-v10 and agent-control 8.0 identities", async () => {
   await withFixture(async (root) => {
     const typesPath = path.join(root, "packages/orchestrator/src/types.ts");
     const accepted = await readFile(typesPath, "utf8");
     await writeFile(
       typesPath,
       accepted.replace(
-        "schemaVersion: 3 | 4 | 5 | 6 | 7 | 8;",
+        "schemaVersion: 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;",
         "schemaVersion: 2;"
       ),
       "utf8"
@@ -998,7 +1000,7 @@ test("release validation protects run-state v3-v8 and agent-control 6.0 identiti
     await writeFile(
       typesPath,
       accepted.replace(
-        '"banzai-agent-status/v5" as const',
+        '"banzai-agent-status/v6" as const',
         '"banzai-agent-status/v1" as const'
       ),
       "utf8"
@@ -1006,6 +1008,22 @@ test("release validation protects run-state v3-v8 and agent-control 6.0 identiti
     result = validate(root);
     assert.equal(result.status, 1);
     assert.match(result.stderr, /^CONTRACT_VERSION_MISMATCH /);
+  });
+});
+
+test("release validation refuses stale current state documentation", async () => {
+  await withFixture(async (root) => {
+    const target = path.join(root, "documentation/orchestrator.md");
+    await writeFile(
+      target,
+      (await readFile(target, "utf8")).replaceAll(
+        "New runs start at schema version 10",
+        "New runs start at schema version 9"
+      )
+    );
+    const result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /^DECISION_CONSULTATION_POLICY_DRIFT /);
   });
 });
 
@@ -1033,7 +1051,7 @@ for (const [relativePath, fragment] of [
   ],
   [
     "plugins/banzai/skills/orchestrate/SKILL.md",
-    "exact supported v6 declaration"
+    "exact supported v8 declaration"
   ],
   ["plugins/banzai/skills/orchestrate/SKILL.md", "banzai-agent-answer/v2"],
   [
@@ -1054,11 +1072,11 @@ for (const [relativePath, fragment] of [
   ],
   [
     "plugins/banzai/skills/orchestrate/references/control-protocol.md",
-    "banzai-agent-capabilities/v6"
+    "banzai-agent-capabilities/v8"
   ],
   [
     "plugins/banzai/skills/orchestrate/references/control-protocol.md",
-    'controlContractVersion: "6.0.0"'
+    'controlContractVersion: "8.0.0"'
   ],
   [
     "plugins/banzai/skills/orchestrate/references/control-protocol.md",
@@ -2885,5 +2903,201 @@ test("runner-owned completion annotations admit only the accepted reciprocal ima
     await validateGuidanceExtraction(root);
     const proposal = await describeGuidanceTransition(root);
     assert.match(proposal.predecessorSha256, /^[a-f0-9]{64}$/u);
+  });
+});
+
+test("ADR-0054 lifecycle images require acceptance and reject arbitrary authority edits", async () => {
+  await withFixture(async (root) => {
+    await validateGuidanceExtraction(root);
+    const authority = path.join(
+      root,
+      "documentation/decisions/0049-task-scoped-verification.md"
+    );
+    const original = await readFile(authority, "utf8");
+    for (const changed of [
+      original.replace(
+        "- Amended by [ADR-0054]",
+        "- Broadly amended by [ADR-0054]"
+      ),
+      original + "\nUnaccepted body change.\n"
+    ]) {
+      assert.notEqual(changed, original);
+      await writeFile(authority, changed);
+      await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    }
+    await writeFile(authority, original);
+    const decision = path.join(
+      root,
+      "documentation/decisions/0054-git-visible-work-artifacts.md"
+    );
+    const accepted = await readFile(decision, "utf8");
+    await writeFile(
+      decision,
+      accepted.replace("- Status: Accepted", "- Status: Proposed")
+    );
+    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    await writeFile(decision, accepted);
+    await validateGuidanceExtraction(root);
+  });
+});
+
+test("ADR-0055 admits only the exact accepted ADR-0054 lifecycle annotation", async () => {
+  await withFixture(async (root) => {
+    await validateGuidanceExtraction(root);
+    const authority = path.join(
+      root,
+      "documentation/decisions/0054-git-visible-work-artifacts.md"
+    );
+    const original = await readFile(authority, "utf8");
+    for (const changed of [
+      original.replace(
+        "gains no role. Implementation is Planned.",
+        "gains a role. Implementation is Planned."
+      ),
+      original + "\nUnaccepted decision body.\n"
+    ]) {
+      assert.notEqual(changed, original);
+      await writeFile(authority, changed);
+      await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    }
+    await writeFile(authority, original);
+    const amendment = path.join(
+      root,
+      "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md"
+    );
+    const accepted = await readFile(amendment, "utf8");
+    await writeFile(
+      amendment,
+      accepted.replace("- Status: Accepted", "- Status: Proposed")
+    );
+    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    await writeFile(amendment, accepted);
+    await validateGuidanceExtraction(root);
+  });
+});
+
+test("ADR-0055 authorizes retained orchestrated and supervisor instruction keys", async () => {
+  await withFixture(async (root) => {
+    const retained = path.join(
+      root,
+      "plugins/banzai/skills/architecture-decision/SKILL.md"
+    );
+    const source = await readFile(retained, "utf8");
+    await writeFile(
+      retained,
+      source.replace(
+        "## Orchestrated Mode\n",
+        "## Orchestrated Mode\n\nFixture planning gate evidence.\n"
+      )
+    );
+    await appendFile(
+      path.join(root, "plugins/banzai/skills/orchestrate/SKILL.md"),
+      "\nFixture planning gate evidence.\n"
+    );
+    const proposal = await describeGuidanceTransition(root);
+    assert.deepEqual(
+      proposal.changes.map((change) => change.key),
+      [
+        "plugins/banzai/skills/architecture-decision/SKILL.md#orchestrated",
+        "plugins/banzai/skills/architecture-decision/SKILL.md#skeleton",
+        "plugins/banzai/skills/orchestrate/SKILL.md"
+      ]
+    );
+    const authorization = async (authorityPath: string) => ({
+      schema: "banzai-instruction-authorization/v1",
+      schemaVersion: 1,
+      predecessorSha256: proposal.predecessorSha256,
+      authorities: [
+        {
+          path: authorityPath,
+          sha256: resourceDigest(
+            await readFile(path.join(root, authorityPath))
+          ),
+          scope: "ADR 0055 instruction gate changes"
+        }
+      ],
+      scope: proposal.changes.map((change) => change.key)
+    });
+    await assert.rejects(
+      evolveGuidanceBaseline(
+        root,
+        await authorization(
+          "documentation/decisions/0044-instruction-baseline-evolution.md"
+        ),
+        { check: true }
+      ),
+      /protected instruction transition scope/u
+    );
+    const authorized = await authorization(
+      "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md"
+    );
+    await evolveGuidanceBaseline(root, authorized, { check: true });
+    await evolveGuidanceBaseline(root, authorized);
+    await validateGuidanceExtraction(root);
+  });
+});
+
+test("planning review contract pins reject schema, manifest and release-policy drift", async () => {
+  await withFixture(async (root) => {
+    assert.equal(validate(root).status, 0);
+    for (const family of ["result", "analysis"]) {
+      const relative = `plugins/banzai/contracts/v1/planning-review-${family}.schema.json`;
+      const target = path.join(root, relative);
+      const original = await readFile(target, "utf8");
+      for (const mutate of [
+        (value: Record<string, unknown>) => {
+          value.$id = "https://invalid.local/schema.json";
+        },
+        (value: Record<string, unknown>) => {
+          (value.properties as Record<string, { const: unknown }>).schema = {
+            const: "invalid-schema"
+          };
+        },
+        (value: Record<string, unknown>) => {
+          (
+            value.properties as Record<string, { const: unknown }>
+          ).schemaVersion = { const: 2 };
+        },
+        (value: Record<string, unknown>) => {
+          (
+            value.properties as Record<string, { const: unknown }>
+          ).contractVersion = { const: "2.0.0" };
+        }
+      ]) {
+        await mutateJson(root, relative, mutate);
+        const result = validate(root);
+        assert.notEqual(result.status, 0);
+        assert.match(
+          result.stderr,
+          /CONTRACT_POLICY_DRIFT|CONTRACT_VERSION_MISMATCH/u
+        );
+        await writeFile(target, original);
+      }
+    }
+    const policyPath = path.join(root, "release-policy.json");
+    const originalPolicy = await readFile(policyPath, "utf8");
+    await mutateJson(
+      root,
+      "release-policy.json",
+      (value: Record<string, unknown>) => {
+        const contracts = value.contracts as Record<
+          string,
+          Record<string, unknown>
+        >;
+        const planning = requiredFixture(contracts.planningReview);
+        planning.resultSchemaVersion = 2;
+      }
+    );
+    assert.match(validate(root).stderr, /CONTRACT_POLICY_DRIFT/u);
+    await writeFile(policyPath, originalPolicy);
+    await mutateJson(
+      root,
+      "plugins/banzai/contracts/contract.json",
+      (value: Record<string, unknown>) => {
+        (value.schemas as Record<string, unknown>).planningReviewResult =
+          "./v2/review-result.schema.json";
+      }
+    );
+    assert.match(validate(root).stderr, /INVALID_CONTRACT_REFERENCE/u);
   });
 });

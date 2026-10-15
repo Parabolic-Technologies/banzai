@@ -10,15 +10,16 @@
     if (!info.isFile() || info.isSymbolicLink() || info.size > 65536) throw new Error("Invalid verification request file.");
     const { verificationOperation } = await import("../lib/verification-helper.mjs");
     const request = JSON.parse(await readFile(args[2], "utf8"));
-    version = request.schemaVersion === 2 ? 2 : 1;
+    version = request.schemaVersion >= 2 ? 2 : 1;
     const result = await verificationOperation(args[0], request);
     process.stdout.write(JSON.stringify({ schema: `banzai-verification-result/v${version}`, schemaVersion: version, ok: true, result, error: null }) + "\n");
     if (version === 2 && args[0] === "execute" && !result.applicability?.complete) process.exitCode = 1;
-    if (args[0] === "execute" && result.supported && result.applicability?.dispositions.find((item) => item.checkId === request.checkId)?.kind === "pending") process.exitCode = 1;
+    if (args[0] === "execute" && result.supported && result.applicability?.dispositions?.find((item) => item.checkId === request.checkId)?.kind === "pending") process.exitCode = 1;
   } catch (error) {
     const policyInvalid = error?.code === "VERIFICATION_POLICY_INVALID";
+    const unsupported = error?.code === "VERIFICATION_REQUEST_UNSUPPORTED";
     process.stdout.write(JSON.stringify({ schema: `banzai-verification-result/v${version}`, schemaVersion: version, ok: false, result: null,
-      error: { code: policyInvalid ? "VERIFICATION_POLICY_INVALID" : "VERIFICATION_EVIDENCE_INVALID", message: policyInvalid ? "The declared task verification policy is invalid. Correct verification.policy before execution." : "Verification could not establish valid bound evidence. Inspect configuration, work ownership and retained attempts; keep required checks fresh." } }) + "\n");
+      error: { code: unsupported ? "VERIFICATION_REQUEST_UNSUPPORTED" : policyInvalid ? "VERIFICATION_POLICY_INVALID" : "VERIFICATION_EVIDENCE_INVALID", message: unsupported ? "Use verification request v3 with documentPath and workflow. Legacy executable requests cannot resume historical work." : policyInvalid ? "The declared task verification policy is invalid. Correct verification.policy before execution." : "Verification could not establish valid bound evidence. Inspect configuration, work ownership and retained attempts; keep required checks fresh." } }) + "\n");
     process.exitCode = 1;
   }
 })();

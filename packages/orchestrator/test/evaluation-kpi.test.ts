@@ -664,7 +664,12 @@ test("attempt retry ratio counts failed and interrupted attempts by kind and fai
         runKey: "b",
         attempts: [
           attempt({
-            kind: ev<AttemptReference["kind"]>(null),
+            kind: ev<
+              Exclude<
+                AttemptReference["kind"],
+                "planning_review" | "planning_analysis"
+              >
+            >(null),
             status: ev("completed")
           })
         ]
@@ -781,7 +786,14 @@ test("configuration signatures derive mixed and unknown fail-closed", () => {
     runKey: "c",
     attempts: [
       attempt({ kind: ev("plan") }),
-      attempt({ kind: ev<AttemptReference["kind"]>(null) })
+      attempt({
+        kind: ev<
+          Exclude<
+            AttemptReference["kind"],
+            "planning_review" | "planning_analysis"
+          >
+        >(null)
+      })
     ]
   });
   assert.deepEqual(deriveRunSignature(unattributable), {

@@ -97,6 +97,18 @@ export function decideRetry(facts: RetryFacts): RetryStep {
 
 function decideWithoutAttempt(facts: RetryFacts): RetryStep {
   const { state } = facts;
+  if (
+    state.blockedFrom === "planning" &&
+    (state.planningReview?.active?.step === "reviewing" ||
+      state.planningReview?.active?.step === "analyzing" ||
+      (state.planningReview?.active == null &&
+        state.planningReview?.closed.at(-1)?.outcome === "stale"))
+  )
+    return decided(
+      true,
+      "Read-only planning review checks can be retried explicitly.",
+      null
+    );
   if (state.blockedFrom === "created") {
     return decided(
       true,
@@ -218,7 +230,9 @@ function decideWithAttempt(
     const expectedStatus =
       attempt.kind === "selection"
         ? "selecting"
-        : attempt.kind === "plan"
+        : attempt.kind === "plan" ||
+            attempt.kind === "planning_review" ||
+            attempt.kind === "planning_analysis"
           ? "planning"
           : attempt.kind === "implementation"
             ? "implementing"
@@ -286,7 +300,9 @@ function decideWithAttempt(
   const expectedStatus =
     attempt.kind === "selection"
       ? "selecting"
-      : attempt.kind === "plan"
+      : attempt.kind === "plan" ||
+          attempt.kind === "planning_review" ||
+          attempt.kind === "planning_analysis"
         ? "planning"
         : attempt.kind === "implementation"
           ? "implementing"

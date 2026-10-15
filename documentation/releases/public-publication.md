@@ -8,7 +8,7 @@ and `@parabolic-technologies/banzai` on npm, followed by the verified
 authorization; this document owns the delivery order, the operator commands,
 and the record of what was actually delivered.
 
-Product owner: **Banzai International, Inc. d/b/a Parabolic, Inc. ("Parabolic")**.
+Product owner: **Banzai International, Inc. d/b/a Parabolic ("Parabolic")**.
 Author and contact: Alexander Torosh, `alexander@parabolic.io`. The root npm
 workspace stays `private: true`; only the CLI workspace is published, with
 `publishConfig.access: "public"` and the `https://registry.npmjs.org/` registry.

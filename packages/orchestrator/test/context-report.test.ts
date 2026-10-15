@@ -230,7 +230,7 @@ test("context collector is deterministic read-only and reports historical gaps",
     const second = await collectContextReport(root, options);
 
     assert.deepEqual(second, first);
-    assert.equal(first.schema, "banzai-context-report/v1");
+    assert.equal(first.schema, "banzai-context-report/v2");
     assert.equal(first.cohort.discoveredRunCount, 4);
     assert.equal(first.cohort.includedRunCount, 2);
     assert.deepEqual(first.cohort.unresolvedRunIds, ["run-unresolved"]);

@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 const execute = promisify(execFile);
 const HASH = /^[0-9a-f]{64}$/u;
 const privatePath =
-  /(?:^|\/)\.banzai\/(?:work|runs|preparation)(?:\/|$)|(?:^|\/)\.banzai\/archive-manifest\.json$|(?:^|\/)(?:\.banzai-version-set|\.banzai-archive-[^/]+|\.banzai-restore-[^/]+)(?:\/|$)/u;
+  /(?:^|\/)\.banzai\/(?:work|runs|preparation|verification|execution-locks)(?:\/|$)|(?:^|\/)\.banzai\/archive-manifest\.json$|(?:^|\/)(?:\.banzai-version-set|\.banzai-archive-[^/]+|\.banzai-restore-[^/]+)(?:\/|$)/u;
 const secretPath =
   /(?:^|\/)(?:\.ssh|\.aws|\.gnupg|auth\.json|credentials(?:\.json)?|\.env(?:\.[^/]+)?)(?:\/|$)|\.(?:pem|key|p12|pfx)$/iu;
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -158,23 +158,35 @@ function scanContents(name, bytes) {
       name,
       "Private-key content requires owner handling."
     );
-  if (name.endsWith(".json")) {
-    let value;
-    try {
-      value = JSON.parse(text);
-    } catch {
-      /* Other format checks own malformed source JSON. */
-    }
-    if (
-      ["banzai-artifact-archive/v1", "banzai-work-binding/v1"].includes(
-        value?.schema
+  if (name.endsWith(".json") || /^documentation\/work\//u.test(name)) {
+    const candidates = [
+      text,
+      ...[
+        ...text.matchAll(/^```(?:json)?[ \t]*\r?\n([\s\S]*?)^```[ \t]*$/gmu)
+      ].map((match) => match[1])
+    ];
+    for (const candidate of candidates) {
+      let value;
+      try {
+        value = JSON.parse(candidate);
+      } catch {
+        /* Other format checks own malformed source JSON. */
+      }
+      if (
+        /^banzai-(?:artifact-archive|work-binding|standalone-verification|verification-(?:decision|applicability|origin-start|origin-finish))\/v\d+$/u.test(
+          value?.schema
+        ) ||
+        (value &&
+          typeof value === "object" &&
+          (("runId" in value && "repoRoot" in value) ||
+            ("token" in value && "pid" in value && "directory" in value)))
       )
-    )
-      fail(
-        "PUBLICATION_PRIVATE_CONTENT",
-        name,
-        "An archive or private work instance cannot enter a payload."
-      );
+        fail(
+          "PUBLICATION_PRIVATE_CONTENT",
+          name,
+          "An archive or private work instance cannot enter a payload."
+        );
+    }
   }
   if (name.endsWith(".map")) {
     let map;
@@ -198,7 +210,7 @@ function scanContents(name, bytes) {
       if (
         typeof source !== "string" ||
         privatePath.test(source) ||
-        /(?:^|\/)documentation\/(?:features|development-plans|changes)\//u.test(
+        /(?:^|\/)documentation\/(?:work|features|development-plans|changes)\//u.test(
           source
         ) ||
         secretPath.test(source)
@@ -228,6 +240,15 @@ export function inspectPublicationFiles(
   let historicalExposure = 0;
   for (const [original, bytes] of files) {
     let name = original;
+    if (
+      distribution !== "source" &&
+      /(?:^|\/)documentation\/work\/(?!\.gitkeep$)/u.test(name)
+    )
+      fail(
+        "PUBLICATION_PACKAGE_INVALID",
+        name,
+        "Source-project work documents are excluded from package payloads."
+      );
     if (distribution === "npm") {
       if (!name.startsWith("package/"))
         fail(
@@ -286,7 +307,11 @@ export function inspectPublicationFiles(
       (name.startsWith("documentation/") ||
         name.startsWith("plugins/banzai/") ||
         /\.(?:md|svg|png|jpg|webp)$/iu.test(name)) &&
-      !entry
+      !entry &&
+      !(
+        distribution === "source" &&
+        /^documentation\/work\/[a-z0-9]+(?:-[a-z0-9]+)*\//u.test(name)
+      )
     )
       fail(
         "PUBLICATION_UNCLASSIFIED",

@@ -4,9 +4,9 @@ import path from "node:path";
 import { BanzaiError } from "./errors.js";
 import { runProcess } from "./process.js";
 import {
-  privateArtifactInventory,
+  workDocumentInventory,
   type ArtifactBoundWork
-} from "./artifact-storage.js";
+} from "./work-documents.js";
 
 const GIT_TIMEOUT_MS = 2 * 60 * 1000;
 
@@ -208,7 +208,7 @@ export interface WorkspaceEntry {
 }
 
 export interface WorkspaceSnapshot {
-  schemaVersion?: 2;
+  schemaVersion?: 2 | 3;
   artifactBindingDigest?: string;
   baseCommit: string;
   digest: string;
@@ -342,17 +342,17 @@ export async function workspaceSnapshot(
   const carriedIn = new Map(
     (options.baseline ?? []).map((entry) => [entry.path, entry.sha256])
   );
-  const privateEntries =
+  const documentEntries =
     options.artifactBinding === undefined
       ? []
-      : await privateArtifactInventory(repoRoot, options.artifactBinding);
-  const privateByPath = new Map(
-    privateEntries.map((entry) => [entry.path, entry])
+      : await workDocumentInventory(repoRoot, options.artifactBinding);
+  const documentByPath = new Map(
+    documentEntries.map((entry) => [entry.path, entry])
   );
   const paths = [
     ...new Set([
       ...(await changedRepositoryPaths(repoRoot)),
-      ...privateByPath.keys()
+      ...documentByPath.keys()
     ])
   ]
     .sort()
@@ -360,9 +360,10 @@ export async function workspaceSnapshot(
   const entries: WorkspaceEntry[] = [];
   for (const relativePath of paths) {
     const entry =
-      privateByPath.get(relativePath) ??
+      documentByPath.get(relativePath) ??
       (await describePath(repoRoot, relativePath));
     if (
+      !documentByPath.has(relativePath) &&
       carriedIn.has(relativePath) &&
       carriedIn.get(relativePath) === entry.sha256
     ) {
@@ -372,7 +373,7 @@ export async function workspaceSnapshot(
   }
   if (options.artifactBinding !== undefined) {
     const identity = {
-      version: 2,
+      version: options.artifactBinding.binding.schemaVersion === 3 ? 3 : 2,
       baseCommit,
       artifactBindingDigest: options.artifactBinding.sha256,
       entries
@@ -381,7 +382,7 @@ export async function workspaceSnapshot(
       .update(JSON.stringify(identity))
       .digest("hex");
     return {
-      schemaVersion: 2,
+      schemaVersion: identity.version as 2 | 3,
       baseCommit,
       artifactBindingDigest: identity.artifactBindingDigest,
       digest,

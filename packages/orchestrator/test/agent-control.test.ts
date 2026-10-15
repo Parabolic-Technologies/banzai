@@ -1,3 +1,4 @@
+import { decodePlanningGateDecision } from "../src/agent-control.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import packageManifest from "../package.json" with { type: "json" };
@@ -12,6 +13,93 @@ import {
   renderAgentControlJson
 } from "../src/agent-control.js";
 import { BanzaiError } from "../src/errors.js";
+import {
+  planningEpisode,
+  planningTriageRequest
+} from "./planning-review-fixtures.js";
+
+test("status v6 projects current planning gates, null ADR descriptions and complete triage without private history", () => {
+  for (const gate of ["plan_approval", "adr_approval"] as const) {
+    const current = state({
+      schemaVersion: 10,
+      status:
+        gate === "plan_approval" ? "needs_plan_approval" : "needs_adr_approval",
+      planningReview: { active: null, closed: [] },
+      planArtifacts: {
+        description:
+          gate === "adr_approval"
+            ? null
+            : "documentation/work/task/description.md",
+        plan:
+          gate === "plan_approval" ? "documentation/work/task/plan.md" : null,
+        adrs: ["documentation/decisions/0001-task.md"],
+        implementationReport: null,
+        testReport: null
+      },
+      humanDecisions: [
+        {
+          kind: "plan_rework",
+          feedback: "FORBIDDEN HISTORY FEEDBACK",
+          bundleDigest: "a".repeat(64),
+          decidedBy: "FORBIDDEN OWNER",
+          decidedAt: TIMESTAMP
+        }
+      ]
+    });
+    const projected = projectAgentControlStatus(workflowStatus(current));
+    assert.equal(projected.schema, "banzai-agent-status/v6");
+    assert.equal(projected.schemaVersion, 6);
+    const activeRun = projected.activeRun;
+    assert.ok(activeRun);
+    const pending = activeRun.pendingGate;
+    assert.ok(
+      pending &&
+        (pending.kind === "plan_approval" || pending.kind === "adr_approval")
+    );
+    assert.deepEqual(
+      pending.decisions,
+      gate === "plan_approval"
+        ? ["approve", "rework", "review"]
+        : ["accept", "reject", "rework", "review"]
+    );
+    assert.deepEqual(
+      pending.reviewPaths,
+      gate === "plan_approval"
+        ? [
+            "documentation/work/task/description.md",
+            "documentation/decisions/0001-task.md",
+            "documentation/work/task/plan.md"
+          ]
+        : ["documentation/decisions/0001-task.md"]
+    );
+    assert.doesNotMatch(
+      renderAgentControlJson(projected),
+      /FORBIDDEN|decidedBy|humanDecisions/
+    );
+  }
+  const pending = planningTriageRequest();
+  const episode = planningEpisode({ decidedBy: "FORBIDDEN EPISODE OWNER" });
+  const current = state({
+    schemaVersion: 10,
+    status: "needs_human_decision",
+    planningReview: { active: episode, closed: [] },
+    pendingHumanDecision: pending
+  });
+  pending.runId = current.runId;
+  const projected = projectAgentControlStatus(workflowStatus(current));
+  const activeRun = projected.activeRun;
+  assert.ok(activeRun);
+  assert.equal(activeRun.pendingGate?.kind, "planning_review_triage");
+  assert.deepEqual(activeRun.pendingGate.findings, pending.findings);
+  assert.deepEqual(activeRun.pendingGate.analysis, pending.analysis);
+  assert.equal(activeRun.pendingGate.episodeId, episode.episodeId);
+  assert.equal(activeRun.pendingGate.analysisDigest, episode.analysisDigest);
+  assert.equal(activeRun.nextAction, "answer_planning_review_triage");
+  assert.doesNotMatch(
+    renderAgentControlJson(projected),
+    /FORBIDDEN|decidedBy|humanDecisions/
+  );
+});
 import type {
   ReviewResult,
   RunState,
@@ -232,9 +320,16 @@ function hasCode(code: string): (error: unknown) => boolean {
 
 test("agent control capabilities declare the exact offline v5 operation set", () => {
   const capabilities = agentControlCapabilities();
-  assert.equal(capabilities.schema, "banzai-agent-capabilities/v6");
-  assert.equal(capabilities.schemaVersion, 6);
-  assert.equal(capabilities.controlContractVersion, "6.0.0");
+  assert.equal(capabilities.schema, "banzai-agent-capabilities/v8");
+  assert.equal(capabilities.schemaVersion, 8);
+  assert.deepEqual(capabilities.workDocuments, {
+    directoryPattern: "documentation/work/<slug>/",
+    bindingSchemas: ["banzai-work-binding/v3"],
+    workspaceSnapshotVersion: 3,
+    verificationRequestSchemas: ["banzai-verification-request/v3"]
+  });
+  assert.equal(Object.hasOwn(capabilities, "artifactStorage"), false);
+  assert.equal(capabilities.controlContractVersion, "8.0.0");
   assert.deepEqual(capabilities.completionPublication, {
     protocol: "banzai-completion-protocol/v1",
     stages: [
@@ -253,7 +348,7 @@ test("agent control capabilities declare the exact offline v5 operation set", ()
       "COMPLETION_PUBLICATION_DRIFT",
       "COMPLETION_PUBLICATION_INTEGRITY"
     ],
-    statusSchema: "banzai-agent-status/v5"
+    statusSchema: "banzai-agent-status/v6"
   });
   assert.equal(capabilities.orchestratorVersion, packageManifest.version);
   assert.equal(capabilities.umbrellaContractVersion, CONTRACT_VERSION);
@@ -264,6 +359,7 @@ test("agent control capabilities declare the exact offline v5 operation set", ()
     "approveAdr",
     "approveVerification",
     "approvePlan",
+    "decideGate",
     "triage",
     "resume",
     "retry",
@@ -274,6 +370,7 @@ test("agent control capabilities declare the exact offline v5 operation set", ()
     AGENT_REQUEST_SCHEMA
   ]);
   assert.deepEqual(capabilities.operations.answer.inputSchemas, [
+    "banzai-agent-answer/v4",
     "banzai-agent-answer/v3",
     AGENT_ANSWER_SCHEMA,
     LEGACY_AGENT_ANSWER_SCHEMA
@@ -287,7 +384,7 @@ test("agent control capabilities declare the exact offline v5 operation set", ()
       supported: operation.supported,
       ttyRequired: operation.ttyRequired
     })),
-    Array.from({ length: 11 }, () => ({
+    Array.from({ length: 12 }, () => ({
       supported: true,
       ttyRequired: false
     }))
@@ -739,6 +836,12 @@ test("status projection derives every semantic action from runner state", () => 
           "documentation/features/x/description.md",
           "documentation/decisions/0018-agent-control.md",
           "documentation/development-plans/x/plan.md"
+        ],
+        decisions: ["approve"],
+        reviewPaths: [
+          "documentation/features/x/description.md",
+          "documentation/decisions/0018-agent-control.md",
+          "documentation/development-plans/x/plan.md"
         ]
       });
     }
@@ -762,8 +865,8 @@ test("status projection derives every semantic action from runner state", () => 
     }
   }
   assert.deepEqual(emptyAgentControlStatus(), {
-    schema: "banzai-agent-status/v5",
-    schemaVersion: 5,
+    schema: "banzai-agent-status/v6",
+    schemaVersion: 6,
     activeRun: null
   });
 });
@@ -961,5 +1064,73 @@ test("configuration v3 answers are closed, bounded and preserve literal argv wit
         commands: Array.from({ length: 201 }, () => command)
       }
     })
+  );
+});
+
+test("planning control documents use closed identities and raw UTF-8 bounds", () => {
+  const gate = {
+    schema: "banzai-agent-gate-decision/v1",
+    schemaVersion: 1,
+    runId: "run-planning",
+    gate: "plan_approval",
+    decision: "rework",
+    adrId: null,
+    feedback: "Owner feedback",
+    paths: null
+  };
+  assert.equal(
+    decodePlanningGateDecision(Buffer.from(JSON.stringify(gate))).feedback,
+    "Owner feedback"
+  );
+  for (const invalid of [
+    { ...gate, feedback: null },
+    { ...gate, paths: ["plan.md"] },
+    { ...gate, adrId: "ADR-0001" },
+    { ...gate, decision: "review" },
+    { ...gate, extra: true },
+    { ...gate, feedback: "\ud800" }
+  ])
+    assert.throws(() =>
+      decodePlanningGateDecision(Buffer.from(JSON.stringify(invalid)))
+    );
+  assert.throws(() =>
+    decodePlanningGateDecision(
+      Buffer.from(
+        JSON.stringify(gate).replace(
+          '"runId":"run-planning"',
+          '"runId":"run-planning","runId":"run-other"'
+        )
+      )
+    )
+  );
+  const answer = {
+    schema: "banzai-agent-answer/v4",
+    schemaVersion: 4,
+    runId: "run-planning",
+    episodeId: "planning-episode-12345678",
+    reviewNumber: 1,
+    analysisDigest: "a".repeat(64),
+    dispositions: Array.from({ length: 20 }, (_, index) => ({
+      findingId: `P1-F${index + 1}`,
+      kind: "instruction",
+      optionId: null,
+      instruction: "ї".repeat(1000)
+    })),
+    additionalInstruction: "ї".repeat(4000)
+  };
+  const raw = JSON.stringify(answer);
+  assert.ok(Buffer.byteLength(raw) < 64 * 1024);
+  assert.equal(
+    decodeAgentControlAnswer(Buffer.from(raw)).schema,
+    "banzai-agent-answer/v4"
+  );
+  const escaped = raw.replace(
+    /[^\x00-\x7f]/gu,
+    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`
+  );
+  assert.throws(
+    () => decodeAgentControlAnswer(Buffer.from(escaped)),
+    (error) =>
+      error instanceof BanzaiError && error.code === "CONTROL_INPUT_TOO_LARGE"
   );
 });

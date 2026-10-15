@@ -368,6 +368,12 @@ Implementation and review must confirm all of the following:
 ## Lifecycle Links
 
 - Narrowly amended by
+  [ADR-0055](./0055-planning-gate-rework-and-independent-planning-review.md),
+  accepted 2026-10-13: context ledgers record the `planning_review` and
+  `planning_analysis` attempt kinds under an explicit vocabulary revision.
+  Exact-byte accounting and existing categories are unchanged. Implementation
+  is Planned.
+- Narrowly amended by
   [ADR-0052](./0052-orchestrator-capability-slice-architecture.md), accepted
   2026-09-28: lifts the deferral of broad `WorkflowRunner` decomposition in
   Risks and follow-ups. Context accounting and budget decisions are unchanged.

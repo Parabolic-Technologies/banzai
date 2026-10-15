@@ -56,7 +56,7 @@ test("context CLI reuses export parsing and writes deterministic read-only outpu
       if (args.includes("--json")) {
         assert.equal(
           (JSON.parse(stdout[0] ?? "") as { schema: string }).schema,
-          "banzai-context-report/v1"
+          "banzai-context-report/v2"
         );
       } else {
         assert.match(stdout[0] ?? "", /^# Banzai Context Report/);

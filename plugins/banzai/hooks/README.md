@@ -88,3 +88,10 @@ Current task verification preserves exact bound artifact grants and adds no
 configuration prerequisite gate. The retained legacy `configuration_prerequisite`
 recognition grants no model write to configuration or other runner controls.
 Historical format recognition does not authorize old-run continuation.
+
+Planning-review and planning-analysis attempts are read-only, with no artifact
+write grant. The runner alone publishes planning-review-N.md beside the exact
+bound work documents. The current hook executes state v10 only and retains its
+newer-schema update diagnostic. Binding v3 gains no role. Both structured output
+contracts remain v1 under umbrella 1.0.0; human planning triage is answer v4 in
+control 8.0.0, and never grants plan approval or ADR acceptance.

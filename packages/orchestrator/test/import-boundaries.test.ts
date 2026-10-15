@@ -174,7 +174,7 @@ test("import_boundaries_permissions_are_exact_and_authorized", () => {
   const wildcard = mutablePolicy();
   first(
     first(
-      wildcard.filter((entry) => entry.importer === "src/artifact-storage.ts")
+      wildcard.filter((entry) => entry.importer === "src/work-documents.ts")
     ).runtime
   ).target = "./*";
   const wildcardError = policyError(
@@ -186,7 +186,7 @@ test("import_boundaries_permissions_are_exact_and_authorized", () => {
   const absolute = mutablePolicy();
   first(
     first(
-      absolute.filter((entry) => entry.importer === "src/artifact-storage.ts")
+      absolute.filter((entry) => entry.importer === "src/work-documents.ts")
     ).runtime
   ).target = "/tmp/private.ts";
   const absoluteError = policyError(
@@ -199,7 +199,7 @@ test("import_boundaries_permissions_are_exact_and_authorized", () => {
   first(
     first(
       missingAuthority.filter(
-        (entry) => entry.importer === "src/artifact-storage.ts"
+        (entry) => entry.importer === "src/work-documents.ts"
       )
     ).runtime
   ).authority = "ADR-9999";
@@ -225,7 +225,7 @@ test("import_boundaries_permissions_are_exact_and_authorized", () => {
   const duplicateTarget = mutablePolicy();
   const duplicateEntry = first(
     duplicateTarget.filter(
-      (entry) => entry.importer === "src/artifact-storage.ts"
+      (entry) => entry.importer === "src/work-documents.ts"
     )
   );
   duplicateEntry.runtime = [
@@ -243,7 +243,7 @@ test("import_boundaries_reject_nonexistent_adr_authority", () => {
   const nonexistentAuthority = mutablePolicy();
   const entry = first(
     nonexistentAuthority.filter(
-      (entry) => entry.importer === "src/artifact-storage.ts"
+      (entry) => entry.importer === "src/work-documents.ts"
     )
   );
   entry.authorities = [...entry.authorities, "ADR-9999"];

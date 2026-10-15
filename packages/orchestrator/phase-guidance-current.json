@@ -30,7 +30,7 @@
     "plugins/banzai/guidance/manifest.md#section:Required Sections": "22a8fe01930411a8e2fbd2dd325ac1bddd954ed8c58429bfeb6b5d299826b834",
     "plugins/banzai/guidance/manifest.md#section:Writing Rules": "fefad73ef15ea5a567391a13bd65b1b2a5b8fff8f0b9fe4ea86449750465743d",
     "plugins/banzai/guidance/planning.md#section:Document": "fd9a5595211de0abc5bfa5080864d36a458120c7b2ee106d720a78b9a2574d8a",
-    "plugins/banzai/guidance/planning.md#section:Rules": "43c342f60097731a1abf69c179e7ce57586262436f1bb2abeca6474ca31f2a80",
+    "plugins/banzai/guidance/planning.md#section:Rules": "8a2c4cad12416434bff4ad8d0fcecdd3bd0003935a77b11920dd8d6f5fb8c2b6",
     "plugins/banzai/guidance/requirements.md#section:Clarification Loop": "0c089ae1a72b5a427ce01c7a1a57b95cf2d97ea083690f418a3b83d56986d973",
     "plugins/banzai/guidance/requirements.md#section:Document": "eba0117ecb6e24ad2cc8ab882fb1cd633683b5545c9e7ff2de9d6a8bbf166e91",
     "plugins/banzai/guidance/requirements.md#section:Rules": "9cf4fbd6f8ea74486dc9be0635423c1f632defa2c6d01bc9ec81575d4a89490c",
@@ -38,66 +38,68 @@
     "plugins/banzai/guidance/review.md#section:Engineering Quality Shadow Procedure": "56593ce0d446c6f3b08cb90421b8ace416517f384179cf11344d0290a2330efb",
     "plugins/banzai/guidance/review.md#section:Read": "4557812a227d34babfdbc399d5c4676ad83011924ab3d14101c024d1345faadb",
     "plugins/banzai/hooks/hooks.json": "eb5bce1be31c2dde64a55ae9af27fe0c176cedc911a76209aa5110493238f3a9",
-    "plugins/banzai/hooks/spec-gate.cjs": "1aed9a6657d6c015bc96e644446c7fd7ed497c49bbf6cf577a0b417528be1583",
+    "plugins/banzai/hooks/spec-gate.cjs": "5c31234cc52973c9132455d59a25af76455d24f4dae8370f2935e3f42b7701d6",
     "plugins/banzai/phases/feature.md": "a300090a34a4f109b4ab4f18ee4eb41edb245f074ab69c2295c45a476bf9be33",
     "plugins/banzai/phases/fix.md": "7f16eb14d308e7d4f8a59cf12445afc1efbcb3c93ad1da8f83911528235634c1",
     "plugins/banzai/phases/implementation.md": "4f8e6fd1a2fed3c463bfc39342f65eabf70848e52d00cb6b18db1eed886a4c6c",
-    "plugins/banzai/phases/planning.md": "cc129bc700c876a0f9a0363cf807c70e0af56300ef6a4a7952d919dfa9581042",
+    "plugins/banzai/phases/planning-review.md": "feee0ef743d8d802eb83ce70acd1dc82fad6ebf76659bc1b843e22b9094f0133",
+    "plugins/banzai/phases/planning.md": "862ce2cdc932847da787b698f0e321ee151dbbefe2554044592820f2b8554096",
     "plugins/banzai/phases/quick-fix.md": "2acd0d7af182c2f77126a4e632639a7dc68627dfe7edf8c856d881b1726dccf1",
-    "plugins/banzai/phases/review.md": "d3872fcb85d60973ca9fac94a0b17c1923b3cd0e1510c5d4ef72e5a2b5834285",
-    "plugins/banzai/policies/artifact-storage.md": "3782a4e10a89df095d686db123148992e5a2d745a3d7bd6a013308b2837847fa",
+    "plugins/banzai/phases/review.md": "bae167a98386f417f1be0d9028059a038456a0b7f5dc970030818c23ba0c277c",
+    "plugins/banzai/policies/artifact-storage.md": "669162b5d4fbf452cbdd692e31105c7b2d5e0acb4337d67cab4b17ad7577b1ca",
     "plugins/banzai/policies/decision-consultation.md": "82a869ef55849063b96742f5a60474bcf54492b737ca2703380d4a53f46f26d5",
-    "plugins/banzai/policies/engineering-quality.md": "f67052be05d810fbc41bcdd813fb9f47c7d0f96dcba2771cbd2de02249d986a9",
-    "plugins/banzai/policies/plan-task-completion.md": "f3b9f2c07a7dff175acfa5d8d0b7f9d1456cfc40bbf816dc95441f8d742274ed",
-    "plugins/banzai/policies/security-assurance.md": "b42cef3a0ccec8e4ba5e23057a4c788fc32227e9a3bca454d9d82d43589d4b74",
-    "plugins/banzai/policies/test-assurance.md": "f24f2b2a1cf9ae18e5a44f196df000362bf0aeb24ef5de05be5e3e55550826bf",
+    "plugins/banzai/policies/engineering-quality.md": "36fdf0cc236d13d136bcba2421ca0e2833176f180014324785a200d9cbfe0cc8",
+    "plugins/banzai/policies/plan-task-completion.md": "953466e31093a9ae5842e711f16b95eccafa74dbdc3e1351081dfff9e6895d35",
+    "plugins/banzai/policies/security-assurance.md": "bc28ae35b90fba8b899141765e98a3e7a72c72e676ddefcd8546f2976bd25a67",
+    "plugins/banzai/policies/test-assurance.md": "5cfbb6eca3931f047494208527a531554aa9ec15e822dc10c606cc439b419860",
+    "plugins/banzai/skills/architecture-decision/SKILL.md#orchestrated": "95746ad61765c0d1105284aba1ba0218bfe1a168fe799f023d188237df44c7b9",
     "plugins/banzai/skills/architecture-decision/SKILL.md#section:ADR Document": "2b4da2dc5ba95ccb30b50dc4b7b5d563a28382fa9b3de32f7be1a28665bfbbc2",
     "plugins/banzai/skills/architecture-decision/SKILL.md#section:Apply The Decision": "ffe4012bf50abea49fe893470266f4c207a7f09b5657efebf3c592e77974079f",
     "plugins/banzai/skills/architecture-decision/SKILL.md#section:Lifecycle": "ae77cfc5bbea06e176855a94568b810e90711e3c36b03d2e50f99523ae4e00f3",
     "plugins/banzai/skills/architecture-decision/SKILL.md#section:Proposal": "2d8b77ed4b5df04462419000fe9703b69ce368ec35e7eb7c870c3867696cd9b8",
-    "plugins/banzai/skills/architecture-decision/SKILL.md#skeleton": "ee504be2d88dc4fb61b55280a731c72d84a5a5c21c1c79d68acd92f3d56b1f68",
-    "plugins/banzai/skills/code-writing/SKILL.md#orchestrated": "d4ca1b3b67f72b010bfe383852f123fdbc320e94d69b3aac0aa5981fb03256af",
+    "plugins/banzai/skills/architecture-decision/SKILL.md#skeleton": "9a8a832cbbbeb6f7addec9a44c28157fe22080cfe624aeb33d984871a50a1aa2",
+    "plugins/banzai/skills/code-writing/SKILL.md#orchestrated": "7702756f16e311468325f389e0d2b92c144da8cc58796f9f0dc712cdeada7567",
     "plugins/banzai/skills/code-writing/SKILL.md#section:Deviations": "0d7910a8f6e373dcdd630cf1e60de693c1c2861f203268770c0a0cb2bda2c285",
     "plugins/banzai/skills/code-writing/SKILL.md#section:Final Verification": "2ba9e7aa4edae8d103aa1ee525e22bb8e69f22c3db3f42b409b9172ce12f49f7",
     "plugins/banzai/skills/code-writing/SKILL.md#section:Implementation Report": "7b19085f138feee83a32e5a77e11ba3d7940b2ec56e484c22bccfad92d5a697c",
     "plugins/banzai/skills/code-writing/SKILL.md#section:Implementation Rules": "ee9a7c98be224dc74ebc71422eae0c80e7cb232fad99f94cfdc46c7bec05ff51",
-    "plugins/banzai/skills/code-writing/SKILL.md#skeleton": "378e4ff9c203511fc55d743e10182736f716070a3e8f527a90b16378a9818605",
-    "plugins/banzai/skills/development-plan/SKILL.md#orchestrated": "2476e4babad02ea3968174759626ab34c7de0c4e87479abadb65d18a7581dfa7",
+    "plugins/banzai/skills/code-writing/SKILL.md#skeleton": "fb46f1c8310c7be05cc9bcd61b8a7958fc4f599efda60db1ff41303708c7f6db",
+    "plugins/banzai/skills/development-plan/SKILL.md#orchestrated": "e23cfa6dca260f0844db821e51ee25d65a0c9e087e2ecb0e75f5065fc1874506",
     "plugins/banzai/skills/development-plan/SKILL.md#section:Document": "e21d42ab849aa5734f0a9a377c9ff21bc19acd75f8dd95593c50bf659496216d",
     "plugins/banzai/skills/development-plan/SKILL.md#section:Rules": "0e03238133dc098c702f7e4000413c73f2ce0d15a82f8b50150d0e9c66f88c53",
-    "plugins/banzai/skills/development-plan/SKILL.md#skeleton": "15fcc8da67a280fa50be243b8a883fa402929fbd073ceba872a728efe5baae38",
+    "plugins/banzai/skills/development-plan/SKILL.md#skeleton": "6c5745aeadd07dc9f05210887a652c498086bedcb6237236d33661d8fcc33789",
     "plugins/banzai/skills/feature-description/SKILL.md#section:Clarification Loop": "8bbc07dea9015ca6d9dbcb65e86220564a93f2e7cd417e77f998c6f2e254f152",
     "plugins/banzai/skills/feature-description/SKILL.md#section:Document": "f01000bf0349da3e7863ba26e31af0ccabca3c2bae7f1ddc0f3b4ae6a149a021",
     "plugins/banzai/skills/feature-description/SKILL.md#section:Rules": "360e107f38f0ec8f1e2db7f6be535990122b06788bfd139e96fb8ba2fdb3fbf1",
-    "plugins/banzai/skills/feature-description/SKILL.md#skeleton": "56c1c9cab2eff3a3688b10d1849b112e57ebc7c5548808ae045e9719fb809ae2",
+    "plugins/banzai/skills/feature-description/SKILL.md#skeleton": "10a5512dab2c73d674ac2581709715f1cd120cf9c9d0d22b8c6dbcd7514d3b00",
     "plugins/banzai/skills/feature-review/SKILL.md#section:Audit": "f17c6db47806cb534f022b04193e97ca0ae10dad7c3b236587cc792cd1fbce46",
     "plugins/banzai/skills/feature-review/SKILL.md#section:Engineering Quality Shadow Procedure": "e67bde92713d55f5f8e1c77342df1d519cea8e041f8806de7b281169ddd539dc",
     "plugins/banzai/skills/feature-review/SKILL.md#section:Read": "fa6f54a4e7eec1e116af6ed7fb945f4c6d07d89178a05bb127371d5f5c036a41",
-    "plugins/banzai/skills/feature-review/SKILL.md#skeleton": "f23d72cf6532939b09e9c3841acceec0bd3f9e9868a188612ee9e5080acd6455",
-    "plugins/banzai/skills/feature-status/SKILL.md": "4e6796079722b1599b8c818aff27fc9645a306cca2afcffc52751eedc448cc2f",
+    "plugins/banzai/skills/feature-review/SKILL.md#skeleton": "c02248f2a130d30142b260fb8f1905ef4be1ddfcb36043b54ae7c9da36205637",
+    "plugins/banzai/skills/feature-status/SKILL.md": "b11d788c893120f5be8814aba27063accf7eab645cd7f377820ef82c79c0ea7b",
     "plugins/banzai/skills/feature/SKILL.md#orchestrated": "6a7d57695d5e1734ea3d5a6e5693dfac5d1dfedd6ea9cc3bfa72fd4cf32f8787",
     "plugins/banzai/skills/feature/SKILL.md#section:`work.md`": "e1aa62db0b9d9411e270fb720510106fd93605aff7317a381a84fce000b8d767",
     "plugins/banzai/skills/feature/SKILL.md#section:Rules": "d9fa280ba5acedfe8fb9bc966c209c3516ef5fce1a2d4c90837768906eaa7a8c",
     "plugins/banzai/skills/feature/SKILL.md#section:Workflow": "e15490d99837a03b6efef9026e418baf0ce17b3228aebcb0c48361645c0b0578",
-    "plugins/banzai/skills/feature/SKILL.md#skeleton": "deca42b1d40d1353f82f2d7001d138eab77bf60d683da7adc86d45d2e7a6ac4d",
-    "plugins/banzai/skills/orchestrate/SKILL.md": "0a3077a96411f017c336cc9f30f8a76bffcb3304efe81d120713b3212cad57e6",
+    "plugins/banzai/skills/feature/SKILL.md#skeleton": "dbe6eedc84a0d7c52391c7d0609a8fd18f9057cea89df9cb06eb21ef13ec852e",
+    "plugins/banzai/skills/orchestrate/SKILL.md": "f7a975167250875abe0a2d4140e5ddc60f6fdae990275b9504b52769e867def1",
     "plugins/banzai/skills/project-manifest/SKILL.md#section:Checklist": "1a49bc5351e1b4d8da7539be676862b42d51e0bd647c1162ea33481875b7b282",
     "plugins/banzai/skills/project-manifest/SKILL.md#section:Maintenance": "3f3f730a748133ad617d3174f29c354809747bb6d9dcf1eaec8f8e1872a736e9",
     "plugins/banzai/skills/project-manifest/SKILL.md#section:Required Sections": "09de6e4168e59fc6c3b871d31a1e23ab3a7e027a8b0e8f27c3a5dbad5f77ca54",
     "plugins/banzai/skills/project-manifest/SKILL.md#section:Writing Rules": "1a65dac6a7a1437fba0b46675a8895b08846334846ae2f176160dcff548871a4",
-    "plugins/banzai/skills/project-manifest/SKILL.md#skeleton": "62d954a93ee1a0b4f3f48e37e941390b3318786725b6a24ddf9cd943f315c396",
+    "plugins/banzai/skills/project-manifest/SKILL.md#skeleton": "2f1e0001aaadc66feaadc6f9c167c97c595cd87e37620c067b4729c17eceff1e",
     "plugins/banzai/skills/quick-fix/SKILL.md#orchestrated": "5cfcd8e07b9d26a2c28ad8d2f7343cc8e613b30a478f9cb4ac9191914e1dc403",
     "plugins/banzai/skills/quick-fix/SKILL.md#section:Change Report": "ec4049539973e80f78450b38b59ccf376674fc3d8f44a2caad68cc9bac510e7f",
     "plugins/banzai/skills/quick-fix/SKILL.md#section:Report Rule": "2200adba089c3c585b554b1b0a9cabe3f0f74e6ac1d8cd45c91103b7e770da39",
     "plugins/banzai/skills/quick-fix/SKILL.md#section:Workflow": "5f80e2b98fd2062d16ae1081bab3d6d91d7fe189ad6bdfe6c51589bf73884038",
-    "plugins/banzai/skills/quick-fix/SKILL.md#skeleton": "4ea4945df11e300d42b7af3c29cd746301af40a6010852df1d94e041ee7afa8a",
+    "plugins/banzai/skills/quick-fix/SKILL.md#skeleton": "9ff6428c5069fdf89ee04de22c0a20cdbe0c660aab069e99f5a5b1120953c188",
     "plugins/banzai/skills/test-writing/SKILL.md#orchestrated": "42ccd21e5794914c85cb6e325ae2031f822cacba2dd88cecac51bb7c65bd3cbb",
     "plugins/banzai/skills/test-writing/SKILL.md#section:Critique Loop": "56e22fd9a79f8a4f299bf3292c9f445a9915a3a8e6c3b4c2e64bdba1e72845dc",
     "plugins/banzai/skills/test-writing/SKILL.md#section:Rules": "26650deaa4670e2075c821f7e3b32d0044854cb6883e1589bd64827e85836a1f",
     "plugins/banzai/skills/test-writing/SKILL.md#section:Suite Runs": "84bcf2d1b88c8fe5ebbca84e3a510ffed985190ee52a53b4e7a35d715db9da2f",
     "plugins/banzai/skills/test-writing/SKILL.md#section:Test Report": "a8a7c5a336b8f398caee7b476ede130318590eda4e526fc5a75e0b61457283f9",
     "plugins/banzai/skills/test-writing/SKILL.md#section:What To Test": "7562f5bf5a5181bdc7f2e3bb364903ae68cb6faceb13ed40adcfe56069124700",
-    "plugins/banzai/skills/test-writing/SKILL.md#skeleton": "20766d3af75c2b907febd213a7ca96d4de32fd4060b08a7efc340d169c27881e"
+    "plugins/banzai/skills/test-writing/SKILL.md#skeleton": "5ab5e68eea07a994a270ab07ff2c329e28462bdb01c74f815f116adf7252631e"
   },
   "transitions": [
     {
@@ -735,6 +737,284 @@
           "key": "plugins/banzai/skills/quick-fix/SKILL.md#skeleton",
           "before": "a3ef97d41b3ddb6e82abd008fc4f4a64a910335a00a08f5792b08ac6129a109a",
           "after": "4ea4945df11e300d42b7af3c29cd746301af40a6010852df1d94e041ee7afa8a"
+        }
+      ]
+    },
+    {
+      "predecessorSha256": "16c12e3e63dc030bc3e0246e6e9038898d3f3e51d51ce5d32ba391f09af58f7b",
+      "successorSha256": "18d192132d11a28e9293f10d238d7575043952d559997a073b2026d918b277be",
+      "authorities": [
+        {
+          "path": "documentation/decisions/0054-git-visible-work-artifacts.md",
+          "sha256": "6ea561ebbd90f390155520129e7cddd4ae417eb00ae069eca091e782be824664",
+          "scope": "Tracked work documents and bounded execution integration under ADR-0054."
+        }
+      ],
+      "changes": [
+        {
+          "key": "plugins/banzai/guidance/planning.md#section:Rules",
+          "before": "43c342f60097731a1abf69c179e7ce57586262436f1bb2abeca6474ca31f2a80",
+          "after": "8a2c4cad12416434bff4ad8d0fcecdd3bd0003935a77b11920dd8d6f5fb8c2b6"
+        },
+        {
+          "key": "plugins/banzai/hooks/spec-gate.cjs",
+          "before": "1aed9a6657d6c015bc96e644446c7fd7ed497c49bbf6cf577a0b417528be1583",
+          "after": "a2adb42ccd1e6c269a00e472e160b6fdff1905a0e0d81e711fefc9f06f94b9ad"
+        },
+        {
+          "key": "plugins/banzai/phases/planning.md",
+          "before": "cc129bc700c876a0f9a0363cf807c70e0af56300ef6a4a7952d919dfa9581042",
+          "after": "7ff1e98e1921fe87687cbd0f74853278dffb381f94dea0e1887a40ba8335f234"
+        },
+        {
+          "key": "plugins/banzai/phases/review.md",
+          "before": "d3872fcb85d60973ca9fac94a0b17c1923b3cd0e1510c5d4ef72e5a2b5834285",
+          "after": "bae167a98386f417f1be0d9028059a038456a0b7f5dc970030818c23ba0c277c"
+        },
+        {
+          "key": "plugins/banzai/policies/artifact-storage.md",
+          "before": "3782a4e10a89df095d686db123148992e5a2d745a3d7bd6a013308b2837847fa",
+          "after": "276e1d7254f470c6338f6290e660f353d4b5dad1d9c75967e56b58184508bdd1"
+        },
+        {
+          "key": "plugins/banzai/skills/architecture-decision/SKILL.md#skeleton",
+          "before": "ee504be2d88dc4fb61b55280a731c72d84a5a5c21c1c79d68acd92f3d56b1f68",
+          "after": "2fa352d5de058aeffb28ae8b8ad988e7c17e3f3c983481ea58fb9991cd908bce"
+        },
+        {
+          "key": "plugins/banzai/skills/code-writing/SKILL.md#orchestrated",
+          "before": "d4ca1b3b67f72b010bfe383852f123fdbc320e94d69b3aac0aa5981fb03256af",
+          "after": "7702756f16e311468325f389e0d2b92c144da8cc58796f9f0dc712cdeada7567"
+        },
+        {
+          "key": "plugins/banzai/skills/code-writing/SKILL.md#skeleton",
+          "before": "378e4ff9c203511fc55d743e10182736f716070a3e8f527a90b16378a9818605",
+          "after": "61ae355a438822983fc2c2a1c85ad4b750792a0a66b16b64a2d14453e58e4f25"
+        },
+        {
+          "key": "plugins/banzai/skills/development-plan/SKILL.md#skeleton",
+          "before": "15fcc8da67a280fa50be243b8a883fa402929fbd073ceba872a728efe5baae38",
+          "after": "6252051ad2701cb38aae031a431574c415d19cdaf8b695f7944d05f2b07dfd36"
+        },
+        {
+          "key": "plugins/banzai/skills/feature-description/SKILL.md#skeleton",
+          "before": "56c1c9cab2eff3a3688b10d1849b112e57ebc7c5548808ae045e9719fb809ae2",
+          "after": "e17215543877bc2836f38a3a9fe0d945359014ee9bc6914a5d6d6f6fc8c430f7"
+        },
+        {
+          "key": "plugins/banzai/skills/feature-review/SKILL.md#skeleton",
+          "before": "f23d72cf6532939b09e9c3841acceec0bd3f9e9868a188612ee9e5080acd6455",
+          "after": "1b3ab74003f2ef12445cc0c0b14cd0ce1a6913f4b9e670b4ff0b696ac20ee0d7"
+        },
+        {
+          "key": "plugins/banzai/skills/feature-status/SKILL.md",
+          "before": "4e6796079722b1599b8c818aff27fc9645a306cca2afcffc52751eedc448cc2f",
+          "after": "7524ecffb97bc05c7441db7a5f1dbed65a418b9ec8b66d610ff2d8eeb0259be5"
+        },
+        {
+          "key": "plugins/banzai/skills/feature/SKILL.md#skeleton",
+          "before": "deca42b1d40d1353f82f2d7001d138eab77bf60d683da7adc86d45d2e7a6ac4d",
+          "after": "6cd5fc3cef9e200e0b0b3e82019dfa4e4e883c1e49ed62ebfc81f2651fca4659"
+        },
+        {
+          "key": "plugins/banzai/skills/project-manifest/SKILL.md#skeleton",
+          "before": "62d954a93ee1a0b4f3f48e37e941390b3318786725b6a24ddf9cd943f315c396",
+          "after": "137672d720336e9633ca16c85eb8b026f5594e16f226b4e58c387d87b5ce7c4b"
+        },
+        {
+          "key": "plugins/banzai/skills/quick-fix/SKILL.md#skeleton",
+          "before": "4ea4945df11e300d42b7af3c29cd746301af40a6010852df1d94e041ee7afa8a",
+          "after": "b67c5c2748b2031689438afcc7dc3e6fa1020182d29c552bccf4f3cede423d2e"
+        },
+        {
+          "key": "plugins/banzai/skills/test-writing/SKILL.md#skeleton",
+          "before": "20766d3af75c2b907febd213a7ca96d4de32fd4060b08a7efc340d169c27881e",
+          "after": "76ea827bf10e1e19ae28fae1d7daafeff3fe5169c9cad419838ef32a78a73c86"
+        }
+      ]
+    },
+    {
+      "predecessorSha256": "18d192132d11a28e9293f10d238d7575043952d559997a073b2026d918b277be",
+      "successorSha256": "a56483ce9489f7a4ba5b0cba63ab3917f75be5dec195cfd12bdfc3fac7c1f9be",
+      "authorities": [
+        {
+          "path": "documentation/decisions/0054-git-visible-work-artifacts.md",
+          "sha256": "6ea561ebbd90f390155520129e7cddd4ae417eb00ae069eca091e782be824664",
+          "scope": "Tracked work documents and bounded execution integration under ADR-0054."
+        }
+      ],
+      "changes": [
+        {
+          "key": "plugins/banzai/skills/orchestrate/SKILL.md",
+          "before": "0a3077a96411f017c336cc9f30f8a76bffcb3304efe81d120713b3212cad57e6",
+          "after": "4fa691f5353c65bee7c5704b72195d9dd421c68e6661545049925ad1bdba6ea3"
+        }
+      ]
+    },
+    {
+      "predecessorSha256": "a56483ce9489f7a4ba5b0cba63ab3917f75be5dec195cfd12bdfc3fac7c1f9be",
+      "successorSha256": "4c3b5608de74fc422f5bee20e89443608533853de47a645668f6d1ca217733c4",
+      "authorities": [
+        {
+          "path": "documentation/decisions/0054-git-visible-work-artifacts.md",
+          "sha256": "6ea561ebbd90f390155520129e7cddd4ae417eb00ae069eca091e782be824664",
+          "scope": "Tracked work documents and bounded execution integration under ADR-0054."
+        }
+      ],
+      "changes": [
+        {
+          "key": "plugins/banzai/skills/architecture-decision/SKILL.md#skeleton",
+          "before": "2fa352d5de058aeffb28ae8b8ad988e7c17e3f3c983481ea58fb9991cd908bce",
+          "after": "39c8443cc9f146d9763c90af1a9245ab34176fce9d63a1b139d97fdabf6754da"
+        },
+        {
+          "key": "plugins/banzai/skills/code-writing/SKILL.md#skeleton",
+          "before": "61ae355a438822983fc2c2a1c85ad4b750792a0a66b16b64a2d14453e58e4f25",
+          "after": "fb46f1c8310c7be05cc9bcd61b8a7958fc4f599efda60db1ff41303708c7f6db"
+        },
+        {
+          "key": "plugins/banzai/skills/development-plan/SKILL.md#skeleton",
+          "before": "6252051ad2701cb38aae031a431574c415d19cdaf8b695f7944d05f2b07dfd36",
+          "after": "02c30749def4371e847938c863869daae2f193ed17293d17bfb05b7a102571e8"
+        },
+        {
+          "key": "plugins/banzai/skills/feature-description/SKILL.md#skeleton",
+          "before": "e17215543877bc2836f38a3a9fe0d945359014ee9bc6914a5d6d6f6fc8c430f7",
+          "after": "10a5512dab2c73d674ac2581709715f1cd120cf9c9d0d22b8c6dbcd7514d3b00"
+        },
+        {
+          "key": "plugins/banzai/skills/feature-review/SKILL.md#skeleton",
+          "before": "1b3ab74003f2ef12445cc0c0b14cd0ce1a6913f4b9e670b4ff0b696ac20ee0d7",
+          "after": "c02248f2a130d30142b260fb8f1905ef4be1ddfcb36043b54ae7c9da36205637"
+        },
+        {
+          "key": "plugins/banzai/skills/feature-status/SKILL.md",
+          "before": "7524ecffb97bc05c7441db7a5f1dbed65a418b9ec8b66d610ff2d8eeb0259be5",
+          "after": "b11d788c893120f5be8814aba27063accf7eab645cd7f377820ef82c79c0ea7b"
+        },
+        {
+          "key": "plugins/banzai/skills/feature/SKILL.md#skeleton",
+          "before": "6cd5fc3cef9e200e0b0b3e82019dfa4e4e883c1e49ed62ebfc81f2651fca4659",
+          "after": "dbe6eedc84a0d7c52391c7d0609a8fd18f9057cea89df9cb06eb21ef13ec852e"
+        },
+        {
+          "key": "plugins/banzai/skills/project-manifest/SKILL.md#skeleton",
+          "before": "137672d720336e9633ca16c85eb8b026f5594e16f226b4e58c387d87b5ce7c4b",
+          "after": "2f1e0001aaadc66feaadc6f9c167c97c595cd87e37620c067b4729c17eceff1e"
+        },
+        {
+          "key": "plugins/banzai/skills/quick-fix/SKILL.md#skeleton",
+          "before": "b67c5c2748b2031689438afcc7dc3e6fa1020182d29c552bccf4f3cede423d2e",
+          "after": "9ff6428c5069fdf89ee04de22c0a20cdbe0c660aab069e99f5a5b1120953c188"
+        },
+        {
+          "key": "plugins/banzai/skills/test-writing/SKILL.md#skeleton",
+          "before": "76ea827bf10e1e19ae28fae1d7daafeff3fe5169c9cad419838ef32a78a73c86",
+          "after": "5ab5e68eea07a994a270ab07ff2c329e28462bdb01c74f815f116adf7252631e"
+        }
+      ]
+    },
+    {
+      "predecessorSha256": "4c3b5608de74fc422f5bee20e89443608533853de47a645668f6d1ca217733c4",
+      "successorSha256": "bd20b34f96db85ce233f9f75df8c0bda23b87e09c85353d1ca15d0b996898556",
+      "authorities": [
+        {
+          "path": "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md",
+          "sha256": "3dbdeaca1a070f0526efda31842c55a24c0cb4792f8311a81df611664bf92caa",
+          "scope": "Implement the accepted planning rework and independent planning review decision."
+        }
+      ],
+      "changes": [
+        {
+          "key": "plugins/banzai/hooks/spec-gate.cjs",
+          "before": "a2adb42ccd1e6c269a00e472e160b6fdff1905a0e0d81e711fefc9f06f94b9ad",
+          "after": "5c31234cc52973c9132455d59a25af76455d24f4dae8370f2935e3f42b7701d6"
+        }
+      ]
+    },
+    {
+      "predecessorSha256": "bd20b34f96db85ce233f9f75df8c0bda23b87e09c85353d1ca15d0b996898556",
+      "successorSha256": "c013ca38e747e2184f9203ec59cd86109a66b9d939539566f07fb42d597f32ea",
+      "authorities": [
+        {
+          "path": "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md",
+          "sha256": "3dbdeaca1a070f0526efda31842c55a24c0cb4792f8311a81df611664bf92caa",
+          "scope": "Implement the accepted planning rework and independent planning review decision."
+        }
+      ],
+      "changes": [
+        {
+          "key": "plugins/banzai/phases/planning-review.md",
+          "before": null,
+          "after": "feee0ef743d8d802eb83ce70acd1dc82fad6ebf76659bc1b843e22b9094f0133"
+        },
+        {
+          "key": "plugins/banzai/phases/planning.md",
+          "before": "7ff1e98e1921fe87687cbd0f74853278dffb381f94dea0e1887a40ba8335f234",
+          "after": "862ce2cdc932847da787b698f0e321ee151dbbefe2554044592820f2b8554096"
+        },
+        {
+          "key": "plugins/banzai/policies/artifact-storage.md",
+          "before": "276e1d7254f470c6338f6290e660f353d4b5dad1d9c75967e56b58184508bdd1",
+          "after": "669162b5d4fbf452cbdd692e31105c7b2d5e0acb4337d67cab4b17ad7577b1ca"
+        },
+        {
+          "key": "plugins/banzai/policies/engineering-quality.md",
+          "before": "f67052be05d810fbc41bcdd813fb9f47c7d0f96dcba2771cbd2de02249d986a9",
+          "after": "36fdf0cc236d13d136bcba2421ca0e2833176f180014324785a200d9cbfe0cc8"
+        },
+        {
+          "key": "plugins/banzai/policies/plan-task-completion.md",
+          "before": "f3b9f2c07a7dff175acfa5d8d0b7f9d1456cfc40bbf816dc95441f8d742274ed",
+          "after": "953466e31093a9ae5842e711f16b95eccafa74dbdc3e1351081dfff9e6895d35"
+        },
+        {
+          "key": "plugins/banzai/policies/security-assurance.md",
+          "before": "b42cef3a0ccec8e4ba5e23057a4c788fc32227e9a3bca454d9d82d43589d4b74",
+          "after": "bc28ae35b90fba8b899141765e98a3e7a72c72e676ddefcd8546f2976bd25a67"
+        },
+        {
+          "key": "plugins/banzai/policies/test-assurance.md",
+          "before": "f24f2b2a1cf9ae18e5a44f196df000362bf0aeb24ef5de05be5e3e55550826bf",
+          "after": "5cfbb6eca3931f047494208527a531554aa9ec15e822dc10c606cc439b419860"
+        },
+        {
+          "key": "plugins/banzai/skills/architecture-decision/SKILL.md#orchestrated",
+          "before": null,
+          "after": "95746ad61765c0d1105284aba1ba0218bfe1a168fe799f023d188237df44c7b9"
+        },
+        {
+          "key": "plugins/banzai/skills/architecture-decision/SKILL.md#skeleton",
+          "before": "39c8443cc9f146d9763c90af1a9245ab34176fce9d63a1b139d97fdabf6754da",
+          "after": "9a8a832cbbbeb6f7addec9a44c28157fe22080cfe624aeb33d984871a50a1aa2"
+        },
+        {
+          "key": "plugins/banzai/skills/development-plan/SKILL.md#orchestrated",
+          "before": "2476e4babad02ea3968174759626ab34c7de0c4e87479abadb65d18a7581dfa7",
+          "after": "e23cfa6dca260f0844db821e51ee25d65a0c9e087e2ecb0e75f5065fc1874506"
+        },
+        {
+          "key": "plugins/banzai/skills/development-plan/SKILL.md#skeleton",
+          "before": "02c30749def4371e847938c863869daae2f193ed17293d17bfb05b7a102571e8",
+          "after": "6c5745aeadd07dc9f05210887a652c498086bedcb6237236d33661d8fcc33789"
+        }
+      ]
+    },
+    {
+      "predecessorSha256": "c013ca38e747e2184f9203ec59cd86109a66b9d939539566f07fb42d597f32ea",
+      "successorSha256": "b58fb5d140c05348b430f859e5afe38872f325b8a5ba943078c3258617d87921",
+      "authorities": [
+        {
+          "path": "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md",
+          "sha256": "3dbdeaca1a070f0526efda31842c55a24c0cb4792f8311a81df611664bf92caa",
+          "scope": "Implement the accepted planning rework and independent planning review decision."
+        }
+      ],
+      "changes": [
+        {
+          "key": "plugins/banzai/skills/orchestrate/SKILL.md",
+          "before": "4fa691f5353c65bee7c5704b72195d9dd421c68e6661545049925ad1bdba6ea3",
+          "after": "f7a975167250875abe0a2d4140e5ddc60f6fdae990275b9504b52769e867def1"
         }
       ]
     }

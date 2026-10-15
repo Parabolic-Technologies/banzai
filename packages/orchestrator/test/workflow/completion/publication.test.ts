@@ -1265,7 +1265,7 @@ test("a failed report replacement keeps the input report and blocks with a resum
       if (blocked) return;
       blocked = true;
       await writeFile(
-        `${path.join(root, candidate.destination)}.${blockerId}.completion.tmp`,
+        `${path.join(runner.store.runDirectory(runId), candidate.candidatePath)}.${blockerId}.completion.tmp`,
         "blocker"
       );
       armed = true;
@@ -1298,7 +1298,7 @@ test("a failed report replacement keeps the input report and blocks with a resum
     });
     assert.equal(persisted.planTaskCompletion, null);
     const destination = path.join(root, candidate.candidate.destination);
-    const blocker = `${destination}.${blockerId}.completion.tmp`;
+    const blocker = `${path.join(runner.store.runDirectory(runId), candidate.candidate.candidatePath)}.${blockerId}.completion.tmp`;
     assert.equal(
       createHash("sha256")
         .update(await readFile(destination))

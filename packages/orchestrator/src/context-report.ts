@@ -4,6 +4,7 @@ import path from "node:path";
 import { decodeContextAttemptLedger } from "./context-accounting.js";
 import { BanzaiError } from "./errors.js";
 import {
+  ATTEMPT_FILE_TOKENS,
   CONTEXT_REPORT_SCHEMA,
   CONTEXT_REPORT_SCHEMA_VERSION,
   PROMPT_COMPONENT_CATEGORY_ORDER,
@@ -33,7 +34,9 @@ const PHASES = [
   "plan",
   "implementation",
   "fix",
-  "review"
+  "review",
+  "planning_review",
+  "planning_analysis"
 ] as const satisfies readonly AttemptReference["kind"][];
 const ROLES = [
   "planner",
@@ -103,9 +106,11 @@ function safeIdentifier(value: unknown): value is string {
 }
 
 function roleForPhase(phase: AttemptReference["kind"]): SessionRole {
-  return phase === "selection" || phase === "plan"
+  return phase === "selection" ||
+    phase === "plan" ||
+    phase === "planning_analysis"
     ? "planner"
-    : phase === "review"
+    : phase === "review" || phase === "planning_review"
       ? "reviewer"
       : "implementer";
 }
@@ -179,7 +184,7 @@ function decodeCanonicalAttempt(
   };
   if (
     identity.mutable !== attempt.mutable ||
-    file !== `${attempt.id}-${attempt.kind}.json`
+    file !== `${attempt.id}-${ATTEMPT_FILE_TOKENS[attempt.kind]}.json`
   ) {
     return invalid(
       runId,
@@ -576,7 +581,9 @@ async function collectRunAttempts(
       .filter(
         (entry) =>
           entry.isFile() &&
-          /-(selection|plan|implementation|fix|review)\.json$/u.test(entry.name)
+          Object.values(ATTEMPT_FILE_TOKENS).some((token) =>
+            entry.name.endsWith(`-${token}.json`)
+          )
       )
       .map((entry) => entry.name)
       .sort();

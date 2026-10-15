@@ -1,3 +1,9 @@
+import { vendorFor } from "../src/models.js";
+import type {
+  PlanningAdapterRequest,
+  PlanningReviewResult,
+  PlanningReviewAnalysis
+} from "../src/types.js";
 import { RunStore } from "../src/store.js";
 import {
   parseTaskVerificationDescriptor,
@@ -6,7 +12,6 @@ import {
 import assert from "node:assert/strict";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { vendorFor } from "../src/models.js";
 import { renderPlanTaskCompletionProjection } from "../src/plan-task-completion.js";
 import {
   CONTRACT_VERSION,
@@ -29,11 +34,60 @@ import {
   type WorkflowSelectionResult
 } from "../src/types.js";
 import { WorkflowRunner } from "../src/workflow.js";
-import { createTestRepository } from "./helpers.js";
+import { createTestRepository, requiredFixture } from "./helpers.js";
+import {
+  planningReviewResult,
+  planningReviewAnalysis
+} from "./planning-review-fixtures.js";
+import type { HumanTimeObserver } from "../src/human-time.js";
 
-export const descriptionPath = "documentation/features/example/description.md";
+export async function createAdrGateFixture(observer?: HumanTimeObserver) {
+  const repository = await createTestRepository();
+  const adapters = new FakeAdapters();
+  adapters.planResults.push(phaseResult("plan", { gate: "adr_approval" }));
+  const runner = new WorkflowRunner(
+    repository.root,
+    adapters,
+    undefined,
+    undefined,
+    observer
+  );
+  const gate = await runner.start({
+    slug: "adr-rework",
+    request: "Plan the ADR."
+  });
+  assert.equal(gate.status, "needs_adr_approval", gate.blockReason ?? "");
+  return { repository, adapters, runner, gate };
+}
 
-export const planPath = "documentation/development-plans/example/plan.md";
+export async function createPlanningReviewFixture(count = 0) {
+  const repository = await createTestRepository();
+  const adapters = new FakeAdapters();
+  const runner = new WorkflowRunner(repository.root, adapters);
+  const gate = await runner.start({
+    slug: "example",
+    request: "Plan the example."
+  });
+  assert.equal(gate.status, "needs_plan_approval", gate.blockReason ?? "");
+  const requested = await runner.requestPlanningReview({
+    paths: null,
+    decidedBy: "owner",
+    autoResume: false
+  });
+  const episode = requiredFixture(requested.planningReview?.active);
+  const result = {
+    ...planningReviewResult(count, episode.reviewNumber),
+    scope: episode.scope
+  };
+  adapters.planningReviewResults.push(result);
+  if (count > 0)
+    adapters.planningAnalysisResults.push(planningReviewAnalysis(result));
+  return { repository, adapters, runner, gate, requested, result };
+}
+
+export const descriptionPath = "documentation/work/example/description.md";
+
+export const planPath = "documentation/work/example/plan.md";
 
 // Resolve the fixture's old role labels against the run's actual private binding.
 export async function boundFixturePath(
@@ -84,11 +138,9 @@ export function phaseResult(
       implementationReport:
         phase === "plan"
           ? null
-          : "documentation/features/example/implementation-report.md",
+          : "documentation/work/example/implementation-report.md",
       testReport:
-        phase === "plan"
-          ? null
-          : "documentation/features/example/test-report.md"
+        phase === "plan" ? null : "documentation/work/example/test-report.md"
     },
     taskCompletion:
       phase === "implementation"
@@ -266,6 +318,70 @@ export async function writeImplementationArtifacts(
 }
 
 export class FakeAdapters implements VendorAdapters {
+  planningReviewResults: PlanningReviewResult[] = [];
+  planningAnalysisResults: PlanningReviewAnalysis[] = [];
+  planningAnalysisErrors: Error[] = [];
+  planningRequests: (
+    | PlanningAdapterRequest<PlanningReviewResult>
+    | PlanningAdapterRequest<PlanningReviewAnalysis>
+  )[] = [];
+  onPlanning:
+    | ((
+        request:
+          | PlanningAdapterRequest<PlanningReviewResult>
+          | PlanningAdapterRequest<PlanningReviewAnalysis>
+      ) => Promise<void>)
+    | null = null;
+  async runPlanningReview(
+    request: PlanningAdapterRequest<PlanningReviewResult>
+  ): Promise<AdapterResult<PlanningReviewResult>> {
+    this.planningRequests.push(request);
+    await this.onPlanning?.(request);
+    const result = this.planningReviewResults.shift();
+    if (result === undefined)
+      throw new Error("Planning review fixture is missing");
+    await request.onTerminalSuccess?.({
+      classification:
+        request.outputContract.vendor === "codex"
+          ? "codex_turn_completed"
+          : "claude_result",
+      observedAt: new Date().toISOString(),
+      result,
+      sessionId: "planning-review-session",
+      usage: null
+    });
+    return {
+      result,
+      sessionId: "planning-review-session",
+      stdout: "",
+      stderr: "",
+      usage: null
+    };
+  }
+  async runPlanningAnalysis(
+    request: PlanningAdapterRequest<PlanningReviewAnalysis>
+  ): Promise<AdapterResult<PlanningReviewAnalysis>> {
+    this.planningRequests.push(request);
+    await this.onPlanning?.(request);
+    const result = this.planningAnalysisResults.shift();
+    if (result === undefined)
+      throw new Error("Planning analysis fixture is missing");
+    const sessionId = request.resumeSessionId ?? "planning-analysis-session";
+    await request.onSessionStarted?.(sessionId);
+    const error = this.planningAnalysisErrors.shift();
+    if (error !== undefined) throw error;
+    await request.onTerminalSuccess?.({
+      classification:
+        request.outputContract.vendor === "codex"
+          ? "codex_turn_completed"
+          : "claude_result",
+      observedAt: new Date().toISOString(),
+      result,
+      sessionId,
+      usage: null
+    });
+    return { result, sessionId, stdout: "", stderr: "", usage: null };
+  }
   fixtureTaskChecks = false;
   codexPreflights = 0;
   claudePreflights = 0;
@@ -386,9 +502,8 @@ export class FakeAdapters implements VendorAdapters {
     ) as RunState;
     const roles = state.artifactBinding?.binding.artifacts;
     const descriptionPath =
-      roles?.description ?? "documentation/features/example/description.md";
-    const planPath =
-      roles?.plan ?? "documentation/development-plans/example/plan.md";
+      roles?.description ?? "documentation/work/example/description.md";
+    const planPath = roles?.plan ?? "documentation/work/example/plan.md";
     const fixtureChecks = this.fixtureTaskChecks
       ? (
           JSON.parse(
@@ -430,16 +545,13 @@ export class FakeAdapters implements VendorAdapters {
       }
       if (!roles) return result;
       const mapping = new Map<string, string | null>([
-        ["documentation/features/example/description.md", descriptionPath],
-        ["documentation/development-plans/example/plan.md", planPath],
+        ["documentation/work/example/description.md", descriptionPath],
+        ["documentation/work/example/plan.md", planPath],
         [
-          "documentation/features/example/implementation-report.md",
+          "documentation/work/example/implementation-report.md",
           roles.implementationReport ?? null
         ],
-        [
-          "documentation/features/example/test-report.md",
-          roles.testReport ?? null
-        ]
+        ["documentation/work/example/test-report.md", roles.testReport ?? null]
       ]);
       for (const key of [
         "description",
@@ -577,7 +689,7 @@ export class FakeAdapters implements VendorAdapters {
             ? roles?.implementationReport
             : state.workflowSelection?.workflow === "quick-fix"
               ? roles?.changeReport
-              : roles?.work) ?? "documentation/features/example/work.md"
+              : roles?.work) ?? "documentation/work/example/work.md"
         );
         await mkdir(path.dirname(workPath), { recursive: true });
         await writeFile(workPath, "# Work\n\nEscalation found.\n", "utf8");

@@ -3,7 +3,7 @@
 - Owner decision: ADR-0038 (Plan Authority); ADR-0017/0025/0047 (Plan Task Completion Evidence)
 - Consumers: `development-plan`, `code-writing`; conditional: `test-writing`, `feature-review`, `feature-status`, `quick-fix`
 - Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)
-- Runner consumers: planning, implementation, review (conditional), fix (conditional), quick-fix (conditional).
+- Runner consumers: planning, implementation, review (conditional), fix (conditional), quick-fix (conditional), planning-review (conditional).
 - Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.
 
 ## Plan Authority

@@ -23,6 +23,38 @@ import {
 } from "../../../src/workflow/checkpoints/terminal-checkpoints.js";
 import { sessionContext } from "../../../src/workflow/domain/sessions.js";
 import { createTestRepository } from "../../helpers.js";
+import { createPlanningReviewFixture } from "../../workflow-fixtures.js";
+import { checkpointSettings } from "../../../src/workflow/checkpoints/terminal-checkpoints.js";
+
+test("planning checkpoints bind their dedicated result contracts and planner/reviewer settings", async () => {
+  const f = await createPlanningReviewFixture(1);
+  try {
+    await f.runner.resume();
+    const attempts = await f.runner.store.readRunAttempts(f.requested.runId);
+    for (const [kind, contract, role] of [
+      ["planning_review", "planning-review-result/v1", "reviewer"],
+      ["planning_analysis", "planning-review-analysis/v1", "planner"]
+    ] as const) {
+      const record = attempts.find((r) => r.attempt.kind === kind);
+      assert.ok(record);
+      const checkpoint = await f.runner.store.readTerminalCheckpointIfExists(
+        f.requested.runId,
+        record.attempt
+      );
+      assert.ok(checkpoint);
+      assert.equal(checkpoint.resultContract, contract);
+      assert.equal(checkpoint.attempt.mutable, false);
+      assert.equal(checkpointSettings(record.attempt, CONFIG).role, role);
+      assert.deepEqual(
+        checkpointSettings(record.attempt, CONFIG).settings,
+        CONFIG.models[role]
+      );
+      assert.equal(record.schemaVersion, 4);
+    }
+  } finally {
+    await f.repository.dispose();
+  }
+});
 import { recordingContext } from "../context-fixture.js";
 
 const SETTINGS: ModelSettings = {

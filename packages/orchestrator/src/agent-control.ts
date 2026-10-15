@@ -1,3 +1,18 @@
+import { gateArtifactPaths } from "./workflow/domain/artifact-scope.js";
+import {
+  planningGateActions,
+  planningReviewScope
+} from "./workflow/domain/planning-review.js";
+import {
+  validateHumanFreeText,
+  parsePlanningReviewTriageAnswer
+} from "./validation.js";
+import { PLANNING_GATE_DOCUMENT, PLANNING_TRIAGE_DOCUMENT } from "./types.js";
+import type {
+  AgentPlanningGateDecision,
+  AgentPlanningTriageAnswer,
+  PlanningReviewAnalysisEntry
+} from "./types.js";
 import path from "node:path";
 import packageManifest from "../package.json" with { type: "json" };
 import { BanzaiError } from "./errors.js";
@@ -117,7 +132,13 @@ function parseDocument(input: Uint8Array): Record<string, unknown> {
   } catch {
     throw controlInputError("Agent control input must be valid JSON.");
   }
-  if (record(value).schema === CONFIGURATION_ANSWER_SCHEMA) {
+  if (
+    [
+      CONFIGURATION_ANSWER_SCHEMA,
+      PLANNING_GATE_DOCUMENT,
+      PLANNING_TRIAGE_DOCUMENT
+    ].some((schema) => schema === record(value).schema)
+  ) {
     const frames: { object: boolean; key: boolean; seen: Set<string> }[] = [];
     const tokens =
       source.match(/"(?:\\.|[^"\\])*"|[{}[\]:,]|[^\s{}[\]:,]+/gu) ?? [];
@@ -135,7 +156,7 @@ function parseDocument(input: Uint8Array): Record<string, unknown> {
         const key = JSON.parse(token) as string;
         if (frame.seen.has(key))
           throw controlInputError(
-            "Configuration answers cannot repeat JSON fields."
+            "Control documents cannot repeat JSON fields."
           );
         frame.seen.add(key);
         frame.key = false;
@@ -148,6 +169,8 @@ function parseDocument(input: Uint8Array): Record<string, unknown> {
 function requireSchema(
   value: Record<string, unknown>,
   schema:
+    | typeof PLANNING_GATE_DOCUMENT
+    | typeof PLANNING_TRIAGE_DOCUMENT
     | typeof AGENT_REQUEST_SCHEMA
     | typeof AGENT_ANSWER_SCHEMA
     | typeof AGENT_RECOVERY_SCHEMA
@@ -182,8 +205,14 @@ export function decodeAgentControlRequest(
 
 export function decodeAgentControlAnswer(
   input: Uint8Array
-): AgentControlAnswerV1 | AgentControlAnswerV2 | AgentControlAnswerV3 {
+):
+  | AgentControlAnswerV1
+  | AgentControlAnswerV2
+  | AgentControlAnswerV3
+  | AgentPlanningTriageAnswer {
   const value = parseDocument(input);
+  if (value.schema === PLANNING_TRIAGE_DOCUMENT)
+    return decodePlanningTriage(value);
   if (value.schema === CONFIGURATION_ANSWER_SCHEMA) {
     const item = configurationObject(value, [
       "schema",
@@ -393,6 +422,162 @@ export function decodeAgentControlRecovery(
   };
 }
 
+function planningIdentifier(value: unknown, label: string): string {
+  if (
+    typeof value !== "string" ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(value)
+  )
+    throw controlInputError(`${label} must be a canonical identifier.`);
+  return value;
+}
+export function decodePlanningGateDecision(
+  input: Uint8Array
+): AgentPlanningGateDecision {
+  const value = parseDocument(input);
+  exactKeys(value, [
+    "schema",
+    "schemaVersion",
+    "runId",
+    "gate",
+    "decision",
+    "adrId",
+    "feedback",
+    "paths"
+  ]);
+  requireSchema(value, PLANNING_GATE_DOCUMENT, 1);
+  if (
+    (value.gate !== "adr_approval" && value.gate !== "plan_approval") ||
+    (value.decision !== "rework" && value.decision !== "review")
+  )
+    throw controlInputError("Unsupported planning gate decision.");
+  let feedback: string | null = null;
+  let adrId: string | null = null;
+  let paths: string[] | null = null;
+  if (value.decision === "rework") {
+    if (
+      value.paths !== null ||
+      (value.gate === "plan_approval" && value.adrId !== null)
+    )
+      throw controlInputError("Rework fields do not match the gate.");
+    feedback = validateHumanFreeText(
+      value.feedback,
+      "Rework feedback",
+      8000,
+      "INVALID_CONTROL_INPUT"
+    );
+    if (value.gate === "adr_approval")
+      adrId = planningIdentifier(value.adrId, "adrId");
+  } else {
+    if (value.feedback !== null || value.adrId !== null)
+      throw controlInputError(
+        "Review fields must have null feedback and ADR id."
+      );
+    if (value.paths !== null) {
+      if (
+        !Array.isArray(value.paths) ||
+        value.paths.some((p) => typeof p !== "string")
+      )
+        throw controlInputError("Review paths must be canonical paths.");
+      paths = value.paths as string[];
+      try {
+        planningReviewScope(paths, paths);
+      } catch {
+        throw controlInputError(
+          "Review paths must be non-empty unique canonical paths."
+        );
+      }
+      if (
+        paths.some(
+          (p) =>
+            p.length > 300 ||
+            /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u.test(
+              p
+            )
+        )
+      )
+        throw controlInputError(
+          "Review paths must be bounded canonical paths."
+        );
+    }
+  }
+  return {
+    schema: PLANNING_GATE_DOCUMENT,
+    schemaVersion: 1,
+    runId: planningIdentifier(value.runId, "runId"),
+    gate: value.gate,
+    decision: value.decision,
+    adrId,
+    feedback,
+    paths
+  };
+}
+function decodePlanningTriage(
+  value: Record<string, unknown>
+): AgentPlanningTriageAnswer {
+  exactKeys(value, [
+    "schema",
+    "schemaVersion",
+    "runId",
+    "episodeId",
+    "reviewNumber",
+    "analysisDigest",
+    "dispositions",
+    "additionalInstruction"
+  ]);
+  requireSchema(value, PLANNING_TRIAGE_DOCUMENT, 4);
+  const runId = planningIdentifier(value.runId, "runId");
+  const episodeId = planningIdentifier(value.episodeId, "episodeId");
+  if (
+    !/^planning-episode-[0-9a-f]{8}$/u.test(episodeId) ||
+    !Number.isSafeInteger(value.reviewNumber) ||
+    Number(value.reviewNumber) < 1 ||
+    Number(value.reviewNumber) > 1_000_000 ||
+    typeof value.analysisDigest !== "string" ||
+    !/^[0-9a-f]{64}$/u.test(value.analysisDigest) ||
+    !Array.isArray(value.dispositions) ||
+    value.dispositions.length < 1 ||
+    value.dispositions.length > 20
+  )
+    throw controlInputError("Planning triage identities are invalid.");
+  const reviewNumber = Number(value.reviewNumber),
+    analysisDigest = value.analysisDigest;
+  const entries: PlanningReviewAnalysisEntry[] = value.dispositions.map(
+    (item) => {
+      const d = record(item);
+      const findingId = planningIdentifier(d.findingId, "findingId");
+      if (!new RegExp(`^P${reviewNumber}-F[1-9][0-9]*$`, "u").test(findingId))
+        throw controlInputError("Finding identity does not match the review.");
+      return {
+        findingId,
+        assessment: "agree",
+        rationale: "Structural validation",
+        options:
+          d.optionId === null
+            ? []
+            : [
+                {
+                  optionId: planningIdentifier(d.optionId, "optionId"),
+                  label: "Option",
+                  consequences: ["Validated at the gate"]
+                }
+              ],
+        recommendation: null
+      };
+    }
+  );
+  const answer = Object.fromEntries(
+    Object.entries(value).filter(
+      ([key]) => key !== "schema" && key !== "schemaVersion"
+    )
+  );
+  const parsed = parsePlanningReviewTriageAnswer(
+    answer,
+    { runId, episodeId, reviewNumber, analysisDigest, entries },
+    "INVALID_CONTROL_INPUT"
+  );
+  return { schema: PLANNING_TRIAGE_DOCUMENT, schemaVersion: 4, ...parsed };
+}
+
 export function agentControlCapabilities(): AgentControlCapabilitiesV5 {
   return {
     schema: AGENT_CAPABILITIES_SCHEMA,
@@ -400,11 +585,31 @@ export function agentControlCapabilities(): AgentControlCapabilitiesV5 {
     controlContractVersion: AGENT_CONTROL_CONTRACT_VERSION,
     orchestratorVersion: packageManifest.version,
     umbrellaContractVersion: CONTRACT_VERSION,
-    artifactStorage: {
-      declarationSchemas: ["banzai-artifact-layout/v1"],
-      bindingSchemas: ["banzai-work-binding/v1", "banzai-work-binding/v2"],
-      privateWorkspaceSnapshotVersion: 2,
-      layouts: ["legacy", "private"]
+    planningGates: {
+      gateDecisionSchema: PLANNING_GATE_DOCUMENT,
+      decisions: {
+        adr_approval: ["accept", "reject", "rework", "review"],
+        plan_approval: ["approve", "rework", "review"]
+      },
+      triage: {
+        pendingKind: "planning_review_triage",
+        answerSchema: PLANNING_TRIAGE_DOCUMENT,
+        dispositions: ["option", "instruction", "decline"]
+      },
+      limits: {
+        feedbackBytes: 8000,
+        instructionBytes: 2000,
+        additionalInstructionBytes: 8000,
+        findings: 20,
+        reviewPaths: 128
+      },
+      statusSchema: AGENT_STATUS_SCHEMA
+    },
+    workDocuments: {
+      directoryPattern: "documentation/work/<slug>/",
+      bindingSchemas: ["banzai-work-binding/v3"],
+      workspaceSnapshotVersion: 3,
+      verificationRequestSchemas: ["banzai-verification-request/v3"]
     },
     configurationPrerequisite: {
       kind: "configuration_prerequisite",
@@ -429,6 +634,7 @@ export function agentControlCapabilities(): AgentControlCapabilitiesV5 {
         supported: true,
         ttyRequired: false,
         inputSchemas: [
+          PLANNING_TRIAGE_DOCUMENT,
           CONFIGURATION_ANSWER_SCHEMA,
           AGENT_ANSWER_SCHEMA,
           LEGACY_AGENT_ANSWER_SCHEMA
@@ -441,6 +647,11 @@ export function agentControlCapabilities(): AgentControlCapabilitiesV5 {
         inputSchemas: [CONFIGURATION_ANSWER_SCHEMA]
       },
       approvePlan: { supported: true, ttyRequired: false, inputSchemas: [] },
+      decideGate: {
+        supported: true,
+        ttyRequired: false,
+        inputSchemas: [PLANNING_GATE_DOCUMENT]
+      },
       triage: { supported: true, ttyRequired: false, inputSchemas: [] },
       resume: { supported: true, ttyRequired: false, inputSchemas: [] },
       retry: { supported: true, ttyRequired: false, inputSchemas: [] },
@@ -700,6 +911,8 @@ function semanticNextAction(status: WorkflowStatus): AgentControlNextAction {
       if (pending === undefined || pending === null) {
         throw statusError("Human-decision state has no persisted request.");
       }
+      if (pending.kind === "planning_review_triage")
+        return "answer_planning_review_triage";
       if (pending.kind === "configuration_prerequisite")
         return "answer_configuration_prerequisite";
       return pending.kind === "decision_consultation"
@@ -774,6 +987,12 @@ function pendingGate(status: WorkflowStatus): AgentControlPendingGateV3 | null {
     );
     return {
       kind: "adr_approval",
+      decisions: planningGateActions(
+        "adr_approval",
+        state.schemaVersion,
+        gateArtifactPaths(state, "adr_approval").length > 0
+      ),
+      reviewPaths: gateArtifactPaths(state, "adr_approval"),
       artifactPaths,
       adrIds: artifactPaths.map((value) => {
         const match = /^(\d{4})-/.exec(path.posix.basename(value));
@@ -785,12 +1004,41 @@ function pendingGate(status: WorkflowStatus): AgentControlPendingGateV3 | null {
     };
   }
   if (state.status === "needs_plan_approval") {
-    return { kind: "plan_approval", artifactPaths: approvalArtifacts(state) };
+    return {
+      kind: "plan_approval",
+      artifactPaths: approvalArtifacts(state),
+      decisions: planningGateActions(
+        "plan_approval",
+        state.schemaVersion,
+        gateArtifactPaths(state, "plan_approval").length > 0
+      ),
+      reviewPaths: gateArtifactPaths(state, "plan_approval")
+    };
   }
   if (state.status === "needs_human_decision") {
     const decision = state.pendingHumanDecision;
     if (decision === undefined || decision === null) {
       throw statusError("Human-decision state has no persisted request.");
+    }
+    if (decision.kind === "planning_review_triage") {
+      return {
+        kind: decision.kind,
+        runId: decision.runId,
+        episodeId: decision.episodeId,
+        reviewNumber: decision.reviewNumber,
+        originGate: decision.originGate,
+        artifactPath: decision.artifactPath,
+        artifactSha256: decision.artifactSha256,
+        analysisDigest: decision.analysisDigest,
+        findings: decision.findings,
+        analysis: decision.analysis.map((entry) => ({
+          findingId: entry.findingId,
+          assessment: entry.assessment,
+          rationale: entry.rationale,
+          options: entry.options,
+          recommendation: entry.recommendation
+        }))
+      };
     }
     if (decision.kind === "configuration_prerequisite") {
       const request = parseConfigurationPrerequisite(

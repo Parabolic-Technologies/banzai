@@ -163,7 +163,7 @@ export class HumanTimeStore {
     );
     if (
       humanTimeId(state.runId) !== runId ||
-      ![1, 2, 3, 4, 5, 6, 7, 8].includes(state.schemaVersion as number)
+      ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(state.schemaVersion as number)
     )
       throw new HumanTimeFailure("INVALID_EVIDENCE");
     return state;
@@ -391,7 +391,7 @@ export class HumanTimeStore {
       const state = humanTimeRecord(json(stateBytes));
       if (
         humanTimeId(state.runId) !== runId ||
-        ![1, 2, 3, 4, 5, 6, 7, 8].includes(state.schemaVersion as number)
+        ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(state.schemaVersion as number)
       )
         throw new HumanTimeFailure("INVALID_EVIDENCE");
       const bytes = await this.file(
@@ -585,8 +585,76 @@ export class HumanTimeStore {
               ordinal
             );
         }
+        if (
+          [
+            "planning_review.triage_pending",
+            "planning_review.gate_restored",
+            "planning_review.stale"
+          ].includes(event.type as string)
+        ) {
+          const pr = humanTimeRecord(state.planningReview);
+          const episodes = [
+            ...(Array.isArray(pr.closed) ? (pr.closed as unknown[]) : []),
+            ...(pr.active == null ? [] : [pr.active])
+          ].map(humanTimeRecord);
+          const episode = episodes.find(
+            (e) =>
+              e.episodeId === detail.episodeId &&
+              e.reviewNumber === detail.reviewNumber
+          );
+          if (episode === undefined)
+            throw new HumanTimeFailure("AMBIGUOUS_ANCHOR");
+          if (event.type === "planning_review.triage_pending") {
+            if (
+              episode.analysisAttemptId !== detail.attemptId ||
+              episode.findingCount !== detail.findingCount ||
+              episode.originGate !== detail.gate
+            )
+              throw new HumanTimeFailure("AMBIGUOUS_ANCHOR");
+            anchor = {
+              type: "planning_review_triage",
+              attemptId: humanTimeId(detail.attemptId),
+              episodeId: humanTimeId(detail.episodeId),
+              reviewNumber: humanTimeInteger(detail.reviewNumber, 1)
+            };
+          } else if (event.type === "planning_review.gate_restored") {
+            if (
+              episode.originGate !== detail.gate ||
+              episode.outcome !== detail.outcome ||
+              !["restored_no_findings", "restored_no_action"].includes(
+                String(detail.outcome)
+              )
+            )
+              throw new HumanTimeFailure("AMBIGUOUS_ANCHOR");
+            anchor =
+              detail.gate === "plan_approval"
+                ? {
+                    type: "plan_approval",
+                    attemptId: humanTimeId(detail.episodeId),
+                    bundleDigest: null
+                  }
+                : {
+                    type: "adr_approval",
+                    attemptId: humanTimeId(detail.episodeId)
+                  };
+          } else if (pending?.anchor.type === "planning_review_triage") {
+            if (
+              episode.outcome !== "stale" ||
+              pending.anchor.episodeId !== detail.episodeId
+            )
+              throw new HumanTimeFailure("AMBIGUOUS_ANCHOR");
+            append(
+              pending.anchor,
+              "superseded",
+              at,
+              "planning_review.stale",
+              ordinal
+            );
+            pending = null;
+          }
+        }
         if (anchor !== null) {
-          const type = event.type as "attempt.applied" | "review.completed";
+          const type = event.type as HumanTimeEventType;
           if (pending !== null)
             append(pending.anchor, "superseded", at, type, ordinal);
           pending = append(anchor, "opened", at, type, ordinal);
@@ -597,8 +665,40 @@ export class HumanTimeStore {
           "approval.adr": "adr_approval",
           "decision.human": "escalation",
           "decision.consultation.answered": "decision_consultation",
-          "review.triaged": "triage"
+          "review.triaged": "triage",
+          "decision.plan_rework": "plan_approval",
+          "planning_review.triaged": "planning_review_triage"
         };
+        if (event.type === "planning_review.requested") {
+          const pr = humanTimeRecord(state.planningReview);
+          const episodes = [
+            ...(Array.isArray(pr.closed) ? (pr.closed as unknown[]) : []),
+            ...(pr.active == null ? [] : [pr.active])
+          ].map(humanTimeRecord);
+          const episode = episodes.find(
+            (e) => e.episodeId === detail.episodeId
+          );
+          const paths =
+            episode === undefined || !Array.isArray(episode.scope)
+              ? []
+              : (episode.scope as unknown[]).map(
+                  (item) => humanTimeRecord(item).path
+                );
+          if (
+            episode === undefined ||
+            !Number.isSafeInteger(detail.reviewNumber) ||
+            (detail.reviewNumber as number) < 1 ||
+            (detail.reviewNumber as number) > Number(episode.reviewNumber) ||
+            episode.originGate !== detail.gate ||
+            episode.decidedBy !== detail.decidedBy ||
+            JSON.stringify(paths) !== JSON.stringify(detail.paths)
+          )
+            throw new HumanTimeFailure("AMBIGUOUS_ANCHOR");
+          if (!["adr_approval", "plan_approval"].includes(String(detail.gate)))
+            throw new HumanTimeFailure("AMBIGUOUS_ANCHOR");
+          responseKinds[event.type] = detail.gate as
+            "adr_approval" | "plan_approval";
+        }
         const responseKind =
           typeof event.type === "string"
             ? responseKinds[event.type]
@@ -612,16 +712,34 @@ export class HumanTimeStore {
           )
             throw new HumanTimeFailure("AMBIGUOUS_ANCHOR");
           if (
-            responseKind === "plan_approval" &&
+            event.type === "approval.plan" &&
             (typeof detail.digest !== "string" ||
               !/^[a-f0-9]{64}$/.test(detail.digest))
           )
             throw new HumanTimeFailure("INVALID_EVIDENCE");
           if (
-            responseKind === "adr_approval" &&
+            event.type === "approval.adr" &&
             !["accept", "reject", "rework"].includes(detail.decision as string)
           )
             throw new HumanTimeFailure("INVALID_EVIDENCE");
+          if (responding.anchor.type === "planning_review_triage") {
+            const answers = (
+              Array.isArray(state.humanDecisions) ? state.humanDecisions : []
+            )
+              .map(humanTimeRecord)
+              .filter(
+                (d) =>
+                  d.kind === "planning_review_triage" &&
+                  d.episodeId === detail.episodeId &&
+                  d.analysisDigest === detail.analysisDigest
+              );
+            if (
+              answers.length !== 1 ||
+              responding.anchor.episodeId !== detail.episodeId ||
+              responding.anchor.reviewNumber !== detail.reviewNumber
+            )
+              throw new HumanTimeFailure("AMBIGUOUS_ANCHOR");
+          }
           if (responding.anchor.type === "decision_consultation") {
             const decisions = Array.isArray(state.humanDecisions)
               ? state.humanDecisions.map(humanTimeRecord)
@@ -671,6 +789,7 @@ export class HumanTimeStore {
           decision_consultation: "needs_human_decision",
           escalation: "needs_human_decision",
           triage: "needs_triage",
+          planning_review_triage: "needs_human_decision",
           recovery_wait: "blocked"
         }[pending.kind];
         let matches = state.status === expectedStatus;
@@ -681,6 +800,13 @@ export class HumanTimeStore {
           matches &&=
             request.requestId === pending.anchor.requestId &&
             request.roundId === pending.anchor.roundId;
+        }
+        if (pending.anchor.type === "planning_review_triage") {
+          const request = humanTimeRecord(state.pendingHumanDecision);
+          matches &&=
+            request.kind === "planning_review_triage" &&
+            request.episodeId === pending.anchor.episodeId &&
+            request.reviewNumber === pending.anchor.reviewNumber;
         }
         if (pending.anchor.type === "triage")
           matches &&=

@@ -2,11 +2,8 @@ import {
   parseVerificationConfiguration,
   parseVerificationObligations
 } from "./verification-evidence.js";
-import {
-  inspectBoundWork,
-  safePath,
-  type ArtifactBoundWork
-} from "./artifact-storage.js";
+import { inspectBoundWork, type ArtifactBoundWork } from "./work-documents.js";
+import { safePath } from "./project-files.js";
 import { createHash } from "node:crypto";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
@@ -254,7 +251,9 @@ export function validatePlanRunnerControlTasks(
         if (
           !(
             relative.toLowerCase() === ".banzai" ||
-            relative.toLowerCase().startsWith(".banzai/")
+            relative.toLowerCase().startsWith(".banzai/") ||
+            relative.toLowerCase() === "documentation/work" ||
+            relative.toLowerCase().startsWith("documentation/work/")
           ) ||
           allowed.has(relative) ||
           targetMode === "read"

@@ -282,6 +282,49 @@ function validLedger(): ContextAttemptLedger {
   };
 }
 
+test("context v2 accounts both planning kinds and v1 refuses them without reinterpretation", () => {
+  for (const [kind, role, identity] of [
+    ["planning_review", "reviewer", "planning-review-result/v1"],
+    ["planning_analysis", "planner", "planning-review-analysis/v1"]
+  ] as const) {
+    const ledger = validLedger();
+    ledger.attempt = { id: `${kind}-1`, kind, mutable: false };
+    const invocation = ledger.invocations[0];
+    assert.ok(invocation);
+    invocation.phase = kind;
+    invocation.role = role;
+    invocation.runnerPayload = measureRunnerPayload(
+      createPromptEnvelope([
+        { category: "phase_instructions", text: "Read the exact scope" }
+      ]),
+      resolveOutputContract("codex", identity)
+    );
+    assert.deepEqual(
+      decodeContextAttemptLedger(ledger, "run-one", ledger.attempt.id),
+      ledger
+    );
+    assert.throws(
+      () =>
+        decodeContextAttemptLedger(
+          { ...ledger, schema: "banzai-context-attempt/v1", schemaVersion: 1 },
+          "run-one",
+          ledger.attempt.id
+        ),
+      (error: unknown) =>
+        error instanceof BanzaiError &&
+        error.code === "INVALID_CONTEXT_EVIDENCE"
+    );
+  }
+  const historical = validLedger();
+  assert.doesNotThrow(() =>
+    decodeContextAttemptLedger(
+      { ...historical, schema: "banzai-context-attempt/v1", schemaVersion: 1 },
+      "run-one",
+      historical.attempt.id
+    )
+  );
+});
+
 test("context ledger decoder is closed and never repeats hostile content", () => {
   const ledger = validLedger();
   assert.deepEqual(

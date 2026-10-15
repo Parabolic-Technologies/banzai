@@ -1,3 +1,4 @@
+import { decodePlanningGateDecision } from "../src/agent-control.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -354,7 +355,7 @@ test("shipped workflow preserves five gates and scopes retained configuration fo
   assert.match(feature, /cannot use the planning-only consultation gate/);
 
   const assertSupervisorSafety = (source: string): void => {
-    assert.match(source, /exact supported v6 declaration/i);
+    assert.match(source, /exact supported v8 declaration/i);
     assert.match(source, /answer_consultation/);
     assert.match(
       source,
@@ -373,15 +374,15 @@ test("shipped workflow preserves five gates and scopes retained configuration fo
     );
   });
 
-  assert.match(protocol, /banzai-agent-capabilities\/v6/);
-  assert.match(protocol, /controlContractVersion: "6\.0\.0"/);
-  assert.match(protocol, /banzai-agent-status\/v5/);
+  assert.match(protocol, /banzai-agent-capabilities\/v8/);
+  assert.match(protocol, /controlContractVersion: "8\.0\.0"/);
+  assert.match(protocol, /banzai-agent-status\/v6/);
   assert.match(protocol, /answer_escalation/);
   assert.match(protocol, /answer_consultation/);
   const documents = [...protocol.matchAll(/```json\n([\s\S]*?)\n```/gu)].map(
     (match) => JSON.parse(match[1] ?? "") as { schema: string }
   );
-  assert.equal(documents.length, 4);
+  assert.equal(documents.length, 6);
   for (const document of documents) {
     const encoded = Buffer.from(JSON.stringify(document));
     if (document.schema === "banzai-agent-request/v1") {
@@ -391,6 +392,10 @@ test("shipped workflow preserves five gates and scopes retained configuration fo
       document.schema === "banzai-agent-answer/v2"
     ) {
       decodeAgentControlAnswer(encoded);
+    } else if (document.schema === "banzai-agent-answer/v4") {
+      decodeAgentControlAnswer(encoded);
+    } else if (document.schema === "banzai-agent-gate-decision/v1") {
+      decodePlanningGateDecision(encoded);
     } else if (document.schema === "banzai-agent-recovery/v1") {
       decodeAgentControlRecovery(encoded);
     } else {

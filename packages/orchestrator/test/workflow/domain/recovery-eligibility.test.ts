@@ -16,6 +16,17 @@ import {
 } from "../../../src/workflow/domain/recovery-eligibility.js";
 
 const BASE_COMMIT = "b".repeat(40);
+
+test("neither read-only planning kind can acquire mutable recovery authority", () => {
+  for (const kind of ["planning_review", "planning_analysis"] as const) {
+    const attempt = { id: `${kind}-1`, kind, mutable: false };
+    const state = blocked({ blockedFrom: "planning", activeAttempt: attempt });
+    const outcome = decideRecovery({ state, digestRejected: null });
+    assert.equal(outcome.kind, "decided");
+    assert.equal(outcome.eligibility.eligible, false);
+    assert.equal(outcome.eligibility.phase, null);
+  }
+});
 const IMPLEMENTATION: AttemptReference = {
   id: "implementation-1-abcdef12",
   kind: "implementation",

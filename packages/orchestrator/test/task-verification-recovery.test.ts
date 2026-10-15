@@ -31,6 +31,12 @@ async function fixture(mode: Scenario) {
     usage: null
   });
   const adapters: VendorAdapters = {
+    runPlanningReview: async () => {
+      throw new Error("Unexpected planning review");
+    },
+    runPlanningAnalysis: async () => {
+      throw new Error("Unexpected planning analysis");
+    },
     preflightCodex: async () => {},
     preflightClaude: async () => {},
     runSelection: async () =>
@@ -212,6 +218,9 @@ for (const mode of [
         );
       const lines: string[] = [];
       const io: InteractiveIO = {
+        multiSelect: async () => {
+          throw new Error("Unexpected multi-select");
+        },
         input: async () => {
           throw new Error("Unexpected input");
         },

@@ -18,6 +18,193 @@ import test from "node:test";
 import { HumanTimeStore } from "../src/human-time-store.js";
 import { HUMAN_TIME_LIMITS, deriveHumanTime } from "../src/human-time.js";
 import type { HumanTimeChange } from "../src/human-time.js";
+import { createTestRepository } from "./helpers.js";
+import {
+  FakeAdapters,
+  createPlanningReviewFixture
+} from "./workflow-fixtures.js";
+import { WorkflowRunner } from "../src/workflow.js";
+import {
+  planningReviewResult,
+  planningReviewAnalysis,
+  planningTriageAnswer
+} from "./planning-review-fixtures.js";
+
+test("human-time planning journeys exclude review/analysis machine time and reopen the restored origin gate", async (t) => {
+  const repository = await createTestRepository();
+  try {
+    let now = Date.parse("2026-10-14T08:00:00.000Z");
+    t.mock.timers.enable({ apis: ["Date"], now });
+    const advance = (ms: number) => {
+      now += ms;
+      t.mock.timers.tick(ms);
+    };
+    const adapters = new FakeAdapters();
+    const runner = new WorkflowRunner(
+      repository.root,
+      adapters,
+      undefined,
+      undefined,
+      undefined,
+      { clock: () => new Date(now) }
+    );
+    const gate = await runner.start({
+      slug: "timing",
+      request: "Plan the example."
+    });
+    advance(60000);
+    const requested = await runner.requestPlanningReview({
+      paths: null,
+      decidedBy: "owner",
+      autoResume: false
+    });
+    const e = requested.planningReview?.active;
+    assert.ok(e);
+    const result = {
+      ...planningReviewResult(1, e.reviewNumber),
+      scope: e.scope
+    };
+    adapters.planningReviewResults.push(result);
+    adapters.planningAnalysisResults.push(planningReviewAnalysis(result));
+    adapters.onPlanning = async () => {
+      advance(3600000);
+    };
+    const triage = await runner.resume();
+    advance(120000);
+    await runner.answerPlanningReview({
+      answer: planningTriageAnswer(triage),
+      decidedBy: "owner"
+    });
+    advance(180000);
+    const store = new HumanTimeStore(repository.root);
+    const evidence = await store.readEvidence(gate.runId);
+    assert.deepEqual(evidence.issues, []);
+    const outcome = await store.update(gate.runId, 0, {
+      captures: [],
+      observations: evidence.observations,
+      effort: null,
+      issues: []
+    });
+    assert.equal(outcome.status, "saved");
+    const summary = deriveHumanTime(
+      await store.read(gate.runId),
+      evidence,
+      new Date(now).toISOString()
+    );
+    assert.equal(summary.answeredCount, 2);
+    assert.equal(summary.answeredMs, 180000);
+    assert.equal(summary.effort, null);
+    assert.equal(
+      summary.episodes.find((ep) => ep.outcome === "open")?.durationMs,
+      180000
+    );
+    assert.equal(
+      summary.episodes.filter((ep) => ep.kind === "planning_review_triage")
+        .length,
+      1
+    );
+    assert.equal(adapters.planningRequests.length, 2);
+    advance(60000);
+    await runner.approvePlan("owner", false);
+    const approved = await store.readEvidence(gate.runId);
+    assert.deepEqual(approved.issues, []);
+    assert.equal(
+      approved.observations.filter((o) => o.endpoint === "answered").length,
+      3
+    );
+    assert.deepEqual(approved.pendingKeys, []);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("human-time plan rework closes its gate and stale planning triage supersedes its anchor", async () => {
+  const f = await createPlanningReviewFixture(1);
+  try {
+    const triage = await f.runner.resume();
+    const value = planningTriageAnswer(triage);
+    const scope = triage.planningReview?.active?.scope[0];
+    assert.ok(scope);
+    await writeFile(
+      path.join(f.repository.root, scope.path),
+      "External changed bytes.\n"
+    );
+    await f.runner.answerPlanningReview({ answer: value, decidedBy: "owner" });
+    const store = new HumanTimeStore(f.repository.root);
+    const stale = await store.readEvidence(triage.runId);
+    assert.deepEqual(stale.issues, []);
+    assert.ok(
+      stale.observations.some(
+        (o) =>
+          o.kind === "planning_review_triage" && o.endpoint === "superseded"
+      )
+    );
+  } finally {
+    await f.repository.dispose();
+  }
+  const repository = await createTestRepository();
+  try {
+    const runner = new WorkflowRunner(repository.root, new FakeAdapters());
+    const gate = await runner.start({
+      slug: "timing-rework",
+      request: "Plan the example."
+    });
+    await runner.reworkPlan({
+      feedback: "Preserve this owner request.",
+      decidedBy: "owner",
+      autoResume: false
+    });
+    const evidence = await new HumanTimeStore(repository.root).readEvidence(
+      gate.runId
+    );
+    assert.deepEqual(evidence.issues, []);
+    assert.ok(
+      evidence.observations.some(
+        (o) => o.kind === "plan_approval" && o.endpoint === "answered"
+      )
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("human-time rejects forged planning episode anchors without inventing evidence", async () => {
+  const f = await createPlanningReviewFixture();
+  try {
+    const file = path.join(
+      f.runner.store.runDirectory(f.requested.runId),
+      "events.jsonl"
+    );
+    const events = (await readFile(file, "utf8"))
+      .trim()
+      .split("\n")
+      .map(
+        (line) =>
+          JSON.parse(line) as {
+            type: string;
+            details?: Record<string, unknown>;
+          }
+      );
+    const requested = events.find(
+      (event) => event.type === "planning_review.requested"
+    );
+    assert.ok(requested?.details);
+    requested.details.episodeId = "planning-episode-ffffffff";
+    await writeFile(
+      file,
+      events.map((event) => JSON.stringify(event)).join("\n") + "\n"
+    );
+    const evidence = await new HumanTimeStore(f.repository.root).readEvidence(
+      f.requested.runId
+    );
+    assert.ok(
+      evidence.issues.some((issue) => issue.code === "AMBIGUOUS_ANCHOR")
+    );
+    assert.deepEqual(evidence.observations, []);
+  } finally {
+    await f.repository.dispose();
+  }
+});
 
 const runId = "run-example";
 async function fixture() {

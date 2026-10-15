@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstat, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { safePath } from "../../artifact-storage.js";
+import { safePath, verifyExecutionIgnore } from "../../project-files.js";
 import {
   BanzaiError,
   InstructionResourceMismatchError,
@@ -638,14 +638,13 @@ export async function publishCapturedCompletion(
     refusal: null
   });
   // Publish: recheck cancellation and destination ownership, then replace
-  // only the exact implementation report with a same-directory rename.
+  // only the exact implementation report with an atomic rename.
   const current = await context.store.readState(state.runId);
   if (current.status === "cancelled")
     return { kind: "stopped", state: current };
   const destination = path.join(context.repoRoot, candidate.destination);
   if (!published) {
-    if (candidate.destination.startsWith(".banzai/"))
-      await safePath(context.repoRoot, candidate.destination);
+    await safePath(context.repoRoot, candidate.destination);
     const before = await observeReport(context, candidate.destination);
     if (
       before.observation.state !== "present" ||
@@ -655,9 +654,13 @@ export async function publishCapturedCompletion(
         "The implementation report changed before publication.",
         "publication"
       );
+    const temporaryRelative = `.banzai/runs/${state.runId}/${candidate.candidatePath}.${context.ids()}.completion.tmp`;
+    await verifyExecutionIgnore(context.repoRoot, temporaryRelative);
     try {
       const mode = (await lstat(destination)).mode & 0o777;
-      const temporary = `${destination}.${context.ids()}.completion.tmp`;
+      const temporary = await safePath(context.repoRoot, temporaryRelative, {
+        missing: true
+      });
       await writeFile(temporary, composition.bytes, { flag: "wx", mode });
       try {
         await rename(temporary, destination);

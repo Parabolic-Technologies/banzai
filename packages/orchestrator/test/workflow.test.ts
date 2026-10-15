@@ -1,6 +1,5 @@
 import { requiredFixture } from "./helpers.js";
 import { spawn, spawnSync } from "node:child_process";
-import { artifactCommand } from "../src/artifact-storage.js";
 import { collectEvaluationExport } from "../src/evaluation.js";
 import { deriveEvaluationKpiReport } from "../src/evaluation-kpi.js";
 import {
@@ -14,14 +13,7 @@ import { InteractiveHumanTime } from "../src/interactive-human-time.js";
 import { HumanTimeStore } from "../src/human-time-store.js";
 import type { HumanTimeBoundary } from "../src/human-time.js";
 import assert from "node:assert/strict";
-import {
-  mkdir,
-  readFile,
-  readdir,
-  realpath,
-  rm,
-  writeFile
-} from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { BanzaiError, ProcessExitError } from "../src/errors.js";
@@ -55,6 +47,7 @@ import type {
 } from "../src/workflow.js";
 import {
   createTestRepository,
+  commitAll,
   monochromeEnv,
   snapshotTree
 } from "./helpers.js";
@@ -75,121 +68,6 @@ import {
   prerequisiteBlockedFixFixture,
   selectionResult
 } from "./workflow-fixtures.js";
-
-for (const outcome of ["completed", "cancelled"] as const) {
-  test(`frozen archive retains a ${outcome} task run as explicitly unsupported evidence`, async () => {
-    const repository = await createTestRepository({
-      artifactLayout: "private"
-    });
-    try {
-      const adapters = new FakeAdapters();
-      adapters.reviewResults.push(passingReview());
-      const runner = new WorkflowRunner(repository.root, adapters);
-      let state = await runner.start({
-        slug: "example",
-        request: "Archive the fixture."
-      });
-      if (outcome === "completed")
-        state = await runner.approvePlan("human", true);
-      else {
-        await runner.cancel({ reason: "intent_changed" });
-        state = (await runner.status()).state;
-      }
-      assert.equal(
-        state.status,
-        outcome === "completed" ? "done" : "cancelled",
-        state.blockReason ?? ""
-      );
-      const invoke = async (
-        operation: string,
-        fields: Record<string, unknown>
-      ) => {
-        const request = path.join(
-          await realpath(repository.root),
-          "archive-request.json"
-        );
-        await writeFile(
-          request,
-          JSON.stringify({
-            schema: "banzai-artifact-request/v1",
-            schemaVersion: 1,
-            repoRoot: repository.root,
-            ...fields
-          })
-        );
-        const response = await artifactCommand([operation, "--json", request]);
-        assert.equal(response.ok, true, JSON.stringify(response));
-        return response.result as Record<string, unknown>;
-      };
-      const archiveDirectory = path.join(
-        await realpath(repository.root),
-        "archive"
-      );
-      const inventoried = await invoke("inventory", {
-        workPaths: [`.banzai/work/${state.artifactBinding?.binding.workId}`],
-        runIds: [state.runId]
-      });
-      const inventoryFile = path.join(
-        await realpath(repository.root),
-        "reviewed-inventory.json"
-      );
-      const reviewed = inventoried.inventory as {
-        retention: { pins: unknown[] };
-      };
-      reviewed.retention.pins = [
-        {
-          sourceId: "project",
-          workId: state.artifactBinding?.binding.workId,
-          reason: "Closed run audit",
-          recordedAt: "2026-09-11T00:00:00.000Z"
-        }
-      ];
-      await writeFile(inventoryFile, JSON.stringify(inventoried.inventory));
-      const exported = await invoke("export", {
-        inventoryFile,
-        destination: archiveDirectory
-      });
-      const verified = await invoke("verify", { bundlePath: archiveDirectory });
-      assert.equal(exported.complete, false, JSON.stringify(verified));
-      assert.ok(
-        (verified.uninterpreted as string[]).includes(
-          `.banzai/runs/${state.runId}/state.json`
-        )
-      );
-      assert.ok(
-        (verified.retainedPaths as string[]).includes(
-          `.banzai/runs/${state.runId}/state.json`
-        )
-      );
-      const destination = path.join(
-        await realpath(repository.root),
-        "restored"
-      );
-      await assert.rejects(
-        invoke("restore", {
-          bundlePath: archiveDirectory,
-          destination
-        }),
-        /Restore requires complete dependency interpretation/
-      );
-      if (outcome === "cancelled") {
-        const plan = state.artifactBinding?.binding.artifacts.plan;
-        assert.ok(plan);
-        await rm(path.join(repository.root, plan));
-        const incomplete = await invoke("inventory", {
-          runIds: [state.runId]
-        });
-        assert.equal(
-          incomplete.complete,
-          false,
-          "missing approved authority must not be a complete inventory"
-        );
-      }
-    } finally {
-      await repository.dispose();
-    }
-  });
-}
 
 function repinFixtureInventory(markdown: string): string {
   const pattern = /```banzai-verification-obligations\/v2\n([\s\S]*?)\n```/u;
@@ -854,7 +732,7 @@ test("an answered lite escalation reselects before further source changes", asyn
         gate: "escalation",
         summary: "The fix changes a public API.",
         questions: ["Approve strict planning for the public API change?"],
-        touchedPaths: ["documentation/features/example/work.md"]
+        touchedPaths: ["documentation/work/example/work.md"]
       })
     );
     const runner = new WorkflowRunner(repository.root, adapters);
@@ -1251,7 +1129,7 @@ for (const editGuidance of [false, true]) {
         const report = await readFile(
           await boundFixturePath(
             repository.root,
-            "documentation/features/example/implementation-report.md"
+            "documentation/work/example/implementation-report.md"
           ),
           "utf8"
         );
@@ -1640,6 +1518,8 @@ test("another active run is rejected even after the checkout is cleaned", async 
     const firstAdapters = new FakeAdapters();
     const first = new WorkflowRunner(repository.root, firstAdapters);
     await first.start({ slug: "example", request: "First run." });
+    // Tracking the planning documents does not replace approval or run ownership.
+    await commitAll(repository.root, "Track reviewable planning documents");
     assert.equal(
       spawnSync("git", ["status", "--porcelain"], {
         cwd: repository.root,
@@ -1825,7 +1705,7 @@ test("human time: ADR, consultation and escalation retain distinct attempt ident
     const consultation = await runner.decideAdr({
       id: "ADR-EXAMPLE",
       decision: "rework",
-      note: null,
+      note: "Revise the proposed decision using the owner feedback.",
       decidedBy: "human",
       autoResume: true
     });
@@ -2567,7 +2447,7 @@ test("characterization: an incomplete completion claim is repaired by one linked
               evidence: [],
               gap: {
                 reportPath:
-                  "documentation/features/example/implementation-report.md",
+                  "documentation/work/example/implementation-report.md",
                 section: "Plan Task Completion",
                 detail: "Still open."
               }

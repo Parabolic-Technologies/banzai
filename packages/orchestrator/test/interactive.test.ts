@@ -8,6 +8,11 @@ import assert from "node:assert/strict";
 import { Writable } from "node:stream";
 import test from "node:test";
 import packageManifest from "../package.json" with { type: "json" };
+import {
+  planningTriageRequest,
+  planningReviewResult,
+  planningReviewAnalysis
+} from "./planning-review-fixtures.js";
 import { DEFAULT_CONFIG, type ModelUpdate } from "../src/config.js";
 import { BanzaiError } from "../src/errors.js";
 import { TerminalAttention } from "../src/terminal-attention.js";
@@ -208,6 +213,7 @@ class FakeIO implements InteractiveIO {
   readonly inputMessages: string[] = [];
   readonly inputOptions: InteractiveInput[] = [];
   readonly confirmationMessages: string[] = [];
+  readonly confirmationDefaults: boolean[] = [];
 
   constructor(
     readonly selections: unknown[],
@@ -234,8 +240,13 @@ class FakeIO implements InteractiveIO {
     return value as T;
   }
 
-  async confirm(message: string): Promise<boolean> {
+  async multiSelect<T>(): Promise<T[]> {
+    return this.selections.shift() as T[];
+  }
+
+  async confirm(message: string, defaultValue = false): Promise<boolean> {
     this.confirmationMessages.push(message);
+    this.confirmationDefaults.push(defaultValue);
     const value = this.confirmations.shift();
     assert.notEqual(value, undefined, "Unexpected confirmation prompt");
     return value ?? false;
@@ -247,6 +258,19 @@ class FakeIO implements InteractiveIO {
 }
 
 class FakeRunner implements InteractiveRunner {
+  async reworkPlan(value: unknown): Promise<RunState> {
+    this.calls.push({ operation: "reworkPlan", value });
+    return runState("needs_plan_approval");
+  }
+  async requestPlanningReview(value: unknown): Promise<RunState> {
+    this.calls.push({ operation: "requestPlanningReview", value });
+    return runState("needs_plan_approval");
+  }
+  async answerPlanningReview(value: unknown): Promise<RunState> {
+    this.calls.push({ operation: "answerPlanningReview", value });
+    return runState("needs_plan_approval");
+  }
+
   async withConfigurationDecisionOwnership<T>(
     action: () => Promise<T>
   ): Promise<T> {
@@ -392,6 +416,319 @@ class FakeRunner implements InteractiveRunner {
     };
   }
 }
+
+function planningTriageStatus(count = 1): WorkflowStatus {
+  const pending = planningTriageRequest();
+  const result = planningReviewResult(count);
+  pending.findings = result.findings;
+  pending.analysis = planningReviewAnalysis(result).entries;
+  const state = runState("needs_human_decision", {
+    schemaVersion: 10,
+    pendingHumanDecision: pending
+  });
+  pending.runId = state.runId;
+  return workflowStatus(state);
+}
+
+test("planning triage interleaves each complete finding card with its disposition in review order", async () => {
+  const status = planningTriageStatus(2);
+  const runner = new FakeRunner([status]);
+  const io = new FakeIO(["decline", "exit"]);
+  const order: string[] = [];
+  const write = io.writeLine.bind(io);
+  const select = io.select.bind(io);
+  io.writeLine = (message) => {
+    order.push(`line:${message}`);
+    write(message);
+  };
+  io.select = async (message, choices) => {
+    order.push(`menu:${message}`);
+    return select(message, choices);
+  };
+  await runInteractive(runner, io, { decidedBy: "owner" });
+  const firstCard = order.findIndex((line) => line.startsWith("line:P1-F1:"));
+  const firstMenu = order.indexOf("menu:Disposition for P1-F1");
+  const secondCard = order.findIndex((line) => line.startsWith("line:P1-F2:"));
+  const secondMenu = order.indexOf("menu:Disposition for P1-F2");
+  assert.ok(
+    firstCard >= 0 &&
+      firstCard < firstMenu &&
+      firstMenu < secondCard &&
+      secondCard < secondMenu
+  );
+  const first = order.slice(firstCard, firstMenu).join("\n");
+  assert.match(first, /No failure case is specified/);
+  assert.match(first, /Suggested resolution: Specify/);
+  assert.match(first, /Assessment: agree/);
+  assert.match(first, /The acceptance test becomes explicit/);
+  assert.match(first, /Advisory recommendation: add-case/);
+  assert.deepEqual(runner.calls, []);
+});
+
+test("planning triage escapes hostile card and choice text and keeps model Exit labels before timing controls", async () => {
+  const status = planningTriageStatus();
+  const pending = status.state.pendingHumanDecision;
+  if (pending?.kind !== "planning_review_triage")
+    throw new Error("Missing triage");
+  const unsafe = "\u001b[2J\u0085\u202e";
+  pending.artifactPath += unsafe;
+  const finding = pending.findings[0];
+  const entry = pending.analysis[0];
+  assert.ok(finding && entry);
+  finding.summary += unsafe;
+  finding.suggestedResolution += unsafe;
+  for (const evidence of finding.evidence) {
+    evidence.path += unsafe;
+    evidence.detail += unsafe;
+  }
+  entry.rationale += unsafe;
+  const option = entry.options[0];
+  assert.ok(option);
+  option.label = "Exit with the recommended fix" + unsafe;
+  option.consequences = ["Consequence" + unsafe];
+  if (entry.recommendation !== null) entry.recommendation.rationale += unsafe;
+  const runner = new FakeRunner([status]);
+  const io = new FakeIO(["exit"]);
+  await runInteractive(runner, io, {
+    decidedBy: "owner" + unsafe,
+    humanTime: new FakeHumanTime()
+  });
+  const visible = [
+    ...io.lines,
+    ...io.choiceNames.flat(),
+    ...io.confirmationMessages
+  ].join("\n");
+  assert.doesNotMatch(visible, /[\u001b\u0085\u202e]/u);
+  assert.match(visible, /\\u001b/);
+  assert.equal(io.choiceSets[0]?.[0], "option:add-case");
+  const recommended = io.choiceNames[0]?.[0];
+  assert.ok(recommended);
+  assert.ok(recommended.endsWith(" (recommended)"));
+  assert.equal(io.choiceSets[0].at(-1), "exit");
+  assert.ok(
+    io.choiceSets[0]
+      .slice(1, -1)
+      .some((value) => String(value).includes("human_time"))
+  );
+  assert.deepEqual(runner.calls, []);
+});
+
+test("planning-triage declined confirmation records nothing and reappears unchanged", async () => {
+  const status = planningTriageStatus();
+  const before = structuredClone(status);
+  const runner = new FakeRunner([status, status]);
+  const io = new FakeIO(["decline", "exit"], [""], [false]);
+  await runInteractive(runner, io, { decidedBy: "owner" });
+  assert.equal(io.confirmationDefaults[0], false);
+  assert.deepEqual(runner.calls, []);
+  assert.equal(io.choiceNames.length, 2);
+  assert.deepEqual(status, before);
+});
+
+test("planning gate menus preserve action order when human-time controls are present", async () => {
+  for (const gate of ["plan", "adr"] as const) {
+    const status = workflowStatus(
+      runState(gate === "plan" ? "needs_plan_approval" : "needs_adr_approval", {
+        schemaVersion: 10,
+        planArtifacts: {
+          description: null,
+          plan: null,
+          adrs: ["documentation/decisions/0001-example.md"],
+          implementationReport: null,
+          testReport: null
+        }
+      })
+    );
+    status.planningReview = {
+      decisions:
+        gate === "plan"
+          ? ["approve", "rework", "review"]
+          : ["accept", "reject", "rework", "review"],
+      reviewPaths: ["documentation/decisions/0001-example.md"],
+      active: null,
+      latest: null
+    };
+    const io = new FakeIO(["exit"]);
+    const runner = new FakeRunner([status]);
+    await runInteractive(runner, io, {
+      decidedBy: "owner",
+      humanTime: new FakeHumanTime()
+    });
+    assert.deepEqual(
+      io.choiceSets[0]?.slice(0, 4),
+      gate === "plan"
+        ? ["approve_plan", "rework_plan", "planning_review", "cancel"]
+        : ["accept", "reject", "rework", "planning_review"]
+    );
+    assert.deepEqual(io.choiceSets[0].slice(-3), [
+      "human_time_update",
+      "human_time_details",
+      "exit"
+    ]);
+    assert.deepEqual(runner.calls, []);
+  }
+});
+
+test("Ctrl+C and EOF at every new planning prompt leave the pending decision unrecorded", async (t) => {
+  interface PromptCase {
+    name: string;
+    gate: "plan" | "adr" | "triage";
+    method: "select" | "input" | "multiSelect" | "confirm";
+    message?: string;
+    selections: unknown[];
+    inputs?: string[];
+  }
+  const cases: PromptCase[] = [
+    {
+      name: "plan menu",
+      gate: "plan",
+      method: "select",
+      message: "Plan decision",
+      selections: []
+    },
+    {
+      name: "ADR menu",
+      gate: "adr",
+      method: "select",
+      message: "Decision for ADR-0001",
+      selections: []
+    },
+    {
+      name: "plan feedback",
+      gate: "plan",
+      method: "input",
+      message: "Rework feedback for the planner",
+      selections: ["rework_plan"]
+    },
+    {
+      name: "ADR feedback",
+      gate: "adr",
+      method: "input",
+      message: "Rework feedback for the planner",
+      selections: ["rework"]
+    },
+    {
+      name: "plan rework confirmation",
+      gate: "plan",
+      method: "confirm",
+      selections: ["rework_plan"],
+      inputs: ["Feedback"]
+    },
+    {
+      name: "ADR rework confirmation",
+      gate: "adr",
+      method: "confirm",
+      selections: ["rework"],
+      inputs: ["Feedback"]
+    },
+    {
+      name: "review scope",
+      gate: "plan",
+      method: "select",
+      message: "Review scope",
+      selections: ["planning_review"]
+    },
+    {
+      name: "artifact selection",
+      gate: "plan",
+      method: "multiSelect",
+      selections: ["planning_review", "choose"]
+    },
+    {
+      name: "review confirmation",
+      gate: "plan",
+      method: "confirm",
+      selections: ["planning_review", "whole"]
+    },
+    {
+      name: "disposition",
+      gate: "triage",
+      method: "select",
+      message: "Disposition for P1-F1",
+      selections: []
+    },
+    {
+      name: "own instruction",
+      gate: "triage",
+      method: "input",
+      message: "Your instruction for P1-F1",
+      selections: ["instruction"]
+    },
+    {
+      name: "additional instruction",
+      gate: "triage",
+      method: "input",
+      message: "Additional instruction for the planner (optional)",
+      selections: ["decline"]
+    },
+    {
+      name: "triage confirmation",
+      gate: "triage",
+      method: "confirm",
+      selections: ["decline"],
+      inputs: [""]
+    }
+  ];
+  for (const errorName of ["ExitPromptError", "AbortPromptError"])
+    for (const c of cases)
+      await t.test(`${errorName}: ${c.name}`, async () => {
+        const status =
+          c.gate === "triage"
+            ? planningTriageStatus()
+            : workflowStatus(
+                runState(
+                  c.gate === "plan"
+                    ? "needs_plan_approval"
+                    : "needs_adr_approval",
+                  {
+                    schemaVersion: 10,
+                    planArtifacts: {
+                      description: "documentation/work/task/description.md",
+                      plan: "documentation/work/task/plan.md",
+                      adrs: ["documentation/decisions/0001-example.md"],
+                      implementationReport: null,
+                      testReport: null
+                    }
+                  }
+                )
+              );
+        status.planningReview = {
+          decisions:
+            c.gate === "adr"
+              ? ["accept", "reject", "rework", "review"]
+              : ["approve", "rework", "review"],
+          reviewPaths: ["documentation/work/task/plan.md"],
+          active: null,
+          latest: null
+        };
+        const before = structuredClone(status);
+        const runner = new FakeRunner([status]);
+        const io = new FakeIO([...c.selections], [...(c.inputs ?? [])]);
+        let interrupted = false;
+        const stop = () => {
+          interrupted = true;
+          const error = new Error("Synthetic prompt interruption");
+          error.name = errorName;
+          throw error;
+        };
+        const select = io.select.bind(io);
+        const input = io.input.bind(io);
+        io.select = async (message, choices) =>
+          c.method === "select" && message === c.message
+            ? stop()
+            : select(message, choices);
+        io.input = async (options) =>
+          c.method === "input" && options.message === c.message
+            ? stop()
+            : input(options);
+        if (c.method === "confirm") io.confirm = async () => stop();
+        if (c.method === "multiSelect") io.multiSelect = async () => stop();
+        await runInteractive(runner, io, { decidedBy: "owner" });
+        assert.ok(interrupted, c.name);
+        assert.deepEqual(runner.calls, []);
+        assert.deepEqual(status, before);
+      });
+});
 
 class FakeModelConfiguration implements ModelConfigurationGateway {
   readonly applied: ModelUpdate[][] = [];
@@ -2336,4 +2673,87 @@ test("accepted review F3 interactive approval escapes controls before the decisi
     runner.calls.some((call) => call.operation === "approvePlan"),
     false
   );
+});
+
+test("v10 ADR menu without human-time controls offers review after rework and exits last", async () => {
+  const status = workflowStatus(
+    runState("needs_adr_approval", {
+      schemaVersion: 10,
+      planArtifacts: {
+        description: null,
+        plan: null,
+        adrs: ["documentation/decisions/0001-example.md"],
+        implementationReport: null,
+        testReport: null
+      }
+    })
+  );
+  status.planningReview = {
+    decisions: ["accept", "reject", "rework", "review"],
+    reviewPaths: ["documentation/decisions/0001-example.md"],
+    active: null,
+    latest: null
+  };
+  const runner = new FakeRunner([status]);
+  const io = new FakeIO(["exit"]);
+  await runInteractive(runner, io, { decidedBy: "owner" });
+  assert.deepEqual(io.choiceNames[0], [
+    "Accept",
+    "Reject",
+    "Request rework",
+    "Request independent review",
+    "Exit without deciding"
+  ]);
+  assert.deepEqual(runner.calls, []);
+});
+
+test("v10 plan menu offers rework and review in exact order with default-No feedback confirmation", async () => {
+  const status = workflowStatus(runState("needs_plan_approval"));
+  status.planningReview = {
+    decisions: ["approve", "rework", "review"],
+    reviewPaths: ["documentation/work/example/plan.md"],
+    active: null,
+    latest: null
+  };
+  const runner = new FakeRunner([status, status]);
+  const io = new FakeIO(["rework_plan", "exit"], ["Owner feedback"], [true]);
+  await runInteractive(runner, io, { decidedBy: "owner" });
+  assert.deepEqual(io.choiceNames[0], [
+    "Approve plan and continue",
+    "Request rework",
+    "Request independent review",
+    "Cancel run",
+    "Exit and decide later"
+  ]);
+  assert.equal(io.inputMessages[0], "Rework feedback for the planner");
+  assert.equal(io.inputOptions[0]?.validate?.(" "), "A value is required.");
+  assert.equal(io.confirmationDefaults[0], false);
+  assert.equal(runner.calls[0]?.operation, "reworkPlan");
+});
+test("v10 selected review scope and declined confirmation cause no runner mutation", async () => {
+  const status = workflowStatus(runState("needs_plan_approval"));
+  status.planningReview = {
+    decisions: ["approve", "rework", "review"],
+    reviewPaths: ["documentation/work/example/plan.md"],
+    active: null,
+    latest: null
+  };
+  const runner = new FakeRunner([status, status]);
+  const io = new FakeIO(
+    [
+      "planning_review",
+      "choose",
+      ["documentation/work/example/plan.md"],
+      "exit"
+    ],
+    [],
+    [false]
+  );
+  await runInteractive(runner, io, { decidedBy: "owner" });
+  assert.deepEqual(runner.calls, []);
+  assert.equal(
+    io.confirmationMessages[0],
+    "Send the selected artifacts to the configured reviewer?"
+  );
+  assert.equal(io.confirmationDefaults[0], false);
 });

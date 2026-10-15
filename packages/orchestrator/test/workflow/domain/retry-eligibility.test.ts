@@ -842,3 +842,175 @@ test("retry allocates a separate malformed-evidence decision for every call", ()
     assert.deepEqual(decideRetry(facts), decided(MALFORMED), name);
   }
 });
+
+test("planning-review retry follows its episode step and keeps applying blocks ordinary", () => {
+  const active = (step: string) =>
+    ({
+      active: { step },
+      closed: []
+    }) as unknown as NonNullable<RunState["planningReview"]>;
+  const closed = (outcome: string, step: string | null = null) =>
+    ({
+      active: step === null ? null : { step },
+      closed: [{ outcome }]
+    }) as unknown as NonNullable<RunState["planningReview"]>;
+  const READ_ONLY = retry(
+    true,
+    "Read-only planning review checks can be retried explicitly.",
+    null
+  );
+  const review = attempt("planning_review");
+  const analysis = attempt("planning_analysis");
+  const rows: [string, RetryFacts, ReturnType<typeof decideRetry>][] = [
+    [
+      "a review step blocked before its attempt exists",
+      {
+        state: blockedState({
+          blockedFrom: "planning",
+          planningReview: active("reviewing")
+        })
+      },
+      decided(READ_ONLY)
+    ],
+    [
+      "an analysis step blocked before its attempt exists",
+      {
+        state: blockedState({
+          blockedFrom: "planning",
+          planningReview: active("analyzing")
+        })
+      },
+      decided(READ_ONLY)
+    ],
+    [
+      "a blocked applying result without an attempt",
+      {
+        state: blockedState({
+          blockedFrom: "planning",
+          planningReview: active("applying")
+        })
+      },
+      decided(NOT_TIED)
+    ],
+    [
+      "a stale latest episode with no active episode",
+      {
+        state: blockedState({
+          blockedFrom: "planning",
+          planningReview: closed("stale")
+        })
+      },
+      decided(READ_ONLY)
+    ],
+    [
+      "a non-stale latest episode with no active episode",
+      {
+        state: blockedState({
+          blockedFrom: "planning",
+          planningReview: closed("applied")
+        })
+      },
+      decided(NOT_TIED)
+    ],
+    [
+      "an older stale episode behind an active applying episode",
+      {
+        state: blockedState({
+          blockedFrom: "planning",
+          planningReview: closed("stale", "applying")
+        })
+      },
+      decided(NOT_TIED)
+    ],
+    [
+      "a reviewing episode blocked outside planning",
+      {
+        state: blockedState({
+          blockedFrom: "reviewing",
+          planningReview: active("reviewing")
+        })
+      },
+      decided(
+        retry(
+          true,
+          "Review checks can be retried after resolving the reported prerequisite.",
+          null
+        )
+      )
+    ],
+    ...([review, analysis] as const).flatMap(
+      (candidate): [string, RetryFacts, ReturnType<typeof decideRetry>][] => [
+        [
+          `an interrupted ${candidate.kind} attempt`,
+          {
+            state: blockedState({
+              blockedFrom: "planning",
+              activeAttempt: candidate
+            }),
+            attemptRecord: record({ status: "started" })
+          },
+          decided(
+            retry(
+              true,
+              `Interrupted ${candidate.kind} attempt ${candidate.id} can be retried explicitly because it was read-only.`,
+              candidate.id
+            )
+          )
+        ],
+        [
+          `a failed ${candidate.kind} attempt`,
+          {
+            state: blockedState({
+              blockedFrom: "planning",
+              activeAttempt: candidate
+            }),
+            attemptRecord: record()
+          },
+          decided(
+            retry(
+              true,
+              `Failed ${candidate.kind} attempt ${candidate.id} can be retried explicitly.`,
+              candidate.id
+            )
+          )
+        ],
+        [
+          `a failed ${candidate.kind} attempt recorded against code review`,
+          {
+            state: blockedState({
+              blockedFrom: "reviewing",
+              activeAttempt: candidate
+            }),
+            attemptRecord: record()
+          },
+          decided(
+            retry(
+              false,
+              `The failed ${candidate.kind} attempt is inconsistent with blockedFrom=reviewing.`,
+              candidate.id
+            )
+          )
+        ],
+        [
+          `a context-budget-blocked ${candidate.kind} attempt`,
+          {
+            state: blockedState({
+              blockedFrom: "planning",
+              activeAttempt: candidate
+            }),
+            attemptRecord: record({ failureCode: "CONTEXT_BUDGET_EXCEEDED" })
+          },
+          decided(
+            retry(
+              true,
+              `Context-budget-blocked ${candidate.kind} attempt ${candidate.id} can be retried explicitly after policy or authorized input changes because no vendor process started.`,
+              candidate.id
+            )
+          )
+        ]
+      ]
+    )
+  ];
+  for (const [name, facts, expected] of rows)
+    assert.deepEqual(decideRetry(facts), expected, name);
+});

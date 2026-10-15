@@ -1,5 +1,6 @@
 import { BanzaiError } from "./errors.js";
 import type { RunState, RunStatus } from "./types.js";
+import { planningRestoreEligible } from "./workflow/domain/planning-review.js";
 
 const ALLOWED_TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
   created: ["selecting", "cancelled", "blocked"],
@@ -12,7 +13,7 @@ const ALLOWED_TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
     "cancelled"
   ],
   needs_adr_approval: ["planning", "cancelled", "blocked"],
-  needs_plan_approval: ["plan_approved", "cancelled", "blocked"],
+  needs_plan_approval: ["planning", "plan_approved", "cancelled", "blocked"],
   needs_human_decision: [
     "selecting",
     "planning",
@@ -99,7 +100,13 @@ export function transitionState(state: RunState, next: RunStatus): void {
       "Only a validated configuration prerequisite checkpoint can use this continuation."
     );
   }
-  if (!ALLOWED_TRANSITIONS[state.status].includes(next)) {
+  if (
+    !ALLOWED_TRANSITIONS[state.status].includes(next) &&
+    !(
+      state.status === "needs_human_decision" &&
+      planningRestoreEligible(state, next)
+    )
+  ) {
     throw new BanzaiError(
       "INVALID_TRANSITION",
       `Cannot transition run ${state.runId} from ${state.status} to ${next}.`

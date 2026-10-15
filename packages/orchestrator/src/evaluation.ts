@@ -1,8 +1,5 @@
-import {
-  safePath,
-  readBytes as readArtifactBytes,
-  parseBinding
-} from "./artifact-storage.js";
+import { safePath, readBytes as readArtifactBytes } from "./project-files.js";
+import { parseBinding } from "./work-documents.js";
 import { readVerificationOrigins } from "./verification-evidence.js";
 import { createHash } from "node:crypto";
 import type { Dirent } from "node:fs";

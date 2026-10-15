@@ -39,8 +39,164 @@ import {
   finding,
   passingReview,
   phaseResult,
-  planPath
+  planPath,
+  createAdrGateFixture
 } from "./workflow-fixtures.js";
+
+async function adrDecisionFixture() {
+  const boundaries: string[] = [];
+  const { repository, adapters, runner, gate } = await createAdrGateFixture(
+    async (boundary) => {
+      boundaries.push(boundary.eventType ?? boundary.kind);
+    }
+  );
+  const gateBytes = () =>
+    Promise.all([
+      readFile(runner.store.statePath(gate.runId)),
+      readFile(path.join(runner.store.runDirectory(gate.runId), "events.jsonl"))
+    ]);
+  return { repository, adapters, runner, gate, gateBytes, boundaries };
+}
+
+test("ADR rework rejects invalid feedback and identities before state, events or human time change", async () => {
+  const f = await adrDecisionFixture();
+  try {
+    const before = await f.gateBytes();
+    const timing = [...f.boundaries];
+    const calls = f.adapters.phasePrompts.length;
+    const invalid = [
+      ...[null, "", " \r\n ", "\u0000", "\u202e", "x".repeat(8001)].map(
+        (note) => ({ id: "ADR-0001", note })
+      ),
+      ...[
+        "ADR-0001 ",
+        " ADR-0001",
+        "ADR\n0001",
+        "ADR\r0001",
+        "ADR\u00850001",
+        "ADR\u202e0001",
+        "x".repeat(501)
+      ].map((id) => ({ id, note: "Valid feedback" }))
+    ];
+    for (const input of invalid) {
+      await assert.rejects(
+        f.runner.decideAdr({
+          ...input,
+          decision: "rework",
+          decidedBy: "owner",
+          autoResume: true
+        })
+      );
+      assert.deepEqual(await f.gateBytes(), before, JSON.stringify(input));
+      assert.deepEqual(f.boundaries, timing);
+      assert.equal(f.adapters.phasePrompts.length, calls);
+    }
+    assert.equal(
+      (await f.runner.store.requireActiveState()).status,
+      "needs_adr_approval"
+    );
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+test("v10 ADR rework records exact feedback and supplies it to the next ordinary planner", async () => {
+  const f = await adrDecisionFixture();
+  try {
+    const feedback = "ADR feedback canary\nPreserve the failure behavior.";
+    const state = await f.runner.decideAdr({
+      id: "ADR-0001",
+      decision: "rework",
+      note: feedback,
+      decidedBy: "owner",
+      autoResume: false
+    });
+    assert.equal(state.status, "planning");
+    assert.equal(state.planApproval, null);
+    const record = state.humanDecisions?.at(-1);
+    assert.equal(record?.kind, "adr_rework");
+    assert.deepEqual(
+      {
+        adrId: record.adrId,
+        feedback: record.feedback,
+        decidedBy: record.decidedBy
+      },
+      { adrId: "ADR-0001", feedback, decidedBy: "owner" }
+    );
+    assert.ok(Number.isFinite(Date.parse(record.decidedAt)));
+    assert.equal(state.adrDecisions.at(-1)?.decision, "rework");
+    const replanned = await f.runner.resume();
+    assert.equal(
+      replanned.status,
+      "needs_plan_approval",
+      replanned.blockReason ?? ""
+    );
+    assert.match(
+      requiredFixture(f.adapters.phasePrompts.at(-1)),
+      /ADR feedback canary/
+    );
+    assert.doesNotMatch(
+      (await f.gateBytes())[1].toString(),
+      /ADR feedback canary|Preserve the failure behavior/
+    );
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+test("ADR acceptance preserves optional notes including CR and adds no rework record", async (t) => {
+  for (const note of [null, "Accepted\rwith the original note."])
+    await t.test(note === null ? "no note" : "CR note", async () => {
+      const f = await adrDecisionFixture();
+      try {
+        await f.runner.decideAdr({
+          id: "ADR-0001",
+          decision: "accept",
+          note,
+          decidedBy: "owner",
+          autoResume: false
+        });
+        const state = await f.runner.store.requireActiveState();
+        assert.equal(state.status, "planning");
+        assert.equal(state.adrDecisions.at(-1)?.note, note);
+        assert.equal(
+          state.humanDecisions?.some((r) => r.kind === "adr_rework"),
+          false
+        );
+      } finally {
+        await f.repository.dispose();
+      }
+    });
+});
+
+test("historical state-9 ADR rework retains its legacy decision shape", async () => {
+  const f = await adrDecisionFixture();
+  try {
+    const state = await f.runner.store.requireActiveState();
+    state.schemaVersion = 9;
+    delete state.planningReview;
+    await f.runner.store.writeState(state);
+    const result = await f.runner.decideAdr({
+      id: "ADR-0001",
+      decision: "rework",
+      note: "Legacy feedback",
+      decidedBy: "owner",
+      autoResume: false
+    });
+    const retained = await f.runner.store.requireActiveState();
+    assert.equal(result.status, "planning");
+    assert.equal(retained.schemaVersion, 9);
+    assert.equal(retained.planningReview, undefined);
+    assert.equal(
+      retained.humanDecisions?.some((r) => r.kind === "adr_rework"),
+      false
+    );
+    assert.equal(retained.adrDecisions.at(-1)?.note, "Legacy feedback");
+    assert.equal(f.adapters.phasePrompts.length, 1);
+  } finally {
+    await f.repository.dispose();
+  }
+});
 
 test("a Codex reviewer gets its artifact rendered by the runner", async () => {
   const repository = await createTestRepository();
@@ -97,7 +253,7 @@ test("a Codex reviewer gets its artifact rendered by the runner", async () => {
       completed.latestReview.artifactPath
     );
     const rendered = await readFile(artifact, "utf8");
-    assert.match(rendered, /banzai-feature-review\/v7/);
+    assert.match(rendered, /banzai-feature-review\/v8/);
     assert.match(rendered, /pass/);
   } finally {
     await repository.dispose();
@@ -1261,7 +1417,7 @@ test("review rendering failures retain primary evidence and make zero formatting
           readFile(
             await boundFixturePath(
               repository.root,
-              "documentation/features/example/review-1.md"
+              "documentation/work/example/review-1.md"
             )
           ),
           /ENOENT/
@@ -1298,7 +1454,7 @@ test("retry reruns a failed review in a fresh attempt", async () => {
         repository.root,
         await boundFixturePath(
           repository.root,
-          "documentation/features/example/review-1.md"
+          "documentation/work/example/review-1.md"
         )
       )
     );
@@ -1388,7 +1544,7 @@ test("invalid review candidate retains diagnostic evidence and retry publishes w
         repository.root,
         await boundFixturePath(
           repository.root,
-          "documentation/features/example/review-2.md"
+          "documentation/work/example/review-2.md"
         )
       ),
       sha256: failedRecord.reviewCandidate.sha256,
@@ -1433,7 +1589,7 @@ test("invalid review candidate retains diagnostic evidence and retry publishes w
       readFile(
         await boundFixturePath(
           repository.root,
-          "documentation/features/example/review-2.md"
+          "documentation/work/example/review-2.md"
         ),
         "utf8"
       ),
@@ -1667,7 +1823,7 @@ test("review v2 publication and application interruptions reconcile exactly once
       await runner.start({ slug: "example", request: "Implement it." });
       const artifact = await boundFixturePath(
         repository.root,
-        "documentation/features/example/review-1.md"
+        "documentation/work/example/review-1.md"
       );
       let injected = false;
       const write = runner.store.writeText.bind(runner.store);
@@ -1830,7 +1986,7 @@ test("review v2 truthful layout blockers publish incomplete coverage without com
     const contents = await readFile(
       await boundFixturePath(
         repository.root,
-        "documentation/features/example/review-1.md"
+        "documentation/work/example/review-1.md"
       ),
       "utf8"
     );
@@ -1890,7 +2046,7 @@ test("review v2 retains schema-valid rejected scope and terminal proof before co
       readFile(
         await boundFixturePath(
           repository.root,
-          "documentation/features/example/review-1.md"
+          "documentation/work/example/review-1.md"
         )
       ),
       /ENOENT/

@@ -1,6 +1,6 @@
 import type { VerificationPhysicalAttempt as VerificationAttemptRecord } from "./verification-evidence.mjs";
 import type { VerificationCapture, VerificationDecision, VerificationOrigin } from "./verification-evidence.mjs";
-export interface VerificationStorage { repoRoot: string; directory: string; workId: string; }
+export interface VerificationStorage { repoRoot: string; directory: string; workId: string; excludedSourcePaths?: string[]; }
 export interface VerificationEvidenceReference { relativePath: string; sha256: string; }
 export interface VerificationApplicability {
   schema: "banzai-verification-applicability/v1"; schemaVersion: 1; workId: string; roundId: string;

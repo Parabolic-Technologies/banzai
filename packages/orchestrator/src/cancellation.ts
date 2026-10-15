@@ -460,11 +460,15 @@ export function captureCancellationContext(raw: unknown): CancellationContext {
         : r.status === "needs_triage"
           ? "triage"
           : r.status === "needs_human_decision"
-            ? pending.kind === "decision_consultation"
-              ? "decision_consultation"
-              : pending.kind === "escalation"
-                ? "escalation"
+            ? pending.kind === "planning_review_triage"
+              ? member(pending.originGate, ["adr_approval", "plan_approval"])
+                ? pending.originGate
                 : null
+              : pending.kind === "decision_consultation"
+                ? "decision_consultation"
+                : pending.kind === "escalation"
+                  ? "escalation"
+                  : null
             : r.status === "blocked" && recoveryPresent
               ? "recovery_wait"
               : null;
@@ -500,7 +504,11 @@ export function captureCancellationContext(raw: unknown): CancellationContext {
     context.attempt = cancellationValue(
       null,
       "state.activeAttempt",
-      r.activeAttempt === null ? "not_applicable" : "missing"
+      ["planning_review", "planning_analysis"].includes(String(attempt.kind))
+        ? "unsupported"
+        : r.activeAttempt === null
+          ? "not_applicable"
+          : "missing"
     );
   const request = cancellationRecord(pending.request);
   if (
@@ -536,7 +544,11 @@ export function captureCancellationContext(raw: unknown): CancellationContext {
     context.decision = cancellationValue(
       null,
       "none",
-      gate === null ? "not_applicable" : "missing"
+      pending.kind === "planning_review_triage"
+        ? "unsupported"
+        : gate === null
+          ? "not_applicable"
+          : "missing"
     );
   return context;
 }

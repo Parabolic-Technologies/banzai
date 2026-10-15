@@ -17,6 +17,66 @@ const script = path.resolve("scripts/publication-check.mjs");
 const digest = (value: string) =>
   createHash("sha256").update(value).digest("hex");
 
+test("tracked work is source content without inventory entries and machine evidence stays excluded", async () => {
+  const { inspectPublicationFiles } = (await import(
+    pathToFileURL(script).href
+  )) as typeof import("../scripts/publication-check.mjs");
+  const policy = {
+    schema: "banzai-publication-inventory/v1",
+    schemaVersion: 1,
+    mode: "clean",
+    entries: []
+  };
+  const document = "documentation/work/new-work/plan.md";
+  const files = new Map([[document, Buffer.from("# Reviewable plan\n")]]);
+  assert.deepEqual(inspectPublicationFiles(policy, files), {
+    schema: "banzai-publication-result/v1",
+    schemaVersion: 1,
+    mode: "clean",
+    fileCount: 1,
+    historicalExposure: 0,
+    classification: "classified-public-surface"
+  });
+  for (const distribution of ["plugin", "npm"] as const)
+    assert.throws(
+      () => inspectPublicationFiles(policy, files, { distribution }),
+      /PACKAGE_INVALID/u
+    );
+  for (const namespace of ["verification", "execution-locks"])
+    assert.throws(
+      () =>
+        inspectPublicationFiles(
+          policy,
+          new Map([
+            [`.banzai/${namespace}/probe/record.json`, Buffer.from("{}")]
+          ])
+        ),
+      /PRIVATE_PATH/u
+    );
+  // Construct the rejected header at runtime; test source is published too.
+  for (const content of [
+    "-----BEGIN " + "PRIVATE KEY-----",
+    '```json\n{"schema":"banzai-work-binding/v3","workId":"private"}\n```\n',
+    '```json\n{"schemaVersion":9,"runId":"private","repoRoot":"private"}\n```\n'
+  ])
+    assert.throws(
+      () =>
+        inspectPublicationFiles(
+          policy,
+          new Map([[document, Buffer.from(content)]])
+        ),
+      /SECRET_SIGNAL|PRIVATE_CONTENT/u
+    );
+  assert.throws(
+    () =>
+      inspectPublicationFiles(
+        policy,
+        new Map([["documentation/work/new-work/.env", Buffer.from("secret")]])
+      ),
+    /PRIVATE_PATH/u
+  );
+});
+
 test("publication guard inspects staged bytes and exact historical exceptions", async () => {
   const repository = await createTestRepository();
   try {
@@ -289,7 +349,7 @@ test("actual source/plugin/npm archive resources and source-map bytes must descr
     assert.equal(
       (await checkInstructionPayloads(root, { source, plugin, npm }))
         .resourceCount,
-      24
+      25
     );
     const policy = JSON.parse(
       await readFile(path.join(root, "publication-policy.json"), "utf8")

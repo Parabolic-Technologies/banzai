@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { createWork, digestBytes } from "../src/artifact-storage.js";
+import { createTestWork as createWork } from "./helpers.js";
+import { digestBytes } from "../src/project-files.js";
 import { reviewSnapshotFixture } from "./review-fixtures.js";
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile, stat } from "node:fs/promises";
@@ -468,11 +469,11 @@ test("accepted F1 validates the actual review iteration destination before priva
       mode: "strict",
       creationId: randomUUID()
     });
-    const workPath = `.banzai/work/${work.binding.workId}`;
+    const workPath = work.binding.artifacts.reviewDirectory;
     const relative = `${workPath}/review-2.md`;
     await writeFile(
       path.join(root, ".gitignore"),
-      `.banzai/runs/\n.banzai/work/**\n!.banzai/work/\n!.banzai/work/*/\n!${relative}\n`
+      `documentation/work/\n.banzai/runs/\n`
     );
     const artifact: ReviewArtifactContext = {
       ...context(),
@@ -480,8 +481,8 @@ test("accepted F1 validates the actual review iteration destination before priva
       path: relative,
       snapshot: {
         ...reviewSnapshotFixture(),
-        schema: "banzai-review-snapshot/v2",
-        schemaVersion: 2,
+        schema: "banzai-review-snapshot/v7",
+        schemaVersion: 7,
         artifactBinding: work
       }
     };
@@ -495,11 +496,21 @@ test("accepted F1 validates the actual review iteration destination before priva
     });
     await writeFile(
       path.join(root, ".gitignore"),
+      ".banzai/runs/\n!.banzai/runs/\n.banzai/runs/*\n!.banzai/runs/example/\n.banzai/runs/example/*\n!.banzai/runs/example/attempts/\n.banzai/runs/example/attempts/*\n!*.publication.tmp\n"
+    );
+    await assert.rejects(publishReviewArtifact(root, artifact, candidate), {
+      code: "ARTIFACT_IGNORE_CONFLICT"
+    });
+    await assert.rejects(readFile(path.join(root, relative)), {
+      code: "ENOENT"
+    });
+    await writeFile(
+      path.join(root, ".gitignore"),
       ".banzai/work/\n.banzai/runs/\n"
     );
     await publishReviewArtifact(root, artifact, candidate);
     assert.equal(await readFile(path.join(root, relative), "utf8"), contents);
-    assert.equal((await stat(path.join(root, relative))).mode & 0o777, 0o600);
+    assert.equal((await stat(path.join(root, relative))).mode & 0o777, 0o644);
   } finally {
     await repository.dispose();
   }

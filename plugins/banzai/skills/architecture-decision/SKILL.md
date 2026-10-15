@@ -20,13 +20,20 @@ only decision-specific responsibilities and does not copy its rule set.
 
 ## Artifact Storage
 
-Before artifact discovery or writing, read the installed
-`../../policies/artifact-storage.md` and resolve the selected work through its
-plugin-local helper. Use the returned role paths for internal work artifacts;
-`documentation/` work paths below describe the explicit legacy layout only.
-Keep ADRs, indexes, manifests and maintained product guidance at their existing
-repository paths. Status/loading stays read-only, and orchestrated work follows
-the persisted run binding and exact phase grants.
+Before reading or writing work documents, read the installed
+`../../policies/artifact-storage.md`. New work uses one flat
+`documentation/work/<slug>/` directory; read and edit selected Markdown files
+with ordinary file tools. Existing work continues at its explicit known paths,
+including follow-up reports and reviews. Do not migrate existing documents or
+consult an artifact-layout declaration. Resolve ambiguous work selection before
+writing. Keep ADRs, indexes, manifests and maintained guidance at their existing
+paths. Read-only discovery creates nothing; runner phases follow their supplied
+binding and exact phase grants.
+
+Concrete `documentation/work/` paths below are new-work defaults. For explicit
+continuation, resolve inputs and outputs from the selected work's known locations
+and links, including its report and review directory; never create a replacement
+work directory to satisfy a new-work path example.
 
 ## Sources
 
@@ -58,6 +65,13 @@ the persisted run binding and exact phase grants.
    - `artifact-storage.md` before resolving, reading or writing work artifacts.
 
 ## Orchestrated Mode
+
+At the ADR and plan gates the owner may request rework with required feedback
+or an independent read-only planning review of the whole bundle or selected
+artifacts. The planner analyzes findings without edits; only recorded human
+dispositions authorize applying revisions. Declined findings stay unchanged.
+These actions grant no approval or acceptance and keep Accepted ADR bodies
+immutable. Revisions return to the normal planning gates.
 
 A legacy or partial layout returns `outcome=needs_human_decision`,
 `gate=escalation`, the layout diagnostic as `summary`, one question naming

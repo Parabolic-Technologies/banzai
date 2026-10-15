@@ -31,7 +31,9 @@ export function instructionPhasesForRole(
   if (role === "planner")
     return route === null || route === "strict" ? ["planning"] : null;
   if (role === "reviewer")
-    return route === null || route === "strict" ? ["review"] : null;
+    return route === null || route === "strict"
+      ? ["review", "planning-review"]
+      : null;
   if (route === null) return ["implementation", "fix", "feature", "quick-fix"];
   return route === "strict" ? ["implementation", "fix"] : [route];
 }

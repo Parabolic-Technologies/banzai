@@ -2,12 +2,12 @@ import { requiredFixture } from "./helpers.js";
 import { instructionPluginFixture } from "./phase-instruction-fixtures.js";
 import { inspectDoctor } from "../src/doctor.js";
 import { spawnSync } from "node:child_process";
+import { createTestWork as createWork } from "./helpers.js";
+import { inspectBoundWork } from "../src/work-documents.js";
 import {
-  acquireWork,
-  createWork,
-  releaseWork,
-  inspectArtifacts
-} from "../src/artifact-storage.js";
+  executionKey,
+  withExecutionOwnership
+} from "../../../plugins/banzai/lib/execution-ownership.mjs";
 import { reviewResultSchema } from "../src/contracts.js";
 import { collectEvaluationExport } from "../src/evaluation.js";
 import { deriveEvaluationKpiReport } from "../src/evaluation-kpi.js";
@@ -65,6 +65,49 @@ import {
 const LAYOUT_DIAGNOSTIC =
   "legacy Banzai layout: run `project-manifest` to migrate";
 
+test("reviewer instruction preflight includes planning-review before any model or attempt", async () => {
+  const repository = await createTestRepository();
+  const plugin = await instructionPluginFixture();
+  try {
+    await configureInstructionPlugin(repository.root, plugin.directory);
+    const configPath = path.join(repository.root, ".banzai/config.json");
+    const config = JSON.parse(
+      await readFile(configPath, "utf8")
+    ) as OrchestratorConfig;
+    config.models.reviewer.executable = config.models.implementer.executable;
+    await writeFile(configPath, JSON.stringify(config));
+    await writeFile(
+      path.join(plugin.directory, "phases/planning-review.md"),
+      "PRIVATE-PLANNING-PREFLIGHT-CANARY"
+    );
+    const adapters = new FakeAdapters();
+    const runner = new WorkflowRunner(repository.root, adapters);
+    await assert.rejects(
+      runner.start({ slug: "example", request: "Plan it." }),
+      { code: "INSTRUCTION_RESOURCE_MISMATCH" }
+    );
+    const state = await runner.store.requireActiveState();
+    assert.equal(state.status, "created");
+    assert.equal(state.activeAttempt, null);
+    assert.deepEqual(await runner.store.readRunAttempts(state.runId), []);
+    assert.equal(
+      adapters.selectionPrompts.length +
+        adapters.phasePrompts.length +
+        adapters.reviewPrompts.length +
+        adapters.planningRequests.length,
+      0
+    );
+    assert.equal(adapters.codexPreflights + adapters.claudePreflights, 0);
+    assert.doesNotMatch(
+      await readFile(runner.store.statePath(state.runId), "utf8"),
+      /PRIVATE-PLANNING-PREFLIGHT-CANARY/
+    );
+  } finally {
+    await plugin.dispose();
+    await repository.dispose();
+  }
+});
+
 class LayoutStopAdapters extends FakeAdapters {
   stopPhase: PhaseResult["phase"] | null = null;
   override async runPhase(
@@ -80,7 +123,7 @@ class LayoutStopAdapters extends FakeAdapters {
         request.repoRoot,
         await boundFixturePath(
           request.repoRoot,
-          "documentation/features/example/implementation-report.md"
+          "documentation/work/example/implementation-report.md"
         )
       );
       const strictImplementation =
@@ -890,7 +933,7 @@ test("adoption mid-chain drift retains completed selection and the last durable 
     assert.ok(checkpoint.value);
     const after = await snapshotTree(path.join(repository.root, ".banzai"));
     const status = await runner.status();
-    const ownedClaim = `work/${status.state.artifactBinding?.binding.workId}/.writer-claim.json`;
+    const ownedClaim = `execution-locks/${executionKey(requiredFixture(status.state.artifactBinding).binding.artifacts.reviewDirectory)}/claim.json`;
     assert.ok(checkpoint.value.some((entry) => entry.path === ownedClaim));
     assert.ok(!after.some((entry) => entry.path === ownedClaim));
     // Only this command's runner/work claims are released; durable evidence stays exact.
@@ -1144,16 +1187,10 @@ for (const artifactLayout of ["legacy", "private"] as const) {
                 "utf8"
               )
             ) as RunState;
-            assert.equal(state.schemaVersion, 8);
+            assert.equal(state.schemaVersion, 10);
             assert.equal(state.workflowSelection, null);
             assert.equal(state.artifactBinding?.binding.mode, "workflow");
-            originalBinding = await readFile(
-              path.join(
-                repository.root,
-                `.banzai/work/${state.artifactBinding.binding.workId}/work.json`
-              ),
-              "utf8"
-            );
+            originalBinding = JSON.stringify(state.artifactBinding);
             return await super.runSelection(request);
           }
         }
@@ -1178,18 +1215,9 @@ for (const artifactLayout of ["legacy", "private"] as const) {
         assert.equal(state.status, "done", state.blockReason ?? "");
         const bound = state.artifactBinding;
         assert.ok(bound);
-        assert.equal(
-          await readFile(
-            path.join(
-              repository.root,
-              `.banzai/work/${bound.binding.workId}/work.json`
-            ),
-            "utf8"
-          ),
-          originalBinding
-        );
-        assert.equal(bound.binding.layout, "private");
-        assert.equal(bound.binding.schemaVersion, 2);
+        assert.equal(JSON.stringify(bound), originalBinding);
+        assert.equal(bound.binding.layout, undefined);
+        assert.equal(bound.binding.schemaVersion, 3);
         if (workflow === "strict") {
           assert.ok(state.latestReview?.artifactPath);
           assert.match(
@@ -1197,7 +1225,7 @@ for (const artifactLayout of ["legacy", "private"] as const) {
               path.join(repository.root, state.latestReview.artifactPath),
               "utf8"
             ),
-            /banzai-feature-review\/v7/u
+            /banzai-feature-review\/v8/u
           );
           assert.equal(state.planTaskCompletion?.status, "valid");
         }
@@ -1335,10 +1363,10 @@ for (const context of [
         request: "Implement the fixture."
       });
       assert.equal(state.status, "done", state.blockReason ?? "");
-      assert.equal(state.artifactBinding?.binding.layout, "private");
+      assert.equal(state.artifactBinding?.binding.layout, undefined);
       // The lite feature workflow never enters the completion protocol, so the
       // run keeps the bootstrap schema.
-      assert.equal(state.schemaVersion, 8);
+      assert.equal(state.schemaVersion, 10);
       assert.ok(
         (await readFile(runner.store.statePath(state.runId), "utf8")).includes(
           state.runId
@@ -1350,8 +1378,8 @@ for (const context of [
   });
 }
 
-test("accepted F2 runner claims exclude standalone writes throughout a phase and clean up on failure", async () => {
-  const repository = await createTestRepository({ artifactLayout: "private" });
+test("runner ownership excludes concurrent verification and cleans up after phase failure", async () => {
+  const repository = await createTestRepository();
   try {
     let rejected = 0;
     class ClaimProbe extends FakeAdapters {
@@ -1362,33 +1390,20 @@ test("accepted F2 runner claims exclude standalone writes throughout a phase and
           await readFile(path.join(request.runDirectory, "state.json"), "utf8")
         ) as RunState;
         assert.ok(state.artifactBinding);
-        const workPath = `.banzai/work/${state.artifactBinding.binding.workId}`;
         await assert.rejects(
-          acquireWork({
-            repoRoot: repository.root,
-            workPath,
-            ownerId: "standalone"
-          }),
+          withExecutionOwnership(
+            repository.root,
+            state.artifactBinding.binding.artifacts.reviewDirectory,
+            async () => {}
+          ),
           { code: "ARTIFACT_OWNERSHIP_CONFLICT" }
         );
         rejected++;
-        const independent = await createWork({
-          repoRoot: repository.root,
-          slug: "unrelated",
-          mode: "lite",
-          creationId: "11111111-1111-4111-8111-111111111111"
-        });
-        const otherPath = `.banzai/work/${independent.binding.workId}`;
-        const other = await acquireWork({
-          repoRoot: repository.root,
-          workPath: otherPath,
-          ownerId: "independent"
-        });
-        await releaseWork({
-          repoRoot: repository.root,
-          workPath: otherPath,
-          token: other.token
-        });
+        await withExecutionOwnership(
+          repository.root,
+          "documentation/work/unrelated",
+          async () => {}
+        );
         return super.runPhase(request);
       }
     }
@@ -1400,27 +1415,21 @@ test("accepted F2 runner claims exclude standalone writes throughout a phase and
     const runner = new WorkflowRunner(repository.root, adapters);
     const blocked = await runner.start({
       slug: "claimed",
-      request: "Exercise exclusive evidence ownership."
+      request: "Exercise execution ownership."
     });
     assert.equal(blocked.status, "blocked", blocked.blockReason ?? "");
     assert.equal(rejected, 1);
     assert.ok(blocked.artifactBinding);
-    const workPath = `.banzai/work/${blocked.artifactBinding.binding.workId}`;
-    const claim = await acquireWork({
-      repoRoot: repository.root,
-      workPath,
-      ownerId: "after-failure"
-    });
-    await releaseWork({
-      repoRoot: repository.root,
-      workPath,
-      token: claim.token
-    });
+    await withExecutionOwnership(
+      repository.root,
+      blocked.artifactBinding.binding.artifacts.reviewDirectory,
+      async () => {}
+    );
     await runner.cancel({ reason: "intent_changed" });
     adapters.reviewResults.push(passingReview());
     const planned = await runner.start({
       slug: "reverse-order",
-      request: "Check standalone-first ownership."
+      request: "Check verification-first ownership."
     });
     assert.equal(
       planned.status,
@@ -1428,35 +1437,34 @@ test("accepted F2 runner claims exclude standalone writes throughout a phase and
       planned.blockReason ?? ""
     );
     assert.ok(planned.artifactBinding);
-    const nextPath = `.banzai/work/${planned.artifactBinding.binding.workId}`;
-    const held = await acquireWork({
-      repoRoot: repository.root,
-      workPath: nextPath,
-      ownerId: "before-runner"
+    let release!: () => void;
+    let entered!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      entered = resolve;
     });
-    const beforeApproval = rejected;
-    await assert.rejects(
-      runner.approvePlan("human", true),
-      /writer|ownership|claim/iu
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const held = withExecutionOwnership(
+      repository.root,
+      planned.artifactBinding.binding.artifacts.reviewDirectory,
+      async () => {
+        entered();
+        await hold;
+      }
     );
-    assert.equal(rejected, beforeApproval);
-    await releaseWork({
-      repoRoot: repository.root,
-      workPath: nextPath,
-      token: held.token
-    });
-    const recovered = await runner.resume();
-    assert.equal(recovered.status, "done", recovered.blockReason ?? "");
-    const final = await acquireWork({
-      repoRoot: repository.root,
-      workPath: nextPath,
-      ownerId: "after-completion"
-    });
-    await releaseWork({
-      repoRoot: repository.root,
-      workPath: nextPath,
-      token: final.token
-    });
+    await ready;
+    try {
+      await assert.rejects(
+        runner.approvePlan("human", true),
+        /executor|ownership|claim/iu
+      );
+    } finally {
+      release();
+      await held;
+    }
+    const completed = await runner.resume();
+    assert.equal(completed.status, "done", completed.blockReason ?? "");
   } finally {
     await repository.dispose();
   }
@@ -1470,7 +1478,7 @@ test("accepted F10 public doctor recognizes actual v4 runs and rejects binding d
       slug: "doctor",
       request: "Inspect a current run."
     });
-    assert.equal(state.schemaVersion, 8);
+    assert.equal(state.schemaVersion, 10);
     assert.ok(state.artifactBinding);
     const report = await inspectDoctor(repository.root);
     assert.notEqual(
@@ -1497,11 +1505,10 @@ test("accepted F10 public doctor recognizes actual v4 runs and rejects binding d
       assert.equal(await readFile(filename, "utf8"), bytes);
     }
     await writeFile(filename, JSON.stringify(state));
-    const bindingFile = path.join(
-      repository.root,
-      `.banzai/work/${state.artifactBinding.binding.workId}/work.json`
-    );
-    await writeFile(bindingFile, (await readFile(bindingFile, "utf8")) + "\n");
+    const tampered = structuredClone(state);
+    assert.ok(tampered.artifactBinding);
+    tampered.artifactBinding.binding.sourceCommit = "0".repeat(40);
+    await writeFile(filename, JSON.stringify(tampered));
     const drift = await inspectDoctor(repository.root);
     assert.equal(
       drift.checks.find((item) => item.id === "run.active")?.status,
@@ -1696,10 +1703,9 @@ test("instruction per-call refusal retains saved approval and triage, exact bind
           const consumerBefore = await snapshotTree(
             path.join(repository.root, ".banzai")
           );
-          const selected = await inspectArtifacts({
-            repoRoot: repository.root,
-            workId: bound.binding.workId
-          });
+          const selected = {
+            work: await inspectBoundWork(repository.root, bound)
+          };
           assert.deepEqual(selected.work, bound);
           assert.notEqual(
             selected.work.binding.workId,

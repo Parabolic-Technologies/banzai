@@ -99,7 +99,7 @@ test("verification capture refuses a project config without an explicit verifica
   assert.deepEqual(calls, []);
 });
 
-test("task verification storage requires a version 2 binding with its verification directory", () => {
+test("task verification storage preserves historical v2 and bounds current v3 review exclusions", () => {
   const { context, calls } = recordingContext({});
   const refused = [
     undefined,
@@ -153,5 +153,36 @@ test("task verification storage requires a version 2 binding with its verificati
       directory: ".banzai/work/w/verification",
       workId: "w"
     }
+  );
+  const current = {
+    schemaVersion: 9,
+    verificationMode: "task",
+    runId: "run-1",
+    reviewIteration: 1,
+    artifactBinding: {
+      sha256: "a".repeat(64),
+      binding: {
+        schemaVersion: 3,
+        workId: "w",
+        artifacts: {
+          reviewDirectory: "documentation/work/example",
+          verificationDirectory: ".banzai/runs/run-1/verification"
+        }
+      }
+    }
+  } as unknown as RunState;
+  assert.deepEqual(taskVerificationStorage(context, current), {
+    repoRoot: context.repoRoot,
+    directory: ".banzai/runs/run-1/verification",
+    workId: "w",
+    excludedSourcePaths: [
+      "documentation/work/example/review-1.md",
+      "documentation/work/example/review-2.md"
+    ]
+  });
+  assert.throws(
+    () =>
+      taskVerificationStorage(context, { ...current, reviewIteration: 1001 }),
+    { code: "VERIFICATION_EVIDENCE_INVALID" }
   );
 });

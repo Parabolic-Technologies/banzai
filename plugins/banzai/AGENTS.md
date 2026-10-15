@@ -19,7 +19,10 @@ approved change that intentionally changes behavior.
 `PROJECT_MANIFEST.md` owns current implemented project facts: stack, commands,
 architecture, conventions, dependencies, and active ADR links. Accepted ADRs
 own architectural intent, rationale, consequences, and decision history.
-Feature artifacts own requirements, execution plans, and verification evidence.
+Work documents own requirements, execution plans, and human-reviewed reports.
+New work uses `documentation/work/<slug>/` with sibling Markdown files; explicit
+existing work retains its known paths. Raw execution evidence stays ignored
+under `.banzai/`. No document migration or layout registration is required.
 This file owns process. Do not choose between a current manifest fact and
 accepted ADR intent; report the current/target difference and stop unless an
 approved plan reconciles it.
@@ -239,8 +242,12 @@ A gate stops work until a human decides. There are five existing gates:
 - a material planning choice after repository analysis
   (`decision_consultation`);
 - ADR acceptance, before planning relies on the decision (`adr_approval`);
+  the owner may request rework with required feedback or independent read-only
+  planning review, followed by explicit human planning-review triage;
 - plan approval, bound to the exact description, accepted ADRs, and plan
-  (`plan_approval`);
+  (`plan_approval`); the owner may request required-feedback rework or an
+  independent planning review. Revisions return to approval; advisory model
+  recommendations and triage never approve or accept an ADR;
 - an escalation trigger discovered in any phase (`escalation`);
 - review triage, because only human-accepted findings reach a fix.
 

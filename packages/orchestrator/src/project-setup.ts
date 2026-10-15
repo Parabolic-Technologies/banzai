@@ -1,4 +1,4 @@
-import { initializeArtifacts } from "./artifact-storage.js";
+import { ensureExecutionIgnores } from "./work-documents.js";
 import { BanzaiError } from "./errors.js";
 import { RunStore } from "./store.js";
 import { runForegroundClient } from "./foreground-client.js";
@@ -28,6 +28,7 @@ export async function withProjectSetupOwnership<T>(
     );
   }
   const store = new RunStore(repoRoot);
+  await ensureExecutionIgnores(repoRoot);
   const lock = await store.acquireLock({ reclaimStale: false });
   try {
     await store.assertSetupEligible();
@@ -100,7 +101,7 @@ export async function runProjectSetup(
     return withProjectSetupOwnership(
       repoRoot,
       async () => {
-        await initializeArtifacts({ repoRoot });
+        await ensureExecutionIgnores(repoRoot);
         return 0;
       },
       dependencies.env
@@ -199,7 +200,7 @@ export async function runProjectSetup(
                 `The client exited with code ${result.exitCode}. Review partial changes before retrying.`
               );
             if (latest.classification === "ready") {
-              await initializeArtifacts({ repoRoot });
+              await ensureExecutionIgnores(repoRoot);
               io.writeLine(
                 "Guidance is ready. Review your files, configure application verification and run banzai doctor. Create an initial commit before starting a task."
               );

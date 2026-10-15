@@ -20,8 +20,45 @@ const PHASES: InstructionPhase[] = [
   "review",
   "fix",
   "feature",
-  "quick-fix"
+  "quick-fix",
+  "planning-review"
 ];
+
+test("planning-review instructions deliver the ordinary threshold, EQ-only exclusion and both examples", () => {
+  const text = phaseInstructionParts("planning-review").join("\n");
+  assert.match(
+    text,
+    /An ordinary finding\s+must independently establish a violated requirement/
+  );
+  assert.match(text, /an EQ-only observation is excluded/);
+  assert.match(
+    text,
+    /omit an EQ-only candidate instead of sending it to\s+analysis or triage/
+  );
+  assert.match(
+    text,
+    /a task that removes an authorization check required by an accepted\s+ADR is an ordinary safety and architecture finding/
+  );
+  assert.match(text, /extract a helper solely to reduce function length/);
+  assert.match(
+    text,
+    /without a violated requirement or invariant, is an excluded EQ-only observation/
+  );
+  assert.match(text, /Write no files/);
+});
+
+test("planning instructions keep Accepted ADR bodies immutable across rework, analysis and triage application", () => {
+  const text = phaseInstructionParts("planning").join("\n");
+  assert.match(
+    text,
+    /Accepted ADR\s+bodies remain immutable; a changed decision requires the normal Proposed ADR\s+and explicit acceptance lifecycle/
+  );
+  assert.match(text, /return a phase gate\s+or change an Accepted ADR body/);
+  assert.match(
+    text,
+    /Preserve Accepted ADR bodies and normal planning\s+write grants/
+  );
+});
 
 test("embedded phase bodies preserve all canonical UTF-8 bytes in the exact resource order", async () => {
   const guidance = {
@@ -30,7 +67,8 @@ test("embedded phase bodies preserve all canonical UTF-8 bytes in the exact reso
     review: ["review"],
     fix: ["fix", "manifest", "code-design"],
     feature: ["feature", "manifest", "code-design"],
-    "quick-fix": ["fix", "manifest", "code-design"]
+    "quick-fix": ["fix", "manifest", "code-design"],
+    "planning-review": ["requirements", "architecture", "planning"]
   };
   for (const phase of PHASES) {
     const ids = instructionResourceIds([phase]).filter(
@@ -45,7 +83,7 @@ test("embedded phase bodies preserve all canonical UTF-8 bytes in the exact reso
       "security-assurance",
       "engineering-quality",
       ...(phase === "feature" ? [] : ["plan-task-completion"]),
-      "artifact-storage"
+      ...(phase === "planning-review" ? [] : ["artifact-storage"])
     ];
     if (phase === "planning") policies.unshift("decision-consultation");
     assert.deepEqual(

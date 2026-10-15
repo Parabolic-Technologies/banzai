@@ -5,7 +5,11 @@ export function humanDecisionQuestions(
   pending: HumanDecisionRequest,
   liteWorkflow: boolean
 ): string[] {
-  if (pending.kind === "configuration_prerequisite") return [];
+  if (
+    pending.kind === "configuration_prerequisite" ||
+    pending.kind === "planning_review_triage"
+  )
+    return [];
   if (pending.kind === "decision_consultation") {
     return pending.request.decisions.map((decision) => decision.question);
   }

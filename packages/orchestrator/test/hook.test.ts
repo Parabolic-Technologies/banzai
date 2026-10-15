@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { digestArtifactBundle, workspaceSnapshot } from "../src/git.js";
-import { createWork } from "../src/artifact-storage.js";
+import { createTestWork as createWork } from "./helpers.js";
 import { checkArtifactPhaseScope } from "../src/workflow/attempts/result-scope.js";
 import { randomUUID } from "node:crypto";
 import {
@@ -22,6 +22,85 @@ import {
 } from "../src/types.js";
 import { workflowAuthorizationDigest } from "../src/workflow.js";
 import { createTestRepository, evaluationStateFixture } from "./helpers.js";
+import { createPlanningReviewFixture } from "./workflow-fixtures.js";
+import { planningTriageAnswer } from "./planning-review-fixtures.js";
+
+test("the real hook denies both planning kinds with runner environments across every write target", async () => {
+  const f = await createPlanningReviewFixture(1);
+  try {
+    const roles = f.requested.artifactBinding?.binding.artifacts;
+    assert.ok(roles);
+    assert.ok(roles.plan);
+    const targets = [
+      roles.plan,
+      "documentation/decisions/9999-new.md",
+      "src/example.ts",
+      `${roles.reviewDirectory}/planning-review-1.md`
+    ];
+    const observed: string[] = [];
+    f.adapters.onPlanning = async (request) => {
+      const state = await f.runner.store.requireActiveState();
+      const kind = state.activeAttempt?.kind;
+      assert.ok(kind === "planning_review" || kind === "planning_analysis");
+      observed.push(kind);
+      assert.equal(request.env.BANZAI_RUN_ID, state.runId);
+      for (const key of [
+        "BANZAI_APPROVAL_DIGEST",
+        "BANZAI_WORKFLOW_DIGEST",
+        "BANZAI_REVIEW_ARTIFACT"
+      ])
+        assert.ok(!request.env[key]);
+      for (const target of targets) {
+        const result = runHook({
+          cwd: f.repository.root,
+          env: request.env,
+          target
+        });
+        assert.equal(
+          result.decision,
+          "deny",
+          `${kind}: ${target}: ${result.reason}`
+        );
+        assert.match(
+          result.reason,
+          /planning review and analysis are read-only/
+        );
+      }
+    };
+    await f.runner.resume();
+    assert.deepEqual(observed, ["planning_review", "planning_analysis"]);
+    const triage = await f.runner.store.requireActiveState();
+    await f.runner.answerPlanningReview({
+      answer: planningTriageAnswer(triage),
+      decidedBy: "owner"
+    });
+    const state = await f.runner.reworkPlan({
+      feedback: "Revise the plan.",
+      decidedBy: "owner",
+      autoResume: false
+    });
+    state.activeAttempt = {
+      id: "plan-2-abcdef12",
+      kind: "plan",
+      mutable: true
+    };
+    await f.runner.store.writeState(state);
+    await f.runner.store.requireActiveState();
+    const denied = runHook({
+      cwd: f.repository.root,
+      env: {
+        BANZAI_RUN_ID: state.runId,
+        BANZAI_APPROVAL_DIGEST: "",
+        BANZAI_WORKFLOW_DIGEST: "",
+        BANZAI_REVIEW_ARTIFACT: ""
+      },
+      target: `${roles.reviewDirectory}/planning-review-1.md`
+    });
+    assert.equal(denied.decision, "deny", denied.reason);
+  } finally {
+    await f.repository.dispose();
+  }
+});
 
 const hookPath = path.resolve(
   process.cwd(),
@@ -468,7 +547,7 @@ test("runner mode fails closed when an edit target cannot be parsed", async () =
 
 // The last entry is the schema the current runner writes, so a runner schema
 // bump fails here until the hook learns it.
-for (const stateVersion of [4, 5, 6, 7, RUN_STATE_SCHEMA_VERSION] as const)
+for (const stateVersion of [RUN_STATE_SCHEMA_VERSION] as const)
   test(`v${stateVersion} hook enforces bound phase roles, read-only selection/review and private layout`, async () => {
     const repository = await createTestRepository({
       artifactLayout: "private"
@@ -478,7 +557,7 @@ for (const stateVersion of [4, 5, 6, 7, RUN_STATE_SCHEMA_VERSION] as const)
       const bound = await createWork({
         repoRoot: root,
         slug: "hook-bound",
-        schemaVersion: stateVersion === 5 || stateVersion === 8 ? 2 : 1,
+        runId: `hook-v${stateVersion}`,
         mode: "workflow",
         creationId: randomUUID()
       });
@@ -527,24 +606,8 @@ for (const stateVersion of [4, 5, 6, 7, RUN_STATE_SCHEMA_VERSION] as const)
                 // Schema 7 adds only the nullable completion publication cursor
                 // to the retained configuration/binding combination; schema 8
                 // keeps the cursor and replaces setup with task verification.
-                ...(stateVersion >= 7 ? { completionPublication: null } : {}),
-                ...(stateVersion === 8 ? { verificationMode: "task" } : {}),
-                ...(stateVersion === 6 || stateVersion === 7
-                  ? {
-                      verificationMode: "ordered",
-                      configurationSetup: {
-                        configSchemaVersion: 2,
-                        configurationDigest: "a".repeat(64),
-                        coverage: "configured",
-                        projectTypes: ["custom"],
-                        uncoveredTypes: [],
-                        continuation: null,
-                        resolutions: [],
-                        skip: null,
-                        transactions: []
-                      }
-                    }
-                  : {}),
+                completionPublication: null,
+                verificationMode: "task",
                 runId,
                 repoRoot: root,
                 artifactBinding: bound,
@@ -624,7 +687,7 @@ for (const stateVersion of [4, 5, 6, 7, RUN_STATE_SCHEMA_VERSION] as const)
           expect(target, "deny");
         expect(roles.changeReport, phase === "fix" ? "allow" : "deny");
       }
-      if (stateVersion === RUN_STATE_SCHEMA_VERSION) {
+      {
         await save("plan", "planning", { schemaVersion: stateVersion + 1 });
         const stale = runHook({
           cwd: root,
@@ -644,7 +707,10 @@ for (const stateVersion of [4, 5, 6, 7, RUN_STATE_SCHEMA_VERSION] as const)
       });
       expect(roles.plan, "deny");
       await save("plan", "planning");
-      await writeFile(path.join(root, ".gitignore"), ".banzai/runs/\n");
+      await writeFile(
+        path.join(root, ".gitignore"),
+        ".banzai/runs/\ndocumentation/work/\n"
+      );
       expect(roles.plan, "deny");
     } finally {
       await repository.dispose();
@@ -702,17 +768,12 @@ for (const artifactLayout of ["private", "legacy"] as const)
           "fix",
           "review"
         ] as const) {
-          // Legacy hooks defer broader documentation scope to the runner. Compare
-          // their shared strict-fix report/approved-byte boundary without changing it.
-          if (
-            artifactLayout === "legacy" &&
-            (workflow !== "strict" || phase !== "fix")
-          )
-            continue;
           const state = evaluationStateFixture({
             workflow,
             extra: {
-              schemaVersion: 4,
+              schemaVersion: 10,
+              completionPublication: null,
+              verificationMode: "task",
               runId,
               repoRoot: root,
               artifactBinding: bound,
@@ -778,7 +839,6 @@ for (const artifactLayout of ["private", "legacy"] as const)
                       : [roles.implementationReport, roles.testReport]
                 : [];
           for (const target of targets) {
-            if (artifactLayout === "legacy" && target === roles.work) continue;
             const allowed = expected.includes(target);
             const label: string = [workflow, phase, target].join(": ");
             assert.equal(
@@ -849,7 +909,9 @@ test("strict planning may record an accepted ADR in the manifest index under hoo
     const state = evaluationStateFixture({
       workflow: "strict",
       extra: {
-        schemaVersion: 4,
+        schemaVersion: 10,
+        completionPublication: null,
+        verificationMode: "task",
         runId,
         repoRoot: root,
         artifactBinding: bound,
@@ -896,32 +958,31 @@ test("strict planning may record an accepted ADR in the manifest index under hoo
   }
 });
 
-test("R4-F4 manual hook defers only for validated private role paths", async () => {
-  const repository = await createTestRepository({ artifactLayout: "private" });
+test("manual hook supports exact historical Markdown without registration and refuses control files", async () => {
+  const repository = await createTestRepository();
   try {
     const root = await realpath(repository.root);
-    const bound = await createWork({
-      repoRoot: root,
-      slug: "hook-manual",
-      mode: "lite",
-      creationId: randomUUID()
-    });
-    assert.ok(bound.binding.artifacts.work);
+    const directory = `.banzai/work/${randomUUID()}`;
+    await mkdir(path.join(root, directory), { recursive: true });
+    await writeFile(
+      path.join(root, directory, "work.json"),
+      "historical metadata stays inert"
+    );
     assert.equal(
-      runHook({ cwd: root, target: bound.binding.artifacts.work }).decision,
+      runHook({ cwd: root, target: `${directory}/work.md` }).decision,
       null
     );
     assert.equal(
-      runHook({ cwd: root, target: `.banzai/work/${randomUUID()}/work.md` })
-        .decision,
-      "deny"
-    );
-    await writeFile(
-      path.join(root, `.banzai/work/${bound.binding.workId}/work.json`),
-      "invalid binding"
+      runHook({ cwd: root, target: `${directory}/review-2.md` }).decision,
+      null
     );
     assert.equal(
-      runHook({ cwd: root, target: bound.binding.artifacts.work }).decision,
+      runHook({ cwd: root, target: `${directory}/work.json` }).decision,
+      "deny"
+    );
+    assert.equal(
+      runHook({ cwd: root, target: `${directory}/verification/forged.json` })
+        .decision,
       "deny"
     );
   } finally {

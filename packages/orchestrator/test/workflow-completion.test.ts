@@ -49,7 +49,7 @@ test("a fix that edits the published completion region is republished from the c
           // led the fixer to edit the published region row directly.
           const reportPath = await boundFixturePath(
             request.repoRoot,
-            "documentation/features/example/implementation-report.md"
+            "documentation/work/example/implementation-report.md"
           );
           const contents = await readFile(reportPath, "utf8");
           assert.ok(contents.includes("&#34;completed&#34;"));
@@ -111,7 +111,7 @@ test("a fix that edits the published completion region is republished from the c
     const report = await readFile(
       await boundFixturePath(
         repository.root,
-        "documentation/features/example/implementation-report.md"
+        "documentation/work/example/implementation-report.md"
       )
     );
     assert.ok(!report.toString("utf8").includes("&#34;incomplete&#34;"));
@@ -324,7 +324,7 @@ test("an accepted-finding fix refreshes the canonical ledger in one attempt", as
           await writeFile(
             await boundFixturePath(
               request.repoRoot,
-              "documentation/features/example/implementation-report.md"
+              "documentation/work/example/implementation-report.md"
             ),
             `# Implementation Report\n\n${renderPlanTaskCompletionProjection(applied.result.taskCompletion)}\n`,
             "utf8"
@@ -758,7 +758,7 @@ test("a model-authored legacy completion table is replaced by the runner-publish
     const report = await readFile(
       await boundFixturePath(
         repository.root,
-        "documentation/features/example/implementation-report.md"
+        "documentation/work/example/implementation-report.md"
       )
     );
     const ledger = phaseResult("implementation").taskCompletion;

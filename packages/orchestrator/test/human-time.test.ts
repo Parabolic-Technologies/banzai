@@ -215,6 +215,41 @@ test("human time: closed ingress rejects extra content, wrong run, forged identi
   );
 });
 
+test("human time: planning triage anchors retain closed episode identities and reject forged digests or fields", () => {
+  const triage: HumanTimeAnchor = {
+    type: "planning_review_triage",
+    attemptId: "planning-analysis-1-abcdef12",
+    episodeId: "planning-episode-abcdef12",
+    reviewNumber: 3
+  };
+  const observation = humanTimeObservation(runId, triage, "opened", opened.at, {
+    kind: "event",
+    type: "planning_review.triage_pending",
+    ordinal: 1
+  });
+  const ledger = emptyHumanTime(runId);
+  ledger.observations = [observation];
+  assert.equal(decodeHumanTime(ledger, runId).status, "valid");
+  for (const anchor of [
+    { ...triage, reviewNumber: 0 },
+    { ...triage, reviewNumber: Number.MAX_SAFE_INTEGER + 1 },
+    { ...triage, episodeId: "../foreign" },
+    { ...triage, attemptId: "" },
+    { ...triage, feedback: "PRIVATE-PLANNING-ANCHOR-CANARY" },
+    { ...triage, episodeId: "planning-episode-ffffffff" }
+  ]) {
+    const decoded = decodeHumanTime(
+      { ...ledger, observations: [{ ...observation, anchor }] },
+      runId
+    );
+    assert.equal(decoded.status, "invalid");
+    assert.doesNotMatch(
+      JSON.stringify(decoded),
+      /PRIVATE-PLANNING-ANCHOR-CANARY/
+    );
+  }
+});
+
 test("human time: parallel gate waits never establish active person time or a task total", () => {
   const { ledger, evidence } = fixture();
   const other: HumanTimeAnchor = {

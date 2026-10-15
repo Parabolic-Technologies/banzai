@@ -16,6 +16,7 @@ import {
   DEFAULT_CONFIG
 } from "../src/config.js";
 import { RunStore } from "../src/store.js";
+import { createTestRepository } from "./helpers.js";
 import {
   applyVerificationConfigDelta,
   previewVerificationConfig,
@@ -25,7 +26,7 @@ import {
 } from "../src/verification-config.js";
 
 test("confirmed inactive saves require ownership, pin bytes/source, and retain an exact reversible delta", async () => {
-  const root = await mkdtemp(path.join(tmpdir(), "banzai-guided-config-"));
+  const { root } = await createTestRepository({ artifactLayout: null });
   try {
     await initializeConfig(root);
     await writeFile(

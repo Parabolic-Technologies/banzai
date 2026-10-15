@@ -487,6 +487,17 @@ by preparing this decision.
 
 ## Lifecycle Links
 
+- Narrowly amended by
+  [ADR-0055](./0055-planning-gate-rework-and-independent-planning-review.md),
+  accepted 2026-10-13: adds the `planning-review` instruction phase for the
+  reviewer role, and adds analysis and triage-application sections to
+  `planning`. Changes follow ADR-0044. Implementation is Planned.
+
+- Amended by [ADR-0054](./0054-git-visible-work-artifacts.md), accepted
+  2026-10-13: shared instructions deliver fixed tracked document paths for new
+  work and remove the retired layout protocol. Delivery ownership and exact
+  phase grants remain. Implementation is Planned.
+
 - Narrowly amended by [ADR-0047](./0047-runner-owned-completion-projection.md),
   accepted 2026-09-15, section 7: sections 7-8 permit new runner-owned v2 completion
   regions and version-aware standalone readers, implementing the deferred

@@ -17,6 +17,9 @@ import type { OrchestratorConfig } from "../src/types.js";
 import { reviewerOnlyClaudeConfig } from "./helpers.js";
 
 class FakeIO implements InteractiveIO {
+  async multiSelect<T>(): Promise<T[]> {
+    throw new Error("Unexpected multi-select");
+  }
   readonly lines: string[] = [];
   readonly prompts: string[] = [];
   readonly choiceValues: unknown[][] = [];

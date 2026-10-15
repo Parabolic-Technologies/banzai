@@ -36,6 +36,75 @@ import {
 import { createPromptEnvelope } from "../src/prompt-envelope.js";
 import { resolveOutputContract } from "../src/output-contract.js";
 import { createTestRepository } from "./helpers.js";
+import { createPlanningReviewFixture } from "./workflow-fixtures.js";
+
+test("state v10 preserves planning episodes and refuses closed/active slot confusion before consumption", async () => {
+  const f = await createPlanningReviewFixture();
+  try {
+    const initial = await f.runner.store.requireActiveState();
+    assert.equal(initial.schemaVersion, 10);
+    assert.deepEqual(initial.planningReview, f.requested.planningReview);
+    const e = initial.planningReview?.active;
+    assert.ok(e);
+    const { step: _step, ...base } = e;
+    void _step;
+    const invalid = structuredClone(initial);
+    Object.assign(invalid, {
+      planningReview: {
+        active: { ...base, outcome: "stale", closedAt: initial.updatedAt },
+        closed: []
+      }
+    });
+    await writeFile(
+      f.runner.store.statePath(initial.runId),
+      JSON.stringify(invalid)
+    );
+    await assert.rejects(
+      f.runner.store.readState(initial.runId),
+      (error: unknown) =>
+        error instanceof BanzaiError && error.code === "STATE_READ_FAILED"
+    );
+    await writeFile(
+      f.runner.store.statePath(initial.runId),
+      JSON.stringify(initial)
+    );
+    const closedSlot = structuredClone(initial);
+    Object.assign(closedSlot, {
+      planningReview: { active: null, closed: [e] }
+    });
+    await writeFile(
+      f.runner.store.statePath(initial.runId),
+      JSON.stringify(closedSlot)
+    );
+    await assert.rejects(
+      f.runner.store.readState(initial.runId),
+      (error: unknown) =>
+        error instanceof BanzaiError && error.code === "STATE_READ_FAILED"
+    );
+    await writeFile(
+      f.runner.store.statePath(initial.runId),
+      JSON.stringify(initial)
+    );
+    for (const version of [1, 7, 9]) {
+      const historical = { ...initial, schemaVersion: version };
+      await writeFile(
+        f.runner.store.statePath(initial.runId),
+        JSON.stringify(historical)
+      );
+      await assert.rejects(f.runner.store.readState(initial.runId));
+    }
+    await writeFile(
+      f.runner.store.statePath(initial.runId),
+      JSON.stringify(initial)
+    );
+    assert.deepEqual(
+      (await f.runner.store.requireActiveState()).planningReview,
+      initial.planningReview
+    );
+  } finally {
+    await f.repository.dispose();
+  }
+});
 
 async function pathExists(filePath: string): Promise<boolean> {
   try {

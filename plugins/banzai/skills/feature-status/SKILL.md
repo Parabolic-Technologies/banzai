@@ -10,24 +10,29 @@ Read-only. Write nothing.
 
 ## Artifact Storage
 
-Before artifact discovery or writing, read the installed
-`../../policies/artifact-storage.md` and resolve the selected work through its
-plugin-local helper. Use the returned role paths for internal work artifacts;
-`documentation/` work paths below describe the explicit legacy layout only.
-Keep ADRs, indexes, manifests and maintained product guidance at their existing
-repository paths. Status/loading stays read-only, and orchestrated work follows
-the persisted run binding and exact phase grants.
+Before reading or writing work documents, read the installed
+`../../policies/artifact-storage.md`. New work uses one flat
+`documentation/work/<slug>/` directory; read and edit selected Markdown files
+with ordinary file tools. Existing work continues at its explicit known paths,
+including follow-up reports and reviews. Do not migrate existing documents or
+consult an artifact-layout declaration. Resolve ambiguous work selection before
+writing. Keep ADRs, indexes, manifests and maintained guidance at their existing
+paths. Read-only discovery creates nothing; runner phases follow their supplied
+binding and exact phase grants.
 
-Standalone verification inspection uses existing task and skill authority.
-With a private v2 binding, resolve `../../scripts/verification.cjs` relative to
-this installed skill and use its v2 inspect or decide request against the bound
-task inventory. These operations are read-only and confer no execution grant.
-This skill does not execute checks through the helper. An authorized implementing
-skill may execute task descriptors within the existing scope; a missing helper,
-v1 binding or unsupported bound artifact retains the applicable fresh-check owner.
-Never require configured profile IDs or fabricate runner approval. Orchestrated
-phases consume runner evidence and never invoke the helper or write its machine
-directory.
+Concrete `documentation/work/` paths below are new-work defaults. For explicit
+continuation, resolve inputs and outputs from the selected work's known locations
+and links, including its report and review directory; never create a replacement
+work directory to satisfy a new-work path example.
+
+Standalone verification inspection uses the installed
+`../../scripts/verification.cjs` v3 inspect/decide request with the exact
+`documentPath`, `workflow` and `roundId`. These operations are read-only and
+create no execution authority or metadata. This skill does not execute checks.
+An authorized implementing skill owns applicable fresh checks when no supported
+inventory or local evidence exists. Never fabricate runner approval or passing
+evidence. Orchestrated phases consume runner evidence and never invoke the
+standalone helper.
 
 ## Sources
 
@@ -60,15 +65,15 @@ directory.
 
 ## Scan
 
-- `documentation/features/<slug>/work.md`
-- `documentation/features/<slug>/description.md`
-- `documentation/development-plans/<slug>/plan.md`
-- `documentation/features/<slug>/implementation-report.md`
-- `documentation/features/<slug>/test-report.md`
-- `documentation/features/<slug>/review-*.md`
+- `documentation/work/<slug>/work.md`
+- `documentation/work/<slug>/description.md`
+- `documentation/work/<slug>/plan.md`
+- `documentation/work/<slug>/implementation-report.md`
+- `documentation/work/<slug>/test-report.md`
+- `documentation/work/<slug>/review-*.md`
 - `documentation/decisions/README.md`
 - `documentation/decisions/NNNN-*.md`
-- `documentation/changes/*.md`
+- `documentation/work/*/change-report.md`
 - `git status`
 - `.banzai/active-run.json`, if present
 

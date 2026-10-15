@@ -3,7 +3,7 @@
 - Owner decision: ADR-0013/0014
 - Consumers: `development-plan`, `code-writing`, `test-writing`, `feature-review`, `feature`, `quick-fix`; conditional: `project-manifest`
 - Process source: the project `AGENTS.md` (authority order, escalation triggers, decision gates)
-- Runner consumers: planning, implementation, review, fix, feature, quick-fix.
+- Runner consumers: planning, implementation, review, fix, feature, quick-fix, planning-review.
 - Delivery: standalone skills load this policy relatively; runner phases receive its body inline. Conditional duties retain their conditions.
 
 ## Test Assurance

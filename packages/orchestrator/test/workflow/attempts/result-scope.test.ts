@@ -9,6 +9,53 @@ import {
   validateSavedArtifactScope
 } from "../../../src/workflow/attempts/result-scope.js";
 import { recordingContext } from "../context-fixture.js";
+import { createPlanningReviewFixture } from "../../workflow-fixtures.js";
+
+test("both read-only planning kinds reject source, documentation, plan and planning-review artifact writes", async (t) => {
+  for (const contract of [
+    "planning-review-result/v1",
+    "planning-review-analysis/v1"
+  ] as const)
+    for (const target of [
+      "source",
+      "documentation",
+      "plan",
+      "planning-artifact"
+    ] as const)
+      await t.test(`${contract} ${target}`, async () => {
+        const f = await createPlanningReviewFixture(1);
+        try {
+          const bound = f.requested.artifactBinding;
+          assert.ok(bound);
+          const destinations = {
+            source: "unauthorized-source.txt",
+            documentation: "documentation/unauthorized-guide.md",
+            plan: bound.binding.artifacts.plan,
+            "planning-artifact": `${bound.binding.artifacts.reviewDirectory}/planning-review-1.md`
+          };
+          const relative = destinations[target];
+          assert.ok(relative);
+          f.adapters.onPlanning = async (request) => {
+            if (request.outputContract.identity === contract)
+              await writeFile(
+                path.join(f.repository.root, relative),
+                "Unauthorized model write\n"
+              );
+          };
+          const blocked = await f.runner.resume();
+          assert.equal(blocked.status, "blocked", blocked.blockReason ?? "");
+          assert.ok(blocked.activeAttempt);
+          const record = await f.runner.store.readRunAttempt(
+            blocked.runId,
+            blocked.activeAttempt
+          );
+          assert.equal(record.failureCode, "ARTIFACT_PHASE_SCOPE_INVALID");
+          assert.equal((await f.runner.status()).retry.eligible, true);
+        } finally {
+          await f.repository.dispose();
+        }
+      });
+});
 
 const ROLES = {
   description: "work/description.md",

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { initializeConfig, DEFAULT_CONFIG } from "../src/config.js";
@@ -23,8 +22,12 @@ import type {
   InteractiveIO
 } from "../src/interactive.js";
 import type { ProcessRunner } from "../src/types.js";
+import { createTestRepository } from "./helpers.js";
 
 class ScriptedIO implements InteractiveIO {
+  async multiSelect<T>(): Promise<T[]> {
+    throw new Error("Unexpected multi-select");
+  }
   lines: string[] = [];
   prompts: string[] = [];
   constructor(readonly answers: unknown[]) {}
@@ -61,7 +64,7 @@ const forbiddenExecution: ProcessRunner = async () => {
   assert.fail("Setup must never execute project commands");
 };
 async function fixture() {
-  const root = await mkdtemp(path.join(tmpdir(), "banzai-verification-ui-"));
+  const { root } = await createTestRepository({ artifactLayout: null });
   await initializeConfig(root);
   // These tests exercise retained explicit legacy profile utilities, not new-task setup.
   await writeFile(

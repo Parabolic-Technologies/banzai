@@ -1,107 +1,80 @@
-# Artifact Storage
+# Work Documents
 
-ADR-0041 separates current shared documentation from local workflow evidence.
-The plugin and CLI use the same resolver and project prerequisite reader. A
-plugin-only project needs Node and Git, but no orchestrator configuration.
-
-## Layout and first use
-
-New eligible projects default to private work. During an authorized first write,
-complete normal project guidance setup first. The helper then adds only missing
-storage and narrow Git exclusions. Read-only inspection and status never create
-folders. An absent `.banzai` is a normal first-use case. Existing recognized work
-selects legacy layout; malformed or ambiguous evidence requires explicit recovery.
-A broad `.banzai/` ignore must be repaired explicitly so the declaration remains
-shareable. Initialization never stages files.
+[ADR-0054](decisions/0054-git-visible-work-artifacts.md) defines one fixed
+convention for new human-reviewed work. Skills read and edit ordinary Markdown;
+no layout declaration, registration, UUID or storage command is required.
+Plugin-only authoring needs no orchestrator installation.
 
 ```text
-project/
-├── AGENTS.md / CLAUDE.md / PROJECT_MANIFEST.md
-├── documentation/
-│   ├── decisions/                 # shared architectural decisions
-│   └── …                         # curated product and maintenance guides
-└── .banzai/
-    ├── artifacts.json            # shared private/legacy default
-    ├── work/<uuid>/              # ignored local work
-    │   ├── work.json             # immutable identity, layout and exact roles
-    │   ├── description.md / plan.md
-    │   ├── implementation-report.md / test-report.md
-    │   ├── work.md               # lite feature instead of strict documents
-    │   ├── change-report.md      # quick-fix only when its report trigger applies
-    │   └── review-1.md           # independent numbered reviews
-    └── runs/<run-id>/            # orchestrator only, ignored execution evidence
+documentation/
+  decisions/                         # ADRs and decision index
+  work/<slug>/
+    description.md                   # strict requirements
+    plan.md                          # strict implementation plan
+    implementation-report.md
+    test-report.md
+    review-1.md                      # each iteration keeps its own file
+    work.md                          # lite feature
+    change-report.md                 # only when its existing trigger applies
+.banzai/                             # ignored execution state
+  runs/<run-id>/                     # runner-owned evidence and candidates
+  verification/<directory-key>/      # standalone verification records
+  execution-locks/<directory-key>/   # live executor ownership
 ```
 
-The tree shows possible roles, not mandatory files in every workflow. Orchestrator
-configuration, active pointer and runner lock retain their separate existing
-ownership. The Banzai source repository retains its own guidance and source
-identity exception; installing the plugin does not turn its templates into root
-instructions. Home and client projects follow their own visibility, retention and
-custody rules. None writes evidence into the installed plugin or Banzai source.
+The tree lists possible documents. Create only those required by the workflow.
+Keep one stable lowercase kebab-case subject slug across planning, implementation
+and review, without required dates, mode/status prefixes, owner folders or a
+navigation index. Add a local assets directory only when supporting files are
+needed. ADRs, guides and the project manifest keep their established paths.
 
-| Development context | Plugin only                             | With orchestrator                             |
-| ------------------- | --------------------------------------- | --------------------------------------------- |
-| Banzai source       | Source instructions; local work binding | Same work binding plus local run evidence     |
-| Personal project    | Project setup; local work binding       | Same setup and binding plus run evidence      |
-| Client project      | Client-owned setup and local evidence   | Same client-owned evidence plus run authority |
+New work must appear in ordinary Git status and diffs. If an ignore hides it,
+correct only the new subtree; do not force-add or unignore historical evidence.
+Git visibility does not authorize staging, commits or pushes. Reports include
+safe commands, results, limitations and decision context; raw private output and
+machine ledgers remain beneath ignored `.banzai/`.
 
-In legacy layout the binding retains `documentation/features/<slug>/`,
-`documentation/development-plans/<slug>/plan.md` and `documentation/changes/`.
-Changing a default never relocates an existing work binding. A handoff passes the
-project-relative `work.json` path or work ID explicitly. A slug alone cannot
-silently select among identities; independent worktrees create independent IDs.
+## Selecting and continuing work
 
-For original standalone work without a binding, inspect its conventional file or
-bundle directory as `workPath`. Select the returned `legacySelection`, then call
-`create` with its exact content-bound `creationId`, slug and mode. This explicit
-registration leaves original strict, lite and change-report bytes and paths intact,
-including after a private default is declared. A changed original invalidates the
-continuation ID; inspect again. The resulting `work.json` is the fresh-session
-handoff identity. Registration is not migration or approval substitution.
+Pass an exact directory or document path. A matching slug or newest timestamp
+is not continuation authority. New work colliding with an existing directory
+requires explicit selection or a different slug. Read-only discovery creates
+nothing.
 
-## Local commands
+Existing tracked legacy and ignored private documents stay where they are.
+Explicit standalone continuation uses those known paths and references, including
+follow-up reports and reviews. No migration, archive restoration, registration,
+copy into Git or historical-run continuation is introduced. Existing declaration
+contents are inert for new work, even when unsupported or malformed.
 
-Use the installed plugin's `scripts/artifacts.cjs`, resolved relative to its skill,
-or `banzai artifacts`. Both accept the same versioned JSON request file:
+## Verification and runner authority
 
-```sh
-node /absolute/installed/plugin/scripts/artifacts.cjs inspect --json /absolute/request.json
-banzai artifacts inspect --json /absolute/request.json
-```
+Standalone `verification.cjs` consumes request v3 with absolute `repoRoot`, exact
+repository-relative `documentPath`, `workflow` (`strict`, `feature` or
+`quick-fix`) and UUID `roundId`; execute may include an exact failed/interrupted
+`retryOf`. Descriptors come from the document's v2 inventory, under the calling
+skill's existing task/plan authorization. Requests carry no commands or output
+paths. Inspect/decide are read-only; absent local evidence is unavailable.
+Execute owns ignored metadata and physical attempts for the selected directory.
+A missing old inventory keeps applicable fresh checks under skill authority
+without rewriting that document or claiming helper support.
 
-```json
-{
-  "schema": "banzai-artifact-request/v1",
-  "schemaVersion": 1,
-  "repoRoot": "/absolute/project"
-}
-```
+New runner state v9 contains immutable binding v3 to fixed document roles and
+its run-local verification directory. There is no separately registered work
+file. Workspace v3 includes selected documents exactly once, including unchanged
+approved files, plus source changes. Snapshot v7 and rendered review v8 retain
+independent review, exact phase grants, approved-byte checks and completion
+receipts. Canonical reviews are runner output after verification; their exact
+paths are excluded from task input observation and remain protected by snapshot,
+workspace and publication validation. Other work documents stay observed.
 
-`initialize` optionally accepts `layout`; `create` adds `slug`, `mode` and a
-caller-retained UUID v4 `creationId`. Retrying that identity returns the same
-binding. Standalone modes are `strict`, `lite` and `fix`; the runner uses immutable
-`workflow` capacity before selection. The actual strict/feature/quick-fix choice
-and phase permissions remain in `state.workflowSelection`.
+Ordinary Markdown editing has no executor claim protocol. Real verification and
+runner mutation retain exclusive execution ownership. Stale ownership requires
+inspection of the original process and an explicit owner recovery decision;
+elapsed time alone never authorizes reclamation. New executors refuse historical
+binding semantics without rewriting old evidence.
 
-Writers `acquire` an explicit `workPath` with an `ownerId`, retain the returned
-claim token, and `write` exact role paths with `inputFile` and `expectedSha256`
-(null means create only). `release` requires the same work path and token. Claims
-coordinate standalone writers and entire runner phases for that work; they never
-approve requirements or implementation. Effective Git checks cover the selected
-binding, claim and report destinations, including nested ignore negations.
-Request files, `inputFile` and `inventoryFile` may use symlinked parent directories
-such as macOS `/tmp` or `/var`; their leaf must be a regular non-symlink file.
-Project-relative artifact paths, private work roots, archive bundles and
-export/restore destinations still reject symlink ancestors. Use physical absolute
-paths for those archive directories. Do not resolve an abandoned claim by deleting
-another owner's evidence.
-
-New run state v6 records the binding and byte hash. Workspace v2 includes the
-selected ignored work, without crawling other work items or runner state. Review
-snapshot v4 and Markdown v5 retain that identity; required completion reports are
-the only private exceptions to the completion evidence exclusion. Versions 1–5
-of run state retain their historical semantics. Control capabilities v4 is the
-explicit support signal; restart updated installed clients before private adoption.
-
-See [archive operations](artifact-archive.md) and the
-[publication boundary](publication-boundary.md).
+Source checks accept the fixed work subtree without per-report inventory entries,
+subject to safe-path and content checks. Source-project documents are excluded
+from actual plugin/npm packages. See [publication boundary](publication-boundary.md)
+and the [historical archive guide](artifact-archive.md).

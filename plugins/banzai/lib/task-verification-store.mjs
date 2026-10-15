@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { readdir, lstat, readFile } from "node:fs/promises";
-import { safePath, readBytes, readJson, makeDirectories, publishNew } from "./artifact-storage.mjs";
+import { safePath, readBytes, readJson, makeDirectories, publishNew, verifyExecutionIgnore } from "./project-files.mjs";
 import { captureVerificationInputs, evidenceDigest, VerificationEvidenceError } from "./verification-evidence.mjs";
 import { authorizeTaskVerification, parseTaskVerificationDescriptor } from "./task-verification.mjs";
 const fail = (message) => { throw new VerificationEvidenceError(message); };
@@ -30,16 +30,17 @@ function captureRecord(value) {
 }
 function reference(value) {
   closed(value, ["relativePath", "sha256"]);
-  if (typeof value.relativePath !== "string" || !/^\.banzai\/(?:work\/[a-f0-9-]{36}|runs\/[a-z0-9][a-z0-9.-]{0,199})\/verification\/(?:decisions|applications|attempts|origins|logs)\/[a-z0-9.-]+$/u.test(value.relativePath) || !HASH.test(value.sha256)) fail("Invalid task evidence reference.");
+  if (typeof value.relativePath !== "string" || !/^\.banzai\/(?:(?:work\/[a-f0-9-]{36}|runs\/[a-z0-9][a-z0-9.-]{0,199})\/verification|verification\/[a-f0-9]{64})\/(?:decisions|applications|attempts|origins|logs)\/[a-z0-9.-]+$/u.test(value.relativePath) || !HASH.test(value.sha256)) fail("Invalid task evidence reference.");
 }
 
 function storage(input) {
-  if (!UUID.test(input.workId) || !/^\.banzai\/(?:work\/[a-f0-9-]{36}|runs\/[a-z0-9][a-z0-9.-]{0,199})\/verification$/u.test(input.directory)) fail("Invalid task verification storage.");
+  if (!UUID.test(input.workId) || !/^\.banzai\/(?:(?:work\/[a-f0-9-]{36}|runs\/[a-z0-9][a-z0-9.-]{0,199})\/verification|verification\/[a-f0-9]{64})$/u.test(input.directory)) fail("Invalid task verification storage.");
   return input.directory;
 }
 async function publish(input, suffix, value) {
   const relativePath = `${storage(input)}/${suffix}`;
   const bytes = typeof value === "string" ? value : JSON.stringify(value, null, 2) + "\n";
+  await verifyExecutionIgnore(input.repoRoot, relativePath);
   await makeDirectories(input.repoRoot, path.posix.dirname(relativePath));
   const existing = await readBytes(input.repoRoot, relativePath, { optional: true, limit: 20 * 1024 * 1024 });
   if (existing !== null) { if (!existing.equals(Buffer.from(bytes))) fail("Immutable task verification evidence differs."); }
@@ -70,6 +71,8 @@ function observedChanges(before, after) {
 export async function captureTaskVerificationInputs(input, descriptors, policy) {
   const entries = []; let bytes = 0; let unavailable = false;
   const root = input.repoRoot;
+  const excludedSourcePaths = new Set(input.excludedSourcePaths ?? []);
+  if ([...excludedSourcePaths].some(file => !/^documentation\/work\/[a-z0-9]+(?:-[a-z0-9]+)*\/review-[1-9]\d*\.md$/u.test(file))) fail("Invalid runner-published review exclusion.");
   let relevant = null;
   const relevantDirectories = new Set();
   try {
@@ -84,7 +87,7 @@ export async function captureTaskVerificationInputs(input, descriptors, policy) 
     const before = await readdir(directory, { withFileTypes: true });
     for (const item of before.sort((a, b) => a.name.localeCompare(b.name))) {
       const relative = prefix + item.name;
-      if (relative === ".git" || relative === ".banzai" || item.name === "node_modules") continue;
+      if (relative === ".git" || relative === ".banzai" || item.name === "node_modules" || excludedSourcePaths.has(relative)) continue;
       if (relevant && !relevant.has(relative) && !relevantDirectories.has(relative)) continue;
       if (entries.length > 50000 || bytes > 128 * 1024 * 1024) fail("Task input observation exceeds its bound.");
       const absolute = path.join(directory, item.name); const stat = await lstat(absolute);
@@ -104,7 +107,7 @@ export async function captureTaskVerificationInputs(input, descriptors, policy) 
   let reusable = null;
   if (policy?.reuse && descriptors.length) {
     const commands = descriptors.map((check) => ({ id: check.id, name: check.name, command: path.isAbsolute(check.command) ? check.command : check.command.includes("/") ? path.posix.join(check.cwd, check.command) : check.command, args: check.args, timeoutMs: check.timeoutMs, evidence: check.evidence, ignoreExplanatory: check.evidence === "equivalent_evidence" }));
-    reusable = await captureVerificationInputs({ repoRoot: root, workId: input.workId, evidenceDirectories: [input.directory], configuration: { profiles: [{ id: "task-capture", projectType: "custom", commands }], policy: policy.reuse } });
+    reusable = await captureVerificationInputs({ repoRoot: root, workId: input.workId, evidenceDirectories: [input.directory], sourceExclusions: [...excludedSourcePaths], configuration: { profiles: [{ id: "task-capture", projectType: "custom", commands }], policy: policy.reuse } });
   }
   const observation = { observedDigest, complete: reusable?.complete === true, reusable };
   if (observedDigest !== null) observedEntries.set(observation, entries);
@@ -237,6 +240,15 @@ export async function executeTaskVerification(input) {
   await revalidate();
   await publish(input, "ledger.json", { schemaVersion: 3 });
   let attempts = await readTaskVerificationAttempts(input, input.recoverInterrupted === true);
+  // Reused identities do not establish that their existing evidence is still private.
+  for (const attempt of attempts) {
+    const stem = `${String(attempt.sequence).padStart(6, "0")}-${attempt.id}`;
+    const suffixes = [`attempts/${stem}.start.json`, `origins/${attempt.id}.start.json`];
+    if (attempt.status !== "started") suffixes.push(`attempts/${stem}.finish.json`, `origins/${attempt.id}.finish.json`);
+    const paths = [...suffixes.map(suffix => `${storage(input)}/${suffix}`),
+      ...[attempt.descriptor, attempt.stdout, attempt.stderr].filter(Boolean).map(reference => reference.relativePath)];
+    for (const relative of paths) await verifyExecutionIgnore(input.repoRoot, relative);
+  }
   if (!input.recoverInterrupted && attempts.some(item => item.status === "started")) fail("Task verification retains an unresolved attempt; owner recovery is required before another round.");
   if (input.retryOf !== undefined && !attempts.some(item => item.id === input.retryOf && item.roundId === roundId && ["failed", "interrupted"].includes(item.status) && selection.checks.some(check => check.descriptor.id === item.checkId))) fail("Retry must identify an unsuccessful check in this exact task round.");
   const descriptors = selection.checks.map((item) => item.descriptor);
@@ -275,6 +287,8 @@ export async function executeTaskVerification(input) {
       descriptor: { ...decisionRef, checkId: item.descriptor.id }, cwd: authorized.cwd, authorityDigest: authorized.authorityDigest, contextDigest: authorized.contextDigest,
       status: "started", startedAt: new Date().toISOString(), completedAt: null, durationMs: null, exitCode: null, signal: null, failureCategory: null, retryOf: previous?.id ?? null, before: current, after: null, stdout: null, stderr: null });
     const stem = `${String(attempt.sequence).padStart(6, "0")}-${attempt.id}`;
+    await verifyExecutionIgnore(input.repoRoot, `${storage(input)}/logs/${attempt.id}.stdout.log`);
+    await verifyExecutionIgnore(input.repoRoot, `${storage(input)}/logs/${attempt.id}.stderr.log`);
     const start = await publish(input, `attempts/${stem}.start.json`, attempt);
     await publish(input, `origins/${attempt.id}.start.json`, { schema: "banzai-verification-origin-start/v2", schemaVersion: 2, workId: input.workId, attemptId: attempt.id, decision: decisionRef, physical: start, before: current });
     // A failed start is an observation too. The owner maps its process exceptions.

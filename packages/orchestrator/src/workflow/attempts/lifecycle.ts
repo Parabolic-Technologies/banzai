@@ -19,13 +19,12 @@ import {
   type PhaseResultEnvelope,
   type RecoveryAuthorization,
   type ReviewMode,
-  type ReviewResult,
+  type TerminalCheckpointResult,
   type ReviewRotationReason,
   type RunState,
   type SessionContext,
   type SessionMode,
-  STRICT_MODEL_ATTEMPT_SCHEMA_VERSION,
-  type WorkflowSelectionResult
+  STRICT_MODEL_ATTEMPT_SCHEMA_VERSION
 } from "../../types.js";
 import {
   digestCanonicalJson,
@@ -54,7 +53,7 @@ export function newAttempt(
   mutable: boolean
 ): AttemptReference {
   return {
-    id: `${kind}-${state.reviewIteration + 1}-${context.ids().slice(0, 8)}`,
+    id: `${kind.replaceAll("_", "-")}-${kind === "planning_review" || kind === "planning_analysis" ? state.planningReview?.active?.reviewNumber : state.reviewIteration + 1}-${context.ids().slice(0, 8)}`,
     kind,
     mutable
   };
@@ -195,7 +194,8 @@ export async function beginAttempt(
     state.metrics.attempts.selection =
       (state.metrics.attempts.selection ?? 0) + 1;
   } else {
-    state.metrics.attempts[attempt.kind] += 1;
+    state.metrics.attempts[attempt.kind] =
+      (state.metrics.attempts[attempt.kind] ?? 0) + 1;
   }
   state.metrics.sessions[policy.sessionMode] += 1;
   if (policy.reviewMode !== undefined) {
@@ -208,6 +208,25 @@ export async function beginAttempt(
     }
   }
   state.activeAttempt = attempt;
+  const episode = state.planningReview?.active;
+  if (episode !== undefined && episode !== null) {
+    if (attempt.kind === "planning_review") {
+      episode.reviewAttemptId = attempt.id;
+      episode.reviewer = {
+        executable: path.basename(policy.sessionContext.executable),
+        model: policy.sessionContext.model,
+        effort: policy.sessionContext.effort
+      };
+    }
+    if (attempt.kind === "planning_analysis")
+      episode.analysisAttemptId = attempt.id;
+    if (
+      attempt.kind === "plan" &&
+      episode.step === "applying" &&
+      episode.applyingAttemptId === null
+    )
+      episode.applyingAttemptId = attempt.id;
+  }
   await context.store.writeState(state);
   await context.store.writeRunAttempt(state.runId, record);
   const timingEvent = await context.store.appendEvent(
@@ -309,7 +328,8 @@ export async function beginRecoveryAttempt(
       "Recovery state changed before the new attempt could be linked."
     );
   }
-  state.metrics.attempts[attempt.kind] += 1;
+  state.metrics.attempts[attempt.kind] =
+    (state.metrics.attempts[attempt.kind] ?? 0) + 1;
   state.metrics.sessions[policy.sessionMode] += 1;
   state.activeAttempt = attempt;
   state.recovery = {
@@ -339,9 +359,7 @@ export async function beginRecoveryAttempt(
   return record;
 }
 
-export async function completeAttempt<
-  T extends WorkflowSelectionResult | PhaseResult | ReviewResult
->(
+export async function completeAttempt<T extends TerminalCheckpointResult>(
   context: RunnerContext,
   state: RunState,
   record: AttemptRecord,
@@ -504,9 +522,7 @@ export async function processStarted(
   }
 }
 
-export async function persistAdapterResult<
-  T extends WorkflowSelectionResult | PhaseResult | ReviewResult
->(
+export async function persistAdapterResult<T extends TerminalCheckpointResult>(
   context: RunnerContext,
   state: RunState,
   record: AttemptRecord,

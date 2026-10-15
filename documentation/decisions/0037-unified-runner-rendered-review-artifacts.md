@@ -353,6 +353,17 @@ requires the subsequent approved plan.
 
 ## Lifecycle Links
 
+- Amended by
+  [ADR-0055](./0055-planning-gate-rework-and-independent-planning-review.md),
+  accepted 2026-10-13: adds a separate runner-rendered, create-only
+  `planning-review-<N>.md` family. Code-review rendering, snapshots, numbering
+  and continuity are unchanged. Implementation is Planned.
+
+- Amended by [ADR-0054](./0054-git-visible-work-artifacts.md), accepted
+  2026-10-13: new canonical review documents use the tracked work directory.
+  Independent review, frozen evidence and validated publication remain.
+  Implementation is Planned.
+
 - Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted
   2026-09-14: snapshot v4/rendered review v5 carry exact runner configuration
   authorship and truthful configured/deferred/skipped coverage. Preserve

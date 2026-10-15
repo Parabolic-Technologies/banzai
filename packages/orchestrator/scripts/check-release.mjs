@@ -429,17 +429,34 @@ function validatePolicyShape(policy) {
     policyPath,
     "review-result identities"
   );
+  requireJsonExact(
+    contracts.planningReview,
+    {
+      resultPath:
+        "plugins/banzai/contracts/v1/planning-review-result.schema.json",
+      resultSchema: "banzai-planning-review-result/v1",
+      resultSchemaVersion: 1,
+      analysisPath:
+        "plugins/banzai/contracts/v1/planning-review-analysis.schema.json",
+      analysisSchema: "banzai-planning-review-analysis/v1",
+      analysisSchemaVersion: 1,
+      artifactFormat: "banzai-planning-review/v1"
+    },
+    "CONTRACT_POLICY_DRIFT",
+    policyPath,
+    "planning-review identities"
+  );
   const state = record(contracts.state, policyPath, "contracts.state");
   requireExact(
     state.currentSchemaVersion,
-    7,
+    10,
     "CONTRACT_POLICY_DRIFT",
     policyPath,
     "current state schema version"
   );
   requireJsonExact(
     state.legacySchemaVersions,
-    [1, 2, 3, 4, 5, 6],
+    [1, 2, 3, 4, 5, 6, 7, 8, 9],
     "CONTRACT_POLICY_DRIFT",
     policyPath,
     "legacy state schema versions"
@@ -450,14 +467,16 @@ function validatePolicyShape(policy) {
     "contracts.agentControl"
   );
   const expectedControl = {
-    contractVersion: "6.0.0",
-    capabilities: "banzai-agent-capabilities/v6",
-    status: "banzai-agent-status/v5",
+    contractVersion: "8.0.0",
+    capabilities: "banzai-agent-capabilities/v8",
+    status: "banzai-agent-status/v6",
     request: "banzai-agent-request/v1",
     answer: "banzai-agent-answer/v2",
     configurationAnswer: "banzai-agent-answer/v3",
     legacyAnswer: "banzai-agent-answer/v1",
-    recovery: "banzai-agent-recovery/v1"
+    recovery: "banzai-agent-recovery/v1",
+    gateDecision: "banzai-agent-gate-decision/v1",
+    planningTriageAnswer: "banzai-agent-answer/v4"
   };
   for (const [key, expected] of Object.entries(expectedControl)) {
     requireExact(
@@ -658,6 +677,50 @@ async function validateNoVersionTransaction(root, policy) {
   }
 }
 
+async function validatePlanningReviewContracts(
+  root,
+  schemas,
+  manifestPath,
+  planningPolicy
+) {
+  for (const family of ["result", "analysis"]) {
+    const relativePath = planningPolicy[family + "Path"];
+    const key =
+      family === "result" ? "planningReviewResult" : "planningReviewAnalysis";
+    requireExact(
+      schemas[key],
+      "./" + relativePath.slice("plugins/banzai/contracts/".length),
+      "INVALID_CONTRACT_REFERENCE",
+      manifestPath,
+      key
+    );
+    const schema = await readJson(root, relativePath);
+    requireExact(
+      schema.$id,
+      "https://banzai.local/contracts/v1/planning-review-" +
+        family +
+        ".schema.json",
+      "CONTRACT_POLICY_DRIFT",
+      relativePath,
+      "$id"
+    );
+    requireExact(
+      schema.properties?.schema?.const,
+      planningPolicy[family + "Schema"],
+      "CONTRACT_POLICY_DRIFT",
+      relativePath,
+      "schema"
+    );
+    requireExact(
+      schema.properties?.schemaVersion?.const,
+      planningPolicy[family + "SchemaVersion"],
+      "CONTRACT_POLICY_DRIFT",
+      relativePath,
+      "schemaVersion"
+    );
+  }
+}
+
 async function validateContracts(root, policy) {
   const manifestPath = "plugins/banzai/contracts/contract.json";
   const manifest = record(
@@ -719,7 +782,19 @@ async function validateContracts(root, policy) {
       "byte-preserved legacy review-result"
     );
   }
-  for (const key of ["workflowSelection", "phaseResult", "reviewResult"]) {
+  await validatePlanningReviewContracts(
+    root,
+    schemas,
+    manifestPath,
+    policy.contracts.planningReview
+  );
+  for (const key of [
+    "workflowSelection",
+    "phaseResult",
+    "reviewResult",
+    "planningReviewResult",
+    "planningReviewAnalysis"
+  ]) {
     const reference = nonEmptyString(
       schemas[key],
       manifestPath,
@@ -884,14 +959,14 @@ async function validateContracts(root, policy) {
     );
   }
   if (
-    !/export interface RunState\s*{[^}]*?schemaVersion:\s*3\s*\|\s*4\s*\|\s*5\s*\|\s*6\s*\|\s*7\s*\|\s*8;/.test(
+    !/export interface RunState\s*{[^}]*?schemaVersion:\s*3\s*\|\s*4\s*\|\s*5\s*\|\s*6\s*\|\s*7\s*\|\s*8\s*\|\s*9\s*\|\s*10;/.test(
       typesSource
     )
   ) {
     fail(
       "STATE_CONTRACT_DRIFT",
       typesPath,
-      "current run state must retain v3-v6 and support task-verification v8"
+      "current run state must retain historical readers and support tracked-document state v10"
     );
   }
   if (!/schemaVersion:\s*1\s*\|\s*2;/.test(typesSource)) {
@@ -903,6 +978,18 @@ async function validateContracts(root, policy) {
   }
 
   const contractConstants = new Map([
+    [
+      "PLANNING_REVIEW_RESULT_SCHEMA",
+      policy.contracts.planningReview.resultSchema
+    ],
+    [
+      "PLANNING_REVIEW_ANALYSIS_SCHEMA",
+      policy.contracts.planningReview.analysisSchema
+    ],
+    [
+      "PLANNING_REVIEW_ARTIFACT_FORMAT",
+      policy.contracts.planningReview.artifactFormat
+    ],
     [
       "AGENT_CONTROL_CONTRACT_VERSION",
       policy.contracts.agentControl.contractVersion
@@ -917,6 +1004,11 @@ async function validateContracts(root, policy) {
     ],
     ["LEGACY_AGENT_ANSWER_SCHEMA", policy.contracts.agentControl.legacyAnswer],
     ["AGENT_RECOVERY_SCHEMA", policy.contracts.agentControl.recovery],
+    ["PLANNING_GATE_DOCUMENT", policy.contracts.agentControl.gateDecision],
+    [
+      "PLANNING_TRIAGE_DOCUMENT",
+      policy.contracts.agentControl.planningTriageAnswer
+    ],
     ["EVALUATION_EXPORT_SCHEMA", policy.contracts.evaluation.export],
     ["EVALUATION_KPI_SCHEMA", policy.contracts.evaluation.kpi]
   ]);
@@ -933,11 +1025,15 @@ async function validateContracts(root, policy) {
     }
   }
   for (const [name, expected] of [
-    ["AGENT_CAPABILITIES_SCHEMA_VERSION", 6],
-    ["AGENT_STATUS_SCHEMA_VERSION", 5],
+    ["PLANNING_REVIEW_RESULT_SCHEMA_VERSION", 1],
+    ["PLANNING_REVIEW_ANALYSIS_SCHEMA_VERSION", 1],
+    ["AGENT_CAPABILITIES_SCHEMA_VERSION", 8],
+    ["AGENT_STATUS_SCHEMA_VERSION", 6],
     ["AGENT_ANSWER_SCHEMA_VERSION", 2],
     ["CONFIGURATION_ANSWER_SCHEMA_VERSION", 3],
     ["AGENT_REQUEST_SCHEMA_VERSION", 1],
+    ["PLANNING_GATE_DOCUMENT_VERSION", 1],
+    ["PLANNING_TRIAGE_DOCUMENT_VERSION", 4],
     ["AGENT_RECOVERY_SCHEMA_VERSION", 1]
   ]) {
     const constant = typesSource.match(new RegExp(`${name}\\s*=\\s*(\\d+)`));
@@ -2616,19 +2712,19 @@ async function validateDecisionConsultationPolicy(root) {
         "There are five existing decision gates",
         "Consultation is conditional, planning-only, and concise",
         "it does not accept an ADR, approve a plan",
-        "control contract `6.0.0`"
+        "control contract `8.0.0`"
       ]
     ],
     [
       "documentation/orchestrator.md",
       [
         "workflow's five existing decision gates",
-        "banzai-agent-capabilities/v6",
-        "banzai-agent-status/v5",
+        "banzai-agent-capabilities/v8",
+        "banzai-agent-status/v6",
         "banzai-agent-answer/v2",
         "A v1 answer cannot answer a consultation.",
-        "New runs start at schema version 8",
-        "State 8 carries the completion publication cursor from creation.",
+        "New runs start at schema version 10",
+        "State 10 carries the completion publication cursor from creation.",
         "The model hand-off uses phase-result v4.",
         "phase-result v1 and v2 remain read-only legacy inputs",
         "Evaluation export and KPI stay on their independent privacy-minimized v1 contracts."
@@ -2648,8 +2744,8 @@ async function validateDecisionConsultationPolicy(root) {
       [
         "the five existing decision gates",
         "five existing workflow gates",
-        "phase-result schema v4 and state schema v8 with explicit historical readers",
-        "control contract version `6.0.0`",
+        "phase-result schema v4 and state schema v10 with explicit historical readers",
+        "control contract version `8.0.0`",
         "phase-result v4 is current",
         "phase-result v1/v2/v3 remain byte-preserved legacy reader surfaces"
       ]
@@ -2734,8 +2830,8 @@ async function validateDecisionConsultationPolicy(root) {
       "packages/orchestrator/scripts/smoke-committed.mjs",
       [
         "setupConsultationRun",
-        "banzai-agent-capabilities/v6",
-        "banzai-agent-status/v5",
+        "banzai-agent-capabilities/v8",
+        "banzai-agent-status/v6",
         "answer_consultation",
         "banzai-agent-answer/v2",
         "consultation lifecycle events are not count-only",
@@ -2745,8 +2841,8 @@ async function validateDecisionConsultationPolicy(root) {
     [
       "packages/orchestrator/test/committed-smoke.test.ts",
       [
-        "banzai-agent-capabilities/v6",
-        "banzai-agent-status/v5",
+        "banzai-agent-capabilities/v8",
+        "banzai-agent-status/v6",
         "control answer --by Smoke User --no-resume",
         "decision.consultation.answered"
       ]
@@ -2804,7 +2900,7 @@ async function validateOrchestrateSkill(root) {
         "BANZAI_WORKFLOW_DIGEST",
         "banzai control capabilities",
         "banzai control status",
-        "exact supported v6 declaration",
+        "exact supported v8 declaration",
         "banzai-agent-request/v1",
         "banzai-agent-answer/v2",
         "banzai-agent-answer/v1",
@@ -2832,9 +2928,14 @@ async function validateOrchestrateSkill(root) {
     [
       "plugins/banzai/skills/orchestrate/references/control-protocol.md",
       [
-        "banzai-agent-capabilities/v6",
-        "banzai-agent-status/v5",
-        'controlContractVersion: "6.0.0"',
+        "banzai-agent-capabilities/v8",
+        "banzai-agent-status/v6",
+        "banzai-agent-gate-decision/v1",
+        "banzai-agent-answer/v4",
+        "answer_planning_review_triage",
+        "raw UTF-8 JSON",
+        "CONTROL_INPUT_TOO_LARGE",
+        'controlContractVersion: "8.0.0"',
         "banzai-agent-request/v1",
         "banzai-agent-answer/v2",
         "banzai-agent-answer/v1",

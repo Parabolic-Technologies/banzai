@@ -2,8 +2,8 @@
 
 Banzai records privacy-safe evidence about the context it controls for every
 model invocation. The attempt-owned contract is
-`banzai-context-attempt/v1`; the independent cross-run report contract is
-`banzai-context-report/v1`. Neither contract changes the model-facing umbrella
+`banzai-context-attempt/v2`; the independent cross-run report contract is
+`banzai-context-report/v2`. Neither contract changes the model-facing umbrella
 contract, `banzai-evaluation-export/v1`, or `banzai-evaluation-kpi/v1`.
 
 ## Evidence Surfaces
@@ -120,7 +120,7 @@ banzai eval context --run 20260801-example --run 20260815-other
 The report shows exact and incomplete physical-attempt coverage before values,
 then fixed-order workflow/phase/role groups. Runner bytes, category totals,
 budget outcomes, vendor usage, and session inventory remain separate. JSON is
-canonical two-space-indented `banzai-context-report/v1` with one trailing
+canonical two-space-indented `banzai-context-report/v2` with one trailing
 newline; Markdown is a projection of the same completed object. Identical
 inputs and arguments produce identical bytes, and reporting never creates a
 config, lock, run, active pointer, or report file.
@@ -150,3 +150,12 @@ Before enabling enforcement or optimizing prompts:
 Every context optimization change must therefore state: **target category or
 surface, baseline cohort and coverage, expected reduction, correctness guard,
 and rollback condition**.
+
+
+Context v2 adds planning_review (reviewer, read-only) and planning_analysis
+(planner, read-only) in the fixed report phase order after code review. The
+per-version reader retains v1 vocabulary and identity; v1 cannot carry either
+new phase. The configuration phase selector vocabulary is unchanged: role and
+global limits apply to the new phases. Scope documents count as authority;
+analysis and applying planning also count the planning-review artifact. Rework
+and planning-triage records enter only planning-family human evidence.

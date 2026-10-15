@@ -9,7 +9,7 @@ import type {
   VerificationDecision,
   VerificationApplicability
 } from "./verification-evidence.js";
-import type { ArtifactBoundWork } from "./artifact-storage.js";
+import type { ArtifactBoundWork } from "./work-documents.js";
 import type {
   ConfigurationAction,
   ConfigurationPrerequisiteRequest,
@@ -23,6 +23,14 @@ import type {
 } from "./git.js";
 
 export const CONTRACT_VERSION = "1.0.0" as const;
+export const PLANNING_REVIEW_RESULT_SCHEMA =
+  "banzai-planning-review-result/v1" as const;
+export const PLANNING_REVIEW_RESULT_SCHEMA_VERSION = 1 as const;
+export const PLANNING_REVIEW_ANALYSIS_SCHEMA =
+  "banzai-planning-review-analysis/v1" as const;
+export const PLANNING_REVIEW_ANALYSIS_SCHEMA_VERSION = 1 as const;
+export const PLANNING_REVIEW_ARTIFACT_FORMAT =
+  "banzai-planning-review/v1" as const;
 export const PHASE_RESULT_SCHEMA_VERSION = 4 as const;
 export const TASK_PHASE_RESULT_SCHEMA_VERSION = 4 as const;
 export const DECISION_CONSULTATION_SCHEMA =
@@ -33,10 +41,10 @@ export const EVALUATION_EXPORT_SCHEMA = "banzai-evaluation-export/v1" as const;
 export const EVALUATION_EXPORT_SCHEMA_VERSION = 1 as const;
 export const EVALUATION_KPI_SCHEMA = "banzai-evaluation-kpi/v1" as const;
 export const EVALUATION_KPI_SCHEMA_VERSION = 1 as const;
-export const CONTEXT_ATTEMPT_SCHEMA = "banzai-context-attempt/v1" as const;
-export const CONTEXT_ATTEMPT_SCHEMA_VERSION = 1 as const;
-export const CONTEXT_REPORT_SCHEMA = "banzai-context-report/v1" as const;
-export const CONTEXT_REPORT_SCHEMA_VERSION = 1 as const;
+export const CONTEXT_ATTEMPT_SCHEMA = "banzai-context-attempt/v2" as const;
+export const CONTEXT_ATTEMPT_SCHEMA_VERSION = 2 as const;
+export const CONTEXT_REPORT_SCHEMA = "banzai-context-report/v2" as const;
+export const CONTEXT_REPORT_SCHEMA_VERSION = 2 as const;
 export const PROMPT_COMPONENT_CATEGORY_ORDER = [
   "common_instructions",
   "phase_instructions",
@@ -76,7 +84,7 @@ export const COMPLETION_PUBLICATION_SCHEMA =
   "banzai-completion-publication/v1" as const;
 export const COMPLETION_RECORD_SCHEMA_VERSION = 1 as const;
 export const COMPLETION_SUMMARY_SCHEMA_VERSION = 2 as const;
-export const RUN_STATE_SCHEMA_VERSION = 8 as const;
+export const RUN_STATE_SCHEMA_VERSION = 10 as const;
 export const COMPLETION_PUBLICATION_STAGES = [
   "capture",
   "validate",
@@ -103,16 +111,16 @@ export const RECOVERY_AUTHORIZATION_SCHEMA_VERSION = 1 as const;
 export const RESULT_DIGEST_EVIDENCE_SCHEMA =
   "banzai-result-digest-evidence/v1" as const;
 export const RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION = 1 as const;
-export const AGENT_CONTROL_CONTRACT_VERSION = "6.0.0" as const;
-export const AGENT_CAPABILITIES_SCHEMA_VERSION = 6 as const;
-export const AGENT_STATUS_SCHEMA_VERSION = 5 as const;
+export const AGENT_CONTROL_CONTRACT_VERSION = "8.0.0" as const;
+export const AGENT_CAPABILITIES_SCHEMA_VERSION = 8 as const;
+export const AGENT_STATUS_SCHEMA_VERSION = 6 as const;
 export const AGENT_ANSWER_SCHEMA_VERSION = 2 as const;
 export const AGENT_REQUEST_SCHEMA_VERSION = 1 as const;
 export const AGENT_RECOVERY_SCHEMA_VERSION = 1 as const;
 export const LEGACY_AGENT_CONTROL_SCHEMA_VERSION = 1 as const;
 export const AGENT_CAPABILITIES_SCHEMA =
-  "banzai-agent-capabilities/v6" as const;
-export const AGENT_STATUS_SCHEMA = "banzai-agent-status/v5" as const;
+  "banzai-agent-capabilities/v8" as const;
+export const AGENT_STATUS_SCHEMA = "banzai-agent-status/v6" as const;
 export const AGENT_REQUEST_SCHEMA = "banzai-agent-request/v1" as const;
 export const AGENT_ANSWER_SCHEMA = "banzai-agent-answer/v2" as const;
 export const CONFIGURATION_ANSWER_SCHEMA = "banzai-agent-answer/v3" as const;
@@ -123,12 +131,31 @@ export const LEGACY_AGENT_CAPABILITIES_SCHEMA =
 export const LEGACY_AGENT_STATUS_SCHEMA = "banzai-agent-status/v1" as const;
 export const LEGACY_AGENT_ANSWER_SCHEMA = "banzai-agent-answer/v1" as const;
 
+export const PLANNING_GATE_DOCUMENT = "banzai-agent-gate-decision/v1" as const;
+export const PLANNING_GATE_DOCUMENT_VERSION = 1 as const;
+export const PLANNING_TRIAGE_DOCUMENT = "banzai-agent-answer/v4" as const;
+export const PLANNING_TRIAGE_DOCUMENT_VERSION = 4 as const;
+export interface AgentPlanningGateDecision {
+  schema: typeof PLANNING_GATE_DOCUMENT;
+  schemaVersion: 1;
+  runId: string;
+  gate: PlanningGate;
+  decision: "rework" | "review";
+  adrId: string | null;
+  feedback: string | null;
+  paths: string[] | null;
+}
+export interface AgentPlanningTriageAnswer extends PlanningReviewTriageAnswer {
+  schema: typeof PLANNING_TRIAGE_DOCUMENT;
+  schemaVersion: 4;
+}
 export type AgentControlOperationName =
   | "status"
   | "start"
   | "answer"
   | "approveAdr"
   | "approvePlan"
+  | "decideGate"
   | "approveVerification"
   | "triage"
   | "resume"
@@ -140,6 +167,8 @@ export interface AgentControlOperationV2 {
   supported: true;
   ttyRequired: false;
   inputSchemas: (
+    | typeof PLANNING_GATE_DOCUMENT
+    | typeof PLANNING_TRIAGE_DOCUMENT
     | typeof AGENT_REQUEST_SCHEMA
     | typeof AGENT_ANSWER_SCHEMA
     | typeof CONFIGURATION_ANSWER_SCHEMA
@@ -149,16 +178,36 @@ export interface AgentControlOperationV2 {
 }
 
 export interface AgentControlCapabilitiesV5 {
+  planningGates: {
+    gateDecisionSchema: typeof PLANNING_GATE_DOCUMENT;
+    decisions: {
+      adr_approval: readonly ["accept", "reject", "rework", "review"];
+      plan_approval: readonly ["approve", "rework", "review"];
+    };
+    triage: {
+      pendingKind: "planning_review_triage";
+      answerSchema: typeof PLANNING_TRIAGE_DOCUMENT;
+      dispositions: readonly ["option", "instruction", "decline"];
+    };
+    limits: {
+      feedbackBytes: 8000;
+      instructionBytes: 2000;
+      additionalInstructionBytes: 8000;
+      findings: 20;
+      reviewPaths: 128;
+    };
+    statusSchema: typeof AGENT_STATUS_SCHEMA;
+  };
   schema: typeof AGENT_CAPABILITIES_SCHEMA;
   schemaVersion: typeof AGENT_CAPABILITIES_SCHEMA_VERSION;
   controlContractVersion: typeof AGENT_CONTROL_CONTRACT_VERSION;
   orchestratorVersion: string;
   umbrellaContractVersion: typeof CONTRACT_VERSION;
-  artifactStorage: {
-    declarationSchemas: ["banzai-artifact-layout/v1"];
-    bindingSchemas: ["banzai-work-binding/v1", "banzai-work-binding/v2"];
-    privateWorkspaceSnapshotVersion: 2;
-    layouts: readonly ["legacy", "private"];
+  workDocuments: {
+    directoryPattern: "documentation/work/<slug>/";
+    bindingSchemas: ["banzai-work-binding/v3"];
+    workspaceSnapshotVersion: 3;
+    verificationRequestSchemas: ["banzai-verification-request/v3"];
   };
   configurationPrerequisite: {
     kind: "configuration_prerequisite";
@@ -231,16 +280,21 @@ export type AgentControlNextAction =
   | Exclude<AgentControlNextActionV1, "answer">
   | "answer_escalation"
   | "answer_consultation"
-  | "answer_configuration_prerequisite";
+  | "answer_configuration_prerequisite"
+  | "answer_planning_review_triage";
 
 export type AgentControlPendingGateV1 =
   | {
       kind: "adr_approval";
+      decisions?: string[];
+      reviewPaths?: string[];
       artifactPaths: string[];
       adrIds: string[];
     }
   | {
       kind: "plan_approval";
+      decisions?: string[];
+      reviewPaths?: string[];
       artifactPaths: string[];
     }
   | {
@@ -360,6 +414,18 @@ export interface AgentControlRunV1 {
 }
 
 export type AgentControlPendingGateV3 =
+  | {
+      kind: "planning_review_triage";
+      runId: string;
+      episodeId: string;
+      reviewNumber: number;
+      originGate: PlanningGate;
+      artifactPath: string;
+      artifactSha256: string;
+      analysisDigest: string;
+      findings: PlanningReviewFinding[];
+      analysis: PlanningReviewAnalysisEntry[];
+    }
   | AgentControlPendingGateV2
   | {
       kind: "configuration_prerequisite";
@@ -641,6 +707,84 @@ export interface ReviewFinding {
   confidence: "high" | "medium" | "low";
 }
 
+export type PlanningGate = "adr_approval" | "plan_approval";
+
+export interface PlanningReviewScope {
+  path: string;
+  sha256: string;
+}
+
+export interface PlanningReviewFinding {
+  id: string;
+  severity: ReviewFinding["severity"];
+  category:
+    | "requirements"
+    | "acceptance"
+    | "architecture"
+    | "plan"
+    | "consistency"
+    | "security"
+    | "testing"
+    | "scope"
+    | "compatibility"
+    | "documentation";
+  summary: string;
+  evidence: ReviewEvidence[];
+  suggestedResolution: string;
+  confidence: ReviewFinding["confidence"];
+}
+
+export interface PlanningReviewResult {
+  contractVersion: typeof CONTRACT_VERSION;
+  schema: typeof PLANNING_REVIEW_RESULT_SCHEMA;
+  schemaVersion: typeof PLANNING_REVIEW_RESULT_SCHEMA_VERSION;
+  reviewNumber: number;
+  scope: PlanningReviewScope[];
+  findings: PlanningReviewFinding[];
+}
+
+export interface PlanningReviewOption {
+  optionId: string;
+  label: string;
+  consequences: string[];
+}
+
+export interface PlanningReviewAnalysisEntry {
+  findingId: string;
+  assessment: "agree" | "partially_agree" | "disagree";
+  rationale: string;
+  options: PlanningReviewOption[];
+  recommendation: { optionId: string; rationale: string } | null;
+}
+
+export interface PlanningReviewAnalysis {
+  contractVersion: typeof CONTRACT_VERSION;
+  schema: typeof PLANNING_REVIEW_ANALYSIS_SCHEMA;
+  schemaVersion: typeof PLANNING_REVIEW_ANALYSIS_SCHEMA_VERSION;
+  reviewNumber: number;
+  resultDigest: string;
+  entries: PlanningReviewAnalysisEntry[];
+}
+
+export type PlanningReviewDisposition =
+  | { findingId: string; kind: "option"; optionId: string; instruction: null }
+  | {
+      findingId: string;
+      kind: "instruction";
+      optionId: null;
+      instruction: string;
+    }
+  | { findingId: string; kind: "decline"; optionId: null; instruction: null };
+
+export interface PlanningReviewTriageAnswer {
+  runId: string;
+  episodeId: string;
+  reviewNumber: number;
+  analysisDigest: string;
+  dispositions: PlanningReviewDisposition[];
+  additionalInstruction: string | null;
+}
+
 export interface ReviewResult {
   /** Absent on historical v1 evidence only. Current ingress requires v2. */
   schemaVersion?: 2;
@@ -724,8 +868,9 @@ export interface ReviewSnapshot {
     | "banzai-review-snapshot/v3"
     | "banzai-review-snapshot/v4"
     | "banzai-review-snapshot/v5"
-    | "banzai-review-snapshot/v6";
-  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6;
+    | "banzai-review-snapshot/v6"
+    | "banzai-review-snapshot/v7";
+  schemaVersion: 1 | 2 | 3 | 4 | 5 | 6 | 7;
   verificationMode?: "ordered" | "policy" | "task";
   taskVerification?: TaskVerificationPublication;
   configurationSetup?: ReviewConfigurationSetup;
@@ -867,7 +1012,9 @@ export type OutputContractIdentity =
   | "phase-result/v3"
   | "phase-result/v4"
   | "review-result/v1"
-  | "review-result/v2";
+  | "review-result/v2"
+  | "planning-review-result/v1"
+  | "planning-review-analysis/v1";
 
 export interface OutputContractEnvelope {
   vendor: "codex" | "claude";
@@ -979,8 +1126,8 @@ export interface ContextInvocationEvidence {
 }
 
 export interface ContextAttemptLedger {
-  schema: typeof CONTEXT_ATTEMPT_SCHEMA;
-  schemaVersion: typeof CONTEXT_ATTEMPT_SCHEMA_VERSION;
+  schema: typeof CONTEXT_ATTEMPT_SCHEMA | "banzai-context-attempt/v1";
+  schemaVersion: typeof CONTEXT_ATTEMPT_SCHEMA_VERSION | 1;
   runId: string;
   attempt: AttemptReference;
   invocations: ContextInvocationEvidence[];
@@ -1203,19 +1350,103 @@ export interface ConsultationDecisionRecord extends ConsultationDecisionRequest 
   decidedBy: string;
 }
 
+export interface PlanningReviewEpisodeBase {
+  episodeId: string;
+  reviewNumber: number;
+  originGate: PlanningGate;
+  scope: PlanningReviewScope[];
+  requestedAt: string;
+  decidedBy: string;
+  reviewer: {
+    executable: string;
+    model: string;
+    effort: ModelSettings["effort"];
+  } | null;
+  reviewAttemptId: string | null;
+  reviewSessionId: string | null;
+  analysisAttemptId: string | null;
+  applyingAttemptId: string | null;
+  resultDigest: string | null;
+  findingCount: number | null;
+  artifact: { path: string; sha256: string } | null;
+  analysisDigest: string | null;
+}
+export interface PlanningReviewEpisode extends PlanningReviewEpisodeBase {
+  step: "reviewing" | "analyzing" | "awaiting_triage" | "applying";
+}
+export interface ClosedPlanningReviewEpisode extends PlanningReviewEpisodeBase {
+  outcome:
+    | "restored_no_findings"
+    | "restored_no_action"
+    | "applied"
+    | "stale"
+    | "cancelled";
+  closedAt: string;
+}
+export interface PlanningReviewState {
+  active: PlanningReviewEpisode | null;
+  closed: ClosedPlanningReviewEpisode[];
+}
+export interface PlanningReviewTriageRequest {
+  kind: "planning_review_triage";
+  runId: string;
+  episodeId: string;
+  reviewNumber: number;
+  originGate: PlanningGate;
+  artifactPath: string;
+  artifactSha256: string;
+  resultDigest: string;
+  analysisDigest: string;
+  findings: PlanningReviewFinding[];
+  analysis: PlanningReviewAnalysisEntry[];
+  requestedAt: string;
+}
+export interface PlanReworkRecord {
+  kind: "plan_rework";
+  feedback: string;
+  bundleDigest: string;
+  decidedBy: string;
+  decidedAt: string;
+}
+export interface AdrReworkRecord {
+  kind: "adr_rework";
+  adrId: string;
+  feedback: string;
+  decidedBy: string;
+  decidedAt: string;
+}
+export interface PlanningReviewTriageRecord extends PlanningReviewTriageAnswer {
+  kind: "planning_review_triage";
+  decidedBy: string;
+  decidedAt: string;
+}
+export const ATTEMPT_FILE_TOKENS = {
+  selection: "selection",
+  plan: "plan",
+  implementation: "implementation",
+  fix: "fix",
+  review: "review",
+  planning_review: "planning-review",
+  planning_analysis: "planning-analysis"
+} as const;
+
 export type HumanDecisionRequest =
   | EscalationDecisionRequest
   | ConsultationDecisionRequest
-  | ConfigurationPrerequisiteRequest;
+  | ConfigurationPrerequisiteRequest
+  | PlanningReviewTriageRequest;
 
 export type HumanDecisionRecord =
   | EscalationDecisionRecord
   | ConsultationDecisionRecord
-  | ConfigurationDecisionRecord;
+  | ConfigurationDecisionRecord
+  | PlanReworkRecord
+  | AdrReworkRecord
+  | PlanningReviewTriageRecord;
 
 export interface AttemptReference {
   id: string;
-  kind: "selection" | "plan" | "implementation" | "fix" | "review";
+  kind: keyof typeof ATTEMPT_FILE_TOKENS;
   mutable: boolean;
 }
 
@@ -1317,6 +1548,8 @@ export interface RunMetrics {
   usageAccountedAttemptIds?: string[];
   attempts: {
     selection?: number;
+    planning_review?: number;
+    planning_analysis?: number;
     plan: number;
     implementation: number;
     fix: number;
@@ -1460,7 +1693,9 @@ export interface RunState {
    * the completion protocol is created; new runs still bootstrap at 4 or 6 and
    * keep their configuration/binding combination unchanged across the move.
    */
-  schemaVersion: 3 | 4 | 5 | 6 | 7 | 8;
+  schemaVersion: 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+  /** Required on v10; absent on historical states. */
+  planningReview?: PlanningReviewState;
   verificationMode?: "ordered" | "policy" | "task";
   taskVerification?: TaskVerificationPublication;
   configurationSetup?: ConfigurationSetupState;
@@ -1542,9 +1777,7 @@ export interface CompletionDiagnostic {
   message: string;
 }
 
-export interface AttemptRecord<
-  T = WorkflowSelectionResult | PersistedPhaseResult | ReviewResult
-> {
+export interface AttemptRecord<T = TerminalCheckpointResult> {
   schemaVersion:
     | 1
     | typeof MODEL_ATTEMPT_SCHEMA_VERSION
@@ -1609,7 +1842,11 @@ export interface AttemptRecord<
 }
 
 export type TerminalCheckpointResult =
-  WorkflowSelectionResult | PersistedPhaseResult | ReviewResult;
+  | WorkflowSelectionResult
+  | PersistedPhaseResult
+  | ReviewResult
+  | PlanningReviewResult
+  | PlanningReviewAnalysis;
 
 export type TerminalSuccessClassification =
   "claude_result" | "codex_turn_completed";
@@ -1620,7 +1857,9 @@ export type TerminalResultContract =
   | "phase-result/v3"
   | "phase-result/v4"
   | "review-result/v1"
-  | "review-result/v2";
+  | "review-result/v2"
+  | "planning-review-result/v1"
+  | "planning-review-analysis/v1";
 
 export interface TerminalAttemptCheckpoint<
   T extends TerminalCheckpointResult = TerminalCheckpointResult
@@ -1888,7 +2127,8 @@ export interface NumericMetric {
 export type EvaluationCompleteness = "complete" | "partial" | "unreadable";
 export type EvaluationCohortMembership = "included" | "unresolved";
 export type EvaluationVendor = "codex" | "claude" | "unknown";
-export type EvaluationAttemptKind = AttemptReference["kind"] | "verification";
+export type EvaluationAttemptKind =
+  "selection" | "plan" | "implementation" | "fix" | "review" | "verification";
 /**
  * Frozen export v1 enum, pinned explicitly: a later persisted attempt status
  * (`interrupted`, `pending_application`) must never widen this contract.
@@ -1988,7 +2228,9 @@ export interface EvaluationStateSource {
   fixCycle: EvidenceValue<number>;
   blockedFrom: EvidenceValue<RunStatus>;
   activeAttemptIdentity: EvidenceValue<string>;
-  activeAttemptKind: EvidenceValue<AttemptReference["kind"]>;
+  activeAttemptKind: EvidenceValue<
+    Exclude<EvaluationAttemptKind, "verification">
+  >;
   activeVerification: EvidenceValue<boolean>;
   triage: Record<FindingDisposition, number>;
   triageIsCumulative: boolean;
@@ -2006,7 +2248,7 @@ export interface EvaluationModelProfileSource {
 export interface EvaluationAttemptSource {
   identity: string;
   schemaVersion: EvidenceValue<number>;
-  kind: EvidenceValue<AttemptReference["kind"]>;
+  kind: EvidenceValue<Exclude<EvaluationAttemptKind, "verification">>;
   mutable: EvidenceValue<boolean>;
   status: EvidenceValue<AttemptRecord["status"]>;
   startedAt: EvidenceValue<string>;
@@ -2063,7 +2305,7 @@ export interface EvaluationAttempt {
   source: {
     schemaVersion: EvidenceValue<number>;
   };
-  kind: EvidenceValue<AttemptReference["kind"]>;
+  kind: EvidenceValue<Exclude<EvaluationAttemptKind, "verification">>;
   mutable: EvidenceValue<boolean>;
   status: EvidenceValue<AttemptRecord["status"]>;
   startedAt: EvidenceValue<string>;
@@ -2427,7 +2669,32 @@ export interface VendorPreflightTarget {
   model: string | null;
 }
 
+export interface PlanningAdapterRequest<
+  T extends PlanningReviewResult | PlanningReviewAnalysis
+> {
+  repoRoot: string;
+  runId: string;
+  runDirectory: string;
+  attemptId: string;
+  prompt: string;
+  promptEnvelope: PromptEnvelope;
+  outputContract: OutputContractEnvelope;
+  settings: ModelSettings;
+  resumeSessionId: string | null;
+  env: NodeJS.ProcessEnv;
+  onStart: (pid: number) => Promise<void>;
+  onProgress: (event: ModelProgressEvent) => void;
+  onSessionStarted?: (sessionId: string) => Promise<void>;
+  onTerminalSuccess?: (terminal: AdapterTerminalSuccess<T>) => Promise<void>;
+  environment?: ClaudeInvocationScope;
+}
 export interface VendorAdapters {
+  runPlanningReview(
+    request: PlanningAdapterRequest<PlanningReviewResult>
+  ): Promise<AdapterResult<PlanningReviewResult>>;
+  runPlanningAnalysis(
+    request: PlanningAdapterRequest<PlanningReviewAnalysis>
+  ): Promise<AdapterResult<PlanningReviewAnalysis>>;
   preflightCodex(
     target: VendorPreflightTarget,
     env?: NodeJS.ProcessEnv
@@ -2461,7 +2728,13 @@ export interface VendorAdapters {
 }
 
 export type InstructionPhase =
-  "planning" | "implementation" | "review" | "fix" | "feature" | "quick-fix";
+  | "planning"
+  | "implementation"
+  | "review"
+  | "fix"
+  | "feature"
+  | "quick-fix"
+  | "planning-review";
 
 /** Ephemeral comparison evidence; never added to persisted or exported contracts. */
 export interface InstructionParity {

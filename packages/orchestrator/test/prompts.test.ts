@@ -11,6 +11,9 @@ import {
   liteImplementationPromptEnvelope,
   planningPrompt,
   planningPromptEnvelope,
+  planningReviewPromptEnvelope,
+  planningAnalysisPromptEnvelope,
+  planningApplicationPromptEnvelope,
   recoveryPrompt,
   recoveryPromptEnvelope,
   reviewPrompt,
@@ -24,6 +27,195 @@ import {
 } from "../src/prompts.js";
 import { resolveOutputContract } from "../src/output-contract.js";
 import { insertPhaseInstructions } from "../src/prompt-envelope.js";
+import {
+  planningEpisode,
+  planningReviewResult,
+  planningReviewAnalysis,
+  planningRestoreState
+} from "./planning-review-fixtures.js";
+import type { HumanDecisionRecord } from "../src/types.js";
+
+test("planning-family envelopes use the specified categories, read-only override and immutable applying evidence", () => {
+  const episode = planningEpisode();
+  const result = planningReviewResult();
+  const analysis = planningReviewAnalysis(result);
+  const triage = planningRestoreState().humanDecisions?.[0];
+  assert.ok(triage?.kind === "planning_review_triage");
+  triage.additionalInstruction = "TRIAGE_ONLY_CANARY";
+  const records: HumanDecisionRecord[] = [
+    {
+      kind: "plan_rework",
+      feedback: "PLAN_REWORK_CANARY",
+      bundleDigest: "a".repeat(64),
+      decidedBy: "owner",
+      decidedAt: episode.requestedAt
+    },
+    {
+      kind: "adr_rework",
+      adrId: "ADR-0001",
+      feedback: "ADR_REWORK_CANARY",
+      decidedBy: "owner",
+      decidedAt: episode.requestedAt
+    },
+    triage
+  ];
+  const adr = [
+    {
+      id: "ADR-0001",
+      decision: "rework" as const,
+      note: "ADR_NOTE_CANARY",
+      decidedBy: "owner",
+      decidedAt: episode.requestedAt
+    }
+  ];
+  const review = planningReviewPromptEnvelope(episode, adr, records);
+  const reviewScope = review.components
+    .filter((c) => c.category === "user_request_scope")
+    .map((c) => c.text)
+    .join("");
+  for (const item of episode.scope) {
+    assert.ok(reviewScope.includes(item.path));
+    assert.ok(reviewScope.includes(item.sha256));
+  }
+  assert.match(reviewScope, /reviewNumber|originGate|sha256/);
+  assert.ok(
+    review.components.some(
+      (c) =>
+        c.category === "approved_requirements_architecture" &&
+        c.text.includes("ADR_NOTE_CANARY")
+    )
+  );
+  for (const canary of [
+    "PLAN_REWORK_CANARY",
+    "ADR_REWORK_CANARY",
+    "TRIAGE_ONLY_CANARY"
+  ])
+    assert.ok(
+      review.components.some(
+        (c) => c.category === "human_decisions" && c.text.includes(canary)
+      )
+    );
+  const analyzing = planningAnalysisPromptEnvelope(
+    episode,
+    result,
+    adr,
+    records
+  );
+  const common =
+    analyzing.components.find((c) => c.category === "common_instructions")
+      ?.text ?? "";
+  assert.match(common, /read-only planner analyzing/);
+  assert.match(
+    common,
+    /dedicated analysis contract overrides all phase write duties and gate instructions/
+  );
+  assert.doesNotMatch(common, /Return phase-result|Every phase result uses/);
+  assert.ok(
+    analyzing.components.some(
+      (c) =>
+        c.category === "review_triage_evidence" &&
+        c.text.includes(result.findings[0]?.id ?? "")
+    )
+  );
+  const base = planningPromptEnvelope("task", "request", adr, records);
+  const applied = planningApplicationPromptEnvelope(
+    base,
+    "documentation/work/task/planning-review-1.md",
+    analysis,
+    triage
+  );
+  const evidence = applied.components.at(-1);
+  assert.equal(evidence?.category, "review_triage_evidence");
+  assert.ok(
+    evidence.text.includes(
+      JSON.stringify(
+        {
+          artifactPath: "documentation/work/task/planning-review-1.md",
+          analysis,
+          decision: triage
+        },
+        null,
+        2
+      )
+    )
+  );
+  assert.match(evidence.text, /declined findings stay unchanged/);
+  for (const envelope of [
+    workflowSelectionPromptEnvelope("request", records),
+    implementationPromptEnvelope(
+      "task",
+      "a".repeat(64),
+      ["documentation/work/task/plan.md"],
+      [],
+      ["T001"],
+      null,
+      records
+    ),
+    liteImplementationPromptEnvelope(
+      "task",
+      "request",
+      "feature",
+      "a".repeat(64),
+      [],
+      records
+    ),
+    liteImplementationPromptEnvelope(
+      "task",
+      "request",
+      "quick-fix",
+      "a".repeat(64),
+      [],
+      records
+    ),
+    fixPromptEnvelope("task", "a".repeat(64), [], [], null, records)
+  ])
+    assert.doesNotMatch(
+      envelope.rendered,
+      /PLAN_REWORK_CANARY|ADR_REWORK_CANARY|TRIAGE_ONLY_CANARY/
+    );
+});
+
+test("planning output contracts preserve their exact vendor serialization", () => {
+  assert.deepEqual(
+    [
+      golden(
+        resolveOutputContract("codex", "planning-review-result/v1").serialized
+      ),
+      golden(
+        resolveOutputContract("claude", "planning-review-result/v1").serialized
+      ),
+      golden(
+        resolveOutputContract("codex", "planning-review-analysis/v1").serialized
+      ),
+      golden(
+        resolveOutputContract("claude", "planning-review-analysis/v1")
+          .serialized
+      )
+    ],
+    [
+      {
+        bytes: 3758,
+        sha256:
+          "b4d172187278600241b3021670a400bfa712362ceb8d2c30098d983aa91f4087"
+      },
+      {
+        bytes: 1794,
+        sha256:
+          "ebcfc4a7cd8436a5d83eec22a87f777ad2d26dbc3e66937c38f278de57366a2f"
+      },
+      {
+        bytes: 3543,
+        sha256:
+          "fe04948b225471a63a1d93f9e4afb8b3646cad4c3da15c27f3500decad011e07"
+      },
+      {
+        bytes: 1714,
+        sha256:
+          "2a2a5a106fe55bca446651f2da1b55178486979cdcb09847cb33b171750dad41"
+      }
+    ]
+  );
+});
 import type {
   InstructionPhase,
   PromptComponent,

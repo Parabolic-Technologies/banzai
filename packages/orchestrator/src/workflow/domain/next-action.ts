@@ -20,7 +20,7 @@ export interface NextActionPublication {
 
 /** The single CLI command the status projection recommends, if any. */
 export function nextAction(
-  state: Pick<RunState, "status">,
+  state: Pick<RunState, "status" | "pendingHumanDecision">,
   retry: NextActionRetry,
   recovery: NextActionRecovery,
   publication: NextActionPublication | null = null
@@ -32,6 +32,8 @@ export function nextAction(
     return "banzai approve plan";
   }
   if (state.status === "needs_human_decision") {
+    if (state.pendingHumanDecision?.kind === "planning_review_triage")
+      return "banzai (terminal), or banzai control answer with a banzai-agent-answer/v4 stdin document";
     return "banzai";
   }
   if (state.status === "needs_triage") {

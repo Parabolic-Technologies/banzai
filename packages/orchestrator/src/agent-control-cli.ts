@@ -1,3 +1,8 @@
+import { decodePlanningGateDecision } from "./agent-control.js";
+import { parsePlanningReviewTriageAnswer } from "./validation.js";
+import { planningReviewScope } from "./workflow/domain/planning-review.js";
+import { gateArtifactPaths } from "./workflow/domain/artifact-scope.js";
+import type { PlanningReviewTriageAnswer } from "./types.js";
 import { BanzaiError } from "./errors.js";
 import {
   agentControlCapabilities,
@@ -20,6 +25,7 @@ import type {
 
 export type AgentControlCliCommand =
   | { command: "capabilities"; cancellation?: true }
+  | { command: "decide"; decidedBy: string | null; autoResume: boolean }
   | { command: "status" }
   | { command: "start"; slug: string }
   | {
@@ -40,6 +46,28 @@ export interface AgentControlCliIO {
 }
 
 export interface AgentControlRunner {
+  reworkPlan(input: {
+    feedback: string;
+    decidedBy: string;
+    autoResume?: boolean;
+  }): Promise<RunState>;
+  requestPlanningReview(input: {
+    paths: string[] | null;
+    decidedBy: string;
+    autoResume?: boolean;
+  }): Promise<RunState>;
+  answerPlanningReview(input: {
+    answer: PlanningReviewTriageAnswer;
+    decidedBy: string;
+    autoResume?: boolean;
+  }): Promise<RunState>;
+  decideAdr(input: {
+    id: string;
+    decision: "accept" | "reject" | "rework";
+    note: string | null;
+    decidedBy: string;
+    autoResume: boolean;
+  }): Promise<RunState>;
   status(): Promise<WorkflowStatus>;
   start(input: { slug: string; request: string }): Promise<RunState>;
   answerHumanDecision(
@@ -92,7 +120,7 @@ export function parseAgentControlArgs(
     }
     return { command: "start", slug: args[2] };
   }
-  if (target === "answer" || target === "recover") {
+  if (target === "answer" || target === "recover" || target === "decide") {
     let decidedBy: string | null = null;
     let autoResume = true;
     let noResumeSeen = false;
@@ -133,7 +161,7 @@ export function parseAgentControlArgs(
     return { command: target, decidedBy, autoResume };
   }
   throw invalidCommand(
-    "Control target must be capabilities, status, start, answer, or recover."
+    "Control target must be capabilities, status, start, answer, decide, or recover."
   );
 }
 
@@ -198,15 +226,83 @@ export async function executeAgentControlCommand(
   const decoded =
     command.command === "start"
       ? { kind: "start" as const, value: decodeAgentControlRequest(input) }
-      : command.command === "answer"
-        ? { kind: "answer" as const, value: decodeAgentControlAnswer(input) }
-        : {
-            kind: "recover" as const,
-            value: decodeAgentControlRecovery(input)
-          };
+      : command.command === "decide"
+        ? { kind: "decide" as const, value: decodePlanningGateDecision(input) }
+        : command.command === "answer"
+          ? { kind: "answer" as const, value: decodeAgentControlAnswer(input) }
+          : {
+              kind: "recover" as const,
+              value: decodeAgentControlRecovery(input)
+            };
   const runner = createRunner();
   if (decoded.kind === "start" && command.command === "start") {
     await runner.start({ slug: command.slug, request: decoded.value.request });
+  } else if (decoded.kind === "decide" && command.command === "decide") {
+    const doc = decoded.value;
+    const current = await runner.status();
+    if (
+      current.state.runId !== doc.runId ||
+      current.state.status !== `needs_${doc.gate}` ||
+      current.state.activeAttempt !== null ||
+      current.state.activeProcess !== null
+    )
+      throw new BanzaiError(
+        "INVALID_CONTROL_INPUT",
+        "Gate decision does not match the active idle gate."
+      );
+    const by = command.decidedBy ?? defaultDecisionMaker;
+    if (doc.decision === "review") {
+      if (current.state.schemaVersion !== 10)
+        throw new BanzaiError(
+          "INVALID_CONTROL_INPUT",
+          "Historical runs do not support planning review."
+        );
+      try {
+        planningReviewScope(
+          gateArtifactPaths(current.state, doc.gate),
+          doc.paths
+        );
+      } catch {
+        throw new BanzaiError(
+          "INVALID_CONTROL_INPUT",
+          "Review scope is outside the current gate artifacts."
+        );
+      }
+      await runner.requestPlanningReview({
+        paths: doc.paths,
+        decidedBy: by,
+        autoResume: command.autoResume
+      });
+    } else if (doc.gate === "plan_approval") {
+      if (current.state.schemaVersion !== 10)
+        throw new BanzaiError(
+          "INVALID_CONTROL_INPUT",
+          "Historical runs do not support plan rework."
+        );
+      await runner.reworkPlan({
+        feedback: doc.feedback ?? "",
+        decidedBy: by,
+        autoResume: command.autoResume
+      });
+    } else {
+      const ids = projectAgentControlStatus(current).activeRun?.pendingGate;
+      if (
+        ids?.kind !== "adr_approval" ||
+        doc.adrId === null ||
+        !ids.adrIds.includes(doc.adrId)
+      )
+        throw new BanzaiError(
+          "INVALID_CONTROL_INPUT",
+          "ADR id is outside the pending gate."
+        );
+      await runner.decideAdr({
+        id: doc.adrId,
+        decision: "rework",
+        note: doc.feedback,
+        decidedBy: by,
+        autoResume: command.autoResume
+      });
+    }
   } else if (decoded.kind === "answer" && command.command === "answer") {
     const answer = decoded.value;
     if (
@@ -219,7 +315,31 @@ export async function executeAgentControlCommand(
       );
     const current = await runner.status();
     const pending = current.state.pendingHumanDecision ?? null;
-    if (answer.schema === "banzai-agent-answer/v3") {
+    if (answer.schema === "banzai-agent-answer/v4") {
+      if (pending?.kind !== "planning_review_triage")
+        throw new BanzaiError(
+          "INVALID_CONTROL_INPUT",
+          "Planning-review triage is not pending."
+        );
+      const value = {
+        runId: answer.runId,
+        episodeId: answer.episodeId,
+        reviewNumber: answer.reviewNumber,
+        analysisDigest: answer.analysisDigest,
+        dispositions: answer.dispositions,
+        additionalInstruction: answer.additionalInstruction
+      };
+      const parsed = parsePlanningReviewTriageAnswer(
+        value,
+        { ...pending, entries: pending.analysis },
+        "INVALID_CONTROL_INPUT"
+      );
+      await runner.answerPlanningReview({
+        answer: parsed,
+        decidedBy: command.decidedBy ?? defaultDecisionMaker,
+        autoResume: command.autoResume
+      });
+    } else if (answer.schema === "banzai-agent-answer/v3") {
       if (
         pending?.kind !== "configuration_prerequisite" ||
         current.state.runId !== answer.runId ||
@@ -244,7 +364,8 @@ export async function executeAgentControlCommand(
     } else if (answer.schema === "banzai-agent-answer/v1") {
       if (
         pending?.kind === "decision_consultation" ||
-        pending?.kind === "configuration_prerequisite"
+        pending?.kind === "configuration_prerequisite" ||
+        pending?.kind === "planning_review_triage"
       ) {
         throw new BanzaiError(
           "CONTROL_SCHEMA_UNSUPPORTED",

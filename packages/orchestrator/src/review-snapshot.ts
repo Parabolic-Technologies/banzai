@@ -5,10 +5,10 @@ import { hashArtifactBytes } from "./git.js";
 import { reviewScopePath } from "./validation.js";
 import type { ReviewSnapshot } from "./types.js";
 import {
-  readSharedReviewSnapshot,
-  sealSharedReviewSnapshot,
-  ArtifactStorageError
-} from "./artifact-storage.js";
+  parseReviewSnapshot as readSharedReviewSnapshot,
+  sealReviewSnapshot as sealSharedReviewSnapshot
+} from "../../../plugins/banzai/lib/review-snapshot.mjs";
+import { ProjectFileError as ArtifactStorageError } from "./project-files.js";
 function invalid(message: string): never {
   throw new BanzaiError("INVALID_REVIEW_SNAPSHOT", message);
 }

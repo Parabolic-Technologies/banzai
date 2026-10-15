@@ -18,6 +18,190 @@ import {
   LEGACY_AGENT_ANSWER_SCHEMA
 } from "../src/types.js";
 import type { WorkflowStatus } from "../src/workflow.js";
+import { planningTriageRequest } from "./planning-review-fixtures.js";
+
+test("control decide has exact stdin grammar and rejects incompatible documents before runner construction", async () => {
+  assert.deepEqual(
+    parseAgentControlArgs(["decide", "--by", "Owner", "--no-resume"]),
+    { command: "decide", decidedBy: "Owner", autoResume: false }
+  );
+  assert.deepEqual(parseAgentControlArgs(["decide"]), {
+    command: "decide",
+    decidedBy: null,
+    autoResume: true
+  });
+  for (const args of [
+    ["decide", "--input-json", "-"],
+    ["decide", "--input-json", "file.json"],
+    ["decide", "--input-json=-"],
+    ["decide", "--unknown"],
+    ["decide", "positional"],
+    ["decide", "--by", "A", "--by", "B"],
+    ["decide", "--no-resume", "--no-resume"]
+  ])
+    assert.throws(() => parseAgentControlArgs(args));
+  let constructions = 0;
+  await assert.rejects(
+    executeAgentControlCommand(
+      { command: "decide", decidedBy: null, autoResume: false },
+      () => {
+        constructions++;
+        return new FakeRunner();
+      },
+      {
+        stdin: stream(
+          document({
+            schema: LEGACY_AGENT_ANSWER_SCHEMA,
+            schemaVersion: 1,
+            answers: ["yes"]
+          })
+        ),
+        stdout: () => {}
+      },
+      "owner"
+    ),
+    (error: unknown) =>
+      error instanceof BanzaiError && error.code === "INVALID_CONTROL_INPUT"
+  );
+  assert.equal(constructions, 0);
+});
+
+test("planning gate prechecks reject foreign, busy and out-of-scope documents without a mutation call", async () => {
+  const gate = {
+    ...currentState(),
+    schemaVersion: 10,
+    status: "needs_plan_approval",
+    planningReview: { active: null, closed: [] },
+    planArtifacts: {
+      description: "documentation/work/task/description.md",
+      plan: "documentation/work/task/plan.md",
+      adrs: [],
+      implementationReport: null,
+      testReport: null
+    }
+  } as RunState;
+  const doc = {
+    schema: "banzai-agent-gate-decision/v1",
+    schemaVersion: 1,
+    runId: gate.runId,
+    gate: "plan_approval",
+    decision: "review",
+    feedback: null,
+    adrId: null,
+    paths: ["documentation/work/task/plan.md"]
+  };
+  const decide = (current: RunState, input: unknown) => {
+    const runner: AgentControlRunner = new FakeRunner();
+    runner.status = async () => status(current);
+    const reviews: unknown[] = [];
+    let reworks = 0;
+    runner.requestPlanningReview = async (value) => {
+      reviews.push(value);
+      return gate;
+    };
+    runner.reworkPlan = async () => {
+      reworks++;
+      return gate;
+    };
+    const run = executeAgentControlCommand(
+      { command: "decide", decidedBy: "owner", autoResume: false },
+      () => runner,
+      { stdin: stream(document(input)), stdout: () => {} },
+      "owner"
+    );
+    return { run, reviews, reworks: () => reworks };
+  };
+  // The positive control proves the fixture reaches the runner, so each
+  // refusal below is attributable to its own precheck.
+  const accepted = decide(gate, doc);
+  await accepted.run;
+  assert.deepEqual(accepted.reviews, [
+    {
+      paths: ["documentation/work/task/plan.md"],
+      decidedBy: "owner",
+      autoResume: false
+    }
+  ]);
+  assert.equal(accepted.reworks(), 0);
+  const idleGate = /^Gate decision does not match the active idle gate\.$/u;
+  for (const [current, input, message] of [
+    [gate, { ...doc, runId: "foreign" }, idleGate],
+    [{ ...gate, status: "planning" }, doc, idleGate],
+    [
+      { ...gate, activeAttempt: { id: "plan", kind: "plan", mutable: true } },
+      doc,
+      idleGate
+    ],
+    [
+      gate,
+      { ...doc, paths: ["documentation/foreign.md"] },
+      /^Review scope is outside the current gate artifacts\.$/u
+    ],
+    [
+      gate,
+      {
+        ...doc,
+        paths: [
+          "documentation/work/task/plan.md",
+          "documentation/work/task/plan.md"
+        ]
+      },
+      /^Review paths must be non-empty unique canonical paths\.$/u
+    ]
+  ] as const) {
+    const refused = decide(current, input);
+    await assert.rejects(
+      refused.run,
+      (error: unknown) =>
+        error instanceof BanzaiError &&
+        error.code === "INVALID_CONTROL_INPUT" &&
+        message.test(error.message)
+    );
+    assert.deepEqual(refused.reviews, []);
+    assert.equal(refused.reworks(), 0);
+  }
+});
+
+test("an over-limit ASCII-escaped planning answer performs no runner call or output", async () => {
+  const pending = planningTriageRequest();
+  const input = {
+    schema: "banzai-agent-answer/v4",
+    schemaVersion: 4,
+    runId: pending.runId,
+    episodeId: pending.episodeId,
+    reviewNumber: pending.reviewNumber,
+    analysisDigest: pending.analysisDigest,
+    dispositions: Array.from({ length: 20 }, (_, i) => ({
+      findingId: `P1-F${i + 1}`,
+      kind: "instruction",
+      optionId: null,
+      instruction: "a".repeat(1500)
+    })),
+    additionalInstruction: null
+  };
+  const raw = document(input);
+  assert.ok(Buffer.byteLength(raw) < MAX_AGENT_CONTROL_INPUT_BYTES);
+  const escaped = raw.replaceAll("a", "\\u0061");
+  assert.deepEqual(JSON.parse(escaped), JSON.parse(raw));
+  assert.ok(Buffer.byteLength(escaped) > MAX_AGENT_CONTROL_INPUT_BYTES);
+  let constructions = 0;
+  const output: string[] = [];
+  await assert.rejects(
+    executeAgentControlCommand(
+      { command: "answer", decidedBy: "owner", autoResume: true },
+      () => {
+        constructions++;
+        return new FakeRunner();
+      },
+      { stdin: stream(escaped), stdout: (value) => output.push(value) },
+      "owner"
+    ),
+    (error: unknown) =>
+      error instanceof BanzaiError && error.code === "CONTROL_INPUT_TOO_LARGE"
+  );
+  assert.equal(constructions, 0);
+  assert.deepEqual(output, []);
+});
 
 function currentState(): RunState {
   return {
@@ -195,6 +379,19 @@ function escalationState(): RunState {
 }
 
 class FakeRunner implements AgentControlRunner {
+  async reworkPlan(): Promise<RunState> {
+    throw new Error("Unexpected plan rework");
+  }
+  async requestPlanningReview(): Promise<RunState> {
+    throw new Error("Unexpected planning review");
+  }
+  async answerPlanningReview(): Promise<RunState> {
+    throw new Error("Unexpected planning triage");
+  }
+  async decideAdr(): Promise<RunState> {
+    throw new Error("Unexpected ADR decision");
+  }
+
   async answerConfigurationPrerequisite(): Promise<RunState> {
     throw new Error("Unexpected configuration prerequisite answer");
   }
@@ -346,7 +543,7 @@ test("capabilities and no-active-run status emit one canonical JSON document", a
   assert.equal(capabilityOutput.length, 1);
   assert.equal(
     (JSON.parse(capabilityOutput[0] ?? "") as { schema: string }).schema,
-    "banzai-agent-capabilities/v6"
+    "banzai-agent-capabilities/v8"
   );
 
   const runner = new FakeRunner();
@@ -362,8 +559,8 @@ test("capabilities and no-active-run status emit one canonical JSON document", a
     "default-user"
   );
   assert.deepEqual(JSON.parse(statusOutput[0] ?? ""), {
-    schema: "banzai-agent-status/v5",
-    schemaVersion: 5,
+    schema: "banzai-agent-status/v6",
+    schemaVersion: 6,
     activeRun: null
   });
 });

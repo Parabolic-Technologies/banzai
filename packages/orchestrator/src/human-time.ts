@@ -41,6 +41,12 @@ export type HumanTimeAnchor =
       requestId: string;
       roundId: string;
     }
+  | {
+      type: "planning_review_triage";
+      attemptId: string;
+      episodeId: string;
+      reviewNumber: number;
+    }
   | { type: "triage"; attemptId: string; reviewIteration: number }
   | { type: "recovery_wait"; attemptId: string | null; ordinal: number };
 export type HumanTimeKind = HumanTimeAnchor["type"];
@@ -54,7 +60,13 @@ export const HUMAN_TIME_EVENT_TYPES = [
   "review.triaged",
   "run.cancelled",
   "attempt.started",
-  "attempt.recovery_started"
+  "attempt.recovery_started",
+  "decision.plan_rework",
+  "planning_review.requested",
+  "planning_review.triage_pending",
+  "planning_review.triaged",
+  "planning_review.gate_restored",
+  "planning_review.stale"
 ] as const;
 export type HumanTimeEventType = (typeof HUMAN_TIME_EVENT_TYPES)[number];
 const STATE_FIELDS = [
@@ -273,6 +285,14 @@ function uniqueIds(values: { id: string }[]): void {
 export function decodeHumanTimeAnchor(value: unknown): HumanTimeAnchor {
   const record = humanTimeRecord(value);
   switch (record.type) {
+    case "planning_review_triage":
+      keys(record, ["type", "attemptId", "episodeId", "reviewNumber"]);
+      return {
+        type: record.type,
+        attemptId: humanTimeId(record.attemptId),
+        episodeId: humanTimeId(record.episodeId),
+        reviewNumber: humanTimeInteger(record.reviewNumber, 1)
+      };
     case "plan_approval":
       keys(record, ["type", "attemptId", "bundleDigest"]);
       return {

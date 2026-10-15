@@ -38,7 +38,7 @@ export async function transitionToCompletionState(
   state: RunState,
   attempt: AttemptReference & { kind: "implementation" | "fix" }
 ): Promise<void> {
-  if (state.schemaVersion === 7 || state.schemaVersion === 8) return;
+  if (state.schemaVersion >= 7) return;
   if (
     state.schemaVersion !== 3 &&
     state.schemaVersion !== 4 &&

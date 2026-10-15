@@ -78,7 +78,7 @@ test("context JSON is canonical and both renderers are byte-deterministic", () =
   assert.equal(json, `${JSON.stringify(value, null, 2)}\n`);
   assert.equal(
     (JSON.parse(json) as { schema: unknown }).schema,
-    "banzai-context-report/v1"
+    "banzai-context-report/v2"
   );
 });
 

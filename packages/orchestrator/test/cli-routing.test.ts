@@ -30,6 +30,339 @@ import {
 } from "./helpers.js";
 
 import { writeAdoptedGuidance } from "./adoption-fixtures.js";
+import {
+  createAdrGateFixture,
+  createPlanningReviewFixture
+} from "./workflow-fixtures.js";
+
+test("ADR CLI rework rejects missing, dangling, empty, whitespace and non-canonical ids without changing evidence", async () => {
+  const f = await createAdrGateFixture();
+  try {
+    const files = [
+      f.runner.store.statePath(f.gate.runId),
+      path.join(f.runner.store.runDirectory(f.gate.runId), "events.jsonl")
+    ];
+    const before = await Promise.all(files.map((p) => readFile(p)));
+    for (const suffix of [
+      [],
+      ["--note"],
+      ["--note", ""],
+      ["--note", " \r\n "],
+      ["--note", "--no-resume"]
+    ]) {
+      const result = spawnSync(
+        process.execPath,
+        [
+          COMMITTED_CLI,
+          "approve",
+          "adr",
+          "--id",
+          "ADR-0001",
+          "--decision",
+          "rework",
+          ...suffix
+        ],
+        {
+          cwd: f.repository.root,
+          encoding: "utf8",
+          env: monochromeEnv(),
+          timeout: 10000
+        }
+      );
+      assert.equal(result.status, 1, result.stderr);
+      assert.match(
+        result.stderr,
+        /\[INVALID_DECISION\] ADR rework requires a non-empty --note\./
+      );
+      assert.deepEqual(
+        await Promise.all(files.map((p) => readFile(p))),
+        before
+      );
+    }
+    for (const id of [
+      "ADR-0001 ",
+      "ADR\r0001",
+      "ADR\u202e0001",
+      "x".repeat(501)
+    ]) {
+      const result = spawnSync(
+        process.execPath,
+        [
+          COMMITTED_CLI,
+          "approve",
+          "adr",
+          "--id",
+          id,
+          "--decision",
+          "rework",
+          "--note",
+          "Valid feedback",
+          "--no-resume"
+        ],
+        {
+          cwd: f.repository.root,
+          encoding: "utf8",
+          env: monochromeEnv(),
+          timeout: 10000
+        }
+      );
+      assert.equal(result.status, 1, result.stderr);
+      assert.deepEqual(
+        await Promise.all(files.map((p) => readFile(p))),
+        before
+      );
+    }
+    assert.equal(
+      (await f.runner.store.requireActiveState()).status,
+      "needs_adr_approval"
+    );
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+test("ADR CLI acceptance preserves missing and CR notes", async () => {
+  for (const note of [null, "Accepted\rwith the original note."]) {
+    const f = await createAdrGateFixture();
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [
+          COMMITTED_CLI,
+          "approve",
+          "adr",
+          "--id",
+          "ADR-0001",
+          "--decision",
+          "accept",
+          ...(note === null ? [] : ["--note", note]),
+          "--no-resume"
+        ],
+        {
+          cwd: f.repository.root,
+          encoding: "utf8",
+          env: monochromeEnv(),
+          timeout: 10000
+        }
+      );
+      assert.equal(result.status, 0, result.stderr);
+      const state = await f.runner.store.requireActiveState();
+      assert.equal(state.status, "planning");
+      assert.equal(state.adrDecisions.at(-1)?.note, note);
+    } finally {
+      await f.repository.dispose();
+    }
+  }
+});
+
+test("documented review and rework CLI routes record their gate decisions without approval", async () => {
+  const cli = (root: string, args: string[]) =>
+    spawnSync(process.execPath, [COMMITTED_CLI, ...args], {
+      cwd: root,
+      encoding: "utf8",
+      env: monochromeEnv(),
+      timeout: 10000
+    });
+  const { WorkflowRunner } = await import("../src/workflow.js");
+  const { FakeAdapters } = await import("./workflow-fixtures.js");
+  for (const route of ["review", "plan-rework"] as const) {
+    const repository = await createTestRepository();
+    try {
+      const runner = new WorkflowRunner(repository.root, new FakeAdapters());
+      const gate = await runner.start({
+        slug: "cli-routes",
+        request: "Plan the example."
+      });
+      assert.equal(gate.status, "needs_plan_approval", gate.blockReason ?? "");
+      const plan = gate.planArtifacts?.plan;
+      assert.ok(plan);
+      // --no-resume keeps the spawned CLI from continuing into a vendor call.
+      const result = cli(
+        repository.root,
+        route === "review"
+          ? [
+              "review",
+              "planning",
+              "--artifact",
+              plan,
+              "--by",
+              "Owner",
+              "--no-resume"
+            ]
+          : [
+              "approve",
+              "plan",
+              "--decision",
+              "rework",
+              "--note",
+              "CLI plan feedback",
+              "--by",
+              "Owner",
+              "--no-resume"
+            ]
+      );
+      assert.equal(result.status, 0, result.stderr);
+      const state = await runner.store.requireActiveState();
+      assert.equal(state.status, "planning");
+      assert.equal(state.planApproval, null);
+      if (route === "review") {
+        assert.deepEqual(
+          state.planningReview?.active?.scope.map((item) => item.path),
+          [plan]
+        );
+        assert.equal(state.planningReview.active.decidedBy, "Owner");
+      } else {
+        const record = state.humanDecisions?.at(-1);
+        assert.equal(record?.kind, "plan_rework");
+        assert.equal(record.feedback, "CLI plan feedback");
+        assert.equal(record.decidedBy, "Owner");
+      }
+    } finally {
+      await repository.dispose();
+    }
+  }
+  const adr = await createAdrGateFixture();
+  try {
+    const result = cli(adr.repository.root, [
+      "approve",
+      "adr",
+      "--id",
+      "ADR-0001",
+      "--decision",
+      "rework",
+      "--note",
+      "CLI ADR feedback",
+      "--no-resume"
+    ]);
+    assert.equal(result.status, 0, result.stderr);
+    const state = await adr.runner.store.requireActiveState();
+    assert.equal(state.status, "planning");
+    assert.equal(state.adrDecisions.at(-1)?.decision, "rework");
+    const record = state.humanDecisions?.at(-1);
+    assert.equal(record?.kind, "adr_rework");
+    assert.equal(record.adrId, "ADR-0001");
+    assert.equal(record.feedback, "CLI ADR feedback");
+  } finally {
+    await adr.repository.dispose();
+  }
+});
+
+test("plan dangling notes follow the decision rule and planning-review grammar fails before mutation", async () => {
+  const f = await createPlanningReviewFixture();
+  try {
+    await f.runner.resume();
+    const files = [
+      f.runner.store.statePath(f.gate.runId),
+      path.join(f.runner.store.runDirectory(f.gate.runId), "events.jsonl")
+    ];
+    const before = await Promise.all(files.map((p) => readFile(p)));
+    for (const [args, code, message] of [
+      [
+        ["approve", "plan", "--note"],
+        "INVALID_DECISION",
+        "--note is accepted only with --decision rework."
+      ],
+      [
+        ["approve", "plan", "--decision", "rework", "--note"],
+        "INVALID_DECISION",
+        "Plan rework requires a non-empty --note."
+      ],
+      [
+        ["approve", "plan", "--note", "--decision", "rework"],
+        "INVALID_DECISION",
+        "Plan rework requires a non-empty --note."
+      ],
+      [["review", "planning", "--artifact=path"], "INVALID_COMMAND", null],
+      [["review", "planning", "--unknown"], "INVALID_COMMAND", null],
+      [["review", "planning", "positional"], "INVALID_COMMAND", null],
+      [["review", "planning", "--artifact"], "INVALID_COMMAND", null],
+      [
+        ["review", "planning", "--by", "X", "--by", "Y"],
+        "INVALID_COMMAND",
+        null
+      ]
+    ] as const) {
+      const result = spawnSync(process.execPath, [COMMITTED_CLI, ...args], {
+        cwd: f.repository.root,
+        encoding: "utf8",
+        env: monochromeEnv(),
+        timeout: 10000
+      });
+      assert.equal(result.status, 1, result.stderr);
+      assert.ok(result.stderr.includes(`[${code}]`));
+      if (message !== null) assert.ok(result.stderr.includes(message));
+      assert.deepEqual(
+        await Promise.all(files.map((p) => readFile(p))),
+        before
+      );
+    }
+    const state = await f.runner.store.requireActiveState();
+    const plan = state.planArtifacts?.plan;
+    assert.ok(plan);
+    const result = spawnSync(
+      process.execPath,
+      [
+        COMMITTED_CLI,
+        "review",
+        "planning",
+        "--artifact",
+        plan,
+        "--artifact",
+        plan,
+        "--no-resume"
+      ],
+      {
+        cwd: f.repository.root,
+        encoding: "utf8",
+        env: monochromeEnv(),
+        timeout: 10000
+      }
+    );
+    assert.equal(result.status, 1, result.stderr);
+    assert.ok(result.stderr.includes("[INVALID_DECISION]"));
+    assert.deepEqual(await Promise.all(files.map((p) => readFile(p))), before);
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+test("planning-triage status has exactly one dedicated Next line and HELP preserves all input identities", async () => {
+  const f = await createPlanningReviewFixture(1);
+  try {
+    await f.runner.resume();
+    const status = runCommittedStatus(f.repository.root);
+    assert.equal(status.status, 0, status.stderr);
+    assert.equal(
+      status.stdout.split("\n").filter((line) => line.startsWith("Next:"))
+        .length,
+      1
+    );
+    assert.match(status.stdout, /banzai-agent-answer\/v4/);
+    const help = spawnSync(process.execPath, [COMMITTED_CLI, "--help"], {
+      cwd: f.repository.root,
+      encoding: "utf8"
+    });
+    assert.equal(help.status, 0, help.stderr);
+    for (const schema of [
+      "banzai-agent-gate-decision/v1",
+      "banzai-agent-answer/v4",
+      "banzai-agent-answer/v3",
+      "banzai-agent-answer/v2",
+      "banzai-agent-answer/v1"
+    ])
+      assert.ok(help.stdout.includes(schema));
+    assert.match(
+      help.stdout,
+      /rework returns to planning with required feedback/
+    );
+    assert.match(
+      help.stdout,
+      /Five existing human decision gates remain distinct/
+    );
+  } finally {
+    await f.repository.dispose();
+  }
+});
 
 const COMMITTED_CLI = path.join(process.cwd(), "dist", "banzai.mjs");
 
@@ -896,6 +1229,80 @@ test("cancellation: committed CLI supports no-TTY omission, exact validation, op
     assert.ok(!json.stdout.includes("cancel-cli"));
     assert.ok(!json.stdout.includes("FORBIDDEN"));
     assert.deepEqual(await snapshotTree(repository.root), terminal);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("approve-plan exact grammar refuses unknown, duplicate and positional forms without changing bytes", async () => {
+  const repository = await createTestRepository();
+  try {
+    const { WorkflowRunner } = await import("../src/workflow.js");
+    const { FakeAdapters } = await import("./workflow-fixtures.js");
+    const runner = new WorkflowRunner(repository.root, new FakeAdapters());
+    const state = await runner.start({
+      slug: "exact-grammar",
+      request: "Plan the example."
+    });
+    assert.equal(state.status, "needs_plan_approval");
+    const stateFile = runner.store.statePath(state.runId);
+    const eventsFile = path.join(
+      runner.store.runDirectory(state.runId),
+      "events.jsonl"
+    );
+    const before = await Promise.all([
+      readFile(stateFile),
+      readFile(eventsFile)
+    ]);
+    for (const args of [
+      ["--decision=rework", "--note=x"],
+      ["--decison", "rework", "--note", "x"],
+      ["--decision", "rework", "--decision", "approve", "--note", "x"],
+      ["rework"],
+      ["--decision", "rework"],
+      ["--decision", "approve", "--note", "x"],
+      ["--by", "X", "--by", "Y"]
+    ]) {
+      const result = spawnSync(
+        process.execPath,
+        [COMMITTED_CLI, "approve", "plan", ...args],
+        {
+          cwd: repository.root,
+          encoding: "utf8",
+          env: monochromeEnv(),
+          timeout: 10000
+        }
+      );
+      assert.notEqual(result.status, 0, JSON.stringify(args));
+      assert.match(result.stderr, /INVALID_COMMAND|INVALID_DECISION/);
+      assert.deepEqual(
+        await Promise.all([readFile(stateFile), readFile(eventsFile)]),
+        before
+      );
+    }
+    const approved = spawnSync(
+      process.execPath,
+      [
+        COMMITTED_CLI,
+        "approve",
+        "plan",
+        "--by",
+        "X",
+        "--no-resume",
+        "--verbose"
+      ],
+      {
+        cwd: repository.root,
+        encoding: "utf8",
+        env: monochromeEnv(),
+        timeout: 10000
+      }
+    );
+    assert.equal(approved.status, 0, approved.stderr);
+    assert.equal(
+      (await runner.store.readState(state.runId)).status,
+      "plan_approved"
+    );
   } finally {
     await repository.dispose();
   }

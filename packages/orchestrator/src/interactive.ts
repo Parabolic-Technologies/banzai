@@ -1,3 +1,9 @@
+import { validateHumanFreeText } from "./validation.js";
+import type {
+  PlanningReviewTriageAnswer,
+  PlanningReviewTriageRequest,
+  PlanningReviewDisposition
+} from "./types.js";
 import {
   configurationDecisionLines,
   taskVerificationStatusLines,
@@ -44,7 +50,11 @@ import type {
   TriageInput,
   WorkflowStatus
 } from "./workflow.js";
-import { humanDecisionQuestions, reviewStatusLines } from "./workflow.js";
+import {
+  humanDecisionQuestions,
+  reviewStatusLines,
+  planningReviewStatusLines
+} from "./workflow.js";
 import type { TerminalAttention } from "./terminal-attention.js";
 import {
   pendingRotationText,
@@ -80,6 +90,11 @@ export interface InteractiveIO {
     choices: readonly InteractiveChoice<T>[],
     signal?: AbortSignal
   ): Promise<T>;
+  multiSelect<T>(
+    message: string,
+    choices: readonly InteractiveChoice<T>[],
+    validate: (values: T[]) => true | string
+  ): Promise<T[]>;
   confirm(message: string, defaultValue?: boolean): Promise<boolean>;
   writeLine(message?: string): void;
 }
@@ -95,6 +110,21 @@ import type {
 } from "./cancellation.js";
 
 export interface InteractiveRunner {
+  reworkPlan(input: {
+    feedback: string;
+    decidedBy: string;
+    autoResume?: boolean;
+  }): Promise<RunState>;
+  requestPlanningReview(input: {
+    paths: string[] | null;
+    decidedBy: string;
+    autoResume?: boolean;
+  }): Promise<RunState>;
+  answerPlanningReview(input: {
+    answer: PlanningReviewTriageAnswer;
+    decidedBy: string;
+    autoResume?: boolean;
+  }): Promise<RunState>;
   readonly repoRoot: string;
   getPlanHumanPrerequisites?(): Promise<string | null>;
   status(): Promise<WorkflowStatus>;
@@ -195,6 +225,8 @@ async function describeRepository(
 type PrimaryAction =
   | "answer_human"
   | "approve_plan"
+  | "rework_plan"
+  | "planning_review"
   | "cancel"
   | "exit"
   | "resume"
@@ -206,7 +238,7 @@ type PrimaryAction =
 type ModelUpdateAction = "update_all" | "update_some" | "keep";
 
 type FindingAction = "accepted" | "rejected" | "deferred" | "exit";
-type AdrAction = AdrDecision["decision"] | "exit";
+type AdrAction = AdrDecision["decision"] | "planning_review" | "exit";
 type ConsultationCardAction =
   | { kind: "option"; optionId: string }
   | { kind: "preference" }
@@ -488,7 +520,7 @@ function renderStatus(
         status.configurationPrerequisite
       ))
         io.writeLine(line);
-    } else
+    } else if (state.pendingHumanDecision.kind !== "planning_review_triage")
       writeLabeled(io, "Decision needed", state.pendingHumanDecision.summary);
     if (state.pendingHumanDecision.kind === "decision_consultation") {
       for (const [
@@ -516,6 +548,8 @@ function renderStatus(
     }
   }
 
+  for (const line of planningReviewStatusLines(status))
+    io.writeLine(escapeTerminalText(line));
   if (status.latestReview !== null && state.latestReview !== null) {
     io.writeLine();
     io.writeLine(
@@ -948,6 +982,183 @@ async function handleHumanDecision(
   return false;
 }
 
+function planningTextValidation(
+  maximum: number,
+  optional = false
+): (value: string) => true | string {
+  return (value) => {
+    if (optional && value.trim() === "") return true;
+    if (value.trim() === "") return "A value is required.";
+    try {
+      validateHumanFreeText(value, "Planner instruction", maximum);
+      return true;
+    } catch (error) {
+      return escapeTerminalText(errorMessage(error));
+    }
+  };
+}
+async function requestPlanningReviewUI(
+  runner: InteractiveRunner,
+  io: InteractiveIO,
+  status: WorkflowStatus,
+  options: InteractiveOptions
+): Promise<boolean> {
+  const base = options.cancellationIO ?? io;
+  const scope = await base.select("Review scope", [
+    { name: "Whole planning bundle", value: "whole" },
+    { name: "Choose artifacts", value: "choose" }
+  ]);
+  const paths =
+    scope === "whole"
+      ? null
+      : await base.multiSelect(
+          "Artifacts to review",
+          (status.planningReview?.reviewPaths ?? []).map((p) => ({
+            name: escapeTerminalText(p),
+            value: p
+          })),
+          (values) =>
+            values.length > 0 ? true : "Choose at least one artifact."
+        );
+  if (
+    await io.confirm(
+      "Send the selected artifacts to the configured reviewer?",
+      false
+    )
+  )
+    await runWork(options, () =>
+      runner.requestPlanningReview({
+        paths,
+        decidedBy: options.decidedBy,
+        autoResume: true
+      })
+    );
+  return true;
+}
+function renderPlanningTriage(
+  io: InteractiveIO,
+  finding: PlanningReviewTriageRequest["findings"][number],
+  entry: PlanningReviewTriageRequest["analysis"][number]
+): void {
+  io.writeLine(
+    `${escapeTerminalText(finding.id)}: ${reviewSeverityText(finding.severity)} / ${escapeTerminalText(finding.category)}`
+  );
+  io.writeLine(escapeTerminalText(finding.summary));
+  for (const evidence of finding.evidence)
+    io.writeLine(
+      escapeTerminalText(
+        `${evidence.path}${evidence.line === null ? "" : `:${evidence.line}`}: ${evidence.detail}`
+      )
+    );
+  io.writeLine(
+    `Suggested resolution: ${escapeTerminalText(finding.suggestedResolution)}`
+  );
+  io.writeLine(
+    `Assessment: ${escapeTerminalText(entry.assessment)}. ${escapeTerminalText(entry.rationale)}`
+  );
+  for (const option of entry.options) {
+    io.writeLine(
+      `${escapeTerminalText(option.label)} (${escapeTerminalText(option.optionId)})`
+    );
+    for (const consequence of option.consequences)
+      io.writeLine(`  ${escapeTerminalText(consequence)}`);
+  }
+  if (entry.recommendation !== null)
+    io.writeLine(
+      `Advisory recommendation: ${escapeTerminalText(entry.recommendation.optionId)}. ${escapeTerminalText(entry.recommendation.rationale)}`
+    );
+}
+async function handlePlanningTriage(
+  runner: InteractiveRunner,
+  io: InteractiveIO,
+  pending: PlanningReviewTriageRequest,
+  options: InteractiveOptions
+): Promise<boolean> {
+  io.writeLine(
+    `Planning-review triage: ${escapeTerminalText(pending.artifactPath)}`
+  );
+  const dispositions: PlanningReviewDisposition[] = [];
+  for (const finding of pending.findings) {
+    const entry = pending.analysis.find((a) => a.findingId === finding.id);
+    if (entry === undefined)
+      throw new BanzaiError(
+        "INVALID_STATE",
+        "Planning finding analysis is missing."
+      );
+    renderPlanningTriage(io, finding, entry);
+    const action = await io.select(
+      `Disposition for ${escapeTerminalText(entry.findingId)}`,
+      [
+        ...entry.options.map((option) => ({
+          name: `${escapeTerminalText(option.label)}${entry.recommendation?.optionId === option.optionId ? " (recommended)" : ""}`,
+          value: `option:${option.optionId}`
+        })),
+        { name: "Write my own instruction", value: "instruction" },
+        { name: "Decline (no change)", value: "decline" },
+        { name: "Exit and decide later", value: "exit" }
+      ]
+    );
+    if (action === "exit") return false;
+    const instruction =
+      action === "instruction"
+        ? await io.input({
+            message: `Your instruction for ${escapeTerminalText(entry.findingId)}`,
+            validate: planningTextValidation(2000)
+          })
+        : null;
+    dispositions.push(
+      action.startsWith("option:")
+        ? {
+            findingId: entry.findingId,
+            kind: "option",
+            optionId: action.slice(7),
+            instruction: null
+          }
+        : action === "instruction"
+          ? {
+              findingId: entry.findingId,
+              kind: "instruction",
+              optionId: null,
+              instruction: instruction ?? ""
+            }
+          : {
+              findingId: entry.findingId,
+              kind: "decline",
+              optionId: null,
+              instruction: null
+            }
+    );
+  }
+  const additional = await io.input({
+    message: "Additional instruction for the planner (optional)",
+    validate: planningTextValidation(8000, true)
+  });
+  io.writeLine(
+    `Planning-review triage: options=${dispositions.filter((d) => d.kind === "option").length}, own=${dispositions.filter((d) => d.kind === "instruction").length}, declined=${dispositions.filter((d) => d.kind === "decline").length}`
+  );
+  if (
+    await io.confirm(
+      `Record this planning-review triage as ${escapeTerminalText(options.decidedBy)}?`,
+      false
+    )
+  )
+    await runWork(options, () =>
+      runner.answerPlanningReview({
+        answer: {
+          runId: pending.runId,
+          episodeId: pending.episodeId,
+          reviewNumber: pending.reviewNumber,
+          analysisDigest: pending.analysisDigest,
+          dispositions,
+          additionalInstruction: additional.trim() === "" ? null : additional
+        },
+        decidedBy: options.decidedBy,
+        autoResume: true
+      })
+    );
+  return true;
+}
+
 async function handleAdr(
   runner: InteractiveRunner,
   io: InteractiveIO,
@@ -977,13 +1188,27 @@ async function handleAdr(
     { name: "Accept", value: "accept" },
     { name: "Reject", value: "reject" },
     { name: "Request rework", value: "rework" },
+    ...(status.planningReview?.decisions.includes("review")
+      ? [
+          {
+            name: "Request independent review",
+            value: "planning_review" as const
+          }
+        ]
+      : []),
     { name: "Exit without deciding", value: "exit" }
   ]);
   if (decision === "exit") {
     return false;
   }
+  if (decision === "planning_review")
+    return requestPlanningReviewUI(runner, io, status, options);
   const noteValue = await io.input({
-    message: "Decision note (optional)"
+    message:
+      decision === "rework"
+        ? "Rework feedback for the planner"
+        : "Decision note (optional)",
+    ...(decision === "rework" ? { validate: planningTextValidation(8000) } : {})
   });
   const note = noteValue.trim().length === 0 ? null : noteValue.trim();
   io.writeLine(`${id}: ${decision}`);
@@ -1147,9 +1372,42 @@ async function handleStatus(
       );
     const action = await io.select<PrimaryAction>("Plan decision", [
       { name: "Approve plan and continue", value: "approve_plan" },
+      ...(status.planningReview?.decisions.includes("rework")
+        ? [{ name: "Request rework", value: "rework_plan" as const }]
+        : []),
+      ...(status.planningReview?.decisions.includes("review")
+        ? [
+            {
+              name: "Request independent review",
+              value: "planning_review" as const
+            }
+          ]
+        : []),
       { name: "Cancel run", value: "cancel" },
       { name: "Exit and decide later", value: "exit" }
     ]);
+    if (action === "planning_review")
+      return requestPlanningReviewUI(runner, io, status, options);
+    if (action === "rework_plan") {
+      const feedback = await io.input({
+        message: "Rework feedback for the planner",
+        validate: planningTextValidation(8000)
+      });
+      if (
+        await io.confirm(
+          `Record this plan rework request as ${escapeTerminalText(options.decidedBy)} and return to planning?`,
+          false
+        )
+      )
+        await runWork(options, () =>
+          runner.reworkPlan({
+            feedback,
+            decidedBy: options.decidedBy,
+            autoResume: true
+          })
+        );
+      return true;
+    }
     if (action === "approve_plan") {
       if (
         await io.confirm(
@@ -1174,6 +1432,13 @@ async function handleStatus(
   }
 
   if (state.status === "needs_human_decision") {
+    if (state.pendingHumanDecision?.kind === "planning_review_triage")
+      return handlePlanningTriage(
+        runner,
+        io,
+        state.pendingHumanDecision,
+        options
+      );
     return status.state.pendingHumanDecision?.kind ===
       "configuration_prerequisite"
       ? runner.withConfigurationDecisionOwnership(() =>
@@ -1221,17 +1486,23 @@ async function handleStatus(
     } else if (status.retry.eligible) {
       choices.push({
         name:
-          status.retry.attemptId === null
-            ? state.blockedFrom === "reviewing"
-              ? "Retry review checks"
-              : "Retry start checks"
-            : isPlanBundleRepair
-              ? "Rerun planning to correct the approved plan"
-              : isCompletionEvidenceRepair
-                ? "Repair plan-task completion evidence"
-                : state.blockedFrom === "planning"
-                  ? "Continue the failed planning attempt"
-                  : "Retry the failed read-only attempt",
+          status.planningReview?.active?.step === "reviewing"
+            ? "Retry planning review"
+            : status.planningReview?.active?.step === "analyzing"
+              ? "Retry planning analysis"
+              : status.planningReview?.latest?.outcome === "stale"
+                ? "Retry planning review"
+                : status.retry.attemptId === null
+                  ? state.blockedFrom === "reviewing"
+                    ? "Retry review checks"
+                    : "Retry start checks"
+                  : isPlanBundleRepair
+                    ? "Rerun planning to correct the approved plan"
+                    : isCompletionEvidenceRepair
+                      ? "Repair plan-task completion evidence"
+                      : state.blockedFrom === "planning"
+                        ? "Continue the failed planning attempt"
+                        : "Retry the failed read-only attempt",
         value: "retry"
       });
     } else if (status.recovery.eligible) {
@@ -1697,6 +1968,7 @@ function renderHumanTime(
     decision_consultation: "Decision consultation",
     escalation: "Escalation",
     triage: "Review triage",
+    planning_review_triage: "Planning-review triage",
     recovery_wait: "Recovery waiting"
   };
   for (const [index, episode] of summary.episodes.entries()) {
@@ -1774,6 +2046,8 @@ function withHumanTimeActions(
   return {
     ...(io.width === undefined ? {} : { width: io.width }),
     input: (options) => io.input(options),
+    multiSelect: (message, choices, validate) =>
+      io.multiSelect(message, choices, validate),
     confirm: (message, defaultValue) => io.confirm(message, defaultValue),
     writeLine: (message) => {
       io.writeLine(message);
@@ -1783,8 +2057,10 @@ function withHumanTimeActions(
       choices: readonly InteractiveChoice<T>[]
     ): Promise<T> {
       const items: InteractiveChoice<T | TimeAction>[] = [...choices];
-      const exit = items.findIndex((choice) =>
-        /^(Exit|Pause)\b/.test(choice.name)
+      const exit = items.reduce(
+        (last, choice, index) =>
+          /^(Exit|Pause)\b/.test(choice.name) ? index : last,
+        -1
       );
       items.splice(
         exit < 0 ? items.length : exit,
