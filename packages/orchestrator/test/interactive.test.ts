@@ -42,7 +42,10 @@ import type {
   CancellationResponseResult,
   CancellationResult
 } from "../src/cancellation.js";
-import { reviewerOnlyClaudeConfig } from "./helpers.js";
+import {
+  historicalBindingFixture,
+  reviewerOnlyClaudeConfig
+} from "./helpers.js";
 
 function runState(
   status: RunState["status"],
@@ -2336,6 +2339,37 @@ test("interactive rejected checkpoint prioritizes completion-evidence repair", a
   assert.equal(io.choiceNames[0]?.[0], "Repair plan-task completion evidence");
   assert.equal(io.choiceSets[0]?.includes("resume"), false);
   assert.deepEqual(runner.calls, [{ operation: "retry", value: null }]);
+});
+
+test("interactive home shows historical runs read-only and offers only cancellation", async () => {
+  const historical = (status: RunState["status"]) =>
+    runState(status, {
+      schemaVersion: 8,
+      artifactBinding: historicalBindingFixture({
+        workId: "11111111-1111-4111-8111-111111111111",
+        slug: "example",
+        createdAt: "2026-07-27T12:00:00.000Z",
+        sourceCommit: null
+      })
+    });
+  const runner = new FakeRunner([
+    workflowStatus(historical("needs_plan_approval"), {
+      nextAction: "banzai cancel"
+    }),
+    workflowStatus(historical("cancelled"))
+  ]);
+  const io = new FakeIO(["cancel", "exit"], [], [true]);
+
+  await runInteractive(runner, io, { decidedBy: "human" });
+
+  assert.deepEqual(io.choiceSets, [
+    ["cancel", "exit"],
+    ["start", "exit"]
+  ]);
+  assert.deepEqual(runner.calls, [{ operation: "cancel", value: null }]);
+  const text = io.lines.join(" ").replace(/\s+/g, " ");
+  assert.match(text, /earlier Banzai version and cannot resume/);
+  assert.match(text, /earlier Banzai version and is read-only/);
 });
 
 test("declining cancellation leaves the active run unchanged", async () => {

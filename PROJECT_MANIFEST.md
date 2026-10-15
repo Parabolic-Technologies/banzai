@@ -878,7 +878,9 @@ reports; strict fix also grants its conditional change report. Lite routes keep
 work/change-report grants. Workspace v3 contains sorted unique Git changes plus
 exact selected documents, including unchanged approved files. Machine evidence
 stays under the run root. Historical runs remain read-only evidence without
-migration or new execution authority. Doctor v5 checks state v10 without repair.
+migration or new execution authority; status, the interactive home and doctor
+present them as read-only history and offer only cancellation for an unfinished
+one. Doctor v5 checks state v10 without repair.
 External hook/client installation remains separate delivery evidence.
 
 Project guidance is inspected before new-run creation and authentication, then

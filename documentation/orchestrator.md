@@ -2082,4 +2082,7 @@ control answer` using direct stdin. Encode human text as raw UTF-8 JSON; on the
 64 KiB limit, let the human shorten their own text or answer in a terminal.
 Never infer a decision or truncate the text. Historical runs cannot acquire new
 rework/review authority or resume through the v10 hook; preserve them and start
-new work. This release does not migrate or install anything automatically.
+new work. `banzai`, `banzai status` and `banzai doctor` show such a run as
+read-only history; an unfinished one offers only `banzai cancel`, after which
+new work starts normally. This release does not migrate or install anything
+automatically.

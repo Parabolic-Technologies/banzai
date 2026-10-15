@@ -25,6 +25,7 @@ import {
   type RunState
 } from "../src/types.js";
 import {
+  historicalRunNotice,
   invocationScopeDigest,
   reviewCompletion,
   reviewExecutionPolicy,
@@ -33,6 +34,7 @@ import {
 } from "../src/workflow.js";
 import { commitAll, createTestRepository } from "./helpers.js";
 import {
+  ageToHistoricalBinding,
   FakeAdapters,
   boundFixturePath,
   descriptionPath,
@@ -195,6 +197,64 @@ test("historical state-9 ADR rework retains its legacy decision shape", async ()
     assert.equal(f.adapters.phasePrompts.length, 1);
   } finally {
     await f.repository.dispose();
+  }
+});
+
+test("a historical done run stays inspectable without revalidating its evidence", async () => {
+  const repository = await createTestRepository();
+  try {
+    const adapters = new FakeAdapters();
+    adapters.reviewResults.push(passingReview());
+    const runner = new WorkflowRunner(repository.root, adapters);
+    await runner.start({ slug: "example", request: "Implement it." });
+    assert.equal((await runner.approvePlan("human")).status, "done");
+    await ageToHistoricalBinding(runner);
+
+    const status = await runner.status();
+    assert.equal(status.latestReview?.verdict, "pass");
+    assert.equal(status.reviewValid, null);
+    assert.equal(status.taskCompletion.state, "legacy");
+    assert.match(
+      status.taskCompletion.diagnostics[0]?.message ?? "",
+      /earlier Banzai version/
+    );
+    assert.equal(status.nextAction, null);
+    assert.match(historicalRunNotice(status.state) ?? "", /read-only/);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("a non-terminal historical run can only be cancelled before new work starts", async () => {
+  const repository = await createTestRepository();
+  try {
+    const runner = new WorkflowRunner(repository.root, new FakeAdapters());
+    const historical = await runner.start({
+      slug: "example",
+      request: "Implement it."
+    });
+    assert.equal(
+      (await runner.approvePlan("human", false)).status,
+      "plan_approved"
+    );
+    await ageToHistoricalBinding(runner);
+
+    const status = await runner.status();
+    assert.equal(status.nextAction, "banzai cancel");
+    assert.match(historicalRunNotice(status.state) ?? "", /cannot resume/);
+    await assert.rejects(runner.resume(), {
+      code: "ARTIFACT_VERSION_UNSUPPORTED"
+    });
+    assert.equal((await runner.cancel()).outcome, "cancelled");
+    assert.equal((await runner.status()).nextAction, null);
+    const next = await runner.start({
+      slug: "next",
+      request: "Start new work."
+    });
+    assert.equal(next.status, "needs_plan_approval");
+    assert.notEqual(next.runId, historical.runId);
+  } finally {
+    await repository.dispose();
   }
 });
 

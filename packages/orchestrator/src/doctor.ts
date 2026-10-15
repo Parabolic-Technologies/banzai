@@ -37,7 +37,7 @@ import type {
   RunStatus,
   VerificationProjectType
 } from "./types.js";
-import { inspectBoundWork } from "./work-documents.js";
+import { inspectBoundWork, isHistoricalWork } from "./work-documents.js";
 import type { ArtifactBoundWork } from "./work-documents.js";
 import { parseConfig } from "./validation.js";
 import { inspectVerificationProject } from "./verification.js";
@@ -666,6 +666,7 @@ async function activeRunCheck(repoRoot: string): Promise<DoctorCheck> {
       "The referenced run state uses an unsupported structure."
     );
   }
+  let historical = false;
   if (
     state.schemaVersion === 4 ||
     state.schemaVersion === 5 ||
@@ -677,10 +678,10 @@ async function activeRunCheck(repoRoot: string): Promise<DoctorCheck> {
   ) {
     try {
       validateConfigurationStateEnvelope(state);
-      await inspectBoundWork(
-        repoRoot,
-        state.artifactBinding as ArtifactBoundWork
-      );
+      const bound = state.artifactBinding as ArtifactBoundWork;
+      // Binding v3 starts at state 9; earlier bindings remain read-only history.
+      historical = state.schemaVersion <= 8 && isHistoricalWork(bound);
+      if (!historical) await inspectBoundWork(repoRoot, bound);
     } catch {
       return check(
         "run.active",
@@ -714,7 +715,24 @@ async function activeRunCheck(repoRoot: string): Promise<DoctorCheck> {
       "run.active",
       "run-state",
       "pass",
-      `The latest-run pointer references terminal status ${state.status}.`
+      historical
+        ? `The latest-run pointer references terminal status ${state.status} from an earlier Banzai version; that run is read-only history.`
+        : `The latest-run pointer references terminal status ${state.status}.`
+    );
+  }
+  if (historical) {
+    return check(
+      "run.active",
+      "run-state",
+      "warning",
+      `A run created by an earlier Banzai version is ${state.status} and cannot resume.`,
+      [
+        {
+          action:
+            "Run banzai cancel, then start new work. The earlier run's documents stay where they are.",
+          documentation: "documentation/getting-started.md"
+        }
+      ]
     );
   }
   return check(

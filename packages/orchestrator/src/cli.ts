@@ -106,13 +106,14 @@ import type {
 } from "./types.js";
 import {
   defaultDecisionMaker,
+  historicalRunNotice,
   reviewStatusLines,
   planningReviewStatusLines,
   WorkflowRunner,
   type WorkflowStatus
 } from "./workflow.js";
 
-import { safePath } from "./project-files.js";
+import { ProjectFileError, safePath } from "./project-files.js";
 import { ensureExecutionIgnores } from "./work-documents.js";
 import { VERIFICATION_EXAMPLES } from "./init-resources.js";
 
@@ -441,6 +442,8 @@ function printState(status: WorkflowStatus, metrics = false): void {
   console.log(`Feature: ${state.slug}`);
   const gloss = runStatusGloss(state.status);
   console.log(`Status: ${state.status}${gloss === null ? "" : ` (${gloss})`}`);
+  const historical = historicalRunNotice(state);
+  if (historical !== null) printLabeled("History", historical);
   const completion = status.taskCompletion;
   const count =
     completion.completed === null
@@ -1400,7 +1403,11 @@ async function main(): Promise<void> {
 
 main()
   .catch((error: unknown) => {
-    const code = error instanceof BanzaiError ? error.code : "UNEXPECTED_ERROR";
+    // Shared plugin-library refusals carry their own stable codes.
+    const code =
+      error instanceof BanzaiError || error instanceof ProjectFileError
+        ? error.code
+        : "UNEXPECTED_ERROR";
     closeProgress();
     console.error(`[${code}] ${errorMessage(error)}`);
     process.exitCode = error instanceof BanzaiError ? error.exitCode : 1;

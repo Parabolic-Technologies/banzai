@@ -16,6 +16,7 @@ import type {
   VerificationAttemptRecord,
   VerificationAttemptStatus
 } from "../src/types.js";
+import type { ArtifactBoundWork } from "../src/work-documents.js";
 
 import { writeAdoptedGuidance } from "./adoption-fixtures.js";
 
@@ -497,6 +498,40 @@ export async function createTestRepository(
     dispose: async () => {
       await rm(root, { recursive: true, force: true });
     }
+  };
+}
+
+/** The private binding v2 that runs created before binding v3 persisted. */
+export function historicalBindingFixture(input: {
+  workId: string;
+  slug: string;
+  createdAt: string;
+  sourceCommit: string | null;
+}): ArtifactBoundWork {
+  const directory = `.banzai/work/${input.workId}`;
+  return {
+    binding: {
+      schema: "banzai-work-binding/v2",
+      schemaVersion: 2,
+      workId: input.workId,
+      slug: input.slug,
+      mode: "workflow",
+      layout: "private",
+      createdAt: input.createdAt,
+      sourceCommit: input.sourceCommit,
+      artifacts: {
+        reviewDirectory: directory,
+        description: `${directory}/description.md`,
+        plan: `${directory}/plan.md`,
+        implementationReport: `${directory}/implementation-report.md`,
+        testReport: `${directory}/test-report.md`,
+        work: `${directory}/work.md`,
+        changeReport: `${directory}/change-report.md`,
+        verificationDirectory: `${directory}/verification`
+      }
+    },
+    // Historical digests covered private work.json bytes, not canonical JSON.
+    sha256: "c".repeat(64)
   };
 }
 

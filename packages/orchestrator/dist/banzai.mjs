@@ -8790,6 +8790,11 @@ async function withRunnerWorkOwnership(root, bound, action) {
   return withExecutionOwnership(root, bound.binding.artifacts.reviewDirectory, action, bound.sha256);
 }
 
+// src/work-documents.ts
+function isHistoricalWork(bound) {
+  return bound !== void 0 && parseBinding(bound.binding).schemaVersion !== 3;
+}
+
 // src/config.ts
 import { access, mkdir as mkdir3, readFile as readFile3, writeFile } from "node:fs/promises";
 import path10 from "node:path";
@@ -31173,6 +31178,10 @@ function planningReviewStatusLines(status) {
   }
   return lines;
 }
+function historicalRunNotice(state) {
+  if (!isHistoricalWork(state.artifactBinding)) return null;
+  return TERMINAL_STATUSES.has(state.status) ? "This run was created by an earlier Banzai version and is read-only. Its documents stay where they are." : "This run was created by an earlier Banzai version and cannot resume. Cancel it to start new work; its documents stay where they are.";
+}
 function reviewStatusLines(status) {
   if (status.latestReview === null || status.state.latestReview === null) {
     return [];
@@ -34332,6 +34341,7 @@ var WorkflowRunner = class {
   }
   async status() {
     const state = await this.store.requireActiveState();
+    const historical = isHistoricalWork(state.artifactBinding);
     let planApprovalValid = null;
     if (state.planApproval !== null) {
       try {
@@ -34345,7 +34355,7 @@ var WorkflowRunner = class {
       }
     }
     let reviewValid = null;
-    if (state.latestReview !== null) {
+    if (state.latestReview !== null && !historical) {
       reviewValid = await workspaceDigest(this.repoRoot, {
         artifactBinding: state.artifactBinding,
         excludedPaths: state.latestReview.artifactPath === void 0 ? [] : [state.latestReview.artifactPath],
@@ -34357,6 +34367,9 @@ var WorkflowRunner = class {
     const recovery = await this.recoveryEligibility(state);
     const taskCompletion = await this.taskCompletionStatus(state);
     const completionPublication2 = await this.completionPublicationStatus(state);
+    let recommended = nextAction(state, retry, recovery, completionPublication2);
+    if (historical)
+      recommended = TERMINAL_STATUSES.has(state.status) ? null : "banzai cancel";
     let configurationPrerequisite;
     if (state.pendingHumanDecision?.kind === "configuration_prerequisite") {
       const request = state.pendingHumanDecision;
@@ -34405,7 +34418,7 @@ var WorkflowRunner = class {
       latestReview,
       retry,
       recovery,
-      nextAction: nextAction(state, retry, recovery, completionPublication2),
+      nextAction: recommended,
       taskCompletion,
       completionPublication: completionPublication2,
       ...configurationPrerequisite ? { configurationPrerequisite } : {}
@@ -34514,6 +34527,21 @@ var WorkflowRunner = class {
             code: checkpoint.errorCode,
             taskId: checkpoint.taskId,
             message: `Completion evidence failed: ${checkpoint.violation}.`
+          }
+        ]
+      };
+    }
+    if (isHistoricalWork(state.artifactBinding)) {
+      return {
+        state: "legacy",
+        source: "legacy",
+        completed: null,
+        total,
+        diagnostics: [
+          {
+            code: "PLAN_TASK_COMPLETION_LEGACY",
+            taskId: null,
+            message: "Run was created by an earlier Banzai version; its recorded completion evidence is read-only and is not revalidated."
           }
         ]
       };
@@ -41293,13 +41321,13 @@ async function activeRunCheck(repoRoot) {
       "The referenced run state uses an unsupported structure."
     );
   }
+  let historical = false;
   if (state.schemaVersion === 4 || state.schemaVersion === 5 || state.schemaVersion === 6 || state.schemaVersion === 7 || state.schemaVersion === 8 || state.schemaVersion === 9 || state.schemaVersion === 10) {
     try {
       validateConfigurationStateEnvelope(state);
-      await inspectBoundWork(
-        repoRoot,
-        state.artifactBinding
-      );
+      const bound = state.artifactBinding;
+      historical = state.schemaVersion <= 8 && isHistoricalWork(bound);
+      if (!historical) await inspectBoundWork(repoRoot, bound);
     } catch {
       return check(
         "run.active",
@@ -41326,7 +41354,21 @@ async function activeRunCheck(repoRoot) {
       "run.active",
       "run-state",
       "pass",
-      `The latest-run pointer references terminal status ${state.status}.`
+      historical ? `The latest-run pointer references terminal status ${state.status} from an earlier Banzai version; that run is read-only history.` : `The latest-run pointer references terminal status ${state.status}.`
+    );
+  }
+  if (historical) {
+    return check(
+      "run.active",
+      "run-state",
+      "warning",
+      `A run created by an earlier Banzai version is ${state.status} and cannot resume.`,
+      [
+        {
+          action: "Run banzai cancel, then start new work. The earlier run's documents stay where they are.",
+          documentation: "documentation/getting-started.md"
+        }
+      ]
     );
   }
   return check(
@@ -44566,6 +44608,11 @@ function renderStatus(io, status, styler, humanTime) {
     io.writeLine(styler.dim(`  ${facts.join(" \xB7 ")}`));
   }
   io.writeLine(styler.dim(`  ${state.runId}`));
+  const historical = historicalRunNotice(state);
+  if (historical !== null) {
+    io.writeLine();
+    writeLabeled(io, "History", historical);
+  }
   if (state.workflowSelection != null) {
     io.writeLine();
     writeLabeled(io, "Why this workflow", state.workflowSelection.reason);
@@ -45268,6 +45315,20 @@ async function handleStatus(runner, io, status, options) {
     ]);
     if (action2 === "start") {
       return await startRun(runner, io, options);
+    }
+    return false;
+  }
+  if (historicalRunNotice(state) !== null) {
+    const action2 = await io.select("What next?", [
+      { name: "Cancel run", value: "cancel" },
+      { name: "Exit", value: "exit" }
+    ]);
+    if (action2 === "cancel") {
+      return await confirmCancellation(
+        runner,
+        options.cancellationIO ?? io,
+        state.runId
+      );
     }
     return false;
   }
@@ -47246,6 +47307,8 @@ function printState(status, metrics = false) {
   console.log(`Feature: ${state.slug}`);
   const gloss = runStatusGloss(state.status);
   console.log(`Status: ${state.status}${gloss === null ? "" : ` (${gloss})`}`);
+  const historical = historicalRunNotice(state);
+  if (historical !== null) printLabeled("History", historical);
   const completion = status.taskCompletion;
   const count = completion.completed === null ? completion.total === null ? completion.state : `${completion.state}/${completion.total}` : `${completion.completed}/${completion.total ?? "?"}`;
   console.log(`Plan tasks: ${count} (${completion.source})`);
@@ -48065,7 +48128,7 @@ ${escapeTerminalText(prerequisites)}`
   throw new BanzaiError("INVALID_COMMAND", `Unknown command: ${command}`);
 }
 main().catch((error) => {
-  const code2 = error instanceof BanzaiError ? error.code : "UNEXPECTED_ERROR";
+  const code2 = error instanceof BanzaiError || error instanceof ProjectFileError ? error.code : "UNEXPECTED_ERROR";
   closeProgress();
   console.error(`[${code2}] ${errorMessage(error)}`);
   process7.exitCode = error instanceof BanzaiError ? error.exitCode : 1;
