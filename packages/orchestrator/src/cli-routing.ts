@@ -30,6 +30,8 @@ export function resolveCliMode(
     command === "compatibility" ||
     command === "control" ||
     command === "verify" ||
+    command === "review" ||
+    (command === "approve" && args[1] === "plan") ||
     (command === "approve" && args[1] === "verification")
   ) {
     return "command";

@@ -7,7 +7,7 @@ implemented project facts — read both before changing anything.
 
 The public repository is
 [Parabolic-Technologies/banzai](https://github.com/Parabolic-Technologies/banzai).
-The product owner is **Banzai International, Inc. d/b/a Parabolic, Inc.
+The product owner is **Banzai International, Inc. d/b/a Parabolic
 ("Parabolic")**.
 The author and maintainer is [Alexander Torosh](https://github.com/alexander-torosh)
 ([alexander@parabolic.io](mailto:alexander@parabolic.io)). Participation follows our
@@ -60,10 +60,11 @@ limits; model output is not independent verification by itself.
 
 Unless you explicitly state otherwise, contributions intentionally submitted
 for inclusion are offered under Apache-2.0, as described in section 5 of
-[LICENSE](LICENSE). You retain copyright in your contribution. Submit only
-material you have the right to license, and identify third-party material with
-its source, license, and required notices. Discuss a different license before
-submitting such material; acceptance is not automatic.
+[LICENSE](LICENSE). You or the applicable copyright holder retain ownership of
+your contribution. No copyright assignment is required. Submit only material you
+have the right to license, and identify third-party material with its source,
+license, and required notices. Discuss a different license before submitting
+such material; acceptance is not automatic.
 
 No separate contributor license agreement or commit sign-off is required by
 this project. These contribution rules do not impose extra restrictions on
@@ -211,10 +212,15 @@ set and its derivations are documented in
 [`documentation/evaluation/README.md`](documentation/evaluation/README.md).
 
 A context optimization must additionally name the exact
-`banzai-context-report/v1` category or evidence surface it intends to reduce,
+`banzai-context-report/v2` category or evidence surface it intends to reduce,
 the representative baseline cohort and coverage, and the existing outcome KPI
 or safety invariant that guards correctness. Use 15–30 representative completed
 runs before setting a project limit; keep the change reversible and record the
 rollback condition. The evidence surfaces, privacy boundary, selector rules,
 and procedure are defined in
 [`documentation/context/README.md`](documentation/context/README.md).
+
+Planning review is a separate read-only attempt family. Keep its events free of
+feedback and model prose, preserve code-review bytes and continuity, and use the
+shared file-token mapping when reading attempts. Evaluation/KPI support is a
+compatibility guard only; state v10 adds no evaluation metric or contract.

@@ -14,6 +14,7 @@ import {
   type Status
 } from "@inquirer/core";
 import {
+  checkbox as checkboxPrompt,
   confirm as confirmPrompt,
   input as inputPrompt,
   select as selectPrompt
@@ -444,6 +445,21 @@ export class InquirerInteractiveIO implements InteractiveIO {
       },
       signal === undefined ? undefined : { signal }
     );
+  }
+
+  async multiSelect<T>(
+    message: string,
+    choices: readonly InteractiveChoice<T>[],
+    validate: (values: T[]) => true | string
+  ): Promise<T[]> {
+    return checkboxPrompt({
+      message,
+      choices: choices.map((choice) => ({
+        name: choice.name,
+        value: choice.value
+      })),
+      validate: (choices) => validate(choices.map((choice) => choice.value))
+    });
   }
 
   async confirm(message: string, defaultValue = false): Promise<boolean> {

@@ -1,3 +1,40 @@
+import { validateTerminalCheckpointResult } from "./workflow/checkpoints/terminal-checkpoints.js";
+import { readBytes as readPlanningBytes } from "./project-files.js";
+import {
+  publishPlanningReviewArtifact,
+  renderPlanningReviewArtifact
+} from "./planning-review-artifact.js";
+import { gateArtifactPaths } from "./workflow/domain/artifact-scope.js";
+import {
+  nextPlanningReviewNumber,
+  planningReviewScope,
+  planningReviewDispatch,
+  planningReviewStaleness,
+  actionablePlanningTriage,
+  closePlanningReview,
+  planningRestoreEligible,
+  planningGateActions
+} from "./workflow/domain/planning-review.js";
+import {
+  validateHumanFreeText,
+  validatePlanningReviewResult,
+  validatePlanningReviewAnalysis,
+  parsePlanningReviewTriageAnswer,
+  parsePlanningReviewAnalysis
+} from "./validation.js";
+import {
+  planningReviewPromptEnvelope,
+  planningAnalysisPromptEnvelope,
+  planningApplicationPromptEnvelope
+} from "./prompts.js";
+import type {
+  PlanningGate,
+  PlanningReviewEpisode,
+  ClosedPlanningReviewEpisode,
+  PlanningReviewResult,
+  PlanningReviewAnalysis,
+  PlanningReviewTriageAnswer
+} from "./types.js";
 import { freezeReviewConfiguration } from "./configuration-review.js";
 import {
   discoverTaskVerification,
@@ -27,7 +64,8 @@ import {
   createExecutionBinding,
   ensureExecutionIgnores,
   inspectBoundWork,
-  ownsArtifact
+  ownsArtifact,
+  planningReviewFilenames
 } from "./work-documents.js";
 import { createHash, randomUUID } from "node:crypto";
 import { verifyExecutionIgnore } from "./project-files.js";
@@ -607,6 +645,25 @@ export interface ConfigurationDecisionInput {
 }
 
 export interface WorkflowStatus {
+  planningReview?: {
+    decisions: string[];
+    reviewPaths: string[];
+    active: {
+      episodeId: string;
+      reviewNumber: number;
+      originGate: PlanningGate;
+      step: PlanningReviewEpisode["step"];
+      artifactPath: string | null;
+      findingCount: number | null;
+    } | null;
+    latest: {
+      reviewNumber: number;
+      originGate: PlanningGate;
+      outcome: ClosedPlanningReviewEpisode["outcome"];
+      artifactPath: string | null;
+      findingCount: number | null;
+    } | null;
+  };
   state: RunState;
   planApprovalValid: boolean | null;
   reviewValid: boolean | null;
@@ -711,6 +768,37 @@ export function reviewCompletion(status: WorkflowStatus): ReviewCompletion {
     deferred: triage.items.filter((item) => item.disposition === "deferred")
       .length
   };
+}
+
+function planningDecisionOwner(value: string): string {
+  return decisionText(
+    validateHumanFreeText(value, "Decision owner", 500),
+    "Decision owner",
+    500
+  );
+}
+
+export function planningReviewStatusLines(status: WorkflowStatus): string[] {
+  const projection = status.planningReview;
+  if (projection === undefined) return [];
+  const lines: string[] = [];
+  if (projection.active !== null)
+    lines.push(
+      `Planning review ${projection.active.reviewNumber}: ${projection.active.step}`,
+      `Planning-review artifact: ${projection.active.artifactPath ?? "not published"}`,
+      `Planning-review findings: ${projection.active.findingCount ?? "not available"}`
+    );
+  else if (projection.latest !== null) {
+    lines.push(
+      `Planning review ${projection.latest.reviewNumber}: ${projection.latest.outcome}`,
+      `Planning-review artifact: ${projection.latest.artifactPath ?? "not published"}`
+    );
+    if (projection.latest.outcome === "restored_no_findings")
+      lines.push(
+        `Independent review found no issues: ${projection.latest.artifactPath}`
+      );
+  }
+  return lines;
 }
 
 export function reviewStatusLines(status: WorkflowStatus): string[] {
@@ -1280,7 +1368,8 @@ export class WorkflowRunner {
         const baseCommit = await currentCommit(this.repoRoot);
         const createdAt = this.now();
         const state: RunState = {
-          schemaVersion: 9,
+          schemaVersion: 10,
+          planningReview: { active: null, closed: [] },
           verificationMode: "task",
           completionPublication: null,
           contractVersion: CONTRACT_VERSION,
@@ -1463,7 +1552,7 @@ export class WorkflowRunner {
           case "selecting":
             return await this.executeSelection(state, config);
           case "planning":
-            return await this.executePlan(state, config);
+            return await this.executePlanningStep(state, config);
           case "plan_approved":
             return await this.executeImplementation(state, config);
           case "implementing":
@@ -1497,6 +1586,13 @@ export class WorkflowRunner {
   }
 
   async retry(): Promise<RunState> {
+    const initial = await this.store.requireActiveState();
+    const dispatch = planningReviewDispatch(initial);
+    if (
+      initial.status === "blocked" &&
+      ["review", "analysis", "published", "restart"].includes(dispatch)
+    )
+      return this.retryPlanningReview();
     try {
       let expectedAttemptId: string | null;
       let expectedRunId: string;
@@ -2235,6 +2331,948 @@ export class WorkflowRunner {
     }
   }
 
+  private requirePlanningGate(state: RunState): PlanningGate {
+    if (state.schemaVersion !== 10)
+      throw new BanzaiError(
+        "ARTIFACT_VERSION_UNSUPPORTED",
+        "Historical runs do not support plan rework or planning review. Preserve their documents and start new work."
+      );
+    requireState(
+      state,
+      ["needs_adr_approval", "needs_plan_approval"],
+      "Planning gate action"
+    );
+    if (
+      (state.workflowSelection?.workflow ?? "strict") !== "strict" ||
+      state.planningReview?.active != null ||
+      state.activeAttempt !== null ||
+      state.activeProcess !== null
+    )
+      throw new BanzaiError(
+        "INVALID_STATE",
+        "Planning gate action requires an idle strict planning gate."
+      );
+    return state.status === "needs_adr_approval"
+      ? "adr_approval"
+      : "plan_approval";
+  }
+
+  async reworkPlan(input: {
+    feedback: string;
+    decidedBy: string;
+    autoResume?: boolean;
+  }): Promise<RunState> {
+    const feedback = validateHumanFreeText(
+      input.feedback,
+      "Plan rework feedback",
+      8000
+    );
+    const decidedBy = planningDecisionOwner(input.decidedBy);
+    const lock = await this.acquireWorkflowLock();
+    try {
+      const state = await this.store.requireActiveState();
+      if (this.requirePlanningGate(state) !== "plan_approval")
+        throw new BanzaiError(
+          "INVALID_STATE",
+          "Plan rework requires plan approval."
+        );
+      const bundle = await digestArtifactBundle(
+        this.repoRoot,
+        gateArtifactPaths(state, "plan_approval")
+      );
+      state.humanDecisions = [
+        ...(state.humanDecisions ?? []),
+        {
+          kind: "plan_rework",
+          feedback,
+          bundleDigest: bundle.digest,
+          decidedBy,
+          decidedAt: this.now()
+        }
+      ];
+      transitionState(state, "planning");
+      await this.store.writeState(state);
+      const event = await this.store.appendEvent(
+        state.runId,
+        "decision.plan_rework",
+        { bundleDigest: bundle.digest, decidedBy }
+      );
+      await observeHumanTime(
+        this.context,
+        state,
+        "decision_recorded",
+        "decision.plan_rework",
+        event.at
+      );
+      return input.autoResume === false
+        ? state
+        : await this.executePlan(state, await loadConfig(this.repoRoot));
+    } finally {
+      await lock.release();
+    }
+  }
+
+  private async gatherPlanningScope(
+    paths: readonly string[]
+  ): Promise<{ path: string; sha256: string | null }[]> {
+    return Promise.all(
+      paths.map(async (relative) => {
+        try {
+          const bytes = await readPlanningBytes(this.repoRoot, relative);
+          return {
+            path: relative,
+            sha256:
+              bytes === null
+                ? null
+                : createHash("sha256").update(bytes).digest("hex")
+          };
+        } catch {
+          return { path: relative, sha256: null };
+        }
+      })
+    );
+  }
+
+  private async planningNumber(state: RunState): Promise<number> {
+    if (state.artifactBinding === undefined)
+      throw new BanzaiError(
+        "INVALID_STATE",
+        "Planning review requires its work binding."
+      );
+    return nextPlanningReviewNumber(
+      [
+        ...(state.planningReview?.closed ?? []),
+        ...(state.planningReview?.active == null
+          ? []
+          : [state.planningReview.active])
+      ],
+      await planningReviewFilenames(this.repoRoot, state.artifactBinding)
+    );
+  }
+
+  private async newPlanningEpisode(
+    state: RunState,
+    gate: PlanningGate,
+    paths: string[],
+    decidedBy: string
+  ): Promise<PlanningReviewEpisode> {
+    const gathered = await this.gatherPlanningScope(paths);
+    if (gathered.some((item) => item.sha256 === null))
+      throw new BanzaiError(
+        "INVALID_DECISION",
+        "Every reviewed artifact must be a contained regular file without symlinks."
+      );
+    const number = await this.planningNumber(state);
+    return {
+      episodeId: `planning-episode-${this.context.ids().replaceAll("-", "").slice(0, 8)}`,
+      reviewNumber: number,
+      originGate: gate,
+      scope: gathered.map((item) => ({
+        path: item.path,
+        sha256: item.sha256 ?? ""
+      })),
+      requestedAt: this.now(),
+      decidedBy,
+      reviewer: null,
+      step: "reviewing",
+      reviewAttemptId: null,
+      reviewSessionId: null,
+      analysisAttemptId: null,
+      applyingAttemptId: null,
+      resultDigest: null,
+      findingCount: null,
+      artifact: null,
+      analysisDigest: null
+    };
+  }
+
+  async requestPlanningReview(input: {
+    paths: string[] | null;
+    decidedBy: string;
+    autoResume?: boolean;
+  }): Promise<RunState> {
+    const decidedBy = planningDecisionOwner(input.decidedBy);
+    if (
+      input.paths !== null &&
+      (!Array.isArray(input.paths) ||
+        input.paths.some((p) => typeof p !== "string"))
+    )
+      throw new BanzaiError(
+        "INVALID_DECISION",
+        "Review scope must be an exact path list."
+      );
+    const lock = await this.acquireWorkflowLock();
+    try {
+      const state = await this.store.requireActiveState();
+      const gate = this.requirePlanningGate(state);
+      const paths = planningReviewScope(
+        gateArtifactPaths(state, gate),
+        input.paths
+      );
+      const episode = await this.newPlanningEpisode(
+        state,
+        gate,
+        paths,
+        decidedBy
+      );
+      state.planningReview = {
+        ...state.planningReview,
+        active: episode,
+        closed: state.planningReview?.closed ?? []
+      };
+      transitionState(state, "planning");
+      await this.store.writeState(state);
+      const event = await this.store.appendEvent(
+        state.runId,
+        "planning_review.requested",
+        {
+          episodeId: episode.episodeId,
+          reviewNumber: episode.reviewNumber,
+          gate,
+          paths,
+          decidedBy
+        }
+      );
+      await observeHumanTime(
+        this.context,
+        state,
+        "decision_recorded",
+        "planning_review.requested",
+        event.at
+      );
+      return input.autoResume === false
+        ? state
+        : await this.executePlanningStep(
+            state,
+            await loadConfig(this.repoRoot)
+          );
+    } finally {
+      await lock.release();
+    }
+  }
+
+  private closePlanningEpisode(
+    state: RunState,
+    outcome: ClosedPlanningReviewEpisode["outcome"]
+  ): void {
+    const pr = state.planningReview;
+    if (pr?.active == null) return;
+    pr.closed.push(closePlanningReview(pr.active, outcome, this.now()));
+    pr.active = null;
+  }
+
+  private async planningScopeCurrent(
+    state: RunState,
+    point: string
+  ): Promise<boolean> {
+    const e = state.planningReview?.active;
+    if (e == null)
+      throw new BanzaiError("INVALID_STATE", "Planning episode is missing.");
+    const changedPaths = planningReviewStaleness(
+      e.scope,
+      await this.gatherPlanningScope(e.scope.map((item) => item.path))
+    );
+    if (changedPaths.length === 0) return true;
+    if (state.status === "needs_human_decision") {
+      state.pendingHumanDecision = null;
+      transitionState(state, "planning");
+    }
+    if (state.status === "blocked") transitionState(state, "planning");
+    state.activeAttempt = null;
+    state.activeProcess = null;
+    this.closePlanningEpisode(state, "stale");
+    blockState(state, "Planning review is stale: reviewed artifacts changed.");
+    await this.store.writeState(state);
+    const event = await this.store.appendEvent(
+      state.runId,
+      "planning_review.stale",
+      {
+        episodeId: e.episodeId,
+        reviewNumber: e.reviewNumber,
+        point,
+        changedPaths
+      }
+    );
+    await observeHumanTime(
+      this.context,
+      state,
+      "checkpoint",
+      "planning_review.stale",
+      event.at
+    );
+    return false;
+  }
+
+  private async restorePlanningGate(
+    state: RunState,
+    outcome: "restored_no_findings" | "restored_no_action"
+  ): Promise<RunState> {
+    const e = state.planningReview?.active;
+    if (e == null)
+      throw new BanzaiError("INVALID_STATE", "Planning episode is missing.");
+    if (!(await this.planningScopeCurrent(state, "before_restore")))
+      return state;
+    const target =
+      e.originGate === "adr_approval"
+        ? "needs_adr_approval"
+        : "needs_plan_approval";
+    if (
+      outcome === "restored_no_action" &&
+      !planningRestoreEligible(state, target)
+    )
+      throw new BanzaiError(
+        "INVALID_TRANSITION",
+        "Planning-review gate restore is inconsistent."
+      );
+    transitionState(state, target);
+    this.closePlanningEpisode(state, outcome);
+    await this.store.writeState(state);
+    const event = await this.store.appendEventOnce(
+      state.runId,
+      "planning_review.gate_restored",
+      {
+        episodeId: e.episodeId,
+        reviewNumber: e.reviewNumber,
+        gate: e.originGate,
+        outcome
+      }
+    );
+    await observeHumanTime(
+      this.context,
+      state,
+      "gate_pending",
+      "planning_review.gate_restored",
+      event.at,
+      e.episodeId
+    );
+    if (outcome === "restored_no_findings")
+      this.info(`Independent review found no issues: ${e.artifact?.path}`);
+    return state;
+  }
+
+  private async readPlanningResult(
+    state: RunState
+  ): Promise<PlanningReviewResult> {
+    const e = state.planningReview?.active;
+    if (e?.reviewAttemptId == null)
+      throw new BanzaiError(
+        "INVALID_STATE",
+        "Review attempt evidence is missing."
+      );
+    const record = await this.store.readRunAttempt(state.runId, {
+      id: e.reviewAttemptId,
+      kind: "planning_review",
+      mutable: false
+    });
+    const result = validatePlanningReviewResult(record.result, e);
+    if (
+      e.resultDigest !== null &&
+      digestCanonicalJson(result) !== e.resultDigest
+    )
+      throw new BanzaiError("INVALID_STATE", "Review result evidence changed.");
+    return result;
+  }
+
+  private async applyPlanningReviewResult(
+    state: RunState,
+    record: AttemptRecord,
+    config: OrchestratorConfig
+  ): Promise<RunState> {
+    const e = state.planningReview?.active;
+    if (e == null || state.artifactBinding === undefined)
+      throw new BanzaiError(
+        "INVALID_STATE",
+        "Planning episode or binding is missing."
+      );
+    const result = validatePlanningReviewResult(record.result, e);
+    if (!(await this.planningScopeCurrent(state, "before_publish")))
+      return state;
+    const candidate = path
+      .relative(
+        this.repoRoot,
+        this.store.planningReviewCandidatePath(state.runId, record.attempt)
+      )
+      .split(path.sep)
+      .join("/");
+    await this.store.writeText(
+      state.runId,
+      path.relative(
+        this.store.runDirectory(state.runId),
+        this.store.planningReviewCandidatePath(state.runId, record.attempt)
+      ),
+      renderPlanningReviewArtifact(e, result)
+    );
+    e.artifact = await publishPlanningReviewArtifact(
+      this.repoRoot,
+      state.artifactBinding,
+      e,
+      result,
+      candidate
+    );
+    e.resultDigest = digestCanonicalJson(result);
+    e.findingCount = result.findings.length;
+    e.reviewSessionId = record.sessionId;
+    state.activeAttempt = null;
+    state.activeProcess = null;
+    await this.store.writeState(state);
+    await this.store.appendEventOnce(state.runId, "planning_review.published", {
+      episodeId: e.episodeId,
+      reviewNumber: e.reviewNumber,
+      attemptId: record.attempt.id,
+      artifactPath: e.artifact.path,
+      artifactSha256: e.artifact.sha256,
+      findingCount: e.findingCount
+    });
+    return await this.continuePublishedPlanningReview(state, config);
+  }
+
+  private async continuePublishedPlanningReview(
+    state: RunState,
+    config: OrchestratorConfig
+  ): Promise<RunState> {
+    const e = state.planningReview?.active;
+    if (e?.artifact == null || e.reviewAttemptId === null)
+      throw new BanzaiError(
+        "INVALID_STATE",
+        "Published planning review evidence is missing."
+      );
+    await this.store.appendEventOnce(state.runId, "planning_review.published", {
+      episodeId: e.episodeId,
+      reviewNumber: e.reviewNumber,
+      attemptId: e.reviewAttemptId,
+      artifactPath: e.artifact.path,
+      artifactSha256: e.artifact.sha256,
+      findingCount: e.findingCount
+    });
+    if (e.findingCount === 0)
+      return await this.restorePlanningGate(state, "restored_no_findings");
+    e.step = "analyzing";
+    await this.store.writeState(state);
+    return await this.executePlanningStep(state, config);
+  }
+
+  private async applyPlanningAnalysis(
+    state: RunState,
+    record: AttemptRecord
+  ): Promise<RunState> {
+    const e = state.planningReview?.active;
+    if (e?.artifact == null || e.resultDigest === null)
+      throw new BanzaiError(
+        "INVALID_STATE",
+        "Planning review evidence is missing."
+      );
+    const result = await this.readPlanningResult(state);
+    const analysis = validatePlanningReviewAnalysis(record.result, {
+      ...e,
+      resultDigest: e.resultDigest,
+      findings: result.findings
+    });
+    if (!(await this.planningScopeCurrent(state, "before_triage")))
+      return state;
+    e.analysisDigest = digestCanonicalJson(analysis);
+    e.step = "awaiting_triage";
+    state.activeAttempt = null;
+    state.activeProcess = null;
+    state.sessions.planner = sessionBinding(
+      record.sessionId,
+      record.sessionContext ??
+        sessionContext(
+          "planner",
+          (await loadConfig(this.repoRoot)).models.planner
+        )
+    );
+    state.pendingHumanDecision = {
+      kind: "planning_review_triage",
+      runId: state.runId,
+      episodeId: e.episodeId,
+      reviewNumber: e.reviewNumber,
+      originGate: e.originGate,
+      artifactPath: e.artifact.path,
+      artifactSha256: e.artifact.sha256,
+      resultDigest: e.resultDigest,
+      analysisDigest: e.analysisDigest,
+      findings: result.findings,
+      analysis: analysis.entries,
+      requestedAt: this.now()
+    };
+    transitionState(state, "needs_human_decision");
+    await this.store.writeState(state);
+    const event = await this.store.appendEventOnce(
+      state.runId,
+      "planning_review.triage_pending",
+      {
+        episodeId: e.episodeId,
+        reviewNumber: e.reviewNumber,
+        attemptId: record.attempt.id,
+        findingCount: result.findings.length,
+        gate: e.originGate
+      }
+    );
+    await observeHumanTime(
+      this.context,
+      state,
+      "gate_pending",
+      "planning_review.triage_pending",
+      event.at,
+      record.attempt.id
+    );
+    return state;
+  }
+
+  private async executePlanningStep(
+    state: RunState,
+    config: OrchestratorConfig,
+    retrySource: AttemptRecord | null = null
+  ): Promise<RunState> {
+    if (
+      state.planningReview?.active != null &&
+      ["reviewing", "analyzing"].includes(state.planningReview.active.step) &&
+      !(await this.planningScopeCurrent(
+        state,
+        state.planningReview.active.artifact !== null &&
+          state.planningReview.active.findingCount === 0
+          ? "before_restore"
+          : "before_attempt"
+      ))
+    )
+      return state;
+    if (!(await hasRunnerWorkOwnership(this.repoRoot, state.artifactBinding)))
+      return withRunnerWorkOwnership(this.repoRoot, state.artifactBinding, () =>
+        this.executePlanningStep(state, config, retrySource)
+      );
+    const dispatch = planningReviewDispatch(state);
+    if (dispatch === "none" || dispatch === "apply")
+      return await this.executePlan(state, config, retrySource);
+    if (dispatch === "published")
+      return await this.continuePublishedPlanningReview(state, config);
+    if (dispatch === "triage") return state;
+    if (dispatch !== "review" && dispatch !== "analysis")
+      throw new BanzaiError(
+        "INVALID_STATE",
+        "Planning episode and attempt are inconsistent."
+      );
+    if (!(await this.planningScopeCurrent(state, "before_attempt")))
+      return state;
+    const e = state.planningReview?.active;
+    if (e == null) return state;
+    const kind =
+      dispatch === "review" ? "planning_review" : "planning_analysis";
+    const role = dispatch === "review" ? "reviewer" : "planner";
+    const settings = config.models[role];
+    const retryBinding =
+      retrySource?.sessionContext === undefined
+        ? null
+        : sessionBinding(retrySource.sessionId, retrySource.sessionContext);
+    const plannerCandidate = sessionBindingMatches(
+      retryBinding,
+      settings,
+      "planner"
+    )
+      ? retryBinding
+      : state.sessions.planner;
+    const binding =
+      role === "planner" &&
+      sessionBindingMatches(plannerCandidate, settings, "planner")
+        ? plannerCandidate
+        : null;
+    const resumeSessionId = binding?.id ?? null;
+    const policy = {
+      sessionMode:
+        resumeSessionId === null ? ("fresh" as const) : ("resumed" as const),
+      resumeSessionId,
+      sessionContext: sessionContext(role, settings)
+    };
+    const attempt = newAttempt(this.context, state, kind, false);
+    const record = await beginAttempt(this.context, state, attempt, policy);
+    try {
+      await this.beforeModelAttempt(undefined, {
+        config,
+        role,
+        phase: dispatch === "review" ? "planning-review" : "planning"
+      });
+      await this.preflightVendor(role, settings);
+      const environment = await this.invocationScope(state.runId, config);
+      const prompt = insertPhaseInstructions(
+        dispatch === "review"
+          ? planningReviewPromptEnvelope(
+              e,
+              state.adrDecisions,
+              state.humanDecisions ?? []
+            )
+          : planningAnalysisPromptEnvelope(
+              e,
+              await this.readPlanningResult(state),
+              state.adrDecisions,
+              state.humanDecisions ?? [],
+              retrySource
+            ),
+        [
+          this.artifactInstructions(state, kind),
+          this.serenaGuidanceFor(environment, settings.executable)
+        ]
+      );
+      const result = await this.invokeWithContext<
+        PlanningReviewResult | PlanningReviewAnalysis
+      >({
+        state,
+        attempt,
+        config,
+        settings,
+        role,
+        sessionMode: policy.sessionMode,
+        kind: "primary",
+        prompt,
+        outputIdentity:
+          dispatch === "review"
+            ? "planning-review-result/v1"
+            : "planning-review-analysis/v1",
+        invoke: async (outputContract) => {
+          const request = {
+            repoRoot: this.repoRoot,
+            runId: state.runId,
+            runDirectory: this.store.runDirectory(state.runId),
+            attemptId: attempt.id,
+            prompt: prompt.rendered,
+            promptEnvelope: prompt,
+            outputContract,
+            settings,
+            resumeSessionId,
+            environment,
+            env: {
+              ...process.env,
+              BANZAI_RUN_ID: state.runId,
+              BANZAI_APPROVAL_DIGEST: "",
+              BANZAI_WORKFLOW_DIGEST: "",
+              BANZAI_REVIEW_ARTIFACT: ""
+            },
+            onStart: async (pid: number) =>
+              processStarted(this.context, state, attempt, pid),
+            onProgress: (event: ModelProgressEvent) => {
+              this.modelProgress(
+                dispatch === "review" ? "Planning review" : "Planning analysis",
+                event
+              );
+            },
+            onSessionStarted: async (id: string) => {
+              if (
+                (record.sessionId !== null && record.sessionId !== id) ||
+                (resumeSessionId !== null && resumeSessionId !== id)
+              )
+                throw new BanzaiError(
+                  "SESSION_ID_CONFLICT",
+                  "The analysis session changed."
+                );
+              record.sessionId = id;
+              await this.store.writeRunAttempt(state.runId, record);
+            }
+          };
+          return dispatch === "review"
+            ? this.adapters.runPlanningReview({
+                ...request,
+                onTerminalSuccess:
+                  terminalCheckpointWriter<PlanningReviewResult>(
+                    this.context,
+                    state,
+                    attempt,
+                    settings,
+                    policy
+                  )
+              })
+            : this.adapters.runPlanningAnalysis({
+                ...request,
+                onTerminalSuccess:
+                  terminalCheckpointWriter<PlanningReviewAnalysis>(
+                    this.context,
+                    state,
+                    attempt,
+                    settings,
+                    policy
+                  )
+              });
+        }
+      });
+      if (dispatch === "review") validatePlanningReviewResult(result.result, e);
+      else
+        validatePlanningReviewAnalysis(result.result, {
+          ...e,
+          resultDigest: e.resultDigest ?? "",
+          findings: (await this.readPlanningResult(state)).findings
+        });
+      await persistAdapterResult(this.context, state, record, result);
+      if (!(await completeAttempt(this.context, state, record, result)))
+        return await this.store.readState(state.runId);
+      return dispatch === "review"
+        ? await this.applyPlanningReviewResult(state, record, config)
+        : await this.applyPlanningAnalysis(state, record);
+    } catch (error) {
+      return await failAttempt(this.context, state, record, error);
+    }
+  }
+
+  async answerPlanningReview(input: {
+    answer: PlanningReviewTriageAnswer;
+    decidedBy: string;
+    autoResume?: boolean;
+  }): Promise<RunState> {
+    const decidedBy = planningDecisionOwner(input.decidedBy);
+    const initial = await this.store.requireActiveState();
+    const prePending = initial.pendingHumanDecision;
+    if (prePending?.kind !== "planning_review_triage")
+      throw new BanzaiError(
+        "INVALID_DECISION",
+        "The run has no pending planning-review triage."
+      );
+    parsePlanningReviewTriageAnswer(input.answer, {
+      ...prePending,
+      entries: prePending.analysis
+    });
+    const lock = await this.acquireWorkflowLock();
+    try {
+      const state = await this.store.requireActiveState();
+      const pending = state.pendingHumanDecision;
+      const e = state.planningReview?.active;
+      if (
+        pending?.kind !== "planning_review_triage" ||
+        e == null ||
+        state.activeAttempt !== null ||
+        state.activeProcess !== null
+      )
+        throw new BanzaiError(
+          "INVALID_DECISION",
+          "The planning-review triage is no longer pending."
+        );
+      const answer = parsePlanningReviewTriageAnswer(input.answer, {
+        ...pending,
+        entries: pending.analysis
+      });
+      if (
+        (state.humanDecisions ?? []).some(
+          (record) =>
+            record.kind === "planning_review_triage" &&
+            record.episodeId === answer.episodeId
+        )
+      )
+        throw new BanzaiError(
+          "INVALID_DECISION",
+          "This planning-review triage is already answered."
+        );
+      if (!(await this.planningScopeCurrent(state, "triage_answer")))
+        return state;
+      const actionable = actionablePlanningTriage(answer);
+      if (
+        !actionable &&
+        !(await this.planningScopeCurrent(state, "before_restore"))
+      )
+        return state;
+      state.humanDecisions = [
+        ...(state.humanDecisions ?? []),
+        {
+          ...answer,
+          kind: "planning_review_triage",
+          decidedBy,
+          decidedAt: this.now()
+        }
+      ];
+      state.pendingHumanDecision = null;
+      if (actionable) {
+        e.step = "applying";
+        transitionState(state, "planning");
+        await this.store.writeState(state);
+      } else {
+        const target =
+          e.originGate === "adr_approval"
+            ? "needs_adr_approval"
+            : "needs_plan_approval";
+        if (!planningRestoreEligible(state, target))
+          throw new BanzaiError(
+            "INVALID_TRANSITION",
+            "Planning-review restore is inconsistent."
+          );
+        transitionState(state, target);
+        this.closePlanningEpisode(state, "restored_no_action");
+        await this.store.writeState(state);
+      }
+      const event = await this.store.appendEvent(
+        state.runId,
+        "planning_review.triaged",
+        {
+          episodeId: e.episodeId,
+          reviewNumber: e.reviewNumber,
+          analysisDigest: e.analysisDigest,
+          optionCount: answer.dispositions.filter((d) => d.kind === "option")
+            .length,
+          instructionCount: answer.dispositions.filter(
+            (d) => d.kind === "instruction"
+          ).length,
+          declineCount: answer.dispositions.filter((d) => d.kind === "decline")
+            .length,
+          additionalInstructionPresent: answer.additionalInstruction !== null,
+          actionable,
+          decidedBy
+        }
+      );
+      await observeHumanTime(
+        this.context,
+        state,
+        "decision_recorded",
+        "planning_review.triaged",
+        event.at
+      );
+      if (!actionable) {
+        const restored = await this.store.appendEventOnce(
+          state.runId,
+          "planning_review.gate_restored",
+          {
+            episodeId: e.episodeId,
+            reviewNumber: e.reviewNumber,
+            gate: e.originGate,
+            outcome: "restored_no_action"
+          }
+        );
+        await observeHumanTime(
+          this.context,
+          state,
+          "gate_pending",
+          "planning_review.gate_restored",
+          restored.at,
+          e.episodeId
+        );
+        return state;
+      }
+      return input.autoResume === false
+        ? state
+        : await this.executePlan(state, await loadConfig(this.repoRoot));
+    } finally {
+      await lock.release();
+    }
+  }
+
+  private async retryPlanningReview(): Promise<RunState> {
+    const lock = await this.acquireWorkflowLock();
+    try {
+      const state = await this.store.requireActiveState();
+      const eligibility = await this.retryEligibility(state);
+      if (!eligibility.eligible)
+        throw new BanzaiError("RETRY_NOT_ALLOWED", eligibility.reason);
+      const source =
+        state.activeAttempt === null
+          ? null
+          : await this.store.readRunAttempt(state.runId, state.activeAttempt);
+      if (planningReviewDispatch(state) === "restart") {
+        const stale = state.planningReview?.closed.at(-1);
+        if (stale === undefined)
+          throw new BanzaiError("INVALID_STATE", "Stale episode is missing.");
+        const paths = stale.scope.map((item) => item.path);
+        const gathered = await this.gatherPlanningScope(paths);
+        const missing = gathered.find((item) => item.sha256 === null);
+        if (missing !== undefined) {
+          state.blockReason = `Planning review cannot restart: ${missing.path} is missing or not a regular file.`;
+          await this.store.writeState(state);
+          return state;
+        }
+        const episode = await this.newPlanningEpisode(
+          state,
+          stale.originGate,
+          paths,
+          stale.decidedBy
+        );
+        if (state.planningReview !== undefined)
+          state.planningReview.active = episode;
+      } else if (
+        source?.failureCode === "PLANNING_REVIEW_PUBLICATION_CONFLICT"
+      ) {
+        const e = state.planningReview?.active;
+        if (e == null)
+          throw new BanzaiError(
+            "INVALID_STATE",
+            "Planning episode is missing."
+          );
+        e.reviewNumber = await this.planningNumber(state);
+        e.reviewAttemptId = null;
+        e.reviewSessionId = null;
+      }
+      state.activeAttempt = null;
+      state.activeProcess = null;
+      transitionState(state, "planning");
+      await this.store.writeState(state);
+      return await this.executePlanningStep(
+        state,
+        await loadConfig(this.repoRoot),
+        source
+      );
+    } finally {
+      await lock.release();
+    }
+  }
+
+  private async reconcilePlanningAttempt(
+    state: RunState,
+    config: OrchestratorConfig,
+    record: AttemptRecord
+  ): Promise<RunState> {
+    if (record.status === "failed") return state;
+    if (
+      !(await this.planningScopeCurrent(
+        state,
+        record.attempt.kind === "planning_review"
+          ? "before_publish"
+          : "before_triage"
+      ))
+    )
+      return state;
+    try {
+      const checkpoint = await this.store.readTerminalCheckpointIfExists(
+        state.runId,
+        record.attempt
+      );
+      if (
+        record.result === null &&
+        checkpoint !== null &&
+        "result" in checkpoint
+      ) {
+        record.result = checkpoint.result;
+        record.sessionId = checkpoint.sessionId;
+        record.usage = checkpoint.usage;
+      }
+      if (record.result === null) {
+        state.activeProcess = null;
+        blockState(
+          state,
+          "Interrupted read-only planning attempt; use banzai retry."
+        );
+        await this.store.writeState(state);
+        return state;
+      }
+      await validateTerminalCheckpointResult(
+        this.context,
+        state,
+        record.attempt,
+        record.result,
+        config,
+        record.status === "completed" &&
+          record.attempt.kind === "planning_review"
+      );
+      if (record.status !== "completed") {
+        if (
+          !(await completeAttempt(this.context, state, record, {
+            result: record.result,
+            sessionId: record.sessionId,
+            stdout: "",
+            stderr: "",
+            usage: record.usage
+          }))
+        )
+          return await this.store.readState(state.runId);
+      }
+      if (state.status === "blocked") transitionState(state, "planning");
+      return record.attempt.kind === "planning_review"
+        ? await this.applyPlanningReviewResult(state, record, config)
+        : await this.applyPlanningAnalysis(state, record);
+    } catch (error) {
+      return await failAttempt(this.context, state, record, error);
+    }
+  }
+
   async approvePlan(approvedBy: string, autoResume = true): Promise<RunState> {
     try {
       const lock = await this.acquireWorkflowLock();
@@ -2340,11 +3378,50 @@ export class WorkflowRunner {
     decidedBy: string;
     autoResume: boolean;
   }): Promise<RunState> {
+    if (input.decision === "rework") {
+      if (input.note === null || input.note.trim().length === 0)
+        throw new BanzaiError(
+          "INVALID_DECISION",
+          "ADR rework requires non-empty feedback."
+        );
+      input = {
+        ...input,
+        note: validateHumanFreeText(input.note, "ADR rework feedback", 8000),
+        decidedBy: planningDecisionOwner(input.decidedBy)
+      };
+      const canonicalId = decisionText(
+        validateHumanFreeText(input.id, "ADR id", 500),
+        "ADR id",
+        500
+      );
+      if (canonicalId !== input.id)
+        throw new BanzaiError("INVALID_ADR", "ADR id must be canonical.");
+    }
     try {
       const lock = await this.acquireWorkflowLock();
       try {
         const state = await this.store.requireActiveState();
         requireState(state, ["needs_adr_approval"], "ADR decision");
+        if (
+          state.activeAttempt !== null ||
+          state.activeProcess !== null ||
+          state.planningReview?.active != null
+        )
+          throw new BanzaiError(
+            "INVALID_STATE",
+            "ADR decision requires an idle gate."
+          );
+        if (input.decision === "rework" && state.schemaVersion === 10)
+          state.humanDecisions = [
+            ...(state.humanDecisions ?? []),
+            {
+              kind: "adr_rework",
+              adrId: input.id,
+              feedback: input.note ?? "",
+              decidedBy: input.decidedBy,
+              decidedAt: this.now()
+            }
+          ];
         if (input.id.trim().length === 0) {
           throw new BanzaiError("INVALID_ADR", "ADR id cannot be empty.");
         }
@@ -2408,7 +3485,9 @@ export class WorkflowRunner {
         if (pending.kind !== "escalation") {
           throw new BanzaiError(
             "INVALID_DECISION",
-            "Decision consultation requires a keyed consultation answer."
+            pending.kind === "planning_review_triage"
+              ? "Planning-review triage requires a keyed planning-review answer."
+              : "Decision consultation requires a keyed consultation answer."
           );
         }
         if (
@@ -3430,6 +4509,7 @@ export class WorkflowRunner {
             context = emptyCancellationContext();
           }
           transitionIdentity.id = this.context.ids();
+          this.closePlanningEpisode(state, "cancelled");
           transitionState(state, "cancelled");
           state.activeProcess = null;
           state.pendingHumanDecision = null;
@@ -3749,6 +4829,9 @@ export class WorkflowRunner {
     }
     return {
       state,
+      ...(state.planningReview === undefined
+        ? {}
+        : { planningReview: this.planningReviewStatus(state) }),
       planApprovalValid,
       reviewValid,
       latestReview,
@@ -3758,6 +4841,48 @@ export class WorkflowRunner {
       taskCompletion,
       completionPublication,
       ...(configurationPrerequisite ? { configurationPrerequisite } : {})
+    };
+  }
+
+  private planningReviewStatus(
+    state: RunState
+  ): NonNullable<WorkflowStatus["planningReview"]> {
+    const e = state.planningReview?.active;
+    const latest = state.planningReview?.closed.at(-1);
+    const gate =
+      state.status === "needs_adr_approval"
+        ? "adr_approval"
+        : state.status === "needs_plan_approval"
+          ? "plan_approval"
+          : null;
+    const paths = gate === null ? [] : gateArtifactPaths(state, gate);
+    return {
+      decisions:
+        gate === null
+          ? []
+          : planningGateActions(gate, state.schemaVersion, paths.length > 0),
+      reviewPaths: paths,
+      active:
+        e == null
+          ? null
+          : {
+              episodeId: e.episodeId,
+              reviewNumber: e.reviewNumber,
+              originGate: e.originGate,
+              step: e.step,
+              artifactPath: e.artifact?.path ?? null,
+              findingCount: e.findingCount
+            },
+      latest:
+        latest === undefined
+          ? null
+          : {
+              reviewNumber: latest.reviewNumber,
+              originGate: latest.originGate,
+              outcome: latest.outcome,
+              artifactPath: latest.artifact?.path ?? null,
+              findingCount: latest.findingCount
+            }
     };
   }
 
@@ -4647,7 +5772,10 @@ export class WorkflowRunner {
       { class: "project_instructions", count: 1 },
       { class: "project_manifest", count: 1 }
     ];
-    const approved = state.planApproval?.paths ?? [];
+    const approved =
+      state.planningReview?.active?.scope.map((item) => item.path) ??
+      state.planApproval?.paths ??
+      [];
     const count = (pattern: RegExp): number =>
       approved.filter((item) => pattern.test(item)).length;
     const descriptionCount = count(/\/description\.md$/u);
@@ -4669,7 +5797,23 @@ export class WorkflowRunner {
     if (phase === "fix" && state.latestReview !== null) {
       entries.push({ class: "review_artifact", count: 1 });
     }
-    const decisions = state.humanDecisions?.length ?? 0;
+    const planningFamily = [
+      "plan",
+      "planning_review",
+      "planning_analysis"
+    ].includes(phase);
+    if (
+      phase === "planning_analysis" ||
+      (phase === "plan" && state.planningReview?.active?.step === "applying")
+    )
+      entries.push({ class: "review_artifact", count: 1 });
+    const decisions = (state.humanDecisions ?? []).filter(
+      (record) =>
+        planningFamily ||
+        !["plan_rework", "adr_rework", "planning_review_triage"].includes(
+          record.kind
+        )
+    ).length;
     if (decisions > 0) {
       entries.push({ class: "human_decision", count: decisions });
     }
@@ -4695,11 +5839,14 @@ export class WorkflowRunner {
       );
     const writes = artifactWritePaths(state, phase);
     return [
-      "Work document authority (run state v9):",
+      "Work document authority:",
       JSON.stringify(bound, null, 2),
       "Use these exact document role paths. ADRs, product documentation and the project manifest keep their existing repository paths.",
       `Artifact writes allowed in this phase: ${JSON.stringify(writes)}.`,
-      phase === "review" || phase === "selection"
+      phase === "review" ||
+      phase === "selection" ||
+      phase === "planning_review" ||
+      phase === "planning_analysis"
         ? "Model artifact write set: []. Every role is read-only, including canonical reviews and attempt-owned candidates."
         : "Other artifact roles are read-only; their presence does not grant writes.",
       "Read required evidence at its supplied path. Do not rebind work, invoke standalone verification, or modify runner state, approvals or another work item.",
@@ -5148,6 +6295,12 @@ export class WorkflowRunner {
     commitTransition?: () => Promise<void>,
     recovery: RecoveryAuthorization | null = null
   ): Promise<RunState> {
+    if (
+      state.planningReview?.active?.step === "applying" &&
+      state.planningReview.active.applyingAttemptId === null &&
+      !(await this.planningScopeCurrent(state, "before_apply"))
+    )
+      return state;
     if (!(await hasRunnerWorkOwnership(this.repoRoot, state.artifactBinding)))
       return withRunnerWorkOwnership(this.repoRoot, state.artifactBinding, () =>
         this.executePlan(
@@ -5160,6 +6313,19 @@ export class WorkflowRunner {
         )
       );
     requireState(state, ["planning"], "Planning");
+    const episode = state.planningReview?.active;
+    if (episode != null && episode.step !== "applying")
+      throw new BanzaiError(
+        "INVALID_STATE",
+        "Ordinary planning cannot run during planning review or triage."
+      );
+    if (
+      episode?.step === "applying" &&
+      episode.applyingAttemptId === null &&
+      !(await this.planningScopeCurrent(state, "before_apply"))
+    )
+      return state;
+
     await this.assertProjectGuidance();
     await this.activity(
       "Planning checks",
@@ -5188,6 +6354,58 @@ export class WorkflowRunner {
         this.serenaGuidanceFor(environment, config.models.planner.executable)
       ]
     );
+    if (episode?.step === "applying") {
+      const decision = [...(state.humanDecisions ?? [])]
+        .reverse()
+        .find(
+          (record) =>
+            record.kind === "planning_review_triage" &&
+            record.episodeId === episode.episodeId
+        );
+      if (
+        decision?.kind !== "planning_review_triage" ||
+        episode.analysisAttemptId === null ||
+        episode.artifact === null
+      )
+        throw new BanzaiError(
+          "INVALID_STATE",
+          "Planning triage application evidence is missing."
+        );
+      const record = await this.store.readRunAttempt(state.runId, {
+        id: episode.analysisAttemptId,
+        kind: "planning_analysis",
+        mutable: false
+      });
+      const analysis = parsePlanningReviewAnalysis(record.result);
+      if (digestCanonicalJson(analysis) !== episode.analysisDigest)
+        throw new BanzaiError(
+          "INVALID_STATE",
+          "Planning analysis evidence changed."
+        );
+      parsePlanningReviewTriageAnswer(
+        {
+          runId: decision.runId,
+          episodeId: decision.episodeId,
+          reviewNumber: decision.reviewNumber,
+          analysisDigest: decision.analysisDigest,
+          dispositions: decision.dispositions,
+          additionalInstruction: decision.additionalInstruction
+        },
+        {
+          runId: state.runId,
+          episodeId: episode.episodeId,
+          reviewNumber: episode.reviewNumber,
+          analysisDigest: episode.analysisDigest,
+          entries: analysis.entries
+        }
+      );
+      prompt = planningApplicationPromptEnvelope(
+        prompt,
+        episode.artifact.path,
+        analysis,
+        decision
+      );
+    }
     prompt = await this.taskDiscoveryPrompt(state, prompt);
     const invocationDigest = digestCanonicalJson({
       environment,
@@ -6552,6 +7770,15 @@ export class WorkflowRunner {
     sessionId: string | null,
     context: SessionContext
   ): Promise<RunState> {
+    if (
+      attempt.kind !== "plan" &&
+      attempt.kind !== "implementation" &&
+      attempt.kind !== "fix"
+    )
+      throw new BanzaiError(
+        "INVALID_STATE",
+        "Only ordinary phase attempts can apply phase results."
+      );
     validateArtifactRoleReferences(state, result);
     if (result.phase !== attempt.kind) {
       throw new BanzaiError(
@@ -6685,6 +7912,15 @@ export class WorkflowRunner {
         state.verification = [];
       }
     }
+    if (
+      attempt.kind === "plan" &&
+      state.planningReview?.active?.step === "applying" &&
+      ["adr_approval", "plan_approval", "decision_consultation"].includes(
+        result.gate ?? "plan_approval"
+      ) &&
+      result.outcome !== "blocked"
+    )
+      this.closePlanningEpisode(state, "applied");
     state.activeAttempt = null;
     await this.store.writeState(state);
     const timingEvent = await this.store.appendEvent(
@@ -7926,7 +9162,7 @@ export class WorkflowRunner {
         );
       const frozen = sealReviewSnapshot({
         schema:
-          state.schemaVersion === 9
+          state.schemaVersion >= 9
             ? "banzai-review-snapshot/v7"
             : state.schemaVersion === 8
               ? "banzai-review-snapshot/v6"
@@ -7940,7 +9176,7 @@ export class WorkflowRunner {
                       ? "banzai-review-snapshot/v2"
                       : "banzai-review-snapshot/v1",
         schemaVersion:
-          state.schemaVersion === 9
+          state.schemaVersion >= 9
             ? 7
             : state.schemaVersion === 8
               ? 6
@@ -8531,6 +9767,11 @@ export class WorkflowRunner {
       return state;
     }
     const record = await this.store.readRunAttempt(state.runId, attempt);
+    if (
+      attempt.kind === "planning_review" ||
+      attempt.kind === "planning_analysis"
+    )
+      return this.reconcilePlanningAttempt(state, config, record);
     if (completionProtocolAttempt(record)) {
       try {
         const reconciled = await this.reconcileCompletionAttempt(

@@ -10,7 +10,7 @@ is a navigational reference and is updated with the module it describes.
 ## Source modules (`src/`)
 
 - `work-documents.ts` — typed projection of fixed tracked document roles and
-  binding-v3 validation. Runner state v9 persists the execution binding directly;
+  binding-v3 validation. Runner state v10 persists the execution binding directly;
   workspace v3 inventories selected documents once, including unchanged approved
   bytes. `lib/work-binding-history.mjs` decodes retained v1/v2 evidence read-only.
   `lib/execution-ownership.mjs` coordinates actual runner/verification execution
@@ -23,6 +23,8 @@ is a navigational reference and is updated with the module it describes.
 
 - `cancellation.ts` — closed observation v1 reasons, response/provenance table,
   pre-transition context and reconciliation; separate report v1 types (ADR-0035).
+  Planning triage retains its origin gate; triage and active planning-review
+  attempts report unsupported availability in the existing v1 vocabulary.
 - `cancellation-evidence.ts` — bounded read-only state/event/attempt ingress,
   safe local paths, fingerprints and exact context references after stopping.
 - `cancellation-cli.ts` — exact cancel flags, optional capability v1 declaration,
@@ -31,6 +33,8 @@ is a navigational reference and is updated with the module it describes.
   resource subtotals, explicit missing/invalid coverage and report-local keys.
   It never constructs a runner, normalizes state through the operational store,
   repairs evidence, infers motivation or joins tasks by name/time.
+  Its v1 model inventory excludes the exact planning-review and
+  planning-analysis attempt file tokens.
 - `cancellation-report-render.ts` — deterministic JSON and Markdown projections
   of one independently versioned report document, without evidence reads.
 - `human-time.ts` — closed private timing codec, episode identities, replacement
@@ -39,13 +43,15 @@ is a navigational reference and is updated with the module it describes.
 - `human-time-store.ts` — bounded canonical state/event/attempt projection and
   private `0600` run-local ledger; physical path checks, exclusive short writes,
   revision checks, atomic replacement and no repair on read.
+  Planning triage and restored gate anchors require corroborated episode and
+  event identities; a request anchor survives same-episode renumbering.
 - `interactive-human-time.ts` — interactive-only injected recorder, capture
   boundaries, process-local clock corroboration and optional cumulative
   single-engineer estimates. Runner hooks observe durable decisions before
   continuation; failures cannot authorize, replay or recover workflow work.
 - `cli.ts` — command surface and non-TTY output. Exposes `banzai`,
   `interactive`, `doctor [--json]`, `model`, `init`, `run`, `status [--json]`,
-  `control capabilities|status|start --slug|answer|recover` (with optional
+  `control capabilities|status|start --slug|answer|decide|recover` (with optional
   `capabilities --cancellation` discovery), `resume`, `retry`,
   `recover`,
   `eval export`, `eval kpi` (checkout and `--input` projection modes), and
@@ -56,11 +62,13 @@ is a navigational reference and is updated with the module it describes.
   `WorkflowRunner`. Also exposes guarded
   `compatibility live --confirm-live`, `approve adr|plan`, `triage`, and
   `cancel [--run <run-id>] [--reason <enum>]`, which never opens a reason prompt.
+  `approve plan` and `review planning` use exact flag parsing; rework requires
+  validated feedback. Planning-triage status prints one answer-v4 Next line.
   Bare invocation without a TTY prints help instead of waiting for
   input, and the help heading derives the Banzai release-train version from the
   orchestrator package mirror under ADR-0033. Human status distinguishes a
   passing review from terminal completion by zero-accepted human triage;
-  structured status JSON is unchanged. It traps
+  structured status JSON includes the bounded planning-review projection. It traps
   `SIGINT` and `SIGTERM` for every run-bearing command, wiring
   `createInterruptHandler` to the progress reporter, `shutdownActiveProcesses`,
   `forceTerminateActiveProcesses`, and `releaseHeldRunnerLocksSync`, and
@@ -76,12 +84,13 @@ is a navigational reference and is updated with the module it describes.
   any inventory query. Never reads marketplace source versions or starts models.
 - `agent-control-cli.ts` — exact non-TTY control grammar and stdin composition.
   Capability discovery runs before Git discovery or runner construction;
-  status, start, answer, and recover reuse the current `WorkflowRunner`, and
+  status, start, answer, decideGate and recover reuse the current `WorkflowRunner`, and
   mutations emit a fresh authoritative status projection.
-- `agent-control.ts` — closed current `banzai-agent-capabilities/v7`
+- `agent-control.ts` — closed current `banzai-agent-capabilities/v8`
   (declaring the completion publication protocol, stages, refusal codes and
-  `pending_application` and task verification), `banzai-agent-status/v5` (bounded
-  task applicability and completion publication state), and configuration `banzai-agent-answer/v3` contracts;
+  `pending_application`, task verification and planning gates), `banzai-agent-status/v6` (bounded
+  task applicability, completion publication state and planning review/triage),
+  planning `banzai-agent-gate-decision/v1` and `banzai-agent-answer/v4`, and configuration `banzai-agent-answer/v3` contracts;
   preserved keyed consultation `banzai-agent-answer/v2`, `banzai-agent-request/v1`, ordered escalation
   `banzai-agent-answer/v1`, and `banzai-agent-recovery/v1` inputs; bounded
   privacy allow-list, semantic state/action projection, exact consultation
@@ -195,13 +204,15 @@ is a navigational reference and is updated with the module it describes.
   `current`, input mode reads only the named files with ordinal-basename
   labels and needs no repository.
 - `context-report.ts` — independent direct read-only collector for
-  `banzai-context-report/v1`. It reads only bounded run
+  `banzai-context-report/v2`. It reads only bounded run
   identity/timestamp/route, canonical attempt identity/status/usage, and
   matching context ledgers; enforces strict identity, privacy, and usage
   consistency; treats historical absence as incomplete physical-attempt
   coverage; and aggregates fixed-order workflow/phase/role runner bytes,
   categories, budget results, vendor usage, and inventory without importing
   evaluation, adapters, store, or workflow.
+  V2 includes both read-only planning kinds through the shared file-token map;
+  historical ledgers retain their version-specific meanings.
 - `context-report-render.ts` — pure canonical two-space JSON plus coverage-first
   deterministic Markdown from the same completed context report.
 - `context-report-cli.ts` — composes direct collection and rendering through
@@ -240,6 +251,10 @@ is a navigational reference and is updated with the module it describes.
   derives the kebab-case feature slug via `generateFeatureSlug`, and keeps the
   session open when a phase returns a gate. It uses the shared review-completion
   projection so terminal triage is never displayed as reviewer pass.
+  Planning gates offer rework and explicit review with default-No confirmations.
+  Planning triage escapes model text and presents each finding/analysis card
+  immediately before its keyed disposition menu; human-time insertion retains
+  the final exit-choice anchor.
 - `inquirer-io.ts` — the `@inquirer/prompts` implementation of
   `InteractiveIO`; the only module bound to the prompt libraries. Its initial
   request input uses `@inquirer/core` to enable bracketed-paste mode, capture
@@ -247,7 +262,8 @@ is a navigational reference and is updated with the module it describes.
   `[Pasted text #N +M lines]` placeholders, show a sanitized preview on an
   immediate identical re-paste, expand exact content on submission, and disable
   bracketed-paste mode through prompt cleanup. Other inputs retain the standard
-  one-line prompt.
+  one-line prompt. The existing checkbox prompt implements selected review
+  scope and validates its selected values before submission.
 - `terminal-attention.ts` — presentation-only macOS Dock attention, composed
   by `cli.ts` and injected into `interactive.ts`. Wraps automatic runner calls
   with a monotonic 30-second threshold and signals once when the returned state
@@ -258,7 +274,8 @@ is a navigational reference and is updated with the module it describes.
   notification state is added; its only repository import is the run-state type.
 - `workflow.ts` — `WorkflowRunner`, the core. Owns `start`, `resume`, `retry`,
   `recover`,
-  `approvePlan`, `decideAdr`, `answerHumanDecision`, `triage`, `cancel`,
+  `approvePlan`, `decideAdr`, `reworkPlan`, `requestPlanningReview`,
+  `answerPlanningReview`, `answerHumanDecision`, `triage`, `cancel`,
   and process-local `recordCancellationResponse`,
   `status`, and the private phase executors for selection, planning,
   implementation, verification, review, and fixes. Also owns preflight,
@@ -268,6 +285,10 @@ is a navigational reference and is updated with the module it describes.
   attempt reconciliation,
   compatible builder-session selection, bounded full/delta reviewer policy,
   and direct terminal completion after complete zero-accepted triage.
+  It serializes planning-review request, read-only review/analysis, triage,
+  applying, stale retry and reconciliation under the existing owners. Applying
+  receives immutable analysis and exact human dispositions; planning retries
+  preserve the independent code-review namespace and sessions.
   For new strict implementation and fix attempts it owns the
   `banzai-completion-protocol/v1` lifecycle (ADR-0047): the v7 state
   transition with retained prior-state bytes, protocol-selected envelope
@@ -466,6 +487,8 @@ is a navigational reference and is updated with the module it describes.
   validation, checkpoint model settings and result-source identity evidence.
   It depends on attempts, completion, verification, review, preflight and
   digest evidence.
+  Planning review and analysis use their dedicated episode binding validators
+  and reviewer/planner settings without establishing phase-result digests.
 - `workflow/domain/failure-classes.ts` — ADR-0052 domain module holding the
   model-failure cause and failure-code sets, the `[RESULT_DIGEST_UNRESOLVED]`
   block-reason prefix and the read-only-attempt retry predicate that retry,
@@ -481,7 +504,12 @@ is a navigational reference and is updated with the module it describes.
   the slug, creation time and UUID, and `requireSlug` (`INVALID_SLUG`).
 - `workflow/domain/artifact-scope.ts` — `artifactPaths`, the approved planning
   bundle in description, ADR, plan order (`INCOMPLETE_PLAN`), and
-  `isDocumentationPath`.
+  `isDocumentationPath`. `gateArtifactPaths` supplies exact gate membership,
+  including an ADR gate whose description is null. Planning review artifacts
+  remain outside approval paths and snapshots.
+- `workflow/domain/planning-review.ts` — pure planning-gate availability,
+  exact subset scope, bounded numbering, dispatch, stale facts, actionable
+  triage and guarded restore decisions under ADR-0052 domain restrictions.
 - `workflow/domain/verification-attempts.ts` — `verificationFailureCategory`,
   which maps process errors to a persisted failure category, and
   `verificationCommandMatches`, which matches a record to its exact command
@@ -543,7 +571,7 @@ is a navigational reference and is updated with the module it describes.
   `events.jsonl`, writes model-attempt records and redacted output, atomically
   begins and finishes strict mode-0600 `<attempt-id>.context.json` ledgers while
   excluding them from canonical attempt enumeration, creates the
-  deterministic attempt-owned review-candidate path, creates the
+  deterministic attempt-owned code-review and planning-review candidate paths, creates the
   schema-version-1 verification ledger marker, atomically owns one bounded leaf
   per physical verification attempt plus sequence-qualified log digests,
   enumerates canonical model-attempt leaves with path/identity validation while
@@ -569,6 +597,10 @@ is a navigational reference and is updated with the module it describes.
   stops/captures the winning state and writes its immutable anchor. Event capture
   and receipt-bound first response use the guarded expected source fingerprint;
   scans, human prompts and model execution occur outside the short guard.
+- `planning-review-state.ts` — closed state-v10 episode, pending-triage and
+  history validation for the store. Active and closed slots have distinct
+  shapes; historical states reject v10 fields without migration. The store
+  remains the only persisted-state owner.
 - `adapters.ts` — `createVendorAdapters` plus the argument builders
   (`buildCodexArguments`, `buildClaudeArguments`,
   `buildClaudeSelectionArguments`, `buildClaudePhaseArguments`) and the minimum
@@ -578,6 +610,9 @@ is a navigational reference and is updated with the module it describes.
   `modelCliMinimum()` for the target's model (`null` skips it), failing with
   `CLI_TOO_OLD` before authentication. Adapter requests consume the exact
   prompt envelope and output-contract bytes already measured by the workflow;
+  the existing read-only construction accepts both planning contracts. Their
+  environment carries the run identity with empty approval, workflow and
+  review-artifact grants; hook and workspace scope checks deny model writes.
   structured usage, turn count, and privacy-safe inventory evidence survive
   success, typed process failure, durable-observer failure, timeout, and
   post-close decoding failure when the vendor reported them. Codex checkpoints
@@ -657,14 +692,20 @@ is a navigational reference and is updated with the module it describes.
   v1/v2, result bound to the retained envelope original), terminal checkpoints
   v1-v3, and the closed readers for completion transition, capture, candidate,
   publication receipt, cursor, summary v2 and diagnostics.
+  Dedicated planning-review result and analysis parsers preserve closed objects,
+  safe prose, exact scope echoes and digest-bound finding order. Triage parses
+  all dispositions before returning them in review order. The shared
+  `validateHumanFreeText` applies the new UTF-8 byte bounds and rejects controls,
+  bidi formatting and lone surrogates without changing legacy text contracts.
 - `prompt-envelope.ts` — in-memory ordered closed prompt components whose
   concatenation is the exact adapter prompt; it adds no implicit separator and
   persists no component text.
 - `output-contract.ts` — one exact vendor-specific serializer for selection,
-  phase, and review schemas. Claude keeps compact sanitized JSON; Codex keeps
+  phase, code-review and both planning-review schemas, with exhaustive identity
+  dispatch. Claude keeps compact sanitized JSON; Codex keeps
   two-space JSON plus one newline, and the same bytes are measured and passed
   to the adapter.
-- `context-accounting.ts` — pure exact UTF-8 measurement, closed v1 ledger
+- `context-accounting.ts` — pure exact UTF-8 measurement, closed per-version v1/v2 ledger
   decoding, selector precedence, and observe/enforce budget evaluation. Only
   exact pre-call `runner_payload_bytes` can enforce; post-call metrics remain
   advisory.
@@ -673,6 +714,9 @@ is a navigational reference and is updated with the module it describes.
   `SCHEMA_VERSION_MISMATCH` when bundled schemas disagree with
   `CONTRACT_VERSION`; current review-result v2 and byte-preserved v1 resolve
   through distinct output-contract identities.
+  Additive `banzai-planning-review-result/v1` and
+  `banzai-planning-review-analysis/v1` retain umbrella `1.0.0` and have separate
+  output identities and manifest references.
 - `init-resources.ts` — generated local verification guide embedded in the
   standalone CLI. `init-resources-build.mjs` reads canonical
   `documentation/verification-examples.md` and resolves sibling product-guide
@@ -755,9 +799,14 @@ is a navigational reference and is updated with the module it describes.
 - `review-artifact.ts` — shared v2 deterministic rendering, complete lossless
   semantic values, required scope versus reviewer assertions, and original
   runner-evidence projection; snapshot v5 renders as `banzai-feature-review/v6`
-  with a runner-owned completion publication section. Validates exact candidate bytes and publishes only
+  with a runner-owned completion publication section. Current snapshot v7
+  renders as `banzai-feature-review/v8`. Validates exact candidate bytes and publishes only
   the in-memory validation proof. Legacy v1 rendering, canonical fallback,
   independent prose rules and typed content diagnostics remain readable.
+- `planning-review-artifact.ts` — deterministic planning-review v1 rendering
+  from validated scope/findings and persisted reviewer settings. It shares the
+  lossless value renderer and atomic create-only publication primitive without
+  changing code-review bytes. Idempotency compares exact bytes.
 - `mcp.ts` — `resolveSerenaWhitelist`, the availability-gated Serena MCP
   whitelist. Gates: `.serena/project.yml` present, a vendor-own registration
   (project `.mcp.json` then user-scope `.claude.json` for Claude;
@@ -838,14 +887,14 @@ is a navigational reference and is updated with the module it describes.
   fresh-input remainder, and an optional turn count. It reads no
   process state, so both surfaces are testable against an explicit width.
 - `types.ts` — all shared types, `CONTRACT_VERSION = "1.0.0"`, phase-result
-  schema v4 and state schema v9 with explicit historical readers, independent
-  agent-control schema and `7.0.0` contract identities, independent
-  `banzai-context-attempt/v1` and `banzai-context-report/v1` identities,
+  schema v4 and state schema v10 with explicit historical readers, independent
+  agent-control schema and `8.0.0` contract identities, independent
+  `banzai-context-attempt/v2` and `banzai-context-report/v2` identities,
   model-attempt v4 and retained v1-v3 readers under
   `banzai-completion-protocol/v1`, terminal-checkpoint v1-v3, the completion
   capture/transition/candidate/publication record identities, completion
   summary v2, recovery contracts, and the pure role/model/effort
-  session-binding matcher; no runtime imports.
+  session-binding matcher and shared attempt file tokens; no runtime imports.
 - `errors.ts` — `BanzaiError` (stable `code`, `exitCode`), `ProcessExitError`
   (retains redacted stdout/stderr plus the typed `failureCause` and the usage
   the failed process had already spent, optional inventory, and turn count),
@@ -943,11 +992,11 @@ shared review/configuration readers still consume them. Generic artifact
 initialization, registration, writing and archive operations are retired. Their
 complete historical tool source remains in Git; existing archive bytes and
 references are preserved without migration. Doctor's read-only active-state check
-admits state v9 and reports historical execution incompatibility without repair.
+admits state v10 and reports historical execution incompatibility without repair.
 
 ## Runner instruction generation and parity
 
-`phase-resources-build.mjs` owns the six-phase/nine-guidance/six-policy inventory
+`phase-resources-build.mjs` owns the seven-phase/ten-guidance/six-policy inventory
 and hook reference identities. Artifact-reader generation resolves shared runtime
 reader imports to canonical validation source, so generation never consumes its
 previous output. `build.mjs` explicitly regenerates the committed
@@ -1047,7 +1096,7 @@ keeping its report schema unchanged.
 
 No historical-run migration is introduced. New binding v3 has explicit new
 semantics; retained v1/v2 artifacts keep their original identity. `doctor` v5 and control
-capabilities v7/status v5 expose task verification without requiring profile
+capabilities v8/status v6 expose task verification without requiring profile
 coverage. Current init emits schema 4 without a verification wizard. The test
 driver's exact file selection, process groups and cleanup are unchanged.
 
@@ -1110,3 +1159,6 @@ its exact declared hook/planning/supervisor transition, including the supervisor
 entry skeleton. For retained ADR-0043 authority, only a leading, indented ADR-0045
 lifecycle annotation may be excluded for comparison; the original accepted body
 and retained suffix must still match their recorded full-byte hash.
+ADR-0055 admits the exact ADR-0054 reciprocal lifecycle annotation through a
+finite image map guarded by its Accepted status. It also authorizes retained
+`#orchestrated` and supervisor skill keys; protected manifest keys remain denied.

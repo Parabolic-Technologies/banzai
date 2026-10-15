@@ -5,6 +5,16 @@ skill behavior remains authoritative; the optional orchestrator constrains
 machine hand-offs with these schemas.
 
 - `contract.json` identifies the active contract version.
+- `v1/planning-review-result.schema.json` is the closed
+  `banzai-planning-review-result/v1` result: an exact review-number and scope
+  digest echo and zero to twenty planning findings. It carries no verdict or
+  approval. The runner renders `banzai-planning-review/v1` artifacts.
+- `v1/planning-review-analysis.schema.json` is the closed
+  `banzai-planning-review-analysis/v1` analysis: one ordered entry per finding,
+  bound to the review's canonical result digest, with one to three options and
+  an optional recommendation naming a listed option. Recommendations are
+  advisory; dispositions remain human decisions. These additive families keep
+  umbrella contract `1.0.0` and existing result contracts unchanged.
 - `v1/workflow-selection.schema.json` constrains the planner's read-only route
   selection before workflow execution.
 - `v1/phase-result.schema.json` is the preserved legacy planner, implementer,
@@ -42,7 +52,7 @@ Acknowledgment is a reviewer assertion, not independent proof of reading or
 substantive assessment. Blocked reviews may truthfully report partial or zero
 coverage and partial accepted-ID assessment without findings or a gate.
 
-New runs use state schema 9. Historical formats remain readable; old-run
+New runs use state schema 10. Historical formats remain readable; old-run
 continuation and migration are not supported. The runner freezes
 `banzai-review-snapshot/v7` evidence before invocation,
 retains the result and diagnostics, validates scope, renders one attempt-owned
@@ -62,10 +72,11 @@ coverage. Historical snapshot and rendered-review formats retain their original
 readers; recognizing them does not enable old-run continuation or migration.
 
 New task verification has no configuration prerequisite gate. Agent control
-7.0.0 declares capabilities v7 and status v5, including bounded task verification
+8.0.0 declares capabilities v8 and status v6, including bounded task verification
 outcomes and the retained runner-owned completion publication protocol. Its
 stages, closed refusal codes and `pending_application` attempt status keep their
-meaning. Existing escalation/consultation answer v1/v2 inputs retain their
+meaning. Planning gates use gate-decision v1 and planning-triage answer v4.
+Existing escalation/consultation answer v1/v2 inputs retain their
 semantics. The retained configuration-answer v3 and `banzai approve verification`
 utilities apply only to legacy configuration surfaces; adding a profile does
 not authorize current task execution or old-run continuation. See the maintained
@@ -108,3 +119,10 @@ exact selected documents as well as Git changes. Capabilities v7 expose the
 request v3. Standalone request v3 selects `documentPath` and `workflow`; its
 response envelope remains v2. Retained binding-v1/v2 decoders preserve history
 without authorizing execution. Existing documents and archives are not migrated.
+
+Planning-review and planning-analysis attempts are read-only, with no artifact
+write grant. The runner alone publishes planning-review-N.md beside the exact
+bound work documents. The current hook executes state v10 only and retains its
+newer-schema update diagnostic. Binding v3 gains no role. Both structured output
+contracts remain v1 under umbrella 1.0.0; human planning triage is answer v4 in
+control 8.0.0, and never grants plan approval or ADR acceptance.

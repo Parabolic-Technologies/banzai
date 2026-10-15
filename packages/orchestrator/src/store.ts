@@ -1,3 +1,4 @@
+import { validatePlanningReviewState } from "./planning-review-state.js";
 import {
   parseTaskVerificationPublication,
   parseVerificationDecision,
@@ -75,6 +76,7 @@ import type {
 import {
   CONTRACT_VERSION,
   CONTEXT_ATTEMPT_SCHEMA,
+  ATTEMPT_FILE_TOKENS,
   CONTEXT_ATTEMPT_SCHEMA_VERSION,
   VERIFICATION_LEDGER_SCHEMA_VERSION
 } from "./types.js";
@@ -305,6 +307,7 @@ function decisionStateStringArray(value: unknown): string[] {
 
 function validateDecisionState(state: RunState): RunState {
   try {
+    validatePlanningReviewState(state);
     const pending = state.pendingHumanDecision ?? null;
     if (
       (state.status === "needs_human_decision" && pending === null) ||
@@ -323,7 +326,7 @@ function validateDecisionState(state: RunState): RunState {
         pending,
         state.configurationSetup.configSchemaVersion
       );
-    } else if (pending !== null) {
+    } else if (pending !== null && pending.kind !== "planning_review_triage") {
       const record = decisionStateRecord(
         pending,
         pending.kind === "escalation"
@@ -349,6 +352,12 @@ function validateDecisionState(state: RunState): RunState {
     const decisionIds = new Set<string>();
     const configurationProposalIds = new Set<string>();
     for (const decision of state.humanDecisions ?? []) {
+      if (
+        decision.kind === "plan_rework" ||
+        decision.kind === "adr_rework" ||
+        decision.kind === "planning_review_triage"
+      )
+        continue;
       if (decision.kind === "configuration_prerequisite") {
         if (
           !hasConfigurationSetup(state) ||
@@ -461,7 +470,7 @@ function validateDecisionState(state: RunState): RunState {
 function normalizeRunState(
   state: RunState | LegacyRunStateV2 | LegacyRunState
 ): RunState {
-  if (![1, 2, 3, 4, 5, 6, 7, 8, 9].includes(state.schemaVersion)) {
+  if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(state.schemaVersion)) {
     throw new BanzaiError(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Unsupported persisted run state version."
@@ -476,7 +485,7 @@ function normalizeRunState(
   if (
     state.schemaVersion === 7 ||
     state.schemaVersion === 8 ||
-    state.schemaVersion === 9
+    state.schemaVersion >= 9
   ) {
     // Only the completion cursor is new. Everything else must remain one of
     // the combinations a v4 or v6 bootstrap could have produced.
@@ -519,7 +528,7 @@ function normalizeRunState(
     state.schemaVersion === 5 ||
     state.schemaVersion === 6 ||
     state.schemaVersion === 8 ||
-    state.schemaVersion === 9 ||
+    state.schemaVersion >= 9 ||
     (state.schemaVersion === 7 && state.artifactBinding !== undefined)
   ) {
     if (
@@ -552,7 +561,7 @@ function normalizeRunState(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Run state v4 retains binding v1 semantics."
     );
-  if (state.schemaVersion === 8 || state.schemaVersion === 9) {
+  if (state.schemaVersion === 8 || state.schemaVersion >= 9) {
     if (state.taskVerification !== undefined) {
       const publication = parseTaskVerificationPublication(
         state.taskVerification
@@ -564,8 +573,8 @@ function normalizeRunState(
       state.verificationMode !== "task" ||
       "configurationSetup" in state ||
       state.artifactBinding?.binding.schemaVersion !==
-        (state.schemaVersion === 9 ? 3 : 2) ||
-      (state.schemaVersion === 9 &&
+        (state.schemaVersion >= 9 ? 3 : 2) ||
+      (state.schemaVersion >= 9 &&
         state.artifactBinding.binding.artifacts.verificationDirectory !==
           `.banzai/runs/${state.runId}/verification`) ||
       "verificationEvidence" in state
@@ -615,7 +624,7 @@ function normalizeRunState(
     state.schemaVersion === 6 ||
     state.schemaVersion === 7 ||
     state.schemaVersion === 8 ||
-    state.schemaVersion === 9
+    state.schemaVersion >= 9
   ) {
     const recovery = state.recovery ?? null;
     if (recovery !== null && recovery.stage === undefined) {
@@ -627,7 +636,7 @@ function normalizeRunState(
           : "attempt_started";
     }
     validateConfigurationStateEnvelope(state);
-    return validateDecisionState(state);
+    return validateDecisionState(state as RunState);
   }
   if (state.schemaVersion === 2) {
     const normalized: RunState = {
@@ -733,7 +742,7 @@ export class RunStore {
     return containedEvidencePath(
       this.runDirectory(runId),
       "attempts",
-      `${safeEvidenceSegment(attempt.id, "attempt.id", 200)}-${attempt.kind}.json`
+      `${safeEvidenceSegment(attempt.id, "attempt.id", 200)}-${ATTEMPT_FILE_TOKENS[attempt.kind]}.json`
     );
   }
 
@@ -1695,7 +1704,7 @@ export class RunStore {
       if (
         raw.runId !== runId ||
         !CANCELLATION_STATUSES.includes(raw.status as RunState["status"]) ||
-        ![1, 2, 3, 4, 5, 6, 7, 8, 9].includes(raw.schemaVersion as number)
+        ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(raw.schemaVersion as number)
       )
         throw new Error();
     } catch {
@@ -1895,6 +1904,17 @@ export class RunStore {
     );
   }
 
+  planningReviewCandidatePath(
+    runId: string,
+    attempt: AttemptReference
+  ): string {
+    return path.join(
+      this.runDirectory(runId),
+      "attempts",
+      `${safeEvidenceSegment(attempt.id, "attempt.id", 200)}.planning-review-candidate.md`
+    );
+  }
+
   async readRunAttempt(
     runId: string,
     attempt: AttemptReference
@@ -1913,7 +1933,9 @@ export class RunStore {
       .filter(
         (entry) =>
           entry.isFile() &&
-          /-(selection|plan|implementation|fix|review)\.json$/u.test(entry.name)
+          Object.values(ATTEMPT_FILE_TOKENS).some((token) =>
+            entry.name.endsWith(`-${token}.json`)
+          )
       )
       .map((entry) => entry.name)
       .sort();
@@ -2016,8 +2038,8 @@ export class RunStore {
       ordinal: (existing?.invocations.length ?? 0) + 1
     };
     const ledger: ContextAttemptLedger = {
-      schema: CONTEXT_ATTEMPT_SCHEMA,
-      schemaVersion: CONTEXT_ATTEMPT_SCHEMA_VERSION,
+      schema: existing?.schema ?? CONTEXT_ATTEMPT_SCHEMA,
+      schemaVersion: existing?.schemaVersion ?? CONTEXT_ATTEMPT_SCHEMA_VERSION,
       runId,
       attempt,
       invocations: [...(existing?.invocations ?? []), entry]
@@ -2147,7 +2169,7 @@ export class RunStore {
     return containedEvidencePath(
       this.runDirectory(runId),
       "digests",
-      `${safeEvidenceSegment(attempt.id, "attempt.id", 200)}-${attempt.kind}.json`
+      `${safeEvidenceSegment(attempt.id, "attempt.id", 200)}-${ATTEMPT_FILE_TOKENS[attempt.kind]}.json`
     );
   }
 

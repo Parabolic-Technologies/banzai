@@ -1,3 +1,8 @@
+import {
+  validatePlanningReviewResult,
+  validatePlanningReviewAnalysis,
+  parsePlanningReviewResult
+} from "../../validation.js";
 import { lstat, readFile } from "node:fs/promises";
 import { BanzaiError } from "../../errors.js";
 import { FALLBACK_VENDOR, vendorFor } from "../../models.js";
@@ -337,7 +342,11 @@ export async function promoteTerminalCheckpoint(
   if (expectedApprovalDigest !== null) {
     await validateApproval(context, state);
   } else if (expectedWorkflowDigest !== null) {
-    if (attempt.kind === "plan") {
+    if (
+      attempt.kind === "plan" ||
+      attempt.kind === "planning_review" ||
+      attempt.kind === "planning_analysis"
+    ) {
       const selection = state.workflowSelection ?? null;
       if (
         selection?.workflow !== "strict" ||
@@ -408,9 +417,46 @@ export async function validateTerminalCheckpointResult(
   state: RunState,
   attempt: AttemptReference,
   result: TerminalCheckpointResult,
-  config: OrchestratorConfig
+  config: OrchestratorConfig,
+  reconcilingPlanningPublication = false
 ): Promise<void> {
-  await validateSavedArtifactScope(context, state, attempt);
+  await validateSavedArtifactScope(
+    context,
+    state,
+    attempt,
+    reconcilingPlanningPublication
+  );
+  if (
+    attempt.kind === "planning_review" ||
+    attempt.kind === "planning_analysis"
+  ) {
+    const episode = state.planningReview?.active;
+    if (episode == null)
+      throw new BanzaiError(
+        "INVALID_TERMINAL_CHECKPOINT",
+        "Planning episode is missing."
+      );
+    if (attempt.kind === "planning_review")
+      validatePlanningReviewResult(result, episode);
+    else {
+      if (episode.reviewAttemptId === null || episode.resultDigest === null)
+        throw new BanzaiError(
+          "INVALID_TERMINAL_CHECKPOINT",
+          "Planning review evidence is missing."
+        );
+      const review = await context.store.readRunAttempt(state.runId, {
+        id: episode.reviewAttemptId,
+        kind: "planning_review",
+        mutable: false
+      });
+      validatePlanningReviewAnalysis(result, {
+        ...episode,
+        resultDigest: episode.resultDigest,
+        findings: parsePlanningReviewResult(review.result).findings
+      });
+    }
+    return;
+  }
   if (attempt.kind === "selection") {
     return;
   }
@@ -516,10 +562,14 @@ export function checkpointSettings(
   attempt: AttemptReference,
   config: OrchestratorConfig
 ): { settings: ModelSettings; role: SessionContext["role"] } {
-  if (attempt.kind === "selection" || attempt.kind === "plan") {
+  if (
+    attempt.kind === "selection" ||
+    attempt.kind === "plan" ||
+    attempt.kind === "planning_analysis"
+  ) {
     return { settings: config.models.planner, role: "planner" };
   }
-  if (attempt.kind === "review") {
+  if (attempt.kind === "review" || attempt.kind === "planning_review") {
     return { settings: config.models.reviewer, role: "reviewer" };
   }
   return { settings: config.models.implementer, role: "implementer" };

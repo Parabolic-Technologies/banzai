@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   assertContractParity,
+  planningReviewResultSchema,
+  planningReviewAnalysisSchema,
   legacyPhaseResultSchema,
   legacyPhaseResultV2Schema,
   phaseResultSchema,
@@ -48,6 +50,10 @@ import {
   evaluationStateFixture,
   verificationAttemptFixture
 } from "./helpers.js";
+import {
+  planningReviewResult,
+  planningReviewAnalysis
+} from "./planning-review-fixtures.js";
 
 function phase(
   overrides: Record<string, unknown> = {}
@@ -267,6 +273,8 @@ test("shared schemas satisfy the OpenAI Structured Outputs subset", () => {
   assertStructuredOutputSchema(phaseResultSchema);
   assertStructuredOutputSchema(legacyPhaseResultV2Schema);
   assertStructuredOutputSchema(reviewResultSchema);
+  assertStructuredOutputSchema(planningReviewResultSchema);
+  assertStructuredOutputSchema(planningReviewAnalysisSchema);
 });
 
 test("workflow selections require a versioned route, confidence, and trigger evidence", () => {
@@ -980,7 +988,9 @@ test("verification ledger decoding accepts bounded lifecycle evidence and reject
   );
 });
 
-function terminalCheckpoint(): TerminalAttemptCheckpoint {
+function terminalCheckpoint(
+  overrides: Partial<Omit<TerminalAttemptCheckpoint, "integrityDigest">> = {}
+): TerminalAttemptCheckpoint {
   const checkpoint: Omit<TerminalAttemptCheckpoint, "integrityDigest"> = {
     schema: "banzai-terminal-attempt-checkpoint/v3",
     schemaVersion: 3,
@@ -1018,13 +1028,61 @@ function terminalCheckpoint(): TerminalAttemptCheckpoint {
     baseCommit: "c".repeat(40),
     approvalDigest: "d".repeat(64),
     workflowDigest: null,
-    scopeDigest: "e".repeat(64)
+    scopeDigest: "e".repeat(64),
+    ...overrides
   };
   return {
     ...checkpoint,
     integrityDigest: terminalCheckpointIntegrity(checkpoint)
   };
 }
+
+test("planning checkpoints select only their own dedicated result contract", () => {
+  const review = planningReviewResult(1, 1);
+  const analysis = planningReviewAnalysis(review);
+  for (const kind of ["planning_review", "planning_analysis"] as const) {
+    const contract =
+      kind === "planning_review"
+        ? "planning-review-result/v1"
+        : "planning-review-analysis/v1";
+    const checkpoint = terminalCheckpoint({
+      attempt: {
+        id: `${kind.replaceAll("_", "-")}-1-abcd1234`,
+        kind,
+        mutable: false
+      },
+      phase: kind,
+      resultContract: contract,
+      result: kind === "planning_review" ? review : analysis,
+      approvalDigest: null,
+      workflowDigest: "d".repeat(64)
+    });
+    assert.deepEqual(parseTerminalAttemptCheckpoint(checkpoint), checkpoint);
+    for (const wrong of [
+      "phase-result/v4",
+      "review-result/v2",
+      kind === "planning_review"
+        ? "planning-review-analysis/v1"
+        : "planning-review-result/v1"
+    ])
+      assert.throws(
+        () =>
+          parseTerminalAttemptCheckpoint({
+            ...checkpoint,
+            resultContract: wrong
+          }),
+        { code: "INVALID_TERMINAL_CHECKPOINT" }
+      );
+    assert.throws(
+      () =>
+        parseTerminalAttemptCheckpoint({
+          ...checkpoint,
+          result: kind === "planning_review" ? analysis : review
+        }),
+      { code: "INVALID_RESULT" }
+    );
+  }
+});
 
 test("terminal checkpoint validation binds exact evidence and integrity", () => {
   const checkpoint = terminalCheckpoint();

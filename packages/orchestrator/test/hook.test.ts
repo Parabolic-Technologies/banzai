@@ -22,6 +22,85 @@ import {
 } from "../src/types.js";
 import { workflowAuthorizationDigest } from "../src/workflow.js";
 import { createTestRepository, evaluationStateFixture } from "./helpers.js";
+import { createPlanningReviewFixture } from "./workflow-fixtures.js";
+import { planningTriageAnswer } from "./planning-review-fixtures.js";
+
+test("the real hook denies both planning kinds with runner environments across every write target", async () => {
+  const f = await createPlanningReviewFixture(1);
+  try {
+    const roles = f.requested.artifactBinding?.binding.artifacts;
+    assert.ok(roles);
+    assert.ok(roles.plan);
+    const targets = [
+      roles.plan,
+      "documentation/decisions/9999-new.md",
+      "src/example.ts",
+      `${roles.reviewDirectory}/planning-review-1.md`
+    ];
+    const observed: string[] = [];
+    f.adapters.onPlanning = async (request) => {
+      const state = await f.runner.store.requireActiveState();
+      const kind = state.activeAttempt?.kind;
+      assert.ok(kind === "planning_review" || kind === "planning_analysis");
+      observed.push(kind);
+      assert.equal(request.env.BANZAI_RUN_ID, state.runId);
+      for (const key of [
+        "BANZAI_APPROVAL_DIGEST",
+        "BANZAI_WORKFLOW_DIGEST",
+        "BANZAI_REVIEW_ARTIFACT"
+      ])
+        assert.ok(!request.env[key]);
+      for (const target of targets) {
+        const result = runHook({
+          cwd: f.repository.root,
+          env: request.env,
+          target
+        });
+        assert.equal(
+          result.decision,
+          "deny",
+          `${kind}: ${target}: ${result.reason}`
+        );
+        assert.match(
+          result.reason,
+          /planning review and analysis are read-only/
+        );
+      }
+    };
+    await f.runner.resume();
+    assert.deepEqual(observed, ["planning_review", "planning_analysis"]);
+    const triage = await f.runner.store.requireActiveState();
+    await f.runner.answerPlanningReview({
+      answer: planningTriageAnswer(triage),
+      decidedBy: "owner"
+    });
+    const state = await f.runner.reworkPlan({
+      feedback: "Revise the plan.",
+      decidedBy: "owner",
+      autoResume: false
+    });
+    state.activeAttempt = {
+      id: "plan-2-abcdef12",
+      kind: "plan",
+      mutable: true
+    };
+    await f.runner.store.writeState(state);
+    await f.runner.store.requireActiveState();
+    const denied = runHook({
+      cwd: f.repository.root,
+      env: {
+        BANZAI_RUN_ID: state.runId,
+        BANZAI_APPROVAL_DIGEST: "",
+        BANZAI_WORKFLOW_DIGEST: "",
+        BANZAI_REVIEW_ARTIFACT: ""
+      },
+      target: `${roles.reviewDirectory}/planning-review-1.md`
+    });
+    assert.equal(denied.decision, "deny", denied.reason);
+  } finally {
+    await f.repository.dispose();
+  }
+});
 
 const hookPath = path.resolve(
   process.cwd(),
@@ -692,7 +771,7 @@ for (const artifactLayout of ["private", "legacy"] as const)
           const state = evaluationStateFixture({
             workflow,
             extra: {
-              schemaVersion: 9,
+              schemaVersion: 10,
               completionPublication: null,
               verificationMode: "task",
               runId,
@@ -830,7 +909,7 @@ test("strict planning may record an accepted ADR in the manifest index under hoo
     const state = evaluationStateFixture({
       workflow: "strict",
       extra: {
-        schemaVersion: 9,
+        schemaVersion: 10,
         completionPublication: null,
         verificationMode: "task",
         runId,

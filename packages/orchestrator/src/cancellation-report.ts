@@ -680,7 +680,9 @@ export async function collectCancellationReport(
           kind === "model" ? modelDirectory : verificationDirectory
         ).entries.filter((e) =>
           kind === "model"
-            ? /-(selection|plan|implementation|fix|review)\.json$/u.test(e.name)
+            ? /-(selection|plan|implementation|fix|review)\.json$/u.test(
+                e.name
+              ) && !/-planning-(?:review|analysis)\.json$/u.test(e.name)
             : e.name !== "ledger.json" && e.name.endsWith(".json")
         );
         const identities = new Set<string>();

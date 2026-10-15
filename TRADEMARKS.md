@@ -1,6 +1,6 @@
 # Names and Logos
 
-Banzai is owned by **Banzai International, Inc. d/b/a Parabolic, Inc.
+Banzai is owned by **Banzai International, Inc. d/b/a Parabolic
 ("Parabolic")**. The Banzai name and logos identify Parabolic's product.
 Apache-2.0 licenses the
 project's copyrightable material, including original artwork, but section 6

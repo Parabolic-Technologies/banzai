@@ -34,7 +34,7 @@ is a runner-owned phase and follow only its assigned Banzai phase skill.
 ## Establish the control boundary
 
 1. Run `banzai control capabilities` before any state-changing command.
-2. Require the exact supported v7 declaration in the reference. Treat missing
+2. Require the exact supported v8 declaration in the reference. Treat missing
    executable, non-zero exit, stderr error, malformed JSON, unsupported
    identity/version, or a missing operation as incompatible.
 3. Stop with a bounded diagnostic when incompatible. Do not install Banzai,
@@ -78,7 +78,8 @@ escalation question or blocked/retry state; never run `project-manifest` or
 edit files for it.
 
 At `approve_adr`, `approve_plan`, `answer_escalation`,
-`answer_consultation`, `answer_configuration_prerequisite`, or `triage`, present the exact
+`answer_consultation`, `answer_configuration_prerequisite`,
+`answer_planning_review_triage`, or `triage`, present the exact
 current artifact paths, ADR/finding IDs, questions, dispositions, evidence
 classification, and decision provenance shown by status. Wait for an explicit
 answer to this current gate.
@@ -110,7 +111,21 @@ rewrite, complete, or infer a decision.
   infer Accept from plan approval, invent an external updater or edit config.
   This historical format does not authorize old-run continuation. New task runs
   never require this configuration gate.
-- Relay an ADR or plan decision only through its existing approval command.
+- At ADR and plan gates show the exact artifacts and offered decisions. Relay
+  approve, accept and reject through their existing argv approval commands.
+  Rework and independent review use `banzai-agent-gate-decision/v1` through
+  direct stdin to `banzai control decide`; preserve exact owner feedback and
+  selected paths, without inventing a decision or changing the scope.
+- At `answer_planning_review_triage`, show every finding and every analysis
+  option with its consequences before the advisory recommendation. Require one
+  explicit option, own instruction or decline per finding, plus any exact
+  additional instruction. Relay `banzai-agent-answer/v4` through direct stdin to
+  `banzai control answer`. The supervisor never chooses, infers or rewrites a
+  disposition, recommendation or feedback.
+- Encode both planning documents as raw UTF-8 JSON; never `\u`-escape non-ASCII
+  text. On `CONTROL_INPUT_TOO_LARGE`, report the error and never truncate,
+  summarize or rewrite the user's text. Ask the user to shorten their own text
+  or answer in `banzai` in a terminal.
 - Relay review triage only after every latest finding ID has exactly one user
   disposition: `accept`, `reject`, or `defer`.
 - Never run `banzai cancel` without an explicit current user decision.

@@ -293,6 +293,7 @@ Non-goals:
   `Planning review is stale: reviewed artifacts changed.`, and a retry starts a
   new planning review of the same paths at their current bytes, which receives
   the next `<N>`.
+
 - **FR38** `Ctrl+C` at any prompt of these flows exits the interface without
   changing the run. A run left at the planning-review triage gate is presented
   again the next time `banzai` opens.

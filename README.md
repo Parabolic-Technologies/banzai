@@ -232,7 +232,7 @@ mutable work. Interrupted implementation is never silently retried. Details:
 
 To supervise a run from a chat agent, explicitly invoke `/banzai:orchestrate`
 (Claude Code) or `$banzai:orchestrate` (Codex); the skill can never select
-itself. Compatible supervisors require control contract `7.0.0`; see
+itself. Compatible supervisors require control contract `8.0.0`; see
 [agent control](documentation/orchestrator.md#agent-control) for exact schemas
 and compatibility checks.
 
@@ -389,11 +389,11 @@ IDs. The sampled rollout procedure and promotion evidence are documented in
   [`documentation/release-checklist.md`](documentation/release-checklist.md)
 - Maintaining this repository — release gate, version parity, conventions:
   [`CONTRIBUTING.md`](CONTRIBUTING.md)
-- Current release notes: [2.6.0](documentation/releases/2.6.0.md).
+- Current release notes: [2.7.1](documentation/releases/2.7.1.md).
 
 ## Author and License
 
-Owned by **Banzai International, Inc. d/b/a Parabolic, Inc. ("Parabolic")**.
+Owned by **Banzai International, Inc. d/b/a Parabolic ("Parabolic")**.
 Created by [Alexander Torosh](https://github.com/alexander-torosh).
 Contact: [alexander@parabolic.io](mailto:alexander@parabolic.io).
 Source: [Parabolic-Technologies/banzai](https://github.com/Parabolic-Technologies/banzai).
@@ -410,3 +410,9 @@ New tasks start without profile setup. Strict mandatory checks belong to the
 approved plan; lite uses the delegated request and actual execution permissions.
 Missing unrelated tooling is not a barrier, and failed required checks prevent
 completion. Legacy `verify` utilities remain explicit compatibility commands.
+
+
+Strict ADR and plan gates offer required-feedback rework and independent planning
+review. Review findings receive read-only planner analysis and explicit human
+triage before any revision. Revisions return for approval; a recommendation
+never approves work. See the [planning loop](documentation/orchestrator.md#rework-and-independent-planning-review).

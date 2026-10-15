@@ -229,7 +229,7 @@ ${handoff}
 
 // JSON in fenced code is inert Markdown and preserves every string, including
 // trailing newlines and control/markup characters, without a second prose owner.
-function reviewValue(value: unknown): string {
+export function reviewValue(value: unknown): string {
   const ordered = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(ordered);
     if (value !== null && typeof value === "object")
@@ -814,17 +814,33 @@ export async function publishReviewArtifact(
     await verifyExecutionIgnore(repoRoot, relative);
   }
   await mkdir(path.dirname(temporaryPath), { recursive: true, mode: 0o700 });
+  await publishArtifactBytes(
+    temporaryPath,
+    absolutePath,
+    candidate.contents,
+    verifyDestinations,
+    context.snapshot !== undefined
+  );
+}
+
+/** Shared atomic publication; callers own containment, visibility and identity. */
+export async function publishArtifactBytes(
+  temporaryPath: string,
+  absolutePath: string,
+  contents: string,
+  verifyDestinations: () => Promise<void>,
+  createOnly: boolean
+): Promise<void> {
   const handle = await open(temporaryPath, "wx", 0o644);
   try {
     try {
-      await handle.writeFile(candidate.contents, "utf8");
+      await handle.writeFile(contents, "utf8");
       await handle.sync();
     } finally {
       await handle.close();
     }
     await verifyDestinations();
-    if (context.snapshot === undefined)
-      await rename(temporaryPath, absolutePath);
+    if (!createOnly) await rename(temporaryPath, absolutePath);
     else {
       // Exclusive atomic publication cannot replace a concurrently created artifact.
       await link(temporaryPath, absolutePath);

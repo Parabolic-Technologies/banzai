@@ -90,7 +90,9 @@ export function isRetryableInterruptedAttempt(
   return (
     !attempt.mutable &&
     record.status === "started" &&
-    (attempt.kind === "selection" || attempt.kind === "review")
+    ["selection", "review", "planning_review", "planning_analysis"].includes(
+      attempt.kind
+    )
   );
 }
 

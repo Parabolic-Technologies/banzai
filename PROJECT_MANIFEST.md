@@ -25,7 +25,7 @@ installed policy source. These files describe nothing here.
   maintains the plugin and the orchestrator; it is not an end-user project
   configured by them.
 - Public project identity: `https://github.com/Parabolic-Technologies/banzai`.
-  Product owner: Banzai International, Inc. d/b/a Parabolic, Inc. ("Parabolic").
+  Product owner: Banzai International, Inc. d/b/a Parabolic ("Parabolic").
   Author: Alexander Torosh (`https://github.com/alexander-torosh`,
   `alexander@parabolic.io`). Original project material uses Apache-2.0; root
   `LICENSE`, `NOTICE`, `TERMS_OF_USE.md`, `TRADEMARKS.md`, and
@@ -466,7 +466,7 @@ Orchestrator (`packages/orchestrator/src/`):
   absent or unreadable plugin versions are explicit, never source-version guesses.
 - `agent-control-cli.ts` / `agent-control.ts` — non-TTY control grammar over
   closed direct-stdin JSON (64 KiB, validated before mutation); current
-  `banzai-agent-capabilities/v7`, `banzai-agent-status/v5`,
+  `banzai-agent-capabilities/v8`, `banzai-agent-status/v6`,
   configuration `banzai-agent-answer/v3`; preserved consultation
   `banzai-agent-answer/v2`, `banzai-agent-request/v1`, escalation
   `banzai-agent-answer/v1`, `banzai-agent-recovery/v1`. Every mutation
@@ -489,9 +489,11 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   tokens, colour detection (`FORCE_COLOR`, `NO_COLOR`, `TERM`), and pure
   width/wrap/usage formatting. Nothing rendered here is parsed back.
 - `workflow.ts` — `WorkflowRunner`, the core: `start`, `resume`, `retry`,
-  `recover`, `approvePlan`, `decideAdr`, `answerHumanDecision`, `triage`,
+  `recover`, `approvePlan`, `reworkPlan`, `decideAdr`, `requestPlanningReview`,
+  `answerPlanningReview`, `answerHumanDecision`, `triage`,
   `cancel`, `recordCancellationResponse`, `status`, and the private phase executors (selection, planning,
-  implementation, verification, review, fixes). Owns preflight including
+  read-only planning review/analysis, implementation, verification, review,
+  fixes). Owns preflight including
   `assertClaudePermissions`, attempt reconciliation, builder-session
   selection, full/delta reviewer policy, snapshot-v7-bound rendered-review-v8
   publication without formatting-only model calls,
@@ -513,6 +515,13 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
 
   It keeps attempt reconciliation, phase-result application, the status
   projections and the phase executors.
+
+- `planning-review-state.ts` — closed state-v10 episode, pending-triage and
+  decision-record validation for `RunStore`, including historical exclusion.
+- `planning-review-artifact.ts` — deterministic planning-review v1 rendering,
+  canonical sibling numbering and create-only, identical-byte publication.
+- `workflow/domain/planning-review.ts` — pure planning-gate availability,
+  exact scope selection, dispatch, stale facts, actionability and guarded restore.
 
 - `workflow/ports.ts` — the type-only `Clock`, `IdSource` and `RunnerSources`
   process-boundary ports, re-exported from `workflow.ts`.
@@ -593,7 +602,7 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   single-active-run lock (`releaseHeldRunnerLocksSync` for signal handlers).
   A separate owned short guard serializes state/events and rejects stale terminal
   changes; it is never released by the signal handler or reclaimed automatically.
-  Normalizes state schema 1 to 2 on read.
+  Normalizes historical state schemas 1 and 2 to schema 3 on read.
 - `plan-task-completion.ts` — approved `TNNN` parsing, the legacy
   `banzai-plan-task-completion/v1` projection renderer/decoder, ledger shape
   validation, `validatePlanTaskCompletion` for historical v1 checkpoints, and
@@ -657,13 +666,14 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   in checkout and fail-closed `--input` modes; imports only `types` and
   `errors`.
 - `context-report-cli.ts` / `context-report.ts` / `context-report-render.ts` —
-  independent `banzai-context-report/v1` collector over context ledgers; never
+  independent `banzai-context-report/v2` collector over context ledgers; never
   imports evaluation, adapters, store, or workflow.
 - `context-accounting.ts` — exact UTF-8 measurement, ledger decoding, and
   observe/enforce budget evaluation; only pre-call `runner_payload_bytes` can
   enforce.
 - `prompt-envelope.ts` / `output-contract.ts` — ordered closed prompt
-  components and the exact vendor-specific schema serialization; the measured
+  components and exhaustive vendor-specific schema serialization, including
+  both planning-review contract identities; the measured
   bytes are the bytes the adapter receives.
 - `cancellation.ts`, `cancellation-evidence.ts`, `cancellation-cli.ts`,
   `cancellation-report.ts`, `cancellation-report-render.ts` — observation v1
@@ -675,13 +685,20 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   (ADR-0034); gate elapsed never becomes active effort, and recorder failures
   cannot authorize or replay workflow work.
 - `validation.ts` — runtime decoders (`parseWorkflowSelectionResult`,
-  `parsePhaseResult`, `parseReviewResult`, `parseConfig`) enforcing the
+  `parsePhaseResult`, `parseReviewResult`, `parseConfig`,
+  `parsePlanningReviewResult`, `parsePlanningReviewAnalysis`) enforcing the
   invariants JSON Schema cannot express, including
   `effectiveResultSourceIdentities` and `parseResultDigestEvidence`.
+  Dedicated planning validators bind review number, scope and canonical result
+  digest; triage validates all dispositions atomically in finding order.
+  `validateHumanFreeText` enforces trimmed inert UTF-8 and per-field byte bounds
+  for planning feedback and instructions without changing legacy validators.
   `banzai-recovery-authorization/v1` keeps its schema identity while accepting a
   read-only `plan` attempt beside the mutable implementation and fix attempts.
 - `contracts.ts` — re-exports the plugin contract JSON; `assertContractParity`
-  fails startup on `CONTRACT_VERSION_MISMATCH` or `SCHEMA_VERSION_MISMATCH`.
+  includes the additive `banzai-planning-review-result/v1` and
+  `banzai-planning-review-analysis/v1` families under umbrella `1.0.0` and fails
+  startup on `CONTRACT_VERSION_MISMATCH` or `SCHEMA_VERSION_MISMATCH`.
 - `configuration-prerequisite.ts` — bounded closed configuration decisions,
   state-6 envelope validation and runner-assigned command identity rules.
 - `verification-config.ts` — exclusive, byte-pinned lossless previews and atomic
@@ -711,7 +728,7 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   resolved to the public repository. Init creates the local guide only when absent,
   under initialization ownership and regular-file/no-symlink checks.
 - `phase-resources.ts` — committed generated raw UTF-8 bodies and SHA-256
-  identities for six phases, ten guidance files, six policies and two hook
+  identities for seven phases, ten guidance files, six policies and two hook
   references. Explicit build generates; check-dist only compares.
 - `phase-instructions.ts` — ordered resource delivery and bounded installed
   identity comparison. Only prompts, workflow and doctor consume it. It imports
@@ -729,7 +746,7 @@ verbose` from `--quiet`/`--verbose`, then `BANZAI_PROGRESS`; stdout stays
   with historical readers,
   full/delta anchors, recorded evidence, digest validation and owned paths.
 - `types.ts` — all shared types, `CONTRACT_VERSION = "1.0.0"`, phase-result
-  schema v4 and state schema v9 with explicit historical readers, attempt
+  schema v4 and state schema v10 with explicit historical readers, attempt
   schema v4 under `banzai-completion-protocol/v1`, terminal checkpoint v3, the
   completion capture/transition/candidate/publication record identities, and the independent
   agent-control, context, and checkpoint/recovery contract identities; no
@@ -777,7 +794,7 @@ Repository release scripts (`packages/orchestrator/scripts/`):
 
 Plugin (`plugins/banzai/`):
 
-- `phases/` and `guidance/` — six runner processes and ten shared portable
+- `phases/` and `guidance/` — seven runner processes and ten shared portable
   guidance files outside skill discovery. `code-design.md` is authored directly
   rather than extracted from a skill section. Standalone skill consumers read
   guidance relatively; retained Orchestrated Mode sections are transitional
@@ -838,7 +855,7 @@ Plugin (`plugins/banzai/`):
   `PROJECT_MANIFEST.md` in the session directory or a parent — and the hook
   stays silent in repositories without that evidence.
 - `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` — plugin manifests,
-  currently version `2.7.0`. The Codex manifest additionally declares the hook
+  currently version `2.7.1`. The Codex manifest additionally declares the hook
   and the store interface metadata.
 - `PROJECT_MANIFEST.md`, `AGENTS.md`, `CLAUDE.md`, and the placeholder
   `documentation/` tree (`README.md`, `decisions/README.md`, `.gitkeep` files) —
@@ -853,7 +870,7 @@ Plugin (`plugins/banzai/`):
   Report duties, conditional changeReport triggers, approval immutability,
   standalone role readers and runner-only review rendering remain unchanged.
 
-New runs use state v9 with task verification and immutable tracked-document
+New runs use state v10 with task verification and immutable tracked-document
 binding v3. New documents share `documentation/work/<slug>/`, independent of
 existing declaration contents. No profile/bootstrap or storage initialization
 readiness gate runs. Strict implementation grants only its implementation/test
@@ -861,7 +878,7 @@ reports; strict fix also grants its conditional change report. Lite routes keep
 work/change-report grants. Workspace v3 contains sorted unique Git changes plus
 exact selected documents, including unchanged approved files. Machine evidence
 stays under the run root. Historical runs remain read-only evidence without
-migration or new execution authority. Doctor v5 checks state v9 without repair.
+migration or new execution authority. Doctor v5 checks state v10 without repair.
 External hook/client installation remains separate delivery evidence.
 
 Project guidance is inspected before new-run creation and authentication, then
@@ -964,6 +981,13 @@ attempt, approval marker or transcript.
 - Human decisions: five existing workflow gates — conditional planning-only
   decision consultation, `adr_approval`, `plan_approval`, `escalation`, and
   review triage. Task verification adds no configuration prerequisite gate.
+  Strict ADR and plan gates support required-feedback rework and explicitly
+  requested read-only planning review. A separate v10 episode binds plain
+  SHA-256 scope, deterministic sibling publication and planner analysis to
+  human triage. Actionable dispositions resume ordinary planning; zero findings
+  or declined triage restore the origin gate. Stale scope fails closed before
+  consumption. Planning attempts do not affect code-review continuity, approval
+  or completion evidence.
   No other phase boundary asks for confirmation; every other
   model boundary emits a report and continues. Operator recovery is a separate
   explicit risk authorization, distinct from workflow gates, retry, approval, or
@@ -994,7 +1018,7 @@ attempt, approval marker or transcript.
   `banzai status --json`.
 - Agent control: `banzai control capabilities` is offline and can run outside a
   Git checkout; it declares the exact independently versioned non-TTY operation
-  set under control contract `7.0.0`, including keyed consultation answers and
+  set under control contract `8.0.0`, including keyed consultation answers and
   explicit `recover` with the
   closed `banzai-agent-recovery/v1` input. `banzai control status` exposes one
   bounded public projection derived from runner state rather than human
@@ -1086,10 +1110,10 @@ attempt, approval marker or transcript.
 - Context evidence: immediately before each actual model invocation, the runner
   writes exact prompt/output-contract UTF-8 counts, closed categories,
   authority counts, and explicit-unavailable post-call surfaces to the physical
-  attempt's `banzai-context-attempt/v1` ledger. `observe` is behavior-neutral;
+  attempt's `banzai-context-attempt/v2` ledger. `observe` is behavior-neutral;
   `enforce` can block only exact pre-call runner bytes without weakening the
   prompt. `banzai eval context` reads those leaves directly under the export
-  cohort grammar and emits independent `banzai-context-report/v1` JSON or its
+  cohort grammar and emits independent `banzai-context-report/v2` JSON or its
   Markdown projection. Missing historical leaves are incomplete, while present
   malformed, content-bearing, or conflicting evidence aborts as
   `INVALID_CONTEXT_EVIDENCE`. The ledger/report allow-list excludes prompts,
@@ -1568,21 +1592,23 @@ status` reports only whether credentials are visible and stored, so a
   runs remain read-only evidence with legacy/unknown completion where applicable;
   their readers do not authorize continuation or migration. Standalone work without
   external evidence still uses mutable plan checkboxes.
-- Current bootstrap: every new route begins at state 9 with document binding 3
+- Current bootstrap: every new route begins at state 10 with document binding 3
   and a nullable completion cursor. Strict completion uses the existing protocol
   directly, without a legacy state-transition record. Snapshot 7/rendered review
   8 freeze task verification and completion receipt identities. Independent
   review assesses requirement coverage and unjustified weakening of checks.
   Historical snapshot/phase/result readers retain their original semantics.
 - Agent-control schemas are independently identified as current
-  `banzai-agent-capabilities/v7`, `banzai-agent-status/v5`, and
+  `banzai-agent-capabilities/v8`, `banzai-agent-status/v6`, and
+  `banzai-agent-gate-decision/v1` and `banzai-agent-answer/v4` for planning,
   `banzai-agent-answer/v3` for configuration, plus preserved consultation
   `banzai-agent-answer/v2`, `banzai-agent-request/v1`,
   escalation `banzai-agent-answer/v1`, and `banzai-agent-recovery/v1`, with
-  control contract version `7.0.0`. Capabilities v7 declare `workDocuments` with the fixed directory pattern,
+  control contract version `8.0.0`. Capabilities v8 declare `workDocuments` with the fixed directory pattern,
   binding v3, workspace v3 and verification request v3, plus task verification and the completion
   publication protocol, stages, refusal codes and the `pending_application`
-  attempt status; status v5 includes bounded task dispositions and completion publication state.
+  attempt status and planning gates; status v6 includes bounded task dispositions,
+  completion publication state and planning review/triage.
   Compatibility is the exact capability declaration, not the
   package version. The optional `orchestrate` skill is invocable only by an
   explicit user invocation: Claude Code uses
@@ -1648,8 +1674,8 @@ status` reports only whether credentials are visible and stored, so a
   only, per-source independence, fail-closed input decoding and configuration
   attribution, and deterministic output. KPI semantic changes require a new
   KPI version; the export version never moves for a KPI change.
-- Context contracts `banzai-context-attempt/v1` and
-  `banzai-context-report/v1` are runner-owned and independent of the umbrella,
+- Context contracts `banzai-context-attempt/v2` and
+  `banzai-context-report/v2` are runner-owned and independent of the umbrella,
   evaluation-export, and KPI contracts. Context-report semantic or privacy
   changes require a new context-report version; no context field may be added
   to either frozen evaluation contract.
@@ -1703,7 +1729,7 @@ status` reports only whether credentials are visible and stored, so a
   source, and the only root Claude settings file is the ignored
   `.claude/settings.local.json`. `plugins/banzai/.claude/settings.json` is
   packaged plugin content, not this repository's configuration.
-- Current Banzai release-train version is `2.6.5`, owned solely by root
+- Current Banzai release-train version is `2.7.1`, owned solely by root
   `package.json.version` and mirrored by four plugin/marketplace fields, the
   orchestrator package, and three `package-lock.json` fields (top-level, root
   package, and workspace package). All nine fields across seven files agree.
@@ -1773,4 +1799,4 @@ restate them here. Paths are relative to `documentation/decisions/`.
 | ADR-0052 | Capability-slice architecture and WorkflowRunner decomposition     | `0052-orchestrator-capability-slice-architecture.md`            | Planned     |
 | ADR-0053 | Single pull-request CI gate and publish-time evidence reuse        | `0053-single-pull-request-ci-gate-and-publish-evidence-reuse.md` | Implemented |
 | ADR-0054 | Git-visible work artifacts                                        | `0054-git-visible-work-artifacts.md`                          | Implemented     |
-| ADR-0055 | Planning gate rework and independent planning review              | `0055-planning-gate-rework-and-independent-planning-review.md` | Planned     |
+| ADR-0055 | Planning gate rework and independent planning review              | `0055-planning-gate-rework-and-independent-planning-review.md` | Implemented     |

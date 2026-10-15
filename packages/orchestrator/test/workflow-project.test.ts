@@ -65,6 +65,49 @@ import {
 const LAYOUT_DIAGNOSTIC =
   "legacy Banzai layout: run `project-manifest` to migrate";
 
+test("reviewer instruction preflight includes planning-review before any model or attempt", async () => {
+  const repository = await createTestRepository();
+  const plugin = await instructionPluginFixture();
+  try {
+    await configureInstructionPlugin(repository.root, plugin.directory);
+    const configPath = path.join(repository.root, ".banzai/config.json");
+    const config = JSON.parse(
+      await readFile(configPath, "utf8")
+    ) as OrchestratorConfig;
+    config.models.reviewer.executable = config.models.implementer.executable;
+    await writeFile(configPath, JSON.stringify(config));
+    await writeFile(
+      path.join(plugin.directory, "phases/planning-review.md"),
+      "PRIVATE-PLANNING-PREFLIGHT-CANARY"
+    );
+    const adapters = new FakeAdapters();
+    const runner = new WorkflowRunner(repository.root, adapters);
+    await assert.rejects(
+      runner.start({ slug: "example", request: "Plan it." }),
+      { code: "INSTRUCTION_RESOURCE_MISMATCH" }
+    );
+    const state = await runner.store.requireActiveState();
+    assert.equal(state.status, "created");
+    assert.equal(state.activeAttempt, null);
+    assert.deepEqual(await runner.store.readRunAttempts(state.runId), []);
+    assert.equal(
+      adapters.selectionPrompts.length +
+        adapters.phasePrompts.length +
+        adapters.reviewPrompts.length +
+        adapters.planningRequests.length,
+      0
+    );
+    assert.equal(adapters.codexPreflights + adapters.claudePreflights, 0);
+    assert.doesNotMatch(
+      await readFile(runner.store.statePath(state.runId), "utf8"),
+      /PRIVATE-PLANNING-PREFLIGHT-CANARY/
+    );
+  } finally {
+    await plugin.dispose();
+    await repository.dispose();
+  }
+});
+
 class LayoutStopAdapters extends FakeAdapters {
   stopPhase: PhaseResult["phase"] | null = null;
   override async runPhase(
@@ -1144,7 +1187,7 @@ for (const artifactLayout of ["legacy", "private"] as const) {
                 "utf8"
               )
             ) as RunState;
-            assert.equal(state.schemaVersion, 9);
+            assert.equal(state.schemaVersion, 10);
             assert.equal(state.workflowSelection, null);
             assert.equal(state.artifactBinding?.binding.mode, "workflow");
             originalBinding = JSON.stringify(state.artifactBinding);
@@ -1323,7 +1366,7 @@ for (const context of [
       assert.equal(state.artifactBinding?.binding.layout, undefined);
       // The lite feature workflow never enters the completion protocol, so the
       // run keeps the bootstrap schema.
-      assert.equal(state.schemaVersion, 9);
+      assert.equal(state.schemaVersion, 10);
       assert.ok(
         (await readFile(runner.store.statePath(state.runId), "utf8")).includes(
           state.runId
@@ -1435,7 +1478,7 @@ test("accepted F10 public doctor recognizes actual v4 runs and rejects binding d
       slug: "doctor",
       request: "Inspect a current run."
     });
-    assert.equal(state.schemaVersion, 9);
+    assert.equal(state.schemaVersion, 10);
     assert.ok(state.artifactBinding);
     const report = await inspectDoctor(repository.root);
     assert.notEqual(

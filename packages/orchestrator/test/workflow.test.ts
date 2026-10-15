@@ -1705,7 +1705,7 @@ test("human time: ADR, consultation and escalation retain distinct attempt ident
     const consultation = await runner.decideAdr({
       id: "ADR-EXAMPLE",
       decision: "rework",
-      note: null,
+      note: "Revise the proposed decision using the owner feedback.",
       decidedBy: "human",
       autoResume: true
     });

@@ -530,8 +530,8 @@ reviewer phases never invoke it.
 
 `banzai control capabilities` is valid outside a Git repository and performs no
 repository discovery, adapter construction, vendor/authentication call, lock,
-recovery, or write. It emits canonical `banzai-agent-capabilities/v7` JSON with
-schema version 7, control contract `7.0.0`, the package-derived Banzai
+recovery, or write. It emits canonical `banzai-agent-capabilities/v8` JSON with
+schema version 8, control contract `8.0.0`, the package-derived Banzai
 release-train version, umbrella contract, the exact supported non-TTY operation
 set, and an ordered `inputSchemas` list per operation. It also declares the
 runner-owned completion publication protocol (`banzai-completion-protocol/v1`),
@@ -542,7 +542,7 @@ output prove neither subscription authentication nor sandbox credential
 visibility. Compatibility still follows these explicit contract and operation
 identities, never the shared release-train value alone.
 
-`banzai control status` emits canonical `banzai-agent-status/v5` JSON. With no
+`banzai control status` emits canonical `banzai-agent-status/v6` JSON. With no
 persisted run, `activeRun` is `null`. Otherwise the allow-list projection
 contains run identity/lifecycle, route, semantic next action, retry and bounded
 recovery eligibility, the pending human gate, approval validity,
@@ -635,8 +635,8 @@ control status after those commands instead of parsing their human prose.
 
 ## Runner instruction delivery
 
-The runner embeds six phase resources (`planning`, `implementation`, `review`,
-`fix`, `feature`, `quick-fix`), ten shared guidance resources and their ordered
+The runner embeds seven phase resources (`planning`, `implementation`, `review`,
+`fix`, `feature`, `quick-fix`, `planning-review`), ten shared guidance resources and their ordered
 six-policy unions from the plugin. Standalone skills load the shared guidance
 relatively. Selection remains prompt-only. Every fresh or resumed call, retry
 and authorized recovery receives the complete applicable payload, exact bound
@@ -758,7 +758,7 @@ iteration; readiness is advisory outside the doctor's exit status.
 
 ## Context Accounting and Budgets
 
-Every model attempt has an adjacent `banzai-context-attempt/v1` ledger. The
+Every model attempt has an adjacent `banzai-context-attempt/v2` ledger. The
 runner checkpoints the exact rendered prompt and vendor-specific output-schema
 UTF-8 byte counts immediately before each adapter call, divided into closed
 semantic categories. Referenced authority is recorded separately as artifact
@@ -802,7 +802,7 @@ banzai eval context --json --from 2026-08-01T00:00:00Z --to 2026-09-01T00:00:00Z
 banzai eval context --run 20260801-example --run 20260815-other
 ```
 
-Its independent identity is `banzai-context-report/v1`. Coverage is shown
+Its independent identity is `banzai-context-report/v2`. Coverage is shown
 before values; runner bytes, vendor tokens/cost/turns, and inventory are never
 folded together. JSON is canonical and Markdown derives from the same object.
 The command constructs neither adapters nor `WorkflowRunner` and creates no
@@ -1682,7 +1682,7 @@ approved `TNNN` order. Under `banzai-completion-protocol/v1` (ADR-0047) the
 model returns that ledger plus report narrative and never authors the
 **Plan Task Completion** table. New strict implementation and fix attempts are
 recorded with attempt schema 4 and the persisted protocol marker. Their
-terminal proof uses `banzai-terminal-attempt-checkpoint/v3` directly in state 9,
+terminal proof uses `banzai-terminal-attempt-checkpoint/v3` directly in state 10,
 without a legacy transition record. After the vendor returns
 a completed result, the attempt becomes `pending_application` and the runner
 captures the report and workspace identities that the terminal checkpoint
@@ -1904,9 +1904,9 @@ terminal checkpoints, recovery authorizations, or failed structured results as
 review verdicts or completion evidence.
 New model attempts use schema version 4 with phase-result 4. Strict implementation
 and fix retain the existing completion protocol and nullable `retryOf` linkage.
-New runs start at schema version 9 with binding v3 to Git-visible work documents
+New runs start at schema version 10 with binding v3 to Git-visible work documents
 and task verification evidence under the ignored run root. Historical run
-continuation is outside the current transition. State 9 carries the completion
+continuation is outside the current transition. State 10 carries the completion
 publication cursor from creation.
 Tagged pending consultations, exact keyed decision history and recovery lineage
 retain their existing meanings. The `source_preserved` stage keeps a completed
@@ -2052,3 +2052,34 @@ actual hygiene leaves/logs remain required, and absence of hygiene is explicit.
 Frozen human-time/evaluation outputs keep their versioned incomplete/unknown
 semantics. See [ADR-0045](decisions/0045-guided-verification-setup.md) for the closed
 contracts and retained authority boundaries.
+
+
+## Rework and independent planning review
+
+At a strict ADR or plan gate, request rework with written feedback or request an
+independent review of the whole planning bundle or selected artifacts. The
+reviewer and planner analysis run read-only. The runner writes a separate
+`planning-review-<N>.md`; zero findings restore the gate. With findings, inspect
+the analysis options and their consequences before its advisory recommendation,
+then choose one option, write your own instruction or decline each finding.
+Only recorded human dispositions reach the applying planner. Revisions return
+to a normal planning gate and still require explicit approval or ADR acceptance.
+Changed reviewed bytes close the episode as stale; explicit retry reviews the
+current bytes under a new number. Existing artifacts are never overwritten.
+
+```text
+banzai approve plan --decision rework --note "Exact owner feedback"
+banzai approve adr --id ADR-0001 --decision rework --note "Exact owner feedback"
+banzai review planning
+banzai review planning --artifact documentation/work/example/plan.md
+```
+
+`approve plan` accepts only its documented flags. Unknown, repeated, positional
+and `--name=value` forms fail before approval. For agent supervisors, control
+8.0.0 declares capabilities v8 and status v6. Send closed gate-decision v1
+through `banzai control decide` and planning-triage answer v4 through `banzai
+control answer` using direct stdin. Encode human text as raw UTF-8 JSON; on the
+64 KiB limit, let the human shorten their own text or answer in a terminal.
+Never infer a decision or truncate the text. Historical runs cannot acquire new
+rework/review authority or resume through the v10 hook; preserve them and start
+new work. This release does not migrate or install anything automatically.

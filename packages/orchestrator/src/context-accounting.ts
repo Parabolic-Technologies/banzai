@@ -28,6 +28,7 @@ const PHASES = [
   "fix",
   "review"
 ] as const;
+const PHASES_V2 = [...PHASES, "planning_review", "planning_analysis"] as const;
 const ROLES = ["planner", "implementer", "reviewer"] as const;
 const WORKFLOWS = ["unselected", "quick-fix", "feature", "strict"] as const;
 const INVOCATION_KINDS = ["primary", "review_artifact_repair"] as const;
@@ -354,7 +355,8 @@ function parseInvocation(
   value: unknown,
   ordinal: number,
   runId: string,
-  attemptId: string
+  attemptId: string,
+  phases: readonly AttemptReference["kind"][]
 ): ContextInvocationEvidence {
   const item = record(value, runId, attemptId, `invocations[${ordinal - 1}]`);
   keys(
@@ -655,7 +657,7 @@ function parseInvocation(
     ordinal,
     kind: enumValue(item.kind, INVOCATION_KINDS, runId, attemptId, "kind"),
     workflow: enumValue(item.workflow, WORKFLOWS, runId, attemptId, "workflow"),
-    phase: enumValue(item.phase, PHASES, runId, attemptId, "phase"),
+    phase: enumValue(item.phase, phases, runId, attemptId, "phase"),
     role: enumValue(item.role, ROLES, runId, attemptId, "role"),
     vendor: enumValue(
       item.vendor,
@@ -809,10 +811,11 @@ export function decodeContextAttemptLedger(
     expectedAttemptId,
     "ledger"
   );
-  if (
-    root.schema !== CONTEXT_ATTEMPT_SCHEMA ||
-    root.schemaVersion !== CONTEXT_ATTEMPT_SCHEMA_VERSION
-  ) {
+  if (!(
+    (root.schema === "banzai-context-attempt/v1" && root.schemaVersion === 1) ||
+    (root.schema === CONTEXT_ATTEMPT_SCHEMA &&
+      root.schemaVersion === CONTEXT_ATTEMPT_SCHEMA_VERSION)
+  )) {
     invalid(
       expectedRunId,
       expectedAttemptId,
@@ -855,11 +858,12 @@ export function decodeContextAttemptLedger(
     invalid(expectedRunId, expectedAttemptId, "attempt.mutable is invalid.");
   if (!Array.isArray(root.invocations) || root.invocations.length === 0)
     invalid(expectedRunId, expectedAttemptId, "invocations must be non-empty.");
+  const phases = root.schemaVersion === 1 ? PHASES : PHASES_V2;
   const parsedAttempt: AttemptReference = {
     id: attemptId,
     kind: enumValue(
       attempt.kind,
-      PHASES,
+      phases,
       expectedRunId,
       expectedAttemptId,
       "attempt.kind"
@@ -867,7 +871,7 @@ export function decodeContextAttemptLedger(
     mutable: attempt.mutable
   };
   const invocations = (root.invocations as unknown[]).map((item, index) =>
-    parseInvocation(item, index + 1, expectedRunId, expectedAttemptId)
+    parseInvocation(item, index + 1, expectedRunId, expectedAttemptId, phases)
   );
   const expectedMutable =
     parsedAttempt.kind === "implementation" || parsedAttempt.kind === "fix";
@@ -879,9 +883,12 @@ export function decodeContextAttemptLedger(
     );
   }
   const expectedRole: SessionRole =
-    parsedAttempt.kind === "selection" || parsedAttempt.kind === "plan"
+    parsedAttempt.kind === "selection" ||
+    parsedAttempt.kind === "plan" ||
+    parsedAttempt.kind === "planning_analysis"
       ? "planner"
-      : parsedAttempt.kind === "review"
+      : parsedAttempt.kind === "review" ||
+          parsedAttempt.kind === "planning_review"
         ? "reviewer"
         : "implementer";
   for (const invocation of invocations) {
@@ -908,8 +915,8 @@ export function decodeContextAttemptLedger(
     );
   }
   return {
-    schema: CONTEXT_ATTEMPT_SCHEMA,
-    schemaVersion: CONTEXT_ATTEMPT_SCHEMA_VERSION,
+    schema: root.schema,
+    schemaVersion: root.schemaVersion,
     runId,
     attempt: parsedAttempt,
     invocations

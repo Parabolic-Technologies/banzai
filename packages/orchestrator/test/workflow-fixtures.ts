@@ -1,3 +1,9 @@
+import { vendorFor } from "../src/models.js";
+import type {
+  PlanningAdapterRequest,
+  PlanningReviewResult,
+  PlanningReviewAnalysis
+} from "../src/types.js";
 import { RunStore } from "../src/store.js";
 import {
   parseTaskVerificationDescriptor,
@@ -6,7 +12,6 @@ import {
 import assert from "node:assert/strict";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { vendorFor } from "../src/models.js";
 import { renderPlanTaskCompletionProjection } from "../src/plan-task-completion.js";
 import {
   CONTRACT_VERSION,
@@ -29,7 +34,56 @@ import {
   type WorkflowSelectionResult
 } from "../src/types.js";
 import { WorkflowRunner } from "../src/workflow.js";
-import { createTestRepository } from "./helpers.js";
+import { createTestRepository, requiredFixture } from "./helpers.js";
+import {
+  planningReviewResult,
+  planningReviewAnalysis
+} from "./planning-review-fixtures.js";
+import type { HumanTimeObserver } from "../src/human-time.js";
+
+export async function createAdrGateFixture(observer?: HumanTimeObserver) {
+  const repository = await createTestRepository();
+  const adapters = new FakeAdapters();
+  adapters.planResults.push(phaseResult("plan", { gate: "adr_approval" }));
+  const runner = new WorkflowRunner(
+    repository.root,
+    adapters,
+    undefined,
+    undefined,
+    observer
+  );
+  const gate = await runner.start({
+    slug: "adr-rework",
+    request: "Plan the ADR."
+  });
+  assert.equal(gate.status, "needs_adr_approval", gate.blockReason ?? "");
+  return { repository, adapters, runner, gate };
+}
+
+export async function createPlanningReviewFixture(count = 0) {
+  const repository = await createTestRepository();
+  const adapters = new FakeAdapters();
+  const runner = new WorkflowRunner(repository.root, adapters);
+  const gate = await runner.start({
+    slug: "example",
+    request: "Plan the example."
+  });
+  assert.equal(gate.status, "needs_plan_approval", gate.blockReason ?? "");
+  const requested = await runner.requestPlanningReview({
+    paths: null,
+    decidedBy: "owner",
+    autoResume: false
+  });
+  const episode = requiredFixture(requested.planningReview?.active);
+  const result = {
+    ...planningReviewResult(count, episode.reviewNumber),
+    scope: episode.scope
+  };
+  adapters.planningReviewResults.push(result);
+  if (count > 0)
+    adapters.planningAnalysisResults.push(planningReviewAnalysis(result));
+  return { repository, adapters, runner, gate, requested, result };
+}
 
 export const descriptionPath = "documentation/work/example/description.md";
 
@@ -264,6 +318,70 @@ export async function writeImplementationArtifacts(
 }
 
 export class FakeAdapters implements VendorAdapters {
+  planningReviewResults: PlanningReviewResult[] = [];
+  planningAnalysisResults: PlanningReviewAnalysis[] = [];
+  planningAnalysisErrors: Error[] = [];
+  planningRequests: (
+    | PlanningAdapterRequest<PlanningReviewResult>
+    | PlanningAdapterRequest<PlanningReviewAnalysis>
+  )[] = [];
+  onPlanning:
+    | ((
+        request:
+          | PlanningAdapterRequest<PlanningReviewResult>
+          | PlanningAdapterRequest<PlanningReviewAnalysis>
+      ) => Promise<void>)
+    | null = null;
+  async runPlanningReview(
+    request: PlanningAdapterRequest<PlanningReviewResult>
+  ): Promise<AdapterResult<PlanningReviewResult>> {
+    this.planningRequests.push(request);
+    await this.onPlanning?.(request);
+    const result = this.planningReviewResults.shift();
+    if (result === undefined)
+      throw new Error("Planning review fixture is missing");
+    await request.onTerminalSuccess?.({
+      classification:
+        request.outputContract.vendor === "codex"
+          ? "codex_turn_completed"
+          : "claude_result",
+      observedAt: new Date().toISOString(),
+      result,
+      sessionId: "planning-review-session",
+      usage: null
+    });
+    return {
+      result,
+      sessionId: "planning-review-session",
+      stdout: "",
+      stderr: "",
+      usage: null
+    };
+  }
+  async runPlanningAnalysis(
+    request: PlanningAdapterRequest<PlanningReviewAnalysis>
+  ): Promise<AdapterResult<PlanningReviewAnalysis>> {
+    this.planningRequests.push(request);
+    await this.onPlanning?.(request);
+    const result = this.planningAnalysisResults.shift();
+    if (result === undefined)
+      throw new Error("Planning analysis fixture is missing");
+    const sessionId = request.resumeSessionId ?? "planning-analysis-session";
+    await request.onSessionStarted?.(sessionId);
+    const error = this.planningAnalysisErrors.shift();
+    if (error !== undefined) throw error;
+    await request.onTerminalSuccess?.({
+      classification:
+        request.outputContract.vendor === "codex"
+          ? "codex_turn_completed"
+          : "claude_result",
+      observedAt: new Date().toISOString(),
+      result,
+      sessionId,
+      usage: null
+    });
+    return { result, sessionId, stdout: "", stderr: "", usage: null };
+  }
   fixtureTaskChecks = false;
   codexPreflights = 0;
   claudePreflights = 0;

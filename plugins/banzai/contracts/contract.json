@@ -3,6 +3,8 @@
   "schemas": {
     "workflowSelection": "./v1/workflow-selection.schema.json",
     "phaseResult": "./v4/phase-result.schema.json",
-    "reviewResult": "./v2/review-result.schema.json"
+    "reviewResult": "./v2/review-result.schema.json",
+    "planningReviewResult": "./v1/planning-review-result.schema.json",
+    "planningReviewAnalysis": "./v1/planning-review-analysis.schema.json"
   }
 }

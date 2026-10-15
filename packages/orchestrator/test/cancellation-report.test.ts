@@ -39,6 +39,31 @@ const anchor = {
   at
 };
 const options = parseCancellationReportArgs([]);
+
+test("cancellation v1 model inventory excludes the two exact planning attempt file tokens", async () => {
+  const directory = await root();
+  try {
+    const f = await add(directory, "run-planning", "plan_unsuitable");
+    const before = await collectCancellationReport(directory, options);
+    for (const token of ["planning-review", "planning-analysis"])
+      await writeFile(
+        path.join(f.directory, "attempts", `${token}-1-abcdef12-${token}.json`),
+        "PRIVATE_PLANNING_ATTEMPT_CANARY malformed JSON\n"
+      );
+    const after = await collectCancellationReport(directory, options);
+    assert.deepEqual(
+      after.runs[0]?.work.modelAttempts,
+      before.runs[0]?.work.modelAttempts
+    );
+    assert.deepEqual(after.issues, before.issues);
+    assert.doesNotMatch(
+      renderCancellationJson(after),
+      /PRIVATE_PLANNING_ATTEMPT_CANARY/
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 async function add(
   root: string,
   id: string,

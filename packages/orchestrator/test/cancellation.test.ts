@@ -23,6 +23,30 @@ import { TerminalRunStateError } from "../src/errors.js";
 import { WorkflowRunner } from "../src/workflow.js";
 import type { RunState, VendorAdapters } from "../src/types.js";
 import { CONTRACT_VERSION } from "../src/types.js";
+import { planningRestoreState } from "./planning-review-fixtures.js";
+
+test("planning cancellation keeps the origin gate and marks both new kinds and triage unsupported", () => {
+  for (const gate of ["plan_approval", "adr_approval"] as const) {
+    const state = planningRestoreState();
+    const pending = state.pendingHumanDecision;
+    assert.ok(pending?.kind === "planning_review_triage");
+    pending.originGate = gate;
+    const context = captureCancellationContext(state);
+    assert.equal(context.gate.value, gate);
+    assert.equal(context.gate.availability, "available");
+    assert.equal(context.decision.availability, "unsupported");
+  }
+  for (const kind of ["planning_review", "planning_analysis"] as const) {
+    const state = planningRestoreState();
+    state.status = "planning";
+    state.pendingHumanDecision = null;
+    state.activeAttempt = { id: `${kind}-1`, kind, mutable: false };
+    assert.equal(
+      captureCancellationContext(state).attempt.availability,
+      "unsupported"
+    );
+  }
+});
 import {
   evaluationAttemptFixture,
   evaluationStateFixture,

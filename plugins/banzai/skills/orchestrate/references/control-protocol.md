@@ -13,9 +13,9 @@ banzai control capabilities
 
 Require one clean JSON document with:
 
-- `schema: "banzai-agent-capabilities/v7"`
-- `schemaVersion: 7`
-- `controlContractVersion: "7.0.0"`
+- `schema: "banzai-agent-capabilities/v8"`
+- `schemaVersion: 8`
+- `controlContractVersion: "8.0.0"`
 - non-empty `orchestratorVersion`
 - `umbrellaContractVersion: "1.0.0"`
 - `workDocuments.directoryPattern: "documentation/work/<slug>/"`,
@@ -23,18 +23,24 @@ Require one clean JSON document with:
   and `verificationRequestSchemas: ["banzai-verification-request/v3"]`;
   no `artifactStorage` layout or declaration capability
 - exactly these supported, non-TTY operations: `status`, `start`, `answer`,
-  `approveAdr`, `approveVerification`, `approvePlan`, `triage`, `resume`, `retry`, `recover`, and
+  `approveAdr`, `approveVerification`, `approvePlan`, `decideGate`, `triage`, `resume`, `retry`, `recover`, and
   `cancel`
 - `start.inputSchemas: ["banzai-agent-request/v1"]`
-- `answer.inputSchemas: ["banzai-agent-answer/v3", "banzai-agent-answer/v2",
+- `answer.inputSchemas: ["banzai-agent-answer/v4", "banzai-agent-answer/v3", "banzai-agent-answer/v2",
 "banzai-agent-answer/v1"]` in that order
 - `approveVerification.inputSchemas: ["banzai-agent-answer/v3"]`
 - `configurationPrerequisite` declares the kind, fixed actions
-  `["accept", "edit", "skip", "cancel"]`, status v5 and answer v3 schemas
+  `["accept", "edit", "skip", "cancel"]`, status v6 and answer v3 schemas
 - `completionPublication` declares `banzai-completion-protocol/v1`, the closed
   refusal codes `COMPLETION_PUBLICATION_IO`, `COMPLETION_PUBLICATION_DRIFT` and
   `COMPLETION_PUBLICATION_INTEGRITY`, and the `pending_application` attempt
   status it may report
+- `decideGate.inputSchemas: ["banzai-agent-gate-decision/v1"]`
+- `planningGates` declares ADR decisions accept/reject/rework/review, plan decisions
+  approve/rework/review, planning_review_triage with answer v4 and disposition
+  kinds option/instruction/decline. Its limits are 8000 feedback bytes, 2000 own
+  instruction bytes, 8000 additional instruction bytes, 20 findings and 128
+  review paths; its status schema is v6.
 - `recover.inputSchemas: ["banzai-agent-recovery/v1"]`
 - `inputSchemas: []` for the other operations
 
@@ -116,7 +122,7 @@ label; otherwise omit it and keep the CLI default. Never identify the agent as
 the human decision maker. Use `--no-resume` only when the user explicitly wants
 the decision persisted without continuing.
 
-Decision consultation uses the same fixed argv only when the latest v5 status
+Decision consultation uses the same fixed argv only when the latest v6 status
 reports `nextAction: "answer_consultation"`. Present each exact bounded card
 sequentially with the labels `Decision`, `Why this matters`, `Repository
 evidence`, `Options`, and `Recommendation` when present. Preserve the current
@@ -238,7 +244,7 @@ Run:
 banzai control status
 ```
 
-Require `schema: "banzai-agent-status/v5"` and `schemaVersion: 5`.
+Require `schema: "banzai-agent-status/v6"` and `schemaVersion: 6`.
 `activeRun: null` means no persisted run is available. A non-null `done` or
 `cancelled` projection is terminal evidence, not an in-progress run. Otherwise
 use only these fields:
@@ -286,8 +292,9 @@ requires an absent or terminal run; cancellation remains an explicit user choice
 
 | `nextAction` | Required supervisor behavior |
 | --- | --- |
-| `approve_adr` | Show every `pendingGate.artifactPaths` and `adrIds`; wait for an explicit current decision for the relevant ADR; run `banzai approve adr --id <ADR-ID> --decision <accept\|reject\|rework>` and refresh status. Do not pass an arbitrary note through shell argv. |
-| `approve_plan` | Show the exact approval bundle; wait for explicit approval/rework/rejection of the current plan; only approval runs `banzai approve plan`; refresh status. |
+| `approve_adr` | Rework and independent review use an identity-bound gate-decision v1 through direct stdin to `banzai control decide`. Show every `pendingGate.artifactPaths` and `adrIds`; wait for an explicit current decision for the relevant ADR; run `banzai approve adr --id <ADR-ID> --decision <accept\|reject>` and refresh status. Do not pass an arbitrary note through shell argv. |
+| `approve_plan` | Rework and independent review use gate-decision v1 through direct stdin to `banzai control decide`. Show the exact approval bundle; wait for explicit approval/rework/rejection of the current plan; only approval runs `banzai approve plan`; refresh status. |
+| `answer_planning_review_triage` | Show exact artifacts, findings, all analysis options and consequences before advisory recommendations. Wait for one explicit disposition per finding and any additional instruction, send an exact v4 document through direct stdin to `banzai control answer`, then refresh status. Never choose, infer or rewrite feedback or a disposition. |
 | `answer_escalation` | Show summary and ordered questions; wait for exact ordered answers; send a v1 answer through `banzai control answer`; refresh status. |
 | `answer_consultation` | Show the exact current run/request/round and every bounded card with `Decision`, `Why this matters`, `Repository evidence`, `Options`, and `Recommendation` when present. Wait for one exact current-user answer per decision or pause without mutation. Send one keyed v2 answer through direct stdin; refresh status. Never choose, infer, rewrite, or treat the response as approval. |
 | `answer_configuration_prerequisite` | Show the exact current proposal and Accept/Edit/Skip/Cancel; wait for the current human response, send only its identity-bound v3 document, then refresh status. Never downcast, infer consent or rewrite config. |
@@ -324,18 +331,69 @@ human stdout. Ignore that prose as state and query versioned control status.
 
 ## Work document capability
 
-Current capabilities v7/control 7.0.0 expose `workDocuments` with
+Current capabilities v8/control 8.0.0 expose `workDocuments` with
 `directoryPattern: "documentation/work/<slug>/"`,
 `bindingSchemas: ["banzai-work-binding/v3"]`, `workspaceSnapshotVersion: 3`
 and `verificationRequestSchemas: ["banzai-verification-request/v3"]`.
 Require that exact capability before supervising new work; infer no support from
-an older capability or a historical reader. New state v9 binds tracked documents
+an older capability or a historical reader. New state v10 binds tracked documents
 without a layout declaration. The runner alone persists execution authority;
 supervisor tools never create or edit work bindings. Request v1, recovery v1,
-escalation answer v1, consultation answer v2, status v5 and configuration answer
+escalation answer v1, consultation answer v2, status v6 and configuration answer
 v3 retain their meanings. Existing documents stay at their known locations.
 
 New task runs expose bounded `taskVerification` status: outcome, completeness,
 absence rationale and check dispositions. Never request profiles or infer a pass
 from an empty legacy verification array. Configuration-prerequisite inputs above
 apply only to retained historical formats.
+
+
+## Planning gate documents
+
+Rework or independent review uses fixed argv `banzai control decide [--by
+<current-user-label>] [--no-resume]`. Bind runId and gate to the current status.
+For ADR rework, adrId must name a projected ADR and feedback is required; plan
+rework has null adrId. Rework has null paths. Review has null feedback and adrId;
+paths is null for the whole gate bundle or an exact non-empty subset of reviewPaths.
+A review or rework never supplies approval or acceptance.
+
+```json
+{
+  "schema": "banzai-agent-gate-decision/v1",
+  "schemaVersion": 1,
+  "runId": "run-from-latest-status",
+  "gate": "plan_approval",
+  "decision": "rework",
+  "adrId": null,
+  "feedback": "Exact feedback from the current user",
+  "paths": null
+}
+```
+
+For planning-review triage preserve the current run, episode, number and analysis
+digest. Show exact artifacts, findings, all options and consequences before any
+advisory recommendation. The supervisor never chooses, infers or rewrites a
+disposition, recommendation or feedback. Each disposition has exactly findingId,
+kind, optionId and instruction. Option chooses a listed id with null instruction;
+own instruction has null optionId; decline has both null. Preserve human text.
+
+```json
+{
+  "schema": "banzai-agent-answer/v4",
+  "schemaVersion": 4,
+  "runId": "run-from-latest-status",
+  "episodeId": "planning-episode-12345678",
+  "reviewNumber": 1,
+  "analysisDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "dispositions": [
+    {"findingId": "P1-F1", "kind": "decline", "optionId": null, "instruction": null}
+  ],
+  "additionalInstruction": null
+}
+```
+
+Encode both documents as raw UTF-8 JSON; never `\u`-escape non-ASCII text.
+The 64 KiB encoded limit is independent of the individual human-text byte bounds.
+On `CONTROL_INPUT_TOO_LARGE`, report the error. Never truncate, summarize or
+rewrite the user's text; ask the user to shorten their own text or answer in
+`banzai` in a terminal. Never downcast planning triage to v1 or consultation v2.

@@ -1,5 +1,9 @@
 import type {
   AdrDecision,
+  PlanningReviewEpisode,
+  PlanningReviewResult,
+  PlanningReviewAnalysis,
+  PlanningReviewTriageRecord,
   AttemptRecord,
   HumanDecisionRecord,
   ReviewFinding,
@@ -129,12 +133,17 @@ export function workflowPhases(
 
 function phaseEnvelope(
   phase: InstructionPhase,
-  components: readonly PromptComponent[]
+  components: readonly PromptComponent[],
+  commonOverride?: string
 ): PromptEnvelope {
   return composePromptComponents([
     {
       category: "common_instructions",
-      text: phase === "review" ? REVIEW_COMMON : COMMON
+      text:
+        commonOverride ??
+        (phase === "review" || phase === "planning-review"
+          ? REVIEW_COMMON
+          : COMMON)
     },
     ...phaseInstructionParts(phase).map((body): PromptComponent => ({
       category: "phase_instructions",
@@ -195,7 +204,16 @@ ${request}`
     {
       category: "human_decisions",
       text: `Recorded escalation decisions and answers:
-${JSON.stringify(humanDecisions, null, 2)}`
+${JSON.stringify(
+  humanDecisions.filter(
+    (record) =>
+      !["plan_rework", "adr_rework", "planning_review_triage"].includes(
+        record.kind
+      )
+  ),
+  null,
+  2
+)}`
     }
   ]);
 }
@@ -365,7 +383,16 @@ ${builderVerificationInstructions()}`
     {
       category: "human_decisions",
       text: `Recorded human decision answers:
-${JSON.stringify(humanDecisions, null, 2)}`
+${JSON.stringify(
+  humanDecisions.filter(
+    (record) =>
+      !["plan_rework", "adr_rework", "planning_review_triage"].includes(
+        record.kind
+      )
+  ),
+  null,
+  2
+)}`
     },
     {
       category: "approved_requirements_architecture",
@@ -463,7 +490,16 @@ ${request}`
     {
       category: "human_decisions",
       text: `Recorded human decision answers:
-${JSON.stringify(humanDecisions, null, 2)}`
+${JSON.stringify(
+  humanDecisions.filter(
+    (record) =>
+      !["plan_rework", "adr_rework", "planning_review_triage"].includes(
+        record.kind
+      )
+  ),
+  null,
+  2
+)}`
     },
     {
       category: "approved_requirements_architecture",
@@ -555,7 +591,16 @@ ${builderVerificationInstructions()}`
     {
       category: "human_decisions",
       text: `Recorded human decision answers:
-${JSON.stringify(humanDecisions, null, 2)}`
+${JSON.stringify(
+  humanDecisions.filter(
+    (record) =>
+      !["plan_rework", "adr_rework", "planning_review_triage"].includes(
+        record.kind
+      )
+  ),
+  null,
+  2
+)}`
     },
     {
       category: "approved_requirements_architecture",
@@ -761,4 +806,87 @@ Cumulative human triage history:
 ${JSON.stringify(input.triageHistory, null, 2)}`
     }
   ]);
+}
+
+export function planningReviewPromptEnvelope(
+  episode: PlanningReviewEpisode,
+  adrDecisions: AdrDecision[],
+  humanDecisions: HumanDecisionRecord[]
+): PromptEnvelope {
+  return phaseEnvelope("planning-review", [
+    {
+      category: "user_request_scope",
+      text: `Review number, origin gate and exact scope:\n${JSON.stringify({ reviewNumber: episode.reviewNumber, originGate: episode.originGate, scope: episode.scope }, null, 2)}`
+    },
+    {
+      category: "approved_requirements_architecture",
+      text: `Recorded ADR decisions:\n${JSON.stringify(adrDecisions, null, 2)}`
+    },
+    {
+      category: "human_decisions",
+      text: `Recorded owner evidence:\n${JSON.stringify(humanDecisions, null, 2)}`
+    }
+  ]);
+}
+const PLANNING_ANALYSIS_COMMON = `You are the read-only planner analyzing an independent planning review inside the Banzai local orchestrator.
+The supplied planning resources are assessment criteria. The dedicated analysis contract overrides all phase write duties and gate instructions.
+Do not write files, approve work, choose human dispositions, create commits or perform external writes.
+Recommendations are advisory and require repository evidence; otherwise use null.
+Return only the structured analysis required by the supplied JSON schema.`;
+export function planningAnalysisPromptEnvelope(
+  episode: PlanningReviewEpisode,
+  result: PlanningReviewResult,
+  adrDecisions: AdrDecision[],
+  humanDecisions: HumanDecisionRecord[],
+  retrySource: AttemptRecord | null = null
+): PromptEnvelope {
+  const base = phaseEnvelope(
+    "planning",
+    [
+      {
+        category: "user_request_scope",
+        text: JSON.stringify(
+          {
+            reviewNumber: episode.reviewNumber,
+            originGate: episode.originGate,
+            scope: episode.scope
+          },
+          null,
+          2
+        )
+      },
+      {
+        category: "approved_requirements_architecture",
+        text: JSON.stringify(adrDecisions, null, 2)
+      },
+      {
+        category: "human_decisions",
+        text: JSON.stringify(humanDecisions, null, 2)
+      },
+      {
+        category: "review_triage_evidence",
+        text: `Validated review findings and result digest:\n${JSON.stringify({ resultDigest: episode.resultDigest, findings: result.findings }, null, 2)}`
+      }
+    ],
+    PLANNING_ANALYSIS_COMMON
+  );
+  return retrySource === null
+    ? base
+    : appendPromptComponent(
+        base,
+        "recovery_instructions",
+        `\n\nRepeat the read-only analysis for this unchanged episode after attempt ${retrySource.attempt.id}. Use the dedicated analysis contract; do not revise artifacts or return a phase gate.`
+      );
+}
+export function planningApplicationPromptEnvelope(
+  base: PromptEnvelope,
+  artifactPath: string,
+  analysis: PlanningReviewAnalysis,
+  decision: PlanningReviewTriageRecord
+): PromptEnvelope {
+  return appendPromptComponent(
+    base,
+    "review_triage_evidence",
+    `\n\nApply only this recorded planning-review triage; declined findings stay unchanged. Never request another review.\n${JSON.stringify({ artifactPath, analysis, decision }, null, 2)}`
+  );
 }

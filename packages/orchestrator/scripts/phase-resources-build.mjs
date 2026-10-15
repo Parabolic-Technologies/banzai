@@ -78,6 +78,16 @@ export const PHASE_DEFINITIONS = {
       "artifact-storage"
     ],
     conditionalPolicies: ["plan-task-completion"]
+  },
+  "planning-review": {
+    guidance: ["requirements", "architecture", "planning"],
+    policies: [
+      "test-assurance",
+      "security-assurance",
+      "engineering-quality",
+      "plan-task-completion"
+    ],
+    conditionalPolicies: ["plan-task-completion"]
   }
 };
 
@@ -709,6 +719,18 @@ const WORK_DOCUMENT_AUTHORITY_AMENDMENTS = new Map([
   ]
 ]);
 
+// The ADR-0054 annotation is admitted only by the accepted ADR-0055.
+const PLANNING_REVIEW_AUTHORITY_AMENDMENTS = new Map([
+  [
+    "3dbdeaca1a070f0526efda31842c55a24c0cb4792f8311a81df611664bf92caa",
+    "ca70c1fc1cebb4b557aa5a8d456de60ff2ffb82db048ac860c127a296d3210a5"
+  ],
+  [
+    "6ea561ebbd90f390155520129e7cddd4ae417eb00ae069eca091e782be824664",
+    "d5a4c6a47cc90f2e72a03f0b40778ca2c4677b95be0c17f07a08a7ebb470b351"
+  ]
+]);
+
 const RETAINED_AUTHORITY_AMENDMENTS = [
   {
     decision: "documentation/decisions/0045-guided-verification-setup.md",
@@ -726,6 +748,11 @@ const RETAINED_AUTHORITY_AMENDMENTS = [
   {
     decision: "documentation/decisions/0054-git-visible-work-artifacts.md",
     images: WORK_DOCUMENT_AUTHORITY_AMENDMENTS
+  },
+  {
+    decision:
+      "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md",
+    images: PLANNING_REVIEW_AUTHORITY_AMENDMENTS
   }
 ];
 
@@ -850,7 +877,8 @@ async function applyTransition(root, original, previous, transition) {
         !transition.authorities.some((authority) =>
           [
             "documentation/decisions/0049-task-scoped-verification.md",
-            "documentation/decisions/0054-git-visible-work-artifacts.md"
+            "documentation/decisions/0054-git-visible-work-artifacts.md",
+            "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md"
           ].includes(authority.path)
         )) ||
       (last !== null && last.localeCompare(change.key, "en") >= 0) ||
@@ -865,7 +893,8 @@ async function applyTransition(root, original, previous, transition) {
           [
             "documentation/decisions/0045-guided-verification-setup.md",
             "documentation/decisions/0049-task-scoped-verification.md",
-            "documentation/decisions/0054-git-visible-work-artifacts.md"
+            "documentation/decisions/0054-git-visible-work-artifacts.md",
+            "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md"
           ].includes(authority.path)
         ))
     )

@@ -17,6 +17,7 @@ const ADR_0045 = "ADR-0045";
 const ADR_0049 = "ADR-0049";
 const ADR_0052 = "ADR-0052";
 const ADR_0054 = "ADR-0054";
+const ADR_0055 = "ADR-0055";
 const POLICY_ADR_AUTHORITIES = new Set([
   ADR_0026,
   ADR_0028,
@@ -30,7 +31,8 @@ const POLICY_ADR_AUTHORITIES = new Set([
   ADR_0045,
   ADR_0049,
   ADR_0052,
-  ADR_0054
+  ADR_0054,
+  ADR_0055
 ]);
 const POLICY_ERROR_CODE = "IMPORT_BOUNDARY_POLICY_INVALID";
 const IMPORTER_PATTERN =
@@ -97,6 +99,38 @@ const boundary = (
  * broaden it.
  */
 export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
+  boundary(
+    "src/planning-review-state.ts",
+    "planning-review-persisted-shapes",
+    [ADR_0052, ADR_0055],
+    [
+      permission("./errors.js", ADR_0055),
+      permission("./validation.js", ADR_0055)
+    ],
+    [permission("./types.js", ADR_0055)]
+  ),
+  boundary(
+    "src/planning-review-artifact.ts",
+    "planning-review-publication",
+    [ADR_0052, ADR_0055],
+    [
+      permission("./errors.js", ADR_0055),
+      permission("./project-files.js", ADR_0055),
+      permission("./work-documents.js", ADR_0055),
+      permission("./review-artifact.js", ADR_0055),
+      permission("./validation.js", ADR_0055)
+    ],
+    [permission("./types.js", ADR_0055)]
+  ),
+  boundary(
+    "src/workflow/domain/planning-review.ts",
+    "planning-review-decisions",
+    [ADR_0052, ADR_0055],
+    [permission("../../errors.js", ADR_0055)],
+    [permission("../../types.js", ADR_0055)],
+    DOMAIN
+  ),
+
   boundary(
     "src/work-documents.ts",
     "work-document-execution-authority",
@@ -315,8 +349,12 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/agent-control-cli.ts",
     "agent-control-cli",
-    [MANIFEST_ARCHITECTURE, MANIFEST_MODULES],
+    [MANIFEST_ARCHITECTURE, MANIFEST_MODULES, ADR_0055],
     [
+      permission("./workflow/domain/planning-review.js", ADR_0055),
+      permission("./workflow/domain/artifact-scope.js", ADR_0055),
+      permission("./validation.js", ADR_0055),
+
       permission("./agent-control.js", MANIFEST_MODULES),
       permission("./errors.js", MANIFEST_ARCHITECTURE)
     ],
@@ -328,8 +366,11 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/agent-control.ts",
     "agent-control-projection",
-    [ADR_0045, MANIFEST_ARCHITECTURE, MANIFEST_MODULES],
+    [ADR_0045, MANIFEST_ARCHITECTURE, MANIFEST_MODULES, ADR_0055],
     [
+      permission("./workflow/domain/planning-review.js", ADR_0055),
+      permission("./workflow/domain/artifact-scope.js", ADR_0055),
+
       permission("./configuration-prerequisite.js", ADR_0045),
       permission("../package.json", MANIFEST_MODULES),
       permission("./errors.js", MANIFEST_ARCHITECTURE),
@@ -408,9 +449,12 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       ADR_0034,
       ADR_0035,
       ADR_0040,
-      ADR_0041
+      ADR_0041,
+      ADR_0055
     ],
     [
+      permission("./validation.js", ADR_0055),
+
       permission("./verification-cli.js", ADR_0045),
       permission("./verification.js", ADR_0045),
       permission("./verification-ui.js", ADR_0045),
@@ -500,8 +544,16 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/contracts.ts",
     "model-contracts",
-    [MANIFEST_ARCHITECTURE, MANIFEST_MODULES, ADR_0049],
+    [MANIFEST_ARCHITECTURE, MANIFEST_MODULES, ADR_0049, ADR_0055],
     [
+      permission(
+        "../../../plugins/banzai/contracts/v1/planning-review-result.schema.json",
+        ADR_0055
+      ),
+      permission(
+        "../../../plugins/banzai/contracts/v1/planning-review-analysis.schema.json",
+        ADR_0055
+      ),
       permission(
         "../../../plugins/banzai/contracts/contract.json",
         MANIFEST_MODULES
@@ -675,8 +727,17 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/interactive.ts",
     "interactive-composition",
-    [ADR_0045, MANIFEST_ARCHITECTURE, MANIFEST_MODULES, ADR_0034, ADR_0035],
     [
+      ADR_0045,
+      MANIFEST_ARCHITECTURE,
+      MANIFEST_MODULES,
+      ADR_0034,
+      ADR_0035,
+      ADR_0055
+    ],
+    [
+      permission("./validation.js", ADR_0055),
+
       permission("./verification-ui.js", ADR_0045),
       permission("./cancellation-cli.js", ADR_0035),
       permission("../package.json", MANIFEST_MODULES),
@@ -822,8 +883,11 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/state-machine.ts",
     "state-machine",
-    [MANIFEST_MODULES, MANIFEST_ARCHITECTURE, ADR_0052],
-    [permission("./errors.js", MANIFEST_ARCHITECTURE)],
+    [MANIFEST_MODULES, MANIFEST_ARCHITECTURE, ADR_0052, ADR_0055],
+    [
+      permission("./workflow/domain/planning-review.js", ADR_0055),
+      permission("./errors.js", MANIFEST_ARCHITECTURE)
+    ],
     [permission("./types.js", MANIFEST_ARCHITECTURE)],
     DOMAIN
   ),
@@ -838,9 +902,12 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       ADR_0028,
       ADR_0035,
       ADR_0041,
-      ADR_0043
+      ADR_0043,
+      ADR_0055
     ],
     [
+      permission("./planning-review-state.js", ADR_0055),
+
       permission("./project-files.js", ADR_0054),
       permission("./configuration-prerequisite.js", ADR_0045),
       permission("./verification.js", ADR_0045),
@@ -916,9 +983,13 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       ADR_0040,
       ADR_0043,
       ADR_0041,
-      ADR_0042
+      ADR_0042,
+      ADR_0055
     ],
     [
+      permission("./planning-review-artifact.js", ADR_0055),
+      permission("./workflow/domain/planning-review.js", ADR_0055),
+
       permission("./project-files.js", ADR_0054),
       permission("./configuration-prerequisite.js", ADR_0045),
       permission("./configuration-review.js", ADR_0045),
@@ -1224,12 +1295,13 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/workflow/attempts/result-scope.ts",
     "workflow-attempts-result-scope",
-    [ADR_0054, ADR_0052],
+    [ADR_0054, ADR_0052, ADR_0055],
     [
       permission("../../project-files.js", ADR_0054),
       permission("../../errors.js", ADR_0052),
       permission("../../git.js", ADR_0052),
       permission("../../review-artifact.js", ADR_0052),
+      permission("../../planning-review-artifact.js", ADR_0055),
       permission("../domain/artifact-scope.js", ADR_0052)
     ],
     [

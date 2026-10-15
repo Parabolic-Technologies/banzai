@@ -68,3 +68,6 @@ only its own live ownership. Never reclaim a stale claim by elapsed time. Legacy
 executable requests are refused with an upgrade diagnostic. An old or unsupported
 inventory keeps applicable fresh-check authority without rewriting that document
 or claiming helper support. No extra report is required solely for verification.
+
+The runner alone renders `planning-review-<N>.md` siblings in the bound flat
+work directory. They have no binding role and never enter the approval bundle.

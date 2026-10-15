@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 import { stripVTControlCharacters } from "node:util";
-import { collapsedPastePrompt } from "../src/inquirer-io.js";
+import {
+  collapsedPastePrompt,
+  InquirerInteractiveIO
+} from "../src/inquirer-io.js";
 
 const PASTE_START = "\u001B[200~";
 const PASTE_END = "\u001B[201~";
@@ -40,6 +43,61 @@ async function promptHarness(
 function paste(input: PassThrough, content: string): void {
   input.write(`${PASTE_START}${content}${PASTE_END}`);
 }
+
+test("multi-select validates selected values and retains the checkbox after an empty selection", async () => {
+  const input = new PassThrough();
+  const output = new PassThrough();
+  output.setEncoding("utf8");
+  let rendered = "";
+  output.on("data", (chunk: string) => {
+    rendered += chunk;
+  });
+  const stdin = Object.getOwnPropertyDescriptor(process, "stdin");
+  const stdout = Object.getOwnPropertyDescriptor(process, "stdout");
+  assert.ok(stdin && stdout);
+  const validations: string[][] = [];
+  let result: Promise<string[]> | null = null;
+  const guard = setTimeout(() => input.write("\u0003"), 5000);
+  try {
+    Object.defineProperty(process, "stdin", {
+      configurable: true,
+      value: input
+    });
+    Object.defineProperty(process, "stdout", {
+      configurable: true,
+      value: output
+    });
+    result = new InquirerInteractiveIO().multiSelect(
+      "Select reviewed documents",
+      [
+        { name: "Plan", value: "plan.md" },
+        { name: "Description", value: "description.md" }
+      ],
+      (values) => {
+        validations.push([...values]);
+        return values.length === 0 ? "Select at least one document." : true;
+      }
+    );
+    await nextTurn();
+    input.write("\r");
+    await nextTurn();
+    assert.match(
+      stripVTControlCharacters(rendered),
+      /Select at least one document\./
+    );
+    input.write(" ");
+    await nextTurn();
+    input.write("\r");
+    assert.deepEqual(await result, ["plan.md"]);
+    assert.deepEqual(validations, [[], ["plan.md"]]);
+  } finally {
+    clearTimeout(guard);
+    input.write("\u0003");
+    if (result !== null) await result.catch(() => {});
+    Object.defineProperty(process, "stdin", stdin);
+    Object.defineProperty(process, "stdout", stdout);
+  }
+});
 
 test("collapsed paste preserves multiline Markdown and renders a placeholder", async () => {
   const harness = await promptHarness((value) =>

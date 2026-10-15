@@ -308,7 +308,9 @@ export function validateConfigurationStateEnvelope(value: unknown): void {
     configurationInvalid();
   const state = value as Record<string, unknown>;
   if (
-    (state.schemaVersion === 8 || state.schemaVersion === 9) &&
+    (state.schemaVersion === 8 ||
+      state.schemaVersion === 9 ||
+      state.schemaVersion === 10) &&
     state.verificationMode !== "task"
   )
     configurationInvalid();
@@ -326,7 +328,9 @@ export function validateConfigurationStateEnvelope(value: unknown): void {
       "configurationSetup" in state ||
       ("verificationMode" in state &&
         !(
-          (state.schemaVersion === 8 || state.schemaVersion === 9) &&
+          (state.schemaVersion === 8 ||
+            state.schemaVersion === 9 ||
+            state.schemaVersion === 10) &&
           state.verificationMode === "task"
         )) ||
       (state.pendingHumanDecision as { kind?: unknown } | null)?.kind ===

@@ -484,6 +484,11 @@
       "sha256": null
     },
     {
+      "path": "documentation/ideas/2026-10-15-faster-tests-and-fewer-full-runs.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
       "path": "documentation/ideas/README.md",
       "classification": "maintainer",
       "sha256": null
@@ -535,6 +540,11 @@
     },
     {
       "path": "documentation/releases/2.6.0.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/releases/2.7.1.md",
       "classification": "maintainer",
       "sha256": null
     },
@@ -810,6 +820,16 @@
     },
     {
       "path": "plugins/banzai/contracts/v1/phase-result.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/v1/planning-review-analysis.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/v1/planning-review-result.schema.json",
       "classification": "product",
       "sha256": null
     },
@@ -1095,6 +1115,11 @@
     },
     {
       "path": "plugins/banzai/phases/implementation.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/phases/planning-review.md",
       "classification": "product",
       "sha256": null
     },

@@ -1100,6 +1100,30 @@ test("doctor v4 compares mixed role unions without hiding structural failures or
       ]
     );
     assert.deepEqual(defaults.fixes, []);
+    const planningReviewPhase = path.join(
+      plugin.directory,
+      "phases/planning-review.md"
+    );
+    const planningReviewBytes = await readFile(planningReviewPhase);
+    await writeFile(planningReviewPhase, "PRIVATE-PLANNING-INSTRUCTION-CANARY");
+    const reviewerBefore = await snapshotTree(repository.root);
+    const reviewerUnion = await inspectDoctor(repository.root, dependencies());
+    assert.equal(checkStatus(reviewerUnion, "claude.instructions"), "fail");
+    assert.equal(reviewerUnion.ready, false);
+    assert.deepEqual(await snapshotTree(repository.root), reviewerBefore);
+    assert.doesNotMatch(
+      renderDoctorJson(reviewerUnion),
+      /PRIVATE-PLANNING-INSTRUCTION-CANARY/
+    );
+    assert.ok(!renderDoctorJson(reviewerUnion).includes(plugin.directory));
+    await writeFile(planningReviewPhase, planningReviewBytes);
+    assert.equal(
+      checkStatus(
+        await inspectDoctor(repository.root, dependencies()),
+        "claude.instructions"
+      ),
+      "pass"
+    );
     config.models.planner.executable = "claude";
     config.models.implementer.executable = "claude";
     const target = path.join(plugin.directory, "phases/fix.md");

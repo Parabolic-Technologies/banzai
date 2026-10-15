@@ -187,12 +187,12 @@ function validateConfigurationStateEnvelope(value) {
   if (!value || typeof value !== "object" || Array.isArray(value))
     configurationInvalid();
   const state = value;
-  if ((state.schemaVersion === 8 || state.schemaVersion === 9) && state.verificationMode !== "task")
+  if ((state.schemaVersion === 8 || state.schemaVersion === 9 || state.schemaVersion === 10) && state.verificationMode !== "task")
     configurationInvalid();
   if (state.schemaVersion !== 6 && !(state.schemaVersion === 7 && "configurationSetup" in state)) {
     if (Array.isArray(state.humanDecisions) && state.humanDecisions.some(
       (record) => record?.kind === "configuration_prerequisite"
-    ) || "configurationSetup" in state || "verificationMode" in state && !((state.schemaVersion === 8 || state.schemaVersion === 9) && state.verificationMode === "task") || state.pendingHumanDecision?.kind === "configuration_prerequisite")
+    ) || "configurationSetup" in state || "verificationMode" in state && !((state.schemaVersion === 8 || state.schemaVersion === 9 || state.schemaVersion === 10) && state.verificationMode === "task") || state.pendingHumanDecision?.kind === "configuration_prerequisite")
       configurationInvalid();
     return;
   }
@@ -673,6 +673,8 @@ var CODEX_EFFORTS = [...FULL_EFFORTS, "ultra"];
 
 // src/types.ts
 var CONTRACT_VERSION = "1.0.0";
+var PLANNING_REVIEW_RESULT_SCHEMA = "banzai-planning-review-result/v1";
+var PLANNING_REVIEW_ANALYSIS_SCHEMA = "banzai-planning-review-analysis/v1";
 var PHASE_RESULT_SCHEMA_VERSION = 4;
 var DECISION_CONSULTATION_SCHEMA = "banzai-decision-consultation/v1";
 var DECISION_CONSULTATION_SCHEMA_VERSION = 1;
@@ -765,12 +767,9 @@ function requireEnum(value, label, allowed) {
   }
   return value;
 }
-function requirePositiveInteger(value, label) {
+function requirePositiveInteger(value, label, code = "INVALID_CONFIG") {
   if (!Number.isInteger(value) || value <= 0) {
-    throw new BanzaiError(
-      "INVALID_CONFIG",
-      `${label} must be a positive integer.`
-    );
+    throw new BanzaiError(code, `${label} must be a positive integer.`);
   }
   return value;
 }
@@ -1056,6 +1055,228 @@ function parseDecisionConsultation(value) {
       "decisionConsultation.roundId"
     ),
     decisions
+  };
+}
+var UNSAFE_PLANNING_TEXT = /[\u061c\u200e\u200f\ud800-\udfff]/u;
+function planningProse(value, label, maximum) {
+  const text2 = consultationProse(value, label, maximum);
+  if (UNSAFE_PLANNING_TEXT.test(text2))
+    return consultationError(`${label} contains unsafe text.`);
+  return text2;
+}
+function planningPath(value, label) {
+  const candidate = consultationPath(value, label);
+  if (UNSAFE_PLANNING_TEXT.test(candidate))
+    return consultationError(`${label} contains unsafe text.`);
+  return candidate;
+}
+function planningReviewNumber(value) {
+  if (!Number.isSafeInteger(value) || value < 1 || value > 1e6)
+    return consultationError(
+      "Planning review number must be between 1 and 1000000."
+    );
+  return value;
+}
+function planningDigest(value, label) {
+  if (typeof value !== "string" || !/^[a-f0-9]{64}$/u.test(value))
+    return consultationError(`${label} must be a lowercase SHA-256 digest.`);
+  return value;
+}
+function planningFindingId(value, reviewNumber) {
+  const id2 = consultationString(value, "finding id", 128);
+  if (!new RegExp(`^P${reviewNumber}-F[1-9][0-9]*$`, "u").test(id2))
+    return consultationError(
+      "Finding id must belong to the current planning review."
+    );
+  return id2;
+}
+function planningArray(value, label, minimum, maximum) {
+  if (!Array.isArray(value) || value.length < minimum || value.length > maximum)
+    return consultationError(`${label} has an invalid item count.`);
+  return value;
+}
+function parsePlanningFinding(value, reviewNumber) {
+  const record = consultationRecord(value, "planning finding", [
+    "id",
+    "severity",
+    "category",
+    "summary",
+    "evidence",
+    "suggestedResolution",
+    "confidence"
+  ]);
+  return {
+    id: planningFindingId(record.id, reviewNumber),
+    severity: requireEnum(record.severity, "severity", [
+      "blocker",
+      "should_fix",
+      "nit"
+    ]),
+    category: requireEnum(record.category, "category", [
+      "requirements",
+      "acceptance",
+      "architecture",
+      "plan",
+      "consistency",
+      "security",
+      "testing",
+      "scope",
+      "compatibility",
+      "documentation"
+    ]),
+    summary: planningProse(record.summary, "summary", 1e3),
+    evidence: planningArray(record.evidence, "evidence", 1, 8).map((item) => {
+      const entry = consultationRecord(item, "evidence item", [
+        "path",
+        "line",
+        "detail"
+      ]);
+      return {
+        path: planningPath(entry.path, "evidence path"),
+        line: entry.line === null ? null : requirePositiveInteger(
+          entry.line,
+          "evidence line",
+          "INVALID_RESULT"
+        ),
+        detail: planningProse(entry.detail, "evidence detail", 500)
+      };
+    }),
+    suggestedResolution: planningProse(
+      record.suggestedResolution,
+      "suggested resolution",
+      1200
+    ),
+    confidence: requireEnum(record.confidence, "confidence", [
+      "high",
+      "medium",
+      "low"
+    ])
+  };
+}
+function parsePlanningReviewResult(value) {
+  const record = consultationRecord(value, "planning review result", [
+    "contractVersion",
+    "schema",
+    "schemaVersion",
+    "reviewNumber",
+    "scope",
+    "findings"
+  ]);
+  if (record.contractVersion !== CONTRACT_VERSION || record.schema !== PLANNING_REVIEW_RESULT_SCHEMA || record.schemaVersion !== 1)
+    return consultationError("Unsupported planning review result contract.");
+  const reviewNumber = planningReviewNumber(record.reviewNumber);
+  const scope = planningArray(record.scope, "scope", 1, 128).map((item) => {
+    const entry = consultationRecord(item, "scope item", ["path", "sha256"]);
+    return {
+      path: planningPath(entry.path, "scope path"),
+      sha256: planningDigest(entry.sha256, "scope digest")
+    };
+  });
+  if (new Set(scope.map((entry) => entry.path)).size !== scope.length)
+    return consultationError("Planning review scope has duplicate paths.");
+  const findings = planningArray(record.findings, "findings", 0, 20).map(
+    (item) => parsePlanningFinding(item, reviewNumber)
+  );
+  if (new Set(findings.map((finding) => finding.id)).size !== findings.length)
+    return consultationError(
+      "Planning review findings have duplicate identities."
+    );
+  return {
+    contractVersion: CONTRACT_VERSION,
+    schema: PLANNING_REVIEW_RESULT_SCHEMA,
+    schemaVersion: 1,
+    reviewNumber,
+    scope,
+    findings
+  };
+}
+function parsePlanningAnalysisEntry(value, reviewNumber) {
+  const record = consultationRecord(value, "planning analysis entry", [
+    "findingId",
+    "assessment",
+    "rationale",
+    "options",
+    "recommendation"
+  ]);
+  const options = planningArray(record.options, "options", 1, 3).map((item) => {
+    const option = consultationRecord(item, "planning option", [
+      "optionId",
+      "label",
+      "consequences"
+    ]);
+    return {
+      optionId: consultationIdentifier(option.optionId, "option id"),
+      label: planningProse(option.label, "option label", 160),
+      consequences: planningArray(
+        option.consequences,
+        "consequences",
+        1,
+        8
+      ).map((text2) => planningProse(text2, "consequence", 500))
+    };
+  });
+  if (new Set(options.map((option) => option.optionId)).size !== options.length || new Set(options.map((option) => option.label)).size !== options.length)
+    return consultationError(
+      "Planning analysis options must have unique ids and labels."
+    );
+  let recommendation = null;
+  if (record.recommendation !== null) {
+    const recommended = consultationRecord(
+      record.recommendation,
+      "recommendation",
+      ["optionId", "rationale"]
+    );
+    const optionId = consultationIdentifier(
+      recommended.optionId,
+      "recommended option"
+    );
+    if (!options.some((option) => option.optionId === optionId))
+      return consultationError("Recommendation must name a listed option.");
+    recommendation = {
+      optionId,
+      rationale: planningProse(
+        recommended.rationale,
+        "recommendation rationale",
+        1e3
+      )
+    };
+  }
+  return {
+    findingId: planningFindingId(record.findingId, reviewNumber),
+    assessment: requireEnum(record.assessment, "assessment", [
+      "agree",
+      "partially_agree",
+      "disagree"
+    ]),
+    rationale: planningProse(record.rationale, "rationale", 1200),
+    options,
+    recommendation
+  };
+}
+function parsePlanningReviewAnalysis(value) {
+  const record = consultationRecord(value, "planning review analysis", [
+    "contractVersion",
+    "schema",
+    "schemaVersion",
+    "reviewNumber",
+    "resultDigest",
+    "entries"
+  ]);
+  if (record.contractVersion !== CONTRACT_VERSION || record.schema !== PLANNING_REVIEW_ANALYSIS_SCHEMA || record.schemaVersion !== 1)
+    return consultationError("Unsupported planning review analysis contract.");
+  const reviewNumber = planningReviewNumber(record.reviewNumber);
+  const entries = planningArray(record.entries, "analysis entries", 1, 20).map(
+    (item) => parsePlanningAnalysisEntry(item, reviewNumber)
+  );
+  if (new Set(entries.map((entry) => entry.findingId)).size !== entries.length)
+    return consultationError("Planning analysis has duplicate findings.");
+  return {
+    contractVersion: CONTRACT_VERSION,
+    schema: PLANNING_REVIEW_ANALYSIS_SCHEMA,
+    schemaVersion: 1,
+    reviewNumber,
+    resultDigest: planningDigest(record.resultDigest, "result digest"),
+    entries
   };
 }
 function completionError(message) {
@@ -1771,7 +1992,15 @@ function parseEvidenceAttempt(value, code, label) {
   exactKeys(value, ["id", "kind", "mutable"], code, label);
   const id2 = evidenceIdentifier(value.id, code, `${label}.id`, 200);
   const kind = value.kind;
-  if (typeof kind !== "string" || !["selection", "plan", "implementation", "fix", "review"].includes(kind)) {
+  if (typeof kind !== "string" || ![
+    "selection",
+    "plan",
+    "implementation",
+    "fix",
+    "review",
+    "planning_review",
+    "planning_analysis"
+  ].includes(kind)) {
     return recoveryEvidenceError(code, `${label}.kind is unsupported.`);
   }
   if (typeof value.mutable !== "boolean") {
@@ -1823,6 +2052,8 @@ function parseEvidenceUsage(value, code, label) {
   };
 }
 function parseCheckpointResult(kind, value, resultContract) {
+  if (kind === "planning_review") return parsePlanningReviewResult(value);
+  if (kind === "planning_analysis") return parsePlanningReviewAnalysis(value);
   if (kind === "selection") {
     return parseWorkflowSelectionResult(value);
   }
@@ -3005,8 +3236,8 @@ function parseTerminalAttemptCheckpoint(value) {
     );
   }
   const resultContract = value.resultContract;
-  const expectedContract = attempt.kind === "selection" ? "workflow-selection/v1" : attempt.kind === "review" ? resultContract === "review-result/v2" ? "review-result/v2" : "review-result/v1" : value.schemaVersion === 3 ? "phase-result/v4" : resultContract === "phase-result/v2" ? "phase-result/v2" : "phase-result/v3";
-  if (resultContract !== expectedContract || attempt.kind !== "selection" && attempt.kind !== "review" && resultContract !== "phase-result/v2" && resultContract !== "phase-result/v3" && resultContract !== "phase-result/v4") {
+  const expectedContract = attempt.kind === "planning_review" ? "planning-review-result/v1" : attempt.kind === "planning_analysis" ? "planning-review-analysis/v1" : attempt.kind === "selection" ? "workflow-selection/v1" : attempt.kind === "review" ? resultContract === "review-result/v2" ? "review-result/v2" : "review-result/v1" : value.schemaVersion === 3 ? "phase-result/v4" : resultContract === "phase-result/v2" ? "phase-result/v2" : "phase-result/v3";
+  if (resultContract !== expectedContract || attempt.kind !== "selection" && attempt.kind !== "review" && attempt.kind !== "planning_review" && attempt.kind !== "planning_analysis" && resultContract !== "phase-result/v2" && resultContract !== "phase-result/v3" && resultContract !== "phase-result/v4") {
     return recoveryEvidenceError(
       code,
       `Checkpoint result contract must be ${expectedContract}.`
@@ -3257,6 +3488,18 @@ function parseModelAttemptRecord(value) {
     );
   }
   const attempt = parseEvidenceAttempt(value.attempt, code, "attempt");
+  if (attempt.kind === "planning_review" || attempt.kind === "planning_analysis") {
+    if (value.schemaVersion !== 4 || attempt.mutable || value.reviewContext !== void 0 || value.reviewMode != null || value.rotationReason != null || !new RegExp(
+      `^${attempt.kind.replaceAll("_", "-")}-[1-9][0-9]*-[0-9a-f]{8}$`,
+      "u"
+    ).test(attempt.id))
+      return recoveryEvidenceError(
+        code,
+        "Planning attempt identity or protocol is invalid."
+      );
+    if (value.result !== null)
+      (attempt.kind === "planning_review" ? parsePlanningReviewResult : parsePlanningReviewAnalysis)(value.result);
+  }
   const strict = value.schemaVersion === STRICT_MODEL_ATTEMPT_SCHEMA_VERSION || value.schemaVersion === 4 && value.completionProtocol !== void 0;
   if (strict) {
     if (attempt.kind !== "implementation" && attempt.kind !== "fix" || !attempt.mutable || value.completionProtocol !== COMPLETION_PROTOCOL || !Object.hasOwn(value, "retryOf") || !Object.hasOwn(value, "envelope") || !Object.hasOwn(value, "completionDiagnostic")) {

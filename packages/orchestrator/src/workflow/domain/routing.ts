@@ -22,6 +22,8 @@ export function terminalResultContract(
   kind: AttemptReference["kind"],
   taskMode = false
 ): TerminalResultContract {
+  if (kind === "planning_review") return "planning-review-result/v1";
+  if (kind === "planning_analysis") return "planning-review-analysis/v1";
   return kind === "selection"
     ? "workflow-selection/v1"
     : kind === "review"

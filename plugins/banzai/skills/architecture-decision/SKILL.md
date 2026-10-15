@@ -66,6 +66,13 @@ work directory to satisfy a new-work path example.
 
 ## Orchestrated Mode
 
+At the ADR and plan gates the owner may request rework with required feedback
+or an independent read-only planning review of the whole bundle or selected
+artifacts. The planner analyzes findings without edits; only recorded human
+dispositions authorize applying revisions. Declined findings stay unchanged.
+These actions grant no approval or acceptance and keep Accepted ADR bodies
+immutable. Revisions return to the normal planning gates.
+
 A legacy or partial layout returns `outcome=needs_human_decision`,
 `gate=escalation`, the layout diagnostic as `summary`, one question naming
 the migration step, and no source change.

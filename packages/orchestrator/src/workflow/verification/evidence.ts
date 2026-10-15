@@ -118,7 +118,7 @@ export function taskVerificationStorage(
 ): VerificationStorage {
   const binding = state.artifactBinding?.binding;
   if (
-    binding?.schemaVersion !== (state.schemaVersion === 9 ? 3 : 2) ||
+    binding?.schemaVersion !== (state.schemaVersion >= 9 ? 3 : 2) ||
     !binding.artifacts.verificationDirectory
   )
     throw new BanzaiError(

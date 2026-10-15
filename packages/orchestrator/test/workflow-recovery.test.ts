@@ -26,8 +26,159 @@ import {
   passingReview,
   phaseResult,
   planPath,
-  prerequisiteBlockedFixFixture
+  prerequisiteBlockedFixFixture,
+  createPlanningReviewFixture
 } from "./workflow-fixtures.js";
+import { planningTriageAnswer } from "./planning-review-fixtures.js";
+
+test("interrupted read-only planning retries resume their own step without ordinary planning or renumbering", async (t) => {
+  for (const kind of ["planning_review", "planning_analysis"] as const)
+    await t.test(kind, async () => {
+      const f = await createPlanningReviewFixture(1);
+      try {
+        let failed = false;
+        f.adapters.onPlanning = async (request) => {
+          if (
+            !failed &&
+            request.outputContract.identity ===
+              (kind === "planning_review"
+                ? "planning-review-result/v1"
+                : "planning-review-analysis/v1")
+          ) {
+            failed = true;
+            throw new Error("Synthetic process interruption");
+          }
+        };
+        const blocked = await f.runner.resume();
+        const attempt = blocked.activeAttempt;
+        assert.ok(attempt);
+        assert.equal(attempt.kind, kind);
+        const source = await f.runner.store.readRunAttempt(
+          blocked.runId,
+          attempt
+        );
+        source.status = "started";
+        source.completedAt = null;
+        source.durationMs = null;
+        source.error = null;
+        source.failureCode = null;
+        await f.runner.store.writeRunAttempt(blocked.runId, source);
+        transitionState(blocked, "planning");
+        await f.runner.store.writeState(blocked);
+        const calls = f.adapters.planningRequests.length;
+        const interrupted = await f.runner.resume();
+        assert.equal(interrupted.status, "blocked");
+        assert.match(
+          interrupted.blockReason ?? "",
+          /Interrupted read-only planning attempt/
+        );
+        assert.equal(
+          (await f.runner.store.readRunAttempt(blocked.runId, attempt)).result,
+          null
+        );
+        assert.equal(f.adapters.planningRequests.length, calls);
+        assert.equal((await f.runner.status()).retry.eligible, true);
+        const retried = await f.runner.retry();
+        assert.equal(
+          retried.status,
+          "needs_human_decision",
+          retried.blockReason ?? ""
+        );
+        assert.equal(
+          retried.planningReview?.active?.episodeId,
+          blocked.planningReview?.active?.episodeId
+        );
+        assert.equal(retried.planningReview?.active?.reviewNumber, 1);
+        assert.equal(f.adapters.phasePrompts.length, 1);
+      } finally {
+        await f.repository.dispose();
+      }
+    });
+});
+
+test("failed read-only planning retries resume exactly their episode step", async (t) => {
+  for (const kind of ["planning_review", "planning_analysis"] as const)
+    await t.test(kind, async () => {
+      const f = await createPlanningReviewFixture(1);
+      try {
+        let failed = false;
+        f.adapters.onPlanning = async (request) => {
+          if (
+            !failed &&
+            request.outputContract.identity ===
+              (kind === "planning_review"
+                ? "planning-review-result/v1"
+                : "planning-review-analysis/v1")
+          ) {
+            failed = true;
+            throw new BanzaiError("MODEL_TIMEOUT", "Synthetic timeout");
+          }
+        };
+        const blocked = await f.runner.resume();
+        assert.equal(blocked.status, "blocked");
+        assert.equal(blocked.activeAttempt?.kind, kind);
+        assert.equal((await f.runner.status()).retry.eligible, true);
+        const episodeId = blocked.planningReview?.active?.episodeId;
+        const retried = await f.runner.retry();
+        assert.equal(
+          retried.status,
+          "needs_human_decision",
+          retried.blockReason ?? ""
+        );
+        assert.equal(retried.planningReview?.active?.episodeId, episodeId);
+        assert.equal(retried.planningReview?.active?.reviewNumber, 1);
+        assert.equal(f.adapters.phasePrompts.length, 1);
+        assert.equal(
+          f.adapters.planningRequests.filter(
+            (r) => r.outputContract.identity === "planning-review-result/v1"
+          ).length,
+          kind === "planning_review" ? 2 : 1
+        );
+      } finally {
+        await f.repository.dispose();
+      }
+    });
+});
+
+test("failed applying retry retains immutable triage and does not rehash the original planning scope", async () => {
+  const f = await createPlanningReviewFixture(1);
+  try {
+    const triage = await f.runner.resume();
+    const value = planningTriageAnswer(triage);
+    value.additionalInstruction = "Retain this applying evidence.";
+    f.adapters.planErrors.push(
+      new BanzaiError("MODEL_TIMEOUT", "Synthetic applying timeout")
+    );
+    const blocked = await f.runner.answerPlanningReview({
+      answer: value,
+      decidedBy: "owner"
+    });
+    assert.equal(blocked.status, "blocked");
+    assert.equal(blocked.activeAttempt?.kind, "plan");
+    assert.equal(blocked.planningReview?.active?.step, "applying");
+    assert.ok(blocked.planningReview.active.applyingAttemptId);
+    const scoped = blocked.planningReview.active.scope[0];
+    assert.ok(scoped);
+    await writeFile(
+      path.join(f.repository.root, scoped.path),
+      "The first applying attempt changed this file.\n"
+    );
+    const retried = await f.runner.retry();
+    assert.equal(
+      retried.status,
+      "needs_plan_approval",
+      retried.blockReason ?? ""
+    );
+    assert.equal(retried.planningReview?.closed.at(-1)?.outcome, "applied");
+    assert.match(
+      f.adapters.phasePrompts.at(-1) ?? "",
+      /Retain this applying evidence/
+    );
+    assert.equal(f.adapters.planningRequests.length, 2);
+  } finally {
+    await f.repository.dispose();
+  }
+});
 
 /**
  * Rewrites a protocol attempt's result together with its retained envelope so

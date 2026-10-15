@@ -1,7 +1,7 @@
 {
   "name": "banzai-plugins",
   "owner": {
-    "name": "Banzai International, Inc. d/b/a Parabolic, Inc. (\"Parabolic\")",
+    "name": "Banzai International, Inc. d/b/a Parabolic (\"Parabolic\")",
     "email": "alexander@parabolic.io"
   },
   "description": "Banzai open-source marketplace for Claude Code plugins.",

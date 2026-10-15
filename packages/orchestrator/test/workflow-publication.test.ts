@@ -60,7 +60,7 @@ test("a narrative-only implementation is published once by the runner with attem
     await runner.start({ slug: "example", request: "Implement it." });
     const done = await runner.approvePlan("human");
     assert.equal(done.status, "done", done.blockReason ?? "");
-    assert.equal(done.schemaVersion, 9);
+    assert.equal(done.schemaVersion, 10);
     assert.equal(done.metrics.attempts.implementation, 1);
     assert.ok(
       adapters.phasePrompts.every((prompt) => !/repair retry/i.test(prompt))

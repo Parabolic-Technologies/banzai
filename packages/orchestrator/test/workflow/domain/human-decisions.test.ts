@@ -3,8 +3,15 @@ import test from "node:test";
 import { BanzaiError } from "../../../src/errors.js";
 import {
   decisionIdentifier,
-  decisionText
+  decisionText,
+  humanDecisionQuestions
 } from "../../../src/workflow/domain/human-decisions.js";
+import { planningTriageRequest } from "../../planning-review-fixtures.js";
+
+test("planning triage never falls through to ordered escalation questions", () => {
+  for (const lite of [false, true])
+    assert.deepEqual(humanDecisionQuestions(planningTriageRequest(), lite), []);
+});
 
 const invalid = (message: string) => (error: unknown) =>
   error instanceof BanzaiError &&

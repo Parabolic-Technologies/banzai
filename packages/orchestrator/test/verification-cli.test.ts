@@ -25,6 +25,9 @@ import type { ProcessRunner } from "../src/types.js";
 import { createTestRepository } from "./helpers.js";
 
 class ScriptedIO implements InteractiveIO {
+  async multiSelect<T>(): Promise<T[]> {
+    throw new Error("Unexpected multi-select");
+  }
   lines: string[] = [];
   prompts: string[] = [];
   constructor(readonly answers: unknown[]) {}

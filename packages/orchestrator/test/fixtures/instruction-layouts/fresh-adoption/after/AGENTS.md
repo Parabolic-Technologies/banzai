@@ -242,8 +242,12 @@ A gate stops work until a human decides. There are five existing gates:
 - a material planning choice after repository analysis
   (`decision_consultation`);
 - ADR acceptance, before planning relies on the decision (`adr_approval`);
+  the owner may request rework with required feedback or independent read-only
+  planning review, followed by explicit human planning-review triage;
 - plan approval, bound to the exact description, accepted ADRs, and plan
-  (`plan_approval`);
+  (`plan_approval`); the owner may request required-feedback rework or an
+  independent planning review. Revisions return to approval; advisory model
+  recommendations and triage never approve or accept an ADR;
 - an escalation trigger discovered in any phase (`escalation`);
 - review triage, because only human-accepted findings reach a fix.
 

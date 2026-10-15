@@ -31,3 +31,5 @@ export function createExecutionBinding(input: {repoRoot: string; slug: string; m
 export function ownsArtifact(binding: WorkBinding, relative: string): boolean;
 export function inspectBoundWork(root: string, bound: BoundWork): Promise<BoundWork>;
 export function workDocumentInventory(root: string, bound: BoundWork): Promise<{path: string; kind: string; sha256: string | null}[]>;
+
+export function planningReviewFilenames(root: string, bound: BoundWork): Promise<string[]>;

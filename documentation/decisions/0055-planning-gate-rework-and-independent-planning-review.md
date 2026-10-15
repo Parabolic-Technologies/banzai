@@ -13,7 +13,7 @@
   proposal-stage wording and the decision body are retained unchanged.
   Dependent planning is authorized; plan approval is still required before
   implementation.
-- Implementation state: Planned.
+- Implementation state: Implemented.
 - Scope: strict orchestrated runs at the `adr_approval` and `plan_approval`
   gates, across the interactive terminal, the non-interactive CLI, agent
   control, the `orchestrate` supervisor protocol and the runner-delivered

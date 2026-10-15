@@ -280,4 +280,9 @@ detection. Report local, installed-client and delivery evidence separately.
   approval, review, verification and completion semantics remain authoritative.
 - No existing ADR is superseded by this proposal before acceptance. Record
   accepted lifecycle links without rewriting historical decision bodies.
+- Amended by
+  [ADR-0055](./0055-planning-gate-rework-and-independent-planning-review.md),
+  accepted 2026-10-13: the flat work directory also holds runner-rendered
+  `planning-review-<N>.md` siblings, recognized by name pattern. Binding v3
+  gains no role. Implementation is Planned.
 - Superseded by: None.

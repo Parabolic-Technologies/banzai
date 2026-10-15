@@ -7,6 +7,7 @@ import {
   type WorkspaceSnapshot
 } from "../../git.js";
 import { reviewArtifactPath } from "../../review-artifact.js";
+import { planningReviewArtifactPath } from "../../planning-review-artifact.js";
 import type {
   AttemptReference,
   PersistedPhaseResult,
@@ -58,7 +59,8 @@ export function validateArtifactRoleReferences(
 export async function validateSavedArtifactScope(
   context: RunnerContext,
   state: RunState,
-  attempt: AttemptReference
+  attempt: AttemptReference,
+  reconcilingPublication = false
 ): Promise<void> {
   if (!state.artifactBinding) return;
   const bytes = await readArtifactBytes(
@@ -70,7 +72,7 @@ export async function validateSavedArtifactScope(
     bytes?.toString("utf8") ?? "null"
   ) as WorkspaceSnapshot | null;
   if (
-    before?.schemaVersion !== (state.schemaVersion === 9 ? 3 : 2) ||
+    before?.schemaVersion !== (state.schemaVersion >= 9 ? 3 : 2) ||
     before.baseCommit !== state.baseCommit ||
     before.artifactBindingDigest !== state.artifactBinding.sha256 ||
     !Array.isArray(before.entries) ||
@@ -78,7 +80,7 @@ export async function validateSavedArtifactScope(
       createHash("sha256")
         .update(
           JSON.stringify({
-            version: state.schemaVersion === 9 ? 3 : 2,
+            version: state.schemaVersion >= 9 ? 3 : 2,
             baseCommit: before.baseCommit,
             artifactBindingDigest: before.artifactBindingDigest,
             entries: before.entries
@@ -90,28 +92,47 @@ export async function validateSavedArtifactScope(
       "ARTIFACT_RECOVERY_REQUIRED",
       "Original attempt artifact workspace evidence is missing or inconsistent."
     );
-  await checkArtifactPhaseScope(context, state, attempt.kind, before);
+  await checkArtifactPhaseScope(
+    context,
+    state,
+    attempt.kind,
+    before,
+    reconcilingPublication
+  );
 }
 
 export async function checkArtifactPhaseScope(
   context: Pick<RunnerContext, "repoRoot">,
   state: RunState,
   phase: AttemptReference["kind"],
-  before: Awaited<ReturnType<typeof workspaceSnapshot>>
+  before: Awaited<ReturnType<typeof workspaceSnapshot>>,
+  reconcilingPublication = false
 ): Promise<void> {
   const bound = state.artifactBinding;
   if (bound === undefined) return;
+  const excludedPaths =
+    phase === "review"
+      ? [reviewArtifactPath(state.slug, state.reviewIteration, bound)]
+      : state.planningReview?.active != null &&
+          phase === "planning_review" &&
+          (reconcilingPublication ||
+            state.planningReview.active.artifact !== null)
+        ? [
+            planningReviewArtifactPath(
+              bound,
+              state.planningReview.active.reviewNumber
+            )
+          ]
+        : [];
   const after = await workspaceSnapshot(context.repoRoot, {
     baseline: state.baseline,
     artifactBinding: bound,
-    excludedPaths:
-      phase === "review"
-        ? [reviewArtifactPath(state.slug, state.reviewIteration, bound)]
-        : []
+    excludedPaths
   });
   const allowed = new Set(artifactWritePaths(state, phase));
   for (const change of workspaceChanges(before, after)) {
     const candidate = change.path;
+    if (excludedPaths.includes(candidate)) continue;
     const privatePath =
       candidate === ".banzai" || candidate.startsWith(".banzai/");
     const legacyWork =
@@ -119,6 +140,8 @@ export async function checkArtifactPhaseScope(
         candidate
       );
     const prohibited =
+      phase === "planning_review" ||
+      phase === "planning_analysis" ||
       phase === "selection" ||
       phase === "review" ||
       (privatePath && !allowed.has(candidate)) ||
@@ -141,6 +164,7 @@ export function artifactWritePaths(
   state: RunState,
   phase: AttemptReference["kind"]
 ): string[] {
+  if (phase === "planning_review" || phase === "planning_analysis") return [];
   const roles = state.artifactBinding?.binding.artifacts;
   if (roles === undefined) return [];
   if (phase === "plan")

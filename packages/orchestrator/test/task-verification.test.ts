@@ -694,6 +694,12 @@ for (const lintFails of [false, true])
       usage: null
     });
     const adapters: VendorAdapters = {
+      runPlanningReview: async () => {
+        throw new Error("Unexpected planning review");
+      },
+      runPlanningAnalysis: async () => {
+        throw new Error("Unexpected planning analysis");
+      },
       preflightCodex: async () => {},
       preflightClaude: async () => {},
       runSelection: async () =>
@@ -793,7 +799,7 @@ for (const lintFails of [false, true])
         lintFails ? "blocked" : "done",
         state.blockReason ?? undefined
       );
-      assert.equal(state.schemaVersion, 9);
+      assert.equal(state.schemaVersion, 10);
       assert.equal(state.verificationMode, "task");
       assert.equal(Object.hasOwn(state, "configurationSetup"), false);
       assert.equal(phases, 1);

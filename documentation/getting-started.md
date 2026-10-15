@@ -244,3 +244,34 @@ You can instead exit the owning session, repair prerequisites with `banzai verif
 add`, `edit` or `remove`, and run `banzai resume`. Resume rechecks the evidence and
 continues from the completed implementation checkpoint. Another terminal cannot
 change config while a model, a check, or a waiting interactive owner holds it.
+
+
+## Rework and independent planning review
+
+At a strict ADR or plan gate, request rework with written feedback or request an
+independent review of the whole planning bundle or selected artifacts. The
+reviewer and planner analysis run read-only. The runner writes a separate
+`planning-review-<N>.md`; zero findings restore the gate. With findings, inspect
+the analysis options and their consequences before its advisory recommendation,
+then choose one option, write your own instruction or decline each finding.
+Only recorded human dispositions reach the applying planner. Revisions return
+to a normal planning gate and still require explicit approval or ADR acceptance.
+Changed reviewed bytes close the episode as stale; explicit retry reviews the
+current bytes under a new number. Existing artifacts are never overwritten.
+
+```text
+banzai approve plan --decision rework --note "Exact owner feedback"
+banzai approve adr --id ADR-0001 --decision rework --note "Exact owner feedback"
+banzai review planning
+banzai review planning --artifact documentation/work/example/plan.md
+```
+
+`approve plan` accepts only its documented flags. Unknown, repeated, positional
+and `--name=value` forms fail before approval. For agent supervisors, control
+8.0.0 declares capabilities v8 and status v6. Send closed gate-decision v1
+through `banzai control decide` and planning-triage answer v4 through `banzai
+control answer` using direct stdin. Encode human text as raw UTF-8 JSON; on the
+64 KiB limit, let the human shorten their own text or answer in a terminal.
+Never infer a decision or truncate the text. Historical runs cannot acquire new
+rework/review authority or resume through the v10 hook; preserve them and start
+new work. This release does not migrate or install anything automatically.

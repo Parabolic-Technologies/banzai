@@ -524,6 +524,7 @@ const ELIGIBILITY_SCENARIOS: {
         await rewriteRunState(runner.store, blocked.runId, (state) => {
           const legacy = state as unknown as Record<string, unknown>;
           legacy.schemaVersion = 7;
+          delete legacy.planningReview;
           delete legacy.verificationMode;
           delete legacy.taskVerification;
           delete legacy.artifactBinding;
@@ -542,6 +543,7 @@ const ELIGIBILITY_SCENARIOS: {
         await rewriteRunState(runner.store, blocked.runId, (state) => {
           const legacy = state as unknown as Record<string, unknown>;
           legacy.schemaVersion = 7;
+          delete legacy.planningReview;
           delete legacy.verificationMode;
           delete legacy.taskVerification;
           delete legacy.artifactBinding;
@@ -565,6 +567,7 @@ const ELIGIBILITY_SCENARIOS: {
         await rewriteRunState(runner.store, blocked.runId, (state) => {
           const legacy = state as unknown as Record<string, unknown>;
           legacy.schemaVersion = 7;
+          delete legacy.planningReview;
           delete legacy.verificationMode;
           delete legacy.taskVerification;
           delete legacy.artifactBinding;

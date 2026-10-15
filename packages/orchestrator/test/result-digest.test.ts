@@ -150,6 +150,12 @@ async function fixture(modes: Mode[], checkExit = 0, mandatory = false) {
   const queue = [...modes];
   let phases = 0;
   const adapters: VendorAdapters = {
+    runPlanningReview: async () => {
+      throw new Error("Unexpected planning review");
+    },
+    runPlanningAnalysis: async () => {
+      throw new Error("Unexpected planning analysis");
+    },
     preflightCodex: async () => {},
     preflightClaude: async () => {},
     runSelection: async () =>
@@ -684,6 +690,12 @@ async function strictFixture(
     throw new Error("Vendor subscription authentication is unavailable.");
   };
   const adapters: VendorAdapters = {
+    runPlanningReview: async () => {
+      throw new Error("Unexpected planning review");
+    },
+    runPlanningAnalysis: async () => {
+      throw new Error("Unexpected planning analysis");
+    },
     preflightCodex: refuseUnavailable,
     preflightClaude: refuseUnavailable,
     runSelection: async () =>
@@ -863,6 +875,12 @@ test("an unrelated failure gains no digest repair and keeps its existing refusal
   const repository = await createTestRepository({ artifactLayout: "private" });
   try {
     const adapters: VendorAdapters = {
+      runPlanningReview: async () => {
+        throw new Error("Unexpected planning review");
+      },
+      runPlanningAnalysis: async () => {
+        throw new Error("Unexpected planning analysis");
+      },
       preflightCodex: async () => {},
       preflightClaude: async () => {},
       runSelection: async () =>

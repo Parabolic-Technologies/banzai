@@ -11,6 +11,7 @@ import {
   documentRoles,
   inspectBoundWork,
   parseBinding,
+  planningReviewFilenames,
   workDocumentInventory
 } from "../../../plugins/banzai/lib/work-documents.mjs";
 import {
@@ -22,6 +23,56 @@ import { verificationOperation } from "../../../plugins/banzai/lib/verification-
 import { evidenceDigest } from "../../../plugins/banzai/lib/verification-evidence.mjs";
 import { createTestRepository } from "./helpers.js";
 import { RunStore } from "../src/store.js";
+
+test("planning-review inventory recognizes exact names without changing bound roles or code-review numbering", async () => {
+  const repo = await createTestRepository({ artifactLayout: null });
+  try {
+    const bound = await createExecutionBinding({
+      repoRoot: repo.root,
+      slug: "planning-inventory",
+      mode: "strict",
+      runId: "run"
+    });
+    const bindingBefore = structuredClone(bound);
+    const directory = bound.binding.artifacts.reviewDirectory;
+    for (const name of [
+      "planning-review-1.md",
+      "planning-review-3.md",
+      "planning-review-01.md",
+      "planning-review-0.md",
+      "planning-review-2.txt",
+      "review-1.md"
+    ])
+      await writeFile(path.join(repo.root, directory, name), name + "\n");
+    assert.deepEqual((await planningReviewFilenames(repo.root, bound)).sort(), [
+      "planning-review-1.md",
+      "planning-review-3.md"
+    ]);
+    const inventory = await workDocumentInventory(repo.root, bound);
+    assert.deepEqual(
+      inventory
+        .filter((item) => /\/(?:planning-)?review-/u.test(item.path))
+        .map((item) => item.path),
+      ["planning-review-1.md", "planning-review-3.md", "review-1.md"].map(
+        (name) => `${directory}/${name}`
+      )
+    );
+    assert.deepEqual(bound, bindingBefore);
+    const oversized = path.join(
+      repo.root,
+      directory,
+      "planning-review-overflow-"
+    );
+    await Promise.all(
+      Array.from({ length: 1001 }, (_, i) => writeFile(`${oversized}${i}`, ""))
+    );
+    await assert.rejects(planningReviewFilenames(repo.root, bound), {
+      code: "ARTIFACT_DISCOVERY_LIMIT"
+    });
+  } finally {
+    await repo.dispose();
+  }
+});
 
 async function privateEvidenceFixture(root: string) {
   const directory = "documentation/work/ignore-probe";

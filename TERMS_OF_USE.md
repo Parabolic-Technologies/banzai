@@ -3,7 +3,7 @@
 Effective date: September 9, 2026
 
 Banzai is an open-source product owned by
-**Banzai International, Inc. d/b/a Parabolic, Inc. ("Parabolic")**.
+**Banzai International, Inc. d/b/a Parabolic ("Parabolic")**.
 The project author is [Alexander Torosh](https://github.com/alexander-torosh).
 The project repository is
 [Parabolic-Technologies/banzai](https://github.com/Parabolic-Technologies/banzai).

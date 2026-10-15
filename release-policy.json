@@ -63,7 +63,9 @@
       "plugins/banzai/contracts/artifacts/v1/work-binding.schema.json",
       "plugins/banzai/contracts/artifacts/v3/work-binding.schema.json",
       "plugins/banzai/contracts/verification/v3/inspect-request.schema.json",
-      "plugins/banzai/contracts/verification/v3/execute-request.schema.json"
+      "plugins/banzai/contracts/verification/v3/execute-request.schema.json",
+      "plugins/banzai/contracts/v1/planning-review-result.schema.json",
+      "plugins/banzai/contracts/v1/planning-review-analysis.schema.json"
     ],
     "requiredPaths": [
       "plugins/banzai/hooks/spec-gate.cjs",
@@ -133,7 +135,10 @@
       "plugins/banzai/lib/review-snapshot.d.mts",
       "plugins/banzai/contracts/artifacts/v3/work-binding.schema.json",
       "plugins/banzai/contracts/verification/v3/inspect-request.schema.json",
-      "plugins/banzai/contracts/verification/v3/execute-request.schema.json"
+      "plugins/banzai/contracts/verification/v3/execute-request.schema.json",
+      "plugins/banzai/contracts/v1/planning-review-result.schema.json",
+      "plugins/banzai/contracts/v1/planning-review-analysis.schema.json",
+      "plugins/banzai/phases/planning-review.md"
     ]
   },
   "contracts": {
@@ -169,7 +174,7 @@
       ]
     },
     "state": {
-      "currentSchemaVersion": 9,
+      "currentSchemaVersion": 10,
       "legacySchemaVersions": [
         1,
         2,
@@ -178,22 +183,34 @@
         5,
         6,
         7,
-        8
+        8,
+        9
       ]
     },
     "agentControl": {
-      "contractVersion": "7.0.0",
-      "capabilities": "banzai-agent-capabilities/v7",
-      "status": "banzai-agent-status/v5",
+      "contractVersion": "8.0.0",
+      "capabilities": "banzai-agent-capabilities/v8",
+      "status": "banzai-agent-status/v6",
       "request": "banzai-agent-request/v1",
       "answer": "banzai-agent-answer/v2",
       "legacyAnswer": "banzai-agent-answer/v1",
       "recovery": "banzai-agent-recovery/v1",
-      "configurationAnswer": "banzai-agent-answer/v3"
+      "configurationAnswer": "banzai-agent-answer/v3",
+      "gateDecision": "banzai-agent-gate-decision/v1",
+      "planningTriageAnswer": "banzai-agent-answer/v4"
     },
     "evaluation": {
       "export": "banzai-evaluation-export/v1",
       "kpi": "banzai-evaluation-kpi/v1"
+    },
+    "planningReview": {
+      "resultPath": "plugins/banzai/contracts/v1/planning-review-result.schema.json",
+      "resultSchema": "banzai-planning-review-result/v1",
+      "resultSchemaVersion": 1,
+      "analysisPath": "plugins/banzai/contracts/v1/planning-review-analysis.schema.json",
+      "analysisSchema": "banzai-planning-review-analysis/v1",
+      "analysisSchemaVersion": 1,
+      "artifactFormat": "banzai-planning-review/v1"
     }
   },
   "orchestrator": {

@@ -4,11 +4,42 @@ import { BanzaiError } from "../../../src/errors.js";
 import type { RunState } from "../../../src/types.js";
 import {
   artifactPaths,
-  isDocumentationPath
+  isDocumentationPath,
+  gateArtifactPaths
 } from "../../../src/workflow/domain/artifact-scope.js";
 
 const withArtifacts = (planArtifacts: unknown) =>
   ({ planArtifacts }) as unknown as RunState;
+
+test("planning scope uses approval order and a null ADR-gate description is valid", () => {
+  const state = withArtifacts({
+    description: "work/description.md",
+    plan: "work/plan.md",
+    adrs: ["documentation/decisions/0001.md", "documentation/decisions/0002.md"]
+  });
+  assert.deepEqual(gateArtifactPaths(state, "plan_approval"), [
+    "work/description.md",
+    "documentation/decisions/0001.md",
+    "documentation/decisions/0002.md",
+    "work/plan.md"
+  ]);
+  assert.deepEqual(gateArtifactPaths(state, "adr_approval"), [
+    "work/description.md",
+    "documentation/decisions/0001.md",
+    "documentation/decisions/0002.md"
+  ]);
+  assert.deepEqual(
+    gateArtifactPaths(
+      withArtifacts({
+        description: null,
+        plan: null,
+        adrs: ["documentation/decisions/0001.md"]
+      }),
+      "adr_approval"
+    ),
+    ["documentation/decisions/0001.md"]
+  );
+});
 
 test("approved artifact paths list the description, ADRs, then the plan", () => {
   assert.deepEqual(

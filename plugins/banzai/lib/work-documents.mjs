@@ -83,7 +83,7 @@ export async function createExecutionBinding({ repoRoot, slug, mode, runId, crea
 export function ownsArtifact(binding, relative) {
   if (Object.entries(binding.artifacts).some(([role, target]) => role !== "verificationDirectory" && role !== "reviewDirectory" && relative === target)) return true;
   const prefix = `${binding.artifacts.reviewDirectory}/`;
-  return relative.startsWith(prefix) && /^review-[1-9]\d*\.md$/u.test(relative.slice(prefix.length));
+  return relative.startsWith(prefix) && /^(?:review|planning-review)-[1-9]\d*\.md$/u.test(relative.slice(prefix.length));
 }
 
 export async function inspectBoundWork(root, bound) {
@@ -103,11 +103,19 @@ export async function workDocumentInventory(root, bound) {
   const selected = new Set(Object.entries(roles).filter(([role]) => !["reviewDirectory", "verificationDirectory"].includes(role)).map(([, relative]) => relative));
   const entries = await readdir(await safePath(root, roles.reviewDirectory, { directory: true }));
   if (entries.length > 1000) fail("ARTIFACT_DISCOVERY_LIMIT", "Selected work inventory exceeds its bound.");
-  for (const entry of entries) if (/^review-[1-9]\d*\.md$/u.test(entry)) selected.add(`${roles.reviewDirectory}/${entry}`);
+  for (const entry of entries) if (/^(?:review|planning-review)-[1-9]\d*\.md$/u.test(entry)) selected.add(`${roles.reviewDirectory}/${entry}`);
   const inventory = [];
   for (const relative of [...selected].sort()) {
     const bytes = await readBytes(root, relative, { optional: true });
     inventory.push({ path: relative, kind: bytes === null ? "deleted" : "file", sha256: bytes === null ? null : digestBytes(Buffer.concat([Buffer.from("file\0"), bytes])) });
   }
   return inventory;
+}
+
+
+export async function planningReviewFilenames(root, bound) {
+  await inspectBoundWork(root, bound);
+  const entries = await readdir(await safePath(root, bound.binding.artifacts.reviewDirectory, { directory: true }));
+  if (entries.length > 1000) fail("ARTIFACT_DISCOVERY_LIMIT", "Selected work inventory exceeds its bound.");
+  return entries.filter(entry => /^planning-review-[1-9][0-9]*\.md$/u.test(entry));
 }

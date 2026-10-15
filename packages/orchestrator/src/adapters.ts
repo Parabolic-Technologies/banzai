@@ -18,6 +18,9 @@ import {
 } from "./output-contract.js";
 import type {
   AdapterResult,
+  PlanningAdapterRequest,
+  PlanningReviewResult,
+  PlanningReviewAnalysis,
   ClaudeEnvironmentSettings,
   ClaudeInvocationScope,
   ModelFailureCause,
@@ -43,6 +46,8 @@ import type {
 } from "./types.js";
 import { resolveSerenaWhitelist, serenaAllowedTools } from "./mcp.js";
 import {
+  parsePlanningReviewResult,
+  parsePlanningReviewAnalysis,
   parsePhaseResult,
   parsePhaseResultEnvelope,
   parseCurrentReviewResult,
@@ -1518,7 +1523,15 @@ function claudeEnvironmentArguments(
   return args;
 }
 
-export function buildClaudeArguments(request: ReviewAdapterRequest): string[] {
+export function buildClaudeArguments(
+  request:
+    | ReviewAdapterRequest
+    | Omit<
+        PlanningAdapterRequest<PlanningReviewResult | PlanningReviewAnalysis>,
+        "onTerminalSuccess"
+      >,
+  identity: OutputContractIdentity = "review-result/v2"
+): string[] {
   const args = [
     "-p",
     invocationPrompt(request),
@@ -1526,7 +1539,7 @@ export function buildClaudeArguments(request: ReviewAdapterRequest): string[] {
     "stream-json",
     "--verbose",
     "--json-schema",
-    requestOutputContract(request, "claude", "review-result/v2"),
+    requestOutputContract(request, "claude", identity),
     "--model",
     request.settings.model,
     "--effort",
@@ -1546,10 +1559,15 @@ export function buildClaudeArguments(request: ReviewAdapterRequest): string[] {
   args.push(
     ...claudeEnvironmentArguments(
       request.environment,
-      request.liveCompatibility?.pluginDirectory ?? null
+      ("liveCompatibility" in request
+        ? request.liveCompatibility.pluginDirectory
+        : null) ?? null
     )
   );
-  if (request.liveCompatibility?.includeHookEvents === true) {
+  if (
+    "liveCompatibility" in request &&
+    request.liveCompatibility.includeHookEvents
+  ) {
     args.push("--include-hook-events");
   }
   return args;
@@ -1794,6 +1812,105 @@ function claudeStructuredResult<T>(
     sessionId: typeof record.session_id === "string" ? record.session_id : null,
     usage: normalizedUsage(record.usage, record.total_cost_usd)
   };
+}
+
+async function runPlanningAdapter<
+  T extends PlanningReviewResult | PlanningReviewAnalysis
+>(
+  runner: ProcessRunner,
+  request: PlanningAdapterRequest<T>,
+  identity: OutputContractIdentity,
+  parse: (value: unknown) => T
+): Promise<AdapterResult<T>> {
+  const vendor = requireVendor(request.settings.executable);
+  return withModelFailureEvidence(runner, vendor, async (run) => {
+    const env = subscriptionOnlyEnvironment({
+      ...request.env,
+      BANZAI_RUN_ID: request.runId,
+      BANZAI_APPROVAL_DIGEST: "",
+      BANZAI_WORKFLOW_DIGEST: "",
+      BANZAI_REVIEW_ARTIFACT: ""
+    });
+    if (vendor === "claude") {
+      const terminal = createClaudeTerminalObserver(
+        parse,
+        request.onTerminalSuccess
+      );
+      const processResult = await run({
+        command: request.settings.executable,
+        args: buildClaudeArguments(request, identity),
+        cwd: request.repoRoot,
+        env,
+        timeoutMs: request.settings.timeoutMs,
+        onStart: request.onStart,
+        onStdoutLine: createClaudeProgressObserver(
+          request.onProgress,
+          request.repoRoot
+        ),
+        onStdoutLineDurable: observeSessionStart(
+          vendor,
+          request.onSessionStarted,
+          terminal.observe
+        )
+      });
+      if (processResult.exitCode !== 0)
+        throw processExitError(
+          "CLAUDE_PLANNING_FAILED",
+          "Claude",
+          processResult
+        );
+      const parsed = claudeStructuredResult(
+        decodeClaudeStdout(processResult.stdout),
+        parse
+      );
+      requireCheckpointResultParity(terminal.result(), parsed.result);
+      return {
+        ...parsed,
+        stdout: processResult.stdout,
+        stderr: processResult.stderr,
+        inventory: claudeSessionInventory(processResult.stdout),
+        turnCount: claudeTurnCount(processResult.stdout)
+      };
+    }
+    const { schemaPath, outputPath } = await writeCodexContract(
+      request.runDirectory,
+      request.attemptId,
+      `${identity.replace("/v1", "")}.schema.json`,
+      requestOutputContract(request, "codex", identity)
+    );
+    const terminal = createCodexTerminalObserver(
+      parse,
+      request.onTerminalSuccess
+    );
+    const processResult = await run({
+      command: request.settings.executable,
+      args: buildCodexArguments(request, schemaPath, outputPath, "read-only"),
+      cwd: request.repoRoot,
+      env,
+      timeoutMs: request.settings.timeoutMs,
+      onStart: request.onStart,
+      onStdoutLine: createCodexProgressObserver(
+        request.onProgress,
+        request.repoRoot
+      ),
+      onStdoutLineDurable: observeSessionStart(
+        vendor,
+        request.onSessionStarted,
+        terminal.observe
+      )
+    });
+    if (processResult.exitCode !== 0)
+      throw processExitError("CODEX_PLANNING_FAILED", "Codex", processResult);
+    const result = parse(await readCodexResult(outputPath));
+    requireCheckpointResultParity(terminal.result(), result);
+    return {
+      result,
+      sessionId: codexSessionId(processResult.stdout),
+      stdout: processResult.stdout,
+      stderr: processResult.stderr,
+      usage: codexUsage(processResult.stdout)
+    };
+  });
 }
 
 export function createVendorAdapters(
@@ -2091,6 +2208,23 @@ export function createVendorAdapters(
           usage: codexUsage(processResult.stdout)
         };
       });
+    },
+
+    async runPlanningReview(request) {
+      return runPlanningAdapter(
+        runner,
+        request,
+        "planning-review-result/v1",
+        parsePlanningReviewResult
+      );
+    },
+    async runPlanningAnalysis(request) {
+      return runPlanningAdapter(
+        runner,
+        request,
+        "planning-review-analysis/v1",
+        parsePlanningReviewAnalysis
+      );
     },
 
     async runReview(

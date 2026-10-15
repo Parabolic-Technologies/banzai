@@ -1,3 +1,4 @@
+import { validateHumanFreeText } from "./validation.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import {
   executeVerificationCli,
@@ -106,6 +107,7 @@ import type {
 import {
   defaultDecisionMaker,
   reviewStatusLines,
+  planningReviewStatusLines,
   WorkflowRunner,
   type WorkflowStatus
 } from "./workflow.js";
@@ -217,6 +219,7 @@ Usage:
   banzai control status
   banzai control start --slug <kebab-case>
   banzai control answer [--by <name>] [--no-resume]
+  banzai control decide [--by <name>] [--no-resume]
   banzai control recover [--by <name>] [--no-resume]
   banzai model
   banzai run --slug <kebab-case> --request <text>
@@ -232,6 +235,8 @@ Usage:
   banzai restore
   banzai recover
   banzai approve plan [--by <name>] [--no-resume]
+  banzai approve plan --decision rework --note <text> [--by <name>] [--no-resume]
+  banzai review planning [--artifact <path> ...] [--by <name>] [--no-resume]
   banzai verify add <type> | edit <id> | remove <id> | list | check
   banzai approve verification [--by <name>] [--no-resume]
   banzai approve adr --id <id> --decision <accept|reject|rework> [--note <text>] [--by <name>] [--no-resume]
@@ -249,6 +254,7 @@ On a terminal, a live status line reports the running phase until it settles.
 Finding lists are comma-separated. Pass an empty string for an empty list.
 Run without arguments in a terminal for interactive mode.
 \`banzai model\` picks the model and effort for each phase and needs a terminal.
+Within the ADR and plan gates, rework returns to planning with required feedback; requested independent planning review uses human planning-review triage. Neither action grants approval.
 Five existing human decision gates remain distinct: conditional planning consultation,
 ADR acceptance, plan approval, escalation, and review triage. Consultation
 records preference provenance; it is not approval or execution authority.
@@ -256,7 +262,8 @@ New tasks use task-scoped verification without profiles, bootstrap, or a
 configuration-prerequisite gate. Legacy configuration commands and answer formats
 remain explicit utilities; they do not authorize continuation of historical runs.
 The legacy \`banzai approve verification\` command reads a closed \`banzai-agent-answer/v3\` document.
-\`banzai control answer\` reads \`banzai-agent-answer/v3\` configuration, keyed
+\`banzai control decide\` reads \`banzai-agent-gate-decision/v1\` from direct stdin.
+\`banzai control answer\` reads \`banzai-agent-answer/v4\` planning-review triage, \`banzai-agent-answer/v3\` configuration, keyed
 \`banzai-agent-answer/v2\` consultation, or ordered \`banzai-agent-answer/v1\` escalation document from direct stdin.
 The runner uses the current checkout and never creates or manages Git worktrees.`;
 
@@ -322,6 +329,112 @@ function printFinding(finding: ReviewFinding): void {
  * the three lines a newcomer most reliably misreads. They stay one flag away
  * rather than leading every command's output.
  */
+export function parsePlanGateArgs(args: readonly string[]): {
+  decision: "approve" | "rework";
+  note: string | null;
+  by: string | null;
+  autoResume: boolean;
+} {
+  const options = exactPlanningOptions(args, false);
+  const decision = options.decision ?? "approve";
+  if (decision !== "approve" && decision !== "rework")
+    throw new BanzaiError(
+      "INVALID_DECISION",
+      "Plan decision must be approve or rework."
+    );
+  if (decision === "approve" && options.note !== null)
+    throw new BanzaiError(
+      "INVALID_DECISION",
+      "--note is accepted only with --decision rework."
+    );
+  if (
+    decision === "rework" &&
+    (options.note === null || options.note.trim().length === 0)
+  )
+    throw new BanzaiError(
+      "INVALID_DECISION",
+      "Plan rework requires a non-empty --note."
+    );
+  const note =
+    options.note === null
+      ? null
+      : validateHumanFreeText(options.note, "Plan rework feedback", 8000);
+  return { decision, note, by: options.by, autoResume: options.autoResume };
+}
+function exactPlanningOptions(
+  args: readonly string[],
+  review: boolean
+): {
+  decision: string | null;
+  note: string | null;
+  by: string | null;
+  autoResume: boolean;
+  paths: string[];
+} {
+  const result = {
+    decision: null as string | null,
+    note: null as string | null,
+    by: null as string | null,
+    autoResume: true,
+    paths: [] as string[]
+  };
+  const seen = new Set<string>();
+  for (let i = 0; i < args.length; i++) {
+    const flag = args[i];
+    if (
+      flag === undefined ||
+      !(
+        review
+          ? ["--artifact", "--by", "--no-resume"]
+          : ["--decision", "--note", "--by", "--no-resume"]
+      ).includes(flag) ||
+      (seen.has(flag) && flag !== "--artifact")
+    )
+      throw new BanzaiError(
+        "INVALID_COMMAND",
+        "Unknown, repeated or positional planning command argument."
+      );
+    seen.add(flag);
+    if (flag === "--no-resume") {
+      result.autoResume = false;
+      continue;
+    }
+    const value = args[++i];
+    if (flag === "--note" && (value === undefined || value.startsWith("--"))) {
+      result.note = "";
+      i--;
+      continue;
+    }
+    if (value === undefined || value.startsWith("--"))
+      throw new BanzaiError(
+        flag === "--note" ? "INVALID_DECISION" : "INVALID_COMMAND",
+        flag === "--note"
+          ? "Plan rework requires a non-empty --note."
+          : "Planning command option requires a value."
+      );
+    if (flag === "--artifact") result.paths.push(value);
+    else if (flag === "--by")
+      result.by = validateHumanFreeText(value, "Decision owner", 500);
+    else if (flag === "--note") result.note = value;
+    else result.decision = value;
+  }
+  return result;
+}
+function parsePlanningReviewArgs(args: readonly string[]): {
+  paths: string[] | null;
+  by: string | null;
+  autoResume: boolean;
+} {
+  if (args[0] !== "planning")
+    throw new BanzaiError("INVALID_COMMAND", "Review target must be planning.");
+  const options = exactPlanningOptions(args.slice(1), true);
+  return {
+    paths: options.paths.length === 0 ? null : options.paths,
+    by: options.by,
+    autoResume: options.autoResume
+  };
+}
+
 function printState(status: WorkflowStatus, metrics = false): void {
   const { state, nextAction } = status;
   console.log(`Run: ${state.runId}`);
@@ -386,7 +499,10 @@ function printState(status: WorkflowStatus, metrics = false): void {
       status.configurationPrerequisite
     ))
       console.log(line);
-  } else if (state.pendingHumanDecision != null) {
+  } else if (
+    state.pendingHumanDecision != null &&
+    state.pendingHumanDecision.kind !== "planning_review_triage"
+  ) {
     printLabeled("Decision needed", state.pendingHumanDecision.summary);
     for (const question of state.pendingHumanDecision.kind === "escalation"
       ? state.pendingHumanDecision.questions
@@ -396,6 +512,8 @@ function printState(status: WorkflowStatus, metrics = false): void {
       printLabeled("Question", question);
     }
   }
+  for (const line of planningReviewStatusLines(status))
+    console.log(escapeTerminalText(line));
   for (const line of reviewStatusLines(status)) {
     console.log(line);
   }
@@ -445,7 +563,9 @@ function printState(status: WorkflowStatus, metrics = false): void {
     );
   } else if (state.status === "needs_human_decision") {
     console.log(
-      "Next: run `banzai` in a terminal to answer the pending decision and continue."
+      state.pendingHumanDecision?.kind === "planning_review_triage"
+        ? "Next: answer in banzai in a terminal or send banzai-agent-answer/v4 to banzai control answer."
+        : "Next: run `banzai` in a terminal to answer the pending decision and continue."
     );
   } else if (state.status === "needs_triage") {
     console.log("Next: triage every finding with `banzai triage ...`.");
@@ -454,7 +574,7 @@ function printState(status: WorkflowStatus, metrics = false): void {
   }
   if (metrics) {
     console.log(
-      `Attempts: selection=${state.metrics.attempts.selection ?? 0}, plan=${state.metrics.attempts.plan}, implementation=${state.metrics.attempts.implementation}, fix=${state.metrics.attempts.fix}, review=${state.metrics.attempts.review}`
+      `Attempts: selection=${state.metrics.attempts.selection ?? 0}, plan=${state.metrics.attempts.plan}, implementation=${state.metrics.attempts.implementation}, fix=${state.metrics.attempts.fix}, review=${state.metrics.attempts.review}, planning_review=${state.metrics.attempts.planning_review ?? 0}, planning_analysis=${state.metrics.attempts.planning_analysis ?? 0}`
     );
     console.log(
       `Sessions: fresh=${state.metrics.sessions.fresh}, resumed=${state.metrics.sessions.resumed}`
@@ -615,6 +735,12 @@ async function main(): Promise<void> {
     console.log(CANCELLATION_HELP);
     return;
   }
+  const planCommand =
+    command === "approve" && args[1] === "plan"
+      ? parsePlanGateArgs(args.slice(2))
+      : null;
+  const reviewCommand =
+    command === "review" ? parsePlanningReviewArgs(args.slice(1)) : null;
   const controlCommand =
     command === "control"
       ? parseAgentControlArgs(args.slice(1))
@@ -1161,6 +1287,17 @@ async function main(): Promise<void> {
     await printRunnerState(runner, metrics);
     return;
   }
+  if (command === "review" && reviewCommand !== null) {
+    await attention.run(() =>
+      runner.requestPlanningReview({
+        paths: reviewCommand.paths,
+        decidedBy: reviewCommand.by ?? defaultDecisionMaker(),
+        autoResume: reviewCommand.autoResume
+      })
+    );
+    await printRunnerState(runner, metrics);
+    return;
+  }
   if (command === "approve") {
     const target = args[1];
     const approvedBy = option(args, "--by") ?? defaultDecisionMaker();
@@ -1171,7 +1308,20 @@ async function main(): Promise<void> {
         console.log(
           `Human prerequisites:\n${escapeTerminalText(prerequisites)}`
         );
-      await attention.run(() => runner.approvePlan(approvedBy, autoResume));
+      if (planCommand === null)
+        throw new BanzaiError("INVALID_COMMAND", "Invalid plan command.");
+      await attention.run(() =>
+        planCommand.decision === "rework"
+          ? runner.reworkPlan({
+              feedback: planCommand.note ?? "",
+              decidedBy: planCommand.by ?? defaultDecisionMaker(),
+              autoResume: planCommand.autoResume
+            })
+          : runner.approvePlan(
+              planCommand.by ?? defaultDecisionMaker(),
+              planCommand.autoResume
+            )
+      );
       await printRunnerState(runner, metrics);
       return;
     }
@@ -1183,11 +1333,26 @@ async function main(): Promise<void> {
           "ADR decision must be accept, reject, or rework."
         );
       }
+      const noteIndex = args.indexOf("--note");
+      const note =
+        decision === "rework"
+          ? noteIndex < 0
+            ? null
+            : (args[noteIndex + 1] ?? null)
+          : option(args, "--note");
+      if (decision === "rework") {
+        if (note === null || note.startsWith("--") || note.trim().length === 0)
+          throw new BanzaiError(
+            "INVALID_DECISION",
+            "ADR rework requires a non-empty --note."
+          );
+        validateHumanFreeText(note, "ADR rework feedback", 8000);
+      }
       await attention.run(() =>
         runner.decideAdr({
           id: requireOption(args, "--id"),
           decision: decision as "accept" | "reject" | "rework",
-          note: option(args, "--note"),
+          note,
           decidedBy: approvedBy,
           autoResume
         })

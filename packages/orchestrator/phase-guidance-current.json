@@ -38,34 +38,36 @@
     "plugins/banzai/guidance/review.md#section:Engineering Quality Shadow Procedure": "56593ce0d446c6f3b08cb90421b8ace416517f384179cf11344d0290a2330efb",
     "plugins/banzai/guidance/review.md#section:Read": "4557812a227d34babfdbc399d5c4676ad83011924ab3d14101c024d1345faadb",
     "plugins/banzai/hooks/hooks.json": "eb5bce1be31c2dde64a55ae9af27fe0c176cedc911a76209aa5110493238f3a9",
-    "plugins/banzai/hooks/spec-gate.cjs": "a2adb42ccd1e6c269a00e472e160b6fdff1905a0e0d81e711fefc9f06f94b9ad",
+    "plugins/banzai/hooks/spec-gate.cjs": "5c31234cc52973c9132455d59a25af76455d24f4dae8370f2935e3f42b7701d6",
     "plugins/banzai/phases/feature.md": "a300090a34a4f109b4ab4f18ee4eb41edb245f074ab69c2295c45a476bf9be33",
     "plugins/banzai/phases/fix.md": "7f16eb14d308e7d4f8a59cf12445afc1efbcb3c93ad1da8f83911528235634c1",
     "plugins/banzai/phases/implementation.md": "4f8e6fd1a2fed3c463bfc39342f65eabf70848e52d00cb6b18db1eed886a4c6c",
-    "plugins/banzai/phases/planning.md": "7ff1e98e1921fe87687cbd0f74853278dffb381f94dea0e1887a40ba8335f234",
+    "plugins/banzai/phases/planning-review.md": "feee0ef743d8d802eb83ce70acd1dc82fad6ebf76659bc1b843e22b9094f0133",
+    "plugins/banzai/phases/planning.md": "862ce2cdc932847da787b698f0e321ee151dbbefe2554044592820f2b8554096",
     "plugins/banzai/phases/quick-fix.md": "2acd0d7af182c2f77126a4e632639a7dc68627dfe7edf8c856d881b1726dccf1",
     "plugins/banzai/phases/review.md": "bae167a98386f417f1be0d9028059a038456a0b7f5dc970030818c23ba0c277c",
-    "plugins/banzai/policies/artifact-storage.md": "276e1d7254f470c6338f6290e660f353d4b5dad1d9c75967e56b58184508bdd1",
+    "plugins/banzai/policies/artifact-storage.md": "669162b5d4fbf452cbdd692e31105c7b2d5e0acb4337d67cab4b17ad7577b1ca",
     "plugins/banzai/policies/decision-consultation.md": "82a869ef55849063b96742f5a60474bcf54492b737ca2703380d4a53f46f26d5",
-    "plugins/banzai/policies/engineering-quality.md": "f67052be05d810fbc41bcdd813fb9f47c7d0f96dcba2771cbd2de02249d986a9",
-    "plugins/banzai/policies/plan-task-completion.md": "f3b9f2c07a7dff175acfa5d8d0b7f9d1456cfc40bbf816dc95441f8d742274ed",
-    "plugins/banzai/policies/security-assurance.md": "b42cef3a0ccec8e4ba5e23057a4c788fc32227e9a3bca454d9d82d43589d4b74",
-    "plugins/banzai/policies/test-assurance.md": "f24f2b2a1cf9ae18e5a44f196df000362bf0aeb24ef5de05be5e3e55550826bf",
+    "plugins/banzai/policies/engineering-quality.md": "36fdf0cc236d13d136bcba2421ca0e2833176f180014324785a200d9cbfe0cc8",
+    "plugins/banzai/policies/plan-task-completion.md": "953466e31093a9ae5842e711f16b95eccafa74dbdc3e1351081dfff9e6895d35",
+    "plugins/banzai/policies/security-assurance.md": "bc28ae35b90fba8b899141765e98a3e7a72c72e676ddefcd8546f2976bd25a67",
+    "plugins/banzai/policies/test-assurance.md": "5cfbb6eca3931f047494208527a531554aa9ec15e822dc10c606cc439b419860",
+    "plugins/banzai/skills/architecture-decision/SKILL.md#orchestrated": "95746ad61765c0d1105284aba1ba0218bfe1a168fe799f023d188237df44c7b9",
     "plugins/banzai/skills/architecture-decision/SKILL.md#section:ADR Document": "2b4da2dc5ba95ccb30b50dc4b7b5d563a28382fa9b3de32f7be1a28665bfbbc2",
     "plugins/banzai/skills/architecture-decision/SKILL.md#section:Apply The Decision": "ffe4012bf50abea49fe893470266f4c207a7f09b5657efebf3c592e77974079f",
     "plugins/banzai/skills/architecture-decision/SKILL.md#section:Lifecycle": "ae77cfc5bbea06e176855a94568b810e90711e3c36b03d2e50f99523ae4e00f3",
     "plugins/banzai/skills/architecture-decision/SKILL.md#section:Proposal": "2d8b77ed4b5df04462419000fe9703b69ce368ec35e7eb7c870c3867696cd9b8",
-    "plugins/banzai/skills/architecture-decision/SKILL.md#skeleton": "39c8443cc9f146d9763c90af1a9245ab34176fce9d63a1b139d97fdabf6754da",
+    "plugins/banzai/skills/architecture-decision/SKILL.md#skeleton": "9a8a832cbbbeb6f7addec9a44c28157fe22080cfe624aeb33d984871a50a1aa2",
     "plugins/banzai/skills/code-writing/SKILL.md#orchestrated": "7702756f16e311468325f389e0d2b92c144da8cc58796f9f0dc712cdeada7567",
     "plugins/banzai/skills/code-writing/SKILL.md#section:Deviations": "0d7910a8f6e373dcdd630cf1e60de693c1c2861f203268770c0a0cb2bda2c285",
     "plugins/banzai/skills/code-writing/SKILL.md#section:Final Verification": "2ba9e7aa4edae8d103aa1ee525e22bb8e69f22c3db3f42b409b9172ce12f49f7",
     "plugins/banzai/skills/code-writing/SKILL.md#section:Implementation Report": "7b19085f138feee83a32e5a77e11ba3d7940b2ec56e484c22bccfad92d5a697c",
     "plugins/banzai/skills/code-writing/SKILL.md#section:Implementation Rules": "ee9a7c98be224dc74ebc71422eae0c80e7cb232fad99f94cfdc46c7bec05ff51",
     "plugins/banzai/skills/code-writing/SKILL.md#skeleton": "fb46f1c8310c7be05cc9bcd61b8a7958fc4f599efda60db1ff41303708c7f6db",
-    "plugins/banzai/skills/development-plan/SKILL.md#orchestrated": "2476e4babad02ea3968174759626ab34c7de0c4e87479abadb65d18a7581dfa7",
+    "plugins/banzai/skills/development-plan/SKILL.md#orchestrated": "e23cfa6dca260f0844db821e51ee25d65a0c9e087e2ecb0e75f5065fc1874506",
     "plugins/banzai/skills/development-plan/SKILL.md#section:Document": "e21d42ab849aa5734f0a9a377c9ff21bc19acd75f8dd95593c50bf659496216d",
     "plugins/banzai/skills/development-plan/SKILL.md#section:Rules": "0e03238133dc098c702f7e4000413c73f2ce0d15a82f8b50150d0e9c66f88c53",
-    "plugins/banzai/skills/development-plan/SKILL.md#skeleton": "02c30749def4371e847938c863869daae2f193ed17293d17bfb05b7a102571e8",
+    "plugins/banzai/skills/development-plan/SKILL.md#skeleton": "6c5745aeadd07dc9f05210887a652c498086bedcb6237236d33661d8fcc33789",
     "plugins/banzai/skills/feature-description/SKILL.md#section:Clarification Loop": "8bbc07dea9015ca6d9dbcb65e86220564a93f2e7cd417e77f998c6f2e254f152",
     "plugins/banzai/skills/feature-description/SKILL.md#section:Document": "f01000bf0349da3e7863ba26e31af0ccabca3c2bae7f1ddc0f3b4ae6a149a021",
     "plugins/banzai/skills/feature-description/SKILL.md#section:Rules": "360e107f38f0ec8f1e2db7f6be535990122b06788bfd139e96fb8ba2fdb3fbf1",
@@ -80,7 +82,7 @@
     "plugins/banzai/skills/feature/SKILL.md#section:Rules": "d9fa280ba5acedfe8fb9bc966c209c3516ef5fce1a2d4c90837768906eaa7a8c",
     "plugins/banzai/skills/feature/SKILL.md#section:Workflow": "e15490d99837a03b6efef9026e418baf0ce17b3228aebcb0c48361645c0b0578",
     "plugins/banzai/skills/feature/SKILL.md#skeleton": "dbe6eedc84a0d7c52391c7d0609a8fd18f9057cea89df9cb06eb21ef13ec852e",
-    "plugins/banzai/skills/orchestrate/SKILL.md": "4fa691f5353c65bee7c5704b72195d9dd421c68e6661545049925ad1bdba6ea3",
+    "plugins/banzai/skills/orchestrate/SKILL.md": "f7a975167250875abe0a2d4140e5ddc60f6fdae990275b9504b52769e867def1",
     "plugins/banzai/skills/project-manifest/SKILL.md#section:Checklist": "1a49bc5351e1b4d8da7539be676862b42d51e0bd647c1162ea33481875b7b282",
     "plugins/banzai/skills/project-manifest/SKILL.md#section:Maintenance": "3f3f730a748133ad617d3174f29c354809747bb6d9dcf1eaec8f8e1872a736e9",
     "plugins/banzai/skills/project-manifest/SKILL.md#section:Required Sections": "09de6e4168e59fc6c3b871d31a1e23ab3a7e027a8b0e8f27c3a5dbad5f77ca54",
@@ -909,6 +911,110 @@
           "key": "plugins/banzai/skills/test-writing/SKILL.md#skeleton",
           "before": "76ea827bf10e1e19ae28fae1d7daafeff3fe5169c9cad419838ef32a78a73c86",
           "after": "5ab5e68eea07a994a270ab07ff2c329e28462bdb01c74f815f116adf7252631e"
+        }
+      ]
+    },
+    {
+      "predecessorSha256": "4c3b5608de74fc422f5bee20e89443608533853de47a645668f6d1ca217733c4",
+      "successorSha256": "bd20b34f96db85ce233f9f75df8c0bda23b87e09c85353d1ca15d0b996898556",
+      "authorities": [
+        {
+          "path": "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md",
+          "sha256": "3dbdeaca1a070f0526efda31842c55a24c0cb4792f8311a81df611664bf92caa",
+          "scope": "Implement the accepted planning rework and independent planning review decision."
+        }
+      ],
+      "changes": [
+        {
+          "key": "plugins/banzai/hooks/spec-gate.cjs",
+          "before": "a2adb42ccd1e6c269a00e472e160b6fdff1905a0e0d81e711fefc9f06f94b9ad",
+          "after": "5c31234cc52973c9132455d59a25af76455d24f4dae8370f2935e3f42b7701d6"
+        }
+      ]
+    },
+    {
+      "predecessorSha256": "bd20b34f96db85ce233f9f75df8c0bda23b87e09c85353d1ca15d0b996898556",
+      "successorSha256": "c013ca38e747e2184f9203ec59cd86109a66b9d939539566f07fb42d597f32ea",
+      "authorities": [
+        {
+          "path": "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md",
+          "sha256": "3dbdeaca1a070f0526efda31842c55a24c0cb4792f8311a81df611664bf92caa",
+          "scope": "Implement the accepted planning rework and independent planning review decision."
+        }
+      ],
+      "changes": [
+        {
+          "key": "plugins/banzai/phases/planning-review.md",
+          "before": null,
+          "after": "feee0ef743d8d802eb83ce70acd1dc82fad6ebf76659bc1b843e22b9094f0133"
+        },
+        {
+          "key": "plugins/banzai/phases/planning.md",
+          "before": "7ff1e98e1921fe87687cbd0f74853278dffb381f94dea0e1887a40ba8335f234",
+          "after": "862ce2cdc932847da787b698f0e321ee151dbbefe2554044592820f2b8554096"
+        },
+        {
+          "key": "plugins/banzai/policies/artifact-storage.md",
+          "before": "276e1d7254f470c6338f6290e660f353d4b5dad1d9c75967e56b58184508bdd1",
+          "after": "669162b5d4fbf452cbdd692e31105c7b2d5e0acb4337d67cab4b17ad7577b1ca"
+        },
+        {
+          "key": "plugins/banzai/policies/engineering-quality.md",
+          "before": "f67052be05d810fbc41bcdd813fb9f47c7d0f96dcba2771cbd2de02249d986a9",
+          "after": "36fdf0cc236d13d136bcba2421ca0e2833176f180014324785a200d9cbfe0cc8"
+        },
+        {
+          "key": "plugins/banzai/policies/plan-task-completion.md",
+          "before": "f3b9f2c07a7dff175acfa5d8d0b7f9d1456cfc40bbf816dc95441f8d742274ed",
+          "after": "953466e31093a9ae5842e711f16b95eccafa74dbdc3e1351081dfff9e6895d35"
+        },
+        {
+          "key": "plugins/banzai/policies/security-assurance.md",
+          "before": "b42cef3a0ccec8e4ba5e23057a4c788fc32227e9a3bca454d9d82d43589d4b74",
+          "after": "bc28ae35b90fba8b899141765e98a3e7a72c72e676ddefcd8546f2976bd25a67"
+        },
+        {
+          "key": "plugins/banzai/policies/test-assurance.md",
+          "before": "f24f2b2a1cf9ae18e5a44f196df000362bf0aeb24ef5de05be5e3e55550826bf",
+          "after": "5cfbb6eca3931f047494208527a531554aa9ec15e822dc10c606cc439b419860"
+        },
+        {
+          "key": "plugins/banzai/skills/architecture-decision/SKILL.md#orchestrated",
+          "before": null,
+          "after": "95746ad61765c0d1105284aba1ba0218bfe1a168fe799f023d188237df44c7b9"
+        },
+        {
+          "key": "plugins/banzai/skills/architecture-decision/SKILL.md#skeleton",
+          "before": "39c8443cc9f146d9763c90af1a9245ab34176fce9d63a1b139d97fdabf6754da",
+          "after": "9a8a832cbbbeb6f7addec9a44c28157fe22080cfe624aeb33d984871a50a1aa2"
+        },
+        {
+          "key": "plugins/banzai/skills/development-plan/SKILL.md#orchestrated",
+          "before": "2476e4babad02ea3968174759626ab34c7de0c4e87479abadb65d18a7581dfa7",
+          "after": "e23cfa6dca260f0844db821e51ee25d65a0c9e087e2ecb0e75f5065fc1874506"
+        },
+        {
+          "key": "plugins/banzai/skills/development-plan/SKILL.md#skeleton",
+          "before": "02c30749def4371e847938c863869daae2f193ed17293d17bfb05b7a102571e8",
+          "after": "6c5745aeadd07dc9f05210887a652c498086bedcb6237236d33661d8fcc33789"
+        }
+      ]
+    },
+    {
+      "predecessorSha256": "c013ca38e747e2184f9203ec59cd86109a66b9d939539566f07fb42d597f32ea",
+      "successorSha256": "b58fb5d140c05348b430f859e5afe38872f325b8a5ba943078c3258617d87921",
+      "authorities": [
+        {
+          "path": "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md",
+          "sha256": "3dbdeaca1a070f0526efda31842c55a24c0cb4792f8311a81df611664bf92caa",
+          "scope": "Implement the accepted planning rework and independent planning review decision."
+        }
+      ],
+      "changes": [
+        {
+          "key": "plugins/banzai/skills/orchestrate/SKILL.md",
+          "before": "4fa691f5353c65bee7c5704b72195d9dd421c68e6661545049925ad1bdba6ea3",
+          "after": "f7a975167250875abe0a2d4140e5ddc60f6fdae990275b9504b52769e867def1"
         }
       ]
     }
