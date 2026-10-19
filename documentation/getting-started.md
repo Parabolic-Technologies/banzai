@@ -1,156 +1,270 @@
 # Your First Banzai Task
 
-Use this guide to take an existing project from installation to a reviewable
-first change. You supply the repository, its checks, and a bounded request;
-Banzai selects the workflow and guides the decisions it needs.
+Follow this guide from installation to a change you can review in your own
+project. Banzai coordinates your coding agents, selects a workflow for the
+request, and presents any decisions it needs from you.
 
-For installation commands and supported client/runtime versions, start with
-the [npm Quick start](../packages/orchestrator/README.md#quick-start). This
-guide expands the project setup and first-task steps.
+**Install → prepare your repository → set up → check readiness → run → inspect.**
+
+For skills directly in one client, follow [Use only the plugin](#use-only-the-plugin).
 
 ## Before you begin
 
-- Use a Git repository on a supported macOS or Linux
-  host. Review existing changes and choose a task branch using your normal
-  Git workflow.
-- Install the Banzai CLI and the separate plugin in both Codex and Claude
-  Code. Both model clients need subscription authentication. Check each
-  client's sign-in state in the environment where you will run Banzai.
-- Install your project's dependencies and identify its actual deterministic
-  test, lint, typecheck, or build commands. The CLI's Node.js runtime does not
+For the CLI workflow, you need:
+
+- **macOS or Linux**, Git, and a regular terminal with interactive input/output.
+- **Node.js 22.20.0+ within major 22**, or **24.11.1+ within major 24**.
+- The model clients for your selected providers, signed in through individual
+  subscriptions. The default configuration uses **Claude Code 2.1.280+** for
+  planning and implementation and **Codex CLI 0.159.1+** for review.
+- Your application's dependencies, when it has any. Banzai can work with an
+  existing project or an empty Git repository. Its Node.js runtime does not
   require your application to use JavaScript.
-- Use a regular terminal. Interactive model selection and human decisions
-  need a TTY.
 
-For a new directory, start with `git init`, then `banzai init`. Guidance setup
-works before the first commit and before an application skeleton exists. Banzai
-explains a missing Git repository and exits before prompts; it never initializes
-Git automatically. After reviewing the resulting guidance and configuration,
-create your initial commit through your usual Git workflow. A task requires a
-committed `HEAD`; an empty baseline is also possible:
+To use one provider, install its client and plugin, then select that provider
+for all three roles during `banzai init` in step 3. Strict review still uses
+a fresh session. You need both clients only when your selected roles use both.
 
-```sh
-git commit --allow-empty --only -m "Initial commit"
-```
+Banzai invokes the local executables for your selected providers. You do not
+enter API keys into Banzai. Model work uses the clients' remote services and
+subscription limits.
 
-This leaves staged files uncommitted. Setup success and a first commit are
-separate prerequisites.
+For older model selections, the vendor minimums are Codex CLI 0.145.0 and
+Claude Code 2.1.218. Each selected model must meet its own
+[client-version requirement](orchestrator.md#model-configuration).
 
-Run these from your project root to check the local executables:
+### Install and sign in to model clients
+
+Follow the installation link for each client you will use. If it is already
+installed and signed in, run the checks in the last column. Use the same
+terminal environment you will use for Banzai.
+
+| Client      | Official instructions                                                                                                                          | Sign in if needed   | Check installation and sign-in                |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | --------------------------------------------- |
+| Codex       | [Install](https://developers.openai.com/codex/cli/#getting-started) · [Sign in](https://learn.chatgpt.com/docs/developer-commands#codex-login) | `codex login`       | `codex --version`, then `codex login status`  |
+| Claude Code | [Install](https://code.claude.com/docs/en/setup#install-claude-code) · [Sign in](https://code.claude.com/docs/en/cli-reference#cli-commands)   | `claude auth login` | `claude --version`, then `claude auth status` |
+
+For the Banzai CLI, choose ChatGPT subscription sign-in for Codex and Claude
+subscription sign-in for Claude Code. API-key and third-party-provider
+authentication are not supported by the orchestrator.
+
+**Expected result:** each selected client reports a suitable version and the
+intended sign-in method. These checks report stored login state; model calls
+can still fail if credentials expire or a subscription limit is reached.
+
+## 1. Install the CLI and plugin
+
+In your regular terminal, check the prerequisites:
 
 ```sh
 node --version
 git --version
-codex --version
-claude --version
+```
+
+Install the Banzai CLI:
+
+```sh
+npm install --global @parabolic-technologies/banzai
 banzai --help
 ```
 
-Version output and help establish executable availability, not authentication
-or a successful model invocation.
+The npm package installs the CLI and its runtime dependencies. Install the
+Banzai plugin separately in each selected client: both for the default
+configuration, or just your chosen client for a configuration using one
+provider. Follow the matching plugin blocks below.
 
-## 1. Initialize and review project guidance
+### Claude Code plugin
+
+**Inside Claude Code**, run:
+
+```text
+/plugin marketplace add https://github.com/Parabolic-Technologies/banzai.git
+/plugin install banzai@banzai-plugins
+```
+
+### Codex plugin
+
+**In your terminal**, run:
+
+```sh
+codex plugin marketplace add https://github.com/Parabolic-Technologies/banzai.git
+codex plugin add banzai@banzai-plugins
+```
+
+**Expected result:** `banzai --help` displays the CLI commands, and the plugin
+is installed and enabled in each selected client. Check sign-in using the
+[client checks above](#install-and-sign-in-to-model-clients).
+
+## 2. Prepare your repository
+
+Open your project's root directory in a regular terminal. Review existing
+changes and choose a task branch through your usual Git workflow:
+
+```sh
+git status --short
+```
+
+For an existing application, install its dependencies and identify the test,
+lint, typecheck, or build commands it actually uses. Banzai selects relevant
+checks from the request and project evidence; new tasks require no verification
+profiles or bootstrap setup.
+
+<details>
+<summary>Starting in a new directory?</summary>
+
+Run this from the intended project directory:
+
+```sh
+git init
+```
+
+Then continue with `banzai init` below. Project guidance setup works before
+the first commit and before an application skeleton exists. Create your first
+commit after reviewing the setup in step 4. A task requires a committed
+`HEAD`; Banzai does not initialize Git automatically.
+
+</details>
+
+**Expected result:** you are in the intended Git repository and know which
+existing changes belong to you.
+
+<a id="1-initialize-and-review-project-guidance"></a>
+
+## 3. Initialize and review project guidance
+
+From your project root:
 
 ```sh
 banzai init
 ```
 
-This creates `.banzai/config.json` and `documentation/verification-examples.md`
-when missing, adds local run-state entries to `.gitignore`, and offers the model
-picker in an interactive terminal. Existing configuration and guide contents are
-retained. The local guide is saved before any prompts, including in non-TTY mode;
-rerunning `banzai init` restores a missing guide without replacing your edits.
-No verification profiles or bootstrap setup is required.
-Use `banzai model` later to change the
-model and effort for each role.
+Choose the model and effort for planning, implementation, and review.
+If you installed only one provider's client, select that provider for all three
+roles instead of keeping the mixed-provider defaults.
+You can change these later with `banzai model`.
 
 If guidance is incomplete, init offers **Run project-manifest with Codex**,
 **Run project-manifest with Claude Code**, **Show manual instructions**, and
-**Exit**. The configured Planning vendor is recommended when available.
-Selecting a client opens the explicit skill; answer its questions and exit the
-client to return to Banzai. Banzai rereads guidance and starts no task automatically.
-Use `banzai setup` later to continue without repeating the model picker.
-Unavailable clients show a reason; install/enable the plugin separately or use
-the manual route in the same project:
+**Exit**. Choose an available client, follow the setup prompts, and review
+its proposed guidance. The configured planning vendor is recommended when
+available.
+
+**Exit the model client when setup is finished to return to Banzai.**
+Banzai rereads the project guidance; setup does not start a task automatically.
+Use `banzai setup` later to continue without repeating model selection.
+
+Review `.banzai/config.json`, `AGENTS.md`, `CLAUDE.md`,
+`PROJECT_MANIFEST.md`, and any proposed settings changes. Preserve your
+project's existing instructions and resolve proposed merges before continuing.
+The manifest should describe your actual stack, conventions, and checks.
+
+Init also creates `documentation/verification-examples.md` when missing and
+adds local run-state entries to `.gitignore`. Existing configuration and guide
+contents are retained.
+
+<details>
+<summary>Run project guidance setup manually</summary>
+
+Invoke the installed skill in the same project:
 
 | Client      | Skill invocation           |
 | ----------- | -------------------------- |
 | Claude Code | `/banzai:project-manifest` |
 | Codex       | `$banzai:project-manifest` |
 
-Review the resulting `AGENTS.md`, `CLAUDE.md`, `PROJECT_MANIFEST.md`, and any
-proposed settings changes. Preserve your project's existing instructions and
-resolve proposed merges before continuing. The manifest should describe the
-actual stack, conventions, and checks for this project.
+Unavailable clients show a reason. Check plugin installation and enablement
+before retrying. If existing instructions require migration, review the
+proposed diff before accepting it. See
+[project guidance setup](orchestrator.md#project-guidance-setup).
 
-## 2. Describe the result you need
+</details>
 
-Start with an ordinary task, including in an empty repository. Banzai identifies
-relevant checks from the request and project evidence. It can create required
-tests and tooling within the authorized scope. You do not maintain a separate
-command catalogue.
+**Expected result:** Banzai has rechecked the guidance, and you have reviewed
+the proposed configuration and instruction changes.
 
-Strict work presents mandatory checks in the plan for approval. Lite work uses
-the delegated task and existing execution permissions, without a verification
-setup gate. Optional project policy can require or forbid checks and limit their
-execution. Missing unrelated scripts and npm placeholders do not become task
-requirements. A failed required check prevents completion.
+<a id="3-check-readiness-and-save-the-reviewed-setup"></a>
 
-See [task verification](verification-examples.md) for the evidence and policy
-model. Historical profile commands remain legacy configuration utilities; they
-are not required to start new work.
-
-## 3. Check readiness and save the reviewed setup
+## 4. Check readiness and save the reviewed setup
 
 ```sh
 banzai doctor
 ```
 
-Resolve every failed check and review the warnings. For structured diagnostic
-output, use `banzai doctor --json`.
+Resolve every failed check and review the warnings. Doctor checks local
+configuration, guidance, executable paths, and state. It does not run your
+application checks or verify model authentication. An authentication advisory
+is expected; workflow startup performs the vendor preflight checks.
 
-Doctor v5 checks structural project guidance, configuration, installed instruction
-resource parity, task policy, executable paths, and
-local state. It does not execute your verification commands or call either
-model vendor. Its authentication advisory is expected: a ready report does
-not prove that a subscription is authenticated or has capacity. Workflow
-startup performs those preflight checks.
+Inspect the setup changes:
 
-Review `git status --short`, then commit the intended configuration, guidance,
-and `.gitignore` changes through your normal Git process. Keep credentials
-and ignored local run state out of the commit. Start from a reviewed, clean
-working tree so the task has a clear baseline.
+```sh
+git status --short
+git diff
+```
 
-## 4. Give Banzai one bounded request
+Review new, untracked files too; `git diff` does not show them. Commit the
+intended configuration, guidance, and `.gitignore` changes through your
+normal Git workflow. Keep credentials and ignored local run state out of the
+commit. Start from a reviewed, clean working tree so the task has a clear
+baseline.
+
+For a new repository, this can be your first commit. If you intentionally need
+an empty baseline that leaves staged files uncommitted, use:
+
+```sh
+git commit --allow-empty --only -m "Initial commit"
+```
+
+**Expected result:** the project has a committed baseline, no unresolved
+readiness failures, and reviewed warnings. Model sign-in and capacity are
+checked when a task starts.
+
+<a id="2-describe-the-result-you-need"></a>
+<a id="4-give-banzai-one-bounded-request"></a>
+
+## 5. Run your first task
+
+From your configured project, on your chosen task branch:
 
 ```sh
 banzai
 ```
 
-Describe one observable change, the existing behavior it must preserve, and
-the cases its tests should cover. For a project that already has a filtered
-records view, a suitable request is:
+Describe one observable change, the behavior it must preserve, and the cases
+its tests should cover. For a project with a filtered records view:
 
 > Add a CSV export for the currently filtered records. Preserve existing access
 > rules and cover empty results and quoted values with tests.
 
-Adapt the request to a feature your application actually has. For a first
-task, choose a small change with a result you can inspect locally. Banzai
-shows the selected route and reason; the request alone does not guarantee a
-particular route.
+Adapt the request to your application. Choose a small change whose result you
+can inspect locally. Banzai displays the selected route and reason; the example
+does not guarantee a particular route.
 
-| Selected route           | What to expect                                                                                                                                                                                 |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `quick-fix` or `feature` | Implementation followed by configured verification; no independent reviewer phase. Escalated work returns for a human decision.                                                                |
-| `strict`                 | Requirements and planning, any required architecture or clarification decisions, approval of the plan, implementation, verification, and independent review. You triage findings when present. |
+| Selected route           | What to expect                                                                                                                                             |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `quick-fix` or `feature` | Implementation and task verification, without an independent reviewer phase. Escalated work returns for a human decision.                                  |
+| `strict`                 | Requirements and planning, any required architecture or clarification decisions, your plan approval, implementation, verification, and independent review. |
 
-For strict work, inspect the actual plan before approving it. Accepting a
-review finding authorizes its scoped fix. Rejected or deferred findings do
-not enter the fixer. A passing review can finish the run; a complete triage
-with no accepted findings can also finish it while retaining the original
-review verdict. See [workflow details](orchestrator.md#workflow-reference).
+For strict work, inspect the plan and its required checks before approving it.
+You can request rework or independent planning review; revisions return for
+approval. After implementation review, accept, reject, or defer each finding.
+Accepted findings authorize scoped fixes. Rejected and deferred findings stay
+out of the fixer. A passing review, or complete triage with no accepted
+findings, can finish the run while retaining the original review verdict.
 
-## 5. Inspect the outcome
+Banzai identifies relevant checks from the task and project evidence. Strict
+plans bind required checks; lightweight work follows your request and existing
+execution permissions. Missing unrelated tooling is not a prerequisite.
+A failed required check prevents completion. See
+[task verification](verification-examples.md) for stack-specific examples.
+
+**Expected result:** Banzai has selected a route and is carrying out the task
+or presenting a decision for you. If blocked, inspect `banzai status` and
+follow the reported next action.
+
+<a id="5-inspect-the-outcome"></a>
+
+## 6. Inspect the outcome
 
 ```sh
 banzai status
@@ -160,121 +274,128 @@ git diff
 ```
 
 Use the reported run state and next action to determine whether the workflow
-has finished. A model saying it is done, or a set of checked plan tasks, is
-not sufficient evidence of workflow completion.
+has finished. Before treating the task as complete:
 
-For your first completed task, check that:
+- Confirm that the run reports completion and its required verification
+  results are available and passed.
+- Inspect the source diff and any new, untracked files.
+- Check the requested behavior in your application.
+- For strict work, inspect the recorded decisions and review outcome,
+  including any rejected or deferred findings.
 
-- the run reports completion and its configured verification results are
-  available;
-- you have inspected the source diff and any new, untracked files (which
-  `git diff` alone does not show);
-- the requested behavior works in your application;
-- any strict-workflow decisions and review results match the actions you
-  approved.
+Work documents live under `documentation/work/<slug>/` and remain visible
+in Git. Existing work retains its known paths. Local run state and verification
+evidence live under ignored `.banzai/runs/<run-id>/`. Follow the paths reported
+by the run; different routes create different documents.
 
-New work documents live together under `documentation/work/<slug>/` and remain
-visible in Git. Explicit existing work retains its known paths without migration. See [artifact storage](artifact-storage.md). Local run
-state and retained verification evidence live under `.banzai/runs/<run-id>/`.
-Follow the paths reported by your run; not every route creates the same files.
-Use your project's normal review and commit process for the resulting change.
+**Expected result:** you have a change you can inspect, its check results,
+and any required planning and review records. The orchestrator leaves commits
+and publication to you. Use your normal review and commit process.
 
 ## Setup troubleshooting
 
-| Symptom                                                         | Next step                                                                                                                                                                                                              |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `banzai` is not found                                           | Confirm the global npm installation and that its executable directory is on this terminal's `PATH`. Reopen the terminal after changing Node installations.                                                             |
-| Model picker or interactive prompts are unavailable             | Run in a regular terminal. For an external supervisor, use the separately documented [agent-control interface](orchestrator.md#agent-control).                                                                         |
-| Missing configuration                                           | Run `banzai init` from the intended Git checkout, then configure its checks.                                                                                                                                           |
-| `GIT_REPOSITORY_REQUIRED` | Run `git init` in the intended project directory and create an initial commit, then start Banzai again. |
-| `GIT_INITIAL_COMMIT_REQUIRED` | Create the first commit on the current branch. For an empty baseline that leaves staged files uncommitted, run `git commit --allow-empty --only -m "Initial commit"`, then start Banzai again. |
-| Missing project coverage or hygiene-only verification           | Add substantive commands for every root-detected project type using the [profile examples](verification-examples.md). Renaming `git diff --check` does not make it a test.                                             |
-| Legacy configuration is not ready                               | Follow the manual [schema-version-1 migration](orchestrator.md#project-verification-readiness). Rerunning `init` does not migrate an existing configuration.                                                           |
-| Doctor cannot find a verification executable                    | Check the command path and dependencies in the same terminal environment. For Python, use the interpreter from the project's environment.                                                                              |
-| Doctor is ready, but startup rejects authentication or capacity | Resolve the reported client sign-in, subscription, or provider issue. Check `banzai status`; retry start checks only when the run offers that action.                                                                  |
-| Claude environment or tool permissions fail                     | Follow the specific finding and [Claude environment guidance](orchestrator.md#spawned-claude-environment). Review proposed project settings rather than granting blanket permissions.                                  |
-| A task is blocked or interrupted                                | Inspect `banzai status` and follow its available action. `retry`, `resume`, and `recover` have different eligibility rules; see [failure recovery](orchestrator.md#failure-recovery). Keep persisted run state intact. |
+| Symptom                                                         | Next step                                                                                                                                                                                     |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `banzai` is not found                                           | Check the global npm installation and this terminal's `PATH`. Reopen the terminal after changing Node installations.                                                                          |
+| A selected model client is not found or is signed out           | Follow the [client installation and sign-in instructions](#install-and-sign-in-to-model-clients), then repeat that client's version and sign-in checks.                                       |
+| The plugin or project-manifest skill is unavailable             | Complete the [Claude Code](#claude-code-plugin) or [Codex](#codex-plugin) plugin installation for that client and check that it is enabled.                                                   |
+| Model picker or interactive prompts are unavailable             | Use a regular terminal. `banzai setup` requires interactive input/output.                                                                                                                     |
+| `GIT_REPOSITORY_REQUIRED`                                       | Run from your project's Git root, or initialize the intended new directory as described in step 2.                                                                                            |
+| `GIT_INITIAL_COMMIT_REQUIRED`                                   | Create your first commit after reviewing the setup in step 4.                                                                                                                                 |
+| Configuration or project guidance is missing                    | Run `banzai init` from the intended repository and complete the offered setup. Use `banzai setup` to continue later.                                                                          |
+| Doctor is ready, but startup rejects authentication or capacity | Resolve the reported client sign-in, subscription, or provider issue. Retry start checks only when `banzai status` offers that action.                                                        |
+| Claude or Codex cannot access its login or state                | Run Banzai from a regular terminal. An enclosing agent sandbox can hide Claude's Keychain login or make Codex state read-only; see [client environment](orchestrator.md#model-configuration). |
+| Claude tool permissions fail                                    | Follow the specific finding and [permission guidance](orchestrator.md#claude-tool-permissions). Review proposed settings before accepting them.                                               |
+| A legacy configuration is reported                              | Follow the [legacy configuration reference](orchestrator.md#project-verification-readiness). Rerunning init does not migrate an existing configuration.                                       |
+| Setup is blocked by unfinished work                             | Inspect `banzai status` and the [setup ownership rules](orchestrator.md#project-guidance-setup). Finish or explicitly cancel the existing run before setup.                                   |
+| A task is blocked or interrupted                                | Follow the action offered by `banzai status`. See [failure recovery](orchestrator.md#failure-recovery) for the distinct retry, resume, and recovery rules.                                    |
 
-If setup still fails, report the OS, Node and client versions, the command,
-the failing check identifier, and a minimal reproduction through
+If setup still fails, report the OS, Node and client versions, command,
+failing check identifier, and a minimal reproduction through
 [GitHub Issues](https://github.com/Parabolic-Technologies/banzai/issues).
-Review diagnostic excerpts before sharing them; omit credentials and private
-project details. Report vulnerabilities through the [security policy](../SECURITY.md).
+Omit credentials and private project details from diagnostics. Report
+vulnerabilities through the [security policy](../SECURITY.md).
 
 ## Before-you-install FAQ
 
-**Do I need both model clients?** The orchestrator setup uses both Codex and
-Claude Code with subscription authentication. The plugin can be used by itself
-in one supported client; see [standalone use](../README.md#using-the-plugin-without-the-orchestrator).
-
-**Do I enter API keys into Banzai?** No. Banzai invokes the local model clients
-and supports individual-subscription authentication. Model calls still use
-those clients' remote services and limits. See the [runtime boundaries](orchestrator.md#boundaries).
+**Do I need both model clients?** The default configuration uses both. You can
+run the orchestrator with one provider by selecting it for planning,
+implementation, and review during `banzai init` or later with `banzai model`.
+Install and sign in to each selected client and install the Banzai plugin there.
+Strict review remains a separate session even when all roles use the same
+provider. You can also [use only the plugin](#use-only-the-plugin).
 
 **Does npm install everything?** It installs the orchestrator and its runtime
-dependencies. Install the model clients and Banzai plugin separately; your
-application also needs its own dependencies and checks.
+dependencies. Install the model clients and Banzai plugin separately, as
+described above.
 
-**Does Banzai require a particular application framework?** No. Configure the
-commands for your own stack. Project detection uses root markers, so nested
-workspaces need an explicit repository-level verification strategy; see
-[mixed and nested projects](verification-examples.md#mixed-and-nested-projects).
+**Does Banzai require a particular application framework?** No. It uses your
+project's stack and selects checks relevant to the task. See
+[verification examples](verification-examples.md) for Node, Python, Go,
+and mixed projects.
 
 **What does a successful first task prove?** It demonstrates the recorded
 workflow and checks for that task. Review the actual result before merging;
 one run is not a general measure of correctness or productivity.
 
-## Incomplete guidance during an existing run
+## Use only the plugin
 
-Setup cannot run while a workflow or another setup holds ownership, or while
-the latest run is unfinished, including paused/blocked states. Use `banzai status`
-to inspect the existing action; finish or explicitly cancel it before CLI setup.
-If a continuation refuses with `PROJECT_SETUP_REQUIRED`, manually repair or
-explicitly migrate the instruction files, then follow the existing resume,
-retry or recovery route. Saved decisions remain saved. The runner revalidates
-approval and recovery identity; guidance repair is no automatic approval.
+This path runs Banzai skills directly in Codex or Claude Code. You need only
+your chosen client and its Banzai plugin; Banzai CLI installation and the
+`banzai init` / `banzai doctor` steps do not apply.
 
-Non-TTY `banzai init` saves configuration and prints the setup next step.
-`banzai setup` requires terminal input/output. Structural guidance readiness
-covers supported files, layout and manifest sections; it does not certify
-application checks, semantic accuracy, subscription availability or host delivery.
+1. **Install your client and plugin.** Follow the matching row in
+   [client installation and sign-in](#install-and-sign-in-to-model-clients),
+   then the [Codex plugin](#codex-plugin) or
+   [Claude Code plugin](#claude-code-plugin) command block. Ensure the plugin
+   is enabled in the client session you will use.
+2. **Prepare project guidance.** Open a client session from your project's root
+   directory and invoke the setup skill shown below. Review its proposed
+   project instructions, manifest, and settings changes before accepting them.
+3. **Run one bounded task.** Invoke `quick-fix` with a specific existing problem
+   and the behavior to preserve, or `feature` for a new capability. Follow the
+   skill's prompts and required human decisions.
+4. **Inspect the result.** Review changed and new files, check the reported
+   verification results, and try the requested behavior before committing
+   through your normal Git workflow.
 
-If a configuration decision is pending, `banzai status` shows its current actions.
-You can instead exit the owning session, repair prerequisites with `banzai verify
-add`, `edit` or `remove`, and run `banzai resume`. Resume rechecks the evidence and
-continues from the completed implementation checkpoint. Another terminal cannot
-change config while a model, a check, or a waiting interactive owner holds it.
+| Client session                     | Prepare project guidance   | First task example                                                                                      |
+| ---------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Run `codex` from the project root  | `$banzai:project-manifest` | `$banzai:quick-fix Improve the README installation instructions. Preserve existing commands and links.` |
+| Run `claude` from the project root | `/banzai:project-manifest` | `/banzai:quick-fix Improve the README installation instructions. Preserve existing commands and links.` |
 
+Enter the skill invocations in the client chat, not in your shell. Adapt the
+example to an actual problem in your project. For a separate source-read-only
+audit, open a fresh client session and invoke `feature-review` with the same
+client-specific prefix and the exact work document or directory to review.
 
-## Rework and independent planning review
+**Expected result:** project guidance is reviewed and one skill has produced a
+change or review artifact with its reported checks. Standalone skills guide
+the work in chat; the orchestrator's run status and automatic phase transitions
+belong to the CLI workflow.
 
-At a strict ADR or plan gate, request rework with written feedback or request an
-independent review of the whole planning bundle or selected artifacts. The
-reviewer and planner analysis run read-only. The runner writes a separate
-`planning-review-<N>.md`; zero findings restore the gate. With findings, inspect
-the analysis options and their consequences before its advisory recommendation,
-then choose one option, write your own instruction or decline each finding.
-Only recorded human dispositions reach the applying planner. Revisions return
-to a normal planning gate and still require explicit approval or ADR acceptance.
-Changed reviewed bytes close the episode as stale; explicit retry reviews the
-current bytes under a new number. Existing artifacts are never overwritten.
+### Strict work with standalone skills
 
-```text
-banzai approve plan --decision rework --note "Exact owner feedback"
-banzai approve adr --id ADR-0001 --decision rework --note "Exact owner feedback"
-banzai review planning
-banzai review planning --artifact documentation/work/example/plan.md
-```
+Use [feature-description](../plugins/banzai/skills/feature-description/SKILL.md)
+to establish requirements and obtain approval. Resolve any material
+architecture decisions through
+[architecture-decision](../plugins/banzai/skills/architecture-decision/SKILL.md),
+then prepare and approve a
+[development-plan](../plugins/banzai/skills/development-plan/SKILL.md).
+After approval, run
+[code-writing](../plugins/banzai/skills/code-writing/SKILL.md),
+[test-writing](../plugins/banzai/skills/test-writing/SKILL.md), and
+[feature-review](../plugins/banzai/skills/feature-review/SKILL.md).
+Review the findings and explicitly select any fixes. Each linked skill
+describes its inputs, outputs, and approval boundaries.
 
-`approve plan` accepts only its documented flags. Unknown, repeated, positional
-and `--name=value` forms fail before approval. For agent supervisors, control
-8.0.0 declares capabilities v8 and status v6. Send closed gate-decision v1
-through `banzai control decide` and planning-triage answer v4 through `banzai
-control answer` using direct stdin. Encode human text as raw UTF-8 JSON; on the
-64 KiB limit, let the human shorten their own text or answer in a terminal.
-Never infer a decision or truncate the text. Historical runs cannot acquire new
-rework/review authority or resume through the v10 hook; preserve them and start
-new work. `banzai`, `banzai status` and `banzai doctor` show such a run as
-read-only history; an unfinished one offers only `banzai cancel`, after which
-new work starts normally. This release does not migrate or install anything
-automatically.
+<a id="incomplete-guidance-during-an-existing-run"></a>
+<a id="rework-and-independent-planning-review"></a>
+
+## Further reading
+
+- [Project guidance setup and repair](orchestrator.md#project-guidance-setup)
+- [Rework and independent planning review](orchestrator.md#rework-and-independent-planning-review)
+- [Models and effort](orchestrator.md#choosing-models)
+- [Work-document storage](artifact-storage.md)
+- [CLI commands and advanced workflows](orchestrator.md#commands)

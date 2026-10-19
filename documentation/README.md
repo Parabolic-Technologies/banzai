@@ -1,27 +1,28 @@
 # Banzai Documentation
 
-Start with the [product overview and installation](../README.md) and the
-[npm Quick start](../packages/orchestrator/README.md#quick-start).
+Start with **[Get started](getting-started.md)** for installation, project setup,
+and your first task. The [product overview](../README.md) explains what Banzai
+adds to your coding workflow.
 
 ## Using Banzai
 
-- [Your first Banzai task](getting-started.md): project setup, expected outcomes,
+- [Your first Banzai task](getting-started.md): installation, project setup, expected outcomes,
   troubleshooting, and answers to common installation questions.
 - [Verification examples](verification-examples.md): adaptable Node, Python,
   Go, and mixed-project checks.
-- [Workflow walkthrough](../packages/orchestrator/README.md#workflow-walkthrough):
+- [How it works](../README.md#how-it-works):
   an illustrated strict workflow and an example request.
 - [CLI reference](orchestrator.md#commands): commands and operational behavior.
 - [Model configuration](orchestrator.md#model-configuration): models and effort
   for planning, implementation, and review.
-- [Verification profiles](orchestrator.md#project-verification-readiness):
-  declare the checks Banzai should run for your project.
+- [Task verification](orchestrator.md#task-verification): how Banzai selects
+  checks from the request and project evidence.
 - [Failure recovery](orchestrator.md#failure-recovery): blocked work, retry,
   resume, and recovery boundaries.
 - [Review artifacts](orchestrator.md#review-artifact): findings and retained
   evidence.
-- [Standalone skills](../README.md#using-the-plugin-without-the-orchestrator):
-  use the plugin in an agent session.
+- [Standalone skills](getting-started.md#use-only-the-plugin):
+  install the plugin in one client, prepare project guidance, and run a first skill.
 
 ## Maintainer references
 
@@ -31,7 +32,8 @@ Start with the [product overview and installation](../README.md) and the
 - [Ideas and research](ideas/README.md): exploratory proposals and sources;
   these do not establish approved policy or implementation authority.
 - [Orchestrator modules](../packages/orchestrator/MODULES.md): module contracts.
-- [Release checklist](release-checklist.md) and [2.7.1 notes](releases/2.7.1.md).
+- [Release checklist](release-checklist.md) and
+  [latest release notes](https://github.com/Parabolic-Technologies/banzai/releases/latest).
 - [Security assurance](security-assurance.md) and
   [engineering quality](engineering-quality.md): maintained policies.
 - [Evaluation KPIs](evaluation/README.md) and [context reporting](context/README.md).
