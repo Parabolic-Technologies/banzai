@@ -2,394 +2,201 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/logo/banzai-logo-dark.svg">
     <source media="(prefers-color-scheme: light)" srcset="assets/logo/banzai-logo-light.svg">
-    <img alt="Banzai — Spec-Driven AI Development" src="assets/logo/banzai-logo.svg" width="480">
+    <img alt="Banzai — Spec-Driven AI Development" src="assets/logo/banzai-logo.svg" width="320">
   </picture>
 </p>
 
-# Banzai — Spec-driven AI development for Codex and Claude Code
+# Banzai
+
+**AI coding workflows with independent review and human control.**
 
 [![npm version](https://img.shields.io/npm/v/%40parabolic-technologies%2Fbanzai)](https://www.npmjs.com/package/@parabolic-technologies/banzai)
-[![CI](https://github.com/Parabolic-Technologies/banzai/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/Parabolic-Technologies/banzai/actions/workflows/ci.yml)
+[![PR CI](https://github.com/Parabolic-Technologies/banzai/actions/workflows/ci.yml/badge.svg?event=pull_request)](https://github.com/Parabolic-Technologies/banzai/actions/workflows/ci.yml?query=event%3Apull_request)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue)](LICENSE)
 
-Turn a development request into requirements, plans, code, tests, and review
-evidence. Banzai coordinates your coding agents while keeping you in control of
-architecture decisions, plan approval, and review findings.
+Banzai is a local CLI that coordinates Codex, Claude Code, or both in your
+repository.
+For complex changes, approve a plan, run implementation and checks, then inspect
+findings from a fresh reviewer session. Small changes follow a lightweight
+workflow.
 
-Small changes take a lightweight path. Complex changes get an approved plan
-and independent review.
+Runs through your existing subscriptions. No API keys required.
 
-[Quick start](packages/orchestrator/README.md#quick-start) ·
-[Your first task](documentation/getting-started.md) ·
-[Walkthrough](#the-loop) · [Documentation](documentation/README.md) ·
-[Report an issue](https://github.com/Parabolic-Technologies/banzai/issues) ·
-[Contribute](CONTRIBUTING.md)
+**[Get started](documentation/getting-started.md)** ·
+[Documentation](documentation/README.md)
 
 ## Why Banzai?
 
-- **Independent review.** In the strict workflow, the reviewer starts without
-  the builder's conversation and reports findings for you to triage. You can
-  use a different model family for implementation and review.
-- **Human control.** You decide on architecture, approve the plan, and accept,
-  reject, or defer review findings. Only accepted findings reach the fixer.
-- **Durable evidence.** Requirements, decisions, plans, code, tests, and review
-  artifacts stay in your project. Banzai runs your configured verification
-  commands before strict review.
-- **Work sized to the task.** The planner chooses `quick-fix`, `feature`, or
-  `strict`. Lightweight routes finish after implementation and verification;
-  uncertain or escalated work falls back to strict.
+- **A fresh review of complex changes.** The strict workflow gives the reviewer
+  your requirements and current code without the builder's conversation.
+- **You control the decisions.** Approve the plan and decide which review
+  findings to fix. Only accepted findings reach the fixer.
+- **Results you can inspect.** Keep requirements, decisions, plans, and review
+  documents in your project, alongside recorded verification results.
+- **A process sized to the task.** Small changes take a shorter route through
+  implementation and checks. Complex or uncertain work gets planning and
+  independent review.
 
-## Two Parts
+<a id="install"></a>
+<a id="two-parts"></a>
 
-Banzai ships as two separately installed parts:
+## Quick start
 
-| Part         | What it is                                                                                                                                                                                                             |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Orchestrator | The local `banzai` CLI, distributed as `@parabolic-technologies/banzai` on npm. Coordinates the selected workflow, runs configured checks, and presents human decisions. Strict work includes an independent reviewer. |
-| Plugin       | Workflow skills for Claude Code and Codex. Standalone skills share guidance and policies with embedded orchestrator phases.                                                                                            |
+Use a regular terminal in your own Git repository. You need:
 
-Use the orchestrator to coordinate a complete run, or use the
-[plugin directly](#using-the-plugin-without-the-orchestrator) to guide an agent
-session. The CLI and plugin have separate installation steps.
+- macOS or Linux, Git, and Node.js **22.20.0+ within major 22** or
+  **24.11.1+ within major 24**;
+- **Codex CLI 0.159.1+** and **Claude Code 2.1.280+** for the default
+  configuration, signed in through individual subscriptions;
+- the Banzai CLI and the separately installed Banzai plugin in each client
+  selected for planning, implementation, or review.
 
-## The Loop
+To use one provider, install its client and plugin, then select that provider
+for all three roles during `banzai init`. Strict review still uses a fresh
+session. The default configuration uses Claude for planning and implementation
+and Codex for review.
+
+Model work uses the clients' remote services and subscription limits.
+The [getting-started guide](documentation/getting-started.md) covers client setup,
+CLI and plugin installation, supported older-client options, and expected results.
+
+<a id="configure-each-project-once"></a>
+<a id="run-a-task"></a>
+
+| Step                   | Action                                                                                                                 | Ready to continue when                                                                                                  |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| 1. Install             | [Install the CLI and required plugins](documentation/getting-started.md#1-install-the-cli-and-plugin).                 | The CLI is available and the plugin is enabled in each selected client.                                                 |
+| 2. Set up your project | Run `banzai init`, choose models, and complete the offered project setup. Exit the client to return to Banzai.         | You have reviewed the generated guidance and configuration.                                                             |
+| 3. Check readiness     | Run `banzai doctor`, resolve failures, review warnings, and commit the reviewed setup through your usual Git workflow. | The project has a committed baseline and no unresolved readiness failures. Doctor does not verify model authentication. |
+| 4. Run a task          | Run `banzai` and enter one bounded request.                                                                            | Banzai displays the selected workflow and guides the decisions it needs.                                                |
+
+Follow **[Get started](documentation/getting-started.md)** from installation
+through inspecting your first change. For a plugin-only workflow in one client,
+see [standalone use](#using-the-plugin-without-the-orchestrator).
+
+<a id="the-loop"></a>
+
+## How it works
+
+For a project with a filtered records view, a first request could be:
+
+> Add a CSV export for the currently filtered records. Preserve existing access
+> rules and cover empty results and quoted values with tests.
+
+Banzai reads the project and selects a route. `quick-fix` and `feature`
+complete after implementation and task verification, without an independent
+reviewer phase. Complex or uncertain work takes the `strict` route:
 
 ![Illustrated strict workflow: planning, human approval, implementation and verification, independent review, and human triage](assets/demo/strict-workflow.svg)
 
-This illustrates the strict workflow, not a recorded model run. The
-[walkthrough and example request](packages/orchestrator/README.md#workflow-walkthrough)
-show how to approach a task; its route and results depend on the actual project.
+This is an illustration of the strict workflow. The example request's actual
+route and results depend on the project.
 
-```text
-banzai
-  -> select            planner, read-only: quick-fix | feature | strict
-  -> quick-fix         implementer -> verification -> done
-  -> feature           implementer -> verification -> done
-  -> strict
-       -> plan         requirements, conditional architecture, development planning
-       -> [you: ADR decisions and plan approval]
-       -> implementation -> verification -> independent review
-       -> passing review -> done
-       -> changes requested -> [you: finding triage]
-          -> no accepted findings -> done by human triage
-          -> accepted findings -> accepted-only fixes -> verification -> re-review
-```
+In strict work, you resolve architecture decisions and approve the plan before
+implementation. Banzai runs the task's checks before independent review.
+The reviewer starts without the builder's conversation; using a different
+model family or vendor is optional. You accept, reject, or defer findings.
+Accepted fixes go through verification and re-review. A passing review, or
+completed triage with no accepted findings, can finish the run.
 
-Runner phases receive canonical instructions, shared guidance and applicable
-policies directly; they do not load or chain standalone chat skills. Selection
-remains prompt-only.
+<a id="safety-boundary"></a>
 
-Automatic selection is the default. The planner chooses the smallest safe route
-from the request and Banzai escalation rules, prints the route, reason, and
-phase responsibilities, and falls back to `strict` whenever a lite route is uncertain.
-
-In strict work, compatible planning, implementation, and fixes can share a
-builder session lineage. The primary reviewer starts fresh with no builder
-transcript and never fixes its own findings. You can configure a different
-model family for review; independent review does not require a vendor switch.
-Lightweight routes complete after implementation and configured verification.
-
-## Install
-
-Use a Git repository on macOS or Linux. Setup works before the first commit;
-create that commit before starting a task.
-For the orchestrator, you need:
-
-- Node.js **22.20.0+ within major 22**, or **24.11.1+ within major 24**;
-- Git, **Codex CLI 0.159.1+**, and **Claude Code 2.1.280+** for the default
-  models; older models need at least Codex CLI 0.145.0 and Claude Code 2.1.218;
-- subscription authentication in both model clients;
-- the Banzai plugin installed in both clients as shown below.
-
-Banzai runs the local `codex` and `claude` executables. It does not require API
-keys or call vendor APIs directly. Model work uses those clients' services and
-subscription limits; running the orchestrator locally does not make model
-inference offline. Use a regular terminal for the CLI.
-
-Install the orchestrator in your terminal:
-
-```sh
-npm install --global @parabolic-technologies/banzai
-banzai --help
-```
-
-Install the plugin inside Claude Code:
-
-```text
-/plugin marketplace add https://github.com/Parabolic-Technologies/banzai.git
-/plugin install banzai@banzai-plugins
-```
-
-For Codex, run these commands in your terminal:
-
-```sh
-codex plugin marketplace add https://github.com/Parabolic-Technologies/banzai.git
-codex plugin add banzai@banzai-plugins
-```
-
-The npm package installs the CLI and its runtime dependencies. The plugin and
-model clients are separate installations. For CLI development from a source
-checkout, see [development setup](documentation/orchestrator.md#setup) and
-[Contributing](CONTRIBUTING.md).
-
-Running Banzai from inside another agent's sandbox can hide Claude Code's
-Keychain login or make Codex's state directory read-only. Both conditions get
-their own diagnostics; run `banzai` from a regular terminal, or see the
-[sandbox notes](documentation/orchestrator.md#model-configuration).
-
-## Configure Each Project Once
-
-From your repository root:
-
-```sh
-banzai init
-```
-
-Choose models and effort for planning, implementation, and review. Use
-`banzai model` later to change them. Init then offers explicit project setup
-with an available client. Exit the client to return to Banzai; it rechecks
-guidance and starts no task automatically. Use `banzai setup` to continue later,
-or invoke the skill manually:
-
-- Claude Code: `/banzai:project-manifest`
-- Codex: `$banzai:project-manifest`
-
-Review the generated guidance and `.banzai/config.json`, preserving your
-project's existing rules. Verification follows each task; you do not configure
-profiles or bootstrap. Banzai selects relevant checks from the requested outcome
-and actual project evidence. See [task verification](documentation/verification-examples.md).
-
-```sh
-banzai doctor
-```
-
-Resolve failed checks and review warnings. Doctor is read-only: it checks
-declarations and local readiness without executing your checks or verifying
-model authentication. Commit the reviewed configuration, guidance, and
-`.gitignore` changes using your normal Git workflow. See
-[Your first Banzai task](documentation/getting-started.md) for expected outcomes
-and troubleshooting.
+Work stays in the current checkout. The orchestrator does not switch branches,
+stash, reset, commit, or publish changes. Existing uncommitted changes are
+recorded and excluded from the reviewed set. Review the final diff, new files,
+and application behavior before committing through your normal Git workflow.
 
 <details>
-<summary>Project instructions and model environment</summary>
+<summary>Human decisions and approval boundaries</summary>
 
-`PROJECT_MANIFEST.md` becomes the source of truth for the project's stack,
-commands, conventions, and active architecture decisions.
+### Where You Decide
 
-The project process lives in `AGENTS.md`; `CLAUDE.md` is an `@AGENTS.md` shim.
-The six policies stay in the installed plugin's `policies/` directory. Standalone
-skills read them relatively; the runner embeds the required phase union with
-shared guidance and resends it on every call. Policy bodies are never copied into
-the project. Updating the plugin
-does not migrate existing project files. On a legacy layout, affected work
-stops with: **legacy Banzai layout: run `project-manifest` to migrate**.
-Invoke `project-manifest` explicitly to review and approve one migration diff
-that preserves shared project rules and confirmed host-specific notes.
-A declined migration leaves project files unchanged; an ambiguous or
-interrupted layout remains stopped. See the
-[migration procedure](plugins/banzai/skills/project-manifest/references/layout-migration.md).
+There are five existing decision gates; the CLI presents their human actions:
 
-Banzai's default Claude environment isolates MCP and scopes settings when it
-can verify a Banzai plugin directory. An unresolved directory leaves ambient
-settings available and produces a warning; an invalid explicit directory
-fails readiness. Skills read policies from the installed plugin. See
-[Spawned Claude environment](documentation/orchestrator.md#spawned-claude-environment).
+| Gate                  | You decide                                                                                      |
+| --------------------- | ----------------------------------------------------------------------------------------------- |
+| Decision consultation | Resolve material options left open after strict planning examines the repository.               |
+| ADR acceptance        | Accept, reject, or rework a proposed architecture decision.                                     |
+| Plan approval         | Approve the exact description, accepted ADRs, and plan.                                         |
+| Review triage         | Accept, reject, or defer each review finding.                                                   |
+| Escalation            | Resolve questions about dependencies, contracts, security, deployment, or unspecified behavior. |
 
-Optional context accounting defaults to `observe` without numerical limits.
-See [context accounting and budgets](documentation/orchestrator.md#context-accounting-and-budgets)
-for the available policy and its limits.
+Which gates appear depends on the route and the task. Consultation is
+conditional, planning-only, and concise: it records your answer to an unresolved
+decision; it does not accept an ADR, approve a plan, authorize code, triage,
+recovery, release, or an external side effect.
+
+Approving the plan authorizes the work it describes. Approved planning
+artifacts remain immutable during implementation and fixes. Checks and review
+follow without separate approval at every phase unless an escalation or
+failure needs attention. The reviewer uses read-only tools; only
+human-accepted findings reach the fixer.
+
+At a strict planning gate, you can request rework or independent planning
+review. Revisions return for approval. See
+[planning review](documentation/orchestrator.md#rework-and-independent-planning-review),
+[plan authority](plugins/banzai/policies/plan-task-completion.md), and
+[runtime boundaries](documentation/orchestrator.md#boundaries).
 
 </details>
 
-## Run A Task
-
-From your configured repository, on your chosen task branch:
-
-```sh
-banzai
-```
-
-Enter one bounded request, such as the CSV example in the
-[walkthrough](packages/orchestrator/README.md#workflow-walkthrough). The CLI
-confirms the request and slug, displays the selected route, and presents
-required [human decisions](#where-you-decide) in the same session. Inspect
-progress and retained evidence with `banzai status`, then review the resulting
-diff and application behavior before committing the change.
-
-Progress streams to stderr; structured stdout such as `banzai status --json`
-stays clean. The [interactive reference](documentation/orchestrator.md#interactive-mode)
-covers multiline paste and terminal behavior.
-
-Every gate has a scriptable equivalent (`banzai approve`, `banzai triage`,
-`banzai resume`, …) — see
-[Commands](documentation/orchestrator.md#commands).
-
-When something fails, `banzai status` names the eligible action: `retry` for
-failed start checks and selection/planning/review attempts, `resume` for
-checkpointed results, and explicitly confirmed `recover` for interrupted
-mutable work. Interrupted implementation is never silently retried. Details:
-[Failure recovery](documentation/orchestrator.md#failure-recovery).
-
-To supervise a run from a chat agent, explicitly invoke `/banzai:orchestrate`
-(Claude Code) or `$banzai:orchestrate` (Codex); the skill can never select
-itself. Compatible supervisors require control contract `8.0.0`; see
-[agent control](documentation/orchestrator.md#agent-control) for exact schemas
-and compatibility checks.
-
-For retained run data, see [evaluation export and KPIs](documentation/evaluation/README.md)
-and [context reporting](documentation/context/README.md). Missing historical
-evidence remains incomplete rather than becoming zero.
-
-Cancellation reasons and the independent Markdown/JSON report are available via
-`banzai cancel --reason <enum>` and `banzai eval cancellations [--json]`.
-See [cancellation observations](documentation/orchestrator.md#cancellation-observations)
-for interactive Skip, evidence availability and resource coverage limits.
-
-## Where You Decide
-
-There are five existing decision gates;
-the CLI presents their human actions:
-
-| Gate                       | You decide                                                                                                             |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Decision consultation      | Choose among material options that remain unresolved after strict planning analyzes repository evidence                |
-| ADR acceptance             | Accept, reject, or rework each proposed architecture decision                                                          |
-| Plan approval              | Approve the exact bundle of description, accepted ADRs, and plan                                                       |
-| Review triage              | Accept, reject, or defer every review finding                                                                          |
-| Escalation                 | Answer the questions a phase raises for dependencies, contracts, security, deployment, or unspecified product behavior |
-
-Which gates appear depends on the selected route and the decisions raised by
-the task.
-
-Consultation is conditional, planning-only, and concise: Banzai shows one to
-three cards with the decision, why it matters, repository evidence, viable
-options, and an advisory recommendation when evidence supports one. The answer
-records decision provenance; it does not accept an ADR, approve a plan,
-authorize code, triage, recovery, release, or an external side effect.
-
-Approving the plan authorizes the work it describes. Implementation proceeds
-through tests, verification, and review without a separate approval at every
-phase, unless an escalation or failure needs attention.
-
-New plans state binding behavior, scope, constraints and verification evidence,
-with exact public or persisted contracts where necessary. Their **Plan Authority**
-section makes useful `Optional implementation guidance:` explicit. Approvers
-review both obligations and discretion; implementers may choose another compliant
-private design, and reviewers assess binding violations and real defects.
-Existing approved plans keep their meaning. Guidance cannot expand scope, waive
-an explicit directive or replace a required check. The shared interpretation
-lives in [the installed plan policy](plugins/banzai/policies/plan-task-completion.md);
-approval still binds every bundle byte, including optional text.
-
-## Safety Boundary
-
-- One active run in the current checkout. The orchestrator does not create
-  worktrees, switch branches, stash, reset, commit, or publish changes.
-- Uncommitted changes present at start are recorded and excluded from the
-  reviewed set, so a run never claims or discards work it did not do.
-- Plan approval is bound to the exact description, accepted ADRs, and plan;
-  approved planning artifacts stay immutable during implementation and fixes.
-- Configured verification precedes strict review. The orchestrated reviewer
-  uses read-only tools and returns structured findings; the runner renders
-  and publishes the review artifact. Only human-accepted findings reach the
-  fixer.
-- Banzai keeps its redacted run evidence in ignored `.banzai/runs/`; its own
-  run records do not persist prompts or full transcripts.
-
-The optional hook additionally asks before the first manual code edit and binds
-orchestrated edits to the active run's approved digest:
-[`plugins/banzai/hooks/README.md`](plugins/banzai/hooks/README.md).
-
 ## Using The Plugin Without The Orchestrator
 
-Use workflow skills directly in one supported client, following their approval
-rules and answering decisions in chat. Model coordination and runner-owned
-verification belong to the orchestrator; standalone use follows each skill's
-instructions for implementation, checks, and reporting. Start with the
-smallest workflow that matches the risk:
+You can use Banzai workflow skills directly in either Codex or Claude Code.
+The [plugin-only walkthrough](documentation/getting-started.md#use-only-the-plugin)
+covers installing your chosen client and plugin, preparing project guidance,
+and running a first skill. This path does not require the Banzai CLI.
 
-| Situation                                 | Skill                   | Primary artifact                                               |
-| ----------------------------------------- | ----------------------- | -------------------------------------------------------------- |
-| Ordinary new capability                   | `feature`               | `documentation/work/<slug>/work.md`                                  |
-| Bug, polish, refactor, review cleanup     | `quick-fix`             | Change report only when needed                                 |
-| Significant architecture choice           | `architecture-decision` | `documentation/decisions/NNNN-<slug>.md`                       |
-| Formal requirements or escalation trigger | Strict workflow         | Description, decisions, plan, implementation and test evidence |
-| Source-read-only audit                    | `feature-review`        | `review-<iteration>.md` and findings                           |
-| Progress check                            | `feature-status`        | Status report                                                  |
+Use `feature` for an ordinary new capability, `quick-fix` for a bounded fix,
+or `feature-review` for a source-read-only audit. Invoke skills as
+`/banzai:<skill>` in Claude Code or `$banzai:<skill>` in Codex.
+Each skill guides its checks, reports, and required human decisions in chat.
 
-Strict workflow: `feature-description` → required ADRs accepted →
-`development-plan` → plan approval → `code-writing` → `test-writing` →
-`feature-review` → triage.
+The orchestrator adds model coordination and runner-owned verification.
+For standalone requirements, architecture decisions, and the strict sequence,
+see [strict work with standalone skills](documentation/getting-started.md#strict-work-with-standalone-skills).
 
-Claude Code uses `/banzai:<skill>`. Codex uses `$banzai:<skill>`.
+<a id="reference"></a>
 
-Artifacts land in a common layout:
+## Documentation and community
 
-```text
-documentation/
-├── work/<slug>/
-│   └── {work,description,plan,implementation-report,test-report,change-report,review-N}.md
-└── decisions/{README.md,NNNN-<slug>.md}
-```
+| What you need                                | Where to go                                                                        |
+| -------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Installation, your first task, or setup help | [Get started](documentation/getting-started.md)                                    |
+| Commands, models, or failure recovery        | [CLI reference](documentation/orchestrator.md)                                     |
+| Checks for your application stack            | [Task verification](documentation/verification-examples.md)                        |
+| Workflow skills and deeper topics            | [Documentation index](documentation/README.md)                                     |
+| Current release notes                        | [Latest release](https://github.com/Parabolic-Technologies/banzai/releases/latest) |
 
-Lite work normally needs only `work.md`. Accepted ADR bodies are immutable;
-changed decisions use a linked superseding ADR. Each `review-<iteration>.md` is
-self-contained: the runner renders and publishes `banzai-feature-review/v8` for
-read-only orchestrated reviewers; standalone reviewers own durable
-`banzai-feature-review/v1` Markdown. A human or another model can continue the
-review from either artifact without a copied transcript.
+Report reproducible problems through
+[GitHub Issues](https://github.com/Parabolic-Technologies/banzai/issues).
+To improve the docs, contribute a fix, or share a workflow, read
+[Contributing](CONTRIBUTING.md). Report vulnerabilities through the
+[security policy](SECURITY.md).
 
-## Engineering Quality
+<details>
+<summary>Advanced workflows and maintainer references</summary>
 
-Banzai applies one vendor-neutral Engineering Quality policy across repository
-discovery, requirements, decisions, planning, implementation, review, and
-resolution. It protects local authority, boundaries, dependency direction,
-contracts, failure/resource semantics, proportional design, bounded scope,
-assurance ownership, compatibility, and incremental legacy change without
-requiring a universal architecture, coding paradigm, design pattern, folder
-layout, dependency-injection technique, or function-size rule.
+To supervise a run from a chat agent, explicitly invoke `/banzai:orchestrate`
+in Claude Code or `$banzai:orchestrate` in Codex. Compatible supervisors
+require control contract `8.0.0`; see
+[agent control](documentation/orchestrator.md#agent-control).
 
-The canonical policy ships in
-[`plugins/banzai/policies/engineering-quality.md`](plugins/banzai/policies/engineering-quality.md).
-Standalone consuming skills explicitly read the installed file on either host; runner phases receive its body inline. Maintainer guidance is in
-[`documentation/engineering-quality.md`](documentation/engineering-quality.md).
+- [Project guidance and setup](documentation/orchestrator.md#project-guidance-setup)
+  and [existing-project migration](plugins/banzai/skills/project-manifest/references/layout-migration.md)
+- [Client environment and permissions](documentation/orchestrator.md#spawned-claude-environment)
+- [Review artifacts](documentation/orchestrator.md#review-artifact)
+  and [work-document storage](documentation/artifact-storage.md)
+- [Evaluation and KPIs](documentation/evaluation/README.md),
+  [context reporting](documentation/context/README.md), and
+  [cancellation observations](documentation/orchestrator.md#cancellation-observations)
+- [Engineering quality](documentation/engineering-quality.md)
+  and [shadow evaluation](documentation/evaluation/engineering-quality-shadow.md)
+- [Machine contracts](plugins/banzai/contracts/),
+  [optional enforcement hook](plugins/banzai/hooks/README.md), and
+  [release checklist](documentation/release-checklist.md)
 
-Structural assessment triggers direct planning, implementation, feature and
-fix work to one shared code-design method covering ownership discovery, the
-assessment contract and its planning and implementation duties. The assessment
-is recorded in the report the work already writes; review audits that record
-under existing authority and never receives the method itself.
-
-The first release is non-blocking shadow mode for EQ-only concerns. An ordinary
-review finding may receive one EQ classification without changing severity or
-verdict. A genuinely additional candidate is retained only as `EQ-SHADOW:`
-deferred coverage for sampled evaluation; it is not triaged, accepted, fixed, or
-used for completion. Re-review remains closure-oriented around accepted finding
-IDs. The sampled rollout procedure and promotion evidence are documented in
-[`documentation/evaluation/engineering-quality-shadow.md`](documentation/evaluation/engineering-quality-shadow.md).
-
-## Reference
-
-- [First task and troubleshooting](documentation/getting-started.md),
-  [verification examples](documentation/verification-examples.md), and the
-  [documentation index](documentation/README.md).
-- Orchestrator manual — commands, doctor, model configuration, spawned
-  environment, failure recovery, evaluation export:
-  [`documentation/orchestrator.md`](documentation/orchestrator.md)
-- Workflow rules: [`plugins/banzai/AGENTS.md`](plugins/banzai/AGENTS.md)
-- Engineering Quality maintainer guide:
-  [`documentation/engineering-quality.md`](documentation/engineering-quality.md)
-- Engineering Quality shadow evaluation:
-  [`documentation/evaluation/engineering-quality-shadow.md`](documentation/evaluation/engineering-quality-shadow.md)
-- Skills: [`plugins/banzai/skills/`](plugins/banzai/skills/)
-- Machine contracts: [`plugins/banzai/contracts/`](plugins/banzai/contracts/)
-- Enforcement hook:
-  [`plugins/banzai/hooks/README.md`](plugins/banzai/hooks/README.md)
-- Release checklist:
-  [`documentation/release-checklist.md`](documentation/release-checklist.md)
-- Maintaining this repository — release gate, version parity, conventions:
-  [`CONTRIBUTING.md`](CONTRIBUTING.md)
-- Current release notes: [2.7.1](documentation/releases/2.7.1.md).
+</details>
 
 ## Author and License
 
@@ -403,16 +210,3 @@ See [NOTICE](NOTICE), [third-party information](THIRD_PARTY_NOTICES.md),
 [Terms of Use](TERMS_OF_USE.md), and [Names and Logos](TRADEMARKS.md).
 Using Banzai does not require open-sourcing your own project. Community
 participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).
-
-New human-reviewed work documents use [documentation/work/<slug>/](documentation/artifact-storage.md) and appear in ordinary Git changes. Existing documents stay at their known paths. Raw execution evidence remains ignored beneath `.banzai/`.
-
-New tasks start without profile setup. Strict mandatory checks belong to the
-approved plan; lite uses the delegated request and actual execution permissions.
-Missing unrelated tooling is not a barrier, and failed required checks prevent
-completion. Legacy `verify` utilities remain explicit compatibility commands.
-
-
-Strict ADR and plan gates offer required-feedback rework and independent planning
-review. Review findings receive read-only planner analysis and explicit human
-triage before any revision. Revisions return for approval; a recommendation
-never approves work. See the [planning loop](documentation/orchestrator.md#rework-and-independent-planning-review).
