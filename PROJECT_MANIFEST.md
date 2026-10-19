@@ -855,7 +855,7 @@ Plugin (`plugins/banzai/`):
   `PROJECT_MANIFEST.md` in the session directory or a parent — and the hook
   stays silent in repositories without that evidence.
 - `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` — plugin manifests,
-  currently version `2.7.1`. The Codex manifest additionally declares the hook
+  currently version `2.7.2`. The Codex manifest additionally declares the hook
   and the store interface metadata.
 - `PROJECT_MANIFEST.md`, `AGENTS.md`, `CLAUDE.md`, and the placeholder
   `documentation/` tree (`README.md`, `decisions/README.md`, `.gitkeep` files) —
@@ -878,7 +878,9 @@ reports; strict fix also grants its conditional change report. Lite routes keep
 work/change-report grants. Workspace v3 contains sorted unique Git changes plus
 exact selected documents, including unchanged approved files. Machine evidence
 stays under the run root. Historical runs remain read-only evidence without
-migration or new execution authority. Doctor v5 checks state v10 without repair.
+migration or new execution authority; status, the interactive home and doctor
+present them as read-only history and offer only cancellation for an unfinished
+one. Doctor v5 checks state v10 without repair.
 External hook/client installation remains separate delivery evidence.
 
 Project guidance is inspected before new-run creation and authentication, then
@@ -1729,7 +1731,7 @@ status` reports only whether credentials are visible and stored, so a
   source, and the only root Claude settings file is the ignored
   `.claude/settings.local.json`. `plugins/banzai/.claude/settings.json` is
   packaged plugin content, not this repository's configuration.
-- Current Banzai release-train version is `2.7.1`, owned solely by root
+- Current Banzai release-train version is `2.7.2`, owned solely by root
   `package.json.version` and mirrored by four plugin/marketplace fields, the
   orchestrator package, and three `package-lock.json` fields (top-level, root
   package, and workspace package). All nine fields across seven files agree.

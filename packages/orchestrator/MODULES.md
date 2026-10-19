@@ -12,7 +12,8 @@ is a navigational reference and is updated with the module it describes.
 - `work-documents.ts` — typed projection of fixed tracked document roles and
   binding-v3 validation. Runner state v10 persists the execution binding directly;
   workspace v3 inventories selected documents once, including unchanged approved
-  bytes. `lib/work-binding-history.mjs` decodes retained v1/v2 evidence read-only.
+  bytes. `lib/work-binding-history.mjs` decodes retained v1/v2 evidence read-only;
+  `isHistoricalWork` is the shared predicate status, home and doctor use for it.
   `lib/execution-ownership.mjs` coordinates actual runner/verification execution
   by the selected document directory; ordinary Markdown editing has no claims.
 - `project-files.ts` — typed projection of the shared contained-filesystem owner,
@@ -992,7 +993,10 @@ shared review/configuration readers still consume them. Generic artifact
 initialization, registration, writing and archive operations are retired. Their
 complete historical tool source remains in Git; existing archive bytes and
 references are preserved without migration. Doctor's read-only active-state check
-admits state v10 and reports historical execution incompatibility without repair.
+admits state v10 and inspects binding v1/v2 runs as read-only history without
+repair: terminal ones pass and unfinished ones warn with a `banzai cancel`
+remedy. Status skips their review revalidation, reports completion as legacy and
+recommends only `banzai cancel`; the interactive home offers only cancellation.
 
 ## Runner instruction generation and parity
 

@@ -64,6 +64,7 @@ import {
   createExecutionBinding,
   ensureExecutionIgnores,
   inspectBoundWork,
+  isHistoricalWork,
   ownsArtifact,
   planningReviewFilenames
 } from "./work-documents.js";
@@ -799,6 +800,14 @@ export function planningReviewStatusLines(status: WorkflowStatus): string[] {
       );
   }
   return lines;
+}
+
+/** The read-only notice for a run bound before the current binding version. */
+export function historicalRunNotice(state: RunState): string | null {
+  if (!isHistoricalWork(state.artifactBinding)) return null;
+  return TERMINAL_STATUSES.has(state.status)
+    ? "This run was created by an earlier Banzai version and is read-only. Its documents stay where they are."
+    : "This run was created by an earlier Banzai version and cannot resume. Cancel it to start new work; its documents stay where they are.";
 }
 
 export function reviewStatusLines(status: WorkflowStatus): string[] {
@@ -4745,6 +4754,7 @@ export class WorkflowRunner {
 
   async status(): Promise<WorkflowStatus> {
     const state = await this.store.requireActiveState();
+    const historical = isHistoricalWork(state.artifactBinding);
     let planApprovalValid: boolean | null = null;
     if (state.planApproval !== null) {
       try {
@@ -4758,7 +4768,8 @@ export class WorkflowRunner {
       }
     }
     let reviewValid: boolean | null = null;
-    if (state.latestReview !== null) {
+    // Historical inventory is not recomputed, so its review cannot be revalidated.
+    if (state.latestReview !== null && !historical) {
       reviewValid =
         (await workspaceDigest(this.repoRoot, {
           artifactBinding: state.artifactBinding,
@@ -4775,6 +4786,12 @@ export class WorkflowRunner {
     const recovery = await this.recoveryEligibility(state);
     const taskCompletion = await this.taskCompletionStatus(state);
     const completionPublication = await this.completionPublicationStatus(state);
+    let recommended = nextAction(state, retry, recovery, completionPublication);
+    // Historical work never resumes execution; cancelling is its only exit.
+    if (historical)
+      recommended = TERMINAL_STATUSES.has(state.status)
+        ? null
+        : "banzai cancel";
     let configurationPrerequisite: WorkflowStatus["configurationPrerequisite"];
     if (state.pendingHumanDecision?.kind === "configuration_prerequisite") {
       const request = state.pendingHumanDecision;
@@ -4837,7 +4854,7 @@ export class WorkflowRunner {
       latestReview,
       retry,
       recovery,
-      nextAction: nextAction(state, retry, recovery, completionPublication),
+      nextAction: recommended,
       taskCompletion,
       completionPublication,
       ...(configurationPrerequisite ? { configurationPrerequisite } : {})
@@ -4973,6 +4990,22 @@ export class WorkflowRunner {
             code: checkpoint.errorCode,
             taskId: checkpoint.taskId,
             message: `Completion evidence failed: ${checkpoint.violation}.`
+          }
+        ]
+      };
+    }
+    if (isHistoricalWork(state.artifactBinding)) {
+      return {
+        state: "legacy",
+        source: "legacy",
+        completed: null,
+        total,
+        diagnostics: [
+          {
+            code: "PLAN_TASK_COMPLETION_LEGACY",
+            taskId: null,
+            message:
+              "Run was created by an earlier Banzai version; its recorded completion evidence is read-only and is not revalidated."
           }
         ]
       };

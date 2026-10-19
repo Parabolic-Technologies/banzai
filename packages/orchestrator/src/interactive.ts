@@ -51,6 +51,7 @@ import type {
   WorkflowStatus
 } from "./workflow.js";
 import {
+  historicalRunNotice,
   humanDecisionQuestions,
   reviewStatusLines,
   planningReviewStatusLines
@@ -492,6 +493,11 @@ function renderStatus(
     io.writeLine(styler.dim(`  ${facts.join(" · ")}`));
   }
   io.writeLine(styler.dim(`  ${state.runId}`));
+  const historical = historicalRunNotice(state);
+  if (historical !== null) {
+    io.writeLine();
+    writeLabeled(io, "History", historical);
+  }
 
   if (state.workflowSelection != null) {
     io.writeLine();
@@ -1360,6 +1366,22 @@ async function handleStatus(
     ]);
     if (action === "start") {
       return await startRun(runner, io, options);
+    }
+    return false;
+  }
+
+  // A non-terminal historical run refuses every gate and continuation.
+  if (historicalRunNotice(state) !== null) {
+    const action = await io.select<PrimaryAction>("What next?", [
+      { name: "Cancel run", value: "cancel" },
+      { name: "Exit", value: "exit" }
+    ]);
+    if (action === "cancel") {
+      return await confirmCancellation(
+        runner,
+        options.cancellationIO ?? io,
+        state.runId
+      );
     }
     return false;
   }

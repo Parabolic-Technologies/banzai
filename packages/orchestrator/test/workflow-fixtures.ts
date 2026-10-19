@@ -34,12 +34,38 @@ import {
   type WorkflowSelectionResult
 } from "../src/types.js";
 import { WorkflowRunner } from "../src/workflow.js";
-import { createTestRepository, requiredFixture } from "./helpers.js";
+import {
+  createTestRepository,
+  historicalBindingFixture,
+  requiredFixture
+} from "./helpers.js";
 import {
   planningReviewResult,
   planningReviewAnalysis
 } from "./planning-review-fixtures.js";
 import type { HumanTimeObserver } from "../src/human-time.js";
+
+/** Rewrites the active run as state 8 with the private binding v2 it persisted. */
+export async function ageToHistoricalBinding(
+  runner: WorkflowRunner
+): Promise<void> {
+  const state = await runner.store.requireActiveState();
+  const binding = requiredFixture(state.artifactBinding).binding;
+  state.schemaVersion = 8;
+  delete state.planningReview;
+  state.artifactBinding = historicalBindingFixture({
+    workId: binding.workId,
+    slug: binding.slug,
+    createdAt: binding.createdAt,
+    sourceCommit: binding.sourceCommit
+  });
+  // Raw bytes, because the store never rewrites a terminal state.
+  await writeFile(
+    runner.store.statePath(state.runId),
+    JSON.stringify(state, null, 2),
+    "utf8"
+  );
+}
 
 export async function createAdrGateFixture(observer?: HumanTimeObserver) {
   const repository = await createTestRepository();

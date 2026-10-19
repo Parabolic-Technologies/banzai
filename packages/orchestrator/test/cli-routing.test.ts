@@ -30,9 +30,13 @@ import {
 } from "./helpers.js";
 
 import { writeAdoptedGuidance } from "./adoption-fixtures.js";
+import { WorkflowRunner } from "../src/workflow.js";
 import {
+  ageToHistoricalBinding,
   createAdrGateFixture,
-  createPlanningReviewFixture
+  createPlanningReviewFixture,
+  FakeAdapters,
+  passingReview
 } from "./workflow-fixtures.js";
 
 test("ADR CLI rework rejects missing, dangling, empty, whitespace and non-canonical ids without changing evidence", async () => {
@@ -810,6 +814,53 @@ test("committed status renders human-triaged completion without changing JSON", 
     assert.equal(json.stdout.includes('"completion"'), false);
   } finally {
     await repository.dispose();
+  }
+});
+
+test("committed status presents a historical-binding run as read-only history", async () => {
+  const repository = await createTestRepository();
+  try {
+    const adapters = new FakeAdapters();
+    adapters.reviewResults.push(passingReview());
+    const runner = new WorkflowRunner(repository.root, adapters);
+    await runner.start({ slug: "example", request: "Implement it." });
+    assert.equal((await runner.approvePlan("human")).status, "done");
+    await ageToHistoricalBinding(runner);
+
+    const human = runCommittedStatus(repository.root);
+    assert.equal(human.status, 0, human.stderr);
+    assert.equal(human.stderr, "");
+    assert.match(
+      human.stdout.replace(/\s+/g, " "),
+      /History: This run was created by an earlier Banzai version and is read-only\./
+    );
+    assert.match(human.stdout, /Review: pass \(iteration 1\)/);
+    assert.doesNotMatch(human.stdout, /Review snapshot:/);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("committed CLI keeps the stable code of a shared-library refusal", async () => {
+  const repository = await createTestRepository();
+  const outside = await mkdtemp(path.join(tmpdir(), "banzai-outside-state-"));
+  try {
+    await rm(path.join(repository.root, ".banzai"), {
+      recursive: true,
+      force: true
+    });
+    await symlink(outside, path.join(repository.root, ".banzai"));
+    const result = spawnSync(process.execPath, [COMMITTED_CLI, "init"], {
+      cwd: repository.root,
+      encoding: "utf8",
+      env: monochromeEnv(),
+      timeout: 10000
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /^\[ARTIFACT_UNSAFE_PATH\] /);
+  } finally {
+    await repository.dispose();
+    await rm(outside, { recursive: true, force: true });
   }
 });
 

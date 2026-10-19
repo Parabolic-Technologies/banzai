@@ -25,7 +25,12 @@ import type {
   OrchestratorConfig,
   VerificationProjectType
 } from "../src/types.js";
-import { reviewerOnlyClaudeConfig, snapshotTree } from "./helpers.js";
+import {
+  historicalBindingFixture,
+  requiredFixture,
+  reviewerOnlyClaudeConfig,
+  snapshotTree
+} from "./helpers.js";
 import { writeAdoptedGuidance } from "./adoption-fixtures.js";
 import { ADOPTED_AGENTS } from "./adoption-fixtures.js";
 
@@ -916,6 +921,50 @@ test("distinguishes terminal active malformed unsafe missing and mismatched run 
       )?.message ?? "",
       /unsupported structure/
     );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("reports runs bound before binding v3 as read-only history", async () => {
+  const repository = await temporaryRoot();
+  const historicalState = (status: string, schemaVersion = 8) => ({
+    schemaVersion,
+    runId: "safe-run",
+    repoRoot: repository.root,
+    status,
+    verificationMode: "task",
+    artifactBinding: historicalBindingFixture({
+      workId: "11111111-1111-4111-8111-111111111111",
+      slug: "earlier-work",
+      createdAt: "2026-09-18T15:25:14.369Z",
+      sourceCommit: null
+    })
+  });
+  const activeRun = async () =>
+    requiredFixture(
+      (await inspectDoctor(repository.root, dependencies())).checks.find(
+        (item) => item.id === "run.active"
+      )
+    );
+  try {
+    await writeConfig(repository.root, substantiveConfig("custom"));
+    await writeRunState(repository.root, { state: historicalState("done") });
+    const done = await activeRun();
+    assert.equal(done.status, "pass");
+    assert.match(done.message, /earlier Banzai version/);
+
+    await writeRunState(repository.root, { state: historicalState("blocked") });
+    const blocked = await activeRun();
+    assert.equal(blocked.status, "warning");
+    assert.match(blocked.message, /cannot resume/);
+    assert.match(blocked.fixes[0]?.action ?? "", /banzai cancel/);
+
+    // Binding v3 is mandatory from state 9, so an older binding there is corrupt.
+    await writeRunState(repository.root, {
+      state: historicalState("done", 10)
+    });
+    assert.equal((await activeRun()).status, "fail");
   } finally {
     await repository.dispose();
   }
