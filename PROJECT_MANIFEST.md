@@ -855,7 +855,7 @@ Plugin (`plugins/banzai/`):
   `PROJECT_MANIFEST.md` in the session directory or a parent — and the hook
   stays silent in repositories without that evidence.
 - `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` — plugin manifests,
-  currently version `2.7.2`. The Codex manifest additionally declares the hook
+  currently version `2.7.3`. The Codex manifest additionally declares the hook
   and the store interface metadata.
 - `PROJECT_MANIFEST.md`, `AGENTS.md`, `CLAUDE.md`, and the placeholder
   `documentation/` tree (`README.md`, `decisions/README.md`, `.gitkeep` files) —
@@ -1731,7 +1731,7 @@ status` reports only whether credentials are visible and stored, so a
   source, and the only root Claude settings file is the ignored
   `.claude/settings.local.json`. `plugins/banzai/.claude/settings.json` is
   packaged plugin content, not this repository's configuration.
-- Current Banzai release-train version is `2.7.2`, owned solely by root
+- Current Banzai release-train version is `2.7.3`, owned solely by root
   `package.json.version` and mirrored by four plugin/marketplace fields, the
   orchestrator package, and three `package-lock.json` fields (top-level, root
   package, and workspace package). All nine fields across seven files agree.

@@ -549,6 +549,11 @@
       "sha256": null
     },
     {
+      "path": "documentation/releases/2.7.3.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
       "path": "documentation/releases/public-publication.md",
       "classification": "maintainer",
       "sha256": null
