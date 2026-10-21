@@ -117,6 +117,7 @@ jobs:
           CHECK
       - run: git --version
       - run: npm ci
+      - run: npm run build:dist
       - run: npm run release:validate
       - run: npm run publication:check
       - name: Skip versions that already exist on the registry

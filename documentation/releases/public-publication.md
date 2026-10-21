@@ -30,8 +30,9 @@ corrected after both versions were published.
 
 1. On `dev`, select the release target and run `npm run version:set -- <version>`
    once. Write `documentation/releases/<version>.md` under the rule above.
-   Rebuild the committed distribution when source or embedded metadata
-   changed, then run `npm ci` and `npm run release:check`.
+   Run `npm ci`, refresh tracked generated resources with `npm run build`
+   when their inputs changed, then run `npm run release:check`. The gate
+   builds ignored `dist/` output from source before checking it.
 2. Push `dev`, open the pull request to `main`, and wait for
    `release_check_node_22` and `release_check_node_24` on the exact candidate.
    Each required lane records the tree it verified as a
@@ -57,7 +58,7 @@ corrected after both versions were published.
    `npm run release:check` on the tag in the exact supported images, and
    nothing is published unless both pass. Then `publish_npm` checks out the
    release tag, requires the tag to equal `v` plus the root `package.json`
-   version, runs `npm ci`, `npm run release:validate` and
+   version, runs `npm ci`, `npm run build:dist`, `npm run release:validate` and
    `npm run publication:check`, skips a version already on the registry,
    publishes only the CLI workspace through npm trusted publishing (OIDC, no
    stored token), and records npm acceptance or the existing-version skip in
@@ -86,6 +87,7 @@ corrected after both versions were published.
    ```text
    git checkout v<version>
    npm ci
+   npm run release:check
    npm publish --dry-run --ignore-scripts --workspace @parabolic-technologies/banzai --access public --registry https://registry.npmjs.org/
    npm publish --ignore-scripts --workspace @parabolic-technologies/banzai --access public --registry https://registry.npmjs.org/
    ```

@@ -127,7 +127,7 @@ async function validateDistributionParity(root) {
     fail(
       "STALE_DISTRIBUTION",
       "packages/orchestrator/dist",
-      "committed bundle or source map differs from a fresh source build"
+      "built bundle or source map differs from a fresh source build"
     );
   }
 }
@@ -1450,7 +1450,10 @@ async function validateCi(root, policy) {
     ],
     ["          package-manager-cache: false", "disabled automatic cache"],
     ["      - run: git --version", "Git preflight"],
-    ["      - run: npm ci", "npm ci"],
+    [
+      "      - run: npm ci\n      - run: npm run build:dist\n      - run: npm run compatibility:live -- --confirm-live",
+      "install and build before live execution"
+    ],
     [
       "      - run: npm run compatibility:live -- --confirm-live",
       "live command"
@@ -1602,6 +1605,7 @@ function publishDefinition(policy) {
     "          CHECK",
     "      - run: git --version",
     "      - run: npm ci",
+    "      - run: npm run build:dist",
     "      - run: npm run release:validate",
     "      - run: npm run publication:check",
     "      - name: Skip versions that already exist on the registry",
@@ -3188,10 +3192,18 @@ async function validateRepository(root) {
     "distribution.sourceMap"
   );
   await access(repositoryPath(root, bundlePath)).catch(() =>
-    fail("STALE_DISTRIBUTION", bundlePath, "committed bundle is missing")
+    fail(
+      "STALE_DISTRIBUTION",
+      bundlePath,
+      "built bundle is missing; run npm run build:dist"
+    )
   );
   await access(repositoryPath(root, sourceMapPath)).catch(() =>
-    fail("STALE_DISTRIBUTION", sourceMapPath, "committed source map is missing")
+    fail(
+      "STALE_DISTRIBUTION",
+      sourceMapPath,
+      "built source map is missing; run npm run build:dist"
+    )
   );
   const bundleStat = await lstat(repositoryPath(root, bundlePath));
   const actualMode = bundleStat.mode & 0o777;
@@ -3200,7 +3212,7 @@ async function validateRepository(root) {
     fail(
       "NON_EXECUTABLE_DISTRIBUTION",
       bundlePath,
-      "committed bundle mode must be 0755"
+      "built bundle mode must be 0755"
     );
   }
 

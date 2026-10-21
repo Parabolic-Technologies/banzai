@@ -140,8 +140,7 @@ const FIXTURE_PATHS = [
   "packages/orchestrator/scripts/release-version.mjs",
   "packages/orchestrator/scripts/smoke-committed.mjs",
   "packages/orchestrator/scripts/version-recover.mjs",
-  "packages/orchestrator/scripts/version-set.mjs",
-  "packages/orchestrator/dist"
+  "packages/orchestrator/scripts/version-set.mjs"
 ] as const;
 
 function replacePolicyFragment(
@@ -198,8 +197,7 @@ async function releaseFixture(): Promise<string> {
   for (const surface of VERSION_SURFACES)
     await setSurfaceVersion(root, surface, "1.19.0");
   await setLegacyLayoutRelease(root, "1.18.0");
-  // The copied dist embeds the checkout version. Rebuild for the fixture's
-  // pinned version so later releases still exercise the intended diagnostics.
+  // A source checkout has no dist. Build for the fixture's pinned version.
   await symlink(
     path.join(REPOSITORY_ROOT, "node_modules"),
     path.join(root, "node_modules"),
@@ -324,6 +322,59 @@ async function withFixture(
     await rm(path.dirname(root), { recursive: true, force: true });
   }
 }
+
+test("distribution-only builds start without dist and preserve tracked generated resources", async () => {
+  await withFixture(async (root) => {
+    const packageRoot = path.join(root, "packages/orchestrator");
+    const generated = [
+      "packages/orchestrator/src/init-resources.ts",
+      "packages/orchestrator/src/phase-resources.ts",
+      "plugins/banzai/lib/artifact-readers.mjs"
+    ];
+    const before = await Promise.all(
+      generated.map((name) => readFile(path.join(root, name)))
+    );
+    await rm(path.join(packageRoot, "dist"), { recursive: true });
+    const build = () =>
+      spawnSync(
+        process.execPath,
+        [path.join(packageRoot, "scripts/build.mjs"), "--distribution-only"],
+        { cwd: packageRoot, encoding: "utf8" }
+      );
+    const result = build();
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(await readdir(path.join(packageRoot, "dist")), [
+      "banzai.mjs",
+      "banzai.mjs.map"
+    ]);
+    assert.equal(
+      (await lstat(path.join(packageRoot, "dist/banzai.mjs"))).mode & 0o777,
+      0o755
+    );
+    assert.equal(validate(root).status, 0);
+    await appendFile(
+      path.join(root, "documentation/verification-examples.md"),
+      "\nChanged guide.\n"
+    );
+    const staleBuild = build();
+    assert.equal(staleBuild.status, 0, staleBuild.stderr);
+    assert.deepEqual(
+      await Promise.all(
+        generated.map((name) => readFile(path.join(root, name)))
+      ),
+      before
+    );
+    const stale = validate(root);
+    assert.equal(stale.status, 1);
+    assert.match(stale.stderr, /^STALE_DISTRIBUTION /);
+    await appendFile(
+      path.join(packageRoot, "src/cli.ts"),
+      "\nconst = invalid syntax;\n"
+    );
+    assert.notEqual(build().status, 0);
+    await assert.rejects(access(path.join(packageRoot, "dist/banzai.mjs")));
+  });
+});
 
 test("initialization guide parity rejects stale or missing resources without repair", async () => {
   await withFixture(async (root) => {
@@ -2020,6 +2071,15 @@ test("release validation rejects a weakened publication gate", async () => {
         ""
       ],
       ["      - run: npm run publication:check\n", ""],
+      ["      - run: npm run build:dist\n", ""],
+      [
+        "      - run: npm run build:dist\n",
+        "      - run: npm run build:dist\n        if: false\n"
+      ],
+      [
+        "      - run: npm run build:dist\n      - run: npm run release:validate\n",
+        "      - run: npm run release:validate\n      - run: npm run build:dist\n"
+      ],
       [
         "      - run: npm run release:validate\n      - run: npm run publication:check\n",
         "      - run: npm run publication:check\n      - run: npm run release:validate\n"

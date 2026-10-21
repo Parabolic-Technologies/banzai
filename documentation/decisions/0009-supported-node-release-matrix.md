@@ -246,10 +246,17 @@ Implementation and review must confirm:
 
 ## Lifecycle Links
 
+- Partially superseded by
+  [ADR-0056](./0056-ci-built-orchestrator-distribution.md), accepted 2026-10-21:
+  the canonical committed-build baseline in Decision and committed/shared
+  output in Compliance item 3 are replaced by per-lane source builds. The
+  supported Node pins, Node 22 target and both blocking lanes remain unchanged.
+  This record remains Accepted for its retained provisions; ADR-0056's
+  implementation state is Planned pending final reconciliation and review.
 - Amended by
   [ADR-0053](./0053-single-pull-request-ci-gate-and-publish-evidence-reuse.md),
   accepted 2026-10-01: the advisory forward lane runs on a weekly schedule and
   on manual dispatch instead of on every pull request. Supported and forward
   pins are unchanged. Implementation of this amendment is Planned.
 - Supersedes: None
-- Superseded by: None
+- Superseded by: None in full

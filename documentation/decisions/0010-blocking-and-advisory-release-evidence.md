@@ -288,6 +288,13 @@ Implementation and review must confirm:
 
 ## Lifecycle Links
 
+- Partially superseded by
+  [ADR-0056](./0056-ci-built-orchestrator-distribution.md), accepted 2026-10-21:
+  Required and Blocking evidence uses freshly built distribution parity and
+  CLI smoke in place of their committed-output equivalents. Both required
+  lanes, failure classification and human release authority remain unchanged.
+  This record remains Accepted for its retained provisions; ADR-0056's
+  implementation state is Planned pending final reconciliation and review.
 - Amended by
   [ADR-0053](./0053-single-pull-request-ci-gate-and-publish-evidence-reuse.md),
   accepted 2026-10-01: required evidence is bound to the published tree, every
@@ -295,4 +302,4 @@ Implementation and review must confirm:
   without GitHub enforcement. Required and advisory classification is
   unchanged. Implementation of this amendment is Planned.
 - Supersedes: None
-- Superseded by: None
+- Superseded by: None in full

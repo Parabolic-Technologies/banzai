@@ -5,9 +5,6 @@ plugins/*/.claude/settings.local.json
 # Application build artifacts
 node_modules/
 dist/
-!packages/orchestrator/dist/
-!packages/orchestrator/dist/banzai.mjs
-!packages/orchestrator/dist/banzai.mjs.map
 build/
 coverage/
 packages/orchestrator/.test-dist/

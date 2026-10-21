@@ -35,6 +35,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "build:dist": "node scripts/build.mjs --distribution-only",
     "build:check": "node scripts/check-dist.mjs",
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "lint": "eslint . --format ./scripts/eslint-formatter.mjs",

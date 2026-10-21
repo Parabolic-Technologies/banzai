@@ -215,10 +215,11 @@ unchanged evidence and authority. The sampled evaluation procedure is
 
 ## Repository Release Confidence
 
-Repository maintenance uses the committed bundle without requiring the global
-link:
+Repository maintenance uses a locally built bundle without requiring the global
+link. `dist/` is ignored by Git and built during CI and npm publication:
 
 ```text
+npm run build:dist
 npm run release:validate
 npm run smoke:committed
 npm run release:check
@@ -265,21 +266,22 @@ parity against root `package.json.version`, rejects any retained version
 transaction or cleanup-guard state, keeps the Claude marketplace versionless,
 and validates required skills/hooks/contracts/entry files, hook syntax,
 package/lockfile policy, canonical Test Assurance, Security Assurance,
-and Engineering Quality policy wiring, committed bundle mode, CI policy, and
+and Engineering Quality policy wiring, built bundle mode, CI policy, and
 documentation policy. Instruction-layout validation pins the exact shim,
 process sections, six policy owners, complete required/conditional read matrix,
 scoped reference rules, migration approval text and last legacy-compatible
 release. The Engineering Quality check protects rule/reference
 and shadow-boundary text; it does not analyze target-project architecture.
-`smoke:committed` creates a disposable Git repository and runs the committed
-bundle's non-TTY help, init, agent-control capabilities/status, doctor JSON, and
+`smoke:committed` retains its historical command name, creates a disposable Git
+repository and runs the locally built bundle's non-TTY help, init,
+agent-control capabilities/status, doctor JSON, and
 evaluation JSON paths twice. Capabilities also run outside Git. The smoke
 requires the v1 identities, clean stderr, deterministic bytes, no source,
 configuration, Git, or `.banzai` mutation, and complete cleanup. Help and
 capability versions must match the current package mirror independently of
 the pinned machine-contract versions.
-`release:check` adds both checks and direct formatting to the unchanged
-`verify` gate, rejects tracked byte or mode mutation, and never invokes
+`release:check` first runs `build:dist`, then adds both checks and direct
+formatting to the unchanged `verify` gate, rejects tracked byte or mode mutation, and never invokes
 `version:set` or `version:recover`.
 
 <!-- release-policy:start -->

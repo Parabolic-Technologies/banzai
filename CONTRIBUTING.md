@@ -36,8 +36,9 @@ improvements and small fixes can be proposed directly.
 2. Install the locked dependencies with `npm ci`. Follow the repository process
    and keep unrelated changes out of the pull request.
 3. Add or update tests when needed to protect material behavior. Update affected
-   documentation and rebuild the committed distribution with `npm run build`
-   if source or embedded metadata changes.
+   documentation and refresh tracked generated resources with `npm run build`
+   if their inputs change. The CLI bundle and source map in `dist/` are ignored
+   build outputs; CI builds them from source.
 4. Run `npm run release:check` and `git diff --check`. Report the exact commands,
    results, and any unavailable checks. Documentation-only changes still need
    relevant link and release validation; explain any unrun checks.
@@ -74,10 +75,11 @@ use of the released software.
 
 ```text
 npm ci
+npm run build:dist
 npm run verify
 ```
 
-`verify` runs typecheck, lint, tests, and the committed-bundle byte check.
+`verify` runs typecheck, lint, tests, and the local bundle byte check.
 Focused test evidence uses
 `node packages/orchestrator/scripts/test.mjs --pattern <regex>`. The formatter
 (`npm run format:check`) is deliberately outside `verify`; run it during final
@@ -125,9 +127,11 @@ npm ci
 npm run release:check
 ```
 
-It runs the full `verify` sequence plus the formatter check,
-plugin/marketplace/release validation, hook syntax, committed-distribution
-checks, and an isolated committed-bundle smoke, and fails if a component
+It first builds the ignored CLI distribution with `build:dist`, then runs the
+full `verify` sequence plus the formatter check, plugin/marketplace/release
+validation, hook syntax, distribution checks, and an isolated built-bundle
+smoke. The build leaves tracked generated resources untouched, so stale
+resources still fail verification. The gate fails if a component
 changes a tracked byte or executable mode. CI runs the same gate on the
 supported Node lanes:
 

@@ -97,4 +97,5 @@ jobs:
           package-manager-cache: false
       - run: git --version
       - run: npm ci
+      - run: npm run build:dist
       - run: npm run compatibility:live -- --confirm-live

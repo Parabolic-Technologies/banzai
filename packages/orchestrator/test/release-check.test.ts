@@ -16,9 +16,13 @@ const SCRIPT = path.join(process.cwd(), "scripts", "release-check.mjs");
 
 test("release check keeps contract drift validation before committed smoke", async () => {
   const source = await readFile(SCRIPT, "utf8");
+  const build = source.indexOf('name: "distribution-build"');
+  const verify = source.indexOf('name: "verify"');
   const validation = source.indexOf('name: "release-validation"');
   const smoke = source.indexOf('name: "committed-smoke"');
   assert.ok(validation >= 0);
+  assert.ok(build >= 0 && verify > build && validation > verify);
+  assert.match(source, /args: \["run", "build:dist"\]/);
   assert.ok(smoke > validation);
   assert.match(source, /args: \["run", "release:validate"\]/);
   assert.match(source, /args: \["run", "smoke:committed"\]/);

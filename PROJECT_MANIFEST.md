@@ -54,11 +54,12 @@ installed policy source. These files describe nothing here.
   `workspaces: ["packages/*"]`.
 - **Build:** `npm run build` — explicitly regenerates committed initialization-guide, phase-resource
   and artifact-reader modules, then bundles `packages/orchestrator/src/cli.ts` into
-  the committed `packages/orchestrator/dist/banzai.mjs` (plus `.map`) with a
-  `#!/usr/bin/env node` banner and mode `0755`.
+  the ignored `packages/orchestrator/dist/banzai.mjs` (plus `.map`) with a
+  `#!/usr/bin/env node` banner and mode `0755`. `npm run build:dist` builds only
+  that distribution, leaving tracked generated modules untouched.
 - **Build check:** `npm run build:check` — compares generated initialization-guide and phase-resource
   bytes without repair, then rebuilds into a temp directory,
-  compares bytes against the committed `dist/`, then smoke-runs the committed
+  compares bytes against the locally built `dist/`, then smoke-runs the built
   executable and asserts its non-TTY help output. Temporary output is removed
   on success and failure.
 - **Typecheck:** `npm run typecheck` — `tsc --project tsconfig.json --noEmit`.
@@ -72,10 +73,10 @@ installed policy source. These files describe nothing here.
   selects exact test-root files before bundling; omission selects the complete suite.
 - **Full gate:** `npm run verify` — `typecheck`, then `lint`, then `test`, then
   `build:check`. The formatter is deliberately not part of this gate.
-- **Release-confidence gate:** `npm run release:check` — preserves `verify`
-  semantics, then adds formatter, nine-field release-train validation, actual
-  source/plugin/npm publication checks, and a
-  disposable committed-bundle smoke. It snapshots tracked bytes and modes,
+- **Release-confidence gate:** `npm run release:check` — starts with `build:dist`,
+  preserves `verify` semantics, then adds formatter, nine-field release-train
+  validation, actual source/plugin/npm publication checks, and a disposable
+  built-bundle smoke. It snapshots tracked bytes and modes before building,
   fails if a component mutates them, and never invokes version synchronization
   or recovery.
 - **Disposable release candidate:** `node packages/orchestrator/scripts/release-candidate-check.mjs`
@@ -95,7 +96,8 @@ installed policy source. These files describe nothing here.
 - **Install for local use:** `npm run install:orchestrator` — builds and
   `npm link`s `@parabolic-technologies/banzai`, exposing `banzai` from this
   checkout.
-  `npm run banzai` runs the committed bundle without linking.
+  `npm run banzai` runs the locally built bundle without linking; a fresh
+  checkout requires `npm run build:dist` first.
 - **npm distribution:** `@parabolic-technologies/banzai` is publishable with
   `publishConfig.access: "public"` and
   `publishConfig.registry: "https://registry.npmjs.org/"`. It exposes the
@@ -136,7 +138,8 @@ installed policy source. These files describe nothing here.
   `live_vendor_compatibility` job requires a manual dispatch with the boolean
   `live_compatibility` input, `github.ref_protected`, repository variable
   `BANZAI_LIVE_COMPATIBILITY=1`, and a dedicated self-hosted Linux runner labeled
-  `banzai-live`. It disables automatic npm caching and retains no artifact.
+  `banzai-live`. It runs `build:dist` after installation, disables automatic
+  npm caching and retains no artifact.
   `.github/workflows/publish.yml` (ADR-0039 as partially superseded by
   ADR-0053) runs on published, non-draft, non-prerelease GitHub Releases. Its
   `release_evidence` job (`actions: read`) runs
@@ -149,7 +152,8 @@ installed policy source. These files describe nothing here.
   exact supported images. `publish_npm`, the only job with `id-token: write`,
   runs in the `npm` environment when the evidence is bound or both fallback
   lanes passed: it checks out the release tag, requires the tag to equal `v`
-  plus the root version and npm 11.5.1+, runs `npm ci`, `release:validate` and
+  plus the root version and npm 11.5.1+, runs `npm ci`, `build:dist`,
+  `release:validate` and
   `publication:check`, skips versions already on the registry, publishes only
   the CLI workspace through npm trusted publishing with no stored registry
   token, then records npm acceptance or the existing-version skip in the job
@@ -310,9 +314,9 @@ setup reuses the existing runner lock without stale ownership reclamation.
     use closed versioned JSON documents on direct process stdin. The CLI
     validates the complete document before invoking the existing
     `WorkflowRunner` mutation.
-- Generated and committed code: `packages/orchestrator/dist/banzai.mjs` and its
-  source map are build outputs kept under version control and byte-verified by
-  `build:check`. `src/contracts.ts` imports the plugin's contract JSON through
+- Generated distribution: `packages/orchestrator/dist/banzai.mjs` and its
+  source map are ignored local/CI build outputs included in npm and
+  byte-verified by `build:check`. `src/contracts.ts` imports the plugin's contract JSON through
   `resolveJsonModule`, so the schemas are embedded in that bundle and a schema
   edit requires a rebuild.
 
@@ -367,7 +371,7 @@ setup reuses the existing runner lock without stale ownership reclamation.
     `security-assurance.md` (maintainer notes on the ADR-0027 policy and its
     evolution rule), and
     the version-controlled `release-checklist.md` runbook.
-  - `packages/orchestrator/` — `src/`, `test/`, `scripts/`, committed `dist/`,
+  - `packages/orchestrator/` — `src/`, `test/`, `scripts/`, ignored generated `dist/`,
     `import-boundaries.mjs` plus its `.d.mts` declaration,
     `eslint.config.mjs`, `tsconfig.json`, `README.md` (npm landing page),
     and `MODULES.md` (per-module maintainer reference linked from section 5).
@@ -404,9 +408,8 @@ setup reuses the existing runner lock without stale ownership reclamation.
   `eligibility`), split by runner capability so the test runner executes them
   in parallel, with their shared doubles in `test/workflow-fixtures.ts`.
   `test/hook.test.ts` covers the plugin hook outside the workspace.
-- `.gitignore` ignores `dist/` globally and then re-includes exactly
-  `packages/orchestrator/dist/banzai.mjs` and `.../banzai.mjs.map`; it also
-  ignores `.claude/settings.local.json`,
+- `.gitignore` ignores `dist/` globally, including the orchestrator bundle and
+  source map. It also ignores `.claude/settings.local.json`,
   `plugins/*/.claude/settings.local.json`, local run/active-run/runner-lock
   evidence, environment files except example/sample files, private-key and
   certificate containers, and the fixed checkout-local
@@ -762,17 +765,18 @@ Repository release scripts (`packages/orchestrator/scripts/`):
   contract identities, whitespace-normalized policy-section drift checks,
   instruction-layout structure and consumer-matrix validation, scoped
   references and migration/legacy-release pins,
-  committed bundle mode and parity, and a hook-runtime version rule:
+  built bundle mode and parity, and a hook-runtime version rule:
   `hooks/spec-gate.cjs`, `hooks/hooks.json` and `plugins/banzai/lib/` must
   match the commit that set the current version unless the working tree
   carries a pending bump (`HOOK_CHANGED_WITHOUT_VERSION_BUMP`). The rule is
   skipped without full Git history (release fixtures, shallow CI clones).
-- `smoke-committed.mjs` — runs the committed bundle in disposable repositories
+- `smoke-committed.mjs` — retains its command name and runs the locally built
+  bundle in disposable repositories
   and asserts clean streams, fixed schema identities, deterministic bytes, no
   mutation, and unconditional cleanup.
-- `release-check.mjs` — composes `verify`, `format:check`, release validation,
-  and committed smoke with tracked-tree mutation detection; never runs version
-  synchronization or recovery.
+- `release-check.mjs` — composes `build:dist`, `verify`, `format:check`, release
+  validation, publication checks and built-bundle smoke with tracked-tree
+  mutation detection; never runs version synchronization or recovery.
 - `release-evidence.mjs` — ADR-0053 release evidence. `record` names the tree a
   required CI lane verified, its run attempt and lane, and refuses a dirty
   tracked checkout. `verify` binds a release tag to that evidence through
@@ -784,7 +788,9 @@ Repository release scripts (`packages/orchestrator/scripts/`):
   cleanup guard, authenticated restoration, and legacy format-1 recovery.
 - `phase-resources-build.mjs` — one exact resource inventory, immutable
   normalized extraction evidence, generated-source parity and actual
-  source/plugin/npm/source-map comparison; rejects indexed/working skew.
+  source/plugin/npm/source-map comparison; compares npm distribution bytes with
+  the local build without requiring `dist` in source archives and rejects
+  indexed/working skew.
 - `instruction-baseline.mjs` — explicit authoring/check interface for current
   instruction expectations and ADR-scoped transitions; preserves the original
   extraction root. Builds and validators never generate baseline transitions.
@@ -1288,7 +1294,9 @@ attempts without another model call`.
   load-bearing contract or safety evidence remains actionable.
 - Required suite: `npm run test` must pass completely; typecheck must be
   clean, lint must report 0 errors (advisory warnings, section 10), and
-  `npm run build:check` must confirm committed `dist/` parity.
+  `npm run build:check` must confirm locally built `dist/` parity. Standalone
+  `verify`, tests and smoke require `npm run build:dist` first on a fresh checkout;
+  `release:check` owns that prerequisite automatically.
   Per-change test counts and covered guarantees are recorded in each feature's
   `test-report.md` / `implementation-report.md`, not here.
 - PTY prerequisites: `test/setup-pty.test.ts` uses `test/pty-driver.py` and
@@ -1371,8 +1379,10 @@ attempts without another model call`.
   fails on drift or any retained `.banzai-version-set`, cleanup guard, or guard
   temporary. Recovery authenticates any coexisting journal remnant against the
   cleanup guard before restoration or recursive cleanup. Record plugin and
-  orchestrator delivery/installed state separately, use explicit contracts for compatibility, and rebuild and commit
-  `packages/orchestrator/dist/` in the same change as any `src` edit.
+  orchestrator delivery/installed state separately and use explicit contracts
+  for compatibility.
+  Rebuild ignored `packages/orchestrator/dist/` for local execution after source
+  changes; CI and publication build it from their own checkout.
 - Agent tooling: `.serena/project.yml` sets the TypeScript language server,
   ignores `assets/**`, and disables Serena memory and
   onboarding tools on purpose — durable guidance belongs in committed
@@ -1663,7 +1673,7 @@ status` reports only whether credentials are visible and stored, so a
   remains `changes_requested`, and human output labels the distinct triage basis.
   Any accepted finding retains the existing accepted-only fix, final
   verification, bounded re-review, rotation, and maximum-cycle behavior.
-- The committed `packages/orchestrator/dist/banzai.mjs` and `.map` must match a
+- The locally built `packages/orchestrator/dist/banzai.mjs` and `.map` must match a
   fresh build byte-for-byte; `npm run build:check` is part of `npm run verify`.
 - Evaluation export contract `banzai-evaluation-export/v1` is independent of
   run-state and model-result schema versions. Its CLI is stdout-only, offline,
@@ -1715,7 +1725,7 @@ status` reports only whether credentials are visible and stored, so a
 - Lint and formatting still cover `packages/orchestrator/**` only. The explicit
   release validator separately covers plugin skills, contracts, packaged hook,
   marketplace copies, policy docs, hook syntax, release metadata, and fresh
-  byte parity for the committed bundle and source map. Its parity-only internal
+  byte parity for the built bundle and source map. Its parity-only internal
   reuse of `check-dist.mjs` omits that script's dependency-requiring CLI smoke;
   ordinary `npm run build:check` and `npm run smoke:committed` retain their full
   smoke semantics.
@@ -1802,3 +1812,4 @@ restate them here. Paths are relative to `documentation/decisions/`.
 | ADR-0053 | Single pull-request CI gate and publish-time evidence reuse        | `0053-single-pull-request-ci-gate-and-publish-evidence-reuse.md` | Implemented |
 | ADR-0054 | Git-visible work artifacts                                        | `0054-git-visible-work-artifacts.md`                          | Implemented     |
 | ADR-0055 | Planning gate rework and independent planning review              | `0055-planning-gate-rework-and-independent-planning-review.md` | Implemented     |
+| ADR-0056 | CI-built orchestrator distribution                                | `0056-ci-built-orchestrator-distribution.md`                    | Implemented     |

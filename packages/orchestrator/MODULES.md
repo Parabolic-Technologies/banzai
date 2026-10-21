@@ -914,7 +914,7 @@ is a navigational reference and is updated with the module it describes.
   Engineering Quality policy references/syntax/identity, the ADR-0050
   structural-assessment trigger heading, code-design method shape and budget,
   consumer anchors and audit exclusion, the versionless Claude
-  marketplace, root version-script wiring, committed bundle mode, and required
+  marketplace, root version-script wiring, built bundle mode, and required
   paths without mutating them. Before resource and distribution parity it
   rejects hook-runtime edits (`hooks/spec-gate.cjs`, `hooks/hooks.json`,
   `plugins/banzai/lib/`) made after the commit that set the current version
@@ -938,15 +938,20 @@ is a navigational reference and is updated with the module it describes.
   incomplete attempt, and evaluation KPI JSON —
   checkout mode plus a non-repository `--input` round-trip over the captured
   export — repeatedly against the
-  committed bundle in disposable repositories, asserting clean streams, fixed
+  locally built bundle in disposable repositories, asserting clean streams, fixed
   schema identities, deterministic bytes, no mutation, and unconditional
   cleanup. Help and capability release versions must match the candidate's
   package mirror; machine-contract identities remain separately pinned.
-- `release-check.mjs` composes `verify`, `format:check`, release validation,
+- `release-check.mjs` composes `build:dist`, `verify`, `format:check`, release validation,
   actual publication checks and
-  committed smoke with a vendor-free environment and tracked-tree mutation
+  built-bundle smoke with a vendor-free environment and tracked-tree mutation
   detection. Its default component list excludes version synchronization and
   recovery.
+- `build.mjs` regenerates tracked resource modules for explicit `build` calls.
+  Its `--distribution-only` mode (`build:dist`) writes only ignored `dist/`
+  output for CI, release checks and publication. `check-dist.mjs` still checks
+  tracked resources without repair and compares bundle/map bytes with a fresh
+  build before CLI smoke.
 - `release-candidate-check.mjs` copies the enumerated checkout into a temporary
   candidate outside the repository, links installed dependencies read-only with
   workspace entries resolving to the candidate's own packages, indexes the
