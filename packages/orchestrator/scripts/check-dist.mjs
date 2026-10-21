@@ -54,7 +54,7 @@ async function checkDistribution(packageRoot, smokeRequired) {
     );
   const temporaryRoot = await mkdtemp(path.join(packageRoot, ".dist-check-"));
   const temporaryFile = path.join(temporaryRoot, "banzai.mjs");
-  const committedFile = path.join(packageRoot, "dist", "banzai.mjs");
+  const builtFile = path.join(packageRoot, "dist", "banzai.mjs");
 
   try {
     await build({
@@ -75,16 +75,10 @@ async function checkDistribution(packageRoot, smokeRequired) {
       const generated = await readFile(`${temporaryFile}${suffix}`).catch(
         () => null
       );
-      const committed = await readFile(`${committedFile}${suffix}`).catch(
-        () => null
-      );
-      if (
-        generated === null ||
-        committed === null ||
-        !generated.equals(committed)
-      ) {
+      const built = await readFile(`${builtFile}${suffix}`).catch(() => null);
+      if (generated === null || built === null || !generated.equals(built)) {
         throw new Error(
-          "Generated orchestrator distribution is stale. Run `npm run build` and commit dist/."
+          "Generated orchestrator distribution is missing or stale. Run `npm run build:dist`."
         );
       }
     }
@@ -93,7 +87,7 @@ async function checkDistribution(packageRoot, smokeRequired) {
   }
 
   if (smokeRequired) {
-    const smoke = await execFileAsync(process.execPath, [committedFile], {
+    const smoke = await execFileAsync(process.execPath, [builtFile], {
       cwd: packageRoot,
       encoding: "utf8"
     });

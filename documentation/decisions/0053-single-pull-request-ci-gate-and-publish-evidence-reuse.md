@@ -329,6 +329,14 @@ Risks and required follow-ups:
 
 ## Lifecycle Links
 
+- Amended by
+  [ADR-0056](./0056-ci-built-orchestrator-distribution.md), accepted 2026-10-21:
+  each consuming checkout builds its distribution, including the publishing
+  job on both evidence-reuse and fallback paths and the manual live job before
+  CLI execution. Evidence identity and binding, both supported lanes, fallback,
+  permissions, cadence, cancellation and live authorization remain unchanged.
+  ADR-0056's implementation state is Planned pending final reconciliation and
+  review.
 - Supersedes: None while Proposed. If accepted, it supersedes only ADR-0039's
   provision that the publish job runs `release:check` on the tag before every
   publication. The rest of ADR-0039 stays.

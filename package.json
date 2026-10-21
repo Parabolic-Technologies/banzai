@@ -10,6 +10,7 @@
   },
   "scripts": {
     "build": "npm run build --workspace @parabolic-technologies/banzai",
+    "build:dist": "npm run build:dist --workspace @parabolic-technologies/banzai",
     "build:check": "npm run build:check --workspace @parabolic-technologies/banzai",
     "install:orchestrator": "npm run build --workspace @parabolic-technologies/banzai && npm link --workspace @parabolic-technologies/banzai",
     "typecheck": "npm run typecheck --workspace @parabolic-technologies/banzai",

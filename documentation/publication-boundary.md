@@ -16,6 +16,11 @@ make it eligible.
 archives from that index and an actual offline npm tarball. Source-project work
 is absent from plugin/npm payloads; plugin scaffolding contains only the empty
 `documentation/work/.gitkeep` template. npm retains its exact payload allowlist.
+Source archives exclude the ignored orchestrator `dist/`; the npm tarball
+contains the bundle and source map built from the candidate. Run
+`npm run build:dist` before a standalone publication check. The check compares
+packed distribution bytes with that local build and retains source/plugin
+instruction and embedded source-map parity.
 The checker stages nothing, rewrites no inventory and removes only its own
 packaging output.
 

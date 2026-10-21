@@ -208,7 +208,7 @@ Current release-train identity:
 - sole authority: root `package.json#/version`;
 - mandatory mirrors: the four plugin/marketplace fields, the orchestrator
   package version, and all three lockfile version fields listed above;
-- committed dist: delivery evidence, not a version authority.
+- CI-built dist: delivery evidence, not a version authority; ignored in Git.
 
 - [ ] State whether the included changes affect the plugin, orchestrator, both,
       or repository maintenance only.
@@ -246,10 +246,12 @@ Current release-train identity:
 - [ ] Run `npm run version:set -- <version>` once for the approved target and
       record its successful nine-field/seven-file result. The command does not build,
       validate, test, install, publish, or perform Git delivery.
-- [ ] Run `npm run release:validate` after synchronization and confirm both
-      nine-way parity and absence of unresolved transaction state.
-- [ ] Rebuild the committed distribution after source or embedded release-policy
-      changes, then rerun all deterministic and
+- [ ] Run `npm run build:dist`, then `npm run release:validate` after
+      synchronization and confirm both nine-way parity and absence of
+      unresolved transaction state.
+- [ ] Refresh tracked generated resources with `npm run build` when their inputs
+      change. The release gate builds ignored distribution output automatically;
+      rerun all deterministic and
       supported-lane evidence for the exact candidate.
 - [ ] Record observed plugin install/publication and orchestrator
       install/publication states independently as `pass`, `fail`,
@@ -263,7 +265,7 @@ Current release-train identity:
 
 - [ ] Confirm description, accepted ADRs, approved plan, implementation report,
       and test report agree.
-- [ ] Confirm committed dist was rebuilt after source changes.
+- [ ] Confirm the release gate built and verified `dist` from the candidate source.
 - [ ] Confirm independent source-read-only feature review is complete.
 - [ ] Confirm every finding has human triage and only accepted IDs were fixed.
 - [ ] Confirm all five existing Banzai human decision gates and exact-path hook boundary

@@ -11,21 +11,28 @@ const packageRoot = path.resolve(
   ".."
 );
 const outputFile = path.join(packageRoot, "dist", "banzai.mjs");
+const args = process.argv.slice(2);
+const distributionOnly = args.length === 1 && args[0] === "--distribution-only";
+if (args.length !== 0 && !distributionOnly) {
+  throw new Error("Invalid build options.");
+}
 
-await writeFile(
-  path.join(packageRoot, "src", "init-resources.ts"),
-  await initResourceBytes(path.resolve(packageRoot, "../.."))
-);
+if (!distributionOnly) {
+  await writeFile(
+    path.join(packageRoot, "src", "init-resources.ts"),
+    await initResourceBytes(path.resolve(packageRoot, "../.."))
+  );
 
-await writeFile(
-  path.join(packageRoot, "src", "phase-resources.ts"),
-  await phaseResourceBytes(path.resolve(packageRoot, "../.."))
-);
+  await writeFile(
+    path.join(packageRoot, "src", "phase-resources.ts"),
+    await phaseResourceBytes(path.resolve(packageRoot, "../.."))
+  );
 
-await writeFile(
-  path.resolve(packageRoot, "../../plugins/banzai/lib/artifact-readers.mjs"),
-  await artifactReaderBytes(packageRoot)
-);
+  await writeFile(
+    path.resolve(packageRoot, "../../plugins/banzai/lib/artifact-readers.mjs"),
+    await artifactReaderBytes(packageRoot)
+  );
+}
 
 await rm(path.dirname(outputFile), { recursive: true, force: true });
 await build({

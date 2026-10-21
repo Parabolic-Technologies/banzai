@@ -430,19 +430,13 @@ export async function checkInstructionPayloads(root, { source, plugin, npm }) {
     throw new Error(
       "INSTRUCTION_PAYLOAD_MISMATCH: source generated resource module is missing or stale."
     );
-  for (const suffix of ["", ".map"]) {
-    const sourceBytes = source.get(
-      `packages/orchestrator/dist/banzai.mjs${suffix}`
+  const bundleBytes = npm.get("package/dist/banzai.mjs");
+  const mapBytes = npm.get("package/dist/banzai.mjs.map");
+  if (!bundleBytes || !mapBytes)
+    throw new Error(
+      "INSTRUCTION_PAYLOAD_MISMATCH: npm bundle or source map is missing."
     );
-    const npmBytes = npm.get(`package/dist/banzai.mjs${suffix}`);
-    if (!sourceBytes || !npmBytes || !sourceBytes.equals(npmBytes))
-      throw new Error(
-        "INSTRUCTION_PAYLOAD_MISMATCH: source and npm distribution bytes differ."
-      );
-  }
-  const map = JSON.parse(
-    npm.get("package/dist/banzai.mjs.map").toString("utf8")
-  );
+  const map = JSON.parse(mapBytes.toString("utf8"));
   const indices = map.sources.flatMap((id, index) =>
     /(?:^|\/)src\/phase-resources\.ts$/.test(id) ? [index] : []
   );
@@ -450,6 +444,19 @@ export async function checkInstructionPayloads(root, { source, plugin, npm }) {
     throw new Error(
       "INSTRUCTION_PAYLOAD_MISMATCH: source map resource bytes are missing or stale."
     );
+  for (const [index, id] of map.sources.entries()) {
+    const sourcePath = path.posix.normalize(
+      path.posix.join("packages/orchestrator/dist", id)
+    );
+    const sourceBytes = source.get(sourcePath);
+    if (
+      !sourceBytes ||
+      sourceBytes.toString("utf8") !== map.sourcesContent[index]
+    )
+      throw new Error(
+        "INSTRUCTION_PAYLOAD_MISMATCH: source map input differs from the source archive."
+      );
+  }
   // Compile only the trusted deterministic module, never execute payload code.
   const { build } = await import("esbuild");
   const compiled = await build({
@@ -465,7 +472,7 @@ export async function checkInstructionPayloads(root, { source, plugin, npm }) {
     target: "node22"
   });
   const text = compiled.outputFiles[0].text;
-  const bundle = npm.get("package/dist/banzai.mjs").toString("utf8");
+  const bundle = bundleBytes.toString("utf8");
   for (const name of [
     "PHASE_RESOURCE_DEFINITIONS",
     "EMBEDDED_PHASE_RESOURCES"
@@ -475,6 +482,16 @@ export async function checkInstructionPayloads(root, { source, plugin, npm }) {
     if (start < 0 || end < 0 || !bundle.includes(text.slice(start, end + 3)))
       throw new Error(
         "INSTRUCTION_PAYLOAD_MISMATCH: bundled instruction identities or text differ."
+      );
+  }
+  for (const suffix of ["", ".map"]) {
+    const builtBytes = await readFile(
+      path.join(root, `packages/orchestrator/dist/banzai.mjs${suffix}`)
+    ).catch(() => null);
+    const npmBytes = npm.get(`package/dist/banzai.mjs${suffix}`);
+    if (!builtBytes || !builtBytes.equals(npmBytes))
+      throw new Error(
+        "INSTRUCTION_PAYLOAD_MISMATCH: built and npm distribution bytes differ."
       );
   }
   return {

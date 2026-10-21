@@ -303,12 +303,19 @@ test("actual source/plugin/npm archive resources and source-map bytes must descr
     const resources = INSTRUCTION_RESOURCE_IDS.map(
       (id) => `plugins/banzai/${id}`
     );
-    const sourceNames = [
+    const buildMap = JSON.parse(
+      await readFile(
+        path.join(root, "packages/orchestrator/dist/banzai.mjs.map"),
+        "utf8"
+      )
+    ) as { sources: string[] };
+    const sourceNames = new Set([
       ...resources,
       GENERATED_PHASE_RESOURCE_PATH,
-      "packages/orchestrator/dist/banzai.mjs",
-      "packages/orchestrator/dist/banzai.mjs.map"
-    ];
+      ...buildMap.sources.map((id) =>
+        path.posix.normalize(path.posix.join("packages/orchestrator/dist", id))
+      )
+    ]);
     const sourceRoot = path.join(fixture.root, "source");
     for (const name of sourceNames) {
       const target = path.join(sourceRoot, name);
@@ -345,6 +352,10 @@ test("actual source/plugin/npm archive resources and source-map bytes must descr
     const source = await archive(sourceRoot, "source", ["."]);
     const plugin = await archive(sourceRoot, "plugin", ["plugins/banzai"]);
     const npm = await archive(npmRoot, "npm", ["package"]);
+    assert.equal(
+      [...source.keys()].some((name) => name.includes("/dist/")),
+      false
+    );
     assert.equal(npm.size, 6);
     assert.equal(
       (await checkInstructionPayloads(root, { source, plugin, npm }))
@@ -364,7 +375,10 @@ test("actual source/plugin/npm archive resources and source-map bytes must descr
       [source, "plugins/banzai/phases/fix.md"],
       [plugin, "plugins/banzai/guidance/review.md"],
       [npm, "package/dist/banzai.mjs"],
-      [source, GENERATED_PHASE_RESOURCE_PATH]
+      [npm, "package/dist/banzai.mjs.map"],
+      [source, GENERATED_PHASE_RESOURCE_PATH],
+      [source, "packages/orchestrator/src/cli.ts"],
+      [source, "packages/orchestrator/package.json"]
     ] as const) {
       const original = files.get(key);
       assert.ok(original);
@@ -380,7 +394,7 @@ test("actual source/plugin/npm archive resources and source-map bytes must descr
       );
       files.set(key, original);
     }
-    // Matching distribution files do not excuse an incorrect embedded source map.
+    // Embedded instructions must still match the source-only archive.
     const originalMap = npm.get("package/dist/banzai.mjs.map");
     assert.ok(originalMap);
     const map = JSON.parse(originalMap.toString("utf8")) as {
@@ -395,13 +409,11 @@ test("actual source/plugin/npm archive resources and source-map bytes must descr
       (map.sourcesContent[index] ?? "") + "\n// skew\n";
     const skew = Buffer.from(JSON.stringify(map));
     npm.set("package/dist/banzai.mjs.map", skew);
-    source.set("packages/orchestrator/dist/banzai.mjs.map", skew);
     await assert.rejects(
       checkInstructionPayloads(root, { source, plugin, npm }),
       /source map resource bytes/
     );
     npm.set("package/dist/banzai.mjs.map", originalMap);
-    source.set("packages/orchestrator/dist/banzai.mjs.map", originalMap);
     const originalBundle = npm.get("package/dist/banzai.mjs");
     assert.ok(originalBundle);
     const changedBundle = Buffer.from(
@@ -413,7 +425,6 @@ test("actual source/plugin/npm archive resources and source-map bytes must descr
         )
     );
     npm.set("package/dist/banzai.mjs", changedBundle);
-    source.set("packages/orchestrator/dist/banzai.mjs", changedBundle);
     await assert.rejects(
       checkInstructionPayloads(root, { source, plugin, npm }),
       /bundled instruction identities/

@@ -27,6 +27,7 @@ function fail(code, detail) {
 function defaultComponents() {
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
   return [
+    { name: "distribution-build", command: npm, args: ["run", "build:dist"] },
     { name: "verify", command: npm, args: ["run", "verify"] },
     { name: "format", command: npm, args: ["run", "format:check"] },
     {
