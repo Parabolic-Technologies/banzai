@@ -262,6 +262,13 @@ is a navigational reference and is updated with the module it describes.
   Planning triage escapes model text and presents each finding/analysis card
   immediately before its keyed disposition menu; human-time insertion retains
   the final exit-choice anchor.
+  `Time for this run` places an optional self-reported active estimate before
+  recorded decision waiting, with timed-response coverage and plain-English
+  availability issues. `View time details` opens a dedicated episode list,
+  subtotal, separate recovery waits, recording/attribution notes and secondary
+  diagnostic codes. Duration display rounds original milliseconds, preserving
+  zero and positive subsecond values; subtotals retain source arithmetic.
+  Estimate actions refresh from current evidence and return to the same menu.
 - `inquirer-io.ts` — the `@inquirer/prompts` implementation of
   `InteractiveIO`; the only module bound to the prompt libraries. Its initial
   request input uses `@inquirer/core` to enable bracketed-paste mode, capture

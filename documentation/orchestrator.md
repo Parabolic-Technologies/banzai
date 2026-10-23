@@ -109,28 +109,55 @@ steps in the Quick start.
 
 ## Interactive Human Time
 
-The interactive run summary includes `Human time — this run`. `Gate response
-elapsed` is the known subtotal from a pending decision to its recorded response,
-before any following model work. It includes passive waiting and does not
-measure active effort. Open, cancelled, superseded and incomplete gates, recovery
-waiting, and capture or clock gaps remain separate in the summary and details.
+The interactive summary shows `Time for this run`, with `Active time estimate`
+before `Waiting for decisions`. A missing estimate reads `Not added · optional`;
+a saved value reads `Self-reported · one person`. Invalid, unreadable or
+conflicting estimate evidence reads `Unavailable`, rather than appearing empty.
+An explicitly entered zero remains a saved estimate.
+
+Decision waiting is elapsed time from a pending request to its recorded response,
+before following model work. It includes time away and does not measure active
+work. Its recorded-response subtotal shows how many answered responses have
+known durations. Recorded waits only are represented; coverage may be incomplete.
+Partial inventory and capture gaps do not invalidate known durations or identify
+a specific missing wait. Open, cancelled, superseded and incomplete decisions,
+provisional values and recovery waiting retain separate outcomes in details.
 
 At an existing human stop or blocked/terminal summary, select
-`Update my active time` to enter **your cumulative active minutes for this run
-so far**. Include preparation, approvals, review, active checks, debugging,
+`Add active time estimate (optional)` or `Edit active time estimate` to enter
+**your cumulative active minutes for this run so far**. Unavailable evidence
+offers `Review active time estimate (unavailable)` and must be checked before
+editing. Include preparation, approvals, review, active checks, debugging,
 manual repair and recovery, including work outside the CLI. Exclude passive
 waiting, minutes already allocated to another run or task, other contributors,
 and study-recording overhead. No identity question or additional post-gate
 prompt is added. The editor returns to the same decision; mid-triage selections
 are retained.
 
-An entry is always `estimated`, with an `as of` timestamp. Entering 15 after 12
+An entry is always self-reported, with an `as of` timestamp in details and the
+editor. Entering 15 after 12
 replaces the total with 15. Blank input or cancelling keeps the earlier value;
-explicit zero saves zero. Nothing is inferred from gate elapsed. The label
-`single-engineer estimate; identity not verified` identifies the collection
-scope. Later work does not refresh a saved estimate. Contributor coverage and
-a complete engineering-task total remain unestablished. Use
-`Show human-time details` to inspect episode outcomes and clock continuity.
+explicit zero saves zero. Nothing is inferred or prefilled from decision waits.
+Later work does not refresh a saved estimate. Action labels refresh after editing.
+Use `View time details` to open `Time details · this run`: recorded episodes,
+durations, a recorded-response subtotal, coverage, recording and attribution
+notes, and secondary diagnostic codes. When all recorded decisions are answered,
+that status appears once. Recovery waiting remains separate and never enters
+the answered-response subtotal; neither do open or provisional waits.
+
+Automatic durations are formatted directly from milliseconds. Zero is `0s`;
+positive values below a second are `<1s`. Below an hour, values round to the
+nearest second with carries (`59.5s` becomes `1m`). Once rounded seconds reach
+an hour, values round to the nearest minute (`1h 2m`); half-unit ties round up.
+Subtotals use original durations, so rounding displayed rows before addition
+can give a different result. Missing durations read `Unavailable`. Rows align
+on wider terminals and stack or wrap at narrow widths, with color optional.
+
+Details explain that the active-time value estimates one person's work; identity
+is not verified, other contributors are not represented, and a complete task
+total is not established. Shared notes describe UTC timestamps and process-local
+clock checks; per-row exceptions preserve unverified or discontinuous clocks.
+Clock checks establish neither identity nor active work.
 
 The interactive path stores bounded local metadata in
 `.banzai/runs/<run-id>/human-time.json` as a private `0600` file. It retains
@@ -2075,7 +2102,6 @@ actual hygiene leaves/logs remain required, and absence of hygiene is explicit.
 Frozen human-time/evaluation outputs keep their versioned incomplete/unknown
 semantics. See [ADR-0045](decisions/0045-guided-verification-setup.md) for the closed
 contracts and retained authority boundaries.
-
 
 ## Rework and independent planning review
 
