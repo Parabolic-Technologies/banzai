@@ -514,51 +514,6 @@
       "sha256": null
     },
     {
-      "path": "documentation/releases/2.2.0.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "documentation/releases/2.2.1.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "documentation/releases/2.2.2.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "documentation/releases/2.3.0.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "documentation/releases/2.4.0.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "documentation/releases/2.5.0.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "documentation/releases/2.6.0.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "documentation/releases/2.7.1.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
-      "path": "documentation/releases/2.7.3.md",
-      "classification": "maintainer",
-      "sha256": null
-    },
-    {
       "path": "documentation/releases/public-publication.md",
       "classification": "maintainer",
       "sha256": null

@@ -13,7 +13,7 @@ projects. Detailed module behavior belongs in the
   local `banzai` CLI that coordinates planning, implementation, verification
   and independent review with human decisions.
 - The plugin and CLI are independently usable and separately delivered. They
-  share release-train version `2.7.3`, owned by root `package.json.version`.
+  share release-train version `2.7.4`, owned by root `package.json.version`.
 - This repository maintains those products. Its root guidance and manifest
   describe the source workspace; packaged templates describe neither its
   process nor its current implementation.
@@ -167,8 +167,9 @@ Paths in the following orchestrator bullets are relative to
 behavior and edge cases; source and tests own the executable evidence.
 
 - `cli.ts`, `cli-routing.ts`, `version-cli.ts` — command composition, TTY
-  routing and version inventory; standalone version/help paths do not require
-  a configured run.
+  routing and version inventory; `--help` gives a compact overview and
+  `help <command>` gives details. Standalone version/help paths require no
+  configured run.
 - `agent-control-cli.ts`, `agent-control.ts` — capability/status projections
   and closed stdin requests, including `control decide`; mutations validate
   before delegating to `WorkflowRunner` and return current status.
@@ -357,6 +358,9 @@ Plugin and release owners:
   preserve production contracts while isolating vendor/process behavior.
   Workflow tests use real temporary Git repositories; mocks of the unit under
   test and assertions that merely mirror private implementation are unsuitable.
+- Release-evidence tests run the real script with a test-only `fetch` preload
+  and native `Request`/`Response` objects; they require no network listener or
+  network access.
 - Required final suite: `npm run verify`, with all tests passing, clean
   typecheck, zero lint errors and distribution parity. Advisory lint warnings
   remain visible. Release work additionally requires fresh `npm run release:check`.
@@ -402,6 +406,10 @@ Plugin and release owners:
 - The root version is the sole release authority; all eight mirrors must
   match. Source version, installed client/plugin versions and publication
   evidence are distinct. Rebuild ignored `dist/` after source changes.
+- GitHub Releases is the sole maintained source of release notes. Notes are
+  prepared in GitHub drafts; version bumps require no local per-version notes.
+  The publication procedure and verified delivery record remain in
+  `documentation/releases/public-publication.md`.
 - `.serena/project.yml` selects TypeScript, ignores `assets/**` and disables
   memory/onboarding tools; durable project guidance belongs in repository docs.
 

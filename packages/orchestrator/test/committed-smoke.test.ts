@@ -75,7 +75,7 @@ async function stdinText() {
   return Buffer.concat(chunks).toString("utf8");
 }
 if (command === "help") {
-  process.stdout.write("Banzai v" + (variant === "help-version-mismatch" ? "0.0.0" : version) + " local cross-vendor workflow runner\\nUsage: banzai <command>\\n  banzai init\\nFive existing human decision gates remain distinct\\nbanzai-agent-answer/v2\\n  banzai eval context [--json] [--from <RFC3339>] [--to <RFC3339>] [--run <run-id>]...\\n");
+  process.stdout.write("Banzai v" + (variant === "help-version-mismatch" ? "0.0.0" : version) + " local cross-vendor workflow runner\\nUsage: banzai [command] [options]\\n  init       Initialize Banzai\\n  status     Show the current run\\nDetails: banzai help <command>\\n");
 } else if (command === "control capabilities") {
   if (variant === "mutation") await writeFile(path.join(process.cwd(), "mutated.txt"), "mutated\\n");
   process.stdout.write(variant === "malformed-capabilities" ? "{bad\\n" : JSON.stringify({
@@ -217,16 +217,6 @@ test("committed-bundle help reports the package-derived release-train version", 
     result.stdout.split("\n")[0],
     `Banzai v${packageManifest.version} local cross-vendor workflow runner`
   );
-  for (const fragment of [
-    "banzai review planning [--artifact <path> ...] [--by <name>] [--no-resume]",
-    "banzai control decide [--by <name>] [--no-resume]",
-    "banzai-agent-gate-decision/v1",
-    "banzai-agent-answer/v4",
-    "banzai-agent-answer/v3",
-    "banzai-agent-answer/v2",
-    "banzai-agent-answer/v1"
-  ])
-    assert.ok(result.stdout.includes(fragment), fragment);
 });
 
 test("forward release smoke accepts synchronized metadata and a freshly rebuilt bundle", async () => {

@@ -303,20 +303,42 @@ function adrIdFromArtifact(artifact: string): string {
   return match?.[1] === undefined ? basename : `ADR-${match[1]}`;
 }
 
-function renderArtifacts(io: InteractiveIO, state: RunState): void {
+function renderArtifacts(
+  io: InteractiveIO,
+  state: RunState,
+  styler: Styler
+): void {
   const artifacts = state.planArtifacts;
   if (artifacts === null) {
     return;
   }
-  io.writeLine("Artifacts:");
+  const lines = ["Artifacts"];
   if (artifacts.description !== null) {
-    io.writeLine(`  Description: ${artifacts.description}`);
+    lines.push(`Description: ${artifacts.description}`);
   }
   for (const adr of artifacts.adrs) {
-    io.writeLine(`  ADR: ${adr}`);
+    lines.push(`ADR: ${adr}`);
   }
   if (artifacts.plan !== null) {
-    io.writeLine(`  Plan: ${artifacts.plan}`);
+    lines.push(`Plan: ${artifacts.plan}`);
+  }
+  renderSection(io, styler, lines);
+}
+
+/** The first line is a heading; the remaining lines share the body indent. */
+function renderSection(
+  io: InteractiveIO,
+  styler: Styler,
+  lines: readonly string[]
+): void {
+  const [heading, ...body] = lines;
+  if (heading === undefined) return;
+  io.writeLine();
+  io.writeLine(styler.bold(heading));
+  for (const text of body) {
+    for (const line of wrapText(text, resolveWidth(io.width), "  ")) {
+      io.writeLine(line);
+    }
   }
 }
 
@@ -404,13 +426,12 @@ function renderConsultationCard(
   }
 }
 
-function renderCost(io: InteractiveIO, state: RunState): void {
+function renderCost(io: InteractiveIO, state: RunState, styler: Styler): void {
   const usage = state.metrics.usage;
   if (usage.costUsd === null) {
     return;
   }
-  io.writeLine();
-  io.writeLine(`Cost: $${usage.costUsd.toFixed(2)}`);
+  renderSection(io, styler, [`Cost: $${usage.costUsd.toFixed(2)}`]);
 }
 
 /**
@@ -500,39 +521,43 @@ function renderStatus(
   io.writeLine(styler.dim(`  ${state.runId}`));
   const historical = historicalRunNotice(state);
   if (historical !== null) {
-    io.writeLine();
-    writeLabeled(io, "History", historical);
+    renderSection(io, styler, ["History", historical]);
   }
 
   if (state.workflowSelection != null) {
-    io.writeLine();
-    writeLabeled(io, "Why this workflow", state.workflowSelection.reason);
+    renderSection(io, styler, [
+      "Why this workflow",
+      state.workflowSelection.reason
+    ]);
   }
-  for (const line of taskVerificationStatusLines(state)) io.writeLine(line);
+  renderSection(io, styler, taskVerificationStatusLines(state));
   if (state.blockReason !== null) {
-    io.writeLine();
-    writeLabeled(io, "Blocked", state.blockReason);
+    renderSection(io, styler, ["Blocked", state.blockReason]);
   }
   if (
     state.status === "needs_adr_approval" ||
     state.status === "needs_plan_approval"
   ) {
-    io.writeLine();
-    renderArtifacts(io, state);
+    renderArtifacts(io, state, styler);
   }
   if (
     state.status === "needs_human_decision" &&
     state.pendingHumanDecision != null
   ) {
-    io.writeLine();
     if (state.pendingHumanDecision.kind === "configuration_prerequisite") {
-      for (const line of configurationDecisionLines(
-        state.pendingHumanDecision,
-        status.configurationPrerequisite
-      ))
-        io.writeLine(line);
+      renderSection(
+        io,
+        styler,
+        configurationDecisionLines(
+          state.pendingHumanDecision,
+          status.configurationPrerequisite
+        )
+      );
     } else if (state.pendingHumanDecision.kind !== "planning_review_triage")
-      writeLabeled(io, "Decision needed", state.pendingHumanDecision.summary);
+      renderSection(io, styler, [
+        "Decision needed",
+        state.pendingHumanDecision.summary
+      ]);
     if (state.pendingHumanDecision.kind === "decision_consultation") {
       for (const [
         index,
@@ -559,8 +584,11 @@ function renderStatus(
     }
   }
 
-  for (const line of planningReviewStatusLines(status))
-    io.writeLine(escapeTerminalText(line));
+  renderSection(
+    io,
+    styler,
+    planningReviewStatusLines(status).map(escapeTerminalText)
+  );
   if (status.latestReview !== null && state.latestReview !== null) {
     io.writeLine();
     io.writeLine(
@@ -610,21 +638,20 @@ function renderStatus(
     status.recovery.eligible &&
     status.recovery.workspace !== null
   ) {
-    io.writeLine();
-    writeLabeled(io, "Recovery available", status.recovery.reason);
+    renderSection(io, styler, ["Recovery available", status.recovery.reason]);
     if (status.recovery.sourceKind === "prerequisite_blocked_fix") {
       writeLabeled(
         io,
-        "Resolved accepted findings",
+        "  Resolved accepted findings",
         status.recovery.resolvedFindingIds.join(", ")
       );
       writeLabeled(
         io,
-        "Remaining accepted findings",
+        "  Remaining accepted findings",
         status.recovery.remainingFindingIds.join(", ")
       );
       for (const prerequisite of status.recovery.prerequisites) {
-        writeLabeled(io, "Operator prerequisite", prerequisite);
+        writeLabeled(io, "  Operator prerequisite", prerequisite);
       }
     }
     io.writeLine(`  Identity: ${status.recovery.recoveryIdentity}`);
@@ -634,13 +661,12 @@ function renderStatus(
     io.writeLine(
       `  Workspace: added=${status.recovery.workspace.added}, modified=${status.recovery.workspace.modified}, deleted=${status.recovery.workspace.deleted}, total=${status.recovery.workspace.total}`
     );
-    writeLabeled(io, "Recovery warning", status.recovery.warning);
+    writeLabeled(io, "  Recovery warning", status.recovery.warning);
   } else if (
     state.status === "blocked" &&
     status.recovery.terminalCheckpointPresent === true
   ) {
-    io.writeLine();
-    writeLabeled(io, "Terminal checkpoint", status.recovery.reason);
+    renderSection(io, styler, ["Terminal checkpoint", status.recovery.reason]);
   }
   if (
     state.status === "blocked" &&
@@ -648,11 +674,10 @@ function renderStatus(
     !status.recovery.eligible &&
     status.recovery.terminalCheckpointPresent !== true
   ) {
-    io.writeLine();
-    writeLabeled(io, "Retry unavailable", status.retry.reason);
+    renderSection(io, styler, ["Retry unavailable", status.retry.reason]);
   }
   if (terminal) {
-    renderCost(io, state);
+    renderCost(io, state, styler);
   }
   if (humanTime !== undefined) renderHumanTime(io, humanTime, false, styler);
 }
@@ -1292,7 +1317,6 @@ async function findingDisposition(
   for (const line of wrapText(finding.fixAcceptance, width, "    ")) {
     io.writeLine(line);
   }
-  io.writeLine();
   return await io.select<FindingAction>(`Disposition for ${finding.id}`, [
     { name: "Accept for fixing", value: "accepted" },
     { name: "Reject", value: "rejected" },
@@ -1714,15 +1738,6 @@ async function checkAuthentication(
 }
 
 /**
- * The launch mark: two point-symmetric corners in block elements, which every
- * terminal paints edge to edge, so the shape survives fonts that leave gaps
- * around other glyphs. It is four columns wide; the second row is indented so
- * the corners meet on the diagonal and the text starts at one column.
- */
-const MARK_TOP = "▄▟";
-const MARK_BOTTOM = "▛▀";
-
-/**
  * The launch header: what is running, where, and against which models. It
  * replaces a thirteen-line model-and-authentication report with one line per
  * phase, because at launch the only authentication fact worth a paragraph is a
@@ -1738,9 +1753,7 @@ function renderHeader(
 ): void {
   const dim = (value: string): string => styler.dim(value);
   io.writeLine();
-  io.writeLine(
-    `${styler.brand(MARK_TOP)}    ${styler.bold("banzai")} ${dim(`v${VERSION}`)}   ${dim("spec-driven run orchestrator")}`
-  );
+  io.writeLine(`${styler.brand(styler.bold("banzai"))} ${dim(`v${VERSION}`)}`);
   const location = [
     path.basename(repoRoot),
     identity?.branch == null ? null : styler.cyan(identity.branch),
@@ -1751,7 +1764,7 @@ function renderHeader(
           `${identity.carriedInChanges} carried-in change${identity.carriedInChanges === 1 ? "" : "s"}`
         )
   ].filter((part) => part !== null);
-  io.writeLine(`  ${styler.brand(MARK_BOTTOM)}  ${location.join(dim(" · "))}`);
+  io.writeLine(location.join(dim(" · ")));
   if (config === null) {
     return;
   }
@@ -1767,6 +1780,10 @@ function renderHeader(
     ...entries.map((entry) => path.basename(entry.executable).length)
   );
   const modelWidth = Math.max(...entries.map((entry) => entry.model.length));
+  const effortWidth = Math.max(...entries.map((entry) => entry.effort.length));
+  const timeoutWidth = Math.max(
+    ...entries.map((entry) => entry.timeout.length)
+  );
   io.writeLine();
   for (const entry of entries) {
     const reason = readiness.get(entry.executable);
@@ -1776,13 +1793,17 @@ function renderHeader(
         : reason === null
           ? styler.green("✓")
           : styler.red("✗");
-    // Trailing whitespace when no gateway reported: end the row at the model.
+    // Leave no trailing gap when no gateway supplied a readiness marker.
+    const readinessCell =
+      marker === ""
+        ? ""
+        : `${" ".repeat(timeoutWidth - entry.timeout.length + 2)}${marker}`;
     io.writeLine(
-      `    ${SHORT_ROLE_LABELS[entry.role].padEnd(roleWidth)}  ${path
+      `  ${SHORT_ROLE_LABELS[entry.role].padEnd(roleWidth)}  ${path
         .basename(entry.executable)
         .padEnd(vendorWidth)} ${styler.bold(entry.model)}${" ".repeat(
         modelWidth - entry.model.length
-      )}  ${dim(`${entry.effort} · ${entry.timeout}`)}  ${marker}`.trimEnd()
+      )}  ${dim(`${entry.effort.padEnd(effortWidth)} · ${entry.timeout}`)}${readinessCell}`
     );
   }
 
@@ -1896,8 +1917,6 @@ async function presentLaunch(
 
   const advisories = modelAdvisories(config);
   if (advisories.length === 0) {
-    io.writeLine();
-    io.writeLine("No configured model needs a known update.");
     return;
   }
 
@@ -2359,16 +2378,23 @@ async function editHumanTime(
   }
 }
 
-function withHumanTimeActions(
+function renderMenuSeparator(io: InteractiveIO, styler: Styler): void {
+  io.writeLine();
+  io.writeLine(styler.dim("─".repeat(resolveWidth(io.width))));
+  io.writeLine();
+}
+
+function withRunMenu(
   io: InteractiveIO,
   gateway: HumanTimeGateway | undefined,
   runId: string,
   styler: Styler = createStyler(false)
 ): InteractiveIO {
-  if (gateway === undefined) return io;
   type TimeAction = "human_time_update" | "human_time_details";
   return {
-    ...(io.width === undefined ? {} : { width: io.width }),
+    get width() {
+      return io.width;
+    },
     input: (options) => io.input(options),
     multiSelect: (message, choices, validate) =>
       io.multiSelect(message, choices, validate),
@@ -2378,8 +2404,13 @@ function withHumanTimeActions(
     },
     async select<T>(
       message: string,
-      choices: readonly InteractiveChoice<T>[]
+      choices: readonly InteractiveChoice<T>[],
+      signal?: AbortSignal
     ): Promise<T> {
+      if (gateway === undefined) {
+        renderMenuSeparator(io, styler);
+        return await io.select(message, choices, signal);
+      }
       while (true) {
         let summary: HumanTimeSummary | undefined;
         try {
@@ -2407,7 +2438,8 @@ function withHumanTimeActions(
           },
           { name: "View time details", value: "human_time_details" }
         );
-        const action = await io.select(message, items);
+        renderMenuSeparator(io, styler);
+        const action = await io.select(message, items, signal);
         if (action !== "human_time_update" && action !== "human_time_details")
           return action;
         try {
@@ -2445,6 +2477,7 @@ async function interactiveLoop(
     if (status === null) {
       io.writeLine();
       io.writeLine("No active repository-local run.");
+      renderMenuSeparator(io, options.styler ?? createStyler(false));
       const action = await io.select<PrimaryAction>("What next?", [
         { name: "Start a new run", value: "start" },
         { name: "Exit", value: "exit" }
@@ -2465,7 +2498,7 @@ async function interactiveLoop(
       }
     }
     renderStatus(io, status, options.styler ?? createStyler(false), humanTime);
-    const decisionIO = withHumanTimeActions(
+    const decisionIO = withRunMenu(
       io,
       options.humanTime,
       status.state.runId,

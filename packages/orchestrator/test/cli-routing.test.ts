@@ -330,7 +330,7 @@ test("plan dangling notes follow the decision rule and planning-review grammar f
   }
 });
 
-test("planning-triage status has exactly one dedicated Next line and HELP preserves all input identities", async () => {
+test("planning-triage status has one Next line and control help preserves input identities", async () => {
   const f = await createPlanningReviewFixture(1);
   try {
     await f.runner.resume();
@@ -342,10 +342,11 @@ test("planning-triage status has exactly one dedicated Next line and HELP preser
       1
     );
     assert.match(status.stdout, /banzai-agent-answer\/v4/);
-    const help = spawnSync(process.execPath, [COMMITTED_CLI, "--help"], {
-      cwd: f.repository.root,
-      encoding: "utf8"
-    });
+    const help = spawnSync(
+      process.execPath,
+      [COMMITTED_CLI, "help", "control"],
+      { cwd: f.repository.root, encoding: "utf8" }
+    );
     assert.equal(help.status, 0, help.stderr);
     for (const schema of [
       "banzai-agent-gate-decision/v1",
@@ -355,20 +356,79 @@ test("planning-triage status has exactly one dedicated Next line and HELP preser
       "banzai-agent-answer/v1"
     ])
       assert.ok(help.stdout.includes(schema));
-    assert.match(
-      help.stdout,
-      /rework returns to planning with required feedback/
-    );
-    assert.match(
-      help.stdout,
-      /Five existing human decision gates remain distinct/
-    );
   } finally {
     await f.repository.dispose();
   }
 });
 
 const COMMITTED_CLI = path.join(process.cwd(), "dist", "banzai.mjs");
+
+test("help keeps the overview concise and resolves command details without a repository", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "banzai-help-"));
+  const invoke = (args: string[]) =>
+    spawnSync(process.execPath, [COMMITTED_CLI, ...args], {
+      cwd: root,
+      encoding: "utf8",
+      env: monochromeEnv(),
+      timeout: 10000
+    });
+  try {
+    const overview = invoke(["--help"]);
+    assert.equal(overview.status, 0, overview.stderr);
+    assert.match(overview.stdout, /banzai help <command>/);
+    assert.doesNotMatch(
+      overview.stdout,
+      /banzai-agent-|configuration-prerequisite|Five existing human decision gates/
+    );
+    for (const args of [[], ["help"]]) {
+      const result = invoke(args);
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stdout, overview.stdout);
+    }
+    for (const topic of [
+      "interactive",
+      "init",
+      "setup",
+      "model",
+      "run",
+      "status",
+      "resume",
+      "retry",
+      "restore",
+      "recover",
+      "cancel",
+      "doctor",
+      "approve",
+      "review",
+      "triage",
+      "eval",
+      "control",
+      "verify",
+      "compatibility"
+    ]) {
+      const detail = invoke(["help", topic]);
+      assert.equal(detail.status, 0, `${topic}: ${detail.stderr}`);
+      assert.match(detail.stdout, new RegExp(`banzai (?:\\[)?${topic}`));
+      assert.notEqual(detail.stdout, overview.stdout);
+    }
+    assert.equal(
+      invoke(["run", "--help"]).stdout,
+      invoke(["help", "run"]).stdout
+    );
+    const progress = invoke(["help", "progress"]);
+    assert.equal(progress.status, 0, progress.stderr);
+    assert.match(progress.stdout, /BANZAI_PROGRESS/);
+    for (const topic of ["unknown", "constructor"]) {
+      const invalid = invoke(["help", topic]);
+      assert.equal(invalid.status, 1);
+      assert.match(invalid.stderr, /\[INVALID_HELP_TOPIC\]/);
+      assert.equal(invalid.stdout, "");
+    }
+    assert.deepEqual(await snapshotTree(root), []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("committed interactive CLI explains Git and first-task HEAD prerequisites before task input", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "banzai-git-prerequisites-"));

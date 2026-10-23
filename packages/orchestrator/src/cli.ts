@@ -208,65 +208,161 @@ function repositoryIdentityGateway(
 
 const HELP = `Banzai v${packageManifest.version} local cross-vendor workflow runner
 
-Usage:
-  banzai --version | -v
-  banzai --plugin-version | -pv
-  banzai
-  banzai interactive
-  banzai init
-  banzai setup
-  banzai doctor [--json]
+Usage: banzai [command] [options]
+Run banzai without arguments in a terminal for interactive mode.
+
+Commands:
+  init       Initialize Banzai in this project
+  setup      Set up project guidance
+  model      Choose models and effort for each phase
+  run        Start a task
+  status     Show the current run and next step
+  resume     Continue the current run
+  cancel     Cancel a run
+  doctor     Check local readiness
+
+More commands:
+  approve, review, triage, retry, restore, recover
+  eval, control, verify, compatibility
+
+Options:
+  --help                  Show this overview
+  --version, -v           Show CLI version
+  --plugin-version, -pv   Show installed plugin versions
+  --quiet                 Show less progress
+  --verbose               Show every model action
+  --metrics               Include run counters
+
+Details: banzai help <command>
+Example: banzai help run
+Progress options: banzai help progress`;
+
+const COMMAND_HELP: Readonly<Record<string, string>> = {
+  interactive: `Usage: banzai [interactive]
+
+Open the interactive workflow. Requires terminal input and output.`,
+  init: `Usage: banzai init
+
+Initialize local configuration. In a terminal, choose models and set up
+project guidance. Run banzai doctor to check readiness.`,
+  setup: `Usage: banzai setup
+
+Set up project guidance through an installed client. Requires a terminal.`,
+  model: `Usage: banzai model
+
+Choose the model and effort for each phase. Requires a terminal.
+Finish or cancel the current run before changing models.`,
+  run: `Usage: banzai run --slug <kebab-case> --request <text>
+
+Start a task in the current checkout.
+Example: banzai run --slug fix-login --request "Fix the login error"
+
+Progress options: banzai help progress`,
+  status: `Usage: banzai status [--json]
+
+Show the current run, pending decisions, and next step.`,
+  resume: `Usage: banzai resume
+
+Continue the current run after resolving its pending decisions or prerequisites.`,
+  retry: `Usage: banzai retry
+
+Retry a failed phase when the current run allows it. Check banzai status first.`,
+  restore: `Usage: banzai restore
+
+Restore approved planning artifacts from the recorded approval.
+Run banzai retry afterwards to continue.`,
+  recover: `Usage: banzai recover
+
+Inspect and confirm recovery of an eligible attempt in a terminal.
+For non-interactive recovery, use banzai control recover.`,
+  cancel: CANCELLATION_HELP,
+  doctor: `Usage: banzai doctor [--json]
+
+Check local project readiness without running models or verification commands.`,
+  approve: `Usage:
+  banzai approve plan [--by <name>] [--no-resume]
+  banzai approve plan --decision rework --note <text> [--by <name>] [--no-resume]
+  banzai approve adr --id <id> --decision <accept|reject|rework> [--note <text>] [--by <name>] [--no-resume]
+
+Approve the current plan or record an ADR decision. Rework returns to planning
+with required feedback; it does not grant approval.
+Use --no-resume to record a decision without continuing execution.
+
+Legacy: banzai approve verification [--by <name>] [--no-resume]
+Reads a banzai-agent-answer/v3 configuration document from direct stdin.`,
+  review: `Usage: banzai review planning [--artifact <path> ...] [--by <name>] [--no-resume]
+
+Request an independent planning review. Repeat --artifact to select documents.
+Review findings require human triage; requesting a review does not grant approval.`,
+  triage: `Usage: banzai triage --accept <ids> --reject <ids> --defer <ids> [--note <text>] [--by <name>] [--no-resume]
+
+Record decisions on code-review findings. Lists are comma-separated;
+pass an empty string ("") for an empty list.
+Use --no-resume to record decisions without continuing execution.`,
+  eval: `Usage:
+  banzai eval export [--json] [--from <RFC3339>] [--to <RFC3339>] [--run <run-id>]...
+  banzai eval kpi [--json] [--from <RFC3339>] [--to <RFC3339>] [--run <run-id>]...
+  banzai eval context [--json] [--from <RFC3339>] [--to <RFC3339>] [--run <run-id>]...
+  banzai eval cancellations [--json] [--from <RFC3339>] [--to <RFC3339>] [--run <run-id>]...
+  banzai eval kpi --input <export.json> [--input <export.json>]... [--json]
+
+Export run evidence or report KPIs, context usage, and cancellations.
+Repeat --run to select runs; --from and --to filter by timestamp.`,
+  control: `Usage:
   banzai control capabilities [--cancellation]
   banzai control status
   banzai control start --slug <kebab-case>
   banzai control answer [--by <name>] [--no-resume]
   banzai control decide [--by <name>] [--no-resume]
   banzai control recover [--by <name>] [--no-resume]
-  banzai model
-  banzai run --slug <kebab-case> --request <text>
-  banzai status [--json]
-  banzai eval export [--json] [--from <RFC3339>] [--to <RFC3339>] [--run <run-id>]...
-  banzai eval kpi [--json] [--from <RFC3339>] [--to <RFC3339>] [--run <run-id>]...
-  banzai eval context [--json] [--from <RFC3339>] [--to <RFC3339>] [--run <run-id>]...
-  banzai eval cancellations [--json] [--from <RFC3339>] [--to <RFC3339>] [--run <run-id>]...
-  banzai eval kpi --input <export.json> [--input <export.json>]... [--json]
-  banzai compatibility live --confirm-live
-  banzai resume
-  banzai retry
-  banzai restore
-  banzai recover
-  banzai approve plan [--by <name>] [--no-resume]
-  banzai approve plan --decision rework --note <text> [--by <name>] [--no-resume]
-  banzai review planning [--artifact <path> ...] [--by <name>] [--no-resume]
-  banzai verify add <type> | edit <id> | remove <id> | list | check
-  banzai approve verification [--by <name>] [--no-resume]
-  banzai approve adr --id <id> --decision <accept|reject|rework> [--note <text>] [--by <name>] [--no-resume]
-  banzai triage --accept <ids> --reject <ids> --defer <ids> [--note <text>] [--by <name>] [--no-resume]
-  banzai cancel [--run <run-id>] [--reason <enum>]
 
-Progress verbosity applies to any command that runs a phase:
+Agent-facing commands return JSON. Start, answer, decide, and recover read
+their request document from direct stdin. Run banzai control capabilities
+for machine-readable contracts.
+
+Input schemas:
+  start     banzai-agent-request/v1
+  decide    banzai-agent-gate-decision/v1
+  recover   banzai-agent-recovery/v1
+  answer    banzai-agent-answer/v4 (planning-review triage)
+            banzai-agent-answer/v3 (legacy configuration)
+            banzai-agent-answer/v2 (keyed consultation)
+            banzai-agent-answer/v1 (ordered escalation)
+
+Consultation records preferences; it does not approve a plan or ADR.
+Use --no-resume to record a decision without continuing execution.`,
+  verify: `Usage: banzai verify add <type> | edit <id> | remove <id> | list | check
+
+Legacy verification configuration utilities. New tasks use task-scoped
+verification and do not require profile setup.
+These utilities do not authorize continuation of historical runs.`,
+  compatibility: `Usage: banzai compatibility live --confirm-live
+
+Run live vendor compatibility probes. Requires explicit live authorization.`,
+  progress: `Progress options for commands that run a phase:
   --quiet     phase boundaries, failures, and runner messages only
   --verbose   every model action, started and finished
   --metrics   also print attempt, session, and review counters
+
 Default is one settled line per finished action. \`BANZAI_PROGRESS\` sets the
 same levels (quiet|normal|verbose) and an explicit flag wins over it.
-On a terminal, a live status line reports the running phase until it settles.
+On a terminal, a live status line reports the running phase until it settles.`
+};
 
-Finding lists are comma-separated. Pass an empty string for an empty list.
-Run without arguments in a terminal for interactive mode.
-\`banzai model\` picks the model and effort for each phase and needs a terminal.
-Within the ADR and plan gates, rework returns to planning with required feedback; requested independent planning review uses human planning-review triage. Neither action grants approval.
-Five existing human decision gates remain distinct: conditional planning consultation,
-ADR acceptance, plan approval, escalation, and review triage. Consultation
-records preference provenance; it is not approval or execution authority.
-New tasks use task-scoped verification without profiles, bootstrap, or a
-configuration-prerequisite gate. Legacy configuration commands and answer formats
-remain explicit utilities; they do not authorize continuation of historical runs.
-The legacy \`banzai approve verification\` command reads a closed \`banzai-agent-answer/v3\` document.
-\`banzai control decide\` reads \`banzai-agent-gate-decision/v1\` from direct stdin.
-\`banzai control answer\` reads \`banzai-agent-answer/v4\` planning-review triage, \`banzai-agent-answer/v3\` configuration, keyed
-\`banzai-agent-answer/v2\` consultation, or ordered \`banzai-agent-answer/v1\` escalation document from direct stdin.
-The runner uses the current checkout and never creates or manages Git worktrees.`;
+function helpText(args: string[]): string {
+  const topic = args[0] === "help" ? args[1] : args[0];
+  if (topic === undefined || topic === "--help" || topic === "help")
+    return HELP;
+  const detail = Object.hasOwn(COMMAND_HELP, topic)
+    ? COMMAND_HELP[topic]
+    : undefined;
+  if (detail === undefined)
+    throw new BanzaiError(
+      "INVALID_HELP_TOPIC",
+      `Unknown help topic: ${topic}. Run banzai --help to list commands.`
+    );
+  return detail;
+}
 
 function option(args: string[], name: string): string | null {
   const index = args.indexOf(name);
@@ -757,7 +853,7 @@ async function main(): Promise<void> {
   const interactiveTerminal = process.stdin.isTTY && process.stdout.isTTY;
   const mode = resolveCliMode(args, process.stdin.isTTY, process.stdout.isTTY);
   if (mode === "help") {
-    console.log(HELP);
+    console.log(helpText(args));
     return;
   }
   if (mode === "tty_required") {

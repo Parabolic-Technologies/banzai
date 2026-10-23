@@ -20,12 +20,14 @@ those actions.
       the candidate tree (ADR-0053). Merge with a merge commit so publication
       can reuse that evidence; a squash or rebase merge makes publication
       re-run both supported lanes.
-- [ ] Confirm `documentation/releases/<version>.md` describes content,
-      requirements, installation, and migration only. It must not call a tag,
-      GitHub Release, or npm version intended, pending, or not yet claimed, and
-      must not say "after publication". Verified delivery facts are appended to
-      the [delivery record](releases/public-publication.md#delivery-record)
-      after publication, never predicted in the notes.
+- [ ] Prepare and review the notes in the GitHub draft release for `v<version>`.
+      [GitHub Releases](https://github.com/Parabolic-Technologies/banzai/releases)
+      is the sole source of release notes; version bumps require no local
+      release-note file. Describe content, requirements, installation, and
+      migration. Keep delivery predictions out of the notes; append verified
+      delivery facts to the
+      [delivery record](releases/public-publication.md#delivery-record)
+      after publication. Saving a draft does not authorize publication.
 
 ## Runtime Policy
 

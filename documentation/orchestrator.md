@@ -497,6 +497,12 @@ cancellation fraction is not itself the objective. See
 
 ## Commands
 
+`banzai --help` shows a compact command overview. Use `banzai help <command>`
+for full syntax and relevant options, for example `banzai help run`,
+`banzai help approve`, or `banzai help control`. `banzai help progress` explains
+progress flags and `BANZAI_PROGRESS`. Help works without a Git repository or
+project configuration.
+
 ### Versions
 
 ```bash

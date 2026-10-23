@@ -795,9 +795,7 @@ export function planningReviewStatusLines(status: WorkflowStatus): string[] {
       `Planning-review artifact: ${projection.latest.artifactPath ?? "not published"}`
     );
     if (projection.latest.outcome === "restored_no_findings")
-      lines.push(
-        `Independent review found no issues: ${projection.latest.artifactPath}`
-      );
+      lines.push("Independent review found no issues.");
   }
   return lines;
 }

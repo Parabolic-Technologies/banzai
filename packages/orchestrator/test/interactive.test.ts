@@ -796,11 +796,11 @@ test("startup checks every configured vendor once and reports it ready", async (
   // Every phase row carries its own readiness marker, so a shared vendor is
   // reported against each role that runs it.
   assert.deepEqual(
-    io.lines.filter((line) => line.startsWith("    ")),
+    io.lines.filter((line) => line.startsWith("  ")),
     [
-      "    plan    claude claude-opus-5-5  xhigh · 30m  ✓",
-      "    impl    claude claude-opus-5-5  xhigh · 60m  ✓",
-      "    review  codex  gpt-6.1-sol      xhigh · 30m  ✓"
+      "  plan    claude claude-opus-5-5  xhigh · 30m  ✓",
+      "  impl    claude claude-opus-5-5  xhigh · 60m  ✓",
+      "  review  codex  gpt-6.1-sol      xhigh · 30m  ✓"
     ]
   );
   // A ready launch spends no lines explaining authentication.
@@ -808,25 +808,6 @@ test("startup checks every configured vendor once and reports it ready", async (
     io.lines.some((line) => line.includes("re-checks")),
     false
   );
-});
-
-test("the launch header carries the brand mark beside the name and location", async () => {
-  const io = new FakeIO(["exit"]);
-
-  await runInteractive(new FakeRunner([null]), io, {
-    decidedBy: "human",
-    models: new FakeModelConfiguration(DEFAULT_CONFIG),
-    auth: new FakeAuthentication()
-  });
-
-  // Unstyled, the mark is plain block elements: two corners meeting on the
-  // diagonal, with the text starting at the same column on both rows.
-  const marked = io.lines.filter(
-    (line) => line.includes("▄▟") || line.includes("▛▀")
-  );
-  assert.equal(marked.length, 2);
-  assert.equal(marked[0]?.startsWith("▄▟    banzai v"), true);
-  assert.equal(marked[1]?.startsWith("  ▛▀  "), true);
 });
 
 test("an expired Claude session is reported at startup, before any phase runs", async () => {
@@ -845,7 +826,7 @@ test("an expired Claude session is reported at startup, before any phase runs", 
 
   assert.ok(
     io.lines.some(
-      (line) => line === "    review  claude claude-opus-5-5  xhigh · 30m  ✗"
+      (line) => line === "  review  claude claude-opus-5-5  xhigh · 30m  ✗"
     )
   );
   // The reason wraps to the terminal, so assert against the joined notice.
@@ -884,7 +865,7 @@ test("Claude is checked whenever any role runs it, not only review", async () =>
   assert.deepEqual(auth.checked, ["claude"]);
   // One vendor, three roles: the failure marks every row it blocks.
   assert.equal(
-    io.lines.filter((line) => line.startsWith("    ") && line.endsWith("✗"))
+    io.lines.filter((line) => line.startsWith("  ") && line.endsWith("✗"))
       .length,
     3
   );
@@ -929,7 +910,7 @@ test("startup skips the authentication check when no gateway is supplied", async
   assert.equal(
     io.lines.some(
       (line) =>
-        line.startsWith("    ") && (line.endsWith("✓") || line.endsWith("✗"))
+        line.startsWith("  ") && (line.endsWith("✓") || line.endsWith("✗"))
     ),
     false
   );
@@ -951,17 +932,20 @@ test("interactive startup shows the models for each phase", async () => {
     )
   );
   assert.ok(
-    io.lines.some((line) => /^ {4}plan {4}claude \S+ {2}xhigh · 30m/.test(line))
+    io.lines.some((line) => /^ {2}plan {4}claude \S+ {2}xhigh · 30m/.test(line))
   );
   assert.ok(
-    io.lines.some((line) => /^ {4}impl {4}claude .+xhigh · 60m/.test(line))
+    io.lines.some((line) => /^ {2}impl {4}claude .+xhigh · 60m/.test(line))
   );
   assert.ok(
     io.lines.some(
       (line) => line.includes("review") && line.includes("gpt-6.1-sol")
     )
   );
-  assert.ok(io.lines.includes("No configured model needs a known update."));
+  assert.equal(
+    io.lines.includes("No configured model needs a known update."),
+    false
+  );
   assert.deepEqual(runner.calls, []);
 });
 
@@ -1312,9 +1296,8 @@ test("interactive status shows the persisted automatic workflow and reason", asy
 
   // The route and its reason are separated: the reason is prose and wraps.
   assert.ok(io.lines.some((line) => line.includes("quick-fix workflow")));
-  assert.ok(
-    io.lines.includes("Why this workflow: This corrects existing behavior.")
-  );
+  assert.ok(io.lines.includes("Why this workflow"));
+  assert.ok(io.lines.includes("  This corrects existing behavior."));
 });
 
 test("interactive status exposes bounded session and review policy evidence", async () => {
