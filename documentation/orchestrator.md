@@ -109,28 +109,55 @@ steps in the Quick start.
 
 ## Interactive Human Time
 
-The interactive run summary includes `Human time — this run`. `Gate response
-elapsed` is the known subtotal from a pending decision to its recorded response,
-before any following model work. It includes passive waiting and does not
-measure active effort. Open, cancelled, superseded and incomplete gates, recovery
-waiting, and capture or clock gaps remain separate in the summary and details.
+The interactive summary shows `Time for this run`, with `Active time estimate`
+before `Waiting for decisions`. A missing estimate reads `Not added · optional`;
+a saved value reads `Self-reported · one person`. Invalid, unreadable or
+conflicting estimate evidence reads `Unavailable`, rather than appearing empty.
+An explicitly entered zero remains a saved estimate.
+
+Decision waiting is elapsed time from a pending request to its recorded response,
+before following model work. It includes time away and does not measure active
+work. Its recorded-response subtotal shows how many answered responses have
+known durations. Recorded waits only are represented; coverage may be incomplete.
+Partial inventory and capture gaps do not invalidate known durations or identify
+a specific missing wait. Open, cancelled, superseded and incomplete decisions,
+provisional values and recovery waiting retain separate outcomes in details.
 
 At an existing human stop or blocked/terminal summary, select
-`Update my active time` to enter **your cumulative active minutes for this run
-so far**. Include preparation, approvals, review, active checks, debugging,
+`Add active time estimate (optional)` or `Edit active time estimate` to enter
+**your cumulative active minutes for this run so far**. Unavailable evidence
+offers `Review active time estimate (unavailable)` and must be checked before
+editing. Include preparation, approvals, review, active checks, debugging,
 manual repair and recovery, including work outside the CLI. Exclude passive
 waiting, minutes already allocated to another run or task, other contributors,
 and study-recording overhead. No identity question or additional post-gate
 prompt is added. The editor returns to the same decision; mid-triage selections
 are retained.
 
-An entry is always `estimated`, with an `as of` timestamp. Entering 15 after 12
+An entry is always self-reported, with an `as of` timestamp in details and the
+editor. Entering 15 after 12
 replaces the total with 15. Blank input or cancelling keeps the earlier value;
-explicit zero saves zero. Nothing is inferred from gate elapsed. The label
-`single-engineer estimate; identity not verified` identifies the collection
-scope. Later work does not refresh a saved estimate. Contributor coverage and
-a complete engineering-task total remain unestablished. Use
-`Show human-time details` to inspect episode outcomes and clock continuity.
+explicit zero saves zero. Nothing is inferred or prefilled from decision waits.
+Later work does not refresh a saved estimate. Action labels refresh after editing.
+Use `View time details` to open `Time details · this run`: recorded episodes,
+durations, a recorded-response subtotal, coverage, recording and attribution
+notes, and secondary diagnostic codes. When all recorded decisions are answered,
+that status appears once. Recovery waiting remains separate and never enters
+the answered-response subtotal; neither do open or provisional waits.
+
+Automatic durations are formatted directly from milliseconds. Zero is `0s`;
+positive values below a second are `<1s`. Below an hour, values round to the
+nearest second with carries (`59.5s` becomes `1m`). Once rounded seconds reach
+an hour, values round to the nearest minute (`1h 2m`); half-unit ties round up.
+Subtotals use original durations, so rounding displayed rows before addition
+can give a different result. Missing durations read `Unavailable`. Rows align
+on wider terminals and stack or wrap at narrow widths, with color optional.
+
+Details explain that the active-time value estimates one person's work; identity
+is not verified, other contributors are not represented, and a complete task
+total is not established. Shared notes describe UTC timestamps and process-local
+clock checks; per-row exceptions preserve unverified or discontinuous clocks.
+Clock checks establish neither identity nor active work.
 
 The interactive path stores bounded local metadata in
 `.banzai/runs/<run-id>/human-time.json` as a private `0600` file. It retains
@@ -469,6 +496,12 @@ cancellation fraction is not itself the objective. See
 [feature specification](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/features/cancellation-observations/description.md).
 
 ## Commands
+
+`banzai --help` shows a compact command overview. Use `banzai help <command>`
+for full syntax and relevant options, for example `banzai help run`,
+`banzai help approve`, or `banzai help control`. `banzai help progress` explains
+progress flags and `BANZAI_PROGRESS`. Help works without a Git repository or
+project configuration.
 
 ### Versions
 
@@ -1834,6 +1867,17 @@ negative-default confirmation. Non-TTY callers use the closed
 result through normal completion, verification, independent review, and triage
 gates. It never infers completion from existing source or reports.
 
+If an abrupt exit also left an execution claim, authorized recovery can reclaim
+it under the repository runner lock. The claim must name the exact bound work
+and a valid local PID that the OS confirms is absent. Banzai preserves its
+original bytes as `recovered-<token>.json` in the same ignored execution-lock
+directory and checks the claim again before removal. Live or reused PIDs,
+uncertain process checks, malformed or mismatched records, unsafe paths and
+changing ownership remain blocked for inspection. Status and ordinary execution
+do not reclaim claims. A saved, still-valid recovery authorization can continue
+through `resume`; recovery revalidates its workspace under work ownership before
+starting a model.
+
 A completed strict fix result is separately eligible only when it is the unique
 current canonical source, has `outcome: blocked`, proves a non-empty proper
 subset of accepted findings resolved, and records at least one question or
@@ -1990,6 +2034,16 @@ applicability. Reuse requires explicit complete dependency declarations and a
 compatible direct successful origin. Missing proof runs fresh; required failures
 block completion. Release gates always run fresh.
 
+Fresh task checks do not require a complete dependency declaration for reuse.
+Ordinary input files are streamed within a 128 MiB aggregate observation budget.
+Secret-like filenames are observed through filesystem metadata only; Banzai
+does not read or hash their values. Their presence disables cross-round reuse,
+while unchanged metadata and ordinary file content permit fresh results in the
+current round. Symlinks, unreadable files, capture races and exhausted budgets
+still prevent applicability. A successful command with an unavailable snapshot
+is reported explicitly; after correcting the cause, use verification retry.
+Earlier attempts remain immutable and implementation is not replayed.
+
 Review snapshot 7 and rendered artifact 8 freeze task checks and completion
 publication. Review-result 2 is unchanged. The independent reviewer assesses
 whether checks cover requirements and were unjustifiably weakened. Frozen
@@ -2054,7 +2108,6 @@ actual hygiene leaves/logs remain required, and absence of hygiene is explicit.
 Frozen human-time/evaluation outputs keep their versioned incomplete/unknown
 semantics. See [ADR-0045](decisions/0045-guided-verification-setup.md) for the closed
 contracts and retained authority boundaries.
-
 
 ## Rework and independent planning review
 

@@ -1,4 +1,9 @@
-import { deriveHumanTime, emptyHumanTimeEvidence } from "../src/human-time.js";
+import {
+  deriveHumanTime,
+  emptyHumanTime,
+  emptyHumanTimeEvidence,
+  humanTimeObservation
+} from "../src/human-time.js";
 import type {
   HumanTimeGateway,
   HumanTimeSummary,
@@ -210,6 +215,7 @@ function consultationPending(): Extract<
 }
 
 class FakeIO implements InteractiveIO {
+  width?: number;
   readonly lines: string[] = [];
   readonly choiceSets: unknown[][] = [];
   readonly choiceNames: string[][] = [];
@@ -790,11 +796,11 @@ test("startup checks every configured vendor once and reports it ready", async (
   // Every phase row carries its own readiness marker, so a shared vendor is
   // reported against each role that runs it.
   assert.deepEqual(
-    io.lines.filter((line) => line.startsWith("    ")),
+    io.lines.filter((line) => line.startsWith("  ")),
     [
-      "    plan    claude claude-opus-5-5  xhigh · 30m  ✓",
-      "    impl    claude claude-opus-5-5  xhigh · 60m  ✓",
-      "    review  codex  gpt-6.1-sol      xhigh · 30m  ✓"
+      "  plan    claude claude-opus-5-5  xhigh · 30m  ✓",
+      "  impl    claude claude-opus-5-5  xhigh · 60m  ✓",
+      "  review  codex  gpt-6.1-sol      xhigh · 30m  ✓"
     ]
   );
   // A ready launch spends no lines explaining authentication.
@@ -802,25 +808,6 @@ test("startup checks every configured vendor once and reports it ready", async (
     io.lines.some((line) => line.includes("re-checks")),
     false
   );
-});
-
-test("the launch header carries the brand mark beside the name and location", async () => {
-  const io = new FakeIO(["exit"]);
-
-  await runInteractive(new FakeRunner([null]), io, {
-    decidedBy: "human",
-    models: new FakeModelConfiguration(DEFAULT_CONFIG),
-    auth: new FakeAuthentication()
-  });
-
-  // Unstyled, the mark is plain block elements: two corners meeting on the
-  // diagonal, with the text starting at the same column on both rows.
-  const marked = io.lines.filter(
-    (line) => line.includes("▄▟") || line.includes("▛▀")
-  );
-  assert.equal(marked.length, 2);
-  assert.equal(marked[0]?.startsWith("▄▟    banzai v"), true);
-  assert.equal(marked[1]?.startsWith("  ▛▀  "), true);
 });
 
 test("an expired Claude session is reported at startup, before any phase runs", async () => {
@@ -839,7 +826,7 @@ test("an expired Claude session is reported at startup, before any phase runs", 
 
   assert.ok(
     io.lines.some(
-      (line) => line === "    review  claude claude-opus-5-5  xhigh · 30m  ✗"
+      (line) => line === "  review  claude claude-opus-5-5  xhigh · 30m  ✗"
     )
   );
   // The reason wraps to the terminal, so assert against the joined notice.
@@ -878,7 +865,7 @@ test("Claude is checked whenever any role runs it, not only review", async () =>
   assert.deepEqual(auth.checked, ["claude"]);
   // One vendor, three roles: the failure marks every row it blocks.
   assert.equal(
-    io.lines.filter((line) => line.startsWith("    ") && line.endsWith("✗"))
+    io.lines.filter((line) => line.startsWith("  ") && line.endsWith("✗"))
       .length,
     3
   );
@@ -923,7 +910,7 @@ test("startup skips the authentication check when no gateway is supplied", async
   assert.equal(
     io.lines.some(
       (line) =>
-        line.startsWith("    ") && (line.endsWith("✓") || line.endsWith("✗"))
+        line.startsWith("  ") && (line.endsWith("✓") || line.endsWith("✗"))
     ),
     false
   );
@@ -945,17 +932,20 @@ test("interactive startup shows the models for each phase", async () => {
     )
   );
   assert.ok(
-    io.lines.some((line) => /^ {4}plan {4}claude \S+ {2}xhigh · 30m/.test(line))
+    io.lines.some((line) => /^ {2}plan {4}claude \S+ {2}xhigh · 30m/.test(line))
   );
   assert.ok(
-    io.lines.some((line) => /^ {4}impl {4}claude .+xhigh · 60m/.test(line))
+    io.lines.some((line) => /^ {2}impl {4}claude .+xhigh · 60m/.test(line))
   );
   assert.ok(
     io.lines.some(
       (line) => line.includes("review") && line.includes("gpt-6.1-sol")
     )
   );
-  assert.ok(io.lines.includes("No configured model needs a known update."));
+  assert.equal(
+    io.lines.includes("No configured model needs a known update."),
+    false
+  );
   assert.deepEqual(runner.calls, []);
 });
 
@@ -1306,9 +1296,8 @@ test("interactive status shows the persisted automatic workflow and reason", asy
 
   // The route and its reason are separated: the reason is prose and wraps.
   assert.ok(io.lines.some((line) => line.includes("quick-fix workflow")));
-  assert.ok(
-    io.lines.includes("Why this workflow: This corrects existing behavior.")
-  );
+  assert.ok(io.lines.includes("Why this workflow"));
+  assert.ok(io.lines.includes("  This corrects existing behavior."));
 });
 
 test("interactive status exposes bounded session and review policy evidence", async () => {
@@ -2432,9 +2421,459 @@ class FakeHumanTime implements HumanTimeGateway {
     minutes: number
   ): Promise<HumanTimeWriteResult> {
     this.edits.push({ runId, revision, minutes });
+    if (this.result.status === "saved") {
+      this.summary = {
+        ...this.summary,
+        revision: this.result.revision,
+        inventory: "partial",
+        issues:
+          this.summary.inventory === "unavailable" ? [] : this.summary.issues,
+        effort: {
+          id: "00000000-0000-4000-8000-000000000001",
+          replaces: null,
+          minutes,
+          recordedAt: "2026-09-06T10:00:00.000Z",
+          asOf: "2026-09-06T10:00:00.000Z",
+          basis: "estimated",
+          scope: "single_engineer_unverified"
+        }
+      };
+    }
     return this.result;
   }
 }
+
+function recordedTimeSummary(): HumanTimeSummary {
+  const ledger = emptyHumanTime("run-example");
+  const anchor = {
+    type: "triage",
+    attemptId: "review-1",
+    reviewIteration: 1
+  } as const;
+  ledger.observations = [
+    humanTimeObservation(
+      "run-example",
+      anchor,
+      "opened",
+      "2026-09-06T10:00:00.000Z",
+      { kind: "event", type: "review.completed", ordinal: 1 }
+    ),
+    humanTimeObservation(
+      "run-example",
+      anchor,
+      "answered",
+      "2026-09-06T10:00:24.000Z",
+      { kind: "event", type: "review.triaged", ordinal: 2 }
+    )
+  ];
+  for (const observation of ledger.observations)
+    observation.clock.continuity = "process_correlated";
+  const evidence = emptyHumanTimeEvidence();
+  evidence.observations = ledger.observations;
+  return deriveHumanTime(
+    { status: "valid", ledger, issues: [] },
+    evidence,
+    "2026-09-06T10:01:00.000Z"
+  );
+}
+
+async function timeView(
+  summary: HumanTimeSummary,
+  details = false,
+  width = 96
+) {
+  const time = new FakeHumanTime();
+  time.summary = summary;
+  const io = new FakeIO(details ? ["human_time_details", "exit"] : ["exit"]);
+  io.width = width;
+  const runner = new FakeRunner([workflowStatus(runState("done"))]);
+  await runInteractive(runner, io, { decidedBy: "human", humanTime: time });
+  assert.deepEqual(runner.calls, []);
+  assert.deepEqual(time.edits, []);
+  return io;
+}
+
+test("human time: compact summary distinguishes absent, saved and explicit zero estimates", async () => {
+  const absent = await timeView(new FakeHumanTime().summary);
+  const text = absent.lines.join("\n");
+  assert.match(text, /Time for this run/);
+  assert.match(text, /Active time estimate\s+Not added · optional/);
+  assert.ok(
+    text.indexOf("Active time estimate") < text.indexOf("Waiting for decisions")
+  );
+  assert.match(
+    text,
+    /Decision waits include time away; they do not measure active work\./
+  );
+  assert.doesNotMatch(
+    text,
+    /Human time —|Timing issues|MISSING_EVIDENCE|0 open|identity not verified/
+  );
+  const actions = absent.choiceNames[0];
+  assert.ok(actions);
+  assert.equal(actions.at(-3), "Add active time estimate (optional)");
+  assert.equal(actions.at(-2), "View time details");
+  for (const minutes of [12, 0]) {
+    const time = new FakeHumanTime();
+    await time.setEstimate("run-example", 0, minutes);
+    const io = await timeView(time.summary);
+    assert.match(
+      io.lines.join("\n"),
+      new RegExp(
+        `Active time estimate\\s+${minutes} min · Self-reported · one person`
+      )
+    );
+    assert.doesNotMatch(io.lines.join("\n"), /as of|2026-09-06T10:00:00/);
+    assert.equal(io.choiceNames[0]?.at(-3), "Edit active time estimate");
+  }
+});
+
+test("human time: unavailable and conflicting evidence is never presented as an empty estimate", async () => {
+  for (const code of [
+    "INVALID_EVIDENCE",
+    "UNSUPPORTED_VERSION",
+    "UNSAFE_PATH",
+    "CONFLICTING_EFFORT"
+  ] as const) {
+    const summary = recordedTimeSummary();
+    summary.revision = code === "CONFLICTING_EFFORT" ? 1 : null;
+    summary.issues = [{ code, episodeKey: null }];
+    const time = new FakeHumanTime();
+    time.summary = summary;
+    const io = new FakeIO(["human_time_update", "human_time_details", "exit"]);
+    const runner = new FakeRunner([workflowStatus(runState("done"))]);
+    await runInteractive(runner, io, { decidedBy: "human", humanTime: time });
+    const text = io.lines.join("\n");
+    assert.match(text, /Active time estimate\s+Unavailable/);
+    assert.doesNotMatch(text, /Not added · optional/);
+    assert.equal(
+      io.choiceNames[0]?.at(-3),
+      "Review active time estimate (unavailable)"
+    );
+    assert.ok(io.lines.includes("Time was not saved"));
+    assert.match(text, /Reopen the time editor/);
+    assert.ok(text.indexOf(code) > text.indexOf("Timing diagnostics"));
+    assert.deepEqual(io.inputMessages, []);
+    assert.deepEqual(time.edits, []);
+    assert.deepEqual(runner.calls, []);
+  }
+});
+
+test("human time: partial inventory and capture gaps preserve known waits with honest response coverage", async () => {
+  const summary = recordedTimeSummary();
+  assert.equal(summary.inventory, "partial");
+  summary.issues.push({ code: "CAPTURE_GAP", episodeKey: null });
+  const partial = await timeView(summary);
+  assert.match(
+    partial.lines.join("\n"),
+    /Waiting for decisions\s+24s · 1 of 1 answered response timed/
+  );
+  assert.match(
+    partial.lines.join("\n"),
+    /Recorded waits only · coverage may be incomplete/
+  );
+  assert.doesNotMatch(
+    partial.lines.join("\n"),
+    /CAPTURE_GAP|lost|interruption|attachment|missing wait/
+  );
+  const [episode] = summary.episodes;
+  assert.ok(episode);
+  summary.episodes.push({
+    ...episode,
+    key: "missing-duration",
+    durationMs: null,
+    continuity: "discontinuity"
+  });
+  summary.answeredCount = 2;
+  summary.unavailableCount = 1;
+  summary.issues.push({
+    code: "CLOCK_DISCONTINUITY",
+    episodeKey: "missing-duration"
+  });
+  const io = await timeView(summary, true);
+  const text = io.lines.join("\n");
+  assert.match(
+    text,
+    /Waiting for decisions\s+24s · 1 of 2 answered responses timed/
+  );
+  assert.match(
+    text,
+    /Recorded-response subtotal\s+24s · 1 of 2 answered responses timed/
+  );
+  assert.match(text, /2\. Review triage\s+Unavailable/);
+  assert.ok(text.indexOf("CAPTURE_GAP") > text.indexOf("Timing diagnostics"));
+});
+
+test("human time: dedicated details share answered status, attribution and clock notes", async () => {
+  const summary = recordedTimeSummary();
+  const time = new FakeHumanTime();
+  await time.setEstimate("run-example", 0, 12);
+  summary.effort = time.summary.effort;
+  const [episode] = summary.episodes;
+  assert.ok(episode);
+  summary.episodes.push({
+    ...episode,
+    key: "second-review",
+    durationMs: 66000
+  });
+  summary.answeredMs = 90000;
+  summary.answeredCount = 2;
+  const io = await timeView(summary, true);
+  const text = io.lines
+    .slice(io.lines.indexOf("Time details · this run"))
+    .join("\n");
+  assert.doesNotMatch(
+    text,
+    /Time for this run|Gate coverage|Gate response elapsed/
+  );
+  assert.match(text, /Estimate as of\s+2026-09-06T10:00:00.000Z/);
+  assert.match(text, /All recorded decisions are answered\./);
+  assert.match(text, /1\. Review triage\s+24s/);
+  assert.match(text, /2\. Review triage\s+1m 6s/);
+  assert.doesNotMatch(text, /24s · answered|1m 6s · answered/);
+  assert.match(text, /Recorded-response subtotal\s+1m 30s/);
+  assert.match(
+    text.replace(/\s+/g, " "),
+    /self-reported estimate for one person.*identity is not verified.*other contributors.*complete task total is not established/
+  );
+  assert.equal((text.match(/Clock continuity was checked/g) ?? []).length, 1);
+  assert.doesNotMatch(text, /UTC wall clock · process correlated/);
+});
+
+test("human time: mixed outcomes, provisional waits, recovery and clock exceptions stay distinct", async () => {
+  const summary = recordedTimeSummary();
+  const [episode] = summary.episodes;
+  assert.ok(episode);
+  summary.episodes.push(
+    {
+      ...episode,
+      key: "open",
+      outcome: "open",
+      durationMs: 1500,
+      provisional: true,
+      continuity: "unverified"
+    },
+    { ...episode, key: "cancelled", outcome: "cancelled", durationMs: 0 },
+    { ...episode, key: "superseded", outcome: "superseded", durationMs: 60000 },
+    {
+      ...episode,
+      key: "incomplete",
+      outcome: "incomplete",
+      durationMs: null,
+      provisional: true
+    },
+    { ...episode, key: "clock", durationMs: null, continuity: "discontinuity" },
+    {
+      ...episode,
+      key: "recovery-open",
+      kind: "recovery_wait",
+      outcome: "open",
+      durationMs: 90000,
+      provisional: true,
+      continuity: "unverified"
+    },
+    {
+      ...episode,
+      key: "recovery-ended",
+      kind: "recovery_wait",
+      outcome: "recovery_ended",
+      durationMs: 120000
+    }
+  );
+  summary.answeredCount = 2;
+  summary.openCount = 1;
+  summary.otherCount = 3;
+  summary.unavailableCount = 2;
+  summary.recoveryUnknown = true;
+  const io = await timeView(summary, true);
+  const text = io.lines
+    .slice(io.lines.indexOf("Time details · this run"))
+    .join("\n");
+  const plain = text.replace(/\s+/g, " ");
+  assert.doesNotMatch(text, /All recorded decisions are answered/);
+  assert.match(plain, /24s · answered/);
+  assert.match(plain, /2s · open · provisional · clock continuity unverified/);
+  assert.match(plain, /0s · cancelled/);
+  assert.match(plain, /1m · superseded/);
+  assert.match(plain, /Unavailable · incomplete evidence · provisional/);
+  assert.match(plain, /Unavailable · answered · clock discontinuity/);
+  assert.match(
+    plain,
+    /Recorded-response subtotal 24s · 1 of 2 answered responses timed/
+  );
+  assert.match(
+    plain,
+    /Recovery waiting.*1m 30s · open · provisional.*2m · ended/
+  );
+  assert.match(plain, /Recovery start or endpoint is unavailable/);
+  assert.match(plain, /Recovery waits are separate from answered responses/);
+});
+
+test("human time: automatic durations round from milliseconds with carries and positive subsecond values", async () => {
+  for (const [milliseconds, display] of [
+    [0, "0s"],
+    [1, "<1s"],
+    [999, "<1s"],
+    [1000, "1s"],
+    [1499, "1s"],
+    [1500, "2s"],
+    [24000, "24s"],
+    [59499, "59s"],
+    [59500, "1m"],
+    [60000, "1m"],
+    [90000, "1m 30s"],
+    [300000, "5m"],
+    [3599499, "59m 59s"],
+    [3599500, "1h"],
+    [3600000, "1h"],
+    [3689999, "1h 1m"],
+    [3690000, "1h 2m"],
+    [3720000, "1h 2m"],
+    [86400000, "24h"]
+  ] as const) {
+    const summary = recordedTimeSummary();
+    summary.answeredMs = milliseconds;
+    const [episode] = summary.episodes;
+    assert.ok(episode);
+    summary.episodes[0] = { ...episode, durationMs: milliseconds };
+    const io = await timeView(summary);
+    assert.ok(
+      io.lines.some(
+        (line) =>
+          line.includes(`Waiting for decisions`) &&
+          line.includes(`${display} ·`)
+      ),
+      `${milliseconds}: ${io.lines.join("\n")}`
+    );
+  }
+  const summary = recordedTimeSummary();
+  const [episode] = summary.episodes;
+  assert.ok(episode);
+  summary.episodes = [
+    { ...episode, durationMs: 1499 },
+    { ...episode, key: "second", durationMs: 1499 }
+  ];
+  summary.answeredCount = 2;
+  summary.answeredMs = 2998;
+  const io = await timeView(summary, true);
+  assert.match(io.lines.join("\n"), /Recorded-response subtotal\s+3s/);
+  assert.match(io.lines.join("\n"), /1\. Review triage\s+1s/);
+  assert.match(io.lines.join("\n"), /2\. Review triage\s+1s/);
+});
+
+test("human time: action labels refresh after save and blank input returns to the same menu", async () => {
+  const time = new FakeHumanTime();
+  const runner = new FakeRunner([workflowStatus(runState("done"))]);
+  const io = new FakeIO(
+    [
+      "human_time_details",
+      "human_time_update",
+      "human_time_details",
+      "human_time_update",
+      "exit"
+    ],
+    ["0", ""]
+  );
+  await runInteractive(runner, io, { decidedBy: "human", humanTime: time });
+  assert.equal(
+    io.choiceNames[0]?.at(-3),
+    "Add active time estimate (optional)"
+  );
+  assert.equal(
+    io.choiceNames[1]?.at(-3),
+    "Add active time estimate (optional)"
+  );
+  for (const names of io.choiceNames.slice(2))
+    assert.equal(names.at(-3), "Edit active time estimate");
+  for (const choices of io.choiceSets)
+    assert.deepEqual(choices, io.choiceSets[0]);
+  assert.deepEqual(time.edits, [
+    { runId: "run-example", revision: 0, minutes: 0 }
+  ]);
+  assert.equal(io.inputOptions[0]?.defaultValue, undefined);
+  assert.equal(io.inputOptions[1]?.defaultValue, undefined);
+  assert.match(
+    io.lines.join("\n"),
+    /Previous estimate: 0 min, as of 2026-09-06T10:00:00.000Z/
+  );
+  assert.deepEqual(runner.calls, []);
+  assert.deepEqual(io.confirmationMessages, []);
+});
+
+test("human time: narrow color-disabled summary and details wrap without clipping", async () => {
+  const summary = recordedTimeSummary();
+  const [episode] = summary.episodes;
+  assert.ok(episode);
+  summary.episodes[0] = {
+    ...episode,
+    kind: "planning_review_triage",
+    continuity: "unverified"
+  };
+  summary.issues.push({ code: "CAPTURE_GAP", episodeKey: null });
+  const io = await timeView(summary, true, 40);
+  const lines = io.lines.slice(io.lines.indexOf("Time for this run"));
+  assert.ok(
+    lines.every((line) => line.length <= 40),
+    lines.filter((line) => line.length > 40).join("\n")
+  );
+  const text = lines.join("\n");
+  assert.doesNotMatch(text, /\u001b\[/);
+  assert.match(text, /Active time estimate\n\s+Not added · optional/);
+  assert.match(text.replace(/\s+/g, " "), /Planning-review triage 24s/);
+  assert.match(text.replace(/\s+/g, " "), /clock continuity unverified/);
+});
+
+test("human time: unreadable timing returns to workflow choices with unavailable action labels", async () => {
+  const time = new FakeHumanTime();
+  time.readSummary = async () => {
+    throw new Error("PRIVATE-TIMING-READ-ERROR");
+  };
+  const runner = new FakeRunner([
+    workflowStatus(runState("needs_plan_approval"))
+  ]);
+  const io = new FakeIO(["human_time_details", "exit"]);
+  await runInteractive(runner, io, { decidedBy: "human", humanTime: time });
+  assert.equal(
+    io.choiceNames[0]?.at(-3),
+    "Review active time estimate (unavailable)"
+  );
+  assert.deepEqual(io.choiceSets[0], io.choiceSets[1]);
+  assert.match(io.lines.join("\n"), /Timing evidence: Unavailable/);
+  assert.doesNotMatch(
+    io.lines.join("\n"),
+    /PRIVATE-TIMING-READ-ERROR|Not added · optional/
+  );
+  assert.deepEqual(time.edits, []);
+  assert.deepEqual(runner.calls, []);
+});
+
+test("human time: failed saves are actionable and never change a saved estimate", async () => {
+  for (const result of [
+    { status: "stale", issue: "STALE_REVISION" },
+    { status: "contended", issue: "WRITE_CONTENDED" },
+    { status: "unavailable", issue: "WRITE_FAILED" }
+  ] as const) {
+    const time = new FakeHumanTime();
+    await time.setEstimate("run-example", 0, 12);
+    time.edits.length = 0;
+    time.result = result;
+    const runner = new FakeRunner([workflowStatus(runState("done"))]);
+    const io = new FakeIO(["human_time_update", "exit"], ["15"]);
+    io.width = 40;
+    await runInteractive(runner, io, { decidedBy: "human", humanTime: time });
+    const plain = io.lines.join("\n").replace(/\s+/g, " ");
+    assert.match(plain, /Time was not saved/);
+    assert.match(plain, /Reopen the time editor/);
+    assert.match(
+      plain,
+      /Previous estimate: 12 min, as of 2026-09-06T10:00:00.000Z/
+    );
+    assert.equal(time.summary.effort?.minutes, 12);
+    assert.equal(io.choiceNames[1]?.at(-3), "Edit active time estimate");
+    assert.equal(io.inputOptions[0]?.defaultValue, undefined);
+    assert.deepEqual(runner.calls, []);
+  }
+});
 
 test("human time: optional English editor at human, blocked and terminal stops never calls workflow mutations", async () => {
   for (const status of [
@@ -2459,9 +2898,7 @@ test("human time: optional English editor at human, blocked and terminal stops n
     assert.equal(humanTime.detached, 1);
     assert.equal(humanTime.attached, 1);
     assert.ok(
-      io.lines.some((line) =>
-        line.includes("single-engineer estimate; identity not verified")
-      )
+      io.lines.some((line) => line.includes("Self-reported · one person"))
     );
     assert.ok(io.lines.some((line) => line.includes("Active time estimate")));
     assert.ok(!io.lines.some((line) => line.includes("Your active time")));

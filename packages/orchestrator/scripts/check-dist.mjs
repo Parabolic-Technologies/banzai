@@ -93,7 +93,7 @@ async function checkDistribution(packageRoot, smokeRequired) {
     });
     if (
       !smoke.stdout.includes("Usage:") ||
-      !smoke.stdout.includes("banzai interactive")
+      !smoke.stdout.includes("interactive mode")
     ) {
       throw new Error(
         "Generated orchestrator distribution did not pass the non-TTY CLI smoke."

@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 // Immutable task verification publication, shared by actual executor owners.
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { constants } from "node:fs";
 import path from "node:path";
-import { readdir, lstat, readFile } from "node:fs/promises";
+import { readdir, lstat, open } from "node:fs/promises";
 import { safePath, readBytes, readJson, makeDirectories, publishNew, verifyExecutionIgnore } from "./project-files.mjs";
 import { captureVerificationInputs, evidenceDigest, VerificationEvidenceError } from "./verification-evidence.mjs";
 import { authorizeTaskVerification, parseTaskVerificationDescriptor } from "./task-verification.mjs";
@@ -69,7 +70,7 @@ function observedChanges(before, after) {
 }
 
 export async function captureTaskVerificationInputs(input, descriptors, policy) {
-  const entries = []; let bytes = 0; let unavailable = false;
+  const entries = []; const budget = { bytes: 0 }; let unavailable = false; let opaque = false;
   const root = input.repoRoot;
   const excludedSourcePaths = new Set(input.excludedSourcePaths ?? []);
   if ([...excludedSourcePaths].some(file => !/^documentation\/work\/[a-z0-9]+(?:-[a-z0-9]+)*\/review-[1-9]\d*\.md$/u.test(file))) fail("Invalid runner-published review exclusion.");
@@ -89,16 +90,19 @@ export async function captureTaskVerificationInputs(input, descriptors, policy) 
       const relative = prefix + item.name;
       if (relative === ".git" || relative === ".banzai" || item.name === "node_modules" || excludedSourcePaths.has(relative)) continue;
       if (relevant && !relevant.has(relative) && !relevantDirectories.has(relative)) continue;
-      if (entries.length > 50000 || bytes > 128 * 1024 * 1024) fail("Task input observation exceeds its bound.");
+      if (entries.length >= 50000) fail("Task input observation exceeds its bound.");
       const absolute = path.join(directory, item.name); const stat = await lstat(absolute);
       if (stat.isSymbolicLink() || (!stat.isFile() && !stat.isDirectory())) { unavailable = true; continue; }
       if (stat.isDirectory()) { await walk(absolute, relative + "/"); continue; }
       // Do not read secrets merely to establish verification provenance.
-      if (/(?:^|\/)(?:\.env(?:\.[^/]*)?|credentials(?:\.[^/]*)?|secrets?(?:\.[^/]*)?|id_(?:rsa|ed25519)|[^/]*\.(?:pem|p12|pfx))$/iu.test(relative)) { unavailable = true; continue; }
-      if (stat.size > 16 * 1024 * 1024) { unavailable = true; continue; }
-      const data = await readFile(absolute); bytes += data.length; const after = await lstat(absolute);
-      if (stat.ino !== after.ino || stat.mtimeMs !== after.mtimeMs || stat.size !== data.length) fail("Task input changed during observation.");
-      entries.push({ path: relative, sha256: evidenceDigest(data), mode: stat.mode & 0o777 });
+      if (/(?:^|\/)(?:\.env(?:\.[^/]*)?|credentials(?:\.[^/]*)?|secrets?(?:\.[^/]*)?|id_(?:rsa|ed25519)|[^/]*\.(?:pem|p12|pfx))$/iu.test(relative)) {
+        opaque = true;
+        // Filesystem identity is a drift guard for this round, never proof of
+        // secret values or complete dependencies for cross-round reuse.
+        entries.push({ path: relative, sha256: evidenceDigest(["opaque-metadata", fileIdentity(stat)]), mode: stat.mode & 0o777 });
+        continue;
+      }
+      entries.push({ path: relative, sha256: await observeFile(absolute, stat, budget), mode: stat.mode & 0o777 });
     }
     if (JSON.stringify(before.map((item) => item.name).sort()) !== JSON.stringify((await readdir(directory)).sort())) fail("Task input inventory changed during observation.");
   }
@@ -107,11 +111,31 @@ export async function captureTaskVerificationInputs(input, descriptors, policy) 
   let reusable = null;
   if (policy?.reuse && descriptors.length) {
     const commands = descriptors.map((check) => ({ id: check.id, name: check.name, command: path.isAbsolute(check.command) ? check.command : check.command.includes("/") ? path.posix.join(check.cwd, check.command) : check.command, args: check.args, timeoutMs: check.timeoutMs, evidence: check.evidence, ignoreExplanatory: check.evidence === "equivalent_evidence" }));
-    reusable = await captureVerificationInputs({ repoRoot: root, workId: input.workId, evidenceDirectories: [input.directory], sourceExclusions: [...excludedSourcePaths], configuration: { profiles: [{ id: "task-capture", projectType: "custom", commands }], policy: policy.reuse } });
+    reusable = opaque ? { complete: false, reason: "inputs_unavailable", candidateDigest: null, checks: [] } : await captureVerificationInputs({ repoRoot: root, workId: input.workId, evidenceDirectories: [input.directory], sourceExclusions: [...excludedSourcePaths], configuration: { profiles: [{ id: "task-capture", projectType: "custom", commands }], policy: policy.reuse } });
   }
   const observation = { observedDigest, complete: reusable?.complete === true, reusable };
   if (observedDigest !== null) observedEntries.set(observation, entries);
   return observation;
+}
+
+const fileIdentity = (stat) => [stat.dev, stat.ino, stat.mode, stat.size, stat.mtimeMs, stat.ctimeMs].join(":");
+
+async function observeFile(absolute, before, budget) {
+  const limit = 128 * 1024 * 1024;
+  if (budget.bytes + before.size > limit) fail("Task input observation exceeds its bound.");
+  const handle = await open(absolute, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const hash = createHash("sha256"); const buffer = Buffer.alloc(512 * 1024); let size = 0;
+    for (;;) {
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+      if (!bytesRead) break;
+      size += bytesRead; budget.bytes += bytesRead;
+      if (budget.bytes > limit) fail("Task input observation exceeds its bound.");
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+    if (size !== before.size || fileIdentity(before) !== fileIdentity(await handle.stat()) || fileIdentity(before) !== fileIdentity(await lstat(absolute))) fail("Task input changed during observation.");
+    return hash.digest("hex");
+  } finally { await handle.close(); }
 }
 
 export function parseTaskVerificationDecision(value) {
@@ -215,6 +239,7 @@ export async function taskVerificationApplicability(input, decision, attempts, c
     if (latest) {
       kind = latest.failureCategory === "timeout" ? "timed_out" : latest.failureCategory === "process_start" ? "unavailable" : latest.status === "started" ? "unavailable" : latest.status === "interrupted" ? "interrupted" : latest.status === "failed" ? "failed" : "unavailable";
       reason = latest.failureCategory === "process_start" ? "The executable could not be started." : latest.failureCategory === "timeout" ? "The check exceeded its execution time limit." : latest.status === "started" ? "A retained attempt has no terminal result." : "Latest physical attempt does not establish applicable success.";
+      if (latest.status === "completed" && (current.observedDigest === null || latest.before.observedDigest === null || latest.after?.observedDigest === null)) reason = "The command succeeded, but its input snapshot is unavailable. Resolve unreadable, unsupported or over-budget inputs, then retry verification without replaying implementation.";
       if (latest.status === "completed" && latest.contextDigest === evidenceDigest(decision.context) && await intact(input, latest.descriptor) && await intact(input, latest.stdout) && await intact(input, latest.stderr)) {
         const original = parseTaskVerificationDecision(await readJson(input.repoRoot, latest.descriptor.relativePath));
         const originalCheck = original.checks.find((entry) => entry.descriptor.id === item.descriptor.id);

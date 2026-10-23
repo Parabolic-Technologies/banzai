@@ -7,7 +7,7 @@ Date: 2026-10-20
 Applied the owner-selected `2.7.3` release version using `npm run version:set --
 2.7.3`: nine fields across seven files. Rebuilt the committed CLI bundle and
 source map, updated both current-version facts in `PROJECT_MANIFEST.md`, and
-added [release notes](../../releases/2.7.3.md).
+added [release notes](https://github.com/Parabolic-Technologies/banzai/releases/tag/v2.7.3).
 
 The release content covers the README and documentation refresh already in
 commit `88ed48f` and the Parabolic logo asset updates. The release notes are

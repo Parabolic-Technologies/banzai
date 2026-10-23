@@ -305,12 +305,9 @@ async function setupRepository(root, bundle, expectedVersion) {
   }
   if (
     !help.includes("Usage:") ||
-    !help.includes("banzai init") ||
-    !help.includes("Five existing human decision gates remain distinct") ||
-    !help.includes("banzai-agent-answer/v2") ||
-    !help.includes(
-      "banzai eval context [--json] [--from <RFC3339>] [--to <RFC3339>] [--run <run-id>]..."
-    )
+    !/^ {2}init\s+/m.test(help) ||
+    !/^ {2}status\s+/m.test(help) ||
+    !help.includes("banzai help <command>")
   ) {
     fail("SMOKE_HELP_MISMATCH", "help output is incomplete");
   }

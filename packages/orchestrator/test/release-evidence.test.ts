@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { readFile, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -10,6 +8,13 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const SCRIPT = path.join(process.cwd(), "scripts", "release-evidence.mjs");
+const API_PRELOAD = path.join(
+  process.cwd(),
+  "test",
+  "fixtures",
+  "release-evidence-api.mjs"
+);
+const API_BASE = "https://api.example.invalid";
 const TOKEN = "release-evidence-fixture-secret-5d1e";
 const REPOSITORY = "example/banzai";
 const REPOSITORY_ID = 4242;
@@ -49,7 +54,11 @@ interface Scenario {
 interface RecordedRequest {
   pathname: string;
   query: URLSearchParams;
-  authorization: string | undefined;
+  authorization: string | null;
+  accept: string | null;
+  apiVersion: string | null;
+  method: string;
+  redirect: string;
 }
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
@@ -132,69 +141,11 @@ function boundScenario(head: string, tree: string): Scenario {
   };
 }
 
-async function startApi(
-  scenario: Scenario
-): Promise<{ server: Server; url: string; requests: RecordedRequest[] }> {
-  const requests: RecordedRequest[] = [];
-  const base = `/repos/${REPOSITORY}/actions`;
-  const server = createServer((request, response) => {
-    const url = new URL(request.url ?? "/", "http://127.0.0.1");
-    requests.push({
-      pathname: url.pathname,
-      query: url.searchParams,
-      authorization: request.headers.authorization
-    });
-    const runId = Number(/\/runs\/(\d+)\//.exec(url.pathname)?.[1]);
-    const route: [Endpoint, string, Record<string, unknown>[]] | null =
-      url.pathname === `${base}/workflows/ci.yml/runs`
-        ? ["runs", "workflow_runs", scenario.runs]
-        : url.pathname.startsWith(`${base}/runs/`) &&
-            url.pathname.endsWith("/jobs")
-          ? ["jobs", "jobs", scenario.runJobs?.[runId] ?? scenario.jobs]
-          : url.pathname.startsWith(`${base}/runs/`) &&
-              url.pathname.endsWith("/artifacts")
-            ? [
-                "artifacts",
-                "artifacts",
-                scenario.runArtifacts?.[runId] ?? scenario.artifacts
-              ]
-            : null;
-    if (route === null) {
-      response.writeHead(404, { "content-type": "application/json" });
-      response.end("{}");
-      return;
-    }
-    const [endpoint, field, items] = route;
-    const fault =
-      (endpoint === "runs"
-        ? undefined
-        : scenario.runFaults?.[runId]?.[endpoint]) ??
-      scenario.faults?.[endpoint] ??
-      {};
-    if (fault.drop === true) {
-      request.socket.destroy();
-      return;
-    }
-    response.writeHead(fault.status ?? 200, {
-      "content-type": "application/json"
-    });
-    response.end(
-      fault.body ??
-        JSON.stringify({
-          total_count: "total" in fault ? fault.total : items.length,
-          [field]: items
-        })
-    );
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address() as AddressInfo;
-  return { server, url: `http://127.0.0.1:${port}`, requests };
-}
-
 async function runScript(
   cwd: string,
   command: string,
-  environment: Record<string, string>
+  environment: Record<string, string>,
+  preload?: string
 ): Promise<RunResult> {
   // Only the variables a test sets reach the script: the suite itself runs
   // inside GitHub Actions, whose GITHUB_* values must not leak in.
@@ -206,7 +157,11 @@ async function runScript(
   try {
     const { stdout, stderr } = await execFileAsync(
       process.execPath,
-      [SCRIPT, command],
+      [
+        ...(preload === undefined ? [] : ["--import", preload]),
+        SCRIPT,
+        command
+      ],
       { cwd, env }
     );
     return { code: 0, stdout, stderr };
@@ -237,16 +192,26 @@ async function verify(
   scenario: Scenario,
   overrides: Record<string, string | null> = {}
 ) {
-  const api = await startApi(scenario);
   const scratch = await mkdtemp(path.join(tmpdir(), "banzai-evidence-out-"));
   const outputFile = path.join(scratch, "output");
   const summaryFile = path.join(scratch, "summary");
+  const fixtureFile = path.join(scratch, "api.json");
+  const requestsFile = path.join(scratch, "requests.jsonl");
   try {
+    await writeFile(
+      fixtureFile,
+      JSON.stringify({
+        repository: REPOSITORY,
+        baseUrl: API_BASE,
+        scenario,
+        requestsFile
+      })
+    );
     const environment: Record<string, string> = {};
     const variables: Record<string, string | null> = {
       GITHUB_REPOSITORY: REPOSITORY,
       GITHUB_REPOSITORY_ID: String(REPOSITORY_ID),
-      GITHUB_API_URL: api.url,
+      GITHUB_API_URL: API_BASE,
       GITHUB_TOKEN: TOKEN,
       GITHUB_OUTPUT: outputFile,
       GITHUB_STEP_SUMMARY: summaryFile,
@@ -255,15 +220,28 @@ async function verify(
     for (const [key, value] of Object.entries(variables)) {
       if (value !== null) environment[key] = value;
     }
-    const result = await runScript(root, "verify", environment);
+    const result = await runScript(
+      root,
+      "verify",
+      { ...environment, BANZAI_TEST_API_FIXTURE: fixtureFile },
+      API_PRELOAD
+    );
     const output = await readOptional(outputFile);
     const summary = await readOptional(summaryFile);
+    const requests = (await readOptional(requestsFile))
+      .split("\n")
+      .filter(Boolean)
+      .map((line): RecordedRequest => {
+        const request = JSON.parse(line) as Omit<RecordedRequest, "query"> & {
+          query: string;
+        };
+        return { ...request, query: new URLSearchParams(request.query) };
+      });
     for (const text of [result.stdout, result.stderr, output, summary]) {
       assert.equal(text.includes(TOKEN), false, "the token was printed");
     }
-    return { ...result, output, summary, requests: api.requests };
+    return { ...result, output, summary, requests };
   } finally {
-    await new Promise((resolve) => api.server.close(resolve));
     await rm(scratch, { recursive: true, force: true });
   }
 }
@@ -302,6 +280,11 @@ test("verify binds a tag to both lanes' evidence from its pull-request run", asy
     );
     for (const request of result.requests) {
       assert.equal(request.authorization, `Bearer ${TOKEN}`);
+      assert.equal(request.accept, "application/vnd.github+json");
+      assert.equal(request.apiVersion, "2022-11-28");
+      assert.equal(request.method, "GET");
+      assert.equal(request.redirect, "error");
+      assert.equal(request.query.get("per_page"), "100");
     }
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
@@ -724,7 +707,7 @@ test("verify stops at a failed response even when a later run would bind", async
       /invalid JSON for the \w+ of CI run 8000/
     ],
     [
-      "a dropped connection",
+      "a rejected fetch",
       { drop: true },
       /request for the \w+ of CI run 8000 failed/
     ],
@@ -805,17 +788,13 @@ test("verify rejects listing counts that do not equal the page", async (t) => {
   }
 });
 
-test("verify treats an unreachable API as unbound", async () => {
+test("verify treats a rejected API fetch as unbound", async () => {
   const fixture = await mergeFixture();
-  const closed = createServer();
-  await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));
-  const { port } = closed.address() as AddressInfo;
-  await new Promise((resolve) => closed.close(resolve));
   try {
     const result = await verify(
       fixture.root,
       boundScenario(fixture.head, fixture.tree),
-      { GITHUB_API_URL: `http://127.0.0.1:${port}` }
+      { GITHUB_API_URL: "https://unreachable.example.invalid" }
     );
     assert.equal(result.code, 0, result.stderr);
     assert.equal(result.output, "bound=false\n");

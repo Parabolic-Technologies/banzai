@@ -113,7 +113,12 @@ export default tseslint.config(
   {
     // Build and test drivers run as plain ESM outside the TypeScript project,
     // so they get syntax-level rules only.
-    files: ["scripts/**/*.mjs", "eslint.config.mjs", "import-boundaries.mjs"],
+    files: [
+      "scripts/**/*.mjs",
+      "test/fixtures/release-evidence-api.mjs",
+      "eslint.config.mjs",
+      "import-boundaries.mjs"
+    ],
     extends: [js.configs.recommended, prettier],
     languageOptions: {
       ecmaVersion: 2023,

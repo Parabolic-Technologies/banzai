@@ -2737,8 +2737,7 @@ async function validateDecisionConsultationPolicy(root) {
     [
       "packages/orchestrator/src/cli.ts",
       [
-        "Five existing human decision gates remain distinct",
-        "Consultation records preference provenance; it is not approval or execution authority.",
+        "Consultation records preferences; it does not approve a plan or ADR.",
         "banzai-agent-answer/v2",
         "banzai-agent-answer/v1"
       ]

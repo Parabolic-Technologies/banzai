@@ -17,7 +17,7 @@ export interface Styler {
   readonly green: (value: string) => string;
   readonly yellow: (value: string) => string;
   readonly cyan: (value: string) => string;
-  /** Brand vermilion for the launch mark; degrades with the colour depth. */
+  /** Brand vermilion for the launch title; degrades with the colour depth. */
   readonly brand: (value: string) => string;
 }
 

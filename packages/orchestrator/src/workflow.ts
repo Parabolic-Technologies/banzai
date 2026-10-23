@@ -795,9 +795,7 @@ export function planningReviewStatusLines(status: WorkflowStatus): string[] {
       `Planning-review artifact: ${projection.latest.artifactPath ?? "not published"}`
     );
     if (projection.latest.outcome === "restored_no_findings")
-      lines.push(
-        `Independent review found no issues: ${projection.latest.artifactPath}`
-      );
+      lines.push("Independent review found no issues.");
   }
   return lines;
 }
@@ -5470,11 +5468,15 @@ export class WorkflowRunner {
     authorization: RecoveryAuthorization
   ): Promise<RunState> {
     await this.assertProjectGuidance();
+    const ownsWork = await hasRunnerWorkOwnership(
+      this.repoRoot,
+      state.artifactBinding
+    );
     // The authorized phase owns its vendor. A planning repair runs the planner
     // and never invokes the implementer, and executePlan preflights the planner
     // itself, so gating it here would block a repair ADR-0051 requires to be
     // reachable.
-    if (authorization.phase !== "plan")
+    if (ownsWork && authorization.phase !== "plan")
       await this.preflightVendor("implementer", config.models.implementer);
     const persistedSourceRecord = await this.store.readRunAttempt(
       state.runId,
@@ -5577,6 +5579,15 @@ export class WorkflowRunner {
         eligibility.eligible
           ? "Recovery authorization no longer matches the exact current workspace."
           : eligibility.reason
+      );
+    }
+    if (!ownsWork) {
+      await this.store.assertLockOwned();
+      return withRunnerWorkOwnership(
+        this.repoRoot,
+        state.artifactBinding,
+        () => this.executeAuthorizedRecovery(state, config, authorization),
+        { recoverStale: true }
       );
     }
     const sourceAttempt = authorization.attempt;

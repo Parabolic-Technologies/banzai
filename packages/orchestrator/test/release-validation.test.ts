@@ -952,7 +952,7 @@ for (const [relativePath, fragment] of [
   ["documentation/orchestrator.md", "A v1 answer cannot answer a"],
   [
     "packages/orchestrator/src/cli.ts",
-    "Five existing human decision gates remain distinct"
+    "Consultation records preferences; it does not approve a plan or ADR."
   ],
   ["PROJECT_MANIFEST.md", "five existing workflow gates"],
   [

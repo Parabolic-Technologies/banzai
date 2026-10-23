@@ -1,6 +1,6 @@
 {
   "name": "banzai",
-  "version": "2.7.3",
+  "version": "2.7.4",
   "description": "Spec-driven development workflow built for a multi-model plan, implementation, and independent review loop, with a lightweight feature flow, conditional ADR governance, quick fixes, feature review, and status helpers.",
   "author": {
     "name": "Alexander Torosh",

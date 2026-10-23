@@ -16,6 +16,12 @@ is a navigational reference and is updated with the module it describes.
   `isHistoricalWork` is the shared predicate status, home and doctor use for it.
   `lib/execution-ownership.mjs` coordinates actual runner/verification execution
   by the selected document directory; ordinary Markdown editing has no claims.
+  Its recovery-only option requires repository ownership, exact bound-work
+  identity and an OS `ESRCH` result for a valid owner PID. It retains the old
+  claim with create-only publication, rechecks liveness, bytes and inode, then
+  uses normal exclusive acquisition. The runner validates current recovery
+  authority before reclamation and again under work ownership before execution.
+  Normal runner phases and standalone verification cannot reclaim stale claims.
 - `project-files.ts` — typed projection of the shared contained-filesystem owner,
   preserving bounded regular reads, ancestor-symlink rejection and atomic/create-only
   writes. Its shared Git exclusion check protects concrete private evidence leaves
@@ -67,8 +73,12 @@ is a navigational reference and is updated with the module it describes.
   validated feedback. Planning-triage status prints one answer-v4 Next line.
   Bare invocation without a TTY prints help instead of waiting for
   input, and the help heading derives the Banzai release-train version from the
-  orchestrator package mirror under ADR-0033. Human status distinguishes a
-  passing review from terminal completion by zero-accepted human triage;
+  orchestrator package mirror under ADR-0033. `--help` and `help` show a compact
+  command overview; `help <command>` supplies command syntax and relevant notes,
+  and `help progress` describes progress options. These help paths work outside
+  a repository without configuration or model execution. Human status
+  distinguishes a passing review from terminal completion by zero-accepted
+  human triage;
   structured status JSON includes the bounded planning-review projection. It traps
   `SIGINT` and `SIGTERM` for every run-bearing command, wiring
   `createInterruptHandler` to the progress reporter, `shutdownActiveProcesses`,
@@ -221,17 +231,24 @@ is a navigational reference and is updated with the module it describes.
 - `cli-routing.ts` — `resolveCliMode` maps argv and TTY presence to
   `interactive | help | command | tty_required`.
 - `interactive.ts` — the launch header and the state-driven decision interface
-  behind `InteractiveIO`. The header opens with the brand mark, two
-  block-element corners in vermilion beside the name and location rows, and
-  names the package-derived Banzai release-train version, the
-  repository with its branch, short commit, and carried-in change count, and one
-  row per phase carrying vendor, model, effort, timeout, and a readiness marker;
+  behind `InteractiveIO`. The compact text-only header opens with the Banzai
+  name in brand vermilion and the package-derived release-train version, with
+  no tagline. The
+  repository row shares the title's left edge and shows its branch, short
+  commit, and carried-in change count. Phase rows use a two-column indent and
+  carry vendor, model, effort, timeout, and a readiness marker in aligned
+  columns, including when effort labels or timeouts differ;
   authentication spends lines only when it fails — once per blocked vendor,
-  naming the phases it blocks, not once per role that shares it. Repository
+  naming the phases it blocks, not once per role that shares it. Model-update
+  notices appear only when an advisory exists. Repository
   facts arrive
   through `RepositoryIdentityGateway` and degrade to the parts that resolved, so
   a detached HEAD or an unreadable index never stops a session starting. The run
-  summary leads with the verdict, states the workflow reason, review execution,
+  summary separates logical sections with one blank line, a bold heading, and
+  two-space body indentation. Run action menus follow a dim horizontal divider
+  with a blank line on either side, including after time details. Planning
+  review shows its artifact path once, alongside the independent-review outcome.
+  The summary leads with the verdict, states the workflow reason, review execution,
   and pending rotation through `vocabulary.ts`, and always lists every finding
   with its id, severity, wrapped summary, and evidence path. Triage then lays
   each finding out for a decision rather than for scanning: a phase-banner rule
@@ -256,6 +273,13 @@ is a navigational reference and is updated with the module it describes.
   Planning triage escapes model text and presents each finding/analysis card
   immediately before its keyed disposition menu; human-time insertion retains
   the final exit-choice anchor.
+  `Time for this run` places an optional self-reported active estimate before
+  recorded decision waiting, with timed-response coverage and plain-English
+  availability issues. `View time details` opens a dedicated episode list,
+  subtotal, separate recovery waits, recording/attribution notes and secondary
+  diagnostic codes. Duration display rounds original milliseconds, preserving
+  zero and positive subsecond values; subtotals retain source arithmetic.
+  Estimate actions refresh from current evidence and return to the same menu.
 - `inquirer-io.ts` — the `@inquirer/prompts` implementation of
   `InteractiveIO`; the only module bound to the prompt libraries. Its initial
   request input uses `@inquirer/core` to enable bracketed-paste mode, capture
@@ -874,7 +898,7 @@ is a navigational reference and is updated with the module it describes.
   `colorEnabled` honours `FORCE_COLOR`, then `NO_COLOR`, then `TERM=dumb`, then
   stream `isTTY`. `colorDepth` reads `FORCE_COLOR=3|2`, then `COLORTERM`, then
   `TERM` to choose 24-bit, 256-colour, or 16-colour codes; only the `brand`
-  style depends on it, rendering Banzai vermilion `#FF5A3C` for the launch mark
+  style depends on it, rendering Banzai vermilion `#FF5A3C` for the launch title
   and degrading to index 203 and then bright red.
 - `format.ts` — pure terminal presentation helpers shared by `cli.ts` and
   `interactive.ts`: `resolveWidth` clamps a reported column count to 40–96,
@@ -1076,6 +1100,14 @@ generated output is ignored. A completed check that changes observed files stops
 the round and names up to ten changed paths with the ignore remedy; input drift
 between selection and launch names its paths the same way. The entry lists stay
 in process memory and the persisted observation format is unchanged.
+Ordinary files are streamed within a 128 MiB aggregate budget, without a 16 MiB
+per-file cutoff. Protected filenames contribute filesystem identity metadata
+only (device, inode, mode, size, modification and change times); their contents
+are never read or hashed. These observations support fresh checks in the current
+round but disable cross-round reuse even with an opt-in policy. Symlinks,
+unreadable files, unstable captures and exhausted budgets remain unavailable.
+Successful commands with unavailable snapshots retain their physical success
+and receive an explicit snapshot diagnostic; retry creates fresh evidence.
 Lite checks derive authority from the user request and persisted workflow
 selection, with inherited-local permissions. Optional schema-4 project policy
 constrains checks; metadata never grants execution permission.

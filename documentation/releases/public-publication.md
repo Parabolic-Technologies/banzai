@@ -13,23 +13,33 @@ Author and contact: Alexander Torosh, `alexander@parabolic.io`. The root npm
 workspace stays `private: true`; only the CLI workspace is published, with
 `publishConfig.access: "public"` and the `https://registry.npmjs.org/` registry.
 
-## Release notes never describe delivery state
+## Release notes live in GitHub Releases
 
-`documentation/releases/<version>.md` describes what the release contains, its
-requirements, installation commands, and migration consequences. It never
-states that a tag, GitHub Release, or npm version is intended, pending, or not
-yet claimed, and never says "after publication". Such statements are true only
-until the release ships and then stay false in every published copy of the
-notes. Verified delivery facts belong in the [delivery record](#delivery-record)
-below, appended after publication; the notes link there instead.
+[GitHub Releases](https://github.com/Parabolic-Technologies/banzai/releases) is
+the sole maintained source of release notes. Prepare and review the notes in
+the GitHub draft release for `v<version>`, then publish that same release after
+the candidate checks and release-owner authorization. A version bump does not
+require a local release-note file. Do not maintain per-version Markdown copies
+in this repository.
 
-The 2.2.0 and 2.2.1 notes originally carried pending-delivery text and were
-corrected after both versions were published.
+Notes describe what the release contains, its requirements, installation
+commands, and migration consequences. Keep predictions about tag creation,
+GitHub publication, or npm availability out of the notes. Verified delivery
+facts belong in the [delivery record](#delivery-record) below, appended after
+publication; publishing a GitHub Release alone does not prove npm availability.
+Saving or editing a draft does not authorize publication.
+
+Documentation links to the
+[latest release](https://github.com/Parabolic-Technologies/banzai/releases/latest)
+or the specific published release's GitHub URL. Earlier local notes remain
+recoverable from Git history; that history is not a second maintained release
+notes archive. This file retains the publication procedure and delivery record.
 
 ## Publication order
 
 1. On `dev`, select the release target and run `npm run version:set -- <version>`
-   once. Write `documentation/releases/<version>.md` under the rule above.
+   once. Prepare and review the notes in a GitHub draft release for `v<version>`
+   under the rule above; no repository release-note file is needed.
    Run `npm ci`, refresh tracked generated resources with `npm run build`
    when their inputs changed, then run `npm run release:check`. The gate
    builds ignored `dist/` output from source before checking it.
@@ -40,8 +50,10 @@ corrected after both versions were published.
    pull request starts a hosted run: pushing `dev` or merging to `main` does
    not, and a newer push to the pull request cancels its older run.
 3. Merge to `main` with a merge commit, create tag `v<version>` on that merge
-   commit, push the tag, and create the GitHub Release from the notes. A squash
-   or rebase merge is allowed but cannot reuse the pull-request evidence.
+   commit, and push the tag. Confirm the prepared draft uses that exact tag,
+   review its notes against the final candidate, and publish it with explicit
+   release-owner authorization. A squash or rebase merge is allowed but cannot
+   reuse the pull-request evidence.
 4. Confirm the repository is public. The npm README loads its illustration and
    logos from `raw.githubusercontent.com` and links GitHub paths; both return
    404 while the repository is private.

@@ -9,7 +9,12 @@ import {
   taskVerificationStatusLines,
   editVerificationCommands
 } from "./verification-ui.js";
-import type { HumanTimeGateway, HumanTimeSummary } from "./human-time.js";
+import type {
+  HumanTimeEpisode,
+  HumanTimeGateway,
+  HumanTimeIssueCode,
+  HumanTimeSummary
+} from "./human-time.js";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import type { ModelUpdate } from "./config.js";
@@ -298,20 +303,42 @@ function adrIdFromArtifact(artifact: string): string {
   return match?.[1] === undefined ? basename : `ADR-${match[1]}`;
 }
 
-function renderArtifacts(io: InteractiveIO, state: RunState): void {
+function renderArtifacts(
+  io: InteractiveIO,
+  state: RunState,
+  styler: Styler
+): void {
   const artifacts = state.planArtifacts;
   if (artifacts === null) {
     return;
   }
-  io.writeLine("Artifacts:");
+  const lines = ["Artifacts"];
   if (artifacts.description !== null) {
-    io.writeLine(`  Description: ${artifacts.description}`);
+    lines.push(`Description: ${artifacts.description}`);
   }
   for (const adr of artifacts.adrs) {
-    io.writeLine(`  ADR: ${adr}`);
+    lines.push(`ADR: ${adr}`);
   }
   if (artifacts.plan !== null) {
-    io.writeLine(`  Plan: ${artifacts.plan}`);
+    lines.push(`Plan: ${artifacts.plan}`);
+  }
+  renderSection(io, styler, lines);
+}
+
+/** The first line is a heading; the remaining lines share the body indent. */
+function renderSection(
+  io: InteractiveIO,
+  styler: Styler,
+  lines: readonly string[]
+): void {
+  const [heading, ...body] = lines;
+  if (heading === undefined) return;
+  io.writeLine();
+  io.writeLine(styler.bold(heading));
+  for (const text of body) {
+    for (const line of wrapText(text, resolveWidth(io.width), "  ")) {
+      io.writeLine(line);
+    }
   }
 }
 
@@ -399,13 +426,12 @@ function renderConsultationCard(
   }
 }
 
-function renderCost(io: InteractiveIO, state: RunState): void {
+function renderCost(io: InteractiveIO, state: RunState, styler: Styler): void {
   const usage = state.metrics.usage;
   if (usage.costUsd === null) {
     return;
   }
-  io.writeLine();
-  io.writeLine(`Cost: $${usage.costUsd.toFixed(2)}`);
+  renderSection(io, styler, [`Cost: $${usage.costUsd.toFixed(2)}`]);
 }
 
 /**
@@ -495,39 +521,43 @@ function renderStatus(
   io.writeLine(styler.dim(`  ${state.runId}`));
   const historical = historicalRunNotice(state);
   if (historical !== null) {
-    io.writeLine();
-    writeLabeled(io, "History", historical);
+    renderSection(io, styler, ["History", historical]);
   }
 
   if (state.workflowSelection != null) {
-    io.writeLine();
-    writeLabeled(io, "Why this workflow", state.workflowSelection.reason);
+    renderSection(io, styler, [
+      "Why this workflow",
+      state.workflowSelection.reason
+    ]);
   }
-  for (const line of taskVerificationStatusLines(state)) io.writeLine(line);
+  renderSection(io, styler, taskVerificationStatusLines(state));
   if (state.blockReason !== null) {
-    io.writeLine();
-    writeLabeled(io, "Blocked", state.blockReason);
+    renderSection(io, styler, ["Blocked", state.blockReason]);
   }
   if (
     state.status === "needs_adr_approval" ||
     state.status === "needs_plan_approval"
   ) {
-    io.writeLine();
-    renderArtifacts(io, state);
+    renderArtifacts(io, state, styler);
   }
   if (
     state.status === "needs_human_decision" &&
     state.pendingHumanDecision != null
   ) {
-    io.writeLine();
     if (state.pendingHumanDecision.kind === "configuration_prerequisite") {
-      for (const line of configurationDecisionLines(
-        state.pendingHumanDecision,
-        status.configurationPrerequisite
-      ))
-        io.writeLine(line);
+      renderSection(
+        io,
+        styler,
+        configurationDecisionLines(
+          state.pendingHumanDecision,
+          status.configurationPrerequisite
+        )
+      );
     } else if (state.pendingHumanDecision.kind !== "planning_review_triage")
-      writeLabeled(io, "Decision needed", state.pendingHumanDecision.summary);
+      renderSection(io, styler, [
+        "Decision needed",
+        state.pendingHumanDecision.summary
+      ]);
     if (state.pendingHumanDecision.kind === "decision_consultation") {
       for (const [
         index,
@@ -554,8 +584,11 @@ function renderStatus(
     }
   }
 
-  for (const line of planningReviewStatusLines(status))
-    io.writeLine(escapeTerminalText(line));
+  renderSection(
+    io,
+    styler,
+    planningReviewStatusLines(status).map(escapeTerminalText)
+  );
   if (status.latestReview !== null && state.latestReview !== null) {
     io.writeLine();
     io.writeLine(
@@ -605,21 +638,20 @@ function renderStatus(
     status.recovery.eligible &&
     status.recovery.workspace !== null
   ) {
-    io.writeLine();
-    writeLabeled(io, "Recovery available", status.recovery.reason);
+    renderSection(io, styler, ["Recovery available", status.recovery.reason]);
     if (status.recovery.sourceKind === "prerequisite_blocked_fix") {
       writeLabeled(
         io,
-        "Resolved accepted findings",
+        "  Resolved accepted findings",
         status.recovery.resolvedFindingIds.join(", ")
       );
       writeLabeled(
         io,
-        "Remaining accepted findings",
+        "  Remaining accepted findings",
         status.recovery.remainingFindingIds.join(", ")
       );
       for (const prerequisite of status.recovery.prerequisites) {
-        writeLabeled(io, "Operator prerequisite", prerequisite);
+        writeLabeled(io, "  Operator prerequisite", prerequisite);
       }
     }
     io.writeLine(`  Identity: ${status.recovery.recoveryIdentity}`);
@@ -629,13 +661,12 @@ function renderStatus(
     io.writeLine(
       `  Workspace: added=${status.recovery.workspace.added}, modified=${status.recovery.workspace.modified}, deleted=${status.recovery.workspace.deleted}, total=${status.recovery.workspace.total}`
     );
-    writeLabeled(io, "Recovery warning", status.recovery.warning);
+    writeLabeled(io, "  Recovery warning", status.recovery.warning);
   } else if (
     state.status === "blocked" &&
     status.recovery.terminalCheckpointPresent === true
   ) {
-    io.writeLine();
-    writeLabeled(io, "Terminal checkpoint", status.recovery.reason);
+    renderSection(io, styler, ["Terminal checkpoint", status.recovery.reason]);
   }
   if (
     state.status === "blocked" &&
@@ -643,13 +674,12 @@ function renderStatus(
     !status.recovery.eligible &&
     status.recovery.terminalCheckpointPresent !== true
   ) {
-    io.writeLine();
-    writeLabeled(io, "Retry unavailable", status.retry.reason);
+    renderSection(io, styler, ["Retry unavailable", status.retry.reason]);
   }
   if (terminal) {
-    renderCost(io, state);
+    renderCost(io, state, styler);
   }
-  if (humanTime !== undefined) renderHumanTime(io, humanTime);
+  if (humanTime !== undefined) renderHumanTime(io, humanTime, false, styler);
 }
 
 async function confirmCancellation(
@@ -1287,7 +1317,6 @@ async function findingDisposition(
   for (const line of wrapText(finding.fixAcceptance, width, "    ")) {
     io.writeLine(line);
   }
-  io.writeLine();
   return await io.select<FindingAction>(`Disposition for ${finding.id}`, [
     { name: "Accept for fixing", value: "accepted" },
     { name: "Reject", value: "rejected" },
@@ -1709,15 +1738,6 @@ async function checkAuthentication(
 }
 
 /**
- * The launch mark: two point-symmetric corners in block elements, which every
- * terminal paints edge to edge, so the shape survives fonts that leave gaps
- * around other glyphs. It is four columns wide; the second row is indented so
- * the corners meet on the diagonal and the text starts at one column.
- */
-const MARK_TOP = "▄▟";
-const MARK_BOTTOM = "▛▀";
-
-/**
  * The launch header: what is running, where, and against which models. It
  * replaces a thirteen-line model-and-authentication report with one line per
  * phase, because at launch the only authentication fact worth a paragraph is a
@@ -1733,9 +1753,7 @@ function renderHeader(
 ): void {
   const dim = (value: string): string => styler.dim(value);
   io.writeLine();
-  io.writeLine(
-    `${styler.brand(MARK_TOP)}    ${styler.bold("banzai")} ${dim(`v${VERSION}`)}   ${dim("spec-driven run orchestrator")}`
-  );
+  io.writeLine(`${styler.brand(styler.bold("banzai"))} ${dim(`v${VERSION}`)}`);
   const location = [
     path.basename(repoRoot),
     identity?.branch == null ? null : styler.cyan(identity.branch),
@@ -1746,7 +1764,7 @@ function renderHeader(
           `${identity.carriedInChanges} carried-in change${identity.carriedInChanges === 1 ? "" : "s"}`
         )
   ].filter((part) => part !== null);
-  io.writeLine(`  ${styler.brand(MARK_BOTTOM)}  ${location.join(dim(" · "))}`);
+  io.writeLine(location.join(dim(" · ")));
   if (config === null) {
     return;
   }
@@ -1762,6 +1780,10 @@ function renderHeader(
     ...entries.map((entry) => path.basename(entry.executable).length)
   );
   const modelWidth = Math.max(...entries.map((entry) => entry.model.length));
+  const effortWidth = Math.max(...entries.map((entry) => entry.effort.length));
+  const timeoutWidth = Math.max(
+    ...entries.map((entry) => entry.timeout.length)
+  );
   io.writeLine();
   for (const entry of entries) {
     const reason = readiness.get(entry.executable);
@@ -1771,13 +1793,17 @@ function renderHeader(
         : reason === null
           ? styler.green("✓")
           : styler.red("✗");
-    // Trailing whitespace when no gateway reported: end the row at the model.
+    // Leave no trailing gap when no gateway supplied a readiness marker.
+    const readinessCell =
+      marker === ""
+        ? ""
+        : `${" ".repeat(timeoutWidth - entry.timeout.length + 2)}${marker}`;
     io.writeLine(
-      `    ${SHORT_ROLE_LABELS[entry.role].padEnd(roleWidth)}  ${path
+      `  ${SHORT_ROLE_LABELS[entry.role].padEnd(roleWidth)}  ${path
         .basename(entry.executable)
         .padEnd(vendorWidth)} ${styler.bold(entry.model)}${" ".repeat(
         modelWidth - entry.model.length
-      )}  ${dim(`${entry.effort} · ${entry.timeout}`)}  ${marker}`.trimEnd()
+      )}  ${dim(`${entry.effort.padEnd(effortWidth)} · ${entry.timeout}`)}${readinessCell}`
     );
   }
 
@@ -1891,8 +1917,6 @@ async function presentLaunch(
 
   const advisories = modelAdvisories(config);
   if (advisories.length === 0) {
-    io.writeLine();
-    io.writeLine("No configured model needs a known update.");
     return;
   }
 
@@ -1939,52 +1963,136 @@ async function presentLaunch(
   io.writeLine("Updated .banzai/config.json. Review and commit the change.");
 }
 
-function humanTimeMinutes(milliseconds: number | null): string {
-  return milliseconds === null
-    ? "unknown"
-    : `${(milliseconds / 60000).toFixed(1)} min`;
+function humanTimeDuration(milliseconds: number | null): string {
+  if (milliseconds === null) return "Unavailable";
+  if (milliseconds === 0) return "0s";
+  if (milliseconds < 1000) return "<1s";
+  const seconds = Math.round(milliseconds / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) {
+    const remainder = seconds % 60;
+    const minutes = `${Math.floor(seconds / 60)}m`;
+    return remainder === 0 ? minutes : `${minutes} ${remainder}s`;
+  }
+  const minutes = Math.round(milliseconds / 60000);
+  const remainder = minutes % 60;
+  const hours = `${Math.floor(minutes / 60)}h`;
+  return remainder === 0 ? hours : `${hours} ${remainder}m`;
 }
 
-function renderHumanTime(
+function humanTimeEstimateStatus(
+  summary: HumanTimeSummary | undefined
+): "missing" | "saved" | "unavailable" {
+  if (
+    summary?.revision == null ||
+    summary.issues.some((issue) => issue.code === "CONFLICTING_EFFORT")
+  )
+    return "unavailable";
+  return summary.effort === null ? "missing" : "saved";
+}
+
+function humanTimeEstimateValue(summary: HumanTimeSummary): string {
+  if (humanTimeEstimateStatus(summary) === "unavailable") return "Unavailable";
+  if (summary.effort === null) return "Not added · optional";
+  return `${summary.effort.minutes} min · Self-reported · one person`;
+}
+
+function humanTimeResponseSubtotal(summary: HumanTimeSummary): string {
+  if (summary.answeredCount === 0) {
+    return summary.inventory === "unavailable"
+      ? "Unavailable · no recorded response durations"
+      : "No answered responses recorded";
+  }
+  const timed = summary.episodes.filter(
+    (episode) =>
+      episode.kind !== "recovery_wait" &&
+      episode.outcome === "answered" &&
+      !episode.provisional &&
+      episode.durationMs !== null
+  ).length;
+  const responses = summary.answeredCount === 1 ? "response" : "responses";
+  return `${humanTimeDuration(summary.answeredMs)} · ${timed} of ${summary.answeredCount} answered ${responses} timed`;
+}
+
+function writeHumanTimeRow(
+  io: InteractiveIO,
+  label: string,
+  body: string
+): void {
+  for (const line of hangingLines(
+    `  ${label.padEnd(23)} `,
+    body,
+    resolveWidth(io.width)
+  ))
+    io.writeLine(line);
+}
+
+function writeHumanTimeNote(
+  io: InteractiveIO,
+  text: string,
+  styler: Styler
+): void {
+  for (const line of wrapText(text, resolveWidth(io.width), "  "))
+    io.writeLine(styler.dim(line));
+}
+
+const HUMAN_TIME_EXPLANATIONS: Record<HumanTimeIssueCode, string> = {
+  MISSING_EVIDENCE:
+    "Some timing evidence is missing; affected durations are unavailable.",
+  INVALID_EVIDENCE: "Could not read or validate the timing evidence.",
+  UNSUPPORTED_VERSION: "The recording uses an unsupported version.",
+  AMBIGUOUS_ANCHOR: "A decision could not be matched to its recording.",
+  CONFLICTING_ENDPOINTS:
+    "Conflicting timestamps prevent timing some decisions.",
+  CONFLICTING_EFFORT:
+    "Active time estimates conflict; review the evidence before editing.",
+  CAPTURE_GAP: "Recorded waits only · coverage may be incomplete",
+  CLOCK_DISCONTINUITY:
+    "Some durations are unavailable because clock continuity failed.",
+  LIMIT_EXCEEDED:
+    "Timing evidence exceeds supported limits; totals may be unavailable.",
+  UNSAFE_PATH: "Could not access the timing evidence safely.",
+  STALE_REVISION:
+    "The estimate changed before it could be saved. Reopen the time editor before retrying.",
+  WRITE_CONTENDED:
+    "Another timing write is in progress. Reopen the time editor and retry.",
+  WRITE_FAILED:
+    "Reopen the time editor to review current evidence before trying again."
+};
+
+function renderHumanTimeIssues(
   io: InteractiveIO,
   summary: HumanTimeSummary,
-  details = false
+  styler: Styler
 ): void {
-  io.writeLine();
-  io.writeLine("Human time — this run");
-  io.writeLine(
-    `  Gate response elapsed   ${humanTimeMinutes(summary.answeredMs)} across ${summary.answeredCount} answered gates`
-  );
-  io.writeLine(
-    `  Active time estimate    ${summary.effort === null ? "unknown" : `${summary.effort.minutes} min · estimated · as of ${summary.effort.asOf}`}`
-  );
-  io.writeLine(
-    "  Coverage                single-engineer estimate; identity not verified"
-  );
-  io.writeLine(
-    "                          other contributors unrecorded; task total not established"
-  );
-  io.writeLine(
-    `  Gate coverage           ${summary.inventory}; ${summary.openCount} open, ${summary.otherCount} other outcomes, ${summary.unavailableCount} unavailable durations`
-  );
-  io.writeLine(
-    "  Gate elapsed includes passive waiting; it is not active human time."
-  );
-  if (summary.recoveryUnknown)
-    io.writeLine("  Recovery waiting        unknown start or endpoint");
-  for (const episode of summary.episodes.filter(
-    (episode) => episode.kind === "recovery_wait"
-  )) {
-    io.writeLine(
-      `  Recovery waiting        ${humanTimeMinutes(episode.durationMs)} · ${episode.outcome === "recovery_ended" ? "ended" : episode.outcome}${episode.provisional ? " · provisional" : ""}`
-    );
+  const codes = new Set(summary.issues.map((issue) => issue.code));
+  for (const code of codes) {
+    if (code === "CAPTURE_GAP") continue;
+    if (
+      code === "MISSING_EVIDENCE" &&
+      summary.revision === 0 &&
+      summary.inventory === "unavailable"
+    )
+      continue;
+    if (["STALE_REVISION", "WRITE_CONTENDED", "WRITE_FAILED"].includes(code))
+      io.writeLine(styler.red("Time was not saved"));
+    writeLabeled(io, "Timing evidence", HUMAN_TIME_EXPLANATIONS[code]);
   }
-  if (summary.issues.length > 0)
-    io.writeLine(
-      `  Timing issues           ${[...new Set(summary.issues.map((issue) => issue.code))].join(", ")}`
+  if (summary.revision === null && codes.size === 0)
+    writeLabeled(
+      io,
+      "Timing evidence",
+      "Unavailable · the recording could not be read."
     );
-  if (!details) return;
-  const names: Record<HumanTimeSummary["episodes"][number]["kind"], string> = {
+}
+
+function renderHumanTimeEpisode(
+  io: InteractiveIO,
+  episode: HumanTimeEpisode,
+  sequence: number,
+  allAnswered: boolean
+): void {
+  const names: Record<HumanTimeEpisode["kind"], string> = {
     plan_approval: "Plan approval",
     adr_approval: "ADR decision",
     decision_consultation: "Decision consultation",
@@ -1993,14 +2101,202 @@ function renderHumanTime(
     planning_review_triage: "Planning-review triage",
     recovery_wait: "Recovery waiting"
   };
-  for (const [index, episode] of summary.episodes.entries()) {
-    io.writeLine(
-      `  ${index + 1}. ${names[episode.kind]}: ${episode.outcome.replaceAll("_", " ")} · ${humanTimeMinutes(episode.durationMs)}${episode.provisional ? " · provisional" : ""}`
+  const outcomes: Record<HumanTimeEpisode["outcome"], string> = {
+    answered: "answered",
+    open: "open",
+    incomplete: "incomplete evidence",
+    cancelled: "cancelled",
+    superseded: "superseded",
+    recovery_ended: "ended"
+  };
+  const parts = [humanTimeDuration(episode.durationMs)];
+  if (!allAnswered) parts.push(outcomes[episode.outcome]);
+  if (episode.provisional) parts.push("provisional");
+  if (episode.continuity === "unverified")
+    parts.push("clock continuity unverified");
+  if (episode.continuity === "discontinuity") parts.push("clock discontinuity");
+  writeHumanTimeRow(
+    io,
+    `${sequence}. ${names[episode.kind]}`,
+    parts.join(" · ")
+  );
+}
+
+function renderHumanTimeDetails(
+  io: InteractiveIO,
+  summary: HumanTimeSummary,
+  styler: Styler
+): void {
+  io.writeLine(styler.bold("Time details · this run"));
+  writeHumanTimeRow(
+    io,
+    "Active time estimate",
+    humanTimeEstimateValue(summary)
+  );
+  if (summary.effort !== null && humanTimeEstimateStatus(summary) === "saved") {
+    writeHumanTimeRow(io, "Estimate as of", summary.effort.asOf);
+    writeHumanTimeNote(io, "Later work does not update this estimate.", styler);
+  }
+  io.writeLine();
+  io.writeLine(styler.bold("Recorded decisions"));
+  const decisions = summary.episodes.filter(
+    (episode) => episode.kind !== "recovery_wait"
+  );
+  const allAnswered =
+    decisions.length > 0 &&
+    decisions.every(
+      (episode) => episode.outcome === "answered" && !episode.provisional
     );
-    io.writeLine(
-      `     UTC wall clock · ${episode.continuity.replaceAll("_", " ")}`
+  if (allAnswered)
+    writeHumanTimeNote(io, "All recorded decisions are answered.", styler);
+  if (decisions.length === 0)
+    writeHumanTimeNote(
+      io,
+      "No decision episodes recorded; timing coverage is not established.",
+      styler
+    );
+  for (const [index, episode] of summary.episodes.entries()) {
+    if (episode.kind !== "recovery_wait")
+      renderHumanTimeEpisode(io, episode, index + 1, allAnswered);
+  }
+  writeHumanTimeRow(
+    io,
+    "Recorded-response subtotal",
+    humanTimeResponseSubtotal(summary)
+  );
+  writeHumanTimeNote(io, HUMAN_TIME_EXPLANATIONS.CAPTURE_GAP, styler);
+  writeHumanTimeNote(
+    io,
+    `${summary.answeredCount} answered · ${summary.openCount} open · ${summary.otherCount} other outcomes · ${summary.unavailableCount} unavailable decision durations`,
+    styler
+  );
+  writeHumanTimeNote(
+    io,
+    "Open and provisional waits do not count as completed responses.",
+    styler
+  );
+
+  if (
+    summary.recoveryUnknown ||
+    summary.episodes.some((episode) => episode.kind === "recovery_wait")
+  ) {
+    io.writeLine();
+    io.writeLine(styler.bold("Recovery waiting"));
+    for (const [index, episode] of summary.episodes.entries()) {
+      if (episode.kind === "recovery_wait")
+        renderHumanTimeEpisode(io, episode, index + 1, false);
+    }
+    if (summary.recoveryUnknown)
+      writeHumanTimeNote(
+        io,
+        "Recovery start or endpoint is unavailable.",
+        styler
+      );
+    writeHumanTimeNote(
+      io,
+      "Recovery waits are separate from answered responses and their subtotal.",
+      styler
     );
   }
+  renderHumanTimeIssues(io, summary, styler);
+  renderHumanTimeRecordingNotes(io, summary, styler);
+}
+
+function renderHumanTimeRecordingNotes(
+  io: InteractiveIO,
+  summary: HumanTimeSummary,
+  styler: Styler
+): void {
+  io.writeLine();
+  io.writeLine(styler.bold("Recording and attribution"));
+  writeHumanTimeNote(
+    io,
+    "Decision waits include time away; they do not measure active work.",
+    styler
+  );
+  writeHumanTimeNote(io, "Durations use UTC timestamps.", styler);
+  if (
+    summary.episodes.some(
+      (episode) => episode.continuity === "process_correlated"
+    )
+  ) {
+    const allCorrelated = summary.episodes.every(
+      (episode) => episode.continuity === "process_correlated"
+    );
+    writeHumanTimeNote(
+      io,
+      allCorrelated
+        ? "Clock continuity was checked within one recording process."
+        : "Clock continuity was checked within one process for rows without a clock warning.",
+      styler
+    );
+  }
+  writeHumanTimeNote(
+    io,
+    "Clock checks do not verify identity or active work.",
+    styler
+  );
+  writeHumanTimeNote(
+    io,
+    "The active-time value is a self-reported estimate for one person; identity is not verified. Work by other contributors is not represented; a complete task total is not established.",
+    styler
+  );
+  if (summary.issues.length > 0) {
+    io.writeLine();
+    writeHumanTimeNote(io, "Timing diagnostics", styler);
+    for (const code of new Set(summary.issues.map((issue) => issue.code)))
+      writeHumanTimeNote(io, code, styler);
+  }
+}
+
+function renderHumanTime(
+  io: InteractiveIO,
+  summary: HumanTimeSummary,
+  details = false,
+  styler: Styler = createStyler(false)
+): void {
+  io.writeLine();
+  if (details) {
+    renderHumanTimeDetails(io, summary, styler);
+    return;
+  }
+  io.writeLine(styler.bold("Time for this run"));
+  writeHumanTimeRow(
+    io,
+    "Active time estimate",
+    humanTimeEstimateValue(summary)
+  );
+  writeHumanTimeRow(
+    io,
+    "Waiting for decisions",
+    humanTimeResponseSubtotal(summary)
+  );
+  writeHumanTimeNote(
+    io,
+    "Decision waits include time away; they do not measure active work.",
+    styler
+  );
+  writeHumanTimeNote(io, HUMAN_TIME_EXPLANATIONS.CAPTURE_GAP, styler);
+  const coverage = [];
+  if (summary.openCount > 0) coverage.push(`${summary.openCount} open`);
+  if (summary.otherCount > 0)
+    coverage.push(`${summary.otherCount} other outcomes`);
+  if (summary.unavailableCount > 0)
+    coverage.push(`${summary.unavailableCount} unavailable decision durations`);
+  if (coverage.length > 0) writeHumanTimeNote(io, coverage.join(" · "), styler);
+  if (summary.recoveryUnknown)
+    writeHumanTimeRow(
+      io,
+      "Recovery waiting",
+      "Start or endpoint unavailable · see time details"
+    );
+  else if (summary.episodes.some((episode) => episode.kind === "recovery_wait"))
+    writeHumanTimeRow(
+      io,
+      "Recovery waiting",
+      "Recorded separately in time details"
+    );
+  renderHumanTimeIssues(io, summary, styler);
 }
 
 async function editHumanTime(
@@ -2009,22 +2305,44 @@ async function editHumanTime(
   runId: string
 ): Promise<void> {
   const summary = await gateway.readSummary(runId);
-  if (summary.revision === null) {
+  if (
+    summary.revision === null ||
+    humanTimeEstimateStatus(summary) === "unavailable"
+  ) {
     io.writeLine("Time was not saved");
+    writeLabeled(
+      io,
+      "Active time estimate",
+      "Unavailable · review the timing evidence before editing."
+    );
+    renderHumanTimeIssues(io, summary, createStyler(false));
+    writeLabeled(
+      io,
+      "Next step",
+      "Reopen the time editor after checking the current evidence."
+    );
     return;
   }
-  io.writeLine(
-    "Include preparation, approvals, review, active checks, debugging, manual repair and recovery, including work outside the CLI."
+  writeHumanTimeNote(
+    io,
+    "Include preparation, approvals, review, active checks, debugging, manual repair and recovery, including work outside the CLI.",
+    createStyler(false)
   );
-  io.writeLine(
-    "Exclude passive waiting, time assigned to other runs or tasks, and study-recording overhead."
+  writeHumanTimeNote(
+    io,
+    "Exclude passive waiting, time assigned to other runs or tasks, other contributors' work, and study-recording overhead.",
+    createStyler(false)
   );
-  io.writeLine(
-    "This replaces the single-engineer total. Do not include other contributors. Leave blank to keep the previous value."
+  writeHumanTimeNote(
+    io,
+    "This replaces your cumulative active time estimate for this run. Leave blank to keep the previous value; enter 0 to save zero. Decision waits are never used as active effort.",
+    createStyler(false)
   );
   if (summary.effort !== null)
-    io.writeLine(
-      `Previous estimate: ${summary.effort.minutes} min, as of ${summary.effort.asOf}`
+    writeLabeled(
+      io,
+      "Previous estimate",
+      `${summary.effort.minutes} min, as of ${summary.effort.asOf}`
     );
   const validate = (value: string): true | string => {
     if (value.trim() === "") return true;
@@ -2050,23 +2368,33 @@ async function editHumanTime(
     summary.revision,
     Number(value)
   );
-  if (result.status !== "saved" && result.status !== "unchanged") {
+  if ("issue" in result) {
     io.writeLine("Time was not saved");
-    io.writeLine(
-      "Reopen the time editor to review current evidence before trying again."
+    writeHumanTimeNote(
+      io,
+      HUMAN_TIME_EXPLANATIONS[result.issue],
+      createStyler(false)
     );
   }
 }
 
-function withHumanTimeActions(
+function renderMenuSeparator(io: InteractiveIO, styler: Styler): void {
+  io.writeLine();
+  io.writeLine(styler.dim("─".repeat(resolveWidth(io.width))));
+  io.writeLine();
+}
+
+function withRunMenu(
   io: InteractiveIO,
   gateway: HumanTimeGateway | undefined,
-  runId: string
+  runId: string,
+  styler: Styler = createStyler(false)
 ): InteractiveIO {
-  if (gateway === undefined) return io;
   type TimeAction = "human_time_update" | "human_time_details";
   return {
-    ...(io.width === undefined ? {} : { width: io.width }),
+    get width() {
+      return io.width;
+    },
     input: (options) => io.input(options),
     multiSelect: (message, choices, validate) =>
       io.multiSelect(message, choices, validate),
@@ -2076,22 +2404,42 @@ function withHumanTimeActions(
     },
     async select<T>(
       message: string,
-      choices: readonly InteractiveChoice<T>[]
+      choices: readonly InteractiveChoice<T>[],
+      signal?: AbortSignal
     ): Promise<T> {
-      const items: InteractiveChoice<T | TimeAction>[] = [...choices];
-      const exit = items.reduce(
-        (last, choice, index) =>
-          /^(Exit|Pause)\b/.test(choice.name) ? index : last,
-        -1
-      );
-      items.splice(
-        exit < 0 ? items.length : exit,
-        0,
-        { name: "Update my active time", value: "human_time_update" },
-        { name: "Show human-time details", value: "human_time_details" }
-      );
+      if (gateway === undefined) {
+        renderMenuSeparator(io, styler);
+        return await io.select(message, choices, signal);
+      }
       while (true) {
-        const action = await io.select(message, items);
+        let summary: HumanTimeSummary | undefined;
+        try {
+          summary = await gateway.readSummary(runId);
+        } catch (error) {
+          if (isPromptExit(error)) throw error;
+        }
+        const estimateLabels = {
+          missing: "Add active time estimate (optional)",
+          saved: "Edit active time estimate",
+          unavailable: "Review active time estimate (unavailable)"
+        };
+        const items: InteractiveChoice<T | TimeAction>[] = [...choices];
+        const exit = items.reduce(
+          (last, choice, index) =>
+            /^(Exit|Pause)\b/.test(choice.name) ? index : last,
+          -1
+        );
+        items.splice(
+          exit < 0 ? items.length : exit,
+          0,
+          {
+            name: estimateLabels[humanTimeEstimateStatus(summary)],
+            value: "human_time_update"
+          },
+          { name: "View time details", value: "human_time_details" }
+        );
+        renderMenuSeparator(io, styler);
+        const action = await io.select(message, items, signal);
         if (action !== "human_time_update" && action !== "human_time_details")
           return action;
         try {
@@ -2100,11 +2448,18 @@ function withHumanTimeActions(
           renderHumanTime(
             io,
             await gateway.readSummary(runId),
-            action === "human_time_details"
+            action === "human_time_details",
+            styler
           );
         } catch (error) {
           if (isPromptExit(error)) throw error;
-          io.writeLine("Time was not saved");
+          if (action === "human_time_update")
+            io.writeLine("Time was not saved");
+          writeLabeled(
+            io,
+            "Timing evidence",
+            "Unavailable · return to this menu and try again."
+          );
         }
       }
     }
@@ -2122,6 +2477,7 @@ async function interactiveLoop(
     if (status === null) {
       io.writeLine();
       io.writeLine("No active repository-local run.");
+      renderMenuSeparator(io, options.styler ?? createStyler(false));
       const action = await io.select<PrimaryAction>("What next?", [
         { name: "Start a new run", value: "start" },
         { name: "Exit", value: "exit" }
@@ -2142,10 +2498,11 @@ async function interactiveLoop(
       }
     }
     renderStatus(io, status, options.styler ?? createStyler(false), humanTime);
-    const decisionIO = withHumanTimeActions(
+    const decisionIO = withRunMenu(
       io,
       options.humanTime,
-      status.state.runId
+      status.state.runId,
+      options.styler ?? createStyler(false)
     );
     if (
       !(await handleStatus(runner, decisionIO, status, {
