@@ -262,7 +262,9 @@ Plugin and release owners:
   skills load installed sources, and runners deliver applicable bodies inline.
 - `plugins/banzai/lib/`, `scripts/verification.cjs` — shared work-document,
   filesystem, execution-ownership, adoption, review and verification contracts;
-  ordinary document authoring allocates no execution records.
+  ordinary document authoring allocates no execution records. Authorized runner
+  recovery preserves and reclaims exact work claims only for confirmed dead
+  owner PIDs; ordinary execution never reclaims them.
 - `plugins/banzai/hooks/spec-gate.cjs`, `hooks/hooks.json` — host file-tool
   authorization; runner context fails closed and source-read-only reviewers
   receive no write grant. The hook is not a general shell sandbox.
@@ -309,6 +311,9 @@ Plugin and release owners:
   local permission authority. Immutable physical attempts and applicability
   records distinguish passed, failed, interrupted, unavailable and reused
   evidence; release checks require fresh execution.
+  Fresh observations stream ordinary files within a 128 MiB total budget and
+  retain only filesystem identity for protected filenames. Protected inputs
+  disable cross-round reuse; unresolved observations remain unavailable.
 - Strict completion uses `banzai-completion-protocol/v1`: the model returns
   claims and narrative, and the runner validates terminal proof, captures
   inputs, publishes the delimited completion region and receipt, then applies

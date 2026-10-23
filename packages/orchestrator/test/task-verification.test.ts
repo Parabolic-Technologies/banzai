@@ -13,10 +13,14 @@ import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import {
   mkdtemp,
+  chmod,
+  lstat,
   mkdir,
   realpath,
   rm,
   symlink,
+  truncate,
+  utimes,
   writeFile
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -582,10 +586,29 @@ test("real executor publishes private descriptor references and refuses denied l
     );
     await executeTaskVerification(input);
     assert.equal(launches, 1);
-    await writeFile(path.join(root, attempt.stdout.relativePath), "tampered");
+    const unknown = path.join(root, "unknown-input");
+    await symlink("missing-target", unknown);
+    const incomplete = await executeTaskVerification(input);
+    assert.equal(launches, 2);
+    assert.equal(incomplete.attempts[1]?.before.observedDigest, null);
+    assert.equal(incomplete.applicability.dispositions[0]?.kind, "unavailable");
+    assert.match(
+      incomplete.applicability.dispositions[0].reason,
+      /input snapshot is unavailable/
+    );
+    await rm(unknown);
+    await writeFile(path.join(root, ".env.example"), "example-only");
+    const retried = await executeTaskVerification(input);
+    assert.equal(launches, 3);
+    assert.equal(retried.applicability.dispositions[0]?.kind, "passed");
+    assert.deepEqual(retried.attempts.slice(0, 2), incomplete.attempts);
+    assert.equal(retried.attempts[2]?.retryOf, incomplete.attempts[1].id);
+    const latest = retried.attempts[2];
+    assert.ok(latest.stdout);
+    await writeFile(path.join(root, latest.stdout.relativePath), "tampered");
     const applied = await taskVerificationApplicability(
       storage,
-      result.decision,
+      retried.decision,
       await readTaskVerificationAttempts(storage),
       await captureTaskVerificationInputs(storage, [descriptor], null)
     );
@@ -593,6 +616,48 @@ test("real executor publishes private descriptor references and refuses denied l
     assert.equal(applied.dispositions[0]?.kind, "unavailable");
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("fresh observations cover large files and opaque secret metadata without enabling reuse", async () => {
+  const repository = await createTestRepository({ artifactLayout: null });
+  const { root } = repository;
+  const storage = {
+    repoRoot: root,
+    workId: randomUUID(),
+    directory: ".banzai/unused"
+  };
+  const secret = path.join(root, ".env.example");
+  const large = path.join(root, "fixture.sql");
+  try {
+    await writeFile(secret, "not-a-real-secret");
+    await chmod(secret, 0o000);
+    await writeFile(large, Buffer.alloc(17 * 1024 * 1024, "a"));
+    const capture = () => captureTaskVerificationInputs(storage, [check], null);
+    const before = await capture();
+    assert.ok(before.observedDigest);
+    assert.equal(before.complete, false);
+    assert.equal(before.reusable, null);
+    assert.equal((await capture()).observedDigest, before.observedDigest);
+    const times = await lstat(large);
+    await writeFile(large, Buffer.alloc(17 * 1024 * 1024, "b"));
+    await utimes(large, times.atime, times.mtime);
+    const modified = await capture();
+    assert.notEqual(modified.observedDigest, before.observedDigest);
+    await chmod(secret, 0o600);
+    const secretTimes = await lstat(secret);
+    const readable = await capture();
+    await writeFile(secret, "different-content");
+    await utimes(secret, secretTimes.atime, secretTimes.mtime);
+    assert.notEqual((await capture()).observedDigest, readable.observedDigest);
+    await symlink("missing-target", path.join(root, "unknown-link"));
+    assert.equal((await capture()).observedDigest, null);
+    await rm(path.join(root, "unknown-link"));
+    await truncate(large, 129 * 1024 * 1024);
+    assert.equal((await capture()).observedDigest, null);
+  } finally {
+    await chmod(secret, 0o600).catch(() => {});
+    await repository.dispose();
   }
 });
 
@@ -1127,6 +1192,17 @@ test("equivalent evidence reuses only declared explanatory changes and reruns fo
       roundId: randomUUID()
     });
     assert.equal(launches, 3);
+    await writeFile(path.join(root, ".env.example"), "example-only");
+    for (let round = 0; round < 2; round++) {
+      const opaque = await executeTaskVerification({
+        ...input,
+        roundId: randomUUID()
+      });
+      assert.equal(opaque.decision.before.complete, false);
+      assert.equal(opaque.decision.before.reusable?.complete, false);
+      assert.equal(opaque.applicability.dispositions[0]?.kind, "passed");
+      assert.equal(launches, 4 + round);
+    }
   } finally {
     await repository.dispose();
   }

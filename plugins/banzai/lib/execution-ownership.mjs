@@ -1,9 +1,9 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { constants } from "node:fs";
-import { open, unlink } from "node:fs/promises";
+import { lstat, open, unlink } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { canonicalJson, digestBytes, fail, ignored, makeDirectories, publishNew, readBytes, readJson, relativePath, safePath, verifyExecutionIgnore } from "./project-files.mjs";
+import { canonicalJson, digestBytes, fail, ignored, makeDirectories, METADATA_LIMIT, publishNew, readBytes, readJson, relativePath, safePath, verifyExecutionIgnore } from "./project-files.mjs";
 import { inspectBoundWork } from "./work-documents.mjs";
 export { verifyExecutionIgnore } from "./project-files.mjs";
 
@@ -29,6 +29,52 @@ export async function ensureExecutionIgnores(root) {
 }
 
 function claimPath(directory) { return `.banzai/execution-locks/${executionKey(directory)}/claim.json`; }
+
+function requireAbsentOwner(pid) {
+  try { process.kill(pid, 0); }
+  catch (error) {
+    if (error.code === "ESRCH") return;
+    fail("ARTIFACT_OWNERSHIP_CONFLICT", "Execution owner liveness could not be confirmed. Retain the claim for owner inspection.");
+  }
+  fail("ARTIFACT_OWNERSHIP_CONFLICT", `Execution owner is still active (pid ${pid}). Retain its claim.`);
+}
+
+async function recoverExecutionClaim(root, directory, identity) {
+  // Only the repository owner may reclaim: ordinary executors never remove a
+  // conflicting claim, and the runner lock serializes authorized recoveries.
+  const runner = await readJson(root, ".banzai/runner.lock");
+  if (runner?.schemaVersion !== 1 || runner.pid !== process.pid || typeof runner.token !== "string" || !runner.token)
+    fail("ARTIFACT_OWNERSHIP_CONFLICT", "Execution recovery requires the current process to own the repository runner lock.");
+  const relative = claimPath(directory);
+  const bytes = await readBytes(root, relative, { optional: true, limit: METADATA_LIMIT });
+  if (bytes === null) return;
+  await verifyExecutionIgnore(root, relative);
+  const named = await lstat(await safePath(root, relative));
+  let claim;
+  try { claim = JSON.parse(bytes.toString("utf8")); }
+  catch { fail("ARTIFACT_OWNERSHIP_CONFLICT", "Execution claim is malformed. Retain it for owner inspection."); }
+  if (claim === null || typeof claim !== "object" || Array.isArray(claim) ||
+      Object.keys(claim).sort().join(",") !== "directory,identity,pid,token" ||
+      claim.directory !== directory || claim.identity !== identity ||
+      typeof claim.token !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(claim.token) ||
+      !Number.isSafeInteger(claim.pid) || claim.pid <= 0 || claim.pid > 2147483647)
+    fail("ARTIFACT_OWNERSHIP_CONFLICT", "Execution claim does not identify this bound work and a valid owner. Retain it for owner inspection.");
+  requireAbsentOwner(claim.pid);
+  const retained = `${path.posix.dirname(relative)}/recovered-${claim.token}.json`;
+  try { await publishNew(root, retained, bytes); }
+  catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    // Recovery may itself have crashed after preserving the old claim.
+    if (!(await readBytes(root, retained, { limit: METADATA_LIMIT })).equals(bytes))
+      fail("ARTIFACT_OWNERSHIP_CONFLICT", "Retained execution claim conflicts with recovery. Preserve both records for owner inspection.");
+  }
+  requireAbsentOwner(claim.pid);
+  const currentBytes = await readBytes(root, relative, { limit: METADATA_LIMIT });
+  const current = await lstat(await safePath(root, relative));
+  if (current.dev !== named.dev || current.ino !== named.ino || !currentBytes.equals(bytes))
+    fail("ARTIFACT_OWNERSHIP_CONFLICT", "Execution claim changed during recovery. Retain the current owner's claim.");
+  await unlink(path.join(root, relative));
+}
 
 export async function withExecutionOwnership(root, directory, action, identity = null) {
   relativePath(directory);
@@ -67,8 +113,10 @@ export async function hasRunnerWorkOwnership(root, bound) {
   return claim?.token === current.token && claim.identity === current.identity;
 }
 
-export async function withRunnerWorkOwnership(root, bound, action) {
+export async function withRunnerWorkOwnership(root, bound, action, options = {}) {
   if (bound === undefined) fail("ARTIFACT_VERSION_UNSUPPORTED", "Historical runs without a current work binding cannot resume execution. Start new work without migrating their documents.");
   await inspectBoundWork(root, bound);
+  if (options.recoverStale === true && !(await hasRunnerWorkOwnership(root, bound)))
+    await recoverExecutionClaim(root, bound.binding.artifacts.reviewDirectory, bound.sha256);
   return withExecutionOwnership(root, bound.binding.artifacts.reviewDirectory, action, bound.sha256);
 }

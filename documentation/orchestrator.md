@@ -1834,6 +1834,17 @@ negative-default confirmation. Non-TTY callers use the closed
 result through normal completion, verification, independent review, and triage
 gates. It never infers completion from existing source or reports.
 
+If an abrupt exit also left an execution claim, authorized recovery can reclaim
+it under the repository runner lock. The claim must name the exact bound work
+and a valid local PID that the OS confirms is absent. Banzai preserves its
+original bytes as `recovered-<token>.json` in the same ignored execution-lock
+directory and checks the claim again before removal. Live or reused PIDs,
+uncertain process checks, malformed or mismatched records, unsafe paths and
+changing ownership remain blocked for inspection. Status and ordinary execution
+do not reclaim claims. A saved, still-valid recovery authorization can continue
+through `resume`; recovery revalidates its workspace under work ownership before
+starting a model.
+
 A completed strict fix result is separately eligible only when it is the unique
 current canonical source, has `outcome: blocked`, proves a non-empty proper
 subset of accepted findings resolved, and records at least one question or
@@ -1989,6 +2000,16 @@ start/finish records link exact descriptors and observed inputs to current
 applicability. Reuse requires explicit complete dependency declarations and a
 compatible direct successful origin. Missing proof runs fresh; required failures
 block completion. Release gates always run fresh.
+
+Fresh task checks do not require a complete dependency declaration for reuse.
+Ordinary input files are streamed within a 128 MiB aggregate observation budget.
+Secret-like filenames are observed through filesystem metadata only; Banzai
+does not read or hash their values. Their presence disables cross-round reuse,
+while unchanged metadata and ordinary file content permit fresh results in the
+current round. Symlinks, unreadable files, capture races and exhausted budgets
+still prevent applicability. A successful command with an unavailable snapshot
+is reported explicitly; after correcting the cause, use verification retry.
+Earlier attempts remain immutable and implementation is not replayed.
 
 Review snapshot 7 and rendered artifact 8 freeze task checks and completion
 publication. Review-result 2 is unchanged. The independent reviewer assesses

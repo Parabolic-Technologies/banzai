@@ -71,8 +71,14 @@ workspace and publication validation. Other work documents stay observed.
 Ordinary Markdown editing has no executor claim protocol. Real verification and
 runner mutation retain exclusive execution ownership. Stale ownership requires
 inspection of the original process and an explicit owner recovery decision;
-elapsed time alone never authorizes reclamation. New executors refuse historical
-binding semantics without rewriting old evidence.
+elapsed time alone never authorizes reclamation. Authorized runner recovery can
+reclaim a claim for its exact bound work while holding repository ownership,
+only when the OS confirms its valid owner PID is absent. It preserves the
+original bytes under the same ignored execution-lock directory before removal
+and rechecks identity and liveness. Live or uncertain owners, malformed claims,
+changed claims and unsafe paths remain blocked. Ordinary execution and
+standalone verification never reclaim work claims. New executors refuse
+historical binding semantics without rewriting old evidence.
 
 Source checks accept the fixed work subtree without per-report inventory entries,
 subject to safe-path and content checks. Source-project documents are excluded

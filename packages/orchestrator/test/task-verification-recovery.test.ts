@@ -130,6 +130,41 @@ async function fixture(mode: Scenario) {
   const runner = new WorkflowRunner(repository.root, adapters);
   return { repository, runner, phases: () => phases };
 }
+test("retry with opaque and large inputs does not replay implementation", async () => {
+  const f = await fixture("failed");
+  try {
+    await writeFile(
+      path.join(f.repository.root, ".env.example"),
+      "example-only"
+    );
+    await writeFile(
+      path.join(f.repository.root, "dump.sql"),
+      Buffer.alloc(17 * 1024 * 1024, "x")
+    );
+    const blocked = await f.runner.start({
+      slug: "partial-snapshot",
+      request: "Verify local behavior."
+    });
+    assert.equal(blocked.status, "blocked");
+    const oldAttempt = blocked.taskVerification?.attempts[0];
+    assert.ok(oldAttempt, blocked.blockReason ?? undefined);
+    assert.ok(oldAttempt.before.observedDigest);
+    assert.equal(oldAttempt.status, "failed");
+    const done = await f.runner.retry();
+    assert.equal(done.status, "done", done.blockReason ?? undefined);
+    assert.equal(f.phases(), 1);
+    assert.deepEqual(done.taskVerification?.attempts[0], oldAttempt);
+    assert.equal(done.taskVerification.attempts[1]?.retryOf, oldAttempt.id);
+    assert.ok(done.taskVerification.attempts[1].before.observedDigest);
+    assert.equal(
+      done.taskVerification.applicability.dispositions[0]?.kind,
+      "passed"
+    );
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
 for (const mode of ["timeout", "interrupted", "prelaunch"] as const) {
   test(`task verification retries ${mode} without replaying implementation`, async () => {
     const f = await fixture(mode);

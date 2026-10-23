@@ -16,6 +16,12 @@ is a navigational reference and is updated with the module it describes.
   `isHistoricalWork` is the shared predicate status, home and doctor use for it.
   `lib/execution-ownership.mjs` coordinates actual runner/verification execution
   by the selected document directory; ordinary Markdown editing has no claims.
+  Its recovery-only option requires repository ownership, exact bound-work
+  identity and an OS `ESRCH` result for a valid owner PID. It retains the old
+  claim with create-only publication, rechecks liveness, bytes and inode, then
+  uses normal exclusive acquisition. The runner validates current recovery
+  authority before reclamation and again under work ownership before execution.
+  Normal runner phases and standalone verification cannot reclaim stale claims.
 - `project-files.ts` — typed projection of the shared contained-filesystem owner,
   preserving bounded regular reads, ancestor-symlink rejection and atomic/create-only
   writes. Its shared Git exclusion check protects concrete private evidence leaves
@@ -1076,6 +1082,14 @@ generated output is ignored. A completed check that changes observed files stops
 the round and names up to ten changed paths with the ignore remedy; input drift
 between selection and launch names its paths the same way. The entry lists stay
 in process memory and the persisted observation format is unchanged.
+Ordinary files are streamed within a 128 MiB aggregate budget, without a 16 MiB
+per-file cutoff. Protected filenames contribute filesystem identity metadata
+only (device, inode, mode, size, modification and change times); their contents
+are never read or hashed. These observations support fresh checks in the current
+round but disable cross-round reuse even with an opt-in policy. Symlinks,
+unreadable files, unstable captures and exhausted budgets remain unavailable.
+Successful commands with unavailable snapshots retain their physical success
+and receive an explicit snapshot diagnostic; retry creates fresh evidence.
 Lite checks derive authority from the user request and persisted workflow
 selection, with inherited-local permissions. Optional schema-4 project policy
 constrains checks; metadata never grants execution permission.

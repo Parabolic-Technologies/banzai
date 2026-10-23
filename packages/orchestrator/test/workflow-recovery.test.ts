@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
+import { executionKey } from "../../../plugins/banzai/lib/execution-ownership.mjs";
 import { BanzaiError, ProcessExitError } from "../src/errors.js";
 import { parsePublishedCompletionRegion } from "../src/plan-task-completion.js";
 import { transitionState } from "../src/state-machine.js";
@@ -1024,7 +1028,7 @@ test("transport-failed mutable implementation offers explicit recovery without w
   }
 });
 
-test("explicit recovery preserves the interrupted attempt and creates one linked implementation", async () => {
+test("explicit recovery reclaims a dead executor claim and creates one linked implementation", async () => {
   const repository = await createTestRepository();
   try {
     const adapters = new FakeAdapters();
@@ -1056,6 +1060,28 @@ test("explicit recovery preserves the interrupted attempt and creates one linked
     delete sourceRecord.completionDiagnostic;
     await runner.store.writeRunAttempt(blocked.runId, sourceRecord);
 
+    const exited = spawn(process.execPath, ["-e", "process.exit(0)"], {
+      stdio: "ignore"
+    });
+    await once(exited, "exit");
+    assert.ok(exited.pid);
+    assert.ok(blocked.artifactBinding);
+    const directory = blocked.artifactBinding.binding.artifacts.reviewDirectory;
+    const claimPath = path.join(
+      repository.root,
+      ".banzai/execution-locks",
+      executionKey(directory),
+      "claim.json"
+    );
+    const claim = {
+      token: randomUUID(),
+      directory,
+      identity: blocked.artifactBinding.sha256,
+      pid: exited.pid
+    };
+    const claimBytes = `${JSON.stringify(claim)}\n`;
+    await writeFile(claimPath, claimBytes);
+
     const status = await runner.status();
     assert.equal(status.retry.eligible, false);
     assert.equal(status.recovery.eligible, true, status.recovery.reason);
@@ -1077,9 +1103,18 @@ test("explicit recovery preserves the interrupted attempt and creates one linked
     assert.equal(authorized.recovery?.sourceAttemptId, sourceAttempt.id);
     assert.equal(authorized.recovery.recoveryAttemptId, null);
     assert.equal(authorized.recovery.stage, "authorized");
+    assert.equal(await readFile(claimPath, "utf8"), claimBytes);
 
     const done = await runner.resume();
     assert.equal(done.status, "done", done.blockReason ?? "");
+    await assert.rejects(readFile(claimPath), { code: "ENOENT" });
+    assert.equal(
+      await readFile(
+        path.join(path.dirname(claimPath), `recovered-${claim.token}.json`),
+        "utf8"
+      ),
+      claimBytes
+    );
     const recoveryAttemptId = done.recovery?.recoveryAttemptId;
     assert.ok(recoveryAttemptId);
     assert.equal(done.recovery?.stage, "attempt_started");
@@ -1117,6 +1152,77 @@ test("explicit recovery preserves the interrupted attempt and creates one linked
   } finally {
     await repository.dispose();
   }
+});
+
+test("execution claims survive missing recovery authority, drift and live executors", async (t) => {
+  for (const reason of [
+    "no authorization",
+    "workspace drift",
+    "live model",
+    "live claim owner"
+  ])
+    await t.test(reason, async () => {
+      const f = await authorizedImplementationRecoveryFixture();
+      try {
+        const state = await f.runner.store.readState(f.authorized.runId);
+        assert.ok(state.artifactBinding);
+        const directory =
+          state.artifactBinding.binding.artifacts.reviewDirectory;
+        const claimPath = path.join(
+          f.repository.root,
+          ".banzai/execution-locks",
+          executionKey(directory),
+          "claim.json"
+        );
+        const bytes = JSON.stringify({
+          token: randomUUID(),
+          directory,
+          identity: state.artifactBinding.sha256,
+          pid: reason === "live claim owner" ? process.pid : 2147483647
+        });
+        await writeFile(claimPath, bytes);
+        if (reason === "workspace drift")
+          await writeFile(
+            path.join(f.repository.root, "changed.txt"),
+            "drift\n"
+          );
+        if (reason === "no authorization") state.recovery = null;
+        if (reason === "live model")
+          state.activeProcess = {
+            pid: process.pid,
+            kind: "implementation",
+            startedAt: new Date().toISOString()
+          };
+        await f.runner.store.writeState(state);
+        const before = await f.runner.store.readRunAttempt(
+          state.runId,
+          f.sourceAttempt
+        );
+        const calls = f.adapters.phasePrompts.length;
+        await f.runner.status();
+        assert.equal(await readFile(claimPath, "utf8"), bytes);
+        if (reason === "no authorization")
+          assert.equal((await f.runner.resume()).status, "blocked");
+        else
+          await assert.rejects(f.runner.resume(), {
+            code:
+              reason === "live claim owner"
+                ? "ARTIFACT_OWNERSHIP_CONFLICT"
+                : "RECOVERY_STALE"
+          });
+        assert.equal(await readFile(claimPath, "utf8"), bytes);
+        assert.equal(f.adapters.phasePrompts.length, calls);
+        assert.deepEqual(
+          await f.runner.store.readRunAttempt(state.runId, f.sourceAttempt),
+          before
+        );
+        assert.deepEqual(await readdir(path.dirname(claimPath)), [
+          "claim.json"
+        ]);
+      } finally {
+        await f.repository.dispose();
+      }
+    });
 });
 
 test("recovery resumes from a persisted interrupted-source stage and reuses one deterministic attempt leaf", async () => {
