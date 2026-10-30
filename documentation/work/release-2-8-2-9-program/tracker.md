@@ -1,0 +1,139 @@
+# banzai 2.8–2.9 program tracker
+
+Status: active · Stage 1 not started · Updated 2026-10-30
+
+This file is the only living record of the program. The plan itself is the
+frozen [brief.md](brief.md); never edit it. Record anything that departs from
+the brief under [Deviations from the brief](#deviations-from-the-brief).
+
+## How to use this tracker
+
+1. Start every session here: read this file, then the brief section of the
+   work package (WP) you are about to touch, then the reading list in the
+   brief's "How to work with this brief".
+2. One WP, one change set, one `documentation/work/<slug>/` directory with
+   `requirements.md`, `plan.md` and a report. Turn the brief's "Done when"
+   items into numbered requirements and link the brief section.
+3. A WP is done only when its report is written and its row below is updated.
+   The owner commits by hand; start the next WP only after that commit, so
+   two change sets never mix in the working tree. Parallel WPs need separate
+   worktrees.
+4. Reserve an ADR ID in [ADR reservations](#adr-reservations) when its draft
+   starts, and check `documentation/decisions/` for a collision right before
+   writing the file. No code relies on a `Proposed` ADR.
+5. After the last WP of a stage, write the gate report in this directory and
+   stop for the owner.
+
+Status values: `not started` · `ADR draft` · `ADR proposed` · `ADR accepted` ·
+`in progress` · `report ready` · `committed`.
+
+## Baseline
+
+- The brief was written against `0145686` (main, merge of PR 22, 2.7.4,
+  2026-10-23). On 2026-10-30 `dev` at `258efe3` has the identical tree, so the
+  brief's file and symbol references apply as written.
+- Next free ADR ID on 2026-10-30: 0057.
+- ADRs pinned in `packages/orchestrator/phase-guidance-current.json` (checked
+  2026-10-30, matches the brief): 0043, 0044, 0045, 0047, 0049, 0050, 0054, 0055. Any lifecycle change to them needs the before/after allow-list entry in
+  `packages/orchestrator/scripts/phase-resources-build.mjs`. This affects WP2
+  (amends 0045) and WP9 (amends 0049, affects 0047).
+
+## Stage 1 (2.8): daily friction
+
+| WP  | Package                                        | Depends on      | ADR                                    | Work directory                         | Status      | Commit | Notes                                         |
+| --- | ---------------------------------------------- | --------------- | -------------------------------------- | -------------------------------------- | ----------- | ------ | --------------------------------------------- |
+| WP1 | Verification failure details and retry warning | —               | none                                   | `wp01-verification-failure-details`    | not started |        | Builds the shared phpcs fixture               |
+| WP2 | Run every required check in one pass           | —               | new, amends 0045 (pinned)              | `wp02-full-verification-pass`          | not started |        | Draft ADR early                               |
+| WP3 | Verification commands at the plan gate         | —               | none; cite 0049 for instruction change | `wp03-plan-gate-verification-commands` | not started |        | Golden prompt digests change                  |
+| WP4 | Re-check human edits at the plan gate          | —               | new, amends 0051                       | `wp04-plan-gate-edit-recheck`          | not started |        | Draft ADR early; control protocol revision    |
+| WP5 | Install guide, plugin scope, doctor hint       | —               | none; stay within 0008                 | `wp05-install-guide-plugin-scope`      | not started |        | Doctor JSON contract version bump             |
+| WP6 | Local model override                           | —               | check eligibility; short ADR likely    | `wp06-local-model-override`            | not started |        | Do before WP7                                 |
+| WP7 | Claude as the default reviewer, with isolation | WP6 recommended | new, amends 0042 §7 and 0037           | `wp07-claude-default-reviewer`         | not started |        | Draft ADR early; live scenario needs go-ahead |
+| WP8 | Stable Claude phases                           | —               | check 0020                             | `wp08-stable-claude-phases`            | not started |        | Live scenario needs go-ahead                  |
+
+### Gate 1
+
+Report: `gate-1-report.md` (not written).
+
+- [ ] phpcs fixture: the command is visible at the plan gate; the blocked
+      summary shows argv, exit code, stderr tail and log paths; every required
+      check ran; Retry warns about a deterministic failure.
+- [ ] A prose edit to plan.md is re-checked and approved without manual
+      hashing (WP4, after its ADR is accepted).
+- [ ] A Claude-only developer installs at local scope from the terminal,
+      leaves `.banzai/config.json` untouched through `config.local.json`, and
+      gets Claude as the default reviewer.
+- [ ] `npm run verify` is green, and the owner-authorized live scenarios pass
+      on Claude Code 2.1.290 and on the current release.
+
+## Stage 2 (2.9): no lost runs
+
+Starts only after the owner closes Gate 1.
+
+| WP   | Package                                                  | Depends on    | ADR                                                         | Work directory                         | Status      | Commit | Notes                        |
+| ---- | -------------------------------------------------------- | ------------- | ----------------------------------------------------------- | -------------------------------------- | ----------- | ------ | ---------------------------- |
+| WP9  | Correct a verification command without re-implementation | WP1, WP3      | new, amends 0049 §1, §2, §4 (pinned); affects 0047 (pinned) | `wp09-verification-command-correction` | not started |        | Control protocol revision    |
+| WP10 | Baseline check run before implementation                 | WP1, WP3, WP9 | new                                                         | `wp10-baseline-check-run`              | not started |        | Control protocol revision    |
+| WP11 | Workflow choice: explanation and override                | —             | new, amends 0001                                            | `wp11-workflow-choice-override`        | not started |        | Template text changes        |
+| WP12 | Slim AGENTS.md template, small-project mode              | —             | new, amends 0036 and 0040                                   | `wp12-slim-agents-template`            | not started |        | Release layout check changes |
+| WP13 | Subscription limits without manual retry                 | WP8           | check 0021                                                  | `wp13-subscription-limit-retry`        | not started |        | Live scenario needs go-ahead |
+| WP14 | Permission denials as a remediation list                 | WP8           | none expected                                               | `wp14-permission-denial-list`          | not started |        | Live scenario needs go-ahead |
+
+### Gate 2
+
+Report: `gate-2-report.md` (not written).
+
+- [ ] On the phpcs fixture, the wrong mandatory command is corrected through
+      WP9 and verification passes without re-implementation; the audit trail
+      shows both approvals and every attempt.
+- [ ] The baseline run (WP10) catches the wrong command before implementation
+      starts.
+- [ ] One real project run by the owner confirms the WP9 route.
+- [ ] `npm run verify` is green, and WP13 and WP14 pass the owner-authorized
+      live probe.
+
+## Stage 3: measure
+
+Planned only after Gate 2; each package needs its own requirements first.
+WP15 eval suite, WP16 native attempt limits, WP17 builder sandbox, WP18 full
+context accounting.
+
+## ADR reservations
+
+| ID  | WP  | Title | Status |
+| --- | --- | ----- | ------ |
+
+None reserved yet.
+
+## Shared fixtures
+
+- phpcs case (a required lint check with a wrong config flag, plus one more
+  required and one supplemental check): planned in WP1; reused by WP2, WP3,
+  WP9, WP10 and both gates. Location to be recorded here.
+
+## Owner decisions
+
+- 2026-10-30: the three decisions in the brief's "Decisions already made"
+  (developer value first; ADR changes welcome; Claude replaces Codex as the
+  default reviewer).
+- 2026-10-30: the program is tracked in this directory. The brief is stored
+  with colleague names replaced by roles and the private research link
+  removed.
+
+## Open questions left to the owner by the brief
+
+Settle each in the named WP's ADR or requirements, then record the answer
+under Owner decisions.
+
+- WP1: add a stable, documented `banzai status --json` projection of failed
+  checks, or keep the raw `taskVerification` state only?
+- WP7: reviewer effort (brief default: the planning effort); do builders keep
+  the `Skill` tool?
+- WP10: default for the baseline run (proposal: on for short checks, opt-in
+  for long suites).
+- WP11: add a Continue or Switch pause after workflow selection (a sixth
+  decision point)?
+
+## Deviations from the brief
+
+None yet.
