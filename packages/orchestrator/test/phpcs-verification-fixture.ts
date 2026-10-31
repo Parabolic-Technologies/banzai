@@ -90,10 +90,10 @@ export const phpcsSupplementalChecks = (): TaskVerificationDescriptor[] => [
 ];
 
 /**
- * A strict run blocked in task verification by the wrong lint command, with
- * the implementation completed and the plan approved.
+ * A strict run waiting for plan approval, with the phpcs tooling committed and
+ * the planned obligations written into plan.md.
  */
-export async function phpcsVerificationFixture(
+export async function phpcsPlanGateFixture(
   options: { lintArgs?: readonly string[] } = {}
 ) {
   const repository = await createTestRepository();
@@ -117,14 +117,30 @@ export async function phpcsVerificationFixture(
     adapters.strictVerificationCandidates = phpcsSupplementalChecks();
     adapters.reviewResults.push(passingReview());
     const runner = new WorkflowRunner(repository.root, adapters);
-    await runner.start({
+    const state = await runner.start({
       slug: "php-module",
       request: "Add the PHP module with schema catalog entries."
     });
-    const state = await runner.approvePlan("human");
     return { repository, adapters, runner, state };
   } catch (error) {
     await repository.dispose();
+    throw error;
+  }
+}
+
+/**
+ * A strict run blocked in task verification by the wrong lint command, with
+ * the implementation completed and the plan approved.
+ */
+export async function phpcsVerificationFixture(
+  options: { lintArgs?: readonly string[] } = {}
+) {
+  const gate = await phpcsPlanGateFixture(options);
+  try {
+    const state = await gate.runner.approvePlan("human");
+    return { ...gate, state };
+  } catch (error) {
+    await gate.repository.dispose();
     throw error;
   }
 }

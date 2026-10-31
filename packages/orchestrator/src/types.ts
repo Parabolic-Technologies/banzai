@@ -2,6 +2,7 @@ import type { ReviewConfigurationSetup } from "./configuration-review.js";
 import type {
   TaskVerificationPublication,
   TaskVerificationCandidates,
+  TaskVerificationDescriptor,
   TaskVerificationPolicy,
   VerificationPolicy,
   ReviewVerificationEvidence,
@@ -1246,6 +1247,21 @@ export interface VerificationCommand {
   args: string[];
   timeoutMs: number;
 }
+
+/**
+ * The checks a plan under approval binds, in verification order, or the error
+ * approval would raise for its inventory. A read-only plan gate projection.
+ */
+export type PlanVerificationInventory =
+  | {
+      checks: {
+        descriptor: TaskVerificationDescriptor;
+        /** `policy` marks a project-policy check the plan does not restate. */
+        origin: "plan" | "policy";
+      }[];
+      absenceReason: string | null;
+    }
+  | { error: string };
 
 export type VerificationProjectType =
   | "repository"

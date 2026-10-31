@@ -33,7 +33,8 @@ import type {
   ClosedPlanningReviewEpisode,
   PlanningReviewResult,
   PlanningReviewAnalysis,
-  PlanningReviewTriageAnswer
+  PlanningReviewTriageAnswer,
+  PlanVerificationInventory
 } from "./types.js";
 import { freezeReviewConfiguration } from "./configuration-review.js";
 import {
@@ -4116,6 +4117,48 @@ export class WorkflowRunner {
     return planHumanPrerequisites(
       await readFile(path.join(this.repoRoot, state.planArtifacts.plan), "utf8")
     );
+  }
+
+  /**
+   * The mandatory checks the plan under approval binds, selected with project
+   * policy exactly as verification will select them. Read-only; the human
+   * renderers call it at the plan gate only.
+   */
+  async planVerificationInventory(
+    state: RunState
+  ): Promise<PlanVerificationInventory | null> {
+    if (
+      state.status !== "needs_plan_approval" ||
+      state.verificationMode !== "task" ||
+      (state.workflowSelection?.workflow ?? "strict") !== "strict" ||
+      !state.planArtifacts?.plan
+    )
+      return null;
+    try {
+      const obligations = parseTaskVerificationObligations(
+        await readFile(
+          path.join(this.repoRoot, state.planArtifacts.plan),
+          "utf8"
+        )
+      );
+      const planned = new Set(obligations.checks.map((check) => check.id));
+      const selection = selectTaskVerification({
+        required: obligations.checks,
+        candidates: null,
+        policy: taskVerificationPolicy(await loadConfig(this.repoRoot))
+      });
+      return {
+        checks: selection.checks.map(({ descriptor }) => ({
+          descriptor,
+          origin: planned.has(descriptor.id) ? "plan" : "policy"
+        })),
+        absenceReason: selection.checks.length
+          ? null
+          : obligations.absenceReason
+      };
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   async answerConfigurationPrerequisite(

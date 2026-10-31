@@ -129,6 +129,14 @@ reviews requirement coverage, permitted future tooling, descriptors and executio
 scope before approving the complete bundle. Discovery is information, not
 execution permission, and no configured profile catalogue is required.
 
+Build each check from the command the project documents for it in the
+manifest, `composer.json` or `package.json` scripts, a Makefile or CI
+configuration, with that command's configuration flags and arguments. Prefer a
+discovered script entry point such as `composer run-script <name>` or
+`npm run <name>` over restating its body, and cite the documenting file in the
+check's `sources`. When the project documents no command for a needed check,
+derive it from the tool's own configuration and say so in the plan.
+
 Mandatory checks cannot be removed, replaced or weakened by phase candidates.
 Permitted supplemental checks remain separate from approved bytes. A changed
 mandatory obligation follows the existing plan approval path. Equivalent evidence

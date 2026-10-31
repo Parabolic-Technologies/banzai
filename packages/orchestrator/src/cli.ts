@@ -6,6 +6,7 @@ import {
 } from "./verification-cli.js";
 import {
   configurationDecisionLines,
+  planVerificationLines,
   taskVerificationStatusLines
 } from "./verification-ui.js";
 import {
@@ -104,6 +105,7 @@ import {
 import { TerminalAttention } from "./terminal-attention.js";
 import type {
   OrchestratorConfig,
+  PlanVerificationInventory,
   ReviewFinding,
   RunState,
   VendorAdapters
@@ -536,10 +538,26 @@ function parsePlanningReviewArgs(args: readonly string[]): {
   };
 }
 
+/** Status facts that need I/O beyond run state; only human output loads them. */
+interface StatusDetails {
+  outputTails?: VerificationOutputTails;
+  planVerification?: PlanVerificationInventory | null;
+}
+
+async function statusDetails(
+  runner: WorkflowRunner,
+  state: RunState
+): Promise<StatusDetails> {
+  return {
+    outputTails: await readVerificationOutputTails(runner.repoRoot, state),
+    planVerification: await runner.planVerificationInventory(state)
+  };
+}
+
 function printState(
   status: WorkflowStatus,
   metrics = false,
-  outputTails?: VerificationOutputTails
+  { outputTails, planVerification }: StatusDetails = {}
 ): void {
   const { state, nextAction } = status;
   console.log(`Run: ${state.runId}`);
@@ -570,6 +588,9 @@ function printState(
   }
   for (const line of taskVerificationStatusLines(state, outputTails))
     console.log(line);
+  if (planVerification != null)
+    for (const line of planVerificationLines(planVerification))
+      console.log(line);
   if (state.blockReason !== null) {
     printLabeled("Blocked", state.blockReason);
   }
@@ -704,11 +725,7 @@ async function printRunnerState(
   metrics: boolean
 ): Promise<void> {
   const status = await runner.status();
-  printState(
-    status,
-    metrics,
-    await readVerificationOutputTails(runner.repoRoot, status.state)
-  );
+  printState(status, metrics, await statusDetails(runner, status.state));
 }
 
 async function activeRunState(
@@ -1322,11 +1339,7 @@ async function main(): Promise<void> {
     if (args.includes("--json")) {
       console.log(JSON.stringify(status, null, 2));
     } else {
-      printState(
-        status,
-        metrics,
-        await readVerificationOutputTails(runner.repoRoot, status.state)
-      );
+      printState(status, metrics, await statusDetails(runner, status.state));
       if (status.planApprovalValid !== null) {
         console.log(
           `Plan approval: ${status.planApprovalValid ? "valid" : "STALE"}`

@@ -37,6 +37,15 @@ Strict checks belong to the approved plan; lite checks use the delegated task an
 current process permissions. Optional project policy may add requirements and
 execution limits. The local runner does not inherit the model CLI sandbox.
 
+At the plan gate, the interactive session, `banzai status` and the state printed
+after a command list **Verification that gates completion**: every check the
+plan binds, then any check the project policy requires, with its requirement
+references, working directory, timeout, the task that creates its tooling, and
+the exact command on its own line. An inventory that approval would reject shows
+that error instead. Planners build each check from the project's documented
+command with its configuration flags and prefer a discovered script entry point
+such as `composer run-script <name>` or `npm run <name>`.
+
 Actual checks and their outcomes are retained as runner evidence. Missing unrelated
 scripts are not requirements; failed or absent mandatory checks prevent completion.
 Strict independent review assesses meaningful test coverage and weakening of
@@ -1023,8 +1032,8 @@ with the recorded answers. A strict route invalidates previous plan approval,
 returns to planning, and requires approval of the revised artifact bundle
 before code execution resumes.
 
-The interface shows artifact paths, findings, blocked reasons, and retry
-eligibility before asking for decisions. `Ctrl+C` while a prompt is open exits
+The interface shows artifact paths, the checks a plan binds, findings, blocked
+reasons, and retry eligibility before asking for decisions. `Ctrl+C` while a prompt is open exits
 the interface without changing the run. `banzai interactive` is an explicit
 alias.
 

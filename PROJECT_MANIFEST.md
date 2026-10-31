@@ -221,7 +221,8 @@ behavior and edge cases; source and tests own the executable evidence.
   legacy profile operations do not gate new tasks.
 - `verification-outcome.ts`, `verification-output.ts` — failed-check outcome
   labels and bounded, redacted log tails for human status; `status --json` and
-  agent control carry no log content.
+  agent control carry no log content. Human status at the plan gate also lists
+  the plan's mandatory checks with argv, cwd and timeout.
 - `validation.ts`, `contracts.ts`, `types.ts`, `errors.ts` — runtime decoding,
   schema parity, shared types and stable failures; `types.ts` has no runtime
   imports.

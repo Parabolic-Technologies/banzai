@@ -1,5 +1,9 @@
 import type { InteractiveIO } from "./interactive.js";
-import type { RunState, VerificationCommand } from "./types.js";
+import type {
+  PlanVerificationInventory,
+  RunState,
+  VerificationCommand
+} from "./types.js";
 import type {
   TaskVerificationAttempt,
   TaskVerificationDescriptor
@@ -86,7 +90,7 @@ function failureDetailLines(
   ] as const;
   return [
     ...[
-      `Command: ${[descriptor.command, ...descriptor.args].map(shellWord).join(" ")}`,
+      `Command: ${commandText(descriptor)}`,
       `Directory: ${descriptor.cwd}`,
       `Result: ${attemptOutcomeText(attempt, descriptor.timeoutMs)}`,
       `Details: ${facts.join(" · ")}`
@@ -112,6 +116,47 @@ function outputLines(
     // Tail lines are already redacted, stripped and escaped by their reader.
     ...tail.lines.map((line) => `      | ${line}`)
   ];
+}
+
+/**
+ * The plan gate's view of the checks approval binds. Every value comes from
+ * model-authored plan bytes; command lines sit at detail indent so renderers
+ * keep them whole and copyable.
+ */
+export function planVerificationLines(
+  inventory: PlanVerificationInventory
+): string[] {
+  const heading = "Verification that gates completion:";
+  if ("error" in inventory)
+    return [heading, escapeTerminalText(`  Unavailable: ${inventory.error}`)];
+  if (inventory.checks.length === 0)
+    return [
+      heading,
+      escapeTerminalText(
+        `  None: ${inventory.absenceReason ?? "the plan records no rationale."}`
+      )
+    ];
+  return [
+    heading,
+    ...inventory.checks.flatMap(({ descriptor, origin }) => {
+      const facts = [
+        `${descriptor.id} (${origin === "plan" ? "required" : "required by project policy"}) for ${descriptor.requirementRefs.join(", ")}`,
+        `directory ${descriptor.cwd}`,
+        `timeout ${formatDuration(descriptor.timeoutMs)}`,
+        ...(descriptor.materialization === null
+          ? []
+          : [`tooling created by ${descriptor.materialization.taskRef}`])
+      ];
+      return [
+        escapeTerminalText(`  ${facts.join(" · ")}`),
+        escapeTerminalText(`    Command: ${commandText(descriptor)}`)
+      ];
+    })
+  ];
+}
+
+function commandText(descriptor: TaskVerificationDescriptor): string {
+  return [descriptor.command, ...descriptor.args].map(shellWord).join(" ");
 }
 
 /** Quotes an argv word only when a POSIX shell would split or expand it. */

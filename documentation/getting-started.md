@@ -246,6 +246,9 @@ does not guarantee a particular route.
 | `strict`                 | Requirements and planning, any required architecture or clarification decisions, your plan approval, implementation, verification, and independent review. |
 
 For strict work, inspect the plan and its required checks before approving it.
+The plan gate and `banzai status` list each check's exact command, directory
+and timeout under **Verification that gates completion**; compare them with the
+commands your project documents, such as a missing `--config` flag.
 You can request rework or independent planning review; revisions return for
 approval. After implementation review, accept, reject, or defer each finding.
 Accepted findings authorize scoped fixes. Rejected and deferred findings stay

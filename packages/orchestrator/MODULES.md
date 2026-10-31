@@ -1087,6 +1087,13 @@ capture. The interactive blocked menu alone calls it, to label a retry that is
 expected to fail again; any read failure yields no outlook, and the outlook
 never gates retry.
 
+At `needs_plan_approval`, `WorkflowRunner.planVerificationInventory(state)`
+parses the plan's v2 inventory and merges project policy through
+`selectTaskVerification`, the path verification takes, and returns the ordered
+checks or the error approval would raise. Only the CLI and interactive
+renderers call it; `planVerificationLines` keeps each command on a
+detail-indented line that renderers never rewrap.
+
 `verification-evidence.ts` exposes the shared builtin-only
 `task-verification.mjs` and `task-verification-store.mjs` owners. Discovery reads
 project metadata inertly and distinguishes absent/unavailable inputs and known
@@ -1184,7 +1191,8 @@ state-8 task runs never enter this prerequisite gate or init wizard.
   runs concurrently with a model, check or waiting interactive owner.
 - `verification-ui.ts` edits executable/argv fields and renders pending actions
   before the repair/resume alternative. It performs no project execution and
-  no I/O; verification output tails arrive from its callers.
+  no I/O; verification output tails and the plan gate's inventory arrive from
+  its callers.
 - `configuration-review.ts` freezes actual deltas, coverage and resolution/Skip
   references for snapshot v4/render v5; historical writers/readers remain bound
   to their original versions. Already-published changes survive source drift and

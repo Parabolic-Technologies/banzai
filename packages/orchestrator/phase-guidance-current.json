@@ -49,7 +49,7 @@
     "plugins/banzai/policies/artifact-storage.md": "669162b5d4fbf452cbdd692e31105c7b2d5e0acb4337d67cab4b17ad7577b1ca",
     "plugins/banzai/policies/decision-consultation.md": "82a869ef55849063b96742f5a60474bcf54492b737ca2703380d4a53f46f26d5",
     "plugins/banzai/policies/engineering-quality.md": "36fdf0cc236d13d136bcba2421ca0e2833176f180014324785a200d9cbfe0cc8",
-    "plugins/banzai/policies/plan-task-completion.md": "953466e31093a9ae5842e711f16b95eccafa74dbdc3e1351081dfff9e6895d35",
+    "plugins/banzai/policies/plan-task-completion.md": "d3dfa8cbc55a6b22bf194e53a9b68fe1e34c89bb679622e3177dd6af02348d5d",
     "plugins/banzai/policies/security-assurance.md": "bc28ae35b90fba8b899141765e98a3e7a72c72e676ddefcd8546f2976bd25a67",
     "plugins/banzai/policies/test-assurance.md": "5cfbb6eca3931f047494208527a531554aa9ec15e822dc10c606cc439b419860",
     "plugins/banzai/skills/architecture-decision/SKILL.md#orchestrated": "95746ad61765c0d1105284aba1ba0218bfe1a168fe799f023d188237df44c7b9",
@@ -1015,6 +1015,24 @@
           "key": "plugins/banzai/skills/orchestrate/SKILL.md",
           "before": "4fa691f5353c65bee7c5704b72195d9dd421c68e6661545049925ad1bdba6ea3",
           "after": "f7a975167250875abe0a2d4140e5ddc60f6fdae990275b9504b52769e867def1"
+        }
+      ]
+    },
+    {
+      "predecessorSha256": "b58fb5d140c05348b430f859e5afe38872f325b8a5ba943078c3258617d87921",
+      "successorSha256": "34d6268cab8ec3a42583c0b3152aa44c133016fb469b074ef57cd4d7a276d1a9",
+      "authorities": [
+        {
+          "path": "documentation/decisions/0049-task-scoped-verification.md",
+          "sha256": "cfe5f7988d28830cbe5fddd8d36661805e5e32ebc2660e9abee6f348a76c243e",
+          "scope": "Section 2: build plan obligations from documented project commands so plan review shows the checks that will run."
+        }
+      ],
+      "changes": [
+        {
+          "key": "plugins/banzai/policies/plan-task-completion.md",
+          "before": "953466e31093a9ae5842e711f16b95eccafa74dbdc3e1351081dfff9e6895d35",
+          "after": "d3dfa8cbc55a6b22bf194e53a9b68fe1e34c89bb679622e3177dd6af02348d5d"
         }
       ]
     }

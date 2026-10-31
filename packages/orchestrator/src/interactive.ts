@@ -2,10 +2,12 @@ import { validateHumanFreeText } from "./validation.js";
 import type {
   PlanningReviewTriageAnswer,
   PlanningReviewTriageRequest,
-  PlanningReviewDisposition
+  PlanningReviewDisposition,
+  PlanVerificationInventory
 } from "./types.js";
 import {
   configurationDecisionLines,
+  planVerificationLines,
   taskVerificationStatusLines,
   editVerificationCommands
 } from "./verification-ui.js";
@@ -139,6 +141,9 @@ export interface InteractiveRunner {
   readonly repoRoot: string;
   getPlanHumanPrerequisites?(): Promise<string | null>;
   verificationRetryOutlook?(): Promise<VerificationRetryOutlook | null>;
+  planVerificationInventory?(
+    state: RunState
+  ): Promise<PlanVerificationInventory | null>;
   status(): Promise<WorkflowStatus>;
   start(input: StartRunInput): Promise<RunState>;
   resume(): Promise<RunState>;
@@ -517,7 +522,8 @@ function renderStatus(
   status: WorkflowStatus,
   styler: Styler,
   humanTime?: HumanTimeSummary,
-  outputTails?: VerificationOutputTails
+  outputTails?: VerificationOutputTails,
+  planVerification?: PlanVerificationInventory | null
 ): void {
   const state = status.state;
   const width = resolveWidth(io.width);
@@ -577,6 +583,12 @@ function renderStatus(
   ) {
     renderArtifacts(io, state, styler);
   }
+  if (planVerification != null)
+    renderPreformattedSection(
+      io,
+      styler,
+      planVerificationLines(planVerification)
+    );
   if (
     state.status === "needs_human_decision" &&
     state.pendingHumanDecision != null
@@ -2558,7 +2570,8 @@ async function interactiveLoop(
       status,
       options.styler ?? createStyler(false),
       humanTime,
-      await readVerificationOutputTails(runner.repoRoot, status.state)
+      await readVerificationOutputTails(runner.repoRoot, status.state),
+      await runner.planVerificationInventory?.(status.state)
     );
     const decisionIO = withRunMenu(
       io,

@@ -40,16 +40,16 @@ Status values: `not started` · `ADR draft` · `ADR proposed` · `ADR accepted` 
 
 ## Stage 1 (2.8): daily friction
 
-| WP  | Package                                        | Depends on      | ADR                                    | Work directory                         | Status       | Commit | Notes                                         |
-| --- | ---------------------------------------------- | --------------- | -------------------------------------- | -------------------------------------- | ------------ | ------ | --------------------------------------------- |
-| WP1 | Verification failure details and retry warning | —               | none                                   | `wp01-verification-failure-details`    | report ready |        | phpcs fixture built; see report deviations    |
-| WP2 | Run every required check in one pass           | —               | new, amends 0045 (pinned)              | `wp02-full-verification-pass`          | not started  |        | Draft ADR early                               |
-| WP3 | Verification commands at the plan gate         | —               | none; cite 0049 for instruction change | `wp03-plan-gate-verification-commands` | not started  |        | Golden prompt digests change                  |
-| WP4 | Re-check human edits at the plan gate          | —               | new, amends 0051                       | `wp04-plan-gate-edit-recheck`          | not started  |        | Draft ADR early; control protocol revision    |
-| WP5 | Install guide, plugin scope, doctor hint       | —               | none; stay within 0008                 | `wp05-install-guide-plugin-scope`      | not started  |        | Doctor JSON contract version bump             |
-| WP6 | Local model override                           | —               | check eligibility; short ADR likely    | `wp06-local-model-override`            | not started  |        | Do before WP7                                 |
-| WP7 | Claude as the default reviewer, with isolation | WP6 recommended | new, amends 0042 §7 and 0037           | `wp07-claude-default-reviewer`         | not started  |        | Draft ADR early; live scenario needs go-ahead |
-| WP8 | Stable Claude phases                           | —               | check 0020                             | `wp08-stable-claude-phases`            | not started  |        | Live scenario needs go-ahead                  |
+| WP  | Package                                        | Depends on      | ADR                                    | Work directory                         | Status       | Commit  | Notes                                         |
+| --- | ---------------------------------------------- | --------------- | -------------------------------------- | -------------------------------------- | ------------ | ------- | --------------------------------------------- |
+| WP1 | Verification failure details and retry warning | —               | none                                   | `wp01-verification-failure-details`    | committed    | d03bc19 | phpcs fixture built; see report deviations    |
+| WP2 | Run every required check in one pass           | —               | new, amends 0045 (pinned)              | `wp02-full-verification-pass`          | not started  |         | Draft ADR early                               |
+| WP3 | Verification commands at the plan gate         | —               | none; cite 0049 for instruction change | `wp03-plan-gate-verification-commands` | report ready |         | Plan gate lists checks; see report deviations |
+| WP4 | Re-check human edits at the plan gate          | —               | new, amends 0051                       | `wp04-plan-gate-edit-recheck`          | not started  |         | Draft ADR early; control protocol revision    |
+| WP5 | Install guide, plugin scope, doctor hint       | —               | none; stay within 0008                 | `wp05-install-guide-plugin-scope`      | not started  |         | Doctor JSON contract version bump             |
+| WP6 | Local model override                           | —               | check eligibility; short ADR likely    | `wp06-local-model-override`            | not started  |         | Do before WP7                                 |
+| WP7 | Claude as the default reviewer, with isolation | WP6 recommended | new, amends 0042 §7 and 0037           | `wp07-claude-default-reviewer`         | not started  |         | Draft ADR early; live scenario needs go-ahead |
+| WP8 | Stable Claude phases                           | —               | check 0020                             | `wp08-stable-claude-phases`            | not started  |         | Live scenario needs go-ahead                  |
 
 ### Gate 1
 
@@ -98,6 +98,14 @@ Planned only after Gate 2; each package needs its own requirements first.
 WP15 eval suite, WP16 native attempt limits, WP17 builder sandbox, WP18 full
 context accounting.
 
+### Eval cases queued for WP15
+
+- WP3, documented commands: a PHP project whose `composer.json` script
+  `cs-check` runs `php-cs-fixer fix --dry-run --diff --config=.php-cs-fixer.php`.
+  A strict plan passes when its lint obligation is `composer run-script cs-check`
+  or keeps `--config=.php-cs-fixer.php`, and cites `composer.json` in
+  `sources`; it fails when the config flag is dropped.
+
 ## ADR reservations
 
 | ID  | WP  | Title | Status |
@@ -111,7 +119,8 @@ None reserved yet.
   required and one supplemental check): planned in WP1; reused by WP2, WP3,
   WP9, WP10 and both gates. Location:
   `packages/orchestrator/test/phpcs-verification-fixture.ts`
-  (`phpcsVerificationFixture`, documented and planned argv exported).
+  (`phpcsPlanGateFixture` stops at the plan gate, `phpcsVerificationFixture`
+  at the verification block; documented and planned argv exported).
 
 ## Owner decisions
 
@@ -142,3 +151,9 @@ under Owner decisions.
   projection is better designed with `banzai control` support in WP9. The
   block reason names checks and outcomes but carries no argv or output. Details
   in the WP1 report.
+- WP3 (2026-10-31): `development-plan/SKILL.md` is unchanged; the standalone
+  skill reads `policies/plan-task-completion.md` before defining strict tasks,
+  so the policy carries the documented-command rule for both paths. The
+  planning instruction has no golden digest (`prompts.test.ts` pins output
+  contracts and repair bytes); a new test pins the sentence instead. The
+  authority is ADR-0049 §2. Details in the WP3 report.
