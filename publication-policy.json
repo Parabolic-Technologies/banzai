@@ -419,6 +419,21 @@
       "sha256": null
     },
     {
+      "path": "documentation/decisions/0057-complete-task-verification-rounds.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0058-human-plan-edits-rechecked-at-the-plan-gate.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0059-claude-default-reviewer-and-reviewer-isolation.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
       "path": "documentation/decisions/README.md",
       "classification": "maintainer",
       "sha256": null

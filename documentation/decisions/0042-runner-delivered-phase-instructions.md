@@ -487,6 +487,13 @@ by preparing this decision.
 
 ## Lifecycle Links
 
+- Amended by
+  [ADR-0059](./0059-claude-default-reviewer-and-reviewer-isolation.md),
+  accepted 2026-10-31, section 7: `Skill` leaves the review and planning-review
+  tool inventories and the live compatibility expectations. Builder
+  inventories, the selection prohibition and evidence rules remain.
+  Implementation is Planned.
+
 - Narrowly amended by
   [ADR-0055](./0055-planning-gate-rework-and-independent-planning-review.md),
   accepted 2026-10-13: adds the `planning-review` instruction phase for the

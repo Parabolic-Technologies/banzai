@@ -136,6 +136,9 @@ const FIXTURE_PATHS = [
   "documentation/decisions/0050-triggered-code-design-assessment.md",
   "documentation/decisions/0054-git-visible-work-artifacts.md",
   "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md",
+  "documentation/decisions/0057-complete-task-verification-rounds.md",
+  "documentation/decisions/0058-human-plan-edits-rechecked-at-the-plan-gate.md",
+  "documentation/decisions/0059-claude-default-reviewer-and-reviewer-isolation.md",
   "packages/orchestrator/scripts/check-dist.mjs",
   "packages/orchestrator/scripts/release-version.mjs",
   "packages/orchestrator/scripts/smoke-committed.mjs",
@@ -3033,6 +3036,45 @@ test("ADR-0055 admits only the exact accepted ADR-0054 lifecycle annotation", as
     await assert.rejects(validateGuidanceExtraction(root), /authority/u);
     await writeFile(amendment, accepted);
     await validateGuidanceExtraction(root);
+  });
+});
+
+test("ADR-0057 and ADR-0058 admit only their exact accepted lifecycle annotations", async () => {
+  await withFixture(async (root) => {
+    await validateGuidanceExtraction(root);
+    for (const [authorityPath, amendmentPath, annotation] of [
+      [
+        "documentation/decisions/0045-guided-verification-setup.md",
+        "documentation/decisions/0057-complete-task-verification-rounds.md",
+        "legacy profile mode and fail-closed stops remain."
+      ],
+      [
+        "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md",
+        "documentation/decisions/0058-human-plan-edits-rechecked-at-the-plan-gate.md",
+        "Approval remains the only transition to `plan_approved`."
+      ]
+    ] as const) {
+      const authority = path.join(root, authorityPath);
+      const original = await readFile(authority, "utf8");
+      for (const changed of [
+        original.replace(annotation, "Other behaviour remains."),
+        original + "\nUnaccepted decision body.\n"
+      ]) {
+        assert.notEqual(changed, original);
+        await writeFile(authority, changed);
+        await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+      }
+      await writeFile(authority, original);
+      const amendment = path.join(root, amendmentPath);
+      const accepted = await readFile(amendment, "utf8");
+      await writeFile(
+        amendment,
+        accepted.replace("- Status: Accepted", "- Status: Proposed")
+      );
+      await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+      await writeFile(amendment, accepted);
+      await validateGuidanceExtraction(root);
+    }
   });
 });
 

@@ -691,6 +691,12 @@ ADR authorizes no release, installation, external execution or publication.
 
 ## Lifecycle Links
 
+- Amended by [ADR-0057](./0057-complete-task-verification-rounds.md), accepted
+  2026-10-31, section 5: task-scoped runner verification continues after
+  command-level check failures, retries every unsuccessful check of a round in
+  one action and names the check that changed project files. `verify check`,
+  legacy profile mode and fail-closed stops remain. Implementation is Planned.
+
 - Supersedes: None in full.
 - Proposed amendments, effective only after explicit acceptance:
   - [ADR-0006](./0006-versioned-verification-profiles.md): optional bootstrap in

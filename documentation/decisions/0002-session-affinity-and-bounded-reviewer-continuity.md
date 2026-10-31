@@ -278,5 +278,11 @@ Implementation and review must confirm:
 
 ## Lifecycle Links
 
+- Narrowly amended by
+  [ADR-0059](./0059-claude-default-reviewer-and-reviewer-isolation.md),
+  accepted 2026-10-31: cross-model independence reads as role and session
+  independence; a reviewer from another vendor is optional. Session affinity,
+  bounded continuity and human triage remain. Implementation is Planned.
+
 - Supersedes: None
 - Superseded by: None

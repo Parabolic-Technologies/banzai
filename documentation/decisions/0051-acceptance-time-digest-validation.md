@@ -278,6 +278,12 @@ observable:
 
 ## Lifecycle Links
 
+- Amended by [ADR-0058](./0058-human-plan-edits-rechecked-at-the-plan-gate.md),
+  accepted 2026-10-31: on the human's explicit re-check at the plan gate, the
+  runner may establish the plan remainder digest over human-edited bytes and
+  keeps the planner's value for audit. Model-result acceptance, digest roles
+  and the repair source remain. Implementation is Planned.
+
 - Supersedes: None
 - Amends: [ADR-0023](./0023-durable-terminal-attempt-checkpoints.md) and
   [ADR-0024](./0024-operator-authorized-prerequisite-blocked-fix-recovery.md)
