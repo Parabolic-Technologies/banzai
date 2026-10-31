@@ -71,7 +71,8 @@ export {
   captureTaskVerificationInputs,
   readTaskVerificationAttempts,
   taskVerificationApplicability,
-  executeTaskVerification
+  executeTaskVerification,
+  unsuccessfulRoundAttempts
 } from "../../../plugins/banzai/lib/task-verification-store.mjs";
 export type {
   TaskVerificationPublication,

@@ -1586,11 +1586,16 @@ async function handleStatus(
       !isDigestRejectedRepair
         ? ((await runner.verificationRetryOutlook?.()) ?? null)
         : null;
+    const retrySet =
+      outlook !== null && outlook.attemptId === status.retry.attemptId
+        ? outlook
+        : null;
     const repeatsFailure =
-      outlook !== null &&
-      outlook.attemptId === status.retry.attemptId &&
-      outlook.sameCommand &&
-      outlook.sameInputs;
+      retrySet !== null &&
+      retrySet.ordinaryExits &&
+      retrySet.sameCommand &&
+      retrySet.sameInputs;
+    const several = (retrySet?.checkIds.length ?? 1) > 1;
     if (isDigestRejectedRepair) {
       // Replaying the rejected evidence reproduces the rejection, so the
       // authorized repair is the offered route (ADR-0051).
@@ -1610,7 +1615,9 @@ async function handleStatus(
                 : status.retry.attemptId === null
                   ? state.blockedFrom === "reviewing"
                     ? "Retry review checks"
-                    : "Retry start checks"
+                    : state.blockedFrom === "verifying"
+                      ? "Retry verification checks"
+                      : "Retry start checks"
                   : isPlanBundleRepair
                     ? "Rerun planning to correct the approved plan"
                     : isCompletionEvidenceRepair
@@ -1618,8 +1625,12 @@ async function handleStatus(
                       : state.blockedFrom === "planning"
                         ? "Continue the failed planning attempt"
                         : repeatsFailure
-                          ? "Retry anyway (same command, same files; expected to fail again)"
-                          : "Retry the failed read-only attempt",
+                          ? several
+                            ? "Retry anyway (same commands, same files; expected to fail again)"
+                            : "Retry anyway (same command, same files; expected to fail again)"
+                          : several
+                            ? `Retry the ${retrySet?.checkIds.length ?? 0} failed checks`
+                            : "Retry the failed read-only attempt",
         value: "retry"
       });
     } else if (status.recovery.eligible) {
@@ -1661,7 +1672,9 @@ async function handleStatus(
         status.retry.attemptId === null
           ? state.blockedFrom === "reviewing"
             ? "Rerun preflight and review checks?"
-            : "Rerun preflight and the repository check?"
+            : state.blockedFrom === "verifying"
+              ? "Rerun the verification checks without replaying implementation?"
+              : "Rerun preflight and the repository check?"
           : isPlanBundleRepair
             ? "Rerun planning and request a new plan approval?"
             : isCompletionEvidenceRepair
@@ -1669,7 +1682,9 @@ async function handleStatus(
               : state.blockedFrom === "planning"
                 ? "Run preflight and continue planning, reusing saved context when compatible?"
                 : repeatsFailure
-                  ? `Check ${escapeTerminalText(outlook.checkId)} failed with an ordinary exit, and its command and the observed project files are unchanged, so it is expected to fail the same way. Retry anyway?`
+                  ? several
+                    ? `Checks ${retrySet.checkIds.map(escapeTerminalText).join(", ")} failed with ordinary exits, and their commands and the observed project files are unchanged, so they are expected to fail the same way. Retry anyway?`
+                    : `Check ${escapeTerminalText(retrySet.checkIds[0] ?? "")} failed with an ordinary exit, and its command and the observed project files are unchanged, so it is expected to fail the same way. Retry anyway?`
                   : "Run preflight and start a fresh retry?";
       if (await io.confirm(message, false)) {
         await runWork(options, () => runner.retry());

@@ -238,7 +238,10 @@ test("retry decisions reproduce every baseline outcome from explicit facts", () 
         state: blockedState({ blockedFrom: "verifying" }),
         taskVerification: {
           readable: true,
-          latest: { id: "check-1", status: "started" }
+          round: [
+            { id: "check-1", status: "failed" },
+            { id: "check-2", status: "started" }
+          ]
         }
       },
       decided(
@@ -256,7 +259,10 @@ test("retry decisions reproduce every baseline outcome from explicit facts", () 
           state: blockedState({ blockedFrom: "verifying" }),
           taskVerification: {
             readable: true,
-            latest: { id: "check-1", status }
+            round: [
+              { id: "check-0", status: "completed" },
+              { id: "check-1", status }
+            ]
           }
         },
         decided(
@@ -268,21 +274,42 @@ test("retry decisions reproduce every baseline outcome from explicit facts", () 
         )
       ]
     ),
+    [
+      "several unsuccessful task checks, the latest of them named",
+      {
+        state: blockedState({ blockedFrom: "verifying" }),
+        taskVerification: {
+          readable: true,
+          round: [
+            { id: "check-1", status: "failed" },
+            { id: "check-2", status: "interrupted" },
+            { id: "check-3", status: "completed" }
+          ]
+        }
+      },
+      decided(
+        retry(
+          true,
+          "The 2 unsuccessful task checks of this round can be retried in one action.",
+          "check-2"
+        )
+      )
+    ],
     ...(
       [
-        ["completed", { id: "check-1", status: "completed" }],
-        ["absent", null]
+        ["completed", [{ id: "check-1", status: "completed" }]],
+        ["absent", []]
       ] as const
     ).map(
-      ([label, latest]): [
+      ([label, round]): [
         string,
         RetryFacts,
         ReturnType<typeof decideRetry>
       ] => [
-        `task verification prerequisites (${label} latest check)`,
+        `task verification prerequisites (${label} round)`,
         {
           state: blockedState({ blockedFrom: "verifying" }),
-          taskVerification: { readable: true, latest }
+          taskVerification: { readable: true, round: [...round] }
         },
         decided(
           retry(

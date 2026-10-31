@@ -40,16 +40,16 @@ Status values: `not started` · `ADR draft` · `ADR proposed` · `ADR accepted` 
 
 ## Stage 1 (2.8): daily friction
 
-| WP  | Package                                        | Depends on      | ADR                                          | Work directory                         | Status       | Commit  | Notes                                         |
-| --- | ---------------------------------------------- | --------------- | -------------------------------------------- | -------------------------------------- | ------------ | ------- | --------------------------------------------- |
-| WP1 | Verification failure details and retry warning | —               | none                                         | `wp01-verification-failure-details`    | committed    | d03bc19 | phpcs fixture built; see report deviations    |
-| WP2 | Run every required check in one pass           | —               | 0057 Accepted; amends 0045 (pinned)          | `wp02-full-verification-pass`          | ADR accepted |         | Ready for requirements                        |
-| WP3 | Verification commands at the plan gate         | —               | none; cite 0049 for instruction change       | `wp03-plan-gate-verification-commands` | committed    | 44f3d03 | Plan gate lists checks; see report deviations |
-| WP4 | Re-check human edits at the plan gate          | —               | 0058 Accepted; amends 0051 and 0055 (pinned) | `wp04-plan-gate-edit-recheck`          | ADR accepted |         | major control revision                        |
-| WP5 | Install guide, plugin scope, doctor hint       | —               | none; stay within 0008                       | `wp05-install-guide-plugin-scope`      | not started  |         | Doctor JSON contract version bump             |
-| WP6 | Local model override                           | —               | check eligibility; short ADR likely          | `wp06-local-model-override`            | not started  |         | Do before WP7                                 |
-| WP7 | Claude as the default reviewer, with isolation | WP6 recommended | 0059 Accepted; amends 0042 §7, 0037, 0002    | `wp07-claude-default-reviewer`         | ADR accepted |         | live scenario needs go-ahead                  |
-| WP8 | Stable Claude phases                           | —               | check 0020                                   | `wp08-stable-claude-phases`            | not started  |         | Live scenario needs go-ahead                  |
+| WP  | Package                                        | Depends on      | ADR                                          | Work directory                         | Status       | Commit  | Notes                                                  |
+| --- | ---------------------------------------------- | --------------- | -------------------------------------------- | -------------------------------------- | ------------ | ------- | ------------------------------------------------------ |
+| WP1 | Verification failure details and retry warning | —               | none                                         | `wp01-verification-failure-details`    | committed    | d03bc19 | phpcs fixture built; see report deviations             |
+| WP2 | Run every required check in one pass           | —               | 0057 Accepted; amends 0045 (pinned)          | `wp02-full-verification-pass`          | report ready |         | Full rounds, one retry; helper v4 published by WP4     |
+| WP3 | Verification commands at the plan gate         | —               | none; cite 0049 for instruction change       | `wp03-plan-gate-verification-commands` | committed    | 44f3d03 | Plan gate lists checks; see report deviations          |
+| WP4 | Re-check human edits at the plan gate          | —               | 0058 Accepted; amends 0051 and 0055 (pinned) | `wp04-plan-gate-edit-recheck`          | ADR accepted |         | major control revision; also publishes helper v4 (WP2) |
+| WP5 | Install guide, plugin scope, doctor hint       | —               | none; stay within 0008                       | `wp05-install-guide-plugin-scope`      | not started  |         | Doctor JSON contract version bump                      |
+| WP6 | Local model override                           | —               | check eligibility; short ADR likely          | `wp06-local-model-override`            | not started  |         | Do before WP7                                          |
+| WP7 | Claude as the default reviewer, with isolation | WP6 recommended | 0059 Accepted; amends 0042 §7, 0037, 0002    | `wp07-claude-default-reviewer`         | ADR accepted |         | live scenario needs go-ahead                           |
+| WP8 | Stable Claude phases                           | —               | check 0020                                   | `wp08-stable-claude-phases`            | not started  |         | Live scenario needs go-ahead                           |
 
 ### Gate 1
 
@@ -65,6 +65,8 @@ Report: `gate-1-report.md` (not written).
       gets Claude as the default reviewer.
 - [ ] `npm run verify` is green, and the owner-authorized live scenarios pass
       on Claude Code 2.1.290 and on the current release.
+- [ ] The release train is set to the 2.8 version with
+      `npm run version:set`, and `npm run release:validate` passes.
 
 ## Stage 2 (2.9): no lost runs
 
@@ -140,6 +142,14 @@ local worktree.
   every mode and for builders in `scoped` mode. Reciprocal links on pinned
   ADR-0045 and ADR-0055 are admitted by exact allow-list images in
   `phase-resources-build.mjs`.
+- 2026-10-31: WP2 plan approved with `Both recommended`, after commit
+  `a0041f6`. WP2 implements helper request v4 without instruction text
+  changes; WP4's major control revision advertises v4 in agent capabilities
+  and publishes it in `policies/artifact-storage.md` and the executing skills.
+- 2026-10-31: the release-train version is bumped at the Gate 1 release, not
+  per package. Until then `npm run release:validate` reports
+  `HOOK_CHANGED_WITHOUT_VERSION_BUMP` for `plugins/banzai/lib` changes (first
+  in WP2); that finding alone does not block a package.
 
 ## Open questions left to the owner by the brief
 

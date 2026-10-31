@@ -845,7 +845,7 @@ test("failed deterministic verification blocks review", async () => {
   }
 });
 
-test("verification executes task checks in selected order and stops on failure", async () => {
+test("verification executes task checks in selected order and continues after a failed check", async () => {
   const repository = await createTestRepository();
   try {
     const configPath = path.join(repository.root, ".banzai", "config.json");
@@ -914,10 +914,11 @@ test("verification executes task checks in selected order and stops on failure",
     });
 
     assert.equal(blocked.status, "blocked");
-    assert.deepEqual(observed, ["first", "second"]);
+    // ADR-0057 §1: a non-zero exit does not hide the checks after it.
+    assert.deepEqual(observed, ["first", "second", "third"]);
     assert.deepEqual(
       blocked.taskVerification?.attempts.map((result) => result.checkId),
-      ["node-primary-1", "node-primary-2"]
+      ["node-primary-1", "node-primary-2", "repository-hygiene-1"]
     );
     assert.equal(blocked.taskVerification.attempts[1]?.exitCode, 7);
   } finally {

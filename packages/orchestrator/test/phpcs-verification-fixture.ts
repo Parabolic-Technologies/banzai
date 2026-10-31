@@ -34,6 +34,8 @@ export const PHPCS_PLANNED_ARGS = PHPCS_DOCUMENTED_ARGS.slice(0, -1);
 
 export const PHPCS_FAILURE_EXIT_CODE = 8;
 export const PHPCS_FAILURE_STDERR_LINES = 26;
+/** Exit code of the schema check when `schemaFailsWithout` names a missing file. */
+export const PHPCS_SCHEMA_FAILURE_EXIT_CODE = 3;
 
 // Built at runtime so no credential-shaped literal sits in the source tree.
 const leakedToken = ["sk", "ant", "phpcsfixturetoken0123"].join("-");
@@ -94,7 +96,7 @@ export const phpcsSupplementalChecks = (): TaskVerificationDescriptor[] => [
  * the planned obligations written into plan.md.
  */
 export async function phpcsPlanGateFixture(
-  options: { lintArgs?: readonly string[] } = {}
+  options: { lintArgs?: readonly string[]; schemaFailsWithout?: string } = {}
 ) {
   const repository = await createTestRepository();
   try {
@@ -105,7 +107,14 @@ export async function phpcsPlanGateFixture(
     );
     await writeFile(
       path.join(repository.root, "tools/schema-catalog-check.cjs"),
-      'console.log("Schema catalog is consistent.");\n'
+      options.schemaFailsWithout === undefined
+        ? 'console.log("Schema catalog is consistent.");\n'
+        : `if (!require("node:fs").existsSync(${JSON.stringify(options.schemaFailsWithout)})) {
+  console.error("Schema catalog entry is missing.");
+  process.exit(${PHPCS_SCHEMA_FAILURE_EXIT_CODE});
+}
+console.log("Schema catalog is consistent.");
+`
     );
     await writeFile(
       path.join(repository.root, ".php-cs-fixer.php"),
@@ -133,7 +142,7 @@ export async function phpcsPlanGateFixture(
  * the implementation completed and the plan approved.
  */
 export async function phpcsVerificationFixture(
-  options: { lintArgs?: readonly string[] } = {}
+  options: { lintArgs?: readonly string[]; schemaFailsWithout?: string } = {}
 ) {
   const gate = await phpcsPlanGateFixture(options);
   try {

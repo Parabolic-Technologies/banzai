@@ -48,6 +48,13 @@ such as `composer run-script <name>` or `npm run <name>`.
 
 Actual checks and their outcomes are retained as runner evidence. Missing unrelated
 scripts are not requirements; failed or absent mandatory checks prevent completion.
+A verification round runs every selected check in order. A non-zero exit, a
+timeout, the output limit or an executable that cannot start does not stop the
+round, so one round reports every failing check. A signal-terminated check, a
+runner failure, a cancellation, a failed authorization or ownership check, and
+changed inputs stop it; the remaining checks show as not run. A check that
+changes observed project files, whether it passed or failed, stops the round
+with its name and the changed paths.
 Strict independent review assesses meaningful test coverage and weakening of
 assertions. See [task verification](verification-examples.md). Earlier profile and
 configuration-gate details below describe legacy utilities and retained historical
@@ -1717,13 +1724,17 @@ never contains command output. `banzai status --json` keeps its shape: it
 carries the raw `state.taskVerification` attempt records, and only the human
 views read the logs.
 
-Retry re-runs the failed check without replaying implementation. When that
-attempt exited with an ordinary non-zero code and neither its command nor the
-observed project files changed since, the interactive action reads
-`Retry anyway (same command, same files; expected to fail again)`. Observed
-files are tracked and untracked non-ignored files; ignored dependencies,
-caches and the environment are not compared, so the label is a prediction and
-never refuses the retry.
+Retry re-runs every unsuccessful check of the round in one action, runs the
+checks that were not run, and keeps checks that passed while the observed
+inputs are unchanged; implementation is not replayed. Each new attempt links
+to the attempt it retries. The interactive action reads
+`Retry the N failed checks` when several checks are rerun. When every rerun
+check exited with an ordinary non-zero code and neither its command nor the
+observed project files changed since, it reads
+`Retry anyway (same command, same files; expected to fail again)`, or
+`same commands` for several checks. Observed files are tracked and untracked
+non-ignored files; ignored dependencies, caches and the environment are not
+compared, so the label is a prediction and never refuses the retry.
 
 Retry never bypasses approval integrity. `banzai approve plan` stores the
 exact bytes of every approved artifact beside the run evidence

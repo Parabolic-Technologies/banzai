@@ -41,6 +41,7 @@ import {
   discoverTaskVerification,
   executeTaskVerification,
   readTaskVerificationAttempts,
+  unsuccessfulRoundAttempts,
   captureTaskVerificationInputs,
   parseTaskVerificationDecision,
   taskVerificationApplicability,
@@ -57,10 +58,16 @@ import {
   persistVerificationApplicability
 } from "./verification-evidence.js";
 import type {
+  TaskVerificationAttempt,
   TaskVerificationAuthority,
+  TaskVerificationDecision,
+  TaskVerificationSelection,
   VerificationCapture
 } from "./verification-evidence.js";
-import { incompleteVerificationSummary } from "./verification-outcome.js";
+import {
+  incompleteVerificationSummary,
+  retryReach
+} from "./verification-outcome.js";
 import {
   hasRunnerWorkOwnership,
   withRunnerWorkOwnership,
@@ -650,9 +657,15 @@ export interface ConfigurationDecisionInput {
 
 /** A prediction for the blocked-run menu only; it never gates a retry. */
 export interface VerificationRetryOutlook {
+  /** The attempt the retry eligibility names. */
   attemptId: string;
-  checkId: string;
+  /** Every check one retry action reruns, in selection order (ADR-0057 §2). */
+  checkIds: string[];
+  /** Every rerun check ended with an ordinary non-zero exit. */
+  ordinaryExits: boolean;
+  /** No rerun check's command changed since its attempt. */
   sameCommand: boolean;
+  /** The observed project files equal those every rerun check saw at launch. */
   sameInputs: boolean;
 }
 
@@ -957,6 +970,17 @@ function validateNodeVersion(): void {
       `Increment 1 supports macOS and Linux; found ${process.platform}.`
     );
   }
+}
+
+/** The latest attempt of each check in the latest task verification round, in sequence order. */
+function latestRoundAttempts<
+  T extends { roundId: string; checkId: string; sequence: number }
+>(attempts: readonly T[]): T[] {
+  const roundId = attempts.at(-1)?.roundId;
+  const latest = new Map<string, T>();
+  for (const attempt of attempts)
+    if (attempt.roundId === roundId) latest.set(attempt.checkId, attempt);
+  return [...latest.values()].sort((a, b) => a.sequence - b.sequence);
 }
 
 /** A failed verification evidence read is a retry decision input. */
@@ -1604,10 +1628,11 @@ export class WorkflowRunner {
   }
 
   /**
-   * Whether retrying the failed task check would repeat a deterministic
-   * failure: same descriptor, same observed files, ordinary non-zero exit.
-   * Input capture can read up to 128 MiB, so only a human choosing a blocked
-   * action asks; status() never does. Any doubt yields null, never a warning.
+   * Which checks a task verification retry reruns, and whether it would
+   * repeat a deterministic failure: same descriptors, same observed files,
+   * ordinary non-zero exits. Input capture can read up to 128 MiB, so only a
+   * human choosing a blocked action asks; status() never does. Any doubt
+   * yields null, never a warning.
    */
   async verificationRetryOutlook(): Promise<VerificationRetryOutlook | null> {
     try {
@@ -1621,56 +1646,94 @@ export class WorkflowRunner {
       const retry = await this.retryEligibility(state);
       if (!retry.eligible || retry.attemptId === null) return null;
       const storage = taskVerificationStorage(this.context, state);
-      const attempt = (await readTaskVerificationAttempts(storage)).find(
-        (item) => item.id === retry.attemptId
-      );
-      if (
-        attempt?.status !== "failed" ||
-        attempt.failureCategory !== "command_exit" ||
-        attempt.signal !== null ||
-        attempt.before.observedDigest === null
-      )
-        return null;
-      const bytes = await readPlanningBytes(
-        this.repoRoot,
-        attempt.descriptor.relativePath,
-        { limit: 20 * 1024 * 1024 }
-      );
-      if (bytes === null) return null;
-      const decision = parseTaskVerificationDecision(
-        JSON.parse(bytes.toString("utf8"))
-      );
-      const failed = decision.checks.find(
-        (item) => item.descriptor.id === attempt.checkId
-      );
+      const attempts = await readTaskVerificationAttempts(storage);
+      const named = attempts.find((item) => item.id === retry.attemptId);
+      if (named === undefined) return null;
       const { result } = await this.taskVerificationSource(state);
       const { selection } = await this.taskVerificationSelection(
         state,
         await loadConfig(this.repoRoot),
         result
       );
-      const current = selection.checks.find(
-        (item) => item.descriptor.id === attempt.checkId
+      const rerun = unsuccessfulRoundAttempts(
+        attempts,
+        selection,
+        named.roundId
       );
-      if (failed === undefined || current === undefined) return null;
-      const observed = await captureTaskVerificationInputs(
-        storage,
-        selection.checks.map((item) => item.descriptor),
-        null
+      if (!rerun.some((item) => item.id === named.id)) return null;
+      const ordinaryExits = rerun.every(
+        (attempt) =>
+          attempt.status === "failed" &&
+          attempt.failureCategory === "command_exit" &&
+          attempt.signal === null &&
+          attempt.before.observedDigest !== null
       );
-      return {
-        attemptId: attempt.id,
-        checkId: attempt.checkId,
-        sameCommand:
-          evidenceDigest(failed.descriptor) ===
-          evidenceDigest(current.descriptor),
-        sameInputs:
+      let sameCommand = false;
+      let sameInputs = false;
+      if (ordinaryExits) {
+        const unchanged = await this.unchangedRetryCommands(rerun, selection);
+        if (unchanged === null) return null;
+        sameCommand = unchanged;
+        const observed = await captureTaskVerificationInputs(
+          storage,
+          selection.checks.map((item) => item.descriptor),
+          null
+        );
+        sameInputs =
           observed.observedDigest !== null &&
-          observed.observedDigest === attempt.before.observedDigest
+          rerun.every(
+            (attempt) =>
+              attempt.before.observedDigest === observed.observedDigest
+          );
+      }
+      return {
+        attemptId: named.id,
+        checkIds: rerun.map((item) => item.checkId),
+        ordinaryExits,
+        sameCommand,
+        sameInputs
       };
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Whether every rerun check's descriptor equals the one its attempt ran;
+   * null when a recorded decision cannot be read.
+   */
+  private async unchangedRetryCommands(
+    rerun: readonly TaskVerificationAttempt[],
+    selection: TaskVerificationSelection
+  ): Promise<boolean | null> {
+    const decisions = new Map<string, TaskVerificationDecision>();
+    let unchanged = true;
+    for (const attempt of rerun) {
+      let decision = decisions.get(attempt.descriptor.relativePath);
+      if (decision === undefined) {
+        const bytes = await readPlanningBytes(
+          this.repoRoot,
+          attempt.descriptor.relativePath,
+          { limit: 20 * 1024 * 1024 }
+        );
+        if (bytes === null) return null;
+        decision = parseTaskVerificationDecision(
+          JSON.parse(bytes.toString("utf8"))
+        );
+        decisions.set(attempt.descriptor.relativePath, decision);
+      }
+      const recorded = decision.checks.find(
+        (item) => item.descriptor.id === attempt.checkId
+      );
+      const current = selection.checks.find(
+        (item) => item.descriptor.id === attempt.checkId
+      );
+      if (recorded === undefined || current === undefined) return null;
+      unchanged &&=
+        evidenceDigest(recorded.descriptor) ===
+        evidenceDigest(current.descriptor);
+    }
+    return unchanged;
   }
 
   async retry(): Promise<RunState> {
@@ -1986,16 +2049,18 @@ export class WorkflowRunner {
                 { attemptId: expectedAttemptId }
               )
           );
-          this.info(
-            expectedAttemptId === null
-              ? "Retrying verification prerequisites without replaying implementation"
-              : `Retrying verification attempt ${expectedAttemptId} with a new physical identity`
-          );
+          // Task checks announce their own retry set once it is read.
+          if (state.verificationMode !== "task")
+            this.info(
+              expectedAttemptId === null
+                ? "Retrying verification prerequisites without replaying implementation"
+                : `Retrying verification attempt ${expectedAttemptId} with a new physical identity`
+            );
           return await this.executeVerification(
             state,
             config,
             undefined,
-            expectedAttemptId ?? undefined,
+            { attemptId: expectedAttemptId },
             commitTransition
           );
         }
@@ -5187,12 +5252,11 @@ export class WorkflowRunner {
       switch (step.evidence) {
         case "task_verification_attempts":
           facts.taskVerification = await readableVerification(async () => ({
-            latest:
-              (
-                await readTaskVerificationAttempts(
-                  taskVerificationStorage(this.context, state)
-                )
-              ).at(-1) ?? null
+            round: latestRoundAttempts(
+              await readTaskVerificationAttempts(
+                taskVerificationStorage(this.context, state)
+              )
+            )
           }));
           break;
         case "legacy_ledger_support":
@@ -8418,7 +8482,7 @@ export class WorkflowRunner {
     state: RunState,
     config: OrchestratorConfig,
     sourceAttempt?: AttemptReference,
-    retryOf?: string,
+    retry?: { attemptId: string | null },
     commitTransition?: () => Promise<void>
   ): Promise<RunState> {
     if (!(await hasRunnerWorkOwnership(this.repoRoot, state.artifactBinding)))
@@ -8427,10 +8491,11 @@ export class WorkflowRunner {
           state,
           config,
           sourceAttempt,
-          retryOf,
+          retry,
           commitTransition
         )
       );
+    const retryOf = retry?.attemptId ?? undefined;
     requireState(state, ["verifying"], "Verification");
     await this.beforeModelAttempt(commitTransition);
     if ((state.workflowSelection?.workflow ?? "strict") === "strict") {
@@ -8458,7 +8523,7 @@ export class WorkflowRunner {
       }
     }
     if (state.verificationMode === "task")
-      return this.executeTaskChecks(state, config, sourceAttempt, retryOf);
+      return this.executeTaskChecks(state, config, sourceAttempt, retry);
     if (!(await this.store.verificationLedgerSupported(state.runId))) {
       return await this.executeLegacyVerification(state, config);
     }
@@ -8891,7 +8956,7 @@ export class WorkflowRunner {
     state: RunState,
     config: OrchestratorConfig,
     sourceAttempt?: AttemptReference,
-    retryOf?: string
+    retry?: { attemptId: string | null }
   ): Promise<RunState> {
     try {
       const { source, result } = await this.taskVerificationSource(
@@ -8959,6 +9024,28 @@ export class WorkflowRunner {
       const roundId =
         previous.find((item) => item.sourceAttemptId === source.id)?.roundId ??
         this.context.ids();
+      // A retry reruns every unsuccessful check of the round (ADR-0057 §2).
+      const retrySet =
+        retry === undefined
+          ? []
+          : unsuccessfulRoundAttempts(previous, selection, roundId).map(
+              (item) => item.id
+            );
+      if (
+        retry?.attemptId !== undefined &&
+        retry.attemptId !== null &&
+        !retrySet.includes(retry.attemptId)
+      )
+        throw new BanzaiError(
+          "VERIFICATION_RETRY_CHANGED",
+          "The unsuccessful checks of this verification round changed before the retry could start."
+        );
+      if (retry !== undefined)
+        this.info(
+          retrySet.length === 0
+            ? "Retrying verification prerequisites without replaying implementation"
+            : `Retrying ${retrySet.length === 1 ? "1 unsuccessful check" : `${retrySet.length} unsuccessful checks`} of this verification round with new physical identities`
+        );
       state.taskVerification = await executeTaskVerification({
         ...storage,
         selection,
@@ -8966,7 +9053,7 @@ export class WorkflowRunner {
         context,
         policy,
         roundId,
-        ...(retryOf ? { retryOf } : {}),
+        ...(retrySet.length > 0 ? { retrySet } : {}),
         recoverInterrupted: true,
         revalidate,
         invoke: async (descriptor, cwd) => {
@@ -9039,7 +9126,7 @@ export class WorkflowRunner {
       if (!state.taskVerification.applicability.complete) {
         blockState(
           state,
-          `Task verification is incomplete: ${incompleteVerificationSummary(state.taskVerification)}. The verification details show each command, its output and log paths. Retry re-runs the failed check without replaying implementation.`
+          `Task verification is incomplete: ${incompleteVerificationSummary(state.taskVerification)}. The verification details show each command, its output and log paths. ${retryReach(state.taskVerification)}`
         );
         await this.store.writeState(state);
         return state;

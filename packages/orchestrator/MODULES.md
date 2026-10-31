@@ -550,7 +550,10 @@ is a navigational reference and is updated with the module it describes.
   the time, and the record keeps its persisted field order.
 - `workflow/domain/retry-eligibility.ts` — ADR-0052 domain rule `decideRetry`.
   It stages retry eligibility over task-verification attempts, the legacy
-  ledger and attempt records, and names the evidence it needs next.
+  ledger and attempt records, and names the evidence it needs next. Task
+  verification reads the latest attempt of every check in the latest round
+  (ADR-0057): a started one asks for reconciliation, and otherwise the latest
+  unsuccessful one names the retry, whose reason counts the checks it reruns.
   `RetryEligibility` moves here and `workflow.ts` re-exports it.
 - `workflow/domain/next-action.ts` — `nextAction`, the next-action text for a
   status from its retry, recovery and publication outcomes. It reads no
@@ -1117,9 +1120,18 @@ only; the size rejection stays a separate typed cause. The launch comparison
 keeps its authority unchanged and states a causal history only from a recorded
 baseline, reporting unknown when none exists.
 Observed inputs follow Git ignore rules, so a check can pass only when its
-generated output is ignored. A completed check that changes observed files stops
-the round and names up to ten changed paths with the ignore remedy; input drift
-between selection and launch names its paths the same way. The entry lists stay
+generated output is ignored. A check that changes observed files, whether it
+passed or failed, stops the round and names up to ten changed paths with the
+ignore remedy; input drift between selection and launch names its paths the
+same way. Under ADR-0057, `taskVerificationContinues` lets a round schedule its
+next check after a non-zero exit, a start failure, a timeout or the output
+limit, reading status, category and signal together because the helper and
+the runner record timeouts differently; a signal, a runner failure or a
+cancellation stops it. `executeTaskVerification` accepts a `retrySet` that must
+equal `unsuccessfulRoundAttempts` for the round, and a lone `retryOf` only
+while it names the round's one unsuccessful check, so neither launches anything
+before a refusal. The standalone helper maps request v4's `retryOf` array to
+that set; v3 keeps its single identity. The entry lists stay
 in process memory and the persisted observation format is unchanged.
 Ordinary files are streamed within a 128 MiB aggregate budget, without a 16 MiB
 per-file cutoff. Protected filenames contribute filesystem identity metadata
@@ -1187,7 +1199,8 @@ state-8 task runs never enter this prerequisite gate or init wizard.
   operation. Current config and this run's retained ID lists define collisions.
 - `verification-cli.ts` owns init's static wizard and verify add/edit/remove/list/
   check. Structured edits cannot change policy fields; explicit check reports all
-  commands while workflow verification remains fail-fast. No configuration write
+  commands, and task verification rounds continue after command-level
+  failures (ADR-0057). No configuration write
   runs concurrently with a model, check or waiting interactive owner.
 - `verification-ui.ts` edits executable/argv fields and renders pending actions
   before the repair/resume alternative. It performs no project execution and

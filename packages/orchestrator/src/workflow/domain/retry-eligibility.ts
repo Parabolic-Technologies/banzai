@@ -30,8 +30,12 @@ export type RetryEvidence =
 
 export interface RetryFacts {
   state: RunState;
+  /**
+   * The latest attempt of every check in the latest task verification round,
+   * in attempt sequence order (ADR-0057 §2).
+   */
   taskVerification?: VerificationEvidence<{
-    latest: LatestVerificationAttempt | null;
+    round: LatestVerificationAttempt[];
   }>;
   legacyLedger?: VerificationEvidence<{ supported: boolean }>;
   legacyVerification?: VerificationEvidence<{
@@ -151,18 +155,31 @@ function decideWithoutAttempt(facts: RetryFacts): RetryStep {
       const evidence = facts.taskVerification;
       if (evidence === undefined) return needs("task_verification_attempts");
       if (!evidence.readable) return malformedVerification();
-      const latest = evidence.latest;
-      const unresolved = latest?.status === "started";
-      const unsuccessful =
-        latest?.status === "failed" || latest?.status === "interrupted";
+      if (evidence.round.some((attempt) => attempt.status === "started"))
+        return decided(
+          true,
+          "Retry reconciles the unresolved physical attempt before running eligible checks.",
+          null
+        );
+      // One action reruns every unsuccessful check of the round; the latest
+      // of them identifies it.
+      const unsuccessful = evidence.round.filter(
+        (attempt) =>
+          attempt.status === "failed" || attempt.status === "interrupted"
+      );
+      const named = unsuccessful.at(-1);
+      if (named === undefined)
+        return decided(
+          true,
+          "Verification prerequisites can be retried without replaying implementation.",
+          null
+        );
       return decided(
         true,
-        unresolved
-          ? "Retry reconciles the unresolved physical attempt before running eligible checks."
-          : unsuccessful
-            ? "The unsuccessful task check can be retried explicitly."
-            : "Verification prerequisites can be retried without replaying implementation.",
-        unsuccessful ? latest.id : null
+        unsuccessful.length === 1
+          ? "The unsuccessful task check can be retried explicitly."
+          : `The ${unsuccessful.length} unsuccessful task checks of this round can be retried in one action.`,
+        named.id
       );
     }
     const ledger = facts.legacyLedger;

@@ -13,7 +13,8 @@
   reciprocal links are recorded. Their proposal-stage wording and the
   decision body are retained unchanged. Dependent planning is authorized;
   plan approval is still required before implementation.
-- Implementation state: Planned.
+- Implementation state: Implemented on 2026-10-31 by
+  [WP2](../work/wp02-full-verification-pass/implementation-report.md).
 - Preparation authority: the owner's 2.8–2.9 brief of 2026-10-30 (WP2) and the
   owner's request on 2026-10-31 to draft the Stage 1 ADRs before their
   packages. Preparing this proposal is not acceptance; no code may rely on it.

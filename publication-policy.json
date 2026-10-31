@@ -894,6 +894,16 @@
       "sha256": null
     },
     {
+      "path": "plugins/banzai/contracts/verification/v4/execute-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/verification/v4/inspect-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
       "path": "plugins/banzai/documentation/README.md",
       "classification": "product",
       "sha256": null

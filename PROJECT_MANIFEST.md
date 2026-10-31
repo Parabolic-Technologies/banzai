@@ -119,7 +119,9 @@ projects. Detailed module behavior belongs in the
 - Model phases invoke local `codex exec` or `claude -p` child processes using
   subscription authentication. There is no direct vendor API or API-key
   path. Vendor processes and verification commands have bounded lifetimes
-  and process-group cleanup; verification commands run sequentially.
+  and process-group cleanup; verification commands run sequentially. A task
+  verification round continues after command-level failures, and one retry
+  reruns every unsuccessful check of the round (ADR-0057).
 - External JSON is decoded at ingress. Schemas are embedded through
   `contracts.ts`; runtime validators enforce invariants beyond JSON Schema.
   `BanzaiError` supplies stable codes, and failed processes retain redacted
@@ -524,6 +526,6 @@ delivery or installation.
 | ADR-0054 | Git-visible work artifacts                                         | [Source](documentation/decisions/0054-git-visible-work-artifacts.md)                             | Implemented |
 | ADR-0055 | Planning gate rework and independent planning review               | [Source](documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md)   | Implemented |
 | ADR-0056 | CI-built orchestrator distribution                                 | [Source](documentation/decisions/0056-ci-built-orchestrator-distribution.md)                     | Implemented |
-| ADR-0057 | Complete task verification rounds after check failures             | [Source](documentation/decisions/0057-complete-task-verification-rounds.md)                      | Planned     |
+| ADR-0057 | Complete task verification rounds after check failures             | [Source](documentation/decisions/0057-complete-task-verification-rounds.md)                      | Implemented |
 | ADR-0058 | Human plan edits re-checked at the plan gate                       | [Source](documentation/decisions/0058-human-plan-edits-rechecked-at-the-plan-gate.md)            | Planned     |
 | ADR-0059 | Claude default reviewer and reviewer isolation                     | [Source](documentation/decisions/0059-claude-default-reviewer-and-reviewer-isolation.md)         | Planned     |

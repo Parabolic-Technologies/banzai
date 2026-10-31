@@ -64,6 +64,8 @@
       "plugins/banzai/contracts/artifacts/v3/work-binding.schema.json",
       "plugins/banzai/contracts/verification/v3/inspect-request.schema.json",
       "plugins/banzai/contracts/verification/v3/execute-request.schema.json",
+      "plugins/banzai/contracts/verification/v4/inspect-request.schema.json",
+      "plugins/banzai/contracts/verification/v4/execute-request.schema.json",
       "plugins/banzai/contracts/v1/planning-review-result.schema.json",
       "plugins/banzai/contracts/v1/planning-review-analysis.schema.json"
     ],
@@ -136,6 +138,8 @@
       "plugins/banzai/contracts/artifacts/v3/work-binding.schema.json",
       "plugins/banzai/contracts/verification/v3/inspect-request.schema.json",
       "plugins/banzai/contracts/verification/v3/execute-request.schema.json",
+      "plugins/banzai/contracts/verification/v4/inspect-request.schema.json",
+      "plugins/banzai/contracts/verification/v4/execute-request.schema.json",
       "plugins/banzai/contracts/v1/planning-review-result.schema.json",
       "plugins/banzai/contracts/v1/planning-review-analysis.schema.json",
       "plugins/banzai/phases/planning-review.md"

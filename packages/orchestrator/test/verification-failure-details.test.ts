@@ -20,6 +20,7 @@ import {
   PHPCS_CHECK_IDS,
   PHPCS_FAILURE_EXIT_CODE,
   PHPCS_FAILURE_STDERR_LINES,
+  PHPCS_SCHEMA_FAILURE_EXIT_CODE,
   phpcsVerificationFixture
 } from "./phpcs-verification-fixture.js";
 
@@ -84,7 +85,19 @@ test("a failing required check shows its command, outcome, output tail and logs"
     assert.equal(state.blockedFrom, "verifying");
     assert.equal(
       state.blockReason,
-      `Task verification is incomplete: ${PHPCS_CHECK_IDS.lint} (required) exited with code ${PHPCS_FAILURE_EXIT_CODE}; ${PHPCS_CHECK_IDS.schema} (required) not run; ${PHPCS_CHECK_IDS.touched} (supplemental) not run. The verification details show each command, its output and log paths. Retry re-runs the failed check without replaying implementation.`
+      `Task verification is incomplete: ${PHPCS_CHECK_IDS.lint} (required) exited with code ${PHPCS_FAILURE_EXIT_CODE}. The verification details show each command, its output and log paths. Retry re-runs the failed check without replaying implementation.`
+    );
+    // ADR-0057 §1: the failed lint check no longer hides the later checks.
+    assert.deepEqual(
+      state.taskVerification?.applicability.dispositions.map((item) => [
+        item.checkId,
+        item.kind
+      ]),
+      [
+        [PHPCS_CHECK_IDS.lint, "failed"],
+        [PHPCS_CHECK_IDS.schema, "passed"],
+        [PHPCS_CHECK_IDS.touched, "passed"]
+      ]
     );
     const attempt = failedAttempt(state);
     assert.ok(attempt.stderr && attempt.stdout);
@@ -139,10 +152,12 @@ test("a failing required check shows its command, outcome, output tail and logs"
       ).includes("Found 24 of 35")
     );
     assert.ok(
-      lines.includes(`  ${PHPCS_CHECK_IDS.schema} (required): not run`)
+      lines.includes(`  ${PHPCS_CHECK_IDS.schema} (required): passed`),
+      lines.join("\n")
     );
     assert.ok(
-      lines.includes(`  ${PHPCS_CHECK_IDS.touched} (supplemental): not run`)
+      lines.includes(`  ${PHPCS_CHECK_IDS.touched} (supplemental): passed`),
+      lines.join("\n")
     );
 
     const status = await exec(
@@ -194,7 +209,8 @@ test("retry warns only while the failed command and observed files are unchanged
     const attempt = failedAttempt(f.state);
     assert.deepEqual(await f.runner.verificationRetryOutlook(), {
       attemptId: attempt.id,
-      checkId: PHPCS_CHECK_IDS.lint,
+      checkIds: [PHPCS_CHECK_IDS.lint],
+      ordinaryExits: true,
       sameCommand: true,
       sameInputs: true
     });
@@ -211,10 +227,10 @@ test("retry warns only while the failed command and observed files are unchanged
       ),
       recorded.confirmations.join("\n")
     );
-    // Declining keeps the run and its single failed attempt.
+    // Declining keeps the run and its round: one failed and two passed attempts.
     assert.equal(
       (await f.runner.status()).state.taskVerification?.attempts.length,
-      1
+      3
     );
 
     await writeFile(
@@ -253,6 +269,80 @@ test("a changed check descriptor is not predicted to fail again", async () => {
     );
     const outlook = await f.runner.verificationRetryOutlook();
     assert.equal(outlook?.sameCommand, false, JSON.stringify(outlook));
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+test("two failed required checks are retried in one action", async () => {
+  const catalog = "catalog/entries.json";
+  const f = await phpcsVerificationFixture({ schemaFailsWithout: catalog });
+  try {
+    const { lint, schema, touched } = PHPCS_CHECK_IDS;
+    assert.equal(
+      f.state.blockReason,
+      `Task verification is incomplete: ${lint} (required) exited with code ${PHPCS_FAILURE_EXIT_CODE}; ${schema} (required) exited with code ${PHPCS_SCHEMA_FAILURE_EXIT_CODE}. The verification details show each command, its output and log paths. Retry re-runs the 2 incomplete checks without replaying implementation.`
+    );
+    const first = f.state.taskVerification?.attempts ?? [];
+    const firstLint = first.find((item) => item.checkId === lint);
+    const firstSchema = first.find((item) => item.checkId === schema);
+    assert.ok(firstLint && firstSchema);
+    assert.deepEqual((await f.runner.status()).retry, {
+      eligible: true,
+      reason:
+        "The 2 unsuccessful task checks of this round can be retried in one action.",
+      attemptId: firstSchema.id
+    });
+    assert.deepEqual(await f.runner.verificationRetryOutlook(), {
+      attemptId: firstSchema.id,
+      checkIds: [lint, schema],
+      ordinaryExits: true,
+      sameCommand: true,
+      sameInputs: true
+    });
+    let recorded = recordingIO();
+    await runInteractive(f.runner, recorded.io, { decidedBy: "human" });
+    assert.ok(
+      recorded.menus[0]?.includes(
+        "Retry anyway (same commands, same files; expected to fail again)"
+      ),
+      recorded.menus.join("\n")
+    );
+
+    await mkdir(path.join(f.repository.root, "catalog"));
+    await writeFile(path.join(f.repository.root, catalog), "{}\n");
+    recorded = recordingIO();
+    await runInteractive(f.runner, recorded.io, { decidedBy: "human" });
+    assert.ok(
+      recorded.menus[0]?.includes("Retry the 2 failed checks"),
+      recorded.menus.join("\n")
+    );
+
+    const retried = await f.runner.retry();
+    const after = retried.taskVerification;
+    assert.ok(after, retried.blockReason ?? undefined);
+    assert.deepEqual(
+      after.applicability.dispositions.map((item) => [item.checkId, item.kind]),
+      [
+        [lint, "failed"],
+        [schema, "passed"],
+        [touched, "passed"]
+      ]
+    );
+    const rerun = after.attempts.slice(first.length);
+    assert.deepEqual(
+      rerun.map((item) => [item.checkId, item.retryOf]),
+      [
+        [lint, firstLint.id],
+        [schema, firstSchema.id],
+        [touched, first.find((item) => item.checkId === touched)?.id]
+      ]
+    );
+    assert.match(
+      retried.blockReason ?? "",
+      /Retry re-runs the failed check without replaying implementation\.$/u
+    );
+    assert.equal((await f.runner.status()).retry.attemptId, rerun[0]?.id);
   } finally {
     await f.repository.dispose();
   }

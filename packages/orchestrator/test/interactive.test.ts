@@ -2055,6 +2055,37 @@ test("interactive mode retries persisted start checks", async () => {
   assert.equal(io.choiceNames[0]?.[0], "Retry start checks");
 });
 
+test("interactive mode names a verification retry without an attempt as verification checks", async () => {
+  const runner = new FakeRunner([
+    workflowStatus(
+      runState("blocked", {
+        blockedFrom: "verifying",
+        blockReason: "Task verification is incomplete: lint (required) not run."
+      }),
+      {
+        retry: {
+          eligible: true,
+          reason:
+            "Retry reconciles the unresolved physical attempt before running eligible checks.",
+          attemptId: null
+        },
+        nextAction: "banzai retry"
+      }
+    ),
+    workflowStatus(runState("needs_plan_approval"))
+  ]);
+  const io = new FakeIO(["retry", "exit"], [], [true]);
+
+  await runInteractive(runner, io, { decidedBy: "human" });
+
+  assert.deepEqual(runner.calls, [{ operation: "retry", value: null }]);
+  assert.equal(io.choiceNames[0]?.[0], "Retry verification checks");
+  assert.equal(
+    io.confirmationMessages[0],
+    "Rerun the verification checks without replaying implementation?"
+  );
+});
+
 test("interactive mode retries review checks that failed before Claude started", async () => {
   const runner = new FakeRunner([
     workflowStatus(

@@ -258,6 +258,25 @@ export async function taskVerificationApplicability(input, decision, attempts, c
   return { ...body, sha256: evidenceDigest(body) };
 }
 
+/** The latest attempt of each selected check in this round that failed or was interrupted, in selection order. */
+export function unsuccessfulRoundAttempts(attempts, selection, roundId) {
+  return selection.checks.map((check) => attempts.filter((item) => item.roundId === roundId && item.checkId === check.descriptor.id).at(-1))
+    .filter((item) => item !== undefined && ["failed", "interrupted"].includes(item.status));
+}
+
+/**
+ * Whether a round schedules its next check after this terminal attempt
+ * (ADR-0057 §1). Command-level outcomes continue; a signal, a runner failure or
+ * a cancellation at launch (recorded as an interrupted start) stops. The helper
+ * records timeouts as failed and the runner as interrupted, so status alone
+ * never decides.
+ */
+export function taskVerificationContinues(attempt) {
+  if (attempt.status === "completed") return true;
+  if (attempt.failureCategory === "timeout" || attempt.failureCategory === "output_limit") return ["failed", "interrupted"].includes(attempt.status);
+  return attempt.status === "failed" && (attempt.failureCategory === "process_start" || (attempt.failureCategory === "command_exit" && attempt.signal === null));
+}
+
 /** Owner supplies authority, context, storage, launch and live revalidation callbacks. */
 export async function executeTaskVerification(input) {
   const { selection, authority, context, policy, roundId, revalidate, invoke } = input;
@@ -276,6 +295,16 @@ export async function executeTaskVerification(input) {
   }
   if (!input.recoverInterrupted && attempts.some(item => item.status === "started")) fail("Task verification retains an unresolved attempt; owner recovery is required before another round.");
   if (input.retryOf !== undefined && !attempts.some(item => item.id === input.retryOf && item.roundId === roundId && ["failed", "interrupted"].includes(item.status) && selection.checks.some(check => check.descriptor.id === item.checkId))) fail("Retry must identify an unsuccessful check in this exact task round.");
+  // A retry set names every unsuccessful check of the round at once (ADR-0057 §2);
+  // a single retryOf stays valid only while it is the round's one unsuccessful
+  // check, so neither form launches anything before it would be refused.
+  const unsuccessful = unsuccessfulRoundAttempts(attempts, selection, roundId);
+  if (input.retrySet !== undefined) {
+    if (input.retryOf !== undefined || !Array.isArray(input.retrySet) || input.retrySet.length === 0 || input.retrySet.length > selection.checks.length || new Set(input.retrySet).size !== input.retrySet.length) fail("Invalid task verification retry set.");
+    if (input.retrySet.length !== unsuccessful.length || unsuccessful.some(item => !input.retrySet.includes(item.id))) fail("Retry must name every unsuccessful check of this exact task round and nothing else.");
+  } else if (input.retryOf !== undefined && unsuccessful.some(item => item.id !== input.retryOf && !(item.status === "interrupted" && input.recoverInterrupted)))
+    fail("Retry must name every unsuccessful check of this exact task round and nothing else.");
+  const retried = (id) => id === input.retryOf || input.retrySet?.includes(id) === true;
   const descriptors = selection.checks.map((item) => item.descriptor);
   const capture = () => captureTaskVerificationInputs(input, descriptors, policy);
   if (input.recoverInterrupted) {
@@ -300,7 +329,7 @@ export async function executeTaskVerification(input) {
     const previous = attempts.filter((attempt) => attempt.checkId === item.descriptor.id).at(-1);
     const applicability = await taskVerificationApplicability(input, decision, attempts, await capture());
     if (["passed", "reused"].includes(applicability.dispositions.find((entry) => entry.checkId === item.descriptor.id)?.kind)) continue;
-    if (previous?.roundId === roundId && (previous.status === "started" || (previous.status === "interrupted" ? !input.recoverInterrupted && previous.id !== input.retryOf : previous.status === "failed" && previous.id !== input.retryOf))) fail("Task verification retains an unresolved attempt; use its explicit retry or recovery action.");
+    if (previous?.roundId === roundId && (previous.status === "started" || (previous.status === "interrupted" ? !input.recoverInterrupted && !retried(previous.id) : previous.status === "failed" && !retried(previous.id)))) fail("Task verification retains an unresolved attempt; use its explicit retry or recovery action.");
     await revalidate();
     const authorized = await authorizeTaskVerification({ repoRoot: input.repoRoot, descriptor: item.descriptor, authority, context, policy, required: item.required });
     const current = await capture();
@@ -326,10 +355,11 @@ export async function executeTaskVerification(input) {
     await publish(input, `origins/${attempt.id}.finish.json`, { schema: "banzai-verification-origin-finish/v2", schemaVersion: 2, workId: input.workId, attemptId: attempt.id, start, physical, after });
     attempts = await readTaskVerificationAttempts(input);
     // Evidence requires unchanged observed inputs, so a check that writes project
-    // files can never pass; name the paths and the remedy at the source.
-    if (terminal.status === "completed" && current.observedDigest !== null && after.observedDigest !== null && after.observedDigest !== current.observedDigest)
+    // files can never pass, and a failed one would surface only as a changed
+    // input at the next launch; name the check, paths and remedy at the source.
+    if (current.observedDigest !== null && after.observedDigest !== null && after.observedDigest !== current.observedDigest)
       fail(`Check ${JSON.stringify(item.descriptor.id)} changed observed project files: ${observedChanges(current, after) ?? "paths unavailable"}. Keep generated output Git-ignored (.gitignore) or make the check leave project files unchanged, then retry verification.`);
-    if (terminal.status !== "completed") break;
+    if (!taskVerificationContinues(terminal)) break;
   }
   await revalidate();
   for (const item of selection.checks) await authorizeTaskVerification({ repoRoot: input.repoRoot, descriptor: item.descriptor, authority, context, policy, required: item.required });

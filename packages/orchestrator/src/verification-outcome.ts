@@ -75,3 +75,13 @@ export function incompleteVerificationSummary(
   const more = incomplete.length - clauses.length;
   return `${clauses.join("; ")}${more > 0 ? `; and ${more} more` : ""}`;
 }
+
+/** The block reason's retry sentence; one retry action reruns every incomplete check. */
+export function retryReach(publication: TaskVerificationPublication): string {
+  const incomplete = publication.applicability.dispositions.filter(
+    (item) => item.kind !== "passed" && item.kind !== "reused"
+  ).length;
+  return incomplete > 1
+    ? `Retry re-runs the ${incomplete} incomplete checks without replaying implementation.`
+    : "Retry re-runs the failed check without replaying implementation.";
+}
