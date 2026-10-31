@@ -1863,7 +1863,7 @@ const ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
       status: "blocked",
       blockedFrom: "verifying",
       blockReason:
-        "Task verification is incomplete. Inspect the retained physical evidence and retry the failed check without replaying implementation."
+        "Task verification is incomplete: custom-1 (supplemental) exited with code 7. The verification details show each command, its output and log paths. Retry re-runs the failed check without replaying implementation."
     }
   },
   "blocked from verifying after every task check completed": {
@@ -2017,7 +2017,7 @@ const ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
       status: "blocked",
       blockedFrom: "verifying",
       blockReason:
-        "Task verification is incomplete. Inspect the retained physical evidence and retry the failed check without replaying implementation."
+        "Task verification is incomplete: custom-1 (supplemental) exited with code 7. The verification details show each command, its output and log paths. Retry re-runs the failed check without replaying implementation."
     }
   },
   "blocked from verifying with invalid completion evidence": {
@@ -2056,7 +2056,7 @@ const ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
       status: "blocked",
       blockedFrom: "verifying",
       blockReason:
-        "Task verification is incomplete. Inspect the retained physical evidence and retry the failed check without replaying implementation."
+        "Task verification is incomplete: custom-1 (supplemental) exited with code 7. The verification details show each command, its output and log paths. Retry re-runs the failed check without replaying implementation."
     }
   },
   "blocked from verifying with invalid plan bundle": {
@@ -2095,7 +2095,7 @@ const ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
       status: "blocked",
       blockedFrom: "verifying",
       blockReason:
-        "Task verification is incomplete. Inspect the retained physical evidence and retry the failed check without replaying implementation."
+        "Task verification is incomplete: custom-1 (supplemental) exited with code 7. The verification details show each command, its output and log paths. Retry re-runs the failed check without replaying implementation."
     }
   },
   "blocked from verifying without a legacy ledger": {
@@ -2134,7 +2134,7 @@ const ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
       status: "blocked",
       blockedFrom: "verifying",
       blockReason:
-        "Task verification is incomplete. Inspect the retained physical evidence and retry the failed check without replaying implementation."
+        "Task verification is incomplete: custom-1 (supplemental) exited with code 7. The verification details show each command, its output and log paths. Retry re-runs the failed check without replaying implementation."
     }
   },
   "blocked from verifying with a failed legacy attempt": {
@@ -2173,7 +2173,7 @@ const ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
       status: "blocked",
       blockedFrom: "verifying",
       blockReason:
-        "Task verification is incomplete. Inspect the retained physical evidence and retry the failed check without replaying implementation."
+        "Task verification is incomplete: custom-1 (supplemental) exited with code 7. The verification details show each command, its output and log paths. Retry re-runs the failed check without replaying implementation."
     }
   },
   "blocked from verifying with a completed legacy attempt": {
@@ -2212,7 +2212,7 @@ const ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
       status: "blocked",
       blockedFrom: "verifying",
       blockReason:
-        "Task verification is incomplete. Inspect the retained physical evidence and retry the failed check without replaying implementation."
+        "Task verification is incomplete: custom-1 (supplemental) exited with code 7. The verification details show each command, its output and log paths. Retry re-runs the failed check without replaying implementation."
     }
   },
   "failed mutable implementation": {
@@ -3760,7 +3760,7 @@ const ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
       status: "blocked",
       blockedFrom: "verifying",
       blockReason:
-        "Task verification is incomplete. Inspect the retained physical evidence and retry the failed check without replaying implementation."
+        "Task verification is incomplete: custom-1 (supplemental) exited with code 7. The verification details show each command, its output and log paths. Retry re-runs the failed check without replaying implementation."
     }
   },
   "blocked from verifying with a malformed legacy ledger": {
@@ -3799,7 +3799,7 @@ const ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
       status: "blocked",
       blockedFrom: "verifying",
       blockReason:
-        "Task verification is incomplete. Inspect the retained physical evidence and retry the failed check without replaying implementation."
+        "Task verification is incomplete: custom-1 (supplemental) exited with code 7. The verification details show each command, its output and log paths. Retry re-runs the failed check without replaying implementation."
     }
   },
   "blocked from verifying with a malformed legacy attempt": {
@@ -3838,7 +3838,7 @@ const ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
       status: "blocked",
       blockedFrom: "verifying",
       blockReason:
-        "Task verification is incomplete. Inspect the retained physical evidence and retry the failed check without replaying implementation."
+        "Task verification is incomplete: custom-1 (supplemental) exited with code 7. The verification details show each command, its output and log paths. Retry re-runs the failed check without replaying implementation."
     }
   },
   "interrupted implementation with a malformed verification ledger": {

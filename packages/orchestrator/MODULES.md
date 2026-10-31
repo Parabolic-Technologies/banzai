@@ -1073,6 +1073,20 @@ CLI and interactive status share the canonical task-outcome projection in
 remain distinct; verification-only retry retains completed implementation and
 revalidates policy, authority and live-process protection before launch.
 
+For every check whose latest attempt did not succeed, the projection adds the
+descriptor's argv, cwd and timeout and the attempt's outcome, failure category,
+duration and log paths. `verification-outcome.ts` owns the pure outcome labels,
+keyed on status, failure category and signal together, and the block-reason
+summary, which never carries output. `verification-output.ts` reads at most the
+last 64 KiB of each log through contained, no-follow paths and returns 20
+redacted, ANSI-stripped, escaped and length-bounded lines; only the CLI and
+interactive renderers call it, so `status()` and `status --json` read no logs.
+`WorkflowRunner.verificationRetryOutlook()` compares a failed `command_exit`
+attempt's descriptor and observed-input digest with the current selection and
+capture. The interactive blocked menu alone calls it, to label a retry that is
+expected to fail again; any read failure yields no outlook, and the outlook
+never gates retry.
+
 `verification-evidence.ts` exposes the shared builtin-only
 `task-verification.mjs` and `task-verification-store.mjs` owners. Discovery reads
 project metadata inertly and distinguishes absent/unavailable inputs and known
@@ -1169,7 +1183,8 @@ state-8 task runs never enter this prerequisite gate or init wizard.
   commands while workflow verification remains fail-fast. No configuration write
   runs concurrently with a model, check or waiting interactive owner.
 - `verification-ui.ts` edits executable/argv fields and renders pending actions
-  before the repair/resume alternative. It performs no project execution.
+  before the repair/resume alternative. It performs no project execution and
+  no I/O; verification output tails arrive from its callers.
 - `configuration-review.ts` freezes actual deltas, coverage and resolution/Skip
   references for snapshot v4/render v5; historical writers/readers remain bound
   to their original versions. Already-published changes survive source drift and

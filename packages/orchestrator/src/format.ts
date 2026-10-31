@@ -122,6 +122,19 @@ export function hangingLines(
   return [`${prefix}${first.slice(indent.length)}`, ...wrapped.slice(1)];
 }
 
+/** Renders an elapsed or limit duration at terminal scale: `850ms`, `4.2s`, `3m 5s`. */
+export function formatDuration(durationMs: number): string {
+  if (durationMs < 1_000) {
+    return `${Math.max(0, Math.round(durationMs))}ms`;
+  }
+  if (durationMs < 60_000) {
+    return `${(durationMs / 1_000).toFixed(durationMs < 10_000 ? 1 : 0)}s`;
+  }
+  const minutes = Math.floor(durationMs / 60_000);
+  const seconds = Math.floor((durationMs % 60_000) / 1_000);
+  return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
+}
+
 function trimmedDecimal(value: number): string {
   return value.toFixed(1).replace(/\.0$/, "");
 }

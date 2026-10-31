@@ -1696,6 +1696,26 @@ offers `Retry review checks`; the scriptable equivalent is `banzai retry`.
 The runner then rechecks the base commit, approved artifact digest, Claude
 authentication, and workspace snapshot before invoking Claude.
 
+When task verification blocks a run, `banzai status` and the interactive status
+list every check with its outcome. For each check whose latest attempt did not
+succeed they also show the command and working directory, the result (exit
+code, timeout, terminating signal or start failure), the failure category,
+duration and timeout, the last 20 lines of redacted stderr (stdout when stderr
+is empty), and the repository-relative stderr and stdout log paths under
+`.banzai/`. A signalled process has no exit code; the recorded `1` is labeled
+synthetic. The block reason names each incomplete check and its outcome and
+never contains command output. `banzai status --json` keeps its shape: it
+carries the raw `state.taskVerification` attempt records, and only the human
+views read the logs.
+
+Retry re-runs the failed check without replaying implementation. When that
+attempt exited with an ordinary non-zero code and neither its command nor the
+observed project files changed since, the interactive action reads
+`Retry anyway (same command, same files; expected to fail again)`. Observed
+files are tracked and untracked non-ignored files; ignored dependencies,
+caches and the environment are not compared, so the label is a prediction and
+never refuses the retry.
+
 Retry never bypasses approval integrity. `banzai approve plan` stores the
 exact bytes of every approved artifact beside the run evidence
 (`.banzai/runs/<run-id>/approval/`), because the bundle paths are typically

@@ -196,14 +196,39 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/verification-ui.ts",
     "guided-verification-editor",
-    [ADR_0045],
+    [ADR_0045, ADR_0049],
     [
       permission("./configuration-prerequisite.js", ADR_0045),
-      permission("./format.js", ADR_0045)
+      permission("./format.js", ADR_0045),
+      permission("./verification-outcome.js", ADR_0049)
     ],
     [
       permission("./interactive.js", ADR_0045),
-      permission("./types.js", ADR_0045)
+      permission("./types.js", ADR_0045),
+      permission("./verification-evidence.js", ADR_0049),
+      permission("./verification-output.js", ADR_0049)
+    ]
+  ),
+  boundary(
+    "src/verification-outcome.ts",
+    "verification-outcome-labels",
+    [ADR_0049],
+    [permission("./format.js", ADR_0049)],
+    [permission("./verification-evidence.js", ADR_0049)]
+  ),
+  boundary(
+    "src/verification-output.ts",
+    "verification-output-tails",
+    [ADR_0049],
+    [
+      permission("./project-files.js", ADR_0049),
+      permission("./process.js", ADR_0049),
+      permission("./format.js", ADR_0049),
+      permission("./verification-outcome.js", ADR_0049)
+    ],
+    [
+      permission("./types.js", ADR_0049),
+      permission("./verification-evidence.js", ADR_0049)
     ]
   ),
   boundary(
@@ -458,6 +483,7 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       permission("./verification-cli.js", ADR_0045),
       permission("./verification.js", ADR_0045),
       permission("./verification-ui.js", ADR_0045),
+      permission("./verification-output.js", ADR_0045),
       permission("./project-files.js", ADR_0054),
       permission("./work-documents.js", ADR_0054),
       permission("./project-adoption.js", ADR_0040),
@@ -739,6 +765,7 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       permission("./validation.js", ADR_0055),
 
       permission("./verification-ui.js", ADR_0045),
+      permission("./verification-output.js", ADR_0045),
       permission("./cancellation-cli.js", ADR_0035),
       permission("../package.json", MANIFEST_MODULES),
       permission("./ansi.js", MANIFEST_MODULES),
@@ -995,6 +1022,7 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       permission("./configuration-review.js", ADR_0045),
       permission("./verification-config.js", ADR_0045),
       permission("./verification-evidence.js", ADR_0043),
+      permission("./verification-outcome.js", ADR_0043),
       permission("./phase-instructions.js", ADR_0042),
       permission("./work-documents.js", ADR_0054),
       permission("./project-adoption.js", ADR_0040),

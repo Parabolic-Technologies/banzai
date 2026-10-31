@@ -1,6 +1,6 @@
 import path from "node:path";
 import { createStyler, type Styler } from "./ansi.js";
-import { resolveWidth, wrapText } from "./format.js";
+import { formatDuration, resolveWidth, wrapText } from "./format.js";
 import type {
   PhaseDescriptor,
   ProgressEvent,
@@ -54,18 +54,6 @@ export function resolveProgressLevel(
   }
   const configured = env.BANZAI_PROGRESS?.trim().toLowerCase() ?? "";
   return LEVELS.has(configured) ? (configured as ProgressLevel) : "normal";
-}
-
-function formatDuration(durationMs: number): string {
-  if (durationMs < 1_000) {
-    return `${Math.max(0, Math.round(durationMs))}ms`;
-  }
-  if (durationMs < 60_000) {
-    return `${(durationMs / 1_000).toFixed(durationMs < 10_000 ? 1 : 0)}s`;
-  }
-  const minutes = Math.floor(durationMs / 60_000);
-  const seconds = Math.floor((durationMs % 60_000) / 1_000);
-  return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
 }
 
 function singleLine(value: string): string {

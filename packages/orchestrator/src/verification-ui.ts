@@ -1,15 +1,37 @@
 import type { InteractiveIO } from "./interactive.js";
 import type { RunState, VerificationCommand } from "./types.js";
-import { escapeTerminalText } from "./format.js";
+import type {
+  TaskVerificationAttempt,
+  TaskVerificationDescriptor
+} from "./verification-evidence.js";
+import { escapeTerminalText, formatDuration } from "./format.js";
+import {
+  attemptOutcomeText,
+  hasCommandOutput
+} from "./verification-outcome.js";
+import type {
+  VerificationOutputTail,
+  VerificationOutputTails
+} from "./verification-output.js";
 import {
   configurationText,
   type ConfigurationPrerequisiteRequest
 } from "./configuration-prerequisite.js";
 
-export function taskVerificationStatusLines(state: RunState): string[] {
+/**
+ * Canonical task-outcome projection for CLI and interactive status. Lines are
+ * preformatted: indentation and output lines are meaningful, so renderers must
+ * not rewrap them. Output tails come from the caller because reading logs is
+ * I/O; without them the details still name every log path.
+ */
+export function taskVerificationStatusLines(
+  state: RunState,
+  tails: VerificationOutputTails = new Map()
+): string[] {
   if (state.verificationMode !== "task") return [];
-  const application = state.taskVerification?.applicability;
-  if (!application)
+  const publication = state.taskVerification;
+  const application = publication?.applicability;
+  if (!publication || !application)
     return [
       state.status === "blocked" && state.blockedFrom === "verifying"
         ? "Verification: unavailable. See the blocked prerequisite."
@@ -25,12 +47,78 @@ export function taskVerificationStatusLines(state: RunState): string[] {
     ) ?? (application.complete && kinds.length > 0 ? "passed" : "not_run");
   return [
     `Verification: ${label(outcome)}`,
-    ...application.dispositions.map((item) =>
-      escapeTerminalText(
-        `  ${item.checkId} (${item.required ? "required" : "supplemental"}): ${label(item.kind)}${item.kind === "reused" ? " (reused evidence)" : ""}${item.kind === "unavailable" ? `. ${item.reason}` : ""}`
-      )
+    ...application.dispositions.flatMap((item) => {
+      const attempt = publication.attempts.find(
+        (entry) => entry.id === item.attemptId
+      );
+      const descriptor = publication.decision.checks.find(
+        (entry) => entry.descriptor.id === item.checkId
+      )?.descriptor;
+      return [
+        escapeTerminalText(
+          `  ${item.checkId} (${item.required ? "required" : "supplemental"}): ${label(item.kind)}${item.kind === "reused" ? " (reused evidence)" : ""}${item.kind === "unavailable" ? `. ${item.reason}` : ""}`
+        ),
+        ...(attempt === undefined ||
+        descriptor === undefined ||
+        attempt.status === "completed"
+          ? []
+          : failureDetailLines(attempt, descriptor, tails.get(attempt.id)))
+      ];
+    })
+  ];
+}
+
+function failureDetailLines(
+  attempt: TaskVerificationAttempt,
+  descriptor: TaskVerificationDescriptor,
+  tail: VerificationOutputTail | null | undefined
+): string[] {
+  const facts = [
+    `failure category: ${attempt.failureCategory ?? "none"}`,
+    attempt.durationMs === null
+      ? "duration unknown"
+      : `duration ${formatDuration(attempt.durationMs)}`,
+    `timeout ${formatDuration(descriptor.timeoutMs)}`
+  ];
+  const logs = [
+    ["stderr", attempt.stderr],
+    ["stdout", attempt.stdout]
+  ] as const;
+  return [
+    ...[
+      `Command: ${[descriptor.command, ...descriptor.args].map(shellWord).join(" ")}`,
+      `Directory: ${descriptor.cwd}`,
+      `Result: ${attemptOutcomeText(attempt, descriptor.timeoutMs)}`,
+      `Details: ${facts.join(" · ")}`
+    ].map((line) => escapeTerminalText(`    ${line}`)),
+    ...outputLines(attempt, tail),
+    ...logs.flatMap(([stream, reference]) =>
+      reference === null
+        ? []
+        : [escapeTerminalText(`    ${stream} log: ${reference.relativePath}`)]
     )
   ];
+}
+
+function outputLines(
+  attempt: TaskVerificationAttempt,
+  tail: VerificationOutputTail | null | undefined
+): string[] {
+  if (!hasCommandOutput(attempt) || tail === undefined) return [];
+  if (tail === null) return ["    Output: the log could not be read."];
+  if (tail.lines.length === 0) return ["    Output: none."];
+  return [
+    `    ${tail.stream}, ${tail.truncated ? `last ${tail.lines.length} lines` : `${tail.lines.length} line${tail.lines.length === 1 ? "" : "s"}`}:`,
+    // Tail lines are already redacted, stripped and escaped by their reader.
+    ...tail.lines.map((line) => `      | ${line}`)
+  ];
+}
+
+/** Quotes an argv word only when a POSIX shell would split or expand it. */
+function shellWord(word: string): string {
+  return /^[A-Za-z0-9_@%+=:,./-]+$/u.test(word)
+    ? word
+    : `'${word.replaceAll("'", "'\\''")}'`;
 }
 
 export function verificationCommandLines(

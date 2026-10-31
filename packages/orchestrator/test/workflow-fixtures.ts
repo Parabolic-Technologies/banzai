@@ -7,7 +7,8 @@ import type {
 import { RunStore } from "../src/store.js";
 import {
   parseTaskVerificationDescriptor,
-  evidenceDigest
+  evidenceDigest,
+  type TaskVerificationDescriptor
 } from "../src/verification-evidence.js";
 import assert from "node:assert/strict";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
@@ -451,6 +452,10 @@ export class FakeAdapters implements VendorAdapters {
   emitReviewTerminalCheckpoint = true;
   failReviewAfterTerminalCheckpoint = false;
   planTaskIds = ["T001"];
+  /** Plan obligations to write instead of the configured profile commands. */
+  planVerificationChecks: TaskVerificationDescriptor[] | null = null;
+  /** Supplemental strict candidates; lite candidates keep `fixtureTaskChecks`. */
+  strictVerificationCandidates: TaskVerificationDescriptor[] | null = null;
 
   protected async emitImplementationCheckpoint(
     request: PhaseAdapterRequest,
@@ -558,16 +563,22 @@ export class FakeAdapters implements VendorAdapters {
     const bind = (result: PhaseResult): PhaseResult => {
       if (state.verificationMode === "task") {
         result.schemaVersion = 4;
-        result.verificationCandidates =
-          result.phase === "plan" ||
-          (state.workflowSelection?.workflow ?? "strict") === "strict"
-            ? null
-            : {
-                checks: fixtureChecks,
-                absenceReason: fixtureChecks.length
-                  ? null
-                  : "Fixture task uses direct source assertions."
-              };
+        const strict =
+          (state.workflowSelection?.workflow ?? "strict") === "strict";
+        const strictCandidates = this.strictVerificationCandidates;
+        if (result.phase === "plan") result.verificationCandidates = null;
+        else if (strict)
+          result.verificationCandidates =
+            strictCandidates === null
+              ? null
+              : { checks: strictCandidates, absenceReason: null };
+        else
+          result.verificationCandidates = {
+            checks: fixtureChecks,
+            absenceReason: fixtureChecks.length
+              ? null
+              : "Fixture task uses direct source assertions."
+          };
       }
       if (!roles) return result;
       const mapping = new Map<string, string | null>([
@@ -653,19 +664,21 @@ export class FakeAdapters implements VendorAdapters {
             "utf8"
           )
         ) as OrchestratorConfig;
-        const checks = config.verification.profiles.flatMap((profile) =>
-          profile.commands.map((command, index) =>
-            parseTaskVerificationDescriptor({
-              ...command,
-              id: `${profile.id}-${index + 1}`,
-              requirementRefs: ["FR1"],
-              cwd: ".",
-              evidence: "fresh",
-              sources: [],
-              materialization: null
-            })
-          )
-        );
+        const checks =
+          this.planVerificationChecks ??
+          config.verification.profiles.flatMap((profile) =>
+            profile.commands.map((command, index) =>
+              parseTaskVerificationDescriptor({
+                ...command,
+                id: `${profile.id}-${index + 1}`,
+                requirementRefs: ["FR1"],
+                cwd: ".",
+                evidence: "fresh",
+                sources: [],
+                materialization: null
+              })
+            )
+          );
         await writeFile(
           file,
           before +

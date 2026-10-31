@@ -219,6 +219,9 @@ behavior and edge cases; source and tests own the executable evidence.
   `configuration-review.ts`, `verification-cli.ts`, `verification-ui.ts` —
   retained legacy configuration utilities and current verification display;
   legacy profile operations do not gate new tasks.
+- `verification-outcome.ts`, `verification-output.ts` — failed-check outcome
+  labels and bounded, redacted log tails for human status; `status --json` and
+  agent control carry no log content.
 - `validation.ts`, `contracts.ts`, `types.ts`, `errors.ts` — runtime decoding,
   schema parity, shared types and stable failures; `types.ts` has no runtime
   imports.

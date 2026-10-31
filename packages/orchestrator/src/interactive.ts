@@ -9,6 +9,10 @@ import {
   taskVerificationStatusLines,
   editVerificationCommands
 } from "./verification-ui.js";
+import {
+  readVerificationOutputTails,
+  type VerificationOutputTails
+} from "./verification-output.js";
 import type {
   HumanTimeEpisode,
   HumanTimeGateway,
@@ -53,6 +57,7 @@ import type {
   RecoverInput,
   StartRunInput,
   TriageInput,
+  VerificationRetryOutlook,
   WorkflowStatus
 } from "./workflow.js";
 import {
@@ -133,6 +138,7 @@ export interface InteractiveRunner {
   }): Promise<RunState>;
   readonly repoRoot: string;
   getPlanHumanPrerequisites?(): Promise<string | null>;
+  verificationRetryOutlook?(): Promise<VerificationRetryOutlook | null>;
   status(): Promise<WorkflowStatus>;
   start(input: StartRunInput): Promise<RunState>;
   resume(): Promise<RunState>;
@@ -342,6 +348,32 @@ function renderSection(
   }
 }
 
+/**
+ * Writes a section whose lines carry their own indentation, such as task
+ * verification details. Only an overlong top-level line wraps, under its own
+ * indent; deeper detail lines (commands, paths, output) stay whole so they can
+ * be copied, and the terminal soft-wraps them.
+ */
+function renderPreformattedSection(
+  io: InteractiveIO,
+  styler: Styler,
+  lines: readonly string[]
+): void {
+  const [heading, ...body] = lines;
+  if (heading === undefined) return;
+  io.writeLine();
+  io.writeLine(styler.bold(heading));
+  const width = resolveWidth(io.width);
+  for (const text of body) {
+    const indent = /^ */u.exec(text)?.[0] ?? "";
+    if (text.length <= width || indent.length >= 4) {
+      io.writeLine(text);
+      continue;
+    }
+    for (const line of wrapText(text, width, indent)) io.writeLine(line);
+  }
+}
+
 /** Writes `Label: body`, wrapping to the terminal when the body is prose. */
 function writeLabeled(io: InteractiveIO, label: string, body: string): void {
   for (const line of labeledLines(label, body, resolveWidth(io.width))) {
@@ -484,7 +516,8 @@ function renderStatus(
   io: InteractiveIO,
   status: WorkflowStatus,
   styler: Styler,
-  humanTime?: HumanTimeSummary
+  humanTime?: HumanTimeSummary,
+  outputTails?: VerificationOutputTails
 ): void {
   const state = status.state;
   const width = resolveWidth(io.width);
@@ -530,7 +563,11 @@ function renderStatus(
       state.workflowSelection.reason
     ]);
   }
-  renderSection(io, styler, taskVerificationStatusLines(state));
+  renderPreformattedSection(
+    io,
+    styler,
+    taskVerificationStatusLines(state, outputTails)
+  );
   if (state.blockReason !== null) {
     renderSection(io, styler, ["Blocked", state.blockReason]);
   }
@@ -1527,6 +1564,21 @@ async function handleStatus(
     const isDigestRejectedRepair =
       status.recovery.eligible &&
       status.recovery.sourceKind === "digest_rejected";
+    // Asked only here, while a human chooses: the comparison captures inputs.
+    const outlook =
+      status.retry.eligible &&
+      status.retry.attemptId !== null &&
+      state.blockedFrom === "verifying" &&
+      !isPlanBundleRepair &&
+      !isCompletionEvidenceRepair &&
+      !isDigestRejectedRepair
+        ? ((await runner.verificationRetryOutlook?.()) ?? null)
+        : null;
+    const repeatsFailure =
+      outlook !== null &&
+      outlook.attemptId === status.retry.attemptId &&
+      outlook.sameCommand &&
+      outlook.sameInputs;
     if (isDigestRejectedRepair) {
       // Replaying the rejected evidence reproduces the rejection, so the
       // authorized repair is the offered route (ADR-0051).
@@ -1553,7 +1605,9 @@ async function handleStatus(
                       ? "Repair plan-task completion evidence"
                       : state.blockedFrom === "planning"
                         ? "Continue the failed planning attempt"
-                        : "Retry the failed read-only attempt",
+                        : repeatsFailure
+                          ? "Retry anyway (same command, same files; expected to fail again)"
+                          : "Retry the failed read-only attempt",
         value: "retry"
       });
     } else if (status.recovery.eligible) {
@@ -1602,7 +1656,9 @@ async function handleStatus(
               ? "Repair plan-task completion evidence in a fresh attempt?"
               : state.blockedFrom === "planning"
                 ? "Run preflight and continue planning, reusing saved context when compatible?"
-                : "Run preflight and start a fresh retry?";
+                : repeatsFailure
+                  ? `Check ${escapeTerminalText(outlook.checkId)} failed with an ordinary exit, and its command and the observed project files are unchanged, so it is expected to fail the same way. Retry anyway?`
+                  : "Run preflight and start a fresh retry?";
       if (await io.confirm(message, false)) {
         await runWork(options, () => runner.retry());
       }
@@ -2497,7 +2553,13 @@ async function interactiveLoop(
         io.writeLine("Time was not saved");
       }
     }
-    renderStatus(io, status, options.styler ?? createStyler(false), humanTime);
+    renderStatus(
+      io,
+      status,
+      options.styler ?? createStyler(false),
+      humanTime,
+      await readVerificationOutputTails(runner.repoRoot, status.state)
+    );
     const decisionIO = withRunMenu(
       io,
       options.humanTime,

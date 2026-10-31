@@ -8,6 +8,10 @@ import {
   configurationDecisionLines,
   taskVerificationStatusLines
 } from "./verification-ui.js";
+import {
+  readVerificationOutputTails,
+  type VerificationOutputTails
+} from "./verification-output.js";
 import { InteractiveHumanTime } from "./interactive-human-time.js";
 import {
   CANCELLATION_HELP,
@@ -532,7 +536,11 @@ function parsePlanningReviewArgs(args: readonly string[]): {
   };
 }
 
-function printState(status: WorkflowStatus, metrics = false): void {
+function printState(
+  status: WorkflowStatus,
+  metrics = false,
+  outputTails?: VerificationOutputTails
+): void {
   const { state, nextAction } = status;
   console.log(`Run: ${state.runId}`);
   console.log(`Feature: ${state.slug}`);
@@ -560,7 +568,8 @@ function printState(status: WorkflowStatus, metrics = false): void {
       `${state.workflowSelection.workflow} (${state.workflowSelection.reason})`
     );
   }
-  for (const line of taskVerificationStatusLines(state)) console.log(line);
+  for (const line of taskVerificationStatusLines(state, outputTails))
+    console.log(line);
   if (state.blockReason !== null) {
     printLabeled("Blocked", state.blockReason);
   }
@@ -694,7 +703,12 @@ async function printRunnerState(
   runner: WorkflowRunner,
   metrics: boolean
 ): Promise<void> {
-  printState(await runner.status(), metrics);
+  const status = await runner.status();
+  printState(
+    status,
+    metrics,
+    await readVerificationOutputTails(runner.repoRoot, status.state)
+  );
 }
 
 async function activeRunState(
@@ -1308,7 +1322,11 @@ async function main(): Promise<void> {
     if (args.includes("--json")) {
       console.log(JSON.stringify(status, null, 2));
     } else {
-      printState(status, metrics);
+      printState(
+        status,
+        metrics,
+        await readVerificationOutputTails(runner.repoRoot, status.state)
+      );
       if (status.planApprovalValid !== null) {
         console.log(
           `Plan approval: ${status.planApprovalValid ? "valid" : "STALE"}`

@@ -2643,7 +2643,7 @@ const TRACE_RETRY: readonly string[] = [
   "state verifying",
   "event attempt.applied",
   "state verifying",
-  "state blocked <- verifying: Task verification is incomplete. Inspect the retained physical evidence and retry the failed check without replaying implementation.",
+  "state blocked <- verifying: Task verification is incomplete: custom-1 (supplemental) exited with code 7. The verification details show each command, its output and log paths. Retry re-runs the failed check without replaying implementation.",
   "state verifying",
   "event verification.retry_requested",
   "state verifying",
@@ -3031,7 +3031,7 @@ const TRACE_CANCEL: readonly string[] = [
   "state verifying",
   "event attempt.applied",
   "state verifying",
-  "state blocked <- verifying: Task verification is incomplete. Inspect the retained physical evidence and retry the failed check without replaying implementation.",
+  "state blocked <- verifying: Task verification is incomplete: custom-1 (supplemental) exited with code 7. The verification details show each command, its output and log paths. Retry re-runs the failed check without replaying implementation.",
   "state cancelled",
   "event run.cancelled"
 ];

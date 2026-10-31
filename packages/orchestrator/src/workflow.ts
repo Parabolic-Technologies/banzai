@@ -41,6 +41,7 @@ import {
   executeTaskVerification,
   readTaskVerificationAttempts,
   captureTaskVerificationInputs,
+  parseTaskVerificationDecision,
   taskVerificationApplicability,
   authorizeTaskVerification,
   parseTaskVerificationObligations,
@@ -58,6 +59,7 @@ import type {
   TaskVerificationAuthority,
   VerificationCapture
 } from "./verification-evidence.js";
+import { incompleteVerificationSummary } from "./verification-outcome.js";
 import {
   hasRunnerWorkOwnership,
   withRunnerWorkOwnership,
@@ -643,6 +645,14 @@ export interface ConfigurationDecisionInput {
   action: ConfigurationAction;
   profile?: unknown;
   decidedBy: string;
+}
+
+/** A prediction for the blocked-run menu only; it never gates a retry. */
+export interface VerificationRetryOutlook {
+  attemptId: string;
+  checkId: string;
+  sameCommand: boolean;
+  sameInputs: boolean;
 }
 
 export interface WorkflowStatus {
@@ -1589,6 +1599,76 @@ export class WorkflowRunner {
     } catch (error) {
       if (error instanceof TerminalRunStateError) return error.state;
       throw error;
+    }
+  }
+
+  /**
+   * Whether retrying the failed task check would repeat a deterministic
+   * failure: same descriptor, same observed files, ordinary non-zero exit.
+   * Input capture can read up to 128 MiB, so only a human choosing a blocked
+   * action asks; status() never does. Any doubt yields null, never a warning.
+   */
+  async verificationRetryOutlook(): Promise<VerificationRetryOutlook | null> {
+    try {
+      const state = await this.store.requireActiveState();
+      if (
+        state.status !== "blocked" ||
+        state.blockedFrom !== "verifying" ||
+        state.verificationMode !== "task"
+      )
+        return null;
+      const retry = await this.retryEligibility(state);
+      if (!retry.eligible || retry.attemptId === null) return null;
+      const storage = taskVerificationStorage(this.context, state);
+      const attempt = (await readTaskVerificationAttempts(storage)).find(
+        (item) => item.id === retry.attemptId
+      );
+      if (
+        attempt?.status !== "failed" ||
+        attempt.failureCategory !== "command_exit" ||
+        attempt.signal !== null ||
+        attempt.before.observedDigest === null
+      )
+        return null;
+      const bytes = await readPlanningBytes(
+        this.repoRoot,
+        attempt.descriptor.relativePath,
+        { limit: 20 * 1024 * 1024 }
+      );
+      if (bytes === null) return null;
+      const decision = parseTaskVerificationDecision(
+        JSON.parse(bytes.toString("utf8"))
+      );
+      const failed = decision.checks.find(
+        (item) => item.descriptor.id === attempt.checkId
+      );
+      const { result } = await this.taskVerificationSource(state);
+      const { selection } = await this.taskVerificationSelection(
+        state,
+        await loadConfig(this.repoRoot),
+        result
+      );
+      const current = selection.checks.find(
+        (item) => item.descriptor.id === attempt.checkId
+      );
+      if (failed === undefined || current === undefined) return null;
+      const observed = await captureTaskVerificationInputs(
+        storage,
+        selection.checks.map((item) => item.descriptor),
+        null
+      );
+      return {
+        attemptId: attempt.id,
+        checkId: attempt.checkId,
+        sameCommand:
+          evidenceDigest(failed.descriptor) ===
+          evidenceDigest(current.descriptor),
+        sameInputs:
+          observed.observedDigest !== null &&
+          observed.observedDigest === attempt.before.observedDigest
+      };
+    } catch {
+      return null;
     }
   }
 
@@ -8682,6 +8762,88 @@ export class WorkflowRunner {
     );
   }
 
+  /** The completed implementation or fix attempt whose result verification checks. */
+  private async taskVerificationSource(
+    state: RunState,
+    sourceAttempt?: AttemptReference
+  ): Promise<{
+    source: AttemptReference & { kind: "implementation" | "fix" };
+    result: PhaseResult;
+  }> {
+    const source = await this.verificationSourceAttempt(
+      state,
+      [],
+      sourceAttempt
+    );
+    const record = await this.store.readRunAttempt(state.runId, source);
+    const result = record.result;
+    if (!result || !("phase" in result) || result.schemaVersion !== 4)
+      throw new BanzaiError(
+        "PHASE_RESULT_SCHEMA_MISMATCH",
+        "Task verification requires phase-result v4 from its completed source attempt."
+      );
+    return { source, result };
+  }
+
+  /** The checks a verification round would run now, from approved and proposed sources. */
+  private async taskVerificationSelection(
+    state: RunState,
+    config: OrchestratorConfig,
+    result: PhaseResult
+  ): Promise<{
+    workflow: "strict" | "feature" | "quick-fix";
+    selectionDigest: string;
+    policy: ReturnType<typeof taskVerificationPolicy>;
+    selection: ReturnType<typeof selectTaskVerification>;
+  }> {
+    const workflow = state.workflowSelection?.workflow;
+    if (!workflow || !state.workflowSelection?.digest)
+      throw new BanzaiError(
+        "VERIFICATION_AUTHORITY_MISSING",
+        "Verification has no persisted workflow authority."
+      );
+    const policy = taskVerificationPolicy(config);
+    const obligations =
+      workflow === "strict"
+        ? parseTaskVerificationObligations(
+            await readFile(
+              path.join(this.repoRoot, completionPlanPath(state)),
+              "utf8"
+            )
+          )
+        : null;
+    if (workflow !== "strict" && !result.verificationCandidates)
+      throw new BanzaiError(
+        "VERIFICATION_SELECTION_MISSING",
+        "Lite verification requires selected task checks or an explicit absence rationale."
+      );
+    const selection = selectTaskVerification({
+      required: obligations?.checks ?? [],
+      candidates:
+        result.verificationCandidates ??
+        (obligations
+          ? {
+              checks: [],
+              absenceReason:
+                obligations.absenceReason ??
+                "Mandatory checks are specified by the plan."
+            }
+          : null),
+      policy
+    });
+    if (!selection.checks.length && !selection.absenceReason)
+      throw new BanzaiError(
+        "VERIFICATION_SELECTION_MISSING",
+        "An empty task selection requires its actual assurance rationale."
+      );
+    return {
+      workflow,
+      selectionDigest: state.workflowSelection.digest,
+      policy,
+      selection
+    };
+  }
+
   private async executeTaskChecks(
     state: RunState,
     config: OrchestratorConfig,
@@ -8689,66 +8851,20 @@ export class WorkflowRunner {
     retryOf?: string
   ): Promise<RunState> {
     try {
-      const source = await this.verificationSourceAttempt(
+      const { source, result } = await this.taskVerificationSource(
         state,
-        [],
         sourceAttempt
       );
-      const record = await this.store.readRunAttempt(state.runId, source);
-      const result = record.result;
-      if (!result || !("phase" in result) || result.schemaVersion !== 4)
-        throw new BanzaiError(
-          "PHASE_RESULT_SCHEMA_MISMATCH",
-          "Task verification requires phase-result v4 from its completed source attempt."
-        );
       const storage = taskVerificationStorage(this.context, state);
-      const workflow = state.workflowSelection?.workflow;
-      if (!workflow || !state.workflowSelection?.digest)
-        throw new BanzaiError(
-          "VERIFICATION_AUTHORITY_MISSING",
-          "Verification has no persisted workflow authority."
-        );
-      const policy = taskVerificationPolicy(config);
-      const obligations =
-        workflow === "strict"
-          ? parseTaskVerificationObligations(
-              await readFile(
-                path.join(this.repoRoot, completionPlanPath(state)),
-                "utf8"
-              )
-            )
-          : null;
-      if (workflow !== "strict" && !result.verificationCandidates)
-        throw new BanzaiError(
-          "VERIFICATION_SELECTION_MISSING",
-          "Lite verification requires selected task checks or an explicit absence rationale."
-        );
-      const selection = selectTaskVerification({
-        required: obligations?.checks ?? [],
-        candidates:
-          result.verificationCandidates ??
-          (obligations
-            ? {
-                checks: [],
-                absenceReason:
-                  obligations.absenceReason ??
-                  "Mandatory checks are specified by the plan."
-              }
-            : null),
-        policy
-      });
-      if (!selection.checks.length && !selection.absenceReason)
-        throw new BanzaiError(
-          "VERIFICATION_SELECTION_MISSING",
-          "An empty task selection requires its actual assurance rationale."
-        );
+      const { workflow, selectionDigest, policy, selection } =
+        await this.taskVerificationSelection(state, config, result);
       const context = taskExecutionContext(this.context, state, policy);
       const authority: TaskVerificationAuthority = {
         workId: storage.workId,
         sourceAttemptId: source.id,
         workflow,
         taskDigest: evidenceDigest(state.request),
-        selectionDigest: state.workflowSelection.digest,
+        selectionDigest,
         approvalDigest:
           workflow === "strict" ? (state.planApproval?.digest ?? null) : null,
         contextDigest: evidenceDigest(context)
@@ -8880,7 +8996,7 @@ export class WorkflowRunner {
       if (!state.taskVerification.applicability.complete) {
         blockState(
           state,
-          "Task verification is incomplete. Inspect the retained physical evidence and retry the failed check without replaying implementation."
+          `Task verification is incomplete: ${incompleteVerificationSummary(state.taskVerification)}. The verification details show each command, its output and log paths. Retry re-runs the failed check without replaying implementation.`
         );
         await this.store.writeState(state);
         return state;

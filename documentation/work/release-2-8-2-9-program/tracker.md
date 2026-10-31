@@ -1,6 +1,6 @@
 # banzai 2.8–2.9 program tracker
 
-Status: active · Stage 1 not started · Updated 2026-10-30
+Status: active · Stage 1 in progress · Updated 2026-10-31
 
 This file is the only living record of the program. The plan itself is the
 frozen [brief.md](brief.md); never edit it. Record anything that departs from
@@ -40,16 +40,16 @@ Status values: `not started` · `ADR draft` · `ADR proposed` · `ADR accepted` 
 
 ## Stage 1 (2.8): daily friction
 
-| WP  | Package                                        | Depends on      | ADR                                    | Work directory                         | Status      | Commit | Notes                                         |
-| --- | ---------------------------------------------- | --------------- | -------------------------------------- | -------------------------------------- | ----------- | ------ | --------------------------------------------- |
-| WP1 | Verification failure details and retry warning | —               | none                                   | `wp01-verification-failure-details`    | not started |        | Builds the shared phpcs fixture               |
-| WP2 | Run every required check in one pass           | —               | new, amends 0045 (pinned)              | `wp02-full-verification-pass`          | not started |        | Draft ADR early                               |
-| WP3 | Verification commands at the plan gate         | —               | none; cite 0049 for instruction change | `wp03-plan-gate-verification-commands` | not started |        | Golden prompt digests change                  |
-| WP4 | Re-check human edits at the plan gate          | —               | new, amends 0051                       | `wp04-plan-gate-edit-recheck`          | not started |        | Draft ADR early; control protocol revision    |
-| WP5 | Install guide, plugin scope, doctor hint       | —               | none; stay within 0008                 | `wp05-install-guide-plugin-scope`      | not started |        | Doctor JSON contract version bump             |
-| WP6 | Local model override                           | —               | check eligibility; short ADR likely    | `wp06-local-model-override`            | not started |        | Do before WP7                                 |
-| WP7 | Claude as the default reviewer, with isolation | WP6 recommended | new, amends 0042 §7 and 0037           | `wp07-claude-default-reviewer`         | not started |        | Draft ADR early; live scenario needs go-ahead |
-| WP8 | Stable Claude phases                           | —               | check 0020                             | `wp08-stable-claude-phases`            | not started |        | Live scenario needs go-ahead                  |
+| WP  | Package                                        | Depends on      | ADR                                    | Work directory                         | Status       | Commit | Notes                                         |
+| --- | ---------------------------------------------- | --------------- | -------------------------------------- | -------------------------------------- | ------------ | ------ | --------------------------------------------- |
+| WP1 | Verification failure details and retry warning | —               | none                                   | `wp01-verification-failure-details`    | report ready |        | phpcs fixture built; see report deviations    |
+| WP2 | Run every required check in one pass           | —               | new, amends 0045 (pinned)              | `wp02-full-verification-pass`          | not started  |        | Draft ADR early                               |
+| WP3 | Verification commands at the plan gate         | —               | none; cite 0049 for instruction change | `wp03-plan-gate-verification-commands` | not started  |        | Golden prompt digests change                  |
+| WP4 | Re-check human edits at the plan gate          | —               | new, amends 0051                       | `wp04-plan-gate-edit-recheck`          | not started  |        | Draft ADR early; control protocol revision    |
+| WP5 | Install guide, plugin scope, doctor hint       | —               | none; stay within 0008                 | `wp05-install-guide-plugin-scope`      | not started  |        | Doctor JSON contract version bump             |
+| WP6 | Local model override                           | —               | check eligibility; short ADR likely    | `wp06-local-model-override`            | not started  |        | Do before WP7                                 |
+| WP7 | Claude as the default reviewer, with isolation | WP6 recommended | new, amends 0042 §7 and 0037           | `wp07-claude-default-reviewer`         | not started  |        | Draft ADR early; live scenario needs go-ahead |
+| WP8 | Stable Claude phases                           | —               | check 0020                             | `wp08-stable-claude-phases`            | not started  |        | Live scenario needs go-ahead                  |
 
 ### Gate 1
 
@@ -109,7 +109,9 @@ None reserved yet.
 
 - phpcs case (a required lint check with a wrong config flag, plus one more
   required and one supplemental check): planned in WP1; reused by WP2, WP3,
-  WP9, WP10 and both gates. Location to be recorded here.
+  WP9, WP10 and both gates. Location:
+  `packages/orchestrator/test/phpcs-verification-fixture.ts`
+  (`phpcsVerificationFixture`, documented and planned argv exported).
 
 ## Owner decisions
 
@@ -125,8 +127,6 @@ None reserved yet.
 Settle each in the named WP's ADR or requirements, then record the answer
 under Owner decisions.
 
-- WP1: add a stable, documented `banzai status --json` projection of failed
-  checks, or keep the raw `taskVerification` state only?
 - WP7: reviewer effort (brief default: the planning effort); do builders keep
   the `Skill` tool?
 - WP10: default for the baseline run (proposal: on for short checks, opt-in
@@ -136,4 +136,9 @@ under Owner decisions.
 
 ## Deviations from the brief
 
-None yet.
+- WP1 (2026-10-31): `retry-eligibility.ts` is at
+  `src/workflow/domain/retry-eligibility.ts`. No stable `status --json`
+  projection was added; the brief left this to the package, and a documented
+  projection is better designed with `banzai control` support in WP9. The
+  block reason names checks and outcomes but carries no argv or output. Details
+  in the WP1 report.
