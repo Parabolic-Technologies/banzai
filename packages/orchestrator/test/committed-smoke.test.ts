@@ -123,7 +123,7 @@ if (command === "help") {
     await new Promise(() => {});
   }
   if (variant === "stderr") process.stderr.write("private output\\n");
-  process.stdout.write(variant === "malformed-doctor" ? "{bad\\n" : JSON.stringify({ schema: "banzai-doctor/v5", schemaVersion: 5, ready: variant !== "not-ready" }) + "\\n");
+  process.stdout.write(variant === "malformed-doctor" ? "{bad\\n" : JSON.stringify({ schema: "banzai-doctor/v6", schemaVersion: 6, ready: variant !== "not-ready" }) + "\\n");
 } else if (command === "control status") {
   process.stdout.write(variant === "malformed-status" ? "{bad\\n" : JSON.stringify({ schema: "banzai-agent-status/v7", schemaVersion: 7, activeRun: await activeStatus() }) + "\\n");
 } else if (command === "control answer --by Smoke User --no-resume") {

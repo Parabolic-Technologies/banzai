@@ -59,6 +59,9 @@ and Codex for review.
 Model work uses the clients' remote services and subscription limits.
 The [getting-started guide](documentation/getting-started.md) covers client setup,
 CLI and plugin installation, supported older-client options, and expected results.
+For Claude Code, it installs the plugin from a terminal at
+[local or project scope](documentation/getting-started.md#claude-code-plugin),
+so Banzai's skills load only in that repository.
 
 <a id="configure-each-project-once"></a>
 <a id="run-a-task"></a>

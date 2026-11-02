@@ -140,10 +140,10 @@ is a navigational reference and is updated with the module it describes.
   missing Python fails the suite.
 - `doctor-cli.ts` — exact doctor argument contract, injected stdout/stderr
   composition, canonical JSON serialization, and deterministic human
-  projection for `banzai-doctor/v5`, including explicit unavailable project
+  projection for `banzai-doctor/v6`, including explicit unavailable project
   types when marker evidence cannot be read.
 - `doctor.ts` — fixed-order project and task-verification diagnostics, with
-  `project.guidance` immediately after `repository.git` and schema version 5. `claude.instructions` follows `claude.environment`
+  `project.guidance` immediately after `repository.git` and schema version 6. `claude.instructions` follows `claude.environment`
   and precedes `claude.permissions`; it compares the configured role union and
   preserves mismatch/bounded-failure/unverifiable precedence. Uses direct
   privacy-bounded config, active-pointer/state, and lock reads plus injected
@@ -155,7 +155,9 @@ is a navigational reference and is updated with the module it describes.
   exposing plugin paths or resolution errors. Its `claude.permissions` check
   reports whether the settings a spawned Claude session loads still grant the
   tools its phases call, carries the shared remediation as its fix, and is
-  skipped whenever no configured role depends on those rules. It never constructs `RunStore`,
+  skipped whenever no configured role depends on those rules. The advisory
+  `claude.plugin-scope` check that follows warns, never fails, when Claude user
+  settings enable Banzai, and passes for local or project installs. It never constructs `RunStore`,
   vendor adapters, or `WorkflowRunner`. Its advisory
   `authentication.models` check explicitly separates executable availability
   from authentication readiness and unchecked CLI versions without calling a
@@ -166,6 +168,9 @@ is a navigational reference and is updated with the module it describes.
   spec-gate hook grants (ADR-0041) and runs shell commands, and a Claude
   reviewer depends on neither because it uses read-only tools and returns
   structured findings for runner-owned artifact rendering.
+  `inspectClaudeUserPluginScope(env)` reads only the user settings file and
+  reports the enabled `banzai@<marketplace>` keys, without Claude's plugin cache
+  or CLI.
   `inspectClaudePermissions()` reads the
   exact sources the resolved scope loads, plus administrator policy settings and
   Claude Code's workspace trust record, which voids every repository-scoped

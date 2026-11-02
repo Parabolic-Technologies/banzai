@@ -13,6 +13,7 @@ import {
 import {
   claudePermissionRemediation,
   inspectClaudePermissions,
+  inspectClaudeUserPluginScope,
   inspectConfiguredClaudePermissions,
   type ClaudePermissionAudit,
   type ClaudePermissionInput
@@ -89,8 +90,8 @@ export interface DoctorSummary {
 }
 
 export interface DoctorReport {
-  schema: "banzai-doctor/v5";
-  schemaVersion: 5;
+  schema: "banzai-doctor/v6";
+  schemaVersion: 6;
   ready: boolean;
   projectTypes: VerificationProjectType[];
   summary: DoctorSummary;
@@ -110,6 +111,11 @@ export interface DoctorDependencies {
   inspectClaudePermissions?(
     input: ClaudePermissionInput
   ): Promise<ClaudePermissionAudit>;
+  /**
+   * Where Claude's user settings are found (`HOME`, `CLAUDE_CONFIG_DIR`).
+   * Defaults to this process's environment; tests point it at a temporary home.
+   */
+  claudeSettingsEnvironment?: NodeJS.ProcessEnv;
 }
 
 const RUN_STATUSES = new Set<RunStatus>([
@@ -516,6 +522,47 @@ async function claudePermissionsCheck(
     "config",
     "pass",
     "Loaded Claude permission rules grant the tools its phases call."
+  );
+}
+
+/**
+ * Advisory only: a user-scope install loads Banzai's skill descriptions into
+ * every Claude session in every repository. Readiness never depends on it.
+ */
+async function claudePluginScopeCheck(
+  dependencies: DoctorDependencies
+): Promise<DoctorCheck> {
+  const scope = await inspectClaudeUserPluginScope(
+    dependencies.claudeSettingsEnvironment ?? process.env
+  );
+  if (scope.state === "unreadable") {
+    return check(
+      "claude.plugin-scope",
+      "config",
+      "skipped",
+      `Claude user settings at ${scope.path} are unreadable or not a JSON object, so the plugin scope was not inspected.`
+    );
+  }
+  if (scope.state === "not_enabled") {
+    return check(
+      "claude.plugin-scope",
+      "config",
+      "pass",
+      "Banzai is not enabled in Claude user settings."
+    );
+  }
+  return check(
+    "claude.plugin-scope",
+    "config",
+    "warning",
+    `Claude user settings at ${scope.path} enable ${scope.keys.join(", ")}, so Banzai skill descriptions load in every repository.`,
+    [
+      {
+        action:
+          "Install Banzai for this repository instead: run `claude plugin uninstall banzai@banzai-plugins --scope user`, then `claude plugin install banzai@banzai-plugins --scope local`, or `--scope project` to share it with your team.",
+        documentation: "documentation/getting-started.md#claude-code-plugin"
+      }
+    ]
   );
 }
 
@@ -956,6 +1003,7 @@ export async function inspectDoctor(
   checks.push(await claudeEnvironmentCheck(config, dependencies));
   checks.push(await claudeInstructionsCheck(config, dependencies));
   checks.push(await claudePermissionsCheck(repoRoot, config, dependencies));
+  checks.push(await claudePluginScopeCheck(dependencies));
 
   let projectTypes: VerificationProjectType[] = [];
   try {
@@ -1033,8 +1081,8 @@ export async function inspectDoctor(
 
   const reportSummary = summary(checks);
   return {
-    schema: "banzai-doctor/v5",
-    schemaVersion: 5,
+    schema: "banzai-doctor/v6",
+    schemaVersion: 6,
     ready: reportSummary.failed === 0,
     projectTypes,
     summary: reportSummary,

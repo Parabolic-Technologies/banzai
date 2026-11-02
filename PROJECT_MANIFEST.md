@@ -244,8 +244,10 @@ behavior and edge cases; source and tests own the executable evidence.
 - `review-snapshot.ts`, `review-artifact.ts` — frozen review inputs and
   deterministic `banzai-feature-review/v8` publication from snapshot v7;
   reviewers return structured results and the runner publishes validated bytes.
-- `doctor-cli.ts`, `doctor.ts` — `banzai-doctor/v5` local readiness diagnostics;
-  no configured commands, authentication, model calls or repair occur.
+- `doctor-cli.ts`, `doctor.ts` — `banzai-doctor/v6` local readiness diagnostics;
+  no configured commands, authentication, model calls or repair occur. The
+  advisory `claude.plugin-scope` warns when Claude user settings enable Banzai
+  and never affects readiness.
 - `evaluation*.ts`, `evaluation-kpi*.ts` — privacy-minimized export and pure
   derived KPIs; frozen contracts retain explicit incomplete coverage.
 - `context-accounting.ts`, `context-report*.ts` — exact runner-byte accounting
@@ -450,7 +452,7 @@ Plugin and release owners:
   limited to 64 KiB and validated before mutation.
 - Reporting contracts are independent: evaluation export and KPI default to
   v1 with explicit v2 support, context attempt/report use v2, cancellation
-  report uses v1 and doctor uses v5. New run-state fields do not change frozen
+  report uses v1 and doctor uses v6. New run-state fields do not change frozen
   report semantics or privacy boundaries.
 - Source schema, phase/guidance/policy and release-policy changes require a
   rebuild before local CLI execution. Explicit build owns generated sources;

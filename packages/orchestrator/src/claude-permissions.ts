@@ -491,3 +491,54 @@ export function claudePermissionRemediation(
   }
   return steps.join("; ");
 }
+
+/**
+ * Whether Claude's user settings enable the Banzai plugin. User scope loads its
+ * skill descriptions into every session in every repository, while local and
+ * project scope keep them to this checkout. Doctor reports the first as
+ * advisory, so only the user file is read; Claude's plugin cache and CLI are
+ * never consulted.
+ */
+export type ClaudeUserPluginScope =
+  | { state: "enabled"; path: string; keys: string[] }
+  | { state: "not_enabled"; path: string }
+  | { state: "unreadable"; path: string };
+
+/** The plugin a key names, before its last `@marketplace` part. */
+function pluginName(key: string): string {
+  const separator = key.lastIndexOf("@");
+  return separator === -1 ? key : key.slice(0, separator);
+}
+
+export async function inspectClaudeUserPluginScope(
+  env: NodeJS.ProcessEnv
+): Promise<ClaudeUserPluginScope> {
+  // The user file ignores the repository root.
+  const file = settingsFile("user", "", env);
+  let raw: string;
+  try {
+    raw = await readFile(file, "utf8");
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT"
+      ? { state: "not_enabled", path: file }
+      : { state: "unreadable", path: file };
+  }
+  let document: unknown;
+  try {
+    document = JSON.parse(raw) as unknown;
+  } catch {
+    return { state: "unreadable", path: file };
+  }
+  if (!isRecord(document)) {
+    return { state: "unreadable", path: file };
+  }
+  const enabled = document.enabledPlugins;
+  const keys = isRecord(enabled)
+    ? Object.keys(enabled)
+        .filter((key) => pluginName(key) === "banzai" && enabled[key] === true)
+        .sort()
+    : [];
+  return keys.length === 0
+    ? { state: "not_enabled", path: file }
+    : { state: "enabled", path: file, keys };
+}

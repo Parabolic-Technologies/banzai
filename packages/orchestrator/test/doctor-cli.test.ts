@@ -36,8 +36,8 @@ function report(options?: {
     });
   }
   return {
-    schema: "banzai-doctor/v5",
-    schemaVersion: 5,
+    schema: "banzai-doctor/v6",
+    schemaVersion: 6,
     ready,
     projectTypes: ["node"],
     summary: {

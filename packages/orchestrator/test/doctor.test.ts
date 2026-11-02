@@ -46,6 +46,7 @@ const CHECK_ORDER = [
   "claude.environment",
   "claude.instructions",
   "claude.permissions",
+  "claude.plugin-scope",
   "project.types",
   "verification.task",
   "executables.models",
@@ -68,8 +69,8 @@ test("task readiness is independent of empty, mixed or stale legacy profile cove
         await writeFile(path.join(repository.root, "package.json"), metadata);
       const before = await snapshotTree(repository.root);
       const report = await inspectDoctor(repository.root, dependencies());
-      assert.equal(report.schema, "banzai-doctor/v5");
-      assert.equal(report.schemaVersion, 5);
+      assert.equal(report.schema, "banzai-doctor/v6");
+      assert.equal(report.schemaVersion, 6);
       assert.equal(checkStatus(report, "verification.task"), "pass");
       assert.equal(report.ready, true);
       assert.doesNotMatch(
@@ -152,6 +153,11 @@ async function temporaryRoot(): Promise<{
   };
 }
 
+const ABSENT_HOME = path.join(
+  tmpdir(),
+  `banzai-doctor-test-absent-home-${process.pid}`
+);
+
 function dependencies(options?: {
   unavailable?: readonly string[];
   liveness?: "live" | "stale";
@@ -161,9 +167,14 @@ function dependencies(options?: {
   inspectClaudePermissions?: NonNullable<
     DoctorDependencies["inspectClaudePermissions"]
   >;
+  claudeSettingsEnvironment?: NodeJS.ProcessEnv;
 }): DoctorDependencies {
   const unavailable = new Set(options?.unavailable ?? []);
   return {
+    // No test reads the developer's own Claude settings.
+    claudeSettingsEnvironment: options?.claudeSettingsEnvironment ?? {
+      HOME: ABSENT_HOME
+    },
     async executableAvailable(command) {
       return !unavailable.has(command);
     },
@@ -1125,8 +1136,8 @@ test("doctor v4 compares mixed role unions without hiding structural failures or
     await writeConfig(repository.root, config);
     const before = await snapshotTree(repository.root);
     const verified = await inspectDoctor(repository.root, dependencies());
-    assert.equal(verified.schema, "banzai-doctor/v5");
-    assert.equal(verified.schemaVersion, 5);
+    assert.equal(verified.schema, "banzai-doctor/v6");
+    assert.equal(verified.schemaVersion, 6);
     assert.equal(checkStatus(verified, "claude.instructions"), "pass");
     assert.deepEqual(
       verified.checks.map((entry) => entry.id),
@@ -1201,6 +1212,127 @@ test("doctor v4 compares mixed role unions without hiding structural failures or
     assert.equal(invalid.ready, false);
   } finally {
     await plugin.dispose();
+    await repository.dispose();
+  }
+});
+
+test("doctor advises repository scope only when Claude user settings enable Banzai", async () => {
+  const repository = await temporaryRoot();
+  const home = await mkdtemp(path.join(tmpdir(), "banzai-doctor-home-"));
+  const userSettings = path.join(home, ".claude", "settings.json");
+  const environment = { HOME: home };
+  const inspect = async (env: NodeJS.ProcessEnv = environment) =>
+    await inspectDoctor(
+      repository.root,
+      dependencies({ claudeSettingsEnvironment: env })
+    );
+  const scopeCheck = (report: DoctorReport) =>
+    report.checks.find((item) => item.id === "claude.plugin-scope");
+  try {
+    await writeConfig(repository.root, reviewerOnlyClaudeConfig());
+    const absent = await inspect();
+    assert.equal(checkStatus(absent, "claude.plugin-scope"), "pass");
+    assert.equal(
+      scopeCheck(absent)?.message,
+      "Banzai is not enabled in Claude user settings."
+    );
+    assert.deepEqual(checkFixes(absent, "claude.plugin-scope"), []);
+
+    await mkdir(path.dirname(userSettings), { recursive: true });
+    const enabled = JSON.stringify({
+      enabledPlugins: {
+        "other@claude-plugins-official": true,
+        "banzai@banzai-plugins": true
+      }
+    });
+    await writeFile(userSettings, enabled);
+    const before = await snapshotTree(home);
+    const warned = await inspect();
+    const warning = scopeCheck(warned);
+    assert.ok(warning);
+    assert.equal(warning.status, "warning");
+    assert.equal(warning.category, "config");
+    assert.equal(
+      warning.message,
+      `Claude user settings at ${userSettings} enable banzai@banzai-plugins, so Banzai skill descriptions load in every repository.`
+    );
+    assert.deepEqual(warning.fixes, [
+      {
+        action:
+          "Install Banzai for this repository instead: run `claude plugin uninstall banzai@banzai-plugins --scope user`, then `claude plugin install banzai@banzai-plugins --scope local`, or `--scope project` to share it with your team.",
+        documentation: "documentation/getting-started.md#claude-code-plugin"
+      }
+    ]);
+    // Advisory only: readiness and the other checks are unchanged.
+    assert.equal(warned.ready, absent.ready);
+    assert.equal(warned.summary.warnings, absent.summary.warnings + 1);
+    assert.deepEqual(
+      warned.checks.filter((item) => item.id !== "claude.plugin-scope"),
+      absent.checks.filter((item) => item.id !== "claude.plugin-scope")
+    );
+    assert.match(
+      renderDoctorText(warned),
+      /\[WARNING\] claude\.plugin-scope \(config\): Claude user settings at .+\n {4}Fix: Install Banzai for this repository instead: .+ \(documentation\/getting-started\.md#claude-code-plugin\)/
+    );
+    assert.deepEqual(await snapshotTree(home), before);
+
+    // CLAUDE_CONFIG_DIR replaces ~/.claude, and any marketplace name matches.
+    const configured = path.join(home, "configured");
+    await mkdir(configured);
+    await writeFile(
+      path.join(configured, "settings.json"),
+      JSON.stringify({ enabledPlugins: { "banzai@fork": true } })
+    );
+    const relocated = scopeCheck(
+      await inspect({ HOME: home, CLAUDE_CONFIG_DIR: configured })
+    );
+    assert.ok(relocated);
+    assert.equal(relocated.status, "warning");
+    assert.match(relocated.message, /enable banzai@fork,/);
+
+    for (const document of [
+      "{}",
+      '{"enabledPlugins":{"banzai@banzai-plugins":false}}',
+      '{"enabledPlugins":{"banzai-extra@banzai-plugins":true,"other@banzai":true}}',
+      '{"enabledPlugins":["banzai@banzai-plugins"]}',
+      '{"enabledPlugins":{"banzai@banzai-plugins":"true"}}'
+    ]) {
+      await writeFile(userSettings, document);
+      assert.equal(
+        checkStatus(await inspect(), "claude.plugin-scope"),
+        "pass",
+        document
+      );
+    }
+
+    // Project and local scope are the recommended installs, never a hint.
+    await rm(userSettings);
+    await mkdir(path.join(repository.root, ".claude"), { recursive: true });
+    for (const file of ["settings.json", "settings.local.json"])
+      await writeFile(path.join(repository.root, ".claude", file), enabled);
+    assert.equal(checkStatus(await inspect(), "claude.plugin-scope"), "pass");
+
+    for (const document of ["{bad", "[]", '"settings"']) {
+      await writeFile(userSettings, document);
+      const malformed = await inspect();
+      const skipped = scopeCheck(malformed);
+      assert.ok(skipped);
+      assert.equal(skipped.status, "skipped", document);
+      assert.equal(
+        skipped.message,
+        `Claude user settings at ${userSettings} are unreadable or not a JSON object, so the plugin scope was not inspected.`
+      );
+      assert.deepEqual(skipped.fixes, []);
+      assert.equal(malformed.ready, absent.ready);
+    }
+    await rm(userSettings);
+    await mkdir(userSettings);
+    assert.equal(
+      checkStatus(await inspect(), "claude.plugin-scope"),
+      "skipped"
+    );
+  } finally {
+    await rm(home, { recursive: true, force: true });
     await repository.dispose();
   }
 });

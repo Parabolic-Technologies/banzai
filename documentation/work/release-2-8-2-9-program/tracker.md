@@ -1,6 +1,6 @@
 # banzai 2.8–2.9 program tracker
 
-Status: active · Stage 1 in progress · Updated 2026-10-31
+Status: active · Stage 1 in progress · Updated 2026-11-02
 
 This file is the only living record of the program. The plan itself is the
 frozen [brief.md](brief.md); never edit it. Record anything that departs from
@@ -45,8 +45,8 @@ Status values: `not started` · `ADR draft` · `ADR proposed` · `ADR accepted` 
 | WP1 | Verification failure details and retry warning | —               | none                                         | `wp01-verification-failure-details`    | committed    | d03bc19 | phpcs fixture built; see report deviations         |
 | WP2 | Run every required check in one pass           | —               | 0057 Accepted; amends 0045 (pinned)          | `wp02-full-verification-pass`          | committed    | da624a4 | Full rounds, one retry; helper v4 published by WP4 |
 | WP3 | Verification commands at the plan gate         | —               | none; cite 0049 for instruction change       | `wp03-plan-gate-verification-commands` | committed    | 44f3d03 | Plan gate lists checks; see report deviations      |
-| WP4 | Re-check human edits at the plan gate          | —               | 0058 Accepted; amends 0051 and 0055 (pinned) | `wp04-plan-gate-edit-recheck`          | report ready |         | Control 9.0.0 with recheck and helper v4           |
-| WP5 | Install guide, plugin scope, doctor hint       | —               | none; stay within 0008                       | `wp05-install-guide-plugin-scope`      | not started  |         | Doctor JSON contract version bump                  |
+| WP4 | Re-check human edits at the plan gate          | —               | 0058 Accepted; amends 0051 and 0055 (pinned) | `wp04-plan-gate-edit-recheck`          | committed    | 04abf55 | Control 9.0.0 with recheck and helper v4           |
+| WP5 | Install guide, plugin scope, doctor hint       | —               | none; stay within 0008                       | `wp05-install-guide-plugin-scope`      | report ready |         | Doctor JSON contract version bump                  |
 | WP6 | Local model override                           | —               | check eligibility; short ADR likely          | `wp06-local-model-override`            | not started  |         | Do before WP7                                      |
 | WP7 | Claude as the default reviewer, with isolation | WP6 recommended | 0059 Accepted; amends 0042 §7, 0037, 0002    | `wp07-claude-default-reviewer`         | ADR accepted |         | live scenario needs go-ahead                       |
 | WP8 | Stable Claude phases                           | —               | check 0020                                   | `wp08-stable-claude-phases`            | not started  |         | Live scenario needs go-ahead                       |
@@ -154,6 +154,10 @@ local worktree.
   `da624a4`. New runs keep starting at state v10, and a run moves to v11 with
   its first plan re-check record. All seven skills that name the helper request
   move to request v4.
+- 2026-11-02: WP5 plan approved with `Q2 with a live probe`, after commit
+  `04abf55`. Doctor v6 opens in WP5 and stays open until Gate 1: WP6 extends
+  it without another bump. The `paths:` investigation includes one live
+  scratch-repository probe.
 
 ## Open questions left to the owner by the brief
 

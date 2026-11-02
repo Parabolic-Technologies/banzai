@@ -75,12 +75,53 @@ provider. Follow the matching plugin blocks below.
 
 ### Claude Code plugin
 
-**Inside Claude Code**, run:
+Install the plugin for one repository. **In your terminal**, from your
+project's root directory, run:
 
-```text
-/plugin marketplace add https://github.com/Parabolic-Technologies/banzai.git
-/plugin install banzai@banzai-plugins
+```sh
+claude plugin marketplace add Parabolic-Technologies/banzai --scope local
+claude plugin install banzai@banzai-plugins --scope local
 ```
+
+The scope decides who gets the plugin and which settings file records it:
+
+| Scope                                  | Settings file                 | Who gets the plugin                      |
+| -------------------------------------- | ----------------------------- | ---------------------------------------- |
+| `local`, recommended for a first try   | `.claude/settings.local.json` | You, in this repository                  |
+| `project`, recommended for a team      | `.claude/settings.json`       | Everyone who works in this repository    |
+| `user`, used when `--scope` is omitted | `~/.claude/settings.json`     | You, in every repository on this machine |
+
+For a team, run both commands with `--scope project`, then review and commit
+`.claude/settings.json`. Each teammate runs
+`claude plugin install banzai@banzai-plugins --scope project` once, because the
+committed file enables the plugin but does not download it.
+
+User scope loads the descriptions of Banzai's skills into every Claude Code
+session, including repositories that do not use Banzai, and `banzai doctor`
+reports it as a warning. To move a user-scope install to this repository, run:
+
+```sh
+claude plugin uninstall banzai@banzai-plugins --scope user
+claude plugin install banzai@banzai-plugins --scope local
+```
+
+**Inside a Claude Code session**,
+`/plugin marketplace add Parabolic-Technologies/banzai` adds the marketplace,
+and `/plugin install banzai@banzai-plugins` opens the plugin's details. Choose
+**Install for you, in this repo only** (local scope) or **Install for all
+collaborators on this repository** (project scope).
+
+**In VS Code**, the Claude Code panel has no `/plugin` command. Type `/plugins`
+to open **Manage plugins**:
+
+1. On the **Marketplaces** tab, add `Parabolic-Technologies/banzai`.
+2. On the **Plugins** tab, install `banzai`.
+3. Choose **Install locally** or **Install for this project**.
+
+You can also run the terminal commands above. The Banzai CLI starts Claude
+phases through the standalone `claude` executable, so for the CLI workflow
+also [install Claude Code](#install-and-sign-in-to-model-clients) and check
+that `claude --version` works in your terminal.
 
 ### Codex plugin
 
@@ -92,7 +133,8 @@ codex plugin add banzai@banzai-plugins
 ```
 
 **Expected result:** `banzai --help` displays the CLI commands, and the plugin
-is installed and enabled in each selected client. Check sign-in using the
+is installed and enabled in each selected client. For Claude Code,
+`claude plugin list` shows `banzai@banzai-plugins` with the scope you chose. Check sign-in using the
 [client checks above](#install-and-sign-in-to-model-clients).
 
 ## 2. Prepare your repository
@@ -307,6 +349,7 @@ and publication to you. Use your normal review and commit process.
 | `banzai` is not found                                           | Check the global npm installation and this terminal's `PATH`. Reopen the terminal after changing Node installations.                                                                                                                          |
 | A selected model client is not found or is signed out           | Follow the [client installation and sign-in instructions](#install-and-sign-in-to-model-clients), then repeat that client's version and sign-in checks.                                                                                       |
 | The plugin or project-manifest skill is unavailable             | Complete the [Claude Code](#claude-code-plugin) or [Codex](#codex-plugin) plugin installation for that client and check that it is enabled.                                                                                                   |
+| `banzai doctor` warns about `claude.plugin-scope`               | Banzai is enabled at Claude user scope. [Move the install to local or project scope](#claude-code-plugin), or keep it: the warning does not affect readiness.                                                                                 |
 | Model picker or interactive prompts are unavailable             | Use a regular terminal. `banzai setup` requires interactive input/output.                                                                                                                                                                     |
 | `GIT_REPOSITORY_REQUIRED`                                       | Run from your project's Git root, or initialize the intended new directory as described in step 2.                                                                                                                                            |
 | `GIT_INITIAL_COMMIT_REQUIRED`                                   | Create your first commit after reviewing the setup in step 4.                                                                                                                                                                                 |

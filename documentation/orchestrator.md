@@ -753,20 +753,20 @@ For ready-to-adapt snippets and setup guidance, see
 
 `banzai doctor` inspects the current Git checkout and writes a deterministic
 human report to stdout. `banzai doctor --json` writes the authoritative
-`banzai-doctor/v5` object instead. It exits 0 exactly when no check failed and
+`banzai-doctor/v6` object instead. It exits 0 exactly when no check failed and
 exits 1 when the checkout is not ready. Warnings, including a live or stale
 valid runner lock, remain visible without changing readiness.
 
 Doctor checks Git, structural project guidance, the supported Node/platform and contract versions, config
 presence and structure, the Claude invocation environment and its tool
-permissions, detected project types, optional task policy,
+permissions, the Claude plugin scope, detected project types, optional task policy,
 required executable availability, the active-run pointer and
 referenced state, and the runner lock. The report's fixed check
 order, sorted project types, two-space JSON, and final newline are stable for
 automation. Expected readiness findings stay in the selected stdout report;
 unexpected CLI failures go to stderr.
 
-Doctor v5 uses `schemaVersion: 5`. Every check has ordered `id`, `category`,
+Doctor v6 uses `schemaVersion: 6`. Every check has ordered `id`, `category`,
 `status`, `message`, `fixes`, and `roles` fields. Failed verification-category
 checks and `executables.verification` include an exact `Fix:` next step and a
 pointer to the verification guide; this does not expand remedies to unrelated
@@ -778,12 +778,24 @@ with no remedies; pinned Claude can be `verified`, `mismatch`, or bounded
 `unverifiable` with an ambient remedy only. Rebuild/update remedies apply only
 to mismatch or bounded failure. The default pinned Claude planner/implementer
 and Codex reviewer produce no parity warning when resources match. Historical
-v1-v3 reports retain their identities; consumers must negotiate v5.
+v1-v5 reports retain their identities; consumers must negotiate v6. v6 adds
+`claude.plugin-scope` and keeps the v5 fields and status semantics.
 
 Doctor also emits an `authentication.models` advisory: it does not invoke a
 vendor, so neither authentication readiness nor the installed vendor CLI
 versions are checked, and executable availability is not authentication proof. This warning leaves `ready` and exit semantics
 unchanged. Startup and phase preflight remain authoritative.
+
+`claude.plugin-scope` follows `claude.permissions` and is advisory. It reads
+only Claude's user settings, `$CLAUDE_CONFIG_DIR/settings.json` or
+`~/.claude/settings.json`, and never runs `claude plugin list`. It warns when
+`enabledPlugins` sets a `banzai@<marketplace>` key to `true`, because user
+scope loads Banzai's skill descriptions into every repository, and its fix
+moves the install to
+[local or project scope](getting-started.md#claude-code-plugin). It passes
+when user settings do not enable Banzai, so a local or project install gives
+no hint, and it is skipped when that file is unreadable or not a JSON object.
+It never fails and never changes `ready`.
 
 Project detection is root-only and uses these markers:
 

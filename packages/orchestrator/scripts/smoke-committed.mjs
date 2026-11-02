@@ -681,7 +681,7 @@ async function runSmoke(options) {
       "doctor repeat"
     );
     const doctor = parseJson(doctorFirst, "doctor");
-    requireIdentity(doctor, "banzai-doctor/v5", 5, "doctor");
+    requireIdentity(doctor, "banzai-doctor/v6", 6, "doctor");
     if (doctor.ready !== true) {
       fail(
         "SMOKE_DOCTOR_NOT_READY",
