@@ -37,7 +37,7 @@ export async function verificationOperation(operation, request) {
   // v4 differs only in retryOf: one attempt id in v3, the round's whole unsuccessful set in v4 (ADR-0057 §2).
   const revision = request?.schema === "banzai-verification-request/v4" && request.schemaVersion === 4 ? 4 : request?.schema === "banzai-verification-request/v3" && request.schemaVersion === 3 ? 3 : null;
   if (revision === null) {
-    const error = new VerificationEvidenceError("Legacy executable requests are unsupported. Use verification request v3 with documentPath and workflow; leave historical documents unchanged.");
+    const error = new VerificationEvidenceError("Legacy executable requests are unsupported. Use verification request v4 with documentPath and workflow; leave historical documents unchanged.");
     error.code = "VERIFICATION_REQUEST_UNSUPPORTED";
     throw error;
   }

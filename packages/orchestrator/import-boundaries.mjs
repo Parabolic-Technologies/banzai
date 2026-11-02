@@ -18,6 +18,7 @@ const ADR_0049 = "ADR-0049";
 const ADR_0052 = "ADR-0052";
 const ADR_0054 = "ADR-0054";
 const ADR_0055 = "ADR-0055";
+const ADR_0058 = "ADR-0058";
 const POLICY_ADR_AUTHORITIES = new Set([
   ADR_0026,
   ADR_0028,
@@ -32,7 +33,8 @@ const POLICY_ADR_AUTHORITIES = new Set([
   ADR_0049,
   ADR_0052,
   ADR_0054,
-  ADR_0055
+  ADR_0055,
+  ADR_0058
 ]);
 const POLICY_ERROR_CODE = "IMPORT_BOUNDARY_POLICY_INVALID";
 const IMPORTER_PATTERN =
@@ -102,8 +104,9 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/planning-review-state.ts",
     "planning-review-persisted-shapes",
-    [ADR_0052, ADR_0055],
+    [ADR_0052, ADR_0055, ADR_0058],
     [
+      permission("./workflow/domain/plan-recheck.js", ADR_0058),
       permission("./errors.js", ADR_0055),
       permission("./validation.js", ADR_0055)
     ],
@@ -129,6 +132,31 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
     [permission("../../errors.js", ADR_0055)],
     [permission("../../types.js", ADR_0055)],
     DOMAIN
+  ),
+  boundary(
+    "src/workflow/domain/plan-recheck.ts",
+    "plan-recheck-summary",
+    [ADR_0052, ADR_0058],
+    [],
+    [permission("../../types.js", ADR_0058)],
+    DOMAIN
+  ),
+  boundary(
+    "src/workflow/plan-gate/recheck.ts",
+    "plan-recheck-io",
+    [ADR_0052, ADR_0058],
+    [
+      permission("../../errors.js", ADR_0058),
+      permission("../../git.js", ADR_0058),
+      permission("../../project-files.js", ADR_0058)
+    ]
+  ),
+  boundary(
+    "src/plan-gate-ui.ts",
+    "plan-gate-presentation",
+    [ADR_0058],
+    [permission("./format.js", ADR_0058)],
+    [permission("./types.js", ADR_0058)]
   ),
 
   boundary(
@@ -475,9 +503,11 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       ADR_0035,
       ADR_0040,
       ADR_0041,
-      ADR_0055
+      ADR_0055,
+      ADR_0058
     ],
     [
+      permission("./plan-gate-ui.js", ADR_0058),
       permission("./validation.js", ADR_0055),
 
       permission("./verification-cli.js", ADR_0045),
@@ -759,9 +789,11 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       MANIFEST_MODULES,
       ADR_0034,
       ADR_0035,
-      ADR_0055
+      ADR_0055,
+      ADR_0058
     ],
     [
+      permission("./plan-gate-ui.js", ADR_0058),
       permission("./validation.js", ADR_0055),
 
       permission("./verification-ui.js", ADR_0045),
@@ -930,9 +962,11 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       ADR_0035,
       ADR_0041,
       ADR_0043,
-      ADR_0055
+      ADR_0055,
+      ADR_0058
     ],
     [
+      permission("./git.js", ADR_0058),
       permission("./planning-review-state.js", ADR_0055),
 
       permission("./project-files.js", ADR_0054),
@@ -1011,9 +1045,12 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       ADR_0043,
       ADR_0041,
       ADR_0042,
-      ADR_0055
+      ADR_0055,
+      ADR_0058
     ],
     [
+      permission("./workflow/plan-gate/recheck.js", ADR_0058),
+      permission("./workflow/domain/plan-recheck.js", ADR_0058),
       permission("./planning-review-artifact.js", ADR_0055),
       permission("./workflow/domain/planning-review.js", ADR_0055),
 

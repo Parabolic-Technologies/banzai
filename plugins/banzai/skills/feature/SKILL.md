@@ -34,7 +34,7 @@ and links, including its report and review directory; never create a replacement
 work directory to satisfy a new-work path example.
 
 Standalone verification retains the calling skill's task/plan authorization.
-Use the installed `../../scripts/verification.cjs` v3 request with the exact
+Use the installed `../../scripts/verification.cjs` v4 request with the exact
 `documentPath`, `workflow` and `roundId` when the selected document has a
 supported task inventory. Inspect/decide are read-only; execute owns private
 machine evidence. Where no supported inventory exists, retain applicable fresh

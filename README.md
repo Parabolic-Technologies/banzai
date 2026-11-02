@@ -133,7 +133,10 @@ failure needs attention. The reviewer uses read-only tools; only
 human-accepted findings reach the fixer.
 
 At a strict planning gate, you can request rework or independent planning
-review. Revisions return for approval. See
+review. Revisions return for approval. You can also edit the plan files
+yourself and choose **Re-check my edits** (`banzai approve plan --decision
+recheck`): it validates the edits and updates the plan's verification digest,
+then the gate waits for your approval. See
 [planning review](documentation/orchestrator.md#rework-and-independent-planning-review),
 [plan authority](plugins/banzai/policies/plan-task-completion.md), and
 [runtime boundaries](documentation/orchestrator.md#boundaries).
@@ -179,7 +182,7 @@ To improve the docs, contribute a fix, or share a workflow, read
 
 To supervise a run from a chat agent, explicitly invoke `/banzai:orchestrate`
 in Claude Code or `$banzai:orchestrate` in Codex. Compatible supervisors
-require control contract `8.0.0`; see
+require control contract `9.0.0`; see
 [agent control](documentation/orchestrator.md#agent-control).
 
 - [Project guidance and setup](documentation/orchestrator.md#project-guidance-setup)

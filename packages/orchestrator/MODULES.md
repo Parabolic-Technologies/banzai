@@ -70,7 +70,9 @@ is a navigational reference and is updated with the module it describes.
   `compatibility live --confirm-live`, `approve adr|plan`, `triage`, and
   `cancel [--run <run-id>] [--reason <enum>]`, which never opens a reason prompt.
   `approve plan` and `review planning` use exact flag parsing; rework requires
-  validated feedback. Planning-triage status prints one answer-v4 Next line.
+  validated feedback, and `--decision recheck` takes no note and ignores
+  `--no-resume`. At a re-check-capable plan gate status prints the CLI waiting
+  copy and the latest re-check summary. Planning-triage status prints one answer-v4 Next line.
   Bare invocation without a TTY prints help instead of waiting for
   input, and the help heading derives the Banzai release-train version from the
   orchestrator package mirror under ADR-0033. `--help` and `help` show a compact
@@ -97,10 +99,12 @@ is a navigational reference and is updated with the module it describes.
   Capability discovery runs before Git discovery or runner construction;
   status, start, answer, decideGate and recover reuse the current `WorkflowRunner`, and
   mutations emit a fresh authoritative status projection.
-- `agent-control.ts` — closed current `banzai-agent-capabilities/v8`
+- `agent-control.ts` — closed current `banzai-agent-capabilities/v9`
   (declaring the completion publication protocol, stages, refusal codes and
-  `pending_application`, task verification and planning gates), `banzai-agent-status/v6` (bounded
-  task applicability, completion publication state and planning review/triage),
+  `pending_application`, task verification, planning gates with the plan
+  `recheck` decision, and verification requests v4/v3), `banzai-agent-status/v7` (bounded
+  task applicability, completion publication state, planning review/triage and
+  the plan gate's latest re-check summary under a 32 KiB guard),
   planning `banzai-agent-gate-decision/v1` and `banzai-agent-answer/v4`, and configuration `banzai-agent-answer/v3` contracts;
   preserved keyed consultation `banzai-agent-answer/v2`, `banzai-agent-request/v1`, ordered escalation
   `banzai-agent-answer/v1`, and `banzai-agent-recovery/v1` inputs; bounded
@@ -270,6 +274,10 @@ is a navigational reference and is updated with the module it describes.
   session open when a phase returns a gate. It uses the shared review-completion
   projection so terminal triage is never displayed as reviewer pass.
   Planning gates offer rework and explicit review with default-No confirmations.
+  A strict task-verification plan gate first prints the waiting copy with the
+  bundle paths and the latest re-check summary, and offers "Re-check my edits"
+  between approve and rework without a confirmation; a refusal is printed and
+  the gate is shown again.
   Planning triage escapes model text and presents each finding/analysis card
   immediately before its keyed disposition menu; human-time insertion retains
   the final exit-choice anchor.
@@ -299,7 +307,7 @@ is a navigational reference and is updated with the module it describes.
   notification state is added; its only repository import is the run-state type.
 - `workflow.ts` — `WorkflowRunner`, the core. Owns `start`, `resume`, `retry`,
   `recover`,
-  `approvePlan`, `decideAdr`, `reworkPlan`, `requestPlanningReview`,
+  `approvePlan`, `recheckPlan`, `decideAdr`, `reworkPlan`, `requestPlanningReview`,
   `answerPlanningReview`, `answerHumanDecision`, `triage`, `cancel`,
   and process-local `recordCancellationResponse`,
   `status`, and the private phase executors for selection, planning,
@@ -314,6 +322,18 @@ is a navigational reference and is updated with the module it describes.
   applying, stale retry and reconciliation under the existing owners. Applying
   receives immutable analysis and exact human dispositions; planning retries
   preserve the independent code-review namespace and sessions.
+  Each strict task-verification entry into `needs_plan_approval` (planning
+  result, planning-review restore, triage restore) retains a gate-entry
+  snapshot. `recheckPlan` (ADR-0058), under the workflow lock at an idle plan
+  gate, validates the edited plan as approval does except for the remainder
+  digest, rewrites only `planRemainderSha256` through the compare-and-replace
+  write, appends a `plan_recheck` record (moving v10 to v11 in the same state
+  write) and a `plan.recheck` event that carries identities, digests, counts and
+  paths and is not a human-time decision boundary. A refusal writes nothing.
+  `approvePlan` never rewrites a digest; a remainder mismatch on v10+ names the
+  re-check, and on v11 the approval's `recheckId` links the latest re-check of
+  the current gate entry whose bundle digest it approves. `status` exposes that
+  entry's latest record as `planRecheck`.
   For new strict implementation and fix attempts it owns the
   `banzai-completion-protocol/v1` lifecycle (ADR-0047): the v7 state
   transition with retained prior-state bytes, protocol-selected envelope
@@ -535,6 +555,24 @@ is a navigational reference and is updated with the module it describes.
 - `workflow/domain/planning-review.ts` — pure planning-gate availability,
   exact subset scope, bounded numbering, dispatch, stale facts, actionable
   triage and guarded restore decisions under ADR-0052 domain restrictions.
+  `planningGateActions` offers `recheck` after approve only at a strict
+  task-verification plan gate on state v10 or later.
+- `workflow/domain/plan-recheck.ts` — `planRecheckSummary`, the pure ADR-0058
+  comparison of the current planning bundle with the planner's version retained
+  at gate entry: changed, added and removed files; Markdown sections by ATX
+  heading outside fences, keyed by level, text and occurrence; check changes by
+  identity with the changed field names from `PLAN_RECHECK_CHECK_FIELDS`; a
+  changed absence rationale; and accepted bundle ADRs whose bytes changed. The
+  runner-owned remainder digest is masked before comparison. Headings are
+  sanitized and capped, and `PLAN_RECHECK_LIMITS` bounds files, a shared heading
+  budget and checks with omitted counts. It returns paths, headings, ids and
+  field names only.
+- `workflow/plan-gate/recheck.ts` — the re-check's I/O shell: refusal errors
+  (`PLAN_RECHECK_REFUSED`, which always says nothing was written), bundle reads
+  that refuse missing, symlinked and non-regular files, exact UTF-8 decoding,
+  the compare-and-replace plan write (`PLAN_RECHECK_CHANGED` when the plan
+  changed after the read; mode preserved) and gate-entry snapshot entries
+  verified against their digests.
 - `workflow/domain/verification-attempts.ts` — `verificationFailureCategory`,
   which maps process errors to a persisted failure category, and
   `verificationCommandMatches`, which matches a record to its exact command
@@ -607,7 +645,11 @@ is a navigational reference and is updated with the module it describes.
   writes the immutable attempt-owned completion transition, original report,
   capture, candidate and publication records (`wx` temp plus link),
   appends deduplicated events through `appendEventOnce`, and enforces the
-  single-active-run lock. Private writes validate each actual destination and
+  single-active-run lock. It writes numbered, create-only plan-gate entry
+  snapshots under `plan-gate/<NNN>/` (private files, manifest `bundle.json`
+  last) and reads the latest one; an unreadable latest entry is
+  `PLAN_GATE_SNAPSHOT_INVALID`, never replaced by an older one. State v11 is
+  read with the v10 rules. Private writes validate each actual destination and
   temporary against effective Git exclusions; the active pointer's temporary
   lives in the ignored runs directory. Locks this process holds are tracked module-wide, so
   `releaseHeldRunnerLocksSync` can drop them from a signal handler, where the
@@ -625,9 +667,12 @@ is a navigational reference and is updated with the module it describes.
   stops/captures the winning state and writes its immutable anchor. Event capture
   and receipt-bound first response use the guarded expected source fingerprint;
   scans, human prompts and model execution occur outside the short guard.
-- `planning-review-state.ts` — closed state-v10 episode, pending-triage and
+- `planning-review-state.ts` — closed state-v10/v11 episode, pending-triage and
   history validation for the store. Active and closed slots have distinct
-  shapes; historical states reject v10 fields without migration. The store
+  shapes; historical states reject v10 fields without migration. Only v11 holds
+  exact, bounded `plan_recheck` records (unique ids, consistent gate entry,
+  planner and written digests, sanitized headings) and a plan approval's
+  `recheckId`, which must name one of them. The store
   remains the only persisted-state owner.
 - `adapters.ts` — `createVendorAdapters` plus the argument builders
   (`buildCodexArguments`, `buildClaudeArguments`,
@@ -916,7 +961,7 @@ is a navigational reference and is updated with the module it describes.
   process state, so both surfaces are testable against an explicit width.
 - `types.ts` — all shared types, `CONTRACT_VERSION = "1.0.0"`, phase-result
   schema v4 and state schema v10 with explicit historical readers, independent
-  agent-control schema and `8.0.0` contract identities, independent
+  agent-control schema and `9.0.0` contract identities, independent
   `banzai-context-attempt/v2` and `banzai-context-report/v2` identities,
   model-attempt v4 and retained v1-v3 readers under
   `banzai-completion-protocol/v1`, terminal-checkpoint v1-v3, the completion
@@ -1154,8 +1199,9 @@ without inventing exit codes and repairs missing origins from retained physical
 bytes; terminal success is not re-executed. Equivalent evidence requires complete
 policy-declared inputs/toolchain/environment and a direct compatible successful
 origin. Changes outside declared explanatory regions and release gates stay
-fresh. Helper request v3 accepts exact document/workflow selection, never arbitrary
-argv. Inspect/decide allocate nothing; execute keeps metadata under ignored
+fresh. Helper request v4 (and the retained v3) accepts exact document/workflow
+selection, never arbitrary argv; a v4 `retryOf` is the round's exact
+unsuccessful attempt set. Inspect/decide allocate nothing; execute keeps metadata under ignored
 `.banzai/verification/`. Legacy executable requests are refused.
 
 Review snapshot 7/rendered review 8 freeze task checks, required/supplemental
@@ -1170,7 +1216,7 @@ keeping its report schema unchanged.
 
 No historical-run migration is introduced. New binding v3 has explicit new
 semantics; retained v1/v2 artifacts keep their original identity. `doctor` v5 and control
-capabilities v8/status v6 expose task verification without requiring profile
+capabilities v9/status v7 expose task verification without requiring profile
 coverage. Current init emits schema 4 without a verification wizard. The test
 driver's exact file selection, process groups and cleanup are unchanged.
 
@@ -1206,6 +1252,10 @@ state-8 task runs never enter this prerequisite gate or init wizard.
   before the repair/resume alternative. It performs no project execution and
   no I/O; verification output tails and the plan gate's inventory arrive from
   its callers.
+- `plan-gate-ui.ts` renders the plan gate's waiting copy with the bundle paths
+  (the terminal names the "Re-check my edits" choice; the CLI names
+  `banzai approve plan --decision recheck`) and the escaped re-check summary,
+  and lists the refusal codes after which the interactive gate is shown again.
 - `configuration-review.ts` freezes actual deltas, coverage and resolution/Skip
   references for snapshot v4/render v5; historical writers/readers remain bound
   to their original versions. Already-published changes survive source drift and

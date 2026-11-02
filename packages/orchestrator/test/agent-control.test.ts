@@ -18,7 +18,7 @@ import {
   planningTriageRequest
 } from "./planning-review-fixtures.js";
 
-test("status v6 projects current planning gates, null ADR descriptions and complete triage without private history", () => {
+test("status v7 projects current planning gates, null ADR descriptions and complete triage without private history", () => {
   for (const gate of ["plan_approval", "adr_approval"] as const) {
     const current = state({
       schemaVersion: 10,
@@ -47,8 +47,8 @@ test("status v6 projects current planning gates, null ADR descriptions and compl
       ]
     });
     const projected = projectAgentControlStatus(workflowStatus(current));
-    assert.equal(projected.schema, "banzai-agent-status/v6");
-    assert.equal(projected.schemaVersion, 6);
+    assert.equal(projected.schema, "banzai-agent-status/v7");
+    assert.equal(projected.schemaVersion, 7);
     const activeRun = projected.activeRun;
     assert.ok(activeRun);
     const pending = activeRun.pendingGate;
@@ -101,6 +101,7 @@ test("status v6 projects current planning gates, null ADR descriptions and compl
   );
 });
 import type {
+  PlanRecheckRecord,
   ReviewResult,
   RunState,
   RunStatus,
@@ -320,16 +321,19 @@ function hasCode(code: string): (error: unknown) => boolean {
 
 test("agent control capabilities declare the exact offline v5 operation set", () => {
   const capabilities = agentControlCapabilities();
-  assert.equal(capabilities.schema, "banzai-agent-capabilities/v8");
-  assert.equal(capabilities.schemaVersion, 8);
+  assert.equal(capabilities.schema, "banzai-agent-capabilities/v9");
+  assert.equal(capabilities.schemaVersion, 9);
   assert.deepEqual(capabilities.workDocuments, {
     directoryPattern: "documentation/work/<slug>/",
     bindingSchemas: ["banzai-work-binding/v3"],
     workspaceSnapshotVersion: 3,
-    verificationRequestSchemas: ["banzai-verification-request/v3"]
+    verificationRequestSchemas: [
+      "banzai-verification-request/v4",
+      "banzai-verification-request/v3"
+    ]
   });
   assert.equal(Object.hasOwn(capabilities, "artifactStorage"), false);
-  assert.equal(capabilities.controlContractVersion, "8.0.0");
+  assert.equal(capabilities.controlContractVersion, "9.0.0");
   assert.deepEqual(capabilities.completionPublication, {
     protocol: "banzai-completion-protocol/v1",
     stages: [
@@ -348,7 +352,7 @@ test("agent control capabilities declare the exact offline v5 operation set", ()
       "COMPLETION_PUBLICATION_DRIFT",
       "COMPLETION_PUBLICATION_INTEGRITY"
     ],
-    statusSchema: "banzai-agent-status/v6"
+    statusSchema: "banzai-agent-status/v7"
   });
   assert.equal(capabilities.orchestratorVersion, packageManifest.version);
   assert.equal(capabilities.umbrellaContractVersion, CONTRACT_VERSION);
@@ -842,7 +846,8 @@ test("status projection derives every semantic action from runner state", () => 
           "documentation/features/x/description.md",
           "documentation/decisions/0018-agent-control.md",
           "documentation/development-plans/x/plan.md"
-        ]
+        ],
+        recheck: null
       });
     }
     if (item.status === "needs_human_decision") {
@@ -865,8 +870,8 @@ test("status projection derives every semantic action from runner state", () => 
     }
   }
   assert.deepEqual(emptyAgentControlStatus(), {
-    schema: "banzai-agent-status/v6",
-    schemaVersion: 6,
+    schema: "banzai-agent-status/v7",
+    schemaVersion: 7,
     activeRun: null
   });
 });
@@ -1132,5 +1137,89 @@ test("planning control documents use closed identities and raw UTF-8 bounds", ()
     () => decodeAgentControlAnswer(Buffer.from(escaped)),
     (error) =>
       error instanceof BanzaiError && error.code === "CONTROL_INPUT_TOO_LARGE"
+  );
+});
+
+test("status v7 carries the current gate entry's re-check summary for a task plan gate", () => {
+  const plan = "documentation/work/task/plan.md";
+  const recheck = (filePath: string): PlanRecheckRecord => ({
+    kind: "plan_recheck",
+    recheckId: "plan-recheck-0123456789ab",
+    gateEntry: 1,
+    plannerBundleDigest: "a".repeat(64),
+    plannerRemainderSha256: "b".repeat(64),
+    observedRemainderSha256: "c".repeat(64),
+    writtenRemainderSha256: "c".repeat(64),
+    bundleDigest: "d".repeat(64),
+    changedPaths: [filePath],
+    summary: {
+      plannerVersion: true,
+      files: [{ path: filePath, change: "changed", sections: null }],
+      omittedFiles: 0,
+      checks: {
+        current: ["unit-tests"],
+        added: [],
+        removed: [],
+        changed: [],
+        absenceReasonChanged: false,
+        omitted: 0
+      },
+      remainderDigestRewritten: true,
+      acceptedAdrsChanged: []
+    },
+    decidedBy: "FORBIDDEN OWNER",
+    decidedAt: TIMESTAMP
+  });
+  const record = recheck(plan);
+  const current = state({
+    schemaVersion: 11,
+    status: "needs_plan_approval",
+    verificationMode: "task",
+    planningReview: { active: null, closed: [] },
+    planArtifacts: {
+      description: "documentation/work/task/description.md",
+      plan,
+      adrs: [],
+      implementationReport: null,
+      testReport: null
+    },
+    humanDecisions: [record]
+  });
+  const projected = projectAgentControlStatus(
+    workflowStatus(current, { planRecheck: record })
+  );
+  const pending = projected.activeRun?.pendingGate;
+  assert.ok(pending?.kind === "plan_approval");
+  assert.deepEqual(pending.decisions, [
+    "approve",
+    "recheck",
+    "rework",
+    "review"
+  ]);
+  assert.deepEqual(pending.recheck, {
+    recheckId: record.recheckId,
+    decidedAt: TIMESTAMP,
+    summary: record.summary
+  });
+  assert.doesNotMatch(
+    renderAgentControlJson(projected),
+    /FORBIDDEN|decidedBy|humanDecisions|aaaaaaaa|bbbbbbbb|cccccccc|dddddddd/
+  );
+  const without = projectAgentControlStatus(workflowStatus(current)).activeRun
+    ?.pendingGate;
+  assert.ok(without?.kind === "plan_approval");
+  assert.equal(without.recheck, null);
+  const oversized = recheck(`${"x/".repeat(17_000)}plan.md`);
+  assert.throws(
+    () =>
+      projectAgentControlStatus(
+        workflowStatus(current, { planRecheck: oversized })
+      ),
+    (error: unknown) =>
+      error instanceof BanzaiError && error.code === "CONTROL_STATUS_INVALID"
+  );
+  assert.deepEqual(
+    agentControlCapabilities().planningGates.decisions.plan_approval,
+    ["approve", "recheck", "rework", "review"]
   );
 });

@@ -93,10 +93,14 @@ export function parseTaskVerificationCandidates(value) {
   return { checks, absenceReason: v.absenceReason === null ? null : text(v.absenceReason, 2000) };
 }
 
-/** Unlike v1 this inventory is self-contained, never derived from profiles. */
-export function parseTaskVerificationObligations(plan) {
+const INVENTORY_BLOCK = /^```banzai-verification-obligations\/v2\r?\n([\s\S]*?)^```[ \t]*$/gm;
+/**
+ * The one inventory and its observed remainder digest. A stale declared digest
+ * fails before the descriptors unless the caller compares it itself.
+ */
+function inspectObligations(plan, verifyRemainder) {
   if (typeof plan !== "string" || Buffer.byteLength(plan) > 16 * 1024 * 1024) fail("Task verification requires bounded plan bytes.");
-  const blocks = [...plan.matchAll(/^```banzai-verification-obligations\/v2\r?\n([\s\S]*?)^```[ \t]*$/gm)];
+  const blocks = [...plan.matchAll(INVENTORY_BLOCK)];
   if (blocks.length !== 1 || [...plan.matchAll(/^```banzai-verification-obligations\//gm)].length !== 1) fail("The plan requires exactly one v2 verification inventory.");
   let parsed;
   try { parsed = JSON.parse(blocks[0][1]); } catch { fail("Malformed task verification inventory."); }
@@ -104,12 +108,46 @@ export function parseTaskVerificationObligations(plan) {
   if (v.schema !== "banzai-verification-obligations/v2" || v.schemaVersion !== 2 || v.complete !== true) fail("Unsupported task verification inventory.");
   const remainder = plan.slice(0, blocks[0].index) + plan.slice(blocks[0].index + blocks[0][0].length);
   const observedRemainder = evidenceDigest(remainder);
-  if (hash(v.planRemainderSha256) !== observedRemainder)
+  if (verifyRemainder && hash(v.planRemainderSha256) !== observedRemainder)
     digestFail("TASK_VERIFICATION_DIGEST_MISMATCH", `planRemainderSha256 does not match the plan bytes outside its inventory: declared ${v.planRemainderSha256}, observed ${observedRemainder}.`,
       { role: taskVerificationDigestRole("plan-remainder"), field: "planRemainderSha256", checkId: null, path: null, declared: v.planRemainderSha256, observed: observedRemainder, size: null, limit: null });
   const selection = parseTaskVerificationCandidates({ checks: v.checks, absenceReason: v.absenceReason });
   if (/\b(?:fresh|rerun|re-run)\b|\brelease:check\b/iu.test(remainder) && selection.checks.some((check) => check.evidence !== "fresh")) fail("Equivalent evidence cannot override fresh plan commitments.");
-  return { schema: v.schema, schemaVersion: 2, complete: true, planRemainderSha256: v.planRemainderSha256, ...selection };
+  return { block: blocks[0], declared: v.planRemainderSha256, observed: observedRemainder, selection };
+}
+
+/** Unlike v1 this inventory is self-contained, never derived from profiles. */
+export function parseTaskVerificationObligations(plan) {
+  const { declared, selection } = inspectObligations(plan, true);
+  return { schema: "banzai-verification-obligations/v2", schemaVersion: 2, complete: true, planRemainderSha256: declared, ...selection };
+}
+
+/**
+ * Reads an inventory whose remainder digest may be stale, for comparing a
+ * human-edited plan with the planner's version. It authorizes nothing.
+ */
+export function readTaskVerificationObligations(plan) {
+  const { declared, observed, selection } = inspectObligations(plan, false);
+  return { schema: "banzai-verification-obligations/v2", schemaVersion: 2, complete: true, planRemainderSha256: hash(declared), observedRemainderSha256: observed, ...selection };
+}
+
+/**
+ * Establishes the remainder digest over human-edited plan bytes on the human's
+ * explicit plan-gate re-check (ADR-0058 §2). The inventory must already be
+ * valid; only the declared 64-character value changes, every other character
+ * stays, and the result passes the full parser.
+ */
+export function rewritePlanRemainderDigest(plan) {
+  const { block, declared, observed } = inspectObligations(plan, false);
+  if (typeof declared !== "string" || !HASH.test(declared)) fail("planRemainderSha256 must be 64 lowercase hexadecimal characters.");
+  const body = block[1];
+  const members = [...body.matchAll(/"planRemainderSha256"\s*:\s*"([a-f0-9]{64})"/gu)];
+  if (members.length !== 1 || members[0][1] !== declared) fail("The inventory must declare planRemainderSha256 exactly once.");
+  if (declared === observed) return { plan, declared, observed, rewritten: false };
+  const offset = block.index + block[0].indexOf("\n") + 1 + members[0].index + members[0][0].length - 65;
+  const rewritten = plan.slice(0, offset) + observed + plan.slice(offset + 64);
+  parseTaskVerificationObligations(rewritten);
+  return { plan: rewritten, declared, observed, rewritten: true };
 }
 
 export function parseTaskVerificationPolicy(value) {

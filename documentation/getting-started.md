@@ -249,8 +249,13 @@ For strict work, inspect the plan and its required checks before approving it.
 The plan gate and `banzai status` list each check's exact command, directory
 and timeout under **Verification that gates completion**; compare them with the
 commands your project documents, such as a missing `--config` flag.
-You can request rework or independent planning review; revisions return for
-approval. After implementation review, accept, reject, or defer each finding.
+The run waits at the gate, and the gate lists the plan files with their full
+paths. To fix the plan yourself, edit those files in any editor, then choose
+**Re-check my edits** or run `banzai approve plan --decision recheck`. The
+re-check validates your edits, updates the plan's verification digest to match
+them, and shows what changed against the planner's version; it never approves.
+Approve afterwards. You can also request rework or independent planning review;
+revisions return for approval. After implementation review, accept, reject, or defer each finding.
 Accepted findings authorize scoped fixes. Rejected and deferred findings stay
 out of the fixer. A passing review, or complete triage with no accepted
 findings, can finish the run while retaining the original review verdict.

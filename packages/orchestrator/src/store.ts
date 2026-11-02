@@ -5,6 +5,7 @@ import {
   parseVerificationApplicability
 } from "./verification-evidence.js";
 import { parseBinding } from "./work-documents.js";
+import { hashArtifactBytes } from "./git.js";
 import { verifyExecutionIgnore } from "./project-files.js";
 import {
   validateConfigurationStateEnvelope,
@@ -354,6 +355,7 @@ function validateDecisionState(state: RunState): RunState {
     for (const decision of state.humanDecisions ?? []) {
       if (
         decision.kind === "plan_rework" ||
+        decision.kind === "plan_recheck" ||
         decision.kind === "adr_rework" ||
         decision.kind === "planning_review_triage"
       )
@@ -470,7 +472,7 @@ function validateDecisionState(state: RunState): RunState {
 function normalizeRunState(
   state: RunState | LegacyRunStateV2 | LegacyRunState
 ): RunState {
-  if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(state.schemaVersion)) {
+  if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(state.schemaVersion)) {
     throw new BanzaiError(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Unsupported persisted run state version."
@@ -866,6 +868,147 @@ export class RunStore {
       entries.push({ path: entry.path, sha256: entry.sha256, contents });
     }
     return { digest: record.digest, entries };
+  }
+
+  private planGateSnapshotPath(runId: string, ...segments: string[]): string {
+    return containedEvidencePath(
+      this.runDirectory(runId),
+      "plan-gate",
+      ...segments
+    );
+  }
+
+  /**
+   * Retains the planner's version of the plan gate bundle each time the run
+   * enters the gate (ADR-0058 §1). Entries are numbered and create-only, so a
+   * later entry never rewrites an earlier comparison base.
+   */
+  async writePlanGateSnapshot(
+    runId: string,
+    digest: string,
+    entries: { path: string; sha256: string; contents: Buffer }[],
+    at: string
+  ): Promise<number> {
+    await mkdir(this.planGateSnapshotPath(runId), {
+      recursive: true,
+      mode: 0o700
+    });
+    const number =
+      ((await this.planGateSnapshotNumbers(runId)).at(-1) ?? 0) + 1;
+    const directory = String(number).padStart(3, "0");
+    await mkdir(this.planGateSnapshotPath(runId, directory), { mode: 0o700 });
+    const manifest: { path: string; file: string; sha256: string }[] = [];
+    for (const [index, entry] of entries.entries()) {
+      const file = `${String(index).padStart(3, "0")}-${safeEvidenceSegment(
+        path.posix.basename(entry.path),
+        "plan gate artifact name",
+        150
+      )}`;
+      const target = this.planGateSnapshotPath(runId, directory, file);
+      await verifyPrivatePaths(this.repoRoot, target);
+      await writeFile(target, entry.contents, { mode: 0o600, flag: "wx" });
+      manifest.push({ path: entry.path, file, sha256: entry.sha256 });
+    }
+    // The manifest lands last, so an interrupted entry reads as unavailable.
+    await atomicWriteJson(
+      this.repoRoot,
+      this.planGateSnapshotPath(runId, directory, "bundle.json"),
+      { schemaVersion: 1, number, digest, at, entries: manifest },
+      false
+    );
+    return number;
+  }
+
+  /** The latest gate-entry number, or null; reads no snapshot bytes. */
+  async latestPlanGateEntry(runId: string): Promise<number | null> {
+    return (await this.planGateSnapshotNumbers(runId)).at(-1) ?? null;
+  }
+
+  private async planGateSnapshotNumbers(runId: string): Promise<number[]> {
+    let names: string[];
+    try {
+      names = await readdir(this.planGateSnapshotPath(runId));
+    } catch {
+      return [];
+    }
+    return names
+      .filter((name) => /^[0-9]{3,9}$/u.test(name))
+      .map(Number)
+      .filter((value) => value > 0)
+      .sort((a, b) => a - b);
+  }
+
+  /**
+   * The latest gate entry, null when the run reached the gate before snapshots
+   * existed. An unreadable latest entry is reported, never replaced by an
+   * older one, because only the latest entry is the planner's current version.
+   */
+  async readLatestPlanGateSnapshot(runId: string): Promise<{
+    number: number;
+    digest: string;
+    entries: { path: string; sha256: string; contents: Buffer }[];
+  } | null> {
+    const number = (await this.planGateSnapshotNumbers(runId)).at(-1);
+    if (number === undefined) return null;
+    const directory = String(number).padStart(3, "0");
+    const unreadable = (): never => {
+      throw new BanzaiError(
+        "PLAN_GATE_SNAPSHOT_INVALID",
+        `The planner's version retained at plan gate entry ${number} is unreadable; inspect .banzai/runs/${runId}/plan-gate/${directory}.`
+      );
+    };
+    let record: {
+      schemaVersion?: unknown;
+      number?: unknown;
+      digest?: unknown;
+      entries?: unknown;
+    };
+    try {
+      record = JSON.parse(
+        await readFile(
+          this.planGateSnapshotPath(runId, directory, "bundle.json"),
+          "utf8"
+        )
+      ) as typeof record;
+    } catch {
+      return unreadable();
+    }
+    if (
+      record.schemaVersion !== 1 ||
+      record.number !== number ||
+      typeof record.digest !== "string" ||
+      !Array.isArray(record.entries)
+    )
+      return unreadable();
+    const entries: { path: string; sha256: string; contents: Buffer }[] = [];
+    for (const item of record.entries as unknown[]) {
+      const entry = item as {
+        path?: unknown;
+        file?: unknown;
+        sha256?: unknown;
+      };
+      if (
+        typeof entry.path !== "string" ||
+        typeof entry.file !== "string" ||
+        typeof entry.sha256 !== "string"
+      )
+        return unreadable();
+      let contents: Buffer;
+      try {
+        contents = await readFile(
+          this.planGateSnapshotPath(
+            runId,
+            directory,
+            safeEvidenceSegment(entry.file, "plan gate artifact file", 160)
+          )
+        );
+      } catch {
+        return unreadable();
+      }
+      if (hashArtifactBytes(contents) !== entry.sha256) return unreadable();
+      entries.push({ path: entry.path, sha256: entry.sha256, contents });
+    }
+    return { number, digest: record.digest, entries };
   }
 
   reviewCandidatePath(runId: string, attempt: AttemptReference): string {
@@ -1704,7 +1847,9 @@ export class RunStore {
       if (
         raw.runId !== runId ||
         !CANCELLATION_STATUSES.includes(raw.status as RunState["status"]) ||
-        ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(raw.schemaVersion as number)
+        ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(
+          raw.schemaVersion as number
+        )
       )
         throw new Error();
     } catch {

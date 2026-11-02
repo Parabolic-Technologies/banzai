@@ -1035,14 +1035,14 @@ for (const relativePath of [
   });
 }
 
-test("release validation protects run-state v3-v10 and agent-control 8.0 identities", async () => {
+test("release validation protects run-state v3-v11 and agent-control 9.0 identities", async () => {
   await withFixture(async (root) => {
     const typesPath = path.join(root, "packages/orchestrator/src/types.ts");
     const accepted = await readFile(typesPath, "utf8");
     await writeFile(
       typesPath,
       accepted.replace(
-        "schemaVersion: 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;",
+        "schemaVersion: 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;",
         "schemaVersion: 2;"
       ),
       "utf8"
@@ -1054,7 +1054,7 @@ test("release validation protects run-state v3-v10 and agent-control 8.0 identit
     await writeFile(
       typesPath,
       accepted.replace(
-        '"banzai-agent-status/v6" as const',
+        '"banzai-agent-status/v7" as const',
         '"banzai-agent-status/v1" as const'
       ),
       "utf8"
@@ -1105,7 +1105,7 @@ for (const [relativePath, fragment] of [
   ],
   [
     "plugins/banzai/skills/orchestrate/SKILL.md",
-    "exact supported v8 declaration"
+    "exact supported v9 declaration"
   ],
   ["plugins/banzai/skills/orchestrate/SKILL.md", "banzai-agent-answer/v2"],
   [
@@ -1126,11 +1126,11 @@ for (const [relativePath, fragment] of [
   ],
   [
     "plugins/banzai/skills/orchestrate/references/control-protocol.md",
-    "banzai-agent-capabilities/v8"
+    "banzai-agent-capabilities/v9"
   ],
   [
     "plugins/banzai/skills/orchestrate/references/control-protocol.md",
-    'controlContractVersion: "8.0.0"'
+    'controlContractVersion: "9.0.0"'
   ],
   [
     "plugins/banzai/skills/orchestrate/references/control-protocol.md",

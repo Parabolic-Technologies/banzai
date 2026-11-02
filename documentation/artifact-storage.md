@@ -49,10 +49,11 @@ contents are inert for new work, even when unsupported or malformed.
 
 ## Verification and runner authority
 
-Standalone `verification.cjs` consumes request v3 with absolute `repoRoot`, exact
+Standalone `verification.cjs` consumes request v4 with absolute `repoRoot`, exact
 repository-relative `documentPath`, `workflow` (`strict`, `feature` or
-`quick-fix`) and UUID `roundId`; execute may include an exact failed/interrupted
-`retryOf`. Descriptors come from the document's v2 inventory, under the calling
+`quick-fix`) and UUID `roundId`; execute may include `retryOf`, the round's
+exact set of unsuccessful latest attempts. Request v3, whose `retryOf` names one
+attempt, keeps its meaning. Descriptors come from the document's v2 inventory, under the calling
 skill's existing task/plan authorization. Requests carry no commands or output
 paths. Inspect/decide are read-only; absent local evidence is unavailable.
 Execute owns ignored metadata and physical attempts for the selected directory.

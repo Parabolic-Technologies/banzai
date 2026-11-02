@@ -545,9 +545,14 @@ test("runner mode fails closed when an edit target cannot be parsed", async () =
   }
 });
 
-// The last entry is the schema the current runner writes, so a runner schema
-// bump fails here until the hook learns it.
-for (const stateVersion of [RUN_STATE_SCHEMA_VERSION] as const)
+// New runs start at the current schema and a plan re-check moves a run to the
+// next one (ADR-0058), so the hook must execute both; the last entry is the
+// newest schema the runner writes, and a bump fails here until the hook learns it.
+const NEWEST_RUN_STATE_SCHEMA = RUN_STATE_SCHEMA_VERSION + 1;
+for (const stateVersion of [
+  RUN_STATE_SCHEMA_VERSION,
+  NEWEST_RUN_STATE_SCHEMA
+] as const)
   test(`v${stateVersion} hook enforces bound phase roles, read-only selection/review and private layout`, async () => {
     const repository = await createTestRepository({
       artifactLayout: "private"
@@ -688,7 +693,9 @@ for (const stateVersion of [RUN_STATE_SCHEMA_VERSION] as const)
         expect(roles.changeReport, phase === "fix" ? "allow" : "deny");
       }
       {
-        await save("plan", "planning", { schemaVersion: stateVersion + 1 });
+        await save("plan", "planning", {
+          schemaVersion: NEWEST_RUN_STATE_SCHEMA + 1
+        });
         const stale = runHook({
           cwd: root,
           target: roles.plan,
@@ -698,7 +705,7 @@ for (const stateVersion of [RUN_STATE_SCHEMA_VERSION] as const)
         assert.match(
           stale.reason,
           new RegExp(
-            `run state schema ${stateVersion + 1} is newer than this installed Banzai hook supports \\(up to ${stateVersion}\\); update the Banzai plugin`
+            `run state schema ${NEWEST_RUN_STATE_SCHEMA + 1} is newer than this installed Banzai hook supports \\(up to ${NEWEST_RUN_STATE_SCHEMA}\\); update the Banzai plugin`
           )
         );
       }

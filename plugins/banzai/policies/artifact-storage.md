@@ -53,12 +53,15 @@ excluded from plugin/npm payloads; client evidence belongs only to its project.
 
 The installed `../../scripts/verification.cjs <inspect|decide|execute> --json
 <request-file>` consumes a private regular JSON request using
-`banzai-verification-request/v3`, `schemaVersion: 3`, absolute `repoRoot`, exact
+`banzai-verification-request/v4`, `schemaVersion: 4`, absolute `repoRoot`, exact
 repository-relative `documentPath`, `workflow` (`strict`, `feature` or
-`quick-fix`) and a UUID `roundId`. Execute may include `retryOf` for an exact
-unsuccessful attempt in that round. Commands and output destinations are never
-request fields; descriptors come from the document's existing v2 obligation
-inventory. The unchanged result envelope is `banzai-verification-result/v2`.
+`quick-fix`) and a UUID `roundId`. A round runs every selected check unless a
+signal, runner failure or fail-closed refusal stops it. Execute may include
+`retryOf`: the ids of every unsuccessful latest attempt in that round and no
+other, so one retry reruns them all. Request v3, whose `retryOf` names one
+attempt, keeps its meaning. Commands and output destinations are never request
+fields; descriptors come from the document's existing v2 obligation inventory.
+The unchanged result envelope is `banzai-verification-result/v2`.
 
 The calling skill must already hold task/plan execution authorization. Inspect
 and decide create nothing; absent machine evidence is unavailable. Execute

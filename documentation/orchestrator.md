@@ -46,6 +46,30 @@ that error instead. Planners build each check from the project's documented
 command with its configuration flags and prefer a discovered script entry point
 such as `composer run-script <name>` or `npm run <name>`.
 
+The plan gate also says that the run is waiting and lists the bundle files with
+full repository-relative paths. Edit them in any editor, then choose **Re-check
+my edits** (between approve and rework) or run
+`banzai approve plan --decision recheck`. A re-check never approves and never
+starts a phase. It validates the edited plan as approval does — exactly one v2
+inventory with valid descriptors, the task heading grammar, the runner-control
+task rule and the fresh-evidence rule — except for the remainder digest, which
+it recomputes over the edited bytes and writes into the inventory's
+`planRemainderSha256`, every other byte unchanged. The write is refused when the
+plan changed while the re-check ran. A refused re-check names the problem and
+writes no file, state, event or snapshot; the run keeps waiting. The summary
+compares the bundle with the planner's version, which the runner retains
+privately under `.banzai/runs/<run-id>/plan-gate/<NNN>/` each time the gate is
+entered: changed, added and removed files, sections by heading, checks by
+identity with the names of changed fields, whether the digest was rewritten, and
+a warning for each changed accepted ADR. It carries no other file content. The
+interactive gate, `banzai status` and agent status show the latest summary of
+the current gate entry. A run that reached the gate before this release says the
+planner's version is unavailable. Approval itself never rewrites a digest:
+approval over edited prose still fails with `TASK_VERIFICATION_DIGEST_MISMATCH`
+and names the re-check. The first re-check moves the run to state v11, which
+records it and links the approval to it; runs that never re-check stay at v10.
+Historical (v9 and earlier) runs and legacy profile-mode plans have no re-check.
+
 Actual checks and their outcomes are retained as runner evidence. Missing unrelated
 scripts are not requirements; failed or absent mandatory checks prevent completion.
 A verification round runs every selected check in order. A non-zero exit, a
@@ -562,6 +586,7 @@ banzai retry
 banzai recover
 banzai approve adr --id <id> --decision accept|reject|rework
 banzai approve plan [--no-resume]
+banzai approve plan --decision recheck [--by <name>]
 banzai triage --accept R1-F1 --reject R1-F2 --defer ""
 banzai cancel [--run <run-id>] [--reason <enum>]
 ```
@@ -581,8 +606,8 @@ reviewer phases never invoke it.
 
 `banzai control capabilities` is valid outside a Git repository and performs no
 repository discovery, adapter construction, vendor/authentication call, lock,
-recovery, or write. It emits canonical `banzai-agent-capabilities/v8` JSON with
-schema version 8, control contract `8.0.0`, the package-derived Banzai
+recovery, or write. It emits canonical `banzai-agent-capabilities/v9` JSON with
+schema version 9, control contract `9.0.0`, the package-derived Banzai
 release-train version, umbrella contract, the exact supported non-TTY operation
 set, and an ordered `inputSchemas` list per operation. It also declares the
 runner-owned completion publication protocol (`banzai-completion-protocol/v1`),
@@ -593,7 +618,7 @@ output prove neither subscription authentication nor sandbox credential
 visibility. Compatibility still follows these explicit contract and operation
 identities, never the shared release-train value alone.
 
-`banzai control status` emits canonical `banzai-agent-status/v6` JSON. With no
+`banzai control status` emits canonical `banzai-agent-status/v7` JSON. With no
 persisted run, `activeRun` is `null`. Otherwise the allow-list projection
 contains run identity/lifecycle, route, semantic next action, retry and bounded
 recovery eligibility, the pending human gate, approval validity,
@@ -2164,19 +2189,23 @@ current bytes under a new number. Existing artifacts are never overwritten.
 
 ```text
 banzai approve plan --decision rework --note "Exact owner feedback"
+banzai approve plan --decision recheck
 banzai approve adr --id ADR-0001 --decision rework --note "Exact owner feedback"
 banzai review planning
 banzai review planning --artifact documentation/work/example/plan.md
 ```
 
 `approve plan` accepts only its documented flags. Unknown, repeated, positional
-and `--name=value` forms fail before approval. For agent supervisors, control
-8.0.0 declares capabilities v8 and status v6. Send closed gate-decision v1
+and `--name=value` forms fail before approval; `--note` is accepted only with
+`--decision rework`, and `--no-resume` has no effect on a re-check. For agent supervisors, control
+9.0.0 declares capabilities v9 and status v7. Send closed gate-decision v1
 through `banzai control decide` and planning-triage answer v4 through `banzai
 control answer` using direct stdin. Encode human text as raw UTF-8 JSON; on the
 64 KiB limit, let the human shorten their own text or answer in a terminal.
-Never infer a decision or truncate the text. Historical runs cannot acquire new
-rework/review authority or resume through the v10 hook; preserve them and start
+Never infer a decision or truncate the text. Relay a re-check as
+`banzai approve plan --decision recheck` only on the human's explicit request,
+and never edit planning files yourself. Historical runs cannot acquire new
+rework/review authority or resume through the v10/v11 hook; preserve them and start
 new work. `banzai`, `banzai status` and `banzai doctor` show such a run as
 read-only history; an unfinished one offers only `banzai cancel`, after which
 new work starts normally. This release does not migrate or install anything

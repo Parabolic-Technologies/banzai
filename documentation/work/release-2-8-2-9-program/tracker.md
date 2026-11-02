@@ -40,16 +40,16 @@ Status values: `not started` · `ADR draft` · `ADR proposed` · `ADR accepted` 
 
 ## Stage 1 (2.8): daily friction
 
-| WP  | Package                                        | Depends on      | ADR                                          | Work directory                         | Status       | Commit  | Notes                                                  |
-| --- | ---------------------------------------------- | --------------- | -------------------------------------------- | -------------------------------------- | ------------ | ------- | ------------------------------------------------------ |
-| WP1 | Verification failure details and retry warning | —               | none                                         | `wp01-verification-failure-details`    | committed    | d03bc19 | phpcs fixture built; see report deviations             |
-| WP2 | Run every required check in one pass           | —               | 0057 Accepted; amends 0045 (pinned)          | `wp02-full-verification-pass`          | report ready |         | Full rounds, one retry; helper v4 published by WP4     |
-| WP3 | Verification commands at the plan gate         | —               | none; cite 0049 for instruction change       | `wp03-plan-gate-verification-commands` | committed    | 44f3d03 | Plan gate lists checks; see report deviations          |
-| WP4 | Re-check human edits at the plan gate          | —               | 0058 Accepted; amends 0051 and 0055 (pinned) | `wp04-plan-gate-edit-recheck`          | ADR accepted |         | major control revision; also publishes helper v4 (WP2) |
-| WP5 | Install guide, plugin scope, doctor hint       | —               | none; stay within 0008                       | `wp05-install-guide-plugin-scope`      | not started  |         | Doctor JSON contract version bump                      |
-| WP6 | Local model override                           | —               | check eligibility; short ADR likely          | `wp06-local-model-override`            | not started  |         | Do before WP7                                          |
-| WP7 | Claude as the default reviewer, with isolation | WP6 recommended | 0059 Accepted; amends 0042 §7, 0037, 0002    | `wp07-claude-default-reviewer`         | ADR accepted |         | live scenario needs go-ahead                           |
-| WP8 | Stable Claude phases                           | —               | check 0020                                   | `wp08-stable-claude-phases`            | not started  |         | Live scenario needs go-ahead                           |
+| WP  | Package                                        | Depends on      | ADR                                          | Work directory                         | Status       | Commit  | Notes                                              |
+| --- | ---------------------------------------------- | --------------- | -------------------------------------------- | -------------------------------------- | ------------ | ------- | -------------------------------------------------- |
+| WP1 | Verification failure details and retry warning | —               | none                                         | `wp01-verification-failure-details`    | committed    | d03bc19 | phpcs fixture built; see report deviations         |
+| WP2 | Run every required check in one pass           | —               | 0057 Accepted; amends 0045 (pinned)          | `wp02-full-verification-pass`          | committed    | da624a4 | Full rounds, one retry; helper v4 published by WP4 |
+| WP3 | Verification commands at the plan gate         | —               | none; cite 0049 for instruction change       | `wp03-plan-gate-verification-commands` | committed    | 44f3d03 | Plan gate lists checks; see report deviations      |
+| WP4 | Re-check human edits at the plan gate          | —               | 0058 Accepted; amends 0051 and 0055 (pinned) | `wp04-plan-gate-edit-recheck`          | report ready |         | Control 9.0.0 with recheck and helper v4           |
+| WP5 | Install guide, plugin scope, doctor hint       | —               | none; stay within 0008                       | `wp05-install-guide-plugin-scope`      | not started  |         | Doctor JSON contract version bump                  |
+| WP6 | Local model override                           | —               | check eligibility; short ADR likely          | `wp06-local-model-override`            | not started  |         | Do before WP7                                      |
+| WP7 | Claude as the default reviewer, with isolation | WP6 recommended | 0059 Accepted; amends 0042 §7, 0037, 0002    | `wp07-claude-default-reviewer`         | ADR accepted |         | live scenario needs go-ahead                       |
+| WP8 | Stable Claude phases                           | —               | check 0020                                   | `wp08-stable-claude-phases`            | not started  |         | Live scenario needs go-ahead                       |
 
 ### Gate 1
 
@@ -150,6 +150,10 @@ local worktree.
   per package. Until then `npm run release:validate` reports
   `HOOK_CHANGED_WITHOUT_VERSION_BUMP` for `plugins/banzai/lib` changes (first
   in WP2); that finding alone does not block a package.
+- 2026-10-31: WP4 plan approved with `Both recommended`, after commit
+  `da624a4`. New runs keep starting at state v10, and a run moves to v11 with
+  its first plan re-check record. All seven skills that name the helper request
+  move to request v4.
 
 ## Open questions left to the owner by the brief
 

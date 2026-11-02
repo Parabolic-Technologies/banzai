@@ -192,9 +192,9 @@
       ]
     },
     "agentControl": {
-      "contractVersion": "8.0.0",
-      "capabilities": "banzai-agent-capabilities/v8",
-      "status": "banzai-agent-status/v6",
+      "contractVersion": "9.0.0",
+      "capabilities": "banzai-agent-capabilities/v9",
+      "status": "banzai-agent-status/v7",
       "request": "banzai-agent-request/v1",
       "answer": "banzai-agent-answer/v2",
       "legacyAnswer": "banzai-agent-answer/v1",

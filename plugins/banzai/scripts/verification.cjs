@@ -19,7 +19,7 @@
     const policyInvalid = error?.code === "VERIFICATION_POLICY_INVALID";
     const unsupported = error?.code === "VERIFICATION_REQUEST_UNSUPPORTED";
     process.stdout.write(JSON.stringify({ schema: `banzai-verification-result/v${version}`, schemaVersion: version, ok: false, result: null,
-      error: { code: unsupported ? "VERIFICATION_REQUEST_UNSUPPORTED" : policyInvalid ? "VERIFICATION_POLICY_INVALID" : "VERIFICATION_EVIDENCE_INVALID", message: unsupported ? "Use verification request v3 with documentPath and workflow. Legacy executable requests cannot resume historical work." : policyInvalid ? "The declared task verification policy is invalid. Correct verification.policy before execution." : "Verification could not establish valid bound evidence. Inspect configuration, work ownership and retained attempts; keep required checks fresh." } }) + "\n");
+      error: { code: unsupported ? "VERIFICATION_REQUEST_UNSUPPORTED" : policyInvalid ? "VERIFICATION_POLICY_INVALID" : "VERIFICATION_EVIDENCE_INVALID", message: unsupported ? "Use verification request v4 with documentPath and workflow. Legacy executable requests cannot resume historical work." : policyInvalid ? "The declared task verification policy is invalid. Correct verification.policy before execution." : "Verification could not establish valid bound evidence. Inspect configuration, work ownership and retained attempts; keep required checks fresh." } }) + "\n");
     process.exitCode = 1;
   }
 })();

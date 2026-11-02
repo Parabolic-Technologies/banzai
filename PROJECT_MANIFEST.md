@@ -175,8 +175,10 @@ behavior and edge cases; source and tests own the executable evidence.
 - `agent-control-cli.ts`, `agent-control.ts` — capability/status projections
   and closed stdin requests, including `control decide`; mutations validate
   before delegating to `WorkflowRunner` and return current status.
-- `interactive.ts`, `inquirer-io.ts` — state-driven human decisions through
-  `InteractiveIO`; only `inquirer-io.ts` imports `@inquirer/*`.
+- `interactive.ts`, `inquirer-io.ts`, `plan-gate-ui.ts` — state-driven human
+  decisions through `InteractiveIO`; only `inquirer-io.ts` imports
+  `@inquirer/*`. `plan-gate-ui.ts` renders the plan gate's waiting copy and the
+  re-check summary for the terminal and the CLI.
 - `progress.ts`, `interrupt.ts`, `terminal-attention.ts`, `vocabulary.ts`,
   `ansi.ts`, `format.ts` — terminal presentation and bounded interruption;
   human rendering never becomes machine authority.
@@ -188,8 +190,10 @@ behavior and edge cases; source and tests own the executable evidence.
   collaborators plus owned per-runner state; capability code receives the
   context, never the facade.
 - `workflow/domain/`, `state-machine.ts` — pure routing, eligibility,
-  planning-review and state-transition rules; facts are gathered by effectful
-  callers without widening reads or changing failure scope.
+  planning-review, plan re-check summary and state-transition rules; facts are
+  gathered by effectful callers without widening reads or changing failure
+  scope. `workflow/plan-gate/` holds the re-check's refusal, bundle-read and
+  compare-and-replace write helpers.
 - `workflow/attempts/`, `workflow/checkpoints/`, `workflow/digest-evidence/`
   — physical attempt lifecycle, terminal proof and acceptance-time digest
   evidence; durable records preserve failed and interrupted attempts.
@@ -286,8 +290,11 @@ Plugin and release owners:
   implementation and Codex `gpt-6.1-sol` for review, all at `xhigh`; context
   defaults to `observe` with no limits and `maxFixCycles` is `3`.
 - New runs use state schema 10, document binding v3 and workspace snapshot v3.
-  One checkout has one active run; state is atomically replaced, events are
-  appended and raw evidence remains under `.banzai/runs/<run-id>/`.
+  A plan-gate re-check moves a run to state v11 in the same write as its first
+  `plan_recheck` record; v10 and v11 are both executable. One checkout has one
+  active run; state is atomically replaced, events are appended and raw
+  evidence remains under `.banzai/runs/<run-id>/`, including the planner's
+  bundle retained at each plan-gate entry under `plan-gate/<NNN>/`.
 - Guidance is inspected before run creation/authentication and again under
   ownership. Continuations check instruction layout before model attempts;
   refusal preserves the last checkpoint, saved decision and retry/recovery
@@ -301,7 +308,13 @@ Plugin and release owners:
 - Human decisions use five existing workflow gates: conditional planning-only
   consultation, ADR approval, plan approval, escalation and review triage.
   Planning gates support feedback-based rework and explicitly requested
-  read-only planning review with separate human triage.
+  read-only planning review with separate human triage. A strict
+  task-verification plan gate also offers **Re-check my edits**
+  (`banzai approve plan --decision recheck`, ADR-0058): it validates the
+  human-edited bundle, rewrites only the plan's `planRemainderSha256`, records
+  a bounded summary against the planner's version, never approves and is not
+  a human-time decision boundary. Approval never rewrites a digest and links
+  the re-check whose bundle digest it approves.
 - Approval digests bind exact requirements, accepted ADRs and plan bytes.
   Workflow digests bind lite selection; workspace identities detect drift.
   Plan checkboxes stay immutable in orchestrated work; operator recovery needs
@@ -423,11 +436,15 @@ Plugin and release owners:
 
 - The umbrella contract is `1.0.0`; phase-result v4 is current and
   review-result v2 is current. `types.ts` declares phase-result schema v4 and
-  state schema v10 with explicit historical readers. Startup rejects schema
+  state schema v10 with explicit historical readers; a plan re-check moves a
+  run to its successor v11. Startup rejects schema
   or umbrella mismatch; phase-result v1/v2/v3 remain byte-preserved legacy
   reader surfaces.
-- Agent control uses control contract version `8.0.0`, capabilities v8 and
-  status v6. Planning decisions use `banzai-agent-gate-decision/v1` and
+- Agent control uses control contract version `9.0.0`, capabilities v9 and
+  status v7. Plan-approval decisions are approve, recheck, rework and review;
+  status carries the current gate entry's re-check summary or null, and
+  capabilities list verification requests v4 and v3. Planning decisions use
+  `banzai-agent-gate-decision/v1` and
   planning triage uses `banzai-agent-answer/v4`; consultation, escalation and
   recovery retain their declared contracts. Closed direct-stdin JSON is
   limited to 64 KiB and validated before mutation.
@@ -527,5 +544,5 @@ delivery or installation.
 | ADR-0055 | Planning gate rework and independent planning review               | [Source](documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md)   | Implemented |
 | ADR-0056 | CI-built orchestrator distribution                                 | [Source](documentation/decisions/0056-ci-built-orchestrator-distribution.md)                     | Implemented |
 | ADR-0057 | Complete task verification rounds after check failures             | [Source](documentation/decisions/0057-complete-task-verification-rounds.md)                      | Implemented |
-| ADR-0058 | Human plan edits re-checked at the plan gate                       | [Source](documentation/decisions/0058-human-plan-edits-rechecked-at-the-plan-gate.md)            | Planned     |
+| ADR-0058 | Human plan edits re-checked at the plan gate                       | [Source](documentation/decisions/0058-human-plan-edits-rechecked-at-the-plan-gate.md)            | Implemented |
 | ADR-0059 | Claude default reviewer and reviewer isolation                     | [Source](documentation/decisions/0059-claude-default-reviewer-and-reviewer-isolation.md)         | Planned     |

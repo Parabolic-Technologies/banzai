@@ -28,6 +28,11 @@ import packageManifest from "../package.json" with { type: "json" };
 import { createStyler, type Styler } from "./ansi.js";
 import { BanzaiError, errorMessage } from "./errors.js";
 import {
+  PLAN_RECHECK_REFUSAL_CODES,
+  planGateWaitingLines,
+  planRecheckLines
+} from "./plan-gate-ui.js";
+import {
   escapeTerminalText,
   formatUsage,
   hangingLines,
@@ -152,6 +157,7 @@ export interface InteractiveRunner {
   restoreEligibility(): Promise<{ eligible: boolean; reason: string }>;
   recover(input: RecoverInput, autoResume?: boolean): Promise<RunState>;
   approvePlan(approvedBy: string, autoResume?: boolean): Promise<RunState>;
+  recheckPlan(input: { decidedBy: string }): Promise<RunState>;
   decideAdr(input: {
     id: string;
     decision: AdrDecision["decision"];
@@ -242,6 +248,7 @@ async function describeRepository(
 type PrimaryAction =
   | "answer_human"
   | "approve_plan"
+  | "recheck_plan"
   | "rework_plan"
   | "planning_review"
   | "cancel"
@@ -589,6 +596,22 @@ function renderStatus(
       styler,
       planVerificationLines(planVerification)
     );
+  if (
+    state.status === "needs_plan_approval" &&
+    status.planningReview?.decisions.includes("recheck") === true
+  ) {
+    renderPreformattedSection(
+      io,
+      styler,
+      planGateWaitingLines(status.planningReview.reviewPaths, "terminal")
+    );
+    if (status.planRecheck !== undefined)
+      renderPreformattedSection(
+        io,
+        styler,
+        planRecheckLines(status.planRecheck)
+      );
+  }
   if (
     state.status === "needs_human_decision" &&
     state.pendingHumanDecision != null
@@ -1472,6 +1495,9 @@ async function handleStatus(
       );
     const action = await io.select<PrimaryAction>("Plan decision", [
       { name: "Approve plan and continue", value: "approve_plan" },
+      ...(status.planningReview?.decisions.includes("recheck")
+        ? [{ name: "Re-check my edits", value: "recheck_plan" as const }]
+        : []),
       ...(status.planningReview?.decisions.includes("rework")
         ? [{ name: "Request rework", value: "rework_plan" as const }]
         : []),
@@ -1488,6 +1514,23 @@ async function handleStatus(
     ]);
     if (action === "planning_review")
       return requestPlanningReviewUI(runner, io, status, options);
+    if (action === "recheck_plan") {
+      // Re-check never approves, so it needs no confirmation; a refusal wrote
+      // nothing and the gate is shown again.
+      try {
+        await runWork(options, () =>
+          runner.recheckPlan({ decidedBy: options.decidedBy })
+        );
+      } catch (error) {
+        if (
+          !(error instanceof BanzaiError) ||
+          !PLAN_RECHECK_REFUSAL_CODES.includes(error.code)
+        )
+          throw error;
+        io.writeLine(escapeTerminalText(error.message));
+      }
+      return true;
+    }
     if (action === "rework_plan") {
       const feedback = await io.input({
         message: "Rework feedback for the planner",

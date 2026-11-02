@@ -2,8 +2,13 @@ import { BanzaiError } from "./errors.js";
 import type {
   PlanningReviewEpisodeBase,
   PlanningReviewTriageRecord,
+  PlanRecheckRecord,
   RunState
 } from "./types.js";
+import {
+  PLAN_RECHECK_CHECK_FIELDS,
+  PLAN_RECHECK_LIMITS
+} from "./workflow/domain/plan-recheck.js";
 import {
   digestCanonicalJson,
   parsePlanningReviewResult,
@@ -394,11 +399,142 @@ function triageRecord(
   parsePlanningReviewTriageAnswer(answer, { ...record, entries }, CODE);
   seen.add(record.episodeId);
 }
+function strings(
+  value: unknown,
+  limit: number,
+  item: (v: unknown) => void
+): void {
+  if (!Array.isArray(value) || value.length > limit) fail();
+  for (const entry of value) item(entry);
+}
+function count(value: unknown): void {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) fail();
+}
+function heading(value: unknown): void {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > PLAN_RECHECK_LIMITS.headingLength + 7 ||
+    /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u.test(value)
+  )
+    fail();
+}
+function checkId(value: unknown): void {
+  if (
+    typeof value !== "string" ||
+    !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(value) ||
+    value.length > 80
+  )
+    fail();
+}
+function nullableDigest(value: unknown): void {
+  if (value !== null) digest(value);
+}
+/** A re-check record names paths, headings and identities only (ADR-0058 §4). */
+function recheckRecord(record: PlanRecheckRecord, ids: Set<string>): void {
+  exact(record, [
+    "kind",
+    "recheckId",
+    "gateEntry",
+    "plannerBundleDigest",
+    "plannerRemainderSha256",
+    "observedRemainderSha256",
+    "writtenRemainderSha256",
+    "bundleDigest",
+    "changedPaths",
+    "summary",
+    "decidedBy",
+    "decidedAt"
+  ]);
+  if (
+    !/^plan-recheck-[0-9a-f]{12}$/u.test(record.recheckId) ||
+    ids.has(record.recheckId)
+  )
+    fail();
+  ids.add(record.recheckId);
+  if (
+    record.gateEntry !== null &&
+    (!Number.isSafeInteger(record.gateEntry) || record.gateEntry < 1)
+  )
+    fail();
+  nullableDigest(record.plannerBundleDigest);
+  nullableDigest(record.plannerRemainderSha256);
+  digest(record.observedRemainderSha256);
+  nullableDigest(record.writtenRemainderSha256);
+  if (
+    record.writtenRemainderSha256 !== null &&
+    record.writtenRemainderSha256 !== record.observedRemainderSha256
+  )
+    fail();
+  digest(record.bundleDigest);
+  if ((record.gateEntry === null) !== (record.plannerBundleDigest === null))
+    fail();
+  strings(record.changedPaths, PLAN_RECHECK_LIMITS.files, pathValue);
+  const summary = exact(record.summary, [
+    "plannerVersion",
+    "files",
+    "omittedFiles",
+    "checks",
+    "remainderDigestRewritten",
+    "acceptedAdrsChanged"
+  ]) as unknown as PlanRecheckRecord["summary"];
+  if (
+    summary.plannerVersion !== (record.gateEntry !== null) ||
+    summary.remainderDigestRewritten !==
+      (record.writtenRemainderSha256 !== null)
+  )
+    fail();
+  strings(summary.files, PLAN_RECHECK_LIMITS.files, (value) => {
+    const file = exact(value, ["path", "change", "sections"]);
+    pathValue(file.path);
+    if (!["added", "removed", "changed"].includes(file.change as string))
+      fail();
+    if (file.sections === null) return;
+    const sections = exact(file.sections, [
+      "added",
+      "removed",
+      "changed",
+      "omitted"
+    ]);
+    for (const key of ["added", "removed", "changed"])
+      strings(sections[key], PLAN_RECHECK_LIMITS.headings, heading);
+    count(sections.omitted);
+  });
+  count(summary.omittedFiles);
+  const checks = exact(summary.checks, [
+    "current",
+    "added",
+    "removed",
+    "changed",
+    "absenceReasonChanged",
+    "omitted"
+  ]);
+  for (const key of ["current", "added", "removed"])
+    strings(checks[key], PLAN_RECHECK_LIMITS.checks, checkId);
+  strings(checks.changed, PLAN_RECHECK_LIMITS.checks, (value) => {
+    const change = exact(value, ["id", "fields"]);
+    checkId(change.id);
+    strings(change.fields, PLAN_RECHECK_CHECK_FIELDS.length, (field) => {
+      if (!(PLAN_RECHECK_CHECK_FIELDS as readonly unknown[]).includes(field))
+        fail();
+    });
+  });
+  if (typeof checks.absenceReasonChanged !== "boolean") fail();
+  count(checks.omitted);
+  strings(summary.acceptedAdrsChanged, PLAN_RECHECK_LIMITS.files, pathValue);
+}
 export function validatePlanningReviewState(state: RunState): void {
   const records = state.humanDecisions ?? [];
   const newRecord = (kind: string): boolean =>
     ["plan_rework", "adr_rework", "planning_review_triage"].includes(kind);
-  if (state.schemaVersion !== 10) {
+  if (state.schemaVersion < 11) {
+    if (
+      records.some((r) => r.kind === "plan_recheck") ||
+      (state.planApproval !== null && "recheckId" in state.planApproval)
+    )
+      fail();
+  }
+  if (state.schemaVersion !== 10 && state.schemaVersion !== 11) {
     if (
       "planningReview" in state ||
       state.pendingHumanDecision?.kind === "planning_review_triage" ||
@@ -417,7 +553,12 @@ export function validatePlanningReviewState(state: RunState): void {
       "configuration_prerequisite",
       "planning_review_triage"
     ];
-    const recordKinds = [...pendingKinds, "plan_rework", "adr_rework"];
+    const recordKinds = [
+      ...pendingKinds,
+      "plan_rework",
+      "adr_rework",
+      ...(state.schemaVersion === 11 ? ["plan_recheck"] : [])
+    ];
     if (
       (state.pendingHumanDecision != null &&
         !pendingKinds.includes(state.pendingHumanDecision.kind)) ||
@@ -427,7 +568,14 @@ export function validatePlanningReviewState(state: RunState): void {
     episodeState(state);
     pendingState(state);
     const seen = new Set<string>();
+    const recheckIds = new Set<string>();
     for (const record of records) {
+      if (record.kind === "plan_recheck") {
+        timestamp(record.decidedAt);
+        text(record.decidedBy);
+        recheckRecord(record, recheckIds);
+        continue;
+      }
       if (!newRecord(record.kind)) continue;
       timestamp(record.decidedAt);
       text(record.decidedBy);
@@ -457,6 +605,13 @@ export function validatePlanningReviewState(state: RunState): void {
     if (
       state.pendingHumanDecision?.kind === "planning_review_triage" &&
       seen.has(state.pendingHumanDecision.episodeId)
+    )
+      fail();
+    const approvedRecheck = state.planApproval?.recheckId;
+    if (
+      approvedRecheck !== undefined &&
+      approvedRecheck !== null &&
+      !recheckIds.has(approvedRecheck)
     )
       fail();
   } catch {

@@ -13,7 +13,8 @@
   reciprocal links are recorded. Their proposal-stage wording and the
   decision body are retained unchanged. Dependent planning is authorized;
   plan approval is still required before implementation.
-- Implementation state: Planned.
+- Implementation state: Implemented on 2026-10-31 by
+  [WP4](../work/wp04-plan-gate-edit-recheck/implementation-report.md).
 - Preparation authority: the owner's 2.8–2.9 brief of 2026-10-30 (WP4), whose
   "Decisions already made" item 2 welcomes the runner recomputing the plan
   digest after a human edit, and the owner's request on 2026-10-31 to draft the

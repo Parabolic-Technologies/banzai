@@ -543,7 +543,7 @@ test("standalone v3 verification reads selected documents without registration a
         schema: "banzai-verification-request/v2",
         schemaVersion: 2
       }),
-      /v3/u
+      /Use verification request v4/u
     );
   } finally {
     await repo.dispose();

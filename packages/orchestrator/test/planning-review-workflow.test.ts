@@ -126,7 +126,13 @@ test("workflow status projects requested, active, triage, restored and stale pla
     const restored = requiredFixture((await f.runner.status()).planningReview);
     assert.equal(restored.active, null);
     assert.equal(restored.latest?.outcome, "restored_no_action");
-    assert.deepEqual(restored.decisions, ["approve", "rework", "review"]);
+    // A restored strict task-verification gate offers the re-check (ADR-0058).
+    assert.deepEqual(restored.decisions, [
+      "approve",
+      "recheck",
+      "rework",
+      "review"
+    ]);
     assert.ok(restored.reviewPaths.length > 0);
     const requested = await f.runner.requestPlanningReview({
       paths: null,

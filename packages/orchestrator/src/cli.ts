@@ -50,6 +50,7 @@ import {
 } from "./context-report-cli.js";
 import { executeDoctor, parseDoctorArgs } from "./doctor-cli.js";
 import { BanzaiError, errorMessage } from "./errors.js";
+import { planGateWaitingLines, planRecheckLines } from "./plan-gate-ui.js";
 import { executeEvaluationExport } from "./evaluation-cli.js";
 import {
   executeEvaluationKpiFromCheckout,
@@ -433,19 +434,19 @@ function printFinding(finding: ReviewFinding): void {
  * rather than leading every command's output.
  */
 export function parsePlanGateArgs(args: readonly string[]): {
-  decision: "approve" | "rework";
+  decision: "approve" | "recheck" | "rework";
   note: string | null;
   by: string | null;
   autoResume: boolean;
 } {
   const options = exactPlanningOptions(args, false);
   const decision = options.decision ?? "approve";
-  if (decision !== "approve" && decision !== "rework")
+  if (decision !== "approve" && decision !== "recheck" && decision !== "rework")
     throw new BanzaiError(
       "INVALID_DECISION",
-      "Plan decision must be approve or rework."
+      "Plan decision must be approve, recheck or rework."
     );
-  if (decision === "approve" && options.note !== null)
+  if (decision !== "rework" && options.note !== null)
     throw new BanzaiError(
       "INVALID_DECISION",
       "--note is accepted only with --decision rework."
@@ -591,6 +592,19 @@ function printState(
   if (planVerification != null)
     for (const line of planVerificationLines(planVerification))
       console.log(line);
+  if (
+    state.status === "needs_plan_approval" &&
+    status.planningReview?.decisions.includes("recheck") === true
+  ) {
+    for (const line of planGateWaitingLines(
+      status.planningReview.reviewPaths,
+      "cli"
+    ))
+      console.log(line);
+    if (status.planRecheck !== undefined)
+      for (const line of planRecheckLines(status.planRecheck))
+        console.log(line);
+  }
   if (state.blockReason !== null) {
     printLabeled("Blocked", state.blockReason);
   }
@@ -688,7 +702,9 @@ function printState(
     );
   } else if (state.status === "needs_plan_approval") {
     console.log(
-      "Next: review the plan artifacts, then run `banzai approve plan`."
+      status.planningReview?.decisions.includes("recheck") === true
+        ? "Next: review the plan artifacts, then run `banzai approve plan`, or `banzai approve plan --decision recheck` after editing them."
+        : "Next: review the plan artifacts, then run `banzai approve plan`."
     );
   } else if (state.status === "needs_human_decision") {
     console.log(
@@ -1447,10 +1463,15 @@ async function main(): Promise<void> {
               decidedBy: planCommand.by ?? defaultDecisionMaker(),
               autoResume: planCommand.autoResume
             })
-          : runner.approvePlan(
-              planCommand.by ?? defaultDecisionMaker(),
-              planCommand.autoResume
-            )
+          : planCommand.decision === "recheck"
+            ? // Re-check never starts a phase, so --no-resume has no effect.
+              runner.recheckPlan({
+                decidedBy: planCommand.by ?? defaultDecisionMaker()
+              })
+            : runner.approvePlan(
+                planCommand.by ?? defaultDecisionMaker(),
+                planCommand.autoResume
+              )
       );
       await printRunnerState(runner, metrics);
       return;

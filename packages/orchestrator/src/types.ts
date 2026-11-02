@@ -10,6 +10,9 @@ import type {
   VerificationDecision,
   VerificationApplicability
 } from "./verification-evidence.js";
+
+// Domain modules read inventories through this module only (ADR-0052).
+export type { TaskVerificationCandidates, TaskVerificationDescriptor };
 import type { ArtifactBoundWork } from "./work-documents.js";
 import type {
   ConfigurationAction,
@@ -112,16 +115,16 @@ export const RECOVERY_AUTHORIZATION_SCHEMA_VERSION = 1 as const;
 export const RESULT_DIGEST_EVIDENCE_SCHEMA =
   "banzai-result-digest-evidence/v1" as const;
 export const RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION = 1 as const;
-export const AGENT_CONTROL_CONTRACT_VERSION = "8.0.0" as const;
-export const AGENT_CAPABILITIES_SCHEMA_VERSION = 8 as const;
-export const AGENT_STATUS_SCHEMA_VERSION = 6 as const;
+export const AGENT_CONTROL_CONTRACT_VERSION = "9.0.0" as const;
+export const AGENT_CAPABILITIES_SCHEMA_VERSION = 9 as const;
+export const AGENT_STATUS_SCHEMA_VERSION = 7 as const;
 export const AGENT_ANSWER_SCHEMA_VERSION = 2 as const;
 export const AGENT_REQUEST_SCHEMA_VERSION = 1 as const;
 export const AGENT_RECOVERY_SCHEMA_VERSION = 1 as const;
 export const LEGACY_AGENT_CONTROL_SCHEMA_VERSION = 1 as const;
 export const AGENT_CAPABILITIES_SCHEMA =
-  "banzai-agent-capabilities/v8" as const;
-export const AGENT_STATUS_SCHEMA = "banzai-agent-status/v6" as const;
+  "banzai-agent-capabilities/v9" as const;
+export const AGENT_STATUS_SCHEMA = "banzai-agent-status/v7" as const;
 export const AGENT_REQUEST_SCHEMA = "banzai-agent-request/v1" as const;
 export const AGENT_ANSWER_SCHEMA = "banzai-agent-answer/v2" as const;
 export const CONFIGURATION_ANSWER_SCHEMA = "banzai-agent-answer/v3" as const;
@@ -183,7 +186,7 @@ export interface AgentControlCapabilitiesV5 {
     gateDecisionSchema: typeof PLANNING_GATE_DOCUMENT;
     decisions: {
       adr_approval: readonly ["accept", "reject", "rework", "review"];
-      plan_approval: readonly ["approve", "rework", "review"];
+      plan_approval: readonly ["approve", "recheck", "rework", "review"];
     };
     triage: {
       pendingKind: "planning_review_triage";
@@ -208,7 +211,10 @@ export interface AgentControlCapabilitiesV5 {
     directoryPattern: "documentation/work/<slug>/";
     bindingSchemas: ["banzai-work-binding/v3"];
     workspaceSnapshotVersion: 3;
-    verificationRequestSchemas: ["banzai-verification-request/v3"];
+    verificationRequestSchemas: [
+      "banzai-verification-request/v4",
+      "banzai-verification-request/v3"
+    ];
   };
   configurationPrerequisite: {
     kind: "configuration_prerequisite";
@@ -266,6 +272,13 @@ export interface AgentControlRecoveryV1 {
   unknownSideEffectsAccepted: true;
 }
 
+/** A re-check as status v7 shows it: no digests and no file contents. */
+export interface AgentControlPlanRecheck {
+  recheckId: string;
+  decidedAt: string;
+  summary: PlanRecheckSummary;
+}
+
 export type AgentControlNextActionV1 =
   | "approve_adr"
   | "approve_plan"
@@ -297,6 +310,8 @@ export type AgentControlPendingGateV1 =
       decisions?: string[];
       reviewPaths?: string[];
       artifactPaths: string[];
+      /** Status v7: the latest re-check of this gate entry, or null. */
+      recheck?: AgentControlPlanRecheck | null;
     }
   | {
       kind: "escalation";
@@ -1323,6 +1338,11 @@ export interface ApprovalRecord {
   approvedAt: string;
   approvedBy: string;
   paths: string[];
+  /**
+   * State v11 only: the plan re-check whose resulting bundle this approval
+   * covers, or null when the approved bytes are the planner's (ADR-0058 §4).
+   */
+  recheckId?: string | null;
 }
 
 export interface AdrDecision {
@@ -1424,6 +1444,51 @@ export interface PlanReworkRecord {
   decidedBy: string;
   decidedAt: string;
 }
+/**
+ * What a plan re-check found against the planner's version at gate entry. It
+ * names files, headings, check identities and field names only, never file
+ * contents (ADR-0058 §3).
+ */
+export interface PlanRecheckSummary {
+  plannerVersion: boolean;
+  files: {
+    path: string;
+    change: "added" | "removed" | "changed";
+    sections: {
+      added: string[];
+      removed: string[];
+      changed: string[];
+      omitted: number;
+    } | null;
+  }[];
+  omittedFiles: number;
+  checks: {
+    current: string[];
+    added: string[];
+    removed: string[];
+    changed: { id: string; fields: string[] }[];
+    absenceReasonChanged: boolean;
+    omitted: number;
+  };
+  remainderDigestRewritten: boolean;
+  acceptedAdrsChanged: string[];
+}
+export interface PlanRecheckRecord {
+  kind: "plan_recheck";
+  recheckId: string;
+  /** The gate-entry snapshot compared with, or null when none exists. */
+  gateEntry: number | null;
+  plannerBundleDigest: string | null;
+  plannerRemainderSha256: string | null;
+  observedRemainderSha256: string;
+  /** Null when the declared digest already matched and nothing was written. */
+  writtenRemainderSha256: string | null;
+  bundleDigest: string;
+  changedPaths: string[];
+  summary: PlanRecheckSummary;
+  decidedBy: string;
+  decidedAt: string;
+}
 export interface AdrReworkRecord {
   kind: "adr_rework";
   adrId: string;
@@ -1457,6 +1522,7 @@ export type HumanDecisionRecord =
   | ConsultationDecisionRecord
   | ConfigurationDecisionRecord
   | PlanReworkRecord
+  | PlanRecheckRecord
   | AdrReworkRecord
   | PlanningReviewTriageRecord;
 
@@ -1708,9 +1774,11 @@ export interface RunState {
    * 7 is reached only when the first strict implementation or fix attempt under
    * the completion protocol is created; new runs still bootstrap at 4 or 6 and
    * keep their configuration/binding combination unchanged across the move.
+   * Likewise 11 is reached only when a v10 run records its first plan
+   * re-check (ADR-0058 §4); new runs still bootstrap at 10.
    */
-  schemaVersion: 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
-  /** Required on v10; absent on historical states. */
+  schemaVersion: 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
+  /** Required on v10 and v11; absent on historical states. */
   planningReview?: PlanningReviewState;
   verificationMode?: "ordered" | "policy" | "task";
   taskVerification?: TaskVerificationPublication;

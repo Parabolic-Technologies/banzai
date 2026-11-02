@@ -52,7 +52,9 @@ Acknowledgment is a reviewer assertion, not independent proof of reading or
 substantive assessment. Blocked reviews may truthfully report partial or zero
 coverage and partial accepted-ID assessment without findings or a gate.
 
-New runs use state schema 10. Historical formats remain readable; old-run
+New runs use state schema 10; a plan-gate re-check moves a run to schema 11
+in the same write as its first re-check record. Historical formats remain
+readable; old-run
 continuation and migration are not supported. The runner freezes
 `banzai-review-snapshot/v7` evidence before invocation,
 retains the result and diagnostics, validates scope, renders one attempt-owned
@@ -72,7 +74,7 @@ coverage. Historical snapshot and rendered-review formats retain their original
 readers; recognizing them does not enable old-run continuation or migration.
 
 New task verification has no configuration prerequisite gate. Agent control
-8.0.0 declares capabilities v8 and status v6, including bounded task verification
+9.0.0 declares capabilities v9 and status v7, including bounded task verification
 outcomes and the retained runner-owned completion publication protocol. Its
 stages, closed refusal codes and `pending_application` attempt status keep their
 meaning. Planning gates use gate-decision v1 and planning-triage answer v4.
@@ -116,13 +118,16 @@ New work binding v3 records fixed `documentation/work/<slug>/` roles in runner
 state without a layout selector or registered work file. Workspace v3 includes
 exact selected documents as well as Git changes. Capabilities v7 expose the
 `workDocuments` directory pattern, binding-v3/workspace-v3 support and verification
-request v3. Standalone request v3 selects `documentPath` and `workflow`; its
-response envelope remains v2. Retained binding-v1/v2 decoders preserve history
+requests. Capabilities v9 list request v4 and the retained v3.
+`verification/v4/` is the current standalone request: it selects `documentPath`
+and `workflow`, and its `retryOf` is the round's exact unsuccessful attempt set;
+v3, whose `retryOf` names one attempt, keeps its meaning. The response envelope
+remains v2. Retained binding-v1/v2 decoders preserve history
 without authorizing execution. Existing documents and archives are not migrated.
 
 Planning-review and planning-analysis attempts are read-only, with no artifact
 write grant. The runner alone publishes planning-review-N.md beside the exact
-bound work documents. The current hook executes state v10 only and retains its
-newer-schema update diagnostic. Binding v3 gains no role. Both structured output
+bound work documents. The current hook executes state v10 and its plan
+re-check successor v11, and retains its newer-schema update diagnostic. Binding v3 gains no role. Both structured output
 contracts remain v1 under umbrella 1.0.0; human planning triage is answer v4 in
-control 8.0.0, and never grants plan approval or ADR acceptance.
+control 9.0.0, and never grants plan approval or ADR acceptance.

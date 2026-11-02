@@ -252,7 +252,7 @@ export async function executeAgentControlCommand(
       );
     const by = command.decidedBy ?? defaultDecisionMaker;
     if (doc.decision === "review") {
-      if (current.state.schemaVersion !== 10)
+      if (current.state.schemaVersion < 10)
         throw new BanzaiError(
           "INVALID_CONTROL_INPUT",
           "Historical runs do not support planning review."
@@ -274,7 +274,7 @@ export async function executeAgentControlCommand(
         autoResume: command.autoResume
       });
     } else if (doc.gate === "plan_approval") {
-      if (current.state.schemaVersion !== 10)
+      if (current.state.schemaVersion < 10)
         throw new BanzaiError(
           "INVALID_CONTROL_INPUT",
           "Historical runs do not support plan rework."

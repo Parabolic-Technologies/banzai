@@ -41,11 +41,12 @@ const crypto = require('crypto');
 const os = require('os');
 const path = require('path');
 
-// Newest run-state schema this hook can interpret; it tracks the runner's
-// RUN_STATE_SCHEMA_VERSION. Codex and Claude Code refresh an installed plugin
+// Newest run-state schema this hook can interpret; it tracks the newest state
+// the runner writes (new runs start at RUN_STATE_SCHEMA_VERSION, and a plan
+// re-check moves one to the next version). Codex and Claude Code refresh an installed plugin
 // cache only on a version change, so a newer state means this hook is stale,
 // not that the run is legacy.
-const NEWEST_RUN_STATE_SCHEMA = 10;
+const NEWEST_RUN_STATE_SCHEMA = 11;
 
 function deferAndExit() {
   // No stdout + exit 0 => Claude Code falls through to normal permission flow.
@@ -292,11 +293,11 @@ if (runnerMode) {
     }
     const controlRoot = path.join(projectRoot, '.banzai');
     let privateWrites = new Set();
-    if (state.schemaVersion === 10 || state.schemaVersion === 9 || state.schemaVersion === 8 || state.schemaVersion === 4 || state.schemaVersion === 5 || state.schemaVersion === 6 || (state.schemaVersion === 7 && state.artifactBinding !== undefined)) {
+    if (state.schemaVersion === 11 || state.schemaVersion === 10 || state.schemaVersion === 9 || state.schemaVersion === 8 || state.schemaVersion === 4 || state.schemaVersion === 5 || state.schemaVersion === 6 || (state.schemaVersion === 7 && state.artifactBinding !== undefined)) {
       const storage = await import('../lib/work-documents.mjs');
       const files = await import('../lib/project-files.mjs');
       const bound = await storage.inspectBoundWork(projectRoot, state.artifactBinding);
-      if (state.schemaVersion !== 10 || bound.binding.schemaVersion !== 3) throw new Error('historical run execution is unsupported; preserve its documents and start new work');
+      if ((state.schemaVersion !== 10 && state.schemaVersion !== 11) || bound.binding.schemaVersion !== 3) throw new Error('historical run execution is unsupported; preserve its documents and start new work');
       if (bound.binding.artifacts.verificationDirectory !== `.banzai/runs/${state.runId}/verification`) throw new Error('verification role belongs to another run');
       if (state.schemaVersion >= 6) {
         const readers = await import('../lib/artifact-readers.mjs');

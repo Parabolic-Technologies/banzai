@@ -574,8 +574,8 @@ async function runSmoke(options) {
     );
     requireIdentity(
       capabilities,
-      "banzai-agent-capabilities/v8",
-      8,
+      "banzai-agent-capabilities/v9",
+      9,
       "agent control capabilities"
     );
     if (capabilities.orchestratorVersion !== expectedVersion) {
@@ -585,7 +585,7 @@ async function runSmoke(options) {
       );
     }
     if (
-      capabilities.controlContractVersion !== "8.0.0" ||
+      capabilities.controlContractVersion !== "9.0.0" ||
       Object.hasOwn(capabilities, "artifactStorage") ||
       capabilities.workDocuments?.directoryPattern !==
         "documentation/work/<slug>/" ||
@@ -593,7 +593,10 @@ async function runSmoke(options) {
         JSON.stringify(["banzai-work-binding/v3"]) ||
       capabilities.workDocuments?.workspaceSnapshotVersion !== 3 ||
       JSON.stringify(capabilities.workDocuments?.verificationRequestSchemas) !==
-        JSON.stringify(["banzai-verification-request/v3"]) ||
+        JSON.stringify([
+          "banzai-verification-request/v4",
+          "banzai-verification-request/v3"
+        ]) ||
       capabilities.operations?.status?.supported !== true ||
       JSON.stringify(capabilities.operations?.decideGate?.inputSchemas) !==
         JSON.stringify(["banzai-agent-gate-decision/v1"]) ||
@@ -648,8 +651,8 @@ async function runSmoke(options) {
     const status = parseJson(statusFirst, "agent control status");
     requireIdentity(
       status,
-      "banzai-agent-status/v6",
-      6,
+      "banzai-agent-status/v7",
+      7,
       "agent control status"
     );
     if (status.activeRun !== null) {
@@ -705,8 +708,8 @@ async function runSmoke(options) {
     );
     requireIdentity(
       consultationStatus,
-      "banzai-agent-status/v6",
-      6,
+      "banzai-agent-status/v7",
+      7,
       "consultation status"
     );
     if (
@@ -752,8 +755,8 @@ async function runSmoke(options) {
     const answered = parseJson(answeredText, "consultation answer");
     requireIdentity(
       answered,
-      "banzai-agent-status/v6",
-      6,
+      "banzai-agent-status/v7",
+      7,
       "consultation answer"
     );
     if (

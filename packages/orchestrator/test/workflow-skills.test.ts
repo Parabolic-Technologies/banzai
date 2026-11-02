@@ -355,7 +355,7 @@ test("shipped workflow preserves five gates and scopes retained configuration fo
   assert.match(feature, /cannot use the planning-only consultation gate/);
 
   const assertSupervisorSafety = (source: string): void => {
-    assert.match(source, /exact supported v8 declaration/i);
+    assert.match(source, /exact supported v9 declaration/i);
     assert.match(source, /answer_consultation/);
     assert.match(
       source,
@@ -374,9 +374,9 @@ test("shipped workflow preserves five gates and scopes retained configuration fo
     );
   });
 
-  assert.match(protocol, /banzai-agent-capabilities\/v8/);
-  assert.match(protocol, /controlContractVersion: "8\.0\.0"/);
-  assert.match(protocol, /banzai-agent-status\/v6/);
+  assert.match(protocol, /banzai-agent-capabilities\/v9/);
+  assert.match(protocol, /controlContractVersion: "9\.0\.0"/);
+  assert.match(protocol, /banzai-agent-status\/v7/);
   assert.match(protocol, /answer_escalation/);
   assert.match(protocol, /answer_consultation/);
   const documents = [...protocol.matchAll(/```json\n([\s\S]*?)\n```/gu)].map(

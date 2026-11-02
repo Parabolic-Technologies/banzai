@@ -47,6 +47,9 @@ import {
   taskVerificationApplicability,
   authorizeTaskVerification,
   parseTaskVerificationObligations,
+  readTaskVerificationObligations,
+  rewritePlanRemainderDigest,
+  TaskVerificationDigestError,
   selectTaskVerification,
   evidenceDigest,
   parseVerificationConfiguration,
@@ -177,8 +180,17 @@ import {
   approvedTaskIds,
   completionPlanPath,
   validateImplementationCompletion,
-  validatePlanningResult
+  validatePlanningResult,
+  validateRunnerControlTasks
 } from "./workflow/completion/plan-tasks.js";
+import {
+  exactUtf8,
+  gateEntryEntries,
+  readRecheckBundle,
+  recheckRefused,
+  replacePlanBytes
+} from "./workflow/plan-gate/recheck.js";
+import { planRecheckSummary } from "./workflow/domain/plan-recheck.js";
 import { taskVerificationPolicy } from "./workflow/verification/required-checks.js";
 import {
   artifactWritePaths,
@@ -349,6 +361,7 @@ import {
   parsePlanTaskCompletionProjection,
   PlanTaskCompletionError,
   summariesMatch,
+  parseApprovedPlanTaskIds,
   validateCompletionClaims,
   type ValidatedPlanTaskCompletion
 } from "./plan-task-completion.js";
@@ -427,6 +440,7 @@ import {
   type DecisionConsultationAnswer,
   type FindingDisposition,
   type HumanDecisionRecord,
+  type PlanRecheckRecord,
   type ModelProgressEvent,
   type ModelSettings,
   type McpWhitelist,
@@ -670,6 +684,8 @@ export interface VerificationRetryOutlook {
 }
 
 export interface WorkflowStatus {
+  /** The latest re-check of the current plan gate entry (ADR-0058 §3). */
+  planRecheck?: PlanRecheckRecord;
   planningReview?: {
     decisions: string[];
     reviewPaths: string[];
@@ -2485,7 +2501,7 @@ export class WorkflowRunner {
   }
 
   private requirePlanningGate(state: RunState): PlanningGate {
-    if (state.schemaVersion !== 10)
+    if (state.schemaVersion < 10)
       throw new BanzaiError(
         "ARTIFACT_VERSION_UNSUPPORTED",
         "Historical runs do not support plan rework or planning review. Preserve their documents and start new work."
@@ -2778,6 +2794,7 @@ export class WorkflowRunner {
         "Planning-review gate restore is inconsistent."
       );
     transitionState(state, target);
+    await this.retainPlanGateEntry(state);
     this.closePlanningEpisode(state, outcome);
     await this.store.writeState(state);
     const event = await this.store.appendEventOnce(
@@ -3242,6 +3259,7 @@ export class WorkflowRunner {
             "Planning-review restore is inconsistent."
           );
         transitionState(state, target);
+        await this.retainPlanGateEntry(state);
         this.closePlanningEpisode(state, "restored_no_action");
         await this.store.writeState(state);
       }
@@ -3438,12 +3456,27 @@ export class WorkflowRunner {
         await approvedTaskIds(this.context, state);
         const approvalConfig = await loadConfig(this.repoRoot);
         if (state.verificationMode === "task")
-          parseTaskVerificationObligations(
-            await readFile(
-              path.join(this.repoRoot, completionPlanPath(state)),
-              "utf8"
+          try {
+            parseTaskVerificationObligations(
+              await readFile(
+                path.join(this.repoRoot, completionPlanPath(state)),
+                "utf8"
+              )
+            );
+          } catch (error) {
+            // Approval never rewrites a digest; it names the human route that
+            // does (ADR-0058 §5).
+            if (
+              error instanceof TaskVerificationDigestError &&
+              error.detail.field === "planRemainderSha256" &&
+              state.schemaVersion >= 10
             )
-          );
+              throw new BanzaiError(
+                "TASK_VERIFICATION_DIGEST_MISMATCH",
+                `${error.message} Choose Re-check my edits, or run \`banzai approve plan --decision recheck\`, to record the digest of your edits.`
+              );
+            throw error;
+          }
         else if (approvalConfig.schemaVersion === 3)
           validatePlanVerificationObligations(
             await readFile(
@@ -3485,7 +3518,15 @@ export class WorkflowRunner {
           digest: bundle.digest,
           approvedAt: this.now(),
           approvedBy,
-          paths: bundle.paths
+          paths: bundle.paths,
+          ...(state.schemaVersion === 11
+            ? {
+                recheckId:
+                  (await this.currentPlanRechecks(state))
+                    .filter((record) => record.bundleDigest === bundle.digest)
+                    .at(-1)?.recheckId ?? null
+              }
+            : {})
         };
         await this.store.writeApprovalSnapshot(
           state.runId,
@@ -3522,6 +3563,169 @@ export class WorkflowRunner {
       if (error instanceof TerminalRunStateError) return error.state;
       throw error;
     }
+  }
+
+  /**
+   * Re-checks human edits at the plan gate (ADR-0058 §2). It validates the
+   * bundle as approval does, establishes the remainder digest over the edited
+   * bytes and records what changed. It never approves and never starts a
+   * phase; a refusal writes nothing.
+   */
+  async recheckPlan(input: { decidedBy: string }): Promise<RunState> {
+    const decidedBy = planningDecisionOwner(input.decidedBy);
+    const lock = await this.acquireWorkflowLock();
+    try {
+      const state = await this.store.requireActiveState();
+      requireState(state, ["needs_plan_approval"], "Plan re-check");
+      if (state.schemaVersion < 10 || state.verificationMode !== "task")
+        throw new BanzaiError(
+          "ARTIFACT_VERSION_UNSUPPORTED",
+          "Plan re-check needs a strict task-verification run on state v10 or later. Historical runs keep their documents; start new work to use re-check."
+        );
+      if (
+        state.activeAttempt !== null ||
+        state.activeProcess !== null ||
+        state.planningReview?.active != null
+      )
+        throw new BanzaiError(
+          "INVALID_STATE",
+          "Plan re-check requires an idle plan gate."
+        );
+      const paths = [...new Set(artifactPaths(state))].sort();
+      const planPath = completionPlanPath(state);
+      const bytes = await readRecheckBundle(this.repoRoot, paths);
+      const planBytes = bytes.get(planPath);
+      if (planBytes === undefined)
+        throw recheckRefused(`${planPath} is not in the plan gate bundle.`);
+      const plan = exactUtf8(planBytes, planPath);
+      let rewrite: ReturnType<typeof rewritePlanRemainderDigest>;
+      try {
+        validateRunnerControlTasks(this.context, state, plan);
+        parseApprovedPlanTaskIds(plan);
+        rewrite = rewritePlanRemainderDigest(plan);
+      } catch (error) {
+        throw recheckRefused(`${planPath}: ${errorMessage(error)}`);
+      }
+      const nextPlan = Buffer.from(rewrite.plan, "utf8");
+      const current = paths.map((relative) => {
+        const read = bytes.get(relative);
+        if (read === undefined)
+          throw recheckRefused(`${relative} was not read.`);
+        return {
+          path: relative,
+          bytes: relative === planPath ? nextPlan : read
+        };
+      });
+      const snapshot = await this.store.readLatestPlanGateSnapshot(state.runId);
+      const plannerPlan = snapshot?.entries.find(
+        (entry) => entry.path === planPath
+      );
+      let plannerInventory: ReturnType<
+        typeof readTaskVerificationObligations
+      > | null = null;
+      try {
+        if (plannerPlan !== undefined)
+          plannerInventory = readTaskVerificationObligations(
+            plannerPlan.contents.toString("utf8")
+          );
+      } catch {
+        plannerInventory = null;
+      }
+      const summary = planRecheckSummary({
+        planner:
+          snapshot?.entries.map((entry) => ({
+            path: entry.path,
+            bytes: entry.contents
+          })) ?? null,
+        current,
+        plannerInventory,
+        currentInventory: parseTaskVerificationObligations(rewrite.plan),
+        remainderDigestRewritten: rewrite.rewritten,
+        adrPaths: state.planArtifacts?.adrs ?? []
+      });
+      const bundleDigest = digestArtifactEntries(
+        current.map((file) => ({
+          path: file.path,
+          sha256: hashArtifactBytes(file.bytes)
+        }))
+      );
+      if (rewrite.rewritten)
+        await replacePlanBytes(this.repoRoot, planPath, planBytes, nextPlan);
+      const record: PlanRecheckRecord = {
+        kind: "plan_recheck",
+        recheckId: `plan-recheck-${this.context.ids().replaceAll("-", "").slice(0, 12)}`,
+        gateEntry: snapshot?.number ?? null,
+        plannerBundleDigest: snapshot?.digest ?? null,
+        plannerRemainderSha256: plannerInventory?.planRemainderSha256 ?? null,
+        observedRemainderSha256: rewrite.observed,
+        writtenRemainderSha256: rewrite.rewritten ? rewrite.observed : null,
+        bundleDigest,
+        changedPaths: summary.files.map((file) => file.path),
+        summary,
+        decidedBy,
+        decidedAt: this.now()
+      };
+      // The record is the first v11 field; the move happens in this write.
+      if (state.schemaVersion === 10) state.schemaVersion = 11;
+      state.humanDecisions = [...(state.humanDecisions ?? []), record];
+      await this.store.writeState(state);
+      await this.store.appendEvent(state.runId, "plan.recheck", {
+        recheckId: record.recheckId,
+        gateEntry: record.gateEntry,
+        plannerBundleDigest: record.plannerBundleDigest,
+        bundleDigest,
+        remainderDigestRewritten: rewrite.rewritten,
+        changedPaths: record.changedPaths,
+        changedCheckCount:
+          summary.checks.added.length +
+          summary.checks.removed.length +
+          summary.checks.changed.length,
+        acceptedAdrChangeCount: summary.acceptedAdrsChanged.length,
+        decidedBy
+      });
+      return state;
+    } finally {
+      await lock.release();
+    }
+  }
+
+  /**
+   * Re-checks of the current gate entry, oldest first. A later entry never
+   * shows or links an earlier entry's re-check.
+   */
+  private async currentPlanRechecks(
+    state: RunState
+  ): Promise<PlanRecheckRecord[]> {
+    if (state.schemaVersion !== 11 || state.status !== "needs_plan_approval")
+      return [];
+    const entry = await this.store.latestPlanGateEntry(state.runId);
+    return (state.humanDecisions ?? []).filter(
+      (record): record is PlanRecheckRecord =>
+        record.kind === "plan_recheck" && record.gateEntry === entry
+    );
+  }
+
+  /**
+   * Retains the planner's version each time a strict task-verification run
+   * enters the plan gate (ADR-0058 §1).
+   */
+  private async retainPlanGateEntry(state: RunState): Promise<void> {
+    if (
+      state.status !== "needs_plan_approval" ||
+      state.verificationMode !== "task" ||
+      state.schemaVersion < 10
+    )
+      return;
+    const bundle = await digestArtifactBundle(
+      this.repoRoot,
+      artifactPaths(state)
+    );
+    await this.store.writePlanGateSnapshot(
+      state.runId,
+      bundle.digest,
+      await gateEntryEntries(this.repoRoot, bundle.entries),
+      this.now()
+    );
   }
 
   async decideAdr(input: {
@@ -3564,7 +3768,7 @@ export class WorkflowRunner {
             "INVALID_STATE",
             "ADR decision requires an idle gate."
           );
-        if (input.decision === "rework" && state.schemaVersion === 10)
+        if (input.decision === "rework" && state.schemaVersion >= 10)
           state.humanDecisions = [
             ...(state.humanDecisions ?? []),
             {
@@ -5030,11 +5234,13 @@ export class WorkflowRunner {
         };
       }
     }
+    const planRecheck = (await this.currentPlanRechecks(state)).at(-1) ?? null;
     return {
       state,
       ...(state.planningReview === undefined
         ? {}
         : { planningReview: this.planningReviewStatus(state) }),
+      ...(planRecheck === null ? {} : { planRecheck }),
       planApprovalValid,
       reviewValid,
       latestReview,
@@ -5063,7 +5269,12 @@ export class WorkflowRunner {
       decisions:
         gate === null
           ? []
-          : planningGateActions(gate, state.schemaVersion, paths.length > 0),
+          : planningGateActions(
+              gate,
+              state.schemaVersion,
+              paths.length > 0,
+              state.verificationMode === "task"
+            ),
       reviewPaths: paths,
       active:
         e == null
@@ -8082,6 +8293,7 @@ export class WorkflowRunner {
       } else {
         artifactPaths(state);
         transitionState(state, "needs_plan_approval");
+        await this.retainPlanGateEntry(state);
       }
     } else {
       state.sessions.implementer = sessionBinding(sessionId, {

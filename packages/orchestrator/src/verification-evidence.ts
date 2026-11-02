@@ -42,6 +42,8 @@ export {
   parseTaskVerificationDescriptor,
   parseTaskVerificationCandidates,
   parseTaskVerificationObligations,
+  readTaskVerificationObligations,
+  rewritePlanRemainderDigest,
   parseTaskVerificationPolicy,
   selectTaskVerification,
   taskVerificationPath,

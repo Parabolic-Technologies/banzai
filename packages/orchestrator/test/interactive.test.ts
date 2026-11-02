@@ -35,6 +35,7 @@ import {
   CONTRACT_VERSION,
   type ModelSettings,
   type OrchestratorConfig,
+  type PlanRecheckRecord,
   type ReviewResult,
   type RunState
 } from "../src/types.js";
@@ -349,6 +350,13 @@ class FakeRunner implements InteractiveRunner {
   async approvePlan(approvedBy: string): Promise<RunState> {
     this.calls.push({ operation: "approvePlan", value: approvedBy });
     return runState("done");
+  }
+
+  recheckError: Error | null = null;
+  async recheckPlan(value: { decidedBy: string }): Promise<RunState> {
+    this.calls.push({ operation: "recheckPlan", value });
+    if (this.recheckError !== null) throw this.recheckError;
+    return runState("needs_plan_approval");
   }
 
   async decideAdr(value: {
@@ -3232,6 +3240,137 @@ test("v10 plan menu offers rework and review in exact order with default-No feed
   assert.equal(io.confirmationDefaults[0], false);
   assert.equal(runner.calls[0]?.operation, "reworkPlan");
 });
+test("a task plan gate says the run waits and re-checks without confirmation, showing a refusal and the gate again", async () => {
+  const paths = [
+    "documentation/work/example/description.md",
+    "documentation/work/example/plan.md"
+  ];
+  const gate = (planRecheck?: PlanRecheckRecord) => {
+    const status = workflowStatus(
+      runState("needs_plan_approval", { schemaVersion: 11 })
+    );
+    status.planningReview = {
+      decisions: ["approve", "recheck", "rework", "review"],
+      reviewPaths: paths,
+      active: null,
+      latest: null
+    };
+    if (planRecheck !== undefined) status.planRecheck = planRecheck;
+    return status;
+  };
+  const record: PlanRecheckRecord = {
+    kind: "plan_recheck",
+    recheckId: "plan-recheck-0123456789ab",
+    gateEntry: 1,
+    plannerBundleDigest: "a".repeat(64),
+    plannerRemainderSha256: "b".repeat(64),
+    observedRemainderSha256: "c".repeat(64),
+    writtenRemainderSha256: "c".repeat(64),
+    bundleDigest: "d".repeat(64),
+    changedPaths: [paths[1] ?? ""],
+    summary: {
+      plannerVersion: true,
+      files: [
+        {
+          path: paths[1] ?? "",
+          change: "changed",
+          sections: {
+            changed: ["## Implementation Tasks"],
+            added: [],
+            removed: [],
+            omitted: 0
+          }
+        }
+      ],
+      omittedFiles: 0,
+      checks: {
+        current: ["unit-tests"],
+        added: [],
+        removed: [],
+        changed: [{ id: "unit-tests", fields: ["argv"] }],
+        absenceReasonChanged: false,
+        omitted: 0
+      },
+      remainderDigestRewritten: true,
+      acceptedAdrsChanged: []
+    },
+    decidedBy: "owner",
+    decidedAt: "2026-10-31T00:00:00.000Z"
+  };
+  class RecheckRunner extends FakeRunner {
+    refusals = 1;
+    override async recheckPlan(value: {
+      decidedBy: string;
+    }): Promise<RunState> {
+      this.calls.push({ operation: "recheckPlan", value });
+      if (this.refusals-- > 0)
+        throw new BanzaiError(
+          "PLAN_RECHECK_REFUSED",
+          "Re-check refused: documentation/work/example/plan.md: Malformed task verification inventory. Nothing was written; the run is still waiting at the plan gate."
+        );
+      return runState("needs_plan_approval", { schemaVersion: 11 });
+    }
+  }
+  const runner = new RecheckRunner([gate(), gate(), gate(record)]);
+  const io = new FakeIO(["recheck_plan", "recheck_plan", "exit"]);
+  await runInteractive(runner, io, { decidedBy: "owner" });
+  assert.deepEqual(io.choiceNames[0], [
+    "Approve plan and continue",
+    "Re-check my edits",
+    "Request rework",
+    "Request independent review",
+    "Cancel run",
+    "Exit and decide later"
+  ]);
+  assert.deepEqual(io.confirmationMessages, []);
+  assert.deepEqual(runner.calls, [
+    { operation: "recheckPlan", value: { decidedBy: "owner" } },
+    { operation: "recheckPlan", value: { decidedBy: "owner" } }
+  ]);
+  const waiting = io.lines.indexOf(
+    "The run is waiting. Edit these files in any editor, then choose Re-check my edits. Exit and decide later keeps the run."
+  );
+  assert.notEqual(waiting, -1, io.lines.join("\n"));
+  assert.deepEqual(io.lines.slice(waiting + 1, waiting + 3), [
+    `  ${paths[0]}`,
+    `  ${paths[1]}`
+  ]);
+  assert.ok(
+    io.lines.includes(
+      "Re-check refused: documentation/work/example/plan.md: Malformed task verification inventory. Nothing was written; the run is still waiting at the plan gate."
+    )
+  );
+  const summary = io.lines.indexOf("Re-check of your edits:");
+  assert.notEqual(summary, -1, io.lines.join("\n"));
+  assert.deepEqual(io.lines.slice(summary, summary + 5), [
+    "Re-check of your edits:",
+    "  The plan's remainder digest was updated to match your edits.",
+    "  Changed: documentation/work/example/plan.md",
+    "    Changed sections: ## Implementation Tasks",
+    "  Check unit-tests changed: argv"
+  ]);
+  assert.equal(io.choiceNames.length, 3);
+});
+
+test("an unexpected re-check error is not shown as a refusal", async () => {
+  const status = workflowStatus(
+    runState("needs_plan_approval", { schemaVersion: 11 })
+  );
+  status.planningReview = {
+    decisions: ["approve", "recheck", "rework"],
+    reviewPaths: ["documentation/work/example/plan.md"],
+    active: null,
+    latest: null
+  };
+  const runner = new FakeRunner([status]);
+  runner.recheckError = new BanzaiError("INVALID_STATE", "Lock lost.");
+  const io = new FakeIO(["recheck_plan"]);
+  await assert.rejects(
+    runInteractive(runner, io, { decidedBy: "owner" }),
+    /Lock lost/u
+  );
+});
+
 test("v10 selected review scope and declined confirmation cause no runner mutation", async () => {
   const status = workflowStatus(runState("needs_plan_approval"));
   status.planningReview = {
