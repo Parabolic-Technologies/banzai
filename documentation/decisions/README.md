@@ -14,7 +14,7 @@ plugin and orchestrator source.
 | [0005](./0005-traceable-evaluation-aggregation.md)                      | Traceable evaluation aggregation                      | Accepted   | 2026-08-02 | [Private work history](../historical-references.md)                           |
 | [0006](./0006-versioned-verification-profiles.md)                       | Versioned verification profiles                       | Accepted   | 2026-08-04 | [Private work history](../historical-references.md)                                 |
 | [0007](./0007-project-type-verification-readiness.md)                   | Project-type verification readiness                   | Accepted   | 2026-08-04 | [Private work history](../historical-references.md)                                 |
-| [0008](./0008-read-only-doctor-diagnostics.md)                          | Read-only doctor diagnostics                          | Accepted   | 2026-08-04 | [Private work history](../historical-references.md)                                 |
+| [0008](./0008-read-only-doctor-diagnostics.md)                          | Read-only doctor diagnostics                          | Accepted   | 2026-08-04 | [Private work history](../historical-references.md); amended by [0060](./0060-local-model-override.md) |
 | [0009](./0009-supported-node-release-matrix.md)                         | Supported Node release matrix                         | Accepted   | 2026-08-10 | [Private work history](../historical-references.md); committed-output baseline partially superseded by [0056](./0056-ci-built-orchestrator-distribution.md) |
 | [0010](./0010-blocking-and-advisory-release-evidence.md)                | Blocking and advisory release evidence                | Accepted   | 2026-08-10 | [Private work history](../historical-references.md); committed-output evidence partially superseded by [0056](./0056-ci-built-orchestrator-distribution.md) |
 | [0011](./0011-protected-live-vendor-compatibility.md)                   | Protected live vendor compatibility                   | Accepted   | 2026-08-10 | [Private work history](../historical-references.md)                                       |
@@ -66,6 +66,7 @@ plugin and orchestrator source.
 | [0057](./0057-complete-task-verification-rounds.md) | Complete task verification rounds after check failures | Accepted | 2026-10-31 | [Program `release-2-8-2-9-program`](../work/release-2-8-2-9-program/tracker.md), WP2; owner accepted in chat; amends 0045 §5; implemented |
 | [0058](./0058-human-plan-edits-rechecked-at-the-plan-gate.md) | Human plan edits re-checked at the plan gate | Accepted | 2026-10-31 | [Program `release-2-8-2-9-program`](../work/release-2-8-2-9-program/tracker.md), WP4; owner accepted in chat; amends 0051 and 0055; implemented |
 | [0059](./0059-claude-default-reviewer-and-reviewer-isolation.md) | Claude default reviewer and reviewer isolation | Accepted | 2026-10-31 | [Program `release-2-8-2-9-program`](../work/release-2-8-2-9-program/tracker.md), WP7; owner accepted in chat; amends 0042 §7, 0037 and 0002; implementation Planned |
+| [0060](./0060-local-model-override.md) | Local model override | Accepted | 2026-11-04 | [Program `release-2-8-2-9-program`](../work/release-2-8-2-9-program/tracker.md), WP6; owner accepted in chat; amends 0008; implementation Planned |
 
 ## File Names
 

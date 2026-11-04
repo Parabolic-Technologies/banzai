@@ -225,6 +225,13 @@ Implementation and review must confirm:
 
 ## Lifecycle Links
 
+- Amended by [ADR-0060](./0060-local-model-override.md), accepted 2026-11-04:
+  doctor v6 adds the `config.local` check, the top-level `models` field, the
+  bounded per-role model disclosure and two read-only Git queries for
+  `config.local`. Preserve offline/read-only behavior, the other privacy rules
+  and historical diagnostic meanings. Implementation of this amendment is
+  Planned.
+
 - Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted
   2026-09-14: doctor v4, per-role parity and cause-specific remedies. Preserve
   offline/read-only behavior and historical diagnostic meanings.

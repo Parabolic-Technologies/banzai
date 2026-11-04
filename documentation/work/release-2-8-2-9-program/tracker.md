@@ -1,6 +1,6 @@
 # banzai 2.8–2.9 program tracker
 
-Status: active · Stage 1 in progress · Updated 2026-11-02
+Status: active · Stage 1 in progress · Updated 2026-11-04
 
 This file is the only living record of the program. The plan itself is the
 frozen [brief.md](brief.md); never edit it. Record anything that departs from
@@ -46,8 +46,8 @@ Status values: `not started` · `ADR draft` · `ADR proposed` · `ADR accepted` 
 | WP2 | Run every required check in one pass           | —               | 0057 Accepted; amends 0045 (pinned)          | `wp02-full-verification-pass`          | committed    | da624a4 | Full rounds, one retry; helper v4 published by WP4 |
 | WP3 | Verification commands at the plan gate         | —               | none; cite 0049 for instruction change       | `wp03-plan-gate-verification-commands` | committed    | 44f3d03 | Plan gate lists checks; see report deviations      |
 | WP4 | Re-check human edits at the plan gate          | —               | 0058 Accepted; amends 0051 and 0055 (pinned) | `wp04-plan-gate-edit-recheck`          | committed    | 04abf55 | Control 9.0.0 with recheck and helper v4           |
-| WP5 | Install guide, plugin scope, doctor hint       | —               | none; stay within 0008                       | `wp05-install-guide-plugin-scope`      | report ready |         | Doctor JSON contract version bump                  |
-| WP6 | Local model override                           | —               | check eligibility; short ADR likely          | `wp06-local-model-override`            | not started  |         | Do before WP7                                      |
+| WP5 | Install guide, plugin scope, doctor hint       | —               | none; stay within 0008                       | `wp05-install-guide-plugin-scope`      | committed    | 5c89c1c | Doctor JSON contract version bump                  |
+| WP6 | Local model override                           | —               | 0060 Accepted; amends 0008                   | `wp06-local-model-override`            | ADR accepted |         | Plan awaits approval; do before WP7                |
 | WP7 | Claude as the default reviewer, with isolation | WP6 recommended | 0059 Accepted; amends 0042 §7, 0037, 0002    | `wp07-claude-default-reviewer`         | ADR accepted |         | live scenario needs go-ahead                       |
 | WP8 | Stable Claude phases                           | —               | check 0020                                   | `wp08-stable-claude-phases`            | not started  |         | Live scenario needs go-ahead                       |
 
@@ -72,14 +72,15 @@ Report: `gate-1-report.md` (not written).
 
 Starts only after the owner closes Gate 1.
 
-| WP   | Package                                                  | Depends on    | ADR                                                         | Work directory                         | Status      | Commit | Notes                        |
-| ---- | -------------------------------------------------------- | ------------- | ----------------------------------------------------------- | -------------------------------------- | ----------- | ------ | ---------------------------- |
-| WP9  | Correct a verification command without re-implementation | WP1, WP3      | new, amends 0049 §1, §2, §4 (pinned); affects 0047 (pinned) | `wp09-verification-command-correction` | not started |        | Control protocol revision    |
-| WP10 | Baseline check run before implementation                 | WP1, WP3, WP9 | new                                                         | `wp10-baseline-check-run`              | not started |        | Control protocol revision    |
-| WP11 | Workflow choice: explanation and override                | —             | new, amends 0001                                            | `wp11-workflow-choice-override`        | not started |        | Template text changes        |
-| WP12 | Slim AGENTS.md template, small-project mode              | —             | new, amends 0036 and 0040                                   | `wp12-slim-agents-template`            | not started |        | Release layout check changes |
-| WP13 | Subscription limits without manual retry                 | WP8           | check 0021                                                  | `wp13-subscription-limit-retry`        | not started |        | Live scenario needs go-ahead |
-| WP14 | Permission denials as a remediation list                 | WP8           | none expected                                               | `wp14-permission-denial-list`          | not started |        | Live scenario needs go-ahead |
+| WP   | Package                                                  | Depends on    | ADR                                                         | Work directory                         | Status      | Commit | Notes                                     |
+| ---- | -------------------------------------------------------- | ------------- | ----------------------------------------------------------- | -------------------------------------- | ----------- | ------ | ----------------------------------------- |
+| WP9  | Correct a verification command without re-implementation | WP1, WP3      | new, amends 0049 §1, §2, §4 (pinned); affects 0047 (pinned) | `wp09-verification-command-correction` | not started |        | Control protocol revision                 |
+| WP10 | Baseline check run before implementation                 | WP1, WP3, WP9 | new                                                         | `wp10-baseline-check-run`              | not started |        | Control protocol revision                 |
+| WP11 | Workflow choice: explanation and override                | —             | new, amends 0001                                            | `wp11-workflow-choice-override`        | not started |        | Template text changes                     |
+| WP12 | Slim AGENTS.md template, small-project mode              | —             | new, amends 0036 and 0040                                   | `wp12-slim-agents-template`            | not started |        | Release layout check changes              |
+| WP13 | Subscription limits without manual retry                 | WP8           | check 0021                                                  | `wp13-subscription-limit-retry`        | not started |        | Live scenario needs go-ahead              |
+| WP14 | Permission denials as a remediation list                 | WP8           | none expected                                               | `wp14-permission-denial-list`          | not started |        | Live scenario needs go-ahead              |
+| WP19 | Initiative skill with brief and tracker                  | —             | new, extends 0054 (pinned)                                  | `wp19-initiative-skill`                | not started |        | Outside the brief; template overlaps WP12 |
 
 ### Gate 2
 
@@ -93,6 +94,9 @@ Report: `gate-2-report.md` (not written).
 - [ ] One real project run by the owner confirms the WP9 route.
 - [ ] `npm run verify` is green, and WP13 and WP14 pass the owner-authorized
       live probe.
+- [ ] A new initiative started through the WP19 skill keeps its brief,
+      tracker and gate reports in `documentation/initiatives/<slug>/`, while
+      its packages stay in `documentation/work/<slug>/`.
 
 ## Stage 3: measure
 
@@ -115,9 +119,10 @@ context accounting.
 | 0057 | WP2 | Complete task verification rounds after check failures | Accepted, 2026-10-31 |
 | 0058 | WP4 | Human plan edits re-checked at the plan gate           | Accepted, 2026-10-31 |
 | 0059 | WP7 | Claude default reviewer and reviewer isolation         | Accepted, 2026-10-31 |
+| 0060 | WP6 | Local model override                                   | Accepted, 2026-11-04 |
 
-IDs checked free on 2026-10-31 in `dev`, `main`, `v3.0.0-branch` and every
-local worktree.
+IDs checked free on 2026-10-31 (0057–0059) and 2026-11-03 (0060) in `dev`,
+`main`, `v3.0.0-branch` and every local worktree.
 
 ## Shared fixtures
 
@@ -158,6 +163,25 @@ local worktree.
   `04abf55`. Doctor v6 opens in WP5 and stays open until Gate 1: WP6 extends
   it without another bump. The `paths:` investigation includes one live
   scratch-repository probe.
+- 2026-11-03: this program's brief-and-tracker method becomes a Banzai
+  feature, added to Stage 2 as WP19 with `As a Stage 2 WP`. Initiative
+  documents live in `documentation/initiatives/<slug>/` (chosen with
+  `documentation/initiatives`); packages stay flat in
+  `documentation/work/<slug>/`, and this program keeps its current path. A
+  nested `work/<initiative>/<wp>/` layout was declined. Proposal: an
+  `initiative` skill invoked by name; its design is settled in the WP19 ADR and
+  requirements.
+- 2026-11-03: WP5 committed as `5c89c1c`. ADR-0060 (local model override) is
+  proposed after three adversarial review rounds and awaits owner acceptance
+  with four owner choices (§9). WP6 requirements and plan wait for that
+  decision.
+- 2026-11-04: ADR-0060 accepted with `Accept, all recommended`: a human
+  `banzai retry` of a blocked run records a new local layer, the whole role
+  triple is the merge unit, "This machine only" is offered first, and the
+  local `executable` is bare `claude` or `codex`. The reciprocal link is on
+  ADR-0008. WP6 requirements and plan are drafted and reviewed; they await
+  plan approval with three owner questions (change sets, live check, agent
+  relay rule).
 
 ## Open questions left to the owner by the brief
 
@@ -187,3 +211,5 @@ under Owner decisions.
   the plan gate decisions, CLI grammar and control surface it adds belong to
   ADR-0055. ADR-0059 also amends ADR-0002 narrowly, whose drivers name
   cross-model review independence. ADR-0057 changes no control contract.
+- Stage 2 (2026-11-03): WP19 is not in the brief; the owner added it. Stage 3
+  keeps WP15–WP18.
