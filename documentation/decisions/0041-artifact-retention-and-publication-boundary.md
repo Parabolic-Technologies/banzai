@@ -477,4 +477,10 @@ synchronization, automatic deletion, new approval authority or incompatible
 frozen evaluation semantics would require a separate decision; this ADR does
 not authorize those through an implementation detail.
 
+- Amended by [ADR-0061](./0061-initiative-skill-and-documents.md), accepted
+  2026-11-05: Markdown under `documentation/initiatives/<slug>/` joins the
+  fixed work-document subtree as a source-tree exemption from per-file
+  classification and is excluded from payloads. Other unclassified
+  documentation still needs classification.
+
 Superseded by: None.

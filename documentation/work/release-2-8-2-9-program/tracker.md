@@ -1,6 +1,6 @@
 # banzai 2.8–2.9 program tracker
 
-Status: active · Stage 1 in progress · Updated 2026-11-04
+Status: active · Stage 1 in progress · Updated 2026-11-05
 
 This file is the only living record of the program. The plan itself is the
 frozen [brief.md](brief.md); never edit it. Record anything that departs from
@@ -40,16 +40,18 @@ Status values: `not started` · `ADR draft` · `ADR proposed` · `ADR accepted` 
 
 ## Stage 1 (2.8): daily friction
 
-| WP  | Package                                        | Depends on      | ADR                                          | Work directory                         | Status       | Commit  | Notes                                              |
-| --- | ---------------------------------------------- | --------------- | -------------------------------------------- | -------------------------------------- | ------------ | ------- | -------------------------------------------------- |
-| WP1 | Verification failure details and retry warning | —               | none                                         | `wp01-verification-failure-details`    | committed    | d03bc19 | phpcs fixture built; see report deviations         |
-| WP2 | Run every required check in one pass           | —               | 0057 Accepted; amends 0045 (pinned)          | `wp02-full-verification-pass`          | committed    | da624a4 | Full rounds, one retry; helper v4 published by WP4 |
-| WP3 | Verification commands at the plan gate         | —               | none; cite 0049 for instruction change       | `wp03-plan-gate-verification-commands` | committed    | 44f3d03 | Plan gate lists checks; see report deviations      |
-| WP4 | Re-check human edits at the plan gate          | —               | 0058 Accepted; amends 0051 and 0055 (pinned) | `wp04-plan-gate-edit-recheck`          | committed    | 04abf55 | Control 9.0.0 with recheck and helper v4           |
-| WP5 | Install guide, plugin scope, doctor hint       | —               | none; stay within 0008                       | `wp05-install-guide-plugin-scope`      | committed    | 5c89c1c | Doctor JSON contract version bump                  |
-| WP6 | Local model override                           | —               | 0060 Accepted; amends 0008                   | `wp06-local-model-override`            | report ready |         | One change set; see report deviations              |
-| WP7 | Claude as the default reviewer, with isolation | WP6 recommended | 0059 Accepted; amends 0042 §7, 0037, 0002    | `wp07-claude-default-reviewer`         | ADR accepted |         | live scenario needs go-ahead                       |
-| WP8 | Stable Claude phases                           | —               | check 0020                                   | `wp08-stable-claude-phases`            | not started  |         | Live scenario needs go-ahead                       |
+| WP   | Package                                        | Depends on      | ADR                                             | Work directory                         | Status       | Commit  | Notes                                              |
+| ---- | ---------------------------------------------- | --------------- | ----------------------------------------------- | -------------------------------------- | ------------ | ------- | -------------------------------------------------- |
+| WP1  | Verification failure details and retry warning | —               | none                                            | `wp01-verification-failure-details`    | committed    | d03bc19 | phpcs fixture built; see report deviations         |
+| WP2  | Run every required check in one pass           | —               | 0057 Accepted; amends 0045 (pinned)             | `wp02-full-verification-pass`          | committed    | da624a4 | Full rounds, one retry; helper v4 published by WP4 |
+| WP3  | Verification commands at the plan gate         | —               | none; cite 0049 for instruction change          | `wp03-plan-gate-verification-commands` | committed    | 44f3d03 | Plan gate lists checks; see report deviations      |
+| WP4  | Re-check human edits at the plan gate          | —               | 0058 Accepted; amends 0051 and 0055 (pinned)    | `wp04-plan-gate-edit-recheck`          | committed    | 04abf55 | Control 9.0.0 with recheck and helper v4           |
+| WP5  | Install guide, plugin scope, doctor hint       | —               | none; stay within 0008                          | `wp05-install-guide-plugin-scope`      | committed    | 5c89c1c | Doctor JSON contract version bump                  |
+| WP6  | Local model override                           | —               | 0060 Accepted; amends 0008                      | `wp06-local-model-override`            | committed    | e26ea54 | One change set; see report deviations              |
+| WP19 | Initiative skill with brief and tracker        | —               | 0061 Accepted; amends 0054 (pinned), 0041, 0036 | `wp19-initiative-skill`                | report ready |         | Outside the brief; template overlaps WP12          |
+| WP20 | Memory notes: no gate prompt, no code unlock   | —               | new; authority for the pinned hook change       | `wp20-spec-gate-memory-notes`          | not started  |         | Pinned hook; template shared with WP19, WP12       |
+| WP7  | Claude as the default reviewer, with isolation | WP6 recommended | 0059 Accepted; amends 0042 §7, 0037, 0002       | `wp07-claude-default-reviewer`         | ADR accepted |         | live scenario needs go-ahead                       |
+| WP8  | Stable Claude phases                           | —               | check 0020                                      | `wp08-stable-claude-phases`            | not started  |         | Live scenario needs go-ahead                       |
 
 ### Gate 1
 
@@ -67,20 +69,25 @@ Report: `gate-1-report.md` (not written).
       on Claude Code 2.1.290 and on the current release.
 - [ ] The release train is set to the 2.8 version with
       `npm run version:set`, and `npm run release:validate` passes.
+- [ ] A new initiative started through the WP19 skill keeps its brief,
+      tracker and gate reports in `documentation/initiatives/<slug>/`, while
+      its packages stay in `documentation/work/<slug>/`.
+- [ ] With the 2.8 plugin installed, the hook lets a manual session write a
+      Claude Code memory note without a prompt or an approval marker, and the
+      next code edit in that session still asks (WP20).
 
 ## Stage 2 (2.9): no lost runs
 
 Starts only after the owner closes Gate 1.
 
-| WP   | Package                                                  | Depends on    | ADR                                                         | Work directory                         | Status      | Commit | Notes                                     |
-| ---- | -------------------------------------------------------- | ------------- | ----------------------------------------------------------- | -------------------------------------- | ----------- | ------ | ----------------------------------------- |
-| WP9  | Correct a verification command without re-implementation | WP1, WP3      | new, amends 0049 §1, §2, §4 (pinned); affects 0047 (pinned) | `wp09-verification-command-correction` | not started |        | Control protocol revision                 |
-| WP10 | Baseline check run before implementation                 | WP1, WP3, WP9 | new                                                         | `wp10-baseline-check-run`              | not started |        | Control protocol revision                 |
-| WP11 | Workflow choice: explanation and override                | —             | new, amends 0001                                            | `wp11-workflow-choice-override`        | not started |        | Template text changes                     |
-| WP12 | Slim AGENTS.md template, small-project mode              | —             | new, amends 0036 and 0040                                   | `wp12-slim-agents-template`            | not started |        | Release layout check changes              |
-| WP13 | Subscription limits without manual retry                 | WP8           | check 0021                                                  | `wp13-subscription-limit-retry`        | not started |        | Live scenario needs go-ahead              |
-| WP14 | Permission denials as a remediation list                 | WP8           | none expected                                               | `wp14-permission-denial-list`          | not started |        | Live scenario needs go-ahead              |
-| WP19 | Initiative skill with brief and tracker                  | —             | new, extends 0054 (pinned)                                  | `wp19-initiative-skill`                | not started |        | Outside the brief; template overlaps WP12 |
+| WP   | Package                                                  | Depends on    | ADR                                                         | Work directory                         | Status      | Commit | Notes                        |
+| ---- | -------------------------------------------------------- | ------------- | ----------------------------------------------------------- | -------------------------------------- | ----------- | ------ | ---------------------------- |
+| WP9  | Correct a verification command without re-implementation | WP1, WP3      | new, amends 0049 §1, §2, §4 (pinned); affects 0047 (pinned) | `wp09-verification-command-correction` | not started |        | Control protocol revision    |
+| WP10 | Baseline check run before implementation                 | WP1, WP3, WP9 | new                                                         | `wp10-baseline-check-run`              | not started |        | Control protocol revision    |
+| WP11 | Workflow choice: explanation and override                | —             | new, amends 0001                                            | `wp11-workflow-choice-override`        | not started |        | Template text changes        |
+| WP12 | Slim AGENTS.md template, small-project mode              | —             | new, amends 0036 and 0040                                   | `wp12-slim-agents-template`            | not started |        | Release layout check changes |
+| WP13 | Subscription limits without manual retry                 | WP8           | check 0021                                                  | `wp13-subscription-limit-retry`        | not started |        | Live scenario needs go-ahead |
+| WP14 | Permission denials as a remediation list                 | WP8           | none expected                                               | `wp14-permission-denial-list`          | not started |        | Live scenario needs go-ahead |
 
 ### Gate 2
 
@@ -94,9 +101,6 @@ Report: `gate-2-report.md` (not written).
 - [ ] One real project run by the owner confirms the WP9 route.
 - [ ] `npm run verify` is green, and WP13 and WP14 pass the owner-authorized
       live probe.
-- [ ] A new initiative started through the WP19 skill keeps its brief,
-      tracker and gate reports in `documentation/initiatives/<slug>/`, while
-      its packages stay in `documentation/work/<slug>/`.
 
 ## Stage 3: measure
 
@@ -114,15 +118,17 @@ context accounting.
 
 ## ADR reservations
 
-| ID   | WP  | Title                                                  | Status               |
-| ---- | --- | ------------------------------------------------------ | -------------------- |
-| 0057 | WP2 | Complete task verification rounds after check failures | Accepted, 2026-10-31 |
-| 0058 | WP4 | Human plan edits re-checked at the plan gate           | Accepted, 2026-10-31 |
-| 0059 | WP7 | Claude default reviewer and reviewer isolation         | Accepted, 2026-10-31 |
-| 0060 | WP6 | Local model override                                   | Accepted, 2026-11-04 |
+| ID   | WP   | Title                                                  | Status               |
+| ---- | ---- | ------------------------------------------------------ | -------------------- |
+| 0057 | WP2  | Complete task verification rounds after check failures | Accepted, 2026-10-31 |
+| 0058 | WP4  | Human plan edits re-checked at the plan gate           | Accepted, 2026-10-31 |
+| 0059 | WP7  | Claude default reviewer and reviewer isolation         | Accepted, 2026-10-31 |
+| 0060 | WP6  | Local model override                                   | Accepted, 2026-11-04 |
+| 0061 | WP19 | Initiative skill and documents                         | Accepted, 2026-11-05 |
 
-IDs checked free on 2026-10-31 (0057–0059) and 2026-11-03 (0060) in `dev`,
-`main`, `v3.0.0-branch` and every local worktree.
+IDs checked free on 2026-10-31 (0057–0059), 2026-11-03 (0060) and 2026-11-05
+(0061) in `dev`, `main`, `v3.0.0-branch`, every local branch and every local
+worktree.
 
 ## Shared fixtures
 
@@ -194,6 +200,39 @@ IDs checked free on 2026-10-31 (0057–0059) and 2026-11-03 (0060) in `dev`,
   the ADR-0008 amendment are marked implemented. `npm run verify` passes;
   `release:validate` reports only the deferred
   `HOOK_CHANGED_WITHOUT_VERSION_BUMP`.
+- 2026-11-05: WP6 committed as `e26ea54`. WP19 moves from Stage 2 to Stage 1,
+  right after WP6, and is the next package; WP7 and WP8 follow it. WP19 ships
+  with 2.8, and its initiative check moves from Gate 2 to Gate 1.
+- 2026-11-05: ADR-0061 (initiative skill and documents) is proposed after two
+  independent review rounds and awaits owner acceptance with three owner
+  choices (section 8). It narrowly amends ADR-0054 and ADR-0041 and adds an
+  `initiative` row to the ADR-0036 read matrix. WP19 requirements and plan
+  wait for that decision.
+- 2026-11-05: ADR-0061 accepted with `Accept, all recommended`: no
+  runner-delivered instruction changes (`artifact-storage.md` and
+  `feature-status` stay as they are), the brief's SHA-256 in the tracker with
+  the re-freeze stop, and explicit invocation only. Reciprocal links are on
+  ADR-0054 (admitted by an exact allow-list image in
+  `phase-resources-build.mjs`), ADR-0041 and ADR-0036. Before the skill can
+  write to this program's tracker, the owner must record a decision that
+  freezes the current `brief.md`.
+- 2026-11-05: WP19 plan approved with `Both recommended`. Q1 (a): a subagent
+  follows the source skill in disposable repositories, with no live vendor
+  run; the live Gate 1 check covers host loading. Q2 (a): the checkout-local
+  publication hook copy is not changed in WP19. Follow-up: refresh it on the
+  owner's request before the first initiative document is pushed.
+- 2026-11-05: WP20 (Claude Code memory notes: no spec-gate prompt, no code
+  unlock) joins Stage 1 right after WP19, so it ships with 2.8 and has a
+  Gate 1 check. It comes from a quick-fix proposal validated that day: the
+  hook is a pinned instruction resource, so the change needs a new ADR and an
+  instruction-baseline transition. On the owner's instruction the brief
+  gains a WP20 row in "Plan at a glance" and a WP20 section in Stage 1; its
+  header records the addition, and no other brief text changed.
+- 2026-11-05: WP19 implemented as one change set; report ready. ADR-0061 is
+  marked implemented except the checkout-local hook reconciliation, which
+  stays the Q2 follow-up. Commits are denied in this environment, so the
+  scenario left three commit-dependent Acceptance items partial; the live
+  Gate 1 check covers them.
 
 ## Open questions left to the owner by the brief
 
@@ -225,3 +264,6 @@ under Owner decisions.
   cross-model review independence. ADR-0057 changes no control contract.
 - Stage 2 (2026-11-03): WP19 is not in the brief; the owner added it. Stage 3
   keeps WP15–WP18.
+- Stage 1 (2026-11-05): the owner moved WP19 into Stage 1 after WP6, so 2.8
+  ships the initiative skill and Gate 1 checks it. WP12 stays in Stage 2 and
+  builds on the AGENTS.md template line that WP19 adds.

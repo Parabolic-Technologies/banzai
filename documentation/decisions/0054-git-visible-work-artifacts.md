@@ -285,4 +285,9 @@ detection. Report local, installed-client and delivery evidence separately.
   accepted 2026-10-13: the flat work directory also holds runner-rendered
   `planning-review-<N>.md` siblings, recognized by name pattern. Binding v3
   gains no role. Implementation is Planned.
+- Amended by
+  [ADR-0061](./0061-initiative-skill-and-documents.md),
+  accepted 2026-11-05: documents that span several works use a second fixed
+  root, `documentation/initiatives/<slug>/`, which shares the source-tree
+  exemption and the payload exclusion. Work directories stay flat.
 - Superseded by: None.

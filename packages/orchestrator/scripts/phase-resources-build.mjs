@@ -764,6 +764,14 @@ const PLAN_RECHECK_AUTHORITY_AMENDMENTS = new Map([
   ]
 ]);
 
+// Exact ADR-0054 reciprocal lifecycle annotation accepted with ADR-0061.
+const INITIATIVE_AUTHORITY_AMENDMENTS = new Map([
+  [
+    "d5a4c6a47cc90f2e72a03f0b40778ca2c4677b95be0c17f07a08a7ebb470b351",
+    "fa51f1151613050410fe4176e368ead2eeb74151a76cd403838b593ba00e1eac"
+  ]
+]);
+
 const RETAINED_AUTHORITY_AMENDMENTS = [
   {
     decision: "documentation/decisions/0045-guided-verification-setup.md",
@@ -796,6 +804,10 @@ const RETAINED_AUTHORITY_AMENDMENTS = [
     decision:
       "documentation/decisions/0058-human-plan-edits-rechecked-at-the-plan-gate.md",
     images: PLAN_RECHECK_AUTHORITY_AMENDMENTS
+  },
+  {
+    decision: "documentation/decisions/0061-initiative-skill-and-documents.md",
+    images: INITIATIVE_AUTHORITY_AMENDMENTS
   }
 ];
 

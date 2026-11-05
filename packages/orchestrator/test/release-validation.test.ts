@@ -140,6 +140,7 @@ const FIXTURE_PATHS = [
   "documentation/decisions/0058-human-plan-edits-rechecked-at-the-plan-gate.md",
   "documentation/decisions/0059-claude-default-reviewer-and-reviewer-isolation.md",
   "documentation/decisions/0060-local-model-override.md",
+  "documentation/decisions/0061-initiative-skill-and-documents.md",
   "packages/orchestrator/scripts/check-dist.mjs",
   "packages/orchestrator/scripts/release-version.mjs",
   "packages/orchestrator/scripts/smoke-committed.mjs",
@@ -1168,6 +1169,79 @@ for (const [relativePath, fragment] of [
       const result = validate(root);
       assert.equal(result.status, 1);
       assert.match(result.stderr, /^ORCHESTRATE_SKILL_POLICY_DRIFT /);
+    });
+  });
+}
+
+for (const [relativePath, fragment] of [
+  ["plugins/banzai/skills/initiative/SKILL.md", "name: initiative"],
+  [
+    "plugins/banzai/skills/initiative/SKILL.md",
+    "disable-model-invocation: true"
+  ],
+  [
+    "plugins/banzai/skills/initiative/SKILL.md",
+    "only when the user invokes this skill explicitly by name"
+  ],
+  [
+    "plugins/banzai/skills/initiative/SKILL.md",
+    "never select it from prompt wording alone"
+  ],
+  [
+    "plugins/banzai/skills/initiative/SKILL.md",
+    "documentation/initiatives/<slug>/"
+  ],
+  [
+    "plugins/banzai/skills/initiative/SKILL.md",
+    "Initiative documents grant no approval."
+  ],
+  [
+    "plugins/banzai/skills/initiative/SKILL.md",
+    "Never fetch, stage, commit or push."
+  ],
+  [
+    "plugins/banzai/skills/initiative/SKILL.md",
+    "Never invoke `orchestrate` or the `banzai` CLI"
+  ],
+  ["plugins/banzai/skills/initiative/SKILL.md", "`next` writes nothing."],
+  [
+    "plugins/banzai/skills/initiative/SKILL.md",
+    "the only write allowed is a re-freeze"
+  ],
+  [
+    "plugins/banzai/skills/initiative/SKILL.md",
+    "`gate` refuses to overwrite an existing report"
+  ],
+  [
+    "plugins/banzai/skills/initiative/SKILL.md",
+    "Never edit `brief.md` after `start`."
+  ],
+  [
+    "plugins/banzai/skills/initiative/agents/openai.yaml",
+    'display_name: "Banzai Initiative"'
+  ],
+  [
+    "plugins/banzai/skills/initiative/agents/openai.yaml",
+    "allow_implicit_invocation: false"
+  ],
+  ["plugins/banzai/AGENTS.md", "Multi-package initiative -> `initiative`"],
+  ["plugins/banzai/AGENTS.md", "are not decision gates"]
+] as const) {
+  test(`release validation protects the initiative skill in ${relativePath}: ${fragment}`, async () => {
+    await withFixture(async (root) => {
+      const target = path.join(root, relativePath);
+      let contents = replacePolicyFragment(
+        await readFile(target, "utf8"),
+        fragment,
+        "REMOVED"
+      );
+      // The check accepts a fragment anywhere, so remove every occurrence.
+      while (contents.replace(/\s+/g, " ").includes(fragment))
+        contents = replacePolicyFragment(contents, fragment, "REMOVED");
+      await writeFile(target, contents, "utf8");
+      const result = validate(root);
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /^INITIATIVE_SKILL_POLICY_DRIFT /);
     });
   });
 }
@@ -2433,6 +2507,31 @@ for (const scenario of [
     file: "skills/project-manifest/references/layout-migration.md",
     mutate: (text: string) =>
       text.replace("Apply only after approval", "Apply immediately")
+  },
+  {
+    name: "a policy read added to the initiative skill",
+    file: "skills/initiative/SKILL.md",
+    mutate: (text: string) =>
+      text.replace(
+        "## Sources\n",
+        "## Sources\n\n- Policies, resolved as `../../policies/<name>.md`:\n  - `engineering-quality.md` before any mode.\n"
+      )
+  },
+  {
+    name: "a missing legacy stop in the initiative skill",
+    file: "skills/initiative/SKILL.md",
+    mutate: (text: string) =>
+      replacePolicyFragment(
+        text,
+        "legacy Banzai layout: run `project-manifest` to migrate",
+        "legacy layout"
+      )
+  },
+  {
+    name: "a writing skill without its policy resolution line",
+    file: "skills/feature-description/SKILL.md",
+    mutate: (text: string) =>
+      text.replace("../../policies/<name>.md", "the installed policies")
   }
 ]) {
   test(`instruction layout rejects ${scenario.name}`, async () => {
@@ -3076,6 +3175,41 @@ test("ADR-0057 and ADR-0058 admit only their exact accepted lifecycle annotation
       await writeFile(amendment, accepted);
       await validateGuidanceExtraction(root);
     }
+  });
+});
+
+test("ADR-0061 admits only its exact accepted ADR-0054 lifecycle annotation", async () => {
+  await withFixture(async (root) => {
+    await validateGuidanceExtraction(root);
+    const authority = path.join(
+      root,
+      "documentation/decisions/0054-git-visible-work-artifacts.md"
+    );
+    const original = await readFile(authority, "utf8");
+    for (const changed of [
+      original.replace(
+        "Work directories stay flat.",
+        "Other behaviour remains."
+      ),
+      original + "\nUnaccepted decision body.\n"
+    ]) {
+      assert.notEqual(changed, original);
+      await writeFile(authority, changed);
+      await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    }
+    await writeFile(authority, original);
+    const amendment = path.join(
+      root,
+      "documentation/decisions/0061-initiative-skill-and-documents.md"
+    );
+    const accepted = await readFile(amendment, "utf8");
+    await writeFile(
+      amendment,
+      accepted.replace("- Status: Accepted", "- Status: Proposed")
+    );
+    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    await writeFile(amendment, accepted);
+    await validateGuidanceExtraction(root);
   });
 });
 

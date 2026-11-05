@@ -15,6 +15,9 @@ const privatePath =
   /(?:^|\/)\.banzai\/(?:work|runs|preparation|verification|execution-locks)(?:\/|$)|(?:^|\/)\.banzai\/archive-manifest\.json$|(?:^|\/)(?:\.banzai-version-set|\.banzai-archive-[^/]+|\.banzai-restore-[^/]+)(?:\/|$)/u;
 const secretPath =
   /(?:^|\/)(?:\.ssh|\.aws|\.gnupg|auth\.json|credentials(?:\.json)?|\.env(?:\.[^/]+)?)(?:\/|$)|\.(?:pem|key|p12|pfx)$/iu;
+// ADR-0061: one level of initiative Markdown, beside the flat work root.
+const initiativeDocument =
+  /^documentation\/initiatives\/[a-z0-9]+(?:-[a-z0-9]+)*\/[^/]+\.md$/u;
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 function fail(code, resource, message) {
   throw new Error(`${code} ${resource}: ${message}`);
@@ -158,7 +161,11 @@ function scanContents(name, bytes) {
       name,
       "Private-key content requires owner handling."
     );
-  if (name.endsWith(".json") || /^documentation\/work\//u.test(name)) {
+  if (
+    name.endsWith(".json") ||
+    /^documentation\/work\//u.test(name) ||
+    initiativeDocument.test(name)
+  ) {
     const candidates = [
       text,
       ...[
@@ -210,7 +217,7 @@ function scanContents(name, bytes) {
       if (
         typeof source !== "string" ||
         privatePath.test(source) ||
-        /(?:^|\/)documentation\/(?:work|features|development-plans|changes)\//u.test(
+        /(?:^|\/)documentation\/(?:work|initiatives|features|development-plans|changes)\//u.test(
           source
         ) ||
         secretPath.test(source)
@@ -242,7 +249,8 @@ export function inspectPublicationFiles(
     let name = original;
     if (
       distribution !== "source" &&
-      /(?:^|\/)documentation\/work\/(?!\.gitkeep$)/u.test(name)
+      (/(?:^|\/)documentation\/work\/(?!\.gitkeep$)/u.test(name) ||
+        /(?:^|\/)documentation\/initiatives\//u.test(name))
     )
       fail(
         "PUBLICATION_PACKAGE_INVALID",
@@ -310,7 +318,8 @@ export function inspectPublicationFiles(
       !entry &&
       !(
         distribution === "source" &&
-        /^documentation\/work\/[a-z0-9]+(?:-[a-z0-9]+)*\//u.test(name)
+        (/^documentation\/work\/[a-z0-9]+(?:-[a-z0-9]+)*\//u.test(name) ||
+          initiativeDocument.test(name))
       )
     )
       fail(

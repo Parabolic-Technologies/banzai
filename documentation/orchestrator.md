@@ -735,7 +735,7 @@ model artifact writes; the runner alone renders review artifacts. Existing
 implementation/fix grants, report triggers, completion evidence and human gates
 remain unchanged. Required bytes count against existing context budgets.
 
-Structural plugin verification still requires all eleven skills and the two
+Structural plugin verification still requires all eleven workflow skills and the two
 hook events/script. Separately, preflight compares the applicable route union
 and each call rechecks its actual phase against the supplied verified directory.
 Matching raw identities are verified; a readable mismatch refuses the call with

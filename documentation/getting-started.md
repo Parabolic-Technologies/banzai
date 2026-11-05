@@ -502,6 +502,38 @@ After approval, run
 Review the findings and explicitly select any fixes. Each linked skill
 describes its inputs, outputs, and approval boundaries.
 
+### Multi-package initiatives
+
+Use [initiative](../plugins/banzai/skills/initiative/SKILL.md) when one plan
+spans several work packages, stages and owner gates. It keeps a frozen brief
+and a living tracker in `documentation/initiatives/<slug>/`. Every package
+still runs through its own workflow in its own `documentation/work/<slug>/`
+directory.
+
+The skill runs only when you invoke it by name:
+
+| Client      | Start                             | Next package              |
+| ----------- | --------------------------------- | ------------------------- |
+| Codex       | `$banzai:initiative start <slug>` | `$banzai:initiative next` |
+| Claude Code | `/banzai:initiative start <slug>` | `/banzai:initiative next` |
+
+1. **Start.** Give the brief in chat or name its file. `start` copies it as
+   approved, records its SHA-256 in the tracker and writes nothing else.
+2. **Next.** `next` reads the tracker, reports drift and hands off one
+   package with its recommended route. It writes nothing.
+3. **Work the package** with `feature`, `quick-fix`, the strict skills or an
+   orchestrated run, then commit it yourself.
+4. **Record.** `record` updates the package row, an owner decision, a
+   deviation, a question or an ADR reservation, one entry at a time.
+5. **Gate.** After a stage's last package, `gate <N>` writes
+   `gate-<N>-report.md` from existing evidence. Record your decision with
+   `record` before the next stage starts.
+
+The skill never edits the brief after `start`, never stages, commits, pushes
+or fetches, runs no project command, and never invokes `orchestrate` or the
+`banzai` CLI. Stage gates are not decision gates, and the documents grant no
+approval.
+
 <a id="incomplete-guidance-during-an-existing-run"></a>
 <a id="rework-and-independent-planning-review"></a>
 

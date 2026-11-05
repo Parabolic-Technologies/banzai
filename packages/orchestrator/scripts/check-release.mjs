@@ -1916,7 +1916,8 @@ async function validateInstructionLayout(root) {
     "feature",
     "quick-fix",
     "project-manifest",
-    "orchestrate"
+    "orchestrate",
+    "initiative"
   ];
   const policyNames = Object.keys(POLICY_READ_MATRIX);
   const requiredPaths = (await readJson(root, "release-policy.json")).plugin
@@ -2061,8 +2062,11 @@ async function validateInstructionLayout(root) {
         fail(code, relativePath, "Sources names an extra or missing policy");
       if (!flatText(contents).includes(diagnostic))
         fail(code, relativePath, "missing legacy diagnostic");
+      // ADR-0061: `initiative` has an empty policy row, so it resolves no
+      // policy file while keeping the process source and the legacy stop.
       if (
-        !sources.includes("../../policies/<name>.md") ||
+        sources.includes("../../policies/<name>.md") !==
+          (skill !== "initiative") ||
         !sources.includes("the project root `AGENTS.md`") ||
         !sources.includes("unreadable")
       )
@@ -2971,6 +2975,55 @@ async function validateOrchestrateSkill(root) {
   }
 }
 
+// ADR-0061: the initiative skill is entered only by explicit invocation and
+// keeps its authority limits; the template routes to it by name.
+async function validateInitiativeSkill(root) {
+  const requiredFragments = new Map([
+    [
+      "plugins/banzai/skills/initiative/SKILL.md",
+      [
+        "name: initiative",
+        "user-invocable: true",
+        "disable-model-invocation: true",
+        "only when the user invokes this skill explicitly by name",
+        "never select it from prompt wording alone",
+        "documentation/initiatives/<slug>/",
+        "Initiative documents grant no approval.",
+        "Never fetch, stage, commit or push.",
+        "Never invoke `orchestrate` or the `banzai` CLI",
+        "`next` writes nothing.",
+        "the only write allowed is a re-freeze",
+        "`gate` refuses to overwrite an existing report",
+        "Never edit `brief.md` after `start`."
+      ]
+    ],
+    [
+      "plugins/banzai/skills/initiative/agents/openai.yaml",
+      [
+        'display_name: "Banzai Initiative"',
+        'default_prompt: "Use $banzai:initiative',
+        "allow_implicit_invocation: false"
+      ]
+    ],
+    [
+      "plugins/banzai/AGENTS.md",
+      ["Multi-package initiative -> `initiative`", "are not decision gates"]
+    ]
+  ]);
+  for (const [relativePath, fragments] of requiredFragments) {
+    const contents = flatText(await readText(root, relativePath));
+    for (const fragment of fragments) {
+      if (!contents.includes(fragment)) {
+        fail(
+          "INITIATIVE_SKILL_POLICY_DRIFT",
+          relativePath,
+          `missing required policy fragment: ${fragment}`
+        );
+      }
+    }
+  }
+}
+
 async function validateRepository(root) {
   const policy = validatePolicyShape(
     await readJson(root, "release-policy.json")
@@ -3059,6 +3112,7 @@ async function validateRepository(root) {
   await validateEngineeringQualityPolicy(root);
   await validateDecisionConsultationPolicy(root);
   await validateOrchestrateSkill(root);
+  await validateInitiativeSkill(root);
   try {
     await validateGuidanceExtraction(root);
   } catch {

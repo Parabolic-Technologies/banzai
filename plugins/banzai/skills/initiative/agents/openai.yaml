@@ -1,0 +1,6 @@
+interface:
+  display_name: "Banzai Initiative"
+  short_description: "Track a multi-package initiative by explicit invocation"
+  default_prompt: "Use $banzai:initiative to show the next package of this initiative."
+policy:
+  allow_implicit_invocation: false

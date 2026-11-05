@@ -164,6 +164,8 @@ Each skill guides its checks, reports, and required human decisions in chat.
 The orchestrator adds model coordination and runner-owned verification.
 For standalone requirements, architecture decisions, and the strict sequence,
 see [strict work with standalone skills](documentation/getting-started.md#strict-work-with-standalone-skills).
+For a plan that spans several packages and stages, invoke `initiative` by name; see
+[multi-package initiatives](documentation/getting-started.md#multi-package-initiatives).
 
 <a id="reference"></a>
 

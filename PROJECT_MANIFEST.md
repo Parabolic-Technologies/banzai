@@ -148,14 +148,19 @@ projects. Detailed module behavior belongs in the
   `documentation/work/<slug>/` directory. Existing private documents keep
   their known paths. No layout declaration, registration or authoring claim
   is required; see [Work Documents](documentation/artifact-storage.md).
+- Documents that span several works live in
+  `documentation/initiatives/<slug>/`: a frozen `brief.md`, a living
+  `tracker.md` and `gate-<N>-report.md` files, kept by the explicitly invoked
+  `initiative` skill (ADR-0061). Their packages stay in flat work directories.
 - `.banzai/` holds ignored local configuration, historical work, runner
   records, verification evidence and execution locks. The legacy
   `documentation/features/`, `documentation/development-plans/` and
   `documentation/changes/` trees remain ignored. Local settings and credentials
   are excluded by [.gitignore](.gitignore).
 - [publication-policy.json](publication-policy.json) selects `clean` mode.
-  Source work documents are eligible for Git review and excluded from
-  plugin/npm payloads; private execution evidence is excluded from public
+  Source work and initiative documents are eligible for Git review, receive
+  the same private-content scan and are excluded from plugin/npm payloads and
+  source maps; private execution evidence is excluded from public
   source and distributions. See the
   [Publication Boundary](documentation/publication-boundary.md).
 - `assets/logo/` owns coordinated SVG and PNG brand assets.
@@ -275,9 +280,9 @@ behavior and edge cases; source and tests own the executable evidence.
 
 Plugin and release owners:
 
-- `plugins/banzai/skills/` — eleven standalone skills;
-  `project-manifest` and `orchestrate` require explicit invocation in both
-  clients. Other skills restrict automatic selection to adopted repositories
+- `plugins/banzai/skills/` — twelve standalone skills;
+  `project-manifest`, `orchestrate` and `initiative` require explicit
+  invocation in both clients. Other skills restrict automatic selection to adopted repositories
   or explicit Banzai/skill requests.
 - `plugins/banzai/AGENTS.md`, `CLAUDE.md` and bootstrap templates — installed
   process, including the five existing decision gates; project-specific merges
@@ -576,3 +581,4 @@ delivery or installation.
 | ADR-0058 | Human plan edits re-checked at the plan gate                       | [Source](documentation/decisions/0058-human-plan-edits-rechecked-at-the-plan-gate.md)            | Implemented |
 | ADR-0059 | Claude default reviewer and reviewer isolation                     | [Source](documentation/decisions/0059-claude-default-reviewer-and-reviewer-isolation.md)         | Planned     |
 | ADR-0060 | Local model override                                               | [Source](documentation/decisions/0060-local-model-override.md)                                   | Implemented |
+| ADR-0061 | Initiative skill and documents                                     | [Source](documentation/decisions/0061-initiative-skill-and-documents.md)                         | Implemented |

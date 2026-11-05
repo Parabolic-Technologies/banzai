@@ -439,6 +439,11 @@
       "sha256": null
     },
     {
+      "path": "documentation/decisions/0061-initiative-skill-and-documents.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
       "path": "documentation/decisions/README.md",
       "classification": "maintainer",
       "sha256": null
@@ -1200,6 +1205,26 @@
     },
     {
       "path": "plugins/banzai/skills/feature/SKILL.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/skills/initiative/SKILL.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/skills/initiative/agents/openai.yaml",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/skills/initiative/references/brief-template.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/skills/initiative/references/tracker-template.md",
       "classification": "product",
       "sha256": null
     },

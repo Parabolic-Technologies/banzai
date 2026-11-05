@@ -114,6 +114,10 @@ invoke no nested CLI process and write nothing.
   `disable-model-invocation: true`: it runs only when the user invokes it by
   name (`/` or `$`). When the manifest is missing or stale, say so and ask the
   user to run it; do not scaffold its files another way instead.
+- Multi-package initiative -> `initiative`, outside runner phases. It carries
+  `disable-model-invocation: true` and runs only when the user invokes it by
+  name; when it looks appropriate, say so and ask the user to run it. Its
+  stage gates fall between packages and are not decision gates.
 - Status report -> `feature-status`.
 - Artifact-aware audit -> `feature-review`.
 
