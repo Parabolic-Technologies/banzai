@@ -552,3 +552,297 @@ test("setup PTY task entry offers guidance first and keeps initial commit as a s
     await host.dispose();
   }
 });
+
+const LOCAL_MODEL_FILE = ".banzai/config.local.json";
+const RUN_STATE_IGNORES =
+  ".banzai/runs/\n.banzai/active-run.json\n.banzai/runner.lock\n.banzai/config.local.json\n";
+
+async function readOptional(target: string): Promise<string | null> {
+  try {
+    return await readFile(target, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+test("model PTY asks where to save when the shared file is tracked and writes only the chosen file", async () => {
+  const host = await fixture();
+  try {
+    await host.configure();
+    await writeFile(path.join(host.root, ".gitignore"), RUN_STATE_IGNORES);
+    const add = spawnSync("git", ["add", "--", ".banzai/config.json"], {
+      cwd: host.root,
+      encoding: "utf8"
+    });
+    assert.equal(add.status, 0, add.stderr);
+    const files = async () => ({
+      shared: await readFile(
+        path.join(host.root, ".banzai/config.json"),
+        "utf8"
+      ),
+      local: await readOptional(path.join(host.root, LOCAL_MODEL_FILE)),
+      gitignore: await readFile(path.join(host.root, ".gitignore"), "utf8"),
+      exclude: await readOptional(path.join(host.root, ".git/info/exclude"))
+    });
+    const before = await files();
+
+    // A model phase never reaches the picker.
+    const denied = host.run(["model"], [{ wait: "Model phases" }]);
+    assert.notEqual(denied.exitCode, 0, denied.output);
+    assert.match(denied.output, /CONFIGURATION_MODEL_WRITE_DENIED/);
+    assert.doesNotMatch(denied.output, /Where should these model choices/);
+    assert.deepEqual(await files(), before);
+    delete host.env.BANZAI_APPROVAL_DIGEST;
+    delete host.env.BANZAI_WORKFLOW_DIGEST;
+
+    // "This machine only" is the first answer.
+    const local = host.run(
+      ["model"],
+      [
+        { wait: "Where should these model choices be saved?", send: "\r" },
+        { wait: "Planning model", send: "\r" },
+        { wait: "Implementation model", send: "\r" },
+        { wait: "Review model", send: "\u001b[B\u001b[B\r" },
+        { wait: "Review effort", send: "\r" },
+        {
+          wait: "Write these changes to .banzai/config.local.json?",
+          send: "y\r"
+        },
+        { wait: "Updated .banzai/config.local.json for this machine only." }
+      ]
+    );
+    assert.equal(local.exitCode, 0, local.output);
+    assert.ok(
+      local.output.indexOf("This machine only") <
+        local.output.indexOf("Shared with the team"),
+      local.output
+    );
+    assert.match(local.output, /Git ignores it, so there is nothing to commit/);
+    const afterLocal = await files();
+    assert.deepEqual(
+      { ...afterLocal, local: before.local },
+      before,
+      "only the local file changes"
+    );
+    const layer = JSON.parse(afterLocal.local ?? "null") as {
+      schemaVersion: number;
+      models: Record<string, { executable: string; model: string }>;
+    };
+    assert.equal(layer.schemaVersion, 1);
+    assert.deepEqual(Object.keys(layer.models), ["reviewer"]);
+    assert.equal(layer.models.reviewer?.executable, "claude");
+    assert.equal(layer.models.reviewer.model, "claude-fable-5-1");
+
+    // The shared answer writes .banzai/config.json and keeps the local layer.
+    const shared = host.run(
+      ["model"],
+      [
+        {
+          wait: "Where should these model choices be saved?",
+          send: "\u001b[B\r"
+        },
+        { wait: "Planning model", send: "\r" },
+        { wait: "Implementation model", send: "\r" },
+        { wait: "Review model", send: "\u001b[B\u001b[B\r" },
+        { wait: "Review effort", send: "\r" },
+        { wait: "Write these changes to .banzai/config.json?", send: "y\r" },
+        { wait: "Updated .banzai/config.json. Review and commit the change." }
+      ]
+    );
+    assert.equal(shared.exitCode, 0, shared.output);
+    assert.match(
+      shared.output,
+      /This machine keeps using its local Review setting: claude claude-fable-5-1 effort=\S+ \(\.banzai\/config\.local\.json\)\./
+    );
+    const afterShared = await files();
+    assert.equal(afterShared.local, afterLocal.local);
+    assert.equal(afterShared.gitignore, before.gitignore);
+    assert.equal(afterShared.exclude, before.exclude);
+    assert.equal(
+      (
+        JSON.parse(afterShared.shared) as {
+          models: { reviewer: { model: string } };
+        }
+      ).models.reviewer.model,
+      "claude-fable-5-1"
+    );
+    await assert.rejects(readFile(host.capture), /ENOENT/);
+  } finally {
+    await host.dispose();
+  }
+});
+
+test("init PTY never asks where to save and names the kept local setting", async () => {
+  const host = await fixture();
+  delete host.env.BANZAI_APPROVAL_DIGEST;
+  delete host.env.BANZAI_WORKFLOW_DIGEST;
+  try {
+    await host.configure();
+    const localText = `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        models: {
+          reviewer: { executable: "codex", model: "gpt-6-sol", effort: "high" }
+        }
+      },
+      null,
+      2
+    )}\n`;
+    await writeFile(path.join(host.root, LOCAL_MODEL_FILE), localText);
+    const shared = await readFile(
+      path.join(host.root, ".banzai/config.json"),
+      "utf8"
+    );
+    const result = host.run(
+      ["init"],
+      [
+        { wait: "Planning model", send: "\r" },
+        { wait: "Implementation model", send: "\r" },
+        { wait: "Review model", send: "\r" },
+        { wait: "? Project setup", send: "\u001b[B\u001b[B\r" },
+        { wait: "explicitly invoke:", send: "\u001b[B\u001b[B\u001b[B\r" }
+      ]
+    );
+    assert.equal(result.exitCode, 0, result.output);
+    assert.doesNotMatch(result.output, /Where should these model choices/);
+    assert.match(
+      result.output,
+      /This machine uses codex gpt-6-sol effort=high \(local\)\./
+    );
+    assert.match(
+      result.output,
+      /This machine keeps using its local Review setting: codex gpt-6-sol effort=high \(\.banzai\/config\.local\.json\)\./
+    );
+    assert.equal(
+      await readFile(path.join(host.root, LOCAL_MODEL_FILE), "utf8"),
+      localText
+    );
+    assert.equal(
+      await readFile(path.join(host.root, ".banzai/config.json"), "utf8"),
+      shared
+    );
+    // Init's own .gitignore line covers the file, so the exclude file is untouched.
+    assert.match(
+      await readFile(path.join(host.root, ".gitignore"), "utf8"),
+      /^\.banzai\/config\.local\.json$/mu
+    );
+    assert.doesNotMatch(
+      (await readOptional(path.join(host.root, ".git/info/exclude"))) ?? "",
+      /config\.local\.json/
+    );
+  } finally {
+    await host.dispose();
+  }
+});
+
+test("launch PTY refuses a defective or tracked local file before any vendor executable starts", async () => {
+  const host = await fixture();
+  delete host.env.BANZAI_APPROVAL_DIGEST;
+  delete host.env.BANZAI_WORKFLOW_DIGEST;
+  try {
+    await host.configure();
+    await writeFile(path.join(host.root, ".gitignore"), RUN_STATE_IGNORES);
+    const git = (...args: string[]) => {
+      const result = spawnSync(
+        "git",
+        [
+          "-c",
+          "user.name=Banzai Tests",
+          "-c",
+          "user.email=tests@banzai.local",
+          ...args
+        ],
+        { cwd: host.root, encoding: "utf8" }
+      );
+      assert.equal(result.status, 0, result.stderr);
+    };
+    // An adopted project with a commit reaches the launch header.
+    await writeFile(path.join(host.root, "AGENTS.md"), ADOPTED_AGENTS);
+    await writeFile(
+      path.join(host.root, "PROJECT_MANIFEST.md"),
+      POPULATED_MANIFEST
+    );
+    git(
+      "add",
+      "--",
+      ".gitignore",
+      ".banzai/config.json",
+      "AGENTS.md",
+      "PROJECT_MANIFEST.md"
+    );
+    git("commit", "-q", "--no-gpg-sign", "-m", "configure");
+    // Every vendor invocation is logged before it reaches the stub.
+    const logged = path.join(host.base, "logged-bin");
+    const log = path.join(host.base, "vendor-invocations.log");
+    await mkdir(logged);
+    for (const vendor of ["claude", "codex"]) {
+      await writeFile(
+        path.join(logged, vendor),
+        `#!/bin/sh\nprintf '%s\\n' "${vendor} $*" >> ${JSON.stringify(log)}\nexec ${JSON.stringify(path.join(host.base, "bin", vendor))} "$@"\n`
+      );
+      await chmod(path.join(logged, vendor), 0o755);
+    }
+    host.env.PATH = `${logged}${path.delimiter}/usr/bin${path.delimiter}/bin`;
+    const localPath = path.join(host.root, LOCAL_MODEL_FILE);
+
+    await writeFile(localPath, "{");
+    const invalid = host.run([], [{ wait: "LOCAL_CONFIG_INVALID" }]);
+    assert.notEqual(invalid.exitCode, 0, invalid.output);
+    assert.doesNotMatch(invalid.output, /banzai v\d/);
+    assert.equal(await readOptional(log), null);
+
+    const localText = `${JSON.stringify({
+      schemaVersion: 1,
+      models: {
+        reviewer: { executable: "codex", model: "gpt-6-sol", effort: "high" }
+      }
+    })}\n`;
+    await writeFile(localPath, localText);
+    git("add", "-f", "--", LOCAL_MODEL_FILE);
+    const tracked = host.run([], [{ wait: "LOCAL_CONFIG_NOT_IGNORED" }]);
+    assert.notEqual(tracked.exitCode, 0, tracked.output);
+    assert.match(
+      tracked.output,
+      /git rm --cached \.banzai\/config\.local\.json/
+    );
+    assert.equal(await readOptional(log), null);
+    git("rm", "-q", "--cached", "--", LOCAL_MODEL_FILE);
+
+    // Control: an ignored local file launches, marks its role and checks
+    // only the vendors the effective configuration uses.
+    const ready = host.run(
+      [],
+      [{ wait: "(local)" }, { wait: "What next?", send: "\u001b[B\r" }]
+    );
+    assert.equal(ready.exitCode, 0, ready.output);
+    assert.match(ready.output, /review\s+codex\s+\S*gpt-6-sol/);
+    const invocations = (await readOptional(log)) ?? "";
+    assert.match(invocations, /^codex /mu);
+    assert.doesNotMatch(invocations, /^claude /mu);
+    assert.equal(await readFile(localPath, "utf8"), localText);
+  } finally {
+    await host.dispose();
+  }
+});
+
+test("model PTY refuses CONFIG_NOT_FOUND before banzai init and leaves the exclude file unchanged", async () => {
+  const host = await fixture();
+  delete host.env.BANZAI_APPROVAL_DIGEST;
+  delete host.env.BANZAI_WORKFLOW_DIGEST;
+  try {
+    const exclude = path.join(host.root, ".git", "info", "exclude");
+    const before = await readOptional(exclude);
+    for (const args of [["model"], ["model", "--local"]]) {
+      const result = host.run(args, [{ wait: "CONFIG_NOT_FOUND" }]);
+      assert.notEqual(result.exitCode, 0, result.output);
+      assert.match(result.output, /Run "banzai init" first\./);
+      assert.doesNotMatch(result.output, /Planning model|Where should/);
+      assert.equal(await readOptional(exclude), before);
+      await assert.rejects(readdir(path.join(host.root, ".banzai")), /ENOENT/);
+    }
+    await assert.rejects(readFile(host.capture), /ENOENT/);
+  } finally {
+    await host.dispose();
+  }
+});

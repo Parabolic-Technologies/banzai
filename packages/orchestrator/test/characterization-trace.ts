@@ -29,6 +29,7 @@ export interface PersistenceTrace {
 }
 
 type CommitCancellation = RunStore["commitCancellation"];
+type CreateRun = RunStore["createRun"];
 
 function defined<T>(value: T | undefined): T {
   if (value === undefined) throw new Error("RunStore method is missing.");
@@ -95,10 +96,15 @@ export function recordPersistence(): PersistenceTrace {
     pendingCreate = null;
   };
 
-  prototype.createRun = async function (this: RunStore, state: RunState) {
-    pendingCreate = stateEntry(state);
+  // Every argument is forwarded: the run's local model layer (ADR-0060 §5)
+  // must reach the store exactly as the runner passed it.
+  prototype.createRun = async function (
+    this: RunStore,
+    ...args: Parameters<CreateRun>
+  ) {
+    pendingCreate = stateEntry(args[0]);
     try {
-      await original.createRun.call(this, state);
+      await original.createRun.apply(this, args);
     } catch (error) {
       pendingCreate = null;
       throw error;

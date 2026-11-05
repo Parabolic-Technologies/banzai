@@ -15,6 +15,8 @@ import path from "node:path";
 import test from "node:test";
 import { resolveCliMode, stripGlobalFlags } from "../src/cli-routing.js";
 import { CONFIG_FILE, DEFAULT_CONFIG } from "../src/config.js";
+import { BanzaiError } from "../src/errors.js";
+import { parseModelArgs } from "../src/model-cli.js";
 import { workspaceDigest } from "../src/git.js";
 import {
   CONTRACT_VERSION,
@@ -1415,6 +1417,106 @@ test("approve-plan exact grammar refuses unknown, duplicate and positional forms
       "plan_approved"
     );
   } finally {
+    await repository.dispose();
+  }
+});
+
+test("banzai model owns an exact grammar, including --help", () => {
+  for (const args of [
+    ["model"],
+    ["model", "--local"],
+    ["model", "--help"],
+    ["model", "--local", "--help"],
+    ["model", "--bogus"]
+  ]) {
+    assert.equal(resolveCliMode(args, false, false), "command", args.join(" "));
+    assert.equal(resolveCliMode(args, true, true), "command", args.join(" "));
+  }
+  assert.deepEqual(parseModelArgs([]), { local: false });
+  assert.deepEqual(parseModelArgs(["--local"]), { local: true });
+  assert.equal(parseModelArgs(["--help"]), "help");
+  for (const args of [
+    ["--local", "--local"],
+    ["--local", "--help"],
+    ["--help", "--local"],
+    ["--help", "--help"],
+    ["--local=true"],
+    ["--shared"],
+    ["-l"],
+    ["local"],
+    ["--LOCAL"],
+    [""]
+  ]) {
+    assert.throws(
+      () => parseModelArgs(args),
+      (error: unknown) =>
+        error instanceof BanzaiError &&
+        error.code === "INVALID_MODEL_OPTION" &&
+        error.message ===
+          "banzai model accepts only an optional --local flag, or --help by itself.",
+      JSON.stringify(args)
+    );
+  }
+});
+
+test("committed banzai model rejects extra arguments everywhere and requires a terminal", async () => {
+  const outside = await mkdtemp(path.join(tmpdir(), "banzai-model-grammar-"));
+  const repository = await createTestRepository({ ignoreLocalConfig: true });
+  const invoke = (cwd: string, args: string[]) =>
+    spawnSync(process.execPath, [COMMITTED_CLI, ...args], {
+      cwd,
+      encoding: "utf8",
+      env: monochromeEnv(),
+      timeout: 10000
+    });
+  try {
+    // The grammar is checked before the terminal and repository discovery.
+    for (const args of [
+      ["model", "--bogus"],
+      ["model", "--local", "--help"],
+      ["model", "extra"]
+    ]) {
+      const result = invoke(outside, args);
+      assert.equal(result.status, 1, args.join(" "));
+      assert.match(result.stderr, /\[INVALID_MODEL_OPTION\]/);
+      assert.equal(result.stdout, "");
+    }
+    const help = invoke(outside, ["model", "--help"]);
+    assert.equal(help.status, 0, help.stderr);
+    assert.equal(help.stdout, invoke(outside, ["help", "model"]).stdout);
+    assert.match(help.stdout, /^Usage: banzai model \[--local\]$/mu);
+    assert.match(help.stdout, /\.banzai\/config\.local\.json/);
+    assert.match(help.stdout, /exclude file, never to \.gitignore/);
+    assert.match(help.stdout, /run banzai cancel/);
+    assert.match(help.stdout, /run banzai retry afterwards/);
+    const overview = invoke(outside, ["help"]);
+    assert.match(
+      overview.stdout,
+      /^ {2}model {6}Choose models per phase, shared or for this machine$/mu
+    );
+    assert.deepEqual(await snapshotTree(outside), []);
+
+    const writable = async () => ({
+      banzai: await snapshotTree(path.join(repository.root, ".banzai")),
+      gitignore: await readFile(
+        path.join(repository.root, ".gitignore"),
+        "utf8"
+      ),
+      exclude: await readFile(
+        path.join(repository.root, ".git", "info", "exclude"),
+        "utf8"
+      ).catch(() => null)
+    });
+    const before = await writable();
+    for (const args of [["model"], ["model", "--local"]]) {
+      const result = invoke(repository.root, args);
+      assert.equal(result.status, 1, args.join(" "));
+      assert.match(result.stderr, /\[TTY_REQUIRED\]/);
+      assert.equal(result.stdout, "");
+    }
+    assert.deepEqual(await writable(), before);
+  } finally {
+    await rm(outside, { recursive: true, force: true });
     await repository.dispose();
   }
 });

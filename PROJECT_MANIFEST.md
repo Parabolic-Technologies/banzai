@@ -204,8 +204,9 @@ behavior and edge cases; source and tests own the executable evidence.
   `workflow/review/result-application.ts` — verification rounds, authority
   checks and result application validation; missing mandatory evidence blocks
   completion.
-- `store.ts` — `RunStore` atomic state, append-only events, attempt records and
-  exclusive run ownership; stale ownership is never reclaimed by elapsed time.
+- `store.ts` — `RunStore` atomic state, append-only events, attempt records,
+  the per-run local model record and exclusive run ownership; stale ownership
+  is never reclaimed by elapsed time.
 - `work-documents.ts`, `project-files.ts`, `project-adoption.ts` — typed
   projections of shared document binding, contained filesystem and adoption
   owners; historical readers grant no new execution authority.
@@ -215,9 +216,16 @@ behavior and edge cases; source and tests own the executable evidence.
 - `project-setup.ts`, `setup-client.ts`, `foreground-client.ts` — explicit
   interactive `project-manifest` entry, client discovery and terminal cleanup;
   setup refuses unfinished runs and creates no task or approval.
-- `config.ts`, `models.ts`, `model-selection.ts` — configuration loading,
-  `DEFAULT_TASK_CONFIG`, source-maintained model metadata and role selection;
-  model updates preserve unrelated configuration bytes.
+- `config.ts`, `models.ts`, `model-selection.ts` — committed configuration
+  loading (`loadCommittedConfig`), `DEFAULT_TASK_CONFIG`, source-maintained
+  model metadata and per-destination role selection; committed model updates
+  preserve unrelated configuration bytes.
+- `local-config.ts`, `model-cli.ts`, `model-status.ts` — the Git-ignored
+  `.banzai/config.local.json` model layer (ADR-0060): validation, the layered
+  and effective readers, Git visibility checks, the clone exclude step and the
+  fixed-format writer; the `banzai model [--local]` picker, launch model reads
+  and advisory writes; human status model lines. A defective, tracked or
+  unignored local file refuses before any vendor executable starts.
 - `verification-evidence.ts`, `verification.ts` — shared task evidence facade,
   inert project discovery and legacy diagnostics; discovered commands confer
   no execution permission.
@@ -247,7 +255,10 @@ behavior and edge cases; source and tests own the executable evidence.
 - `doctor-cli.ts`, `doctor.ts` — `banzai-doctor/v6` local readiness diagnostics;
   no configured commands, authentication, model calls or repair occur. The
   advisory `claude.plugin-scope` warns when Claude user settings enable Banzai
-  and never affects readiness.
+  and never affects readiness. `config.local` checks the local model file with
+  only `git ls-files --error-unmatch` and `git check-ignore -q`, and the
+  top-level `models` array discloses each role's vendor, pattern-matched model,
+  effort and source.
 - `evaluation*.ts`, `evaluation-kpi*.ts` — privacy-minimized export and pure
   derived KPIs; frozen contracts retain explicit incomplete coverage.
 - `context-accounting.ts`, `context-report*.ts` — exact runner-byte accounting
@@ -256,8 +267,9 @@ behavior and edge cases; source and tests own the executable evidence.
 - `cancellation*.ts`, `human-time*.ts`, `interactive-human-time.ts` —
   cancellation provenance, independent reports and private timing; elapsed
   gate time and estimates never become measured person-time totals.
-- `git.ts` — repository baseline, approval bundles and workspace identities;
-  staged, unstaged, untracked and selected-document evidence remain distinct.
+- `git.ts` — repository baseline, approval bundles, workspace identities,
+  index and ignore queries and the clone exclude-file append; staged,
+  unstaged, untracked and selected-document evidence remain distinct.
 - `live-compatibility*.ts` — explicitly authorized disposable vendor probes;
   closed summaries and cleanup isolate auth material and raw output.
 
@@ -291,6 +303,17 @@ Plugin and release owners:
   verification policy. Defaults use Claude `claude-opus-5-5` for planning and
   implementation and Codex `gpt-6.1-sol` for review, all at `xhigh`; context
   defaults to `observe` with no limits and `maxFixCycles` is `3`.
+- The optional `.banzai/config.local.json` (`schemaVersion` `1`) replaces whole
+  role triples of `executable` (`claude` or `codex`), `model` and `effort` for
+  one checkout; every other key stays committed. `banzai init` adds its exact
+  `.gitignore` line, and local writers add it only to the clone's exclude file.
+- Each run records its local model layer in the create-only
+  `.banzai/runs/<run-id>/model-override.json`
+  (`banzai-run-model-override/v1`) before `state.json`. Runner resolutions
+  merge that record with the current committed file; a changed local file
+  refuses with `LOCAL_MODEL_OVERRIDE_CHANGED` until it is restored, a
+  `banzai retry` records it (from a terminal once the run has a model attempt)
+  or the run is cancelled.
 - New runs use state schema 10, document binding v3 and workspace snapshot v3.
   A plan-gate re-check moves a run to state v11 in the same write as its first
   `plan_recheck` record; v10 and v11 are both executable. One checkout has one
@@ -454,6 +477,10 @@ Plugin and release owners:
   v1 with explicit v2 support, context attempt/report use v2, cancellation
   report uses v1 and doctor uses v6. New run-state fields do not change frozen
   report semantics or privacy boundaries.
+- The local model file cannot change timeouts, verification, context limits or
+  the Claude environment. `status --json`, agent status v7, capabilities v9
+  and run state schemas carry no local model data; agents learn of a changed
+  file only from `LOCAL_MODEL_OVERRIDE_CHANGED`.
 - Source schema, phase/guidance/policy and release-policy changes require a
   rebuild before local CLI execution. Explicit build owns generated sources;
   validation detects drift without repairing tracked files.
@@ -548,3 +575,4 @@ delivery or installation.
 | ADR-0057 | Complete task verification rounds after check failures             | [Source](documentation/decisions/0057-complete-task-verification-rounds.md)                      | Implemented |
 | ADR-0058 | Human plan edits re-checked at the plan gate                       | [Source](documentation/decisions/0058-human-plan-edits-rechecked-at-the-plan-gate.md)            | Implemented |
 | ADR-0059 | Claude default reviewer and reviewer isolation                     | [Source](documentation/decisions/0059-claude-default-reviewer-and-reviewer-isolation.md)         | Planned     |
+| ADR-0060 | Local model override                                               | [Source](documentation/decisions/0060-local-model-override.md)                                   | Implemented |

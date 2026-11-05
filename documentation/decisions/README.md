@@ -66,7 +66,7 @@ plugin and orchestrator source.
 | [0057](./0057-complete-task-verification-rounds.md) | Complete task verification rounds after check failures | Accepted | 2026-10-31 | [Program `release-2-8-2-9-program`](../work/release-2-8-2-9-program/tracker.md), WP2; owner accepted in chat; amends 0045 §5; implemented |
 | [0058](./0058-human-plan-edits-rechecked-at-the-plan-gate.md) | Human plan edits re-checked at the plan gate | Accepted | 2026-10-31 | [Program `release-2-8-2-9-program`](../work/release-2-8-2-9-program/tracker.md), WP4; owner accepted in chat; amends 0051 and 0055; implemented |
 | [0059](./0059-claude-default-reviewer-and-reviewer-isolation.md) | Claude default reviewer and reviewer isolation | Accepted | 2026-10-31 | [Program `release-2-8-2-9-program`](../work/release-2-8-2-9-program/tracker.md), WP7; owner accepted in chat; amends 0042 §7, 0037 and 0002; implementation Planned |
-| [0060](./0060-local-model-override.md) | Local model override | Accepted | 2026-11-04 | [Program `release-2-8-2-9-program`](../work/release-2-8-2-9-program/tracker.md), WP6; owner accepted in chat; amends 0008; implementation Planned |
+| [0060](./0060-local-model-override.md) | Local model override | Accepted | 2026-11-04 | [Program `release-2-8-2-9-program`](../work/release-2-8-2-9-program/tracker.md), WP6; owner accepted in chat; amends 0008; implemented |
 
 ## File Names
 

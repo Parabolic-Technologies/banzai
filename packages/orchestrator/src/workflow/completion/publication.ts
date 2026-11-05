@@ -4,8 +4,7 @@ import path from "node:path";
 import { safePath, verifyExecutionIgnore } from "../../project-files.js";
 import {
   BanzaiError,
-  InstructionResourceMismatchError,
-  ProjectSetupRequiredError,
+  passesThroughRunCatches,
   TerminalRunStateError
 } from "../../errors.js";
 import { currentCommit, digestArtifactBundle } from "../../git.js";
@@ -343,12 +342,7 @@ export async function continueCompletionPublication(
       config
     );
   } catch (error) {
-    if (
-      error instanceof TerminalRunStateError ||
-      error instanceof ProjectSetupRequiredError ||
-      error instanceof InstructionResourceMismatchError
-    )
-      throw error;
+    if (passesThroughRunCatches(error)) throw error;
     if (error instanceof PlanTaskCompletionError)
       return {
         kind: "stopped",

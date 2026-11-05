@@ -139,6 +139,7 @@ const FIXTURE_PATHS = [
   "documentation/decisions/0057-complete-task-verification-rounds.md",
   "documentation/decisions/0058-human-plan-edits-rechecked-at-the-plan-gate.md",
   "documentation/decisions/0059-claude-default-reviewer-and-reviewer-isolation.md",
+  "documentation/decisions/0060-local-model-override.md",
   "packages/orchestrator/scripts/check-dist.mjs",
   "packages/orchestrator/scripts/release-version.mjs",
   "packages/orchestrator/scripts/smoke-committed.mjs",

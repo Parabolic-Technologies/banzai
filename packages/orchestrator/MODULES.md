@@ -88,6 +88,22 @@ is a navigational reference and is updated with the module it describes.
   restores the terminal an interrupted prompt left in raw mode with the cursor
   hidden. `init` and a completed `setup` end with the blocking reasons and
   remediation of the shared Claude permission audit, and write no grant.
+  `model` takes no argument, `--local`, or `--help` alone (`parseModelArgs`,
+  `INVALID_MODEL_OPTION`), checked before the terminal check and repository
+  discovery. In a terminal it runs `executeModelPicker` with `runner.status`
+  for the blocked-run exception; `init` runs the picker on the committed file
+  only. Outside a run, `init`, `setup`, `run` and the interactive entry read
+  the effective `loadConfig` with a fresh Git visibility answer, so a tracked,
+  unignored or invalid `.banzai/config.local.json` refuses with its
+  `LOCAL_CONFIG_*` code before any vendor executable starts. The launch
+  gateway reads through `loadLaunchModels` and writes advisory updates through
+  `applyLaunchModelUpdates`. Human `status` prints the `Models:` or
+  `Current models:` block from `runner.modelStatus` before the `Next:` line and
+  passes the status through `humanStatusView`, which makes retry and recovery
+  ineligible and recommends `banzai cancel` for an invalid run model record;
+  `status --json` stays as `status()` derives it. `recover` checks the same
+  view with `requireRecoverable`. `retry` passes
+  `terminal: stdin and stdout are TTYs` to `runner.retry`.
 - `version-cli.ts` — early, repository-independent `--version` / `-v` and
   `--plugin-version` / `-pv` commands, also accepting em-dash long aliases.
   Reads the package mirror or bounded local client inventories, including
@@ -141,7 +157,12 @@ is a navigational reference and is updated with the module it describes.
 - `doctor-cli.ts` — exact doctor argument contract, injected stdout/stderr
   composition, canonical JSON serialization, and deterministic human
   projection for `banzai-doctor/v6`, including explicit unavailable project
-  types when marker evidence cannot be read.
+  types when marker evidence cannot be read. `doctorInspection` injects the
+  local model file's Git probe. The text report prints, between
+  `Project types:` and `Checks:`, a `Models:` block of escaped
+  `  <role>: <vendor> <model> effort=<effort> (<source>)` lines, with `other`
+  for an unknown vendor and `unlisted` for an undisclosed model, or
+  `Models: unavailable` for an empty array.
 - `doctor.ts` — fixed-order project and task-verification diagnostics, with
   `project.guidance` immediately after `repository.git` and schema version 6. `claude.instructions` follows `claude.environment`
   and precedes `claude.permissions`; it compares the configured role union and
@@ -161,7 +182,21 @@ is a navigational reference and is updated with the module it describes.
   vendor adapters, or `WorkflowRunner`. Its advisory
   `authentication.models` check explicitly separates executable availability
   from authentication readiness and unchecked CLI versions without calling a
-  vendor.
+  vendor. `config.local` follows `config.version` (ADR-0060): presence,
+  safety and validity come from the local file reader, and the injected
+  `localConfigGitState` probe runs `git ls-files --error-unmatch --` and
+  `git check-ignore -q --` at the repository root with `LC_ALL=C` only when
+  the file exists. Each cause (tracked, not ignored, unsafe, unreadable,
+  invalid at a schema path, invalid file, refused key, Git unavailable) has
+  fixed text and a fix linking `documentation/orchestrator.md#model-configuration`;
+  a symbolic link at `.banzai/` fails even without a file. The report's
+  top-level `models`, between `projectTypes` and `summary`, lists each role's
+  `vendor` (`claude`, `codex` or null), its `model` only when it matches
+  `MODEL_IDENTIFIER_PATTERN`, `effort` and `source`, and is empty while
+  `config.local` fails or the committed configuration is unavailable.
+  `claude.instructions`, `claude.permissions` and `executables.models`
+  evaluate the effective configuration and are skipped while `config.local`
+  fails; `claude.environment` and verification checks keep committed values.
 - `claude-permissions.ts` — offline audit of the permission rules a spawned
   Claude session will honor. `claudePermissionDemand(config)` reads which roles
   actually depend on them: a Claude planner or implementer writes files the
@@ -238,7 +273,9 @@ is a navigational reference and is updated with the module it describes.
 - `context-report-cli.ts` — composes direct collection and rendering through
   injected streams while reusing the exact `eval export` cohort parser.
 - `cli-routing.ts` — `resolveCliMode` maps argv and TTY presence to
-  `interactive | help | command | tty_required`.
+  `interactive | help | command | tty_required`. `model` is one of the
+  exact-contract commands, so `banzai model --help` and argument errors reach
+  its parser instead of the global help shortcut.
 - `interactive.ts` — the launch header and the state-driven decision interface
   behind `InteractiveIO`. The compact text-only header opens with the Banzai
   name in brand vermilion and the package-derived release-train version, with
@@ -293,6 +330,20 @@ is a navigational reference and is updated with the module it describes.
   diagnostic codes. Duration display rounds original milliseconds, preserving
   zero and positive subsecond values; subtotals retain source arithmetic.
   Estimate actions refresh from current evidence and return to the same menu.
+  The header takes one layered read from `ModelConfigurationGateway.load()`
+  (ADR-0060). With a non-terminal run it shows, and checks authentication
+  for, the run-effective configuration (the committed file with the run's
+  recorded local layer) and adds a notice with the drift block or the invalid
+  record lines; otherwise it shows the current effective configuration. A
+  role from the local file carries `(local)` in its timeout cell, so rows
+  from the committed file alone stay byte-identical, and every model value is
+  escaped. A `LocalConfigError` from the gateway ends the launch before the
+  authentication check; other configuration errors keep the
+  `Model configuration unavailable` report. The update advisory evaluates the
+  current effective configuration, names every file it would change in its
+  options and confirmation, sends each update to the file that supplies its
+  role, prints one result line per changed file, and keeps its deferral text
+  during any active run. Interactive retry passes `terminal: true`.
 - `inquirer-io.ts` — the `@inquirer/prompts` implementation of
   `InteractiveIO`; the only module bound to the prompt libraries. Its initial
   request input uses `@inquirer/core` to enable bracketed-paste mode, capture
@@ -455,6 +506,32 @@ is a navigational reference and is updated with the module it describes.
   including verification execution and applicability, calling the moved
   operations from there. Only `now()` remains as a runner-side helper over the
   context.
+
+  The ADR-0060 run guard lives here. Every public command except status and
+  cancel starts with a fresh guard holder and Git visibility answer. Runner
+  resolutions merge the current committed configuration with the run's model
+  record, read once per command through the store and held, and never with
+  the current local file; the module imports `loadCommittedConfig` and the
+  layer helpers, never the effective `loadConfig`. `start` takes its one
+  layered read under the start lock and passes the local layer to
+  `createRun`. `compareModelRecord` runs at the entry of each state-changing
+  command, where a tracked or unignored local file refuses with
+  `LOCAL_CONFIG_NOT_IGNORED`, and before each model attempt and pending
+  transition. It compares the record on disk and the current local layer with
+  the held record and refuses with `LOCAL_MODEL_OVERRIDE_CHANGED` (escaped
+  drift lines and the fixed advice) or `LOCAL_MODEL_OVERRIDE_RECORD_INVALID`,
+  writing no block reason, event or rotation reason. Resume of a `created` or
+  `selecting` run without a model attempt, `retry({ terminal })`, and
+  `retryPlanningReview` record again instead: `readLayerForRecording` reads
+  the local file, the record and the terminal rule under the command's lock,
+  and refuses a different layer without a terminal once the run has a model
+  attempt; `recordModelLayer` prints the changed roles, replaces the record
+  and appends `model_override.recorded` with role sources only.
+  `modelStatus(state | null)` returns the `ModelStatus` that human status
+  prints, reading a fresh local layer and the record without
+  filling the guard holder, comparing or failing on a defect; `status()` and
+  its `WorkflowStatus` are unchanged, and status evaluates retry, recovery and
+  `nextAction` on the run-effective configuration.
 
 - `workflow/ports.ts` — type-only ADR-0052 process-boundary ports: `Clock`
   (`() => Date`), `IdSource` (RFC 4122 version 4 UUID text) and
@@ -672,6 +749,16 @@ is a navigational reference and is updated with the module it describes.
   stops/captures the winning state and writes its immutable anchor. Event capture
   and receipt-bound first response use the guarded expected source fingerprint;
   scans, human prompts and model execution occur outside the short guard.
+  `createRun(state, localModels)` writes the create-only `model-override.json`
+  (`banzai-run-model-override/v1`, roles in fixed order, mode `0600`) as the
+  first file in the new run directory, before `state.json` and the active
+  pointer. `readModelOverrideRecord` reads it through the contained reader
+  and never throws for a defect: `absent` only once the run directory is
+  confirmed, otherwise `recorded` or a `LOCAL_MODEL_OVERRIDE_RECORD_INVALID`
+  defect with fixed text that names the record and says to cancel.
+  `replaceModelOverrideRecord`, called only when a command records again,
+  publishes a new record through a temporary file renamed over it, or
+  create-only for a run without one, and never writes through a link.
 - `planning-review-state.ts` — closed state-v10/v11 episode, pending-triage and
   history validation for the store. Active and closed slots have distinct
   shapes; historical states reject v10 fields without migration. Only v11 holds
@@ -802,9 +889,13 @@ is a navigational reference and is updated with the module it describes.
   CLI init creates the local guide under its initialization lock before prompts,
   using create-only writes and rejecting symlinks or non-regular paths.
 - `config.ts` — `.banzai/config.json` location, `DEFAULT_CONFIG`,
-  `loadConfig`, `initializeConfig`, and `applyModelUpdates`, which rewrites only
-  requested `model`, `executable`, and `effort` JSON value tokens and preserves
-  every unrelated byte. The optional context policy defaults to
+  `loadCommittedConfig`, `initializeConfig`, and `applyModelUpdates`, which
+  rewrites only requested `model`, `executable`, and `effort` JSON value tokens
+  and preserves every unrelated byte. `loadCommittedConfig` reads the
+  committed file alone; committed-only readers and the layered reader of
+  `local-config.ts` use it, and the effective `loadConfig` lives there.
+  `initializeConfig` appends the exact `.banzai/config.local.json` line with
+  the run-state entries when `.gitignore` lacks it. The optional context policy defaults to
   `{ mode: "observe", limits: [] }`; selector-specific limits may be observed,
   while enforcement is restricted to exact pre-call runner-payload bytes and
   ships with no universal numerical maximum.
@@ -824,7 +915,78 @@ is a navigational reference and is updated with the module it describes.
   creates the configuration, its `configCreated` result selects `Use default`
   wording, default markers, and an initial-setup summary. Repeated `init` and
   `banzai model` retain the saved-configuration wording, even when the saved
-  values match the defaults.
+  values match the defaults. `selectModelDestination` asks where to save,
+  with "This machine only" first; `chooseModelSettings` runs the dialog for
+  the chosen destination, and `selectModelSettings` remains the committed
+  dialog without a local layer. The committed dialog starts from and compares
+  with the committed triples, tags them `(committed)` and shows the local
+  triple while a local layer exists, copies the pending committed planner
+  triple for "Match Planning", and names the roles this machine keeps from
+  the local file; its builder-session line uses the effective settings. The
+  local dialog starts from each role's effective triple with its source,
+  returns only triples that differ, removes an entry for
+  "Use shared setting: <triple>" or for the committed triple itself, offers
+  "Match Planning" only for a bare `claude` or `codex` planner, and announces
+  deletion when no entry remains.
+- `local-config.ts` — the ADR-0060 local model layer. `parseLocalModelFile`
+  and `parseLocalModelLayer` validate `.banzai/config.local.json`: exactly
+  `schemaVersion: 1` and `models`, roles with exactly a bare `claude` or
+  `codex` executable, a model matching `MODEL_IDENTIFIER_PATTERN` and a
+  committed effort, as a UTF-8 JSON object of at most 64 KiB. Defects are
+  `LOCAL_CONFIG_KEY_REFUSED` or `LOCAL_CONFIG_INVALID`; messages name only
+  plain-identifier field paths and never echo a value or parser text.
+  `createLocalConfigVisibility` asks Git once per command, index first, then
+  ignore. `readLocalModelLayer` checks `.banzai/` and the file with `lstat`,
+  asks Git only about an existing file, then reads through the contained
+  reader; it returns a defect instead of throwing, while a Git failure
+  propagates. `readLayeredConfig` returns the committed configuration
+  (`loadCommittedConfig`), the local status and the effective configuration,
+  null for a defective file; `mergeModelLayer` replaces whole triples and
+  records each role's source. `loadEffectiveConfig` and `loadConfig` refuse a
+  defect with `LocalConfigError` and serve only reads outside a run.
+  `sameModelLayer` is the order-independent comparison value, and
+  `localModelDriftLines` builds the escaped
+  `<Role>: recorded <triple|shared>, now <triple|shared>` lines or one line
+  naming an unusable file; `LOCAL_MODEL_DRIFT_HEADING` and
+  `LOCAL_MODEL_DRIFT_ADVICE` hold the fixed text. `ensureLocalConfigExcluded`
+  is the writers' exclude step: a path in the index refuses with the tracked
+  message even without a file, an ignored path needs nothing, otherwise it
+  appends the exact line to the clone's exclude file and refuses a
+  `.gitignore` negation that keeps the path visible. `writeLocalModelLayer`
+  validates the layer, requires `.banzai/`, refuses a tracked or unignored
+  path and any symbolic link, writes the canonical `renderLocalModelFile`
+  text through a `wx` mode-`0600` temporary renamed over the target, and
+  deletes the file for an empty layer. Nothing here edits `.gitignore`.
+- `model-cli.ts` — `banzai model [--local]` and the launch model I/O.
+  `parseModelArgs` is the exact grammar; `MODEL_PHASE_VARIABLES` make every
+  writer refuse inside a model phase with `CONFIGURATION_MODEL_WRITE_DENIED`.
+  `executeModelPicker` runs, in order, that refusal, `ensureLocalConfigExcluded`
+  outside the lock, the runner lock without stale reclaim (`RUNNER_LOCKED`
+  with model-specific text), the active-run gate, the layered read (a
+  defective local file stops before any menu), the destination and one write
+  to the chosen file. The gate passes no run or a done or cancelled one; a
+  blocked run whose status recommends `banzai retry` and whose model record
+  is readable gets the local destination only and `MODEL_RETRY_LINE`; any
+  other run refuses with `RUN_IN_PROGRESS` naming `banzai cancel`. `init`
+  writes the committed file; `--local` and the exception write the local
+  file; otherwise the destination question is asked when a local file exists
+  or `.banzai/config.json` is in the Git index. `loadLaunchModels` is the
+  launch gateway's one layered read with a fresh Git check, plus the active
+  run's run-effective models and drift lines or its invalid record.
+  `applyLaunchModelUpdates` writes advisory updates under the lock to each
+  role's source file, the local file first, refusing during any active run
+  and with `MODEL_CONFIGURATION_CHANGED` when a role's source or model changed
+  since the launch showed it.
+- `model-status.ts` — human text for `WorkflowRunner.modelStatus`.
+  `modelStatusLines` renders `Models:` for a non-terminal run or
+  `Current models:` otherwise, with escaped
+  `  <Label>: <executable> <model> <effort> (<source>)` lines, the drift block
+  of `modelDriftBlock` (shared with the launch header), a single unusable
+  local file line, `<heading>: unavailable (<code>)`, or the invalid-record
+  lines of `recordInvalidLines`. `humanStatusView` marks retry and recovery
+  ineligible with a reason naming the record and recommends `banzai cancel`
+  for an invalid record; `requireRecoverable` is the `recover` pre-check on
+  that view. `status --json` and agent status never pass through it.
 - `git.ts` — repository discovery, `currentCommit`, `currentBranch` (display
   only; null on a detached HEAD), `digestArtifactBundle`,
   `repositoryBaseline`, `workspaceSnapshot`, `workspaceDigest`, and
@@ -839,6 +1001,14 @@ is a navigational reference and is updated with the module it describes.
   complete setup, then need a commit before task input or creation. Failures
   exit with code 1;
   doctor and cancellation reporting retain their bounded Git diagnostics.
+  `isPathInIndex` (`git ls-files --error-unmatch --`) and `isPathIgnored`
+  (`git check-ignore -q --`) answer by exit status 0 or 1 and raise any other
+  result as a Git failure, never as "no". `cloneExcludePath` resolves
+  `git rev-parse --git-path info/exclude` against the repository root, so
+  linked worktrees share the common directory's file. `appendCloneExcludeLine`
+  creates `info/` when missing, refuses a link or non-regular file there with
+  `GIT_EXCLUDE_UNSAFE`, opens without following links and appends a missing
+  line once.
 - `phase-resources.ts` — generated committed exact resource text and SHA-256
   identities; imports nothing. `phase-instructions.ts` validates/selects that
   data and compares only declared resources inside a supplied verified plugin
@@ -938,7 +1108,9 @@ is a navigational reference and is updated with the module it describes.
   stays on screen names both the phase and what is running it, redrawn on a spinner tick and
   erased before every settled line and on close; it replaces the heartbeat while
   active and is disabled entirely under `verbose`, which exists to produce a
-  faithful log.
+  faithful log. The banner's executable name, model and effort and the live
+  line's model and effort pass through `escapeTerminalField`, because they
+  may come from a developer's local model file.
 - `vocabulary.ts` — plain-English renderings of the run's internal tokens for
   human output only: `runStatusText`, `reviewVerdictText`, `reviewExecutionText`
   (which turns `full/fresh (rotation=…)` into one sentence),
@@ -964,6 +1136,10 @@ is a navigational reference and is updated with the module it describes.
   `formatUsage` render token consumption with the cache ratio, the
   fresh-input remainder, and an optional turn count. It reads no
   process state, so both surfaces are testable against an explicit width.
+  `escapeTerminalText` escapes terminal controls in printed text;
+  `escapeTerminalField` also escapes TAB and LF, so a configuration value
+  printed inside a line, such as a model from either model file, cannot move
+  the cursor or start a line. Escaping an escaped value changes nothing.
 - `types.ts` — all shared types, `CONTRACT_VERSION = "1.0.0"`, phase-result
   schema v4 and state schema v10 with explicit historical readers, independent
   agent-control schema and `9.0.0` contract identities, independent
@@ -976,7 +1152,16 @@ is a navigational reference and is updated with the module it describes.
 - `errors.ts` — `BanzaiError` (stable `code`, `exitCode`), `ProcessExitError`
   (retains redacted stdout/stderr plus the typed `failureCause` and the usage
   the failed process had already spent, optional inventory, and turn count),
-  `errorMessage`.
+  `errorMessage`. `LocalConfigError` carries a local model file defect
+  (`LOCAL_CONFIG_INVALID`, `LOCAL_CONFIG_KEY_REFUSED` or
+  `LOCAL_CONFIG_NOT_IGNORED`). `LocalModelOverrideRefusalError` is the run
+  guard refusal (`LOCAL_MODEL_OVERRIDE_CHANGED` or
+  `LOCAL_MODEL_OVERRIDE_RECORD_INVALID`), which preserves the last durable
+  checkpoint and every retry and recovery authority.
+  `passesThroughRunCatches` names the errors every catch between a check point
+  and a command boundary rethrows unchanged: a terminal transition, the
+  project-setup and instruction-resource refusals, and the run guard
+  refusals.
 
 ## Release scripts (`scripts/`)
 
@@ -1010,8 +1195,11 @@ is a navigational reference and is updated with the module it describes.
   skill skeletons and Orchestrated Mode blocks remain byte-frozen. These
   checks do not perform
   semantic analysis of target-project source.
-- `smoke-committed.mjs` runs help, control capabilities, init, no-run control
-  status, ready doctor JSON, evaluation JSON, context JSON over a historical
+- `smoke-committed.mjs` runs help, control capabilities, init (which must add
+  the exact `.banzai/config.local.json` line to `.gitignore` once), no-run
+  control status, ready doctor JSON (whose `models` array must sit between
+  `projectTypes` and `summary` and match the smoke configuration's committed
+  roles), evaluation JSON, context JSON over a historical
   incomplete attempt, and evaluation KPI JSON —
   checkout mode plus a non-repository `--input` round-trip over the captured
   export — repeatedly against the

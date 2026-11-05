@@ -3,9 +3,7 @@ import path from "node:path";
 import {
   BanzaiError,
   errorMessage,
-  InstructionResourceMismatchError,
-  ProjectSetupRequiredError,
-  TerminalRunStateError
+  passesThroughRunCatches
 } from "../../errors.js";
 import {
   parseApprovedPlanTaskIds,
@@ -112,12 +110,7 @@ export async function validatePlanningResult(
       );
     validateRunnerControlTasks(context, state, markdown);
   } catch (error) {
-    if (
-      error instanceof TerminalRunStateError ||
-      error instanceof ProjectSetupRequiredError ||
-      error instanceof InstructionResourceMismatchError
-    )
-      throw error;
+    if (passesThroughRunCatches(error)) throw error;
     // A rejected remainder digest is a defective planning result, not an
     // unreadable artifact: it keeps the approved_plan_invalid semantics that
     // rerun planning, and says exactly which digest disagreed.

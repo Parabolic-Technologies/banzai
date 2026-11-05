@@ -47,7 +47,7 @@ Status values: `not started` · `ADR draft` · `ADR proposed` · `ADR accepted` 
 | WP3 | Verification commands at the plan gate         | —               | none; cite 0049 for instruction change       | `wp03-plan-gate-verification-commands` | committed    | 44f3d03 | Plan gate lists checks; see report deviations      |
 | WP4 | Re-check human edits at the plan gate          | —               | 0058 Accepted; amends 0051 and 0055 (pinned) | `wp04-plan-gate-edit-recheck`          | committed    | 04abf55 | Control 9.0.0 with recheck and helper v4           |
 | WP5 | Install guide, plugin scope, doctor hint       | —               | none; stay within 0008                       | `wp05-install-guide-plugin-scope`      | committed    | 5c89c1c | Doctor JSON contract version bump                  |
-| WP6 | Local model override                           | —               | 0060 Accepted; amends 0008                   | `wp06-local-model-override`            | ADR accepted |         | Plan awaits approval; do before WP7                |
+| WP6 | Local model override                           | —               | 0060 Accepted; amends 0008                   | `wp06-local-model-override`            | report ready |         | One change set; see report deviations              |
 | WP7 | Claude as the default reviewer, with isolation | WP6 recommended | 0059 Accepted; amends 0042 §7, 0037, 0002    | `wp07-claude-default-reviewer`         | ADR accepted |         | live scenario needs go-ahead                       |
 | WP8 | Stable Claude phases                           | —               | check 0020                                   | `wp08-stable-claude-phases`            | not started  |         | Live scenario needs go-ahead                       |
 
@@ -179,9 +179,21 @@ IDs checked free on 2026-10-31 (0057–0059) and 2026-11-03 (0060) in `dev`,
   `banzai retry` of a blocked run records a new local layer, the whole role
   triple is the merge unit, "This machine only" is offered first, and the
   local `executable` is bare `claude` or `codex`. The reciprocal link is on
-  ADR-0008. WP6 requirements and plan are drafted and reviewed; they await
-  plan approval with three owner questions (change sets, live check, agent
-  relay rule).
+  ADR-0008.
+- 2026-11-04: WP6 plan approved with `All recommended`, after commit
+  `64763e6`. WP6 is one change set with one report; WP6a and WP6b are working
+  milestones only. The Done-when scenario uses `claude` and `codex` PATH shims
+  with no live vendor run. No skill changes in WP6. Follow-ups:
+  - the WP that next revises
+    `skills/orchestrate/references/control-protocol.md` adds a stop-and-relay
+    rule for `LOCAL_MODEL_OVERRIDE_CHANGED`;
+  - before Gate 1, a quick fix checks the WP5 `claude.plugin-scope` doctor
+    message against ADR-0008's privacy rules: it may print an absolute
+    settings path and raw keys.
+- 2026-11-05: WP6 implemented as one change set; report ready. ADR-0060 and
+  the ADR-0008 amendment are marked implemented. `npm run verify` passes;
+  `release:validate` reports only the deferred
+  `HOOK_CHANGED_WITHOUT_VERSION_BUMP`.
 
 ## Open questions left to the owner by the brief
 

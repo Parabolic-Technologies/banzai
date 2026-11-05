@@ -274,7 +274,20 @@ import {
   claudePermissionRemediation,
   inspectClaudePermissions
 } from "./claude-permissions.js";
-import { loadConfig } from "./config.js";
+import { loadCommittedConfig } from "./config.js";
+import {
+  createLocalConfigVisibility,
+  localModelDriftLines,
+  localModelsOf,
+  LOCAL_MODEL_DRIFT_ADVICE,
+  LOCAL_MODEL_DRIFT_HEADING,
+  mergeModelLayer,
+  readLayeredConfig,
+  readLocalModelLayer,
+  requireEffectiveConfig,
+  sameModelLayer,
+  type LocalConfigVisibility
+} from "./local-config.js";
 import {
   CONFIGURATION_ACTIONS,
   CONFIGURATION_PREREQUISITE_SCHEMA,
@@ -321,6 +334,9 @@ import {
 import {
   BanzaiError,
   errorMessage,
+  LocalConfigError,
+  LocalModelOverrideRefusalError,
+  passesThroughRunCatches,
   ProcessExitError,
   ProjectSetupRequiredError,
   InstructionResourceMismatchError,
@@ -444,6 +460,12 @@ import {
   type ModelProgressEvent,
   type ModelSettings,
   type McpWhitelist,
+  type EffectiveModelConfiguration,
+  type LocalModelLayer,
+  type LocalModelLayerStatus,
+  type ModelOverrideRecordStatus,
+  type ModelRoleStatuses,
+  type ModelStatus,
   type ModelUsage,
   type OrchestratorConfig,
   type OutputContractEnvelope,
@@ -879,6 +901,109 @@ interface RecoveryWorkspaceSnapshot {
   snapshot?: WorkspaceSnapshot;
 }
 
+/**
+ * Supplies the run-effective configuration to an eligibility rule. State
+ * changing commands pass the guard holder's resolution; status passes the
+ * configuration it built once, or a source that fails when none exists, so a
+ * defective record counts as unavailable configuration evidence there.
+ */
+type RunConfigurationSource = () => Promise<OrchestratorConfig>;
+
+/**
+ * The local model layer one command holds for a run (ADR-0060 §5). `models`
+ * is the layer every resolution merges and every check point compares the
+ * current local file with. `recorded` is what the sidecar on disk must hold:
+ * the record as read, or the one this command wrote. They differ only while a
+ * retry holds a new layer it has not recorded yet.
+ */
+interface HeldModelRecord {
+  runId: string;
+  models: LocalModelLayer;
+  recorded: LocalModelLayer;
+}
+
+/**
+ * One command's run guard (ADR-0060 §5). `record` is held for every later
+ * resolution and check point; `visibility` asks Git about the local file once
+ * per command. Every public command entry replaces the holder, so an
+ * interactive session that reuses one runner never carries either into the
+ * next command.
+ */
+interface ModelGuard {
+  readonly visibility: LocalConfigVisibility;
+  record: HeldModelRecord | null;
+}
+
+/** A new local layer a recording command holds and has yet to record. */
+interface PendingModelRecording {
+  runId: string;
+  models: LocalModelLayer;
+  /** The escaped §7 lines of each changed role. */
+  lines: string[];
+}
+
+/** The heading printed before the changed roles a command records. */
+const LOCAL_MODEL_RECORDING_HEADING =
+  "Recording the changed local models for this run";
+
+function newModelGuard(): ModelGuard {
+  return { visibility: createLocalConfigVisibility(), record: null };
+}
+
+/** The held role map of a readable record; an absent record is a legacy `{}`. */
+function modelRecordLayer(record: ModelOverrideRecordStatus): LocalModelLayer {
+  if (record.state === "defective")
+    throw new LocalModelOverrideRefusalError(
+      "LOCAL_MODEL_OVERRIDE_RECORD_INVALID",
+      record.defect.message
+    );
+  return record.state === "recorded" ? record.models : {};
+}
+
+/**
+ * `LOCAL_MODEL_OVERRIDE_CHANGED` with the ADR-0060 §7 lines: the heading, each
+ * escaped drift line indented by two spaces, and the closing advice.
+ */
+function modelOverrideChanged(lines: readonly string[]): BanzaiError {
+  return new LocalModelOverrideRefusalError(
+    "LOCAL_MODEL_OVERRIDE_CHANGED",
+    [
+      LOCAL_MODEL_DRIFT_HEADING,
+      ...lines.map((line) => `  ${line}`),
+      LOCAL_MODEL_DRIFT_ADVICE
+    ].join("\n")
+  );
+}
+
+/** Each role's triple and the file it comes from in an effective configuration. */
+function roleStatuses(
+  effective: EffectiveModelConfiguration
+): ModelRoleStatuses {
+  const status = (role: ModelRole) => {
+    const settings = effective.config.models[role];
+    return {
+      executable: settings.executable,
+      model: settings.model,
+      effort: settings.effort,
+      source: effective.sources[role]
+    };
+  };
+  return {
+    planner: status("planner"),
+    implementer: status("implementer"),
+    reviewer: status("reviewer")
+  };
+}
+
+/**
+ * The escaped line naming a local file that cannot be used, as the drift
+ * lines name it (ADR-0060 §7): `tracked`, `not ignored` or `invalid (<field
+ * path>)`. Only called for a defective status, whose drift is that one line.
+ */
+function localDefectLine(local: LocalModelLayerStatus): string {
+  return localModelDriftLines({}, local).join(" ");
+}
+
 interface PrerequisiteBlockedFixScope extends PrerequisiteScope {
   record: AttemptRecord<PersistedPhaseResult>;
   result: PersistedPhaseResult;
@@ -1045,6 +1170,261 @@ export class WorkflowRunner {
   }
 
   private readonly configurationOwnership = new ConfigurationOwnership();
+
+  private modelGuard: ModelGuard = newModelGuard();
+
+  /**
+   * Starts a public command: a fresh guard holder and Git visibility answer
+   * (ADR-0060 §4, §5). Status and cancel never call it, never fill the holder
+   * and never compare.
+   */
+  private beginCommand(): void {
+    this.modelGuard = newModelGuard();
+  }
+
+  /**
+   * The run's local model record, read through the contained reader at the
+   * command's first resolution and held for the rest of the command. A
+   * defective record refuses with `LOCAL_MODEL_OVERRIDE_RECORD_INVALID`.
+   */
+  private async heldModelRecord(runId: string): Promise<HeldModelRecord> {
+    const held = this.modelGuard.record;
+    if (held?.runId === runId) return held;
+    const models = modelRecordLayer(
+      await this.store.readModelOverrideRecord(runId)
+    );
+    const record = { runId, models, recorded: models };
+    this.modelGuard.record = record;
+    return record;
+  }
+
+  /**
+   * ADR-0060 §5 Recording again, read step, under the command's lock and
+   * before its first write: the current local file in reading 3's order
+   * (index, ignore, then validation), then the run's record, then the
+   * terminal rule. A defective local file refuses with `LocalConfigError` and
+   * a defective record with `LOCAL_MODEL_OVERRIDE_RECORD_INVALID`. Once the
+   * run has a model attempt, a different layer needs a terminal; without one
+   * the command refuses with `LOCAL_MODEL_OVERRIDE_CHANGED` and writes
+   * nothing. The command then holds the current layer; a different one is
+   * returned for `recordModelLayer`, and the sidecar stays as read until then.
+   */
+  private async readLayerForRecording(
+    state: Pick<RunState, "runId">,
+    rule: { modelAttempt: boolean; terminal: boolean }
+  ): Promise<PendingModelRecording | null> {
+    const current = await readLocalModelLayer(this.repoRoot, {
+      visibility: this.modelGuard.visibility
+    });
+    if (current.state === "defective")
+      throw new LocalConfigError(current.defect);
+    const models = current.state === "valid" ? current.models : {};
+    const recorded = modelRecordLayer(
+      await this.store.readModelOverrideRecord(state.runId)
+    );
+    if (sameModelLayer(models, recorded)) {
+      this.modelGuard.record = {
+        runId: state.runId,
+        models: recorded,
+        recorded
+      };
+      return null;
+    }
+    const lines = localModelDriftLines(recorded, current);
+    if (rule.modelAttempt && !rule.terminal) throw modelOverrideChanged(lines);
+    this.modelGuard.record = { runId: state.runId, models, recorded };
+    return { runId: state.runId, models, lines };
+  }
+
+  /**
+   * ADR-0060 §5 Recording again, write step, before the command's first
+   * transition: prints each changed role with its recorded and new triple,
+   * replaces the sidecar (or creates one for a run that has none) and appends
+   * `model_override.recorded`, which names roles and sources only. From here
+   * on the command's check points compare with the new record.
+   */
+  private async recordModelLayer(
+    pending: PendingModelRecording
+  ): Promise<void> {
+    const held = this.modelGuard.record;
+    if (held?.runId !== pending.runId || held.models !== pending.models)
+      throw new BanzaiError(
+        "INVALID_STATE",
+        "The local model layer to record is no longer held."
+      );
+    this.info(`${LOCAL_MODEL_RECORDING_HEADING}:`);
+    for (const line of pending.lines) this.info(`  ${line}`);
+    await this.store.replaceModelOverrideRecord(pending.runId, pending.models);
+    held.recorded = pending.models;
+    await this.store.appendEvent(pending.runId, "model_override.recorded", {
+      sources: Object.fromEntries(
+        MODEL_ROLES.map((role) => [
+          role,
+          pending.models[role] === undefined ? "committed" : "local"
+        ])
+      )
+    });
+  }
+
+  /**
+   * The run-effective configuration (ADR-0060 §5 Merge): the current committed
+   * configuration with the run's held local record, never the current local
+   * file. Nested resolutions never compare and never refuse a drift.
+   */
+  private async runConfiguration(
+    state: Pick<RunState, "runId">
+  ): Promise<OrchestratorConfig> {
+    return await this.runEffective(
+      await loadCommittedConfig(this.repoRoot),
+      state
+    );
+  }
+
+  /** The held local record merged into an already read committed configuration. */
+  private async runEffective(
+    committed: OrchestratorConfig,
+    state: Pick<RunState, "runId">
+  ): Promise<OrchestratorConfig> {
+    return mergeModelLayer(
+      committed,
+      (await this.heldModelRecord(state.runId)).models
+    ).config;
+  }
+
+  /**
+   * Status's configuration source (ADR-0060 §5): the run's record read once,
+   * without throwing, and merged into the committed configuration on demand.
+   * Status never fills or uses the guard holder and never compares. A
+   * defective record fails each read as a plain error, so status reports it
+   * as an unvalidated precondition and the run guard refusal never escapes.
+   */
+  private async statusConfiguration(
+    state: Pick<RunState, "runId">
+  ): Promise<RunConfigurationSource> {
+    let record: ModelOverrideRecordStatus | null;
+    try {
+      record = await this.store.readModelOverrideRecord(state.runId);
+    } catch {
+      record = null;
+    }
+    return async () => {
+      if (record === null)
+        throw new BanzaiError(
+          "LOCAL_MODEL_OVERRIDE_RECORD_INVALID",
+          "The local model record of this run could not be read."
+        );
+      if (record.state === "defective")
+        throw new BanzaiError(record.defect.code, record.defect.message);
+      return mergeModelLayer(
+        await loadCommittedConfig(this.repoRoot),
+        record.state === "recorded" ? record.models : {}
+      ).config;
+    };
+  }
+
+  /**
+   * ADR-0060 §7 model status for human output (`banzai status` and the
+   * interactive launch header); see `ModelStatus` for its shape. Pass the
+   * run's state, or `null` outside a run. A run that is not done or cancelled
+   * reports its run-effective models, the current ones and the drift between
+   * its record and the current local file; otherwise the current models.
+   *
+   * Read-only, and separate from `status()`, whose `WorkflowStatus` stays
+   * unchanged: it reads the committed file, the local file through a fresh Git
+   * answer cache and the run's record, never fills the guard holder, never
+   * compares-and-refuses and never fails on a defective local file, record or
+   * committed file. Only a Git failure propagates, as in the layered reader.
+   */
+  async modelStatus(
+    state: Pick<RunState, "runId" | "status"> | null
+  ): Promise<ModelStatus> {
+    const scope =
+      state === null || TERMINAL_STATUSES.has(state.status) ? "current" : "run";
+    let committed: OrchestratorConfig;
+    try {
+      committed = await loadCommittedConfig(this.repoRoot);
+    } catch (error) {
+      return {
+        scope,
+        state: "unavailable",
+        code: error instanceof BanzaiError ? error.code : "CONFIG_UNAVAILABLE"
+      };
+    }
+    const local = await readLocalModelLayer(this.repoRoot, {
+      visibility: createLocalConfigVisibility()
+    });
+    const currentModels = localModelsOf(local);
+    const current =
+      currentModels === null
+        ? null
+        : roleStatuses(mergeModelLayer(committed, currentModels));
+    if (scope === "current" || state === null)
+      return current === null
+        ? {
+            scope: "current",
+            state: "local_defective",
+            localDefect: localDefectLine(local)
+          }
+        : { scope: "current", state: "effective", current };
+    let record: ModelOverrideRecordStatus | null;
+    try {
+      record = await this.store.readModelOverrideRecord(state.runId);
+    } catch {
+      record = null;
+    }
+    if (record === null || record.state === "defective")
+      return {
+        scope: "run",
+        state: "record_invalid",
+        runId: state.runId,
+        recordPath:
+          record?.defect.path ??
+          `.banzai/runs/${state.runId}/model-override.json`
+      };
+    const recorded = record.state === "recorded" ? record.models : {};
+    return {
+      scope: "run",
+      state: "recorded",
+      runId: state.runId,
+      run: roleStatuses(mergeModelLayer(committed, recorded)),
+      current,
+      drift: localModelDriftLines(recorded, local)
+    };
+  }
+
+  /**
+   * An ADR-0060 §5 check point. The first kind (`entry`) runs once per
+   * state-changing command under the runner lock and before its first write,
+   * after the §4 Git check, which refuses a tracked or unignored local file
+   * with `LOCAL_CONFIG_NOT_IGNORED`. The second kind runs before a model
+   * attempt is created or a pending transition is committed. Both compare the
+   * sidecar on disk and the current local file with the held record, and
+   * write nothing.
+   */
+  private async compareModelRecord(
+    state: Pick<RunState, "runId">,
+    kind: "entry" | "attempt"
+  ): Promise<void> {
+    const current = await readLocalModelLayer(this.repoRoot, {
+      visibility: this.modelGuard.visibility
+    });
+    if (
+      kind === "entry" &&
+      current.state === "defective" &&
+      current.defect.code === "LOCAL_CONFIG_NOT_IGNORED"
+    )
+      throw new LocalConfigError(current.defect);
+    const held = await this.heldModelRecord(state.runId);
+    const onDisk = modelRecordLayer(
+      await this.store.readModelOverrideRecord(state.runId)
+    );
+    if (!sameModelLayer(onDisk, held.recorded))
+      throw modelOverrideChanged([
+        `.banzai/runs/${state.runId}/model-override.json: rewritten after this command read it`
+      ]);
+    if (!sameModelLayer(localModelsOf(current), held.models))
+      throw modelOverrideChanged(localModelDriftLines(held.models, current));
+  }
 
   private async acquireWorkflowLock(options: { reclaimStale?: boolean } = {}) {
     if (this.configurationOwnership.owned()) {
@@ -1248,12 +1628,7 @@ export class WorkflowRunner {
     try {
       return await resolver({ repoRoot: this.repoRoot, codexExecutable });
     } catch (error) {
-      if (
-        error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError ||
-        error instanceof InstructionResourceMismatchError
-      )
-        throw error;
+      if (passesThroughRunCatches(error)) throw error;
       this.info(`MCP whitelist unavailable: ${errorMessage(error)}`);
       return null;
     }
@@ -1323,12 +1698,7 @@ export class WorkflowRunner {
       });
       return result;
     } catch (error) {
-      if (
-        error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError ||
-        error instanceof InstructionResourceMismatchError
-      )
-        throw error;
+      if (passesThroughRunCatches(error)) throw error;
       this.report({
         kind: "activity_failed",
         id,
@@ -1356,7 +1726,8 @@ export class WorkflowRunner {
       config: OrchestratorConfig;
       role: ModelRole;
       phase: InstructionPhase | "selection";
-    }
+    },
+    options: { compareModels?: boolean } = {}
   ): Promise<void> {
     await this.assertProjectGuidance();
     const state = await this.store.requireActiveState();
@@ -1371,6 +1742,13 @@ export class WorkflowRunner {
         }
       ]);
     }
+    // ADR-0060 §5 check point 2: before a model attempt or a pending
+    // transition, never before a verification command alone.
+    if (
+      (invocation !== undefined || commitTransition !== undefined) &&
+      options.compareModels !== false
+    )
+      await this.compareModelRecord(state, "attempt");
     await commitTransition?.();
   }
 
@@ -1405,6 +1783,7 @@ export class WorkflowRunner {
   }
 
   async start(input: StartRunInput): Promise<RunState> {
+    this.beginCommand();
     try {
       requireSlug(input.slug);
       if (input.request.trim().length === 0) {
@@ -1415,14 +1794,21 @@ export class WorkflowRunner {
       }
       // Validate before lock acquisition because the lock initializes the local
       // run directory. Reload under the lock below so a concurrent config edit
-      // cannot swap policy after this mutation-free validation boundary.
-      await loadConfig(this.repoRoot);
+      // cannot swap policy after this mutation-free validation boundary. The
+      // local model layer is read only there, once, so the layer the run
+      // records is the layer it starts with (ADR-0060 §5).
+      await loadCommittedConfig(this.repoRoot);
       await currentCommit(this.repoRoot);
       await this.assertProjectGuidance(false);
       const lock = await this.acquireWorkflowLock();
       try {
         this.info(`Preparing run ${input.slug} in ${this.repoRoot}`);
-        const config = await loadConfig(this.repoRoot);
+        const effective = requireEffectiveConfig(
+          await readLayeredConfig(this.repoRoot, {
+            visibility: this.modelGuard.visibility
+          })
+        );
+        const config = effective.config;
         const baseCommit = await currentCommit(this.repoRoot);
         const createdAt = this.now();
         const state: RunState = {
@@ -1505,7 +1891,12 @@ export class WorkflowRunner {
           createdAt: state.createdAt
         });
         await ensureExecutionIgnores(this.repoRoot);
-        await this.store.createRun(state);
+        await this.store.createRun(state, effective.models);
+        this.modelGuard.record = {
+          runId: state.runId,
+          models: effective.models,
+          recorded: effective.models
+        };
         await observeHumanTime(this.context, state, "run_created");
         await this.assertProjectGuidance();
         try {
@@ -1526,12 +1917,7 @@ export class WorkflowRunner {
           );
           this.reportBaseline(state);
         } catch (error) {
-          if (
-            error instanceof TerminalRunStateError ||
-            error instanceof ProjectSetupRequiredError ||
-            error instanceof InstructionResourceMismatchError
-          )
-            throw error;
+          if (passesThroughRunCatches(error)) throw error;
           return await recordStartFailure(this.context, state, error);
         }
         transitionState(state, "selecting");
@@ -1548,6 +1934,7 @@ export class WorkflowRunner {
   }
 
   async resume(): Promise<RunState> {
+    this.beginCommand();
     try {
       const lock = await this.acquireWorkflowLock();
       try {
@@ -1556,10 +1943,18 @@ export class WorkflowRunner {
         if (TERMINAL_STATUSES.has(state.status)) {
           return state;
         }
-        const config = await loadConfig(this.repoRoot);
+        const committed = await loadCommittedConfig(this.repoRoot);
         assertContractParity();
+        // Every path below that writes compares first (ADR-0060 §5 check
+        // point 1, reading 12); a resume that only returns state writes
+        // nothing and never compares.
+        const continueWith = async (): Promise<OrchestratorConfig> => {
+          await this.compareModelRecord(state, "entry");
+          return await this.runEffective(committed, state);
+        };
 
         if (state.recovery?.recoveryAttemptId === null) {
+          const config = await continueWith();
           const authorization = await this.store.readRecoveryAuthorization(
             state.runId,
             state.recovery.authorizationId
@@ -1584,6 +1979,7 @@ export class WorkflowRunner {
             );
             return state;
           }
+          const config = await continueWith();
           this.info(`Reconciling recorded attempt ${state.activeAttempt.id}`);
           return await this.reconcileAttempt(state, config);
         }
@@ -1604,33 +2000,53 @@ export class WorkflowRunner {
         }
         switch (state.status) {
           case "created":
-            transitionState(state, "selecting");
-            await this.store.writeState(state);
+          case "selecting": {
+            // A run in `created` or `selecting` with no model attempt records
+            // the current local layer again instead of comparing, before its
+            // first write (ADR-0060 §5 Recording again, reading 13). A crash,
+            // setup refusal or check-point refusal before the selection
+            // attempt leaves such a run.
+            let config: OrchestratorConfig;
+            if (await this.withoutModelAttempt(state)) {
+              const pending = await this.readLayerForRecording(state, {
+                modelAttempt: false,
+                terminal: false
+              });
+              if (pending !== null) await this.recordModelLayer(pending);
+              config = await this.runEffective(committed, state);
+            } else config = await continueWith();
+            if (state.status === "created") {
+              transitionState(state, "selecting");
+              await this.store.writeState(state);
+            }
             return await this.executeSelection(state, config);
-          case "selecting":
-            return await this.executeSelection(state, config);
+          }
           case "planning":
-            return await this.executePlanningStep(state, config);
+            return await this.executePlanningStep(state, await continueWith());
           case "plan_approved":
-            return await this.executeImplementation(state, config);
           case "implementing":
-            return await this.executeImplementation(state, config);
+            return await this.executeImplementation(
+              state,
+              await continueWith()
+            );
           case "verifying":
-            return await this.executeVerification(state, config);
+            return await this.executeVerification(state, await continueWith());
           case "reviewing":
-            return await this.executeReview(state, config);
+            return await this.executeReview(state, await continueWith());
           case "fixing":
-            return await this.executeFix(state, config);
+            return await this.executeFix(state, await continueWith());
           case "needs_adr_approval":
           case "needs_plan_approval":
           case "needs_triage":
           case "blocked":
             return state;
           case "needs_human_decision":
-            return state.pendingHumanDecision?.kind ===
-              "configuration_prerequisite"
-              ? await this.resumeConfigurationPrerequisite(state, true)
-              : state;
+            if (
+              state.pendingHumanDecision?.kind !== "configuration_prerequisite"
+            )
+              return state;
+            await continueWith();
+            return await this.resumeConfigurationPrerequisite(state, true);
           default:
             return state;
         }
@@ -1644,6 +2060,27 @@ export class WorkflowRunner {
   }
 
   /**
+   * ADR-0060 reading 13: the run has no attempt record, no active attempt and
+   * no model attempt in its metrics. Only such a run in `created` or
+   * `selecting` records a new local layer on resume, and only such a run
+   * blocked from `created` records one on retry without a terminal.
+   */
+  private async withoutModelAttempt(state: RunState): Promise<boolean> {
+    const counts = state.metrics.attempts;
+    if (
+      state.activeAttempt !== null ||
+      (counts.selection ?? 0) +
+        counts.plan +
+        counts.implementation +
+        counts.fix +
+        counts.review >
+        0
+    )
+      return false;
+    return (await this.store.readRunAttempts(state.runId)).length === 0;
+  }
+
+  /**
    * Which checks a task verification retry reruns, and whether it would
    * repeat a deterministic failure: same descriptors, same observed files,
    * ordinary non-zero exits. Input capture can read up to 128 MiB, so only a
@@ -1651,6 +2088,7 @@ export class WorkflowRunner {
    * yields null, never a warning.
    */
   async verificationRetryOutlook(): Promise<VerificationRetryOutlook | null> {
+    this.beginCommand();
     try {
       const state = await this.store.requireActiveState();
       if (
@@ -1668,7 +2106,7 @@ export class WorkflowRunner {
       const { result } = await this.taskVerificationSource(state);
       const { selection } = await this.taskVerificationSelection(
         state,
-        await loadConfig(this.repoRoot),
+        await this.runConfiguration(state),
         result
       );
       const rerun = unsuccessfulRoundAttempts(
@@ -1752,19 +2190,29 @@ export class WorkflowRunner {
     return unchanged;
   }
 
-  async retry(): Promise<RunState> {
+  /**
+   * Retries a blocked run. Retry records the current local model layer again
+   * (ADR-0060 §5 Recording again): under the eligibility lock it reads the
+   * local file and the run's record and applies the terminal rule, and once
+   * the run has a model attempt a different layer needs `terminal: true` (a
+   * human at a terminal). The default is `false`, as for an agent.
+   */
+  async retry(options: { terminal?: boolean } = {}): Promise<RunState> {
+    this.beginCommand();
+    const terminal = options.terminal === true;
     const initial = await this.store.requireActiveState();
     const dispatch = planningReviewDispatch(initial);
     if (
       initial.status === "blocked" &&
       ["review", "analysis", "published", "restart"].includes(dispatch)
     )
-      return this.retryPlanningReview();
+      return this.retryPlanningReview(terminal);
     try {
       let expectedAttemptId: string | null;
       let expectedRunId: string;
       let retryCheckpoint: RunState["blockedFrom"];
       let planningCheckpointRejection: string | null = null;
+      let pendingRecording: PendingModelRecording | null;
       const eligibilityLock = await this.acquireWorkflowLock();
       try {
         const state = await this.store.requireActiveState();
@@ -1773,6 +2221,13 @@ export class WorkflowRunner {
         if (!retry.eligible) {
           throw new BanzaiError("RETRY_NOT_ALLOWED", retry.reason);
         }
+        // Reading 16: the local file, then the record, then the terminal
+        // rule, before any write. The preflight and every phase this retry
+        // starts resolve with the layer held here.
+        pendingRecording = await this.readLayerForRecording(state, {
+          modelAttempt: !(await this.withoutModelAttempt(state)),
+          terminal
+        });
         await this.assertProjectGuidance();
         if (state.activeAttempt?.kind === "plan") {
           const source = await this.store.readRunAttempt(
@@ -1786,12 +2241,19 @@ export class WorkflowRunner {
               state.activeAttempt
             )) !== null
           ) {
+            // The reconcile applies the plan with the new layer, so the
+            // layer is recorded before its first write; a later preflight
+            // failure keeps this record.
+            if (pendingRecording !== null) {
+              await this.recordModelLayer(pendingRecording);
+              pendingRecording = null;
+            }
             this.info(
               "Reconciling the saved planning terminal result before retry"
             );
             const reconciled = await this.reconcileAttempt(
               state,
-              await loadConfig(this.repoRoot)
+              await this.runConfiguration(state)
             );
             if (
               reconciled.status !== "blocked" ||
@@ -1829,7 +2291,7 @@ export class WorkflowRunner {
 
       let config: OrchestratorConfig;
       try {
-        config = await loadConfig(this.repoRoot);
+        config = await this.runConfiguration({ runId: expectedRunId });
         await this.activity(
           "Retry preflight",
           "rechecking tools, contracts, verification commands, and subscription authentication",
@@ -1838,12 +2300,7 @@ export class WorkflowRunner {
           }
         );
       } catch (error) {
-        if (
-          error instanceof TerminalRunStateError ||
-          error instanceof ProjectSetupRequiredError ||
-          error instanceof InstructionResourceMismatchError
-        )
-          throw error;
+        if (passesThroughRunCatches(error)) throw error;
         if (retryCheckpoint === null) {
           throw error;
         }
@@ -1873,6 +2330,9 @@ export class WorkflowRunner {
               "The retry checkpoint changed while preflight was running."
             );
           }
+          // ADR-0060 §5: compare before the check failure is recorded. The
+          // failure leaves the record as it is.
+          await this.compareModelRecord(state, "attempt");
           if (retryCheckpoint === "created") {
             return await recordStartFailure(this.context, state, error);
           }
@@ -1929,6 +2389,13 @@ export class WorkflowRunner {
           );
         }
         await this.assertProjectGuidance();
+        // ADR-0060 §5: an edit since the eligibility read refuses here.
+        await this.compareModelRecord(state, "attempt");
+        const recordPending = async (): Promise<void> => {
+          if (pendingRecording === null) return;
+          await this.recordModelLayer(pendingRecording);
+          pendingRecording = null;
+        };
         const pendingTransition: (() => Promise<unknown>)[] = [];
         const commitTransition = async () => {
           for (const publish of pendingTransition) await publish();
@@ -1946,14 +2413,12 @@ export class WorkflowRunner {
             );
             this.reportBaseline(state);
           } catch (error) {
-            if (
-              error instanceof TerminalRunStateError ||
-              error instanceof ProjectSetupRequiredError ||
-              error instanceof InstructionResourceMismatchError
-            )
-              throw error;
+            if (passesThroughRunCatches(error)) throw error;
             return await recordStartFailure(this.context, state, error);
           }
+          // Reading 16: for this checkpoint the repository check acts as
+          // preflight, so the layer is recorded after it.
+          await recordPending();
           transitionState(state, "created");
           pendingTransition.push(
             async () =>
@@ -1974,6 +2439,7 @@ export class WorkflowRunner {
           );
           return await this.executeSelection(state, config, commitTransition);
         }
+        await recordPending();
         if (retryCheckpoint === "reviewing") {
           transitionState(state, "reviewing");
           pendingTransition.push(async () => {
@@ -2360,11 +2826,15 @@ export class WorkflowRunner {
   }
 
   async recover(input: RecoverInput, autoResume = true): Promise<RunState> {
+    this.beginCommand();
     try {
       const lock = await this.acquireWorkflowLock();
       try {
         const state = await this.store.requireActiveState();
-        const eligibility = await this.recoveryEligibility(state);
+        await this.compareModelRecord(state, "entry");
+        const eligibility = await this.recoveryEligibility(state, () =>
+          this.runConfiguration(state)
+        );
         if (!eligibility.eligible) {
           throw new BanzaiError("RECOVERY_NOT_ALLOWED", eligibility.reason);
         }
@@ -2484,7 +2954,7 @@ export class WorkflowRunner {
         if (!autoResume) {
           return state;
         }
-        const config = await loadConfig(this.repoRoot);
+        const config = await this.runConfiguration(state);
         assertContractParity();
         return await this.executeAuthorizedRecovery(
           state,
@@ -2537,6 +3007,7 @@ export class WorkflowRunner {
       8000
     );
     const decidedBy = planningDecisionOwner(input.decidedBy);
+    this.beginCommand();
     const lock = await this.acquireWorkflowLock();
     try {
       const state = await this.store.requireActiveState();
@@ -2545,6 +3016,7 @@ export class WorkflowRunner {
           "INVALID_STATE",
           "Plan rework requires plan approval."
         );
+      await this.compareModelRecord(state, "entry");
       const bundle = await digestArtifactBundle(
         this.repoRoot,
         gateArtifactPaths(state, "plan_approval")
@@ -2575,7 +3047,7 @@ export class WorkflowRunner {
       );
       return input.autoResume === false
         ? state
-        : await this.executePlan(state, await loadConfig(this.repoRoot));
+        : await this.executePlan(state, await this.runConfiguration(state));
     } finally {
       await lock.release();
     }
@@ -2670,10 +3142,12 @@ export class WorkflowRunner {
         "INVALID_DECISION",
         "Review scope must be an exact path list."
       );
+    this.beginCommand();
     const lock = await this.acquireWorkflowLock();
     try {
       const state = await this.store.requireActiveState();
       const gate = this.requirePlanningGate(state);
+      await this.compareModelRecord(state, "entry");
       const paths = planningReviewScope(
         gateArtifactPaths(state, gate),
         input.paths
@@ -2713,7 +3187,7 @@ export class WorkflowRunner {
         ? state
         : await this.executePlanningStep(
             state,
-            await loadConfig(this.repoRoot)
+            await this.runConfiguration(state)
           );
     } finally {
       await lock.release();
@@ -2948,7 +3422,7 @@ export class WorkflowRunner {
       record.sessionContext ??
         sessionContext(
           "planner",
-          (await loadConfig(this.repoRoot)).models.planner
+          (await this.runConfiguration(state)).models.planner
         )
     );
     state.pendingHumanDecision = {
@@ -3052,14 +3526,21 @@ export class WorkflowRunner {
       resumeSessionId,
       sessionContext: sessionContext(role, settings)
     };
+    // ADR-0060 §5: planning review and analysis compare before they create
+    // their attempt; the instruction checks below stay inside it.
+    await this.compareModelRecord(state, "attempt");
     const attempt = newAttempt(this.context, state, kind, false);
     const record = await beginAttempt(this.context, state, attempt, policy);
     try {
-      await this.beforeModelAttempt(undefined, {
-        config,
-        role,
-        phase: dispatch === "review" ? "planning-review" : "planning"
-      });
+      await this.beforeModelAttempt(
+        undefined,
+        {
+          config,
+          role,
+          phase: dispatch === "review" ? "planning-review" : "planning"
+        },
+        { compareModels: false }
+      );
       await this.preflightVendor(role, settings);
       const environment = await this.invocationScope(state.runId, config);
       const prompt = insertPhaseInstructions(
@@ -3175,6 +3656,9 @@ export class WorkflowRunner {
         ? await this.applyPlanningReviewResult(state, record, config)
         : await this.applyPlanningAnalysis(state, record);
     } catch (error) {
+      // The analysis continuation's check point may refuse after this review
+      // attempt completed; the completed attempt stays as recorded.
+      if (error instanceof LocalModelOverrideRefusalError) throw error;
       return await failAttempt(this.context, state, record, error);
     }
   }
@@ -3196,6 +3680,7 @@ export class WorkflowRunner {
       ...prePending,
       entries: prePending.analysis
     });
+    this.beginCommand();
     const lock = await this.acquireWorkflowLock();
     try {
       const state = await this.store.requireActiveState();
@@ -3226,6 +3711,7 @@ export class WorkflowRunner {
           "INVALID_DECISION",
           "This planning-review triage is already answered."
         );
+      await this.compareModelRecord(state, "entry");
       if (!(await this.planningScopeCurrent(state, "triage_answer")))
         return state;
       const actionable = actionablePlanningTriage(answer);
@@ -3312,19 +3798,26 @@ export class WorkflowRunner {
       }
       return input.autoResume === false
         ? state
-        : await this.executePlan(state, await loadConfig(this.repoRoot));
+        : await this.executePlan(state, await this.runConfiguration(state));
     } finally {
       await lock.release();
     }
   }
 
-  private async retryPlanningReview(): Promise<RunState> {
+  private async retryPlanningReview(terminal: boolean): Promise<RunState> {
     const lock = await this.acquireWorkflowLock();
     try {
       const state = await this.store.requireActiveState();
       const eligibility = await this.retryEligibility(state);
       if (!eligibility.eligible)
         throw new BanzaiError("RETRY_NOT_ALLOWED", eligibility.reason);
+      // ADR-0060 §5: the planning-review retry reads, checks and records
+      // under its single lock, before its first write.
+      const pending = await this.readLayerForRecording(state, {
+        modelAttempt: !(await this.withoutModelAttempt(state)),
+        terminal
+      });
+      if (pending !== null) await this.recordModelLayer(pending);
       const source =
         state.activeAttempt === null
           ? null
@@ -3368,7 +3861,7 @@ export class WorkflowRunner {
       await this.store.writeState(state);
       return await this.executePlanningStep(
         state,
-        await loadConfig(this.repoRoot),
+        await this.runConfiguration(state),
         source
       );
     } finally {
@@ -3440,21 +3933,24 @@ export class WorkflowRunner {
         ? await this.applyPlanningReviewResult(state, record, config)
         : await this.applyPlanningAnalysis(state, record);
     } catch (error) {
+      if (error instanceof LocalModelOverrideRefusalError) throw error;
       return await failAttempt(this.context, state, record, error);
     }
   }
 
   async approvePlan(approvedBy: string, autoResume = true): Promise<RunState> {
+    this.beginCommand();
     try {
       const lock = await this.acquireWorkflowLock();
       try {
         const state = await this.store.requireActiveState();
         requireState(state, ["needs_plan_approval"], "Plan approval");
+        await this.compareModelRecord(state, "entry");
         // Approval binds whatever bytes exist right now, so the canonical task
         // grammar is checked against those exact bytes: an on-disk edit between
         // the gate and the approval cannot smuggle in a malformed heading.
         await approvedTaskIds(this.context, state);
-        const approvalConfig = await loadConfig(this.repoRoot);
+        const approvalConfig = await this.runConfiguration(state);
         if (state.verificationMode === "task")
           try {
             parseTaskVerificationObligations(
@@ -3554,7 +4050,7 @@ export class WorkflowRunner {
         if (!autoResume) {
           return state;
         }
-        const config = await loadConfig(this.repoRoot);
+        const config = await this.runConfiguration(state);
         return await this.executeImplementation(state, config);
       } finally {
         await lock.release();
@@ -3573,6 +4069,7 @@ export class WorkflowRunner {
    */
   async recheckPlan(input: { decidedBy: string }): Promise<RunState> {
     const decidedBy = planningDecisionOwner(input.decidedBy);
+    this.beginCommand();
     const lock = await this.acquireWorkflowLock();
     try {
       const state = await this.store.requireActiveState();
@@ -3591,6 +4088,7 @@ export class WorkflowRunner {
           "INVALID_STATE",
           "Plan re-check requires an idle plan gate."
         );
+      await this.compareModelRecord(state, "entry");
       const paths = [...new Set(artifactPaths(state))].sort();
       const planPath = completionPlanPath(state);
       const bytes = await readRecheckBundle(this.repoRoot, paths);
@@ -3754,6 +4252,7 @@ export class WorkflowRunner {
       if (canonicalId !== input.id)
         throw new BanzaiError("INVALID_ADR", "ADR id must be canonical.");
     }
+    this.beginCommand();
     try {
       const lock = await this.acquireWorkflowLock();
       try {
@@ -3768,6 +4267,7 @@ export class WorkflowRunner {
             "INVALID_STATE",
             "ADR decision requires an idle gate."
           );
+        await this.compareModelRecord(state, "entry");
         if (input.decision === "rework" && state.schemaVersion >= 10)
           state.humanDecisions = [
             ...(state.humanDecisions ?? []),
@@ -3813,7 +4313,10 @@ export class WorkflowRunner {
         if (!input.autoResume) {
           return state;
         }
-        return await this.executePlan(state, await loadConfig(this.repoRoot));
+        return await this.executePlan(
+          state,
+          await this.runConfiguration(state)
+        );
       } finally {
         await lock.release();
       }
@@ -3827,6 +4330,7 @@ export class WorkflowRunner {
     input: HumanDecisionInput,
     autoResume = true
   ): Promise<RunState> {
+    this.beginCommand();
     try {
       const lock = await this.acquireWorkflowLock();
       try {
@@ -3856,6 +4360,7 @@ export class WorkflowRunner {
             "Every human decision question requires a non-empty answer."
           );
         }
+        await this.compareModelRecord(state, "entry");
         const decision: HumanDecisionRecord = {
           ...pending,
           answers: [...input.answers],
@@ -3897,7 +4402,7 @@ export class WorkflowRunner {
         if (!autoResume) {
           return state;
         }
-        const config = await loadConfig(this.repoRoot);
+        const config = await this.runConfiguration(state);
         return reselectLiteWorkflow
           ? await this.executeSelection(state, config)
           : await this.executePlan(state, config);
@@ -4345,7 +4850,7 @@ export class WorkflowRunner {
           }
         );
         return autoResume
-          ? this.executeVerification(state, await loadConfig(this.repoRoot))
+          ? this.executeVerification(state, await this.runConfiguration(state))
           : state;
       }
     }
@@ -4358,8 +4863,13 @@ export class WorkflowRunner {
         "satisfied_by_configuration",
         null
       );
+      // The handoff carries the run-effective configuration, never the
+      // committed-only verification read (ADR-0060 §2).
       return autoResume
-        ? this.executeVerification(state, current.config)
+        ? this.executeVerification(
+            state,
+            await this.runEffective(current.config, state)
+          )
         : state;
     }
     if (
@@ -4414,7 +4924,8 @@ export class WorkflowRunner {
       const selection = selectTaskVerification({
         required: obligations.checks,
         candidates: null,
-        policy: taskVerificationPolicy(await loadConfig(this.repoRoot))
+        // Committed-only: a plan-gate projection that supplies no models.
+        policy: taskVerificationPolicy(await loadCommittedConfig(this.repoRoot))
       });
       return {
         checks: selection.checks.map(({ descriptor }) => ({
@@ -4435,6 +4946,7 @@ export class WorkflowRunner {
     autoResume = true
   ): Promise<RunState> {
     configurationText(input.decidedBy);
+    this.beginCommand();
     const lock = await this.acquireWorkflowLock();
     try {
       const state = await this.store.requireActiveState();
@@ -4472,6 +4984,7 @@ export class WorkflowRunner {
             );
             return result.state ?? (await this.store.readState(state.runId));
           }
+          await this.compareModelRecord(state, "entry");
           await this.validateConfigurationContinuation(
             state,
             pending.continuation
@@ -4611,7 +5124,10 @@ export class WorkflowRunner {
             );
           }
           return autoResume
-            ? this.executeVerification(state, await loadConfig(this.repoRoot))
+            ? this.executeVerification(
+                state,
+                await this.runConfiguration(state)
+              )
             : state;
         }
       );
@@ -4635,6 +5151,7 @@ export class WorkflowRunner {
       decisionIdentifier(input.requestId, "requestId");
       decisionIdentifier(input.roundId, "roundId");
       decisionText(input.decidedBy, "decidedBy", 200);
+      this.beginCommand();
       const lock = await this.acquireWorkflowLock();
       try {
         const state = await this.store.requireActiveState();
@@ -4681,6 +5198,7 @@ export class WorkflowRunner {
           input.answers,
           pending.request
         );
+        await this.compareModelRecord(state, "entry");
         const decidedAt = this.now();
         const decision: HumanDecisionRecord = {
           ...pending,
@@ -4721,7 +5239,10 @@ export class WorkflowRunner {
         if (!autoResume) {
           return state;
         }
-        return await this.executePlan(state, await loadConfig(this.repoRoot));
+        return await this.executePlan(
+          state,
+          await this.runConfiguration(state)
+        );
       } finally {
         await lock.release();
       }
@@ -4732,6 +5253,7 @@ export class WorkflowRunner {
   }
 
   async triage(input: TriageInput, autoResume = true): Promise<RunState> {
+    this.beginCommand();
     try {
       const lock = await this.acquireWorkflowLock();
       try {
@@ -4739,6 +5261,7 @@ export class WorkflowRunner {
         requireState(state, ["needs_triage"], "Review triage");
         const review = await this.readLatestReview(state);
         const items = this.validateTriage(review.findings, input);
+        await this.compareModelRecord(state, "entry");
         const triage: TriageRecord = {
           reviewIteration: state.reviewIteration,
           decidedAt: this.now(),
@@ -4789,12 +5312,7 @@ export class WorkflowRunner {
           try {
             await revalidateTaskCompletion(this.context, state);
           } catch (error) {
-            if (
-              error instanceof TerminalRunStateError ||
-              error instanceof ProjectSetupRequiredError ||
-              error instanceof InstructionResourceMismatchError
-            )
-              throw error;
+            if (passesThroughRunCatches(error)) throw error;
             return await blockForCompletionFailure(
               this.context,
               state,
@@ -4809,7 +5327,7 @@ export class WorkflowRunner {
           await this.store.writeState(state);
           return state;
         }
-        const config = await loadConfig(this.repoRoot);
+        const config = await this.runConfiguration(state);
         if (state.fixCycle >= config.maxFixCycles) {
           blockState(state, "Maximum fix-cycle count reached.");
           await this.store.writeState(state);
@@ -5173,9 +5691,14 @@ export class WorkflowRunner {
     const latestReview =
       state.latestReview === null ? null : await this.readLatestReview(state);
     const retry = await this.retryEligibility(state);
-    const recovery = await this.recoveryEligibility(state);
+    // One configuration source for the whole status call (ADR-0060 §5).
+    const configuration = await this.statusConfiguration(state);
+    const recovery = await this.recoveryEligibility(state, configuration);
     const taskCompletion = await this.taskCompletionStatus(state);
-    const completionPublication = await this.completionPublicationStatus(state);
+    const completionPublication = await this.completionPublicationStatus(
+      state,
+      configuration
+    );
     let recommended = nextAction(state, retry, recovery, completionPublication);
     // Historical work never resumes execution; cancelling is its only exit.
     if (historical)
@@ -5186,7 +5709,8 @@ export class WorkflowRunner {
     if (state.pendingHumanDecision?.kind === "configuration_prerequisite") {
       const request = state.pendingHumanDecision;
       try {
-        const config = await loadConfig(this.repoRoot);
+        // Committed-only: verification configuration supplies no models.
+        const config = await loadCommittedConfig(this.repoRoot);
         const inspection = await inspectVerificationProject(this.repoRoot);
         const profiles = [
           ...new Set(
@@ -5337,12 +5861,7 @@ export class WorkflowRunner {
         diagnostic =
           "Run predates the canonical task-completion ledger; a report table cannot establish exact completion retroactively.";
       } catch (error) {
-        if (
-          error instanceof TerminalRunStateError ||
-          error instanceof ProjectSetupRequiredError ||
-          error instanceof InstructionResourceMismatchError
-        )
-          throw error;
+        if (passesThroughRunCatches(error)) throw error;
         if (error instanceof PlanTaskCompletionError) {
           diagnostic = error.message;
         }
@@ -5429,12 +5948,7 @@ export class WorkflowRunner {
         diagnostics: []
       };
     } catch (error) {
-      if (
-        error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError ||
-        error instanceof InstructionResourceMismatchError
-      )
-        throw error;
+      if (passesThroughRunCatches(error)) throw error;
       const completionError =
         error instanceof PlanTaskCompletionError ? error : null;
       return {
@@ -5597,7 +6111,8 @@ export class WorkflowRunner {
   }
 
   private async prerequisiteBlockedFixRecoveryEligibility(
-    state: RunState
+    state: RunState,
+    configuration: RunConfigurationSource
   ): Promise<RecoveryEligibility> {
     const facts: PrerequisiteBlockedFixFacts = { state };
     const workspace: RecoveryWorkspaceSnapshot = {};
@@ -5612,14 +6127,15 @@ export class WorkflowRunner {
         if (step.evidence === "prerequisite_source")
           facts.source = await this.prerequisiteBlockedFixSource(state);
         else
-          await this.gatherRecoveryPrecondition(state, step, facts, workspace);
+          await this.gatherRecoveryPrecondition(
+            state,
+            step,
+            facts,
+            workspace,
+            configuration
+          );
       } catch (error) {
-        if (
-          error instanceof TerminalRunStateError ||
-          error instanceof ProjectSetupRequiredError ||
-          error instanceof InstructionResourceMismatchError
-        )
-          throw error;
+        if (passesThroughRunCatches(error)) throw error;
         facts.preconditionFailure = {
           message: error instanceof BanzaiError ? error.message : null
         };
@@ -5630,7 +6146,8 @@ export class WorkflowRunner {
   /** ADR-0051's digest-rejected source; the rule documents its evidence. */
   private async digestRejectedRecoveryEligibility(
     state: RunState,
-    attempt: AttemptReference
+    attempt: AttemptReference,
+    configuration: RunConfigurationSource
   ): Promise<RecoveryEligibility | null> {
     const facts: DigestRejectedFacts = { state, attempt };
     const workspace: RecoveryWorkspaceSnapshot = {};
@@ -5646,12 +6163,7 @@ export class WorkflowRunner {
           );
           facts.source = { readable: true, record, evidence };
         } catch (error) {
-          if (
-            error instanceof TerminalRunStateError ||
-            error instanceof ProjectSetupRequiredError ||
-            error instanceof InstructionResourceMismatchError
-          )
-            throw error;
+          if (passesThroughRunCatches(error)) throw error;
           facts.source = {
             readable: false,
             invalidEvidenceMessage:
@@ -5695,16 +6207,12 @@ export class WorkflowRunner {
               state,
               step,
               facts,
-              workspace
+              workspace,
+              configuration
             );
         }
       } catch (error) {
-        if (
-          error instanceof TerminalRunStateError ||
-          error instanceof ProjectSetupRequiredError ||
-          error instanceof InstructionResourceMismatchError
-        )
-          throw error;
+        if (passesThroughRunCatches(error)) throw error;
         facts.preconditionsFailed = true;
       }
     }
@@ -5712,20 +6220,23 @@ export class WorkflowRunner {
 
   /**
    * Gathers one precondition every recovery source reads the same way. Each
-   * source keeps its own baseline error scope around the call.
+   * source keeps its own baseline error scope around the call. The
+   * configuration comes from the caller: the run resolver for a command that
+   * may write, or the status source built once per status call (ADR-0060 §2).
    */
   private async gatherRecoveryPrecondition(
     state: RunState,
     step: RecoveryPreconditionStep,
     facts: RecoveryPreconditionFacts,
-    workspace: RecoveryWorkspaceSnapshot
+    workspace: RecoveryWorkspaceSnapshot,
+    configuration: RunConfigurationSource
   ): Promise<void> {
     switch (step.evidence) {
       case "head_commit":
         facts.headCommit = await currentCommit(this.repoRoot);
         return;
       case "configuration": {
-        const config = await loadConfig(this.repoRoot);
+        const config = await configuration();
         assertContractParity();
         const settings = config.models[step.role];
         const vendor =
@@ -5798,7 +6309,8 @@ export class WorkflowRunner {
   }
 
   private async recoveryEligibility(
-    state: RunState
+    state: RunState,
+    configuration: RunConfigurationSource
   ): Promise<RecoveryEligibility> {
     const facts: RecoveryFacts = { state };
     const workspace: RecoveryWorkspaceSnapshot = {};
@@ -5809,12 +6321,16 @@ export class WorkflowRunner {
         case "digest_rejected_source":
           facts.digestRejected = await this.digestRejectedRecoveryEligibility(
             state,
-            step.attempt
+            step.attempt,
+            configuration
           );
           break;
         case "prerequisite_blocked_fix_source":
           facts.prerequisiteBlockedFix =
-            await this.prerequisiteBlockedFixRecoveryEligibility(state);
+            await this.prerequisiteBlockedFixRecoveryEligibility(
+              state,
+              configuration
+            );
           break;
         case "process_liveness":
           facts.processAlive = this.store.processAlive(step.pid);
@@ -5851,9 +6367,13 @@ export class WorkflowRunner {
               state,
               step,
               facts,
-              workspace
+              workspace,
+              configuration
             );
-          } catch {
+          } catch (error) {
+            // A defective run record refuses a state-changing command; the
+            // status source never throws this class (ADR-0060 §5).
+            if (error instanceof LocalModelOverrideRefusalError) throw error;
             facts.preconditionsFailed = true;
           }
       }
@@ -5936,7 +6456,9 @@ export class WorkflowRunner {
               activeProcess: null
             }
           : state;
-    const eligibility = await this.recoveryEligibility(eligibilityState);
+    const eligibility = await this.recoveryEligibility(eligibilityState, () =>
+      this.runConfiguration(state)
+    );
     await this.assertProjectGuidance();
     const workspace = eligibility.workspace;
     const expectedSourceKind = digestRejected
@@ -6086,12 +6608,7 @@ export class WorkflowRunner {
               commitTransition
             );
     } catch (error) {
-      if (
-        error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError ||
-        error instanceof InstructionResourceMismatchError
-      )
-        throw error;
+      if (passesThroughRunCatches(error)) throw error;
       const current = await this.store.readState(state.runId);
       if (
         current.activeAttempt === null &&
@@ -6504,12 +7021,7 @@ export class WorkflowRunner {
           before
         );
     } catch (error) {
-      if (
-        error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError ||
-        error instanceof InstructionResourceMismatchError
-      )
-        throw error;
+      if (passesThroughRunCatches(error)) throw error;
       await finish("failed", {
         usage:
           error instanceof ProcessExitError
@@ -6645,24 +7157,14 @@ export class WorkflowRunner {
           config
         );
       } catch (error) {
-        if (
-          error instanceof TerminalRunStateError ||
-          error instanceof ProjectSetupRequiredError ||
-          error instanceof InstructionResourceMismatchError
-        )
-          throw error;
+        if (passesThroughRunCatches(error)) throw error;
         state.activeAttempt = null;
         blockState(state, errorMessage(error));
         await this.store.writeState(state);
         return state;
       }
     } catch (error) {
-      if (
-        error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError ||
-        error instanceof InstructionResourceMismatchError
-      )
-        throw error;
+      if (passesThroughRunCatches(error)) throw error;
       return await failAttempt(this.context, state, record, error);
     }
   }
@@ -7073,24 +7575,14 @@ export class WorkflowRunner {
           sessionContext("planner", config.models.planner)
         );
       } catch (error) {
-        if (
-          error instanceof TerminalRunStateError ||
-          error instanceof ProjectSetupRequiredError ||
-          error instanceof InstructionResourceMismatchError
-        )
-          throw error;
+        if (passesThroughRunCatches(error)) throw error;
         state.activeAttempt = null;
         blockState(state, errorMessage(error));
         await this.store.writeState(state);
         return state;
       }
     } catch (error) {
-      if (
-        error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError ||
-        error instanceof InstructionResourceMismatchError
-      )
-        throw error;
+      if (passesThroughRunCatches(error)) throw error;
       // Capture the stopped workspace, not the pre-planning tree: planning may
       // have written documentation. Missing evidence only disables cache reuse.
       try {
@@ -7391,24 +7883,14 @@ export class WorkflowRunner {
           sessionContext("implementer", config.models.implementer)
         );
       } catch (error) {
-        if (
-          error instanceof TerminalRunStateError ||
-          error instanceof ProjectSetupRequiredError ||
-          error instanceof InstructionResourceMismatchError
-        )
-          throw error;
+        if (passesThroughRunCatches(error)) throw error;
         state.activeAttempt = null;
         blockState(state, errorMessage(error));
         await this.store.writeState(state);
         return state;
       }
     } catch (error) {
-      if (
-        error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError ||
-        error instanceof InstructionResourceMismatchError
-      )
-        throw error;
+      if (passesThroughRunCatches(error)) throw error;
       return await failAttempt(this.context, state, record, error);
     }
   }
@@ -7661,12 +8143,7 @@ export class WorkflowRunner {
         sessionContext("implementer", config.models.implementer)
       );
     } catch (error) {
-      if (
-        error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError ||
-        error instanceof InstructionResourceMismatchError
-      )
-        throw error;
+      if (passesThroughRunCatches(error)) throw error;
       return await failAttempt(this.context, state, record, error);
     }
   }
@@ -7709,12 +8186,7 @@ export class WorkflowRunner {
           baseline: state.baseline
         });
       } catch (error) {
-        if (
-          error instanceof TerminalRunStateError ||
-          error instanceof ProjectSetupRequiredError ||
-          error instanceof InstructionResourceMismatchError
-        )
-          throw error;
+        if (passesThroughRunCatches(error)) throw error;
         diagnostic = {
           violation:
             error instanceof PlanTaskCompletionError
@@ -8056,7 +8528,8 @@ export class WorkflowRunner {
    * corrupt or conflicting proof exposes cancel.
    */
   private async completionPublicationStatus(
-    state: RunState
+    state: RunState,
+    configuration: RunConfigurationSource
   ): Promise<WorkflowStatus["completionPublication"]> {
     const cursor = state.completionPublication ?? null;
     if (cursor === null) return null;
@@ -8090,7 +8563,7 @@ export class WorkflowRunner {
               state,
               record.envelope.artifacts
             );
-            const config = await loadConfig(this.repoRoot);
+            const config = await configuration();
             let restored = false;
             if (capture === null && candidate === null) {
               const checkpoint =
@@ -8404,7 +8877,7 @@ export class WorkflowRunner {
     if (state.status === "verifying") {
       return await this.executeVerification(
         state,
-        await loadConfig(this.repoRoot),
+        await this.runConfiguration(state),
         attempt.kind === "implementation" || attempt.kind === "fix"
           ? attempt
           : undefined
@@ -8480,7 +8953,7 @@ export class WorkflowRunner {
           );
         const storage = taskVerificationStorage(this.context, state);
         const policy = taskVerificationPolicy(
-          config ?? (await loadConfig(this.repoRoot))
+          config ?? (await this.runConfiguration(state))
         );
         if (
           (policy ? evidenceDigest(policy) : null) !==
@@ -8534,6 +9007,8 @@ export class WorkflowRunner {
           );
         return true;
       } catch (error) {
+        // A run guard refusal adds no block reason (ADR-0060 §5).
+        if (error instanceof LocalModelOverrideRefusalError) throw error;
         blockState(
           state,
           await digestRejectionReason(
@@ -8551,7 +9026,7 @@ export class WorkflowRunner {
       hasConfigurationSetup(state) &&
       state.configurationSetup?.coverage === "skipped"
     ) {
-      const current = await loadConfig(this.repoRoot);
+      const current = await this.runConfiguration(state);
       const inspection = await inspectVerificationProject(this.repoRoot);
       if (!this.configurationSkipCurrent(state, current, inspection)) {
         const records = await this.store.readVerificationAttempts(state.runId);
@@ -8637,7 +9112,7 @@ export class WorkflowRunner {
         this.requireVerificationApplicability(state, config)
       );
     try {
-      const currentConfig = await loadConfig(this.repoRoot);
+      const currentConfig = await this.runConfiguration(state);
       if (
         config &&
         JSON.stringify(currentConfig.verification) !==
@@ -8684,6 +9159,8 @@ export class WorkflowRunner {
         );
       return true;
     } catch (error) {
+      // A run guard refusal adds no block reason (ADR-0060 §5).
+      if (error instanceof LocalModelOverrideRefusalError) throw error;
       blockState(state, errorMessage(error));
       await this.store.writeState(state);
       return false;
@@ -8718,12 +9195,7 @@ export class WorkflowRunner {
           sourceAttempt?.kind === "fix"
         );
       } catch (error) {
-        if (
-          error instanceof TerminalRunStateError ||
-          error instanceof ProjectSetupRequiredError ||
-          error instanceof InstructionResourceMismatchError
-        )
-          throw error;
+        if (passesThroughRunCatches(error)) throw error;
         return await blockForCompletionFailure(
           this.context,
           state,
@@ -8801,12 +9273,7 @@ export class WorkflowRunner {
     try {
       reconcileVerificationState(state, records, round, descriptors);
     } catch (error) {
-      if (
-        error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError ||
-        error instanceof InstructionResourceMismatchError
-      )
-        throw error;
+      if (passesThroughRunCatches(error)) throw error;
       state.activeProcess = null;
       blockState(state, errorMessage(error));
       await this.store.writeState(state);
@@ -9204,7 +9671,7 @@ export class WorkflowRunner {
           );
         if (
           evidenceDigest(
-            taskVerificationPolicy(await loadConfig(this.repoRoot))
+            taskVerificationPolicy(await this.runConfiguration(state))
           ) !== evidenceDigest(policy)
         )
           throw new BanzaiError(
@@ -9357,6 +9824,9 @@ export class WorkflowRunner {
       });
       return state;
     } catch (error) {
+      // Only the run guard refusals pass: they keep the task verification
+      // and add no block reason (ADR-0060 §5).
+      if (error instanceof LocalModelOverrideRefusalError) throw error;
       const current = await this.store.readState(state.runId);
       if (current.status === "cancelled") return current;
       state.activeProcess = null;
@@ -9499,6 +9969,8 @@ export class WorkflowRunner {
         state.blockReason ===
           "Required task verification is unavailable or stale."
       ) {
+        // ADR-0060 §5 check point 2 before the pending retry transition.
+        await this.compareModelRecord(state, "attempt");
         await commitTransition();
         transitionState(state, "verifying");
         await this.store.writeState(state);
@@ -9511,12 +9983,7 @@ export class WorkflowRunner {
     try {
       validatedCompletion = await revalidateTaskCompletion(this.context, state);
     } catch (error) {
-      if (
-        error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError ||
-        error instanceof InstructionResourceMismatchError
-      )
-        throw error;
+      if (passesThroughRunCatches(error)) throw error;
       return await blockForCompletionFailure(
         this.context,
         state,
@@ -9547,12 +10014,7 @@ export class WorkflowRunner {
         }
       );
     } catch (error) {
-      if (
-        error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError ||
-        error instanceof InstructionResourceMismatchError
-      )
-        throw error;
+      if (passesThroughRunCatches(error)) throw error;
       const current = await this.store.readState(state.runId);
       if (current.status === "cancelled") {
         return current;
@@ -9901,12 +10363,7 @@ export class WorkflowRunner {
       candidateEvidence.validation = "passed";
       await this.store.writeRunAttempt(state.runId, record);
     } catch (error) {
-      if (
-        error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError ||
-        error instanceof InstructionResourceMismatchError
-      )
-        throw error;
+      if (passesThroughRunCatches(error)) throw error;
       (record.reviewDiagnostics ??= []).push({
         stage: "render_validation",
         code:
@@ -9975,12 +10432,7 @@ export class WorkflowRunner {
         }
       );
     } catch (error) {
-      if (
-        error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError ||
-        error instanceof InstructionResourceMismatchError
-      )
-        throw error;
+      if (passesThroughRunCatches(error)) throw error;
       (record.reviewDiagnostics ??= []).push({
         stage: "publication_application",
         code:
@@ -10144,12 +10596,7 @@ export class WorkflowRunner {
       try {
         await revalidateTaskCompletion(this.context, state);
       } catch (error) {
-        if (
-          error instanceof TerminalRunStateError ||
-          error instanceof ProjectSetupRequiredError ||
-          error instanceof InstructionResourceMismatchError
-        )
-          throw error;
+        if (passesThroughRunCatches(error)) throw error;
         return await blockForCompletionFailure(
           this.context,
           state,
@@ -10283,12 +10730,7 @@ export class WorkflowRunner {
         );
         if (reconciled !== null) return reconciled;
       } catch (error) {
-        if (
-          error instanceof TerminalRunStateError ||
-          error instanceof ProjectSetupRequiredError ||
-          error instanceof InstructionResourceMismatchError
-        )
-          throw error;
+        if (passesThroughRunCatches(error)) throw error;
         state.activeProcess = null;
         blockState(
           state,
@@ -10313,12 +10755,7 @@ export class WorkflowRunner {
         config
       );
     } catch (error) {
-      if (
-        error instanceof TerminalRunStateError ||
-        error instanceof ProjectSetupRequiredError ||
-        error instanceof InstructionResourceMismatchError
-      )
-        throw error;
+      if (passesThroughRunCatches(error)) throw error;
       if (attempt.kind === "plan" && error instanceof PlanTaskCompletionError) {
         record.status = "failed";
         record.error = error.message;
@@ -10389,12 +10826,7 @@ export class WorkflowRunner {
             state
           );
         } catch (error) {
-          if (
-            error instanceof TerminalRunStateError ||
-            error instanceof ProjectSetupRequiredError ||
-            error instanceof InstructionResourceMismatchError
-          )
-            throw error;
+          if (passesThroughRunCatches(error)) throw error;
           return await blockForCompletionFailure(
             this.context,
             state,
@@ -10593,12 +11025,7 @@ export class WorkflowRunner {
             await publishReviewArtifact(this.repoRoot, artifact, candidate);
           }
         } catch (error) {
-          if (
-            error instanceof TerminalRunStateError ||
-            error instanceof ProjectSetupRequiredError ||
-            error instanceof InstructionResourceMismatchError
-          )
-            throw error;
+          if (passesThroughRunCatches(error)) throw error;
           if (record.reviewContext !== undefined) {
             (record.reviewDiagnostics ??= []).push({
               stage: "recovery",
@@ -10685,12 +11112,7 @@ export class WorkflowRunner {
             )
           ).summary;
         } catch (error) {
-          if (
-            error instanceof TerminalRunStateError ||
-            error instanceof ProjectSetupRequiredError ||
-            error instanceof InstructionResourceMismatchError
-          )
-            throw error;
+          if (passesThroughRunCatches(error)) throw error;
           return await blockForCompletionFailure(
             this.context,
             state,

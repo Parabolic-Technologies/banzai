@@ -8,7 +8,7 @@ import {
   CONFIG_FILE,
   DEFAULT_CONFIG,
   initializeConfig,
-  loadConfig,
+  loadCommittedConfig,
   editVerificationConfigBytes
 } from "../src/config.js";
 import { parseConfig } from "../src/validation.js";
@@ -169,10 +169,46 @@ test("init is idempotent and preserves tracked config", async () => {
     const ignore = await readFile(path.join(root, ".gitignore"), "utf8");
     assert.match(ignore, /^coverage\/\n/);
     assert.match(ignore, /\.banzai\/runs\//);
-    const config = await loadConfig(root);
+    const config = await loadCommittedConfig(root);
     assert.equal(config.schemaVersion, 4);
     assert.deepEqual(config.context, { mode: "observe", limits: [] });
     assert.deepEqual(config.verification.profiles, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("init adds the exact local model ignore line once and keeps broad rules", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "banzai-init-local-"));
+  try {
+    const broad = ".banzai/*\n!.banzai/config.json\n";
+    await writeFile(path.join(root, ".gitignore"), broad, "utf8");
+    await initializeConfig(root);
+    await initializeConfig(root);
+    const ignore = await readFile(path.join(root, ".gitignore"), "utf8");
+    assert.ok(ignore.startsWith(broad), ignore);
+    assert.equal(
+      ignore.split("\n").filter((line) => line === ".banzai/config.local.json")
+        .length,
+      1
+    );
+    // Only the exact line is added, never a broader local pattern.
+    assert.doesNotMatch(ignore, /config\.local\.\*|\*\.local\.json/u);
+
+    const existing = await mkdtemp(path.join(tmpdir(), "banzai-init-local-"));
+    try {
+      const lines =
+        ".banzai/runs/\n.banzai/active-run.json\n.banzai/runner.lock\n.banzai/config.local.json\n";
+      await writeFile(path.join(existing, ".gitignore"), lines, "utf8");
+      const result = await initializeConfig(existing);
+      assert.equal(result.gitignoreUpdated, false);
+      assert.equal(
+        await readFile(path.join(existing, ".gitignore"), "utf8"),
+        lines
+      );
+    } finally {
+      await rm(existing, { recursive: true, force: true });
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -300,7 +336,7 @@ test("loads schema version one through a stable compatibility profile", async ()
     const configPath = path.join(root, CONFIG_FILE);
     await writeFile(configPath, `${JSON.stringify(legacy, null, 2)}\n`, "utf8");
 
-    const loaded = await loadConfig(root);
+    const loaded = await loadCommittedConfig(root);
     assert.equal(loaded.schemaVersion, 1);
     const legacyProfile = loaded.verification.profiles[0];
     assert.ok(legacyProfile);

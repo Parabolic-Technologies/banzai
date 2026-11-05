@@ -20,6 +20,14 @@ import {
 } from "./claude-permissions.js";
 import { CONFIG_FILE } from "./config.js";
 import {
+  LOCAL_CONFIG_FILE,
+  MODEL_IDENTIFIER_PATTERN,
+  createLocalConfigVisibility,
+  mergeModelLayer,
+  readLocalModelLayer,
+  type LocalConfigGitProbe
+} from "./local-config.js";
+import {
   adoptionDiagnostic,
   inspectProjectAdoption
 } from "./project-adoption.js";
@@ -34,6 +42,12 @@ import {
 import { CONTRACT_VERSION } from "./types.js";
 import type {
   ClaudeEnvironmentSettings,
+  LocalConfigDefect,
+  LocalModelLayer,
+  LocalModelLayerStatus,
+  ModelSettings,
+  ModelSource,
+  ModelSources,
   OrchestratorConfig,
   RunStatus,
   VerificationProjectType
@@ -89,14 +103,38 @@ export interface DoctorSummary {
   skipped: number;
 }
 
+/**
+ * One role of the effective configuration (ADR-0060 §6, §8). Only the vendor,
+ * an identifier-shaped model, the effort and the source are disclosed; the
+ * executable path, timeouts and every other value stay undisclosed.
+ */
+export interface DoctorModel {
+  role: "planner" | "implementer" | "reviewer";
+  /** `null` for an executable that is neither `claude` nor `codex`. */
+  vendor: "claude" | "codex" | null;
+  /** `null` unless the identifier matches `MODEL_IDENTIFIER_PATTERN`. */
+  model: string | null;
+  effort: ModelSettings["effort"];
+  source: ModelSource;
+}
+
 export interface DoctorReport {
   schema: "banzai-doctor/v6";
   schemaVersion: 6;
   ready: boolean;
   projectTypes: VerificationProjectType[];
+  /** Empty while the effective configuration is unavailable. */
+  models: DoctorModel[];
   summary: DoctorSummary;
   checks: DoctorCheck[];
 }
+
+/**
+ * The two read-only Git queries doctor may run for the local model file
+ * (ADR-0060 §8): `git ls-files --error-unmatch --` and
+ * `git check-ignore -q --`, at the repository root with `LC_ALL=C`.
+ */
+export type DoctorLocalConfigGitProbe = LocalConfigGitProbe;
 
 export interface DoctorDependencies {
   executableAvailable(
@@ -116,6 +154,12 @@ export interface DoctorDependencies {
    * Defaults to this process's environment; tests point it at a temporary home.
    */
   claudeSettingsEnvironment?: NodeJS.ProcessEnv;
+  /**
+   * Injected by the composition root, because doctor itself never imports the
+   * Git module. Asked only when `.banzai/config.local.json` exists. Without
+   * it, an existing local file fails `config.local` as if Git could not run.
+   */
+  localConfigGitState?: DoctorLocalConfigGitProbe;
 }
 
 const RUN_STATUSES = new Set<RunStatus>([
@@ -192,6 +236,13 @@ const DEFAULT_DEPENDENCIES: DoctorDependencies = {
   executableAvailable,
   processAlive
 };
+
+/** The default doctor dependencies with `overrides` in their place. */
+export function doctorDependencies(
+  overrides: Partial<DoctorDependencies> = {}
+): DoctorDependencies {
+  return { ...DEFAULT_DEPENDENCIES, ...overrides };
+}
 
 function check(
   id: string,
@@ -322,6 +373,264 @@ function configVersionCheck(document: unknown): DoctorCheck {
   );
 }
 
+const LOCAL_CONFIG_DOCUMENTATION =
+  "documentation/orchestrator.md#model-configuration";
+const LOCAL_CONFIG_CORRECTION: DoctorFix = {
+  action: `Correct ${LOCAL_CONFIG_FILE}, or delete it to use the shared models in ${CONFIG_FILE}.`,
+  documentation: LOCAL_CONFIG_DOCUMENTATION
+};
+
+/**
+ * The field paths of the local file's own schema. Doctor names a defect's
+ * field path only from this fixed set, so no key chosen by the file's author
+ * reaches the report (ADR-0060 §6, §8).
+ */
+const SCHEMA_FIELD_PATHS: ReadonlySet<string> = new Set([
+  "schemaVersion",
+  "models",
+  ...MODEL_ROLES.flatMap((role) => [
+    `models.${role}`,
+    `models.${role}.executable`,
+    `models.${role}.model`,
+    `models.${role}.effort`
+  ])
+]);
+
+/** Where a refused key sits, named only through the schema's own paths. */
+function refusedKeyLocation(fieldPath: string): string {
+  const unsupported = "an unsupported key in ";
+  let parent: string;
+  if (fieldPath.startsWith(unsupported)) {
+    parent = fieldPath.slice(unsupported.length);
+  } else if (fieldPath.includes(".")) {
+    parent = fieldPath.slice(0, fieldPath.lastIndexOf("."));
+  } else {
+    return "at the top level";
+  }
+  return SCHEMA_FIELD_PATHS.has(parent) ? `in ${parent}` : "in the file";
+}
+
+function localConfigFailure(message: string, fix: DoctorFix): DoctorCheck {
+  return check("config.local", "config", "fail", message, [fix]);
+}
+
+/** The fixed `config.local` text for each cause of a refused local file. */
+function localConfigDefectCheck(defect: LocalConfigDefect): DoctorCheck {
+  switch (defect.cause) {
+    case "tracked":
+      return localConfigFailure(
+        `${LOCAL_CONFIG_FILE} is in the Git index, so it is shared through Git and may hold someone else's model choice.`,
+        {
+          action: `Run \`git rm --cached ${LOCAL_CONFIG_FILE}\`, review the local copy, and commit the removal.`,
+          documentation: LOCAL_CONFIG_DOCUMENTATION
+        }
+      );
+    case "not_ignored":
+      return localConfigFailure(
+        `${LOCAL_CONFIG_FILE} is not ignored by Git, so it could be committed and shared.`,
+        {
+          action: `Run \`banzai model --local\`, which ignores the file for this clone, or add the line ${LOCAL_CONFIG_FILE} to .gitignore and commit it.`,
+          documentation: LOCAL_CONFIG_DOCUMENTATION
+        }
+      );
+    case "unsafe":
+      return localConfigFailure(
+        `${LOCAL_CONFIG_FILE} is unsafe to read: it or .banzai/ is a symbolic link, or it is not a regular file.`,
+        {
+          action: `Make .banzai/ a directory and ${LOCAL_CONFIG_FILE} a regular file, or delete the local file to use the shared models in ${CONFIG_FILE}.`,
+          documentation: LOCAL_CONFIG_DOCUMENTATION
+        }
+      );
+    case "unreadable":
+      return localConfigFailure(
+        `${LOCAL_CONFIG_FILE} cannot be read.`,
+        LOCAL_CONFIG_CORRECTION
+      );
+    case "refused_key":
+      return localConfigFailure(
+        `${LOCAL_CONFIG_FILE} sets a key that is not allowed ${refusedKeyLocation(defect.fieldPath)}; it may set only schemaVersion and models, with executable, model and effort for planner, implementer and reviewer.`,
+        LOCAL_CONFIG_CORRECTION
+      );
+    case "invalid":
+      return localConfigFailure(
+        invalidLocalConfigMessage(defect.fieldPath),
+        LOCAL_CONFIG_CORRECTION
+      );
+  }
+}
+
+function invalidLocalConfigMessage(fieldPath: string): string {
+  if (fieldPath === LOCAL_CONFIG_FILE) {
+    return `${LOCAL_CONFIG_FILE} is not a local model file: it is larger than 64 KiB, not UTF-8 text, not JSON or not a JSON object.`;
+  }
+  return SCHEMA_FIELD_PATHS.has(fieldPath)
+    ? `${LOCAL_CONFIG_FILE} has a missing or invalid value at ${fieldPath}.`
+    : `${LOCAL_CONFIG_FILE} has a missing or invalid value.`;
+}
+
+/** A failure of one of the two Git queries, never a statement about the file. */
+class LocalConfigGitUnavailable extends Error {
+  constructor() {
+    super("Git could not answer for the local model file.");
+    this.name = "LocalConfigGitUnavailable";
+  }
+}
+
+/**
+ * Wraps the injected probe so any Git failure, or a missing probe, surfaces as
+ * one marker that `config.local` reports with fixed text.
+ */
+function doctorGitProbe(
+  probe: DoctorLocalConfigGitProbe | undefined
+): LocalConfigGitProbe {
+  const ask = async (
+    query: (target: DoctorLocalConfigGitProbe) => Promise<boolean>
+  ): Promise<boolean> => {
+    if (probe === undefined) throw new LocalConfigGitUnavailable();
+    try {
+      return await query(probe);
+    } catch {
+      throw new LocalConfigGitUnavailable();
+    }
+  };
+  return {
+    isPathInIndex: async (repoRoot, relativePath) =>
+      await ask(async (target) => target.isPathInIndex(repoRoot, relativePath)),
+    isPathIgnored: async (repoRoot, relativePath) =>
+      await ask(async (target) => target.isPathIgnored(repoRoot, relativePath))
+  };
+}
+
+interface LocalConfigInspection {
+  check: DoctorCheck;
+  /** The usable local layer (`{}` when absent); null while `config.local` fails. */
+  layer: LocalModelLayer | null;
+}
+
+/**
+ * The `config.local` check (ADR-0060 §6). The layered reader decides presence
+ * by `lstat`, so Git is asked only about an existing file, and in the order
+ * index, then ignore state, then the contained read and validation.
+ */
+async function localConfigCheck(
+  repoRoot: string,
+  dependencies: DoctorDependencies
+): Promise<LocalConfigInspection> {
+  let status: LocalModelLayerStatus;
+  try {
+    status = await readLocalModelLayer(repoRoot, {
+      visibility: createLocalConfigVisibility(
+        doctorGitProbe(dependencies.localConfigGitState)
+      )
+    });
+  } catch (error) {
+    return {
+      check:
+        error instanceof LocalConfigGitUnavailable
+          ? localConfigFailure(
+              `Git could not report whether ${LOCAL_CONFIG_FILE} is in the Git index or ignored, so the local model file was not used.`,
+              {
+                action:
+                  "Make sure git runs in this checkout, then run banzai doctor again.",
+                documentation: LOCAL_CONFIG_DOCUMENTATION
+              }
+            )
+          : localConfigFailure(
+              `${LOCAL_CONFIG_FILE} cannot be read.`,
+              LOCAL_CONFIG_CORRECTION
+            ),
+      layer: null
+    };
+  }
+  if (status.state === "defective") {
+    return { check: localConfigDefectCheck(status.defect), layer: null };
+  }
+  if (status.state === "absent") {
+    return {
+      check: check(
+        "config.local",
+        "config",
+        "pass",
+        `No local model file is present; every role uses the shared models in ${CONFIG_FILE}.`
+      ),
+      layer: {}
+    };
+  }
+  return {
+    check: check(
+      "config.local",
+      "config",
+      "pass",
+      `${LOCAL_CONFIG_FILE} is valid, ignored by Git and not in the Git index; the roles it sets replace the shared ones.`
+    ),
+    layer: status.models
+  };
+}
+
+/**
+ * The disclosed per-role models of the effective configuration (ADR-0060 §8),
+ * in planner, implementer, reviewer order.
+ */
+function doctorModels(
+  config: OrchestratorConfig,
+  sources: ModelSources
+): DoctorModel[] {
+  return MODEL_ROLES.map((role) => {
+    const settings = config.models[role];
+    return {
+      role,
+      vendor: vendorFor(settings.executable),
+      model: MODEL_IDENTIFIER_PATTERN.test(settings.model)
+        ? settings.model
+        : null,
+      effort: settings.effort,
+      source: sources[role]
+    };
+  });
+}
+
+/** Why a role check that reads the effective configuration did not run. */
+const LOCAL_CONFIG_SKIP = "while the local model file fails config.local";
+
+/** What the role checks and the `models` field read (ADR-0060 §2, §6). */
+interface RoleConfiguration {
+  /** The effective configuration; null without a valid committed one. */
+  config: OrchestratorConfig | null;
+  /** `config.local` failed, so the role checks are skipped. */
+  localFailed: boolean;
+  models: DoctorModel[];
+  executables: string[] | null;
+  executablesSkipped: string | undefined;
+}
+
+function roleConfiguration(
+  committed: OrchestratorConfig | null,
+  layer: LocalModelLayer | null
+): RoleConfiguration {
+  if (committed === null || layer === null) {
+    return {
+      config: committed,
+      localFailed: layer === null,
+      models: [],
+      executables: null,
+      executablesSkipped:
+        committed === null
+          ? undefined
+          : `Model executable availability is skipped ${LOCAL_CONFIG_SKIP}.`
+    };
+  }
+  const effective = mergeModelLayer(committed, layer);
+  return {
+    config: effective.config,
+    localFailed: false,
+    models: doctorModels(effective.config, effective.sources),
+    executables: MODEL_ROLES.map(
+      (role) => effective.config.models[role].executable
+    ),
+    executablesSkipped: undefined
+  };
+}
+
 async function claudeEnvironmentCheck(
   config: OrchestratorConfig | null,
   dependencies: DoctorDependencies
@@ -371,6 +680,7 @@ async function claudeEnvironmentCheck(
 
 async function claudeInstructionsCheck(
   config: OrchestratorConfig | null,
+  localFailed: boolean,
   dependencies: DoctorDependencies
 ): Promise<DoctorCheck> {
   if (config === null)
@@ -379,6 +689,13 @@ async function claudeInstructionsCheck(
       "config",
       "skipped",
       "Instruction comparison is skipped without a valid configuration."
+    );
+  if (localFailed)
+    return check(
+      "claude.instructions",
+      "config",
+      "skipped",
+      `Instruction comparison is skipped ${LOCAL_CONFIG_SKIP}.`
     );
   let directory: string | null;
   try {
@@ -446,6 +763,7 @@ async function claudeInstructionsCheck(
 async function claudePermissionsCheck(
   repoRoot: string,
   config: OrchestratorConfig | null,
+  localFailed: boolean,
   dependencies: DoctorDependencies
 ): Promise<DoctorCheck> {
   if (config === null) {
@@ -454,6 +772,14 @@ async function claudePermissionsCheck(
       "config",
       "skipped",
       "Claude permission inspection requires a valid configuration."
+    );
+  }
+  if (localFailed) {
+    return check(
+      "claude.permissions",
+      "config",
+      "skipped",
+      `Claude permission inspection is skipped ${LOCAL_CONFIG_SKIP}.`
     );
   }
   const permissions = await inspectConfiguredClaudePermissions(
@@ -570,15 +896,11 @@ async function configuredExecutableCheck(
   id: "executables.models" | "executables.verification",
   commands: readonly string[] | null,
   repoRoot: string,
-  dependencies: DoctorDependencies
+  dependencies: DoctorDependencies,
+  skipped = "Executable availability requires a valid configuration."
 ): Promise<DoctorCheck> {
   if (commands === null) {
-    return check(
-      id,
-      "executables",
-      "skipped",
-      "Executable availability requires a valid configuration."
-    );
+    return check(id, "executables", "skipped", skipped);
   }
   const uniqueCommands = [...new Set(commands)];
   let missing = 0;
@@ -1000,9 +1322,24 @@ export async function inspectDoctor(
     );
   }
   checks.push(configVersionCheck(configDocument));
+  const local = await localConfigCheck(repoRoot, dependencies);
+  checks.push(local.check);
+  // ADR-0060 §2, §6: role checks read the effective configuration; the
+  // environment and verification checks keep the committed values, which the
+  // local file cannot change.
+  const roles = roleConfiguration(config, local.layer);
   checks.push(await claudeEnvironmentCheck(config, dependencies));
-  checks.push(await claudeInstructionsCheck(config, dependencies));
-  checks.push(await claudePermissionsCheck(repoRoot, config, dependencies));
+  checks.push(
+    await claudeInstructionsCheck(roles.config, roles.localFailed, dependencies)
+  );
+  checks.push(
+    await claudePermissionsCheck(
+      repoRoot,
+      roles.config,
+      roles.localFailed,
+      dependencies
+    )
+  );
   checks.push(await claudePluginScopeCheck(dependencies));
 
   let projectTypes: VerificationProjectType[] = [];
@@ -1049,15 +1386,10 @@ export async function inspectDoctor(
   checks.push(
     await configuredExecutableCheck(
       "executables.models",
-      config === null
-        ? null
-        : [
-            config.models.planner.executable,
-            config.models.implementer.executable,
-            config.models.reviewer.executable
-          ],
+      roles.executables,
       repoRoot,
-      dependencies
+      dependencies,
+      roles.executablesSkipped
     ),
     await configuredExecutableCheck(
       "executables.verification",
@@ -1085,6 +1417,7 @@ export async function inspectDoctor(
     schemaVersion: 6,
     ready: reportSummary.failed === 0,
     projectTypes,
+    models: roles.models,
     summary: reportSummary,
     checks
   };

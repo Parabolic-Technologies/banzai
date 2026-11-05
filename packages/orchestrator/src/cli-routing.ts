@@ -26,6 +26,7 @@ export function resolveCliMode(
   // must reach their parser instead of the global help shortcut.
   if (
     command === "doctor" ||
+    command === "model" ||
     command === "cancel" ||
     command === "compatibility" ||
     command === "control" ||

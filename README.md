@@ -54,7 +54,10 @@ Use a regular terminal in your own Git repository. You need:
 To use one provider, install its client and plugin, then select that provider
 for all three roles during `banzai init`. Strict review still uses a fresh
 session. The default configuration uses Claude for planning and implementation
-and Codex for review.
+and Codex for review. The team shares these choices in `.banzai/config.json`;
+`banzai model --local` saves different models for any phase on your machine
+only, in the Git-ignored
+[local model file](documentation/orchestrator.md#local-model-file).
 
 Model work uses the clients' remote services and subscription limits.
 The [getting-started guide](documentation/getting-started.md) covers client setup,

@@ -229,8 +229,8 @@ Implementation and review must confirm:
   doctor v6 adds the `config.local` check, the top-level `models` field, the
   bounded per-role model disclosure and two read-only Git queries for
   `config.local`. Preserve offline/read-only behavior, the other privacy rules
-  and historical diagnostic meanings. Implementation of this amendment is
-  Planned.
+  and historical diagnostic meanings. Implemented on 2026-11-05 by
+  [WP6](../work/wp06-local-model-override/implementation-report.md).
 
 - Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted
   2026-09-14: doctor v4, per-role parity and cause-specific remedies. Preserve

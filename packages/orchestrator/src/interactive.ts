@@ -23,16 +23,16 @@ import type {
 } from "./human-time.js";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import type { ModelUpdate } from "./config.js";
 import packageManifest from "../package.json" with { type: "json" };
 import { createStyler, type Styler } from "./ansi.js";
-import { BanzaiError, errorMessage } from "./errors.js";
+import { BanzaiError, errorMessage, LocalConfigError } from "./errors.js";
 import {
   PLAN_RECHECK_REFUSAL_CODES,
   planGateWaitingLines,
   planRecheckLines
 } from "./plan-gate-ui.js";
 import {
+  escapeTerminalField,
   escapeTerminalText,
   formatUsage,
   hangingLines,
@@ -48,11 +48,20 @@ import {
   type ModelAdvisory,
   type ModelRole
 } from "./models.js";
+import {
+  humanStatusView,
+  modelDriftBlock,
+  recordInvalidLines
+} from "./model-status.js";
 import type {
   AdrDecision,
   DecisionConsultationAnswer,
   DecisionConsultationCard,
+  EffectiveModelConfiguration,
   ModelSettings,
+  ModelSource,
+  ModelSources,
+  ModelStatus,
   OrchestratorConfig,
   ReviewFinding,
   RunState
@@ -150,9 +159,14 @@ export interface InteractiveRunner {
     state: RunState
   ): Promise<PlanVerificationInventory | null>;
   status(): Promise<WorkflowStatus>;
+  /** The run's model view, which human status applies (ADR-0060 reading 11). */
+  modelStatus?(
+    state: Pick<RunState, "runId" | "status"> | null
+  ): Promise<ModelStatus>;
   start(input: StartRunInput): Promise<RunState>;
   resume(): Promise<RunState>;
-  retry(): Promise<RunState>;
+  /** The interactive session is a human at a terminal (ADR-0060 reading 17). */
+  retry(options?: { terminal?: boolean }): Promise<RunState>;
   restoreApproval(): Promise<string[]>;
   restoreEligibility(): Promise<{ eligible: boolean; reason: string }>;
   recover(input: RecoverInput, autoResume?: boolean): Promise<RunState>;
@@ -186,14 +200,71 @@ export interface InteractiveRunner {
   ): Promise<CancellationResponseResult>;
 }
 
+/** The two model files (ADR-0060 §1). */
+export type ModelConfigurationFile =
+  typeof COMMITTED_MODEL_FILE | typeof LOCAL_MODEL_FILE;
+
+const COMMITTED_MODEL_FILE = ".banzai/config.json";
+const LOCAL_MODEL_FILE = ".banzai/config.local.json";
+
+/**
+ * The models of the active run, when it is neither done nor cancelled
+ * (ADR-0060 §7). `recorded` holds the run-effective configuration (the
+ * committed file merged with the run's record) and the escaped drift lines
+ * between the record and the current local file; `record_invalid` is a run
+ * whose record cannot be read, which has no run-effective configuration.
+ */
+export type LaunchRunModels =
+  | {
+      state: "recorded";
+      runId: string;
+      models: EffectiveModelConfiguration;
+      drift: readonly string[];
+    }
+  | { state: "record_invalid"; runId: string; recordPath: string };
+
+/**
+ * One layered read at launch (ADR-0060 §2, §7). `effective` is what a new run
+ * would use now: its `models` are the local layer and its `sources` name the
+ * file that supplies each role.
+ */
+export interface LaunchModels {
+  committed: OrchestratorConfig;
+  effective: EffectiveModelConfiguration;
+  /** The non-terminal run's models; null without one. */
+  run: LaunchRunModels | null;
+}
+
+/**
+ * One advisory update, routed to the file that supplies its role (ADR-0060
+ * §3). `replaces` is the model the launch showed, so a write after a
+ * concurrent edit refuses instead of changing another value.
+ */
+export interface LaunchModelUpdate {
+  role: ModelRole;
+  model: string;
+  replaces: string;
+  source: ModelSource;
+}
+
 /**
  * Repository-local model configuration. Kept separate from the runner because
  * configuration is read and written outside any run.
  */
 export interface ModelConfigurationGateway {
-  /** Resolves to null when the project has no `.banzai/config.json` yet. */
-  load(): Promise<OrchestratorConfig | null>;
-  applyModelUpdates(updates: readonly ModelUpdate[]): Promise<void>;
+  /**
+   * Resolves to null when the project has no `.banzai/config.json` yet. A
+   * refused local file rejects with `LocalConfigError`, which ends the launch
+   * before authentication (reading 9).
+   */
+  load(): Promise<LaunchModels | null>;
+  /**
+   * Writes each update to the file that supplies its role, under the runner
+   * lock, and resolves to the files that changed.
+   */
+  applyModelUpdates(
+    updates: readonly LaunchModelUpdate[]
+  ): Promise<readonly ModelConfigurationFile[]>;
 }
 
 /**
@@ -313,6 +384,27 @@ async function statusOrNull(
     }
     throw error;
   }
+}
+
+/**
+ * ADR-0060 reading 11 for the interactive session, as for `banzai status`: a
+ * run whose model record cannot be read offers neither retry nor recovery and
+ * recommends cancel. A proven terminal result is not offered either, because
+ * resuming it refuses on the same record.
+ */
+async function humanStatus(
+  runner: InteractiveRunner,
+  status: WorkflowStatus
+): Promise<WorkflowStatus> {
+  const models = await runner.modelStatus?.(status.state);
+  if (models === undefined) return status;
+  const view = humanStatusView(status, models);
+  return models.state === "record_invalid"
+    ? {
+        ...view,
+        recovery: { ...view.recovery, terminalCheckpointPresent: false }
+      }
+    : view;
 }
 
 function adrIdFromArtifact(artifact: string): string {
@@ -1730,7 +1822,7 @@ async function handleStatus(
                     : `Check ${escapeTerminalText(retrySet.checkIds[0] ?? "")} failed with an ordinary exit, and its command and the observed project files are unchanged, so it is expected to fail the same way. Retry anyway?`
                   : "Run preflight and start a fresh retry?";
       if (await io.confirm(message, false)) {
-        await runWork(options, () => runner.retry());
+        await runWork(options, () => runner.retry({ terminal: true }));
       }
       return true;
     }
@@ -1863,18 +1955,36 @@ async function checkAuthentication(
   }));
 }
 
+/** The models a launch header shows: the configuration and each role's file. */
+interface HeaderModels {
+  config: OrchestratorConfig;
+  sources: ModelSources;
+}
+
+/**
+ * Reading 9: with a non-terminal run the header and the authentication markers
+ * use the run-effective configuration; without one, the current effective
+ * configuration. A run whose record cannot be read has none to show.
+ */
+function headerModels(models: LaunchModels): HeaderModels | null {
+  if (models.run === null) return models.effective;
+  return models.run.state === "recorded" ? models.run.models : null;
+}
+
 /**
  * The launch header: what is running, where, and against which models. It
  * replaces a thirteen-line model-and-authentication report with one line per
  * phase, because at launch the only authentication fact worth a paragraph is a
- * failing one.
+ * failing one. A role the local file supplies is marked `(local)`; with every
+ * role from `.banzai/config.json` the rows are unchanged (ADR-0060 §7). Every
+ * model value is printed through terminal escaping.
  */
 function renderHeader(
   io: InteractiveIO,
   styler: Styler,
   repoRoot: string,
   identity: RepositoryIdentity | null,
-  config: OrchestratorConfig | null,
+  models: HeaderModels | null,
   authentication: readonly VendorAuthentication[]
 ): void {
   const dim = (value: string): string => styler.dim(value);
@@ -1891,20 +2001,26 @@ function renderHeader(
         )
   ].filter((part) => part !== null);
   io.writeLine(location.join(dim(" · ")));
-  if (config === null) {
+  if (models === null) {
     return;
   }
 
   const readiness = new Map(
     authentication.map((entry) => [entry.executable, entry.reason])
   );
-  const entries = configuredModels(config);
+  const entries = configuredModels(models.config).map((entry) => ({
+    role: entry.role,
+    executable: entry.executable,
+    vendor: escapeTerminalField(path.basename(entry.executable)),
+    model: escapeTerminalField(entry.model),
+    effort: escapeTerminalField(entry.effort),
+    // The mark rides the timeout cell, so readiness markers stay aligned.
+    timeout: `${entry.timeout}${models.sources[entry.role] === "local" ? " (local)" : ""}`
+  }));
   const roleWidth = Math.max(
     ...entries.map((entry) => SHORT_ROLE_LABELS[entry.role].length)
   );
-  const vendorWidth = Math.max(
-    ...entries.map((entry) => path.basename(entry.executable).length)
-  );
+  const vendorWidth = Math.max(...entries.map((entry) => entry.vendor.length));
   const modelWidth = Math.max(...entries.map((entry) => entry.model.length));
   const effortWidth = Math.max(...entries.map((entry) => entry.effort.length));
   const timeoutWidth = Math.max(
@@ -1925,9 +2041,9 @@ function renderHeader(
         ? ""
         : `${" ".repeat(timeoutWidth - entry.timeout.length + 2)}${marker}`;
     io.writeLine(
-      `  ${SHORT_ROLE_LABELS[entry.role].padEnd(roleWidth)}  ${path
-        .basename(entry.executable)
-        .padEnd(vendorWidth)} ${styler.bold(entry.model)}${" ".repeat(
+      `  ${SHORT_ROLE_LABELS[entry.role].padEnd(roleWidth)}  ${entry.vendor.padEnd(
+        vendorWidth
+      )} ${styler.bold(entry.model)}${" ".repeat(
         modelWidth - entry.model.length
       )}  ${dim(`${entry.effort.padEnd(effortWidth)} · ${entry.timeout}`)}${readinessCell}`
     );
@@ -1941,10 +2057,36 @@ function renderHeader(
   io.writeLine();
   renderNotice(io, styler, styler.red, [
     ...failures.map(
-      (entry) => `${entry.executable} (${entry.roles}): ${entry.reason ?? ""}`
+      (entry) =>
+        `${escapeTerminalField(entry.executable)} (${entry.roles}): ${entry.reason ?? ""}`
     ),
     "Every phase re-checks this; resolve it before starting a run."
   ]);
+}
+
+/**
+ * ADR-0060 §7 and reading 11 for the launch: the drift lines of a
+ * non-terminal run, or the run's unreadable model record with the advice to
+ * cancel it. Nothing for a run without drift or without a run.
+ */
+function renderRunModelNotice(
+  io: InteractiveIO,
+  styler: Styler,
+  run: LaunchRunModels | null
+): void {
+  if (run === null) return;
+  const lines =
+    run.state === "recorded"
+      ? modelDriftBlock(run.drift)
+      : recordInvalidLines(run.recordPath);
+  if (lines.length === 0) return;
+  io.writeLine();
+  renderNotice(
+    io,
+    styler,
+    run.state === "recorded" ? styler.yellow : styler.red,
+    lines
+  );
 }
 
 /** A left-ruled block for advisories and blockers, echoing the CLI convention. */
@@ -1962,13 +2104,27 @@ function renderNotice(
   }
 }
 
+/** The files a set of advisories would change, `.banzai/config.json` first. */
+function advisoryFiles(
+  advisories: readonly ModelAdvisory[],
+  sources: ModelSources
+): ModelConfigurationFile[] {
+  const files: ModelConfigurationFile[] = [];
+  if (advisories.some((advisory) => sources[advisory.role] === "committed"))
+    files.push(COMMITTED_MODEL_FILE);
+  if (advisories.some((advisory) => sources[advisory.role] === "local"))
+    files.push(LOCAL_MODEL_FILE);
+  return files;
+}
+
 async function chooseModelUpdates(
   io: InteractiveIO,
-  advisories: readonly ModelAdvisory[]
-): Promise<ModelUpdate[]> {
+  advisories: readonly ModelAdvisory[],
+  sources: ModelSources
+): Promise<ModelAdvisory[]> {
   const action = await io.select<ModelUpdateAction>("Model configuration", [
     {
-      name: `Update ${advisories.length === 1 ? "this model" : `all ${advisories.length} models`} in .banzai/config.json`,
+      name: `Update ${advisories.length === 1 ? "this model" : `all ${advisories.length} models`} in ${advisoryFiles(advisories, sources).join(" and ")}`,
       value: "update_all"
     },
     { name: "Choose which models to update", value: "update_some" },
@@ -1977,25 +2133,23 @@ async function chooseModelUpdates(
   if (action === "keep") {
     return [];
   }
-  const selected =
-    action === "update_all"
-      ? [...advisories]
-      : await filterModelUpdates(io, advisories);
-  return selected.map((advisory) => ({
-    role: advisory.role,
-    model: advisory.replacement
-  }));
+  return action === "update_all"
+    ? [...advisories]
+    : await filterModelUpdates(io, advisories, sources);
 }
 
 async function filterModelUpdates(
   io: InteractiveIO,
-  advisories: readonly ModelAdvisory[]
+  advisories: readonly ModelAdvisory[],
+  sources: ModelSources
 ): Promise<ModelAdvisory[]> {
   const selected: ModelAdvisory[] = [];
   for (const advisory of advisories) {
+    const file =
+      sources[advisory.role] === "local" ? ` in ${LOCAL_MODEL_FILE}` : "";
     if (
       await io.confirm(
-        `${advisory.label}: replace ${advisory.model} with ${advisory.replacement}?`,
+        `${advisory.label}: replace ${advisory.model} with ${advisory.replacement}${file}?`,
         false
       )
     ) {
@@ -2003,6 +2157,13 @@ async function filterModelUpdates(
     }
   }
   return selected;
+}
+
+/** The result line for each changed file (ADR-0060 §3). */
+function modelUpdateResultLine(file: ModelConfigurationFile): string {
+  return file === COMMITTED_MODEL_FILE
+    ? `Updated ${COMMITTED_MODEL_FILE}. Review and commit the change.`
+    : `Updated ${LOCAL_MODEL_FILE} for this machine only. Git ignores it, so there is nothing to commit.`;
 }
 
 async function presentLaunch(
@@ -2013,18 +2174,24 @@ async function presentLaunch(
   const styler = options.styler ?? createStyler(false);
   const gateway = options.models;
   const identity = await describeRepository(options);
-  let config: OrchestratorConfig | null = null;
+  let models: LaunchModels | null = null;
   let loadError: string | null = null;
   if (gateway !== undefined) {
     try {
-      config = await gateway.load();
+      models = await gateway.load();
     } catch (error) {
+      // A refused local model file ends the launch before authentication;
+      // committed configuration errors keep the unavailable report
+      // (ADR-0060 §4, reading 9).
+      if (error instanceof LocalConfigError) throw error;
       loadError = errorMessage(error);
     }
   }
+  const shown = models === null ? null : headerModels(models);
   const authentication =
-    config === null ? [] : await checkAuthentication(config, options.auth);
-  renderHeader(io, styler, runner.repoRoot, identity, config, authentication);
+    shown === null ? [] : await checkAuthentication(shown.config, options.auth);
+  renderHeader(io, styler, runner.repoRoot, identity, shown, authentication);
+  renderRunModelNotice(io, styler, models?.run ?? null);
   if (loadError !== null) {
     io.writeLine();
     io.writeLine(`Model configuration unavailable: ${loadError}`);
@@ -2033,7 +2200,7 @@ async function presentLaunch(
   if (gateway === undefined) {
     return;
   }
-  if (config === null) {
+  if (models === null) {
     io.writeLine();
     io.writeLine(
       "No .banzai/config.json found. Run `banzai init` to configure models."
@@ -2041,6 +2208,9 @@ async function presentLaunch(
     return;
   }
 
+  // The advisory concerns the files, so it reads the current effective
+  // configuration and writes each update to the file that supplies its role.
+  const { config, sources } = models.effective;
   const advisories = modelAdvisories(config);
   if (advisories.length === 0) {
     return;
@@ -2066,27 +2236,35 @@ async function presentLaunch(
     return;
   }
 
-  const updates = await chooseModelUpdates(io, advisories);
-  if (updates.length === 0) {
+  const chosen = await chooseModelUpdates(io, advisories, sources);
+  if (chosen.length === 0) {
     io.writeLine("Keeping the current model configuration.");
     return;
   }
   if (
     !(await io.confirm(
-      `Write ${updates.length === 1 ? "this change" : `these ${updates.length} changes`} to .banzai/config.json?`,
+      `Write ${chosen.length === 1 ? "this change" : `these ${chosen.length} changes`} to ${advisoryFiles(chosen, sources).join(" and ")}?`,
       false
     ))
   ) {
     io.writeLine("Keeping the current model configuration.");
     return;
   }
+  let changed: readonly ModelConfigurationFile[];
   try {
-    await gateway.applyModelUpdates(updates);
+    changed = await gateway.applyModelUpdates(
+      chosen.map((advisory) => ({
+        role: advisory.role,
+        model: advisory.replacement,
+        replaces: advisory.model,
+        source: sources[advisory.role]
+      }))
+    );
   } catch (error) {
     io.writeLine(`Model configuration was not updated: ${errorMessage(error)}`);
     return;
   }
-  io.writeLine("Updated .banzai/config.json. Review and commit the change.");
+  for (const file of changed) io.writeLine(modelUpdateResultLine(file));
 }
 
 function humanTimeDuration(milliseconds: number | null): string {
@@ -2599,8 +2777,8 @@ async function interactiveLoop(
 ): Promise<void> {
   await presentLaunch(runner, io, options);
   while (true) {
-    const status = await statusOrNull(runner);
-    if (status === null) {
+    const observed = await statusOrNull(runner);
+    if (observed === null) {
       io.writeLine();
       io.writeLine("No active repository-local run.");
       renderMenuSeparator(io, options.styler ?? createStyler(false));
@@ -2614,6 +2792,7 @@ async function interactiveLoop(
       if (!(await startRun(runner, io, options))) return;
       continue;
     }
+    const status = await humanStatus(runner, observed);
     let humanTime: HumanTimeSummary | undefined;
     if (options.humanTime !== undefined) {
       try {

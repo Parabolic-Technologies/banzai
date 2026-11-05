@@ -193,3 +193,16 @@ export function escapeTerminalText(text: string): string {
     (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`
   );
 }
+
+/**
+ * Terminal escaping for one configuration value printed inside a line, such as
+ * a model name (ADR-0060): the escaping above plus TAB and LF, so a value can
+ * neither move the cursor nor start a new line. The escaped form contains no
+ * escapable character, so escaping it again changes nothing.
+ */
+export function escapeTerminalField(text: string): string {
+  return escapeTerminalText(text).replace(
+    /[\t\n]/gu,
+    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`
+  );
+}

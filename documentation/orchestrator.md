@@ -572,7 +572,7 @@ banzai control status
 banzai control start --slug <slug>
 banzai control answer [--by <name>] [--no-resume]
 banzai control recover [--by <name>] [--no-resume]
-banzai model
+banzai model [--local]
 banzai run --slug <slug> --request <text>
 banzai status [--json]
 banzai eval export [--json] [--from <RFC3339>] [--to <RFC3339>] [--run <run-id>]...
@@ -709,6 +709,20 @@ Existing approval, triage, resume, retry, cancel, human status, interactive,
 and `status --json` commands retain their behavior. A supervisor refreshes
 control status after those commands instead of parsing their human prose.
 
+The [local model file](#local-model-file) leaves the control surface
+unchanged: capabilities v9, status v7 and `status --json` carry no model
+sources or drift. A supervisor learns of a changed local file only when the
+command that status recommends refuses with `LOCAL_MODEL_OVERRIDE_CHANGED`.
+That refusal writes nothing and keeps the recommendation, so the supervisor
+relays the error's lines to the human instead of repeating the command or
+editing `.banzai/config.local.json`. Before the run's first model attempt, an
+agent's `banzai retry` of a blocked run, or `banzai resume` of a run still in
+`created` or `selecting`, records the new local models and prints the change.
+After it, an agent's retry refuses: it runs without a terminal, and only a
+human `banzai retry` in a terminal records a changed local file for such a run.
+`LOCAL_MODEL_OVERRIDE_RECORD_INVALID` means the run's own record cannot be
+read; relay it too, because the remedy is `banzai cancel`.
+
 ## Runner instruction delivery
 
 The runner embeds seven phase resources (`planning`, `implementation`, `review`,
@@ -758,7 +772,7 @@ exits 1 when the checkout is not ready. Warnings, including a live or stale
 valid runner lock, remain visible without changing readiness.
 
 Doctor checks Git, structural project guidance, the supported Node/platform and contract versions, config
-presence and structure, the Claude invocation environment and its tool
+presence and structure, the local model file, the Claude invocation environment and its tool
 permissions, the Claude plugin scope, detected project types, optional task policy,
 required executable availability, the active-run pointer and
 referenced state, and the runner lock. The report's fixed check
@@ -796,6 +810,39 @@ moves the install to
 when user settings do not enable Banzai, so a local or project install gives
 no hint, and it is skipped when that file is unreadable or not a JSON object.
 It never fails and never changes `ready`.
+
+`config.local` follows `config.version` and checks the
+[local model file](#local-model-file). It passes when
+`.banzai/config.local.json` is absent, or when it is valid, ignored by Git and
+not in the Git index. It fails, with a fixed message per cause and a fix that
+links [Model Configuration](#model-configuration), when the file is in the Git
+index, is not ignored, is unsafe (a symbolic link or a non-regular file, or a
+symbolic link at `.banzai/`, which fails even when no local file exists), is
+unreadable, is invalid, or sets a refused key, and when Git cannot answer the
+query. A message names at most a field path from the local file's schema and
+never repeats a key or value from the file. Only when the file exists does
+doctor run `git ls-files --error-unmatch -- .banzai/config.local.json` and
+`git check-ignore -q -- .banzai/config.local.json`, at the repository root
+with `LC_ALL=C`; these two read-only queries are the only Git commands the
+local file adds.
+
+The top-level `models` array sits between `projectTypes` and `summary`. It
+holds one entry per role, in planner, implementer, reviewer order, with exactly
+`role`, `vendor` (`claude`, `codex`, or `null` for any other executable),
+`model` (`null` unless the identifier matches the local file's model pattern),
+`effort`, and `source` (`committed` or `local`). Executable paths, timeouts and
+other configuration values stay undisclosed. The array is empty while
+`config.local` fails or the committed configuration is missing or invalid. The
+text report prints a `Models:` block between `Project types:` and `Checks:`,
+one line per role such as
+`  reviewer: claude claude-opus-5-5 effort=xhigh (local)`, with `other` for an
+unknown vendor, `unlisted` for an undisclosed model, and `Models: unavailable`
+for an empty array.
+
+`claude.instructions`, `claude.permissions`, and `executables.models` evaluate
+the effective configuration, so a local Claude reviewer is checked as Claude.
+While `config.local` fails they are `skipped`. `claude.environment` and the
+verification checks read committed values, which the local file cannot change.
 
 Project detection is root-only and uses these markers:
 
@@ -835,7 +882,9 @@ neither rewritten nor treated as current task authorization.
 
 Model selection preserves this tracked representation byte-for-byte outside
 the exact requested `model`, `executable`, and `effort` JSON value tokens,
-including schema-version-1 formatting and unknown fields.
+including schema-version-1 formatting and unknown fields. The ignored
+`.banzai/config.local.json` has no such guarantee: writers always emit its
+fixed format.
 
 Doctor is offline and structurally read-only. It runs before vendor adapters or
 `WorkflowRunner`, never authenticates, invokes a model, executes verification,
@@ -1253,13 +1302,67 @@ re-review may resume only that independent source-read-only reviewer.
 picks its models immediately. When `init` creates the configuration, the preset
 choice reads `Use default: <model> (effort=<level>)`, with matching default labels
 and help text. Repeated `init` and `banzai model` use `Keep` for the saved settings,
-including saved settings that still match the defaults.
+including saved settings that still match the defaults. `init` always saves to
+`.banzai/config.json` and never asks where to save; when a local model file
+exists, its summary names each phase for which this machine keeps the local
+setting.
 Outside a terminal, `init` prints a pointer to
 `banzai model` instead, and `banzai model` itself exits with `TTY_REQUIRED`.
+`banzai model` accepts no argument, `--local`, or `--help` by itself; anything
+else fails with `INVALID_MODEL_OPTION` before the terminal check.
 
-`banzai model` refuses while a run is active, for the same reason the startup
-currency check defers: phases read model settings fresh, so a mid-run change
-would swap the model executing the rest of an approved plan.
+### Saving models for this machine
+
+`banzai model --local` saves the choices for this machine only, in the
+Git-ignored [local model file](#local-model-file). Without `--local`, the
+picker asks where to save before the phase menus when `.banzai/config.json` is
+in the Git index or a local file exists:
+
+```text
+? Where should these model choices be saved?
+  > This machine only (.banzai/config.local.json, ignored by Git)
+    Shared with the team (.banzai/config.json; commit it)
+```
+
+Otherwise it saves to `.banzai/config.json`, as before.
+
+For this machine, each phase menu starts from the phase's current setting and
+tags it `(committed)` or `(local)`. Only a setting that differs from the shared
+one is written, so a shared setting is never copied into the local file. A
+phase with a local entry also offers `Use shared setting: <setting>`, which
+removes the entry, as does choosing the shared setting itself; when no entry
+is left, the file is deleted. **Match Planning** is offered only when the
+current planning executable is `claude` or `codex`.
+
+For the team, the menus start from `.banzai/config.json`, and **Match Planning**
+copies the shared planning setting, so a local setting never reaches the shared
+file. While a local file sets any phase, each menu tags the shared setting
+`(committed)`, a phase the local file overrides adds
+`This machine uses <setting> (local).`, and the summary says that this machine
+keeps using its local setting. The builder-session line describes the settings
+this machine will actually run.
+
+The confirmation and result name the file. `Review and commit the change`
+appears only when `.banzai/config.json` changed; a local write says that Git
+ignores the file. Before taking the runner lock, every picker run, including
+`init`'s, makes sure Git ignores the local file. A path in the Git index is
+refused, even when no local file exists. A path that Git does not ignore is
+added to this clone's exclude file, never to `.gitignore`.
+
+The picker then takes the runner lock without reclaiming a stale one, so it
+refuses while another Banzai command holds `.banzai/runner.lock`. It also
+refuses with `RUN_IN_PROGRESS` while a run is neither done nor cancelled, for
+the same reason the startup currency check defers: a mid-run change would swap
+the model executing the rest of an approved plan. Finish the run, or run
+`banzai cancel`, first. One exception lets a blocked run continue with other
+models: while `banzai status` recommends `banzai retry` for it, `banzai model`
+saves to this machine without asking, never writes `.banzai/config.json`, and
+ends with `Run banzai retry to continue this run with the new models.` The
+retry records the new local models for the run, as
+[Failure Recovery](#local-model-changes) describes. Inside a model phase,
+where `BANZAI_*` authorization is present, `banzai model` and `init` refuse
+with `CONFIGURATION_MODEL_WRITE_DENIED`. A tracked, unignored or invalid local
+file stops the picker before any menu, and nothing is written.
 
 The Claude entries come from the published Claude model catalog; the GPT entries
 and their reasoning levels come from the Codex CLI's model metadata and official
@@ -1267,6 +1370,12 @@ model documentation. Both are source facts maintained in
 [`src/models.ts`](../packages/orchestrator/src/models.ts) — see the note on catalog maintenance below.
 
 ## Model Configuration
+
+`.banzai/config.json` holds each phase's executable, model, effort, and timeout
+for everyone who uses the repository. A developer can replace a phase's
+executable, model, and effort on one machine with the Git-ignored
+`.banzai/config.local.json`; see [Local model file](#local-model-file) below.
+Every model value Banzai prints from either file is escaped for the terminal.
 
 Interactive startup names the Banzai release-train version and the checkout,
 then prints one row per phase — vendor, model, effort, timeout — and checks
@@ -1282,6 +1391,26 @@ subscription authentication for every vendor the configuration actually uses:
 
 No configured model needs a known update.
 ```
+
+A phase whose setting comes from `.banzai/config.local.json` carries `(local)`
+after its timeout; with every phase from `.banzai/config.json` the rows are
+unchanged:
+
+```text
+    plan    claude claude-opus-5-5  xhigh · 30m          ✓
+    impl    claude claude-opus-5-5  xhigh · 60m          ✓
+    review  claude claude-opus-5-5  xhigh · 30m (local)  ✓
+```
+
+While a run is neither done nor cancelled, the rows and the authentication
+markers show the run's models: the current `.banzai/config.json` with the local
+models the run recorded. When the local file no longer matches that record, the
+header adds the drift lines described under
+[Failure Recovery](#local-model-changes). For a run whose model record cannot
+be read, the header shows no rows and says to cancel the run. A local file in
+the Git index, not ignored by Git, or invalid ends the launch with its
+`LOCAL_CONFIG_*` code before the authentication check, so no vendor executable
+starts.
 
 The check is driven by the `executable` each role configures, not by the role, so
 Claude is checked whenever any of planning, implementation, or review runs it —
@@ -1341,7 +1470,8 @@ read, so detecting that would require a real model call at every launch.
 
 It then checks each configured model against a catalog of known model
 identifiers. When a newer or supported model replaces one, Banzai names the
-replacement and offers to write it to `.banzai/config.json`:
+replacement and offers to write it to the file that supplies that phase —
+`.banzai/config.json`, or `.banzai/config.local.json` for a local phase:
 
 ```text
 Newer models are available:
@@ -1349,11 +1479,16 @@ Newer models are available:
 ```
 
 The dialog offers updating every reported model, choosing them one at a time, or
-keeping the configuration. Nothing is written without an explicit confirmation.
+keeping the configuration. Its options and confirmation name every file that
+will change. Nothing is written without an explicit confirmation.
 The rewrite replaces only the `model` fields it was asked to change; executables,
 efforts, timeouts, verification commands, and unrecognized fields are preserved
 byte-for-byte, and a configuration the runner would refuse to load is never
-written. The result is a tracked file — review and commit it.
+written. A change to `.banzai/config.json` is tracked — review and commit it. A
+local phase's update rewrites `.banzai/config.local.json` in its fixed format,
+changing only that phase's `model`; Git ignores it. If a phase's model or the
+file that supplies it changed after the launch showed it, the update refuses
+with `MODEL_CONFIGURATION_CHANGED` and nothing is written.
 
 Three cases produce no offer:
 
@@ -1412,6 +1547,89 @@ for scripts, CI, direct recovery, and explicit slug overrides:
 ```text
 banzai run --slug my-explicit-slug --request "Implement the task"
 ```
+
+### Local model file
+
+`.banzai/config.local.json` is optional and belongs to one checkout. Write it
+with `banzai model --local`, or by hand:
+
+```json
+{
+  "schemaVersion": 1,
+  "models": {
+    "reviewer": {
+      "executable": "claude",
+      "model": "claude-opus-5-5",
+      "effort": "xhigh"
+    }
+  }
+}
+```
+
+- The top-level keys are exactly `schemaVersion`, the integer `1`, and
+  `models`, which holds zero to three of `planner`, `implementer`, and
+  `reviewer`.
+- Each entry has exactly `executable`, `model`, and `effort`, and replaces the
+  committed executable, model, and effort of that phase as one unit.
+  `executable` is the bare name `claude` or `codex`, which your `PATH`
+  resolves; a path, another name, or another case is refused. `model` matches
+  `^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]{0,127}$`. `effort` takes the committed
+  values: `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`.
+- The file is UTF-8 JSON of at most 64 KiB. It must be a regular file, and
+  neither it nor `.banzai/` may be a symbolic link. Only a missing file means
+  no override.
+
+Everything else stays committed: timeouts, verification, context limits, the
+Claude environment, and every other key. Any other top-level key, an unknown
+phase, `timeoutMs`, or another field in an entry fails with
+`LOCAL_CONFIG_KEY_REFUSED`; every other defect fails with
+`LOCAL_CONFIG_INVALID`. Both messages name the field path, never a value from
+the file, and end with "Correct .banzai/config.local.json, or delete it to use
+the shared models in .banzai/config.json."
+
+Outside a run, every command uses the effective configuration: the committed
+file with each local entry in its phase's place. A run records the local
+models it starts with and keeps using them, merged with the current committed
+file, until it is done or cancelled. A later edit of the local file is refused
+rather than adopted; see [Failure Recovery](#local-model-changes). Committed
+model edits keep their current effect on a run, including a fresh session for
+a changed setting. Doctor, `banzai status`, the picker, and the launch header
+name each phase's source, `committed` or `local`. Overriding only planning or
+only implementation makes the two differ, so implementation starts fresh
+instead of reusing the planning session; the picker's builder-session line
+shows this.
+
+The file must stay out of Git. `banzai init` adds the exact line
+`.banzai/config.local.json` to `.gitignore` when it is missing; commit that
+change. In a repository initialized earlier, `banzai model` adds the line to
+this clone's exclude file instead: the file that
+`git rev-parse --git-path info/exclude` names, which every worktree of the
+clone shares and Git never tracks. Banzai never edits `.gitignore` for the
+local file outside `init`.
+
+Every command that reads the current local file, except `banzai status` and
+doctor, refuses with `LOCAL_CONFIG_NOT_IGNORED` before any vendor executable
+starts when the file:
+
+- is in the Git index: run `git rm --cached .banzai/config.local.json`, review
+  the local copy, and commit the removal;
+- is not ignored by Git: run `banzai model --local`, which ignores it for this
+  clone, or add the line `.banzai/config.local.json` to `.gitignore` and commit
+  it. When a `.gitignore` negation (a line starting with `!`) includes the file
+  again after the exclude entry is added, remove that rule and commit the
+  change.
+
+`banzai status` reports these conditions without failing, and doctor fails
+`config.local`.
+
+`banzai model` and the launch update offer write the local file. They take the
+runner lock, confirm that the path is ignored and not in the Git index, never
+write through a symbolic link, and replace the file through a temporary file in
+`.banzai/` with mode `0600`. They always write the same format: two-space JSON
+with a final newline, keys in the order shown above, and phases in planner,
+implementer, reviewer order. Removing the last entry deletes the file. See
+[Saving models for this machine](#saving-models-for-this-machine) for the
+picker and its blocked-run exception.
 
 ## Project guidance setup
 
@@ -2013,6 +2231,77 @@ non-recoverable blocked states fail closed. Inspect the checkout and logs, then
 run `banzai cancel` when appropriate. Do not edit or delete `.banzai` state to
 recover.
 
+### Local model changes
+
+A run records the [local models](#local-model-file) it starts with, and
+`banzai status` lists the models it runs with and their sources:
+
+```text
+Models:
+  Planning: claude claude-opus-5-5 xhigh (committed)
+  Implementation: claude claude-opus-5-5 xhigh (committed)
+  Review: claude claude-opus-5-5 xhigh (local)
+```
+
+For a done or cancelled run the heading reads `Current models:` and the lines
+show what a new run would use. Every state-changing command — resume, approve,
+triage, recover, rework, planning-review requests and answers, ADR and human
+decisions, and configuration answers other than Cancel — compares the current
+`.banzai/config.local.json` and the run's record with the models it holds
+before its first write, and again before each model attempt and pending
+transition. Entries that differ only in key order or formatting are equal. A
+difference refuses with `LOCAL_MODEL_OVERRIDE_CHANGED`:
+
+```text
+Local models changed since this run recorded them
+  Review: recorded claude claude-opus-5-5 xhigh, now shared
+Restore .banzai/config.local.json, run banzai retry in a terminal when banzai status recommends it, or run banzai cancel. A change you did not make may come from a model phase or a project script.
+```
+
+`shared` means that the phase has no local entry and uses
+`.banzai/config.json`. A local file that cannot be used shows one line instead,
+such as `.banzai/config.local.json: invalid (models.reviewer.effort)`,
+`.banzai/config.local.json: tracked`, or
+`.banzai/config.local.json: not ignored`; at a command's entry, a tracked or
+unignored file refuses with `LOCAL_CONFIG_NOT_IGNORED` instead. A record
+rewritten while a command runs refuses the same way, with a line naming
+`model-override.json`. The refusal writes nothing at a command's entry; before
+an attempt it adds no write, and what the command already completed stays. It
+records no block reason, event, or review rotation and consumes no retry or
+recovery authority, so `banzai status` keeps its recommendation and prints the
+same lines under the run's models. To continue:
+
+- restore the local file and repeat the recommended command;
+- when `banzai status` recommends `banzai retry`, run it in a terminal to
+  continue with the changed models; or
+- run `banzai cancel`.
+
+`banzai cancel`, `banzai status`, and verification commands never compare.
+
+Two commands record the current local models instead of comparing: `resume`
+of a run still in `created` or `selecting` with no model attempt, and
+`banzai retry` of a blocked run, including its planning-review retry and its
+reconcile of a saved planning result. When the models differ, the command
+prints `Recording the changed local models for this run:` with each changed
+phase, replaces the record, and appends a `model_override.recorded` event that
+names each phase's source without model values. A changed setting starts a
+fresh session, as a committed change does. Once the run has a model attempt,
+recording different models needs a terminal: `banzai retry` without one, as
+under agent control, refuses with `LOCAL_MODEL_OVERRIDE_CHANGED` and writes
+nothing. A failed retry preflight leaves the record unchanged, unless the retry
+recorded the new models before reconciling a saved planning result. To give a
+blocked run other models, run `banzai model`, which saves to this machine while
+status recommends retry, then `banzai retry`.
+
+`LOCAL_MODEL_OVERRIDE_RECORD_INVALID` means that the record itself is
+unreadable, a symbolic link, not a regular file, not valid JSON, of another
+identity, or invalid. Banzai never reads such a record as missing, so the
+run's models cannot be confirmed: `banzai status` prints the record path as
+`invalid`, reports retry and recovery as not eligible, and recommends
+`banzai cancel`. Cancel the run and start a new one. A run created before
+local model files has no record; it runs on committed models and refuses while
+the local file sets any phase, until a command that records gives it one.
+
 ## Local State
 
 `.banzai/runs/<run-id>/state.json` is atomically replaced. `events.jsonl` is an
@@ -2091,6 +2380,17 @@ supplies run and approval identity for reads while removing inherited
 mutation while reviewing or while a review attempt is active, before workflow
 write grants. Standalone session behavior remains separate when runner variables
 are absent.
+
+`.banzai/config.local.json` is the optional per-developer
+[local model file](#local-model-file). Git ignores it, and it belongs to no
+run. Each new run writes the create-only
+`.banzai/runs/<run-id>/model-override.json`, mode `0600`, before `state.json`
+and the active-run pointer:
+`{"schema":"banzai-run-model-override/v1","models":{…}}`, holding the local
+models the run started with, or `{}` without a local file. Only the
+[recording commands](#local-model-changes) replace it; never edit it by hand.
+A run without the file was created before local model files existed. Run state
+schemas are unchanged.
 
 ## Work documents
 

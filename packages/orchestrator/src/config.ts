@@ -82,7 +82,12 @@ async function pathExists(filePath: string): Promise<boolean> {
   }
 }
 
-export async function loadConfig(
+/**
+ * The committed `.banzai/config.json` alone. Committed-only readers and the
+ * layered reader in `local-config.ts` use it; the configuration a phase uses
+ * merges the local model layer (ADR-0060 §2).
+ */
+export async function loadCommittedConfig(
   repoRoot: string
 ): Promise<OrchestratorConfig> {
   const configPath = path.join(repoRoot, CONFIG_FILE);
@@ -682,7 +687,10 @@ export async function initializeConfig(
   const requiredEntries = [
     ".banzai/runs/",
     ".banzai/active-run.json",
-    ".banzai/runner.lock"
+    ".banzai/runner.lock",
+    // The exact line for the per-developer model file, never a broader
+    // pattern that would hide portable configuration (ADR-0060 §4, ADR-0041).
+    ".banzai/config.local.json"
   ];
   let current = "";
   if (await pathExists(ignorePath)) {

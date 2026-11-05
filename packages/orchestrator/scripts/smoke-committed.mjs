@@ -209,6 +209,73 @@ function requireIdentity(value, schema, schemaVersion, label) {
   }
 }
 
+// ADR-0060: init ignores the per-developer model file with this exact line,
+// and doctor discloses a committed model only when it matches the pattern.
+const LOCAL_MODEL_IGNORE_LINE = ".banzai/config.local.json";
+const MODEL_ROLES = ["planner", "implementer", "reviewer"];
+const MODEL_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]{0,127}$/u;
+
+async function requireLocalModelIgnoreLine(root) {
+  let gitignore;
+  try {
+    gitignore = await readFile(path.join(root, ".gitignore"), "utf8");
+  } catch {
+    fail("SMOKE_IGNORE_MISMATCH", "init did not create .gitignore");
+  }
+  const matches = gitignore
+    .split(/\r?\n/u)
+    .filter((line) => line === LOCAL_MODEL_IGNORE_LINE);
+  if (matches.length !== 1) {
+    fail(
+      "SMOKE_IGNORE_MISMATCH",
+      "init did not add the local model file ignore line exactly once"
+    );
+  }
+}
+
+// The smoke configuration runs every role on the Node executable, which
+// belongs to neither vendor, and has no local model file.
+function expectedDoctorModels(config) {
+  return MODEL_ROLES.map((role) => {
+    const settings = config.models[role];
+    return {
+      role,
+      vendor: null,
+      model:
+        typeof settings.model === "string" &&
+        MODEL_IDENTIFIER_PATTERN.test(settings.model)
+          ? settings.model
+          : null,
+      effort: settings.effort,
+      source: "committed"
+    };
+  });
+}
+
+function requireDoctorModels(doctor, config) {
+  const keys = Object.keys(doctor);
+  const position = keys.indexOf("models");
+  if (
+    position < 1 ||
+    keys[position - 1] !== "projectTypes" ||
+    keys[position + 1] !== "summary"
+  ) {
+    fail(
+      "SMOKE_CONTRACT_MISMATCH",
+      "doctor models do not sit between projectTypes and summary"
+    );
+  }
+  if (
+    JSON.stringify(doctor.models) !==
+    JSON.stringify(expectedDoctorModels(config))
+  ) {
+    fail(
+      "SMOKE_CONTRACT_MISMATCH",
+      "doctor models differ from the committed configuration"
+    );
+  }
+}
+
 async function snapshotTree(root) {
   const entries = [];
   async function visit(directory, prefix) {
@@ -312,6 +379,7 @@ async function setupRepository(root, bundle, expectedVersion) {
     fail("SMOKE_HELP_MISMATCH", "help output is incomplete");
   }
   await runCli(bundle, root, ["init"], "init");
+  await requireLocalModelIgnoreLine(root);
 
   const configPath = path.join(root, ".banzai", "config.json");
   const config = parseJson(await readFile(configPath, "utf8"), "init config");
@@ -688,6 +756,13 @@ async function runSmoke(options) {
         "doctor did not report a ready repository"
       );
     }
+    requireDoctorModels(
+      doctor,
+      parseJson(
+        await readFile(path.join(smokeRoot, ".banzai", "config.json"), "utf8"),
+        "smoke config"
+      )
+    );
     if (doctorFirst !== doctorSecond) {
       fail(
         "SMOKE_NONDETERMINISTIC",

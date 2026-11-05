@@ -8,7 +8,7 @@ import {
   CONFIG_FILE,
   DEFAULT_CONFIG,
   initializeConfig,
-  loadConfig
+  loadCommittedConfig
 } from "../src/config.js";
 import { BanzaiError } from "../src/errors.js";
 import {
@@ -291,7 +291,7 @@ test("applying model updates rewrites only the named model fields", async () => 
       { role: "reviewer", model: "claude-fable-5-1" }
     ]);
 
-    const updated = await loadConfig(root);
+    const updated = await loadCommittedConfig(root);
     assert.equal(updated.models.reviewer.model, "claude-fable-5-1");
     assert.equal(updated.models.reviewer.effort, "xhigh");
     assert.equal(

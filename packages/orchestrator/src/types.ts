@@ -1315,6 +1315,193 @@ export interface OrchestratorConfig {
   maxFixCycles: number;
 }
 
+/** The file that supplies a role's model triple (ADR-0060 §2). */
+export type ModelSource = "committed" | "local";
+
+export type ModelSources = Record<
+  keyof OrchestratorConfig["models"],
+  ModelSource
+>;
+
+/**
+ * A role triple from `.banzai/config.local.json`. It replaces the committed
+ * triple as one unit; `timeoutMs` stays committed (ADR-0060 §1).
+ */
+export interface LocalModelTriple {
+  executable: "claude" | "codex";
+  model: string;
+  effort: ModelSettings["effort"];
+}
+
+/** The normalized local role map; `{}` when no local file exists. */
+export type LocalModelLayer = Partial<
+  Record<keyof OrchestratorConfig["models"], LocalModelTriple>
+>;
+
+export type LocalConfigDefectCode =
+  | "LOCAL_CONFIG_INVALID"
+  | "LOCAL_CONFIG_KEY_REFUSED"
+  | "LOCAL_CONFIG_NOT_IGNORED";
+
+/**
+ * Why a local model file cannot be used: `unsafe` covers a symbolic link at
+ * `.banzai/` or at the file and a non-regular file; `invalid` covers the size
+ * bound, the encoding, JSON and every wrong value.
+ */
+export type LocalConfigDefectCause =
+  | "unsafe"
+  | "unreadable"
+  | "invalid"
+  | "refused_key"
+  | "tracked"
+  | "not_ignored";
+
+/**
+ * A refused local model file. `fieldPath` and `message` never carry a value
+ * from the file: a key is named only when it is a plain identifier.
+ */
+export interface LocalConfigDefect {
+  code: LocalConfigDefectCode;
+  cause: LocalConfigDefectCause;
+  fieldPath: string;
+  message: string;
+}
+
+export type UsableLocalModelLayer =
+  { state: "absent" } | { state: "valid"; models: LocalModelLayer };
+
+export interface DefectiveLocalModelLayer {
+  state: "defective";
+  defect: LocalConfigDefect;
+}
+
+export type LocalModelLayerStatus =
+  UsableLocalModelLayer | DefectiveLocalModelLayer;
+
+/** The committed configuration with each local triple in its place. */
+export interface EffectiveModelConfiguration {
+  config: OrchestratorConfig;
+  models: LocalModelLayer;
+  sources: ModelSources;
+}
+
+/**
+ * What the layered reader saw: the committed layer always, and the effective
+ * configuration only while the local file is usable.
+ */
+export type LayeredConfiguration =
+  | {
+      committed: OrchestratorConfig;
+      local: UsableLocalModelLayer;
+      effective: EffectiveModelConfiguration;
+    }
+  | {
+      committed: OrchestratorConfig;
+      local: DefectiveLocalModelLayer;
+      effective: null;
+    };
+
+/**
+ * One role of a model status: the triple a phase of that role uses and the
+ * file it comes from. Values are raw file values; print each through
+ * `escapeTerminalField`.
+ */
+export interface ModelRoleStatus {
+  executable: string;
+  model: string;
+  effort: ModelSettings["effort"];
+  source: ModelSource;
+}
+
+export type ModelRoleStatuses = Record<
+  keyof OrchestratorConfig["models"],
+  ModelRoleStatus
+>;
+
+/**
+ * ADR-0060 §7 model status for human output only: `banzai status` and the
+ * interactive launch header. It is never part of `WorkflowStatus`, so
+ * `status --json` and agent status stay unchanged.
+ *
+ * `scope` says which models it describes:
+ * - `run`: a run that is not done or cancelled. `run` holds the
+ *   run-effective models (the committed file merged with the run's record),
+ *   `current` the models a new run would use now (`null` while the local file
+ *   cannot be used), and `drift` the escaped lines between the record and the
+ *   current local file: one `<Role>: recorded …, now …` line per differing
+ *   role, or one line naming a tracked, unignored or invalid local file;
+ *   empty without drift.
+ * - `current`: no run, or a done or cancelled one. `current` holds the models
+ *   a new run would use now; `localDefect` is the escaped line naming a local
+ *   file that cannot be used, in place of those models.
+ *
+ * `record_invalid` is a run whose record cannot be read: it has no
+ * run-effective configuration, and human output reports retry and recovery
+ * as not eligible and recommends `banzai cancel` (reading 11).
+ * `unavailable` is a committed file that cannot be read, with its error code.
+ */
+export type ModelStatus =
+  | {
+      scope: "run";
+      state: "recorded";
+      runId: string;
+      run: ModelRoleStatuses;
+      current: ModelRoleStatuses | null;
+      drift: string[];
+    }
+  | {
+      scope: "run";
+      state: "record_invalid";
+      runId: string;
+      /** The record's repository-relative path. */
+      recordPath: string;
+    }
+  | { scope: "current"; state: "effective"; current: ModelRoleStatuses }
+  | { scope: "current"; state: "local_defective"; localDefect: string }
+  | { scope: "run" | "current"; state: "unavailable"; code: string };
+
+/**
+ * The run's local model record, `.banzai/runs/<runId>/model-override.json`
+ * (ADR-0060 §5): the normalized role map of the local file that started or
+ * last re-recorded the run, `{}` when there was none. It sits beside run
+ * state, never inside it, so run state schemas are unchanged.
+ */
+export interface ModelOverrideRecord {
+  schema: "banzai-run-model-override/v1";
+  models: LocalModelLayer;
+}
+
+/**
+ * Why a run's model record cannot be used: `unsafe` covers a symbolic link at
+ * or above it and a non-regular file; `unreadable` covers I/O failures and a
+ * missing run directory; `invalid` covers the size bound, the encoding, JSON,
+ * another identity and every value the local file would refuse.
+ */
+export type ModelOverrideRecordDefectCause =
+  "unsafe" | "unreadable" | "invalid";
+
+/**
+ * A run model record that is neither usable nor absent. It is never treated
+ * as absent; `path` is repository-relative and `message` names it and says to
+ * cancel the run without echoing anything from the file.
+ */
+export interface ModelOverrideRecordDefect {
+  code: "LOCAL_MODEL_OVERRIDE_RECORD_INVALID";
+  cause: ModelOverrideRecordDefectCause;
+  path: string;
+  message: string;
+}
+
+/**
+ * What a run's model record says. Only `absent`, reported once the run
+ * directory itself is confirmed, means a run created before ADR-0060, which
+ * has an empty record.
+ */
+export type ModelOverrideRecordStatus =
+  | { state: "absent" }
+  | { state: "recorded"; models: LocalModelLayer }
+  | { state: "defective"; defect: ModelOverrideRecordDefect };
+
 export type RunStatus =
   | "created"
   | "selecting"

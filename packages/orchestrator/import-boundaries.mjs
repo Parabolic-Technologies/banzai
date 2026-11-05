@@ -19,6 +19,7 @@ const ADR_0052 = "ADR-0052";
 const ADR_0054 = "ADR-0054";
 const ADR_0055 = "ADR-0055";
 const ADR_0058 = "ADR-0058";
+const ADR_0060 = "ADR-0060";
 const POLICY_ADR_AUTHORITIES = new Set([
   ADR_0026,
   ADR_0028,
@@ -34,7 +35,8 @@ const POLICY_ADR_AUTHORITIES = new Set([
   ADR_0052,
   ADR_0054,
   ADR_0055,
-  ADR_0058
+  ADR_0058,
+  ADR_0060
 ]);
 const POLICY_ERROR_CODE = "IMPORT_BOUNDARY_POLICY_INVALID";
 const IMPORTER_PATTERN =
@@ -504,9 +506,12 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       ADR_0040,
       ADR_0041,
       ADR_0055,
-      ADR_0058
+      ADR_0058,
+      ADR_0060
     ],
     [
+      permission("./local-config.js", ADR_0060),
+      permission("./model-status.js", ADR_0060),
       permission("./plan-gate-ui.js", ADR_0058),
       permission("./validation.js", ADR_0055),
 
@@ -541,7 +546,7 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       permission("./interactive.js", MANIFEST_ARCHITECTURE),
       permission("./interrupt.js", MANIFEST_MODULES),
       permission("./live-compatibility-cli.js", MANIFEST_MODULES),
-      permission("./model-selection.js", MANIFEST_MODULES),
+      permission("./model-cli.js", ADR_0060),
       permission("./models.js", MANIFEST_MODULES),
       permission("./process.js", MANIFEST_ARCHITECTURE),
       permission("./progress.js", MANIFEST_MODULES),
@@ -649,8 +654,9 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/doctor-cli.ts",
     "doctor-cli",
-    [MANIFEST_MODULES, MANIFEST_ARCHITECTURE],
+    [MANIFEST_MODULES, MANIFEST_ARCHITECTURE, ADR_0060],
     [
+      permission("./format.js", ADR_0060),
       permission("./doctor.js", MANIFEST_MODULES),
       permission("./errors.js", MANIFEST_ARCHITECTURE)
     ]
@@ -665,9 +671,11 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       MANIFEST_MODULES,
       ADR_0040,
       ADR_0041,
-      ADR_0042
+      ADR_0042,
+      ADR_0060
     ],
     [
+      permission("./local-config.js", ADR_0060),
       permission("./configuration-prerequisite.js", ADR_0045),
       permission("./phase-instructions.js", ADR_0042),
       permission("./work-documents.js", ADR_0054),
@@ -790,9 +798,11 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       ADR_0034,
       ADR_0035,
       ADR_0055,
-      ADR_0058
+      ADR_0058,
+      ADR_0060
     ],
     [
+      permission("./model-status.js", ADR_0060),
       permission("./plan-gate-ui.js", ADR_0058),
       permission("./validation.js", ADR_0055),
 
@@ -810,7 +820,6 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
     [
       permission("./cancellation.js", ADR_0035),
       permission("./human-time.js", ADR_0034),
-      permission("./config.js", MANIFEST_MODULES),
       permission("./terminal-attention.js", MANIFEST_MODULES),
       permission("./types.js", MANIFEST_ARCHITECTURE)
     ]
@@ -845,6 +854,20 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
     ]
   ),
   boundary(
+    "src/local-config.ts",
+    "local-model-configuration",
+    [ADR_0060],
+    [
+      permission("./config.js", ADR_0060),
+      permission("./errors.js", ADR_0060),
+      permission("./format.js", ADR_0060),
+      permission("./git.js", ADR_0060),
+      permission("./models.js", ADR_0060),
+      permission("./project-files.js", ADR_0060)
+    ],
+    [permission("./types.js", ADR_0060)]
+  ),
+  boundary(
     "src/mcp.ts",
     "mcp-policy",
     [MANIFEST_MODULES, MANIFEST_ARCHITECTURE],
@@ -852,15 +875,47 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
     [permission("./types.js", MANIFEST_ARCHITECTURE)]
   ),
   boundary(
+    "src/model-cli.ts",
+    "model-command",
+    [ADR_0060],
+    [
+      permission("./config.js", ADR_0060),
+      permission("./errors.js", ADR_0060),
+      permission("./format.js", ADR_0060),
+      permission("./local-config.js", ADR_0060),
+      permission("./model-selection.js", ADR_0060),
+      permission("./store.js", ADR_0060)
+    ],
+    [
+      permission("./interactive.js", ADR_0060),
+      permission("./types.js", ADR_0060)
+    ]
+  ),
+  boundary(
     "src/model-selection.ts",
     "model-selection-ui",
-    [MANIFEST_MODULES, MANIFEST_ARCHITECTURE],
-    [permission("./models.js", MANIFEST_MODULES)],
+    [MANIFEST_MODULES, MANIFEST_ARCHITECTURE, ADR_0060],
+    [
+      permission("./format.js", ADR_0060),
+      permission("./models.js", MANIFEST_MODULES)
+    ],
     [
       permission("./config.js", MANIFEST_MODULES),
       permission("./interactive.js", MANIFEST_MODULES),
       permission("./types.js", MANIFEST_ARCHITECTURE)
     ]
+  ),
+  boundary(
+    "src/model-status.ts",
+    "model-status-text",
+    [ADR_0060],
+    [
+      permission("./errors.js", ADR_0060),
+      permission("./format.js", ADR_0060),
+      permission("./local-config.js", ADR_0060),
+      permission("./models.js", ADR_0060)
+    ],
+    [permission("./types.js", ADR_0060), permission("./workflow.js", ADR_0060)]
   ),
   boundary(
     "src/models.ts",
@@ -963,9 +1018,11 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       ADR_0041,
       ADR_0043,
       ADR_0055,
-      ADR_0058
+      ADR_0058,
+      ADR_0060
     ],
     [
+      permission("./local-config.js", ADR_0060),
       permission("./git.js", ADR_0058),
       permission("./planning-review-state.js", ADR_0055),
 
@@ -1046,9 +1103,11 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       ADR_0041,
       ADR_0042,
       ADR_0055,
-      ADR_0058
+      ADR_0058,
+      ADR_0060
     ],
     [
+      permission("./local-config.js", ADR_0060),
       permission("./workflow/plan-gate/recheck.js", ADR_0058),
       permission("./workflow/domain/plan-recheck.js", ADR_0058),
       permission("./planning-review-artifact.js", ADR_0055),

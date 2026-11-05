@@ -10,7 +10,11 @@ import type {
   HumanTimeWriteResult
 } from "../src/human-time.js";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { Writable } from "node:stream";
+import { promisify } from "node:util";
 import test from "node:test";
 import packageManifest from "../package.json" with { type: "json" };
 import {
@@ -18,8 +22,21 @@ import {
   planningReviewResult,
   planningReviewAnalysis
 } from "./planning-review-fixtures.js";
-import { DEFAULT_CONFIG, type ModelUpdate } from "../src/config.js";
-import { BanzaiError } from "../src/errors.js";
+import { createStyler } from "../src/ansi.js";
+import { CONFIG_FILE, DEFAULT_CONFIG } from "../src/config.js";
+import { BanzaiError, LocalConfigError } from "../src/errors.js";
+import {
+  LOCAL_CONFIG_FILE,
+  LOCAL_MODEL_DRIFT_ADVICE,
+  LOCAL_MODEL_DRIFT_HEADING,
+  localConfigNotIgnoredDefect,
+  localModelDriftLines,
+  mergeModelLayer,
+  parseLocalModelFile
+} from "../src/local-config.js";
+import { applyLaunchModelUpdates, loadLaunchModels } from "../src/model-cli.js";
+import { WorkflowRunner } from "../src/workflow.js";
+import { FakeAdapters } from "./workflow-fixtures.js";
 import { TerminalAttention } from "../src/terminal-attention.js";
 import {
   generateFeatureSlug,
@@ -29,11 +46,16 @@ import {
   type InteractiveIO,
   type AuthenticationGateway,
   type InteractiveRunner,
+  type LaunchModelUpdate,
+  type LaunchModels,
+  type ModelConfigurationFile,
   type ModelConfigurationGateway
 } from "../src/interactive.js";
 import {
   CONTRACT_VERSION,
+  type LocalModelLayer,
   type ModelSettings,
+  type ModelStatus,
   type OrchestratorConfig,
   type PlanRecheckRecord,
   type ReviewResult,
@@ -49,9 +71,16 @@ import type {
   CancellationResult
 } from "../src/cancellation.js";
 import {
+  commitAll,
+  createTestRepository,
   historicalBindingFixture,
-  reviewerOnlyClaudeConfig
+  localModelFileText,
+  reviewerOnlyClaudeConfig,
+  withVendorExecutablesOnPath,
+  writeLocalModels
 } from "./helpers.js";
+
+const execFileAsync = promisify(execFile);
 
 function runState(
   status: RunState["status"],
@@ -292,6 +321,8 @@ class FakeRunner implements InteractiveRunner {
 
   readonly repoRoot = "/repo/example";
   readonly calls: { operation: string; value: unknown }[] = [];
+  /** The options of each retry call (ADR-0060 reading 17). */
+  readonly retryOptions: unknown[] = [];
   restoreEligible: { eligible: boolean; reason: string } = {
     eligible: false,
     reason: "The run has no recorded plan approval."
@@ -329,8 +360,9 @@ class FakeRunner implements InteractiveRunner {
     return runState("needs_plan_approval");
   }
 
-  async retry(): Promise<RunState> {
+  async retry(options?: { terminal?: boolean }): Promise<RunState> {
     this.calls.push({ operation: "retry", value: null });
+    this.retryOptions.push(options);
     return runState("needs_plan_approval");
   }
 
@@ -747,27 +779,56 @@ test("Ctrl+C and EOF at every new planning prompt leave the pending decision unr
       });
 });
 
+/** The launch view of a project with no local file and no run. */
+function committedOnly(config: OrchestratorConfig): LaunchModels {
+  return {
+    committed: config,
+    effective: {
+      config,
+      models: {},
+      sources: {
+        planner: "committed",
+        implementer: "committed",
+        reviewer: "committed"
+      }
+    },
+    run: null
+  };
+}
+
 class FakeModelConfiguration implements ModelConfigurationGateway {
-  readonly applied: ModelUpdate[][] = [];
+  readonly applied: LaunchModelUpdate[][] = [];
+  readonly models: LaunchModels | null;
 
   constructor(
-    readonly config: OrchestratorConfig | null,
+    models: OrchestratorConfig | LaunchModels | null,
     readonly loadFailure: Error | null = null,
     readonly writeFailure: Error | null = null
-  ) {}
+  ) {
+    this.models =
+      models === null || "effective" in models ? models : committedOnly(models);
+  }
 
-  async load(): Promise<OrchestratorConfig | null> {
+  async load(): Promise<LaunchModels | null> {
     if (this.loadFailure !== null) {
       throw this.loadFailure;
     }
-    return this.config;
+    return this.models;
   }
 
-  async applyModelUpdates(updates: readonly ModelUpdate[]): Promise<void> {
+  async applyModelUpdates(
+    updates: readonly LaunchModelUpdate[]
+  ): Promise<ModelConfigurationFile[]> {
     if (this.writeFailure !== null) {
       throw this.writeFailure;
     }
     this.applied.push([...updates]);
+    const files: ModelConfigurationFile[] = [];
+    if (updates.some((update) => update.source === "committed"))
+      files.push(".banzai/config.json");
+    if (updates.some((update) => update.source === "local"))
+      files.push(".banzai/config.local.json");
+    return files;
   }
 }
 
@@ -970,7 +1031,14 @@ test("interactive startup offers to update a superseded model", async () => {
   });
 
   assert.deepEqual(configuration.applied, [
-    [{ role: "reviewer", model: "claude-opus-5-5" }]
+    [
+      {
+        role: "reviewer",
+        model: "claude-opus-5-5",
+        replaces: "claude-opus-4-7",
+        source: "committed"
+      }
+    ]
   ]);
   assert.ok(
     io.lines.some((line) =>
@@ -1035,7 +1103,14 @@ test("per-model selection updates only the confirmed roles", async () => {
   });
 
   assert.deepEqual(configuration.applied, [
-    [{ role: "reviewer", model: "claude-opus-5-5" }]
+    [
+      {
+        role: "reviewer",
+        model: "claude-opus-5-5",
+        replaces: "claude-opus-4-7",
+        source: "committed"
+      }
+    ]
   ]);
 });
 
@@ -1098,6 +1173,35 @@ test("an unreadable configuration reports the reason and continues", async () =>
     )
   );
   assert.deepEqual(io.choiceSets, [["start", "exit"]]);
+});
+
+test("a refused local model file ends the launch before authentication", async () => {
+  for (const defect of [
+    localConfigNotIgnoredDefect("not_ignored"),
+    localConfigNotIgnoredDefect("tracked")
+  ]) {
+    const auth = new FakeAuthentication();
+    const runner = new FakeRunner([null]);
+    const io = new FakeIO(["exit"]);
+    await assert.rejects(
+      runInteractive(runner, io, {
+        decidedBy: "human",
+        models: new FakeModelConfiguration(
+          DEFAULT_CONFIG,
+          new LocalConfigError(defect)
+        ),
+        auth
+      }),
+      { code: "LOCAL_CONFIG_NOT_IGNORED", message: defect.message }
+    );
+    assert.deepEqual(auth.checked, []);
+    assert.deepEqual(io.choiceSets, []);
+    assert.ok(
+      io.lines.every(
+        (line) => !line.includes("Model configuration unavailable")
+      )
+    );
+  }
 });
 
 test("a failed configuration write is reported without ending the session", async () => {
@@ -1906,6 +2010,32 @@ test("interactive mode offers retry only when status marks it eligible", async (
   );
 });
 
+test("interactive retry runs as a human at a terminal", async () => {
+  const runner = new FakeRunner([
+    workflowStatus(
+      runState("blocked", {
+        blockedFrom: "planning",
+        blockReason: "Codex authentication is unavailable."
+      }),
+      {
+        retry: {
+          eligible: true,
+          reason: "Failed plan attempt can be retried.",
+          attemptId: "plan-1-abcd1234"
+        },
+        nextAction: "banzai retry"
+      }
+    ),
+    workflowStatus(runState("done"))
+  ]);
+  const io = new FakeIO(["retry", "exit"], [], [true]);
+
+  await runInteractive(runner, io, { decidedBy: "human" });
+
+  // A changed local model layer may be recorded only with a terminal.
+  assert.deepEqual(runner.retryOptions, [{ terminal: true }]);
+});
+
 test("interactive mode names completion-evidence repair instead of a read-only retry", async () => {
   const attemptId = "implementation-1-abcd1234";
   const runner = new FakeRunner([
@@ -2320,6 +2450,129 @@ test("interactive blocked checkpoint offers resume instead of recovery or cancel
   assert.deepEqual(io.choiceSets[0], ["resume", "cancel", "exit"]);
   assert.equal(io.choiceNames[0]?.[0], "Resume the proven terminal result");
   assert.deepEqual(runner.calls, [{ operation: "resume", value: null }]);
+});
+
+test("interactive blocked menu offers cancel when the run's model record is invalid", async () => {
+  // ADR-0060 reading 11, as `banzai status` shows it: retry, recovery and a
+  // terminal resume would refuse on the record, so only cancel is offered.
+  class RecordInvalidRunner extends FakeRunner {
+    readonly modelStatusRequests: unknown[] = [];
+    async modelStatus(
+      state: Pick<RunState, "runId" | "status"> | null
+    ): Promise<ModelStatus> {
+      this.modelStatusRequests.push(state?.runId ?? null);
+      return {
+        scope: "run",
+        state: "record_invalid",
+        runId: state?.runId ?? "",
+        recordPath: `.banzai/runs/${state?.runId ?? ""}/model-override.json`
+      };
+    }
+  }
+  const blocked = runState("blocked", {
+    blockedFrom: "fixing",
+    blockReason: "Fix attempt was interrupted after changing the checkout."
+  });
+  const recovery = workflowStatus(blocked).recovery;
+  const views: [string, WorkflowStatus][] = [
+    [
+      "retry",
+      workflowStatus(blocked, {
+        retry: {
+          eligible: true,
+          reason: "Failed read-only attempt can be retried.",
+          attemptId: "review-1-abcd1234"
+        },
+        nextAction: "banzai retry"
+      })
+    ],
+    [
+      "recovery",
+      workflowStatus(blocked, {
+        recovery: {
+          ...recovery,
+          eligible: true,
+          reason: "The exact interrupted fix workspace can be recovered.",
+          sourceKind: "interrupted",
+          attemptId: "fix-4-9884535f",
+          phase: "fix",
+          authorization: "plan_approval",
+          recoveryIdentity: "a".repeat(64),
+          workspace: {
+            digest: "workspace-digest",
+            added: 1,
+            modified: 0,
+            deleted: 0,
+            total: 1
+          }
+        },
+        nextAction: "banzai recover"
+      })
+    ],
+    [
+      "terminal checkpoint",
+      workflowStatus(blocked, {
+        recovery: {
+          ...recovery,
+          terminalCheckpointPresent: true,
+          reason: "A durable terminal checkpoint can be reconciled.",
+          attemptId: "fix-4-checkpoint",
+          phase: "fix"
+        },
+        nextAction: "banzai resume"
+      })
+    ]
+  ];
+  for (const [label, status] of views) {
+    const runner = new RecordInvalidRunner([status]);
+    const io = new FakeIO(["exit"]);
+
+    await runInteractive(runner, io, { decidedBy: "human" });
+
+    assert.deepEqual(io.choiceSets[0], ["cancel", "exit"], label);
+    assert.deepEqual(runner.modelStatusRequests, [blocked.runId], label);
+    assert.ok(
+      io.lines.some((line) =>
+        line.includes(
+          `.banzai/runs/${blocked.runId}/model-override.json is invalid`
+        )
+      ),
+      label
+    );
+    assert.ok(
+      io.lines.some((line) => line.includes("Run banzai cancel")),
+      label
+    );
+    assert.deepEqual(runner.calls, [], label);
+  }
+
+  // Any other model view leaves the menu as status reports it.
+  const committed = (role: keyof OrchestratorConfig["models"]) => {
+    const { executable, model, effort } = DEFAULT_CONFIG.models[role];
+    return { executable, model, effort, source: "committed" as const };
+  };
+  class RecordedRunner extends FakeRunner {
+    async modelStatus(): Promise<ModelStatus> {
+      return {
+        scope: "run",
+        state: "recorded",
+        runId: blocked.runId,
+        run: {
+          planner: committed("planner"),
+          implementer: committed("implementer"),
+          reviewer: committed("reviewer")
+        },
+        current: null,
+        drift: []
+      };
+    }
+  }
+  const recorded = new RecordedRunner([
+    views[0]?.[1] ?? workflowStatus(blocked)
+  ]);
+  const io = new FakeIO(["exit"]);
+  await runInteractive(recorded, io, { decidedBy: "human" });
+  assert.deepEqual(io.choiceSets[0], ["retry", "cancel", "exit"]);
 });
 
 test("interactive rejected checkpoint prioritizes completion-evidence repair", async () => {
@@ -3397,4 +3650,600 @@ test("v10 selected review scope and declined confirmation cause no runner mutati
     "Send the selected artifacts to the configured reviewer?"
   );
   assert.equal(io.confirmationDefaults[0], false);
+});
+
+const PRE_WP6_RESET = "\u001b[0m";
+
+test("a committed-only launch renders the pre-WP6 header and advisory byte for byte", async () => {
+  // Captured from the pre-WP6 interactive.ts (commit 04abf55) with this exact
+  // scenario; only the version is substituted.
+  const configuration = new FakeModelConfiguration(
+    configWithReviewer("claude-opus-4-7")
+  );
+  const auth = new FakeAuthentication({ codex: "session expired" });
+  const runner = new FakeRunner([null, null]);
+  const io = new FakeIO(["update_all", "exit"], [], [true]);
+  io.width = 80;
+  await runInteractive(runner, io, {
+    decidedBy: "human",
+    models: configuration,
+    auth,
+    repository: {
+      describe: async () => ({
+        branch: "main",
+        commit: "0123456789abcdef",
+        carriedInChanges: 2
+      })
+    },
+    styler: createStyler(true)
+  });
+  const r = PRE_WP6_RESET;
+  assert.deepEqual(io.lines, [
+    "",
+    `\u001b[91m\u001b[1mbanzai${r}${r} \u001b[2mv${packageManifest.version}${r}`,
+    `example\u001b[2m · ${r}\u001b[36mmain${r}\u001b[2m · ${r}\u001b[2m@ 0123456${r}\u001b[2m · ${r}\u001b[2m2 carried-in changes${r}`,
+    "",
+    `  plan    codex  \u001b[1mgpt-6.1-sol${r}      \u001b[2mxhigh · 30m${r}  \u001b[31m✗${r}`,
+    `  impl    codex  \u001b[1mgpt-6.1-sol${r}      \u001b[2mxhigh · 60m${r}  \u001b[31m✗${r}`,
+    `  review  claude \u001b[1mclaude-opus-4-7${r}  \u001b[2mxhigh · 30m${r}  \u001b[32m✓${r}`,
+    "",
+    `\u001b[31m│${r} \u001b[31mcodex (Planning, Implementation): session expired${r}`,
+    `\u001b[31m│${r} \u001b[31mEvery phase re-checks this; resolve it before starting a run.${r}`,
+    "",
+    `\u001b[33m│${r} \u001b[33mA newer model is available:${r}`,
+    `\u001b[33m│${r} \u001b[33mReview: claude-opus-4-7 is superseded by claude-opus-5-5.${r}`,
+    "Updated .banzai/config.json. Review and commit the change.",
+    "",
+    "No active repository-local run.",
+    "",
+    `\u001b[2m${"─".repeat(80)}${r}`,
+    ""
+  ]);
+  assert.deepEqual(io.choiceNames, [
+    [
+      "Update this model in .banzai/config.json",
+      "Choose which models to update",
+      "Keep the current configuration"
+    ],
+    ["Start a new run", "Exit"]
+  ]);
+  assert.deepEqual(io.confirmationMessages, [
+    "Write this change to .banzai/config.json?"
+  ]);
+});
+
+const LOCAL_CODEX_REVIEWER: LocalModelLayer = {
+  reviewer: { executable: "codex", model: "gpt-6-sol", effort: "high" }
+};
+
+function launchModels(
+  committed: OrchestratorConfig,
+  local: LocalModelLayer,
+  run: LaunchModels["run"] = null
+): LaunchModels {
+  return { committed, effective: mergeModelLayer(committed, local), run };
+}
+
+function headerRows(io: FakeIO): string[] {
+  return io.lines.filter((line) => /^ {2}(plan|impl|review) /u.test(line));
+}
+
+function noticeText(io: FakeIO): string {
+  return io.lines
+    .filter((line) => line.startsWith("│ "))
+    .map((line) => line.slice(2))
+    .join(" ");
+}
+
+test("the launch header marks each role the local file supplies", async () => {
+  const auth = new FakeAuthentication();
+  const io = new FakeIO(["exit"]);
+  await runInteractive(new FakeRunner([null]), io, {
+    decidedBy: "human",
+    models: new FakeModelConfiguration(
+      launchModels(reviewerOnlyClaudeConfig(), LOCAL_CODEX_REVIEWER)
+    ),
+    auth
+  });
+  assert.deepEqual(headerRows(io), [
+    "  plan    codex gpt-6.1-sol  xhigh · 30m          ✓",
+    "  impl    codex gpt-6.1-sol  xhigh · 60m          ✓",
+    "  review  codex gpt-6-sol    high  · 30m (local)  ✓"
+  ]);
+  // The markers follow the effective configuration: only codex runs.
+  assert.deepEqual(auth.checked, ["codex"]);
+});
+
+test("with a non-terminal run the header shows the run's models and the drift lines", async () => {
+  const committed = reviewerOnlyClaudeConfig();
+  const recorded: LocalModelLayer = {
+    reviewer: { executable: "claude", model: "claude-fable-5-1", effort: "max" }
+  };
+  const drift = localModelDriftLines(recorded, {
+    state: "valid",
+    models: LOCAL_CODEX_REVIEWER
+  });
+  assert.deepEqual(drift, [
+    "Review: recorded claude claude-fable-5-1 max, now codex gpt-6-sol high"
+  ]);
+  const auth = new FakeAuthentication();
+  const io = new FakeIO(["exit"]);
+  await runInteractive(
+    new FakeRunner([workflowStatus(runState("needs_plan_approval"))]),
+    io,
+    {
+      decidedBy: "human",
+      models: new FakeModelConfiguration(
+        launchModels(committed, LOCAL_CODEX_REVIEWER, {
+          state: "recorded",
+          runId: "run-example",
+          models: mergeModelLayer(committed, recorded),
+          drift
+        })
+      ),
+      auth
+    }
+  );
+  assert.deepEqual(headerRows(io), [
+    "  plan    codex  gpt-6.1-sol       xhigh · 30m          ✓",
+    "  impl    codex  gpt-6.1-sol       xhigh · 60m          ✓",
+    "  review  claude claude-fable-5-1  max   · 30m (local)  ✓"
+  ]);
+  // Reading 9: the markers use the run-effective configuration.
+  assert.deepEqual(auth.checked, ["codex", "claude"]);
+  const notice = noticeText(io);
+  assert.ok(notice.startsWith(LOCAL_MODEL_DRIFT_HEADING), notice);
+  assert.ok(notice.includes(drift[0] ?? ""), notice);
+  assert.ok(notice.endsWith(LOCAL_MODEL_DRIFT_ADVICE), notice);
+  assert.ok(
+    io.lines.indexOf(headerRows(io).at(-1) ?? "") <
+      io.lines.findIndex((line) => line.startsWith("│ "))
+  );
+  assert.deepEqual(io.choiceSets, [["approve_plan", "cancel", "exit"]]);
+
+  // A run without drift adds no notice.
+  const quiet = new FakeIO(["exit"]);
+  await runInteractive(
+    new FakeRunner([workflowStatus(runState("needs_plan_approval"))]),
+    quiet,
+    {
+      decidedBy: "human",
+      models: new FakeModelConfiguration(
+        launchModels(committed, recorded, {
+          state: "recorded",
+          runId: "run-example",
+          models: mergeModelLayer(committed, recorded),
+          drift: []
+        })
+      )
+    }
+  );
+  assert.equal(noticeText(quiet), "");
+});
+
+test("a run whose model record cannot be read shows no models and advises cancel", async () => {
+  const auth = new FakeAuthentication();
+  const io = new FakeIO(["exit"]);
+  await runInteractive(
+    new FakeRunner([workflowStatus(runState("needs_plan_approval"))]),
+    io,
+    {
+      decidedBy: "human",
+      models: new FakeModelConfiguration(
+        launchModels(
+          reviewerOnlyClaudeConfig(),
+          {},
+          {
+            state: "record_invalid",
+            runId: "run-example",
+            recordPath: ".banzai/runs/run-example/model-override.json"
+          }
+        )
+      ),
+      auth
+    }
+  );
+  assert.deepEqual(headerRows(io), []);
+  assert.deepEqual(auth.checked, []);
+  assert.equal(
+    noticeText(io),
+    ".banzai/runs/run-example/model-override.json: invalid The models this run recorded cannot be confirmed. Run banzai cancel to end this run."
+  );
+});
+
+test("hostile configuration values are escaped in the launch header", async () => {
+  const config = reviewerOnlyClaudeConfig();
+  config.models.reviewer.executable = "/opt/\u001b]0;x\u0007/claude";
+  config.models.reviewer.model = "evil\u001b[2J\nmodel";
+  const auth = new FakeAuthentication({
+    [config.models.reviewer.executable]: "session expired"
+  });
+  const io = new FakeIO(["exit"]);
+  await runInteractive(new FakeRunner([null]), io, {
+    decidedBy: "human",
+    models: new FakeModelConfiguration(config),
+    auth
+  });
+  assert.equal(
+    io.lines.some((line) => /[\u001b\u0007]/u.test(line)),
+    false,
+    io.lines.join("\n")
+  );
+  assert.ok(
+    headerRows(io).some((line) =>
+      line.includes("claude evil\\u001b[2J\\u000amodel  xhigh · 30m  ✗")
+    ),
+    headerRows(io).join("\n")
+  );
+  assert.ok(
+    noticeText(io).includes(
+      "/opt/\\u001b]0;x\\u0007/claude (Review): session expired"
+    )
+  );
+});
+
+function mixedAdvisoryModels(): LaunchModels {
+  const committed = configWithReviewer("claude-opus-4-7");
+  return launchModels(committed, {
+    planner: { executable: "claude", model: "claude-opus-4-6", effort: "high" }
+  });
+}
+
+const UPDATED_COMMITTED =
+  "Updated .banzai/config.json. Review and commit the change.";
+const UPDATED_LOCAL =
+  "Updated .banzai/config.local.json for this machine only. Git ignores it, so there is nothing to commit.";
+
+test("the advisory routes each update to the file that supplies its role and names every file", async () => {
+  const configuration = new FakeModelConfiguration(mixedAdvisoryModels());
+  const io = new FakeIO(["update_all", "exit"], [], [true]);
+  await runInteractive(new FakeRunner([null, null]), io, {
+    decidedBy: "human",
+    models: configuration
+  });
+  assert.equal(
+    headerRows(io)[0],
+    "  plan    claude claude-opus-4-6  high  · 30m (local)"
+  );
+  assert.equal(
+    io.choiceNames[0]?.[0],
+    "Update all 2 models in .banzai/config.json and .banzai/config.local.json"
+  );
+  assert.deepEqual(io.confirmationMessages, [
+    "Write these 2 changes to .banzai/config.json and .banzai/config.local.json?"
+  ]);
+  assert.deepEqual(configuration.applied, [
+    [
+      {
+        role: "planner",
+        model: "claude-opus-5-5",
+        replaces: "claude-opus-4-6",
+        source: "local"
+      },
+      {
+        role: "reviewer",
+        model: "claude-opus-5-5",
+        replaces: "claude-opus-4-7",
+        source: "committed"
+      }
+    ]
+  ]);
+  assert.ok(io.lines.includes(UPDATED_COMMITTED));
+  assert.ok(io.lines.includes(UPDATED_LOCAL));
+
+  // Choosing only the local role names only the local file, and there is
+  // nothing to commit.
+  const some = new FakeModelConfiguration(mixedAdvisoryModels());
+  const chosen = new FakeIO(["update_some", "exit"], [], [true, false, true]);
+  await runInteractive(new FakeRunner([null, null]), chosen, {
+    decidedBy: "human",
+    models: some
+  });
+  assert.deepEqual(chosen.confirmationMessages, [
+    "Planning: replace claude-opus-4-6 with claude-opus-5-5 in .banzai/config.local.json?",
+    "Review: replace claude-opus-4-7 with claude-opus-5-5?",
+    "Write this change to .banzai/config.local.json?"
+  ]);
+  assert.deepEqual(
+    some.applied.map((updates) => updates.map((update) => update.source)),
+    [["local"]]
+  );
+  assert.ok(chosen.lines.includes(UPDATED_LOCAL));
+  assert.equal(chosen.lines.includes(UPDATED_COMMITTED), false);
+});
+
+test("an active run keeps the advisory deferral text with a local layer", async () => {
+  const configuration = new FakeModelConfiguration(mixedAdvisoryModels());
+  const active = workflowStatus(runState("needs_plan_approval"));
+  const io = new FakeIO(["exit"]);
+  await runInteractive(new FakeRunner([active, active]), io, {
+    decidedBy: "human",
+    models: configuration
+  });
+  assert.deepEqual(configuration.applied, []);
+  assert.ok(
+    io.lines.includes(
+      "Run run-example is still needs_plan_approval. Finish or cancel it before changing models."
+    )
+  );
+  assert.deepEqual(io.choiceSets, [["approve_plan", "cancel", "exit"]]);
+});
+
+test("an invalid or refused-key local file also ends the launch before authentication", async () => {
+  for (const [bytes, code] of [
+    ["{", "LOCAL_CONFIG_INVALID"],
+    [
+      JSON.stringify({ schemaVersion: 1, models: {}, timeoutMs: 1 }),
+      "LOCAL_CONFIG_KEY_REFUSED"
+    ]
+  ] as const) {
+    const parsed = parseLocalModelFile(Buffer.from(bytes));
+    if (parsed.ok) assert.fail(`${code}: the file parsed`);
+    const auth = new FakeAuthentication();
+    const io = new FakeIO(["exit"]);
+    await assert.rejects(
+      runInteractive(new FakeRunner([null]), io, {
+        decidedBy: "human",
+        models: new FakeModelConfiguration(
+          DEFAULT_CONFIG,
+          new LocalConfigError(parsed.defect)
+        ),
+        auth
+      }),
+      { code }
+    );
+    assert.deepEqual(auth.checked, []);
+    assert.deepEqual(io.choiceSets, []);
+    assert.deepEqual(headerRows(io), []);
+  }
+});
+
+/** A repository with a superseded committed reviewer and a superseded local planner. */
+async function advisoryRepository() {
+  const repository = await createTestRepository({ ignoreLocalConfig: true });
+  const configPath = path.join(repository.root, CONFIG_FILE);
+  const config = JSON.parse(
+    await readFile(configPath, "utf8")
+  ) as OrchestratorConfig;
+  config.models = configWithReviewer("claude-opus-4-7").models;
+  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  await commitAll(repository.root, "superseded reviewer");
+  await writeLocalModels(repository.root, LOCAL_SUPERSEDED_PLANNER);
+  return repository;
+}
+
+const LOCAL_SUPERSEDED_PLANNER: LocalModelLayer = {
+  planner: { executable: "claude", model: "claude-opus-4-6", effort: "high" }
+};
+
+async function readOptional(target: string): Promise<string | null> {
+  try {
+    return await readFile(target, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function modelFiles(root: string) {
+  return {
+    committed: await readFile(path.join(root, CONFIG_FILE), "utf8"),
+    local: await readOptional(path.join(root, LOCAL_CONFIG_FILE)),
+    gitignore: await readFile(path.join(root, ".gitignore"), "utf8"),
+    exclude: await readOptional(path.join(root, ".git/info/exclude"))
+  };
+}
+
+function launchGateway(root: string): ModelConfigurationGateway {
+  return {
+    load: async () => await loadLaunchModels(root),
+    applyModelUpdates: async (updates) =>
+      await applyLaunchModelUpdates(root, updates, { env: {} })
+  };
+}
+
+test("the launch gateway writes each advisory update only to the file that supplies its role", async () => {
+  const repository = await advisoryRepository();
+  try {
+    const root = repository.root;
+    const before = await modelFiles(root);
+    const io = new FakeIO(["update_all", "exit"], [], [true]);
+    await runInteractive(new FakeRunner([null, null]), io, {
+      decidedBy: "human",
+      models: launchGateway(root)
+    });
+    const after = await modelFiles(root);
+    // Only the committed reviewer value changes in .banzai/config.json.
+    assert.equal(
+      after.committed,
+      before.committed.replace('"claude-opus-4-7"', '"claude-opus-5-5"')
+    );
+    assert.notEqual(after.committed, before.committed);
+    assert.equal(
+      after.local,
+      localModelFileText({
+        planner: {
+          executable: "claude",
+          model: "claude-opus-5-5",
+          effort: "high"
+        }
+      })
+    );
+    assert.equal(after.gitignore, before.gitignore);
+    assert.equal(after.exclude, before.exclude);
+    assert.ok(io.lines.includes(UPDATED_COMMITTED));
+    assert.ok(io.lines.includes(UPDATED_LOCAL));
+
+    // A write for a model the launch no longer shows refuses with nothing written.
+    await assert.rejects(
+      applyLaunchModelUpdates(
+        root,
+        [
+          {
+            role: "planner",
+            model: "claude-opus-5-5",
+            replaces: "claude-opus-4-6",
+            source: "local"
+          }
+        ],
+        { env: {} }
+      ),
+      { code: "MODEL_CONFIGURATION_CHANGED" }
+    );
+    await assert.rejects(
+      applyLaunchModelUpdates(
+        root,
+        [
+          {
+            role: "reviewer",
+            model: "claude-opus-5-5",
+            replaces: "claude-opus-5-5",
+            source: "local"
+          }
+        ],
+        { env: {} }
+      ),
+      { code: "MODEL_CONFIGURATION_CHANGED" }
+    );
+    // A model phase never writes.
+    await assert.rejects(
+      applyLaunchModelUpdates(root, [], { env: { BANZAI_RUN_ID: "x" } }),
+      { code: "CONFIGURATION_MODEL_WRITE_DENIED" }
+    );
+    assert.deepEqual(await modelFiles(root), after);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("a tracked local file is refused by the launch and by the advisory writer", async () => {
+  const repository = await advisoryRepository();
+  try {
+    const root = repository.root;
+    const track = async () =>
+      await execFileAsync("git", ["add", "-f", "--", LOCAL_CONFIG_FILE], {
+        cwd: root
+      });
+    const tracked = localConfigNotIgnoredDefect("tracked").message;
+
+    // Tracked after the launch read it: the writer refuses with nothing written.
+    const before = await modelFiles(root);
+    const gateway = launchGateway(root);
+    const io = new FakeIO(["update_all", "exit"], [], [true]);
+    await runInteractive(new FakeRunner([null, null]), io, {
+      decidedBy: "human",
+      models: {
+        load: async () => await gateway.load(),
+        applyModelUpdates: async (updates) => {
+          await track();
+          return await gateway.applyModelUpdates(updates);
+        }
+      }
+    });
+    assert.ok(
+      io.lines.includes(`Model configuration was not updated: ${tracked}`),
+      io.lines.join("\n")
+    );
+    assert.deepEqual(await modelFiles(root), before);
+
+    // Tracked before the launch: it ends before authentication.
+    const auth = new FakeAuthentication();
+    const refused = new FakeIO(["exit"]);
+    await assert.rejects(
+      runInteractive(new FakeRunner([null]), refused, {
+        decidedBy: "human",
+        models: launchGateway(root),
+        auth
+      }),
+      { code: "LOCAL_CONFIG_NOT_IGNORED", message: tracked }
+    );
+    assert.deepEqual(auth.checked, []);
+    assert.deepEqual(await modelFiles(root), before);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("the launch gateway reads the active run's models, drift and record, and its writer refuses during the run", async () => {
+  const repository = await createTestRepository({ ignoreLocalConfig: true });
+  try {
+    await withVendorExecutablesOnPath(async () => {
+      const root = repository.root;
+      assert.deepEqual(
+        (await loadLaunchModels(root))?.run,
+        null,
+        "no run, no run models"
+      );
+      await writeLocalModels(root, LOCAL_CODEX_REVIEWER);
+      const runner = new WorkflowRunner(root, new FakeAdapters());
+      const gate = await runner.start({
+        slug: "example",
+        request: "Implement it."
+      });
+      assert.equal(gate.status, "needs_plan_approval", gate.blockReason ?? "");
+      const current: LocalModelLayer = {
+        reviewer: {
+          executable: "claude",
+          model: "claude-fable-5-1",
+          effort: "max"
+        }
+      };
+      await writeLocalModels(root, current);
+      const models = await loadLaunchModels(root);
+      assert.ok(models !== null);
+      assert.equal(models.effective.sources.reviewer, "local");
+      assert.equal(
+        models.effective.config.models.reviewer.model,
+        "claude-fable-5-1"
+      );
+      assert.ok(models.run?.state === "recorded");
+      assert.equal(models.run.runId, gate.runId);
+      assert.equal(models.run.models.config.models.reviewer.model, "gpt-6-sol");
+      assert.equal(models.run.models.sources.reviewer, "local");
+      assert.deepEqual(models.run.drift, [
+        "Review: recorded codex gpt-6-sol high, now claude claude-fable-5-1 max"
+      ]);
+
+      const before = await modelFiles(root);
+      await assert.rejects(
+        applyLaunchModelUpdates(
+          root,
+          [
+            {
+              role: "reviewer",
+              model: "claude-opus-5-5",
+              replaces: "claude-fable-5-1",
+              source: "local"
+            }
+          ],
+          { env: {} }
+        ),
+        {
+          code: "RUN_IN_PROGRESS",
+          message: `Run ${gate.runId} is needs_plan_approval. Finish it, or run banzai cancel, before changing models.`
+        }
+      );
+      assert.deepEqual(await modelFiles(root), before);
+
+      // A record that cannot be read leaves no run-effective configuration.
+      await writeFile(
+        path.join(runner.store.runDirectory(gate.runId), "model-override.json"),
+        "{not json"
+      );
+      const invalid = await loadLaunchModels(root);
+      assert.deepEqual(invalid?.run, {
+        state: "record_invalid",
+        runId: gate.runId,
+        recordPath: `.banzai/runs/${gate.runId}/model-override.json`
+      });
+
+      // A refused local file ends the read before any run lookup.
+      await writeFile(path.join(root, LOCAL_CONFIG_FILE), "{");
+      await assert.rejects(loadLaunchModels(root), {
+        code: "LOCAL_CONFIG_INVALID"
+      });
+    });
+  } finally {
+    await repository.dispose();
+  }
 });

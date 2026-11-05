@@ -17,7 +17,8 @@
   answers: a human `banzai retry` of a blocked run records a new local layer;
   the whole role triple is the merge unit; "This machine only" is offered
   first; the local `executable` is the bare name `claude` or `codex`.
-- Implementation state: Planned.
+- Implementation state: Implemented on 2026-11-05 by
+  [WP6](../work/wp06-local-model-override/implementation-report.md).
 - Preparation authority: the owner's 2.8–2.9 brief of 2026-10-30 (WP6) and the
   owner's request on 2026-11-03 to continue the program. Preparing this
   proposal is not acceptance; no code may rely on it.
