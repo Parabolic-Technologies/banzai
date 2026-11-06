@@ -259,7 +259,7 @@
     "totalTimeoutMs": 900000,
     "minimumCliVersions": {
       "codex": "0.145.0",
-      "claude": "2.1.218"
+      "claude": "2.1.290"
     },
     "authRootVariables": {
       "codex": "BANZAI_LIVE_CODEX_AUTH_ROOT",

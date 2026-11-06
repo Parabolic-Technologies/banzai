@@ -46,7 +46,7 @@ Use a regular terminal in your own Git repository. You need:
 
 - macOS or Linux, Git, and Node.js **22.20.0+ within major 22** or
   **24.11.1+ within major 24**;
-- **Claude Code 2.1.290+** for the default configuration, signed in through an
+- **Claude Code 2.1.290+** for every Claude role, signed in through an
   individual subscription, and the **Codex CLI** only for roles you assign to
   Codex;
 - the Banzai CLI and the separately installed Banzai plugin in each client

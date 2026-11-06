@@ -6639,14 +6639,12 @@ export class WorkflowRunner {
    */
   private async preflightVendor(
     role: ModelRole,
-    settings: ModelSettings,
-    reviews = role === "reviewer"
+    settings: ModelSettings
   ): Promise<void> {
     const vendor = vendorFor(settings.executable) ?? FALLBACK_VENDOR[role];
     const target = {
       executable: settings.executable,
-      model: settings.model,
-      reviews
+      model: settings.model
     };
     if (vendor === "claude") {
       await this.adapters.preflightClaude(target);
@@ -6719,15 +6717,13 @@ export class WorkflowRunner {
       await assertExecutable(verification.command, this.repoRoot, environment);
     }
     // One check per vendor/executable pair, so roles sharing a vendor are not
-    // checked twice while the implementer is no longer skipped entirely. The
-    // pair counts as reviewing when any role that shares it is the reviewer,
-    // so a shared Claude client meets the review isolation minimum here.
+    // checked twice while the implementer is no longer skipped entirely. One
+    // Claude minimum applies to every role (ADR-0063 §1).
     const pairKey = (role: ModelRole): string => {
       const settings = config.models[role];
       const vendor = vendorFor(settings.executable) ?? FALLBACK_VENDOR[role];
       return `${vendor}:${settings.executable}`;
     };
-    const reviewingPair = pairKey("reviewer");
     const checked = new Set<string>();
     for (const role of MODEL_ROLES) {
       const key = pairKey(role);
@@ -6735,11 +6731,7 @@ export class WorkflowRunner {
         continue;
       }
       checked.add(key);
-      await this.preflightVendor(
-        role,
-        config.models[role],
-        key === reviewingPair
-      );
+      await this.preflightVendor(role, config.models[role]);
     }
     await this.assertClaudePermissions(config);
   }

@@ -32,10 +32,10 @@ Banzai invokes the local executables for your selected providers. You do not
 enter API keys into Banzai. Model work uses the clients' remote services and
 subscription limits.
 
-For older model selections, the vendor minimums are Codex CLI 0.145.0 and
-Claude Code 2.1.218. Each selected model must meet its own
-[client-version requirement](orchestrator.md#model-configuration), and a Claude
-reviewer needs Claude Code 2.1.290 or newer, which `banzai doctor` checks.
+Every Claude role needs Claude Code 2.1.290 or newer, which `banzai doctor`
+checks. Codex roles need Codex CLI 0.145.0 or newer, and each selected model
+must meet its own
+[client-version requirement](orchestrator.md#model-configuration).
 
 ### Install and sign in to model clients
 

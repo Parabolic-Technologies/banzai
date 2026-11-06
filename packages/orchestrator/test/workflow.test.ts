@@ -3157,68 +3157,18 @@ test("default runner sources keep the baseline timestamp and identifier formats"
   }
 });
 
-/** Refuses only a reviewing Claude target, as an old client would (R8). */
-class BelowReviewFloorAdapters extends FakeAdapters {
+/** Refuses every Claude target, as a client below the minimum would. */
+class BelowClaudeMinimumAdapters extends FakeAdapters {
   async preflightClaude(target: VendorPreflightTarget): Promise<void> {
     await super.preflightClaude(target);
-    if (target.reviews === true) {
-      throw new BanzaiError(
-        "CLI_TOO_OLD",
-        "claude 2.1.289 cannot isolate the reviewer, which requires 2.1.290 or newer."
-      );
-    }
+    throw new BanzaiError(
+      "CLI_TOO_OLD",
+      "claude 2.1.289 is older than required 2.1.290: earlier releases can report a delivered structured result as an error. Update claude."
+    );
   }
 }
 
-test("run start applies the review floor to a vendor pair the reviewer shares, before selection", async () => {
-  const repository = await createTestRepository();
-  try {
-    await withVendorExecutablesOnPath(async () => {
-      const configPath = path.join(repository.root, ".banzai/config.json");
-      const config = JSON.parse(
-        await readFile(configPath, "utf8")
-      ) as OrchestratorConfig;
-      // The ADR-0059 default: every role on one Claude executable.
-      for (const role of ["planner", "implementer", "reviewer"] as const) {
-        config.models[role].executable = "claude";
-        config.models[role].model = "claude-opus-5-5";
-      }
-      await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
-      await commitAll(repository.root, "all roles on claude");
-
-      const adapters = new BelowReviewFloorAdapters();
-      adapters.reviewResults.push(passingReview());
-      const runner = new WorkflowRunner(repository.root, adapters);
-      const blocked = await runner.start({
-        slug: "example",
-        request: "Implement it."
-      });
-      assert.equal(blocked.status, "blocked", blocked.blockReason ?? "");
-      assert.equal(blocked.blockedFrom, "created");
-      assert.match(blocked.blockReason ?? "", /cannot isolate the reviewer/u);
-      assert.equal(adapters.selectionPrompts.length, 0);
-      // One check for the shared pair, marked as reviewing.
-      assert.deepEqual(
-        adapters.claudePreflightTargets.map((target) => target.reviews),
-        [true]
-      );
-      assert.equal(adapters.codexPreflights, 0);
-
-      const retried = await runner.retry();
-      assert.equal(retried.status, "blocked", retried.blockReason ?? "");
-      assert.equal(retried.blockedFrom, "created");
-      assert.equal(adapters.selectionPrompts.length, 0);
-      assert.deepEqual(
-        adapters.claudePreflightTargets.map((target) => target.reviews),
-        [true, true]
-      );
-    });
-  } finally {
-    await repository.dispose();
-  }
-});
-
-test("run start leaves a Claude pair that only builds without the review floor", async () => {
+test("run start refuses an old Claude client for a pair that only builds, before selection", async () => {
   const repository = await createTestRepository();
   try {
     await withVendorExecutablesOnPath(async () => {
@@ -3235,7 +3185,47 @@ test("run start leaves a Claude pair that only builds without the review floor",
       await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
       await commitAll(repository.root, "claude builds, codex reviews");
 
-      const adapters = new BelowReviewFloorAdapters();
+      const adapters = new BelowClaudeMinimumAdapters();
+      adapters.reviewResults.push(passingReview());
+      const runner = new WorkflowRunner(repository.root, adapters);
+      const blocked = await runner.start({
+        slug: "example",
+        request: "Implement it."
+      });
+      assert.equal(blocked.status, "blocked", blocked.blockReason ?? "");
+      assert.equal(blocked.blockedFrom, "created");
+      assert.match(blocked.blockReason ?? "", /older than required 2\.1\.290/u);
+      assert.equal(adapters.selectionPrompts.length, 0);
+      // ADR-0063 §1: one minimum, so the shared pair carries no review marker.
+      assert.deepEqual(adapters.claudePreflightTargets, [
+        { executable: "claude", model: "claude-opus-5-5" }
+      ]);
+
+      const retried = await runner.retry();
+      assert.equal(retried.status, "blocked", retried.blockReason ?? "");
+      assert.equal(adapters.selectionPrompts.length, 0);
+    });
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("run start checks a Claude pair shared by every role once, without a review marker", async () => {
+  const repository = await createTestRepository();
+  try {
+    await withVendorExecutablesOnPath(async () => {
+      const configPath = path.join(repository.root, ".banzai/config.json");
+      const config = JSON.parse(
+        await readFile(configPath, "utf8")
+      ) as OrchestratorConfig;
+      for (const role of ["planner", "implementer", "reviewer"] as const) {
+        config.models[role].executable = "claude";
+        config.models[role].model = "claude-opus-5-5";
+      }
+      await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
+      await commitAll(repository.root, "all roles on claude");
+
+      const adapters = new FakeAdapters();
       adapters.reviewResults.push(passingReview());
       const runner = new WorkflowRunner(repository.root, adapters);
       const planned = await runner.start({
@@ -3247,10 +3237,13 @@ test("run start leaves a Claude pair that only builds without the review floor",
         "needs_plan_approval",
         planned.blockReason ?? ""
       );
-      assert.ok(adapters.claudePreflightTargets.length > 0);
+      assert.deepEqual(adapters.claudePreflightTargets[0], {
+        executable: "claude",
+        model: "claude-opus-5-5"
+      });
       assert.ok(
         adapters.claudePreflightTargets.every(
-          (target) => target.reviews !== true
+          (target) => !("reviews" in target)
         )
       );
     });

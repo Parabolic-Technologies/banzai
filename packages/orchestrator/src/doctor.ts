@@ -4,12 +4,15 @@ import { access, lstat, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import {
-  REVIEW_ISOLATION_MINIMUM_CLAUDE_VERSION,
-  meetsReviewIsolationMinimum,
+  MINIMUM_CLAUDE_VERSION,
+  describeRoles,
+  meetsClaudeMinimum,
   resolveClaudeInvocationScope,
   vendorFor,
+  vendorUsage,
   FALLBACK_VENDOR,
   MODEL_ROLES,
+  type ModelRole,
   type ResolvedClaudeInvocationScope
 } from "./adapters.js";
 import {
@@ -1031,16 +1034,17 @@ async function configuredExecutableCheck(
 
 const CLAUDE_VERSION_FIXES: DoctorFix[] = [
   {
-    action: `Update Claude Code to ${REVIEW_ISOLATION_MINIMUM_CLAUDE_VERSION} or newer, or choose another reviewer with \`banzai model\`.`,
+    action: `Update Claude Code to ${MINIMUM_CLAUDE_VERSION} or newer, or choose other models with \`banzai model\`.`,
     documentation:
       "documentation/getting-started.md#install-and-sign-in-to-model-clients"
   }
 ];
 
 /**
- * The review isolation minimum for a Claude reviewer (ADR-0059 §2), read
- * offline. Only the effective reviewer whose executable is `claude` qualifies;
- * the run start still refuses an older client whatever this reports.
+ * The one Claude Code minimum (ADR-0063 §1, §5), read offline for every role
+ * that runs on Claude. Each distinct executable is read once; an unavailable
+ * one is left to `executables.models`. Run start still refuses an older client
+ * whatever this reports.
  */
 async function claudeVersionCheck(
   roles: RoleConfiguration,
@@ -1053,7 +1057,7 @@ async function claudeVersionCheck(
       id,
       "executables",
       "skipped",
-      "The Claude reviewer version check requires a valid configuration."
+      "The Claude Code version check requires a valid configuration."
     );
   }
   if (roles.localFailed) {
@@ -1061,55 +1065,83 @@ async function claudeVersionCheck(
       id,
       "executables",
       "skipped",
-      `The Claude reviewer version check is skipped ${LOCAL_CONFIG_SKIP}.`
+      `The Claude Code version check is skipped ${LOCAL_CONFIG_SKIP}.`
     );
   }
-  const executable = roles.config.models.reviewer.executable;
-  if (vendorFor(executable) !== "claude") {
+  const claude = vendorUsage(roles.config).filter(
+    (usage) => usage.vendor === "claude"
+  );
+  if (claude.length === 0) {
     return check(
       id,
       "executables",
       "skipped",
-      "The reviewer does not run on Claude Code, so the review isolation minimum does not apply."
+      "No role runs on Claude Code, so its minimum does not apply."
     );
   }
   const environment = { PATH: process.env.PATH };
-  if (
-    !(await dependencies.executableAvailable(executable, repoRoot, environment))
-  ) {
+  const read: { version: string | null; roles: string }[] = [];
+  const unavailable: ModelRole[] = [];
+  for (const usage of claude) {
+    if (
+      !(await dependencies.executableAvailable(
+        usage.executable,
+        repoRoot,
+        environment
+      ))
+    ) {
+      unavailable.push(...usage.roles);
+      continue;
+    }
+    read.push({
+      version: await (
+        dependencies.installedClaudeVersion ?? readInstalledClaudeVersion
+      )(usage.executable, repoRoot, environment),
+      roles: describeRoles(usage.roles)
+    });
+  }
+  if (read.length === 0) {
     return check(
       id,
       "executables",
       "skipped",
-      "The Claude reviewer executable is unavailable, so its version was not read."
+      "No configured Claude Code executable is available, so no version was read."
     );
   }
-  const version = await (
-    dependencies.installedClaudeVersion ?? readInstalledClaudeVersion
-  )(executable, repoRoot, environment);
-  if (version === null) {
+  const notChecked =
+    unavailable.length === 0
+      ? ""
+      : ` Not checked, because its executable is unavailable: ${describeRoles(unavailable)}.`;
+  const describe = (entry: { version: string | null; roles: string }) =>
+    `${entry.version} (${entry.roles})`;
+  const old = read.filter(
+    (entry) => entry.version !== null && !meetsClaudeMinimum(entry.version)
+  );
+  if (old.length > 0) {
+    return check(
+      id,
+      "executables",
+      "fail",
+      `Claude Code is older than the minimum ${MINIMUM_CLAUDE_VERSION}: ${old.map(describe).join("; ")}.${notChecked}`,
+      CLAUDE_VERSION_FIXES
+    );
+  }
+  const unknown = read.filter((entry) => entry.version === null);
+  if (unknown.length > 0) {
     return check(
       id,
       "executables",
       "warning",
-      `The installed Claude Code version could not be read offline. Run start refuses a reviewer older than ${REVIEW_ISOLATION_MINIMUM_CLAUDE_VERSION}.`,
+      `The installed Claude Code version could not be read offline for ${unknown.map((entry) => entry.roles).join("; ")}. Run start refuses Claude Code older than ${MINIMUM_CLAUDE_VERSION}.${notChecked}`,
       CLAUDE_VERSION_FIXES
     );
   }
-  return meetsReviewIsolationMinimum(version)
-    ? check(
-        id,
-        "executables",
-        "pass",
-        `Claude Code ${version} meets the reviewer isolation minimum ${REVIEW_ISOLATION_MINIMUM_CLAUDE_VERSION}.`
-      )
-    : check(
-        id,
-        "executables",
-        "fail",
-        `Claude Code ${version} cannot isolate the reviewer, which requires ${REVIEW_ISOLATION_MINIMUM_CLAUDE_VERSION} or newer.`,
-        CLAUDE_VERSION_FIXES
-      );
+  return check(
+    id,
+    "executables",
+    "pass",
+    `Claude Code meets the minimum ${MINIMUM_CLAUDE_VERSION}: ${read.map(describe).join("; ")}.${notChecked}`
+  );
 }
 
 async function activeRunCheck(repoRoot: string): Promise<DoctorCheck> {
@@ -1579,7 +1611,7 @@ export async function inspectDoctor(
       "authentication.models",
       "executables",
       "warning",
-      "Model authentication readiness was not checked, and doctor checks no vendor CLI version except the Claude reviewer's, which it reads offline. Doctor is offline and executable availability is not authentication proof; startup preflight remains authoritative. Run Banzai from a regular terminal, restore vendor login, or use the vendor-supported setup-token flow when unattended authentication is required."
+      "Model authentication readiness was not checked, and doctor checks no vendor CLI version except Claude Code's, which it reads offline. Doctor is offline and executable availability is not authentication proof; startup preflight remains authoritative. Run Banzai from a regular terminal, restore vendor login, or use the vendor-supported setup-token flow when unattended authentication is required."
     ),
     await activeRunCheck(repoRoot),
     await runnerLockCheck(repoRoot, dependencies)

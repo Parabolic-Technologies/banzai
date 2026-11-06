@@ -142,6 +142,7 @@ const FIXTURE_PATHS = [
   "documentation/decisions/0060-local-model-override.md",
   "documentation/decisions/0061-initiative-skill-and-documents.md",
   "documentation/decisions/0062-claude-memory-notes-in-the-manual-hook-gate.md",
+  "documentation/decisions/0063-stable-headless-vendor-invocations.md",
   "packages/orchestrator/scripts/check-dist.mjs",
   "packages/orchestrator/scripts/release-version.mjs",
   "packages/orchestrator/scripts/smoke-committed.mjs",

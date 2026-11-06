@@ -4,6 +4,8 @@ import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import releasePolicy from "../../../release-policy.json" with { type: "json" };
+import { MINIMUM_CLAUDE_VERSION } from "../src/adapters.js";
 import { BanzaiError } from "../src/errors.js";
 import {
   executeLiveCompatibility,
@@ -102,9 +104,9 @@ async function repositoryFixture(): Promise<{
   return { parent, repository, temporaryParent, codexAuth, claudeAuth };
 }
 
+/** ADR-0063 §3: every model invocation receives its prompt on stdin. */
 function promptFrom(spec: ProcessSpec): string {
-  const index = spec.args.indexOf("-p");
-  return spec.args[index + 1] ?? "";
+  return spec.stdin ?? "";
 }
 
 function emitLine(spec: ProcessSpec, value: unknown): void {
@@ -182,8 +184,7 @@ const ISOLATION_VARIABLES = [
 ];
 
 function reviewResponse(spec: ProcessSpec) {
-  const prompt =
-    spec.command === "claude" ? promptFrom(spec) : (spec.args.at(-1) ?? "");
+  const prompt = promptFrom(spec);
   const digest = /snapshotDigest: "([a-f0-9]{64})"/.exec(prompt)?.[1];
   assert.ok(digest);
   return {
@@ -256,7 +257,7 @@ function fakeLiveRunner(options?: {
   interruptVendor?: "codex" | "claude";
   codexCommandShape?: CodexCommandShape;
   onModelProcess?: (spec: ProcessSpec) => void;
-  /** The Claude version `--version` reports; the review floor by default. */
+  /** The Claude version `--version` reports; the Claude minimum by default. */
   claudeVersion?: string;
   /** The tools the Claude host reports in `system/init`. */
   claudeTools?: readonly string[];
@@ -934,7 +935,39 @@ test("a spawn without both isolation variables fails only the inventory check", 
   );
 });
 
-test("the live Claude preflight applies the review isolation floor", async () => {
+test("the live policy pins the one Claude minimum", () => {
+  assert.equal(MINIMUM_CLAUDE_VERSION, "2.1.290");
+  assert.equal(
+    releasePolicy.live.minimumCliVersions.claude,
+    MINIMUM_CLAUDE_VERSION
+  );
+  // ADR-0063 §6: the live budget is unchanged.
+  assert.equal(releasePolicy.live.maxInvocations, 2);
+  assert.equal(releasePolicy.live.perInvocationTimeoutMs, 300_000);
+});
+
+test("the live Claude review runs at the live bound with a Bash maximum derived from it", async () => {
+  const children: { env: NodeJS.ProcessEnv; timeoutMs: number }[] = [];
+  const summary = await liveSummary({
+    onModelProcess: (spec) => {
+      if (spec.command === "claude") {
+        children.push({ env: { ...spec.env }, timeoutMs: spec.timeoutMs });
+      }
+    }
+  });
+  assert.equal(summary.status, "pass", JSON.stringify(summary));
+  assert.deepEqual(
+    children.map((child) => child.timeoutMs),
+    [300_000]
+  );
+  const [child] = children;
+  assert.ok(child);
+  // Five minutes minus the reserve falls to the vendor's 2-minute floor.
+  assert.equal(child.env.BASH_MAX_TIMEOUT_MS, "120000");
+  assert.equal(child.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS, "1");
+});
+
+test("the live Claude preflight applies the one Claude minimum", async () => {
   const summary = await liveSummary({ claudeVersion: "2.1.289" });
   assert.equal(summary.status, "unavailable", JSON.stringify(summary));
   assert.deepEqual(liveCheck(summary, "preflight.claude"), {

@@ -849,12 +849,14 @@ class FakeAuthentication implements AuthenticationGateway {
   }
 }
 
-test("the launch check marks a vendor entry as reviewing only when the reviewer runs on it", async () => {
+test("the launch check hands each vendor entry to the gateway once, without a review marker", async () => {
   const checks = async (config: OrchestratorConfig) => {
-    const seen: [string, boolean][] = [];
+    const seen: unknown[][] = [];
     const auth: AuthenticationGateway = {
-      async check(settings: ModelSettings, reviews: boolean) {
-        seen.push([settings.executable, reviews]);
+      // ADR-0063 §1: one minimum, so the gateway needs only the settings.
+      async check(...args: unknown[]) {
+        const [settings] = args as [ModelSettings];
+        seen.push([settings.executable, args.length]);
         return null;
       }
     };
@@ -870,19 +872,14 @@ test("the launch check marks a vendor entry as reviewing only when the reviewer 
     allClaude.models[role].executable = "claude";
     allClaude.models[role].model = "claude-opus-5-5";
   }
-  assert.deepEqual(await checks(allClaude), [["claude", true]]);
+  assert.deepEqual(await checks(allClaude), [["claude", 1]]);
 
   const claudeBuilds = structuredClone(allClaude);
   claudeBuilds.models.reviewer.executable = "codex";
   claudeBuilds.models.reviewer.model = "gpt-6.1-sol";
   assert.deepEqual(await checks(claudeBuilds), [
-    ["claude", false],
-    ["codex", true]
-  ]);
-
-  assert.deepEqual(await checks(reviewerOnlyClaudeConfig()), [
-    ["codex", false],
-    ["claude", true]
+    ["claude", 1],
+    ["codex", 1]
   ]);
 });
 

@@ -267,3 +267,10 @@ Follow-ups:
 - Supersedes: None.
 - Superseded by: None.
 - Required lifecycle decision: accept, reject with a reason, or request rework.
+- Amended by
+  [ADR-0063](./0063-stable-headless-vendor-invocations.md), accepted
+  2026-11-06: the review isolation floor folds into one Claude Code
+  minimum of 2.1.290, and doctor's `claude.version` covers every Claude role.
+  Codex review arguments change only in prompt transport. Ambient builders
+  gain the run-stability environment and the stdin prompt. Review isolation
+  and auto-memory rules remain. Implemented on 2026-11-06 by WP8.

@@ -1114,11 +1114,7 @@ async function preflightVendor(
     if (vendor === "codex") {
       await adapters.preflightCodex(settings, environment);
     } else {
-      // The live Claude scenario is a review (ADR-0059 §2).
-      await adapters.preflightClaude(
-        { ...settings, reviews: true },
-        environment
-      );
+      await adapters.preflightClaude(settings, environment);
     }
     updateCheck(run, `preflight.${vendor}`, "pass", "OK", now() - started);
     return true;

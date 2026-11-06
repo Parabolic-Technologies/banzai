@@ -2835,6 +2835,11 @@ export interface ProcessSpec {
   cwd: string;
   env: NodeJS.ProcessEnv;
   timeoutMs: number;
+  /**
+   * Text written whole to the child's stdin, which is then closed (ADR-0063
+   * §3). Without it, stdin is ignored.
+   */
+  stdin?: string;
   maxOutputBytes?: number;
   onStart?: (pid: number) => Promise<void> | void;
   onStdoutLine?: (line: string) => void;
@@ -2938,11 +2943,6 @@ export interface ReviewAdapterRequest {
 export interface VendorPreflightTarget {
   executable: string;
   model: string | null;
-  /**
-   * Whether the target runs a review role. A reviewing Claude target must meet
-   * the review isolation minimum (ADR-0059 §2); a building target need not.
-   */
-  reviews?: boolean;
 }
 
 export interface PlanningAdapterRequest<

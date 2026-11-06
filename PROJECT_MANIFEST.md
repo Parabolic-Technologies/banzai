@@ -218,6 +218,13 @@ behavior and edge cases; source and tests own the executable evidence.
 - `adapters.ts`, `process.ts`, `mcp.ts`, `claude-permissions.ts` — vendor argv,
   auth, child lifetime, redaction and scoped tool access; unavailable optional
   Serena is advisory, while required permission failures stop execution.
+  Every headless model invocation receives its prompt on stdin
+  (`ProcessSpec.stdin`, written in full and closed at spawn; stdin errors never
+  escape): Claude runs `-p` with no prompt argument and Codex takes `-`. Every
+  headless Claude child, in both `claudeEnvironment` modes, runs with
+  `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, `BASH_MAX_TIMEOUT_MS` equal to its
+  timeout minus a 5-minute reserve with a 2-minute floor, and no
+  `BASH_DEFAULT_TIMEOUT_MS` (ADR-0063); Codex children get none of these.
 - `project-setup.ts`, `setup-client.ts`, `foreground-client.ts` — explicit
   interactive `project-manifest` entry, client discovery and terminal cleanup;
   setup refuses unfinished runs and creates no task or approval.
@@ -263,9 +270,10 @@ behavior and edge cases; source and tests own the executable evidence.
   and never affects readiness. `config.local` checks the local model file with
   only `git ls-files --error-unmatch` and `git check-ignore -q`, and the
   top-level `models` array discloses each role's vendor, pattern-matched model,
-  effort and source. `claude.version` reads a Claude reviewer's installed
-  version from the file system only and fails below the review isolation
-  minimum; it is skipped for other reviewers.
+  effort and source. `claude.version` reads the installed version of each
+  Claude executable that a role uses from the file system only and fails below
+  the Claude Code minimum; it is skipped when no role runs on an available
+  Claude executable.
 - `evaluation*.ts`, `evaluation-kpi*.ts` — privacy-minimized export and pure
   derived KPIs; frozen contracts retain explicit incomplete coverage.
 - `context-accounting.ts`, `context-report*.ts` — exact runner-byte accounting
@@ -389,10 +397,9 @@ Plugin and release owners:
   `typescript-eslint` `^8.65.0`, `globals` `^17.8.0`, `prettier` `^3.9.6` and
   `eslint-config-prettier` `^10.1.8`. The root declares no dependencies.
 - External runtime tools are Git and the configured local vendor clients.
-  Vendor-wide minimums are Codex `0.145.0` and Claude Code `2.1.218`. A Claude
-  reviewer requires Claude Code `2.1.290` for review isolation, so the default
-  all-Claude configuration does too; the Codex CLI is needed only when a role
-  uses it. Model-specific minimums are maintained in
+  Vendor-wide minimums are Codex `0.145.0` and Claude Code `2.1.290`; the
+  Claude minimum applies to every Claude role (ADR-0063), and the Codex CLI is
+  needed only when a role uses it. Model-specific minimums are maintained in
   `packages/orchestrator/src/models.ts`.
 - PTY tests require `python3` with its standard library on macOS/Linux.
   Python is a test prerequisite; the CLI runtime uses Node.
@@ -592,3 +599,4 @@ delivery or installation.
 | ADR-0060 | Local model override                                               | [Source](documentation/decisions/0060-local-model-override.md)                                   | Implemented |
 | ADR-0061 | Initiative skill and documents                                     | [Source](documentation/decisions/0061-initiative-skill-and-documents.md)                         | Implemented |
 | ADR-0062 | Claude Code memory notes in the manual hook gate                   | [Source](documentation/decisions/0062-claude-memory-notes-in-the-manual-hook-gate.md)            | Implemented |
+| ADR-0063 | Stable headless vendor invocations                                 | [Source](documentation/decisions/0063-stable-headless-vendor-invocations.md)                     | Implemented |

@@ -148,7 +148,7 @@ function authenticationGateway(
   adapters: VendorAdapters
 ): AuthenticationGateway {
   return {
-    async check(settings, reviews): Promise<string | null> {
+    async check(settings): Promise<string | null> {
       // Dispatch on the executable the role actually runs, not on the role.
       const vendor = vendorFor(settings.executable);
       if (vendor === null) {
@@ -156,8 +156,7 @@ function authenticationGateway(
       }
       const target = {
         executable: settings.executable,
-        model: settings.model,
-        reviews
+        model: settings.model
       };
       try {
         if (vendor === "claude") {

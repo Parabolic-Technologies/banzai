@@ -127,7 +127,7 @@ test("supported models, tier aliases, and unknown identifiers raise no advisory"
   }
 });
 
-test("models newer than the vendor CLI minimum name the release that first serves them", () => {
+test("catalogued models record the CLI release that first serves them", () => {
   assert.deepEqual(
     SELECTABLE_MODELS.flatMap((model) => {
       const minimum = modelCliMinimum(model.vendor, model.id);

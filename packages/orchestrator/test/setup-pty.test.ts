@@ -90,7 +90,7 @@ import path from 'node:path';
 const vendor=path.basename(process.argv[1]); const args=process.argv.slice(2); const key=args.join(' ');
 const plugin=${JSON.stringify(plugin)};
 if(key==='--help') { console.log('--ask-for-approval --permission-mode'); process.exit(0); }
-if(key==='--version') { console.log(vendor==='codex'?'codex-cli 0.145.0':'2.1.218'); process.exit(0); }
+if(key==='--version') { console.log(vendor==='codex'?'codex-cli 0.145.0':'2.1.290'); process.exit(0); }
 if(key==='login status') { if(process.env.BANZAI_TEST_REMOVE_EXECUTABLE==='1') fs.unlinkSync(process.argv[1]); console.log('Logged in using ChatGPT'); process.exit(0); }
 if(key==='auth status --json') { console.log(JSON.stringify({loggedIn:true,authMethod:'oauth',apiProvider:'firstparty'})); process.exit(0); }
 if(key==='plugin marketplace list --json') { console.log(JSON.stringify({marketplaces:[{name:'local-banzai',root:plugin}]})); process.exit(0); }

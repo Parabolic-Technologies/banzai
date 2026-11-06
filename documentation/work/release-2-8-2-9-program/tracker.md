@@ -50,8 +50,8 @@ Status values: `not started` · `ADR draft` · `ADR proposed` · `ADR accepted` 
 | WP6  | Local model override                           | —               | 0060 Accepted; amends 0008                      | `wp06-local-model-override`            | committed    | e26ea54 | One change set; see report deviations              |
 | WP19 | Initiative skill with brief and tracker        | —               | 0061 Accepted; amends 0054 (pinned), 0041, 0036 | `wp19-initiative-skill`                | committed    | 138b206 | Outside the brief; template overlaps WP12          |
 | WP20 | Memory notes: no gate prompt, no code unlock   | —               | 0062 accepted; authority for the pinned hook    | `wp20-spec-gate-memory-notes`          | committed    | ebfcd3e | Pinned hook; template shared with WP19, WP12       |
-| WP7  | Claude as the default reviewer, with isolation | WP6 recommended | 0059 Accepted; amends 0042 §7, 0037, 0002       | `wp07-claude-default-reviewer`         | report ready |         | Report ready; live run needs go-ahead              |
-| WP8  | Stable Claude phases                           | —               | check 0020                                      | `wp08-stable-claude-phases`            | not started  |         | Live scenario needs go-ahead                       |
+| WP7  | Claude as the default reviewer, with isolation | WP6 recommended | 0059 Accepted; amends 0042 §7, 0037, 0002       | `wp07-claude-default-reviewer`         | committed    | d0785db | Live run at Gate 1 needs go-ahead                  |
+| WP8  | Stable Claude phases                           | —               | 0063 Accepted; amends 0020, 0022, 0059          | `wp08-stable-claude-phases`            | report ready |         | Gate 1 probe needs the owner's run                 |
 
 ### Gate 1
 
@@ -78,6 +78,13 @@ Report: `gate-1-report.md` (not written).
       scratchpad write leaves only `bookkeeping-<session>` in
       `$TMPDIR/banzai-spec-gate/`, and the next code edit still asks with the
       first-change reason.
+- [ ] WP8 probe (ADR-0063 §6), on Claude Code 2.1.290 and on the current
+      release: a Banzai implementation phase runs one foreground command
+      longer than 10 minutes, whose sentinel exists before the result; no
+      background-task event occurs; the phase and a resumed invocation each
+      emit exactly one `result` event and exit 0. Run
+      `node packages/orchestrator/scripts/gate-1-probe.mjs --repository <scratch>`
+      per `documentation/work/wp08-stable-claude-phases/gate-1-probe.md`.
 
 ## Stage 2 (2.9): no lost runs
 
@@ -129,10 +136,11 @@ context accounting.
 | 0060 | WP6  | Local model override                                   | Accepted, 2026-11-04 |
 | 0061 | WP19 | Initiative skill and documents                         | Accepted, 2026-11-05 |
 | 0062 | WP20 | Claude Code memory notes in the manual hook gate       | Accepted, 2026-11-05 |
+| 0063 | WP8  | Stable headless vendor invocations                     | Accepted, 2026-11-06 |
 
 IDs checked free on 2026-10-31 (0057–0059), 2026-11-03 (0060) and 2026-11-05
-(0061) in `dev`, `main`, `v3.0.0-branch`, every local branch and every local
-worktree.
+(0061) and 2026-11-06 (0063) in `dev`, `main`, `v3.0.0-branch`, every local
+branch and every local worktree.
 
 ## Shared fixtures
 
@@ -271,6 +279,47 @@ worktree.
   offline. ADR-0059 is Implemented. The Gate 1 live run still needs the
   owner's go-ahead; the 2.8 version bump clears the deferred
   `HOOK_CHANGED_WITHOUT_VERSION_BUMP`.
+- 2026-11-06: WP7 committed as `d0785db`. WP8 starts with `WP8 next`.
+- 2026-11-06: before drafting WP8, the owner answered four closed questions
+  with the recommended options:
+  - ambient mode: "New ADR, every mode". The run-stability variables and the
+    stdin prompt apply in `scoped` and `ambient` mode, through ADR-0063, which
+    narrowly amends ADR-0020, ADR-0022 and ADR-0059;
+  - live evidence: "Gate 1 manual probe". `compatibility:live`, its v2
+    summary and its two-invocation budget stay unchanged, and a live-suite
+    budget decision comes before WP13 and WP14;
+  - doctor: "Every Claude role". `claude.version` covers every role on
+    Claude;
+  - Codex: "Yes, with `-`". The Codex prompt also moves to stdin.
+
+  ADR-0063 is drafted as Proposed. One independent review found that the
+  stdin prompt also touches ADR-0022's no-whitelist argv and ADR-0059's
+  unchanged Codex review arguments. The draft now amends both. It also
+  sharpens the probe: the command runs longer than 10 minutes, so it
+  exercises the raised Bash maximum, and a resumed invocation follows. The
+  ADR awaits acceptance.
+
+- 2026-11-06: ADR-0063 accepted with `Accept`. Its reciprocal links are
+  recorded in ADR-0020, ADR-0022 and ADR-0059, and the manifest lists it as
+  Planned. WP8 requirements and plan follow.
+
+- 2026-11-06: WP8 requirements and plan drafted under ADR-0063. An
+  independent read-only review found five major and eleven minor issues, all
+  addressed. Three owner questions wait at plan approval: Q1 the Bash timeout
+  reserve, Q2 settings `env` overrides, Q3 the Gate 1 probe form.
+
+- 2026-11-06: WP8 plan approved with `Approve, all (a)`: Q1 a 5-minute Bash
+  reserve with a 2-minute floor, Q2 settings `env` overrides documented only,
+  Q3 a maintainer probe script for Gate 1.
+
+- 2026-11-06: WP8 implemented as one change set; report ready. Every Claude
+  role needs Claude Code 2.1.290. Every headless model invocation receives
+  its prompt on stdin, and every headless Claude invocation runs, in both
+  modes, without background tasks, with `BASH_MAX_TIMEOUT_MS` at its timeout
+  minus 5 minutes (2-minute floor) and without `BASH_DEFAULT_TIMEOUT_MS`.
+  Doctor's `claude.version` covers every Claude role. ADR-0063 is
+  Implemented. The Gate 1 probe is built and documented, and awaits the
+  owner's run on 2.1.290 and on the current release.
 
 ## Open questions left to the owner by the brief
 
@@ -311,3 +360,18 @@ under Owner decisions.
   in the client binary. The host reports no auto memory or fallback state and
   a classifier flag cannot be triggered safely, so whether the host honours
   the variables rests on the vendor's documentation and the version floor.
+- WP8 (2026-11-06): owner choices before drafting depart from the brief in
+  three places:
+  - the brief asks for a new live scenario in the suite; the long-command
+    evidence is instead a Gate 1 probe run by the owner, because
+    `release-policy.json` and ADR-0046 keep `compatibility:live` at two
+    invocations under the v2 summary;
+  - the brief says doctor checks no versions; WP7 already added the offline
+    `claude.version`, and WP8 extends it to every Claude role;
+  - the brief leaves Codex to a separate check; Codex `exec` and
+    `exec resume` read a `-` prompt from stdin from 0.145.0, so WP8 moves the
+    Codex prompt too.
+- WP8 (2026-11-06): under Q1 (a), a timeout below 7 minutes gets the
+  2-minute Bash floor instead of the full 5-minute reserve, which departs from
+  ADR-0063 Compliance 4. No default role is affected; the live review's
+  5-minute bound gets 120,000 ms.

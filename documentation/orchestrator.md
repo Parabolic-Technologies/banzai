@@ -125,10 +125,9 @@ metadata does not imply shared installation or publication.
 
 - macOS or Linux with Node.js 22.20.0+ within major 22 or Node.js 24.11.1+
   within major 24;
-- a local `claude` 2.1.218+ executable, and `codex` 0.145.0+ when a role uses
-  it, or the newer release a configured model needs (see
-  [Model Configuration](#model-configuration)); a Claude reviewer needs
-  `claude` 2.1.290+;
+- a local `claude` 2.1.290+ executable for every Claude role, and `codex`
+  0.145.0+ when a role uses it, or the newer release a configured model needs
+  (see [Model Configuration](#model-configuration));
 - individual-subscription authentication only;
 - one active run in the current checkout;
 - no API keys, direct vendor APIs, worktrees, branch switching, stash, reset,
@@ -450,7 +449,19 @@ separate from live evidence.
 contains both names. The binary is searched, never run, and only the result is
 kept. This shows that the variables were sent and that the client knows them;
 the client's behaviour on them rests on the vendor's documentation. The live
-Claude preflight applies the reviewer minimum.
+Claude preflight applies the one Claude minimum of
+[Model Configuration](#model-configuration).
+
+Both live invocations receive their prompt on stdin, and the Claude review
+runs with the run-stability environment of
+[Headless Invocations](#headless-invocations); at the five-minute bound its
+`BASH_MAX_TIMEOUT_MS` is the 120,000 ms floor. The live suite runs no long
+foreground command. That host behaviour has its own owner-run probe,
+`node packages/orchestrator/scripts/gate-1-probe.mjs`, which runs a Banzai
+implementation phase with an 11-minute foreground command and a resumed
+invocation in a scratch repository; see
+[the Gate 1 probe](work/wp08-stable-claude-phases/gate-1-probe.md). It is not
+part of `compatibility:live` and makes no automatic model call.
 
 Each invocation is limited to five minutes, the complete command to fifteen
 minutes, and the total to two model calls. The only stdout is
@@ -807,20 +818,24 @@ and reviewer produce no parity warning when resources match. Historical
 v1-v5 reports retain their identities; consumers must negotiate v6. v6 adds
 `claude.plugin-scope` and keeps the v5 fields and status semantics.
 
-`claude.version` follows `executables.models`. It applies only when the
-effective reviewer's executable is `claude`, and it never runs the client: it
-resolves the executable on `PATH`, follows its links, and reads the version
-from the native installer's `versions/<version>` file name or from the first
-`package.json` above an npm install, which must name
-`@anthropic-ai/claude-code` or its platform package. It passes at or above
-2.1.290, fails below it, warns when no layout yields a version, and is skipped
-for another reviewer, an unusable configuration or local model file, or an
-unavailable executable. It prints versions only, and its fix links
+`claude.version` follows `executables.models`. It applies to every role whose
+effective executable is a Claude Code client, and it never runs the client:
+for each distinct executable those roles name, it resolves the executable on
+`PATH` once, follows its links, and reads the version from the native
+installer's `versions/<version>` file name or from the first `package.json`
+above an npm install, which must name `@anthropic-ai/claude-code` or its
+platform package. It fails when any version is below 2.1.290, warns when no
+layout yields a version, and passes otherwise; the worst result wins, and the
+message names the roles behind each version. Roles whose executable is
+unavailable are named as not checked. The check is skipped when no role runs
+on Claude, when no named Claude executable is available, or for an unusable
+configuration or local model file. It prints versions and role names only,
+and its fix links
 [Install and sign in to model clients](getting-started.md#install-and-sign-in-to-model-clients).
 
 Doctor also emits an `authentication.models` advisory: it does not invoke a
 vendor, so authentication readiness is not checked, it checks no vendor CLI
-version except the Claude reviewer's, which it reads offline, and executable
+version except Claude Code's, which it reads offline, and executable
 availability is not authentication proof. This warning leaves `ready` and exit
 semantics unchanged. Startup and phase preflight remain authoritative.
 
@@ -864,8 +879,8 @@ unknown vendor, `unlisted` for an undisclosed model, and `Models: unavailable`
 for an empty array.
 
 `claude.instructions`, `claude.permissions`, `executables.models`, and
-`claude.version` evaluate the effective configuration, so a local Claude
-reviewer is checked as Claude.
+`claude.version` evaluate the effective configuration, so a role that the
+local file moves to Claude is checked as Claude.
 While `config.local` fails they are `skipped`. `claude.environment` and the
 verification checks read committed values, which the local file cannot change.
 
@@ -1206,7 +1221,9 @@ review run without auto memory and without the refusal fallback, through
 `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` and
 `CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK=1`, which Banzai sets after building the
 subscription environment in both `claudeEnvironment` modes, so an inherited
-value never survives. A request the client flags therefore fails the review
+value never survives; like every headless Claude invocation, they also carry
+the run-stability environment and the stdin prompt of
+[Headless Invocations](#headless-invocations). A request the client flags therefore fails the review
 instead of continuing on another model: the attempt is recorded with its
 message and stays retryable, and no review result is fabricated. Since Claude
 Code 2.1.312 the variable also stops the model switch for a model name the
@@ -1552,9 +1569,10 @@ retired.
 
 `banzai init` and non-interactive commands do not run this check.
 
-Some models need a newer vendor CLI than the minimums in
-[Boundaries](#boundaries). The catalog records the first release that serves
-each of them:
+The catalog records the first CLI release that serves each of these models. A
+model minimum at or below the vendor minimum in [Boundaries](#boundaries)
+stays recorded and never decides; every Claude entry is currently at or below
+Claude Code 2.1.290:
 
 | Model                     | Minimum CLI         |
 | ------------------------- | ------------------- |
@@ -1574,14 +1592,14 @@ model again before its call. Tier aliases, models without an entry, and
 unrecognized identifiers need only the vendor minimum. `banzai setup` launches
 its client without a model, so it needs only the vendor minimum.
 
-A Claude reviewer also needs Claude Code 2.1.290 or newer, the first release
-that honours both review isolation variables. The launch header, run start,
-the planning-review and review preflights and the live harness refuse an older
-client with `CLI_TOO_OLD`, naming the installed version and the minimum. The
-launch header and run start apply it to an executable whenever any role that
-shares it is the reviewer; a client that only builds needs only the vendor and
-model minimums. `banzai doctor` reads this one version offline in
-`claude.version` and checks no other CLI version.
+Every Claude role needs Claude Code 2.1.290 or newer (ADR-0063). Earlier
+releases can report a delivered `--json-schema` result as an error, and
+2.1.290 is also the first release that honours both review isolation
+variables. The launch header, run start, `banzai setup`, every phase,
+planning-review and review preflight, and the live harness refuse an older
+client with `CLI_TOO_OLD`, naming the installed version, the minimum and the
+reason. `banzai doctor` reads the version of each Claude executable that a
+role uses offline in `claude.version` and checks no other CLI version.
 
 Claude entries come from Claude Code's model configuration documentation, which
 states that an older client refuses the model before sending a request. Codex
@@ -1783,6 +1801,49 @@ this:
 passes, explicit ambient mode and automatic MCP-only degradation warn, and an
 invalid explicit plugin directory fails readiness. The check is filesystem-only
 and does not invoke Claude.
+
+### Headless Invocations
+
+Every headless model invocation receives its rendered prompt on stdin
+(ADR-0063): Claude runs `-p` with no prompt argument, and Codex takes `-` as
+the prompt argument of `exec` and `exec resume`. Argv carries only flags and
+identifiers, so a prompt is never bound by the operating system's argument
+limit and never appears in a process listing. The runner writes the prompt
+once at spawn and closes stdin; a child that exits before reading keeps its
+own process outcome. Version probes and other processes that take no prompt
+keep stdin ignored, and `banzai setup` keeps its interactive argv launch.
+
+Every headless Claude invocation — planning, planning analysis, planning
+review, workflow selection, implementation, fixes and review — also runs, in
+both `claudeEnvironment` modes, with:
+
+- `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, so a long command runs in the
+  foreground and a timed-out command is stopped rather than moved to the
+  background, where it could outlive the phase's result;
+- `BASH_MAX_TIMEOUT_MS` set to the invocation's timeout minus a five-minute
+  reserve for the closing turn, and never below two minutes: 1,500,000 ms for
+  a 30-minute planner or reviewer and 3,300,000 ms for a 60-minute
+  implementer. A command started with the maximum then ends before the runner
+  stops the phase. Timeouts below seven minutes get the two-minute floor and
+  keep less than the full reserve;
+- no `BASH_DEFAULT_TIMEOUT_MS`: Banzai removes an inherited value, so the
+  client's two-minute default applies and the raised maximum stays the
+  ceiling.
+
+Banzai sets these values after filtering the subscription environment, so an
+inherited value never survives. Ambient mode restores discovery arguments
+only; it keeps the stdin prompt and these variables. Codex children receive
+none of them.
+
+A Claude settings file can still replace these values: Claude Code writes each
+`env` entry of every settings file it loads into its own environment, over
+the inherited value. Scoped mode with a verified plugin directory loads the
+shared project `.claude/settings.json` and managed settings; ambient mode and
+scoped mode without a plugin directory also load user settings and project
+`.claude/settings.local.json`. Banzai does not inspect or override such an
+`env` block. Keep `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS`,
+`BASH_MAX_TIMEOUT_MS` and `BASH_DEFAULT_TIMEOUT_MS` out of the settings
+files a Banzai run loads.
 
 ### Claude Tool Permissions
 

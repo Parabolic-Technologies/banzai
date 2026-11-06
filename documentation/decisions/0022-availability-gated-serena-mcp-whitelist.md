@@ -275,3 +275,8 @@ Implementation and review must confirm all of the following:
   the resolved whitelist, and zero servers when none resolves". Every other part
   of ADR-0020 stands unchanged, its status remains Accepted, and its body is
   untouched; the amendment is recorded in its lifecycle metadata.
+- Amended by
+  [ADR-0063](./0063-stable-headless-vendor-invocations.md), accepted
+  2026-11-06: without a whitelist, both vendors' argument vectors stay
+  identical in their discovery arguments, and the prompt moves from argv to
+  stdin. Whitelist resolution, availability gating and fallback remain. Implemented on 2026-11-06 by WP8.

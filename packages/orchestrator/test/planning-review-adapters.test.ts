@@ -59,14 +59,21 @@ test("planning invocations preserve read-only argv, exact schema and environment
                 ])
                   assert.ok(!spec.env[key]);
                 assert.equal(spec.cwd, directory);
+                // ADR-0063 §3: the prompt travels on stdin, never in argv.
+                assert.equal(spec.stdin, "Read only");
+                assert.equal(spec.args.includes("Read only"), false);
                 if (vendor === "codex") {
                   assert.equal(spec.env[MEMORY], undefined);
                   assert.equal(spec.env[FALLBACK], undefined);
+                  assert.equal(spec.env.BASH_MAX_TIMEOUT_MS, undefined);
+                  assert.equal(
+                    spec.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS,
+                    undefined
+                  );
                 }
                 if (vendor === "claude") {
                   assert.deepEqual(spec.args, [
                     "-p",
-                    "Read only",
                     "--output-format",
                     "stream-json",
                     "--verbose",
@@ -122,7 +129,7 @@ test("planning invocations preserve read-only argv, exact schema and environment
                           "-c",
                           'sandbox_mode="read-only"',
                           "session",
-                          "Read only"
+                          "-"
                         ]
                       : [
                           "exec",
@@ -131,7 +138,7 @@ test("planning invocations preserve read-only argv, exact schema and environment
                           "read-only",
                           "--cd",
                           directory,
-                          "Read only"
+                          "-"
                         ]
                   );
                   assert.ok(
@@ -254,7 +261,13 @@ function planningRequest(
       timeoutMs: 1000
     },
     resumeSessionId: null,
-    env: { PATH: "/usr/bin", [MEMORY]: "0", [FALLBACK]: "0" },
+    env: {
+      PATH: "/usr/bin",
+      [MEMORY]: "0",
+      [FALLBACK]: "0",
+      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "0",
+      BASH_DEFAULT_TIMEOUT_MS: "9999999"
+    },
     onStart: async () => {},
     onProgress: () => {},
     ...extra
@@ -319,6 +332,10 @@ test("Claude planning review isolates the reviewer and planning analysis keeps t
         assert.equal(env[FALLBACK], "0", label);
       }
       assert.equal(env.BANZAI_RUN_ID, "run-planning", label);
+      // ADR-0063 §2: a 1-second timeout keeps the vendor's 2-minute floor.
+      assert.equal(env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS, "1", label);
+      assert.equal(env.BASH_MAX_TIMEOUT_MS, "120000", label);
+      assert.equal("BASH_DEFAULT_TIMEOUT_MS" in env, false, label);
     }
 });
 

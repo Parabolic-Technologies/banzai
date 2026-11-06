@@ -16,7 +16,6 @@ import path from "node:path";
 import test from "node:test";
 import {
   AMBIENT_CLAUDE_SCOPE,
-  REVIEW_ISOLATION_MINIMUM_CLAUDE_VERSION,
   buildClaudeArguments,
   buildClaudePhaseArguments,
   buildClaudeSelectionArguments,
@@ -53,6 +52,7 @@ import type {
   ModelProgressEvent,
   ProcessResult,
   ProcessRunner,
+  ProcessSpec,
   ReviewAdapterRequest,
   WorkflowSelectionAdapterRequest
 } from "../src/types.js";
@@ -208,13 +208,25 @@ function scoped(environment: ClaudeInvocationScope | undefined): {
   return environment === undefined ? {} : { environment };
 }
 
-/** The argv and environment of the one child a call spawns. */
+interface SpawnedChild {
+  args: string[];
+  env: NodeJS.ProcessEnv;
+  stdin: string | undefined;
+  timeoutMs: number;
+}
+
+/** The argv, environment, stdin and timeout of the one child a call spawns. */
 async function spawned(
   call: (adapters: ReturnType<typeof createVendorAdapters>) => Promise<unknown>
-): Promise<{ args: string[]; env: NodeJS.ProcessEnv }> {
-  const spawns: { args: string[]; env: NodeJS.ProcessEnv }[] = [];
+): Promise<SpawnedChild> {
+  const spawns: SpawnedChild[] = [];
   const runner: ProcessRunner = async (spec) => {
-    spawns.push({ args: spec.args, env: { ...spec.env } });
+    spawns.push({
+      args: spec.args,
+      env: { ...spec.env },
+      stdin: spec.stdin,
+      timeoutMs: spec.timeoutMs
+    });
     return failed("", "stopped after spawn");
   };
   await call(createVendorAdapters(runner)).then(
@@ -222,7 +234,9 @@ async function spawned(
     () => undefined
   );
   assert.equal(spawns.length, 1);
-  return spawns[0] as { args: string[]; env: NodeJS.ProcessEnv };
+  const [child] = spawns;
+  assert.ok(child);
+  return child;
 }
 
 async function pluginFixture(
@@ -720,7 +734,7 @@ test("Claude builders and selection disable auto memory in scoped mode only", as
   }
 });
 
-test("Claude builders and selection keep today's environment in ambient mode and without a scope", async () => {
+test("Claude builders and selection add only the run-stability settings in ambient mode and without a scope", async () => {
   for (const source of [
     inheritedIsolationOptOut,
     { PATH: "/usr/bin", CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK: "1" },
@@ -745,8 +759,14 @@ test("Claude builders and selection keep today's environment in ambient mode and
           ...scoped(environment)
         })
       );
-      assert.deepEqual(phase.env, subscriptionOnlyEnvironment(source));
-      assert.deepEqual(selection.env, subscriptionOnlyEnvironment(source));
+      // ADR-0063 §2: the three run-stability settings apply in every mode.
+      const expected = {
+        ...subscriptionOnlyEnvironment(source),
+        CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
+        BASH_MAX_TIMEOUT_MS: "120000"
+      };
+      assert.deepEqual(phase.env, expected);
+      assert.deepEqual(selection.env, expected);
     }
   }
 });
@@ -1110,7 +1130,7 @@ test("subscription child environment strips vendor API overrides", () => {
 test("preflight distinguishes Codex sandbox credential isolation from a normal Claude logout", async () => {
   const runner: ProcessRunner = async (spec) => {
     return spec.args[0] === "--version"
-      ? successful("2.1.218 (Claude Code)\n")
+      ? successful("2.1.290 (Claude Code)\n")
       : failed(
           JSON.stringify({
             loggedIn: false,
@@ -1226,7 +1246,7 @@ test("preflight distinguishes invalid auth evidence from auth-status invocation 
     const runner: ProcessRunner = async () => {
       invocation += 1;
       return invocation === 1
-        ? successful("2.1.218 (Claude Code)\n")
+        ? successful("2.1.290 (Claude Code)\n")
         : fixture.result;
     };
     await assert.rejects(
@@ -1247,7 +1267,7 @@ test("preflight accepts subscription auth and rejects Claude API auth", async ()
     calls.push(spec.args);
     if (spec.args[0] === "--version") {
       return successful(
-        calls.length === 1 ? "codex-cli 0.145.0\n" : "2.1.218 (Claude Code)\n"
+        calls.length === 1 ? "codex-cli 0.145.0\n" : "2.1.290 (Claude Code)\n"
       );
     }
     if (spec.args[0] === "login") {
@@ -1272,7 +1292,7 @@ test("preflight accepts subscription auth and rejects Claude API auth", async ()
   const apiRunner: ProcessRunner = async () => {
     invocation += 1;
     return invocation === 1
-      ? successful("2.1.218 (Claude Code)\n")
+      ? successful("2.1.290 (Claude Code)\n")
       : successful(
           JSON.stringify({
             loggedIn: true,
@@ -1287,144 +1307,137 @@ test("preflight accepts subscription auth and rejects Claude API auth", async ()
   );
 });
 
-test("preflight refuses a CLI older than the configured model's release before checking authentication", async () => {
-  for (const fixture of [
-    {
-      vendor: "claude",
-      model: "claude-opus-5-5",
-      version: (value: string) => `${value} (Claude Code)\n`,
-      vendorMinimum: "2.1.218",
-      belowVendorMinimum: "2.1.217",
-      tooOld: "2.1.279",
-      required: "2.1.280"
-    },
-    {
-      vendor: "codex",
-      model: "gpt-6.1-sol",
-      version: (value: string) => `codex-cli ${value}\n`,
-      vendorMinimum: "0.145.0",
-      belowVendorMinimum: "0.144.9",
-      tooOld: "0.159.0",
-      required: "0.159.1"
+/** A fake vendor CLI that reports `installed` and a signed-in subscription. */
+function preflightAdapters(
+  installed: string,
+  calls: string[][] = []
+): ReturnType<typeof createVendorAdapters> {
+  return createVendorAdapters(async (spec) => {
+    calls.push(spec.args);
+    if (spec.args[0] === "--version") {
+      return successful(
+        spec.command === "codex"
+          ? `codex-cli ${installed}\n`
+          : `${installed} (Claude Code)\n`
+      );
     }
-  ] as const) {
+    if (spec.args[0] === "login") {
+      return successful("Logged in using ChatGPT\n");
+    }
+    return successful(
+      JSON.stringify({
+        loggedIn: true,
+        authMethod: "oauth",
+        apiProvider: "firstParty"
+      })
+    );
+  });
+}
+
+const codexPreflightEnvironment = {
+  CODEX_HOME: tmpdir(),
+  PATH: process.env.PATH
+};
+
+test("preflight refuses a CLI older than the configured model's release before checking authentication", async () => {
+  // Every catalogued Claude model is served by the vendor-wide minimum, so the
+  // model minimum is exercised on Codex; Claude's is proven below.
+  const model = "gpt-6.1-sol";
+  const calls: string[][] = [];
+  const preflight = (installed: string, selected: string | null) =>
+    preflightAdapters(installed, calls).preflightCodex(
+      { executable: "codex", model: selected },
+      codexPreflightEnvironment
+    );
+
+  await assert.rejects(preflight("0.159.0", model), (error: unknown) => {
+    assert.ok(error instanceof BanzaiError);
+    assert.equal(error.code, "CLI_TOO_OLD");
+    assert.equal(
+      error.message,
+      `codex 0.159.0 cannot run ${model}, which requires 0.159.1 or newer. Update codex, or choose another model with \`banzai model\`.`
+    );
+    return true;
+  });
+  assert.deepEqual(calls, [["--version"]]);
+  await assert.rejects(
+    preflight("0.144.9", model),
+    /codex 0\.144\.9 is older than required 0\.145\.0\.$/
+  );
+
+  calls.length = 0;
+  await preflight("0.159.1", model);
+  assert.equal(calls.length, 2);
+  // A launch that leaves model choice to the client needs only the
+  // vendor-wide minimum.
+  await preflight("0.145.0", null);
+});
+
+test("preflight refuses Claude Code below 2.1.290 for every role, naming the reason", async () => {
+  for (const model of ["claude-opus-5-5", "claude-fable-5-1", null]) {
     const calls: string[][] = [];
-    const preflight = async (
-      installed: string,
-      model: string | null
-    ): Promise<void> => {
-      const adapters = createVendorAdapters(async (spec) => {
-        calls.push(spec.args);
-        if (spec.args[0] === "--version") {
-          return successful(fixture.version(installed));
-        }
-        if (spec.args[0] === "login") {
-          return successful("Logged in using ChatGPT\n");
-        }
-        return successful(
+    await assert.rejects(
+      preflightAdapters("2.1.289", calls).preflightClaude({
+        executable: "claude",
+        model
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof BanzaiError);
+        assert.equal(error.code, "CLI_TOO_OLD");
+        assert.equal(
+          error.message,
+          "claude 2.1.289 is older than required 2.1.290: earlier releases can report a delivered structured result as an error. Update claude."
+        );
+        return true;
+      }
+    );
+    // Refused before authentication is checked.
+    assert.deepEqual(calls, [["--version"]], String(model));
+    await preflightAdapters("2.1.290").preflightClaude({
+      executable: "claude",
+      model
+    });
+  }
+  // Codex keeps its own minimum and its existing message.
+  await preflightAdapters("0.145.0").preflightCodex(
+    { executable: "codex", model: null },
+    codexPreflightEnvironment
+  );
+});
+
+test("metadata probes spawn without stdin", async () => {
+  const specs: ProcessSpec[] = [];
+  const adapters = createVendorAdapters(async (spec) => {
+    specs.push(spec);
+    if (spec.args[0] === "--version") {
+      return successful(
+        spec.command === "codex"
+          ? "codex-cli 0.166.0\n"
+          : "2.1.290 (Claude Code)\n"
+      );
+    }
+    return spec.args[0] === "login"
+      ? successful("Logged in using ChatGPT\n")
+      : successful(
           JSON.stringify({
             loggedIn: true,
             authMethod: "oauth",
             apiProvider: "firstParty"
           })
         );
-      });
-      const target = { executable: fixture.vendor, model };
-      const env = { CODEX_HOME: tmpdir(), PATH: process.env.PATH };
-      await (fixture.vendor === "claude"
-        ? adapters.preflightClaude(target, env)
-        : adapters.preflightCodex(target, env));
-    };
-
-    await assert.rejects(
-      preflight(fixture.tooOld, fixture.model),
-      (error: unknown) => {
-        assert.ok(error instanceof BanzaiError);
-        assert.equal(error.code, "CLI_TOO_OLD");
-        assert.equal(
-          error.message,
-          `${fixture.vendor} ${fixture.tooOld} cannot run ${fixture.model}, which requires ${fixture.required} or newer. Update ${fixture.vendor}, or choose another model with \`banzai model\`.`
-        );
-        return true;
-      }
-    );
-    assert.deepEqual(calls, [["--version"]], fixture.vendor);
-    await assert.rejects(
-      preflight(fixture.belowVendorMinimum, fixture.model),
-      new RegExp(`is older than required ${fixture.vendorMinimum}\\.$`)
-    );
-
-    calls.length = 0;
-    await preflight(fixture.required, fixture.model);
-    assert.equal(calls.length, 2, fixture.vendor);
-    // A launch that leaves model choice to the client needs only the
-    // vendor-wide minimum.
-    await preflight(fixture.vendorMinimum, null);
+  });
+  await adapters.preflightClaude({ executable: "claude", model: null });
+  await adapters.preflightCodex(
+    { executable: "codex", model: null },
+    codexPreflightEnvironment
+  );
+  assert.deepEqual(
+    specs.map((spec) => spec.args[0]),
+    ["--version", "auth", "--version", "login"]
+  );
+  for (const spec of specs) {
+    assert.equal(spec.stdin, undefined, spec.args.join(" "));
   }
-});
-
-test("preflight refuses a reviewing Claude target below the review isolation floor", async () => {
-  assert.equal(REVIEW_ISOLATION_MINIMUM_CLAUDE_VERSION, "2.1.290");
-  const calls: string[][] = [];
-  const adaptersAt = (installed: string) =>
-    createVendorAdapters(async (spec) => {
-      calls.push(spec.args);
-      if (spec.args[0] === "--version") {
-        return successful(
-          spec.command === "codex"
-            ? `codex-cli ${installed}\n`
-            : `${installed} (Claude Code)\n`
-        );
-      }
-      if (spec.args[0] === "login") {
-        return successful("Logged in using ChatGPT\n");
-      }
-      return successful(
-        JSON.stringify({
-          loggedIn: true,
-          authMethod: "oauth",
-          apiProvider: "firstParty"
-        })
-      );
-    });
-  const reviewer = {
-    executable: "claude",
-    model: "claude-opus-5-5",
-    reviews: true
-  };
-  await assert.rejects(
-    adaptersAt("2.1.289").preflightClaude(reviewer),
-    (error: unknown) => {
-      assert.ok(error instanceof BanzaiError);
-      assert.equal(error.code, "CLI_TOO_OLD");
-      assert.equal(
-        error.message,
-        "claude 2.1.289 cannot isolate the reviewer, which requires 2.1.290 or newer. Update claude, or choose another reviewer with `banzai model`."
-      );
-      return true;
-    }
-  );
-  // Refused before authentication is checked, like the model minimum.
-  assert.deepEqual(calls, [["--version"]]);
-  await assert.rejects(
-    adaptersAt("2.1.289").preflightClaude({ ...reviewer, model: null }),
-    /cannot isolate the reviewer/
-  );
-  // A target that only builds is not subject to the floor.
-  await adaptersAt("2.1.289").preflightClaude({
-    executable: "claude",
-    model: "claude-opus-5-5"
-  });
-  await adaptersAt("2.1.289").preflightClaude({
-    ...reviewer,
-    reviews: false
-  });
-  await adaptersAt("2.1.290").preflightClaude(reviewer);
-  // The floor belongs to Claude review isolation; Codex keeps its minimums.
-  await adaptersAt("0.159.1").preflightCodex(
-    { executable: "codex", model: "gpt-6.1-sol", reviews: true },
-    { CODEX_HOME: tmpdir(), PATH: process.env.PATH }
-  );
 });
 
 test("a refused Claude review fails through typed handling without a result", async () => {
@@ -2784,6 +2797,351 @@ test("Codex decodes a protocol attempt through the safe envelope instead of disc
         runDirectory
       })
     );
+  } finally {
+    await rm(runDirectory, { recursive: true, force: true });
+  }
+});
+
+/** ADR-0063 §3: a prompt that no other argument could contain by accident. */
+const STDIN_PROMPT = "WP8 stdin prompt that must never reach argv";
+
+function onStdin<T extends { prompt: string }>(request: T): T {
+  return {
+    ...request,
+    prompt: STDIN_PROMPT,
+    promptEnvelope: createPromptEnvelope([
+      { category: "phase_instructions", text: STDIN_PROMPT }
+    ])
+  };
+}
+
+test("every vendor spawn carries its prompt on stdin and never in argv", async () => {
+  const runDirectory = await mkdtemp(path.join(tmpdir(), "banzai-stdin-"));
+  try {
+    const scopes: [string, ClaudeInvocationScope | undefined][] = [
+      ["scoped", scopedEnvironment],
+      ["scoped with a whitelist", whitelistedScope],
+      ["ambient", AMBIENT_CLAUDE_SCOPE],
+      ["no scope", undefined]
+    ];
+    for (const [name, environment] of scopes) {
+      for (const resumeSessionId of [null, "session-1"]) {
+        const children: [string, SpawnedChild][] = [
+          [
+            "claude review",
+            await spawned((adapters) =>
+              adapters.runReview(
+                onStdin({
+                  ...baseReviewRequest,
+                  resumeSessionId,
+                  ...scoped(environment)
+                })
+              )
+            )
+          ],
+          [
+            "codex review",
+            await spawned((adapters) =>
+              adapters.runReview(
+                onStdin({
+                  ...baseReviewRequest,
+                  runDirectory,
+                  settings: codexSettings,
+                  outputContract: codexReviewOutputContract,
+                  resumeSessionId,
+                  ...scoped(environment)
+                })
+              )
+            )
+          ],
+          [
+            "claude phase",
+            await spawned((adapters) =>
+              adapters.runPhase(
+                onStdin({
+                  ...basePhaseRequest,
+                  settings,
+                  outputContract: claudePhaseOutputContract,
+                  resumeSessionId,
+                  ...scoped(environment)
+                })
+              )
+            )
+          ],
+          [
+            "codex phase",
+            await spawned((adapters) =>
+              adapters.runPhase(
+                onStdin({
+                  ...basePhaseRequest,
+                  runDirectory,
+                  resumeSessionId,
+                  ...scoped(environment)
+                })
+              )
+            )
+          ]
+        ];
+        // Workflow selection never resumes.
+        if (resumeSessionId === null) {
+          children.push(
+            [
+              "claude selection",
+              await spawned((adapters) =>
+                adapters.runSelection(
+                  onStdin({
+                    ...baseSelectionRequest,
+                    settings,
+                    outputContract: claudeSelectionOutputContract,
+                    ...scoped(environment)
+                  })
+                )
+              )
+            ],
+            [
+              "codex selection",
+              await spawned((adapters) =>
+                adapters.runSelection(
+                  onStdin({
+                    ...baseSelectionRequest,
+                    runDirectory,
+                    ...scoped(environment)
+                  })
+                )
+              )
+            ]
+          );
+        }
+        for (const [kind, child] of children) {
+          const label = `${kind}, ${name}, ${resumeSessionId ?? "fresh"}`;
+          assert.equal(child.stdin, STDIN_PROMPT, label);
+          assert.equal(
+            child.args.some((arg) => arg.includes(STDIN_PROMPT)),
+            false,
+            label
+          );
+          if (kind.startsWith("claude")) {
+            assert.deepEqual(
+              child.args.slice(0, 2),
+              ["-p", "--output-format"],
+              label
+            );
+          } else {
+            assert.equal(child.args.at(-1), "-", label);
+          }
+        }
+      }
+    }
+  } finally {
+    await rm(runDirectory, { recursive: true, force: true });
+  }
+});
+
+test("ambient and no-whitelist argv is today's argv without the prompt", () => {
+  const noWhitelist: ClaudeInvocationScope = {
+    strictMcpConfig: true,
+    settingSources: null,
+    pluginDirectory: null,
+    mcp: { claude: null, codex: null, notes: [] }
+  };
+  for (const environment of [AMBIENT_CLAUDE_SCOPE, noWhitelist]) {
+    const strict = environment.strictMcpConfig ? ["--strict-mcp-config"] : [];
+    const head = (args: string[]) => [
+      "-p",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--json-schema",
+      flagValue(args, "--json-schema"),
+      "--model",
+      "model-id",
+      "--effort",
+      "xhigh",
+      "--permission-mode",
+      "dontAsk"
+    ];
+    const review = buildClaudeArguments({ ...baseReviewRequest, environment });
+    assert.deepEqual(review, [
+      ...head(review),
+      "--tools",
+      REVIEW_TOOLS,
+      "--disallowedTools",
+      REVIEW_DISALLOWED_TOOLS,
+      ...strict
+    ]);
+    const selection = buildClaudeSelectionArguments({
+      ...baseSelectionRequest,
+      settings,
+      outputContract: claudeSelectionOutputContract,
+      environment
+    });
+    assert.deepEqual(selection, [
+      ...head(selection),
+      "--add-dir",
+      "/repo",
+      "--tools",
+      "Read,Glob,Grep",
+      "--disallowedTools",
+      "Skill,Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch",
+      ...strict
+    ]);
+    for (const resumeSessionId of [null, "session-1"]) {
+      const phase = buildClaudePhaseArguments({
+        ...basePhaseRequest,
+        settings,
+        outputContract: claudePhaseOutputContract,
+        resumeSessionId,
+        environment
+      });
+      assert.deepEqual(phase, [
+        ...head(phase),
+        "--add-dir",
+        "/repo",
+        "--tools",
+        "Read,Glob,Grep,Skill,Edit,Write,NotebookEdit,Bash",
+        "--disallowedTools",
+        "WebFetch,WebSearch",
+        ...(resumeSessionId === null ? [] : ["--resume", resumeSessionId]),
+        ...strict
+      ]);
+      const codex = buildCodexArguments(
+        { ...basePhaseRequest, resumeSessionId, environment },
+        "/schema.json",
+        "/out.json"
+      );
+      const shared = [
+        "--json",
+        "--output-schema",
+        "/schema.json",
+        "-o",
+        "/out.json",
+        "-m",
+        "model-id",
+        "-c",
+        'model_reasoning_effort="xhigh"'
+      ];
+      assert.deepEqual(
+        codex,
+        resumeSessionId === null
+          ? [
+              "exec",
+              ...shared,
+              "--sandbox",
+              "workspace-write",
+              "--cd",
+              "/repo",
+              "-"
+            ]
+          : [
+              "exec",
+              "resume",
+              ...shared,
+              "-c",
+              'sandbox_mode="workspace-write"',
+              resumeSessionId,
+              "-"
+            ]
+      );
+    }
+  }
+});
+
+/** Inherited values that a headless Claude child must never keep. */
+const inheritedRunStability: NodeJS.ProcessEnv = {
+  ...inheritedIsolationOptOut,
+  CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "0",
+  BASH_MAX_TIMEOUT_MS: "9999999",
+  BASH_DEFAULT_TIMEOUT_MS: "9999999"
+};
+
+/**
+ * ADR-0063 §2 with the approved Q1 (a): the enforced timeout minus a 5-minute
+ * reserve, never below the vendor's 2-minute default ceiling.
+ */
+const BASH_MAXIMA: readonly [number, string][] = [
+  [60 * 60_000, "3300000"],
+  [30 * 60_000, "1500000"],
+  [7 * 60_000, "120000"],
+  [5 * 60_000, "120000"],
+  [2 * 60_000, "120000"]
+];
+
+test("every Claude call site runs without background tasks and with a Bash maximum inside its timeout", async () => {
+  for (const [timeoutMs, maximum] of BASH_MAXIMA) {
+    const timed = { ...settings, timeoutMs };
+    for (const [name, environment] of claudeScopes) {
+      const children: [string, SpawnedChild][] = [
+        [
+          "review",
+          await spawned((adapters) =>
+            adapters.runReview({
+              ...baseReviewRequest,
+              settings: timed,
+              env: inheritedRunStability,
+              ...scoped(environment)
+            })
+          )
+        ],
+        [
+          "phase",
+          await spawned((adapters) =>
+            adapters.runPhase({
+              ...basePhaseRequest,
+              settings: timed,
+              outputContract: claudePhaseOutputContract,
+              env: inheritedRunStability,
+              ...scoped(environment)
+            })
+          )
+        ],
+        [
+          "selection",
+          await spawned((adapters) =>
+            adapters.runSelection({
+              ...baseSelectionRequest,
+              settings: timed,
+              outputContract: claudeSelectionOutputContract,
+              env: inheritedRunStability,
+              ...scoped(environment)
+            })
+          )
+        ]
+      ];
+      for (const [kind, child] of children) {
+        const label = `${kind}, ${name}, ${timeoutMs}ms`;
+        assert.equal(child.timeoutMs, timeoutMs, label);
+        assert.equal(
+          child.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS,
+          "1",
+          label
+        );
+        assert.equal(child.env.BASH_MAX_TIMEOUT_MS, maximum, label);
+        assert.equal("BASH_DEFAULT_TIMEOUT_MS" in child.env, false, label);
+        assert.equal(child.env.ANTHROPIC_API_KEY, undefined, label);
+        assert.equal(child.env.PATH, "/usr/bin", label);
+      }
+    }
+  }
+});
+
+test("Codex children receive no run-stability settings from Banzai", async () => {
+  const runDirectory = await mkdtemp(path.join(tmpdir(), "banzai-codex-bash-"));
+  try {
+    for (const source of [{ PATH: "/usr/bin" }, inheritedRunStability]) {
+      const phase = await spawned((adapters) =>
+        adapters.runPhase({ ...basePhaseRequest, runDirectory, env: source })
+      );
+      const selection = await spawned((adapters) =>
+        adapters.runSelection({
+          ...baseSelectionRequest,
+          runDirectory,
+          env: source
+        })
+      );
+      // An inherited value passes through as it did before; none is added.
+      assert.deepEqual(phase.env, subscriptionOnlyEnvironment(source));
+      assert.deepEqual(selection.env, subscriptionOnlyEnvironment(source));
+    }
   } finally {
     await rm(runDirectory, { recursive: true, force: true });
   }

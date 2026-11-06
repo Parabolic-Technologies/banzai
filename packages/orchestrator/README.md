@@ -42,9 +42,10 @@ Runs through your existing subscriptions. No API keys required.
 Use a regular terminal in your own Git repository on macOS or Linux. You need
 Git, Node.js **22.20.0+ within major 22** or **24.11.1+ within major 24**,
 and the clients for your selected providers, signed in through individual
-subscriptions. The default configuration uses **Claude Code 2.1.290+** for
-planning, implementation and review; the **Codex CLI** is needed only for roles
-you assign to Codex during `banzai init`. Strict review uses a fresh session
+subscriptions. The default configuration uses Claude Code for planning,
+implementation and review, and every Claude role needs **Claude Code
+2.1.290+**; the **Codex CLI** is needed only for roles you assign to Codex
+during `banzai init`. Strict review uses a fresh session
 without the builder's conversation, shared memory or skills. Model work uses
 the clients' remote services and subscription limits.
 

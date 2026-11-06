@@ -203,6 +203,8 @@ function dependencies(options?: {
   readClaudeVersion?: boolean;
   /** Receives every command whose Claude version doctor reads. */
   claudeVersionCalls?: string[];
+  /** Per-executable readings that override `claudeVersion`. */
+  claudeVersions?: Readonly<Record<string, string | null>>;
 }): DoctorDependencies {
   const unavailable = new Set(options?.unavailable ?? []);
   const claudeVersion =
@@ -213,7 +215,10 @@ function dependencies(options?: {
       : {
           async installedClaudeVersion(command: string) {
             options?.claudeVersionCalls?.push(command);
-            return claudeVersion;
+            const readings = options?.claudeVersions ?? {};
+            return command in readings
+              ? (readings[command] ?? null)
+              : claudeVersion;
           }
         }),
     // No test reads the developer's own Claude settings.
@@ -359,7 +364,7 @@ test("reports a deterministic ready Node project without mutating it", async () 
     assert.match(
       first.checks.find((item) => item.id === "authentication.models")
         ?.message ?? "",
-      /no vendor CLI version except the Claude reviewer's, which it reads offline/
+      /no vendor CLI version except Claude Code's, which it reads offline/
     );
     assert.equal(first.summary.warnings, 1);
     assert.equal(
@@ -2381,16 +2386,34 @@ test("a real Git checkout answers only the two permitted queries, at the reposit
 const CLAUDE_VERSION_FIX: DoctorFix[] = [
   {
     action:
-      "Update Claude Code to 2.1.290 or newer, or choose another reviewer with `banzai model`.",
+      "Update Claude Code to 2.1.290 or newer, or choose other models with `banzai model`.",
     documentation:
       "documentation/getting-started.md#install-and-sign-in-to-model-clients"
   }
 ];
 
-test("claude.version enforces the review isolation floor for a Claude reviewer", async () => {
+/** Every role on Claude Code: the ADR-0059 default. */
+function allClaudeConfig(): OrchestratorConfig {
+  const config = substantiveConfig();
+  for (const role of ["planner", "implementer"] as const) {
+    config.models[role].executable = "claude";
+    config.models[role].model = "claude-opus-5-5";
+  }
+  return config;
+}
+
+/** Claude plans and implements; Codex reviews. */
+function claudeBuildsConfig(): OrchestratorConfig {
+  const config = allClaudeConfig();
+  config.models.reviewer.executable = "codex";
+  config.models.reviewer.model = "gpt-6.1-sol";
+  return config;
+}
+
+test("claude.version checks every Claude role against the one minimum", async () => {
   const repository = await temporaryRoot();
   try {
-    await writeConfig(repository.root, reviewerOnlyClaudeConfig());
+    await writeConfig(repository.root, allClaudeConfig());
     for (const version of ["2.1.290", "2.1.319"]) {
       const calls: string[] = [];
       const report = await inspectDoctor(
@@ -2401,7 +2424,7 @@ test("claude.version enforces the review isolation floor for a Claude reviewer",
         id: "claude.version",
         category: "executables",
         status: "pass",
-        message: `Claude Code ${version} meets the reviewer isolation minimum 2.1.290.`,
+        message: `Claude Code meets the minimum 2.1.290: ${version} (Planning, Implementation, Review).`,
         fixes: [],
         roles: []
       });
@@ -2409,6 +2432,8 @@ test("claude.version enforces the review isolation floor for a Claude reviewer",
       assert.equal(report.ready, true);
     }
 
+    // ADR-0063 §5: a Claude builder is held to the minimum too.
+    await writeConfig(repository.root, claudeBuildsConfig());
     const old = await inspectDoctor(
       repository.root,
       dependencies({ claudeVersion: "2.1.289" })
@@ -2418,12 +2443,16 @@ test("claude.version enforces the review isolation floor for a Claude reviewer",
       category: "executables",
       status: "fail",
       message:
-        "Claude Code 2.1.289 cannot isolate the reviewer, which requires 2.1.290 or newer.",
+        "Claude Code is older than the minimum 2.1.290: 2.1.289 (Planning, Implementation).",
       fixes: CLAUDE_VERSION_FIX,
       roles: []
     });
     assert.equal(old.ready, false);
 
+    const plannerOnly = claudeBuildsConfig();
+    plannerOnly.models.implementer.executable = "codex";
+    plannerOnly.models.implementer.model = "gpt-6.1-sol";
+    await writeConfig(repository.root, plannerOnly);
     const unknown = await inspectDoctor(
       repository.root,
       dependencies({ claudeVersion: null })
@@ -2433,7 +2462,7 @@ test("claude.version enforces the review isolation floor for a Claude reviewer",
       category: "executables",
       status: "warning",
       message:
-        "The installed Claude Code version could not be read offline. Run start refuses a reviewer older than 2.1.290.",
+        "The installed Claude Code version could not be read offline for Planning. Run start refuses Claude Code older than 2.1.290.",
       fixes: CLAUDE_VERSION_FIX,
       roles: []
     });
@@ -2443,7 +2472,67 @@ test("claude.version enforces the review isolation floor for a Claude reviewer",
   }
 });
 
-test("claude.version is skipped unless the effective reviewer runs on an available Claude executable", async () => {
+test("claude.version reads each Claude executable once and the worse result wins", async () => {
+  const repository = await temporaryRoot();
+  const next = "/opt/claude-next/bin/claude";
+  try {
+    const config = allClaudeConfig();
+    config.models.implementer.executable = next;
+    await writeConfig(repository.root, config);
+
+    const calls: string[] = [];
+    const mixed = await inspectDoctor(
+      repository.root,
+      dependencies({
+        claudeVersion: "2.1.300",
+        claudeVersions: { [next]: "2.1.289" },
+        claudeVersionCalls: calls
+      })
+    );
+    assert.equal(findCheck(mixed, "claude.version").status, "fail");
+    assert.equal(
+      findCheck(mixed, "claude.version").message,
+      "Claude Code is older than the minimum 2.1.290: 2.1.289 (Implementation)."
+    );
+    assert.deepEqual(calls, ["claude", next]);
+    assert.equal(doctorOutput(mixed).includes(next), false);
+
+    const unreadable = await inspectDoctor(
+      repository.root,
+      dependencies({
+        claudeVersion: "2.1.300",
+        claudeVersions: { [next]: null }
+      })
+    );
+    assert.equal(findCheck(unreadable, "claude.version").status, "warning");
+
+    // An unavailable executable is left to executables.models and named.
+    calls.length = 0;
+    const partial = await inspectDoctor(
+      repository.root,
+      dependencies({
+        claudeVersion: "2.1.300",
+        claudeVersionCalls: calls,
+        unavailable: [next]
+      })
+    );
+    assert.deepEqual(findCheck(partial, "claude.version"), {
+      id: "claude.version",
+      category: "executables",
+      status: "pass",
+      message:
+        "Claude Code meets the minimum 2.1.290: 2.1.300 (Planning, Review). Not checked, because its executable is unavailable: Implementation.",
+      fixes: [],
+      roles: []
+    });
+    assert.deepEqual(calls, ["claude"]);
+    assert.equal(findCheck(partial, "executables.models").status, "fail");
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("claude.version is skipped unless a role runs on an available Claude executable", async () => {
   const repository = await temporaryRoot();
   const skipped = async (
     config: unknown,
@@ -2462,35 +2551,35 @@ test("claude.version is skipped unless the effective reviewer runs on an availab
     return result.message;
   };
   try {
-    const codexReviewer = substantiveConfig();
-    codexReviewer.models.reviewer.executable = "codex";
-    codexReviewer.models.reviewer.model = "gpt-6.1-sol";
+    const allCodex = substantiveConfig();
+    allCodex.models.reviewer.executable = "codex";
+    allCodex.models.reviewer.model = "gpt-6.1-sol";
     assert.equal(
-      await skipped(codexReviewer),
-      "The reviewer does not run on Claude Code, so the review isolation minimum does not apply."
+      await skipped(allCodex),
+      "No role runs on Claude Code, so its minimum does not apply."
     );
     // A Node executable falls back to the Claude adapter but never qualifies.
     assert.equal(
       await skipped(locallyExecutableConfig()),
-      "The reviewer does not run on Claude Code, so the review isolation minimum does not apply."
+      "No role runs on Claude Code, so its minimum does not apply."
     );
     assert.equal(
-      await skipped(reviewerOnlyClaudeConfig(), { unavailable: ["claude"] }),
-      "The Claude reviewer executable is unavailable, so its version was not read."
+      await skipped(allClaudeConfig(), { unavailable: ["claude"] }),
+      "No configured Claude Code executable is available, so no version was read."
     );
     assert.equal(
       await skipped("{ not json"),
-      "The Claude reviewer version check requires a valid configuration."
+      "The Claude Code version check requires a valid configuration."
     );
     await writeFile(
       path.join(repository.root, LOCAL_CONFIG_FILE),
       `${JSON.stringify({ schemaVersion: 1, models: {}, FORBIDDENKEY: true })}\n`
     );
     assert.equal(
-      await skipped(reviewerOnlyClaudeConfig(), {
+      await skipped(allClaudeConfig(), {
         localConfigGitState: recordingProbe().probe
       }),
-      "The Claude reviewer version check is skipped while the local model file fails config.local."
+      "The Claude Code version check is skipped while the local model file fails config.local."
     );
   } finally {
     await repository.dispose();
