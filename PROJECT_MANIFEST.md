@@ -297,7 +297,10 @@ Plugin and release owners:
   owner PIDs; ordinary execution never reclaims them.
 - `plugins/banzai/hooks/spec-gate.cjs`, `hooks/hooks.json` — host file-tool
   authorization; runner context fails closed and source-read-only reviewers
-  receive no write grant. The hook is not a general shell sandbox.
+  receive no write grant. In manual mode it also frees Claude Code memory
+  notes and gives host bookkeeping writes (plans, subagent memory, session
+  scratchpad) an approval scope that never authorizes code (ADR-0062). The
+  hook is not a general shell sandbox.
 - `packages/orchestrator/scripts/` — build, test, release/version,
   instruction-baseline and publication tools; explicit generation is separate
   from validation. See [Release scripts](packages/orchestrator/MODULES.md#release-scripts-scripts).
@@ -582,3 +585,4 @@ delivery or installation.
 | ADR-0059 | Claude default reviewer and reviewer isolation                     | [Source](documentation/decisions/0059-claude-default-reviewer-and-reviewer-isolation.md)         | Planned     |
 | ADR-0060 | Local model override                                               | [Source](documentation/decisions/0060-local-model-override.md)                                   | Implemented |
 | ADR-0061 | Initiative skill and documents                                     | [Source](documentation/decisions/0061-initiative-skill-and-documents.md)                         | Implemented |
+| ADR-0062 | Claude Code memory notes in the manual hook gate                   | [Source](documentation/decisions/0062-claude-memory-notes-in-the-manual-hook-gate.md)            | Implemented |

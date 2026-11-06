@@ -444,6 +444,11 @@
       "sha256": null
     },
     {
+      "path": "documentation/decisions/0062-claude-memory-notes-in-the-manual-hook-gate.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
       "path": "documentation/decisions/README.md",
       "classification": "maintainer",
       "sha256": null

@@ -38,7 +38,7 @@
     "plugins/banzai/guidance/review.md#section:Engineering Quality Shadow Procedure": "56593ce0d446c6f3b08cb90421b8ace416517f384179cf11344d0290a2330efb",
     "plugins/banzai/guidance/review.md#section:Read": "4557812a227d34babfdbc399d5c4676ad83011924ab3d14101c024d1345faadb",
     "plugins/banzai/hooks/hooks.json": "eb5bce1be31c2dde64a55ae9af27fe0c176cedc911a76209aa5110493238f3a9",
-    "plugins/banzai/hooks/spec-gate.cjs": "93659be21468d61b29cbb67542258a139ca0803f615f2404366f48f4e33078a5",
+    "plugins/banzai/hooks/spec-gate.cjs": "fab91f126fe90c51dd2976b5116f9fa1cd73af84e8b3e089a9e8a56f90bc5181",
     "plugins/banzai/phases/feature.md": "a300090a34a4f109b4ab4f18ee4eb41edb245f074ab69c2295c45a476bf9be33",
     "plugins/banzai/phases/fix.md": "7f16eb14d308e7d4f8a59cf12445afc1efbcb3c93ad1da8f83911528235634c1",
     "plugins/banzai/phases/implementation.md": "4f8e6fd1a2fed3c463bfc39342f65eabf70848e52d00cb6b18db1eed886a4c6c",
@@ -1106,6 +1106,24 @@
           "key": "plugins/banzai/skills/test-writing/SKILL.md#skeleton",
           "before": "5ab5e68eea07a994a270ab07ff2c329e28462bdb01c74f815f116adf7252631e",
           "after": "0ed1378a49ad838a797f33a6a31e3d9fe6a68cd841287172ae1366527d5517b3"
+        }
+      ]
+    },
+    {
+      "predecessorSha256": "c84d822c0b06001cd9ff60790fc55d065db090b308aa9adae434e6fa8be9ff12",
+      "successorSha256": "cae322b16467e541d91dc91fde6fe420e0ba0074d8318a4aaf9ce42bdb4d34b4",
+      "authorities": [
+        {
+          "path": "documentation/decisions/0062-claude-memory-notes-in-the-manual-hook-gate.md",
+          "sha256": "e28a014f67d2ddc4d0142f1789f7531cff3085448fd07ca3277bdfae471012ef",
+          "scope": "Manual hook gate: Claude Code memory notes defer; host bookkeeping writes get their own approval scope"
+        }
+      ],
+      "changes": [
+        {
+          "key": "plugins/banzai/hooks/spec-gate.cjs",
+          "before": "93659be21468d61b29cbb67542258a139ca0803f615f2404366f48f4e33078a5",
+          "after": "fab91f126fe90c51dd2976b5116f9fa1cd73af84e8b3e089a9e8a56f90bc5181"
         }
       ]
     }

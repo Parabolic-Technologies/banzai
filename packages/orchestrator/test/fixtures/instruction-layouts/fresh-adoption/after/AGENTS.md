@@ -298,14 +298,18 @@ approved plan.
 `hooks/spec-gate.cjs` enforces authorized-workflow-before-code where supported.
 
 - Free paths: `documentation/**`, `PROJECT_MANIFEST.md`, `CLAUDE.md`,
-  `AGENTS.md`.
+  `AGENTS.md`. In manual sessions, Claude Code memory notes
+  (`<config>/projects/<project>/memory/<name>.md`, where `<config>` is an
+  absolute `CLAUDE_CONFIG_DIR` or `~/.claude`) are free paths too.
 - Manual sessions are gated only in Banzai-adopted projects: the hook requires
   `.banzai/config.json` or a root `PROJECT_MANIFEST.md` in the session
   directory or a parent, and stays silent elsewhere because there is no spec
   or plan to protect.
 - Standalone: the first code/codebase edit in a session asks for human approval,
   one approval unlocks later code edits in that session, and a new session
-  re-locks.
+  re-locks. Approving a Claude Code plan, subagent-memory or session
+  scratchpad write allows only such writes for the session; the first code
+  edit still asks.
 - Orchestrated strict: the hook checks the active run and approved artifact
   digest, so approved code phases run without a per-edit prompt and writes to
   the approved bundle are denied.

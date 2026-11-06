@@ -1,6 +1,6 @@
 ---
 name: initiative
-description: Keep a multi-package initiative on track with a frozen brief and a living tracker in documentation/initiatives/<slug>/. Explicit user invocation only: run it only when the user runs this skill by name, and never select it from prompt wording alone. Do not use for an ordinary feature, fix, plan, review, or status request.
+description: Keep a multi-package initiative on track with a frozen brief and a living tracker under documentation/initiatives/. Explicit user invocation only: run it only when the user runs this skill by name, and never select it from prompt wording alone. Do not use for an ordinary feature, fix, plan, review, or status request.
 user-invocable: true
 disable-model-invocation: true
 ---

@@ -68,6 +68,7 @@ plugin and orchestrator source.
 | [0059](./0059-claude-default-reviewer-and-reviewer-isolation.md) | Claude default reviewer and reviewer isolation | Accepted | 2026-10-31 | [Program `release-2-8-2-9-program`](../work/release-2-8-2-9-program/tracker.md), WP7; owner accepted in chat; amends 0042 §7, 0037 and 0002; implementation Planned |
 | [0060](./0060-local-model-override.md) | Local model override | Accepted | 2026-11-04 | [Program `release-2-8-2-9-program`](../work/release-2-8-2-9-program/tracker.md), WP6; owner accepted in chat; amends 0008; implemented |
 | [0061](./0061-initiative-skill-and-documents.md) | Initiative skill and documents | Accepted | 2026-11-05 | [Program `release-2-8-2-9-program`](../work/release-2-8-2-9-program/tracker.md), WP19; owner accepted in chat; amends 0054, 0041 and 0036; implementation Implemented except the checkout-local hook reconciliation, an owner follow-up |
+| [0062](./0062-claude-memory-notes-in-the-manual-hook-gate.md) | Claude Code memory notes in the manual hook gate | Accepted | 2026-11-05 | [Program `release-2-8-2-9-program`](../work/release-2-8-2-9-program/tracker.md), WP20; owner accepted in chat with choice 1 B; authority for the pinned hook transition; implementation Implemented; installed clients receive it with the 2.8 plugin release |
 
 ## File Names
 

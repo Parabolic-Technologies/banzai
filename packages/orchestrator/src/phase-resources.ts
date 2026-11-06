@@ -219,6 +219,6 @@ export const EMBEDDED_PHASE_RESOURCES = {
     "sha256": "eb5bce1be31c2dde64a55ae9af27fe0c176cedc911a76209aa5110493238f3a9"
   },
   "hooks/spec-gate.cjs": {
-    "sha256": "93659be21468d61b29cbb67542258a139ca0803f615f2404366f48f4e33078a5"
+    "sha256": "fab91f126fe90c51dd2976b5116f9fa1cd73af84e8b3e089a9e8a56f90bc5181"
   }
 } as const;

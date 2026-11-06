@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import {
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   realpath,
   rm,
@@ -110,10 +111,18 @@ const hookPath = path.resolve(
 function runHook(input: {
   cwd: string;
   env?: NodeJS.ProcessEnv;
-  event?: string;
-  target?: string;
-  tool?: string;
-}): { decision: string | null; reason: string; stdout: string } {
+  event?: string | undefined;
+  target?: string | undefined;
+  tool?: string | undefined;
+  sessionId?: string;
+  scratchpadDir?: unknown;
+  toolInput?: Record<string, unknown> | undefined;
+}): {
+  decision: string | null;
+  reason: string;
+  context: string;
+  stdout: string;
+} {
   const env = { ...process.env, ...input.env };
   delete env.BANZAI_RUN_ID;
   delete env.BANZAI_APPROVAL_DIGEST;
@@ -125,26 +134,33 @@ function runHook(input: {
       hook_event_name: input.event ?? "PreToolUse",
       tool_name: input.tool ?? "Edit",
       cwd: input.cwd,
-      session_id: `test-${process.pid}-${Math.random()}`,
+      session_id: input.sessionId ?? `test-${process.pid}-${Math.random()}`,
       permission_mode: "default",
-      tool_input: { file_path: input.target ?? "src/example.ts" }
+      tool_input: input.toolInput ?? {
+        file_path: input.target ?? "src/example.ts"
+      },
+      ...(input.scratchpadDir === undefined
+        ? {}
+        : { scratchpad_dir: input.scratchpadDir })
     }),
     encoding: "utf8",
     env
   });
   assert.equal(result.status, 0, result.stderr);
   if (result.stdout.length === 0) {
-    return { decision: null, reason: "", stdout: result.stdout };
+    return { decision: null, reason: "", context: "", stdout: result.stdout };
   }
   const decoded = JSON.parse(result.stdout) as {
     hookSpecificOutput: {
       permissionDecision: string;
       permissionDecisionReason: string;
+      additionalContext?: string;
     };
   };
   return {
     decision: decoded.hookSpecificOutput.permissionDecision,
     reason: decoded.hookSpecificOutput.permissionDecisionReason,
+    context: decoded.hookSpecificOutput.additionalContext ?? "",
     stdout: result.stdout
   };
 }
@@ -691,6 +707,14 @@ for (const stateVersion of [
         ])
           expect(target, "deny");
         expect(roles.changeReport, phase === "fix" ? "allow" : "deny");
+        // ADR-0062 §3: the manual memory-note deferral never reaches runner mode.
+        const config = path.join(path.dirname(root), "hook-claude-config");
+        const memoryNote = runHook({
+          cwd: root,
+          target: path.join(config, "projects", "p", "memory", "note.md"),
+          env: { ...env, CLAUDE_CONFIG_DIR: config }
+        });
+        assert.equal(memoryNote.decision, "deny", memoryNote.reason);
       }
       {
         await save("plan", "planning", {
@@ -994,5 +1018,380 @@ test("manual hook supports exact historical Markdown without registration and re
     );
   } finally {
     await repository.dispose();
+  }
+});
+
+// ADR-0062: Claude Code memory notes and host bookkeeping in the manual gate.
+const FIRST_CHANGE = /first code\/codebase change this session/;
+const PROJECT_ALLOW =
+  "banzai spec-gate: implementation phase already approved for this session.";
+const BOOKKEEPING_ASK =
+  "banzai spec-gate: host bookkeeping write (plan, subagent memory or session scratchpad). Approval allows writes under these host directories for this session only; it does not authorize project code changes.";
+const BOOKKEEPING_CONTEXT =
+  "This approval covers host bookkeeping directories only (plans, subagent memory, session scratchpad). The first project code change in this session still needs its own approval.";
+const BOOKKEEPING_ALLOW =
+  "banzai spec-gate: host bookkeeping writes already approved for this session.";
+
+// Every path comes from one sandbox string, so the hook's lexical matching
+// never sees two spellings of the same directory, and the real ~/.claude and
+// the real marker directory stay untouched.
+async function createHostSandbox() {
+  const root = await mkdtemp(path.join(tmpdir(), "banzai-hook-host-"));
+  const home = path.join(root, "home");
+  const tmp = path.join(root, "tmp");
+  const config = path.join(root, "config");
+  const scratch = path.join(root, "scratch");
+  const repo = path.join(root, "repo");
+  for (const directory of [home, tmp, config, scratch, repo])
+    await mkdir(directory, { recursive: true });
+  await writeFile(
+    path.join(repo, "PROJECT_MANIFEST.md"),
+    "# PROJECT_MANIFEST.md\n",
+    "utf8"
+  );
+  const markerDirectory = path.join(tmp, "banzai-spec-gate");
+  const env: NodeJS.ProcessEnv = {
+    HOME: home,
+    TMPDIR: tmp,
+    CLAUDE_CONFIG_DIR: config,
+    PLUGIN_ROOT: undefined,
+    CLAUDE_PLUGIN_ROOT: undefined
+  };
+  return {
+    home,
+    tmp,
+    config,
+    scratch,
+    repo,
+    env,
+    markerDirectory,
+    note: (base = config) =>
+      path.join(base, "projects", "-repo", "memory", "note.md"),
+    plan: path.join(config, "plans", "plan.md"),
+    run: (input: {
+      target?: string;
+      session: string;
+      event?: string;
+      env?: NodeJS.ProcessEnv;
+      cwd?: string;
+      scratchpadDir?: unknown;
+      toolInput?: Record<string, unknown>;
+      tool?: string;
+    }) =>
+      runHook({
+        cwd: input.cwd ?? repo,
+        target: input.target,
+        event: input.event,
+        tool: input.tool,
+        sessionId: input.session,
+        env: { ...env, ...input.env },
+        scratchpadDir: "scratchpadDir" in input ? input.scratchpadDir : scratch,
+        toolInput: input.toolInput
+      }),
+    markers: async () => {
+      try {
+        return (await readdir(markerDirectory)).sort();
+      } catch {
+        return [];
+      }
+    },
+    dispose: () => rm(root, { recursive: true, force: true })
+  };
+}
+
+function patch(...targets: string[]) {
+  return {
+    command: [
+      "*** Begin Patch",
+      ...targets.map((target) => `*** Update File: ${target}`),
+      "*** End Patch"
+    ].join("\n")
+  };
+}
+
+test("a manual memory-note write defers and writes no marker, while a code write still does", async () => {
+  const s = await createHostSandbox();
+  try {
+    const pre = s.run({ target: s.note(), session: "s1" });
+    assert.equal(pre.decision, null, pre.reason);
+    assert.equal(pre.stdout, "");
+    s.run({ target: s.note(), session: "s1", event: "PostToolUse" });
+    assert.deepEqual(await s.markers(), []);
+    s.run({ target: "src/example.ts", session: "s1", event: "PostToolUse" });
+    assert.deepEqual(await s.markers(), ["approved-s1"]);
+  } finally {
+    await s.dispose();
+  }
+});
+
+test("only an exact memory-note path defers; near misses keep the first-change prompt", async () => {
+  const s = await createHostSandbox();
+  try {
+    const memory = path.join(s.config, "projects", "-repo", "memory");
+    const targets = [
+      path.join(s.config, "settings.json"),
+      path.join(memory, "..", "escape.md"),
+      path.join(memory, "note.json"),
+      path.join(memory, "sub", "note.md"),
+      path.join(memory, ".md"),
+      path.join(s.config, "projects", "-repo", "Memory", "note.md"),
+      "src/example.ts"
+    ];
+    for (const [index, target] of targets.entries()) {
+      const result = s.run({ target, session: `s2-${index}` });
+      assert.equal(result.decision, "ask", target);
+      assert.match(result.reason, FIRST_CHANGE, target);
+    }
+    // A relative CLAUDE_CONFIG_DIR defines no memory root and does not fall
+    // back to $HOME/.claude.
+    for (const [index, target] of [
+      s.note(),
+      s.note(path.join(s.home, ".claude"))
+    ].entries()) {
+      const result = s.run({
+        target,
+        session: `s2-relative-${index}`,
+        env: { CLAUDE_CONFIG_DIR: "relative-config" }
+      });
+      assert.equal(result.decision, "ask", target);
+      assert.match(result.reason, FIRST_CHANGE, target);
+    }
+    const other = s.run({
+      target: s.note(path.join(s.home, ".claude")),
+      session: "s2-home"
+    });
+    assert.equal(other.decision, "ask");
+  } finally {
+    await s.dispose();
+  }
+});
+
+test("CLAUDE_CONFIG_DIR selects the memory root, with $HOME/.claude when unset or empty", async () => {
+  const s = await createHostSandbox();
+  try {
+    const homeNote = s.note(path.join(s.home, ".claude"));
+    for (const [session, target, env] of [
+      ["s3-set", s.note(), {}],
+      ["s3-trailing", s.note(), { CLAUDE_CONFIG_DIR: s.config + path.sep }],
+      ["s3-empty", homeNote, { CLAUDE_CONFIG_DIR: "" }],
+      ["s3-unset", homeNote, { CLAUDE_CONFIG_DIR: undefined }]
+    ] as const) {
+      const result = s.run({ target, session, env });
+      assert.equal(result.decision, null, `${session}: ${result.reason}`);
+    }
+  } finally {
+    await s.dispose();
+  }
+});
+
+test("a bookkeeping approval allows only bookkeeping writes until a code write is approved", async () => {
+  const s = await createHostSandbox();
+  try {
+    const session = "s4";
+    const first = s.run({ target: s.plan, session });
+    assert.equal(first.decision, "ask");
+    assert.equal(first.reason, BOOKKEEPING_ASK);
+    assert.equal(first.context, BOOKKEEPING_CONTEXT);
+    s.run({ target: s.plan, session, event: "PostToolUse" });
+    assert.deepEqual(await s.markers(), ["bookkeeping-s4"]);
+    const scratch = path.join(s.scratch, "notes.txt");
+    const later = s.run({ target: scratch, session });
+    assert.equal(later.decision, "allow");
+    assert.equal(later.reason, BOOKKEEPING_ALLOW);
+    const code = s.run({ target: "src/example.ts", session });
+    assert.equal(code.decision, "ask");
+    assert.match(code.reason, FIRST_CHANGE);
+    s.run({ target: "src/example.ts", session, event: "PostToolUse" });
+    assert.deepEqual(await s.markers(), ["approved-s4", "bookkeeping-s4"]);
+    for (const target of [scratch, "src/example.ts"]) {
+      const result = s.run({ target, session });
+      assert.equal(result.decision, "allow", target);
+      assert.equal(result.reason, PROJECT_ALLOW, target);
+    }
+  } finally {
+    await s.dispose();
+  }
+});
+
+test("scratchpad and subagent-memory writes record only the bookkeeping marker", async () => {
+  const s = await createHostSandbox();
+  try {
+    s.run({
+      target: path.join(s.scratch, "notes.txt"),
+      session: "s5-scratch",
+      event: "PostToolUse"
+    });
+    assert.deepEqual(await s.markers(), ["bookkeeping-s5-scratch"]);
+    s.run({
+      target: path.join(s.config, "agent-memory", "reviewer", "MEMORY.md"),
+      session: "s5-agent",
+      event: "PostToolUse"
+    });
+    assert.deepEqual(await s.markers(), [
+      "bookkeeping-s5-agent",
+      "bookkeeping-s5-scratch"
+    ]);
+  } finally {
+    await s.dispose();
+  }
+});
+
+test("a patch with any project target is a project write", async () => {
+  const s = await createHostSandbox();
+  try {
+    const input = {
+      toolInput: patch(s.plan, "src/example.ts"),
+      tool: "apply_patch"
+    };
+    const pre = s.run({ ...input, session: "s6" });
+    assert.equal(pre.decision, "ask");
+    assert.match(pre.reason, FIRST_CHANGE);
+    s.run({ ...input, session: "s6", event: "PostToolUse" });
+    assert.deepEqual(await s.markers(), ["approved-s6"]);
+  } finally {
+    await s.dispose();
+  }
+});
+
+test("bookkeeping beside free paths or memory notes is a bookkeeping write", async () => {
+  const s = await createHostSandbox();
+  try {
+    for (const [session, other] of [
+      ["s6-doc", "documentation/notes.md"],
+      ["s6-note", s.note()]
+    ] as const) {
+      const result = s.run({
+        toolInput: patch(s.plan, other),
+        tool: "apply_patch",
+        session
+      });
+      assert.equal(result.decision, "ask", session);
+      assert.equal(result.reason, BOOKKEEPING_ASK, session);
+    }
+  } finally {
+    await s.dispose();
+  }
+});
+
+test("bookkeeping roots fail closed to project writes when excluded or mismatched", async () => {
+  const s = await createHostSandbox();
+  try {
+    const scratchFile = path.join(s.scratch, "notes.txt");
+    const nestedRepo = path.join(s.scratch, "repo");
+    await mkdir(nestedRepo, { recursive: true });
+    await writeFile(path.join(nestedRepo, "PROJECT_MANIFEST.md"), "# M\n");
+    const nestedTmp = path.join(s.scratch, "tmp");
+    const plugin = path.join(s.scratch, "plugin");
+    const cases: {
+      name: string;
+      target: string;
+      env?: NodeJS.ProcessEnv;
+      cwd?: string;
+      scratchpadDir?: unknown;
+    }[] = [
+      {
+        name: "marker directory below the scratchpad",
+        target: path.join(nestedTmp, "banzai-spec-gate", "approved-x"),
+        env: { TMPDIR: nestedTmp }
+      },
+      {
+        name: "scratchpad that holds the marker directory",
+        target: scratchFile,
+        env: { TMPDIR: nestedTmp }
+      },
+      {
+        name: "plugin root below the scratchpad",
+        target: path.join(plugin, "hooks", "spec-gate.cjs"),
+        env: { CLAUDE_PLUGIN_ROOT: plugin }
+      },
+      {
+        name: "marker segment in any case",
+        target: path.join(s.scratch, "x", "Banzai-Spec-Gate", "approved-x")
+      },
+      {
+        name: "cwd below the scratchpad",
+        target: scratchFile,
+        cwd: nestedRepo
+      },
+      {
+        name: "no scratchpad_dir",
+        target: scratchFile,
+        scratchpadDir: undefined
+      },
+      {
+        name: "relative scratchpad_dir",
+        target: scratchFile,
+        scratchpadDir: "scratch"
+      },
+      {
+        name: "non-string scratchpad_dir",
+        target: scratchFile,
+        scratchpadDir: 42
+      },
+      { name: "settings.json", target: path.join(s.config, "settings.json") },
+      ...(process.platform === "win32"
+        ? []
+        : [
+            {
+              name: "case variant of the plans root",
+              target: path.join(s.config, "Plans", "plan.md")
+            }
+          ])
+    ];
+    for (const [index, item] of cases.entries()) {
+      const result = s.run({ ...item, session: `s7-${index}` });
+      assert.equal(result.decision, "ask", item.name);
+      assert.match(result.reason, FIRST_CHANGE, item.name);
+    }
+  } finally {
+    await s.dispose();
+  }
+});
+
+test("an existing project marker still allows bookkeeping writes", async () => {
+  const s = await createHostSandbox();
+  try {
+    await mkdir(s.markerDirectory, { recursive: true });
+    await writeFile(path.join(s.markerDirectory, "approved-s8"), "1");
+    const result = s.run({ target: s.plan, session: "s8" });
+    assert.equal(result.decision, "allow");
+    assert.equal(result.reason, PROJECT_ALLOW);
+  } finally {
+    await s.dispose();
+  }
+});
+
+test("a bookkeeping marker alone never allows a project write", async () => {
+  const s = await createHostSandbox();
+  try {
+    await mkdir(s.markerDirectory, { recursive: true });
+    await writeFile(path.join(s.markerDirectory, "bookkeeping-s9"), "1");
+    for (const target of [
+      path.join(s.config, "settings.json"),
+      "src/example.ts"
+    ]) {
+      const result = s.run({ target, session: "s9" });
+      assert.equal(result.decision, "ask", target);
+      assert.match(result.reason, FIRST_CHANGE, target);
+    }
+  } finally {
+    await s.dispose();
+  }
+});
+
+test("a memory note beside a non-historical .banzai/work target is still denied", async () => {
+  const s = await createHostSandbox();
+  const repository = await createTestRepository();
+  try {
+    const result = runHook({
+      cwd: await realpath(repository.root),
+      tool: "apply_patch",
+      toolInput: patch(s.note(), `.banzai/work/${randomUUID()}/state.json`),
+      env: s.env
+    });
+    assert.equal(result.decision, "deny", result.reason);
+  } finally {
+    await repository.dispose();
+    await s.dispose();
   }
 });

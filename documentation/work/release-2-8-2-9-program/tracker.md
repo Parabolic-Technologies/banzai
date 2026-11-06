@@ -1,6 +1,6 @@
 # banzai 2.8–2.9 program tracker
 
-Status: active · Stage 1 in progress · Updated 2026-11-05
+Status: active · Stage 1 in progress · Updated 2026-11-06
 
 This file is the only living record of the program. The plan itself is the
 frozen [brief.md](brief.md); never edit it. Record anything that departs from
@@ -48,8 +48,8 @@ Status values: `not started` · `ADR draft` · `ADR proposed` · `ADR accepted` 
 | WP4  | Re-check human edits at the plan gate          | —               | 0058 Accepted; amends 0051 and 0055 (pinned)    | `wp04-plan-gate-edit-recheck`          | committed    | 04abf55 | Control 9.0.0 with recheck and helper v4           |
 | WP5  | Install guide, plugin scope, doctor hint       | —               | none; stay within 0008                          | `wp05-install-guide-plugin-scope`      | committed    | 5c89c1c | Doctor JSON contract version bump                  |
 | WP6  | Local model override                           | —               | 0060 Accepted; amends 0008                      | `wp06-local-model-override`            | committed    | e26ea54 | One change set; see report deviations              |
-| WP19 | Initiative skill with brief and tracker        | —               | 0061 Accepted; amends 0054 (pinned), 0041, 0036 | `wp19-initiative-skill`                | report ready |         | Outside the brief; template overlaps WP12          |
-| WP20 | Memory notes: no gate prompt, no code unlock   | —               | new; authority for the pinned hook change       | `wp20-spec-gate-memory-notes`          | not started  |         | Pinned hook; template shared with WP19, WP12       |
+| WP19 | Initiative skill with brief and tracker        | —               | 0061 Accepted; amends 0054 (pinned), 0041, 0036 | `wp19-initiative-skill`                | committed    | 138b206 | Outside the brief; template overlaps WP12          |
+| WP20 | Memory notes: no gate prompt, no code unlock   | —               | 0062 accepted; authority for the pinned hook    | `wp20-spec-gate-memory-notes`          | report ready |         | Pinned hook; template shared with WP19, WP12       |
 | WP7  | Claude as the default reviewer, with isolation | WP6 recommended | 0059 Accepted; amends 0042 §7, 0037, 0002       | `wp07-claude-default-reviewer`         | ADR accepted |         | live scenario needs go-ahead                       |
 | WP8  | Stable Claude phases                           | —               | check 0020                                      | `wp08-stable-claude-phases`            | not started  |         | Live scenario needs go-ahead                       |
 
@@ -74,7 +74,10 @@ Report: `gate-1-report.md` (not written).
       its packages stay in `documentation/work/<slug>/`.
 - [ ] With the 2.8 plugin installed, the hook lets a manual session write a
       Claude Code memory note without a prompt or an approval marker, and the
-      next code edit in that session still asks (WP20).
+      next code edit in that session still asks (WP20). Approving one
+      scratchpad write leaves only `bookkeeping-<session>` in
+      `$TMPDIR/banzai-spec-gate/`, and the next code edit still asks with the
+      first-change reason.
 
 ## Stage 2 (2.9): no lost runs
 
@@ -125,6 +128,7 @@ context accounting.
 | 0059 | WP7  | Claude default reviewer and reviewer isolation         | Accepted, 2026-10-31 |
 | 0060 | WP6  | Local model override                                   | Accepted, 2026-11-04 |
 | 0061 | WP19 | Initiative skill and documents                         | Accepted, 2026-11-05 |
+| 0062 | WP20 | Claude Code memory notes in the manual hook gate       | Accepted, 2026-11-05 |
 
 IDs checked free on 2026-10-31 (0057–0059), 2026-11-03 (0060) and 2026-11-05
 (0061) in `dev`, `main`, `v3.0.0-branch`, every local branch and every local
@@ -233,6 +237,21 @@ worktree.
   stays the Q2 follow-up. Commits are denied in this environment, so the
   scenario left three commit-dependent Acceptance items partial; the live
   Gate 1 check covers them.
+- 2026-11-05: WP19 committed as `138b206`, with the WP20 brief and tracker
+  additions. WP20 starts with `Yes, WP20 next`; ADR ID 0062 is reserved.
+- 2026-11-05: ADR-0062 proposed after three review rounds. Option B was
+  refined from the brief's project-root line to a closed allow-list of host
+  bookkeeping roots with its own marker, because a project-root line fails
+  open; the ADR records that variant as rejected. It awaits owner acceptance
+  and owner choice 1 (B recommended, or A).
+- 2026-11-05: `Ок, приймаю B`. ADR-0062 is accepted with choice 1 B, so
+  WP20 covers memory notes and the separate host-bookkeeping approval scope.
+- 2026-11-06: `Approve, Q1 (a)`. The WP20 requirements and plan are approved;
+  host evidence comes from hook tests, and the WP20 Gate 1 item gains a
+  scratchpad step.
+- 2026-11-06: WP20 implemented as one change set; report ready. ADR-0062 is
+  Implemented, and its hook transition is published. Installed clients receive
+  the change with the 2.8 version bump.
 
 ## Open questions left to the owner by the brief
 
