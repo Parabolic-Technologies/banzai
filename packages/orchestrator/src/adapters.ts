@@ -56,6 +56,57 @@ import {
 
 export const MINIMUM_CODEX_VERSION = "0.145.0";
 export const MINIMUM_CLAUDE_VERSION = "2.1.218";
+/**
+ * ADR-0059 §2: the oldest Claude Code that honours both review isolation
+ * variables. A target that reviews is refused below it; builders are not.
+ */
+export const REVIEW_ISOLATION_MINIMUM_CLAUDE_VERSION = "2.1.290";
+
+/** ADR-0059 §2: a Claude review reads; it runs no skill and no other review flow. */
+const CLAUDE_REVIEW_TOOLS = "Read,Glob,Grep";
+const CLAUDE_REVIEW_DISALLOWED_TOOLS =
+  "Skill,Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch";
+/** A planner-role read-only invocation (planning analysis) keeps `Skill`. */
+const CLAUDE_PLANNER_READ_TOOLS = "Read,Glob,Grep,Skill";
+const CLAUDE_PLANNER_READ_DISALLOWED_TOOLS =
+  "Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch";
+const CLAUDE_DISABLE_AUTO_MEMORY = "CLAUDE_CODE_DISABLE_AUTO_MEMORY";
+const CLAUDE_DISABLE_REFUSAL_FALLBACK = "CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK";
+
+/**
+ * The isolation contract every Claude review invocation carries (ADR-0059 §2).
+ * The reviewer invocation digest covers it, so a session recorded before this
+ * contract existed rotates instead of resuming.
+ */
+export const CLAUDE_REVIEW_ISOLATION = {
+  tools: CLAUDE_REVIEW_TOOLS,
+  disallowedTools: CLAUDE_REVIEW_DISALLOWED_TOOLS,
+  environment: [CLAUDE_DISABLE_AUTO_MEMORY, CLAUDE_DISABLE_REFUSAL_FALLBACK]
+} as const;
+
+/**
+ * Applied to the environment `subscriptionOnlyEnvironment` built, so an
+ * inherited value never survives (ADR-0059 §2–§3). A review runs without auto
+ * memory and without the refusal fallback in every mode. Every other Claude
+ * role loses auto memory only in scoped mode and keeps the vendor fallback;
+ * in ambient mode, or without a scope, its environment is unchanged.
+ */
+function isolatedClaudeEnvironment(
+  env: NodeJS.ProcessEnv,
+  reviews: boolean,
+  scope: ClaudeInvocationScope | undefined
+): NodeJS.ProcessEnv {
+  if (reviews) {
+    return {
+      ...env,
+      [CLAUDE_DISABLE_AUTO_MEMORY]: "1",
+      [CLAUDE_DISABLE_REFUSAL_FALLBACK]: "1"
+    };
+  }
+  return scope?.strictMcpConfig === true
+    ? { ...env, [CLAUDE_DISABLE_AUTO_MEMORY]: "1" }
+    : env;
+}
 const MAX_FAILURE_SUMMARY_LENGTH = 1_000;
 const MAX_PROGRESS_DETAIL_LENGTH = 240;
 
@@ -1076,6 +1127,11 @@ function parseVersion(output: string, executable: string): string {
   return match[1];
 }
 
+/** Whether a Claude Code version honours both review isolation variables. */
+export function meetsReviewIsolationMinimum(version: string): boolean {
+  return versionAtLeast(version, REVIEW_ISOLATION_MINIMUM_CLAUDE_VERSION);
+}
+
 function versionAtLeast(actual: string, minimum: string): boolean {
   const left = actual.split(".").map(Number);
   const right = minimum.split(".").map(Number);
@@ -1148,6 +1204,17 @@ async function requireVersion(
     throw new BanzaiError(
       "CLI_TOO_OLD",
       `${target.executable} ${actual} is older than required ${minimum}.`
+    );
+  }
+  // An older client ignores the isolation variables silently (ADR-0059 §2).
+  if (
+    vendor === "claude" &&
+    target.reviews === true &&
+    !versionAtLeast(actual, REVIEW_ISOLATION_MINIMUM_CLAUDE_VERSION)
+  ) {
+    throw new BanzaiError(
+      "CLI_TOO_OLD",
+      `${target.executable} ${actual} cannot isolate the reviewer, which requires ${REVIEW_ISOLATION_MINIMUM_CLAUDE_VERSION} or newer. Update ${target.executable}, or choose another reviewer with \`banzai model\`.`
     );
   }
   const modelMinimum =
@@ -1530,7 +1597,9 @@ export function buildClaudeArguments(
         PlanningAdapterRequest<PlanningReviewResult | PlanningReviewAnalysis>,
         "onTerminalSuccess"
       >,
-  identity: OutputContractIdentity = "review-result/v2"
+  identity: OutputContractIdentity = "review-result/v2",
+  // Review and planning review are review roles; planning analysis is not.
+  reviews = true
 ): string[] {
   const args = [
     "-p",
@@ -1547,9 +1616,11 @@ export function buildClaudeArguments(
     "--permission-mode",
     "dontAsk",
     "--tools",
-    "Read,Glob,Grep,Skill",
+    reviews ? CLAUDE_REVIEW_TOOLS : CLAUDE_PLANNER_READ_TOOLS,
     "--disallowedTools",
-    "Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch"
+    reviews
+      ? CLAUDE_REVIEW_DISALLOWED_TOOLS
+      : CLAUDE_PLANNER_READ_DISALLOWED_TOOLS
   ];
   if (request.resumeSessionId !== null) {
     args.push("--resume", request.resumeSessionId);
@@ -1820,7 +1891,8 @@ async function runPlanningAdapter<
   runner: ProcessRunner,
   request: PlanningAdapterRequest<T>,
   identity: OutputContractIdentity,
-  parse: (value: unknown) => T
+  parse: (value: unknown) => T,
+  reviews: boolean
 ): Promise<AdapterResult<T>> {
   const vendor = requireVendor(request.settings.executable);
   return withModelFailureEvidence(runner, vendor, async (run) => {
@@ -1838,9 +1910,9 @@ async function runPlanningAdapter<
       );
       const processResult = await run({
         command: request.settings.executable,
-        args: buildClaudeArguments(request, identity),
+        args: buildClaudeArguments(request, identity, reviews),
         cwd: request.repoRoot,
-        env,
+        env: isolatedClaudeEnvironment(env, reviews, request.environment),
         timeoutMs: request.settings.timeoutMs,
         onStart: request.onStart,
         onStdoutLine: createClaudeProgressObserver(
@@ -2023,7 +2095,7 @@ export function createVendorAdapters(
             command: request.settings.executable,
             args: buildClaudeSelectionArguments(request),
             cwd: request.repoRoot,
-            env,
+            env: isolatedClaudeEnvironment(env, false, request.environment),
             timeoutMs: request.settings.timeoutMs,
             onStart: request.onStart,
             onStdoutLine: observeProgress,
@@ -2128,7 +2200,7 @@ export function createVendorAdapters(
             command: request.settings.executable,
             args: buildClaudePhaseArguments(request),
             cwd: request.repoRoot,
-            env,
+            env: isolatedClaudeEnvironment(env, false, request.environment),
             timeoutMs: request.settings.timeoutMs,
             onStart: request.onStart,
             onStdoutLine: observeProgress,
@@ -2215,7 +2287,8 @@ export function createVendorAdapters(
         runner,
         request,
         "planning-review-result/v1",
-        parsePlanningReviewResult
+        parsePlanningReviewResult,
+        true
       );
     },
     async runPlanningAnalysis(request) {
@@ -2223,7 +2296,8 @@ export function createVendorAdapters(
         runner,
         request,
         "planning-review-analysis/v1",
-        parsePlanningReviewAnalysis
+        parsePlanningReviewAnalysis,
+        false
       );
     },
 
@@ -2304,7 +2378,7 @@ export function createVendorAdapters(
           command: request.settings.executable,
           args: buildClaudeArguments(request),
           cwd: request.repoRoot,
-          env,
+          env: isolatedClaudeEnvironment(env, true, request.environment),
           timeoutMs: request.settings.timeoutMs,
           onStart: request.onStart,
           onStdoutLine: observeProgress,

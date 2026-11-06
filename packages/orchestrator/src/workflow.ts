@@ -88,7 +88,10 @@ import { access, chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { resolveClaudeInvocationScope } from "./adapters.js";
+import {
+  CLAUDE_REVIEW_ISOLATION,
+  resolveClaudeInvocationScope
+} from "./adapters.js";
 import {
   sealReviewSnapshot,
   reviewApprovedArtifacts
@@ -534,9 +537,11 @@ interface ReviewExecutionPolicy extends AttemptPolicy {
 }
 
 /**
- * Identifies the ambient-environment inputs that decide a Claude session's tool
- * inventory. Comparing it before resuming rotates a stale reviewer without
- * spending the full-prefix re-cache that a mismatched resume would cost.
+ * Identifies the inputs that decide a Claude reviewer session's tool inventory:
+ * the ambient-environment scope and the review isolation contract (ADR-0059
+ * §2). Comparing it before resuming rotates a stale reviewer without spending
+ * the full-prefix re-cache that a mismatched resume would cost, and retires a
+ * session recorded before the isolation contract existed.
  */
 export function invocationScopeDigest(scope: ClaudeInvocationScope): string {
   return createHash("sha256")
@@ -544,7 +549,8 @@ export function invocationScopeDigest(scope: ClaudeInvocationScope): string {
       JSON.stringify([
         scope.strictMcpConfig,
         scope.settingSources,
-        scope.pluginDirectory
+        scope.pluginDirectory,
+        CLAUDE_REVIEW_ISOLATION
       ])
     )
     .digest("hex");
@@ -6633,14 +6639,20 @@ export class WorkflowRunner {
    */
   private async preflightVendor(
     role: ModelRole,
-    settings: ModelSettings
+    settings: ModelSettings,
+    reviews = role === "reviewer"
   ): Promise<void> {
     const vendor = vendorFor(settings.executable) ?? FALLBACK_VENDOR[role];
+    const target = {
+      executable: settings.executable,
+      model: settings.model,
+      reviews
+    };
     if (vendor === "claude") {
-      await this.adapters.preflightClaude(settings);
+      await this.adapters.preflightClaude(target);
       return;
     }
-    await this.adapters.preflightCodex(settings);
+    await this.adapters.preflightCodex(target);
   }
 
   /**
@@ -6707,17 +6719,27 @@ export class WorkflowRunner {
       await assertExecutable(verification.command, this.repoRoot, environment);
     }
     // One check per vendor/executable pair, so roles sharing a vendor are not
-    // checked twice while the implementer is no longer skipped entirely.
-    const checked = new Set<string>();
-    for (const role of MODEL_ROLES) {
+    // checked twice while the implementer is no longer skipped entirely. The
+    // pair counts as reviewing when any role that shares it is the reviewer,
+    // so a shared Claude client meets the review isolation minimum here.
+    const pairKey = (role: ModelRole): string => {
       const settings = config.models[role];
       const vendor = vendorFor(settings.executable) ?? FALLBACK_VENDOR[role];
-      const key = `${vendor}:${settings.executable}`;
+      return `${vendor}:${settings.executable}`;
+    };
+    const reviewingPair = pairKey("reviewer");
+    const checked = new Set<string>();
+    for (const role of MODEL_ROLES) {
+      const key = pairKey(role);
       if (checked.has(key)) {
         continue;
       }
       checked.add(key);
-      await this.preflightVendor(role, settings);
+      await this.preflightVendor(
+        role,
+        config.models[role],
+        key === reviewingPair
+      );
     }
     await this.assertClaudePermissions(config);
   }

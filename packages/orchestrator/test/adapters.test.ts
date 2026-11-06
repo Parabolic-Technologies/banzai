@@ -16,6 +16,7 @@ import path from "node:path";
 import test from "node:test";
 import {
   AMBIENT_CLAUDE_SCOPE,
+  REVIEW_ISOLATION_MINIMUM_CLAUDE_VERSION,
   buildClaudeArguments,
   buildClaudePhaseArguments,
   buildClaudeSelectionArguments,
@@ -167,6 +168,61 @@ const scopedEnvironment: ClaudeInvocationScope = {
 function flagValue(args: string[], flag: string): string | undefined {
   const index = args.indexOf(flag);
   return index === -1 ? undefined : args[index + 1];
+}
+
+/** ADR-0059 §2: the review roles' read-only tool set, without `Skill`. */
+const REVIEW_TOOLS = "Read,Glob,Grep";
+const REVIEW_DISALLOWED_TOOLS =
+  "Skill,Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch";
+const ISOLATION_VARIABLES = [
+  "CLAUDE_CODE_DISABLE_AUTO_MEMORY",
+  "CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK"
+] as const;
+
+/** Scoped mode without a packaged plugin: still `strictMcpConfig`. */
+const degradedScopedEnvironment: ClaudeInvocationScope = {
+  strictMcpConfig: true,
+  settingSources: null,
+  pluginDirectory: null
+};
+
+/** Every Claude scope a call site can receive, `undefined` included. */
+const claudeScopes: readonly [string, ClaudeInvocationScope | undefined][] = [
+  ["scoped", scopedEnvironment],
+  ["degraded scoped", degradedScopedEnvironment],
+  ["ambient", AMBIENT_CLAUDE_SCOPE],
+  ["no scope", undefined]
+];
+
+/** An inherited opt-out that a review must never keep. */
+const inheritedIsolationOptOut: NodeJS.ProcessEnv = {
+  PATH: "/usr/bin",
+  ANTHROPIC_API_KEY: "must-be-removed",
+  CLAUDE_CODE_DISABLE_AUTO_MEMORY: "0",
+  CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK: "0"
+};
+
+function scoped(environment: ClaudeInvocationScope | undefined): {
+  environment?: ClaudeInvocationScope;
+} {
+  return environment === undefined ? {} : { environment };
+}
+
+/** The argv and environment of the one child a call spawns. */
+async function spawned(
+  call: (adapters: ReturnType<typeof createVendorAdapters>) => Promise<unknown>
+): Promise<{ args: string[]; env: NodeJS.ProcessEnv }> {
+  const spawns: { args: string[]; env: NodeJS.ProcessEnv }[] = [];
+  const runner: ProcessRunner = async (spec) => {
+    spawns.push({ args: spec.args, env: { ...spec.env } });
+    return failed("", "stopped after spawn");
+  };
+  await call(createVendorAdapters(runner)).then(
+    () => assert.fail("the stopped child must fail the call"),
+    () => undefined
+  );
+  assert.equal(spawns.length, 1);
+  return spawns[0] as { args: string[]; env: NodeJS.ProcessEnv };
 }
 
 async function pluginFixture(
@@ -545,11 +601,8 @@ test("Claude reviewer exposes read-only tools and denies all writing", () => {
   const outputFormat = args.indexOf("--output-format");
   assert.equal(args[outputFormat + 1], "stream-json");
   assert.ok(args.includes("--verbose"));
-  assert.ok(args.includes("Read,Glob,Grep,Skill"));
-  assert.ok(
-    args.includes("Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch")
-  );
-  assert.ok(!args.includes("Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch"));
+  assert.equal(flagValue(args, "--tools"), REVIEW_TOOLS);
+  assert.equal(flagValue(args, "--disallowedTools"), REVIEW_DISALLOWED_TOOLS);
   assert.ok(!args.includes("--bare"));
   assert.ok(!args.includes("--resume"));
   assert.ok(!args.includes("--worktree"));
@@ -578,10 +631,8 @@ test("resumed reviewers reapply vendor read-only restrictions", () => {
     resumeSessionId: "review-session"
   });
   assert.deepEqual(claude.slice(-2), ["--resume", "review-session"]);
-  assert.ok(claude.includes("Read,Glob,Grep,Skill"));
-  assert.ok(
-    claude.includes("Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch")
-  );
+  assert.equal(flagValue(claude, "--tools"), REVIEW_TOOLS);
+  assert.equal(flagValue(claude, "--disallowedTools"), REVIEW_DISALLOWED_TOOLS);
 
   const codex = buildCodexArguments(
     {
@@ -594,6 +645,172 @@ test("resumed reviewers reapply vendor read-only restrictions", () => {
   );
   assert.ok(codex.includes('sandbox_mode="read-only"'));
   assert.equal(codex.includes("workspace-write"), false);
+});
+
+test("Claude review and routine re-review drop Skill from the read-only tool set", () => {
+  for (const resumeSessionId of [null, "review-session"]) {
+    for (const [name, environment] of claudeScopes) {
+      const args = buildClaudeArguments({
+        ...baseReviewRequest,
+        resumeSessionId,
+        ...scoped(environment)
+      });
+      assert.equal(flagValue(args, "--tools"), REVIEW_TOOLS, name);
+      assert.equal(
+        flagValue(args, "--disallowedTools"),
+        REVIEW_DISALLOWED_TOOLS,
+        name
+      );
+    }
+  }
+});
+
+test("Claude review disables auto memory and refusal fallback in every scope", async () => {
+  for (const resumeSessionId of [null, "review-session"]) {
+    for (const [name, environment] of claudeScopes) {
+      const child = await spawned((adapters) =>
+        adapters.runReview({
+          ...baseReviewRequest,
+          resumeSessionId,
+          env: inheritedIsolationOptOut,
+          ...scoped(environment)
+        })
+      );
+      for (const variable of ISOLATION_VARIABLES) {
+        assert.equal(child.env[variable], "1", `${variable} ${name}`);
+      }
+      assert.equal(child.env.PATH, "/usr/bin");
+      assert.equal(child.env.ANTHROPIC_API_KEY, undefined);
+      assert.equal(child.env.BANZAI_RUN_ID, "run-example");
+    }
+  }
+});
+
+test("Claude builders and selection disable auto memory in scoped mode only", async () => {
+  const calls = {
+    phase: (environment: ClaudeInvocationScope | undefined) =>
+      spawned((adapters) =>
+        adapters.runPhase({
+          ...basePhaseRequest,
+          settings,
+          outputContract: claudePhaseOutputContract,
+          env: inheritedIsolationOptOut,
+          ...scoped(environment)
+        })
+      ),
+    selection: (environment: ClaudeInvocationScope | undefined) =>
+      spawned((adapters) =>
+        adapters.runSelection({
+          ...baseSelectionRequest,
+          settings,
+          outputContract: claudeSelectionOutputContract,
+          env: inheritedIsolationOptOut,
+          ...scoped(environment)
+        })
+      )
+  };
+  for (const [kind, call] of Object.entries(calls)) {
+    for (const environment of [scopedEnvironment, degradedScopedEnvironment]) {
+      const child = await call(environment);
+      assert.equal(child.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY, "1", kind);
+      // Builders keep the vendor's refusal fallback: an inherited value passes.
+      assert.equal(child.env.CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK, "0", kind);
+      assert.equal(child.env.ANTHROPIC_API_KEY, undefined, kind);
+    }
+  }
+});
+
+test("Claude builders and selection keep today's environment in ambient mode and without a scope", async () => {
+  for (const source of [
+    inheritedIsolationOptOut,
+    { PATH: "/usr/bin", CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK: "1" },
+    { PATH: "/usr/bin" }
+  ]) {
+    for (const environment of [AMBIENT_CLAUDE_SCOPE, undefined]) {
+      const phase = await spawned((adapters) =>
+        adapters.runPhase({
+          ...basePhaseRequest,
+          settings,
+          outputContract: claudePhaseOutputContract,
+          env: source,
+          ...scoped(environment)
+        })
+      );
+      const selection = await spawned((adapters) =>
+        adapters.runSelection({
+          ...baseSelectionRequest,
+          settings,
+          outputContract: claudeSelectionOutputContract,
+          env: source,
+          ...scoped(environment)
+        })
+      );
+      assert.deepEqual(phase.env, subscriptionOnlyEnvironment(source));
+      assert.deepEqual(selection.env, subscriptionOnlyEnvironment(source));
+    }
+  }
+});
+
+test("Codex children get neither isolation variable and unchanged arguments", async () => {
+  const runDirectory = await mkdtemp(path.join(tmpdir(), "banzai-codex-env-"));
+  try {
+    const source = { PATH: "/usr/bin", CODEX_HOME: "/codex-home" };
+    for (const environment of [
+      scopedEnvironment,
+      AMBIENT_CLAUDE_SCOPE,
+      undefined
+    ]) {
+      const review = await spawned((adapters) =>
+        adapters.runReview({
+          ...baseReviewRequest,
+          runDirectory,
+          settings: codexSettings,
+          outputContract: codexReviewOutputContract,
+          env: source,
+          ...scoped(environment)
+        })
+      );
+      const phase = await spawned((adapters) =>
+        adapters.runPhase({
+          ...basePhaseRequest,
+          runDirectory,
+          env: source,
+          ...scoped(environment)
+        })
+      );
+      const selection = await spawned((adapters) =>
+        adapters.runSelection({
+          ...baseSelectionRequest,
+          runDirectory,
+          env: source,
+          ...scoped(environment)
+        })
+      );
+      assert.deepEqual(
+        review.env,
+        subscriptionOnlyEnvironment({
+          ...source,
+          BANZAI_RUN_ID: "run-example",
+          BANZAI_APPROVAL_DIGEST: "approved-digest"
+        })
+      );
+      assert.deepEqual(phase.env, subscriptionOnlyEnvironment(source));
+      assert.deepEqual(selection.env, subscriptionOnlyEnvironment(source));
+      for (const child of [review, phase, selection]) {
+        for (const variable of ISOLATION_VARIABLES) {
+          assert.equal(child.env[variable], undefined, variable);
+        }
+        assert.equal(
+          child.args.some((arg) => arg.includes("CLAUDE_CODE_DISABLE")),
+          false
+        );
+      }
+      assert.equal(review.args.includes("Skill"), false);
+      assert.ok(review.args.includes("read-only"));
+    }
+  } finally {
+    await rm(runDirectory, { recursive: true, force: true });
+  }
 });
 
 test("Claude workflow selection exposes only read-only tools and its schema", () => {
@@ -1143,6 +1360,131 @@ test("preflight refuses a CLI older than the configured model's release before c
     // A launch that leaves model choice to the client needs only the
     // vendor-wide minimum.
     await preflight(fixture.vendorMinimum, null);
+  }
+});
+
+test("preflight refuses a reviewing Claude target below the review isolation floor", async () => {
+  assert.equal(REVIEW_ISOLATION_MINIMUM_CLAUDE_VERSION, "2.1.290");
+  const calls: string[][] = [];
+  const adaptersAt = (installed: string) =>
+    createVendorAdapters(async (spec) => {
+      calls.push(spec.args);
+      if (spec.args[0] === "--version") {
+        return successful(
+          spec.command === "codex"
+            ? `codex-cli ${installed}\n`
+            : `${installed} (Claude Code)\n`
+        );
+      }
+      if (spec.args[0] === "login") {
+        return successful("Logged in using ChatGPT\n");
+      }
+      return successful(
+        JSON.stringify({
+          loggedIn: true,
+          authMethod: "oauth",
+          apiProvider: "firstParty"
+        })
+      );
+    });
+  const reviewer = {
+    executable: "claude",
+    model: "claude-opus-5-5",
+    reviews: true
+  };
+  await assert.rejects(
+    adaptersAt("2.1.289").preflightClaude(reviewer),
+    (error: unknown) => {
+      assert.ok(error instanceof BanzaiError);
+      assert.equal(error.code, "CLI_TOO_OLD");
+      assert.equal(
+        error.message,
+        "claude 2.1.289 cannot isolate the reviewer, which requires 2.1.290 or newer. Update claude, or choose another reviewer with `banzai model`."
+      );
+      return true;
+    }
+  );
+  // Refused before authentication is checked, like the model minimum.
+  assert.deepEqual(calls, [["--version"]]);
+  await assert.rejects(
+    adaptersAt("2.1.289").preflightClaude({ ...reviewer, model: null }),
+    /cannot isolate the reviewer/
+  );
+  // A target that only builds is not subject to the floor.
+  await adaptersAt("2.1.289").preflightClaude({
+    executable: "claude",
+    model: "claude-opus-5-5"
+  });
+  await adaptersAt("2.1.289").preflightClaude({
+    ...reviewer,
+    reviews: false
+  });
+  await adaptersAt("2.1.290").preflightClaude(reviewer);
+  // The floor belongs to Claude review isolation; Codex keeps its minimums.
+  await adaptersAt("0.159.1").preflightCodex(
+    { executable: "codex", model: "gpt-6.1-sol", reviews: true },
+    { CODEX_HOME: tmpdir(), PATH: process.env.PATH }
+  );
+});
+
+test("a refused Claude review fails through typed handling without a result", async () => {
+  for (const shape of [
+    {
+      name: "non-zero exit with an error result",
+      exitCode: 1,
+      line: JSON.stringify({
+        type: "result",
+        subtype: "error_during_execution",
+        is_error: true,
+        result: "The request was declined.",
+        session_id: "review-session"
+      })
+    },
+    {
+      name: "success result without structured output",
+      exitCode: 0,
+      line: JSON.stringify({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "I can't help with that.",
+        session_id: "review-session"
+      })
+    }
+  ]) {
+    let checkpoints = 0;
+    const runner: ProcessRunner = async (spec) => {
+      const result = { ...successful(shape.line), exitCode: shape.exitCode };
+      try {
+        await spec.onStdoutLineDurable?.(shape.line);
+      } catch (error) {
+        // runProcess reports a durable observer failure this way.
+        throw new ProcessExitError(
+          error instanceof BanzaiError ? error.code : "PROCESS_OBSERVER_FAILED",
+          (error as Error).message,
+          result
+        );
+      }
+      return result;
+    };
+    await assert.rejects(
+      createVendorAdapters(runner).runReview({
+        ...baseReviewRequest,
+        onTerminalSuccess: async () => {
+          checkpoints += 1;
+        }
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof ProcessExitError, shape.name);
+        assert.equal(error.failureCause, "unclassified", shape.name);
+        if (shape.exitCode !== 0) {
+          assert.equal(error.code, "CLAUDE_REVIEW_FAILED", shape.name);
+        }
+        assert.equal(error.result.stdout, shape.line, shape.name);
+        return true;
+      }
+    );
+    assert.equal(checkpoints, 0, shape.name);
   }
 });
 

@@ -66,15 +66,16 @@ Orchestrated work assigns phase responsibilities to three model roles so review 
 - implementer: lite feature or quick-fix work; strict implementation and
   assurance, followed by accepted-finding fixes when human triage requires them;
 - reviewer: independent source-read-only review, with no planner or implementer
-  transcript. Compatible strict planning, implementation, and fixes share one
-  builder lineage. The primary review starts a fresh independent reviewer;
+  transcript. Independence comes from a fresh session, no memory shared with
+  the builders and a fixed read-only tool set. Compatible strict planning,
+  implementation, and fixes share one builder lineage. The primary review starts a fresh independent reviewer;
   routine re-review may resume that reviewer for at most two deltas before a
   fresh full review. Both vendors return structured review evidence. The runner
   alone renders and validates the attempt-owned candidate and publishes the
   canonical review artifact.
 
 The reviewer never fixes its own findings. The implementer never triages them.
-The fixer may read the review artifact for cross-model context, but only the
+The fixer may read the review artifact for review context, but only the
 human-triaged structured finding payload defines its scope.
 
 When triage accepts no finding, the strict run finishes from the recorded human

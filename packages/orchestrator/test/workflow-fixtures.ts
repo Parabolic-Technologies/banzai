@@ -31,6 +31,7 @@ import {
   type RunState,
   type SessionInventory,
   type VendorAdapters,
+  type VendorPreflightTarget,
   type WorkflowSelectionAdapterRequest,
   type WorkflowSelectionResult
 } from "../src/types.js";
@@ -415,6 +416,9 @@ export class FakeAdapters implements VendorAdapters {
   onCodexPreflight: (() => Promise<void>) | null = null;
   onClaudePreflight: (() => Promise<void>) | null = null;
   claudePreflightErrors: Error[] = [];
+  /** Every preflight target in call order, as the runner passed it. */
+  codexPreflightTargets: VendorPreflightTarget[] = [];
+  claudePreflightTargets: VendorPreflightTarget[] = [];
   selectionPrompts: string[] = [];
   selectionErrors: Error[] = [];
   selectionResults: WorkflowSelectionResult[] = [];
@@ -491,13 +495,15 @@ export class FakeAdapters implements VendorAdapters {
     });
   }
 
-  async preflightCodex(): Promise<void> {
+  async preflightCodex(target: VendorPreflightTarget): Promise<void> {
     this.codexPreflights += 1;
+    this.codexPreflightTargets.push(target);
     await this.onCodexPreflight?.();
   }
 
-  async preflightClaude(): Promise<void> {
+  async preflightClaude(target: VendorPreflightTarget): Promise<void> {
     this.claudePreflights += 1;
+    this.claudePreflightTargets.push(target);
     await this.onClaudePreflight?.();
     const error = this.claudePreflightErrors.shift();
     if (error !== undefined) {

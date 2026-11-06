@@ -48,7 +48,8 @@ test("the shipped default configuration uses only current models", () => {
     [
       ["claude", "claude-opus-5-5", "xhigh"],
       ["claude", "claude-opus-5-5", "xhigh"],
-      ["codex", "gpt-6.1-sol", "xhigh"]
+      // ADR-0059 §1: Claude reviews by default.
+      ["claude", "claude-opus-5-5", "xhigh"]
     ]
   );
 });

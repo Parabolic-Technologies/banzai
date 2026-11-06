@@ -263,7 +263,9 @@ behavior and edge cases; source and tests own the executable evidence.
   and never affects readiness. `config.local` checks the local model file with
   only `git ls-files --error-unmatch` and `git check-ignore -q`, and the
   top-level `models` array discloses each role's vendor, pattern-matched model,
-  effort and source.
+  effort and source. `claude.version` reads a Claude reviewer's installed
+  version from the file system only and fails below the review isolation
+  minimum; it is skipped for other reviewers.
 - `evaluation*.ts`, `evaluation-kpi*.ts` — privacy-minimized export and pure
   derived KPIs; frozen contracts retain explicit incomplete coverage.
 - `context-accounting.ts`, `context-report*.ts` — exact runner-byte accounting
@@ -308,8 +310,8 @@ Plugin and release owners:
 ## 6. State & Data Flow
 
 - `banzai init` writes config schema 4 with model settings and optional task
-  verification policy. Defaults use Claude `claude-opus-5-5` for planning and
-  implementation and Codex `gpt-6.1-sol` for review, all at `xhigh`; context
+  verification policy. Defaults use Claude `claude-opus-5-5` for every role,
+  all at `xhigh` (ADR-0059); an existing reviewer configuration is kept; context
   defaults to `observe` with no limits and `maxFixCycles` is `3`.
 - The optional `.banzai/config.local.json` (`schemaVersion` `1`) replaces whole
   role triples of `executable` (`claude` or `codex`), `model` and `effort` for
@@ -387,9 +389,11 @@ Plugin and release owners:
   `typescript-eslint` `^8.65.0`, `globals` `^17.8.0`, `prettier` `^3.9.6` and
   `eslint-config-prettier` `^10.1.8`. The root declares no dependencies.
 - External runtime tools are Git and the configured local vendor clients.
-  Vendor-wide minimums are Codex `0.145.0` and Claude Code `2.1.218`; default
-  models require Codex `0.159.1` and Claude Code `2.1.280`. Model-specific
-  minimums are maintained in `packages/orchestrator/src/models.ts`.
+  Vendor-wide minimums are Codex `0.145.0` and Claude Code `2.1.218`. A Claude
+  reviewer requires Claude Code `2.1.290` for review isolation, so the default
+  all-Claude configuration does too; the Codex CLI is needed only when a role
+  uses it. Model-specific minimums are maintained in
+  `packages/orchestrator/src/models.ts`.
 - PTY tests require `python3` with its standard library on macOS/Linux.
   Python is a test prerequisite; the CLI runtime uses Node.
 - New runtime or development dependencies require explicit user approval and
@@ -499,7 +503,9 @@ Plugin and release owners:
 - Claude execution scopes MCP access and, when a verified plugin directory
   resolves, project settings plus that plugin. Deny/ask rules override hook
   write grants; shell permission is separate. Code reviewers have no write
-  tools. The CLI never silently writes permission rules.
+  tools. Claude review roles receive only `Read`, `Glob` and `Grep` and run
+  without auto memory or refusal fallback. The CLI never silently writes
+  permission rules.
 - Runner operations do not switch branches, create worktrees, stash, reset or
   commit. Start-time changes are recorded as baseline evidence. Explicit
   restore uses digest-verified approved bytes; recovery preserves failed
@@ -582,7 +588,7 @@ delivery or installation.
 | ADR-0056 | CI-built orchestrator distribution                                 | [Source](documentation/decisions/0056-ci-built-orchestrator-distribution.md)                     | Implemented |
 | ADR-0057 | Complete task verification rounds after check failures             | [Source](documentation/decisions/0057-complete-task-verification-rounds.md)                      | Implemented |
 | ADR-0058 | Human plan edits re-checked at the plan gate                       | [Source](documentation/decisions/0058-human-plan-edits-rechecked-at-the-plan-gate.md)            | Implemented |
-| ADR-0059 | Claude default reviewer and reviewer isolation                     | [Source](documentation/decisions/0059-claude-default-reviewer-and-reviewer-isolation.md)         | Planned     |
+| ADR-0059 | Claude default reviewer and reviewer isolation                     | [Source](documentation/decisions/0059-claude-default-reviewer-and-reviewer-isolation.md)         | Implemented |
 | ADR-0060 | Local model override                                               | [Source](documentation/decisions/0060-local-model-override.md)                                   | Implemented |
 | ADR-0061 | Initiative skill and documents                                     | [Source](documentation/decisions/0061-initiative-skill-and-documents.md)                         | Implemented |
 | ADR-0062 | Claude Code memory notes in the manual hook gate                   | [Source](documentation/decisions/0062-claude-memory-notes-in-the-manual-hook-gate.md)            | Implemented |

@@ -4,6 +4,8 @@ import { access, lstat, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import {
+  REVIEW_ISOLATION_MINIMUM_CLAUDE_VERSION,
+  meetsReviewIsolationMinimum,
   resolveClaudeInvocationScope,
   vendorFor,
   FALLBACK_VENDOR,
@@ -160,6 +162,16 @@ export interface DoctorDependencies {
    * it, an existing local file fails `config.local` as if Git could not run.
    */
   localConfigGitState?: DoctorLocalConfigGitProbe;
+  /**
+   * The installed Claude Code version, read from the file system only
+   * (ADR-0008, ADR-0059 §2), or `null` when no known layout yields one.
+   * Defaults to `readInstalledClaudeVersion`.
+   */
+  installedClaudeVersion?(
+    command: string,
+    cwd: string,
+    env: NodeJS.ProcessEnv
+  ): Promise<string | null>;
 }
 
 const RUN_STATUSES = new Set<RunStatus>([
@@ -221,6 +233,84 @@ async function executableAvailable(
     }
   }
   return false;
+}
+
+const VERSION_SHAPE = /^\d+\.\d+\.\d+$/u;
+/** The npm wrapper package, or the platform package that carries the binary. */
+const CLAUDE_PACKAGE_NAME =
+  /^@anthropic-ai\/claude-code(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?$/u;
+const PACKAGE_MANIFEST_LIMIT = 1024 * 1024;
+
+/**
+ * The native installer names each installed file by its version, as in
+ * `~/.local/share/claude/versions/2.1.319`.
+ */
+function nativeInstallerVersion(resolved: string): string | null {
+  const name = path.basename(resolved);
+  return path.basename(path.dirname(resolved)) === "versions" &&
+    VERSION_SHAPE.test(name)
+    ? name
+    : null;
+}
+
+/**
+ * npm installs the binary inside its package (the wrapper's `bin/claude.exe`,
+ * or the platform package). The walk stops at the first `package.json` above
+ * the file, whatever it names, so an unrelated manifest is never skipped past.
+ */
+async function npmPackageVersion(resolved: string): Promise<string | null> {
+  let directory = path.dirname(resolved);
+  for (;;) {
+    const manifest = path.join(directory, "package.json");
+    let found = false;
+    try {
+      const metadata = await stat(manifest);
+      found = true;
+      if (!metadata.isFile() || metadata.size > PACKAGE_MANIFEST_LIMIT) {
+        return null;
+      }
+      const parsed = JSON.parse(await readFile(manifest, "utf8")) as unknown;
+      return isRecord(parsed) &&
+        typeof parsed.name === "string" &&
+        CLAUDE_PACKAGE_NAME.test(parsed.name) &&
+        typeof parsed.version === "string" &&
+        VERSION_SHAPE.test(parsed.version)
+        ? parsed.version
+        : null;
+    } catch {
+      if (found) return null;
+    }
+    const parent = path.dirname(directory);
+    if (parent === directory) return null;
+    directory = parent;
+  }
+}
+
+/**
+ * Reads the installed Claude Code version without running it (ADR-0008): the
+ * first executable `PATH` candidate, as `executableAvailable` finds it, is
+ * resolved through its links and matched against the native and npm layouts.
+ * Returns `null` when neither yields a version-shaped value.
+ */
+export async function readInstalledClaudeVersion(
+  command: string,
+  cwd: string,
+  env: NodeJS.ProcessEnv
+): Promise<string | null> {
+  for (const candidate of executableCandidates(command, cwd, env)) {
+    let resolved: string;
+    try {
+      await access(candidate, constants.X_OK);
+      if (!(await stat(candidate)).isFile()) continue;
+      resolved = await realpath(candidate);
+    } catch {
+      continue;
+    }
+    return (
+      nativeInstallerVersion(resolved) ?? (await npmPackageVersion(resolved))
+    );
+  }
+  return null;
 }
 
 function processAlive(pid: number): "live" | "stale" {
@@ -939,6 +1029,89 @@ async function configuredExecutableCheck(
   );
 }
 
+const CLAUDE_VERSION_FIXES: DoctorFix[] = [
+  {
+    action: `Update Claude Code to ${REVIEW_ISOLATION_MINIMUM_CLAUDE_VERSION} or newer, or choose another reviewer with \`banzai model\`.`,
+    documentation:
+      "documentation/getting-started.md#install-and-sign-in-to-model-clients"
+  }
+];
+
+/**
+ * The review isolation minimum for a Claude reviewer (ADR-0059 §2), read
+ * offline. Only the effective reviewer whose executable is `claude` qualifies;
+ * the run start still refuses an older client whatever this reports.
+ */
+async function claudeVersionCheck(
+  roles: RoleConfiguration,
+  repoRoot: string,
+  dependencies: DoctorDependencies
+): Promise<DoctorCheck> {
+  const id = "claude.version";
+  if (roles.config === null) {
+    return check(
+      id,
+      "executables",
+      "skipped",
+      "The Claude reviewer version check requires a valid configuration."
+    );
+  }
+  if (roles.localFailed) {
+    return check(
+      id,
+      "executables",
+      "skipped",
+      `The Claude reviewer version check is skipped ${LOCAL_CONFIG_SKIP}.`
+    );
+  }
+  const executable = roles.config.models.reviewer.executable;
+  if (vendorFor(executable) !== "claude") {
+    return check(
+      id,
+      "executables",
+      "skipped",
+      "The reviewer does not run on Claude Code, so the review isolation minimum does not apply."
+    );
+  }
+  const environment = { PATH: process.env.PATH };
+  if (
+    !(await dependencies.executableAvailable(executable, repoRoot, environment))
+  ) {
+    return check(
+      id,
+      "executables",
+      "skipped",
+      "The Claude reviewer executable is unavailable, so its version was not read."
+    );
+  }
+  const version = await (
+    dependencies.installedClaudeVersion ?? readInstalledClaudeVersion
+  )(executable, repoRoot, environment);
+  if (version === null) {
+    return check(
+      id,
+      "executables",
+      "warning",
+      `The installed Claude Code version could not be read offline. Run start refuses a reviewer older than ${REVIEW_ISOLATION_MINIMUM_CLAUDE_VERSION}.`,
+      CLAUDE_VERSION_FIXES
+    );
+  }
+  return meetsReviewIsolationMinimum(version)
+    ? check(
+        id,
+        "executables",
+        "pass",
+        `Claude Code ${version} meets the reviewer isolation minimum ${REVIEW_ISOLATION_MINIMUM_CLAUDE_VERSION}.`
+      )
+    : check(
+        id,
+        "executables",
+        "fail",
+        `Claude Code ${version} cannot isolate the reviewer, which requires ${REVIEW_ISOLATION_MINIMUM_CLAUDE_VERSION} or newer.`,
+        CLAUDE_VERSION_FIXES
+      );
+}
+
 async function activeRunCheck(repoRoot: string): Promise<DoctorCheck> {
   const banzaiRoot = path.join(repoRoot, ".banzai");
   const pointerPath = path.join(banzaiRoot, "active-run.json");
@@ -1391,6 +1564,7 @@ export async function inspectDoctor(
       dependencies,
       roles.executablesSkipped
     ),
+    await claudeVersionCheck(roles, repoRoot, dependencies),
     await configuredExecutableCheck(
       "executables.verification",
       config === null
@@ -1405,7 +1579,7 @@ export async function inspectDoctor(
       "authentication.models",
       "executables",
       "warning",
-      "Model authentication readiness and vendor CLI versions were not checked. Doctor is offline and executable availability is not authentication proof; startup preflight remains authoritative. Run Banzai from a regular terminal, restore vendor login, or use the vendor-supported setup-token flow when unattended authentication is required."
+      "Model authentication readiness was not checked, and doctor checks no vendor CLI version except the Claude reviewer's, which it reads offline. Doctor is offline and executable availability is not authentication proof; startup preflight remains authoritative. Run Banzai from a regular terminal, restore vendor login, or use the vendor-supported setup-token flow when unattended authentication is required."
     ),
     await activeRunCheck(repoRoot),
     await runnerLockCheck(repoRoot, dependencies)

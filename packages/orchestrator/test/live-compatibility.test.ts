@@ -10,6 +10,7 @@ import {
   parseLiveCompatibilityArgs
 } from "../src/live-compatibility-cli.js";
 import {
+  liveClaudeReviewChecks,
   normalizedCliVersion,
   runLiveCompatibility,
   validateLiveCompatibilityPolicy
@@ -158,21 +159,27 @@ function codexObservationLines(
   }
 }
 
-function claudeObservationLines(spec: ProcessSpec, omit: string | null): void {
+function claudeObservationLines(
+  spec: ProcessSpec,
+  omit: string | null,
+  tools: readonly string[] = ["Read", "Glob", "Grep"]
+): void {
   if (omit === "exact") return;
   emitLine(spec, {
     type: "system",
     subtype: "init",
     session_id: "live",
-    tools: [
-      "Read",
-      "Glob",
-      "Grep",
-      "Skill",
-      ...(omit === "write-exposed" ? ["Write"] : [])
-    ]
+    tools: [...tools, ...(omit === "write-exposed" ? ["Write"] : [])]
   });
 }
+
+/** The default isolating client: both variable names are in its binary. */
+const isolatingClient = async (): Promise<boolean> => true;
+
+const ISOLATION_VARIABLES = [
+  "CLAUDE_CODE_DISABLE_AUTO_MEMORY",
+  "CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK"
+];
 
 function reviewResponse(spec: ProcessSpec) {
   const prompt =
@@ -249,6 +256,10 @@ function fakeLiveRunner(options?: {
   interruptVendor?: "codex" | "claude";
   codexCommandShape?: CodexCommandShape;
   onModelProcess?: (spec: ProcessSpec) => void;
+  /** The Claude version `--version` reports; the review floor by default. */
+  claudeVersion?: string;
+  /** The tools the Claude host reports in `system/init`. */
+  claudeTools?: readonly string[];
 }): ProcessRunner {
   return async (spec) => {
     if (spec.command === "git") {
@@ -258,7 +269,7 @@ function fakeLiveRunner(options?: {
       return successful(
         spec.command === "codex"
           ? "codex-cli 0.145.0\n"
-          : "2.1.220 (Claude Code)\n"
+          : `${options?.claudeVersion ?? "2.1.290"} (Claude Code)\n`
       );
     }
     if (spec.command === "codex" && spec.args.join(" ") === "login status") {
@@ -350,7 +361,11 @@ function fakeLiveRunner(options?: {
         throw new BanzaiError("PROCESS_TIMEOUT", "Claude timed out.");
       }
       if ((options?.observationShape ?? "realistic") === "realistic") {
-        claudeObservationLines(spec, options?.omitObservation ?? null);
+        claudeObservationLines(
+          spec,
+          options?.omitObservation ?? null,
+          options?.claudeTools
+        );
       } else {
         untrustedObservationLines(
           spec,
@@ -359,11 +374,13 @@ function fakeLiveRunner(options?: {
         );
       }
       assert.equal(spec.env.BANZAI_REVIEW_ARTIFACT, undefined);
-      assert.ok(spec.args.includes("Read,Glob,Grep,Skill"));
-      assert.ok(
-        spec.args.includes(
-          "Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch"
-        )
+      assert.equal(
+        spec.args[spec.args.indexOf("--tools") + 1],
+        "Read,Glob,Grep"
+      );
+      assert.equal(
+        spec.args[spec.args.indexOf("--disallowedTools") + 1],
+        "Skill,Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch"
       );
       const result = successful(
         `${JSON.stringify({
@@ -433,6 +450,7 @@ test("missing subscription auth is unavailable, never pass", async () => {
     const summary = await runLiveCompatibility(candidate.repository, {
       environment: { PATH: process.env.PATH },
       temporaryParent: candidate.temporaryParent,
+      claudeBinaryContains: isolatingClient,
       processRunner: fakeLiveRunner()
     });
     assert.equal(summary.status, "unavailable", JSON.stringify(summary));
@@ -458,6 +476,7 @@ test("fake live suite proves exact artifact permission and fail-closed denials",
         BANZAI_LIVE_CLAUDE_AUTH_ROOT: candidate.claudeAuth
       },
       temporaryParent: candidate.temporaryParent,
+      claudeBinaryContains: isolatingClient,
       processRunner: fakeLiveRunner({ privateOutput: secret })
     });
     assert.equal(summary.status, "pass", JSON.stringify(summary));
@@ -483,6 +502,7 @@ test("an anchored Codex shell wrapper remains valid denial evidence", async () =
         BANZAI_LIVE_CLAUDE_AUTH_ROOT: candidate.claudeAuth
       },
       temporaryParent: candidate.temporaryParent,
+      claudeBinaryContains: isolatingClient,
       processRunner: fakeLiveRunner({ codexCommandShape: "shell-wrapper" })
     });
     assert.equal(summary.status, "pass", JSON.stringify(summary));
@@ -507,6 +527,7 @@ for (const shape of [
           BANZAI_LIVE_CLAUDE_AUTH_ROOT: candidate.claudeAuth
         },
         temporaryParent: candidate.temporaryParent,
+        claudeBinaryContains: isolatingClient,
         processRunner: fakeLiveRunner({ codexCommandShape: shape })
       });
       assert.equal(summary.status, "fail", JSON.stringify(summary));
@@ -533,6 +554,7 @@ for (const missing of ["exact", "write-exposed"]) {
           BANZAI_LIVE_CLAUDE_AUTH_ROOT: candidate.claudeAuth
         },
         temporaryParent: candidate.temporaryParent,
+        claudeBinaryContains: isolatingClient,
         processRunner: fakeLiveRunner({ omitObservation: missing })
       });
       assert.equal(summary.status, "fail");
@@ -560,6 +582,7 @@ for (const shape of ["untyped", "assistant-prose"] as const) {
           BANZAI_LIVE_CLAUDE_AUTH_ROOT: candidate.claudeAuth
         },
         temporaryParent: candidate.temporaryParent,
+        claudeBinaryContains: isolatingClient,
         processRunner: fakeLiveRunner({ observationShape: shape })
       });
       assert.equal(summary.status, "fail", JSON.stringify(summary));
@@ -590,6 +613,7 @@ test("forbidden source mutation fails closed", async () => {
         BANZAI_LIVE_CLAUDE_AUTH_ROOT: candidate.claudeAuth
       },
       temporaryParent: candidate.temporaryParent,
+      claudeBinaryContains: isolatingClient,
       processRunner: fakeLiveRunner({ mutateSource: true })
     });
     assert.equal(summary.status, "fail");
@@ -618,6 +642,7 @@ for (const [label, options] of [
           BANZAI_LIVE_CLAUDE_AUTH_ROOT: candidate.claudeAuth
         },
         temporaryParent: candidate.temporaryParent,
+        claudeBinaryContains: isolatingClient,
         processRunner: fakeLiveRunner(options)
       });
       assert.equal(summary.status, "fail");
@@ -650,6 +675,7 @@ for (const [label, options] of [
           BANZAI_LIVE_CLAUDE_AUTH_ROOT: candidate.claudeAuth
         },
         temporaryParent: candidate.temporaryParent,
+        claudeBinaryContains: isolatingClient,
         processRunner: fakeLiveRunner(options)
       });
       assert.equal(summary.status, "fail", JSON.stringify(summary));
@@ -681,6 +707,7 @@ test("model invocations enforce the accepted per-call and count bounds", async (
         BANZAI_LIVE_CLAUDE_AUTH_ROOT: candidate.claudeAuth
       },
       temporaryParent: candidate.temporaryParent,
+      claudeBinaryContains: isolatingClient,
       processRunner: fakeLiveRunner({
         onModelProcess: (spec) => timeouts.push(spec.timeoutMs)
       })
@@ -705,6 +732,7 @@ test("total deadline overflow is a failure and still cleans up", async () => {
         BANZAI_LIVE_CLAUDE_AUTH_ROOT: candidate.claudeAuth
       },
       temporaryParent: candidate.temporaryParent,
+      claudeBinaryContains: isolatingClient,
       processRunner: fakeLiveRunner(),
       now: () => {
         time += 100_000;
@@ -733,6 +761,7 @@ test("interruption terminates the active process group and cleans up", async () 
         BANZAI_LIVE_CLAUDE_AUTH_ROOT: candidate.claudeAuth
       },
       temporaryParent: candidate.temporaryParent,
+      claudeBinaryContains: isolatingClient,
       processRunner: fakeLiveRunner({ interruptVendor: "codex" }),
       processGroupTerminator: (pid) => terminated.push(pid)
     });
@@ -760,4 +789,167 @@ test("live CLI returns unavailable as exit 2 with a fixed JSON summary", async (
   const summary = JSON.parse(stdout.join("")) as Record<string, unknown>;
   assert.equal(summary.schema, "banzai-live-compatibility/v2");
   assert.equal(summary.status, "unavailable");
+});
+
+const LIVE_CHECK_IDS = [
+  "candidate.exact",
+  "preflight.codex",
+  "preflight.claude",
+  "codex.source_denied",
+  "codex.control_denied",
+  "codex.structured_result",
+  "codex.runner_artifact",
+  "claude.source_denied",
+  "claude.control_denied",
+  "claude.other_artifact_denied",
+  "claude.candidate_denied",
+  "claude.read_only_inventory",
+  "claude.runner_artifact",
+  "claude.structured_result",
+  "workspace.unchanged",
+  "bounds.enforced",
+  "cleanup.complete"
+];
+
+async function liveSummary(
+  options: Parameters<typeof fakeLiveRunner>[0] = {},
+  claudeBinaryContains: (
+    executable: string,
+    names: readonly string[],
+    environment: NodeJS.ProcessEnv
+  ) => Promise<boolean> = isolatingClient
+) {
+  const candidate = await repositoryFixture();
+  try {
+    return await runLiveCompatibility(candidate.repository, {
+      environment: {
+        PATH: process.env.PATH,
+        BANZAI_LIVE_CODEX_AUTH_ROOT: candidate.codexAuth,
+        BANZAI_LIVE_CLAUDE_AUTH_ROOT: candidate.claudeAuth
+      },
+      temporaryParent: candidate.temporaryParent,
+      claudeBinaryContains,
+      processRunner: fakeLiveRunner(options)
+    });
+  } finally {
+    await rm(candidate.parent, { recursive: true, force: true });
+  }
+}
+
+function liveCheck(
+  summary: Awaited<ReturnType<typeof runLiveCompatibility>>,
+  id: string
+) {
+  const found = summary.checks.find((check) => check.id === id);
+  assert.ok(found, id);
+  return { status: found.status, code: found.code };
+}
+
+test("the Claude review inventory admits Read, Glob, Grep and an optional StructuredOutput only", async () => {
+  const skill = await liveSummary({
+    claudeTools: ["Read", "Glob", "Grep", "Skill"]
+  });
+  assert.deepEqual(liveCheck(skill, "claude.read_only_inventory"), {
+    status: "fail",
+    code: "DENIAL_NOT_OBSERVED"
+  });
+  assert.equal(skill.status, "fail");
+
+  const structured = await liveSummary({
+    claudeTools: ["Read", "Glob", "Grep", "StructuredOutput"]
+  });
+  assert.equal(structured.status, "pass", JSON.stringify(structured));
+  assert.deepEqual(liveCheck(structured, "claude.read_only_inventory"), {
+    status: "pass",
+    code: "CAPABILITY_EXCLUDED"
+  });
+});
+
+test("the Claude review spawn carries both isolation variables and the client is searched for their names", async () => {
+  const environments: NodeJS.ProcessEnv[] = [];
+  const searched: [string, readonly string[]][] = [];
+  const summary = await liveSummary(
+    {
+      onModelProcess: (spec) => {
+        if (spec.command === "claude") environments.push({ ...spec.env });
+      }
+    },
+    async (executable, names) => {
+      searched.push([executable, names]);
+      return true;
+    }
+  );
+  assert.equal(summary.status, "pass", JSON.stringify(summary));
+  assert.equal(environments.length, 1);
+  for (const variable of ISOLATION_VARIABLES) {
+    assert.equal(environments[0]?.[variable], "1", variable);
+  }
+  assert.deepEqual(searched, [["claude", ISOLATION_VARIABLES]]);
+});
+
+test("a client without the isolation names fails only the inventory check", async () => {
+  const summary = await liveSummary({}, async () => false);
+  assert.equal(summary.status, "fail");
+  assert.deepEqual(liveCheck(summary, "claude.read_only_inventory"), {
+    status: "fail",
+    code: "ISOLATION_NOT_OBSERVED"
+  });
+  for (const id of LIVE_CHECK_IDS.filter(
+    (id) => id !== "claude.read_only_inventory"
+  )) {
+    assert.equal(liveCheck(summary, id).status, "pass", id);
+  }
+});
+
+test("a spawn without both isolation variables fails only the inventory check", () => {
+  const base = {
+    sourceDenied: false,
+    controlDenied: false,
+    inventoryObserved: true,
+    inventoryInvalid: false
+  };
+  assert.deepEqual(
+    liveClaudeReviewChecks({ ...base, isolationEnvironment: false }, true),
+    [
+      ["claude.read_only_inventory", "fail", "ISOLATION_NOT_OBSERVED"],
+      ["claude.source_denied", "pass", "CAPABILITY_EXCLUDED"],
+      ["claude.control_denied", "pass", "CAPABILITY_EXCLUDED"],
+      ["claude.other_artifact_denied", "pass", "CAPABILITY_EXCLUDED"],
+      ["claude.candidate_denied", "pass", "CAPABILITY_EXCLUDED"]
+    ]
+  );
+  assert.deepEqual(
+    liveClaudeReviewChecks({ ...base, isolationEnvironment: true }, true).map(
+      ([, status]) => status
+    ),
+    ["pass", "pass", "pass", "pass", "pass"]
+  );
+  // A restricted inventory is still required for every Claude denial check.
+  assert.deepEqual(
+    liveClaudeReviewChecks(
+      { ...base, inventoryInvalid: true, isolationEnvironment: true },
+      true
+    ).map(([, status, code]) => [status, code]),
+    Array.from({ length: 5 }, () => ["fail", "DENIAL_NOT_OBSERVED"])
+  );
+});
+
+test("the live Claude preflight applies the review isolation floor", async () => {
+  const summary = await liveSummary({ claudeVersion: "2.1.289" });
+  assert.equal(summary.status, "unavailable", JSON.stringify(summary));
+  assert.deepEqual(liveCheck(summary, "preflight.claude"), {
+    status: "unavailable",
+    code: "CLI_TOO_OLD"
+  });
+  assert.equal(summary.invocationCount, 0);
+});
+
+test("the live summary keeps schema v2 and its check IDs", async () => {
+  const summary = await liveSummary();
+  assert.equal(summary.schema, "banzai-live-compatibility/v2");
+  assert.equal(summary.schemaVersion, 2);
+  assert.deepEqual(
+    summary.checks.map((check) => check.id),
+    LIVE_CHECK_IDS
+  );
 });

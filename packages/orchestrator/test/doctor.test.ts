@@ -20,7 +20,7 @@ import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import type { ClaudePermissionAudit } from "../src/claude-permissions.js";
-import { CONFIG_FILE } from "../src/config.js";
+import { CONFIG_FILE, DEFAULT_CONFIG } from "../src/config.js";
 import {
   doctorInspection,
   renderDoctorJson,
@@ -28,6 +28,7 @@ import {
 } from "../src/doctor-cli.js";
 import {
   inspectDoctor,
+  readInstalledClaudeVersion,
   type DoctorCheck,
   type DoctorDependencies,
   type DoctorFix,
@@ -71,6 +72,7 @@ const CHECK_ORDER = [
   "project.types",
   "verification.task",
   "executables.models",
+  "claude.version",
   "executables.verification",
   "authentication.models",
   "run.active",
@@ -192,9 +194,28 @@ function dependencies(options?: {
   localConfigGitState?: DoctorLocalConfigGitProbe;
   /** Receives every command whose availability doctor asks about. */
   executableCalls?: string[];
+  /**
+   * The offline Claude version reading. The default never reads the
+   * developer's own installation.
+   */
+  claudeVersion?: string | null;
+  /** Uses the real file-system reader instead of `claudeVersion`. */
+  readClaudeVersion?: boolean;
+  /** Receives every command whose Claude version doctor reads. */
+  claudeVersionCalls?: string[];
 }): DoctorDependencies {
   const unavailable = new Set(options?.unavailable ?? []);
+  const claudeVersion =
+    options?.claudeVersion === undefined ? "2.1.300" : options.claudeVersion;
   return {
+    ...(options?.readClaudeVersion === true
+      ? {}
+      : {
+          async installedClaudeVersion(command: string) {
+            options?.claudeVersionCalls?.push(command);
+            return claudeVersion;
+          }
+        }),
     // No test reads the developer's own Claude settings.
     claudeSettingsEnvironment: options?.claudeSettingsEnvironment ?? {
       HOME: ABSENT_HOME
@@ -334,6 +355,11 @@ test("reports a deterministic ready Node project without mutating it", async () 
       first.checks.find((item) => item.id === "authentication.models")
         ?.message ?? "",
       /not checked.*not authentication proof.*startup preflight/s
+    );
+    assert.match(
+      first.checks.find((item) => item.id === "authentication.models")
+        ?.message ?? "",
+      /no vendor CLI version except the Claude reviewer's, which it reads offline/
     );
     assert.equal(first.summary.warnings, 1);
     assert.equal(
@@ -2351,3 +2377,297 @@ test("a real Git checkout answers only the two permitted queries, at the reposit
     await repository.dispose();
   }
 });
+
+const CLAUDE_VERSION_FIX: DoctorFix[] = [
+  {
+    action:
+      "Update Claude Code to 2.1.290 or newer, or choose another reviewer with `banzai model`.",
+    documentation:
+      "documentation/getting-started.md#install-and-sign-in-to-model-clients"
+  }
+];
+
+test("claude.version enforces the review isolation floor for a Claude reviewer", async () => {
+  const repository = await temporaryRoot();
+  try {
+    await writeConfig(repository.root, reviewerOnlyClaudeConfig());
+    for (const version of ["2.1.290", "2.1.319"]) {
+      const calls: string[] = [];
+      const report = await inspectDoctor(
+        repository.root,
+        dependencies({ claudeVersion: version, claudeVersionCalls: calls })
+      );
+      assert.deepEqual(findCheck(report, "claude.version"), {
+        id: "claude.version",
+        category: "executables",
+        status: "pass",
+        message: `Claude Code ${version} meets the reviewer isolation minimum 2.1.290.`,
+        fixes: [],
+        roles: []
+      });
+      assert.deepEqual(calls, ["claude"]);
+      assert.equal(report.ready, true);
+    }
+
+    const old = await inspectDoctor(
+      repository.root,
+      dependencies({ claudeVersion: "2.1.289" })
+    );
+    assert.deepEqual(findCheck(old, "claude.version"), {
+      id: "claude.version",
+      category: "executables",
+      status: "fail",
+      message:
+        "Claude Code 2.1.289 cannot isolate the reviewer, which requires 2.1.290 or newer.",
+      fixes: CLAUDE_VERSION_FIX,
+      roles: []
+    });
+    assert.equal(old.ready, false);
+
+    const unknown = await inspectDoctor(
+      repository.root,
+      dependencies({ claudeVersion: null })
+    );
+    assert.deepEqual(findCheck(unknown, "claude.version"), {
+      id: "claude.version",
+      category: "executables",
+      status: "warning",
+      message:
+        "The installed Claude Code version could not be read offline. Run start refuses a reviewer older than 2.1.290.",
+      fixes: CLAUDE_VERSION_FIX,
+      roles: []
+    });
+    assert.equal(unknown.ready, true);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("claude.version is skipped unless the effective reviewer runs on an available Claude executable", async () => {
+  const repository = await temporaryRoot();
+  const skipped = async (
+    config: unknown,
+    options: Parameters<typeof dependencies>[0] = {}
+  ): Promise<string> => {
+    await writeConfig(repository.root, config);
+    const calls: string[] = [];
+    const report = await inspectDoctor(
+      repository.root,
+      dependencies({ ...options, claudeVersionCalls: calls })
+    );
+    const result = findCheck(report, "claude.version");
+    assert.equal(result.status, "skipped", result.message);
+    assert.deepEqual(result.fixes, []);
+    assert.deepEqual(calls, []);
+    return result.message;
+  };
+  try {
+    const codexReviewer = substantiveConfig();
+    codexReviewer.models.reviewer.executable = "codex";
+    codexReviewer.models.reviewer.model = "gpt-6.1-sol";
+    assert.equal(
+      await skipped(codexReviewer),
+      "The reviewer does not run on Claude Code, so the review isolation minimum does not apply."
+    );
+    // A Node executable falls back to the Claude adapter but never qualifies.
+    assert.equal(
+      await skipped(locallyExecutableConfig()),
+      "The reviewer does not run on Claude Code, so the review isolation minimum does not apply."
+    );
+    assert.equal(
+      await skipped(reviewerOnlyClaudeConfig(), { unavailable: ["claude"] }),
+      "The Claude reviewer executable is unavailable, so its version was not read."
+    );
+    assert.equal(
+      await skipped("{ not json"),
+      "The Claude reviewer version check requires a valid configuration."
+    );
+    await writeFile(
+      path.join(repository.root, LOCAL_CONFIG_FILE),
+      `${JSON.stringify({ schemaVersion: 1, models: {}, FORBIDDENKEY: true })}\n`
+    );
+    assert.equal(
+      await skipped(reviewerOnlyClaudeConfig(), {
+        localConfigGitState: recordingProbe().probe
+      }),
+      "The Claude reviewer version check is skipped while the local model file fails config.local."
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("claude.version reads a local Claude reviewer over a committed Codex reviewer", async () => {
+  const repository = await temporaryRoot();
+  try {
+    const committed = substantiveConfig();
+    committed.models.reviewer.executable = "codex";
+    committed.models.reviewer.model = "gpt-6.1-sol";
+    await writeConfig(repository.root, committed);
+    await writeLocalModels(repository.root, {
+      reviewer: {
+        executable: "claude",
+        model: "claude-opus-5-5",
+        effort: "xhigh"
+      }
+    });
+    const calls: string[] = [];
+    const report = await inspectDoctor(
+      repository.root,
+      dependencies({
+        claudeVersion: "2.1.289",
+        claudeVersionCalls: calls,
+        localConfigGitState: recordingProbe().probe
+      })
+    );
+    assert.equal(findCheck(report, "config.local").status, "pass");
+    assert.equal(findCheck(report, "claude.version").status, "fail");
+    assert.deepEqual(calls, ["claude"]);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("the default configuration with only claude installed has no failed check", async () => {
+  const repository = await temporaryRoot();
+  try {
+    await writeFile(path.join(repository.root, "package.json"), "{}\n", "utf8");
+    await writeConfig(repository.root, structuredClone(DEFAULT_CONFIG));
+    const report = await inspectDoctor(
+      repository.root,
+      dependencies({ unavailable: ["codex"] })
+    );
+    assert.deepEqual(
+      report.checks
+        .filter((item) => item.status === "fail")
+        .map((item) => item.id),
+      []
+    );
+    assert.equal(findCheck(report, "claude.version").status, "pass");
+    assert.equal(report.ready, true);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+/** A shell script that leaves a marker if anything ever executes it. */
+async function writeTrapExecutable(
+  file: string,
+  marker: string
+): Promise<void> {
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(
+    file,
+    `#!/bin/sh\necho executed > "${marker}"\necho "2.1.100 (Claude Code)"\n`,
+    "utf8"
+  );
+  await chmod(file, 0o755);
+}
+
+test("the offline Claude version reader follows native and npm installs without running them", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "banzai-claude-version-"));
+  const marker = path.join(root, "executed");
+  const bin = path.join(root, "bin");
+  const read = async (target: string | null): Promise<string | null> => {
+    await rm(bin, { recursive: true, force: true });
+    await mkdir(bin, { recursive: true });
+    if (target !== null) await symlink(target, path.join(bin, "claude"));
+    return await readInstalledClaudeVersion("claude", root, { PATH: bin });
+  };
+  try {
+    // Native installer: the resolved file is named by its version.
+    const native = path.join(root, "share/claude/versions/2.1.319");
+    await writeTrapExecutable(native, marker);
+    assert.equal(await read(native), "2.1.319");
+    const notVersion = path.join(root, "share/claude/versions/latest");
+    await writeTrapExecutable(notVersion, marker);
+    assert.equal(await read(notVersion), null);
+
+    // npm: install.cjs places the platform binary over bin/claude.exe.
+    const wrapper = path.join(
+      root,
+      "lib/node_modules/@anthropic-ai/claude-code"
+    );
+    await writeFile(
+      path.join(await mkdirp(wrapper), "package.json"),
+      JSON.stringify({ name: "@anthropic-ai/claude-code", version: "2.1.300" })
+    );
+    const wrapperBinary = path.join(wrapper, "bin/claude.exe");
+    await writeTrapExecutable(wrapperBinary, marker);
+    assert.equal(await read(wrapperBinary), "2.1.300");
+
+    const platform = path.join(
+      root,
+      "lib/node_modules/@anthropic-ai/claude-code-darwin-arm64"
+    );
+    await writeFile(
+      path.join(await mkdirp(platform), "package.json"),
+      JSON.stringify({
+        name: "@anthropic-ai/claude-code-darwin-arm64",
+        version: "2.1.301"
+      })
+    );
+    const platformBinary = path.join(platform, "claude");
+    await writeTrapExecutable(platformBinary, marker);
+    assert.equal(await read(platformBinary), "2.1.301");
+
+    // The walk stops at the first package.json, whatever it names.
+    await writeFile(
+      path.join(wrapper, "bin/package.json"),
+      JSON.stringify({ name: "other", version: "9.9.9" })
+    );
+    assert.equal(await read(wrapperBinary), null);
+    await writeFile(
+      path.join(wrapper, "bin/package.json"),
+      JSON.stringify({
+        name: "@anthropic-ai/claude-code",
+        version: "2.1.300-beta.1"
+      })
+    );
+    assert.equal(await read(wrapperBinary), null);
+    await writeFile(path.join(wrapper, "bin/package.json"), "{ not json");
+    assert.equal(await read(wrapperBinary), null);
+
+    // An unknown layout and a missing executable read as unknown.
+    const plain = path.join(root, "opt/claude");
+    await writeTrapExecutable(plain, marker);
+    assert.equal(await read(plain), null);
+    assert.equal(await read(null), null);
+
+    await assert.rejects(access(marker), { code: "ENOENT" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("claude.version prints versions only, never the executable path", async () => {
+  const repository = await temporaryRoot();
+  const root = await mkdtemp(path.join(tmpdir(), "banzai-claude-path-"));
+  try {
+    const marker = path.join(root, "executed");
+    const native = path.join(root, "share/claude/versions/2.1.289");
+    await writeTrapExecutable(native, marker);
+    const config = reviewerOnlyClaudeConfig();
+    config.models.reviewer.executable = path.join(root, "bin", "claude");
+    await mkdir(path.join(root, "bin"));
+    await symlink(native, config.models.reviewer.executable);
+    await writeConfig(repository.root, config);
+    const report = await inspectDoctor(
+      repository.root,
+      dependencies({ readClaudeVersion: true })
+    );
+    assert.equal(findCheck(report, "claude.version").status, "fail");
+    assert.match(findCheck(report, "claude.version").message, /2\.1\.289/);
+    assert.equal(doctorOutput(report).includes(root), false);
+    assert.equal(doctorOutput(report).includes(await realpath(root)), false);
+    await assert.rejects(access(marker), { code: "ENOENT" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await repository.dispose();
+  }
+});
+
+async function mkdirp(directory: string): Promise<string> {
+  await mkdir(directory, { recursive: true });
+  return directory;
+}

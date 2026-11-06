@@ -2938,6 +2938,11 @@ export interface ReviewAdapterRequest {
 export interface VendorPreflightTarget {
   executable: string;
   model: string | null;
+  /**
+   * Whether the target runs a review role. A reviewing Claude target must meet
+   * the review isolation minimum (ADR-0059 §2); a building target need not.
+   */
+  reviews?: boolean;
 }
 
 export interface PlanningAdapterRequest<

@@ -46,15 +46,17 @@ Use a regular terminal in your own Git repository. You need:
 
 - macOS or Linux, Git, and Node.js **22.20.0+ within major 22** or
   **24.11.1+ within major 24**;
-- **Codex CLI 0.159.1+** and **Claude Code 2.1.280+** for the default
-  configuration, signed in through individual subscriptions;
+- **Claude Code 2.1.290+** for the default configuration, signed in through an
+  individual subscription, and the **Codex CLI** only for roles you assign to
+  Codex;
 - the Banzai CLI and the separately installed Banzai plugin in each client
   selected for planning, implementation, or review.
 
-To use one provider, install its client and plugin, then select that provider
-for all three roles during `banzai init`. Strict review still uses a fresh
-session. The default configuration uses Claude for planning and implementation
-and Codex for review. The team shares these choices in `.banzai/config.json`;
+The default configuration uses Claude for planning, implementation and review.
+To use Codex for any role, install its client and plugin, then select it during
+`banzai init`. Strict review uses a fresh session without the builder's
+conversation, shared memory or skills. The team shares these choices in
+`.banzai/config.json`;
 `banzai model --local` saves different models for any phase on your machine
 only, in the Git-ignored
 [local model file](documentation/orchestrator.md#local-model-file).

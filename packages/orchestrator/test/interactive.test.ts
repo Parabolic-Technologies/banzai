@@ -849,6 +849,51 @@ class FakeAuthentication implements AuthenticationGateway {
   }
 }
 
+test("the launch check marks a vendor entry as reviewing only when the reviewer runs on it", async () => {
+  const checks = async (config: OrchestratorConfig) => {
+    const seen: [string, boolean][] = [];
+    const auth: AuthenticationGateway = {
+      async check(settings: ModelSettings, reviews: boolean) {
+        seen.push([settings.executable, reviews]);
+        return null;
+      }
+    };
+    await runInteractive(new FakeRunner([null]), new FakeIO(["exit"]), {
+      decidedBy: "human",
+      models: new FakeModelConfiguration(config),
+      auth
+    });
+    return seen;
+  };
+  const allClaude = reviewerOnlyClaudeConfig();
+  for (const role of ["planner", "implementer"] as const) {
+    allClaude.models[role].executable = "claude";
+    allClaude.models[role].model = "claude-opus-5-5";
+  }
+  assert.deepEqual(await checks(allClaude), [["claude", true]]);
+
+  const claudeBuilds = structuredClone(allClaude);
+  claudeBuilds.models.reviewer.executable = "codex";
+  claudeBuilds.models.reviewer.model = "gpt-6.1-sol";
+  assert.deepEqual(await checks(claudeBuilds), [
+    ["claude", false],
+    ["codex", true]
+  ]);
+
+  assert.deepEqual(await checks(reviewerOnlyClaudeConfig()), [
+    ["codex", false],
+    ["claude", true]
+  ]);
+});
+
+/** Claude builds and Codex reviews: the mixed-vendor layout, pinned. */
+function codexReviewerConfig(): OrchestratorConfig {
+  const config = structuredClone(DEFAULT_CONFIG);
+  config.models.reviewer.executable = "codex";
+  config.models.reviewer.model = "gpt-6.1-sol";
+  return config;
+}
+
 test("startup checks every configured vendor once and reports it ready", async () => {
   const auth = new FakeAuthentication();
   const runner = new FakeRunner([null]);
@@ -856,7 +901,7 @@ test("startup checks every configured vendor once and reports it ready", async (
 
   await runInteractive(runner, io, {
     decidedBy: "human",
-    models: new FakeModelConfiguration(DEFAULT_CONFIG),
+    models: new FakeModelConfiguration(codexReviewerConfig()),
     auth
   });
 
@@ -1006,9 +1051,10 @@ test("interactive startup shows the models for each phase", async () => {
   assert.ok(
     io.lines.some((line) => /^ {2}impl {4}claude .+xhigh · 60m/.test(line))
   );
+  // ADR-0059 §1: the default reviewer is Claude.
   assert.ok(
-    io.lines.some(
-      (line) => line.includes("review") && line.includes("gpt-6.1-sol")
+    io.lines.some((line) =>
+      /^ {2}review {2}claude claude-opus-5-5 +xhigh · 30m/.test(line)
     )
   );
   assert.equal(

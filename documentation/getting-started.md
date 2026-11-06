@@ -15,15 +15,18 @@ For the CLI workflow, you need:
 - **macOS or Linux**, Git, and a regular terminal with interactive input/output.
 - **Node.js 22.20.0+ within major 22**, or **24.11.1+ within major 24**.
 - The model clients for your selected providers, signed in through individual
-  subscriptions. The default configuration uses **Claude Code 2.1.280+** for
-  planning and implementation and **Codex CLI 0.159.1+** for review.
+  subscriptions. The default configuration uses **Claude Code 2.1.290+** for
+  planning, implementation and review. You need the **Codex CLI** only when you
+  select a Codex model for a role.
 - Your application's dependencies, when it has any. Banzai can work with an
   existing project or an empty Git repository. Its Node.js runtime does not
   require your application to use JavaScript.
 
-To use one provider, install its client and plugin, then select that provider
-for all three roles during `banzai init` in step 3. Strict review still uses
-a fresh session. You need both clients only when your selected roles use both.
+Claude Code serves every role by default; to use Codex instead, install its
+client and plugin, then select it for the roles you want during `banzai init`
+in step 3. Strict review uses a fresh session without the builder's
+conversation, shared memory or skills, whichever vendor runs it. You need both
+clients only when your selected roles use both.
 
 Banzai invokes the local executables for your selected providers. You do not
 enter API keys into Banzai. Model work uses the clients' remote services and
@@ -31,7 +34,8 @@ subscription limits.
 
 For older model selections, the vendor minimums are Codex CLI 0.145.0 and
 Claude Code 2.1.218. Each selected model must meet its own
-[client-version requirement](orchestrator.md#model-configuration).
+[client-version requirement](orchestrator.md#model-configuration), and a Claude
+reviewer needs Claude Code 2.1.290 or newer, which `banzai doctor` checks.
 
 ### Install and sign in to model clients
 

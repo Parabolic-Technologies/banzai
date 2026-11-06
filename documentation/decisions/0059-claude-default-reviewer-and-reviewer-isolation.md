@@ -16,7 +16,8 @@
 - Owner choices (section 5): accepted as written, with the recommended
   answers: reviewer effort `xhigh`; builders keep `Skill`; auto memory off for
   review roles in every mode and for builders in `scoped` mode.
-- Implementation state: Planned.
+- Implementation state: Implemented on 2026-11-06 by WP7 of the 2.8–2.9
+  program, for the 2.8 release.
 - Preparation authority: the owner's 2.8–2.9 brief of 2026-10-30 (WP7) and the
   owner's request on 2026-10-31 to draft the Stage 1 ADRs. Preparing this
   proposal is not acceptance; no code may rely on it.

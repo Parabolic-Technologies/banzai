@@ -148,17 +148,22 @@ function authenticationGateway(
   adapters: VendorAdapters
 ): AuthenticationGateway {
   return {
-    async check(settings): Promise<string | null> {
+    async check(settings, reviews): Promise<string | null> {
       // Dispatch on the executable the role actually runs, not on the role.
       const vendor = vendorFor(settings.executable);
       if (vendor === null) {
         return null;
       }
+      const target = {
+        executable: settings.executable,
+        model: settings.model,
+        reviews
+      };
       try {
         if (vendor === "claude") {
-          await adapters.preflightClaude(settings);
+          await adapters.preflightClaude(target);
         } else {
-          await adapters.preflightCodex(settings);
+          await adapters.preflightCodex(target);
         }
         return null;
       } catch (error) {

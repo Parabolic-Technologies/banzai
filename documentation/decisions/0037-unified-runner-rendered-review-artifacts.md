@@ -358,7 +358,7 @@ requires the subsequent approved plan.
   accepted 2026-10-31: required Claude review tools become `Read`, `Glob` and
   `Grep`, and review roles run without auto memory or refusal fallback.
   Read-only enforcement, the Serena boundary and independent sessions remain.
-  Implementation is Planned.
+  Implemented by WP7 for the 2.8 release.
 
 - Amended by
   [ADR-0055](./0055-planning-gate-rework-and-independent-planning-review.md),

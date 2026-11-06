@@ -22,7 +22,9 @@ import {
   CONTRACT_VERSION,
   PLAN_TASK_COMPLETION_SCHEMA_VERSION,
   type AdapterResult,
+  type OrchestratorConfig,
   type PhaseAdapterRequest,
+  type VendorPreflightTarget,
   type PhaseResult,
   type ProcessRunner,
   type ProgressEvent
@@ -49,7 +51,8 @@ import {
   createTestRepository,
   commitAll,
   monochromeEnv,
-  snapshotTree
+  snapshotTree,
+  withVendorExecutablesOnPath
 } from "./helpers.js";
 import {
   assertTrace,
@@ -3149,6 +3152,108 @@ test("default runner sources keep the baseline timestamp and identifier formats"
       assert.match(record.startedAt, ISO_TIMESTAMP);
       assert.match(record.completedAt ?? "", ISO_TIMESTAMP);
     }
+  } finally {
+    await repository.dispose();
+  }
+});
+
+/** Refuses only a reviewing Claude target, as an old client would (R8). */
+class BelowReviewFloorAdapters extends FakeAdapters {
+  async preflightClaude(target: VendorPreflightTarget): Promise<void> {
+    await super.preflightClaude(target);
+    if (target.reviews === true) {
+      throw new BanzaiError(
+        "CLI_TOO_OLD",
+        "claude 2.1.289 cannot isolate the reviewer, which requires 2.1.290 or newer."
+      );
+    }
+  }
+}
+
+test("run start applies the review floor to a vendor pair the reviewer shares, before selection", async () => {
+  const repository = await createTestRepository();
+  try {
+    await withVendorExecutablesOnPath(async () => {
+      const configPath = path.join(repository.root, ".banzai/config.json");
+      const config = JSON.parse(
+        await readFile(configPath, "utf8")
+      ) as OrchestratorConfig;
+      // The ADR-0059 default: every role on one Claude executable.
+      for (const role of ["planner", "implementer", "reviewer"] as const) {
+        config.models[role].executable = "claude";
+        config.models[role].model = "claude-opus-5-5";
+      }
+      await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
+      await commitAll(repository.root, "all roles on claude");
+
+      const adapters = new BelowReviewFloorAdapters();
+      adapters.reviewResults.push(passingReview());
+      const runner = new WorkflowRunner(repository.root, adapters);
+      const blocked = await runner.start({
+        slug: "example",
+        request: "Implement it."
+      });
+      assert.equal(blocked.status, "blocked", blocked.blockReason ?? "");
+      assert.equal(blocked.blockedFrom, "created");
+      assert.match(blocked.blockReason ?? "", /cannot isolate the reviewer/u);
+      assert.equal(adapters.selectionPrompts.length, 0);
+      // One check for the shared pair, marked as reviewing.
+      assert.deepEqual(
+        adapters.claudePreflightTargets.map((target) => target.reviews),
+        [true]
+      );
+      assert.equal(adapters.codexPreflights, 0);
+
+      const retried = await runner.retry();
+      assert.equal(retried.status, "blocked", retried.blockReason ?? "");
+      assert.equal(retried.blockedFrom, "created");
+      assert.equal(adapters.selectionPrompts.length, 0);
+      assert.deepEqual(
+        adapters.claudePreflightTargets.map((target) => target.reviews),
+        [true, true]
+      );
+    });
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("run start leaves a Claude pair that only builds without the review floor", async () => {
+  const repository = await createTestRepository();
+  try {
+    await withVendorExecutablesOnPath(async () => {
+      const configPath = path.join(repository.root, ".banzai/config.json");
+      const config = JSON.parse(
+        await readFile(configPath, "utf8")
+      ) as OrchestratorConfig;
+      for (const role of ["planner", "implementer"] as const) {
+        config.models[role].executable = "claude";
+        config.models[role].model = "claude-opus-5-5";
+      }
+      config.models.reviewer.executable = "codex";
+      config.models.reviewer.model = "gpt-6.1-sol";
+      await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
+      await commitAll(repository.root, "claude builds, codex reviews");
+
+      const adapters = new BelowReviewFloorAdapters();
+      adapters.reviewResults.push(passingReview());
+      const runner = new WorkflowRunner(repository.root, adapters);
+      const planned = await runner.start({
+        slug: "example",
+        request: "Implement it."
+      });
+      assert.equal(
+        planned.status,
+        "needs_plan_approval",
+        planned.blockReason ?? ""
+      );
+      assert.ok(adapters.claudePreflightTargets.length > 0);
+      assert.ok(
+        adapters.claudePreflightTargets.every(
+          (target) => target.reviews !== true
+        )
+      );
+    });
   } finally {
     await repository.dispose();
   }

@@ -133,7 +133,11 @@ is a navigational reference and is updated with the module it describes.
 - `live-compatibility.ts` — protected live-only candidate cloning,
   subscription-auth-root isolation, version/auth preflight, bounded reviewer
   scenarios, exact Codex write-probe events, Claude
-  restricted host inventory, source/control snapshots, runner-rendered v2
+  restricted host inventory (Read, Glob, Grep, optional StructuredOutput) with
+  review isolation evidence for `claude.read_only_inventory` — both variables
+  on the review spawn and both names in the resolved client binary, which is
+  searched and never run — the reviewer minimum in the Claude preflight,
+  source/control snapshots, runner-rendered v2
   review artifacts, closed `banzai-live-compatibility/v2` evidence, process bounds, and cleanup.
 - `project-adoption.ts` — facade over the canonical plugin prerequisite reader;
   filesystem-only, bounded regular-file inspection of
@@ -179,10 +183,16 @@ is a navigational reference and is updated with the module it describes.
   skipped whenever no configured role depends on those rules. The advisory
   `claude.plugin-scope` check that follows warns, never fails, when Claude user
   settings enable Banzai, and passes for local or project installs. It never constructs `RunStore`,
-  vendor adapters, or `WorkflowRunner`. Its advisory
+  vendor adapters, or `WorkflowRunner`. `claude.version`, after
+  `executables.models`, reads a Claude reviewer's installed version from the
+  file system only (`readInstalledClaudeVersion`, injectable as
+  `installedClaudeVersion`): the native installer's `versions/<version>` file
+  or the first `package.json` above an npm install. It fails below the review
+  isolation minimum, warns when no layout yields a version, prints versions
+  only, and is skipped for any other reviewer. Its advisory
   `authentication.models` check explicitly separates executable availability
-  from authentication readiness and unchecked CLI versions without calling a
-  vendor. `config.local` follows `config.version` (ADR-0060): presence,
+  from authentication readiness and from every CLI version but that one,
+  without calling a vendor. `config.local` follows `config.version` (ADR-0060): presence,
   safety and validity come from the local file reader, and the injected
   `localConfigGitState` probe runs `git ls-files --error-unmatch --` and
   `git check-ignore -q --` at the repository root with `LC_ALL=C` only when
@@ -194,9 +204,9 @@ is a navigational reference and is updated with the module it describes.
   `vendor` (`claude`, `codex` or null), its `model` only when it matches
   `MODEL_IDENTIFIER_PATTERN`, `effort` and `source`, and is empty while
   `config.local` fails or the committed configuration is unavailable.
-  `claude.instructions`, `claude.permissions` and `executables.models`
-  evaluate the effective configuration and are skipped while `config.local`
-  fails; `claude.environment` and verification checks keep committed values.
+  `claude.instructions`, `claude.permissions`, `executables.models` and
+  `claude.version` evaluate the effective configuration and are skipped while
+  `config.local` fails; `claude.environment` and verification checks keep committed values.
 - `claude-permissions.ts` — offline audit of the permission rules a spawned
   Claude session will honor. `claudePermissionDemand(config)` reads which roles
   actually depend on them: a Claude planner or implementer writes files the
@@ -770,10 +780,20 @@ is a navigational reference and is updated with the module it describes.
   (`buildCodexArguments`, `buildClaudeArguments`,
   `buildClaudeSelectionArguments`, `buildClaudePhaseArguments`) and the minimum
   CLI versions `MINIMUM_CODEX_VERSION = "0.145.0"` and
-  `MINIMUM_CLAUDE_VERSION = "2.1.218"`. Preflight takes a
-  `VendorPreflightTarget` and, after the vendor-wide minimum, applies
+  `MINIMUM_CLAUDE_VERSION = "2.1.218"`, with
+  `REVIEW_ISOLATION_MINIMUM_CLAUDE_VERSION = "2.1.290"` beside them. Preflight
+  takes a `VendorPreflightTarget` and, after the vendor-wide minimum, applies
+  the review isolation minimum when a Claude target `reviews`, then
   `modelCliMinimum()` for the target's model (`null` skips it), failing with
-  `CLI_TOO_OLD` before authentication. Adapter requests consume the exact
+  `CLI_TOO_OLD` before authentication. Claude review, routine re-review and
+  planning review receive `--tools Read,Glob,Grep` with `Skill` first in the
+  disallowed list, and run with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` and
+  `CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK=1` set after
+  `subscriptionOnlyEnvironment` in every scope (ADR-0059). Planning analysis
+  keeps `Read,Glob,Grep,Skill`; it, the phases and selection gain only the
+  memory variable, and only under a `strictMcpConfig` scope. Codex argv and
+  environments are unchanged. `CLAUDE_REVIEW_ISOLATION` is the contract the
+  workflow's reviewer invocation digest covers. Adapter requests consume the exact
   prompt envelope and output-contract bytes already measured by the workflow;
   the existing read-only construction accepts both planning contracts. Their
   environment carries the run identity with empty approval, workflow and
@@ -888,7 +908,8 @@ is a navigational reference and is updated with the module it describes.
   links to the public repository; build generates and check-dist compares.
   CLI init creates the local guide under its initialization lock before prompts,
   using create-only writes and rejecting symlinks or non-regular paths.
-- `config.ts` — `.banzai/config.json` location, `DEFAULT_CONFIG`,
+- `config.ts` — `.banzai/config.json` location, `DEFAULT_CONFIG` (Claude
+  `claude-opus-5-5` for every role, ADR-0059),
   `loadCommittedConfig`, `initializeConfig`, and `applyModelUpdates`, which
   rewrites only requested `model`, `executable`, and `effort` JSON value tokens
   and preserves every unrelated byte. `loadCommittedConfig` reads the

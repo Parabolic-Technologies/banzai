@@ -125,8 +125,10 @@ metadata does not imply shared installation or publication.
 
 - macOS or Linux with Node.js 22.20.0+ within major 22 or Node.js 24.11.1+
   within major 24;
-- local `codex` 0.145.0+ and `claude` 2.1.218+ executables, or the newer
-  release a configured model needs (see [Model Configuration](#model-configuration));
+- a local `claude` 2.1.218+ executable, and `codex` 0.145.0+ when a role uses
+  it, or the newer release a configured model needs (see
+  [Model Configuration](#model-configuration)); a Claude reviewer needs
+  `claude` 2.1.290+;
 - individual-subscription authentication only;
 - one active run in the current checkout;
 - no API keys, direct vendor APIs, worktrees, branch switching, stash, reset,
@@ -433,12 +435,22 @@ payload, target, bounded probe result, and non-zero denial count as evidence.
 Arbitrary prefixes, suffixes, operators, and trailing arguments are rejected;
 the runner renders both vendors' candidates from review-result/v2 and their
 frozen fixture snapshots. Claude uses the same read-only arguments as normal
-review. A typed host `system/init` inventory must include Read, Glob, Grep and
-Skill and exclude every other capability except StructuredOutput. This proves
-source/control/candidate writing is unavailable through exposed tools; it does
-not claim an attempted write was denied. Missing, duplicate, unknown or writable
-tools fail the authenticated scenario. Model prose and requested argv alone do
-not establish this evidence. Offline hook tests are separate from live evidence.
+review. A typed host `system/init` inventory must include Read, Glob and Grep
+and exclude every other capability except StructuredOutput; `Skill` fails it.
+This proves source/control/candidate writing is unavailable through exposed
+tools; it does not claim an attempted write was denied. Missing, duplicate,
+unknown or writable tools fail the authenticated scenario. Model prose and
+requested argv alone do not establish this evidence. Offline hook tests are
+separate from live evidence.
+
+`claude.read_only_inventory` also requires review isolation, reported with
+`ISOLATION_NOT_OBSERVED` when absent: the spawned Claude review process carried
+`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` and
+`CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK=1`, and the resolved client binary
+contains both names. The binary is searched, never run, and only the result is
+kept. This shows that the variables were sent and that the client knows them;
+the client's behaviour on them rests on the vendor's documentation. The live
+Claude preflight applies the reviewer minimum.
 
 Each invocation is limited to five minutes, the complete command to fifteen
 minutes, and the total to two model calls. The only stdout is
@@ -774,7 +786,7 @@ valid runner lock, remain visible without changing readiness.
 Doctor checks Git, structural project guidance, the supported Node/platform and contract versions, config
 presence and structure, the local model file, the Claude invocation environment and its tool
 permissions, the Claude plugin scope, detected project types, optional task policy,
-required executable availability, the active-run pointer and
+required executable availability, the Claude reviewer's version, the active-run pointer and
 referenced state, and the runner lock. The report's fixed check
 order, sorted project types, two-space JSON, and final newline are stable for
 automation. Expected readiness findings stay in the selected stdout report;
@@ -790,15 +802,27 @@ categories. The schema diagnostic reports the file's actual config version.
 with no remedies; pinned Claude can be `verified`, `mismatch`, or bounded
 `failure`. A mismatch fails readiness. Ambient or unresolved scope is
 `unverifiable` with an ambient remedy only. Rebuild/update remedies apply only
-to mismatch or bounded failure. The default pinned Claude planner/implementer
-and Codex reviewer produce no parity warning when resources match. Historical
+to mismatch or bounded failure. The default pinned Claude planner, implementer
+and reviewer produce no parity warning when resources match. Historical
 v1-v5 reports retain their identities; consumers must negotiate v6. v6 adds
 `claude.plugin-scope` and keeps the v5 fields and status semantics.
 
+`claude.version` follows `executables.models`. It applies only when the
+effective reviewer's executable is `claude`, and it never runs the client: it
+resolves the executable on `PATH`, follows its links, and reads the version
+from the native installer's `versions/<version>` file name or from the first
+`package.json` above an npm install, which must name
+`@anthropic-ai/claude-code` or its platform package. It passes at or above
+2.1.290, fails below it, warns when no layout yields a version, and is skipped
+for another reviewer, an unusable configuration or local model file, or an
+unavailable executable. It prints versions only, and its fix links
+[Install and sign in to model clients](getting-started.md#install-and-sign-in-to-model-clients).
+
 Doctor also emits an `authentication.models` advisory: it does not invoke a
-vendor, so neither authentication readiness nor the installed vendor CLI
-versions are checked, and executable availability is not authentication proof. This warning leaves `ready` and exit semantics
-unchanged. Startup and phase preflight remain authoritative.
+vendor, so authentication readiness is not checked, it checks no vendor CLI
+version except the Claude reviewer's, which it reads offline, and executable
+availability is not authentication proof. This warning leaves `ready` and exit
+semantics unchanged. Startup and phase preflight remain authoritative.
 
 `claude.plugin-scope` follows `claude.permissions` and is advisory. It reads
 only Claude's user settings, `$CLAUDE_CONFIG_DIR/settings.json` or
@@ -839,8 +863,9 @@ one line per role such as
 unknown vendor, `unlisted` for an undisclosed model, and `Models: unavailable`
 for an empty array.
 
-`claude.instructions`, `claude.permissions`, and `executables.models` evaluate
-the effective configuration, so a local Claude reviewer is checked as Claude.
+`claude.instructions`, `claude.permissions`, `executables.models`, and
+`claude.version` evaluate the effective configuration, so a local Claude
+reviewer is checked as Claude.
 While `config.local` fails they are `skipped`. `claude.environment` and the
 verification checks read committed values, which the local file cannot change.
 
@@ -1175,8 +1200,22 @@ Each physical attempt owns
 `.banzai/runs/<run-id>/attempts/<attempt-id>.review-candidate.md` and a private,
 immutable `.review-snapshot.json` sidecar. Codex and Claude are read-only and
 return `review-result/v2`; the runner owns rendering, validation and publication.
-Claude exposes Read, Glob, Grep and Skill, with Write and other mutation tools
-explicitly denied. Stale inherited review/workflow authorization is removed.
+Claude exposes Read, Glob and Grep, with `Skill`, Write and other mutation
+tools explicitly denied (ADR-0059). Review, routine re-review and planning
+review run without auto memory and without the refusal fallback, through
+`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` and
+`CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK=1`, which Banzai sets after building the
+subscription environment in both `claudeEnvironment` modes, so an inherited
+value never survives. A request the client flags therefore fails the review
+instead of continuing on another model: the attempt is recorded with its
+message and stays retryable, and no review result is fabricated. Since Claude
+Code 2.1.312 the variable also stops the model switch for a model name the
+client does not recognize, so such a reviewer fails a flagged request too.
+Planning analysis keeps `Skill`; planning, implementation, fixes, workflow
+selection and planning analysis keep the refusal fallback and run without auto
+memory in `scoped` mode only. Codex review is unchanged. A Claude reviewer
+session recorded before this isolation rotates once to a fresh full review.
+Stale inherited review/workflow authorization is removed.
 
 The reviewer acknowledges the exact approved artifact paths and snapshot digest
 with scope acknowledgment version 1. Full reviews cover the complete approved
@@ -1293,10 +1332,12 @@ timeouts, verification commands, and unrecognized fields are left alone.
 
 Mixing vendors is supported in any combination: GPT planning with a Claude
 reviewer, Claude implementation with a GPT reviewer, or one vendor throughout.
-Keeping the reviewer on a different vendor than the implementer is the point of
-the loop. Compatible planning, implementation, and fixes share a builder
-lineage; the primary reviewer starts fresh with no builder transcript. Routine
-re-review may resume only that independent source-read-only reviewer.
+Reviewer independence comes from a fresh session with no builder transcript,
+no shared memory and a fixed read-only tool set; a reviewer from another
+vendor is an option, not a requirement. Compatible planning, implementation,
+and fixes share a builder lineage; the primary reviewer starts fresh with no
+builder transcript. Routine re-review may resume only that independent
+source-read-only reviewer.
 
 `banzai init` runs the same dialog once the configuration exists, so a new project
 picks its models immediately. When `init` creates the configuration, the preset
@@ -1387,7 +1428,7 @@ subscription authentication for every vendor the configuration actually uses:
 
     plan    claude claude-opus-5-5  xhigh · 30m  ✓
     impl    claude claude-opus-5-5  xhigh · 60m  ✓
-    review  codex  gpt-6.1-sol      xhigh · 30m  ✓
+    review  claude claude-opus-5-5  xhigh · 30m  ✓
 
 No configured model needs a known update.
 ```
@@ -1419,7 +1460,7 @@ concurrently and add roughly a second to startup.
 
 A ready launch spends no lines on authentication. An unavailable vendor marks
 every phase row it blocks and is named once, with the reason and the phases it
-would have run:
+would have run. With Claude building and Codex reviewing:
 
 ```text
     plan    claude claude-opus-5-5  xhigh · 30m  ✗
@@ -1528,11 +1569,19 @@ The vendor preflight of a role that runs one of these models fails with
 `CLI_TOO_OLD` before authentication is checked or the model is called, naming
 the model and the release it needs: update the CLI, or choose another model with
 `banzai model`. The launch header and run start check each executable once,
-against the first role that uses it; every phase checks its own model again
-before its call. Tier aliases, models without an entry, and unrecognized
-identifiers need only the vendor minimum. `banzai setup` launches its client
-without a model, so it needs only the vendor minimum, and `banzai doctor` does
-not check CLI versions.
+against the model of the first role that uses it; every phase checks its own
+model again before its call. Tier aliases, models without an entry, and
+unrecognized identifiers need only the vendor minimum. `banzai setup` launches
+its client without a model, so it needs only the vendor minimum.
+
+A Claude reviewer also needs Claude Code 2.1.290 or newer, the first release
+that honours both review isolation variables. The launch header, run start,
+the planning-review and review preflights and the live harness refuse an older
+client with `CLI_TOO_OLD`, naming the installed version and the minimum. The
+launch header and run start apply it to an executable whenever any role that
+shares it is the reviewer; a client that only builds needs only the vendor and
+model minimums. `banzai doctor` reads this one version offline in
+`claude.version` and checks no other CLI version.
 
 Claude entries come from Claude Code's model configuration documentation, which
 states that an older client refuses the model before sending a request. Codex
@@ -1881,7 +1930,8 @@ seconds naming the actions still running.
 Codex `--json` and Claude `--output-format stream-json` events are normalized
 into the same model, action, skill, and usage lines. The supplied phase responsibilities appear in each start line; observable
 Claude `Skill` calls and supported Codex skill events are reported only when
-they occur. Available inventories remain unchanged. Fewer Skill events prove
+they occur. Builder inventories remain unchanged; Claude review roles no
+longer receive `Skill` (ADR-0059). Fewer Skill events prove
 neither model compliance nor lower cost. Because
 implementation, verification, and review advance without a gate, this progress
 stream is how an approved run reports itself until the next decision.

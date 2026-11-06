@@ -612,3 +612,43 @@ test("guided structural profile edits retain irregular unselected separators", (
     );
   }
 });
+
+test("init writes Claude as the default reviewer and keeps an existing reviewer", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "banzai-init-reviewer-"));
+  try {
+    await initializeConfig(root);
+    const config = await loadCommittedConfig(root);
+    // ADR-0059 §1: one vendor serves every role by default.
+    assert.deepEqual(config.models.reviewer, {
+      executable: "claude",
+      model: "claude-opus-5-5",
+      effort: "xhigh",
+      timeoutMs: 30 * 60_000
+    });
+    assert.deepEqual(DEFAULT_CONFIG.models.reviewer, config.models.reviewer);
+
+    // A configuration that names a Codex reviewer loads unchanged.
+    const raw = JSON.parse(
+      await readFile(path.join(root, CONFIG_FILE), "utf8")
+    ) as { models: { reviewer: Record<string, unknown> } };
+    raw.models.reviewer = {
+      executable: "codex",
+      model: "gpt-6.1-sol",
+      effort: "xhigh",
+      timeoutMs: 1_800_000
+    };
+    const text = `${JSON.stringify(raw, null, 2)}\n`;
+    await writeFile(path.join(root, CONFIG_FILE), text, "utf8");
+    assert.deepEqual(await initializeConfig(root), {
+      configCreated: false,
+      gitignoreUpdated: false
+    });
+    assert.equal(await readFile(path.join(root, CONFIG_FILE), "utf8"), text);
+    assert.deepEqual(
+      (await loadCommittedConfig(root)).models.reviewer,
+      raw.models.reviewer
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

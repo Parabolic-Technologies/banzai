@@ -4605,9 +4605,11 @@ var DEFAULT_CONFIG = {
       effort: "xhigh",
       timeoutMs: 60 * 60 * 1e3
     },
+    // ADR-0059 §1: one vendor serves every role by default. Independence comes
+    // from the reviewer's fresh, isolated session, not from a second vendor.
     reviewer: {
-      executable: "codex",
-      model: "gpt-6.1-sol",
+      executable: "claude",
+      model: "claude-opus-5-5",
       effort: "xhigh",
       timeoutMs: 30 * 60 * 1e3
     }

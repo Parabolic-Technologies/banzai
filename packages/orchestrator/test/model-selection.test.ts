@@ -1257,3 +1257,26 @@ test("before banzai init every model writer refuses CONFIG_NOT_FOUND and writes 
     await rm(outside, { recursive: true, force: true });
   }
 });
+
+test("the init picker shows Claude as the review default and still offers Codex", async () => {
+  const io = new FakeIO(["__keep__", "__keep__", "__keep__"]);
+  const updates = await selectModelSettings(
+    io,
+    structuredClone(DEFAULT_CONFIG),
+    true
+  );
+  assert.deepEqual(updates, []);
+  assert.ok(
+    io.lines.includes("Review default: claude claude-opus-5-5 effort=xhigh"),
+    io.lines.join("\n")
+  );
+  assert.equal(io.prompts.length, 3);
+  const review = io.choiceValues[2] ?? [];
+  assert.equal(
+    io.choiceNames[2]?.[0],
+    "Use default: claude-opus-5-5 (effort=xhigh)"
+  );
+  for (const model of SELECTABLE_MODELS) {
+    assert.ok(review.includes(model.id), model.id);
+  }
+});

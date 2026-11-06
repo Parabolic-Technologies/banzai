@@ -49,8 +49,8 @@ Status values: `not started` · `ADR draft` · `ADR proposed` · `ADR accepted` 
 | WP5  | Install guide, plugin scope, doctor hint       | —               | none; stay within 0008                          | `wp05-install-guide-plugin-scope`      | committed    | 5c89c1c | Doctor JSON contract version bump                  |
 | WP6  | Local model override                           | —               | 0060 Accepted; amends 0008                      | `wp06-local-model-override`            | committed    | e26ea54 | One change set; see report deviations              |
 | WP19 | Initiative skill with brief and tracker        | —               | 0061 Accepted; amends 0054 (pinned), 0041, 0036 | `wp19-initiative-skill`                | committed    | 138b206 | Outside the brief; template overlaps WP12          |
-| WP20 | Memory notes: no gate prompt, no code unlock   | —               | 0062 accepted; authority for the pinned hook    | `wp20-spec-gate-memory-notes`          | report ready |         | Pinned hook; template shared with WP19, WP12       |
-| WP7  | Claude as the default reviewer, with isolation | WP6 recommended | 0059 Accepted; amends 0042 §7, 0037, 0002       | `wp07-claude-default-reviewer`         | ADR accepted |         | live scenario needs go-ahead                       |
+| WP20 | Memory notes: no gate prompt, no code unlock   | —               | 0062 accepted; authority for the pinned hook    | `wp20-spec-gate-memory-notes`          | committed    | ebfcd3e | Pinned hook; template shared with WP19, WP12       |
+| WP7  | Claude as the default reviewer, with isolation | WP6 recommended | 0059 Accepted; amends 0042 §7, 0037, 0002       | `wp07-claude-default-reviewer`         | report ready |         | Report ready; live run needs go-ahead              |
 | WP8  | Stable Claude phases                           | —               | check 0020                                      | `wp08-stable-claude-phases`            | not started  |         | Live scenario needs go-ahead                       |
 
 ### Gate 1
@@ -252,6 +252,25 @@ worktree.
 - 2026-11-06: WP20 implemented as one change set; report ready. ADR-0062 is
   Implemented, and its hook transition is published. Installed clients receive
   the change with the 2.8 version bump.
+- 2026-11-06: WP20 committed as `ebfcd3e`. WP7 starts with `WP7 next`. Its
+  requirements and plan are drafted after one independent review round and
+  await approval with three owner questions: the review isolation floor
+  version (Q1), how doctor enforces it (Q2), and what the live scenario must
+  prove about isolation (Q3).
+- 2026-11-06: `Approve, all (a)`. The WP7 requirements and plan are approved.
+  Q1 (a): the review isolation floor is 2.1.290, after a check of the 2.1.290
+  binary that never runs it. Q2 (a): doctor reads the Claude reviewer's
+  version from the file system only. Q3 (a): the live scenario requires the
+  inventory without `Skill`, both variables in the reviewer's spawn
+  environment and both names in the client binary. The host's honouring of
+  the variables is not observed live; see Deviations.
+- 2026-11-06: WP7 implemented as one change set; report ready. Claude
+  `claude-opus-5-5` is the default reviewer, Claude review roles run with
+  `Read`, `Glob` and `Grep` only and without auto memory or refusal fallback,
+  a Claude reviewer needs Claude Code 2.1.290, and doctor reads that version
+  offline. ADR-0059 is Implemented. The Gate 1 live run still needs the
+  owner's go-ahead; the 2.8 version bump clears the deferred
+  `HOOK_CHANGED_WITHOUT_VERSION_BUMP`.
 
 ## Open questions left to the owner by the brief
 
@@ -286,3 +305,9 @@ under Owner decisions.
 - Stage 1 (2026-11-05): the owner moved WP19 into Stage 1 after WP6, so 2.8
   ships the initiative skill and Gate 1 checks it. WP12 stays in Stage 2 and
   builds on the AGENTS.md template line that WP19 adds.
+- WP7 (2026-11-06): ADR-0059 Compliance 7 says the live scenario confirms the
+  Claude reviewer's isolation. With Q3 (a) it confirms the inventory without
+  `Skill`, both variables in the reviewer's spawn environment and both names
+  in the client binary. The host reports no auto memory or fallback state and
+  a classifier flag cannot be triggered safely, so whether the host honours
+  the variables rests on the vendor's documentation and the version floor.

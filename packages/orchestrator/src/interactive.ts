@@ -272,7 +272,11 @@ export interface ModelConfigurationGateway {
  * the vendor is ready, or to the reason it is not.
  */
 export interface AuthenticationGateway {
-  check(settings: ModelSettings): Promise<string | null>;
+  /**
+   * `reviews` is set when the reviewer runs on this entry, so a Claude client
+   * must also meet the review isolation minimum (ADR-0059 §2).
+   */
+  check(settings: ModelSettings, reviews: boolean): Promise<string | null>;
 }
 
 /** Display-only repository facts for the launch header. */
@@ -1942,7 +1946,10 @@ async function checkAuthentication(
   const reasons = await Promise.all(
     usage.map(async (entry) => {
       try {
-        return await auth.check(entry.settings);
+        return await auth.check(
+          entry.settings,
+          entry.roles.includes("reviewer")
+        );
       } catch (error) {
         return errorMessage(error);
       }
