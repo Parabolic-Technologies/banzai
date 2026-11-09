@@ -246,36 +246,92 @@ test("a linked planning artifact with no state cursor reconciles idempotently wi
   }
 });
 
-test("a blocked applying result follows ordinary planning retry eligibility", async () => {
+test("a blocked applying result continues the applying step on retry", async () => {
   const f = await fixture(1);
   try {
     const pending = await f.runner.resume();
     const value = answer(pending);
     value.additionalInstruction = "Apply the owner's revision.";
+    const summary = "The planner cannot complete this revision.";
     f.adapters.planResults.push(
-      phaseResult("plan", {
-        outcome: "blocked",
-        gate: null,
-        summary: "The planner cannot complete this revision."
-      })
+      phaseResult("plan", { outcome: "blocked", gate: null, summary })
     );
     const blocked = await f.runner.answerPlanningReview({
       answer: value,
       decidedBy: "owner"
     });
     assert.equal(blocked.status, "blocked", blocked.blockReason ?? "");
-    assert.equal(blocked.planningReview?.active?.step, "applying");
+    const episode = blocked.planningReview?.active;
+    assert.equal(episode?.step, "applying");
     assert.equal(blocked.activeAttempt, null);
-    assert.equal((await f.runner.status()).retry.eligible, false);
-    const before = await bytes(f.runner);
-    const calls = f.adapters.phasePrompts.length;
-    await assert.rejects(
-      f.runner.retry(),
-      (error: unknown) =>
-        error instanceof BanzaiError && error.code === "RETRY_NOT_ALLOWED"
+    const status = await f.runner.status();
+    assert.equal(status.retry.eligible, true, status.retry.reason);
+    assert.equal(status.retry.attemptId, episode.applyingAttemptId);
+    assert.equal(status.nextAction, "banzai retry");
+
+    const planned = await f.runner.retry();
+    assert.equal(
+      planned.status,
+      "needs_plan_approval",
+      planned.blockReason ?? ""
     );
-    assert.deepEqual(await bytes(f.runner), before);
-    assert.equal(f.adapters.phasePrompts.length, calls);
+    const prompt = f.adapters.phasePrompts.at(-1) ?? "";
+    assert.ok(
+      prompt.includes("Apply only this recorded planning-review triage")
+    );
+    assert.ok(prompt.includes("Apply the owner's revision."));
+    assert.ok(prompt.includes("## Continue blocked planning"));
+    assert.ok(prompt.includes(JSON.stringify(summary)));
+    assert.equal(planned.planningReview?.active, null);
+    assert.equal(planned.planningReview.closed.at(-1)?.outcome, "applied");
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+test("a run shaped like the 2026-11-06 incident can continue planning", async () => {
+  const f = await fixture(1);
+  try {
+    const pending = await f.runner.resume();
+    const value = answer(pending);
+    value.additionalInstruction = "Apply the owner's revision.";
+    const applied = await f.runner.answerPlanningReview({
+      answer: value,
+      decidedBy: "owner"
+    });
+    assert.equal(
+      applied.status,
+      "needs_plan_approval",
+      applied.blockReason ?? ""
+    );
+    assert.equal(applied.planningReview?.closed.at(-1)?.outcome, "applied");
+    const summary =
+      "Blocked: every command that can produce a digest is denied.";
+    f.adapters.planResults.push(
+      phaseResult("plan", { outcome: "blocked", gate: null, summary })
+    );
+    const blocked = await f.runner.reworkPlan({
+      feedback: "Add the missing check.",
+      decidedBy: "owner"
+    });
+    assert.equal(blocked.status, "blocked", blocked.blockReason ?? "");
+    assert.equal(blocked.blockedFrom, "planning");
+    assert.equal(blocked.blockReason, summary);
+    assert.equal(blocked.planningReview?.active, null);
+    const status = await f.runner.status();
+    assert.equal(status.retry.eligible, true, status.retry.reason);
+    const planned = await f.runner.retry();
+    assert.equal(
+      planned.status,
+      "needs_plan_approval",
+      planned.blockReason ?? ""
+    );
+    assert.equal(
+      (await f.runner.store.readRunAttempts(planned.runId)).filter(
+        (record) => record.planningContext?.retryOf === status.retry.attemptId
+      ).length,
+      1
+    );
   } finally {
     await f.repository.dispose();
   }

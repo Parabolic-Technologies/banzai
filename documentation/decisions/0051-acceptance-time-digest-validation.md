@@ -278,6 +278,13 @@ observable:
 
 ## Lifecycle Links
 
+- Amended by [ADR-0064](./0064-runner-recorded-plan-remainder-digest.md),
+  accepted 2026-11-06: for the plan remainder role, the runner records the
+  digest when it accepts a planning result that requests plan approval,
+  instead of rejecting a model-authored mismatch. Descriptor source roles,
+  the consumption checks and their repair source remain. Implemented by WP21
+  of the 2.8–2.9 program.
+
 - Amended by [ADR-0058](./0058-human-plan-edits-rechecked-at-the-plan-gate.md),
   accepted 2026-10-31: on the human's explicit re-check at the plan gate, the
   runner may establish the plan remainder digest over human-edited bytes and

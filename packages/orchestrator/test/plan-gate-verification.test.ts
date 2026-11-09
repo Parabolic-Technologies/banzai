@@ -205,3 +205,22 @@ test("the planning instruction asks for documented commands", () => {
     )
   );
 });
+
+test("the planning instruction leaves the remainder digest to the runner", () => {
+  const prompt = planningPrompt("example", "Plan the example.", []);
+  assert.ok(
+    prompt.includes(
+      "Set planRemainderSha256 to 64 zeros and do not compute it: the runner records the digest when it accepts a result that requests plan approval."
+    ),
+    prompt
+  );
+  assert.ok(!prompt.includes("Compute the SHA-256"), prompt);
+});
+
+test("the planning instruction says a reported block can be continued", () => {
+  assert.ok(
+    planningPrompt("example", "Plan the example.", []).includes(
+      "The human can continue a planning block you report with outcome=blocked by running `banzai retry`, so its summary must name the cause and the exact human action needed first."
+    )
+  );
+});

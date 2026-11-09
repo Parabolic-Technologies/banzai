@@ -454,6 +454,16 @@
       "sha256": null
     },
     {
+      "path": "documentation/decisions/0064-runner-recorded-plan-remainder-digest.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0065-continuable-planner-declared-planning-blocks.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
       "path": "documentation/decisions/README.md",
       "classification": "maintainer",
       "sha256": null

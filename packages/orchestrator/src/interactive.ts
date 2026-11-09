@@ -1758,7 +1758,9 @@ async function handleStatus(
                     : isCompletionEvidenceRepair
                       ? "Repair plan-task completion evidence"
                       : state.blockedFrom === "planning"
-                        ? "Continue the failed planning attempt"
+                        ? state.activeAttempt === null
+                          ? "Continue planning after the reported block"
+                          : "Continue the failed planning attempt"
                         : repeatsFailure
                           ? several
                             ? "Retry anyway (same commands, same files; expected to fail again)"
@@ -1815,7 +1817,9 @@ async function handleStatus(
             : isCompletionEvidenceRepair
               ? "Repair plan-task completion evidence in a fresh attempt?"
               : state.blockedFrom === "planning"
-                ? "Run preflight and continue planning, reusing saved context when compatible?"
+                ? state.activeAttempt === null
+                  ? "Run preflight and continue planning after the reported block?"
+                  : "Run preflight and continue planning, reusing saved context when compatible?"
                 : repeatsFailure
                   ? several
                     ? `Checks ${retrySet.checkIds.map(escapeTerminalText).join(", ")} failed with ordinary exits, and their commands and the observed project files are unchanged, so they are expected to fail the same way. Retry anyway?`

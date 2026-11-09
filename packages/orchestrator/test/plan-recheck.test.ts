@@ -29,7 +29,13 @@ import {
   planRecheckSummary
 } from "../src/workflow/domain/plan-recheck.js";
 import { replacePlanBytes } from "../src/workflow/plan-gate/recheck.js";
-import { monochromeEnv, snapshotTree } from "./helpers.js";
+import { WorkflowRunner } from "../src/workflow.js";
+import {
+  createTestRepository,
+  monochromeEnv,
+  snapshotTree
+} from "./helpers.js";
+import { FakeAdapters } from "./workflow-fixtures.js";
 import {
   PHPCS_CHECK_IDS,
   phpcsPlanGateFixture
@@ -993,6 +999,87 @@ test("an unreadable latest gate-entry snapshot refuses the re-check without writ
       hasCode("PLAN_GATE_SNAPSHOT_INVALID", /plan gate entry 1 is unreadable/u)
     );
     assert.deepEqual(await tree(f), before);
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+async function runnerRecordedGate() {
+  const repository = await createTestRepository();
+  const adapters = new FakeAdapters();
+  adapters.planRemainderDeclared = "0".repeat(64);
+  const runner = new WorkflowRunner(repository.root, adapters);
+  const state = await runner.start({
+    slug: "example",
+    request: "Plan the example."
+  });
+  assert.equal(state.status, "needs_plan_approval", state.blockReason ?? "");
+  const relative = state.planArtifacts?.plan;
+  assert.ok(relative);
+  return {
+    repository,
+    runner,
+    state,
+    relative,
+    file: path.join(repository.root, relative)
+  };
+}
+
+test("a runner-recorded plan is the gate-entry version, needs no re-check and approves", async () => {
+  const f = await runnerRecordedGate();
+  try {
+    const recorded = await readFile(f.file);
+    const inventory = parseTaskVerificationObligations(recorded.toString());
+    assert.notEqual(inventory.planRemainderSha256, "0".repeat(64));
+    const snapshot = await f.runner.store.readLatestPlanGateSnapshot(
+      f.state.runId
+    );
+    assert.deepEqual(
+      snapshot?.entries.find((entry) => entry.path === f.relative)?.contents,
+      recorded
+    );
+    const approved = await f.runner.approvePlan("human", false);
+    assert.notEqual(approved.planApproval, null);
+    assert.deepEqual(await readFile(f.file), recorded);
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+test("a re-check of an unedited runner-recorded plan rewrites nothing and names the recorded value", async () => {
+  const f = await runnerRecordedGate();
+  try {
+    const recorded = await readFile(f.file);
+    const { planRemainderSha256 } = parseTaskVerificationObligations(
+      recorded.toString()
+    );
+    const record = latestRecheck(
+      await f.runner.recheckPlan({ decidedBy: "human" })
+    );
+    assert.equal(record.summary.remainderDigestRewritten, false);
+    assert.equal(record.writtenRemainderSha256, null);
+    assert.equal(record.plannerRemainderSha256, planRemainderSha256);
+    assert.equal(record.observedRemainderSha256, planRemainderSha256);
+    assert.deepEqual(await readFile(f.file), recorded);
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+test("approval over a later hand edit of a runner-recorded plan fails, names the re-check and writes nothing", async () => {
+  const f = await runnerRecordedGate();
+  try {
+    await appendFile(f.file, "\nA human edit.\n");
+    const edited = await readFile(f.file);
+    await assert.rejects(
+      f.runner.approvePlan("human", false),
+      hasCode("TASK_VERIFICATION_DIGEST_MISMATCH", /Re-check my edits/u)
+    );
+    assert.deepEqual(await readFile(f.file), edited);
+    assert.equal(
+      (await f.runner.store.requireActiveState()).planApproval,
+      null
+    );
   } finally {
     await f.repository.dispose();
   }

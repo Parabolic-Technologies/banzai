@@ -358,6 +358,10 @@ Plugin and release owners:
   a bounded summary against the planner's version, never approves and is not
   a human-time decision boundary. Approval never rewrites a digest and links
   the re-check whose bundle digest it approves.
+- The runner records a strict plan's remainder digest when it accepts a
+  planning result that requests approval (ADR-0064); planners write 64 zeros.
+  `banzai retry` continues planning after a block the planner reported
+  (ADR-0065), including one from a planning review's applying step.
 - Approval digests bind exact requirements, accepted ADRs and plan bytes.
   Workflow digests bind lite selection; workspace identities detect drift.
   Plan checkboxes stay immutable in orchestrated work; operator recovery needs
@@ -600,3 +604,5 @@ delivery or installation.
 | ADR-0061 | Initiative skill and documents                                     | [Source](documentation/decisions/0061-initiative-skill-and-documents.md)                         | Implemented |
 | ADR-0062 | Claude Code memory notes in the manual hook gate                   | [Source](documentation/decisions/0062-claude-memory-notes-in-the-manual-hook-gate.md)            | Implemented |
 | ADR-0063 | Stable headless vendor invocations                                 | [Source](documentation/decisions/0063-stable-headless-vendor-invocations.md)                     | Implemented |
+| ADR-0064 | Runner-recorded plan remainder digest                              | [Source](documentation/decisions/0064-runner-recorded-plan-remainder-digest.md)                  | Implemented |
+| ADR-0065 | Continuable planner-declared planning blocks                       | [Source](documentation/decisions/0065-continuable-planner-declared-planning-blocks.md)           | Implemented |

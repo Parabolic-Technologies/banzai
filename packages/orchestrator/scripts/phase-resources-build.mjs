@@ -772,6 +772,14 @@ const INITIATIVE_AUTHORITY_AMENDMENTS = new Map([
   ]
 ]);
 
+// Exact ADR-0058 reciprocal lifecycle annotation accepted with ADR-0064.
+const RECORDED_REMAINDER_AUTHORITY_AMENDMENTS = new Map([
+  [
+    "406e94f7eb4f1c75422897d43ee64a96a1c323c5b424557696b21ec9329db663",
+    "ac3b2ff812989ce960e882009d2c5c854292ec3865aeb0b90d7da850a9c26515"
+  ]
+]);
+
 const RETAINED_AUTHORITY_AMENDMENTS = [
   {
     decision: "documentation/decisions/0045-guided-verification-setup.md",
@@ -808,6 +816,11 @@ const RETAINED_AUTHORITY_AMENDMENTS = [
   {
     decision: "documentation/decisions/0061-initiative-skill-and-documents.md",
     images: INITIATIVE_AUTHORITY_AMENDMENTS
+  },
+  {
+    decision:
+      "documentation/decisions/0064-runner-recorded-plan-remainder-digest.md",
+    images: RECORDED_REMAINDER_AUTHORITY_AMENDMENTS
   }
 ];
 

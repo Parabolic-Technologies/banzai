@@ -108,11 +108,13 @@ import {
   isRetryableInterruptedAttempt,
   PLAN_BUNDLE_COMPLETION_VIOLATIONS,
   PLANNING_REPAIR_FAILURE_CODES,
+  plannerBlockSummary,
   RECOVERABLE_MUTABLE_FAILURE_CAUSES,
   TERMINAL_INTEGRITY_FAILURE_CODES
 } from "./workflow/domain/failure-classes.js";
 import {
   decideRetry,
+  latestAttemptRecord,
   type RetryEligibility,
   type RetryFacts,
   type VerificationEvidence
@@ -401,6 +403,7 @@ import {
   implementationPromptEnvelope,
   liteImplementationPromptEnvelope,
   planningPromptEnvelope,
+  blockedPlanningPromptEnvelope,
   planningRetryPromptEnvelope,
   recoveryPromptEnvelope,
   reviewPromptEnvelope,
@@ -2289,7 +2292,9 @@ export class WorkflowRunner {
                   : expectedAttemptId === null
                     ? "Retry requested for verification prerequisites"
                     : `Retry requested for verification attempt ${expectedAttemptId}`
-                : `Retry requested for failed attempt ${expectedAttemptId}`
+                : retryCheckpoint === "planning"
+                  ? `Retry requested to continue planning after the block reported in ${expectedAttemptId}`
+                  : `Retry requested for failed attempt ${expectedAttemptId}`
         );
       } finally {
         await eligibilityLock.release();
@@ -2590,6 +2595,43 @@ export class WorkflowRunner {
           return await this.executeImplementation(
             state,
             config,
+            null,
+            commitTransition
+          );
+        }
+        if (retryCheckpoint === "planning" && expectedAttemptId !== null) {
+          // ADR-0065: the attempt that reported the block is the source.
+          const blockedAttemptId = expectedAttemptId;
+          await validateBaseCommit(this.context, state);
+          const source = (await this.store.readRunAttempts(state.runId)).find(
+            (record) => record.attempt.id === blockedAttemptId
+          );
+          if (source === undefined)
+            throw new BanzaiError(
+              "RETRY_STATE_CHANGED",
+              "The blocked planning attempt could not be read."
+            );
+          transitionState(state, "planning");
+          pendingTransition.push(async () => {
+            await this.store.writeState(state);
+          });
+          pendingTransition.push(
+            async () =>
+              await this.store.appendEvent(
+                state.runId,
+                "attempt.retry_requested",
+                {
+                  failedAttemptId: blockedAttemptId,
+                  kind: "plan",
+                  retryFrom: "planning"
+                }
+              )
+          );
+          this.info("Continuing planning after the reported block");
+          return await this.executePlan(
+            state,
+            config,
+            source,
             null,
             commitTransition
           );
@@ -6002,6 +6044,13 @@ export class WorkflowRunner {
               null
           }));
           break;
+        case "latest_attempt":
+          facts.latestAttempt = await readableVerification(async () => ({
+            record: latestAttemptRecord(
+              await this.store.readRunAttempts(state.runId)
+            )
+          }));
+          break;
         case "attempt_record":
           facts.attemptRecord = await this.store.readRunAttempt(
             state.runId,
@@ -7385,12 +7434,14 @@ export class WorkflowRunner {
           config.models.planner,
           "planner"
         );
+      const blockSummary = plannerBlockSummary(retrySource);
       const supportedFailure =
-        !TERMINAL_INTEGRITY_FAILURE_CODES.has(retrySource.failureCode ?? "") &&
-        (RECOVERABLE_MUTABLE_FAILURE_CAUSES.has(
-          retrySource.failureCause ?? "unclassified"
-        ) ||
-          PLANNING_REPAIR_FAILURE_CODES.has(retrySource.failureCode ?? ""));
+        blockSummary !== null ||
+        (!TERMINAL_INTEGRITY_FAILURE_CODES.has(retrySource.failureCode ?? "") &&
+          (RECOVERABLE_MUTABLE_FAILURE_CAUSES.has(
+            retrySource.failureCause ?? "unclassified"
+          ) ||
+            PLANNING_REPAIR_FAILURE_CODES.has(retrySource.failureCode ?? "")));
       let reason =
         checkpointRejection !== null
           ? "saved terminal evidence was rejected"
@@ -7410,22 +7461,30 @@ export class WorkflowRunner {
           artifactBinding: state.artifactBinding
         })) !== context.workspaceDigest
       ) {
-        reason = "the workspace changed since the failed attempt";
+        reason = `the workspace changed since the ${blockSummary === null ? "failed" : "blocked"} attempt`;
       }
       resumeSessionId = reason === null ? retrySource.sessionId : null;
-      prompt = planningRetryPromptEnvelope(
-        prompt,
-        retrySource,
-        redactSensitiveText(
-          [
-            checkpointRejection,
-            retrySource.error ?? "No failure diagnostic was recorded."
-          ]
-            .filter((message) => message !== null)
-            .join("\n")
-        ).slice(0, 2000),
-        resumeSessionId === null ? "fresh" : "resumed"
-      );
+      prompt =
+        blockSummary === null
+          ? planningRetryPromptEnvelope(
+              prompt,
+              retrySource,
+              redactSensitiveText(
+                [
+                  checkpointRejection,
+                  retrySource.error ?? "No failure diagnostic was recorded."
+                ]
+                  .filter((message) => message !== null)
+                  .join("\n")
+              ).slice(0, 2000),
+              resumeSessionId === null ? "fresh" : "resumed"
+            )
+          : blockedPlanningPromptEnvelope(
+              prompt,
+              retrySource,
+              redactSensitiveText(blockSummary).slice(0, 2000),
+              resumeSessionId === null ? "fresh" : "resumed"
+            );
       this.info(
         resumeSessionId === null
           ? `Continuing planning from existing artifacts in a fresh session: ${reason}`
@@ -7577,6 +7636,10 @@ export class WorkflowRunner {
       // stays the planner's to fix — never discovered post-approval on an
       // immutable bundle where only rerunning planning could correct it.
       await validatePlanningResult(this.context, state, attempt, planResult);
+      // A block the human may continue: without this, retry could never
+      // reuse the session (ADR-0065 §2).
+      if (planResult.outcome === "blocked")
+        await this.captureStoppedPlanningWorkspace(state, record);
       if (!(await completeAttempt(this.context, state, record, applied))) {
         return await this.store.readState(state.runId);
       }
@@ -7597,29 +7660,39 @@ export class WorkflowRunner {
       }
     } catch (error) {
       if (passesThroughRunCatches(error)) throw error;
-      // Capture the stopped workspace, not the pre-planning tree: planning may
-      // have written documentation. Missing evidence only disables cache reuse.
-      try {
-        const snapshot = await workspaceSnapshot(this.repoRoot, {
-          artifactBinding: state.artifactBinding
-        });
-        record.planningContext.workspaceDigest =
-          snapshot.baseCommit === state.baseCommit ? snapshot.digest : null;
-        record.planningContext.artifactPaths = snapshot.entries
-          .filter(
-            (entry) =>
-              entry.kind === "file" &&
-              (entry.path.startsWith("documentation/") ||
-                entry.path === "PROJECT_MANIFEST.md" ||
-                artifactWritePaths(state, "plan").includes(entry.path)) &&
-              entry.path.length <= 300
-          )
-          .map((entry) => entry.path)
-          .slice(0, 128);
-      } catch {
-        record.planningContext.workspaceDigest = null;
-      }
+      await this.captureStoppedPlanningWorkspace(state, record);
       return await failAttempt(this.context, state, record, error);
+    }
+  }
+
+  /**
+   * Captures the stopped workspace, not the pre-planning tree: planning may
+   * have written documentation. Missing evidence only disables cache reuse.
+   */
+  private async captureStoppedPlanningWorkspace(
+    state: RunState,
+    record: AttemptRecord
+  ): Promise<void> {
+    if (record.planningContext === undefined) return;
+    try {
+      const snapshot = await workspaceSnapshot(this.repoRoot, {
+        artifactBinding: state.artifactBinding
+      });
+      record.planningContext.workspaceDigest =
+        snapshot.baseCommit === state.baseCommit ? snapshot.digest : null;
+      record.planningContext.artifactPaths = snapshot.entries
+        .filter(
+          (entry) =>
+            entry.kind === "file" &&
+            (entry.path.startsWith("documentation/") ||
+              entry.path === "PROJECT_MANIFEST.md" ||
+              artifactWritePaths(state, "plan").includes(entry.path)) &&
+            entry.path.length <= 300
+        )
+        .map((entry) => entry.path)
+        .slice(0, 128);
+    } catch {
+      record.planningContext.workspaceDigest = null;
     }
   }
 

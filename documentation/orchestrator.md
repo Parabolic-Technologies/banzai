@@ -46,6 +46,13 @@ that error instead. Planners build each check from the project's documented
 command with its configuration flags and prefer a discovered script entry point
 such as `composer run-script <name>` or `npm run <name>`.
 
+The planner does not compute the inventory's `planRemainderSha256`. It writes 64
+zeros, and when the runner accepts a planning result that requests plan approval
+it validates the plan, records the digest evidence and writes the remainder digest
+into the plan, every other byte unchanged. The gate shows those bytes. A plan
+that changes during that write is left as it is and fails the attempt, which
+`banzai retry` can continue.
+
 The plan gate also says that the run is waiting and lists the bundle files with
 full repository-relative paths. Edit them in any editor, then choose **Re-check
 my edits** (between approve and rework) or run
@@ -2031,6 +2038,17 @@ banzai status
 banzai retry
 ```
 
+A planner can also stop planning by returning `outcome=blocked`, with a summary
+that names the cause and what you need to do first. Do that, then choose `Continue
+planning after the reported block` in interactive mode or run `banzai retry`. It
+runs preflight and starts a new plan attempt that records the blocked attempt and
+receives the summary as diagnostic data. The planner session resumes when the
+workspace and planner settings are unchanged, and otherwise a fresh session
+restores context from the planning files. Recorded ADR decisions, consultation
+answers and planning-review triage keep their effect, and a block from a planning
+review's applying step continues that step. Blocks reported by implementation
+and fix attempts keep their own routes.
+
 Retry reruns preflight, preserves the failed attempt, and creates a distinct
 attempt. Selection and source-read-only review are also retryable after
 interruption. A review retry reuses the latest unfinished iteration and
@@ -2297,22 +2315,27 @@ record remains completed and byte-stable; a new descendant cannot seed another
 prerequisite recovery chain.
 
 A third source covers a model-authored digest that never matched the bytes it
-named. Every such digest is established when the artifact carrying it is
-accepted: a phase result's proposed descriptor sources are compared before the
-result is accepted, and a planning artifact's `planRemainderSha256` is compared
-when the plan is read. Which digests are compared follows one rule shared by
-acceptance and launch — a plan remainder digest binds its inventory to the plan
-bytes outside it, a source identity on a lite or supplemental descriptor is an
-execution precondition, and a source identity recorded on a required obligation
-stays descriptive metadata and is never compared. A rejection names the contract
-field, the repository-relative path, the declared digest and the observed digest
-and nothing else; a source above the permitted size is reported separately with
-that size and the permitted limit. The comparison is recorded per attempt as
-`banzai-result-digest-evidence/v1` under `.banzai/runs/<run-id>/digests/`,
-written once and never restated, so the later launch check can say whether the
-bytes changed after acceptance or never matched. With no such record the causal
-history is reported as unknown and is never reconstructed from the bytes on disk
-now.
+named. A phase result's proposed descriptor sources are compared before the result
+is accepted. Which digests are compared follows one rule shared by acceptance and
+launch — a plan remainder digest binds its inventory to the plan bytes outside it,
+a source identity on a lite or supplemental descriptor is an execution
+precondition, and a source identity recorded on a required obligation stays
+descriptive metadata and is never compared. A rejection names the contract field,
+the repository-relative path, the declared digest and the observed digest and
+nothing else; a source above the permitted size is reported separately with that
+size and the permitted limit. The comparison is recorded per attempt as
+`banzai-result-digest-evidence/v2` under `.banzai/runs/<run-id>/digests/`, written
+once and never restated, so the later launch check can say whether the bytes
+changed after acceptance or never matched. With no such record the causal history
+is reported as unknown and is never reconstructed from the bytes on disk now.
+
+A plan remainder digest no longer reaches this source. The runner records it when
+it accepts a planning result, and the v2 comparison keeps the planner's value as
+`declared`, the runner's as `observed`, and `recorded: true`, so the record is
+accepted. Reconciling an interrupted acceptance reaches the same plan bytes and
+keeps the first record. Records written as
+`banzai-result-digest-evidence/v1` stay readable, as comparisons the runner did
+not record, and a plan digest rejected under v1 keeps this repair route.
 
 A rejected result fails its attempt and keeps its result as evidence. When the
 run is non-terminal with no live attempt, the attempt reached a terminal

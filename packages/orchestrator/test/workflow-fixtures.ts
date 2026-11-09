@@ -458,6 +458,8 @@ export class FakeAdapters implements VendorAdapters {
   planTaskIds = ["T001"];
   /** Plan obligations to write instead of the configured profile commands. */
   planVerificationChecks: TaskVerificationDescriptor[] | null = null;
+  /** The remainder digest the planner declares instead of the correct one. */
+  planRemainderDeclared: string | null = null;
   /** Supplemental strict candidates; lite candidates keep `fixtureTaskChecks`. */
   strictVerificationCandidates: TaskVerificationDescriptor[] | null = null;
 
@@ -693,7 +695,8 @@ export class FakeAdapters implements VendorAdapters {
               schema: "banzai-verification-obligations/v2",
               schemaVersion: 2,
               complete: true,
-              planRemainderSha256: evidenceDigest(before + "\n"),
+              planRemainderSha256:
+                this.planRemainderDeclared ?? evidenceDigest(before + "\n"),
               checks,
               absenceReason: checks.length
                 ? null

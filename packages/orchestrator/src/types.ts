@@ -113,8 +113,12 @@ export const RECOVERY_AUTHORIZATION_SCHEMA =
   "banzai-recovery-authorization/v1" as const;
 export const RECOVERY_AUTHORIZATION_SCHEMA_VERSION = 1 as const;
 export const RESULT_DIGEST_EVIDENCE_SCHEMA =
+  "banzai-result-digest-evidence/v2" as const;
+export const RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION = 2 as const;
+/** Written before ADR-0064 and read as comparisons the runner never recorded. */
+export const LEGACY_RESULT_DIGEST_EVIDENCE_SCHEMA =
   "banzai-result-digest-evidence/v1" as const;
-export const RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION = 1 as const;
+export const LEGACY_RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION = 1 as const;
 export const AGENT_CONTROL_CONTRACT_VERSION = "9.0.0" as const;
 export const AGENT_CAPABILITIES_SCHEMA_VERSION = 9 as const;
 export const AGENT_STATUS_SCHEMA_VERSION = 7 as const;
@@ -2341,6 +2345,12 @@ export interface ResultDigestComparison {
   /** The bound a size rejection exceeded; null for every other outcome. */
   limit: number | null;
   matched: boolean;
+  /**
+   * True only for a plan remainder the runner wrote at acceptance (ADR-0064):
+   * `declared` is the planner's value, `observed` the recorded one, and the
+   * mismatch does not reject the result.
+   */
+  recorded: boolean;
 }
 
 /**
@@ -2350,8 +2360,12 @@ export interface ResultDigestComparison {
  * baseline exists and none may be reconstructed from current bytes.
  */
 export interface ResultDigestEvidence {
-  schema: typeof RESULT_DIGEST_EVIDENCE_SCHEMA;
-  schemaVersion: typeof RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION;
+  schema:
+    | typeof RESULT_DIGEST_EVIDENCE_SCHEMA
+    | typeof LEGACY_RESULT_DIGEST_EVIDENCE_SCHEMA;
+  schemaVersion:
+    | typeof RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION
+    | typeof LEGACY_RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION;
   runId: string;
   attempt: { id: string; kind: AttemptReference["kind"] };
   outcome: "accepted" | "rejected";

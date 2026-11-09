@@ -35,6 +35,8 @@ import {
   PLAN_TASK_COMPLETION_SCHEMA_VERSION,
   RECOVERY_AUTHORIZATION_SCHEMA,
   RECOVERY_AUTHORIZATION_SCHEMA_VERSION,
+  LEGACY_RESULT_DIGEST_EVIDENCE_SCHEMA,
+  LEGACY_RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION,
   RESULT_DIGEST_EVIDENCE_SCHEMA,
   RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION,
   STRICT_MODEL_ATTEMPT_SCHEMA_VERSION,
@@ -1473,9 +1475,13 @@ export function parseResultDigestEvidence(
     code,
     "Result digest evidence"
   );
+  const legacy =
+    value.schema === LEGACY_RESULT_DIGEST_EVIDENCE_SCHEMA &&
+    value.schemaVersion === LEGACY_RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION;
   if (
-    value.schema !== RESULT_DIGEST_EVIDENCE_SCHEMA ||
-    value.schemaVersion !== RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION
+    !legacy &&
+    (value.schema !== RESULT_DIGEST_EVIDENCE_SCHEMA ||
+      value.schemaVersion !== RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION)
   ) {
     return recoveryEvidenceError(
       code,
@@ -1519,7 +1525,8 @@ export function parseResultDigestEvidence(
           "observed",
           "size",
           "limit",
-          "matched"
+          "matched",
+          ...(legacy ? [] : ["recorded"])
         ],
         code,
         label
@@ -1529,6 +1536,26 @@ export function parseResultDigestEvidence(
       }
       if (typeof item.matched !== "boolean") {
         return recoveryEvidenceError(code, `${label}.matched must be boolean.`);
+      }
+      const recorded = legacy ? false : item.recorded;
+      if (typeof recorded !== "boolean") {
+        return recoveryEvidenceError(
+          code,
+          `${label}.recorded must be boolean.`
+        );
+      }
+      if (
+        recorded &&
+        (kind !== "plan" ||
+          item.role !== "binding" ||
+          item.field !== "planRemainderSha256" ||
+          item.matched ||
+          item.observed === null)
+      ) {
+        return recoveryEvidenceError(
+          code,
+          `${label}.recorded is only valid for a plan remainder the runner wrote.`
+        );
       }
       return {
         role: item.role,
@@ -1553,12 +1580,15 @@ export function parseResultDigestEvidence(
             : evidenceDigest(item.observed, code, `${label}.observed`),
         size: evidenceByteCount(item.size, code, `${label}.size`),
         limit: evidenceByteCount(item.limit, code, `${label}.limit`),
-        matched: item.matched
+        matched: item.matched,
+        recorded
       };
     }
   );
   if (
-    comparisons.some((comparison) => !comparison.matched) !==
+    comparisons.some(
+      (comparison) => !comparison.matched && !comparison.recorded
+    ) !==
     (value.outcome === "rejected")
   ) {
     return recoveryEvidenceError(
@@ -1567,8 +1597,12 @@ export function parseResultDigestEvidence(
     );
   }
   return {
-    schema: RESULT_DIGEST_EVIDENCE_SCHEMA,
-    schemaVersion: RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION,
+    schema: legacy
+      ? LEGACY_RESULT_DIGEST_EVIDENCE_SCHEMA
+      : RESULT_DIGEST_EVIDENCE_SCHEMA,
+    schemaVersion: legacy
+      ? LEGACY_RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION
+      : RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION,
     runId: evidenceIdentifier(value.runId, code, "runId", 300),
     attempt: {
       id: evidenceIdentifier(value.attempt.id, code, "attempt.id", 200),

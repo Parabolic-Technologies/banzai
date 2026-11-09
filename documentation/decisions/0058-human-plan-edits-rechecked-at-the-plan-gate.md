@@ -286,6 +286,12 @@ Follow-ups:
   agent-control surface under a new major revision. Its authority boundaries
   hold: approval remains the only transition to `plan_approved`.
 - Preserves ADR-0017, ADR-0038, ADR-0049 §2 and ADR-0034.
+- Amended by [ADR-0064](./0064-runner-recorded-plan-remainder-digest.md),
+  accepted 2026-11-06: §5's second bullet and Compliance item 3 no longer
+  apply to the plan remainder, which the runner records when it accepts a
+  planning result. The gate-entry version (§1) and the re-check record's
+  planner remainder digest (§4) hold that value. The re-check, its write and
+  approval's refusal to rewrite remain. Implementation is Planned.
 - Supersedes: None.
 - Superseded by: None.
 - Required lifecycle decision: accept, reject with a reason, or request rework.

@@ -20,6 +20,7 @@ const ADR_0054 = "ADR-0054";
 const ADR_0055 = "ADR-0055";
 const ADR_0058 = "ADR-0058";
 const ADR_0060 = "ADR-0060";
+const ADR_0064 = "ADR-0064";
 const POLICY_ADR_AUTHORITIES = new Set([
   ADR_0026,
   ADR_0028,
@@ -36,7 +37,8 @@ const POLICY_ADR_AUTHORITIES = new Set([
   ADR_0054,
   ADR_0055,
   ADR_0058,
-  ADR_0060
+  ADR_0060,
+  ADR_0064
 ]);
 const POLICY_ERROR_CODE = "IMPORT_BOUNDARY_POLICY_INVALID";
 const IMPORTER_PATTERN =
@@ -1390,13 +1392,13 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/workflow/completion/plan-tasks.ts",
     "workflow-completion-plan-tasks",
-    [ADR_0052],
+    [ADR_0052, ADR_0064],
     [
       permission("../../errors.js", ADR_0052),
       permission("../../plan-task-completion.js", ADR_0052),
-      permission("../../validation.js", ADR_0052),
       permission("../../verification-evidence.js", ADR_0052),
-      permission("../digest-evidence/records.js", ADR_0052)
+      permission("../digest-evidence/records.js", ADR_0052),
+      permission("../plan-gate/recheck.js", ADR_0064)
     ],
     [
       permission("../../types.js", ADR_0052),

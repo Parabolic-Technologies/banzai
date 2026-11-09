@@ -2,7 +2,8 @@ import type { AttemptRecord, AttemptReference, RunState } from "../../types.js";
 import {
   DIGEST_UNRESOLVED_BLOCK_PREFIX,
   isRetryableInterruptedAttempt,
-  PLAN_BUNDLE_COMPLETION_VIOLATIONS
+  PLAN_BUNDLE_COMPLETION_VIOLATIONS,
+  plannerBlockSummary
 } from "./failure-classes.js";
 
 export interface RetryEligibility {
@@ -26,6 +27,7 @@ export type RetryEvidence =
   | "task_verification_attempts"
   | "legacy_ledger_support"
   | "legacy_verification_attempts"
+  | "latest_attempt"
   | "attempt_record";
 
 export interface RetryFacts {
@@ -42,6 +44,32 @@ export interface RetryFacts {
     latest: LatestVerificationAttempt | null;
   }>;
   attemptRecord?: AttemptRecord;
+  /** The run's latest attempt; null when the records name no single one. */
+  latestAttempt?: VerificationEvidence<{ record: AttemptRecord | null }>;
+}
+
+/**
+ * The attempt the run started last. Attempt file names carry random
+ * identities, so only `startedAt` orders them, and a tie names no attempt.
+ */
+export function latestAttemptRecord(
+  records: readonly AttemptRecord[]
+): AttemptRecord | null {
+  let latest: AttemptRecord | null = null;
+  let tied = false;
+  for (const record of records) {
+    const order =
+      latest === null
+        ? 1
+        : Date.parse(record.startedAt) - Date.parse(latest.startedAt);
+    if (order > 0) {
+      latest = record;
+      tied = false;
+    } else if (order === 0 && record !== latest) {
+      tied = true;
+    }
+  }
+  return tied ? null : latest;
 }
 
 export type RetryStep =
@@ -113,6 +141,24 @@ function decideWithoutAttempt(facts: RetryFacts): RetryStep {
       "Read-only planning review checks can be retried explicitly.",
       null
     );
+  if (
+    state.blockedFrom === "planning" &&
+    (state.planningReview?.active == null ||
+      state.planningReview.active.step === "applying")
+  ) {
+    // ADR-0065: read from durable records, so a run blocked this way before
+    // the rule existed qualifies too.
+    const evidence = facts.latestAttempt;
+    if (evidence === undefined) return needs("latest_attempt");
+    const record = evidence.readable ? evidence.record : null;
+    const summary = record === null ? null : plannerBlockSummary(record);
+    if (record !== null && summary !== null && summary === state.blockReason)
+      return decided(
+        true,
+        `The planner reported a block in attempt ${record.attempt.id}; retry continues planning after you resolve it.`,
+        record.attempt.id
+      );
+  }
   if (state.blockedFrom === "created") {
     return decided(
       true,

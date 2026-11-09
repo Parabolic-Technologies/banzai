@@ -584,8 +584,14 @@ is a navigational reference and is updated with the module it describes.
   identities and the workspace that completion capture and terminal proof
   record, and compares two observations exactly (`sameObservedInputs`).
 - `workflow/completion/plan-tasks.ts` — the approved plan path and task
-  identifiers, runner control-task and planning-result validation (including
-  the plan remainder digest), and implementation-completion validation.
+  identifiers, runner control-task and planning-result validation, and
+  implementation-completion validation. For a strict task-verification result
+  that requests plan approval, `validatePlanningResult` also records the plan
+  remainder digest (ADR-0064): it refuses and validates the plan, records the
+  evidence, then rewrites only the value through the compare-and-replace write.
+  Live acceptance and terminal-checkpoint reconciliation share this path, so a
+  repeated pass writes nothing new. A plan that changed since the read fails as
+  `PLAN_TASK_COMPLETION_INVALID` with its path named.
 - `workflow/completion/refusal.ts` — `CompletionRefusal`, the ADR-0047
   publication refusal whose closed code and stage are persisted with operator
   guidance; rejecting a captured completion input with its repair checkpoint
@@ -669,7 +675,8 @@ is a navigational reference and is updated with the module it describes.
   that refuse missing, symlinked and non-regular files, exact UTF-8 decoding,
   the compare-and-replace plan write (`PLAN_RECHECK_CHANGED` when the plan
   changed after the read; mode preserved) and gate-entry snapshot entries
-  verified against their digests.
+  verified against their digests. The read, decode and write helpers take the
+  caller's failure, because planning-result acceptance reuses them with its own.
 - `workflow/domain/verification-attempts.ts` — `verificationFailureCategory`,
   which maps process errors to a persisted failure category, and
   `verificationCommandMatches`, which matches a record to its exact command
@@ -689,6 +696,11 @@ is a navigational reference and is updated with the module it describes.
   verification reads the latest attempt of every check in the latest round
   (ADR-0057): a started one asks for reconciliation, and otherwise the latest
   unsuccessful one names the retry, whose reason counts the checks it reruns.
+  A planning block (ADR-0065) asks for the run's latest attempt by `startedAt`:
+  a completed plan attempt whose result reported `outcome=blocked` with the
+  run's block reason as its summary names the retry. `plannerBlockSummary`
+  (`failure-classes.ts`) reads that result, and `executePlan` uses it to allow
+  session reuse and choose the "Continue blocked planning" prompt component.
   `RetryEligibility` moves here and `workflow.ts` re-exports it.
 - `workflow/domain/next-action.ts` — `nextAction`, the next-action text for a
   status from its retry, recovery and publication outcomes. It reads no
@@ -1397,10 +1409,12 @@ both the acceptance comparison and `authorizeTaskVerification` classify through
 `comparableTaskVerificationSources`. A model-authored digest is established when
 its artifact is accepted: `workflow.ts` compares each effective supplement
 source and records the outcome through `store.ts` as
-`banzai-result-digest-evidence/v1`, written once per attempt and never restated,
-while `validatePlanningResult` classifies the existing plan-remainder detection
-the same way. A rejection carries the field, path, declared and observed digests
-only; the size rejection stays a separate typed cause. The launch comparison
+`banzai-result-digest-evidence/v2`, written once per attempt and never restated.
+`validation.ts` also reads v1 records, whose comparisons read as `recorded: false`.
+`validatePlanningResult` records the plan remainder with `recorded: true` when it
+writes it, which never rejects the result (ADR-0064). A rejection carries the
+field, path, declared and observed digests only; the size rejection stays a
+separate typed cause. The launch comparison
 keeps its authority unchanged and states a causal history only from a recorded
 baseline, reporting unknown when none exists.
 Observed inputs follow Git ignore rules, so a check can pass only when its

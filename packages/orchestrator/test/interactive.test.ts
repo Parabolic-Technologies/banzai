@@ -2294,6 +2294,72 @@ test("interactive mode retries review checks that failed before Claude started",
   assert.equal(io.choiceNames[0]?.[0], "Retry review checks");
 });
 
+test("interactive mode continues planning after a block the planner reported", async () => {
+  const runner = new FakeRunner([
+    workflowStatus(
+      runState("blocked", {
+        blockedFrom: "planning",
+        blockReason: "The planner needs a permission from the owner.",
+        activeAttempt: null
+      }),
+      {
+        retry: {
+          eligible: true,
+          reason:
+            "The planner reported a block in attempt plan-1-block; retry continues planning after you resolve it.",
+          attemptId: "plan-1-block"
+        },
+        nextAction: "banzai retry"
+      }
+    ),
+    workflowStatus(runState("done"))
+  ]);
+  const io = new FakeIO(["retry", "exit"], [], [true]);
+
+  await runInteractive(runner, io, { decidedBy: "human" });
+
+  assert.deepEqual(runner.calls, [{ operation: "retry", value: null }]);
+  assert.equal(
+    io.choiceNames[0]?.[0],
+    "Continue planning after the reported block"
+  );
+  assert.equal(
+    io.confirmationMessages[0],
+    "Run preflight and continue planning after the reported block?"
+  );
+});
+
+test("interactive mode keeps the failed planning copy for a failed attempt", async () => {
+  const runner = new FakeRunner([
+    workflowStatus(
+      runState("blocked", {
+        blockedFrom: "planning",
+        blockReason: "plan failed: the process timed out.",
+        activeAttempt: { id: "plan-1-failed", kind: "plan", mutable: false }
+      }),
+      {
+        retry: {
+          eligible: true,
+          reason:
+            "Failed plan attempt plan-1-failed can be retried explicitly.",
+          attemptId: "plan-1-failed"
+        },
+        nextAction: "banzai retry"
+      }
+    ),
+    workflowStatus(runState("done"))
+  ]);
+  const io = new FakeIO(["retry", "exit"], [], [true]);
+
+  await runInteractive(runner, io, { decidedBy: "human" });
+
+  assert.equal(io.choiceNames[0]?.[0], "Continue the failed planning attempt");
+  assert.equal(
+    io.confirmationMessages[0],
+    "Run preflight and continue planning, reusing saved context when compatible?"
+  );
+});
+
 test("interactive mode hides retry when blocked status marks it unavailable", async () => {
   const runner = new FakeRunner([
     workflowStatus(

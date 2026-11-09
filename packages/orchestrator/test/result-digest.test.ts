@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { RunStore } from "../src/store.js";
 import { WorkflowRunner } from "../src/workflow.js";
+import { digestRejectionReason } from "../src/workflow/digest-evidence/records.js";
 import {
   effectiveResultSourceIdentities,
   parseResultDigestEvidence
@@ -21,6 +22,7 @@ import type {
   VendorAdapters
 } from "../src/types.js";
 import { commitAll, createTestRepository } from "./helpers.js";
+import { recordingContext } from "./workflow/context-fixture.js";
 import {
   assertTrace,
   assertTraceComplete,
@@ -263,6 +265,7 @@ test("a fabricated source digest is rejected when the result is accepted, naming
     assert.ok(comparison);
     assert.equal(comparison.role, "precondition");
     assert.equal(comparison.matched, false);
+    assert.equal(comparison.recorded, false);
     assert.equal(comparison.observed, evidenceDigest(CHECK_SOURCE));
   } finally {
     await f.repository.dispose();
@@ -642,8 +645,20 @@ test("an established baseline is never restated by a later comparison", async ()
 const PLAN_BODY =
   "# Plan\n\n## Implementation Tasks\n\n- [ ] **T001 - Implement the fixture**\n";
 
-function planMarkdown(pin: "correct" | "fabricated"): string {
-  const before = PLAN_BODY;
+/**
+ * `refused` plans fail acceptance on their task heading: the bytes a run
+ * rejected before ADR-0064 are recreated by `recreatePlanDigestRejection`.
+ */
+type PlanPin = "correct" | "fabricated" | "refused";
+
+function planMarkdown(pin: PlanPin): string {
+  const before =
+    pin === "refused"
+      ? PLAN_BODY.replace(
+          "**T001 - Implement the fixture**",
+          "**T001 - Implement the fixture** (see notes)"
+        )
+      : PLAN_BODY;
   const after = "\n";
   return (
     before +
@@ -675,10 +690,7 @@ async function markImplementerUnavailable(root: string): Promise<void> {
 }
 
 /** A strict run whose planner pins the plan remainder digest per attempt. */
-async function strictFixture(
-  pins: ("correct" | "fabricated")[],
-  refuseImplementer = false
-) {
+async function strictFixture(pins: PlanPin[], refuseImplementer = false) {
   const repository = await createTestRepository({ artifactLayout: "private" });
   if (refuseImplementer) await markImplementerUnavailable(repository.root);
   const queue = [...pins];
@@ -765,8 +777,89 @@ async function strictFixture(
   };
 }
 
-test("a fabricated plan remainder digest is rejected at acceptance and repaired through an authorized planning attempt", async () => {
-  const f = await strictFixture(["fabricated", "correct"]);
+/**
+ * The durable records of a run whose plan remainder was rejected at acceptance
+ * before ADR-0064. No current path writes them, so the attempt is failed on a
+ * refused plan and its v1 evidence and diagnostic are written as they were.
+ */
+async function recreatePlanDigestRejection(
+  store: RunStore,
+  state: RunState
+): Promise<AttemptReference> {
+  const attempt = state.activeAttempt;
+  assert.ok(attempt);
+  const record = await store.readRunAttempt(state.runId, attempt);
+  const plan = (record.result as PhaseResult).artifacts.plan;
+  assert.ok(plan);
+  const declared = "a".repeat(64);
+  const observed = "b".repeat(64);
+  const evidencePath = store.resultDigestEvidencePath(state.runId, attempt);
+  await mkdir(path.dirname(evidencePath), { recursive: true });
+  await writeFile(
+    evidencePath,
+    `${JSON.stringify(
+      {
+        schema: "banzai-result-digest-evidence/v1",
+        schemaVersion: 1,
+        runId: state.runId,
+        attempt: { id: attempt.id, kind: attempt.kind },
+        outcome: "rejected",
+        comparisons: [
+          {
+            role: "binding",
+            field: "planRemainderSha256",
+            checkId: null,
+            path: plan,
+            declared,
+            observed,
+            size: null,
+            limit: null,
+            matched: false
+          }
+        ]
+      },
+      null,
+      2
+    )}\n`
+  );
+  const diagnostic = `The plan result declared 1 digest that did not match the bytes it named when the result was accepted. planRemainderSha256 at ${plan} declared ${declared} but the bytes hash to ${observed}.`;
+  record.error = `[PLAN_TASK_COMPLETION_INVALID] ${diagnostic}`;
+  await store.writeRunAttempt(state.runId, record);
+  await rewriteRunState(store, state.runId, (current) => {
+    current.blockReason = `plan failed: ${diagnostic}`;
+  });
+  return attempt;
+}
+
+test("a plan remainder digest the planner fabricated is recorded by the runner, not rejected", async () => {
+  const f = await strictFixture(["fabricated"]);
+  try {
+    const gate = await f.runner.start({
+      slug: "plan-digest",
+      request: "Escalate this change."
+    });
+    assert.equal(gate.status, "needs_plan_approval", gate.blockReason ?? "");
+    assert.equal(f.planAttempts(), 1);
+    const [record] = (await f.store.readRunAttempts(gate.runId)).filter(
+      (item) => item.attempt.kind === "plan"
+    );
+    assert.ok(record);
+    const evidence = await f.store.readResultDigestEvidenceIfExists(
+      gate.runId,
+      record.attempt
+    );
+    assert.equal(evidence?.outcome, "accepted");
+    assert.equal(evidence.comparisons[0]?.declared, "a".repeat(64));
+    assert.equal(evidence.comparisons[0].recorded, true);
+    assert.equal(evidence.comparisons[0].matched, false);
+    assert.equal((await f.runner.status()).recovery.eligible, false);
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+test("a plan digest rejected before ADR-0064 is still repaired through an authorized planning attempt", async () => {
+  const f = await strictFixture(["refused", "correct"]);
   try {
     const blocked = await f.runner.start({
       slug: "plan-digest",
@@ -774,16 +867,9 @@ test("a fabricated plan remainder digest is rejected at acceptance and repaired 
     });
     assert.equal(blocked.status, "blocked");
     assert.equal(blocked.blockedFrom, "planning");
-    const reason = blocked.blockReason ?? "";
-    assert.match(reason, /planRemainderSha256/);
-    assert.match(reason, new RegExp("a".repeat(64)));
-    assert.doesNotMatch(reason, /could not be read/);
-    assert.doesNotMatch(reason, /Implementation Tasks/);
+    const rejected = await recreatePlanDigestRejection(f.store, blocked);
     // A planning result never gains a strict plan-task completion ledger.
     assert.equal(blocked.planTaskCompletion, null);
-
-    const rejected = blocked.activeAttempt;
-    assert.ok(rejected);
     assert.equal(
       (await f.store.readResultDigestEvidenceIfExists(blocked.runId, rejected))
         ?.outcome,
@@ -834,15 +920,14 @@ test("a fabricated plan remainder digest is rejected at acceptance and repaired 
 });
 
 test("a planning repair is not gated on the implementer vendor it never runs", async () => {
-  const f = await strictFixture(["fabricated", "correct"], true);
+  const f = await strictFixture(["refused", "correct"], true);
   try {
     const blocked = await f.runner.start({
       slug: "plan-digest-preflight",
       request: "Escalate this change."
     });
     assert.equal(blocked.status, "blocked");
-    const rejected = blocked.activeAttempt;
-    assert.ok(rejected);
+    const rejected = await recreatePlanDigestRejection(f.store, blocked);
     const status = await f.runner.status();
     assert.equal(status.recovery.eligible, true, status.recovery.reason);
     assert.equal(status.recovery.phase, "plan");
@@ -1134,13 +1219,14 @@ const DIGEST_SCENARIOS: {
   ).map(([name, mutate]) => ({
     name,
     arrange: async () => {
-      const f = await strictFixture(["fabricated", "correct"]);
+      const f = await strictFixture(["refused", "correct"]);
       try {
         const blocked = await f.runner.start({
           slug: "plan-repair",
           request: "Plan it."
         });
         assert.equal(blocked.status, "blocked", "fixture must block");
+        await recreatePlanDigestRejection(f.runner.store, blocked);
         await mutate(f.runner.store, blocked.runId);
         return {
           root: f.repository.root,
@@ -1697,3 +1783,157 @@ const DIGEST_ELIGIBILITY_BASELINE: Readonly<Record<string, unknown>> = {
     }
   }
 };
+
+const DIGESTS = { zeros: "0".repeat(64), recorded: "b".repeat(64) };
+
+function evidenceRecord(
+  overrides: {
+    kind?: string;
+    outcome?: string;
+    comparison?: Record<string, unknown>;
+    version?: 1 | 2;
+  } = {}
+) {
+  const version = overrides.version ?? 2;
+  return {
+    schema: `banzai-result-digest-evidence/v${version}`,
+    schemaVersion: version,
+    runId: "run",
+    attempt: { id: "attempt", kind: overrides.kind ?? "plan" },
+    outcome: overrides.outcome ?? "accepted",
+    comparisons: [
+      {
+        role: "binding",
+        field: "planRemainderSha256",
+        checkId: null,
+        path: "plan.md",
+        declared: DIGESTS.zeros,
+        observed: DIGESTS.recorded,
+        size: null,
+        limit: null,
+        matched: false,
+        ...(version === 2 ? { recorded: true } : {}),
+        ...overrides.comparison
+      }
+    ]
+  };
+}
+
+test("digest evidence v2 keeps a recorded remainder accepted", () => {
+  const parsed = parseResultDigestEvidence(evidenceRecord());
+  assert.equal(parsed.schema, "banzai-result-digest-evidence/v2");
+  assert.equal(parsed.schemaVersion, 2);
+  assert.equal(parsed.outcome, "accepted");
+  assert.equal(parsed.comparisons[0]?.recorded, true);
+  // An unmatched comparison the runner did not record is a rejection.
+  assert.equal(
+    parseResultDigestEvidence(
+      evidenceRecord({
+        outcome: "rejected",
+        comparison: { recorded: false }
+      })
+    ).outcome,
+    "rejected"
+  );
+});
+
+test("digest evidence v1 stays readable and reads as not recorded", () => {
+  const parsed = parseResultDigestEvidence(
+    evidenceRecord({ version: 1, outcome: "rejected" })
+  );
+  assert.equal(parsed.schema, "banzai-result-digest-evidence/v1");
+  assert.equal(parsed.schemaVersion, 1);
+  assert.equal(parsed.outcome, "rejected");
+  assert.equal(parsed.comparisons[0]?.recorded, false);
+});
+
+const REFUSED_EVIDENCE: [string, Parameters<typeof evidenceRecord>[0]][] = [
+  ["v2 without recorded", { comparison: { recorded: undefined } }],
+  ["v1 that claims recorded", { version: 1, comparison: { recorded: false } }],
+  ["a recorded comparison of another attempt kind", { kind: "implementation" }],
+  ["a recorded precondition", { comparison: { role: "precondition" } }],
+  ["a recorded comparison of another field", { comparison: { field: "x" } }],
+  ["a recorded comparison that matched", { comparison: { matched: true } }],
+  [
+    "a recorded comparison with no observed value",
+    { comparison: { observed: null } }
+  ],
+  ["a recorded comparison in a rejected record", { outcome: "rejected" }],
+  [
+    "an unrecorded mismatch in an accepted record",
+    { comparison: { recorded: false } }
+  ]
+];
+
+for (const [name, overrides] of REFUSED_EVIDENCE)
+  test(`digest evidence refuses ${name}`, () => {
+    const record = evidenceRecord(overrides);
+    const [comparison] = record.comparisons;
+    if (comparison !== undefined && comparison.recorded === undefined)
+      delete (comparison as { recorded?: unknown }).recorded;
+    assert.throws(() => parseResultDigestEvidence(record), {
+      code: "RESULT_DIGEST_EVIDENCE_INVALID"
+    });
+  });
+
+test("new digest evidence must be v2 and cannot restate v1", async () => {
+  const repository = await createTestRepository();
+  try {
+    const store = new RunStore(repository.root);
+    await assert.rejects(
+      store.establishResultDigestEvidence(
+        "run",
+        evidenceRecord({
+          version: 1,
+          outcome: "rejected"
+        }) as unknown as ResultDigestEvidence
+      ),
+      { code: "RESULT_DIGEST_EVIDENCE_INVALID" }
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("a later mismatch of a runner-recorded remainder reports a change after acceptance", async () => {
+  const PLAN_ATTEMPT = { id: "attempt", kind: "plan", mutable: false };
+  const { context } = recordingContext({
+    readRunAttempts: () => [{ attempt: PLAN_ATTEMPT }],
+    readResultDigestEvidenceIfExists: () =>
+      parseResultDigestEvidence(evidenceRecord())
+  });
+  const mismatch = (declared: string) =>
+    Object.assign(new Error("planRemainderSha256 does not match."), {
+      code: "TASK_VERIFICATION_DIGEST_MISMATCH",
+      detail: {
+        role: "binding",
+        field: "planRemainderSha256",
+        checkId: null,
+        path: null,
+        declared,
+        observed: "c".repeat(64),
+        size: null,
+        limit: null
+      }
+    });
+  const state = { runId: "run" } as RunState;
+  assert.equal(
+    await digestRejectionReason(
+      context,
+      state,
+      "attempt",
+      mismatch(DIGESTS.recorded)
+    ),
+    "planRemainderSha256 does not match. It matched when the runner recorded it at acceptance, so the source changed after acceptance."
+  );
+  // A digest the record never held has no known history.
+  assert.match(
+    await digestRejectionReason(
+      context,
+      state,
+      "attempt",
+      mismatch("d".repeat(64))
+    ),
+    /recorded no acceptance baseline for that digest/u
+  );
+});

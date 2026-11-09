@@ -761,6 +761,59 @@ test("plan guard keeps prohibitions and reads local to each instruction", () => 
     );
 });
 
+test("plan guard reads a path list joined with and or or under a read-only label", () => {
+  for (const body of [
+    "Unchanged paths:\n  - `.banzai/**` and `.claude/settings.json`;",
+    "Unchanged paths:\n  - `PROJECT_MANIFEST.md` and `.banzai/**`",
+    "Unchanged paths:\n  - `.banzai/**`, `a.md`, and `b.md`;",
+    "Read-only references: `.banzai/config.json` or `.banzai/runs/`.",
+    "**Unchanged paths:** `.banzai/config.json` and any `.banzai/runs/`"
+  ])
+    assert.doesNotThrow(() => {
+      validatePlanRunnerControlTasks(controlPlan(body), "/project", []);
+    }, body);
+  for (const body of [
+    "`.banzai/config.json` and `a.md`",
+    "Unchanged paths: `.banzai/config.json` and invalidate the cache.",
+    "Unchanged paths:\n  - `.banzai/config.json` and `a.md` must be regenerated",
+    "Files to change: `.banzai/config.json` and `a.md`"
+  ])
+    assert.throws(
+      () => {
+        validatePlanRunnerControlTasks(controlPlan(body), "/project", []);
+      },
+      { code: "PLAN_RUNNER_CONTROL_TASK" },
+      body
+    );
+});
+
+test("plan guard reads a stated absence of change to a closed path list", () => {
+  for (const body of [
+    "After `pnpm format`, `git status` shows no change to any Markdown file, `documentation/`, `.banzai/`, `.claude/`, or `pnpm-lock.yaml`.",
+    "Confirm no changes to `.banzai/config.json`.",
+    "`git status` shows no edits in `.banzai/` or `.claude/`.",
+    "No change to `.banzai/config.json`."
+  ])
+    assert.doesNotThrow(() => {
+      validatePlanRunnerControlTasks(controlPlan(body), "/project", []);
+    }, body);
+  for (const body of [
+    "Make no change to `PROJECT_MANIFEST.md`, then write `.banzai/config.json`.",
+    "Make no change to `PROJECT_MANIFEST.md` and update `.banzai/config.json`.",
+    "After writing `.banzai/config.json`, expect no change to `PROJECT_MANIFEST.md`.",
+    "Expect no change to `PROJECT_MANIFEST.md` after writing `.banzai/config.json`.",
+    "Apply no change to `.banzai/config.json` except the new key.",
+    "Change `.banzai/config.json`."
+  ])
+    assert.throws(
+      () => {
+        validatePlanRunnerControlTasks(controlPlan(body), "/project", []);
+      },
+      { code: "PLAN_RUNNER_CONTROL_TASK" },
+      body
+    );
+});
+
 test("plan guard does not carry access declarations or implicit targets into another task", () => {
   const prefix = controlPlan(
     "Read-only references:\n  - `.banzai/config.json`"

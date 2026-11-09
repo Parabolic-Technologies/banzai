@@ -89,6 +89,7 @@ import {
   CONTEXT_ATTEMPT_SCHEMA,
   ATTEMPT_FILE_TOKENS,
   CONTEXT_ATTEMPT_SCHEMA_VERSION,
+  RESULT_DIGEST_EVIDENCE_SCHEMA,
   VERIFICATION_LEDGER_SCHEMA_VERSION
 } from "./types.js";
 import {
@@ -2560,6 +2561,12 @@ export class RunStore {
       throw new BanzaiError(
         "RESULT_DIGEST_EVIDENCE_INVALID",
         "Result digest evidence run identity does not match its path."
+      );
+    }
+    if (parsed.schema !== RESULT_DIGEST_EVIDENCE_SCHEMA) {
+      throw new BanzaiError(
+        "RESULT_DIGEST_EVIDENCE_INVALID",
+        `New result digest evidence must use ${RESULT_DIGEST_EVIDENCE_SCHEMA}.`
       );
     }
     const existing = await this.readResultDigestEvidenceIfExists(

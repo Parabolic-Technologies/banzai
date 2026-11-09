@@ -51,7 +51,8 @@ Status values: `not started` · `ADR draft` · `ADR proposed` · `ADR accepted` 
 | WP19 | Initiative skill with brief and tracker        | —               | 0061 Accepted; amends 0054 (pinned), 0041, 0036 | `wp19-initiative-skill`                | committed    | 138b206 | Outside the brief; template overlaps WP12          |
 | WP20 | Memory notes: no gate prompt, no code unlock   | —               | 0062 accepted; authority for the pinned hook    | `wp20-spec-gate-memory-notes`          | committed    | ebfcd3e | Pinned hook; template shared with WP19, WP12       |
 | WP7  | Claude as the default reviewer, with isolation | WP6 recommended | 0059 Accepted; amends 0042 §7, 0037, 0002       | `wp07-claude-default-reviewer`         | committed    | d0785db | Live run at Gate 1 needs go-ahead                  |
-| WP8  | Stable Claude phases                           | —               | 0063 Accepted; amends 0020, 0022, 0059          | `wp08-stable-claude-phases`            | report ready |         | Gate 1 probe needs the owner's run                 |
+| WP8  | Stable Claude phases                           | —               | 0063 Accepted; amends 0020, 0022, 0059          | `wp08-stable-claude-phases`            | committed    | 2cc3954 | Gate 1 probe needs the owner's run                 |
+| WP21 | Runner-recorded plan digest, planning retry    | —               | 0064, 0065 Accepted; amend 0051, 0058, 0036     | `wp21-planner-digest-and-retry`        | report ready |         | Outside the brief; owner-run incident              |
 
 ### Gate 1
 
@@ -85,6 +86,10 @@ Report: `gate-1-report.md` (not written).
       emit exactly one `result` event and exit 0. Run
       `node packages/orchestrator/scripts/gate-1-probe.mjs --repository <scratch>`
       per `documentation/work/wp08-stable-claude-phases/gate-1-probe.md`.
+- [ ] WP21, after ADR-0064 and ADR-0065 are accepted: a strict run with the
+      default Claude planner and no shell allow rules reaches the plan gate
+      with a remainder digest the runner recorded, and a planner-declared
+      planning block continues with `banzai retry`.
 
 ## Stage 2 (2.9): no lost runs
 
@@ -137,10 +142,12 @@ context accounting.
 | 0061 | WP19 | Initiative skill and documents                         | Accepted, 2026-11-05 |
 | 0062 | WP20 | Claude Code memory notes in the manual hook gate       | Accepted, 2026-11-05 |
 | 0063 | WP8  | Stable headless vendor invocations                     | Accepted, 2026-11-06 |
+| 0064 | WP21 | Runner-recorded plan remainder digest                  | Accepted, 2026-11-06 |
+| 0065 | WP21 | Continuable planner-declared planning blocks           | Accepted, 2026-11-06 |
 
 IDs checked free on 2026-10-31 (0057–0059), 2026-11-03 (0060) and 2026-11-05
-(0061) and 2026-11-06 (0063) in `dev`, `main`, `v3.0.0-branch`, every local
-branch and every local worktree.
+(0061) and 2026-11-06 (0063, 0064–0065) in `dev`, `main`, `v3.0.0-branch`,
+every local branch and every local worktree.
 
 ## Shared fixtures
 
@@ -321,6 +328,60 @@ branch and every local worktree.
   Implemented. The Gate 1 probe is built and documented, and awaits the
   owner's run on 2.1.290 and on the current release.
 
+- 2026-11-06: WP8 committed as `2cc3954`.
+
+- 2026-11-06: an owner run in a bootstrap-only project stopped at strict
+  planning. The default Claude planner could not compute
+  `planRemainderSha256`: under `dontAsk` every hashing command was denied.
+  It returned `outcome=blocked`, which left the run cancel-only. With
+  `Yes, fix it here`, the owner answered three closed questions with the
+  recommended options:
+  - digest: "Runner records it". The runner records the remainder digest
+    when it accepts a planning result that requests plan approval
+    (ADR-0064, amends ADR-0051 and ADR-0058);
+  - blocked planning: "Allow retry". `banzai retry` continues a
+    planner-declared planning block (ADR-0065, amends ADR-0036);
+  - placement: "New WP21 in Stage 1". WP21 ships with 2.8 and has a Gate 1
+    item.
+
+  ADR-0064 and ADR-0065 are drafted as Proposed. One independent read-only
+  review found three major and six minor issues, all applied: ADR-0058 is
+  pinned, so its reciprocal link needs an allow-list image; a block during a
+  planning review's `applying` step is covered; ADR-0024's reasons against
+  retrying completed blocked results are addressed. Both ADRs await
+  acceptance.
+
+- 2026-11-06: ADR-0064 and ADR-0065 accepted with `Accept both`. Their
+  reciprocal links are recorded in ADR-0051, ADR-0036 and pinned ADR-0058,
+  whose exact before and after images are admitted in
+  `phase-resources-build.mjs` keyed by ADR-0064. The manifest lists both as
+  Planned. WP21 requirements and plan follow.
+
+- 2026-11-06: WP21 requirements and plan written and awaiting plan approval.
+  The plan has no open questions. A plan changed during acceptance fails with
+  the existing `PLAN_TASK_COMPLETION_INVALID` code, which already keeps a
+  failed planning attempt retryable with session reuse, so no new failure code
+  enters persisted state.
+
+- 2026-11-09: `Approve plan`. The WP21 requirements and plan are approved.
+
+- 2026-11-09: WP21 implemented as one change set; report ready. ADR-0064 and
+  ADR-0065 are Implemented. The incident run's `banzai retry` stays a Gate 1
+  item for the owner.
+
+- 2026-11-09: The owner ran `banzai retry` on the incident run. Retry continued
+  planning, and the planner requested plan approval with the zeros in place. The
+  runner-control plan check then refused the plan on two false positives that
+  the earlier block had hidden. `Yes, fix it here`: both are fixed in
+  [`change-report.md`](../wp21-planner-digest-and-retry/change-report.md).
+
+- 2026-11-09: The incident run then produced the WP21 Gate 1 evidence: it reached
+  the plan gate with a runner-recorded digest and was approved, and a later
+  planner block continued with retry in the resumed session. The Gate 1 item
+  stays unticked for the owner. The run's current block is outside WP21: proto
+  0.58.2 launches `bin/pnpm.cjs`, which pnpm 12.18.0 no longer ships, and the
+  running CLI kept the Node 24 `PATH` it started with.
+
 ## Open questions left to the owner by the brief
 
 Settle each in the named WP's ADR or requirements, then record the answer
@@ -371,6 +432,9 @@ under Owner decisions.
   - the brief leaves Codex to a separate check; Codex `exec` and
     `exec resume` read a `-` prompt from stdin from 0.145.0, so WP8 moves the
     Codex prompt too.
+- Stage 1 (2026-11-06): WP21 is not in the brief; the owner added it after
+  the planning incident recorded under Owner decisions, because Claude is the
+  default planner since ADR-0059.
 - WP8 (2026-11-06): under Q1 (a), a timeout below 7 minutes gets the
   2-minute Bash floor instead of the full 5-minute reserve, which departs from
   ADR-0063 Compliance 4. No default role is affected; the live review's

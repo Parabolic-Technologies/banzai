@@ -15,16 +15,16 @@ import {
 import type {
   AttemptReference,
   PersistedPhaseResult,
-  ResultDigestComparison,
   RunState
 } from "../../types.js";
-import { ResultDigestRejectedError } from "../../validation.js";
-import { parseTaskVerificationObligations } from "../../verification-evidence.js";
+import { rewritePlanRemainderDigest } from "../../verification-evidence.js";
 import type { RunnerContext } from "../context.js";
+import { recordResultDigestEvidence } from "../digest-evidence/records.js";
 import {
-  recordResultDigestEvidence,
-  taskVerificationDigestDetail
-} from "../digest-evidence/records.js";
+  exactUtf8,
+  readRecheckBundle,
+  replacePlanBytes
+} from "../plan-gate/recheck.js";
 
 export function completionPlanPath(state: RunState): string {
   const planPath = state.planArtifacts?.plan ?? null;
@@ -95,84 +95,90 @@ export async function validatePlanningResult(
 ): Promise<void> {
   if (result.gate !== "plan_approval" || result.artifacts.plan === null) return;
   try {
+    if (state.verificationMode === "task") {
+      await recordPlanRemainderDigest(
+        context,
+        state,
+        attempt,
+        result.artifacts.plan
+      );
+      return;
+    }
     const markdown = await readFile(
       path.join(context.repoRoot, result.artifacts.plan),
       "utf8"
     );
     parseApprovedPlanTaskIds(markdown);
-    if (state.verificationMode === "task")
-      await establishPlanRemainderDigest(
-        context,
-        state,
-        attempt,
-        result.artifacts.plan,
-        markdown
-      );
     validateRunnerControlTasks(context, state, markdown);
   } catch (error) {
     if (passesThroughRunCatches(error)) throw error;
-    // A rejected remainder digest is a defective planning result, not an
-    // unreadable artifact: it keeps the approved_plan_invalid semantics that
-    // rerun planning, and says exactly which digest disagreed.
-    if (error instanceof ResultDigestRejectedError)
-      throw new PlanTaskCompletionError("approved_plan_invalid", error.message);
     if (
       error instanceof PlanTaskCompletionError ||
       (error instanceof BanzaiError &&
         error.code === "PLAN_RUNNER_CONTROL_TASK")
     )
       throw error;
-    throw new PlanTaskCompletionError(
-      "approved_plan_invalid",
-      `The planning artifact could not be read: ${errorMessage(error)}`
-    );
+    throw planningArtifactRefused(errorMessage(error));
   }
 }
 
+function planningArtifactRefused(message: string): PlanTaskCompletionError {
+  return new PlanTaskCompletionError(
+    "approved_plan_invalid",
+    `The planning artifact could not be read: ${message}`
+  );
+}
+
 /**
- * The plan remainder digest is the one binding role ADR-0051 fixes, and the
- * detection that establishes it already lives in the shared inventory
- * parser. This only classifies that existing outcome: an accepted record
- * becomes the baseline a later reader may cite, and a rejected record is
- * what makes the attempt recognizable as a digest-rejected result. No strict
- * plan-task completion ledger is written for a planning attempt.
+ * ADR-0064: a model cannot hash without a command, so the runner establishes
+ * the remainder digest of a plan that requests approval. A plan the shared
+ * inventory rules refuse is never written. The evidence is durable before the
+ * write, which keeps the planner's value auditable, and reconciling the same
+ * attempt reaches the same bytes because the store keeps its first record.
  */
-export async function establishPlanRemainderDigest(
+async function recordPlanRemainderDigest(
   context: RunnerContext,
   state: RunState,
   attempt: AttemptReference,
-  planPath: string,
-  markdown: string
+  planPath: string
 ): Promise<void> {
-  let comparison: ResultDigestComparison;
-  try {
-    const obligations = parseTaskVerificationObligations(markdown);
-    comparison = {
+  const planBytes = (
+    await readRecheckBundle(
+      context.repoRoot,
+      [planPath],
+      planningArtifactRefused
+    )
+  ).get(planPath);
+  if (planBytes === undefined)
+    throw planningArtifactRefused(`${planPath} was not read.`);
+  const markdown = exactUtf8(planBytes, planPath, planningArtifactRefused);
+  parseApprovedPlanTaskIds(markdown);
+  const digest = rewritePlanRemainderDigest(markdown);
+  validateRunnerControlTasks(context, state, markdown);
+  await recordResultDigestEvidence(context, state, attempt, [
+    {
       role: "binding",
       field: "planRemainderSha256",
       checkId: null,
       path: planPath,
-      declared: obligations.planRemainderSha256,
-      observed: obligations.planRemainderSha256,
+      declared: digest.declared,
+      observed: digest.observed,
       size: null,
       limit: null,
-      matched: true
-    };
-  } catch (error) {
-    const detail = taskVerificationDigestDetail(error);
-    if (detail === null) throw error;
-    if (detail.role !== "binding") throw error;
-    comparison = {
-      role: "binding",
-      field: detail.field,
-      checkId: null,
-      path: planPath,
-      declared: detail.declared,
-      observed: detail.observed,
-      size: null,
-      limit: null,
-      matched: false
-    };
-  }
-  await recordResultDigestEvidence(context, state, attempt, [comparison]);
+      matched: !digest.rewritten,
+      recorded: digest.rewritten
+    }
+  ]);
+  if (digest.rewritten)
+    await replacePlanBytes(
+      context.repoRoot,
+      planPath,
+      planBytes,
+      Buffer.from(digest.plan, "utf8"),
+      (relative) =>
+        new PlanTaskCompletionError(
+          "approved_plan_invalid",
+          `${relative} changed while Banzai was recording its remainder digest. Nothing was written; retry planning.`
+        )
+    );
 }
