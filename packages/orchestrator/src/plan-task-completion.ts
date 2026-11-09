@@ -138,7 +138,6 @@ const PLAN_PROHIBITION = new RegExp(
 // text after it could be a write this form would hide.
 const PLAN_NO_CHANGE =
   /^[^@]*\bno\s+(?:changes?|edits?|modifications?|updates?|writes?)\s+(?:to|in|under)\s+(?:any\s+[^@,]+,\s*)?(?:any\s+)?@\d+@(?:(?:,\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+)(?:any\s+)?@\d+@)*\s*$/iu;
-const PLAN_LIST_CONJUNCTION = /\b(?:and|or)\s+(?:any\s+)?(?=@\d+@)/giu;
 
 function planClauseAccess(
   clause: string,
@@ -149,6 +148,10 @@ function planClauseAccess(
   if (PLAN_NO_CHANGE.test(clause)) return "read";
   const prohibited = PLAN_PROHIBITION.test(clause);
   if (!prohibited && PLAN_WRITE_ACTION.test(clause)) return "write";
+  // The label already says what its entries are, whether paths or descriptions
+  // such as "the reference", in any language. It grants nothing: the hook and
+  // phase scope still decide every write.
+  if (declared === "read") return "read";
   // Do not let a recognized read/prohibition classify a second, unrecognized
   // instruction. Path-only continuations are lists; other prose needs clarity.
   if (
@@ -168,13 +171,6 @@ function planClauseAccess(
     /\b(?:read|inspect|review|compare|consult|check|verify|cat)\b/iu.test(
       clause
     )
-  )
-    return "read";
-  // Structured reference lists also work when explanatory prose is not English.
-  // A conjunction directly before a path only continues the list.
-  if (
-    declared === "read" &&
-    /^[\s\d@,.:-]*$/u.test(clause.replace(PLAN_LIST_CONJUNCTION, ""))
   )
     return "read";
   return "unknown";

@@ -13,7 +13,7 @@ projects. Detailed module behavior belongs in the
   local `banzai` CLI that coordinates planning, implementation, verification
   and independent review with human decisions.
 - The plugin and CLI are independently usable and separately delivered. They
-  share release-train version `2.7.4`, owned by root `package.json.version`.
+  share release-train version `2.8.0`, owned by root `package.json.version`.
 - This repository maintains those products. Its root guidance and manifest
   describe the source workspace; packaged templates describe neither its
   process nor its current implementation.

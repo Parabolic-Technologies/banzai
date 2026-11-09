@@ -761,21 +761,25 @@ test("plan guard keeps prohibitions and reads local to each instruction", () => 
     );
 });
 
-test("plan guard reads a path list joined with and or or under a read-only label", () => {
+test("plan guard takes a read-only label at its word unless the statement names a write", () => {
   for (const body of [
     "Unchanged paths:\n  - `.banzai/**` and `.claude/settings.json`;",
     "Unchanged paths:\n  - `PROJECT_MANIFEST.md` and `.banzai/**`",
     "Unchanged paths:\n  - `.banzai/**`, `a.md`, and `b.md`;",
     "Read-only references: `.banzai/config.json` or `.banzai/runs/`.",
-    "**Unchanged paths:** `.banzai/config.json` and any `.banzai/runs/`"
+    "**Unchanged paths:** `.banzai/config.json` and any `.banzai/runs/`",
+    "Unchanged paths: `AGENTS.md`, the reference, `CLAUDE.md`, `.claude/**`,\n    `.banzai/**`, `package.json`, and accepted ADR bodies.",
+    "Read-only references: `.banzai/config.json` for the configured checks.",
+    "Unchanged paths: `.banzai/**`, which the runner owns."
   ])
     assert.doesNotThrow(() => {
       validatePlanRunnerControlTasks(controlPlan(body), "/project", []);
     }, body);
   for (const body of [
     "`.banzai/config.json` and `a.md`",
-    "Unchanged paths: `.banzai/config.json` and invalidate the cache.",
-    "Unchanged paths:\n  - `.banzai/config.json` and `a.md` must be regenerated",
+    "Unchanged paths: `.banzai/config.json` and update `.banzai/runs/`.",
+    "Unchanged paths: `.banzai/config.json`, then rewrite it.",
+    "Unchanged paths: `.banzai/config.json`.\nFiles: `.banzai/config.json`",
     "Files to change: `.banzai/config.json` and `a.md`"
   ])
     assert.throws(

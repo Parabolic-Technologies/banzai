@@ -158,8 +158,9 @@ Notes on this table:
 ## Checks
 
 All on 2026-11-09. The focused rows describe the WP21 change set. The `verify`
-and candidate rows were rerun after the follow-up fix in
-[change-report.md](change-report.md), so they describe the current tree.
+and candidate rows were rerun after the first follow-up fix in
+[change-report.md](change-report.md), so they describe the tree committed for WP21.
+Later changes and their checks are in that report.
 
 | Check                                                                                             | Result                                                                                                                                                                                                                                                   |
 | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -40,25 +40,25 @@ Status values: `not started` · `ADR draft` · `ADR proposed` · `ADR accepted` 
 
 ## Stage 1 (2.8): daily friction
 
-| WP   | Package                                        | Depends on      | ADR                                             | Work directory                         | Status       | Commit  | Notes                                              |
-| ---- | ---------------------------------------------- | --------------- | ----------------------------------------------- | -------------------------------------- | ------------ | ------- | -------------------------------------------------- |
-| WP1  | Verification failure details and retry warning | —               | none                                            | `wp01-verification-failure-details`    | committed    | d03bc19 | phpcs fixture built; see report deviations         |
-| WP2  | Run every required check in one pass           | —               | 0057 Accepted; amends 0045 (pinned)             | `wp02-full-verification-pass`          | committed    | da624a4 | Full rounds, one retry; helper v4 published by WP4 |
-| WP3  | Verification commands at the plan gate         | —               | none; cite 0049 for instruction change          | `wp03-plan-gate-verification-commands` | committed    | 44f3d03 | Plan gate lists checks; see report deviations      |
-| WP4  | Re-check human edits at the plan gate          | —               | 0058 Accepted; amends 0051 and 0055 (pinned)    | `wp04-plan-gate-edit-recheck`          | committed    | 04abf55 | Control 9.0.0 with recheck and helper v4           |
-| WP5  | Install guide, plugin scope, doctor hint       | —               | none; stay within 0008                          | `wp05-install-guide-plugin-scope`      | committed    | 5c89c1c | Doctor JSON contract version bump                  |
-| WP6  | Local model override                           | —               | 0060 Accepted; amends 0008                      | `wp06-local-model-override`            | committed    | e26ea54 | One change set; see report deviations              |
-| WP19 | Initiative skill with brief and tracker        | —               | 0061 Accepted; amends 0054 (pinned), 0041, 0036 | `wp19-initiative-skill`                | committed    | 138b206 | Outside the brief; template overlaps WP12          |
-| WP20 | Memory notes: no gate prompt, no code unlock   | —               | 0062 accepted; authority for the pinned hook    | `wp20-spec-gate-memory-notes`          | committed    | ebfcd3e | Pinned hook; template shared with WP19, WP12       |
-| WP7  | Claude as the default reviewer, with isolation | WP6 recommended | 0059 Accepted; amends 0042 §7, 0037, 0002       | `wp07-claude-default-reviewer`         | committed    | d0785db | Live run at Gate 1 needs go-ahead                  |
-| WP8  | Stable Claude phases                           | —               | 0063 Accepted; amends 0020, 0022, 0059          | `wp08-stable-claude-phases`            | committed    | 2cc3954 | Gate 1 probe needs the owner's run                 |
-| WP21 | Runner-recorded plan digest, planning retry    | —               | 0064, 0065 Accepted; amend 0051, 0058, 0036     | `wp21-planner-digest-and-retry`        | report ready |         | Outside the brief; owner-run incident              |
+| WP   | Package                                        | Depends on      | ADR                                             | Work directory                         | Status    | Commit  | Notes                                              |
+| ---- | ---------------------------------------------- | --------------- | ----------------------------------------------- | -------------------------------------- | --------- | ------- | -------------------------------------------------- |
+| WP1  | Verification failure details and retry warning | —               | none                                            | `wp01-verification-failure-details`    | committed | d03bc19 | phpcs fixture built; see report deviations         |
+| WP2  | Run every required check in one pass           | —               | 0057 Accepted; amends 0045 (pinned)             | `wp02-full-verification-pass`          | committed | da624a4 | Full rounds, one retry; helper v4 published by WP4 |
+| WP3  | Verification commands at the plan gate         | —               | none; cite 0049 for instruction change          | `wp03-plan-gate-verification-commands` | committed | 44f3d03 | Plan gate lists checks; see report deviations      |
+| WP4  | Re-check human edits at the plan gate          | —               | 0058 Accepted; amends 0051 and 0055 (pinned)    | `wp04-plan-gate-edit-recheck`          | committed | 04abf55 | Control 9.0.0 with recheck and helper v4           |
+| WP5  | Install guide, plugin scope, doctor hint       | —               | none; stay within 0008                          | `wp05-install-guide-plugin-scope`      | committed | 5c89c1c | Doctor JSON contract version bump                  |
+| WP6  | Local model override                           | —               | 0060 Accepted; amends 0008                      | `wp06-local-model-override`            | committed | e26ea54 | One change set; see report deviations              |
+| WP19 | Initiative skill with brief and tracker        | —               | 0061 Accepted; amends 0054 (pinned), 0041, 0036 | `wp19-initiative-skill`                | committed | 138b206 | Outside the brief; template overlaps WP12          |
+| WP20 | Memory notes: no gate prompt, no code unlock   | —               | 0062 accepted; authority for the pinned hook    | `wp20-spec-gate-memory-notes`          | committed | ebfcd3e | Pinned hook; template shared with WP19, WP12       |
+| WP7  | Claude as the default reviewer, with isolation | WP6 recommended | 0059 Accepted; amends 0042 §7, 0037, 0002       | `wp07-claude-default-reviewer`         | committed | d0785db | Live run at Gate 1 needs go-ahead                  |
+| WP8  | Stable Claude phases                           | —               | 0063 Accepted; amends 0020, 0022, 0059          | `wp08-stable-claude-phases`            | committed | 2cc3954 | Gate 1 probe needs the owner's run                 |
+| WP21 | Runner-recorded plan digest, planning retry    | —               | 0064, 0065 Accepted; amend 0051, 0058, 0036     | `wp21-planner-digest-and-retry`        | committed | d84ba84 | Outside the brief; owner-run incident              |
 
 ### Gate 1
 
-Report: `gate-1-report.md` (not written).
+Report: [`gate-1-report.md`](gate-1-report.md), waiting for the owner.
 
-- [ ] phpcs fixture: the command is visible at the plan gate; the blocked
+- [x] phpcs fixture: the command is visible at the plan gate; the blocked
       summary shows argv, exit code, stderr tail and log paths; every required
       check ran; Retry warns about a deterministic failure.
 - [ ] A prose edit to plan.md is re-checked and approved without manual
@@ -68,7 +68,7 @@ Report: `gate-1-report.md` (not written).
       gets Claude as the default reviewer.
 - [ ] `npm run verify` is green, and the owner-authorized live scenarios pass
       on Claude Code 2.1.290 and on the current release.
-- [ ] The release train is set to the 2.8 version with
+- [x] The release train is set to the 2.8 version with
       `npm run version:set`, and `npm run release:validate` passes.
 - [ ] A new initiative started through the WP19 skill keeps its brief,
       tracker and gate reports in `documentation/initiatives/<slug>/`, while
@@ -86,7 +86,7 @@ Report: `gate-1-report.md` (not written).
       emit exactly one `result` event and exit 0. Run
       `node packages/orchestrator/scripts/gate-1-probe.mjs --repository <scratch>`
       per `documentation/work/wp08-stable-claude-phases/gate-1-probe.md`.
-- [ ] WP21, after ADR-0064 and ADR-0065 are accepted: a strict run with the
+- [x] WP21, after ADR-0064 and ADR-0065 are accepted: a strict run with the
       default Claude planner and no shell allow rules reaches the plan gate
       with a remainder digest the runner recorded, and a planner-declared
       planning block continues with `banzai retry`.
@@ -381,6 +381,27 @@ every local branch and every local worktree.
   stays unticked for the owner. The run's current block is outside WP21: proto
   0.58.2 launches `bin/pnpm.cjs`, which pnpm 12.18.0 no longer ships, and the
   running CLI kept the Node 24 `PATH` it started with.
+
+- 2026-11-09: WP21 committed as `d84ba84`, which completes Stage 1. On the
+  owner's go-ahead, the release train moved to `2.8.0` and `npm run
+release:validate` passes, so the deferred `HOOK_CHANGED_WITHOUT_VERSION_BUMP`
+  is gone. See the [change report](../release-2-8-0/change-report.md). The Gate 1
+  report is written, and the gate waits for the owner.
+
+- 2026-11-09: A new owner run in the same project failed planning on a third
+  runner-control false positive, descriptive entries under `Unchanged paths:`. On
+  the owner's request the check now takes a read-only label at its word unless the
+  statement names a recognized write. The fix is in the working tree on top of
+  `d84ba84`, so the 2.8.0 candidate must include it. See the WP21
+  [change report](../wp21-planner-digest-and-retry/change-report.md).
+
+- 2026-11-09: `Yes, it's enough`. The owner accepts the phpcs fixture replay as
+  the evidence for the first Gate 1 item, although no model or real phpcs took
+  part. That item is ticked, and the other eight stay open.
+
+- 2026-11-09: `Accept both`. The owner accepts the release-train item and the WP21
+  item on the Gate 1 report's evidence, and both are ticked. Six items stay open:
+  the prose edit re-check and the five that need the owner's run.
 
 ## Open questions left to the owner by the brief
 
