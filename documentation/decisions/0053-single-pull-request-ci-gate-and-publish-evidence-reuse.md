@@ -337,6 +337,13 @@ Risks and required follow-ups:
   permissions, cadence, cancellation and live authorization remain unchanged.
   ADR-0056's implementation state is Planned pending final reconciliation and
   review.
+- Amended by
+  [ADR-0067](./0067-node-26-supported-release-lane.md), accepted 2026-11-10:
+  "both required lanes" means every required lane in `release-policy.json`,
+  now Node 22.20.0, 24.11.1 and 26.13.0, for evidence binding and the publish
+  fallback; the advisory forward lane and the weekly schedule are retired.
+  Evidence identity, permissions, cancellation and live authorization are
+  unchanged.
 - Supersedes: None while Proposed. If accepted, it supersedes only ADR-0039's
   provision that the publish job runs `release:check` on the tag before every
   publication. The rest of ADR-0039 stays.

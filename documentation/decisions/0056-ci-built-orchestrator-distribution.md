@@ -265,4 +265,8 @@ Implementation and review must confirm:
   [review 3](../work/ci-built-orchestrator-dist/review-3.md) resolved R2-F1 with
   verdict `pass`. This source implementation state does not assert hosted CI
   execution, npm publication or registry delivery.
+- Amended by
+  [ADR-0067](./0067-node-26-supported-release-lane.md), accepted 2026-11-10:
+  the exact required lanes are Node 22.20.0, 24.11.1 and 26.13.0. Per-lane
+  source builds, the Node 22 target and the publishing build are unchanged.
 - Superseded by: None.

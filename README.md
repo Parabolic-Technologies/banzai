@@ -44,8 +44,8 @@ Runs through your existing subscriptions. No API keys required.
 
 Use a regular terminal in your own Git repository. You need:
 
-- macOS or Linux, Git, and Node.js **22.20.0+ within major 22** or
-  **24.11.1+ within major 24**;
+- macOS or Linux, Git, and Node.js **22.20.0+ within major 22**,
+  **24.11.1+ within major 24** or **26.13.0+ within major 26**;
 - **Claude Code 2.1.290+** for every Claude role, signed in through an
   individual subscription, and the **Codex CLI** only for roles you assign to
   Codex;

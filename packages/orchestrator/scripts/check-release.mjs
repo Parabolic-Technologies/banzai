@@ -236,7 +236,7 @@ function validatePolicyShape(policy) {
   const node = record(root.node, policyPath, "node");
   requireExact(
     node.engines,
-    ">=22.20.0 <23 || >=24.11.1 <25",
+    ">=22.20.0 <23 || >=24.11.1 <25 || >=26.13.0 <27",
     "NODE_POLICY_DRIFT",
     policyPath,
     "engines"
@@ -249,17 +249,19 @@ function validatePolicyShape(policy) {
     "build target"
   );
   const supported = array(node.supported, policyPath, "node.supported");
-  if (supported.length !== 2) {
+  // ADR-0067: exactly three required supported lanes and no forward lane.
+  const expectedSupported = [
+    [22, "22.20.0", "node:22.20.0-bookworm", "release_check_node_22"],
+    [24, "24.11.1", "node:24.11.1-bookworm", "release_check_node_24"],
+    [26, "26.13.0", "node:26.13.0-bookworm", "release_check_node_26"]
+  ];
+  if (supported.length !== expectedSupported.length) {
     fail(
       "NODE_POLICY_DRIFT",
       policyPath,
-      "exactly two supported lanes are required"
+      "exactly three supported lanes are required"
     );
   }
-  const expectedSupported = [
-    [22, "22.20.0", "node:22.20.0-bookworm", "release_check_node_22"],
-    [24, "24.11.1", "node:24.11.1-bookworm", "release_check_node_24"]
-  ];
   for (const [index, expected] of expectedSupported.entries()) {
     const lane = record(
       supported[index],
@@ -278,25 +280,10 @@ function validatePolicyShape(policy) {
       );
     }
   }
-  const forward = record(node.forward, policyPath, "node.forward");
-  const expectedForward = [
-    26,
-    "26.7.0",
-    "node:26.7.0-bookworm",
-    "forward_compatibility_node_26"
-  ];
-  if (
-    JSON.stringify([
-      forward.major,
-      forward.version,
-      forward.image,
-      forward.job
-    ]) !== JSON.stringify(expectedForward) ||
-    forward.required !== false
-  ) {
+  if (Object.hasOwn(node, "forward")) {
     fail("NODE_POLICY_DRIFT", policyPath, "forward lane is not accepted");
   }
-  for (const lane of [...supported, forward]) {
+  for (const lane of supported) {
     if (!/^node:\d+\.\d+\.\d+-bookworm$/.test(lane.image)) {
       fail(
         "NODE_POLICY_DRIFT",
@@ -1214,7 +1201,15 @@ async function validateHookRuntimeVersion(root, releaseVersion) {
 }
 
 const ciWorkflow = ".github/workflows/ci.yml";
-const ciSchedule = "17 5 * * 1";
+
+// ADR-0039 and ADR-0067: evidence checking, publishing and the live lane keep
+// the Node 24 runtime while the supported matrix grows.
+const toolingLaneJob = "release_check_node_24";
+
+function toolingNodeVersion(policy) {
+  return policy.node.supported.find((lane) => lane.job === toolingLaneJob)
+    .version;
+}
 
 function jobBlock(source, job) {
   const escaped = job.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1236,18 +1231,14 @@ function requireJobText(block, expected, job, label) {
   }
 }
 
-// ADR-0053: each deterministic lane must be exactly its approved job. Any
-// added line, in any YAML spelling of a key (a quoted or escaped `if`, for
+// ADR-0053 and ADR-0067: each required lane must be exactly its approved job.
+// Any added line, in any YAML spelling of a key (a quoted or escaped `if`, for
 // example), could change when the lane runs or skip its gate, so the lane is
 // compared as whole text instead of matching keys by pattern.
 function ciLaneDefinition(lane) {
   return [
-    lane.required === true
-      ? "    if: github.event_name != 'schedule'"
-      : "    if: github.event_name != 'pull_request'",
     "    runs-on: ubuntu-24.04",
     `    container: ${lane.image}`,
-    ...(lane.required === true ? [] : ["    continue-on-error: true"]),
     "    steps:",
     "      - uses: actions/checkout@v6",
     "        with:",
@@ -1257,18 +1248,14 @@ function ciLaneDefinition(lane) {
     '      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"',
     "      - run: npm ci",
     "      - run: npm run release:check",
-    ...(lane.required === true
-      ? [
-          "      - id: release_evidence",
-          "        run: node packages/orchestrator/scripts/release-evidence.mjs record",
-          "      - uses: actions/upload-artifact@v7",
-          "        with:",
-          "          name: ${{ steps.release_evidence.outputs.name }}",
-          "          path: ${{ steps.release_evidence.outputs.path }}",
-          "          if-no-files-found: error",
-          "          retention-days: 30"
-        ]
-      : [])
+    "      - id: release_evidence",
+    "        run: node packages/orchestrator/scripts/release-evidence.mjs record",
+    "      - uses: actions/upload-artifact@v7",
+    "        with:",
+    "          name: ${{ steps.release_evidence.outputs.name }}",
+    "          path: ${{ steps.release_evidence.outputs.path }}",
+    "          if-no-files-found: error",
+    "          retention-days: 30"
   ].join("\n");
 }
 
@@ -1285,9 +1272,7 @@ async function validateCi(root, policy) {
     `      ${policy.ci.liveInput}:`,
     "        description: Run live vendor compatibility on the dedicated protected runner",
     "        type: boolean",
-    "        default: false",
-    "  schedule:",
-    `    - cron: "${ciSchedule}"`
+    "        default: false"
   ].join("\n");
   if (
     source
@@ -1297,7 +1282,7 @@ async function validateCi(root, policy) {
     fail(
       "CI_POLICY_DRIFT",
       ciWorkflow,
-      "expected pull_request, opt-in manual and weekly schedule triggers"
+      "expected pull_request and opt-in manual triggers"
     );
   }
   // ADR-0053: a newer push cancels only the older run of the same pull
@@ -1318,7 +1303,7 @@ async function validateCi(root, policy) {
     "read-only permissions and pull-request-only cancellation"
   );
 
-  const lanes = [...policy.node.supported, policy.node.forward];
+  const lanes = policy.node.supported;
   const liveJob = nonEmptyString(
     policy.ci.liveJob,
     "release-policy.json",
@@ -1338,7 +1323,7 @@ async function validateCi(root, policy) {
     fail(
       "CI_POLICY_DRIFT",
       ciWorkflow,
-      "expected exactly the supported, forward and live jobs"
+      "expected exactly the supported and live jobs"
     );
   }
   for (const lane of lanes) {
@@ -1383,16 +1368,8 @@ async function validateCi(root, policy) {
     if (/^\s+needs:/m.test(block)) {
       fail("CI_POLICY_DRIFT", ciWorkflow, `${lane.job} must run independently`);
     }
-    if (lane.required === true && /continue-on-error:/.test(block)) {
+    if (/continue-on-error:/.test(block)) {
       fail("CI_POLICY_DRIFT", ciWorkflow, `${lane.job} must be required`);
-    }
-    if (lane.required === false) {
-      requireJobText(
-        block,
-        "    continue-on-error: true",
-        lane.job,
-        "advisory flag"
-      );
     }
     if (/\b(?:codex|claude|auth|compatibility:live|banzai)\b/i.test(block)) {
       fail(
@@ -1445,7 +1422,7 @@ async function validateCi(root, policy) {
     ],
     ["      - uses: actions/setup-node@v6", "Node setup"],
     [
-      `          node-version: ${policy.node.supported.at(-1).version}`,
+      `          node-version: ${toolingNodeVersion(policy)}`,
       "supported live runtime"
     ],
     ["          package-manager-cache: false", "disabled automatic cache"],
@@ -1493,13 +1470,13 @@ const releaseGuard =
   "github.event.release.draft == false && github.event.release.prerelease == false";
 
 // ADR-0053: publication either reuses bound pull-request evidence or runs the
-// complete gate on both supported lanes, and only the publishing job can mint
+// complete gate on every supported lane, and only the publishing job can mint
 // an OIDC token. Any added line, in any YAML spelling of a key (a quoted or
 // escaped `if`, for example), could weaken that, so the validator owns the
 // whole file as exact text instead of matching keys by pattern.
 function publishDefinition(policy) {
   const lanes = policy.node.supported;
-  const node = `          node-version: ${lanes.at(-1).version}`;
+  const node = `          node-version: ${toolingNodeVersion(policy)}`;
   const evidence = [
     "name: Publish",
     "",
@@ -1563,7 +1540,10 @@ function publishDefinition(policy) {
     .join(" && ");
   const publish = [
     `  ${publishJob}:`,
-    `    needs: [${[evidenceJob, ...lanes.map((lane) => lane.job)].join(", ")}]`,
+    "    needs:",
+    ...[evidenceJob, ...lanes.map((lane) => lane.job)].map(
+      (job) => `      - ${job}`
+    ),
     "    if: >-",
     "      !cancelled() &&",
     `      ${releaseGuard} &&`,
@@ -1665,14 +1645,7 @@ function renderPolicyBlock(policy) {
       `\`${lane.image}\``,
       `\`${lane.job}\``,
       "required"
-    ]),
-    [
-      "Forward compatibility",
-      policy.node.forward.version,
-      `\`${policy.node.forward.image}\``,
-      `\`${policy.node.forward.job}\``,
-      "advisory"
-    ]
+    ])
   ];
   const widths = rows[0].map((_, index) =>
     Math.max(...rows.map((row) => row[index].length))

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "node": {
-    "engines": ">=22.20.0 <23 || >=24.11.1 <25",
+    "engines": ">=22.20.0 <23 || >=24.11.1 <25 || >=26.13.0 <27",
     "buildTarget": "node22",
     "supported": [
       {
@@ -17,15 +17,15 @@
         "image": "node:24.11.1-bookworm",
         "job": "release_check_node_24",
         "required": true
+      },
+      {
+        "major": 26,
+        "version": "26.13.0",
+        "image": "node:26.13.0-bookworm",
+        "job": "release_check_node_26",
+        "required": true
       }
-    ],
-    "forward": {
-      "major": 26,
-      "version": "26.7.0",
-      "image": "node:26.7.0-bookworm",
-      "job": "forward_compatibility_node_26",
-      "required": false
-    }
+    ]
   },
   "plugin": {
     "versionMirrors": [

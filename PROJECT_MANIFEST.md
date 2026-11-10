@@ -28,9 +28,10 @@ projects. Detailed module behavior belongs in the
 - Language: TypeScript `^5.9.0` for the orchestrator; builtin-only ESM modules
   and CommonJS hook/helper entry points for the plugin; Markdown guidance and
   JSON Schema contracts. No application framework is installed.
-- Runtime: Node.js `>=22.20.0 <23 || >=24.11.1 <25` on macOS or Linux.
-  [release-policy.json](release-policy.json) pins required Node `22.20.0` and
-  `24.11.1` lanes and advisory Node `26.7.0`. esbuild targets `node22`, ESM and
+- Runtime: Node.js `>=22.20.0 <23 || >=24.11.1 <25 || >=26.13.0 <27` on macOS
+  or Linux. [release-policy.json](release-policy.json) pins required Node
+  `22.20.0`, `24.11.1` and `26.13.0` lanes and no forward lane (ADR-0067).
+  esbuild targets `node22`, ESM and
   the Node platform.
 - Package manager: npm workspaces, `workspaces: ["packages/*"]`, with root
   `package-lock.json` at `lockfileVersion: 3`.
@@ -72,13 +73,14 @@ projects. Detailed module behavior belongs in the
 - `npm run banzai` runs the local bundle. `npm run install:orchestrator`
   builds and links `@parabolic-technologies/banzai` for local CLI use.
 - [.github/workflows/ci.yml](.github/workflows/ci.yml) runs the complete
-  release gate on both supported Node lanes for pull requests and manual
-  dispatch. The advisory forward lane runs on weekly schedule or dispatch;
-  the live lane additionally requires explicit protected-runner authorization.
+  release gate on all three supported Node lanes for pull requests and manual
+  dispatch; it has no scheduled run. The live lane additionally requires
+  explicit protected-runner authorization.
   Branch pushes alone start no workflow.
 - [.github/workflows/publish.yml](.github/workflows/publish.yml) handles
-  published stable GitHub Releases. It reuses tree-bound evidence from both
-  required PR lanes when valid, otherwise runs both lanes on the release tag.
+  published stable GitHub Releases. It reuses tree-bound evidence from all
+  required PR lanes when valid, otherwise runs every supported lane on the
+  release tag. Evidence checking and publishing run on Node 24.11.1.
   The publishing job builds its own bundle and uses npm trusted publishing
   for the CLI workspace. Plugin installation and registry availability have
   separate delivery evidence in
@@ -613,3 +615,4 @@ delivery or installation.
 | ADR-0064 | Runner-recorded plan remainder digest                              | [Source](documentation/decisions/0064-runner-recorded-plan-remainder-digest.md)                  | Implemented |
 | ADR-0065 | Continuable planner-declared planning blocks                       | [Source](documentation/decisions/0065-continuable-planner-declared-planning-blocks.md)           | Implemented |
 | ADR-0066 | Date-prefixed work and initiative slugs                            | [Source](documentation/decisions/0066-date-prefixed-work-and-initiative-slugs.md)                | Implemented |
+| ADR-0067 | Node 26 supported release lane                                     | [Source](documentation/decisions/0067-node-26-supported-release-lane.md)                         | Implemented |

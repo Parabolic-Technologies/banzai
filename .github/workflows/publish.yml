@@ -74,13 +74,38 @@ jobs:
       - run: npm ci
       - run: npm run release:check
 
+  release_check_node_26:
+    needs: release_evidence
+    if: >-
+      !cancelled() &&
+      github.event.release.draft == false && github.event.release.prerelease == false &&
+      needs.release_evidence.outputs.bound != 'true'
+    runs-on: ubuntu-24.04
+    container: node:26.13.0-bookworm
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+      - run: git --version
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: npm ci
+      - run: npm run release:check
+
   publish_npm:
-    needs: [release_evidence, release_check_node_22, release_check_node_24]
+    needs:
+      - release_evidence
+      - release_check_node_22
+      - release_check_node_24
+      - release_check_node_26
     if: >-
       !cancelled() &&
       github.event.release.draft == false && github.event.release.prerelease == false &&
       ((needs.release_evidence.result == 'success' && needs.release_evidence.outputs.bound == 'true') ||
-      (needs.release_check_node_22.result == 'success' && needs.release_check_node_24.result == 'success'))
+      (needs.release_check_node_22.result == 'success' && needs.release_check_node_24.result == 'success' && needs.release_check_node_26.result == 'success'))
     runs-on: ubuntu-24.04
     environment: npm
     timeout-minutes: 30

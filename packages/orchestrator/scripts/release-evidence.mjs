@@ -423,7 +423,7 @@ async function verify() {
         ? error.message
         : "the evidence check failed unexpectedly";
     outputs = "bound=false\n";
-    summary = `Release evidence not bound: ${reason}. The complete release gate runs on both supported lanes.`;
+    summary = `Release evidence not bound: ${reason}. The complete release gate runs on every supported lane.`;
   }
   await appendFile(config.outputFile, outputs, "utf8");
   await appendFile(config.summaryFile, `${summary}\n`, "utf8");

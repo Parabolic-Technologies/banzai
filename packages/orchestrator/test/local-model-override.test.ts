@@ -1739,42 +1739,45 @@ async function profilePrerequisite(root: string) {
 test("a profile-mode run at a configuration prerequisite compares its record on resume", async () => {
   const repository = await createTestRepository({ ignoreLocalConfig: true });
   try {
-    const f = await profilePrerequisite(repository.root);
-    const calls = modelCalls(f.adapters);
-    // Persisted work bound before binding v3 cannot resume execution, and
-    // every route into the prerequisite (resume, an answer, banzai verify)
-    // checks the bound work first. So the prerequisite is never satisfied
-    // and no review starts; with recorded models resume reaches that check.
-    const historical = {
-      code: "ARTIFACT_VERSION_UNSUPPORTED",
-      message: /^Historical work can be inspected but cannot resume execution/u
-    };
-    const recorded = await banzaiBytes(repository.root);
-    await assert.rejects(f.runner.resume(), historical);
-    await assert.rejects(
-      f.runner.answerConfigurationPrerequisite(f.answer, false),
-      historical
-    );
-    assert.deepEqual(await banzaiBytes(repository.root), recorded);
+    await withVendorExecutablesOnPath(async () => {
+      const f = await profilePrerequisite(repository.root);
+      const calls = modelCalls(f.adapters);
+      // Persisted work bound before binding v3 cannot resume execution, and
+      // every route into the prerequisite (resume, an answer, banzai verify)
+      // checks the bound work first. So the prerequisite is never satisfied
+      // and no review starts; with recorded models resume reaches that check.
+      const historical = {
+        code: "ARTIFACT_VERSION_UNSUPPORTED",
+        message:
+          /^Historical work can be inspected but cannot resume execution/u
+      };
+      const recorded = await banzaiBytes(repository.root);
+      await assert.rejects(f.runner.resume(), historical);
+      await assert.rejects(
+        f.runner.answerConfigurationPrerequisite(f.answer, false),
+        historical
+      );
+      assert.deepEqual(await banzaiBytes(repository.root), recorded);
 
-    // A changed local layer refuses at resume entry, before the bound work
-    // is read. An answer refuses at its bound-work check, which comes first.
-    await writeLocalModels(repository.root, DRIFTED);
-    const drifted = await banzaiBytes(repository.root);
-    await assert.rejects(
-      f.runner.resume(),
-      changedFrom(LOCAL_REVIEWER, DRIFTED)
-    );
-    await assert.rejects(
-      f.runner.answerConfigurationPrerequisite(f.answer, false),
-      historical
-    );
-    assert.deepEqual(await banzaiBytes(repository.root), drifted);
-    assert.deepEqual(
-      await recordedLayer(f.runner, f.gate.runId),
-      LOCAL_REVIEWER
-    );
-    assert.deepEqual(modelCalls(f.adapters), calls);
+      // A changed local layer refuses at resume entry, before the bound work
+      // is read. An answer refuses at its bound-work check, which comes first.
+      await writeLocalModels(repository.root, DRIFTED);
+      const drifted = await banzaiBytes(repository.root);
+      await assert.rejects(
+        f.runner.resume(),
+        changedFrom(LOCAL_REVIEWER, DRIFTED)
+      );
+      await assert.rejects(
+        f.runner.answerConfigurationPrerequisite(f.answer, false),
+        historical
+      );
+      assert.deepEqual(await banzaiBytes(repository.root), drifted);
+      assert.deepEqual(
+        await recordedLayer(f.runner, f.gate.runId),
+        LOCAL_REVIEWER
+      );
+      assert.deepEqual(modelCalls(f.adapters), calls);
+    });
   } finally {
     await repository.dispose();
   }

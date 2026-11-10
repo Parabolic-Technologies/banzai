@@ -130,8 +130,8 @@ metadata does not imply shared installation or publication.
 
 ## Boundaries
 
-- macOS or Linux with Node.js 22.20.0+ within major 22 or Node.js 24.11.1+
-  within major 24;
+- macOS or Linux with Node.js 22.20.0+ within major 22, 24.11.1+ within
+  major 24, or 26.13.0+ within major 26;
 - a local `claude` 2.1.290+ executable for every Claude role, and `codex`
   0.145.0+ when a role uses it, or the newer release a configured model needs
   (see [Model Configuration](#model-configuration));
@@ -361,20 +361,21 @@ formatting to the unchanged `verify` gate, rejects tracked byte or mode mutation
 
 <!-- release-policy:start -->
 
-Engines: `>=22.20.0 <23 || >=24.11.1 <25`
+Engines: `>=22.20.0 <23 || >=24.11.1 <25 || >=26.13.0 <27`
 
 Version authority: `package.json#/version`; 9 fields in 7 files.
 
-| Evidence              | Node    | Image                   | GitHub Actions job              | Policy   |
-| --------------------- | ------- | ----------------------- | ------------------------------- | -------- |
-| Supported (blocking)  | 22.20.0 | `node:22.20.0-bookworm` | `release_check_node_22`         | required |
-| Supported (blocking)  | 24.11.1 | `node:24.11.1-bookworm` | `release_check_node_24`         | required |
-| Forward compatibility | 26.7.0  | `node:26.7.0-bookworm`  | `forward_compatibility_node_26` | advisory |
+| Evidence             | Node    | Image                   | GitHub Actions job      | Policy   |
+| -------------------- | ------- | ----------------------- | ----------------------- | -------- |
+| Supported (blocking) | 22.20.0 | `node:22.20.0-bookworm` | `release_check_node_22` | required |
+| Supported (blocking) | 24.11.1 | `node:24.11.1-bookworm` | `release_check_node_24` | required |
+| Supported (blocking) | 26.13.0 | `node:26.13.0-bookworm` | `release_check_node_26` | required |
 
 <!-- release-policy:end -->
 
 The supported lanes are blocking and each runs `npm ci` plus the full local
-gate. Node 26 is advisory forward compatibility. A required environment
+gate ([ADR-0067](decisions/0067-node-26-supported-release-lane.md)). Node 23,
+25 and 27 have no lane and no support claim. A required environment
 failure remains missing evidence rather than becoming a product pass.
 The images are the Git-capable official Bookworm variants. Each lane runs
 `git --version` and registers `$GITHUB_WORKSPACE` as a Git `safe.directory`
@@ -384,8 +385,8 @@ which Git otherwise rejects as dubious ownership.
 
 The workflow is [`.github/workflows/ci.yml`](https://github.com/Parabolic-Technologies/banzai/blob/main/.github/workflows/ci.yml)
 ([ADR-0053](decisions/0053-single-pull-request-ci-gate-and-publish-evidence-reuse.md)).
-The supported lanes run on pull requests and manual dispatch; the Node 26 lane
-runs on a weekly schedule and manual dispatch, never on pull requests. A push
+The supported lanes run on pull requests and manual dispatch; the workflow has
+no scheduled run. A push
 to `main` or `dev` starts no hosted run, and a newer push to a pull request
 cancels that pull request's in-progress run. After `release:check` passes, each
 supported lane records the tree it verified as a 30-day
@@ -394,13 +395,14 @@ supported lane records the tree it verified as a 30-day
 Publication through `.github/workflows/publish.yml` reuses that evidence only
 when the release tag is a merge commit whose tree equals its second parent's,
 and a successful pull-request run of this repository's `ci.yml` for that parent
-has both supported lanes' evidence for the tag's tree in its latest attempt.
-Otherwise both supported lanes run the complete `release:check` on the tag
+has every supported lane's evidence for the tag's tree in its latest attempt.
+Otherwise every supported lane runs the complete `release:check` on the tag
 before anything is published. The `release_evidence` job summary states which
 path ran. `npm run release:validate` owns the layout of both workflows.
 
 Where the GitHub plan offers branch protection or rulesets, require
-`release_check_node_22` and `release_check_node_24` after GitHub has reported
+`release_check_node_22`, `release_check_node_24` and `release_check_node_26`
+after GitHub has reported
 those checks; this private repository on GitHub Free has neither, so the
 publication gate is the mechanical release enforcement. Workflow YAML does not
 configure repository merge rules. Validate workflow syntax locally with
@@ -416,7 +418,7 @@ that machine. Keep the live job disabled if that protected runner boundary is
 unavailable. Once provisioned, set repository variable
 `BANZAI_LIVE_COMPATIBILITY` to `1`, select **Run workflow** on a protected ref,
 and enable the `live_compatibility` input. The job requires all three conditions
-and is skipped on pull request and schedule events. Node setup disables automatic
+and is skipped on pull request events. Node setup disables automatic
 npm caching, checkout disables persisted credentials, and no artifact upload
 is configured. GitHub runner provisioning and authenticated live execution
 require their own evidence.

@@ -301,5 +301,9 @@ Implementation and review must confirm:
   publication path proves both supported lanes, and merge policy applies
   without GitHub enforcement. Required and advisory classification is
   unchanged. Implementation of this amendment is Planned.
+- Amended by
+  [ADR-0067](./0067-node-26-supported-release-lane.md), accepted 2026-11-10:
+  the Node 26 forward lane leaves the Advisory set because Node 26 becomes a
+  required lane. Failure classification and release authority are unchanged.
 - Supersedes: None
 - Superseded by: None in full

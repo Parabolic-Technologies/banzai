@@ -13,7 +13,8 @@ For skills directly in one client, follow [Use only the plugin](#use-only-the-pl
 For the CLI workflow, you need:
 
 - **macOS or Linux**, Git, and a regular terminal with interactive input/output.
-- **Node.js 22.20.0+ within major 22**, or **24.11.1+ within major 24**.
+- **Node.js 22.20.0+ within major 22**, **24.11.1+ within major 24**, or
+  **26.13.0+ within major 26**.
 - The model clients for your selected providers, signed in through individual
   subscriptions. The default configuration uses **Claude Code 2.1.290+** for
   planning, implementation and review. You need the **Codex CLI** only when you

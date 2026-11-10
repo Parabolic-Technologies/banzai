@@ -258,5 +258,11 @@ Implementation and review must confirm:
   accepted 2026-10-01: the advisory forward lane runs on a weekly schedule and
   on manual dispatch instead of on every pull request. Supported and forward
   pins are unchanged. Implementation of this amendment is Planned.
+- Partially superseded by
+  [ADR-0067](./0067-node-26-supported-release-lane.md), accepted 2026-11-10:
+  the two-major support set and engines value in Decision, the Node 26 forward
+  lane, and Compliance items 1, 2 and 4. Node 26 from 26.13.0 becomes a third
+  required lane and the forward lane is retired. Exact pinning, policy
+  validation, the Node 22 target and the new-major ADR rule remain.
 - Supersedes: None
 - Superseded by: None in full
