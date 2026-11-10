@@ -43,7 +43,9 @@ export async function recordResultDigestEvidence(
   attempt: AttemptReference,
   comparisons: ResultDigestComparison[]
 ): Promise<ResultDigestEvidence> {
-  const rejected = comparisons.filter((comparison) => !comparison.matched);
+  const rejected = comparisons.filter(
+    (comparison) => !comparison.matched && !comparison.recorded
+  );
   const evidence = await context.store.establishResultDigestEvidence(
     state.runId,
     {
@@ -110,17 +112,24 @@ export async function digestRejectionReason(
   }
   // Only a comparison of this exact identity establishes a cause. A baseline
   // that never covered it — the selection classified it differently then —
-  // leaves the history unknown exactly as an absent record does.
+  // leaves the history unknown exactly as an absent record does. The plan
+  // remainder names no path in its failure, so its field identifies it, and
+  // a remainder the runner wrote is known by the value it wrote (ADR-0064).
   const recorded =
     baseline?.comparisons.find(
       (comparison) =>
         comparison.checkId === detail.checkId &&
-        comparison.path === detail.path &&
-        comparison.declared === detail.declared
+        (detail.path === null
+          ? comparison.field === detail.field
+          : comparison.path === detail.path) &&
+        (comparison.recorded ? comparison.observed : comparison.declared) ===
+          detail.declared
     ) ?? null;
   if (recorded === null) {
     return `${DIGEST_UNRESOLVED_BLOCK_PREFIX} ${base} This run recorded no acceptance baseline for that digest, so whether it ever matched is unknown.`;
   }
+  if (recorded.recorded)
+    return `${base} It matched when the runner recorded it at acceptance, so the source changed after acceptance.`;
   // Only a recorded match makes the bytes restorable to a known target, so
   // only that case leaves an action an operator can actually take.
   return recorded.matched

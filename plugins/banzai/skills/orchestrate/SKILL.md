@@ -34,7 +34,7 @@ is a runner-owned phase and follow only its assigned Banzai phase skill.
 ## Establish the control boundary
 
 1. Run `banzai control capabilities` before any state-changing command.
-2. Require the exact supported v8 declaration in the reference. Treat missing
+2. Require the exact supported v9 declaration in the reference. Treat missing
    executable, non-zero exit, stderr error, malformed JSON, unsupported
    identity/version, or a missing operation as incompatible.
 3. Stop with a bounded diagnostic when incompatible. Do not install Banzai,
@@ -113,6 +113,9 @@ rewrite, complete, or infer a decision.
   never require this configuration gate.
 - At ADR and plan gates show the exact artifacts and offered decisions. Relay
   approve, accept and reject through their existing argv approval commands.
+  Relay a plan re-check as `banzai approve plan --decision recheck` only on the
+  current human's explicit request after they edited the plan files; never
+  edit planning files yourself, and a re-check never approves.
   Rework and independent review use `banzai-agent-gate-decision/v1` through
   direct stdin to `banzai control decide`; preserve exact owner feedback and
   selected paths, without inventing a decision or changing the scope.

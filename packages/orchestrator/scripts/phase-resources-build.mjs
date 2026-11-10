@@ -748,6 +748,46 @@ const PLANNING_REVIEW_AUTHORITY_AMENDMENTS = new Map([
   ]
 ]);
 
+// Exact ADR-0045 reciprocal lifecycle annotation accepted with ADR-0057.
+const VERIFICATION_ROUND_AUTHORITY_AMENDMENTS = new Map([
+  [
+    "2223816677806b7c02979e7d73a7e1ed4ab6ccd099ac4b5d59e8ea015dd25e49",
+    "3cbb3e619f8c13ddea6a19fd2c1816eb494276194a3085a7947279b164975ee1"
+  ]
+]);
+
+// Exact ADR-0055 reciprocal lifecycle annotation accepted with ADR-0058.
+const PLAN_RECHECK_AUTHORITY_AMENDMENTS = new Map([
+  [
+    "ca70c1fc1cebb4b557aa5a8d456de60ff2ffb82db048ac860c127a296d3210a5",
+    "eda0d1212b4104b308780e1d1931f1f978e600cd226ffa33f3a67908efddd291"
+  ]
+]);
+
+// Exact ADR-0054 reciprocal lifecycle annotation accepted with ADR-0061.
+const INITIATIVE_AUTHORITY_AMENDMENTS = new Map([
+  [
+    "d5a4c6a47cc90f2e72a03f0b40778ca2c4677b95be0c17f07a08a7ebb470b351",
+    "fa51f1151613050410fe4176e368ead2eeb74151a76cd403838b593ba00e1eac"
+  ]
+]);
+
+// Exact ADR-0058 reciprocal lifecycle annotation accepted with ADR-0064.
+const RECORDED_REMAINDER_AUTHORITY_AMENDMENTS = new Map([
+  [
+    "406e94f7eb4f1c75422897d43ee64a96a1c323c5b424557696b21ec9329db663",
+    "ac3b2ff812989ce960e882009d2c5c854292ec3865aeb0b90d7da850a9c26515"
+  ]
+]);
+
+// Exact ADR-0054 reciprocal lifecycle annotation accepted with ADR-0066.
+const DATE_PREFIX_AUTHORITY_AMENDMENTS = new Map([
+  [
+    "fa51f1151613050410fe4176e368ead2eeb74151a76cd403838b593ba00e1eac",
+    "3456df71a276e3ae3278d18c86b73c95c9ad07cb108cec1d1e05bf11d1a2ca11"
+  ]
+]);
+
 const RETAINED_AUTHORITY_AMENDMENTS = [
   {
     decision: "documentation/decisions/0045-guided-verification-setup.md",
@@ -770,6 +810,30 @@ const RETAINED_AUTHORITY_AMENDMENTS = [
     decision:
       "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md",
     images: PLANNING_REVIEW_AUTHORITY_AMENDMENTS
+  },
+  {
+    decision:
+      "documentation/decisions/0057-complete-task-verification-rounds.md",
+    images: VERIFICATION_ROUND_AUTHORITY_AMENDMENTS
+  },
+  {
+    decision:
+      "documentation/decisions/0058-human-plan-edits-rechecked-at-the-plan-gate.md",
+    images: PLAN_RECHECK_AUTHORITY_AMENDMENTS
+  },
+  {
+    decision: "documentation/decisions/0061-initiative-skill-and-documents.md",
+    images: INITIATIVE_AUTHORITY_AMENDMENTS
+  },
+  {
+    decision:
+      "documentation/decisions/0064-runner-recorded-plan-remainder-digest.md",
+    images: RECORDED_REMAINDER_AUTHORITY_AMENDMENTS
+  },
+  {
+    decision:
+      "documentation/decisions/0066-date-prefixed-work-and-initiative-slugs.md",
+    images: DATE_PREFIX_AUTHORITY_AMENDMENTS
   }
 ];
 

@@ -8,8 +8,6 @@ on:
         description: Run live vendor compatibility on the dedicated protected runner
         type: boolean
         default: false
-  schedule:
-    - cron: "17 5 * * 1"
 
 permissions:
   contents: read
@@ -20,7 +18,6 @@ concurrency:
 
 jobs:
   release_check_node_22:
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     container: node:22.20.0-bookworm
     steps:
@@ -42,7 +39,6 @@ jobs:
           retention-days: 30
 
   release_check_node_24:
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     container: node:24.11.1-bookworm
     steps:
@@ -63,11 +59,9 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  forward_compatibility_node_26:
-    if: github.event_name != 'pull_request'
+  release_check_node_26:
     runs-on: ubuntu-24.04
-    container: node:26.7.0-bookworm
-    continue-on-error: true
+    container: node:26.13.0-bookworm
     steps:
       - uses: actions/checkout@v6
         with:
@@ -77,6 +71,14 @@ jobs:
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - run: npm ci
       - run: npm run release:check
+      - id: release_evidence
+        run: node packages/orchestrator/scripts/release-evidence.mjs record
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.release_evidence.outputs.name }}
+          path: ${{ steps.release_evidence.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
 
   live_vendor_compatibility:
     if: >-

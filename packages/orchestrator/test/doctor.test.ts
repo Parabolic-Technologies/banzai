@@ -1,35 +1,56 @@
 import { instructionPluginFixture } from "./phase-instruction-fixtures.js";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { constants } from "node:fs";
 import {
+  access,
   chmod,
   mkdir,
   mkdtemp,
   readlink,
   readFile,
+  realpath,
   rm,
+  stat,
   symlink,
   writeFile
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 import type { ClaudePermissionAudit } from "../src/claude-permissions.js";
-import { CONFIG_FILE } from "../src/config.js";
-import { renderDoctorJson, renderDoctorText } from "../src/doctor-cli.js";
+import { CONFIG_FILE, DEFAULT_CONFIG } from "../src/config.js";
+import {
+  doctorInspection,
+  renderDoctorJson,
+  renderDoctorText
+} from "../src/doctor-cli.js";
 import {
   inspectDoctor,
+  readInstalledClaudeVersion,
+  type DoctorCheck,
   type DoctorDependencies,
+  type DoctorFix,
+  type DoctorLocalConfigGitProbe,
   type DoctorReport
 } from "../src/doctor.js";
+import { isPathIgnored, isPathInIndex } from "../src/git.js";
+import { LOCAL_CONFIG_FILE, LOCAL_CONFIG_LIMIT } from "../src/local-config.js";
 import type {
+  LocalModelLayer,
   OrchestratorConfig,
   VerificationProjectType
 } from "../src/types.js";
 import {
+  LOCAL_CONFIG_IGNORE_LINE,
+  createTestRepository,
   historicalBindingFixture,
+  localModelFileText,
   requiredFixture,
   reviewerOnlyClaudeConfig,
-  snapshotTree
+  snapshotTree,
+  writeLocalModels
 } from "./helpers.js";
 import { writeAdoptedGuidance } from "./adoption-fixtures.js";
 import { ADOPTED_AGENTS } from "./adoption-fixtures.js";
@@ -43,12 +64,15 @@ const CHECK_ORDER = [
   "config.present",
   "config.valid",
   "config.version",
+  "config.local",
   "claude.environment",
   "claude.instructions",
   "claude.permissions",
+  "claude.plugin-scope",
   "project.types",
   "verification.task",
   "executables.models",
+  "claude.version",
   "executables.verification",
   "authentication.models",
   "run.active",
@@ -68,8 +92,8 @@ test("task readiness is independent of empty, mixed or stale legacy profile cove
         await writeFile(path.join(repository.root, "package.json"), metadata);
       const before = await snapshotTree(repository.root);
       const report = await inspectDoctor(repository.root, dependencies());
-      assert.equal(report.schema, "banzai-doctor/v5");
-      assert.equal(report.schemaVersion, 5);
+      assert.equal(report.schema, "banzai-doctor/v6");
+      assert.equal(report.schemaVersion, 6);
       assert.equal(checkStatus(report, "verification.task"), "pass");
       assert.equal(report.ready, true);
       assert.doesNotMatch(
@@ -152,6 +176,11 @@ async function temporaryRoot(): Promise<{
   };
 }
 
+const ABSENT_HOME = path.join(
+  tmpdir(),
+  `banzai-doctor-test-absent-home-${process.pid}`
+);
+
 function dependencies(options?: {
   unavailable?: readonly string[];
   liveness?: "live" | "stale";
@@ -161,10 +190,43 @@ function dependencies(options?: {
   inspectClaudePermissions?: NonNullable<
     DoctorDependencies["inspectClaudePermissions"]
   >;
+  claudeSettingsEnvironment?: NodeJS.ProcessEnv;
+  localConfigGitState?: DoctorLocalConfigGitProbe;
+  /** Receives every command whose availability doctor asks about. */
+  executableCalls?: string[];
+  /**
+   * The offline Claude version reading. The default never reads the
+   * developer's own installation.
+   */
+  claudeVersion?: string | null;
+  /** Uses the real file-system reader instead of `claudeVersion`. */
+  readClaudeVersion?: boolean;
+  /** Receives every command whose Claude version doctor reads. */
+  claudeVersionCalls?: string[];
+  /** Per-executable readings that override `claudeVersion`. */
+  claudeVersions?: Readonly<Record<string, string | null>>;
 }): DoctorDependencies {
   const unavailable = new Set(options?.unavailable ?? []);
+  const claudeVersion =
+    options?.claudeVersion === undefined ? "2.1.300" : options.claudeVersion;
   return {
+    ...(options?.readClaudeVersion === true
+      ? {}
+      : {
+          async installedClaudeVersion(command: string) {
+            options?.claudeVersionCalls?.push(command);
+            const readings = options?.claudeVersions ?? {};
+            return command in readings
+              ? (readings[command] ?? null)
+              : claudeVersion;
+          }
+        }),
+    // No test reads the developer's own Claude settings.
+    claudeSettingsEnvironment: options?.claudeSettingsEnvironment ?? {
+      HOME: ABSENT_HOME
+    },
     async executableAvailable(command) {
+      options?.executableCalls?.push(command);
       return !unavailable.has(command);
     },
     processAlive() {
@@ -177,7 +239,10 @@ function dependencies(options?: {
         }),
     ...(options?.inspectClaudePermissions === undefined
       ? {}
-      : { inspectClaudePermissions: options.inspectClaudePermissions })
+      : { inspectClaudePermissions: options.inspectClaudePermissions }),
+    ...(options?.localConfigGitState === undefined
+      ? {}
+      : { localConfigGitState: options.localConfigGitState })
   };
 }
 
@@ -295,6 +360,11 @@ test("reports a deterministic ready Node project without mutating it", async () 
       first.checks.find((item) => item.id === "authentication.models")
         ?.message ?? "",
       /not checked.*not authentication proof.*startup preflight/s
+    );
+    assert.match(
+      first.checks.find((item) => item.id === "authentication.models")
+        ?.message ?? "",
+      /no vendor CLI version except Claude Code's, which it reads offline/
     );
     assert.equal(first.summary.warnings, 1);
     assert.equal(
@@ -1125,8 +1195,8 @@ test("doctor v4 compares mixed role unions without hiding structural failures or
     await writeConfig(repository.root, config);
     const before = await snapshotTree(repository.root);
     const verified = await inspectDoctor(repository.root, dependencies());
-    assert.equal(verified.schema, "banzai-doctor/v5");
-    assert.equal(verified.schemaVersion, 5);
+    assert.equal(verified.schema, "banzai-doctor/v6");
+    assert.equal(verified.schemaVersion, 6);
     assert.equal(checkStatus(verified, "claude.instructions"), "pass");
     assert.deepEqual(
       verified.checks.map((entry) => entry.id),
@@ -1204,3 +1274,1489 @@ test("doctor v4 compares mixed role unions without hiding structural failures or
     await repository.dispose();
   }
 });
+
+test("doctor advises repository scope only when Claude user settings enable Banzai", async () => {
+  const repository = await temporaryRoot();
+  const home = await mkdtemp(path.join(tmpdir(), "banzai-doctor-home-"));
+  const userSettings = path.join(home, ".claude", "settings.json");
+  const environment = { HOME: home };
+  const inspect = async (env: NodeJS.ProcessEnv = environment) =>
+    await inspectDoctor(
+      repository.root,
+      dependencies({ claudeSettingsEnvironment: env })
+    );
+  const scopeCheck = (report: DoctorReport) =>
+    report.checks.find((item) => item.id === "claude.plugin-scope");
+  try {
+    await writeConfig(repository.root, reviewerOnlyClaudeConfig());
+    const absent = await inspect();
+    assert.equal(checkStatus(absent, "claude.plugin-scope"), "pass");
+    assert.equal(
+      scopeCheck(absent)?.message,
+      "Banzai is not enabled in Claude user settings."
+    );
+    assert.deepEqual(checkFixes(absent, "claude.plugin-scope"), []);
+
+    await mkdir(path.dirname(userSettings), { recursive: true });
+    const enabled = JSON.stringify({
+      enabledPlugins: {
+        "other@claude-plugins-official": true,
+        "banzai@banzai-plugins": true
+      }
+    });
+    await writeFile(userSettings, enabled);
+    const before = await snapshotTree(home);
+    const warned = await inspect();
+    const warning = scopeCheck(warned);
+    assert.ok(warning);
+    assert.equal(warning.status, "warning");
+    assert.equal(warning.category, "config");
+    assert.equal(
+      warning.message,
+      `Claude user settings at ${userSettings} enable banzai@banzai-plugins, so Banzai skill descriptions load in every repository.`
+    );
+    assert.deepEqual(warning.fixes, [
+      {
+        action:
+          "Install Banzai for this repository instead: run `claude plugin uninstall banzai@banzai-plugins --scope user`, then `claude plugin install banzai@banzai-plugins --scope local`, or `--scope project` to share it with your team.",
+        documentation: "documentation/getting-started.md#claude-code-plugin"
+      }
+    ]);
+    // Advisory only: readiness and the other checks are unchanged.
+    assert.equal(warned.ready, absent.ready);
+    assert.equal(warned.summary.warnings, absent.summary.warnings + 1);
+    assert.deepEqual(
+      warned.checks.filter((item) => item.id !== "claude.plugin-scope"),
+      absent.checks.filter((item) => item.id !== "claude.plugin-scope")
+    );
+    assert.match(
+      renderDoctorText(warned),
+      /\[WARNING\] claude\.plugin-scope \(config\): Claude user settings at .+\n {4}Fix: Install Banzai for this repository instead: .+ \(documentation\/getting-started\.md#claude-code-plugin\)/
+    );
+    assert.deepEqual(await snapshotTree(home), before);
+
+    // CLAUDE_CONFIG_DIR replaces ~/.claude, and any marketplace name matches.
+    const configured = path.join(home, "configured");
+    await mkdir(configured);
+    await writeFile(
+      path.join(configured, "settings.json"),
+      JSON.stringify({ enabledPlugins: { "banzai@fork": true } })
+    );
+    const relocated = scopeCheck(
+      await inspect({ HOME: home, CLAUDE_CONFIG_DIR: configured })
+    );
+    assert.ok(relocated);
+    assert.equal(relocated.status, "warning");
+    assert.match(relocated.message, /enable banzai@fork,/);
+
+    for (const document of [
+      "{}",
+      '{"enabledPlugins":{"banzai@banzai-plugins":false}}',
+      '{"enabledPlugins":{"banzai-extra@banzai-plugins":true,"other@banzai":true}}',
+      '{"enabledPlugins":["banzai@banzai-plugins"]}',
+      '{"enabledPlugins":{"banzai@banzai-plugins":"true"}}'
+    ]) {
+      await writeFile(userSettings, document);
+      assert.equal(
+        checkStatus(await inspect(), "claude.plugin-scope"),
+        "pass",
+        document
+      );
+    }
+
+    // Project and local scope are the recommended installs, never a hint.
+    await rm(userSettings);
+    await mkdir(path.join(repository.root, ".claude"), { recursive: true });
+    for (const file of ["settings.json", "settings.local.json"])
+      await writeFile(path.join(repository.root, ".claude", file), enabled);
+    assert.equal(checkStatus(await inspect(), "claude.plugin-scope"), "pass");
+
+    for (const document of ["{bad", "[]", '"settings"']) {
+      await writeFile(userSettings, document);
+      const malformed = await inspect();
+      const skipped = scopeCheck(malformed);
+      assert.ok(skipped);
+      assert.equal(skipped.status, "skipped", document);
+      assert.equal(
+        skipped.message,
+        `Claude user settings at ${userSettings} are unreadable or not a JSON object, so the plugin scope was not inspected.`
+      );
+      assert.deepEqual(skipped.fixes, []);
+      assert.equal(malformed.ready, absent.ready);
+    }
+    await rm(userSettings);
+    await mkdir(userSettings);
+    assert.equal(
+      checkStatus(await inspect(), "claude.plugin-scope"),
+      "skipped"
+    );
+  } finally {
+    await rm(home, { recursive: true, force: true });
+    await repository.dispose();
+  }
+});
+
+const execFileAsync = promisify(execFile);
+
+const LOCAL_DOCUMENTATION = "documentation/orchestrator.md#model-configuration";
+const LOCAL_MESSAGES = {
+  absent:
+    "No local model file is present; every role uses the shared models in .banzai/config.json.",
+  valid:
+    ".banzai/config.local.json is valid, ignored by Git and not in the Git index; the roles it sets replace the shared ones.",
+  tracked:
+    ".banzai/config.local.json is in the Git index, so it is shared through Git and may hold someone else's model choice.",
+  notIgnored:
+    ".banzai/config.local.json is not ignored by Git, so it could be committed and shared.",
+  unsafe:
+    ".banzai/config.local.json is unsafe to read: it or .banzai/ is a symbolic link, or it is not a regular file.",
+  unreadable: ".banzai/config.local.json cannot be read.",
+  invalidFile:
+    ".banzai/config.local.json is not a local model file: it is larger than 64 KiB, not UTF-8 text, not JSON or not a JSON object.",
+  git: "Git could not report whether .banzai/config.local.json is in the Git index or ignored, so the local model file was not used."
+} as const;
+
+function invalidAt(fieldPath: string): string {
+  return `.banzai/config.local.json has a missing or invalid value at ${fieldPath}.`;
+}
+
+function refusedKey(location: string): string {
+  return `.banzai/config.local.json sets a key that is not allowed ${location}; it may set only schemaVersion and models, with executable, model and effort for planner, implementer and reviewer.`;
+}
+
+const LOCAL_FIXES = {
+  correct: {
+    action:
+      "Correct .banzai/config.local.json, or delete it to use the shared models in .banzai/config.json.",
+    documentation: LOCAL_DOCUMENTATION
+  },
+  tracked: {
+    action:
+      "Run `git rm --cached .banzai/config.local.json`, review the local copy, and commit the removal.",
+    documentation: LOCAL_DOCUMENTATION
+  },
+  notIgnored: {
+    action:
+      "Run `banzai model --local`, which ignores the file for this clone, or add the line .banzai/config.local.json to .gitignore and commit it.",
+    documentation: LOCAL_DOCUMENTATION
+  },
+  unsafe: {
+    action:
+      "Make .banzai/ a directory and .banzai/config.local.json a regular file, or delete the local file to use the shared models in .banzai/config.json.",
+    documentation: LOCAL_DOCUMENTATION
+  },
+  git: {
+    action:
+      "Make sure git runs in this checkout, then run banzai doctor again.",
+    documentation: LOCAL_DOCUMENTATION
+  }
+} satisfies Record<string, DoctorFix>;
+
+const LOCAL_SKIPS = {
+  "claude.instructions":
+    "Instruction comparison is skipped while the local model file fails config.local.",
+  "claude.permissions":
+    "Claude permission inspection is skipped while the local model file fails config.local.",
+  "executables.models":
+    "Model executable availability is skipped while the local model file fails config.local."
+} as const;
+
+const LOCAL_REVIEWER: LocalModelLayer = {
+  reviewer: { executable: "claude", model: "claude-sonnet-5", effort: "high" }
+};
+
+/** A fake of the two ADR-0060 §8 queries that records each question asked. */
+function recordingProbe(
+  answers: {
+    tracked?: boolean | "fails";
+    ignored?: boolean | "fails";
+  } = {}
+): { calls: string[]; probe: DoctorLocalConfigGitProbe } {
+  const calls: string[] = [];
+  const answer = (value: boolean | "fails" | undefined, fallback: boolean) => {
+    if (value === "fails") throw new Error("FORBIDDEN-GIT-STDERR");
+    return value ?? fallback;
+  };
+  return {
+    calls,
+    probe: {
+      async isPathInIndex(repoRoot, relativePath) {
+        calls.push(`index ${repoRoot} ${relativePath}`);
+        return answer(answers.tracked, false);
+      },
+      async isPathIgnored(repoRoot, relativePath) {
+        calls.push(`ignored ${repoRoot} ${relativePath}`);
+        return answer(answers.ignored, true);
+      }
+    }
+  };
+}
+
+function findCheck(report: DoctorReport, id: string): DoctorCheck {
+  return requiredFixture(report.checks.find((item) => item.id === id));
+}
+
+function doctorOutput(report: DoctorReport): string {
+  return renderDoctorJson(report) + renderDoctorText(report);
+}
+
+test("config.local follows config.version, passes without a local file and asks Git nothing", async () => {
+  const repository = await temporaryRoot();
+  try {
+    const recorded = recordingProbe();
+    const unconfigured = await inspectDoctor(
+      repository.root,
+      dependencies({ localConfigGitState: recorded.probe })
+    );
+    assert.deepEqual(
+      unconfigured.checks.map((item) => item.id),
+      CHECK_ORDER
+    );
+    assert.equal(findCheck(unconfigured, "config.local").status, "pass");
+    assert.deepEqual(unconfigured.models, []);
+    assert.match(renderDoctorText(unconfigured), /\nModels: unavailable\n/);
+
+    await writeConfig(repository.root, reviewerOnlyClaudeConfig());
+    const report = await inspectDoctor(
+      repository.root,
+      dependencies({ localConfigGitState: recorded.probe })
+    );
+    const ids = report.checks.map((item) => item.id);
+    assert.deepEqual(ids, CHECK_ORDER);
+    assert.equal(
+      ids.indexOf("config.local"),
+      ids.indexOf("config.version") + 1
+    );
+    assert.deepEqual(findCheck(report, "config.local"), {
+      id: "config.local",
+      category: "config",
+      status: "pass",
+      message: LOCAL_MESSAGES.absent,
+      fixes: [],
+      roles: []
+    });
+    assert.deepEqual(recorded.calls, []);
+    assert.equal(report.ready, true);
+    assert.deepEqual(Object.keys(report), [
+      "schema",
+      "schemaVersion",
+      "ready",
+      "projectTypes",
+      "models",
+      "summary",
+      "checks"
+    ]);
+    assert.deepEqual(report.models, [
+      {
+        role: "planner",
+        vendor: "codex",
+        model: "gpt-6.1-sol",
+        effort: "xhigh",
+        source: "committed"
+      },
+      {
+        role: "implementer",
+        vendor: "codex",
+        model: "gpt-6.1-sol",
+        effort: "xhigh",
+        source: "committed"
+      },
+      {
+        role: "reviewer",
+        vendor: "claude",
+        model: "claude-opus-5-5",
+        effort: "xhigh",
+        source: "committed"
+      }
+    ]);
+    assert.match(
+      renderDoctorText(report),
+      /\nProject types: [^\n]*\nModels:\n {2}planner: codex gpt-6\.1-sol effort=xhigh \(committed\)\n {2}implementer: codex gpt-6\.1-sol effort=xhigh \(committed\)\n {2}reviewer: claude claude-opus-5-5 effort=xhigh \(committed\)\nChecks:\n/
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("config.local reports each local file cause with fixed text, asking Git only about an existing file", async (t) => {
+  const repository = await temporaryRoot();
+  const target = path.join(repository.root, LOCAL_CONFIG_FILE);
+  const canonical = localModelFileText(LOCAL_REVIEWER);
+  const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`;
+  const triple = {
+    executable: "claude",
+    model: "claude-opus-5-5",
+    effort: "xhigh"
+  };
+  const cases: {
+    name: string;
+    write(): Promise<void>;
+    answers?: Parameters<typeof recordingProbe>[0];
+    withoutProbe?: true;
+    readable?: false;
+    status: "pass" | "fail";
+    message: string;
+    fixes: DoctorFix[];
+    queries: ("index" | "ignored")[];
+  }[] = [
+    {
+      name: "valid",
+      write: async () => {
+        await writeFile(target, canonical);
+      },
+      status: "pass",
+      message: LOCAL_MESSAGES.valid,
+      fixes: [],
+      queries: ["index", "ignored"]
+    },
+    {
+      name: "tracked",
+      write: async () => {
+        await writeFile(target, canonical);
+      },
+      answers: { tracked: true, ignored: true },
+      status: "fail",
+      message: LOCAL_MESSAGES.tracked,
+      fixes: [LOCAL_FIXES.tracked],
+      queries: ["index"]
+    },
+    {
+      name: "not ignored",
+      write: async () => {
+        await writeFile(target, canonical);
+      },
+      answers: { ignored: false },
+      status: "fail",
+      message: LOCAL_MESSAGES.notIgnored,
+      fixes: [LOCAL_FIXES.notIgnored],
+      queries: ["index", "ignored"]
+    },
+    {
+      name: "index query cannot run",
+      write: async () => {
+        await writeFile(target, canonical);
+      },
+      answers: { tracked: "fails" },
+      status: "fail",
+      message: LOCAL_MESSAGES.git,
+      fixes: [LOCAL_FIXES.git],
+      queries: ["index"]
+    },
+    {
+      name: "ignore query cannot run",
+      write: async () => {
+        await writeFile(target, canonical);
+      },
+      answers: { ignored: "fails" },
+      status: "fail",
+      message: LOCAL_MESSAGES.git,
+      fixes: [LOCAL_FIXES.git],
+      queries: ["index", "ignored"]
+    },
+    {
+      name: "no Git probe",
+      write: async () => {
+        await writeFile(target, canonical);
+      },
+      withoutProbe: true,
+      status: "fail",
+      message: LOCAL_MESSAGES.git,
+      fixes: [LOCAL_FIXES.git],
+      queries: []
+    },
+    {
+      name: "malformed JSON",
+      write: async () => {
+        await writeFile(target, "{FORBIDDEN-LOCAL-JSON");
+      },
+      status: "fail",
+      message: LOCAL_MESSAGES.invalidFile,
+      fixes: [LOCAL_FIXES.correct],
+      queries: ["index", "ignored"]
+    },
+    {
+      name: "not an object",
+      write: async () => {
+        await writeFile(target, json(["FORBIDDEN-ARRAY"]));
+      },
+      status: "fail",
+      message: LOCAL_MESSAGES.invalidFile,
+      fixes: [LOCAL_FIXES.correct],
+      queries: ["index", "ignored"]
+    },
+    {
+      name: "oversized",
+      write: async () => {
+        await writeFile(
+          target,
+          canonical.trimEnd() +
+            " ".repeat(LOCAL_CONFIG_LIMIT - canonical.length + 1) +
+            "\n"
+        );
+      },
+      status: "fail",
+      message: LOCAL_MESSAGES.invalidFile,
+      fixes: [LOCAL_FIXES.correct],
+      queries: ["index", "ignored"]
+    },
+    {
+      name: "wrong schema version",
+      write: async () => {
+        await writeFile(target, json({ schemaVersion: 2, models: {} }));
+      },
+      status: "fail",
+      message: invalidAt("schemaVersion"),
+      fixes: [LOCAL_FIXES.correct],
+      queries: ["index", "ignored"]
+    },
+    {
+      name: "out-of-pattern model",
+      write: async () => {
+        await writeFile(
+          target,
+          json({
+            schemaVersion: 1,
+            models: { reviewer: { ...triple, model: "FORBIDDEN local model" } }
+          })
+        );
+      },
+      status: "fail",
+      message: invalidAt("models.reviewer.model"),
+      fixes: [LOCAL_FIXES.correct],
+      queries: ["index", "ignored"]
+    },
+    {
+      name: "executable path",
+      write: async () => {
+        await writeFile(
+          target,
+          json({
+            schemaVersion: 1,
+            models: {
+              planner: { ...triple, executable: "/FORBIDDEN-PATH/claude" }
+            }
+          })
+        );
+      },
+      status: "fail",
+      message: invalidAt("models.planner.executable"),
+      fixes: [LOCAL_FIXES.correct],
+      queries: ["index", "ignored"]
+    },
+    {
+      name: "missing effort",
+      write: async () => {
+        await writeFile(
+          target,
+          json({
+            schemaVersion: 1,
+            models: {
+              implementer: { executable: "codex", model: "gpt-6.1-sol" }
+            }
+          })
+        );
+      },
+      status: "fail",
+      message: invalidAt("models.implementer.effort"),
+      fixes: [LOCAL_FIXES.correct],
+      queries: ["index", "ignored"]
+    },
+    {
+      name: "refused top-level key",
+      write: async () => {
+        await writeFile(
+          target,
+          json({
+            schemaVersion: 1,
+            models: {},
+            FORBIDDENTOPKEY: "FORBIDDEN-TOP-VALUE"
+          })
+        );
+      },
+      status: "fail",
+      message: refusedKey("at the top level"),
+      fixes: [LOCAL_FIXES.correct],
+      queries: ["index", "ignored"]
+    },
+    {
+      name: "unsupported top-level key",
+      write: async () => {
+        await writeFile(
+          target,
+          json({ schemaVersion: 1, models: {}, "FORBIDDEN key!": 1 })
+        );
+      },
+      status: "fail",
+      message: refusedKey("at the top level"),
+      fixes: [LOCAL_FIXES.correct],
+      queries: ["index", "ignored"]
+    },
+    {
+      name: "unknown role",
+      write: async () => {
+        await writeFile(
+          target,
+          json({ schemaVersion: 1, models: { FORBIDDENROLE: triple } })
+        );
+      },
+      status: "fail",
+      message: refusedKey("in models"),
+      fixes: [LOCAL_FIXES.correct],
+      queries: ["index", "ignored"]
+    },
+    {
+      name: "timeout in a role",
+      write: async () => {
+        await writeFile(
+          target,
+          json({
+            schemaVersion: 1,
+            models: { reviewer: { ...triple, timeoutMs: 7654321 } }
+          })
+        );
+      },
+      status: "fail",
+      message: refusedKey("in models.reviewer"),
+      fixes: [LOCAL_FIXES.correct],
+      queries: ["index", "ignored"]
+    },
+    {
+      name: "unsupported role key",
+      write: async () => {
+        await writeFile(
+          target,
+          json({
+            schemaVersion: 1,
+            models: {
+              reviewer: { ...triple, "FORBIDDEN key!": "FORBIDDEN-VALUE" }
+            }
+          })
+        );
+      },
+      status: "fail",
+      message: refusedKey("in models.reviewer"),
+      fixes: [LOCAL_FIXES.correct],
+      queries: ["index", "ignored"]
+    },
+    {
+      name: "symbolic link",
+      write: async () => {
+        await writeFile(
+          path.join(repository.root, "FORBIDDEN-LINK-TARGET.json"),
+          canonical
+        );
+        await symlink("../FORBIDDEN-LINK-TARGET.json", target);
+      },
+      status: "fail",
+      message: LOCAL_MESSAGES.unsafe,
+      fixes: [LOCAL_FIXES.unsafe],
+      queries: ["index", "ignored"]
+    },
+    {
+      name: "dangling link",
+      write: async () => {
+        await symlink("FORBIDDEN-MISSING-TARGET", target);
+      },
+      status: "fail",
+      message: LOCAL_MESSAGES.unsafe,
+      fixes: [LOCAL_FIXES.unsafe],
+      queries: ["index", "ignored"]
+    },
+    {
+      name: "directory",
+      write: async () => {
+        await mkdir(target);
+      },
+      status: "fail",
+      message: LOCAL_MESSAGES.unsafe,
+      fixes: [LOCAL_FIXES.unsafe],
+      queries: ["index", "ignored"]
+    },
+    {
+      name: "FIFO",
+      write: async () => {
+        await execFileAsync("mkfifo", [target]);
+      },
+      status: "fail",
+      message: LOCAL_MESSAGES.unsafe,
+      fixes: [LOCAL_FIXES.unsafe],
+      queries: ["index", "ignored"]
+    },
+    ...(process.getuid?.() === 0
+      ? []
+      : [
+          {
+            name: "unreadable",
+            write: async () => {
+              await writeFile(target, canonical);
+              await chmod(target, 0o000);
+            },
+            readable: false as const,
+            status: "fail" as const,
+            message: LOCAL_MESSAGES.unreadable,
+            fixes: [LOCAL_FIXES.correct],
+            queries: ["index" as const, "ignored" as const]
+          }
+        ])
+  ];
+  try {
+    await writeConfig(repository.root, reviewerOnlyClaudeConfig());
+    const root = path.resolve(repository.root);
+    for (const item of cases)
+      await t.test(item.name, async () => {
+        try {
+          await item.write();
+          const recorded = recordingProbe(item.answers);
+          const before =
+            item.readable === false
+              ? null
+              : await snapshotTree(repository.root);
+          const report = await inspectDoctor(
+            repository.root,
+            dependencies(
+              item.withoutProbe === true
+                ? {}
+                : { localConfigGitState: recorded.probe }
+            )
+          );
+          assert.deepEqual(
+            report.checks.map((entry) => entry.id),
+            CHECK_ORDER
+          );
+          assert.deepEqual(findCheck(report, "config.local"), {
+            id: "config.local",
+            category: "config",
+            status: item.status,
+            message: item.message,
+            fixes: item.fixes,
+            roles: []
+          });
+          assert.deepEqual(
+            recorded.calls,
+            item.queries.map((query) => `${query} ${root} ${LOCAL_CONFIG_FILE}`)
+          );
+          if (item.status === "pass") {
+            assert.equal(report.ready, true);
+            assert.deepEqual(report.models[2], {
+              role: "reviewer",
+              vendor: "claude",
+              model: "claude-sonnet-5",
+              effort: "high",
+              source: "local"
+            });
+          } else {
+            assert.equal(report.ready, false);
+            assert.deepEqual(report.models, []);
+            for (const [id, message] of Object.entries(LOCAL_SKIPS)) {
+              assert.equal(findCheck(report, id).status, "skipped");
+              assert.equal(findCheck(report, id).message, message);
+            }
+          }
+          const output = doctorOutput(report);
+          assert.doesNotMatch(output, /FORBIDDEN|7654321/);
+          assert.equal(output.includes(repository.root), false);
+          if (before !== null)
+            assert.deepEqual(await snapshotTree(repository.root), before);
+        } finally {
+          if (item.readable === false) await chmod(target, 0o600);
+          await rm(target, { recursive: true, force: true });
+        }
+      });
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("a symbolic link or file at .banzai/ fails config.local even without a local file, asking Git nothing", async () => {
+  const repository = await temporaryRoot();
+  const external = await temporaryRoot();
+  try {
+    await writeConfig(external.root, reviewerOnlyClaudeConfig());
+    const local = path.join(repository.root, ".banzai");
+    await symlink(path.join(external.root, ".banzai"), local);
+    for (const shape of ["symbolic link", "regular file"]) {
+      const recorded = recordingProbe();
+      const before = await snapshotTree(repository.root);
+      const report = await inspectDoctor(
+        repository.root,
+        dependencies({ localConfigGitState: recorded.probe })
+      );
+      assert.deepEqual(
+        findCheck(report, "config.local"),
+        {
+          id: "config.local",
+          category: "config",
+          status: "fail",
+          message: LOCAL_MESSAGES.unsafe,
+          fixes: [LOCAL_FIXES.unsafe],
+          roles: []
+        },
+        shape
+      );
+      assert.deepEqual(recorded.calls, [], shape);
+      assert.deepEqual(report.models, []);
+      assert.equal(report.ready, false);
+      assert.deepEqual(await snapshotTree(repository.root), before);
+      await rm(local);
+      await writeFile(local, "not a directory\n");
+    }
+  } finally {
+    await repository.dispose();
+    await external.dispose();
+  }
+});
+
+test("role checks read the effective configuration and are skipped while config.local fails", async () => {
+  const repository = await temporaryRoot();
+  const plugin = await instructionPluginFixture();
+  const audits: string[] = [];
+  const recorded = recordingProbe();
+  const inspect = async (executableCalls: string[] = []) =>
+    await inspectDoctor(
+      repository.root,
+      dependencies({
+        unavailable: ["claude"],
+        executableCalls,
+        localConfigGitState: recorded.probe,
+        async inspectClaudePermissions(input) {
+          audits.push(JSON.stringify(input.demand));
+          return {
+            demand: input.demand,
+            sources: ["project"],
+            trust: "trusted",
+            tools: [],
+            repositoryRulesIgnored: false,
+            blocking: [],
+            advisories: []
+          };
+        }
+      })
+    );
+  const roleVendors = (report: DoctorReport) =>
+    findCheck(report, "claude.instructions").roles.map((role) => [
+      role.role,
+      role.vendor,
+      role.state
+    ]);
+  const claudeReviewer = {
+    executable: "claude",
+    model: "claude-opus-5-5",
+    effort: "xhigh"
+  } as const;
+  try {
+    const committed = substantiveConfig("custom");
+    for (const role of ["planner", "implementer", "reviewer"] as const) {
+      committed.models[role].executable = "codex";
+      committed.models[role].model = "gpt-6.1-sol";
+    }
+    committed.claudeEnvironment = {
+      mode: "scoped",
+      pluginDirectory: plugin.directory
+    };
+    await writeConfig(repository.root, committed);
+
+    const shared = await inspect();
+    assert.deepEqual(roleVendors(shared), [
+      ["planner", "codex", "not_applicable"],
+      ["implementer", "codex", "not_applicable"],
+      ["reviewer", "codex", "not_applicable"]
+    ]);
+    assert.equal(findCheck(shared, "executables.models").status, "pass");
+    assert.equal(findCheck(shared, "claude.permissions").status, "skipped");
+    assert.deepEqual(audits, []);
+
+    // A local Claude reviewer over the committed Codex reviewer counts.
+    await writeLocalModels(repository.root, { reviewer: claudeReviewer });
+    const executableCalls: string[] = [];
+    const reviewer = await inspect(executableCalls);
+    assert.equal(findCheck(reviewer, "config.local").status, "pass");
+    assert.deepEqual(roleVendors(reviewer), [
+      ["planner", "codex", "not_applicable"],
+      ["implementer", "codex", "not_applicable"],
+      ["reviewer", "claude", "verified"]
+    ]);
+    assert.equal(findCheck(reviewer, "claude.instructions").status, "pass");
+    assert.deepEqual(findCheck(reviewer, "executables.models"), {
+      id: "executables.models",
+      category: "executables",
+      status: "fail",
+      message: "1 of 2 configured model executables are unavailable.",
+      fixes: [],
+      roles: []
+    });
+    assert.ok(executableCalls.includes("claude"));
+    assert.ok(executableCalls.includes("codex"));
+    // A Claude reviewer depends on no permission rule (ADR-0045).
+    assert.equal(findCheck(reviewer, "claude.permissions").status, "skipped");
+    assert.deepEqual(reviewer.models[2], {
+      role: "reviewer",
+      vendor: "claude",
+      model: "claude-opus-5-5",
+      effort: "xhigh",
+      source: "local"
+    });
+    assert.deepEqual(
+      reviewer.models.map((model) => model.source),
+      ["committed", "committed", "local"]
+    );
+    // The environment check keeps the committed values.
+    assert.equal(findCheck(reviewer, "claude.environment").status, "pass");
+
+    // A local Claude implementer makes the permission audit run.
+    await writeLocalModels(repository.root, {
+      implementer: claudeReviewer,
+      reviewer: claudeReviewer
+    });
+    const building = await inspect();
+    assert.equal(findCheck(building, "claude.permissions").status, "pass");
+    assert.deepEqual(audits, [
+      JSON.stringify({ fileWrites: true, shellCommands: true })
+    ]);
+    assert.deepEqual(roleVendors(building)[1]?.slice(0, 2), [
+      "implementer",
+      "claude"
+    ]);
+
+    // While config.local fails, all three skip and models is empty.
+    audits.length = 0;
+    await writeFile(
+      path.join(repository.root, LOCAL_CONFIG_FILE),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        models: { implementer: claudeReviewer, reviewer: claudeReviewer },
+        FORBIDDENKEY: true
+      })}\n`
+    );
+    const failedCalls: string[] = [];
+    const failed = await inspect(failedCalls);
+    assert.equal(findCheck(failed, "config.local").status, "fail");
+    for (const [id, message] of Object.entries(LOCAL_SKIPS)) {
+      assert.deepEqual(findCheck(failed, id), {
+        id,
+        category: id === "executables.models" ? "executables" : "config",
+        status: "skipped",
+        message,
+        fixes: [],
+        roles: []
+      });
+    }
+    assert.deepEqual(audits, []);
+    assert.equal(failedCalls.includes("claude"), false);
+    assert.equal(failedCalls.includes("codex"), false);
+    assert.deepEqual(failed.models, []);
+    assert.equal(failed.ready, false);
+    assert.equal(findCheck(failed, "claude.environment").status, "pass");
+    assert.match(renderDoctorText(failed), /\nModels: unavailable\nChecks:\n/);
+    assert.doesNotMatch(doctorOutput(failed), /FORBIDDEN/);
+  } finally {
+    await plugin.dispose();
+    await repository.dispose();
+  }
+});
+
+test("doctor discloses only bounded model fields and never local keys or values or other committed values", async () => {
+  const repository = await temporaryRoot();
+  try {
+    const committed = substantiveConfig("custom");
+    committed.models.planner.executable = "/FORBIDDEN-EXEC-PATH/codex";
+    committed.models.planner.model = "FORBIDDEN committed model";
+    committed.models.planner.timeoutMs = 7654321;
+    committed.models.implementer.executable = "FORBIDDEN-OTHER-EXEC";
+    committed.models.implementer.model = "gpt-6.1-sol";
+    committed.models.implementer.effort = "medium";
+    committed.models.reviewer.model = "FORBIDDEN\u001b[31m";
+    await writeConfig(repository.root, committed);
+    const recorded = recordingProbe();
+    const inspect = async () =>
+      await inspectDoctor(
+        repository.root,
+        dependencies({ localConfigGitState: recorded.probe })
+      );
+    const assertPrivate = (report: DoctorReport) => {
+      const output = doctorOutput(report);
+      assert.doesNotMatch(output, /FORBIDDEN|7654321|\u001b/);
+      assert.equal(output.includes(repository.root), false);
+    };
+
+    const shared = await inspect();
+    const sharedModels = [
+      {
+        role: "planner",
+        vendor: "codex",
+        model: null,
+        effort: "xhigh",
+        source: "committed"
+      },
+      {
+        role: "implementer",
+        vendor: null,
+        model: "gpt-6.1-sol",
+        effort: "medium",
+        source: "committed"
+      },
+      {
+        role: "reviewer",
+        vendor: "claude",
+        model: null,
+        effort: "xhigh",
+        source: "committed"
+      }
+    ];
+    assert.deepEqual(shared.models, sharedModels);
+    assert.match(
+      renderDoctorText(shared),
+      /\nModels:\n {2}planner: codex unlisted effort=xhigh \(committed\)\n {2}implementer: other gpt-6\.1-sol effort=medium \(committed\)\n {2}reviewer: claude unlisted effort=xhigh \(committed\)\n/
+    );
+    assertPrivate(shared);
+
+    // A valid local triple is disclosed under the same rules, with its source.
+    await writeLocalModels(repository.root, {
+      reviewer: { executable: "codex", model: "gpt-6.1-sol", effort: "low" }
+    });
+    const local = await inspect();
+    assert.deepEqual(local.models, [
+      ...sharedModels.slice(0, 2),
+      {
+        role: "reviewer",
+        vendor: "codex",
+        model: "gpt-6.1-sol",
+        effort: "low",
+        source: "local"
+      }
+    ]);
+    assertPrivate(local);
+
+    const triple = {
+      executable: "claude",
+      model: "claude-opus-5-5",
+      effort: "xhigh"
+    };
+    for (const document of [
+      { schemaVersion: 1, models: {}, FORBIDDENTOPKEY: "FORBIDDEN-VALUE" },
+      {
+        schemaVersion: 1,
+        models: { reviewer: { ...triple, FORBIDDENFIELD: "FORBIDDEN-VALUE" } }
+      },
+      { schemaVersion: 1, models: { FORBIDDENROLE: triple } },
+      {
+        schemaVersion: 1,
+        models: { reviewer: { ...triple, model: "FORBIDDEN MODEL VALUE" } }
+      },
+      {
+        schemaVersion: 1,
+        models: { reviewer: { ...triple, effort: "FORBIDDEN-EFFORT" } }
+      },
+      {
+        schemaVersion: 1,
+        models: { reviewer: { ...triple, executable: "FORBIDDEN-EXECUTABLE" } }
+      },
+      { schemaVersion: "FORBIDDEN-VERSION", models: {} }
+    ]) {
+      await writeFile(
+        path.join(repository.root, LOCAL_CONFIG_FILE),
+        `${JSON.stringify(document)}\n`
+      );
+      const refused = await inspect();
+      assert.equal(findCheck(refused, "config.local").status, "fail");
+      assert.deepEqual(refused.models, []);
+      assertPrivate(refused);
+    }
+  } finally {
+    await repository.dispose();
+  }
+});
+
+async function realGitExecutable(): Promise<string> {
+  for (const entry of (process.env.PATH ?? "").split(path.delimiter)) {
+    if (entry.length === 0) continue;
+    const candidate = path.join(entry, "git");
+    try {
+      await access(candidate, constants.X_OK);
+      if ((await stat(candidate)).isFile()) return candidate;
+    } catch {
+      // Continue through PATH.
+    }
+  }
+  throw new Error("git is not on PATH");
+}
+
+test("a real Git checkout answers only the two permitted queries, at the repository root with LC_ALL=C", async () => {
+  const repository = await createTestRepository({ ignoreLocalConfig: true });
+  const shims = await mkdtemp(path.join(tmpdir(), "banzai-doctor-git-shim-"));
+  const log = path.join(shims, "git.log");
+  const realGit = await realGitExecutable();
+  await writeFile(
+    path.join(shims, "git"),
+    `#!/bin/sh\nprintf '%s|%s|%s\\n' "$(pwd -P)" "\${LC_ALL-}" "$*" >> '${log}'\nexec '${realGit}' "$@"\n`,
+    { mode: 0o755 }
+  );
+  const previous = {
+    PATH: process.env.PATH,
+    HOME: process.env.HOME,
+    CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR
+  };
+  const restore = () => {
+    for (const [name, value] of Object.entries(previous)) {
+      if (value === undefined) Reflect.deleteProperty(process.env, name);
+      else process.env[name] = value;
+    }
+  };
+  const root = await realpath(repository.root);
+  const index = `${root}|C|ls-files --error-unmatch -- ${LOCAL_CONFIG_FILE}`;
+  const ignore = `${root}|C|check-ignore -q -- ${LOCAL_CONFIG_FILE}`;
+  const inspect = async (
+    run: (repoRoot: string) => Promise<DoctorReport> = async (repoRoot) =>
+      await inspectDoctor(
+        repoRoot,
+        dependencies({ localConfigGitState: { isPathInIndex, isPathIgnored } })
+      )
+  ): Promise<{ report: DoctorReport; queries: string[] }> => {
+    await writeFile(log, "");
+    const before = await snapshotTree(repository.root);
+    process.env.PATH = `${shims}${path.delimiter}${previous.PATH ?? ""}`;
+    // The CLI composition reads Claude user settings from this environment.
+    process.env.HOME = ABSENT_HOME;
+    delete process.env.CLAUDE_CONFIG_DIR;
+    let report: DoctorReport;
+    try {
+      report = await run(repository.root);
+    } finally {
+      restore();
+    }
+    assert.deepEqual(await snapshotTree(repository.root), before);
+    const queries = (await readFile(log, "utf8"))
+      .split("\n")
+      .filter((line) => line.length > 0);
+    return { report, queries };
+  };
+  try {
+    const absent = await inspect();
+    assert.equal(findCheck(absent.report, "config.local").status, "pass");
+    assert.deepEqual(absent.queries, []);
+
+    await writeLocalModels(repository.root, LOCAL_REVIEWER);
+    const valid = await inspect();
+    assert.deepEqual(
+      findCheck(valid.report, "config.local").message,
+      LOCAL_MESSAGES.valid
+    );
+    assert.deepEqual(valid.queries, [index, ignore]);
+    assert.equal(valid.report.models[2]?.source, "local");
+
+    const gitignore = path.join(repository.root, ".gitignore");
+    const ignoreText = await readFile(gitignore, "utf8");
+    await writeFile(
+      gitignore,
+      ignoreText.replace(`${LOCAL_CONFIG_IGNORE_LINE}\n`, "")
+    );
+    const unignored = await inspect();
+    assert.equal(
+      findCheck(unignored.report, "config.local").message,
+      LOCAL_MESSAGES.notIgnored
+    );
+    assert.deepEqual(unignored.queries, [index, ignore]);
+
+    await writeFile(gitignore, ignoreText);
+    await execFileAsync(realGit, ["add", "-f", "--", LOCAL_CONFIG_FILE], {
+      cwd: repository.root
+    });
+    const tracked = await inspect();
+    assert.equal(
+      findCheck(tracked.report, "config.local").message,
+      LOCAL_MESSAGES.tracked
+    );
+    assert.deepEqual(tracked.queries, [index]);
+
+    // The CLI's own composition wires the same two queries.
+    const composed = await inspect(
+      doctorInspection({ isPathInIndex, isPathIgnored })
+    );
+    assert.equal(
+      findCheck(composed.report, "config.local").message,
+      LOCAL_MESSAGES.tracked
+    );
+    assert.deepEqual(composed.queries, [index]);
+  } finally {
+    restore();
+    await rm(shims, { recursive: true, force: true });
+    await repository.dispose();
+  }
+});
+
+const CLAUDE_VERSION_FIX: DoctorFix[] = [
+  {
+    action:
+      "Update Claude Code to 2.1.290 or newer, or choose other models with `banzai model`.",
+    documentation:
+      "documentation/getting-started.md#install-and-sign-in-to-model-clients"
+  }
+];
+
+/** Every role on Claude Code: the ADR-0059 default. */
+function allClaudeConfig(): OrchestratorConfig {
+  const config = substantiveConfig();
+  for (const role of ["planner", "implementer"] as const) {
+    config.models[role].executable = "claude";
+    config.models[role].model = "claude-opus-5-5";
+  }
+  return config;
+}
+
+/** Claude plans and implements; Codex reviews. */
+function claudeBuildsConfig(): OrchestratorConfig {
+  const config = allClaudeConfig();
+  config.models.reviewer.executable = "codex";
+  config.models.reviewer.model = "gpt-6.1-sol";
+  return config;
+}
+
+test("claude.version checks every Claude role against the one minimum", async () => {
+  const repository = await temporaryRoot();
+  try {
+    await writeConfig(repository.root, allClaudeConfig());
+    for (const version of ["2.1.290", "2.1.319"]) {
+      const calls: string[] = [];
+      const report = await inspectDoctor(
+        repository.root,
+        dependencies({ claudeVersion: version, claudeVersionCalls: calls })
+      );
+      assert.deepEqual(findCheck(report, "claude.version"), {
+        id: "claude.version",
+        category: "executables",
+        status: "pass",
+        message: `Claude Code meets the minimum 2.1.290: ${version} (Planning, Implementation, Review).`,
+        fixes: [],
+        roles: []
+      });
+      assert.deepEqual(calls, ["claude"]);
+      assert.equal(report.ready, true);
+    }
+
+    // ADR-0063 §5: a Claude builder is held to the minimum too.
+    await writeConfig(repository.root, claudeBuildsConfig());
+    const old = await inspectDoctor(
+      repository.root,
+      dependencies({ claudeVersion: "2.1.289" })
+    );
+    assert.deepEqual(findCheck(old, "claude.version"), {
+      id: "claude.version",
+      category: "executables",
+      status: "fail",
+      message:
+        "Claude Code is older than the minimum 2.1.290: 2.1.289 (Planning, Implementation).",
+      fixes: CLAUDE_VERSION_FIX,
+      roles: []
+    });
+    assert.equal(old.ready, false);
+
+    const plannerOnly = claudeBuildsConfig();
+    plannerOnly.models.implementer.executable = "codex";
+    plannerOnly.models.implementer.model = "gpt-6.1-sol";
+    await writeConfig(repository.root, plannerOnly);
+    const unknown = await inspectDoctor(
+      repository.root,
+      dependencies({ claudeVersion: null })
+    );
+    assert.deepEqual(findCheck(unknown, "claude.version"), {
+      id: "claude.version",
+      category: "executables",
+      status: "warning",
+      message:
+        "The installed Claude Code version could not be read offline for Planning. Run start refuses Claude Code older than 2.1.290.",
+      fixes: CLAUDE_VERSION_FIX,
+      roles: []
+    });
+    assert.equal(unknown.ready, true);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("claude.version reads each Claude executable once and the worse result wins", async () => {
+  const repository = await temporaryRoot();
+  const next = "/opt/claude-next/bin/claude";
+  try {
+    const config = allClaudeConfig();
+    config.models.implementer.executable = next;
+    await writeConfig(repository.root, config);
+
+    const calls: string[] = [];
+    const mixed = await inspectDoctor(
+      repository.root,
+      dependencies({
+        claudeVersion: "2.1.300",
+        claudeVersions: { [next]: "2.1.289" },
+        claudeVersionCalls: calls
+      })
+    );
+    assert.equal(findCheck(mixed, "claude.version").status, "fail");
+    assert.equal(
+      findCheck(mixed, "claude.version").message,
+      "Claude Code is older than the minimum 2.1.290: 2.1.289 (Implementation)."
+    );
+    assert.deepEqual(calls, ["claude", next]);
+    assert.equal(doctorOutput(mixed).includes(next), false);
+
+    const unreadable = await inspectDoctor(
+      repository.root,
+      dependencies({
+        claudeVersion: "2.1.300",
+        claudeVersions: { [next]: null }
+      })
+    );
+    assert.equal(findCheck(unreadable, "claude.version").status, "warning");
+
+    // An unavailable executable is left to executables.models and named.
+    calls.length = 0;
+    const partial = await inspectDoctor(
+      repository.root,
+      dependencies({
+        claudeVersion: "2.1.300",
+        claudeVersionCalls: calls,
+        unavailable: [next]
+      })
+    );
+    assert.deepEqual(findCheck(partial, "claude.version"), {
+      id: "claude.version",
+      category: "executables",
+      status: "pass",
+      message:
+        "Claude Code meets the minimum 2.1.290: 2.1.300 (Planning, Review). Not checked, because its executable is unavailable: Implementation.",
+      fixes: [],
+      roles: []
+    });
+    assert.deepEqual(calls, ["claude"]);
+    assert.equal(findCheck(partial, "executables.models").status, "fail");
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("claude.version is skipped unless a role runs on an available Claude executable", async () => {
+  const repository = await temporaryRoot();
+  const skipped = async (
+    config: unknown,
+    options: Parameters<typeof dependencies>[0] = {}
+  ): Promise<string> => {
+    await writeConfig(repository.root, config);
+    const calls: string[] = [];
+    const report = await inspectDoctor(
+      repository.root,
+      dependencies({ ...options, claudeVersionCalls: calls })
+    );
+    const result = findCheck(report, "claude.version");
+    assert.equal(result.status, "skipped", result.message);
+    assert.deepEqual(result.fixes, []);
+    assert.deepEqual(calls, []);
+    return result.message;
+  };
+  try {
+    const allCodex = substantiveConfig();
+    allCodex.models.reviewer.executable = "codex";
+    allCodex.models.reviewer.model = "gpt-6.1-sol";
+    assert.equal(
+      await skipped(allCodex),
+      "No role runs on Claude Code, so its minimum does not apply."
+    );
+    // A Node executable falls back to the Claude adapter but never qualifies.
+    assert.equal(
+      await skipped(locallyExecutableConfig()),
+      "No role runs on Claude Code, so its minimum does not apply."
+    );
+    assert.equal(
+      await skipped(allClaudeConfig(), { unavailable: ["claude"] }),
+      "No configured Claude Code executable is available, so no version was read."
+    );
+    assert.equal(
+      await skipped("{ not json"),
+      "The Claude Code version check requires a valid configuration."
+    );
+    await writeFile(
+      path.join(repository.root, LOCAL_CONFIG_FILE),
+      `${JSON.stringify({ schemaVersion: 1, models: {}, FORBIDDENKEY: true })}\n`
+    );
+    assert.equal(
+      await skipped(allClaudeConfig(), {
+        localConfigGitState: recordingProbe().probe
+      }),
+      "The Claude Code version check is skipped while the local model file fails config.local."
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("claude.version reads a local Claude reviewer over a committed Codex reviewer", async () => {
+  const repository = await temporaryRoot();
+  try {
+    const committed = substantiveConfig();
+    committed.models.reviewer.executable = "codex";
+    committed.models.reviewer.model = "gpt-6.1-sol";
+    await writeConfig(repository.root, committed);
+    await writeLocalModels(repository.root, {
+      reviewer: {
+        executable: "claude",
+        model: "claude-opus-5-5",
+        effort: "xhigh"
+      }
+    });
+    const calls: string[] = [];
+    const report = await inspectDoctor(
+      repository.root,
+      dependencies({
+        claudeVersion: "2.1.289",
+        claudeVersionCalls: calls,
+        localConfigGitState: recordingProbe().probe
+      })
+    );
+    assert.equal(findCheck(report, "config.local").status, "pass");
+    assert.equal(findCheck(report, "claude.version").status, "fail");
+    assert.deepEqual(calls, ["claude"]);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("the default configuration with only claude installed has no failed check", async () => {
+  const repository = await temporaryRoot();
+  try {
+    await writeFile(path.join(repository.root, "package.json"), "{}\n", "utf8");
+    await writeConfig(repository.root, structuredClone(DEFAULT_CONFIG));
+    const report = await inspectDoctor(
+      repository.root,
+      dependencies({ unavailable: ["codex"] })
+    );
+    assert.deepEqual(
+      report.checks
+        .filter((item) => item.status === "fail")
+        .map((item) => item.id),
+      []
+    );
+    assert.equal(findCheck(report, "claude.version").status, "pass");
+    assert.equal(report.ready, true);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+/** A shell script that leaves a marker if anything ever executes it. */
+async function writeTrapExecutable(
+  file: string,
+  marker: string
+): Promise<void> {
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(
+    file,
+    `#!/bin/sh\necho executed > "${marker}"\necho "2.1.100 (Claude Code)"\n`,
+    "utf8"
+  );
+  await chmod(file, 0o755);
+}
+
+test("the offline Claude version reader follows native and npm installs without running them", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "banzai-claude-version-"));
+  const marker = path.join(root, "executed");
+  const bin = path.join(root, "bin");
+  const read = async (target: string | null): Promise<string | null> => {
+    await rm(bin, { recursive: true, force: true });
+    await mkdir(bin, { recursive: true });
+    if (target !== null) await symlink(target, path.join(bin, "claude"));
+    return await readInstalledClaudeVersion("claude", root, { PATH: bin });
+  };
+  try {
+    // Native installer: the resolved file is named by its version.
+    const native = path.join(root, "share/claude/versions/2.1.319");
+    await writeTrapExecutable(native, marker);
+    assert.equal(await read(native), "2.1.319");
+    const notVersion = path.join(root, "share/claude/versions/latest");
+    await writeTrapExecutable(notVersion, marker);
+    assert.equal(await read(notVersion), null);
+
+    // npm: install.cjs places the platform binary over bin/claude.exe.
+    const wrapper = path.join(
+      root,
+      "lib/node_modules/@anthropic-ai/claude-code"
+    );
+    await writeFile(
+      path.join(await mkdirp(wrapper), "package.json"),
+      JSON.stringify({ name: "@anthropic-ai/claude-code", version: "2.1.300" })
+    );
+    const wrapperBinary = path.join(wrapper, "bin/claude.exe");
+    await writeTrapExecutable(wrapperBinary, marker);
+    assert.equal(await read(wrapperBinary), "2.1.300");
+
+    const platform = path.join(
+      root,
+      "lib/node_modules/@anthropic-ai/claude-code-darwin-arm64"
+    );
+    await writeFile(
+      path.join(await mkdirp(platform), "package.json"),
+      JSON.stringify({
+        name: "@anthropic-ai/claude-code-darwin-arm64",
+        version: "2.1.301"
+      })
+    );
+    const platformBinary = path.join(platform, "claude");
+    await writeTrapExecutable(platformBinary, marker);
+    assert.equal(await read(platformBinary), "2.1.301");
+
+    // The walk stops at the first package.json, whatever it names.
+    await writeFile(
+      path.join(wrapper, "bin/package.json"),
+      JSON.stringify({ name: "other", version: "9.9.9" })
+    );
+    assert.equal(await read(wrapperBinary), null);
+    await writeFile(
+      path.join(wrapper, "bin/package.json"),
+      JSON.stringify({
+        name: "@anthropic-ai/claude-code",
+        version: "2.1.300-beta.1"
+      })
+    );
+    assert.equal(await read(wrapperBinary), null);
+    await writeFile(path.join(wrapper, "bin/package.json"), "{ not json");
+    assert.equal(await read(wrapperBinary), null);
+
+    // An unknown layout and a missing executable read as unknown.
+    const plain = path.join(root, "opt/claude");
+    await writeTrapExecutable(plain, marker);
+    assert.equal(await read(plain), null);
+    assert.equal(await read(null), null);
+
+    await assert.rejects(access(marker), { code: "ENOENT" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("claude.version prints versions only, never the executable path", async () => {
+  const repository = await temporaryRoot();
+  const root = await mkdtemp(path.join(tmpdir(), "banzai-claude-path-"));
+  try {
+    const marker = path.join(root, "executed");
+    const native = path.join(root, "share/claude/versions/2.1.289");
+    await writeTrapExecutable(native, marker);
+    const config = reviewerOnlyClaudeConfig();
+    config.models.reviewer.executable = path.join(root, "bin", "claude");
+    await mkdir(path.join(root, "bin"));
+    await symlink(native, config.models.reviewer.executable);
+    await writeConfig(repository.root, config);
+    const report = await inspectDoctor(
+      repository.root,
+      dependencies({ readClaudeVersion: true })
+    );
+    assert.equal(findCheck(report, "claude.version").status, "fail");
+    assert.match(findCheck(report, "claude.version").message, /2\.1\.289/);
+    assert.equal(doctorOutput(report).includes(root), false);
+    assert.equal(doctorOutput(report).includes(await realpath(root)), false);
+    await assert.rejects(access(marker), { code: "ENOENT" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await repository.dispose();
+  }
+});
+
+async function mkdirp(directory: string): Promise<string> {
+  await mkdir(directory, { recursive: true });
+  return directory;
+}

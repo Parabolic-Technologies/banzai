@@ -138,13 +138,28 @@ export const runProcess: ProcessRunner = async (
     const drained = new Promise<void>((resolveDrainPromise) => {
       resolveDrain = resolveDrainPromise;
     });
-    const child = spawn(spec.command, spec.args, {
+    const options = {
       cwd: spec.cwd,
       env: spec.env,
       shell: false,
-      detached: process.platform !== "win32",
-      stdio: ["ignore", "pipe", "pipe"]
-    });
+      detached: process.platform !== "win32"
+    };
+    const child =
+      spec.stdin === undefined
+        ? spawn(spec.command, spec.args, {
+            ...options,
+            stdio: ["ignore", "pipe", "pipe"]
+          })
+        : spawn(spec.command, spec.args, {
+            ...options,
+            stdio: ["pipe", "pipe", "pipe"]
+          });
+    if (spec.stdin !== undefined && child.stdin !== null) {
+      // A child may exit, or never start, before it reads everything; the
+      // resulting EPIPE must not escape, because the process outcome decides.
+      child.stdin.on("error", () => undefined);
+      child.stdin.end(spec.stdin, "utf8");
+    }
     const registerChild = (): void => {
       if (child.pid !== undefined && !activeChildren.has(child.pid)) {
         activeChildren.set(child.pid, { pid: child.pid, drained });

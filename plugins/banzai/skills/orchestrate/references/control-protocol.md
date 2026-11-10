@@ -13,14 +13,14 @@ banzai control capabilities
 
 Require one clean JSON document with:
 
-- `schema: "banzai-agent-capabilities/v8"`
-- `schemaVersion: 8`
-- `controlContractVersion: "8.0.0"`
+- `schema: "banzai-agent-capabilities/v9"`
+- `schemaVersion: 9`
+- `controlContractVersion: "9.0.0"`
 - non-empty `orchestratorVersion`
 - `umbrellaContractVersion: "1.0.0"`
 - `workDocuments.directoryPattern: "documentation/work/<slug>/"`,
   `bindingSchemas: ["banzai-work-binding/v3"]`, `workspaceSnapshotVersion: 3`,
-  and `verificationRequestSchemas: ["banzai-verification-request/v3"]`;
+  and `verificationRequestSchemas: ["banzai-verification-request/v4", "banzai-verification-request/v3"]`;
   no `artifactStorage` layout or declaration capability
 - exactly these supported, non-TTY operations: `status`, `start`, `answer`,
   `approveAdr`, `approveVerification`, `approvePlan`, `decideGate`, `triage`, `resume`, `retry`, `recover`, and
@@ -30,17 +30,17 @@ Require one clean JSON document with:
 "banzai-agent-answer/v1"]` in that order
 - `approveVerification.inputSchemas: ["banzai-agent-answer/v3"]`
 - `configurationPrerequisite` declares the kind, fixed actions
-  `["accept", "edit", "skip", "cancel"]`, status v6 and answer v3 schemas
+  `["accept", "edit", "skip", "cancel"]`, status v7 and answer v3 schemas
 - `completionPublication` declares `banzai-completion-protocol/v1`, the closed
   refusal codes `COMPLETION_PUBLICATION_IO`, `COMPLETION_PUBLICATION_DRIFT` and
   `COMPLETION_PUBLICATION_INTEGRITY`, and the `pending_application` attempt
   status it may report
 - `decideGate.inputSchemas: ["banzai-agent-gate-decision/v1"]`
 - `planningGates` declares ADR decisions accept/reject/rework/review, plan decisions
-  approve/rework/review, planning_review_triage with answer v4 and disposition
+  approve/recheck/rework/review, planning_review_triage with answer v4 and disposition
   kinds option/instruction/decline. Its limits are 8000 feedback bytes, 2000 own
   instruction bytes, 8000 additional instruction bytes, 20 findings and 128
-  review paths; its status schema is v6.
+  review paths; its status schema is v7.
 - `recover.inputSchemas: ["banzai-agent-recovery/v1"]`
 - `inputSchemas: []` for the other operations
 
@@ -244,7 +244,7 @@ Run:
 banzai control status
 ```
 
-Require `schema: "banzai-agent-status/v6"` and `schemaVersion: 6`.
+Require `schema: "banzai-agent-status/v7"` and `schemaVersion: 7`.
 `activeRun: null` means no persisted run is available. A non-null `done` or
 `cancelled` projection is terminal evidence, not an in-progress run. Otherwise
 use only these fields:
@@ -252,7 +252,9 @@ use only these fields:
 - `runId`, `slug`, `state`, and optional `route`;
 - semantic `nextAction`;
 - bounded `blocked`, `retry`, and recovery summaries;
-- closed `pendingGate` data;
+- closed `pendingGate` data; a `plan_approval` gate carries `recheck`, the
+  latest re-check summary of the current gate entry (paths, headings, check
+  identities and field names only) or `null`;
 - plan/review approval validity;
 - task-completion state, source, counts, and diagnostics;
 - bounded `completionPublication`: the publishing attempt and kind, protocol,
@@ -293,7 +295,7 @@ requires an absent or terminal run; cancellation remains an explicit user choice
 | `nextAction` | Required supervisor behavior |
 | --- | --- |
 | `approve_adr` | Rework and independent review use an identity-bound gate-decision v1 through direct stdin to `banzai control decide`. Show every `pendingGate.artifactPaths` and `adrIds`; wait for an explicit current decision for the relevant ADR; run `banzai approve adr --id <ADR-ID> --decision <accept\|reject>` and refresh status. Do not pass an arbitrary note through shell argv. |
-| `approve_plan` | Rework and independent review use gate-decision v1 through direct stdin to `banzai control decide`. Show the exact approval bundle; wait for explicit approval/rework/rejection of the current plan; only approval runs `banzai approve plan`; refresh status. |
+| `approve_plan` | Rework and independent review use gate-decision v1 through direct stdin to `banzai control decide`. Show the exact approval bundle and any `pendingGate.recheck` summary; wait for explicit approval/re-check/rework/rejection of the current plan; only approval runs `banzai approve plan`. When `pendingGate.decisions` includes `recheck` and the current human explicitly asks to re-check their own edits, run `banzai approve plan --decision recheck`; it never approves. Never edit planning files yourself. Refresh status. |
 | `answer_planning_review_triage` | Show exact artifacts, findings, all analysis options and consequences before advisory recommendations. Wait for one explicit disposition per finding and any additional instruction, send an exact v4 document through direct stdin to `banzai control answer`, then refresh status. Never choose, infer or rewrite feedback or a disposition. |
 | `answer_escalation` | Show summary and ordered questions; wait for exact ordered answers; send a v1 answer through `banzai control answer`; refresh status. |
 | `answer_consultation` | Show the exact current run/request/round and every bounded card with `Decision`, `Why this matters`, `Repository evidence`, `Options`, and `Recommendation` when present. Wait for one exact current-user answer per decision or pause without mutation. Send one keyed v2 answer through direct stdin; refresh status. Never choose, infer, rewrite, or treat the response as approval. |
@@ -331,15 +333,16 @@ human stdout. Ignore that prose as state and query versioned control status.
 
 ## Work document capability
 
-Current capabilities v8/control 8.0.0 expose `workDocuments` with
+Current capabilities v9/control 9.0.0 expose `workDocuments` with
 `directoryPattern: "documentation/work/<slug>/"`,
 `bindingSchemas: ["banzai-work-binding/v3"]`, `workspaceSnapshotVersion: 3`
-and `verificationRequestSchemas: ["banzai-verification-request/v3"]`.
+and `verificationRequestSchemas: ["banzai-verification-request/v4",
+"banzai-verification-request/v3"]`.
 Require that exact capability before supervising new work; infer no support from
 an older capability or a historical reader. New state v10 binds tracked documents
 without a layout declaration. The runner alone persists execution authority;
 supervisor tools never create or edit work bindings. Request v1, recovery v1,
-escalation answer v1, consultation answer v2, status v6 and configuration answer
+escalation answer v1, consultation answer v2, status v7 and configuration answer
 v3 retain their meanings. Existing documents stay at their known locations.
 
 New task runs expose bounded `taskVerification` status: outcome, completeness,

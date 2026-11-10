@@ -2,7 +2,8 @@ import type { AttemptRecord, AttemptReference, RunState } from "../../types.js";
 import {
   DIGEST_UNRESOLVED_BLOCK_PREFIX,
   isRetryableInterruptedAttempt,
-  PLAN_BUNDLE_COMPLETION_VIOLATIONS
+  PLAN_BUNDLE_COMPLETION_VIOLATIONS,
+  plannerBlockSummary
 } from "./failure-classes.js";
 
 export interface RetryEligibility {
@@ -26,18 +27,49 @@ export type RetryEvidence =
   | "task_verification_attempts"
   | "legacy_ledger_support"
   | "legacy_verification_attempts"
+  | "latest_attempt"
   | "attempt_record";
 
 export interface RetryFacts {
   state: RunState;
+  /**
+   * The latest attempt of every check in the latest task verification round,
+   * in attempt sequence order (ADR-0057 §2).
+   */
   taskVerification?: VerificationEvidence<{
-    latest: LatestVerificationAttempt | null;
+    round: LatestVerificationAttempt[];
   }>;
   legacyLedger?: VerificationEvidence<{ supported: boolean }>;
   legacyVerification?: VerificationEvidence<{
     latest: LatestVerificationAttempt | null;
   }>;
   attemptRecord?: AttemptRecord;
+  /** The run's latest attempt; null when the records name no single one. */
+  latestAttempt?: VerificationEvidence<{ record: AttemptRecord | null }>;
+}
+
+/**
+ * The attempt the run started last. Attempt file names carry random
+ * identities, so only `startedAt` orders them, and a tie names no attempt.
+ */
+export function latestAttemptRecord(
+  records: readonly AttemptRecord[]
+): AttemptRecord | null {
+  let latest: AttemptRecord | null = null;
+  let tied = false;
+  for (const record of records) {
+    const order =
+      latest === null
+        ? 1
+        : Date.parse(record.startedAt) - Date.parse(latest.startedAt);
+    if (order > 0) {
+      latest = record;
+      tied = false;
+    } else if (order === 0 && record !== latest) {
+      tied = true;
+    }
+  }
+  return tied ? null : latest;
 }
 
 export type RetryStep =
@@ -109,6 +141,24 @@ function decideWithoutAttempt(facts: RetryFacts): RetryStep {
       "Read-only planning review checks can be retried explicitly.",
       null
     );
+  if (
+    state.blockedFrom === "planning" &&
+    (state.planningReview?.active == null ||
+      state.planningReview.active.step === "applying")
+  ) {
+    // ADR-0065: read from durable records, so a run blocked this way before
+    // the rule existed qualifies too.
+    const evidence = facts.latestAttempt;
+    if (evidence === undefined) return needs("latest_attempt");
+    const record = evidence.readable ? evidence.record : null;
+    const summary = record === null ? null : plannerBlockSummary(record);
+    if (record !== null && summary !== null && summary === state.blockReason)
+      return decided(
+        true,
+        `The planner reported a block in attempt ${record.attempt.id}; retry continues planning after you resolve it.`,
+        record.attempt.id
+      );
+  }
   if (state.blockedFrom === "created") {
     return decided(
       true,
@@ -151,18 +201,31 @@ function decideWithoutAttempt(facts: RetryFacts): RetryStep {
       const evidence = facts.taskVerification;
       if (evidence === undefined) return needs("task_verification_attempts");
       if (!evidence.readable) return malformedVerification();
-      const latest = evidence.latest;
-      const unresolved = latest?.status === "started";
-      const unsuccessful =
-        latest?.status === "failed" || latest?.status === "interrupted";
+      if (evidence.round.some((attempt) => attempt.status === "started"))
+        return decided(
+          true,
+          "Retry reconciles the unresolved physical attempt before running eligible checks.",
+          null
+        );
+      // One action reruns every unsuccessful check of the round; the latest
+      // of them identifies it.
+      const unsuccessful = evidence.round.filter(
+        (attempt) =>
+          attempt.status === "failed" || attempt.status === "interrupted"
+      );
+      const named = unsuccessful.at(-1);
+      if (named === undefined)
+        return decided(
+          true,
+          "Verification prerequisites can be retried without replaying implementation.",
+          null
+        );
       return decided(
         true,
-        unresolved
-          ? "Retry reconciles the unresolved physical attempt before running eligible checks."
-          : unsuccessful
-            ? "The unsuccessful task check can be retried explicitly."
-            : "Verification prerequisites can be retried without replaying implementation.",
-        unsuccessful ? latest.id : null
+        unsuccessful.length === 1
+          ? "The unsuccessful task check can be retried explicitly."
+          : `The ${unsuccessful.length} unsuccessful task checks of this round can be retried in one action.`,
+        named.id
       );
     }
     const ledger = facts.legacyLedger;

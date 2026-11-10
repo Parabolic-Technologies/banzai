@@ -1,5 +1,6 @@
 import { requiredFixture } from "./helpers.js";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import {
   chmod,
   mkdir,
@@ -11,12 +12,15 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
+import { resolveClaudeInvocationScope } from "../src/adapters.js";
 import { BanzaiError, ProcessExitError } from "../src/errors.js";
 import { renderReviewArtifact } from "../src/review-artifact.js";
 import {
   CONTRACT_VERSION,
   type AdapterResult,
   type AttemptRecord,
+  type ClaudeInvocationScope,
+  type OrchestratorConfig,
   type PhaseAdapterRequest,
   type PhaseResult,
   type ProcessResult,
@@ -1137,6 +1141,110 @@ async function useClaudeReviewer(root: string): Promise<void> {
   config.models.reviewer.executable = claudeExecutable;
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
+
+/** The reviewer digest as recorded before ADR-0059: the scope fields only. */
+function preIsolationScopeDigest(scope: ClaudeInvocationScope): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        scope.strictMcpConfig,
+        scope.settingSources,
+        scope.pluginDirectory
+      ])
+    )
+    .digest("hex");
+}
+
+/** Runs to a first `changes_requested` review on the given reviewer. */
+async function reviewedOn(root: string, reviewerName: "claude" | "codex") {
+  const configPath = path.join(root, ".banzai/config.json");
+  const config = JSON.parse(
+    await readFile(configPath, "utf8")
+  ) as OrchestratorConfig;
+  const executable = path.join(root, "tools", reviewerName);
+  await mkdir(path.dirname(executable), { recursive: true });
+  await writeFile(executable, "#!/bin/sh\nexit 0\n", "utf8");
+  await chmod(executable, 0o755);
+  config.models.reviewer.executable = executable;
+  await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  const adapters = new FakeAdapters();
+  adapters.reviewResults.push({
+    contractVersion: CONTRACT_VERSION,
+    verdict: "changes_requested",
+    summary: "One finding.",
+    findings: [finding("R1-F1", "Defect.")],
+    reviewedFindingIds: [],
+    deferredCoverage: []
+  });
+  const runner = new WorkflowRunner(root, adapters);
+  await runner.start({ slug: "example", request: "Implement it." });
+  const reviewed = await runner.approvePlan("human");
+  const reviewer = reviewed.sessions.reviewer;
+  assert.ok(reviewer);
+  return {
+    config,
+    reviewed,
+    reviewer,
+    settings: {
+      executable: reviewer.executable,
+      model: reviewer.model,
+      effort: reviewer.effort,
+      timeoutMs: 1_000
+    }
+  };
+}
+
+test("a Claude reviewer session recorded before review isolation rotates to a full review", async () => {
+  const repository = await createTestRepository();
+  try {
+    const { config, reviewed, reviewer, settings } = await reviewedOn(
+      repository.root,
+      "claude"
+    );
+    const { scope } = await resolveClaudeInvocationScope(
+      config.claudeEnvironment
+    );
+    const current = invocationScopeDigest(scope);
+    assert.equal(reviewer.invocationDigest, current);
+    // The isolation contract is part of the digest, so a pre-change binding
+    // no longer matches the same scope.
+    const preIsolation = preIsolationScopeDigest(scope);
+    assert.notEqual(preIsolation, current);
+
+    const stale = structuredClone(reviewed);
+    assert.ok(stale.sessions.reviewer);
+    stale.sessions.reviewer.invocationDigest = preIsolation;
+    const rotated = reviewExecutionPolicy(stale, settings, current);
+    assert.equal(rotated.rotationReason, "session-inventory-changed");
+    assert.equal(rotated.sessionMode, "fresh");
+    assert.equal(rotated.reviewMode, "full");
+
+    // A binding recorded with the isolation digest resumes.
+    assert.equal(
+      reviewExecutionPolicy(reviewed, settings, current).rotationReason,
+      null
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("a Codex reviewer session carries no invocation digest and never rotates for it", async () => {
+  const repository = await createTestRepository();
+  try {
+    const { reviewed, reviewer, settings } = await reviewedOn(
+      repository.root,
+      "codex"
+    );
+    assert.equal(reviewer.invocationDigest, undefined);
+    assert.equal(
+      reviewExecutionPolicy(reviewed, settings, null).rotationReason,
+      null
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
 
 async function failedRereviewFixture(error: Error) {
   const repository = await createTestRepository();

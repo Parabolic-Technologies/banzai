@@ -26,7 +26,7 @@ and links, including its report and review directory; never create a replacement
 work directory to satisfy a new-work path example.
 
 Standalone verification inspection uses the installed
-`../../scripts/verification.cjs` v3 inspect/decide request with the exact
+`../../scripts/verification.cjs` v4 inspect/decide request with the exact
 `documentPath`, `workflow` and `roundId`. These operations are read-only and
 create no execution authority or metadata. This skill does not execute checks.
 An authorized implementing skill owns applicable fresh checks when no supported

@@ -31,6 +31,14 @@ Quick-fix report:
 work/<slug>/change-report.md
 ```
 
+Multi-package initiative, kept by the explicitly invoked `initiative` skill:
+
+```text
+initiatives/<slug>/brief.md
+initiatives/<slug>/tracker.md
+initiatives/<slug>/gate-<N>-report.md
+```
+
 Optional local orchestrator machine contracts are shipped separately from
 project documentation templates:
 
@@ -47,6 +55,9 @@ Rules:
 - Use short kebab-case slugs/names.
 - Link related artifacts at the top.
 - Create `work/<slug>/change-report.md` only when `quick-fix` requires an audit trail.
+- An initiative's brief is frozen at `start`; its tracker is the living
+  record. Each package keeps its own flat `work/<slug>/` directory, and
+  initiative documents grant no approval.
 - Each review lands at the next `review-<iteration>.md`. Both orchestrated
   reviewers are read-only; the runner renders, validates and publishes
   `banzai-feature-review/v8`. Standalone `feature-review` owns a durable
@@ -81,7 +92,7 @@ No document migration, layout declaration or registration is required.
 
 Planning-review and planning-analysis attempts are read-only, with no artifact
 write grant. The runner alone publishes planning-review-N.md beside the exact
-bound work documents. The current hook executes state v10 only and retains its
-newer-schema update diagnostic. Binding v3 gains no role. Both structured output
+bound work documents. The current hook executes state v10 and its plan
+re-check successor v11, and retains its newer-schema update diagnostic. Binding v3 gains no role. Both structured output
 contracts remain v1 under umbrella 1.0.0; human planning triage is answer v4 in
-control 8.0.0, and never grants plan approval or ADR acceptance.
+control 9.0.0, and never grants plan approval or ADR acceptance.

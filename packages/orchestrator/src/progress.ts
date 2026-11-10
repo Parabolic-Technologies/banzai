@@ -1,6 +1,11 @@
 import path from "node:path";
 import { createStyler, type Styler } from "./ansi.js";
-import { resolveWidth, wrapText } from "./format.js";
+import {
+  escapeTerminalField,
+  formatDuration,
+  resolveWidth,
+  wrapText
+} from "./format.js";
 import type {
   PhaseDescriptor,
   ProgressEvent,
@@ -56,18 +61,6 @@ export function resolveProgressLevel(
   return LEVELS.has(configured) ? (configured as ProgressLevel) : "normal";
 }
 
-function formatDuration(durationMs: number): string {
-  if (durationMs < 1_000) {
-    return `${Math.max(0, Math.round(durationMs))}ms`;
-  }
-  if (durationMs < 60_000) {
-    return `${(durationMs / 1_000).toFixed(durationMs < 10_000 ? 1 : 0)}s`;
-  }
-  const minutes = Math.floor(durationMs / 60_000);
-  const seconds = Math.floor((durationMs % 60_000) / 1_000);
-  return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
-}
-
 function singleLine(value: string): string {
   return value
     .replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ")
@@ -87,12 +80,14 @@ function phaseBanner(
   width: number,
   styler: Styler
 ): string {
-  const vendor = path.basename(descriptor.executable);
+  // Executable, model and effort come from configuration, which may be a
+  // developer's local file (ADR-0060), so each is escaped as a field.
+  const vendor = escapeTerminalField(path.basename(descriptor.executable));
   const timeout = `${Math.ceil(descriptor.timeoutMs / 60_000)}m cap`;
   const facts = [
     vendor,
-    descriptor.model,
-    descriptor.effort,
+    escapeTerminalField(descriptor.model),
+    escapeTerminalField(descriptor.effort),
     descriptor.sessionMode,
     timeout
   ].join(" · ");
@@ -292,7 +287,7 @@ export class TerminalProgressReporter {
     const model =
       live.descriptor === undefined
         ? ""
-        : ` · ${live.descriptor.model} ${live.descriptor.effort}`;
+        : ` · ${escapeTerminalField(live.descriptor.model)} ${escapeTerminalField(live.descriptor.effort)}`;
     const plain = `${frame} ${live.label}${model}  ${facts.join(" · ")}`;
     // One column short of the terminal: a status line that wraps leaves the
     // overflow behind on the next erase. Measured in grapheme clusters so a

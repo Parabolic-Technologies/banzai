@@ -27,8 +27,8 @@ interface VendorCatalog {
   supported: ReadonlySet<string>;
   replacements: ReadonlyMap<string, CatalogEntry>;
   /**
-   * The first CLI release that serves a model, recorded only where it is newer
-   * than the vendor-wide minimum the adapters enforce.
+   * The first CLI release that serves a model. A model minimum at or below the
+   * vendor-wide minimum the adapters enforce stays recorded and never decides.
    */
   cliMinimums: ReadonlyMap<string, string>;
 }

@@ -3,6 +3,7 @@ import { classifyModelFailure } from "../../adapters.js";
 import {
   BanzaiError,
   errorMessage,
+  LocalModelOverrideRefusalError,
   ProcessExitError,
   TerminalRunStateError
 } from "../../errors.js";
@@ -390,6 +391,9 @@ export async function failAttempt(
   error: unknown
 ): Promise<RunState> {
   if (error instanceof TerminalRunStateError) return error.state;
+  // Backstop for ADR-0060 §5: a run guard refusal is never an attempt failure.
+  // Check points sit before attempt creation, so none should arrive here.
+  if (error instanceof LocalModelOverrideRefusalError) throw error;
   const completionError =
     (record.attempt.kind === "implementation" ||
       record.attempt.kind === "fix") &&

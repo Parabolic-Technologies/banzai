@@ -136,6 +136,15 @@ const FIXTURE_PATHS = [
   "documentation/decisions/0050-triggered-code-design-assessment.md",
   "documentation/decisions/0054-git-visible-work-artifacts.md",
   "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md",
+  "documentation/decisions/0057-complete-task-verification-rounds.md",
+  "documentation/decisions/0058-human-plan-edits-rechecked-at-the-plan-gate.md",
+  "documentation/decisions/0059-claude-default-reviewer-and-reviewer-isolation.md",
+  "documentation/decisions/0060-local-model-override.md",
+  "documentation/decisions/0061-initiative-skill-and-documents.md",
+  "documentation/decisions/0062-claude-memory-notes-in-the-manual-hook-gate.md",
+  "documentation/decisions/0063-stable-headless-vendor-invocations.md",
+  "documentation/decisions/0064-runner-recorded-plan-remainder-digest.md",
+  "documentation/decisions/0066-date-prefixed-work-and-initiative-slugs.md",
   "packages/orchestrator/scripts/check-dist.mjs",
   "packages/orchestrator/scripts/release-version.mjs",
   "packages/orchestrator/scripts/smoke-committed.mjs",
@@ -1032,14 +1041,14 @@ for (const relativePath of [
   });
 }
 
-test("release validation protects run-state v3-v10 and agent-control 8.0 identities", async () => {
+test("release validation protects run-state v3-v11 and agent-control 9.0 identities", async () => {
   await withFixture(async (root) => {
     const typesPath = path.join(root, "packages/orchestrator/src/types.ts");
     const accepted = await readFile(typesPath, "utf8");
     await writeFile(
       typesPath,
       accepted.replace(
-        "schemaVersion: 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;",
+        "schemaVersion: 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;",
         "schemaVersion: 2;"
       ),
       "utf8"
@@ -1051,7 +1060,7 @@ test("release validation protects run-state v3-v10 and agent-control 8.0 identit
     await writeFile(
       typesPath,
       accepted.replace(
-        '"banzai-agent-status/v6" as const',
+        '"banzai-agent-status/v7" as const',
         '"banzai-agent-status/v1" as const'
       ),
       "utf8"
@@ -1102,7 +1111,7 @@ for (const [relativePath, fragment] of [
   ],
   [
     "plugins/banzai/skills/orchestrate/SKILL.md",
-    "exact supported v8 declaration"
+    "exact supported v9 declaration"
   ],
   ["plugins/banzai/skills/orchestrate/SKILL.md", "banzai-agent-answer/v2"],
   [
@@ -1123,11 +1132,11 @@ for (const [relativePath, fragment] of [
   ],
   [
     "plugins/banzai/skills/orchestrate/references/control-protocol.md",
-    "banzai-agent-capabilities/v8"
+    "banzai-agent-capabilities/v9"
   ],
   [
     "plugins/banzai/skills/orchestrate/references/control-protocol.md",
-    'controlContractVersion: "8.0.0"'
+    'controlContractVersion: "9.0.0"'
   ],
   [
     "plugins/banzai/skills/orchestrate/references/control-protocol.md",
@@ -1168,16 +1177,88 @@ for (const [relativePath, fragment] of [
   });
 }
 
+for (const [relativePath, fragment] of [
+  ["plugins/banzai/skills/initiative/SKILL.md", "name: initiative"],
+  [
+    "plugins/banzai/skills/initiative/SKILL.md",
+    "disable-model-invocation: true"
+  ],
+  [
+    "plugins/banzai/skills/initiative/SKILL.md",
+    "only when the user invokes this skill explicitly by name"
+  ],
+  [
+    "plugins/banzai/skills/initiative/SKILL.md",
+    "never select it from prompt wording alone"
+  ],
+  [
+    "plugins/banzai/skills/initiative/SKILL.md",
+    "documentation/initiatives/<slug>/"
+  ],
+  [
+    "plugins/banzai/skills/initiative/SKILL.md",
+    "Initiative documents grant no approval."
+  ],
+  [
+    "plugins/banzai/skills/initiative/SKILL.md",
+    "Never fetch, stage, commit or push."
+  ],
+  [
+    "plugins/banzai/skills/initiative/SKILL.md",
+    "Never invoke `orchestrate` or the `banzai` CLI"
+  ],
+  ["plugins/banzai/skills/initiative/SKILL.md", "`next` writes nothing."],
+  [
+    "plugins/banzai/skills/initiative/SKILL.md",
+    "the only write allowed is a re-freeze"
+  ],
+  [
+    "plugins/banzai/skills/initiative/SKILL.md",
+    "`gate` refuses to overwrite an existing report"
+  ],
+  [
+    "plugins/banzai/skills/initiative/SKILL.md",
+    "Never edit `brief.md` after `start`."
+  ],
+  [
+    "plugins/banzai/skills/initiative/agents/openai.yaml",
+    'display_name: "Banzai Initiative"'
+  ],
+  [
+    "plugins/banzai/skills/initiative/agents/openai.yaml",
+    "allow_implicit_invocation: false"
+  ],
+  ["plugins/banzai/AGENTS.md", "Multi-package initiative -> `initiative`"],
+  ["plugins/banzai/AGENTS.md", "are not decision gates"]
+] as const) {
+  test(`release validation protects the initiative skill in ${relativePath}: ${fragment}`, async () => {
+    await withFixture(async (root) => {
+      const target = path.join(root, relativePath);
+      let contents = replacePolicyFragment(
+        await readFile(target, "utf8"),
+        fragment,
+        "REMOVED"
+      );
+      // The check accepts a fragment anywhere, so remove every occurrence.
+      while (contents.replace(/\s+/g, " ").includes(fragment))
+        contents = replacePolicyFragment(contents, fragment, "REMOVED");
+      await writeFile(target, contents, "utf8");
+      const result = validate(root);
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /^INITIATIVE_SKILL_POLICY_DRIFT /);
+    });
+  });
+}
+
 test("release policy pins Git-capable Node images", async () => {
   const policy = JSON.parse(
     await readFile(path.join(REPOSITORY_ROOT, "release-policy.json"), "utf8")
   ) as {
     node: {
       supported: { image: string }[];
-      forward: { image: string };
     };
   };
-  for (const lane of [...policy.node.supported, policy.node.forward]) {
+  for (const lane of policy.node.supported) {
     assert.match(lane.image, /^node:\d+\.\d+\.\d+-bookworm$/);
     assert.doesNotMatch(lane.image, /-slim$/);
   }
@@ -1833,6 +1914,78 @@ test("release validation rejects Node and GitHub Actions policy drift", async ()
   });
 });
 
+test("release policy accepts exactly the three ADR-0067 supported lanes", async () => {
+  type Lane = Record<string, unknown>;
+  interface NodePolicy {
+    supported: Lane[];
+    forward?: Lane;
+    engines?: string;
+  }
+  const mutations: [string, (node: NodePolicy) => void][] = [
+    ["Node 26 lane removed", (node) => void node.supported.pop()],
+    [
+      "Node 26 lane advisory",
+      (node) => {
+        node.supported[2] = { ...node.supported[2], required: false };
+      }
+    ],
+    [
+      "Node 26 lane re-pinned",
+      (node) => {
+        node.supported[2] = {
+          ...node.supported[2],
+          version: "26.7.0",
+          image: "node:26.7.0-bookworm"
+        };
+      }
+    ],
+    [
+      "Node 25 lane added",
+      (node) => {
+        node.supported.push({
+          major: 25,
+          version: "25.2.1",
+          image: "node:25.2.1-bookworm",
+          job: "release_check_node_25",
+          required: true
+        });
+      }
+    ],
+    [
+      "forward lane reintroduced",
+      (node) => {
+        node.forward = {
+          major: 26,
+          version: "26.7.0",
+          image: "node:26.7.0-bookworm",
+          job: "forward_compatibility_node_26",
+          required: false
+        };
+      }
+    ],
+    [
+      "engines without Node 26",
+      (node) => {
+        node.engines = ">=22.20.0 <23 || >=24.11.1 <25";
+      }
+    ]
+  ];
+  await withFixture(async (root) => {
+    for (const [label, mutate] of mutations) {
+      await cp(
+        path.join(REPOSITORY_ROOT, "release-policy.json"),
+        path.join(root, "release-policy.json")
+      );
+      await mutateJson(root, "release-policy.json", (value) => {
+        mutate(value.node as NodePolicy);
+      });
+      const result = validate(root);
+      assert.equal(result.status, 1, `accepted policy mutation: ${label}`);
+      assert.match(result.stderr, /^NODE_POLICY_DRIFT /, label);
+    }
+  });
+});
+
 test("default CI lanes reject vendor calls and live CI requires explicit opt-in", async () => {
   await withFixture(async (root) => {
     const ciPath = path.join(root, ".github/workflows/ci.yml");
@@ -1874,12 +2027,12 @@ test("release validation rejects weakened GitHub CI evidence and live isolation"
         "  push:\n    branches: [main]\n  pull_request:\n",
         "CI_POLICY_DRIFT"
       ],
+      // ADR-0067 retired the weekly schedule with the forward lane.
       [
-        '    - cron: "17 5 * * 1"',
-        '    - cron: "17 5 * * *"',
+        "        default: false\n",
+        '        default: false\n  schedule:\n    - cron: "17 5 * * 1"\n',
         "CI_POLICY_DRIFT"
       ],
-      ['  schedule:\n    - cron: "17 5 * * 1"\n', "", "CI_POLICY_DRIFT"],
       [
         "concurrency:\n  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}\n  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n\n",
         "",
@@ -1891,14 +2044,14 @@ test("release validation rejects weakened GitHub CI evidence and live isolation"
         "CI_POLICY_DRIFT"
       ],
       [
-        "    if: github.event_name != 'schedule'\n",
-        "    if: always()\n",
+        "  release_check_node_26:\n",
+        "  release_check_node_26:\n    if: always()\n",
         "CI_POLICY_DRIFT"
       ],
       // A more-indented line continues the plain-scalar condition.
       [
-        "    if: github.event_name != 'schedule'\n",
-        "    if: github.event_name != 'schedule'\n      || true\n",
+        "  release_check_node_26:\n",
+        "  release_check_node_26:\n    if: github.event_name != 'pull_request'\n      || true\n",
         "CI_POLICY_DRIFT"
       ],
       [
@@ -1913,9 +2066,26 @@ test("release validation rejects weakened GitHub CI evidence and live isolation"
         "CI_POLICY_DRIFT"
       ],
       ["      - uses: actions/upload-artifact@v7\n", "", "CI_POLICY_DRIFT"],
+      // Node 26 is a required lane: it runs on pull requests and blocks.
       [
-        "    if: github.event_name != 'pull_request'",
-        "    if: github.event_name != 'schedule'",
+        "  release_check_node_26:\n",
+        "  release_check_node_26:\n    if: github.event_name != 'pull_request'\n",
+        "CI_POLICY_DRIFT"
+      ],
+      [
+        "  release_check_node_26:\n",
+        "  release_check_node_26:\n    continue-on-error: true\n",
+        "CI_POLICY_DRIFT"
+      ],
+      [
+        "    container: node:26.13.0-bookworm",
+        "    container: node:26.7.0-bookworm",
+        "CI_POLICY_DRIFT"
+      ],
+      // No forward lane is accepted (ADR-0067).
+      [
+        "  live_vendor_compatibility:\n",
+        "  forward_compatibility_node_26:\n    if: github.event_name != 'pull_request'\n    runs-on: ubuntu-24.04\n    container: node:26.7.0-bookworm\n    continue-on-error: true\n    steps:\n      - uses: actions/checkout@v6\n\n  live_vendor_compatibility:\n",
         "CI_POLICY_DRIFT"
       ],
       ["  pull_request:\n", "  pull_request_target:\n", "CI_POLICY_DRIFT"],
@@ -1933,7 +2103,7 @@ test("release validation rejects weakened GitHub CI evidence and live isolation"
       ],
       [
         "  release_check_node_22:\n",
-        "  release_check_node_22:\n    needs: forward_compatibility_node_26\n",
+        "  release_check_node_22:\n    needs: release_check_node_24\n",
         "CI_POLICY_DRIFT"
       ],
       [
@@ -2011,18 +2181,36 @@ test("release validation rejects a weakened publication gate", async () => {
         "  release_check_node_22:\n    continue-on-error: true\n"
       ],
       [
-        "      (needs.release_check_node_22.result == 'success' && needs.release_check_node_24.result == 'success'))",
-        "      (needs.release_check_node_24.result == 'success'))"
+        "      (needs.release_check_node_22.result == 'success' && needs.release_check_node_24.result == 'success' && needs.release_check_node_26.result == 'success'))",
+        "      (needs.release_check_node_24.result == 'success' && needs.release_check_node_26.result == 'success'))"
+      ],
+      // ADR-0067: publication without the Node 26 lane is not accepted.
+      [
+        "      (needs.release_check_node_22.result == 'success' && needs.release_check_node_24.result == 'success' && needs.release_check_node_26.result == 'success'))",
+        "      (needs.release_check_node_22.result == 'success' && needs.release_check_node_24.result == 'success'))"
+      ],
+      [
+        "      - release_check_node_24\n      - release_check_node_26\n",
+        "      - release_check_node_24\n"
+      ],
+      [
+        "    container: node:26.13.0-bookworm",
+        "    container: node:24.11.1-bookworm"
+      ],
+      // Evidence checking and publishing stay on Node 24 (ADR-0039).
+      [
+        "          node-version: 24.11.1\n          registry-url:",
+        "          node-version: 26.13.0\n          registry-url:"
       ],
       // Appended disjunctions, also after a blank line inside the folded
       // scalar, would admit publication without any gate (review-2 F1).
       [
-        "      (needs.release_check_node_22.result == 'success' && needs.release_check_node_24.result == 'success'))\n",
-        "      (needs.release_check_node_22.result == 'success' && needs.release_check_node_24.result == 'success'))\n      || true\n"
+        "      (needs.release_check_node_22.result == 'success' && needs.release_check_node_24.result == 'success' && needs.release_check_node_26.result == 'success'))\n",
+        "      (needs.release_check_node_22.result == 'success' && needs.release_check_node_24.result == 'success' && needs.release_check_node_26.result == 'success'))\n      || true\n"
       ],
       [
-        "      (needs.release_check_node_22.result == 'success' && needs.release_check_node_24.result == 'success'))\n",
-        "      (needs.release_check_node_22.result == 'success' && needs.release_check_node_24.result == 'success'))\n\n      || true\n"
+        "      (needs.release_check_node_22.result == 'success' && needs.release_check_node_24.result == 'success' && needs.release_check_node_26.result == 'success'))\n",
+        "      (needs.release_check_node_22.result == 'success' && needs.release_check_node_24.result == 'success' && needs.release_check_node_26.result == 'success'))\n\n      || true\n"
       ],
       // A step condition would let a fallback lane succeed without its gate.
       [
@@ -2429,6 +2617,31 @@ for (const scenario of [
     file: "skills/project-manifest/references/layout-migration.md",
     mutate: (text: string) =>
       text.replace("Apply only after approval", "Apply immediately")
+  },
+  {
+    name: "a policy read added to the initiative skill",
+    file: "skills/initiative/SKILL.md",
+    mutate: (text: string) =>
+      text.replace(
+        "## Sources\n",
+        "## Sources\n\n- Policies, resolved as `../../policies/<name>.md`:\n  - `engineering-quality.md` before any mode.\n"
+      )
+  },
+  {
+    name: "a missing legacy stop in the initiative skill",
+    file: "skills/initiative/SKILL.md",
+    mutate: (text: string) =>
+      replacePolicyFragment(
+        text,
+        "legacy Banzai layout: run `project-manifest` to migrate",
+        "legacy layout"
+      )
+  },
+  {
+    name: "a writing skill without its policy resolution line",
+    file: "skills/feature-description/SKILL.md",
+    mutate: (text: string) =>
+      text.replace("../../policies/<name>.md", "the installed policies")
   }
 ]) {
   test(`instruction layout rejects ${scenario.name}`, async () => {
@@ -3024,6 +3237,150 @@ test("ADR-0055 admits only the exact accepted ADR-0054 lifecycle annotation", as
     const amendment = path.join(
       root,
       "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md"
+    );
+    const accepted = await readFile(amendment, "utf8");
+    await writeFile(
+      amendment,
+      accepted.replace("- Status: Accepted", "- Status: Proposed")
+    );
+    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    await writeFile(amendment, accepted);
+    await validateGuidanceExtraction(root);
+  });
+});
+
+test("ADR-0057 and ADR-0058 admit only their exact accepted lifecycle annotations", async () => {
+  await withFixture(async (root) => {
+    await validateGuidanceExtraction(root);
+    for (const [authorityPath, amendmentPath, annotation] of [
+      [
+        "documentation/decisions/0045-guided-verification-setup.md",
+        "documentation/decisions/0057-complete-task-verification-rounds.md",
+        "legacy profile mode and fail-closed stops remain."
+      ],
+      [
+        "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md",
+        "documentation/decisions/0058-human-plan-edits-rechecked-at-the-plan-gate.md",
+        "Approval remains the only transition to `plan_approved`."
+      ]
+    ] as const) {
+      const authority = path.join(root, authorityPath);
+      const original = await readFile(authority, "utf8");
+      for (const changed of [
+        original.replace(annotation, "Other behaviour remains."),
+        original + "\nUnaccepted decision body.\n"
+      ]) {
+        assert.notEqual(changed, original);
+        await writeFile(authority, changed);
+        await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+      }
+      await writeFile(authority, original);
+      const amendment = path.join(root, amendmentPath);
+      const accepted = await readFile(amendment, "utf8");
+      await writeFile(
+        amendment,
+        accepted.replace("- Status: Accepted", "- Status: Proposed")
+      );
+      await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+      await writeFile(amendment, accepted);
+      await validateGuidanceExtraction(root);
+    }
+  });
+});
+
+test("ADR-0061 admits only its exact accepted ADR-0054 lifecycle annotation", async () => {
+  await withFixture(async (root) => {
+    await validateGuidanceExtraction(root);
+    const authority = path.join(
+      root,
+      "documentation/decisions/0054-git-visible-work-artifacts.md"
+    );
+    const original = await readFile(authority, "utf8");
+    for (const changed of [
+      original.replace(
+        "Work directories stay flat.",
+        "Other behaviour remains."
+      ),
+      original + "\nUnaccepted decision body.\n"
+    ]) {
+      assert.notEqual(changed, original);
+      await writeFile(authority, changed);
+      await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    }
+    await writeFile(authority, original);
+    const amendment = path.join(
+      root,
+      "documentation/decisions/0061-initiative-skill-and-documents.md"
+    );
+    const accepted = await readFile(amendment, "utf8");
+    await writeFile(
+      amendment,
+      accepted.replace("- Status: Accepted", "- Status: Proposed")
+    );
+    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    await writeFile(amendment, accepted);
+    await validateGuidanceExtraction(root);
+  });
+});
+
+test("ADR-0064 admits only its exact accepted ADR-0058 lifecycle annotation", async () => {
+  await withFixture(async (root) => {
+    await validateGuidanceExtraction(root);
+    const authority = path.join(
+      root,
+      "documentation/decisions/0058-human-plan-edits-rechecked-at-the-plan-gate.md"
+    );
+    const original = await readFile(authority, "utf8");
+    for (const changed of [
+      original.replace(
+        "approval's refusal to rewrite remain. Implementation is Planned.",
+        "Other behaviour remains."
+      ),
+      original + "\nUnaccepted decision body.\n"
+    ]) {
+      assert.notEqual(changed, original);
+      await writeFile(authority, changed);
+      await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    }
+    await writeFile(authority, original);
+    const amendment = path.join(
+      root,
+      "documentation/decisions/0064-runner-recorded-plan-remainder-digest.md"
+    );
+    const accepted = await readFile(amendment, "utf8");
+    await writeFile(
+      amendment,
+      accepted.replace("- Status: Accepted", "- Status: Proposed")
+    );
+    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    await writeFile(amendment, accepted);
+    await validateGuidanceExtraction(root);
+  });
+});
+
+test("ADR-0066 admits only its exact accepted ADR-0054 lifecycle annotation", async () => {
+  await withFixture(async (root) => {
+    await validateGuidanceExtraction(root);
+    const authority = path.join(
+      root,
+      "documentation/decisions/0054-git-visible-work-artifacts.md"
+    );
+    const original = await readFile(authority, "utf8");
+    for (const changed of [
+      original.replace(
+        "required name prefix. Existing directories keep their names.",
+        "Other behaviour remains."
+      ),
+      original + "\nUnaccepted decision body.\n"
+    ]) {
+      assert.notEqual(changed, original);
+      await writeFile(authority, changed);
+      await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    }
+    await writeFile(authority, original);
+    const amendment = path.join(
+      root,
+      "documentation/decisions/0066-date-prefixed-work-and-initiative-slugs.md"
     );
     const accepted = await readFile(amendment, "utf8");
     await writeFile(

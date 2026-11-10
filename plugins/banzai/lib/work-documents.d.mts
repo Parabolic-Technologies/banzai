@@ -21,8 +21,10 @@ export interface WorkBinding {
 }
 export interface BoundWork { binding: WorkBinding; sha256: string }
 export const WORK_DIRECTORY: "documentation/work";
+export const INITIATIVE_DIRECTORY: "documentation/initiatives";
 export const BINDING_SCHEMA: "banzai-work-binding/v3";
 export function workDirectory(slug: string): string;
+export function workSlugConflict(repoRoot: string, slug: string): Promise<string | null>;
 export function documentRoles(slug: string, mode: WorkBinding["mode"]): WorkArtifacts;
 export function parseBinding(value: unknown): WorkBinding;
 export function ignored(root: string, relative: string): Promise<boolean>;

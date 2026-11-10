@@ -15,6 +15,7 @@ export {
   ownsArtifact,
   planningReviewFilenames,
   workDocumentInventory,
+  workSlugConflict,
   verifyDocumentVisibility
 } from "../../../plugins/banzai/lib/work-documents.mjs";
 export {

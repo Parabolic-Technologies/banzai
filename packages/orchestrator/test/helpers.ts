@@ -5,6 +5,7 @@ import {
   readFile,
   readdir,
   rm,
+  symlink,
   writeFile
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -12,6 +13,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { DEFAULT_CONFIG } from "../src/config.js";
 import type {
+  LocalModelLayer,
   OrchestratorConfig,
   VerificationAttemptRecord,
   VerificationAttemptStatus
@@ -431,8 +433,15 @@ export async function commitAll(root: string, message: string): Promise<void> {
   await execFileAsync("git", ["commit", "-qm", message], { cwd: root });
 }
 
+/** The exact `.gitignore` line ADR-0060 §4 prescribes for the local model file. */
+export const LOCAL_CONFIG_IGNORE_LINE = ".banzai/config.local.json";
+
 export async function createTestRepository(
-  options: { artifactLayout?: "legacy" | "private" | null } = {}
+  options: {
+    artifactLayout?: "legacy" | "private" | null;
+    /** Commit the exact local model file ignore line (ADR-0060 §4). */
+    ignoreLocalConfig?: boolean;
+  } = {}
 ): Promise<{
   root: string;
   dispose(): Promise<void>;
@@ -476,7 +485,10 @@ export async function createTestRepository(
   );
   await writeFile(
     path.join(root, ".gitignore"),
-    ".banzai/runs/\n.banzai/active-run.json\n.banzai/runner.lock\n.banzai/work/\n.banzai/.artifact-init.lock\n.banzai/verification/\n.banzai/execution-locks/\n",
+    ".banzai/runs/\n.banzai/active-run.json\n.banzai/runner.lock\n.banzai/work/\n.banzai/.artifact-init.lock\n.banzai/verification/\n.banzai/execution-locks/\n" +
+      (options.ignoreLocalConfig === true
+        ? `${LOCAL_CONFIG_IGNORE_LINE}\n`
+        : ""),
     "utf8"
   );
   // Only explicitly selected historical fixtures carry a layout declaration.
@@ -499,6 +511,100 @@ export async function createTestRepository(
       await rm(root, { recursive: true, force: true });
     }
   };
+}
+
+/**
+ * The canonical bytes of `.banzai/config.local.json` (ADR-0060 §1): two-space
+ * JSON with a final newline, `schemaVersion` before `models`, roles in planner,
+ * implementer, reviewer order and each triple as executable, model, effort.
+ * Written here independently of any production writer.
+ */
+export function localModelFileText(models: LocalModelLayer): string {
+  const roles: Record<string, unknown> = {};
+  for (const role of ["planner", "implementer", "reviewer"] as const) {
+    const triple = models[role];
+    if (triple === undefined) continue;
+    roles[role] = {
+      executable: triple.executable,
+      model: triple.model,
+      effort: triple.effort
+    };
+  }
+  return `${JSON.stringify({ schemaVersion: 1, models: roles }, null, 2)}\n`;
+}
+
+/** Writes a canonical local model file, creating `.banzai/` when needed. */
+export async function writeLocalModels(
+  root: string,
+  models: LocalModelLayer
+): Promise<string> {
+  const target = path.join(root, LOCAL_CONFIG_IGNORE_LINE);
+  await mkdir(path.dirname(target), { recursive: true });
+  await writeFile(target, localModelFileText(models), "utf8");
+  return target;
+}
+
+export interface VendorExecutableShims {
+  /** Holds `claude` and `codex`, each a link to the Node binary running the suite. */
+  directory: string;
+  /** This process's `PATH` with the shim directory first. */
+  path: string;
+  /** A child environment whose `PATH` resolves the shims first. */
+  env(overrides?: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
+  dispose(): Promise<void>;
+}
+
+/**
+ * Executables named `claude` and `codex` for configurations that use the bare
+ * vendor names, as a local model file must (ADR-0060 §1). Like the fixtures'
+ * `process.execPath` executables they only satisfy `PATH` resolution in
+ * preflight and doctor: in-process runs still send every model request to the
+ * injected `FakeAdapters`, which tell the vendors apart by executable name.
+ */
+export async function createVendorExecutableShims(): Promise<VendorExecutableShims> {
+  const directory = await mkdtemp(path.join(tmpdir(), "banzai-vendor-shims-"));
+  for (const vendor of ["claude", "codex"]) {
+    await symlink(process.execPath, path.join(directory, vendor));
+  }
+  const prefixed = (value: string | undefined): string =>
+    value === undefined || value.length === 0
+      ? directory
+      : `${directory}${path.delimiter}${value}`;
+  return {
+    directory,
+    path: prefixed(process.env.PATH),
+    env: (overrides = {}) => ({
+      ...process.env,
+      ...overrides,
+      PATH: prefixed(overrides.PATH ?? process.env.PATH)
+    }),
+    dispose: async () => {
+      await rm(directory, { recursive: true, force: true });
+    }
+  };
+}
+
+/**
+ * Runs `callback` with the vendor shims first on this process's `PATH` and
+ * restores `PATH` afterwards. `PATH` is process-wide, so callers must not run
+ * other subtests concurrently.
+ */
+export async function withVendorExecutablesOnPath<T>(
+  callback: (shims: VendorExecutableShims) => Promise<T>
+): Promise<T> {
+  const shims = await createVendorExecutableShims();
+  const previous = process.env.PATH;
+  process.env.PATH = shims.path;
+  try {
+    return await callback(shims);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.PATH;
+    } else {
+      process.env.PATH = previous;
+    }
+    await shims.dispose();
+  }
 }
 
 /** The private binding v2 that runs created before binding v3 persisted. */

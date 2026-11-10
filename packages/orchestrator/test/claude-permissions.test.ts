@@ -8,6 +8,7 @@ import {
   claudePermissionDemanded,
   claudePermissionRemediation,
   inspectClaudePermissions,
+  inspectClaudeUserPluginScope,
   type ClaudePermissionDemand
 } from "../src/claude-permissions.js";
 import type { OrchestratorConfig } from "../src/types.js";
@@ -353,5 +354,47 @@ test("ambient discovery loads user and local rules the scoped run never sees", a
     assert.deepEqual(untrustedAmbient.advisories, []);
   } finally {
     await repository.dispose();
+  }
+});
+
+test("the user plugin scope reads only enabled banzai keys from the user settings file", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "banzai-plugin-scope-"));
+  try {
+    const file = path.join(home, ".claude", "settings.json");
+    // An empty CLAUDE_CONFIG_DIR falls back to ~/.claude, as for permissions.
+    const env = { HOME: home, CLAUDE_CONFIG_DIR: "" };
+    assert.deepEqual(await inspectClaudeUserPluginScope(env), {
+      state: "not_enabled",
+      path: file
+    });
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(
+      file,
+      JSON.stringify({
+        enabledPlugins: {
+          "banzai@zeta": true,
+          "other@banzai": true,
+          "banzai@banzai-plugins": true,
+          "banzai@disabled": false
+        }
+      })
+    );
+    assert.deepEqual(await inspectClaudeUserPluginScope(env), {
+      state: "enabled",
+      path: file,
+      keys: ["banzai@banzai-plugins", "banzai@zeta"]
+    });
+    await writeFile(file, '{"enabledPlugins":null}');
+    assert.equal(
+      (await inspectClaudeUserPluginScope(env)).state,
+      "not_enabled"
+    );
+    await writeFile(file, "not json");
+    assert.deepEqual(await inspectClaudeUserPluginScope(env), {
+      state: "unreadable",
+      path: file
+    });
+  } finally {
+    await rm(home, { recursive: true, force: true });
   }
 });

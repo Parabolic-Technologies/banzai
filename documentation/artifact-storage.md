@@ -23,10 +23,17 @@ documentation/
 ```
 
 The tree lists possible documents. Create only those required by the workflow.
-Keep one stable lowercase kebab-case subject slug across planning, implementation
-and review, without required dates, mode/status prefixes, owner folders or a
-navigation index. Add a local assets directory only when supporting files are
-needed. ADRs, guides and the project manifest keep their established paths.
+Keep one stable slug across planning, implementation and review, without
+mode/status prefixes, owner folders or a navigation index. A new work or
+initiative directory is named `yymmdd-<subject>`: its local creation date as
+two-digit year, month and day, then a lowercase kebab-case subject
+([ADR-0066](decisions/0066-date-prefixed-work-and-initiative-slugs.md)). A
+subject that already begins with today's prefix keeps it; any other receives
+it, and the prefix is never omitted. The full name, at most 100 characters,
+must be unused under `documentation/work/` and `documentation/initiatives/`.
+Existing undated directories keep their names. Add a local assets directory
+only when supporting files are needed. ADRs, guides and the project manifest
+keep their established paths.
 
 New work must appear in ordinary Git status and diffs. If an ignore hides it,
 correct only the new subtree; do not force-add or unignore historical evidence.
@@ -49,10 +56,11 @@ contents are inert for new work, even when unsupported or malformed.
 
 ## Verification and runner authority
 
-Standalone `verification.cjs` consumes request v3 with absolute `repoRoot`, exact
+Standalone `verification.cjs` consumes request v4 with absolute `repoRoot`, exact
 repository-relative `documentPath`, `workflow` (`strict`, `feature` or
-`quick-fix`) and UUID `roundId`; execute may include an exact failed/interrupted
-`retryOf`. Descriptors come from the document's v2 inventory, under the calling
+`quick-fix`) and UUID `roundId`; execute may include `retryOf`, the round's
+exact set of unsuccessful latest attempts. Request v3, whose `retryOf` names one
+attempt, keeps its meaning. Descriptors come from the document's v2 inventory, under the calling
 skill's existing task/plan authorization. Requests carry no commands or output
 paths. Inspect/decide are read-only; absent local evidence is unavailable.
 Execute owns ignored metadata and physical attempts for the selected directory.

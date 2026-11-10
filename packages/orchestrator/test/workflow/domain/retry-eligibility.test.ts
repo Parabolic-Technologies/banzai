@@ -7,6 +7,7 @@ import type {
 } from "../../../src/types.js";
 import {
   decideRetry,
+  latestAttemptRecord,
   type RetryEligibility,
   type RetryEvidence,
   type RetryFacts
@@ -238,7 +239,10 @@ test("retry decisions reproduce every baseline outcome from explicit facts", () 
         state: blockedState({ blockedFrom: "verifying" }),
         taskVerification: {
           readable: true,
-          latest: { id: "check-1", status: "started" }
+          round: [
+            { id: "check-1", status: "failed" },
+            { id: "check-2", status: "started" }
+          ]
         }
       },
       decided(
@@ -256,7 +260,10 @@ test("retry decisions reproduce every baseline outcome from explicit facts", () 
           state: blockedState({ blockedFrom: "verifying" }),
           taskVerification: {
             readable: true,
-            latest: { id: "check-1", status }
+            round: [
+              { id: "check-0", status: "completed" },
+              { id: "check-1", status }
+            ]
           }
         },
         decided(
@@ -268,21 +275,42 @@ test("retry decisions reproduce every baseline outcome from explicit facts", () 
         )
       ]
     ),
+    [
+      "several unsuccessful task checks, the latest of them named",
+      {
+        state: blockedState({ blockedFrom: "verifying" }),
+        taskVerification: {
+          readable: true,
+          round: [
+            { id: "check-1", status: "failed" },
+            { id: "check-2", status: "interrupted" },
+            { id: "check-3", status: "completed" }
+          ]
+        }
+      },
+      decided(
+        retry(
+          true,
+          "The 2 unsuccessful task checks of this round can be retried in one action.",
+          "check-2"
+        )
+      )
+    ],
     ...(
       [
-        ["completed", { id: "check-1", status: "completed" }],
-        ["absent", null]
+        ["completed", [{ id: "check-1", status: "completed" }]],
+        ["absent", []]
       ] as const
     ).map(
-      ([label, latest]): [
+      ([label, round]): [
         string,
         RetryFacts,
         ReturnType<typeof decideRetry>
       ] => [
-        `task verification prerequisites (${label} latest check)`,
+        `task verification prerequisites (${label} round)`,
         {
           state: blockedState({ blockedFrom: "verifying" }),
-          taskVerification: { readable: true, latest }
+          taskVerification: { readable: true, round: [...round] }
         },
         decided(
           retry(
@@ -426,7 +454,8 @@ test("retry decisions reproduce every baseline outcome from explicit facts", () 
         state: blockedState({
           blockedFrom: "planning",
           blockReason: APPROVAL_CHANGED
-        })
+        }),
+        latestAttempt: { readable: true, record: null }
       },
       decided(NOT_TIED)
     ],
@@ -843,7 +872,7 @@ test("retry allocates a separate malformed-evidence decision for every call", ()
   }
 });
 
-test("planning-review retry follows its episode step and keeps applying blocks ordinary", () => {
+test("planning-review retry follows its episode step and asks a blocked applying step for its attempt", () => {
   const active = (step: string) =>
     ({
       active: { step },
@@ -888,7 +917,8 @@ test("planning-review retry follows its episode step and keeps applying blocks o
         state: blockedState({
           blockedFrom: "planning",
           planningReview: active("applying")
-        })
+        }),
+        latestAttempt: { readable: true, record: null }
       },
       decided(NOT_TIED)
     ],
@@ -908,7 +938,8 @@ test("planning-review retry follows its episode step and keeps applying blocks o
         state: blockedState({
           blockedFrom: "planning",
           planningReview: closed("applied")
-        })
+        }),
+        latestAttempt: { readable: true, record: null }
       },
       decided(NOT_TIED)
     ],
@@ -918,7 +949,8 @@ test("planning-review retry follows its episode step and keeps applying blocks o
         state: blockedState({
           blockedFrom: "planning",
           planningReview: closed("stale", "applying")
-        })
+        }),
+        latestAttempt: { readable: true, record: null }
       },
       decided(NOT_TIED)
     ],
@@ -1013,4 +1045,175 @@ test("planning-review retry follows its episode step and keeps applying blocks o
   ];
   for (const [name, facts, expected] of rows)
     assert.deepEqual(decideRetry(facts), expected, name);
+});
+
+const BLOCK_SUMMARY = "Blocked: the planner needs a permission from the owner.";
+
+function planAttemptRecord(
+  overrides: Partial<AttemptRecord> & {
+    outcome?: string;
+    summary?: string;
+    kind?: AttemptReference["kind"];
+  } = {}
+): AttemptRecord {
+  const {
+    outcome = "blocked",
+    summary = BLOCK_SUMMARY,
+    kind = "plan"
+  } = overrides;
+  return {
+    attempt: { id: `${kind}-1-block`, kind, mutable: false },
+    status: "completed",
+    startedAt: "2026-11-06T15:25:07.197Z",
+    result: { outcome, summary },
+    ...overrides
+  } as unknown as AttemptRecord;
+}
+
+const plannerBlockState = (overrides: Partial<RunState> = {}): RunState =>
+  blockedState({
+    blockedFrom: "planning",
+    blockReason: BLOCK_SUMMARY,
+    ...overrides
+  });
+
+const PLANNER_BLOCK = decided(
+  retry(
+    true,
+    "The planner reported a block in attempt plan-1-block; retry continues planning after you resolve it.",
+    "plan-1-block"
+  )
+);
+
+test("a planning block asks for the latest attempt, and only that block", () => {
+  assert.deepEqual(decideRetry({ state: plannerBlockState() }), {
+    kind: "needs",
+    evidence: "latest_attempt"
+  });
+  for (const blockedFrom of [
+    "implementing",
+    "fixing",
+    "plan_approved"
+  ] as const)
+    assert.deepEqual(
+      decideRetry({ state: plannerBlockState({ blockedFrom }) }),
+      decided(NOT_TIED),
+      blockedFrom
+    );
+});
+
+test("a block the latest plan attempt reported can be retried", () => {
+  const record = planAttemptRecord();
+  const review = (value: unknown) =>
+    plannerBlockState({
+      planningReview: value as NonNullable<RunState["planningReview"]>
+    });
+  for (const state of [
+    plannerBlockState(),
+    review({ active: { step: "applying" }, closed: [] }),
+    // The incident: a closed, applied review and a later blocked plan attempt.
+    review({ active: null, closed: [{ outcome: "applied" }] })
+  ])
+    assert.deepEqual(
+      decideRetry({ state, latestAttempt: { readable: true, record } }),
+      PLANNER_BLOCK
+    );
+});
+
+test("any other planning block keeps the refusal", () => {
+  const rows: [string, RetryFacts][] = [
+    [
+      "a block reason that differs from the result summary",
+      {
+        state: plannerBlockState({ blockReason: "Something else." }),
+        latestAttempt: { readable: true, record: planAttemptRecord() }
+      }
+    ],
+    [
+      "a latest attempt that is not a plan attempt",
+      {
+        state: plannerBlockState(),
+        latestAttempt: {
+          readable: true,
+          record: planAttemptRecord({ kind: "planning_analysis" })
+        }
+      }
+    ],
+    [
+      "a plan attempt that did not complete",
+      {
+        state: plannerBlockState(),
+        latestAttempt: {
+          readable: true,
+          record: planAttemptRecord({ status: "failed" })
+        }
+      }
+    ],
+    [
+      "a plan result with another outcome",
+      {
+        state: plannerBlockState(),
+        latestAttempt: {
+          readable: true,
+          record: planAttemptRecord({ outcome: "needs_human_decision" })
+        }
+      }
+    ],
+    [
+      "a plan attempt with no result",
+      {
+        state: plannerBlockState(),
+        latestAttempt: {
+          readable: true,
+          record: planAttemptRecord({ result: null })
+        }
+      }
+    ],
+    [
+      "no single latest attempt",
+      {
+        state: plannerBlockState(),
+        latestAttempt: { readable: true, record: null }
+      }
+    ],
+    [
+      "unreadable attempt records",
+      { state: plannerBlockState(), latestAttempt: { readable: false } }
+    ],
+    [
+      "an episode awaiting triage",
+      {
+        state: plannerBlockState({
+          planningReview: {
+            active: { step: "awaiting_triage" },
+            closed: []
+          } as unknown as NonNullable<RunState["planningReview"]>
+        }),
+        latestAttempt: { readable: true, record: planAttemptRecord() }
+      }
+    ]
+  ];
+  for (const [name, facts] of rows)
+    assert.deepEqual(decideRetry(facts), decided(NOT_TIED), name);
+});
+
+test("the latest attempt is the one started last, never the last file name", () => {
+  const record = (id: string, startedAt: string) =>
+    ({ attempt: { id }, startedAt }) as unknown as AttemptRecord;
+  // The incident's own order: file names sort a completed gate after the block.
+  const block = record("plan-1-caf41b68", "2026-11-06T15:25:07.197Z");
+  const gate = record("plan-1-cb7aaafe", "2026-11-06T15:24:01.448Z");
+  assert.equal(latestAttemptRecord([block, gate]), block);
+  assert.equal(latestAttemptRecord([gate, block]), block);
+  assert.equal(latestAttemptRecord([]), null);
+  assert.equal(
+    latestAttemptRecord([
+      gate,
+      block,
+      record("plan-1-tied", "2026-11-06T15:25:07.197Z")
+    ]),
+    null,
+    "a tie names no single latest attempt"
+  );
+  assert.equal(latestAttemptRecord([gate, block, gate]), block);
 });

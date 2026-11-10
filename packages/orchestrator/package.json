@@ -1,6 +1,6 @@
 {
   "name": "@parabolic-technologies/banzai",
-  "version": "2.7.4",
+  "version": "2.8.1",
   "private": false,
   "description": "Spec-driven AI development CLI for Codex and Claude Code, with human approvals and independent review for complex changes.",
   "keywords": [
@@ -31,7 +31,7 @@
     "registry": "https://registry.npmjs.org/"
   },
   "engines": {
-    "node": ">=22.20.0 <23 || >=24.11.1 <25"
+    "node": ">=22.20.0 <23 || >=24.11.1 <25 || >=26.13.0 <27"
   },
   "scripts": {
     "build": "node scripts/build.mjs",

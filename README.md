@@ -44,21 +44,29 @@ Runs through your existing subscriptions. No API keys required.
 
 Use a regular terminal in your own Git repository. You need:
 
-- macOS or Linux, Git, and Node.js **22.20.0+ within major 22** or
-  **24.11.1+ within major 24**;
-- **Codex CLI 0.159.1+** and **Claude Code 2.1.280+** for the default
-  configuration, signed in through individual subscriptions;
+- macOS or Linux, Git, and Node.js **22.20.0+ within major 22**,
+  **24.11.1+ within major 24** or **26.13.0+ within major 26**;
+- **Claude Code 2.1.290+** for every Claude role, signed in through an
+  individual subscription, and the **Codex CLI** only for roles you assign to
+  Codex;
 - the Banzai CLI and the separately installed Banzai plugin in each client
   selected for planning, implementation, or review.
 
-To use one provider, install its client and plugin, then select that provider
-for all three roles during `banzai init`. Strict review still uses a fresh
-session. The default configuration uses Claude for planning and implementation
-and Codex for review.
+The default configuration uses Claude for planning, implementation and review.
+To use Codex for any role, install its client and plugin, then select it during
+`banzai init`. Strict review uses a fresh session without the builder's
+conversation, shared memory or skills. The team shares these choices in
+`.banzai/config.json`;
+`banzai model --local` saves different models for any phase on your machine
+only, in the Git-ignored
+[local model file](documentation/orchestrator.md#local-model-file).
 
 Model work uses the clients' remote services and subscription limits.
 The [getting-started guide](documentation/getting-started.md) covers client setup,
 CLI and plugin installation, supported older-client options, and expected results.
+For Claude Code, it installs the plugin from a terminal at
+[local or project scope](documentation/getting-started.md#claude-code-plugin),
+so Banzai's skills load only in that repository.
 
 <a id="configure-each-project-once"></a>
 <a id="run-a-task"></a>
@@ -133,7 +141,10 @@ failure needs attention. The reviewer uses read-only tools; only
 human-accepted findings reach the fixer.
 
 At a strict planning gate, you can request rework or independent planning
-review. Revisions return for approval. See
+review. Revisions return for approval. You can also edit the plan files
+yourself and choose **Re-check my edits** (`banzai approve plan --decision
+recheck`): it validates the edits and updates the plan's verification digest,
+then the gate waits for your approval. See
 [planning review](documentation/orchestrator.md#rework-and-independent-planning-review),
 [plan authority](plugins/banzai/policies/plan-task-completion.md), and
 [runtime boundaries](documentation/orchestrator.md#boundaries).
@@ -155,6 +166,8 @@ Each skill guides its checks, reports, and required human decisions in chat.
 The orchestrator adds model coordination and runner-owned verification.
 For standalone requirements, architecture decisions, and the strict sequence,
 see [strict work with standalone skills](documentation/getting-started.md#strict-work-with-standalone-skills).
+For a plan that spans several packages and stages, invoke `initiative` by name; see
+[multi-package initiatives](documentation/getting-started.md#multi-package-initiatives).
 
 <a id="reference"></a>
 
@@ -179,7 +192,7 @@ To improve the docs, contribute a fix, or share a workflow, read
 
 To supervise a run from a chat agent, explicitly invoke `/banzai:orchestrate`
 in Claude Code or `$banzai:orchestrate` in Codex. Compatible supervisors
-require control contract `8.0.0`; see
+require control contract `9.0.0`; see
 [agent control](documentation/orchestrator.md#agent-control).
 
 - [Project guidance and setup](documentation/orchestrator.md#project-guidance-setup)

@@ -37,8 +37,55 @@ Strict checks belong to the approved plan; lite checks use the delegated task an
 current process permissions. Optional project policy may add requirements and
 execution limits. The local runner does not inherit the model CLI sandbox.
 
+At the plan gate, the interactive session, `banzai status` and the state printed
+after a command list **Verification that gates completion**: every check the
+plan binds, then any check the project policy requires, with its requirement
+references, working directory, timeout, the task that creates its tooling, and
+the exact command on its own line. An inventory that approval would reject shows
+that error instead. Planners build each check from the project's documented
+command with its configuration flags and prefer a discovered script entry point
+such as `composer run-script <name>` or `npm run <name>`.
+
+The planner does not compute the inventory's `planRemainderSha256`. It writes 64
+zeros, and when the runner accepts a planning result that requests plan approval
+it validates the plan, records the digest evidence and writes the remainder digest
+into the plan, every other byte unchanged. The gate shows those bytes. A plan
+that changes during that write is left as it is and fails the attempt, which
+`banzai retry` can continue.
+
+The plan gate also says that the run is waiting and lists the bundle files with
+full repository-relative paths. Edit them in any editor, then choose **Re-check
+my edits** (between approve and rework) or run
+`banzai approve plan --decision recheck`. A re-check never approves and never
+starts a phase. It validates the edited plan as approval does — exactly one v2
+inventory with valid descriptors, the task heading grammar, the runner-control
+task rule and the fresh-evidence rule — except for the remainder digest, which
+it recomputes over the edited bytes and writes into the inventory's
+`planRemainderSha256`, every other byte unchanged. The write is refused when the
+plan changed while the re-check ran. A refused re-check names the problem and
+writes no file, state, event or snapshot; the run keeps waiting. The summary
+compares the bundle with the planner's version, which the runner retains
+privately under `.banzai/runs/<run-id>/plan-gate/<NNN>/` each time the gate is
+entered: changed, added and removed files, sections by heading, checks by
+identity with the names of changed fields, whether the digest was rewritten, and
+a warning for each changed accepted ADR. It carries no other file content. The
+interactive gate, `banzai status` and agent status show the latest summary of
+the current gate entry. A run that reached the gate before this release says the
+planner's version is unavailable. Approval itself never rewrites a digest:
+approval over edited prose still fails with `TASK_VERIFICATION_DIGEST_MISMATCH`
+and names the re-check. The first re-check moves the run to state v11, which
+records it and links the approval to it; runs that never re-check stay at v10.
+Historical (v9 and earlier) runs and legacy profile-mode plans have no re-check.
+
 Actual checks and their outcomes are retained as runner evidence. Missing unrelated
 scripts are not requirements; failed or absent mandatory checks prevent completion.
+A verification round runs every selected check in order. A non-zero exit, a
+timeout, the output limit or an executable that cannot start does not stop the
+round, so one round reports every failing check. A signal-terminated check, a
+runner failure, a cancellation, a failed authorization or ownership check, and
+changed inputs stop it; the remaining checks show as not run. A check that
+changes observed project files, whether it passed or failed, stops the round
+with its name and the changed paths.
 Strict independent review assesses meaningful test coverage and weakening of
 assertions. See [task verification](verification-examples.md). Earlier profile and
 configuration-gate details below describe legacy utilities and retained historical
@@ -83,10 +130,11 @@ metadata does not imply shared installation or publication.
 
 ## Boundaries
 
-- macOS or Linux with Node.js 22.20.0+ within major 22 or Node.js 24.11.1+
-  within major 24;
-- local `codex` 0.145.0+ and `claude` 2.1.218+ executables, or the newer
-  release a configured model needs (see [Model Configuration](#model-configuration));
+- macOS or Linux with Node.js 22.20.0+ within major 22, 24.11.1+ within
+  major 24, or 26.13.0+ within major 26;
+- a local `claude` 2.1.290+ executable for every Claude role, and `codex`
+  0.145.0+ when a role uses it, or the newer release a configured model needs
+  (see [Model Configuration](#model-configuration));
 - individual-subscription authentication only;
 - one active run in the current checkout;
 - no API keys, direct vendor APIs, worktrees, branch switching, stash, reset,
@@ -313,20 +361,21 @@ formatting to the unchanged `verify` gate, rejects tracked byte or mode mutation
 
 <!-- release-policy:start -->
 
-Engines: `>=22.20.0 <23 || >=24.11.1 <25`
+Engines: `>=22.20.0 <23 || >=24.11.1 <25 || >=26.13.0 <27`
 
 Version authority: `package.json#/version`; 9 fields in 7 files.
 
-| Evidence              | Node    | Image                   | GitHub Actions job              | Policy   |
-| --------------------- | ------- | ----------------------- | ------------------------------- | -------- |
-| Supported (blocking)  | 22.20.0 | `node:22.20.0-bookworm` | `release_check_node_22`         | required |
-| Supported (blocking)  | 24.11.1 | `node:24.11.1-bookworm` | `release_check_node_24`         | required |
-| Forward compatibility | 26.7.0  | `node:26.7.0-bookworm`  | `forward_compatibility_node_26` | advisory |
+| Evidence             | Node    | Image                   | GitHub Actions job      | Policy   |
+| -------------------- | ------- | ----------------------- | ----------------------- | -------- |
+| Supported (blocking) | 22.20.0 | `node:22.20.0-bookworm` | `release_check_node_22` | required |
+| Supported (blocking) | 24.11.1 | `node:24.11.1-bookworm` | `release_check_node_24` | required |
+| Supported (blocking) | 26.13.0 | `node:26.13.0-bookworm` | `release_check_node_26` | required |
 
 <!-- release-policy:end -->
 
 The supported lanes are blocking and each runs `npm ci` plus the full local
-gate. Node 26 is advisory forward compatibility. A required environment
+gate ([ADR-0067](decisions/0067-node-26-supported-release-lane.md)). Node 23,
+25 and 27 have no lane and no support claim. A required environment
 failure remains missing evidence rather than becoming a product pass.
 The images are the Git-capable official Bookworm variants. Each lane runs
 `git --version` and registers `$GITHUB_WORKSPACE` as a Git `safe.directory`
@@ -336,8 +385,8 @@ which Git otherwise rejects as dubious ownership.
 
 The workflow is [`.github/workflows/ci.yml`](https://github.com/Parabolic-Technologies/banzai/blob/main/.github/workflows/ci.yml)
 ([ADR-0053](decisions/0053-single-pull-request-ci-gate-and-publish-evidence-reuse.md)).
-The supported lanes run on pull requests and manual dispatch; the Node 26 lane
-runs on a weekly schedule and manual dispatch, never on pull requests. A push
+The supported lanes run on pull requests and manual dispatch; the workflow has
+no scheduled run. A push
 to `main` or `dev` starts no hosted run, and a newer push to a pull request
 cancels that pull request's in-progress run. After `release:check` passes, each
 supported lane records the tree it verified as a 30-day
@@ -346,13 +395,14 @@ supported lane records the tree it verified as a 30-day
 Publication through `.github/workflows/publish.yml` reuses that evidence only
 when the release tag is a merge commit whose tree equals its second parent's,
 and a successful pull-request run of this repository's `ci.yml` for that parent
-has both supported lanes' evidence for the tag's tree in its latest attempt.
-Otherwise both supported lanes run the complete `release:check` on the tag
+has every supported lane's evidence for the tag's tree in its latest attempt.
+Otherwise every supported lane runs the complete `release:check` on the tag
 before anything is published. The `release_evidence` job summary states which
 path ran. `npm run release:validate` owns the layout of both workflows.
 
 Where the GitHub plan offers branch protection or rulesets, require
-`release_check_node_22` and `release_check_node_24` after GitHub has reported
+`release_check_node_22`, `release_check_node_24` and `release_check_node_26`
+after GitHub has reported
 those checks; this private repository on GitHub Free has neither, so the
 publication gate is the mechanical release enforcement. Workflow YAML does not
 configure repository merge rules. Validate workflow syntax locally with
@@ -368,7 +418,7 @@ that machine. Keep the live job disabled if that protected runner boundary is
 unavailable. Once provisioned, set repository variable
 `BANZAI_LIVE_COMPATIBILITY` to `1`, select **Run workflow** on a protected ref,
 and enable the `live_compatibility` input. The job requires all three conditions
-and is skipped on pull request and schedule events. Node setup disables automatic
+and is skipped on pull request events. Node setup disables automatic
 npm caching, checkout disables persisted credentials, and no artifact upload
 is configured. GitHub runner provisioning and authenticated live execution
 require their own evidence.
@@ -393,12 +443,34 @@ payload, target, bounded probe result, and non-zero denial count as evidence.
 Arbitrary prefixes, suffixes, operators, and trailing arguments are rejected;
 the runner renders both vendors' candidates from review-result/v2 and their
 frozen fixture snapshots. Claude uses the same read-only arguments as normal
-review. A typed host `system/init` inventory must include Read, Glob, Grep and
-Skill and exclude every other capability except StructuredOutput. This proves
-source/control/candidate writing is unavailable through exposed tools; it does
-not claim an attempted write was denied. Missing, duplicate, unknown or writable
-tools fail the authenticated scenario. Model prose and requested argv alone do
-not establish this evidence. Offline hook tests are separate from live evidence.
+review. A typed host `system/init` inventory must include Read, Glob and Grep
+and exclude every other capability except StructuredOutput; `Skill` fails it.
+This proves source/control/candidate writing is unavailable through exposed
+tools; it does not claim an attempted write was denied. Missing, duplicate,
+unknown or writable tools fail the authenticated scenario. Model prose and
+requested argv alone do not establish this evidence. Offline hook tests are
+separate from live evidence.
+
+`claude.read_only_inventory` also requires review isolation, reported with
+`ISOLATION_NOT_OBSERVED` when absent: the spawned Claude review process carried
+`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` and
+`CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK=1`, and the resolved client binary
+contains both names. The binary is searched, never run, and only the result is
+kept. This shows that the variables were sent and that the client knows them;
+the client's behaviour on them rests on the vendor's documentation. The live
+Claude preflight applies the one Claude minimum of
+[Model Configuration](#model-configuration).
+
+Both live invocations receive their prompt on stdin, and the Claude review
+runs with the run-stability environment of
+[Headless Invocations](#headless-invocations); at the five-minute bound its
+`BASH_MAX_TIMEOUT_MS` is the 120,000 ms floor. The live suite runs no long
+foreground command. That host behaviour has its own owner-run probe,
+`node packages/orchestrator/scripts/gate-1-probe.mjs`, which runs a Banzai
+implementation phase with an 11-minute foreground command and a resumed
+invocation in a scratch repository; see
+[the Gate 1 probe](work/wp08-stable-claude-phases/gate-1-probe.md). It is not
+part of `compatibility:live` and makes no automatic model call.
 
 Each invocation is limited to five minutes, the complete command to fifteen
 minutes, and the total to two model calls. The only stdout is
@@ -532,7 +604,7 @@ banzai control status
 banzai control start --slug <slug>
 banzai control answer [--by <name>] [--no-resume]
 banzai control recover [--by <name>] [--no-resume]
-banzai model
+banzai model [--local]
 banzai run --slug <slug> --request <text>
 banzai status [--json]
 banzai eval export [--json] [--from <RFC3339>] [--to <RFC3339>] [--run <run-id>]...
@@ -546,6 +618,7 @@ banzai retry
 banzai recover
 banzai approve adr --id <id> --decision accept|reject|rework
 banzai approve plan [--no-resume]
+banzai approve plan --decision recheck [--by <name>]
 banzai triage --accept R1-F1 --reject R1-F2 --defer ""
 banzai cancel [--run <run-id>] [--reason <enum>]
 ```
@@ -565,8 +638,8 @@ reviewer phases never invoke it.
 
 `banzai control capabilities` is valid outside a Git repository and performs no
 repository discovery, adapter construction, vendor/authentication call, lock,
-recovery, or write. It emits canonical `banzai-agent-capabilities/v8` JSON with
-schema version 8, control contract `8.0.0`, the package-derived Banzai
+recovery, or write. It emits canonical `banzai-agent-capabilities/v9` JSON with
+schema version 9, control contract `9.0.0`, the package-derived Banzai
 release-train version, umbrella contract, the exact supported non-TTY operation
 set, and an ordered `inputSchemas` list per operation. It also declares the
 runner-owned completion publication protocol (`banzai-completion-protocol/v1`),
@@ -577,7 +650,7 @@ output prove neither subscription authentication nor sandbox credential
 visibility. Compatibility still follows these explicit contract and operation
 identities, never the shared release-train value alone.
 
-`banzai control status` emits canonical `banzai-agent-status/v6` JSON. With no
+`banzai control status` emits canonical `banzai-agent-status/v7` JSON. With no
 persisted run, `activeRun` is `null`. Otherwise the allow-list projection
 contains run identity/lifecycle, route, semantic next action, retry and bounded
 recovery eligibility, the pending human gate, approval validity,
@@ -668,6 +741,20 @@ Existing approval, triage, resume, retry, cancel, human status, interactive,
 and `status --json` commands retain their behavior. A supervisor refreshes
 control status after those commands instead of parsing their human prose.
 
+The [local model file](#local-model-file) leaves the control surface
+unchanged: capabilities v9, status v7 and `status --json` carry no model
+sources or drift. A supervisor learns of a changed local file only when the
+command that status recommends refuses with `LOCAL_MODEL_OVERRIDE_CHANGED`.
+That refusal writes nothing and keeps the recommendation, so the supervisor
+relays the error's lines to the human instead of repeating the command or
+editing `.banzai/config.local.json`. Before the run's first model attempt, an
+agent's `banzai retry` of a blocked run, or `banzai resume` of a run still in
+`created` or `selecting`, records the new local models and prints the change.
+After it, an agent's retry refuses: it runs without a terminal, and only a
+human `banzai retry` in a terminal records a changed local file for such a run.
+`LOCAL_MODEL_OVERRIDE_RECORD_INVALID` means the run's own record cannot be
+read; relay it too, because the remedy is `banzai cancel`.
+
 ## Runner instruction delivery
 
 The runner embeds seven phase resources (`planning`, `implementation`, `review`,
@@ -680,7 +767,7 @@ model artifact writes; the runner alone renders review artifacts. Existing
 implementation/fix grants, report triggers, completion evidence and human gates
 remain unchanged. Required bytes count against existing context budgets.
 
-Structural plugin verification still requires all eleven skills and the two
+Structural plugin verification still requires all eleven workflow skills and the two
 hook events/script. Separately, preflight compares the applicable route union
 and each call rechecks its actual phase against the supplied verified directory.
 Matching raw identities are verified; a readable mismatch refuses the call with
@@ -712,20 +799,20 @@ For ready-to-adapt snippets and setup guidance, see
 
 `banzai doctor` inspects the current Git checkout and writes a deterministic
 human report to stdout. `banzai doctor --json` writes the authoritative
-`banzai-doctor/v5` object instead. It exits 0 exactly when no check failed and
+`banzai-doctor/v6` object instead. It exits 0 exactly when no check failed and
 exits 1 when the checkout is not ready. Warnings, including a live or stale
 valid runner lock, remain visible without changing readiness.
 
 Doctor checks Git, structural project guidance, the supported Node/platform and contract versions, config
-presence and structure, the Claude invocation environment and its tool
-permissions, detected project types, optional task policy,
-required executable availability, the active-run pointer and
+presence and structure, the local model file, the Claude invocation environment and its tool
+permissions, the Claude plugin scope, detected project types, optional task policy,
+required executable availability, the Claude reviewer's version, the active-run pointer and
 referenced state, and the runner lock. The report's fixed check
 order, sorted project types, two-space JSON, and final newline are stable for
 automation. Expected readiness findings stay in the selected stdout report;
 unexpected CLI failures go to stderr.
 
-Doctor v5 uses `schemaVersion: 5`. Every check has ordered `id`, `category`,
+Doctor v6 uses `schemaVersion: 6`. Every check has ordered `id`, `category`,
 `status`, `message`, `fixes`, and `roles` fields. Failed verification-category
 checks and `executables.verification` include an exact `Fix:` next step and a
 pointer to the verification guide; this does not expand remedies to unrelated
@@ -735,14 +822,76 @@ categories. The schema diagnostic reports the file's actual config version.
 with no remedies; pinned Claude can be `verified`, `mismatch`, or bounded
 `failure`. A mismatch fails readiness. Ambient or unresolved scope is
 `unverifiable` with an ambient remedy only. Rebuild/update remedies apply only
-to mismatch or bounded failure. The default pinned Claude planner/implementer
-and Codex reviewer produce no parity warning when resources match. Historical
-v1-v3 reports retain their identities; consumers must negotiate v5.
+to mismatch or bounded failure. The default pinned Claude planner, implementer
+and reviewer produce no parity warning when resources match. Historical
+v1-v5 reports retain their identities; consumers must negotiate v6. v6 adds
+`claude.plugin-scope` and keeps the v5 fields and status semantics.
+
+`claude.version` follows `executables.models`. It applies to every role whose
+effective executable is a Claude Code client, and it never runs the client:
+for each distinct executable those roles name, it resolves the executable on
+`PATH` once, follows its links, and reads the version from the native
+installer's `versions/<version>` file name or from the first `package.json`
+above an npm install, which must name `@anthropic-ai/claude-code` or its
+platform package. It fails when any version is below 2.1.290, warns when no
+layout yields a version, and passes otherwise; the worst result wins, and the
+message names the roles behind each version. Roles whose executable is
+unavailable are named as not checked. The check is skipped when no role runs
+on Claude, when no named Claude executable is available, or for an unusable
+configuration or local model file. It prints versions and role names only,
+and its fix links
+[Install and sign in to model clients](getting-started.md#install-and-sign-in-to-model-clients).
 
 Doctor also emits an `authentication.models` advisory: it does not invoke a
-vendor, so neither authentication readiness nor the installed vendor CLI
-versions are checked, and executable availability is not authentication proof. This warning leaves `ready` and exit semantics
-unchanged. Startup and phase preflight remain authoritative.
+vendor, so authentication readiness is not checked, it checks no vendor CLI
+version except Claude Code's, which it reads offline, and executable
+availability is not authentication proof. This warning leaves `ready` and exit
+semantics unchanged. Startup and phase preflight remain authoritative.
+
+`claude.plugin-scope` follows `claude.permissions` and is advisory. It reads
+only Claude's user settings, `$CLAUDE_CONFIG_DIR/settings.json` or
+`~/.claude/settings.json`, and never runs `claude plugin list`. It warns when
+`enabledPlugins` sets a `banzai@<marketplace>` key to `true`, because user
+scope loads Banzai's skill descriptions into every repository, and its fix
+moves the install to
+[local or project scope](getting-started.md#claude-code-plugin). It passes
+when user settings do not enable Banzai, so a local or project install gives
+no hint, and it is skipped when that file is unreadable or not a JSON object.
+It never fails and never changes `ready`.
+
+`config.local` follows `config.version` and checks the
+[local model file](#local-model-file). It passes when
+`.banzai/config.local.json` is absent, or when it is valid, ignored by Git and
+not in the Git index. It fails, with a fixed message per cause and a fix that
+links [Model Configuration](#model-configuration), when the file is in the Git
+index, is not ignored, is unsafe (a symbolic link or a non-regular file, or a
+symbolic link at `.banzai/`, which fails even when no local file exists), is
+unreadable, is invalid, or sets a refused key, and when Git cannot answer the
+query. A message names at most a field path from the local file's schema and
+never repeats a key or value from the file. Only when the file exists does
+doctor run `git ls-files --error-unmatch -- .banzai/config.local.json` and
+`git check-ignore -q -- .banzai/config.local.json`, at the repository root
+with `LC_ALL=C`; these two read-only queries are the only Git commands the
+local file adds.
+
+The top-level `models` array sits between `projectTypes` and `summary`. It
+holds one entry per role, in planner, implementer, reviewer order, with exactly
+`role`, `vendor` (`claude`, `codex`, or `null` for any other executable),
+`model` (`null` unless the identifier matches the local file's model pattern),
+`effort`, and `source` (`committed` or `local`). Executable paths, timeouts and
+other configuration values stay undisclosed. The array is empty while
+`config.local` fails or the committed configuration is missing or invalid. The
+text report prints a `Models:` block between `Project types:` and `Checks:`,
+one line per role such as
+`  reviewer: claude claude-opus-5-5 effort=xhigh (local)`, with `other` for an
+unknown vendor, `unlisted` for an undisclosed model, and `Models: unavailable`
+for an empty array.
+
+`claude.instructions`, `claude.permissions`, `executables.models`, and
+`claude.version` evaluate the effective configuration, so a role that the
+local file moves to Claude is checked as Claude.
+While `config.local` fails they are `skipped`. `claude.environment` and the
+verification checks read committed values, which the local file cannot change.
 
 Project detection is root-only and uses these markers:
 
@@ -782,7 +931,9 @@ neither rewritten nor treated as current task authorization.
 
 Model selection preserves this tracked representation byte-for-byte outside
 the exact requested `model`, `executable`, and `effort` JSON value tokens,
-including schema-version-1 formatting and unknown fields.
+including schema-version-1 formatting and unknown fields. The ignored
+`.banzai/config.local.json` has no such guarantee: writers always emit its
+fixed format.
 
 Doctor is offline and structurally read-only. It runs before vendor adapters or
 `WorkflowRunner`, never authenticates, invokes a model, executes verification,
@@ -971,9 +1122,20 @@ banzai
 
 With terminal input and output attached, the runner opens a minimal
 state-driven interface. When no run exists, it collects the task request,
-derives a deterministic kebab-case slug, and shows that slug before the start
-confirmation. The planner then selects and displays `quick-fix`, `feature`, or
-`strict` with its reason and phase responsibilities.
+derives a deterministic kebab-case slug, and prints it with the local date
+prefix as `Generated slug: <yymmdd>-<slug>`. One prompt,
+`Press Enter or y to accept it, or type your own slug:`, then accepts that slug
+or takes the engineer's own. A typed slug receives today's `yymmdd-` prefix
+unless it already starts with it, and the prompt stays open with a message
+while the result is not lowercase kebab-case, exceeds 100 characters, or names
+an existing `documentation/work/` or `documentation/initiatives/` directory.
+When that existence check is refused, for example because a documentation
+directory is a symlink, the prompt shows `Could not check <slug>: <reason>`.
+The session then prints `Slug: <final>` and `Request: <request>` before the
+start confirmation, and the run starts with that slug unchanged
+([ADR-0066](decisions/0066-date-prefixed-work-and-initiative-slugs.md)).
+The planner then selects and displays `quick-fix`, `feature`, or `strict` with
+its reason and phase responsibilities.
 
 The request prompt enables terminal bracketed-paste mode. A multiline paste is
 captured through its closing marker and rendered as
@@ -1023,8 +1185,8 @@ with the recorded answers. A strict route invalidates previous plan approval,
 returns to planning, and requires approval of the revised artifact bundle
 before code execution resumes.
 
-The interface shows artifact paths, findings, blocked reasons, and retry
-eligibility before asking for decisions. `Ctrl+C` while a prompt is open exits
+The interface shows artifact paths, the checks a plan binds, findings, blocked
+reasons, and retry eligibility before asking for decisions. `Ctrl+C` while a prompt is open exits
 the interface without changing the run. `banzai interactive` is an explicit
 alias.
 
@@ -1073,8 +1235,24 @@ Each physical attempt owns
 `.banzai/runs/<run-id>/attempts/<attempt-id>.review-candidate.md` and a private,
 immutable `.review-snapshot.json` sidecar. Codex and Claude are read-only and
 return `review-result/v2`; the runner owns rendering, validation and publication.
-Claude exposes Read, Glob, Grep and Skill, with Write and other mutation tools
-explicitly denied. Stale inherited review/workflow authorization is removed.
+Claude exposes Read, Glob and Grep, with `Skill`, Write and other mutation
+tools explicitly denied (ADR-0059). Review, routine re-review and planning
+review run without auto memory and without the refusal fallback, through
+`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` and
+`CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK=1`, which Banzai sets after building the
+subscription environment in both `claudeEnvironment` modes, so an inherited
+value never survives; like every headless Claude invocation, they also carry
+the run-stability environment and the stdin prompt of
+[Headless Invocations](#headless-invocations). A request the client flags therefore fails the review
+instead of continuing on another model: the attempt is recorded with its
+message and stays retryable, and no review result is fabricated. Since Claude
+Code 2.1.312 the variable also stops the model switch for a model name the
+client does not recognize, so such a reviewer fails a flagged request too.
+Planning analysis keeps `Skill`; planning, implementation, fixes, workflow
+selection and planning analysis keep the refusal fallback and run without auto
+memory in `scoped` mode only. Codex review is unchanged. A Claude reviewer
+session recorded before this isolation rotates once to a fresh full review.
+Stale inherited review/workflow authorization is removed.
 
 The reviewer acknowledges the exact approved artifact paths and snapshot digest
 with scope acknowledgment version 1. Full reviews cover the complete approved
@@ -1191,22 +1369,78 @@ timeouts, verification commands, and unrecognized fields are left alone.
 
 Mixing vendors is supported in any combination: GPT planning with a Claude
 reviewer, Claude implementation with a GPT reviewer, or one vendor throughout.
-Keeping the reviewer on a different vendor than the implementer is the point of
-the loop. Compatible planning, implementation, and fixes share a builder
-lineage; the primary reviewer starts fresh with no builder transcript. Routine
-re-review may resume only that independent source-read-only reviewer.
+Reviewer independence comes from a fresh session with no builder transcript,
+no shared memory and a fixed read-only tool set; a reviewer from another
+vendor is an option, not a requirement. Compatible planning, implementation,
+and fixes share a builder lineage; the primary reviewer starts fresh with no
+builder transcript. Routine re-review may resume only that independent
+source-read-only reviewer.
 
 `banzai init` runs the same dialog once the configuration exists, so a new project
 picks its models immediately. When `init` creates the configuration, the preset
 choice reads `Use default: <model> (effort=<level>)`, with matching default labels
 and help text. Repeated `init` and `banzai model` use `Keep` for the saved settings,
-including saved settings that still match the defaults.
+including saved settings that still match the defaults. `init` always saves to
+`.banzai/config.json` and never asks where to save; when a local model file
+exists, its summary names each phase for which this machine keeps the local
+setting.
 Outside a terminal, `init` prints a pointer to
 `banzai model` instead, and `banzai model` itself exits with `TTY_REQUIRED`.
+`banzai model` accepts no argument, `--local`, or `--help` by itself; anything
+else fails with `INVALID_MODEL_OPTION` before the terminal check.
 
-`banzai model` refuses while a run is active, for the same reason the startup
-currency check defers: phases read model settings fresh, so a mid-run change
-would swap the model executing the rest of an approved plan.
+### Saving models for this machine
+
+`banzai model --local` saves the choices for this machine only, in the
+Git-ignored [local model file](#local-model-file). Without `--local`, the
+picker asks where to save before the phase menus when `.banzai/config.json` is
+in the Git index or a local file exists:
+
+```text
+? Where should these model choices be saved?
+  > This machine only (.banzai/config.local.json, ignored by Git)
+    Shared with the team (.banzai/config.json; commit it)
+```
+
+Otherwise it saves to `.banzai/config.json`, as before.
+
+For this machine, each phase menu starts from the phase's current setting and
+tags it `(committed)` or `(local)`. Only a setting that differs from the shared
+one is written, so a shared setting is never copied into the local file. A
+phase with a local entry also offers `Use shared setting: <setting>`, which
+removes the entry, as does choosing the shared setting itself; when no entry
+is left, the file is deleted. **Match Planning** is offered only when the
+current planning executable is `claude` or `codex`.
+
+For the team, the menus start from `.banzai/config.json`, and **Match Planning**
+copies the shared planning setting, so a local setting never reaches the shared
+file. While a local file sets any phase, each menu tags the shared setting
+`(committed)`, a phase the local file overrides adds
+`This machine uses <setting> (local).`, and the summary says that this machine
+keeps using its local setting. The builder-session line describes the settings
+this machine will actually run.
+
+The confirmation and result name the file. `Review and commit the change`
+appears only when `.banzai/config.json` changed; a local write says that Git
+ignores the file. Before taking the runner lock, every picker run, including
+`init`'s, makes sure Git ignores the local file. A path in the Git index is
+refused, even when no local file exists. A path that Git does not ignore is
+added to this clone's exclude file, never to `.gitignore`.
+
+The picker then takes the runner lock without reclaiming a stale one, so it
+refuses while another Banzai command holds `.banzai/runner.lock`. It also
+refuses with `RUN_IN_PROGRESS` while a run is neither done nor cancelled, for
+the same reason the startup currency check defers: a mid-run change would swap
+the model executing the rest of an approved plan. Finish the run, or run
+`banzai cancel`, first. One exception lets a blocked run continue with other
+models: while `banzai status` recommends `banzai retry` for it, `banzai model`
+saves to this machine without asking, never writes `.banzai/config.json`, and
+ends with `Run banzai retry to continue this run with the new models.` The
+retry records the new local models for the run, as
+[Failure Recovery](#local-model-changes) describes. Inside a model phase,
+where `BANZAI_*` authorization is present, `banzai model` and `init` refuse
+with `CONFIGURATION_MODEL_WRITE_DENIED`. A tracked, unignored or invalid local
+file stops the picker before any menu, and nothing is written.
 
 The Claude entries come from the published Claude model catalog; the GPT entries
 and their reasoning levels come from the Codex CLI's model metadata and official
@@ -1214,6 +1448,12 @@ model documentation. Both are source facts maintained in
 [`src/models.ts`](../packages/orchestrator/src/models.ts) — see the note on catalog maintenance below.
 
 ## Model Configuration
+
+`.banzai/config.json` holds each phase's executable, model, effort, and timeout
+for everyone who uses the repository. A developer can replace a phase's
+executable, model, and effort on one machine with the Git-ignored
+`.banzai/config.local.json`; see [Local model file](#local-model-file) below.
+Every model value Banzai prints from either file is escaped for the terminal.
 
 Interactive startup names the Banzai release-train version and the checkout,
 then prints one row per phase — vendor, model, effort, timeout — and checks
@@ -1225,10 +1465,30 @@ subscription authentication for every vendor the configuration actually uses:
 
     plan    claude claude-opus-5-5  xhigh · 30m  ✓
     impl    claude claude-opus-5-5  xhigh · 60m  ✓
-    review  codex  gpt-6.1-sol      xhigh · 30m  ✓
+    review  claude claude-opus-5-5  xhigh · 30m  ✓
 
 No configured model needs a known update.
 ```
+
+A phase whose setting comes from `.banzai/config.local.json` carries `(local)`
+after its timeout; with every phase from `.banzai/config.json` the rows are
+unchanged:
+
+```text
+    plan    claude claude-opus-5-5  xhigh · 30m          ✓
+    impl    claude claude-opus-5-5  xhigh · 60m          ✓
+    review  claude claude-opus-5-5  xhigh · 30m (local)  ✓
+```
+
+While a run is neither done nor cancelled, the rows and the authentication
+markers show the run's models: the current `.banzai/config.json` with the local
+models the run recorded. When the local file no longer matches that record, the
+header adds the drift lines described under
+[Failure Recovery](#local-model-changes). For a run whose model record cannot
+be read, the header shows no rows and says to cancel the run. A local file in
+the Git index, not ignored by Git, or invalid ends the launch with its
+`LOCAL_CONFIG_*` code before the authentication check, so no vendor executable
+starts.
 
 The check is driven by the `executable` each role configures, not by the role, so
 Claude is checked whenever any of planning, implementation, or review runs it —
@@ -1237,7 +1497,7 @@ concurrently and add roughly a second to startup.
 
 A ready launch spends no lines on authentication. An unavailable vendor marks
 every phase row it blocks and is named once, with the reason and the phases it
-would have run:
+would have run. With Claude building and Codex reviewing:
 
 ```text
     plan    claude claude-opus-5-5  xhigh · 30m  ✗
@@ -1288,7 +1548,8 @@ read, so detecting that would require a real model call at every launch.
 
 It then checks each configured model against a catalog of known model
 identifiers. When a newer or supported model replaces one, Banzai names the
-replacement and offers to write it to `.banzai/config.json`:
+replacement and offers to write it to the file that supplies that phase —
+`.banzai/config.json`, or `.banzai/config.local.json` for a local phase:
 
 ```text
 Newer models are available:
@@ -1296,11 +1557,16 @@ Newer models are available:
 ```
 
 The dialog offers updating every reported model, choosing them one at a time, or
-keeping the configuration. Nothing is written without an explicit confirmation.
+keeping the configuration. Its options and confirmation name every file that
+will change. Nothing is written without an explicit confirmation.
 The rewrite replaces only the `model` fields it was asked to change; executables,
 efforts, timeouts, verification commands, and unrecognized fields are preserved
 byte-for-byte, and a configuration the runner would refuse to load is never
-written. The result is a tracked file — review and commit it.
+written. A change to `.banzai/config.json` is tracked — review and commit it. A
+local phase's update rewrites `.banzai/config.local.json` in its fixed format,
+changing only that phase's `model`; Git ignores it. If a phase's model or the
+file that supplies it changed after the launch showed it, the update refuses
+with `MODEL_CONFIGURATION_CHANGED` and nothing is written.
 
 Three cases produce no offer:
 
@@ -1323,9 +1589,10 @@ retired.
 
 `banzai init` and non-interactive commands do not run this check.
 
-Some models need a newer vendor CLI than the minimums in
-[Boundaries](#boundaries). The catalog records the first release that serves
-each of them:
+The catalog records the first CLI release that serves each of these models. A
+model minimum at or below the vendor minimum in [Boundaries](#boundaries)
+stays recorded and never decides; every Claude entry is currently at or below
+Claude Code 2.1.290:
 
 | Model                     | Minimum CLI         |
 | ------------------------- | ------------------- |
@@ -1340,11 +1607,19 @@ The vendor preflight of a role that runs one of these models fails with
 `CLI_TOO_OLD` before authentication is checked or the model is called, naming
 the model and the release it needs: update the CLI, or choose another model with
 `banzai model`. The launch header and run start check each executable once,
-against the first role that uses it; every phase checks its own model again
-before its call. Tier aliases, models without an entry, and unrecognized
-identifiers need only the vendor minimum. `banzai setup` launches its client
-without a model, so it needs only the vendor minimum, and `banzai doctor` does
-not check CLI versions.
+against the model of the first role that uses it; every phase checks its own
+model again before its call. Tier aliases, models without an entry, and
+unrecognized identifiers need only the vendor minimum. `banzai setup` launches
+its client without a model, so it needs only the vendor minimum.
+
+Every Claude role needs Claude Code 2.1.290 or newer (ADR-0063). Earlier
+releases can report a delivered `--json-schema` result as an error, and
+2.1.290 is also the first release that honours both review isolation
+variables. The launch header, run start, `banzai setup`, every phase,
+planning-review and review preflight, and the live harness refuse an older
+client with `CLI_TOO_OLD`, naming the installed version, the minimum and the
+reason. `banzai doctor` reads the version of each Claude executable that a
+role uses offline in `claude.version` and checks no other CLI version.
 
 Claude entries come from Claude Code's model configuration documentation, which
 states that an older client refuses the model before sending a request. Codex
@@ -1359,6 +1634,95 @@ for scripts, CI, direct recovery, and explicit slug overrides:
 ```text
 banzai run --slug my-explicit-slug --request "Implement the task"
 ```
+
+`banzai run --slug` and `banzai control start --slug` apply the same local date
+prefix when the command starts: on 2026-11-10 the example above starts run slug
+`261110-my-explicit-slug` in `documentation/work/261110-my-explicit-slug/`.
+Status reports the prefixed slug. A start refuses, creating nothing, when that
+directory or `documentation/initiatives/261110-my-explicit-slug/` exists.
+
+### Local model file
+
+`.banzai/config.local.json` is optional and belongs to one checkout. Write it
+with `banzai model --local`, or by hand:
+
+```json
+{
+  "schemaVersion": 1,
+  "models": {
+    "reviewer": {
+      "executable": "claude",
+      "model": "claude-opus-5-5",
+      "effort": "xhigh"
+    }
+  }
+}
+```
+
+- The top-level keys are exactly `schemaVersion`, the integer `1`, and
+  `models`, which holds zero to three of `planner`, `implementer`, and
+  `reviewer`.
+- Each entry has exactly `executable`, `model`, and `effort`, and replaces the
+  committed executable, model, and effort of that phase as one unit.
+  `executable` is the bare name `claude` or `codex`, which your `PATH`
+  resolves; a path, another name, or another case is refused. `model` matches
+  `^[A-Za-z0-9][A-Za-z0-9._:/@\[\]-]{0,127}$`. `effort` takes the committed
+  values: `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`.
+- The file is UTF-8 JSON of at most 64 KiB. It must be a regular file, and
+  neither it nor `.banzai/` may be a symbolic link. Only a missing file means
+  no override.
+
+Everything else stays committed: timeouts, verification, context limits, the
+Claude environment, and every other key. Any other top-level key, an unknown
+phase, `timeoutMs`, or another field in an entry fails with
+`LOCAL_CONFIG_KEY_REFUSED`; every other defect fails with
+`LOCAL_CONFIG_INVALID`. Both messages name the field path, never a value from
+the file, and end with "Correct .banzai/config.local.json, or delete it to use
+the shared models in .banzai/config.json."
+
+Outside a run, every command uses the effective configuration: the committed
+file with each local entry in its phase's place. A run records the local
+models it starts with and keeps using them, merged with the current committed
+file, until it is done or cancelled. A later edit of the local file is refused
+rather than adopted; see [Failure Recovery](#local-model-changes). Committed
+model edits keep their current effect on a run, including a fresh session for
+a changed setting. Doctor, `banzai status`, the picker, and the launch header
+name each phase's source, `committed` or `local`. Overriding only planning or
+only implementation makes the two differ, so implementation starts fresh
+instead of reusing the planning session; the picker's builder-session line
+shows this.
+
+The file must stay out of Git. `banzai init` adds the exact line
+`.banzai/config.local.json` to `.gitignore` when it is missing; commit that
+change. In a repository initialized earlier, `banzai model` adds the line to
+this clone's exclude file instead: the file that
+`git rev-parse --git-path info/exclude` names, which every worktree of the
+clone shares and Git never tracks. Banzai never edits `.gitignore` for the
+local file outside `init`.
+
+Every command that reads the current local file, except `banzai status` and
+doctor, refuses with `LOCAL_CONFIG_NOT_IGNORED` before any vendor executable
+starts when the file:
+
+- is in the Git index: run `git rm --cached .banzai/config.local.json`, review
+  the local copy, and commit the removal;
+- is not ignored by Git: run `banzai model --local`, which ignores it for this
+  clone, or add the line `.banzai/config.local.json` to `.gitignore` and commit
+  it. When a `.gitignore` negation (a line starting with `!`) includes the file
+  again after the exclude entry is added, remove that rule and commit the
+  change.
+
+`banzai status` reports these conditions without failing, and doctor fails
+`config.local`.
+
+`banzai model` and the launch update offer write the local file. They take the
+runner lock, confirm that the path is ignored and not in the Git index, never
+write through a symbolic link, and replace the file through a temporary file in
+`.banzai/` with mode `0600`. They always write the same format: two-space JSON
+with a final newline, keys in the order shown above, and phases in planner,
+implementer, reviewer order. Removing the last entry deletes the file. See
+[Saving models for this machine](#saving-models-for-this-machine) for the
+picker and its blocked-run exception.
 
 ## Project guidance setup
 
@@ -1463,6 +1827,49 @@ this:
 passes, explicit ambient mode and automatic MCP-only degradation warn, and an
 invalid explicit plugin directory fails readiness. The check is filesystem-only
 and does not invoke Claude.
+
+### Headless Invocations
+
+Every headless model invocation receives its rendered prompt on stdin
+(ADR-0063): Claude runs `-p` with no prompt argument, and Codex takes `-` as
+the prompt argument of `exec` and `exec resume`. Argv carries only flags and
+identifiers, so a prompt is never bound by the operating system's argument
+limit and never appears in a process listing. The runner writes the prompt
+once at spawn and closes stdin; a child that exits before reading keeps its
+own process outcome. Version probes and other processes that take no prompt
+keep stdin ignored, and `banzai setup` keeps its interactive argv launch.
+
+Every headless Claude invocation — planning, planning analysis, planning
+review, workflow selection, implementation, fixes and review — also runs, in
+both `claudeEnvironment` modes, with:
+
+- `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, so a long command runs in the
+  foreground and a timed-out command is stopped rather than moved to the
+  background, where it could outlive the phase's result;
+- `BASH_MAX_TIMEOUT_MS` set to the invocation's timeout minus a five-minute
+  reserve for the closing turn, and never below two minutes: 1,500,000 ms for
+  a 30-minute planner or reviewer and 3,300,000 ms for a 60-minute
+  implementer. A command started with the maximum then ends before the runner
+  stops the phase. Timeouts below seven minutes get the two-minute floor and
+  keep less than the full reserve;
+- no `BASH_DEFAULT_TIMEOUT_MS`: Banzai removes an inherited value, so the
+  client's two-minute default applies and the raised maximum stays the
+  ceiling.
+
+Banzai sets these values after filtering the subscription environment, so an
+inherited value never survives. Ambient mode restores discovery arguments
+only; it keeps the stdin prompt and these variables. Codex children receive
+none of them.
+
+A Claude settings file can still replace these values: Claude Code writes each
+`env` entry of every settings file it loads into its own environment, over
+the inherited value. Scoped mode with a verified plugin directory loads the
+shared project `.claude/settings.json` and managed settings; ambient mode and
+scoped mode without a plugin directory also load user settings and project
+`.claude/settings.local.json`. Banzai does not inspect or override such an
+`env` block. Keep `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS`,
+`BASH_MAX_TIMEOUT_MS` and `BASH_DEFAULT_TIMEOUT_MS` out of the settings
+files a Banzai run loads.
 
 ### Claude Tool Permissions
 
@@ -1610,7 +2017,8 @@ seconds naming the actions still running.
 Codex `--json` and Claude `--output-format stream-json` events are normalized
 into the same model, action, skill, and usage lines. The supplied phase responsibilities appear in each start line; observable
 Claude `Skill` calls and supported Codex skill events are reported only when
-they occur. Available inventories remain unchanged. Fewer Skill events prove
+they occur. Builder inventories remain unchanged; Claude review roles no
+longer receive `Skill` (ADR-0059). Fewer Skill events prove
 neither model compliance nor lower cost. Because
 implementation, verification, and review advance without a gate, this progress
 stream is how an approved run reports itself until the next decision.
@@ -1648,6 +2056,17 @@ banzai status
 # Resolve the reported authentication, CLI, MCP, or provider problem.
 banzai retry
 ```
+
+A planner can also stop planning by returning `outcome=blocked`, with a summary
+that names the cause and what you need to do first. Do that, then choose `Continue
+planning after the reported block` in interactive mode or run `banzai retry`. It
+runs preflight and starts a new plan attempt that records the blocked attempt and
+receives the summary as diagnostic data. The planner session resumes when the
+workspace and planner settings are unchanged, and otherwise a fresh session
+restores context from the planning files. Recorded ADR decisions, consultation
+answers and planning-review triage keep their effect, and a block from a planning
+review's applying step continues that step. Blocks reported by implementation
+and fix attempts keep their own routes.
 
 Retry reruns preflight, preserves the failed attempt, and creates a distinct
 attempt. Selection and source-read-only review are also retryable after
@@ -1695,6 +2114,30 @@ fixing Claude authentication or another reported prerequisite, interactive mode
 offers `Retry review checks`; the scriptable equivalent is `banzai retry`.
 The runner then rechecks the base commit, approved artifact digest, Claude
 authentication, and workspace snapshot before invoking Claude.
+
+When task verification blocks a run, `banzai status` and the interactive status
+list every check with its outcome. For each check whose latest attempt did not
+succeed they also show the command and working directory, the result (exit
+code, timeout, terminating signal or start failure), the failure category,
+duration and timeout, the last 20 lines of redacted stderr (stdout when stderr
+is empty), and the repository-relative stderr and stdout log paths under
+`.banzai/`. A signalled process has no exit code; the recorded `1` is labeled
+synthetic. The block reason names each incomplete check and its outcome and
+never contains command output. `banzai status --json` keeps its shape: it
+carries the raw `state.taskVerification` attempt records, and only the human
+views read the logs.
+
+Retry re-runs every unsuccessful check of the round in one action, runs the
+checks that were not run, and keeps checks that passed while the observed
+inputs are unchanged; implementation is not replayed. Each new attempt links
+to the attempt it retries. The interactive action reads
+`Retry the N failed checks` when several checks are rerun. When every rerun
+check exited with an ordinary non-zero code and neither its command nor the
+observed project files changed since, it reads
+`Retry anyway (same command, same files; expected to fail again)`, or
+`same commands` for several checks. Observed files are tracked and untracked
+non-ignored files; ignored dependencies, caches and the environment are not
+compared, so the label is a prediction and never refuses the retry.
 
 Retry never bypasses approval integrity. `banzai approve plan` stores the
 exact bytes of every approved artifact beside the run evidence
@@ -1891,22 +2334,27 @@ record remains completed and byte-stable; a new descendant cannot seed another
 prerequisite recovery chain.
 
 A third source covers a model-authored digest that never matched the bytes it
-named. Every such digest is established when the artifact carrying it is
-accepted: a phase result's proposed descriptor sources are compared before the
-result is accepted, and a planning artifact's `planRemainderSha256` is compared
-when the plan is read. Which digests are compared follows one rule shared by
-acceptance and launch — a plan remainder digest binds its inventory to the plan
-bytes outside it, a source identity on a lite or supplemental descriptor is an
-execution precondition, and a source identity recorded on a required obligation
-stays descriptive metadata and is never compared. A rejection names the contract
-field, the repository-relative path, the declared digest and the observed digest
-and nothing else; a source above the permitted size is reported separately with
-that size and the permitted limit. The comparison is recorded per attempt as
-`banzai-result-digest-evidence/v1` under `.banzai/runs/<run-id>/digests/`,
-written once and never restated, so the later launch check can say whether the
-bytes changed after acceptance or never matched. With no such record the causal
-history is reported as unknown and is never reconstructed from the bytes on disk
-now.
+named. A phase result's proposed descriptor sources are compared before the result
+is accepted. Which digests are compared follows one rule shared by acceptance and
+launch — a plan remainder digest binds its inventory to the plan bytes outside it,
+a source identity on a lite or supplemental descriptor is an execution
+precondition, and a source identity recorded on a required obligation stays
+descriptive metadata and is never compared. A rejection names the contract field,
+the repository-relative path, the declared digest and the observed digest and
+nothing else; a source above the permitted size is reported separately with that
+size and the permitted limit. The comparison is recorded per attempt as
+`banzai-result-digest-evidence/v2` under `.banzai/runs/<run-id>/digests/`, written
+once and never restated, so the later launch check can say whether the bytes
+changed after acceptance or never matched. With no such record the causal history
+is reported as unknown and is never reconstructed from the bytes on disk now.
+
+A plan remainder digest no longer reaches this source. The runner records it when
+it accepts a planning result, and the v2 comparison keeps the planner's value as
+`declared`, the runner's as `observed`, and `recorded: true`, so the record is
+accepted. Reconciling an interrupted acceptance reaches the same plan bytes and
+keeps the first record. Records written as
+`banzai-result-digest-evidence/v1` stay readable, as comparisons the runner did
+not record, and a plan digest rejected under v1 keeps this repair route.
 
 A rejected result fails its attempt and keeps its result as evidence. When the
 run is non-terminal with no live attempt, the attempt reached a terminal
@@ -1935,6 +2383,77 @@ model call and requires a new inspection and decision. Other interrupted or
 non-recoverable blocked states fail closed. Inspect the checkout and logs, then
 run `banzai cancel` when appropriate. Do not edit or delete `.banzai` state to
 recover.
+
+### Local model changes
+
+A run records the [local models](#local-model-file) it starts with, and
+`banzai status` lists the models it runs with and their sources:
+
+```text
+Models:
+  Planning: claude claude-opus-5-5 xhigh (committed)
+  Implementation: claude claude-opus-5-5 xhigh (committed)
+  Review: claude claude-opus-5-5 xhigh (local)
+```
+
+For a done or cancelled run the heading reads `Current models:` and the lines
+show what a new run would use. Every state-changing command — resume, approve,
+triage, recover, rework, planning-review requests and answers, ADR and human
+decisions, and configuration answers other than Cancel — compares the current
+`.banzai/config.local.json` and the run's record with the models it holds
+before its first write, and again before each model attempt and pending
+transition. Entries that differ only in key order or formatting are equal. A
+difference refuses with `LOCAL_MODEL_OVERRIDE_CHANGED`:
+
+```text
+Local models changed since this run recorded them
+  Review: recorded claude claude-opus-5-5 xhigh, now shared
+Restore .banzai/config.local.json, run banzai retry in a terminal when banzai status recommends it, or run banzai cancel. A change you did not make may come from a model phase or a project script.
+```
+
+`shared` means that the phase has no local entry and uses
+`.banzai/config.json`. A local file that cannot be used shows one line instead,
+such as `.banzai/config.local.json: invalid (models.reviewer.effort)`,
+`.banzai/config.local.json: tracked`, or
+`.banzai/config.local.json: not ignored`; at a command's entry, a tracked or
+unignored file refuses with `LOCAL_CONFIG_NOT_IGNORED` instead. A record
+rewritten while a command runs refuses the same way, with a line naming
+`model-override.json`. The refusal writes nothing at a command's entry; before
+an attempt it adds no write, and what the command already completed stays. It
+records no block reason, event, or review rotation and consumes no retry or
+recovery authority, so `banzai status` keeps its recommendation and prints the
+same lines under the run's models. To continue:
+
+- restore the local file and repeat the recommended command;
+- when `banzai status` recommends `banzai retry`, run it in a terminal to
+  continue with the changed models; or
+- run `banzai cancel`.
+
+`banzai cancel`, `banzai status`, and verification commands never compare.
+
+Two commands record the current local models instead of comparing: `resume`
+of a run still in `created` or `selecting` with no model attempt, and
+`banzai retry` of a blocked run, including its planning-review retry and its
+reconcile of a saved planning result. When the models differ, the command
+prints `Recording the changed local models for this run:` with each changed
+phase, replaces the record, and appends a `model_override.recorded` event that
+names each phase's source without model values. A changed setting starts a
+fresh session, as a committed change does. Once the run has a model attempt,
+recording different models needs a terminal: `banzai retry` without one, as
+under agent control, refuses with `LOCAL_MODEL_OVERRIDE_CHANGED` and writes
+nothing. A failed retry preflight leaves the record unchanged, unless the retry
+recorded the new models before reconciling a saved planning result. To give a
+blocked run other models, run `banzai model`, which saves to this machine while
+status recommends retry, then `banzai retry`.
+
+`LOCAL_MODEL_OVERRIDE_RECORD_INVALID` means that the record itself is
+unreadable, a symbolic link, not a regular file, not valid JSON, of another
+identity, or invalid. Banzai never reads such a record as missing, so the
+run's models cannot be confirmed: `banzai status` prints the record path as
+`invalid`, reports retry and recovery as not eligible, and recommends
+`banzai cancel`. Cancel the run and start a new one. A run created before
+local model files has no record; it runs on committed models and refuses while
+the local file sets any phase, until a command that records gives it one.
 
 ## Local State
 
@@ -2014,6 +2533,17 @@ supplies run and approval identity for reads while removing inherited
 mutation while reviewing or while a review attempt is active, before workflow
 write grants. Standalone session behavior remains separate when runner variables
 are absent.
+
+`.banzai/config.local.json` is the optional per-developer
+[local model file](#local-model-file). Git ignores it, and it belongs to no
+run. Each new run writes the create-only
+`.banzai/runs/<run-id>/model-override.json`, mode `0600`, before `state.json`
+and the active-run pointer:
+`{"schema":"banzai-run-model-override/v1","models":{…}}`, holding the local
+models the run started with, or `{}` without a local file. Only the
+[recording commands](#local-model-changes) replace it; never edit it by hand.
+A run without the file was created before local model files existed. Run state
+schemas are unchanged.
 
 ## Work documents
 
@@ -2124,19 +2654,23 @@ current bytes under a new number. Existing artifacts are never overwritten.
 
 ```text
 banzai approve plan --decision rework --note "Exact owner feedback"
+banzai approve plan --decision recheck
 banzai approve adr --id ADR-0001 --decision rework --note "Exact owner feedback"
 banzai review planning
 banzai review planning --artifact documentation/work/example/plan.md
 ```
 
 `approve plan` accepts only its documented flags. Unknown, repeated, positional
-and `--name=value` forms fail before approval. For agent supervisors, control
-8.0.0 declares capabilities v8 and status v6. Send closed gate-decision v1
+and `--name=value` forms fail before approval; `--note` is accepted only with
+`--decision rework`, and `--no-resume` has no effect on a re-check. For agent supervisors, control
+9.0.0 declares capabilities v9 and status v7. Send closed gate-decision v1
 through `banzai control decide` and planning-triage answer v4 through `banzai
 control answer` using direct stdin. Encode human text as raw UTF-8 JSON; on the
 64 KiB limit, let the human shorten their own text or answer in a terminal.
-Never infer a decision or truncate the text. Historical runs cannot acquire new
-rework/review authority or resume through the v10 hook; preserve them and start
+Never infer a decision or truncate the text. Relay a re-check as
+`banzai approve plan --decision recheck` only on the human's explicit request,
+and never edit planning files yourself. Historical runs cannot acquire new
+rework/review authority or resume through the v10/v11 hook; preserve them and start
 new work. `banzai`, `banzai status` and `banzai doctor` show such a run as
 read-only history; an unfinished one offers only `banzai cancel`, after which
 new work starts normally. This release does not migrate or install anything

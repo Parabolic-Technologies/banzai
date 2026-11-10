@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { readFile, readdir, writeFile } from "node:fs/promises";
+import { appendFile, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { executionKey } from "../../../plugins/banzai/lib/execution-ownership.mjs";
+import { projectAgentControlStatus } from "../src/agent-control.js";
 import { BanzaiError, ProcessExitError } from "../src/errors.js";
 import { parsePublishedCompletionRegion } from "../src/plan-task-completion.js";
 import { transitionState } from "../src/state-machine.js";
@@ -19,6 +20,10 @@ import {
   type PhaseAdapterRequest,
   type PhaseResult
 } from "../src/types.js";
+import {
+  evidenceDigest,
+  parseTaskVerificationObligations
+} from "../src/verification-evidence.js";
 import { WorkflowRunner } from "../src/workflow.js";
 import { createTestRepository } from "./helpers.js";
 import {
@@ -2119,6 +2124,440 @@ test("cancellation during retry preflight is never overwritten", async () => {
     assert.equal(cancelled.status, "cancelled");
     assert.equal((await runner.status()).state.status, "cancelled");
     assert.equal(adapters.phasePrompts.length, 1);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+const ZERO_DIGEST = "0".repeat(64);
+
+function planPathOf(root: string, plan: string | null | undefined): string {
+  assert.ok(plan);
+  return path.join(root, plan);
+}
+
+async function interruptedZeroDigestPlanning() {
+  const repository = await createTestRepository();
+  const adapters = new PlanningContinuityAdapters();
+  adapters.checkpoint = true;
+  adapters.planRemainderDeclared = ZERO_DIGEST;
+  const runner = new WorkflowRunner(repository.root, adapters);
+  const blocked = await runner.start({
+    slug: "example",
+    request: "Plan the fixture."
+  });
+  assert.equal(blocked.status, "blocked");
+  const attempt = blocked.activeAttempt;
+  assert.ok(attempt);
+  const relative = blocked.artifactBinding?.binding.artifacts.plan;
+  assert.ok(relative);
+  const file = path.join(repository.root, relative);
+  const planner = await readFile(file, "utf8");
+  const digest = evidenceDigest(
+    planner.replace(
+      /```banzai-verification-obligations\/v2\n[\s\S]*?\n```/u,
+      ""
+    )
+  );
+  const first = {
+    schema: "banzai-result-digest-evidence/v2" as const,
+    schemaVersion: 2 as const,
+    runId: blocked.runId,
+    attempt: { id: attempt.id, kind: attempt.kind },
+    outcome: "accepted" as const,
+    comparisons: [
+      {
+        role: "binding" as const,
+        field: "planRemainderSha256",
+        checkId: null,
+        path: relative,
+        declared: ZERO_DIGEST,
+        observed: digest,
+        size: null,
+        limit: null,
+        matched: false,
+        recorded: true
+      }
+    ]
+  };
+  return {
+    repository,
+    adapters,
+    runner,
+    blocked,
+    attempt,
+    file,
+    planner,
+    digest,
+    first
+  };
+}
+
+test("reconciling a planning result records the digest it was interrupted before recording", async () => {
+  const f = await interruptedZeroDigestPlanning();
+  try {
+    assert.equal(
+      await f.runner.store.readResultDigestEvidenceIfExists(
+        f.blocked.runId,
+        f.attempt
+      ),
+      null
+    );
+    const planned = await f.runner.retry();
+    assert.equal(
+      planned.status,
+      "needs_plan_approval",
+      planned.blockReason ?? undefined
+    );
+    assert.equal(f.adapters.phasePrompts.length, 1);
+    assert.equal(
+      await readFile(f.file, "utf8"),
+      f.planner.replace(ZERO_DIGEST, f.digest)
+    );
+    assert.deepEqual(
+      await f.runner.store.readResultDigestEvidenceIfExists(
+        f.blocked.runId,
+        f.attempt
+      ),
+      f.first
+    );
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+test("reconciling after the evidence write writes the plan and keeps the first record", async () => {
+  const f = await interruptedZeroDigestPlanning();
+  try {
+    await f.runner.store.establishResultDigestEvidence(
+      f.blocked.runId,
+      f.first
+    );
+    const planned = await f.runner.retry();
+    assert.equal(
+      planned.status,
+      "needs_plan_approval",
+      planned.blockReason ?? undefined
+    );
+    assert.equal(
+      await readFile(f.file, "utf8"),
+      f.planner.replace(ZERO_DIGEST, f.digest)
+    );
+    assert.deepEqual(
+      await f.runner.store.readResultDigestEvidenceIfExists(
+        f.blocked.runId,
+        f.attempt
+      ),
+      f.first
+    );
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+test("reconciling after the plan write writes nothing and keeps the first record", async () => {
+  const f = await interruptedZeroDigestPlanning();
+  try {
+    await f.runner.store.establishResultDigestEvidence(
+      f.blocked.runId,
+      f.first
+    );
+    const recorded = f.planner.replace(ZERO_DIGEST, f.digest);
+    await writeFile(f.file, recorded);
+    const planned = await f.runner.retry();
+    assert.equal(
+      planned.status,
+      "needs_plan_approval",
+      planned.blockReason ?? undefined
+    );
+    assert.equal(await readFile(f.file, "utf8"), recorded);
+    assert.deepEqual(
+      await f.runner.store.readResultDigestEvidenceIfExists(
+        f.blocked.runId,
+        f.attempt
+      ),
+      f.first
+    );
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+test("a plan changed during acceptance fails its attempt, and retry continues in the same session", async () => {
+  const repository = await createTestRepository();
+  try {
+    const adapters = new FakeAdapters();
+    adapters.planRemainderDeclared = ZERO_DIGEST;
+    const runner = new WorkflowRunner(repository.root, adapters);
+    const store = runner.store;
+    const establish = store.establishResultDigestEvidence.bind(store);
+    let relative: string | null = null;
+    store.establishResultDigestEvidence = async (runId, evidence) => {
+      store.establishResultDigestEvidence = establish;
+      relative = evidence.comparisons[0]?.path ?? null;
+      await appendFile(
+        planPathOf(repository.root, relative),
+        "\nA concurrent edit.\n"
+      );
+      return await establish(runId, evidence);
+    };
+    const blocked = await runner.start({
+      slug: "example",
+      request: "Plan the fixture."
+    });
+    assert.equal(blocked.status, "blocked");
+    assert.equal(blocked.blockedFrom, "planning");
+    assert.ok(blocked.activeAttempt);
+    const failed = await store.readRunAttempt(
+      blocked.runId,
+      blocked.activeAttempt
+    );
+    assert.equal(failed.status, "failed");
+    assert.equal(failed.failureCode, "PLAN_TASK_COMPLETION_INVALID");
+    assert.ok(failed.error?.includes(`${relative} changed while Banzai`));
+    assert.match(
+      await readFile(planPathOf(repository.root, relative), "utf8"),
+      /A concurrent edit\./u
+    );
+    const status = await runner.status();
+    assert.equal(status.retry.eligible, true, status.retry.reason);
+    assert.equal(status.retry.attemptId, failed.attempt.id);
+
+    const planned = await runner.retry();
+    assert.equal(
+      planned.status,
+      "needs_plan_approval",
+      planned.blockReason ?? undefined
+    );
+    assert.deepEqual(adapters.phaseResumeSessionIds, [null, "planner-session"]);
+  } finally {
+    await repository.dispose();
+  }
+});
+
+const BLOCK_SUMMARY =
+  "The planner cannot read tools/schema.json; allow it, then retry.";
+
+function plannerBlock() {
+  return phaseResult("plan", {
+    outcome: "blocked",
+    gate: null,
+    summary: BLOCK_SUMMARY
+  });
+}
+
+async function plannerBlockedRun(adapters = new FakeAdapters()) {
+  const repository = await createTestRepository();
+  adapters.planResults.push(plannerBlock());
+  const runner = new WorkflowRunner(repository.root, adapters);
+  const blocked = await runner.start({
+    slug: "example",
+    request: "Plan the fixture."
+  });
+  assert.equal(blocked.status, "blocked");
+  assert.equal(blocked.blockedFrom, "planning");
+  assert.equal(blocked.blockReason, BLOCK_SUMMARY);
+  assert.equal(blocked.activeAttempt, null);
+  const [source] = (await runner.store.readRunAttempts(blocked.runId)).filter(
+    (record) => record.attempt.kind === "plan"
+  );
+  assert.ok(source);
+  return { repository, adapters, runner, blocked, source };
+}
+
+test("retry continues planning after a block the planner reported", async () => {
+  const f = await plannerBlockedRun();
+  try {
+    const status = await f.runner.status();
+    assert.equal(status.retry.eligible, true, status.retry.reason);
+    assert.equal(status.retry.attemptId, f.source.attempt.id);
+    assert.equal(
+      status.retry.reason,
+      `The planner reported a block in attempt ${f.source.attempt.id}; retry continues planning after you resolve it.`
+    );
+    assert.equal(status.nextAction, "banzai retry");
+    assert.equal(
+      projectAgentControlStatus(status).activeRun?.nextAction,
+      "retry"
+    );
+
+    const planned = await f.runner.retry();
+    assert.equal(
+      planned.status,
+      "needs_plan_approval",
+      planned.blockReason ?? undefined
+    );
+    assert.deepEqual(f.adapters.phaseResumeSessionIds, [
+      null,
+      "planner-session"
+    ]);
+    const prompt = f.adapters.phasePrompts.at(-1) ?? "";
+    assert.ok(prompt.includes("## Continue blocked planning"), prompt);
+    assert.ok(prompt.includes(JSON.stringify(BLOCK_SUMMARY)), prompt);
+    assert.ok(!prompt.includes("## Continue failed planning"), prompt);
+    const continued = (await f.runner.store.readRunAttempts(planned.runId))
+      .filter((record) => record.attempt.kind === "plan")
+      .find((record) => record.attempt.id !== f.source.attempt.id);
+    assert.equal(continued?.planningContext?.retryOf, f.source.attempt.id);
+    const events = (
+      await readFile(
+        path.join(f.runner.store.runDirectory(planned.runId), "events.jsonl"),
+        "utf8"
+      )
+    )
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { type: string; details?: unknown });
+    assert.deepEqual(
+      events.find((event) => event.type === "attempt.retry_requested")?.details,
+      {
+        failedAttemptId: f.source.attempt.id,
+        kind: "plan",
+        retryFrom: "planning"
+      }
+    );
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+test("a planner block continues in a fresh session when the workspace changed", async () => {
+  const f = await plannerBlockedRun();
+  try {
+    await writeFile(path.join(f.repository.root, "resolved.txt"), "Fixed.\n");
+    const planned = await f.runner.retry();
+    assert.equal(
+      planned.status,
+      "needs_plan_approval",
+      planned.blockReason ?? undefined
+    );
+    assert.deepEqual(f.adapters.phaseResumeSessionIds, [null, null]);
+    const prompt = f.adapters.phasePrompts.at(-1) ?? "";
+    assert.ok(prompt.includes("## Continue blocked planning"), prompt);
+    assert.ok(
+      prompt.includes("Restore context from existing planning artifacts"),
+      prompt
+    );
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+test("a planner block keeps recorded ADR decisions when it continues", async () => {
+  const repository = await createTestRepository();
+  try {
+    const adapters = new FakeAdapters();
+    adapters.planResults.push(
+      phaseResult("plan", {
+        gate: "adr_approval",
+        questions: ["Accept ADR 0001?"],
+        artifacts: {
+          ...phaseResult("plan").artifacts,
+          adrs: ["documentation/decisions/0001-example.md"]
+        }
+      }),
+      plannerBlock()
+    );
+    const runner = new WorkflowRunner(repository.root, adapters);
+    const gate = await runner.start({
+      slug: "example",
+      request: "Plan the fixture."
+    });
+    assert.equal(gate.status, "needs_adr_approval", gate.blockReason ?? "");
+    const blocked = await runner.decideAdr({
+      id: "0001",
+      decision: "accept",
+      note: null,
+      decidedBy: "owner",
+      autoResume: true
+    });
+    assert.equal(blocked.status, "blocked", blocked.blockReason ?? "");
+    const decisions = structuredClone(blocked.adrDecisions);
+    assert.equal(decisions.length, 1);
+    const planned = await runner.retry();
+    assert.equal(
+      planned.status,
+      "needs_plan_approval",
+      planned.blockReason ?? undefined
+    );
+    assert.deepEqual(planned.adrDecisions, decisions);
+    assert.ok(
+      (adapters.phasePrompts.at(-1) ?? "").includes(
+        JSON.stringify(decisions, null, 2)
+      )
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("a failed preflight leaves a planner block as it was", async () => {
+  const adapters = new FakeAdapters();
+  const f = await plannerBlockedRun(adapters);
+  try {
+    const before = await f.runner.store.readState(f.blocked.runId);
+    const calls = adapters.phasePrompts.length;
+    const refuse = () => {
+      throw new Error("Vendor subscription authentication is unavailable.");
+    };
+    adapters.onCodexPreflight = refuse;
+    adapters.onClaudePreflight = refuse;
+    await assert.rejects(f.runner.retry(), /authentication is unavailable/u);
+    assert.deepEqual(await f.runner.store.readState(f.blocked.runId), before);
+    assert.equal(adapters.phasePrompts.length, calls);
+    assert.equal((await f.runner.status()).retry.eligible, true);
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+test("a block the planner did not report is not continued", async () => {
+  const f = await plannerBlockedRun();
+  try {
+    const state = await f.runner.store.readState(f.blocked.runId);
+    state.blockReason = "An operator blocked this run.";
+    await f.runner.store.writeState(state);
+    const status = await f.runner.status();
+    assert.equal(status.retry.eligible, false);
+    assert.equal(status.retry.attemptId, null);
+    assert.equal(status.nextAction, "banzai cancel");
+    await assert.rejects(f.runner.retry(), {
+      code: "RETRY_NOT_ALLOWED"
+    });
+  } finally {
+    await f.repository.dispose();
+  }
+});
+
+test("the runner records a planner's zeros before the plan gate, across its own bytes", async () => {
+  const repository = await createTestRepository();
+  try {
+    const adapters = new FakeAdapters();
+    adapters.planRemainderDeclared = ZERO_DIGEST;
+    const runner = new WorkflowRunner(repository.root, adapters);
+    const gate = await runner.start({
+      slug: "example",
+      request: "Plan the fixture."
+    });
+    assert.equal(gate.status, "needs_plan_approval", gate.blockReason ?? "");
+    const plan = await readFile(
+      planPathOf(repository.root, gate.planArtifacts?.plan),
+      "utf8"
+    );
+    const { planRemainderSha256 } = parseTaskVerificationObligations(plan);
+    const [record] = (await runner.store.readRunAttempts(gate.runId)).filter(
+      (item) => item.attempt.kind === "plan"
+    );
+    assert.ok(record);
+    const evidence = await runner.store.readResultDigestEvidenceIfExists(
+      gate.runId,
+      record.attempt
+    );
+    assert.equal(evidence?.schema, "banzai-result-digest-evidence/v2");
+    assert.equal(evidence.outcome, "accepted");
+    assert.equal(evidence.comparisons[0]?.declared, ZERO_DIGEST);
+    assert.equal(evidence.comparisons[0].observed, planRemainderSha256);
+    assert.equal(evidence.comparisons[0].recorded, true);
   } finally {
     await repository.dispose();
   }

@@ -13,7 +13,7 @@ projects. Detailed module behavior belongs in the
   local `banzai` CLI that coordinates planning, implementation, verification
   and independent review with human decisions.
 - The plugin and CLI are independently usable and separately delivered. They
-  share release-train version `2.7.4`, owned by root `package.json.version`.
+  share release-train version `2.8.1`, owned by root `package.json.version`.
 - This repository maintains those products. Its root guidance and manifest
   describe the source workspace; packaged templates describe neither its
   process nor its current implementation.
@@ -28,9 +28,10 @@ projects. Detailed module behavior belongs in the
 - Language: TypeScript `^5.9.0` for the orchestrator; builtin-only ESM modules
   and CommonJS hook/helper entry points for the plugin; Markdown guidance and
   JSON Schema contracts. No application framework is installed.
-- Runtime: Node.js `>=22.20.0 <23 || >=24.11.1 <25` on macOS or Linux.
-  [release-policy.json](release-policy.json) pins required Node `22.20.0` and
-  `24.11.1` lanes and advisory Node `26.7.0`. esbuild targets `node22`, ESM and
+- Runtime: Node.js `>=22.20.0 <23 || >=24.11.1 <25 || >=26.13.0 <27` on macOS
+  or Linux. [release-policy.json](release-policy.json) pins required Node
+  `22.20.0`, `24.11.1` and `26.13.0` lanes and no forward lane (ADR-0067).
+  esbuild targets `node22`, ESM and
   the Node platform.
 - Package manager: npm workspaces, `workspaces: ["packages/*"]`, with root
   `package-lock.json` at `lockfileVersion: 3`.
@@ -72,13 +73,14 @@ projects. Detailed module behavior belongs in the
 - `npm run banzai` runs the local bundle. `npm run install:orchestrator`
   builds and links `@parabolic-technologies/banzai` for local CLI use.
 - [.github/workflows/ci.yml](.github/workflows/ci.yml) runs the complete
-  release gate on both supported Node lanes for pull requests and manual
-  dispatch. The advisory forward lane runs on weekly schedule or dispatch;
-  the live lane additionally requires explicit protected-runner authorization.
+  release gate on all three supported Node lanes for pull requests and manual
+  dispatch; it has no scheduled run. The live lane additionally requires
+  explicit protected-runner authorization.
   Branch pushes alone start no workflow.
 - [.github/workflows/publish.yml](.github/workflows/publish.yml) handles
-  published stable GitHub Releases. It reuses tree-bound evidence from both
-  required PR lanes when valid, otherwise runs both lanes on the release tag.
+  published stable GitHub Releases. It reuses tree-bound evidence from all
+  required PR lanes when valid, otherwise runs every supported lane on the
+  release tag. Evidence checking and publishing run on Node 24.11.1.
   The publishing job builds its own bundle and uses npm trusted publishing
   for the CLI workspace. Plugin installation and registry availability have
   separate delivery evidence in
@@ -119,7 +121,9 @@ projects. Detailed module behavior belongs in the
 - Model phases invoke local `codex exec` or `claude -p` child processes using
   subscription authentication. There is no direct vendor API or API-key
   path. Vendor processes and verification commands have bounded lifetimes
-  and process-group cleanup; verification commands run sequentially.
+  and process-group cleanup; verification commands run sequentially. A task
+  verification round continues after command-level failures, and one retry
+  reruns every unsuccessful check of the round (ADR-0057).
 - External JSON is decoded at ingress. Schemas are embedded through
   `contracts.ts`; runtime validators enforce invariants beyond JSON Schema.
   `BanzaiError` supplies stable codes, and failed processes retain redacted
@@ -146,14 +150,19 @@ projects. Detailed module behavior belongs in the
   `documentation/work/<slug>/` directory. Existing private documents keep
   their known paths. No layout declaration, registration or authoring claim
   is required; see [Work Documents](documentation/artifact-storage.md).
+- Documents that span several works live in
+  `documentation/initiatives/<slug>/`: a frozen `brief.md`, a living
+  `tracker.md` and `gate-<N>-report.md` files, kept by the explicitly invoked
+  `initiative` skill (ADR-0061). Their packages stay in flat work directories.
 - `.banzai/` holds ignored local configuration, historical work, runner
   records, verification evidence and execution locks. The legacy
   `documentation/features/`, `documentation/development-plans/` and
   `documentation/changes/` trees remain ignored. Local settings and credentials
   are excluded by [.gitignore](.gitignore).
 - [publication-policy.json](publication-policy.json) selects `clean` mode.
-  Source work documents are eligible for Git review and excluded from
-  plugin/npm payloads; private execution evidence is excluded from public
+  Source work and initiative documents are eligible for Git review, receive
+  the same private-content scan and are excluded from plugin/npm payloads and
+  source maps; private execution evidence is excluded from public
   source and distributions. See the
   [Publication Boundary](documentation/publication-boundary.md).
 - `assets/logo/` owns coordinated SVG and PNG brand assets.
@@ -173,8 +182,12 @@ behavior and edge cases; source and tests own the executable evidence.
 - `agent-control-cli.ts`, `agent-control.ts` — capability/status projections
   and closed stdin requests, including `control decide`; mutations validate
   before delegating to `WorkflowRunner` and return current status.
-- `interactive.ts`, `inquirer-io.ts` — state-driven human decisions through
-  `InteractiveIO`; only `inquirer-io.ts` imports `@inquirer/*`.
+- `interactive.ts`, `inquirer-io.ts`, `plan-gate-ui.ts` — state-driven human
+  decisions through `InteractiveIO`; only `inquirer-io.ts` imports
+  `@inquirer/*`. A new run's slug step offers the date-prefixed generated slug
+  or validates a typed one before the start confirmation. `plan-gate-ui.ts`
+  renders the plan gate's waiting copy and the re-check summary for the
+  terminal and the CLI.
 - `progress.ts`, `interrupt.ts`, `terminal-attention.ts`, `vocabulary.ts`,
   `ansi.ts`, `format.ts` — terminal presentation and bounded interruption;
   human rendering never becomes machine authority.
@@ -186,8 +199,10 @@ behavior and edge cases; source and tests own the executable evidence.
   collaborators plus owned per-runner state; capability code receives the
   context, never the facade.
 - `workflow/domain/`, `state-machine.ts` — pure routing, eligibility,
-  planning-review and state-transition rules; facts are gathered by effectful
-  callers without widening reads or changing failure scope.
+  planning-review, plan re-check summary and state-transition rules; facts are
+  gathered by effectful callers without widening reads or changing failure
+  scope. `workflow/plan-gate/` holds the re-check's refusal, bundle-read and
+  compare-and-replace write helpers.
 - `workflow/attempts/`, `workflow/checkpoints/`, `workflow/digest-evidence/`
   — physical attempt lifecycle, terminal proof and acceptance-time digest
   evidence; durable records preserve failed and interrupted attempts.
@@ -198,20 +213,35 @@ behavior and edge cases; source and tests own the executable evidence.
   `workflow/review/result-application.ts` — verification rounds, authority
   checks and result application validation; missing mandatory evidence blocks
   completion.
-- `store.ts` — `RunStore` atomic state, append-only events, attempt records and
-  exclusive run ownership; stale ownership is never reclaimed by elapsed time.
+- `store.ts` — `RunStore` atomic state, append-only events, attempt records,
+  the per-run local model record and exclusive run ownership; stale ownership
+  is never reclaimed by elapsed time.
 - `work-documents.ts`, `project-files.ts`, `project-adoption.ts` — typed
   projections of shared document binding, contained filesystem and adoption
   owners; historical readers grant no new execution authority.
 - `adapters.ts`, `process.ts`, `mcp.ts`, `claude-permissions.ts` — vendor argv,
   auth, child lifetime, redaction and scoped tool access; unavailable optional
   Serena is advisory, while required permission failures stop execution.
+  Every headless model invocation receives its prompt on stdin
+  (`ProcessSpec.stdin`, written in full and closed at spawn; stdin errors never
+  escape): Claude runs `-p` with no prompt argument and Codex takes `-`. Every
+  headless Claude child, in both `claudeEnvironment` modes, runs with
+  `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, `BASH_MAX_TIMEOUT_MS` equal to its
+  timeout minus a 5-minute reserve with a 2-minute floor, and no
+  `BASH_DEFAULT_TIMEOUT_MS` (ADR-0063); Codex children get none of these.
 - `project-setup.ts`, `setup-client.ts`, `foreground-client.ts` — explicit
   interactive `project-manifest` entry, client discovery and terminal cleanup;
   setup refuses unfinished runs and creates no task or approval.
-- `config.ts`, `models.ts`, `model-selection.ts` — configuration loading,
-  `DEFAULT_TASK_CONFIG`, source-maintained model metadata and role selection;
-  model updates preserve unrelated configuration bytes.
+- `config.ts`, `models.ts`, `model-selection.ts` — committed configuration
+  loading (`loadCommittedConfig`), `DEFAULT_TASK_CONFIG`, source-maintained
+  model metadata and per-destination role selection; committed model updates
+  preserve unrelated configuration bytes.
+- `local-config.ts`, `model-cli.ts`, `model-status.ts` — the Git-ignored
+  `.banzai/config.local.json` model layer (ADR-0060): validation, the layered
+  and effective readers, Git visibility checks, the clone exclude step and the
+  fixed-format writer; the `banzai model [--local]` picker, launch model reads
+  and advisory writes; human status model lines. A defective, tracked or
+  unignored local file refuses before any vendor executable starts.
 - `verification-evidence.ts`, `verification.ts` — shared task evidence facade,
   inert project discovery and legacy diagnostics; discovered commands confer
   no execution permission.
@@ -219,6 +249,10 @@ behavior and edge cases; source and tests own the executable evidence.
   `configuration-review.ts`, `verification-cli.ts`, `verification-ui.ts` —
   retained legacy configuration utilities and current verification display;
   legacy profile operations do not gate new tasks.
+- `verification-outcome.ts`, `verification-output.ts` — failed-check outcome
+  labels and bounded, redacted log tails for human status; `status --json` and
+  agent control carry no log content. Human status at the plan gate also lists
+  the plan's mandatory checks with argv, cwd and timeout.
 - `validation.ts`, `contracts.ts`, `types.ts`, `errors.ts` — runtime decoding,
   schema parity, shared types and stable failures; `types.ts` has no runtime
   imports.
@@ -234,8 +268,16 @@ behavior and edge cases; source and tests own the executable evidence.
 - `review-snapshot.ts`, `review-artifact.ts` — frozen review inputs and
   deterministic `banzai-feature-review/v8` publication from snapshot v7;
   reviewers return structured results and the runner publishes validated bytes.
-- `doctor-cli.ts`, `doctor.ts` — `banzai-doctor/v5` local readiness diagnostics;
-  no configured commands, authentication, model calls or repair occur.
+- `doctor-cli.ts`, `doctor.ts` — `banzai-doctor/v6` local readiness diagnostics;
+  no configured commands, authentication, model calls or repair occur. The
+  advisory `claude.plugin-scope` warns when Claude user settings enable Banzai
+  and never affects readiness. `config.local` checks the local model file with
+  only `git ls-files --error-unmatch` and `git check-ignore -q`, and the
+  top-level `models` array discloses each role's vendor, pattern-matched model,
+  effort and source. `claude.version` reads the installed version of each
+  Claude executable that a role uses from the file system only and fails below
+  the Claude Code minimum; it is skipped when no role runs on an available
+  Claude executable.
 - `evaluation*.ts`, `evaluation-kpi*.ts` — privacy-minimized export and pure
   derived KPIs; frozen contracts retain explicit incomplete coverage.
 - `context-accounting.ts`, `context-report*.ts` — exact runner-byte accounting
@@ -244,16 +286,17 @@ behavior and edge cases; source and tests own the executable evidence.
 - `cancellation*.ts`, `human-time*.ts`, `interactive-human-time.ts` —
   cancellation provenance, independent reports and private timing; elapsed
   gate time and estimates never become measured person-time totals.
-- `git.ts` — repository baseline, approval bundles and workspace identities;
-  staged, unstaged, untracked and selected-document evidence remain distinct.
+- `git.ts` — repository baseline, approval bundles, workspace identities,
+  index and ignore queries and the clone exclude-file append; staged,
+  unstaged, untracked and selected-document evidence remain distinct.
 - `live-compatibility*.ts` — explicitly authorized disposable vendor probes;
   closed summaries and cleanup isolate auth material and raw output.
 
 Plugin and release owners:
 
-- `plugins/banzai/skills/` — eleven standalone skills;
-  `project-manifest` and `orchestrate` require explicit invocation in both
-  clients. Other skills restrict automatic selection to adopted repositories
+- `plugins/banzai/skills/` — twelve standalone skills;
+  `project-manifest`, `orchestrate` and `initiative` require explicit
+  invocation in both clients. Other skills restrict automatic selection to adopted repositories
   or explicit Banzai/skill requests.
 - `plugins/banzai/AGENTS.md`, `CLAUDE.md` and bootstrap templates — installed
   process, including the five existing decision gates; project-specific merges
@@ -268,7 +311,10 @@ Plugin and release owners:
   owner PIDs; ordinary execution never reclaims them.
 - `plugins/banzai/hooks/spec-gate.cjs`, `hooks/hooks.json` — host file-tool
   authorization; runner context fails closed and source-read-only reviewers
-  receive no write grant. The hook is not a general shell sandbox.
+  receive no write grant. In manual mode it also frees Claude Code memory
+  notes and gives host bookkeeping writes (plans, subagent memory, session
+  scratchpad) an approval scope that never authorizes code (ADR-0062). The
+  hook is not a general shell sandbox.
 - `packages/orchestrator/scripts/` — build, test, release/version,
   instruction-baseline and publication tools; explicit generation is separate
   from validation. See [Release scripts](packages/orchestrator/MODULES.md#release-scripts-scripts).
@@ -276,12 +322,26 @@ Plugin and release owners:
 ## 6. State & Data Flow
 
 - `banzai init` writes config schema 4 with model settings and optional task
-  verification policy. Defaults use Claude `claude-opus-5-5` for planning and
-  implementation and Codex `gpt-6.1-sol` for review, all at `xhigh`; context
+  verification policy. Defaults use Claude `claude-opus-5-5` for every role,
+  all at `xhigh` (ADR-0059); an existing reviewer configuration is kept; context
   defaults to `observe` with no limits and `maxFixCycles` is `3`.
+- The optional `.banzai/config.local.json` (`schemaVersion` `1`) replaces whole
+  role triples of `executable` (`claude` or `codex`), `model` and `effort` for
+  one checkout; every other key stays committed. `banzai init` adds its exact
+  `.gitignore` line, and local writers add it only to the clone's exclude file.
+- Each run records its local model layer in the create-only
+  `.banzai/runs/<run-id>/model-override.json`
+  (`banzai-run-model-override/v1`) before `state.json`. Runner resolutions
+  merge that record with the current committed file; a changed local file
+  refuses with `LOCAL_MODEL_OVERRIDE_CHANGED` until it is restored, a
+  `banzai retry` records it (from a terminal once the run has a model attempt)
+  or the run is cancelled.
 - New runs use state schema 10, document binding v3 and workspace snapshot v3.
-  One checkout has one active run; state is atomically replaced, events are
-  appended and raw evidence remains under `.banzai/runs/<run-id>/`.
+  A plan-gate re-check moves a run to state v11 in the same write as its first
+  `plan_recheck` record; v10 and v11 are both executable. One checkout has one
+  active run; state is atomically replaced, events are appended and raw
+  evidence remains under `.banzai/runs/<run-id>/`, including the planner's
+  bundle retained at each plan-gate entry under `plan-gate/<NNN>/`.
 - Guidance is inspected before run creation/authentication and again under
   ownership. Continuations check instruction layout before model attempts;
   refusal preserves the last checkpoint, saved decision and retry/recovery
@@ -295,7 +355,17 @@ Plugin and release owners:
 - Human decisions use five existing workflow gates: conditional planning-only
   consultation, ADR approval, plan approval, escalation and review triage.
   Planning gates support feedback-based rework and explicitly requested
-  read-only planning review with separate human triage.
+  read-only planning review with separate human triage. A strict
+  task-verification plan gate also offers **Re-check my edits**
+  (`banzai approve plan --decision recheck`, ADR-0058): it validates the
+  human-edited bundle, rewrites only the plan's `planRemainderSha256`, records
+  a bounded summary against the planner's version, never approves and is not
+  a human-time decision boundary. Approval never rewrites a digest and links
+  the re-check whose bundle digest it approves.
+- The runner records a strict plan's remainder digest when it accepts a
+  planning result that requests approval (ADR-0064); planners write 64 zeros.
+  `banzai retry` continues planning after a block the planner reported
+  (ADR-0065), including one from a planning review's applying step.
 - Approval digests bind exact requirements, accepted ADRs and plan bytes.
   Workflow digests bind lite selection; workspace identities detect drift.
   Plan checkboxes stay immutable in orchestrated work; operator recovery needs
@@ -335,9 +405,10 @@ Plugin and release owners:
   `typescript-eslint` `^8.65.0`, `globals` `^17.8.0`, `prettier` `^3.9.6` and
   `eslint-config-prettier` `^10.1.8`. The root declares no dependencies.
 - External runtime tools are Git and the configured local vendor clients.
-  Vendor-wide minimums are Codex `0.145.0` and Claude Code `2.1.218`; default
-  models require Codex `0.159.1` and Claude Code `2.1.280`. Model-specific
-  minimums are maintained in `packages/orchestrator/src/models.ts`.
+  Vendor-wide minimums are Codex `0.145.0` and Claude Code `2.1.290`; the
+  Claude minimum applies to every Claude role (ADR-0063), and the Codex CLI is
+  needed only when a role uses it. Model-specific minimums are maintained in
+  `packages/orchestrator/src/models.ts`.
 - PTY tests require `python3` with its standard library on macOS/Linux.
   Python is a test prerequisite; the CLI runtime uses Node.
 - New runtime or development dependencies require explicit user approval and
@@ -387,6 +458,10 @@ Plugin and release owners:
   variables use `camelCase`; types/classes use `PascalCase`; constants and
   error codes use `SCREAMING_SNAKE_CASE`. ADR paths use
   `documentation/decisions/NNNN-<short-kebab-case-title>.md`.
+- New `documentation/work/` and `documentation/initiatives/` directories, and
+  the run slugs the CLI starts, are named `yymmdd-<kebab-case-subject>` from
+  the local creation date (ADR-0066), at most 100 characters and unused in
+  both roots; existing undated directories keep their names.
 - TypeScript uses `strict`, `noUncheckedIndexedAccess`,
   `exactOptionalPropertyTypes`, `verbatimModuleSyntax` and NodeNext module
   resolution. Relative imports use `.js` and type-only imports are explicit.
@@ -417,18 +492,26 @@ Plugin and release owners:
 
 - The umbrella contract is `1.0.0`; phase-result v4 is current and
   review-result v2 is current. `types.ts` declares phase-result schema v4 and
-  state schema v10 with explicit historical readers. Startup rejects schema
+  state schema v10 with explicit historical readers; a plan re-check moves a
+  run to its successor v11. Startup rejects schema
   or umbrella mismatch; phase-result v1/v2/v3 remain byte-preserved legacy
   reader surfaces.
-- Agent control uses control contract version `8.0.0`, capabilities v8 and
-  status v6. Planning decisions use `banzai-agent-gate-decision/v1` and
+- Agent control uses control contract version `9.0.0`, capabilities v9 and
+  status v7. Plan-approval decisions are approve, recheck, rework and review;
+  status carries the current gate entry's re-check summary or null, and
+  capabilities list verification requests v4 and v3. Planning decisions use
+  `banzai-agent-gate-decision/v1` and
   planning triage uses `banzai-agent-answer/v4`; consultation, escalation and
   recovery retain their declared contracts. Closed direct-stdin JSON is
   limited to 64 KiB and validated before mutation.
 - Reporting contracts are independent: evaluation export and KPI default to
   v1 with explicit v2 support, context attempt/report use v2, cancellation
-  report uses v1 and doctor uses v5. New run-state fields do not change frozen
+  report uses v1 and doctor uses v6. New run-state fields do not change frozen
   report semantics or privacy boundaries.
+- The local model file cannot change timeouts, verification, context limits or
+  the Claude environment. `status --json`, agent status v7, capabilities v9
+  and run state schemas carry no local model data; agents learn of a changed
+  file only from `LOCAL_MODEL_OVERRIDE_CHANGED`.
 - Source schema, phase/guidance/policy and release-policy changes require a
   rebuild before local CLI execution. Explicit build owns generated sources;
   validation detects drift without repairing tracked files.
@@ -439,7 +522,9 @@ Plugin and release owners:
 - Claude execution scopes MCP access and, when a verified plugin directory
   resolves, project settings plus that plugin. Deny/ask rules override hook
   write grants; shell permission is separate. Code reviewers have no write
-  tools. The CLI never silently writes permission rules.
+  tools. Claude review roles receive only `Read`, `Glob` and `Grep` and run
+  without auto memory or refusal fallback. The CLI never silently writes
+  permission rules.
 - Runner operations do not switch branches, create worktrees, stash, reset or
   commit. Start-time changes are recorded as baseline evidence. Explicit
   restore uses digest-verified approved bytes; recovery preserves failed
@@ -520,3 +605,14 @@ delivery or installation.
 | ADR-0054 | Git-visible work artifacts                                         | [Source](documentation/decisions/0054-git-visible-work-artifacts.md)                             | Implemented |
 | ADR-0055 | Planning gate rework and independent planning review               | [Source](documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md)   | Implemented |
 | ADR-0056 | CI-built orchestrator distribution                                 | [Source](documentation/decisions/0056-ci-built-orchestrator-distribution.md)                     | Implemented |
+| ADR-0057 | Complete task verification rounds after check failures             | [Source](documentation/decisions/0057-complete-task-verification-rounds.md)                      | Implemented |
+| ADR-0058 | Human plan edits re-checked at the plan gate                       | [Source](documentation/decisions/0058-human-plan-edits-rechecked-at-the-plan-gate.md)            | Implemented |
+| ADR-0059 | Claude default reviewer and reviewer isolation                     | [Source](documentation/decisions/0059-claude-default-reviewer-and-reviewer-isolation.md)         | Implemented |
+| ADR-0060 | Local model override                                               | [Source](documentation/decisions/0060-local-model-override.md)                                   | Implemented |
+| ADR-0061 | Initiative skill and documents                                     | [Source](documentation/decisions/0061-initiative-skill-and-documents.md)                         | Implemented |
+| ADR-0062 | Claude Code memory notes in the manual hook gate                   | [Source](documentation/decisions/0062-claude-memory-notes-in-the-manual-hook-gate.md)            | Implemented |
+| ADR-0063 | Stable headless vendor invocations                                 | [Source](documentation/decisions/0063-stable-headless-vendor-invocations.md)                     | Implemented |
+| ADR-0064 | Runner-recorded plan remainder digest                              | [Source](documentation/decisions/0064-runner-recorded-plan-remainder-digest.md)                  | Implemented |
+| ADR-0065 | Continuable planner-declared planning blocks                       | [Source](documentation/decisions/0065-continuable-planner-declared-planning-blocks.md)           | Implemented |
+| ADR-0066 | Date-prefixed work and initiative slugs                            | [Source](documentation/decisions/0066-date-prefixed-work-and-initiative-slugs.md)                | Implemented |
+| ADR-0067 | Node 26 supported release lane                                     | [Source](documentation/decisions/0067-node-26-supported-release-lane.md)                         | Implemented |

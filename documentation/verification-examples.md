@@ -47,7 +47,7 @@ Unknown inputs or a later failed/incomplete attempt cannot count as reusable suc
 
 New work keeps documents in `documentation/work/<slug>/`; the runner records
 binding v3 in its ignored state, and standalone verification selects the exact
-document through request v3 without registering Markdown. Existing runs are not
+document through request v4 without registering Markdown. Existing runs are not
 migration or continuation targets for this change; start a new task. Retained
 historical files are not rewritten or used as new approval authority. Legacy
 profile utilities do not control new-task verification.

@@ -14,6 +14,11 @@ is a navigational reference and is updated with the module it describes.
   workspace v3 inventories selected documents once, including unchanged approved
   bytes. `lib/work-binding-history.mjs` decodes retained v1/v2 evidence read-only;
   `isHistoricalWork` is the shared predicate status, home and doctor use for it.
+  `workSlugConflict` is the read-only ADR-0066 query for a final slug: it
+  returns the existing `documentation/work/<slug>` or
+  `documentation/initiatives/<slug>` through contained-path resolution, and
+  execution-binding creation refuses either with `ARTIFACT_WORK_CONFLICT`
+  before creating the work directory.
   `lib/execution-ownership.mjs` coordinates actual runner/verification execution
   by the selected document directory; ordinary Markdown editing has no claims.
   Its recovery-only option requires repository ownership, exact bound-work
@@ -70,7 +75,9 @@ is a navigational reference and is updated with the module it describes.
   `compatibility live --confirm-live`, `approve adr|plan`, `triage`, and
   `cancel [--run <run-id>] [--reason <enum>]`, which never opens a reason prompt.
   `approve plan` and `review planning` use exact flag parsing; rework requires
-  validated feedback. Planning-triage status prints one answer-v4 Next line.
+  validated feedback, and `--decision recheck` takes no note and ignores
+  `--no-resume`. At a re-check-capable plan gate status prints the CLI waiting
+  copy and the latest re-check summary. Planning-triage status prints one answer-v4 Next line.
   Bare invocation without a TTY prints help instead of waiting for
   input, and the help heading derives the Banzai release-train version from the
   orchestrator package mirror under ADR-0033. `--help` and `help` show a compact
@@ -86,6 +93,22 @@ is a navigational reference and is updated with the module it describes.
   restores the terminal an interrupted prompt left in raw mode with the cursor
   hidden. `init` and a completed `setup` end with the blocking reasons and
   remediation of the shared Claude permission audit, and write no grant.
+  `model` takes no argument, `--local`, or `--help` alone (`parseModelArgs`,
+  `INVALID_MODEL_OPTION`), checked before the terminal check and repository
+  discovery. In a terminal it runs `executeModelPicker` with `runner.status`
+  for the blocked-run exception; `init` runs the picker on the committed file
+  only. Outside a run, `init`, `setup`, `run` and the interactive entry read
+  the effective `loadConfig` with a fresh Git visibility answer, so a tracked,
+  unignored or invalid `.banzai/config.local.json` refuses with its
+  `LOCAL_CONFIG_*` code before any vendor executable starts. The launch
+  gateway reads through `loadLaunchModels` and writes advisory updates through
+  `applyLaunchModelUpdates`. Human `status` prints the `Models:` or
+  `Current models:` block from `runner.modelStatus` before the `Next:` line and
+  passes the status through `humanStatusView`, which makes retry and recovery
+  ineligible and recommends `banzai cancel` for an invalid run model record;
+  `status --json` stays as `status()` derives it. `recover` checks the same
+  view with `requireRecoverable`. `retry` passes
+  `terminal: stdin and stdout are TTYs` to `runner.retry`.
 - `version-cli.ts` — early, repository-independent `--version` / `-v` and
   `--plugin-version` / `-pv` commands, also accepting em-dash long aliases.
   Reads the package mirror or bounded local client inventories, including
@@ -97,10 +120,12 @@ is a navigational reference and is updated with the module it describes.
   Capability discovery runs before Git discovery or runner construction;
   status, start, answer, decideGate and recover reuse the current `WorkflowRunner`, and
   mutations emit a fresh authoritative status projection.
-- `agent-control.ts` — closed current `banzai-agent-capabilities/v8`
+- `agent-control.ts` — closed current `banzai-agent-capabilities/v9`
   (declaring the completion publication protocol, stages, refusal codes and
-  `pending_application`, task verification and planning gates), `banzai-agent-status/v6` (bounded
-  task applicability, completion publication state and planning review/triage),
+  `pending_application`, task verification, planning gates with the plan
+  `recheck` decision, and verification requests v4/v3), `banzai-agent-status/v7` (bounded
+  task applicability, completion publication state, planning review/triage and
+  the plan gate's latest re-check summary under a 32 KiB guard),
   planning `banzai-agent-gate-decision/v1` and `banzai-agent-answer/v4`, and configuration `banzai-agent-answer/v3` contracts;
   preserved keyed consultation `banzai-agent-answer/v2`, `banzai-agent-request/v1`, ordered escalation
   `banzai-agent-answer/v1`, and `banzai-agent-recovery/v1` inputs; bounded
@@ -113,7 +138,13 @@ is a navigational reference and is updated with the module it describes.
 - `live-compatibility.ts` — protected live-only candidate cloning,
   subscription-auth-root isolation, version/auth preflight, bounded reviewer
   scenarios, exact Codex write-probe events, Claude
-  restricted host inventory, source/control snapshots, runner-rendered v2
+  restricted host inventory (Read, Glob, Grep, optional StructuredOutput) with
+  review isolation evidence for `claude.read_only_inventory` — both variables
+  on the review spawn and both names in the resolved client binary, which is
+  searched and never run — the one Claude minimum in the Claude preflight,
+  the adapters' stdin prompt and run-stability environment (the five-minute
+  bound gives `BASH_MAX_TIMEOUT_MS` its 120,000 ms floor),
+  source/control snapshots, runner-rendered v2
   review artifacts, closed `banzai-live-compatibility/v2` evidence, process bounds, and cleanup.
 - `project-adoption.ts` — facade over the canonical plugin prerequisite reader;
   filesystem-only, bounded regular-file inspection of
@@ -136,10 +167,15 @@ is a navigational reference and is updated with the module it describes.
   missing Python fails the suite.
 - `doctor-cli.ts` — exact doctor argument contract, injected stdout/stderr
   composition, canonical JSON serialization, and deterministic human
-  projection for `banzai-doctor/v5`, including explicit unavailable project
-  types when marker evidence cannot be read.
+  projection for `banzai-doctor/v6`, including explicit unavailable project
+  types when marker evidence cannot be read. `doctorInspection` injects the
+  local model file's Git probe. The text report prints, between
+  `Project types:` and `Checks:`, a `Models:` block of escaped
+  `  <role>: <vendor> <model> effort=<effort> (<source>)` lines, with `other`
+  for an unknown vendor and `unlisted` for an undisclosed model, or
+  `Models: unavailable` for an empty array.
 - `doctor.ts` — fixed-order project and task-verification diagnostics, with
-  `project.guidance` immediately after `repository.git` and schema version 5. `claude.instructions` follows `claude.environment`
+  `project.guidance` immediately after `repository.git` and schema version 6. `claude.instructions` follows `claude.environment`
   and precedes `claude.permissions`; it compares the configured role union and
   preserves mismatch/bounded-failure/unverifiable precedence. Uses direct
   privacy-bounded config, active-pointer/state, and lock reads plus injected
@@ -151,17 +187,45 @@ is a navigational reference and is updated with the module it describes.
   exposing plugin paths or resolution errors. Its `claude.permissions` check
   reports whether the settings a spawned Claude session loads still grant the
   tools its phases call, carries the shared remediation as its fix, and is
-  skipped whenever no configured role depends on those rules. It never constructs `RunStore`,
-  vendor adapters, or `WorkflowRunner`. Its advisory
-  `authentication.models` check explicitly separates executable availability
-  from authentication readiness and unchecked CLI versions without calling a
-  vendor.
+  skipped whenever no configured role depends on those rules. The advisory
+  `claude.plugin-scope` check that follows warns, never fails, when Claude user
+  settings enable Banzai, and passes for local or project installs. It never constructs `RunStore`,
+  vendor adapters, or `WorkflowRunner`. `claude.version`, after
+  `executables.models`, groups the effective Claude roles by executable
+  (`vendorUsage`) and reads each available executable's installed version
+  once from the file system only (`readInstalledClaudeVersion`, injectable as
+  `installedClaudeVersion`): the native installer's `versions/<version>` file
+  or the first `package.json` above an npm install. It fails when any version
+  is below `MINIMUM_CLAUDE_VERSION` (`meetsClaudeMinimum`), warns when no
+  layout yields a version, otherwise passes, and names the roles behind each
+  version and any role whose executable is unavailable. It prints versions
+  and role names only, and is skipped when no role runs on an available
+  Claude executable. Its advisory `authentication.models` check explicitly
+  separates executable availability from authentication readiness and from
+  every CLI version but Claude Code's, without calling a vendor. `config.local` follows `config.version` (ADR-0060): presence,
+  safety and validity come from the local file reader, and the injected
+  `localConfigGitState` probe runs `git ls-files --error-unmatch --` and
+  `git check-ignore -q --` at the repository root with `LC_ALL=C` only when
+  the file exists. Each cause (tracked, not ignored, unsafe, unreadable,
+  invalid at a schema path, invalid file, refused key, Git unavailable) has
+  fixed text and a fix linking `documentation/orchestrator.md#model-configuration`;
+  a symbolic link at `.banzai/` fails even without a file. The report's
+  top-level `models`, between `projectTypes` and `summary`, lists each role's
+  `vendor` (`claude`, `codex` or null), its `model` only when it matches
+  `MODEL_IDENTIFIER_PATTERN`, `effort` and `source`, and is empty while
+  `config.local` fails or the committed configuration is unavailable.
+  `claude.instructions`, `claude.permissions`, `executables.models` and
+  `claude.version` evaluate the effective configuration and are skipped while
+  `config.local` fails; `claude.environment` and verification checks keep committed values.
 - `claude-permissions.ts` — offline audit of the permission rules a spawned
   Claude session will honor. `claudePermissionDemand(config)` reads which roles
   actually depend on them: a Claude planner or implementer writes files the
   spec-gate hook grants (ADR-0041) and runs shell commands, and a Claude
   reviewer depends on neither because it uses read-only tools and returns
   structured findings for runner-owned artifact rendering.
+  `inspectClaudeUserPluginScope(env)` reads only the user settings file and
+  reports the enabled `banzai@<marketplace>` keys, without Claude's plugin cache
+  or CLI.
   `inspectClaudePermissions()` reads the
   exact sources the resolved scope loads, plus administrator policy settings and
   Claude Code's workspace trust record, which voids every repository-scoped
@@ -229,7 +293,9 @@ is a navigational reference and is updated with the module it describes.
 - `context-report-cli.ts` — composes direct collection and rendering through
   injected streams while reusing the exact `eval export` cohort parser.
 - `cli-routing.ts` — `resolveCliMode` maps argv and TTY presence to
-  `interactive | help | command | tty_required`.
+  `interactive | help | command | tty_required`. `model` is one of the
+  exact-contract commands, so `banzai model --help` and argument errors reach
+  its parser instead of the global help shortcut.
 - `interactive.ts` — the launch header and the state-driven decision interface
   behind `InteractiveIO`. The compact text-only header opens with the Banzai
   name in brand vermilion and the package-derived release-train version, with
@@ -267,9 +333,21 @@ is a navigational reference and is updated with the module it describes.
   digest-rejected result whose authorized repair outranks replaying its terminal
   checkpoint,
   derives the kebab-case feature slug via `generateFeatureSlug`, and keeps the
-  session open when a phase returns a gate. It uses the shared review-completion
+  session open when a phase returns a gate. Before the start confirmation, the
+  slug step prints `Generated slug:` with the date-prefixed default and asks one
+  input: Enter, `y` or `Y` keep it, other text is finalized with today's prefix.
+  Its validation keeps the prompt open for format, then length, then an
+  existing directory reported by the optional `workSlugs` gateway. A gateway
+  refusal or failure keeps the prompt open with `Could not check <slug>:` and
+  its reason, because the prompt library drops a rejected validation. The
+  session starts the run with the slug that passed validation, read from the
+  optional `clock` (ADR-0066). It uses the shared review-completion
   projection so terminal triage is never displayed as reviewer pass.
   Planning gates offer rework and explicit review with default-No confirmations.
+  A strict task-verification plan gate first prints the waiting copy with the
+  bundle paths and the latest re-check summary, and offers "Re-check my edits"
+  between approve and rework without a confirmation; a refusal is printed and
+  the gate is shown again.
   Planning triage escapes model text and presents each finding/analysis card
   immediately before its keyed disposition menu; human-time insertion retains
   the final exit-choice anchor.
@@ -280,6 +358,20 @@ is a navigational reference and is updated with the module it describes.
   diagnostic codes. Duration display rounds original milliseconds, preserving
   zero and positive subsecond values; subtotals retain source arithmetic.
   Estimate actions refresh from current evidence and return to the same menu.
+  The header takes one layered read from `ModelConfigurationGateway.load()`
+  (ADR-0060). With a non-terminal run it shows, and checks authentication
+  for, the run-effective configuration (the committed file with the run's
+  recorded local layer) and adds a notice with the drift block or the invalid
+  record lines; otherwise it shows the current effective configuration. A
+  role from the local file carries `(local)` in its timeout cell, so rows
+  from the committed file alone stay byte-identical, and every model value is
+  escaped. A `LocalConfigError` from the gateway ends the launch before the
+  authentication check; other configuration errors keep the
+  `Model configuration unavailable` report. The update advisory evaluates the
+  current effective configuration, names every file it would change in its
+  options and confirmation, sends each update to the file that supplies its
+  role, prints one result line per changed file, and keeps its deferral text
+  during any active run. Interactive retry passes `terminal: true`.
 - `inquirer-io.ts` — the `@inquirer/prompts` implementation of
   `InteractiveIO`; the only module bound to the prompt libraries. Its initial
   request input uses `@inquirer/core` to enable bracketed-paste mode, capture
@@ -299,7 +391,7 @@ is a navigational reference and is updated with the module it describes.
   notification state is added; its only repository import is the run-state type.
 - `workflow.ts` — `WorkflowRunner`, the core. Owns `start`, `resume`, `retry`,
   `recover`,
-  `approvePlan`, `decideAdr`, `reworkPlan`, `requestPlanningReview`,
+  `approvePlan`, `recheckPlan`, `decideAdr`, `reworkPlan`, `requestPlanningReview`,
   `answerPlanningReview`, `answerHumanDecision`, `triage`, `cancel`,
   and process-local `recordCancellationResponse`,
   `status`, and the private phase executors for selection, planning,
@@ -314,6 +406,18 @@ is a navigational reference and is updated with the module it describes.
   applying, stale retry and reconciliation under the existing owners. Applying
   receives immutable analysis and exact human dispositions; planning retries
   preserve the independent code-review namespace and sessions.
+  Each strict task-verification entry into `needs_plan_approval` (planning
+  result, planning-review restore, triage restore) retains a gate-entry
+  snapshot. `recheckPlan` (ADR-0058), under the workflow lock at an idle plan
+  gate, validates the edited plan as approval does except for the remainder
+  digest, rewrites only `planRemainderSha256` through the compare-and-replace
+  write, appends a `plan_recheck` record (moving v10 to v11 in the same state
+  write) and a `plan.recheck` event that carries identities, digests, counts and
+  paths and is not a human-time decision boundary. A refusal writes nothing.
+  `approvePlan` never rewrites a digest; a remainder mismatch on v10+ names the
+  re-check, and on v11 the approval's `recheckId` links the latest re-check of
+  the current gate entry whose bundle digest it approves. `status` exposes that
+  entry's latest record as `planRecheck`.
   For new strict implementation and fix attempts it owns the
   `banzai-completion-protocol/v1` lifecycle (ADR-0047): the v7 state
   transition with retained prior-state bytes, protocol-selected envelope
@@ -431,6 +535,32 @@ is a navigational reference and is updated with the module it describes.
   operations from there. Only `now()` remains as a runner-side helper over the
   context.
 
+  The ADR-0060 run guard lives here. Every public command except status and
+  cancel starts with a fresh guard holder and Git visibility answer. Runner
+  resolutions merge the current committed configuration with the run's model
+  record, read once per command through the store and held, and never with
+  the current local file; the module imports `loadCommittedConfig` and the
+  layer helpers, never the effective `loadConfig`. `start` takes its one
+  layered read under the start lock and passes the local layer to
+  `createRun`. `compareModelRecord` runs at the entry of each state-changing
+  command, where a tracked or unignored local file refuses with
+  `LOCAL_CONFIG_NOT_IGNORED`, and before each model attempt and pending
+  transition. It compares the record on disk and the current local layer with
+  the held record and refuses with `LOCAL_MODEL_OVERRIDE_CHANGED` (escaped
+  drift lines and the fixed advice) or `LOCAL_MODEL_OVERRIDE_RECORD_INVALID`,
+  writing no block reason, event or rotation reason. Resume of a `created` or
+  `selecting` run without a model attempt, `retry({ terminal })`, and
+  `retryPlanningReview` record again instead: `readLayerForRecording` reads
+  the local file, the record and the terminal rule under the command's lock,
+  and refuses a different layer without a terminal once the run has a model
+  attempt; `recordModelLayer` prints the changed roles, replaces the record
+  and appends `model_override.recorded` with role sources only.
+  `modelStatus(state | null)` returns the `ModelStatus` that human status
+  prints, reading a fresh local layer and the record without
+  filling the guard holder, comparing or failing on a defect; `status()` and
+  its `WorkflowStatus` are unchanged, and status evaluates retry, recovery and
+  `nextAction` on the run-effective configuration.
+
 - `workflow/ports.ts` — type-only ADR-0052 process-boundary ports: `Clock`
   (`() => Date`), `IdSource` (RFC 4122 version 4 UUID text) and
   `RunnerSources`. It is a domain module and `workflow.ts` re-exports it.
@@ -467,8 +597,14 @@ is a navigational reference and is updated with the module it describes.
   identities and the workspace that completion capture and terminal proof
   record, and compares two observations exactly (`sameObservedInputs`).
 - `workflow/completion/plan-tasks.ts` — the approved plan path and task
-  identifiers, runner control-task and planning-result validation (including
-  the plan remainder digest), and implementation-completion validation.
+  identifiers, runner control-task and planning-result validation, and
+  implementation-completion validation. For a strict task-verification result
+  that requests plan approval, `validatePlanningResult` also records the plan
+  remainder digest (ADR-0064): it refuses and validates the plan, records the
+  evidence, then rewrites only the value through the compare-and-replace write.
+  Live acceptance and terminal-checkpoint reconciliation share this path, so a
+  repeated pass writes nothing new. A plan that changed since the read fails as
+  `PLAN_TASK_COMPLETION_INVALID` with its path named.
 - `workflow/completion/refusal.ts` — `CompletionRefusal`, the ADR-0047
   publication refusal whose closed code and stage are persisted with operator
   guidance; rejecting a captured completion input with its repair checkpoint
@@ -526,7 +662,13 @@ is a navigational reference and is updated with the module it describes.
   `workflow.ts` re-exports, and the `decisionText` and `decisionIdentifier`
   validators for human-decision input (`INVALID_DECISION`).
 - `workflow/domain/run-identity.ts` — `runId`, the run identifier derived from
-  the slug, creation time and UUID, and `requireSlug` (`INVALID_SLUG`).
+  the slug, creation time and UUID, and `requireSlug` (`INVALID_SLUG`). It also
+  owns the ADR-0066 slug rule for new work: `workSlugDatePrefix` gives the
+  `yymmdd-` prefix of a supplied instant's local calendar date,
+  `finalizeWorkSlug` adds it unless the candidate already starts with that
+  date's prefix, and `workSlugProblem` classifies a final slug as wrong
+  `format` (not kebab-case or not prefixed) before too `length` (over
+  `MAX_WORK_SLUG_LENGTH`, 100, prefix included). Callers own the clock.
 - `workflow/domain/artifact-scope.ts` — `artifactPaths`, the approved planning
   bundle in description, ADR, plan order (`INCOMPLETE_PLAN`), and
   `isDocumentationPath`. `gateArtifactPaths` supplies exact gate membership,
@@ -535,6 +677,25 @@ is a navigational reference and is updated with the module it describes.
 - `workflow/domain/planning-review.ts` — pure planning-gate availability,
   exact subset scope, bounded numbering, dispatch, stale facts, actionable
   triage and guarded restore decisions under ADR-0052 domain restrictions.
+  `planningGateActions` offers `recheck` after approve only at a strict
+  task-verification plan gate on state v10 or later.
+- `workflow/domain/plan-recheck.ts` — `planRecheckSummary`, the pure ADR-0058
+  comparison of the current planning bundle with the planner's version retained
+  at gate entry: changed, added and removed files; Markdown sections by ATX
+  heading outside fences, keyed by level, text and occurrence; check changes by
+  identity with the changed field names from `PLAN_RECHECK_CHECK_FIELDS`; a
+  changed absence rationale; and accepted bundle ADRs whose bytes changed. The
+  runner-owned remainder digest is masked before comparison. Headings are
+  sanitized and capped, and `PLAN_RECHECK_LIMITS` bounds files, a shared heading
+  budget and checks with omitted counts. It returns paths, headings, ids and
+  field names only.
+- `workflow/plan-gate/recheck.ts` — the re-check's I/O shell: refusal errors
+  (`PLAN_RECHECK_REFUSED`, which always says nothing was written), bundle reads
+  that refuse missing, symlinked and non-regular files, exact UTF-8 decoding,
+  the compare-and-replace plan write (`PLAN_RECHECK_CHANGED` when the plan
+  changed after the read; mode preserved) and gate-entry snapshot entries
+  verified against their digests. The read, decode and write helpers take the
+  caller's failure, because planning-result acceptance reuses them with its own.
 - `workflow/domain/verification-attempts.ts` — `verificationFailureCategory`,
   which maps process errors to a persisted failure category, and
   `verificationCommandMatches`, which matches a record to its exact command
@@ -550,7 +711,15 @@ is a navigational reference and is updated with the module it describes.
   the time, and the record keeps its persisted field order.
 - `workflow/domain/retry-eligibility.ts` — ADR-0052 domain rule `decideRetry`.
   It stages retry eligibility over task-verification attempts, the legacy
-  ledger and attempt records, and names the evidence it needs next.
+  ledger and attempt records, and names the evidence it needs next. Task
+  verification reads the latest attempt of every check in the latest round
+  (ADR-0057): a started one asks for reconciliation, and otherwise the latest
+  unsuccessful one names the retry, whose reason counts the checks it reruns.
+  A planning block (ADR-0065) asks for the run's latest attempt by `startedAt`:
+  a completed plan attempt whose result reported `outcome=blocked` with the
+  run's block reason as its summary names the retry. `plannerBlockSummary`
+  (`failure-classes.ts`) reads that result, and `executePlan` uses it to allow
+  session reuse and choose the "Continue blocked planning" prompt component.
   `RetryEligibility` moves here and `workflow.ts` re-exports it.
 - `workflow/domain/next-action.ts` — `nextAction`, the next-action text for a
   status from its retry, recovery and publication outcomes. It reads no
@@ -604,7 +773,11 @@ is a navigational reference and is updated with the module it describes.
   writes the immutable attempt-owned completion transition, original report,
   capture, candidate and publication records (`wx` temp plus link),
   appends deduplicated events through `appendEventOnce`, and enforces the
-  single-active-run lock. Private writes validate each actual destination and
+  single-active-run lock. It writes numbered, create-only plan-gate entry
+  snapshots under `plan-gate/<NNN>/` (private files, manifest `bundle.json`
+  last) and reads the latest one; an unreadable latest entry is
+  `PLAN_GATE_SNAPSHOT_INVALID`, never replaced by an older one. State v11 is
+  read with the v10 rules. Private writes validate each actual destination and
   temporary against effective Git exclusions; the active pointer's temporary
   lives in the ignored runs directory. Locks this process holds are tracked module-wide, so
   `releaseHeldRunnerLocksSync` can drop them from a signal handler, where the
@@ -622,18 +795,50 @@ is a navigational reference and is updated with the module it describes.
   stops/captures the winning state and writes its immutable anchor. Event capture
   and receipt-bound first response use the guarded expected source fingerprint;
   scans, human prompts and model execution occur outside the short guard.
-- `planning-review-state.ts` — closed state-v10 episode, pending-triage and
+  `createRun(state, localModels)` writes the create-only `model-override.json`
+  (`banzai-run-model-override/v1`, roles in fixed order, mode `0600`) as the
+  first file in the new run directory, before `state.json` and the active
+  pointer. `readModelOverrideRecord` reads it through the contained reader
+  and never throws for a defect: `absent` only once the run directory is
+  confirmed, otherwise `recorded` or a `LOCAL_MODEL_OVERRIDE_RECORD_INVALID`
+  defect with fixed text that names the record and says to cancel.
+  `replaceModelOverrideRecord`, called only when a command records again,
+  publishes a new record through a temporary file renamed over it, or
+  create-only for a run without one, and never writes through a link.
+- `planning-review-state.ts` — closed state-v10/v11 episode, pending-triage and
   history validation for the store. Active and closed slots have distinct
-  shapes; historical states reject v10 fields without migration. The store
+  shapes; historical states reject v10 fields without migration. Only v11 holds
+  exact, bounded `plan_recheck` records (unique ids, consistent gate entry,
+  planner and written digests, sanitized headings) and a plan approval's
+  `recheckId`, which must name one of them. The store
   remains the only persisted-state owner.
 - `adapters.ts` — `createVendorAdapters` plus the argument builders
   (`buildCodexArguments`, `buildClaudeArguments`,
   `buildClaudeSelectionArguments`, `buildClaudePhaseArguments`) and the minimum
   CLI versions `MINIMUM_CODEX_VERSION = "0.145.0"` and
-  `MINIMUM_CLAUDE_VERSION = "2.1.218"`. Preflight takes a
-  `VendorPreflightTarget` and, after the vendor-wide minimum, applies
-  `modelCliMinimum()` for the target's model (`null` skips it), failing with
-  `CLI_TOO_OLD` before authentication. Adapter requests consume the exact
+  `MINIMUM_CLAUDE_VERSION = "2.1.290"`, the one Claude minimum for every role
+  (ADR-0063), with `meetsClaudeMinimum` for doctor. Preflight takes a
+  `VendorPreflightTarget` (`executable`, `model`) and, after the vendor-wide
+  minimum, applies `modelCliMinimum()` for the target's model (`null` skips
+  it), failing with `CLI_TOO_OLD` before authentication; the Claude message
+  names the reason. Every builder renders the prompt check through
+  `invocationPrompt` but keeps the prompt out of argv: Claude runs `-p` with no
+  prompt argument and Codex ends with `-`, and every spawn passes the prompt as
+  `ProcessSpec.stdin`. Claude review, routine re-review and planning review
+  receive `--tools Read,Glob,Grep` with `Skill` first in the disallowed list,
+  and run with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` and
+  `CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK=1` set after
+  `subscriptionOnlyEnvironment` in every scope (ADR-0059). Planning analysis
+  keeps `Read,Glob,Grep,Skill`; it, the phases and selection gain only the
+  memory variable, and only under a `strictMcpConfig` scope.
+  `isolatedClaudeEnvironment` then sets, for every Claude spawn in every scope,
+  `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` and `BASH_MAX_TIMEOUT_MS` from
+  `claudeBashMaxTimeoutMs(settings.timeoutMs)` — the timeout minus
+  `CLAUDE_BASH_TIMEOUT_RESERVE_MS` (5 minutes), floored at
+  `CLAUDE_BASH_TIMEOUT_FLOOR_MS` (2 minutes) — and deletes
+  `BASH_DEFAULT_TIMEOUT_MS`. Codex environments are unchanged.
+  `CLAUDE_REVIEW_ISOLATION` is the contract the workflow's reviewer invocation
+  digest covers. Adapter requests consume the exact
   prompt envelope and output-contract bytes already measured by the workflow;
   the existing read-only construction accepts both planning contracts. Their
   environment carries the run identity with empty approval, workflow and
@@ -706,7 +911,10 @@ is a navigational reference and is updated with the module it describes.
   failures remain distinct as `CODEX_STATE_NOT_WRITABLE`.
 - `process.ts` — `runProcess`, `subscriptionOnlyEnvironment`,
   `redactSensitiveText`, `terminateProcessGroup`. Strips API-key environment
-  variables and redacts secrets from retained output.
+  variables and redacts secrets from retained output. A `ProcessSpec.stdin`
+  string is written to a piped stdin in full at spawn, which is then closed;
+  a stdin write or close error is swallowed so the process outcome decides.
+  Without it, stdin stays ignored.
 - `validation.ts` — runtime decoders (`parseWorkflowSelectionResult`,
   `parsePhaseResult`, `parseReviewResult`, `parseConfig`) that enforce the
   invariants JSON Schema cannot express: non-empty values, identifier patterns,
@@ -748,10 +956,15 @@ is a navigational reference and is updated with the module it describes.
   links to the public repository; build generates and check-dist compares.
   CLI init creates the local guide under its initialization lock before prompts,
   using create-only writes and rejecting symlinks or non-regular paths.
-- `config.ts` — `.banzai/config.json` location, `DEFAULT_CONFIG`,
-  `loadConfig`, `initializeConfig`, and `applyModelUpdates`, which rewrites only
-  requested `model`, `executable`, and `effort` JSON value tokens and preserves
-  every unrelated byte. The optional context policy defaults to
+- `config.ts` — `.banzai/config.json` location, `DEFAULT_CONFIG` (Claude
+  `claude-opus-5-5` for every role, ADR-0059),
+  `loadCommittedConfig`, `initializeConfig`, and `applyModelUpdates`, which
+  rewrites only requested `model`, `executable`, and `effort` JSON value tokens
+  and preserves every unrelated byte. `loadCommittedConfig` reads the
+  committed file alone; committed-only readers and the layered reader of
+  `local-config.ts` use it, and the effective `loadConfig` lives there.
+  `initializeConfig` appends the exact `.banzai/config.local.json` line with
+  the run-state entries when `.gitignore` lacks it. The optional context policy defaults to
   `{ mode: "observe", limits: [] }`; selector-specific limits may be observed,
   while enforcement is restricted to exact pre-call runner-payload bytes and
   ships with no universal numerical maximum.
@@ -771,7 +984,78 @@ is a navigational reference and is updated with the module it describes.
   creates the configuration, its `configCreated` result selects `Use default`
   wording, default markers, and an initial-setup summary. Repeated `init` and
   `banzai model` retain the saved-configuration wording, even when the saved
-  values match the defaults.
+  values match the defaults. `selectModelDestination` asks where to save,
+  with "This machine only" first; `chooseModelSettings` runs the dialog for
+  the chosen destination, and `selectModelSettings` remains the committed
+  dialog without a local layer. The committed dialog starts from and compares
+  with the committed triples, tags them `(committed)` and shows the local
+  triple while a local layer exists, copies the pending committed planner
+  triple for "Match Planning", and names the roles this machine keeps from
+  the local file; its builder-session line uses the effective settings. The
+  local dialog starts from each role's effective triple with its source,
+  returns only triples that differ, removes an entry for
+  "Use shared setting: <triple>" or for the committed triple itself, offers
+  "Match Planning" only for a bare `claude` or `codex` planner, and announces
+  deletion when no entry remains.
+- `local-config.ts` — the ADR-0060 local model layer. `parseLocalModelFile`
+  and `parseLocalModelLayer` validate `.banzai/config.local.json`: exactly
+  `schemaVersion: 1` and `models`, roles with exactly a bare `claude` or
+  `codex` executable, a model matching `MODEL_IDENTIFIER_PATTERN` and a
+  committed effort, as a UTF-8 JSON object of at most 64 KiB. Defects are
+  `LOCAL_CONFIG_KEY_REFUSED` or `LOCAL_CONFIG_INVALID`; messages name only
+  plain-identifier field paths and never echo a value or parser text.
+  `createLocalConfigVisibility` asks Git once per command, index first, then
+  ignore. `readLocalModelLayer` checks `.banzai/` and the file with `lstat`,
+  asks Git only about an existing file, then reads through the contained
+  reader; it returns a defect instead of throwing, while a Git failure
+  propagates. `readLayeredConfig` returns the committed configuration
+  (`loadCommittedConfig`), the local status and the effective configuration,
+  null for a defective file; `mergeModelLayer` replaces whole triples and
+  records each role's source. `loadEffectiveConfig` and `loadConfig` refuse a
+  defect with `LocalConfigError` and serve only reads outside a run.
+  `sameModelLayer` is the order-independent comparison value, and
+  `localModelDriftLines` builds the escaped
+  `<Role>: recorded <triple|shared>, now <triple|shared>` lines or one line
+  naming an unusable file; `LOCAL_MODEL_DRIFT_HEADING` and
+  `LOCAL_MODEL_DRIFT_ADVICE` hold the fixed text. `ensureLocalConfigExcluded`
+  is the writers' exclude step: a path in the index refuses with the tracked
+  message even without a file, an ignored path needs nothing, otherwise it
+  appends the exact line to the clone's exclude file and refuses a
+  `.gitignore` negation that keeps the path visible. `writeLocalModelLayer`
+  validates the layer, requires `.banzai/`, refuses a tracked or unignored
+  path and any symbolic link, writes the canonical `renderLocalModelFile`
+  text through a `wx` mode-`0600` temporary renamed over the target, and
+  deletes the file for an empty layer. Nothing here edits `.gitignore`.
+- `model-cli.ts` — `banzai model [--local]` and the launch model I/O.
+  `parseModelArgs` is the exact grammar; `MODEL_PHASE_VARIABLES` make every
+  writer refuse inside a model phase with `CONFIGURATION_MODEL_WRITE_DENIED`.
+  `executeModelPicker` runs, in order, that refusal, `ensureLocalConfigExcluded`
+  outside the lock, the runner lock without stale reclaim (`RUNNER_LOCKED`
+  with model-specific text), the active-run gate, the layered read (a
+  defective local file stops before any menu), the destination and one write
+  to the chosen file. The gate passes no run or a done or cancelled one; a
+  blocked run whose status recommends `banzai retry` and whose model record
+  is readable gets the local destination only and `MODEL_RETRY_LINE`; any
+  other run refuses with `RUN_IN_PROGRESS` naming `banzai cancel`. `init`
+  writes the committed file; `--local` and the exception write the local
+  file; otherwise the destination question is asked when a local file exists
+  or `.banzai/config.json` is in the Git index. `loadLaunchModels` is the
+  launch gateway's one layered read with a fresh Git check, plus the active
+  run's run-effective models and drift lines or its invalid record.
+  `applyLaunchModelUpdates` writes advisory updates under the lock to each
+  role's source file, the local file first, refusing during any active run
+  and with `MODEL_CONFIGURATION_CHANGED` when a role's source or model changed
+  since the launch showed it.
+- `model-status.ts` — human text for `WorkflowRunner.modelStatus`.
+  `modelStatusLines` renders `Models:` for a non-terminal run or
+  `Current models:` otherwise, with escaped
+  `  <Label>: <executable> <model> <effort> (<source>)` lines, the drift block
+  of `modelDriftBlock` (shared with the launch header), a single unusable
+  local file line, `<heading>: unavailable (<code>)`, or the invalid-record
+  lines of `recordInvalidLines`. `humanStatusView` marks retry and recovery
+  ineligible with a reason naming the record and recommends `banzai cancel`
+  for an invalid record; `requireRecoverable` is the `recover` pre-check on
+  that view. `status --json` and agent status never pass through it.
 - `git.ts` — repository discovery, `currentCommit`, `currentBranch` (display
   only; null on a detached HEAD), `digestArtifactBundle`,
   `repositoryBaseline`, `workspaceSnapshot`, `workspaceDigest`, and
@@ -786,6 +1070,14 @@ is a navigational reference and is updated with the module it describes.
   complete setup, then need a commit before task input or creation. Failures
   exit with code 1;
   doctor and cancellation reporting retain their bounded Git diagnostics.
+  `isPathInIndex` (`git ls-files --error-unmatch --`) and `isPathIgnored`
+  (`git check-ignore -q --`) answer by exit status 0 or 1 and raise any other
+  result as a Git failure, never as "no". `cloneExcludePath` resolves
+  `git rev-parse --git-path info/exclude` against the repository root, so
+  linked worktrees share the common directory's file. `appendCloneExcludeLine`
+  creates `info/` when missing, refuses a link or non-regular file there with
+  `GIT_EXCLUDE_UNSAFE`, opens without following links and appends a missing
+  line once.
 - `phase-resources.ts` — generated committed exact resource text and SHA-256
   identities; imports nothing. `phase-instructions.ts` validates/selects that
   data and compares only declared resources inside a supplied verified plugin
@@ -885,7 +1177,9 @@ is a navigational reference and is updated with the module it describes.
   stays on screen names both the phase and what is running it, redrawn on a spinner tick and
   erased before every settled line and on close; it replaces the heartbeat while
   active and is disabled entirely under `verbose`, which exists to produce a
-  faithful log.
+  faithful log. The banner's executable name, model and effort and the live
+  line's model and effort pass through `escapeTerminalField`, because they
+  may come from a developer's local model file.
 - `vocabulary.ts` — plain-English renderings of the run's internal tokens for
   human output only: `runStatusText`, `reviewVerdictText`, `reviewExecutionText`
   (which turns `full/fresh (rotation=…)` into one sentence),
@@ -911,9 +1205,13 @@ is a navigational reference and is updated with the module it describes.
   `formatUsage` render token consumption with the cache ratio, the
   fresh-input remainder, and an optional turn count. It reads no
   process state, so both surfaces are testable against an explicit width.
+  `escapeTerminalText` escapes terminal controls in printed text;
+  `escapeTerminalField` also escapes TAB and LF, so a configuration value
+  printed inside a line, such as a model from either model file, cannot move
+  the cursor or start a line. Escaping an escaped value changes nothing.
 - `types.ts` — all shared types, `CONTRACT_VERSION = "1.0.0"`, phase-result
   schema v4 and state schema v10 with explicit historical readers, independent
-  agent-control schema and `8.0.0` contract identities, independent
+  agent-control schema and `9.0.0` contract identities, independent
   `banzai-context-attempt/v2` and `banzai-context-report/v2` identities,
   model-attempt v4 and retained v1-v3 readers under
   `banzai-completion-protocol/v1`, terminal-checkpoint v1-v3, the completion
@@ -923,7 +1221,16 @@ is a navigational reference and is updated with the module it describes.
 - `errors.ts` — `BanzaiError` (stable `code`, `exitCode`), `ProcessExitError`
   (retains redacted stdout/stderr plus the typed `failureCause` and the usage
   the failed process had already spent, optional inventory, and turn count),
-  `errorMessage`.
+  `errorMessage`. `LocalConfigError` carries a local model file defect
+  (`LOCAL_CONFIG_INVALID`, `LOCAL_CONFIG_KEY_REFUSED` or
+  `LOCAL_CONFIG_NOT_IGNORED`). `LocalModelOverrideRefusalError` is the run
+  guard refusal (`LOCAL_MODEL_OVERRIDE_CHANGED` or
+  `LOCAL_MODEL_OVERRIDE_RECORD_INVALID`), which preserves the last durable
+  checkpoint and every retry and recovery authority.
+  `passesThroughRunCatches` names the errors every catch between a check point
+  and a command boundary rethrows unchanged: a terminal transition, the
+  project-setup and instruction-resource refusals, and the run guard
+  refusals.
 
 ## Release scripts (`scripts/`)
 
@@ -957,8 +1264,11 @@ is a navigational reference and is updated with the module it describes.
   skill skeletons and Orchestrated Mode blocks remain byte-frozen. These
   checks do not perform
   semantic analysis of target-project source.
-- `smoke-committed.mjs` runs help, control capabilities, init, no-run control
-  status, ready doctor JSON, evaluation JSON, context JSON over a historical
+- `smoke-committed.mjs` runs help, control capabilities, init (which must add
+  the exact `.banzai/config.local.json` line to `.gitignore` once), no-run
+  control status, ready doctor JSON (whose `models` array must sit between
+  `projectTypes` and `summary` and match the smoke configuration's committed
+  roles), evaluation JSON, context JSON over a historical
   incomplete attempt, and evaluation KPI JSON —
   checkout mode plus a non-repository `--input` round-trip over the captured
   export — repeatedly against the
@@ -998,6 +1308,14 @@ is a navigational reference and is updated with the module it describes.
   accepts exactly one target; `version-recover.mjs` derives the same checkout
   and accepts no arguments. They expose no production root/path override and
   perform no unrelated command or delivery action.
+- `gate-1-probe.mjs` is the owner-run Gate 1 probe of ADR-0063 §6 and is not
+  part of any check. It bundles `test/probes/gate-1-probe-main.ts` into
+  `.dist-check-gate-1-probe/` and runs it against a scratch repository and a
+  chosen `claude` executable. The probe runs one implementation phase through
+  `createVendorAdapters` and the real `runProcess`, then a resumed invocation,
+  classifies stream lines with the pure `test/probes/gate-1-probe.ts`, and
+  prints only `banzai-gate-1-probe/v1` counts, exit statuses and a verdict. It
+  refuses to start inside Claude Code.
 
 Project adoption refusal (ADR-0040) is independent of a run failure. Workflow
 checks complete guidance before new-run publication and layout only before
@@ -1073,6 +1391,27 @@ CLI and interactive status share the canonical task-outcome projection in
 remain distinct; verification-only retry retains completed implementation and
 revalidates policy, authority and live-process protection before launch.
 
+For every check whose latest attempt did not succeed, the projection adds the
+descriptor's argv, cwd and timeout and the attempt's outcome, failure category,
+duration and log paths. `verification-outcome.ts` owns the pure outcome labels,
+keyed on status, failure category and signal together, and the block-reason
+summary, which never carries output. `verification-output.ts` reads at most the
+last 64 KiB of each log through contained, no-follow paths and returns 20
+redacted, ANSI-stripped, escaped and length-bounded lines; only the CLI and
+interactive renderers call it, so `status()` and `status --json` read no logs.
+`WorkflowRunner.verificationRetryOutlook()` compares a failed `command_exit`
+attempt's descriptor and observed-input digest with the current selection and
+capture. The interactive blocked menu alone calls it, to label a retry that is
+expected to fail again; any read failure yields no outlook, and the outlook
+never gates retry.
+
+At `needs_plan_approval`, `WorkflowRunner.planVerificationInventory(state)`
+parses the plan's v2 inventory and merges project policy through
+`selectTaskVerification`, the path verification takes, and returns the ordered
+checks or the error approval would raise. Only the CLI and interactive
+renderers call it; `planVerificationLines` keeps each command on a
+detail-indented line that renderers never rewrap.
+
 `verification-evidence.ts` exposes the shared builtin-only
 `task-verification.mjs` and `task-verification-store.mjs` owners. Discovery reads
 project metadata inertly and distinguishes absent/unavailable inputs and known
@@ -1089,16 +1428,27 @@ both the acceptance comparison and `authorizeTaskVerification` classify through
 `comparableTaskVerificationSources`. A model-authored digest is established when
 its artifact is accepted: `workflow.ts` compares each effective supplement
 source and records the outcome through `store.ts` as
-`banzai-result-digest-evidence/v1`, written once per attempt and never restated,
-while `validatePlanningResult` classifies the existing plan-remainder detection
-the same way. A rejection carries the field, path, declared and observed digests
-only; the size rejection stays a separate typed cause. The launch comparison
+`banzai-result-digest-evidence/v2`, written once per attempt and never restated.
+`validation.ts` also reads v1 records, whose comparisons read as `recorded: false`.
+`validatePlanningResult` records the plan remainder with `recorded: true` when it
+writes it, which never rejects the result (ADR-0064). A rejection carries the
+field, path, declared and observed digests only; the size rejection stays a
+separate typed cause. The launch comparison
 keeps its authority unchanged and states a causal history only from a recorded
 baseline, reporting unknown when none exists.
 Observed inputs follow Git ignore rules, so a check can pass only when its
-generated output is ignored. A completed check that changes observed files stops
-the round and names up to ten changed paths with the ignore remedy; input drift
-between selection and launch names its paths the same way. The entry lists stay
+generated output is ignored. A check that changes observed files, whether it
+passed or failed, stops the round and names up to ten changed paths with the
+ignore remedy; input drift between selection and launch names its paths the
+same way. Under ADR-0057, `taskVerificationContinues` lets a round schedule its
+next check after a non-zero exit, a start failure, a timeout or the output
+limit, reading status, category and signal together because the helper and
+the runner record timeouts differently; a signal, a runner failure or a
+cancellation stops it. `executeTaskVerification` accepts a `retrySet` that must
+equal `unsuccessfulRoundAttempts` for the round, and a lone `retryOf` only
+while it names the round's one unsuccessful check, so neither launches anything
+before a refusal. The standalone helper maps request v4's `retryOf` array to
+that set; v3 keeps its single identity. The entry lists stay
 in process memory and the persisted observation format is unchanged.
 Ordinary files are streamed within a 128 MiB aggregate budget, without a 16 MiB
 per-file cutoff. Protected filenames contribute filesystem identity metadata
@@ -1121,8 +1471,9 @@ without inventing exit codes and repairs missing origins from retained physical
 bytes; terminal success is not re-executed. Equivalent evidence requires complete
 policy-declared inputs/toolchain/environment and a direct compatible successful
 origin. Changes outside declared explanatory regions and release gates stay
-fresh. Helper request v3 accepts exact document/workflow selection, never arbitrary
-argv. Inspect/decide allocate nothing; execute keeps metadata under ignored
+fresh. Helper request v4 (and the retained v3) accepts exact document/workflow
+selection, never arbitrary argv; a v4 `retryOf` is the round's exact
+unsuccessful attempt set. Inspect/decide allocate nothing; execute keeps metadata under ignored
 `.banzai/verification/`. Legacy executable requests are refused.
 
 Review snapshot 7/rendered review 8 freeze task checks, required/supplemental
@@ -1137,7 +1488,7 @@ keeping its report schema unchanged.
 
 No historical-run migration is introduced. New binding v3 has explicit new
 semantics; retained v1/v2 artifacts keep their original identity. `doctor` v5 and control
-capabilities v8/status v6 expose task verification without requiring profile
+capabilities v9/status v7 expose task verification without requiring profile
 coverage. Current init emits schema 4 without a verification wizard. The test
 driver's exact file selection, process groups and cleanup are unchanged.
 
@@ -1166,10 +1517,17 @@ state-8 task runs never enter this prerequisite gate or init wizard.
   operation. Current config and this run's retained ID lists define collisions.
 - `verification-cli.ts` owns init's static wizard and verify add/edit/remove/list/
   check. Structured edits cannot change policy fields; explicit check reports all
-  commands while workflow verification remains fail-fast. No configuration write
+  commands, and task verification rounds continue after command-level
+  failures (ADR-0057). No configuration write
   runs concurrently with a model, check or waiting interactive owner.
 - `verification-ui.ts` edits executable/argv fields and renders pending actions
-  before the repair/resume alternative. It performs no project execution.
+  before the repair/resume alternative. It performs no project execution and
+  no I/O; verification output tails and the plan gate's inventory arrive from
+  its callers.
+- `plan-gate-ui.ts` renders the plan gate's waiting copy with the bundle paths
+  (the terminal names the "Re-check my edits" choice; the CLI names
+  `banzai approve plan --decision recheck`) and the escaped re-check summary,
+  and lists the refusal codes after which the interactive gate is shown again.
 - `configuration-review.ts` freezes actual deltas, coverage and resolution/Skip
   references for snapshot v4/render v5; historical writers/readers remain bound
   to their original versions. Already-published changes survive source drift and

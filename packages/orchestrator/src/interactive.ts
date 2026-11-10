@@ -2,13 +2,19 @@ import { validateHumanFreeText } from "./validation.js";
 import type {
   PlanningReviewTriageAnswer,
   PlanningReviewTriageRequest,
-  PlanningReviewDisposition
+  PlanningReviewDisposition,
+  PlanVerificationInventory
 } from "./types.js";
 import {
   configurationDecisionLines,
+  planVerificationLines,
   taskVerificationStatusLines,
   editVerificationCommands
 } from "./verification-ui.js";
+import {
+  readVerificationOutputTails,
+  type VerificationOutputTails
+} from "./verification-output.js";
 import type {
   HumanTimeEpisode,
   HumanTimeGateway,
@@ -17,11 +23,16 @@ import type {
 } from "./human-time.js";
 import { createHash } from "node:crypto";
 import path from "node:path";
-import type { ModelUpdate } from "./config.js";
 import packageManifest from "../package.json" with { type: "json" };
 import { createStyler, type Styler } from "./ansi.js";
-import { BanzaiError, errorMessage } from "./errors.js";
+import { BanzaiError, errorMessage, LocalConfigError } from "./errors.js";
 import {
+  PLAN_RECHECK_REFUSAL_CODES,
+  planGateWaitingLines,
+  planRecheckLines
+} from "./plan-gate-ui.js";
+import {
+  escapeTerminalField,
   escapeTerminalText,
   formatUsage,
   hangingLines,
@@ -37,11 +48,20 @@ import {
   type ModelAdvisory,
   type ModelRole
 } from "./models.js";
+import {
+  humanStatusView,
+  modelDriftBlock,
+  recordInvalidLines
+} from "./model-status.js";
 import type {
   AdrDecision,
   DecisionConsultationAnswer,
   DecisionConsultationCard,
+  EffectiveModelConfiguration,
   ModelSettings,
+  ModelSource,
+  ModelSources,
+  ModelStatus,
   OrchestratorConfig,
   ReviewFinding,
   RunState
@@ -53,6 +73,7 @@ import type {
   RecoverInput,
   StartRunInput,
   TriageInput,
+  VerificationRetryOutlook,
   WorkflowStatus
 } from "./workflow.js";
 import {
@@ -62,6 +83,12 @@ import {
   planningReviewStatusLines
 } from "./workflow.js";
 import type { TerminalAttention } from "./terminal-attention.js";
+import {
+  finalizeWorkSlug,
+  MAX_WORK_SLUG_LENGTH,
+  workSlugDatePrefix,
+  workSlugProblem
+} from "./workflow/domain/run-identity.js";
 import {
   pendingRotationText,
   reviewExecutionText,
@@ -81,7 +108,7 @@ export interface InteractiveInput {
   message: string;
   defaultValue?: string;
   collapsedPaste?: boolean;
-  validate?: (value: string) => true | string;
+  validate?: (value: string) => true | string | Promise<true | string>;
 }
 
 export interface InteractiveIO {
@@ -133,14 +160,24 @@ export interface InteractiveRunner {
   }): Promise<RunState>;
   readonly repoRoot: string;
   getPlanHumanPrerequisites?(): Promise<string | null>;
+  verificationRetryOutlook?(): Promise<VerificationRetryOutlook | null>;
+  planVerificationInventory?(
+    state: RunState
+  ): Promise<PlanVerificationInventory | null>;
   status(): Promise<WorkflowStatus>;
+  /** The run's model view, which human status applies (ADR-0060 reading 11). */
+  modelStatus?(
+    state: Pick<RunState, "runId" | "status"> | null
+  ): Promise<ModelStatus>;
   start(input: StartRunInput): Promise<RunState>;
   resume(): Promise<RunState>;
-  retry(): Promise<RunState>;
+  /** The interactive session is a human at a terminal (ADR-0060 reading 17). */
+  retry(options?: { terminal?: boolean }): Promise<RunState>;
   restoreApproval(): Promise<string[]>;
   restoreEligibility(): Promise<{ eligible: boolean; reason: string }>;
   recover(input: RecoverInput, autoResume?: boolean): Promise<RunState>;
   approvePlan(approvedBy: string, autoResume?: boolean): Promise<RunState>;
+  recheckPlan(input: { decidedBy: string }): Promise<RunState>;
   decideAdr(input: {
     id: string;
     decision: AdrDecision["decision"];
@@ -169,14 +206,71 @@ export interface InteractiveRunner {
   ): Promise<CancellationResponseResult>;
 }
 
+/** The two model files (ADR-0060 §1). */
+export type ModelConfigurationFile =
+  typeof COMMITTED_MODEL_FILE | typeof LOCAL_MODEL_FILE;
+
+const COMMITTED_MODEL_FILE = ".banzai/config.json";
+const LOCAL_MODEL_FILE = ".banzai/config.local.json";
+
+/**
+ * The models of the active run, when it is neither done nor cancelled
+ * (ADR-0060 §7). `recorded` holds the run-effective configuration (the
+ * committed file merged with the run's record) and the escaped drift lines
+ * between the record and the current local file; `record_invalid` is a run
+ * whose record cannot be read, which has no run-effective configuration.
+ */
+export type LaunchRunModels =
+  | {
+      state: "recorded";
+      runId: string;
+      models: EffectiveModelConfiguration;
+      drift: readonly string[];
+    }
+  | { state: "record_invalid"; runId: string; recordPath: string };
+
+/**
+ * One layered read at launch (ADR-0060 §2, §7). `effective` is what a new run
+ * would use now: its `models` are the local layer and its `sources` name the
+ * file that supplies each role.
+ */
+export interface LaunchModels {
+  committed: OrchestratorConfig;
+  effective: EffectiveModelConfiguration;
+  /** The non-terminal run's models; null without one. */
+  run: LaunchRunModels | null;
+}
+
+/**
+ * One advisory update, routed to the file that supplies its role (ADR-0060
+ * §3). `replaces` is the model the launch showed, so a write after a
+ * concurrent edit refuses instead of changing another value.
+ */
+export interface LaunchModelUpdate {
+  role: ModelRole;
+  model: string;
+  replaces: string;
+  source: ModelSource;
+}
+
 /**
  * Repository-local model configuration. Kept separate from the runner because
  * configuration is read and written outside any run.
  */
 export interface ModelConfigurationGateway {
-  /** Resolves to null when the project has no `.banzai/config.json` yet. */
-  load(): Promise<OrchestratorConfig | null>;
-  applyModelUpdates(updates: readonly ModelUpdate[]): Promise<void>;
+  /**
+   * Resolves to null when the project has no `.banzai/config.json` yet. A
+   * refused local file rejects with `LocalConfigError`, which ends the launch
+   * before authentication (reading 9).
+   */
+  load(): Promise<LaunchModels | null>;
+  /**
+   * Writes each update to the file that supplies its role, under the runner
+   * lock, and resolves to the files that changed.
+   */
+  applyModelUpdates(
+    updates: readonly LaunchModelUpdate[]
+  ): Promise<readonly ModelConfigurationFile[]>;
 }
 
 /**
@@ -198,8 +292,18 @@ export interface RepositoryIdentityGateway {
   describe(): Promise<RepositoryIdentity>;
 }
 
+/** Existing directory names that a new work slug must not reuse (ADR-0066). */
+export interface WorkSlugGateway {
+  /** The repository-relative work or initiative directory with this name. */
+  conflict(slug: string): Promise<string | null>;
+}
+
 export interface InteractiveOptions {
   beforeStart?: () => Promise<boolean>;
+  /** Reads the local date of new work slugs; defaults to the system clock. */
+  clock?: () => Date;
+  /** Without it the slug step skips only the conflict check; run start refuses a conflict anyway. */
+  workSlugs?: WorkSlugGateway;
   /** Base IO for the single cancellation reason prompt, without timing actions. */
   cancellationIO?: InteractiveIO;
   humanTime?: HumanTimeGateway;
@@ -231,6 +335,7 @@ async function describeRepository(
 type PrimaryAction =
   | "answer_human"
   | "approve_plan"
+  | "recheck_plan"
   | "rework_plan"
   | "planning_review"
   | "cancel"
@@ -297,6 +402,27 @@ async function statusOrNull(
   }
 }
 
+/**
+ * ADR-0060 reading 11 for the interactive session, as for `banzai status`: a
+ * run whose model record cannot be read offers neither retry nor recovery and
+ * recommends cancel. A proven terminal result is not offered either, because
+ * resuming it refuses on the same record.
+ */
+async function humanStatus(
+  runner: InteractiveRunner,
+  status: WorkflowStatus
+): Promise<WorkflowStatus> {
+  const models = await runner.modelStatus?.(status.state);
+  if (models === undefined) return status;
+  const view = humanStatusView(status, models);
+  return models.state === "record_invalid"
+    ? {
+        ...view,
+        recovery: { ...view.recovery, terminalCheckpointPresent: false }
+      }
+    : view;
+}
+
 function adrIdFromArtifact(artifact: string): string {
   const basename = path.basename(artifact, path.extname(artifact));
   const match = /^(?:adr[-_])?([0-9]+)/i.exec(basename);
@@ -339,6 +465,32 @@ function renderSection(
     for (const line of wrapText(text, resolveWidth(io.width), "  ")) {
       io.writeLine(line);
     }
+  }
+}
+
+/**
+ * Writes a section whose lines carry their own indentation, such as task
+ * verification details. Only an overlong top-level line wraps, under its own
+ * indent; deeper detail lines (commands, paths, output) stay whole so they can
+ * be copied, and the terminal soft-wraps them.
+ */
+function renderPreformattedSection(
+  io: InteractiveIO,
+  styler: Styler,
+  lines: readonly string[]
+): void {
+  const [heading, ...body] = lines;
+  if (heading === undefined) return;
+  io.writeLine();
+  io.writeLine(styler.bold(heading));
+  const width = resolveWidth(io.width);
+  for (const text of body) {
+    const indent = /^ */u.exec(text)?.[0] ?? "";
+    if (text.length <= width || indent.length >= 4) {
+      io.writeLine(text);
+      continue;
+    }
+    for (const line of wrapText(text, width, indent)) io.writeLine(line);
   }
 }
 
@@ -484,7 +636,9 @@ function renderStatus(
   io: InteractiveIO,
   status: WorkflowStatus,
   styler: Styler,
-  humanTime?: HumanTimeSummary
+  humanTime?: HumanTimeSummary,
+  outputTails?: VerificationOutputTails,
+  planVerification?: PlanVerificationInventory | null
 ): void {
   const state = status.state;
   const width = resolveWidth(io.width);
@@ -530,7 +684,11 @@ function renderStatus(
       state.workflowSelection.reason
     ]);
   }
-  renderSection(io, styler, taskVerificationStatusLines(state));
+  renderPreformattedSection(
+    io,
+    styler,
+    taskVerificationStatusLines(state, outputTails)
+  );
   if (state.blockReason !== null) {
     renderSection(io, styler, ["Blocked", state.blockReason]);
   }
@@ -539,6 +697,28 @@ function renderStatus(
     state.status === "needs_plan_approval"
   ) {
     renderArtifacts(io, state, styler);
+  }
+  if (planVerification != null)
+    renderPreformattedSection(
+      io,
+      styler,
+      planVerificationLines(planVerification)
+    );
+  if (
+    state.status === "needs_plan_approval" &&
+    status.planningReview?.decisions.includes("recheck") === true
+  ) {
+    renderPreformattedSection(
+      io,
+      styler,
+      planGateWaitingLines(status.planningReview.reviewPaths, "terminal")
+    );
+    if (status.planRecheck !== undefined)
+      renderPreformattedSection(
+        io,
+        styler,
+        planRecheckLines(status.planRecheck)
+      );
   }
   if (
     state.status === "needs_human_decision" &&
@@ -755,6 +935,61 @@ async function runWork(
   }
 }
 
+/**
+ * One input step that accepts the generated slug or takes the engineer's own.
+ * The date is read at submission, and the slug that passed validation is the
+ * slug the run starts with, even if the date changes before confirmation.
+ */
+async function selectWorkSlug(
+  io: InteractiveIO,
+  generated: string,
+  clock: () => Date,
+  workSlugs: WorkSlugGateway | undefined
+): Promise<string> {
+  const finalize = (value: string, at: Date): string => {
+    const trimmed = value.trim();
+    return finalizeWorkSlug(
+      trimmed === "" || trimmed === "y" || trimmed === "Y"
+        ? generated
+        : trimmed,
+      at
+    );
+  };
+  const accepted: { value: string | null; slug: string } = {
+    value: null,
+    slug: ""
+  };
+  const value = await io.input({
+    message: "Press Enter or y to accept it, or type your own slug:",
+    validate: async (candidate) => {
+      const at = clock();
+      const slug = finalize(candidate, at);
+      const problem = workSlugProblem(slug, at);
+      if (problem === "format") {
+        return "Use lowercase letters, digits and single hyphens, for example login-fix.";
+      }
+      if (problem === "length") {
+        return `Use at most ${String(MAX_WORK_SLUG_LENGTH)} characters, including the ${workSlugDatePrefix(at)} prefix.`;
+      }
+      let existing: string | null;
+      try {
+        existing = (await workSlugs?.conflict(slug)) ?? null;
+      } catch (error) {
+        // Inquirer drops a rejected validation and the process crashes, so a
+        // refused or failed check keeps the prompt open with its reason.
+        return `Could not check ${slug}: ${escapeTerminalText(errorMessage(error))}`;
+      }
+      if (existing !== null) {
+        return `${existing} already exists. Type a different slug.`;
+      }
+      accepted.value = candidate;
+      accepted.slug = slug;
+      return true;
+    }
+  });
+  return accepted.value === value ? accepted.slug : finalize(value, clock());
+}
+
 async function startRun(
   runner: InteractiveRunner,
   io: InteractiveIO,
@@ -769,8 +1004,11 @@ async function startRun(
       validate: nonEmpty
     })
   ).trim();
-  const slug = generateFeatureSlug(request);
-  io.writeLine(`Generated slug: ${slug}`);
+  const clock = options.clock ?? (() => new Date());
+  const generated = generateFeatureSlug(request);
+  io.writeLine(`Generated slug: ${finalizeWorkSlug(generated, clock())}`);
+  const slug = await selectWorkSlug(io, generated, clock, options.workSlugs);
+  io.writeLine(`Slug: ${slug}`);
   io.writeLine(`Request: ${request}`);
   if (
     await io.confirm("Start this task with automatic workflow selection?", true)
@@ -1423,6 +1661,9 @@ async function handleStatus(
       );
     const action = await io.select<PrimaryAction>("Plan decision", [
       { name: "Approve plan and continue", value: "approve_plan" },
+      ...(status.planningReview?.decisions.includes("recheck")
+        ? [{ name: "Re-check my edits", value: "recheck_plan" as const }]
+        : []),
       ...(status.planningReview?.decisions.includes("rework")
         ? [{ name: "Request rework", value: "rework_plan" as const }]
         : []),
@@ -1439,6 +1680,23 @@ async function handleStatus(
     ]);
     if (action === "planning_review")
       return requestPlanningReviewUI(runner, io, status, options);
+    if (action === "recheck_plan") {
+      // Re-check never approves, so it needs no confirmation; a refusal wrote
+      // nothing and the gate is shown again.
+      try {
+        await runWork(options, () =>
+          runner.recheckPlan({ decidedBy: options.decidedBy })
+        );
+      } catch (error) {
+        if (
+          !(error instanceof BanzaiError) ||
+          !PLAN_RECHECK_REFUSAL_CODES.includes(error.code)
+        )
+          throw error;
+        io.writeLine(escapeTerminalText(error.message));
+      }
+      return true;
+    }
     if (action === "rework_plan") {
       const feedback = await io.input({
         message: "Rework feedback for the planner",
@@ -1527,6 +1785,26 @@ async function handleStatus(
     const isDigestRejectedRepair =
       status.recovery.eligible &&
       status.recovery.sourceKind === "digest_rejected";
+    // Asked only here, while a human chooses: the comparison captures inputs.
+    const outlook =
+      status.retry.eligible &&
+      status.retry.attemptId !== null &&
+      state.blockedFrom === "verifying" &&
+      !isPlanBundleRepair &&
+      !isCompletionEvidenceRepair &&
+      !isDigestRejectedRepair
+        ? ((await runner.verificationRetryOutlook?.()) ?? null)
+        : null;
+    const retrySet =
+      outlook !== null && outlook.attemptId === status.retry.attemptId
+        ? outlook
+        : null;
+    const repeatsFailure =
+      retrySet !== null &&
+      retrySet.ordinaryExits &&
+      retrySet.sameCommand &&
+      retrySet.sameInputs;
+    const several = (retrySet?.checkIds.length ?? 1) > 1;
     if (isDigestRejectedRepair) {
       // Replaying the rejected evidence reproduces the rejection, so the
       // authorized repair is the offered route (ADR-0051).
@@ -1546,14 +1824,24 @@ async function handleStatus(
                 : status.retry.attemptId === null
                   ? state.blockedFrom === "reviewing"
                     ? "Retry review checks"
-                    : "Retry start checks"
+                    : state.blockedFrom === "verifying"
+                      ? "Retry verification checks"
+                      : "Retry start checks"
                   : isPlanBundleRepair
                     ? "Rerun planning to correct the approved plan"
                     : isCompletionEvidenceRepair
                       ? "Repair plan-task completion evidence"
                       : state.blockedFrom === "planning"
-                        ? "Continue the failed planning attempt"
-                        : "Retry the failed read-only attempt",
+                        ? state.activeAttempt === null
+                          ? "Continue planning after the reported block"
+                          : "Continue the failed planning attempt"
+                        : repeatsFailure
+                          ? several
+                            ? "Retry anyway (same commands, same files; expected to fail again)"
+                            : "Retry anyway (same command, same files; expected to fail again)"
+                          : several
+                            ? `Retry the ${retrySet?.checkIds.length ?? 0} failed checks`
+                            : "Retry the failed read-only attempt",
         value: "retry"
       });
     } else if (status.recovery.eligible) {
@@ -1595,16 +1883,24 @@ async function handleStatus(
         status.retry.attemptId === null
           ? state.blockedFrom === "reviewing"
             ? "Rerun preflight and review checks?"
-            : "Rerun preflight and the repository check?"
+            : state.blockedFrom === "verifying"
+              ? "Rerun the verification checks without replaying implementation?"
+              : "Rerun preflight and the repository check?"
           : isPlanBundleRepair
             ? "Rerun planning and request a new plan approval?"
             : isCompletionEvidenceRepair
               ? "Repair plan-task completion evidence in a fresh attempt?"
               : state.blockedFrom === "planning"
-                ? "Run preflight and continue planning, reusing saved context when compatible?"
-                : "Run preflight and start a fresh retry?";
+                ? state.activeAttempt === null
+                  ? "Run preflight and continue planning after the reported block?"
+                  : "Run preflight and continue planning, reusing saved context when compatible?"
+                : repeatsFailure
+                  ? several
+                    ? `Checks ${retrySet.checkIds.map(escapeTerminalText).join(", ")} failed with ordinary exits, and their commands and the observed project files are unchanged, so they are expected to fail the same way. Retry anyway?`
+                    : `Check ${escapeTerminalText(retrySet.checkIds[0] ?? "")} failed with an ordinary exit, and its command and the observed project files are unchanged, so it is expected to fail the same way. Retry anyway?`
+                  : "Run preflight and start a fresh retry?";
       if (await io.confirm(message, false)) {
-        await runWork(options, () => runner.retry());
+        await runWork(options, () => runner.retry({ terminal: true }));
       }
       return true;
     }
@@ -1737,18 +2033,36 @@ async function checkAuthentication(
   }));
 }
 
+/** The models a launch header shows: the configuration and each role's file. */
+interface HeaderModels {
+  config: OrchestratorConfig;
+  sources: ModelSources;
+}
+
+/**
+ * Reading 9: with a non-terminal run the header and the authentication markers
+ * use the run-effective configuration; without one, the current effective
+ * configuration. A run whose record cannot be read has none to show.
+ */
+function headerModels(models: LaunchModels): HeaderModels | null {
+  if (models.run === null) return models.effective;
+  return models.run.state === "recorded" ? models.run.models : null;
+}
+
 /**
  * The launch header: what is running, where, and against which models. It
  * replaces a thirteen-line model-and-authentication report with one line per
  * phase, because at launch the only authentication fact worth a paragraph is a
- * failing one.
+ * failing one. A role the local file supplies is marked `(local)`; with every
+ * role from `.banzai/config.json` the rows are unchanged (ADR-0060 §7). Every
+ * model value is printed through terminal escaping.
  */
 function renderHeader(
   io: InteractiveIO,
   styler: Styler,
   repoRoot: string,
   identity: RepositoryIdentity | null,
-  config: OrchestratorConfig | null,
+  models: HeaderModels | null,
   authentication: readonly VendorAuthentication[]
 ): void {
   const dim = (value: string): string => styler.dim(value);
@@ -1765,20 +2079,26 @@ function renderHeader(
         )
   ].filter((part) => part !== null);
   io.writeLine(location.join(dim(" · ")));
-  if (config === null) {
+  if (models === null) {
     return;
   }
 
   const readiness = new Map(
     authentication.map((entry) => [entry.executable, entry.reason])
   );
-  const entries = configuredModels(config);
+  const entries = configuredModels(models.config).map((entry) => ({
+    role: entry.role,
+    executable: entry.executable,
+    vendor: escapeTerminalField(path.basename(entry.executable)),
+    model: escapeTerminalField(entry.model),
+    effort: escapeTerminalField(entry.effort),
+    // The mark rides the timeout cell, so readiness markers stay aligned.
+    timeout: `${entry.timeout}${models.sources[entry.role] === "local" ? " (local)" : ""}`
+  }));
   const roleWidth = Math.max(
     ...entries.map((entry) => SHORT_ROLE_LABELS[entry.role].length)
   );
-  const vendorWidth = Math.max(
-    ...entries.map((entry) => path.basename(entry.executable).length)
-  );
+  const vendorWidth = Math.max(...entries.map((entry) => entry.vendor.length));
   const modelWidth = Math.max(...entries.map((entry) => entry.model.length));
   const effortWidth = Math.max(...entries.map((entry) => entry.effort.length));
   const timeoutWidth = Math.max(
@@ -1799,9 +2119,9 @@ function renderHeader(
         ? ""
         : `${" ".repeat(timeoutWidth - entry.timeout.length + 2)}${marker}`;
     io.writeLine(
-      `  ${SHORT_ROLE_LABELS[entry.role].padEnd(roleWidth)}  ${path
-        .basename(entry.executable)
-        .padEnd(vendorWidth)} ${styler.bold(entry.model)}${" ".repeat(
+      `  ${SHORT_ROLE_LABELS[entry.role].padEnd(roleWidth)}  ${entry.vendor.padEnd(
+        vendorWidth
+      )} ${styler.bold(entry.model)}${" ".repeat(
         modelWidth - entry.model.length
       )}  ${dim(`${entry.effort.padEnd(effortWidth)} · ${entry.timeout}`)}${readinessCell}`
     );
@@ -1815,10 +2135,36 @@ function renderHeader(
   io.writeLine();
   renderNotice(io, styler, styler.red, [
     ...failures.map(
-      (entry) => `${entry.executable} (${entry.roles}): ${entry.reason ?? ""}`
+      (entry) =>
+        `${escapeTerminalField(entry.executable)} (${entry.roles}): ${entry.reason ?? ""}`
     ),
     "Every phase re-checks this; resolve it before starting a run."
   ]);
+}
+
+/**
+ * ADR-0060 §7 and reading 11 for the launch: the drift lines of a
+ * non-terminal run, or the run's unreadable model record with the advice to
+ * cancel it. Nothing for a run without drift or without a run.
+ */
+function renderRunModelNotice(
+  io: InteractiveIO,
+  styler: Styler,
+  run: LaunchRunModels | null
+): void {
+  if (run === null) return;
+  const lines =
+    run.state === "recorded"
+      ? modelDriftBlock(run.drift)
+      : recordInvalidLines(run.recordPath);
+  if (lines.length === 0) return;
+  io.writeLine();
+  renderNotice(
+    io,
+    styler,
+    run.state === "recorded" ? styler.yellow : styler.red,
+    lines
+  );
 }
 
 /** A left-ruled block for advisories and blockers, echoing the CLI convention. */
@@ -1836,13 +2182,27 @@ function renderNotice(
   }
 }
 
+/** The files a set of advisories would change, `.banzai/config.json` first. */
+function advisoryFiles(
+  advisories: readonly ModelAdvisory[],
+  sources: ModelSources
+): ModelConfigurationFile[] {
+  const files: ModelConfigurationFile[] = [];
+  if (advisories.some((advisory) => sources[advisory.role] === "committed"))
+    files.push(COMMITTED_MODEL_FILE);
+  if (advisories.some((advisory) => sources[advisory.role] === "local"))
+    files.push(LOCAL_MODEL_FILE);
+  return files;
+}
+
 async function chooseModelUpdates(
   io: InteractiveIO,
-  advisories: readonly ModelAdvisory[]
-): Promise<ModelUpdate[]> {
+  advisories: readonly ModelAdvisory[],
+  sources: ModelSources
+): Promise<ModelAdvisory[]> {
   const action = await io.select<ModelUpdateAction>("Model configuration", [
     {
-      name: `Update ${advisories.length === 1 ? "this model" : `all ${advisories.length} models`} in .banzai/config.json`,
+      name: `Update ${advisories.length === 1 ? "this model" : `all ${advisories.length} models`} in ${advisoryFiles(advisories, sources).join(" and ")}`,
       value: "update_all"
     },
     { name: "Choose which models to update", value: "update_some" },
@@ -1851,25 +2211,23 @@ async function chooseModelUpdates(
   if (action === "keep") {
     return [];
   }
-  const selected =
-    action === "update_all"
-      ? [...advisories]
-      : await filterModelUpdates(io, advisories);
-  return selected.map((advisory) => ({
-    role: advisory.role,
-    model: advisory.replacement
-  }));
+  return action === "update_all"
+    ? [...advisories]
+    : await filterModelUpdates(io, advisories, sources);
 }
 
 async function filterModelUpdates(
   io: InteractiveIO,
-  advisories: readonly ModelAdvisory[]
+  advisories: readonly ModelAdvisory[],
+  sources: ModelSources
 ): Promise<ModelAdvisory[]> {
   const selected: ModelAdvisory[] = [];
   for (const advisory of advisories) {
+    const file =
+      sources[advisory.role] === "local" ? ` in ${LOCAL_MODEL_FILE}` : "";
     if (
       await io.confirm(
-        `${advisory.label}: replace ${advisory.model} with ${advisory.replacement}?`,
+        `${advisory.label}: replace ${advisory.model} with ${advisory.replacement}${file}?`,
         false
       )
     ) {
@@ -1877,6 +2235,13 @@ async function filterModelUpdates(
     }
   }
   return selected;
+}
+
+/** The result line for each changed file (ADR-0060 §3). */
+function modelUpdateResultLine(file: ModelConfigurationFile): string {
+  return file === COMMITTED_MODEL_FILE
+    ? `Updated ${COMMITTED_MODEL_FILE}. Review and commit the change.`
+    : `Updated ${LOCAL_MODEL_FILE} for this machine only. Git ignores it, so there is nothing to commit.`;
 }
 
 async function presentLaunch(
@@ -1887,18 +2252,24 @@ async function presentLaunch(
   const styler = options.styler ?? createStyler(false);
   const gateway = options.models;
   const identity = await describeRepository(options);
-  let config: OrchestratorConfig | null = null;
+  let models: LaunchModels | null = null;
   let loadError: string | null = null;
   if (gateway !== undefined) {
     try {
-      config = await gateway.load();
+      models = await gateway.load();
     } catch (error) {
+      // A refused local model file ends the launch before authentication;
+      // committed configuration errors keep the unavailable report
+      // (ADR-0060 §4, reading 9).
+      if (error instanceof LocalConfigError) throw error;
       loadError = errorMessage(error);
     }
   }
+  const shown = models === null ? null : headerModels(models);
   const authentication =
-    config === null ? [] : await checkAuthentication(config, options.auth);
-  renderHeader(io, styler, runner.repoRoot, identity, config, authentication);
+    shown === null ? [] : await checkAuthentication(shown.config, options.auth);
+  renderHeader(io, styler, runner.repoRoot, identity, shown, authentication);
+  renderRunModelNotice(io, styler, models?.run ?? null);
   if (loadError !== null) {
     io.writeLine();
     io.writeLine(`Model configuration unavailable: ${loadError}`);
@@ -1907,7 +2278,7 @@ async function presentLaunch(
   if (gateway === undefined) {
     return;
   }
-  if (config === null) {
+  if (models === null) {
     io.writeLine();
     io.writeLine(
       "No .banzai/config.json found. Run `banzai init` to configure models."
@@ -1915,6 +2286,9 @@ async function presentLaunch(
     return;
   }
 
+  // The advisory concerns the files, so it reads the current effective
+  // configuration and writes each update to the file that supplies its role.
+  const { config, sources } = models.effective;
   const advisories = modelAdvisories(config);
   if (advisories.length === 0) {
     return;
@@ -1940,27 +2314,35 @@ async function presentLaunch(
     return;
   }
 
-  const updates = await chooseModelUpdates(io, advisories);
-  if (updates.length === 0) {
+  const chosen = await chooseModelUpdates(io, advisories, sources);
+  if (chosen.length === 0) {
     io.writeLine("Keeping the current model configuration.");
     return;
   }
   if (
     !(await io.confirm(
-      `Write ${updates.length === 1 ? "this change" : `these ${updates.length} changes`} to .banzai/config.json?`,
+      `Write ${chosen.length === 1 ? "this change" : `these ${chosen.length} changes`} to ${advisoryFiles(chosen, sources).join(" and ")}?`,
       false
     ))
   ) {
     io.writeLine("Keeping the current model configuration.");
     return;
   }
+  let changed: readonly ModelConfigurationFile[];
   try {
-    await gateway.applyModelUpdates(updates);
+    changed = await gateway.applyModelUpdates(
+      chosen.map((advisory) => ({
+        role: advisory.role,
+        model: advisory.replacement,
+        replaces: advisory.model,
+        source: sources[advisory.role]
+      }))
+    );
   } catch (error) {
     io.writeLine(`Model configuration was not updated: ${errorMessage(error)}`);
     return;
   }
-  io.writeLine("Updated .banzai/config.json. Review and commit the change.");
+  for (const file of changed) io.writeLine(modelUpdateResultLine(file));
 }
 
 function humanTimeDuration(milliseconds: number | null): string {
@@ -2473,8 +2855,8 @@ async function interactiveLoop(
 ): Promise<void> {
   await presentLaunch(runner, io, options);
   while (true) {
-    const status = await statusOrNull(runner);
-    if (status === null) {
+    const observed = await statusOrNull(runner);
+    if (observed === null) {
       io.writeLine();
       io.writeLine("No active repository-local run.");
       renderMenuSeparator(io, options.styler ?? createStyler(false));
@@ -2488,6 +2870,7 @@ async function interactiveLoop(
       if (!(await startRun(runner, io, options))) return;
       continue;
     }
+    const status = await humanStatus(runner, observed);
     let humanTime: HumanTimeSummary | undefined;
     if (options.humanTime !== undefined) {
       try {
@@ -2497,7 +2880,14 @@ async function interactiveLoop(
         io.writeLine("Time was not saved");
       }
     }
-    renderStatus(io, status, options.styler ?? createStyler(false), humanTime);
+    renderStatus(
+      io,
+      status,
+      options.styler ?? createStyler(false),
+      humanTime,
+      await readVerificationOutputTails(runner.repoRoot, status.state),
+      await runner.planVerificationInventory?.(status.state)
+    );
     const decisionIO = withRunMenu(
       io,
       options.humanTime,

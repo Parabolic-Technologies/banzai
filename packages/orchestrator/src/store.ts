@@ -5,6 +5,7 @@ import {
   parseVerificationApplicability
 } from "./verification-evidence.js";
 import { parseBinding } from "./work-documents.js";
+import { hashArtifactBytes } from "./git.js";
 import { verifyExecutionIgnore } from "./project-files.js";
 import {
   validateConfigurationStateEnvelope,
@@ -31,7 +32,12 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import { BanzaiError, TerminalRunStateError } from "./errors.js";
+import {
+  BanzaiError,
+  LocalConfigError,
+  TerminalRunStateError
+} from "./errors.js";
+import { LOCAL_CONFIG_LIMIT, parseLocalModelMap } from "./local-config.js";
 import {
   CANCELLATION_STATUSES,
   cancellationRecord,
@@ -56,6 +62,11 @@ import type {
   ContextInvocationEvidence,
   EscalationDecisionRecord,
   EscalationDecisionRequest,
+  LocalModelLayer,
+  ModelOverrideRecord,
+  ModelOverrideRecordDefect,
+  ModelOverrideRecordDefectCause,
+  ModelOverrideRecordStatus,
   ResultDigestEvidence,
   CompletionCandidate,
   CompletionCapture,
@@ -78,6 +89,7 @@ import {
   CONTEXT_ATTEMPT_SCHEMA,
   ATTEMPT_FILE_TOKENS,
   CONTEXT_ATTEMPT_SCHEMA_VERSION,
+  RESULT_DIGEST_EVIDENCE_SCHEMA,
   VERIFICATION_LEDGER_SCHEMA_VERSION
 } from "./types.js";
 import {
@@ -236,6 +248,91 @@ async function readJson<T>(filePath: string, label: string): Promise<T> {
   }
 }
 
+/** The identity of a run's local model record (ADR-0060 §5). */
+export const MODEL_OVERRIDE_RECORD_SCHEMA = "banzai-run-model-override/v1";
+const MODEL_OVERRIDE_RECORD_FILE = "model-override.json";
+
+const MODEL_OVERRIDE_RECORD_PROBLEMS: Record<
+  ModelOverrideRecordDefectCause,
+  string
+> = {
+  unsafe: "is a symbolic link, lies below one, or is not a regular file",
+  unreadable: "could not be read",
+  invalid: `is not a valid ${MODEL_OVERRIDE_RECORD_SCHEMA} record`
+};
+
+/**
+ * The `LOCAL_MODEL_OVERRIDE_RECORD_INVALID` defect for a run's model record.
+ * Fixed text per cause: it names the record and says to cancel the run, and
+ * never repeats anything read from the file.
+ */
+function modelOverrideRecordDefect(
+  runId: string,
+  cause: ModelOverrideRecordDefectCause
+): ModelOverrideRecordDefect {
+  const relative = `.banzai/runs/${runId}/${MODEL_OVERRIDE_RECORD_FILE}`;
+  return {
+    code: "LOCAL_MODEL_OVERRIDE_RECORD_INVALID",
+    cause,
+    path: relative,
+    message: `The local model record of this run, ${relative}, ${MODEL_OVERRIDE_RECORD_PROBLEMS[cause]}, so the models this run recorded cannot be confirmed. Banzai never reads it as missing. Run banzai cancel to end this run.`
+  };
+}
+
+function cancellationPathCause(error: unknown): ModelOverrideRecordDefectCause {
+  const code = cancellationRecord(error).code;
+  return code === "UNSAFE_EVIDENCE" || code === "ELOOP"
+    ? "unsafe"
+    : "unreadable";
+}
+
+/**
+ * A role map validated under the local file's rules (ADR-0060 §1) and
+ * normalized to planner, implementer, reviewer order with each triple as
+ * executable, model, effort. Refuses before anything is written.
+ */
+function normalizedModelOverride(models: LocalModelLayer): LocalModelLayer {
+  const parsed = parseLocalModelMap(models);
+  if (!parsed.ok) throw new LocalConfigError(parsed.defect);
+  return parsed.models;
+}
+
+function modelOverrideRecord(models: LocalModelLayer): ModelOverrideRecord {
+  return { schema: MODEL_OVERRIDE_RECORD_SCHEMA, models };
+}
+
+/** Two-space JSON with a final newline, as every store JSON write. */
+function modelOverrideRecordBytes(models: LocalModelLayer): Buffer {
+  return Buffer.from(
+    `${JSON.stringify(modelOverrideRecord(models), null, 2)}\n`,
+    "utf8"
+  );
+}
+
+/** The record's role map, or null for anything but an exact valid record. */
+function parseModelOverrideRecord(text: string): LocalModelLayer | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).length !== 2 ||
+    !Object.hasOwn(record, "schema") ||
+    !Object.hasOwn(record, "models") ||
+    record.schema !== MODEL_OVERRIDE_RECORD_SCHEMA
+  ) {
+    return null;
+  }
+  const models = parseLocalModelMap(record.models);
+  return models.ok ? models.models : null;
+}
+
 type LegacyEscalationDecisionRequest = Omit<EscalationDecisionRequest, "kind">;
 type LegacyEscalationDecisionRecord = Omit<EscalationDecisionRecord, "kind">;
 
@@ -354,6 +451,7 @@ function validateDecisionState(state: RunState): RunState {
     for (const decision of state.humanDecisions ?? []) {
       if (
         decision.kind === "plan_rework" ||
+        decision.kind === "plan_recheck" ||
         decision.kind === "adr_rework" ||
         decision.kind === "planning_review_triage"
       )
@@ -470,7 +568,7 @@ function validateDecisionState(state: RunState): RunState {
 function normalizeRunState(
   state: RunState | LegacyRunStateV2 | LegacyRunState
 ): RunState {
-  if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(state.schemaVersion)) {
+  if (![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(state.schemaVersion)) {
     throw new BanzaiError(
       "ARTIFACT_VERSION_UNSUPPORTED",
       "Unsupported persisted run state version."
@@ -738,6 +836,14 @@ export class RunStore {
     return path.join(this.runDirectory(runId), "state.json");
   }
 
+  /** The run's local model record beside its state (ADR-0060 §5). */
+  modelOverrideRecordPath(runId: string): string {
+    return containedEvidencePath(
+      this.runDirectory(runId),
+      MODEL_OVERRIDE_RECORD_FILE
+    );
+  }
+
   attemptPath(runId: string, attempt: AttemptReference): string {
     return containedEvidencePath(
       this.runDirectory(runId),
@@ -866,6 +972,147 @@ export class RunStore {
       entries.push({ path: entry.path, sha256: entry.sha256, contents });
     }
     return { digest: record.digest, entries };
+  }
+
+  private planGateSnapshotPath(runId: string, ...segments: string[]): string {
+    return containedEvidencePath(
+      this.runDirectory(runId),
+      "plan-gate",
+      ...segments
+    );
+  }
+
+  /**
+   * Retains the planner's version of the plan gate bundle each time the run
+   * enters the gate (ADR-0058 §1). Entries are numbered and create-only, so a
+   * later entry never rewrites an earlier comparison base.
+   */
+  async writePlanGateSnapshot(
+    runId: string,
+    digest: string,
+    entries: { path: string; sha256: string; contents: Buffer }[],
+    at: string
+  ): Promise<number> {
+    await mkdir(this.planGateSnapshotPath(runId), {
+      recursive: true,
+      mode: 0o700
+    });
+    const number =
+      ((await this.planGateSnapshotNumbers(runId)).at(-1) ?? 0) + 1;
+    const directory = String(number).padStart(3, "0");
+    await mkdir(this.planGateSnapshotPath(runId, directory), { mode: 0o700 });
+    const manifest: { path: string; file: string; sha256: string }[] = [];
+    for (const [index, entry] of entries.entries()) {
+      const file = `${String(index).padStart(3, "0")}-${safeEvidenceSegment(
+        path.posix.basename(entry.path),
+        "plan gate artifact name",
+        150
+      )}`;
+      const target = this.planGateSnapshotPath(runId, directory, file);
+      await verifyPrivatePaths(this.repoRoot, target);
+      await writeFile(target, entry.contents, { mode: 0o600, flag: "wx" });
+      manifest.push({ path: entry.path, file, sha256: entry.sha256 });
+    }
+    // The manifest lands last, so an interrupted entry reads as unavailable.
+    await atomicWriteJson(
+      this.repoRoot,
+      this.planGateSnapshotPath(runId, directory, "bundle.json"),
+      { schemaVersion: 1, number, digest, at, entries: manifest },
+      false
+    );
+    return number;
+  }
+
+  /** The latest gate-entry number, or null; reads no snapshot bytes. */
+  async latestPlanGateEntry(runId: string): Promise<number | null> {
+    return (await this.planGateSnapshotNumbers(runId)).at(-1) ?? null;
+  }
+
+  private async planGateSnapshotNumbers(runId: string): Promise<number[]> {
+    let names: string[];
+    try {
+      names = await readdir(this.planGateSnapshotPath(runId));
+    } catch {
+      return [];
+    }
+    return names
+      .filter((name) => /^[0-9]{3,9}$/u.test(name))
+      .map(Number)
+      .filter((value) => value > 0)
+      .sort((a, b) => a - b);
+  }
+
+  /**
+   * The latest gate entry, null when the run reached the gate before snapshots
+   * existed. An unreadable latest entry is reported, never replaced by an
+   * older one, because only the latest entry is the planner's current version.
+   */
+  async readLatestPlanGateSnapshot(runId: string): Promise<{
+    number: number;
+    digest: string;
+    entries: { path: string; sha256: string; contents: Buffer }[];
+  } | null> {
+    const number = (await this.planGateSnapshotNumbers(runId)).at(-1);
+    if (number === undefined) return null;
+    const directory = String(number).padStart(3, "0");
+    const unreadable = (): never => {
+      throw new BanzaiError(
+        "PLAN_GATE_SNAPSHOT_INVALID",
+        `The planner's version retained at plan gate entry ${number} is unreadable; inspect .banzai/runs/${runId}/plan-gate/${directory}.`
+      );
+    };
+    let record: {
+      schemaVersion?: unknown;
+      number?: unknown;
+      digest?: unknown;
+      entries?: unknown;
+    };
+    try {
+      record = JSON.parse(
+        await readFile(
+          this.planGateSnapshotPath(runId, directory, "bundle.json"),
+          "utf8"
+        )
+      ) as typeof record;
+    } catch {
+      return unreadable();
+    }
+    if (
+      record.schemaVersion !== 1 ||
+      record.number !== number ||
+      typeof record.digest !== "string" ||
+      !Array.isArray(record.entries)
+    )
+      return unreadable();
+    const entries: { path: string; sha256: string; contents: Buffer }[] = [];
+    for (const item of record.entries as unknown[]) {
+      const entry = item as {
+        path?: unknown;
+        file?: unknown;
+        sha256?: unknown;
+      };
+      if (
+        typeof entry.path !== "string" ||
+        typeof entry.file !== "string" ||
+        typeof entry.sha256 !== "string"
+      )
+        return unreadable();
+      let contents: Buffer;
+      try {
+        contents = await readFile(
+          this.planGateSnapshotPath(
+            runId,
+            directory,
+            safeEvidenceSegment(entry.file, "plan gate artifact file", 160)
+          )
+        );
+      } catch {
+        return unreadable();
+      }
+      if (hashArtifactBytes(contents) !== entry.sha256) return unreadable();
+      entries.push({ path: entry.path, sha256: entry.sha256, contents });
+    }
+    return { number, digest: record.digest, entries };
   }
 
   reviewCandidatePath(runId: string, attempt: AttemptReference): string {
@@ -1530,7 +1777,17 @@ export class RunStore {
     }
   }
 
-  async createRun(state: RunState): Promise<void> {
+  /**
+   * Creates the run. `localModels` is the local layer from the same read that
+   * starts the run, `{}` without a local file (ADR-0060 §5). Its create-only
+   * record is the first file in the new run directory, so a failure leaves
+   * neither `state.json` nor the active-run pointer.
+   */
+  async createRun(
+    state: RunState,
+    localModels: LocalModelLayer = {}
+  ): Promise<void> {
+    const models = normalizedModelOverride(localModels);
     await this.initialize();
     const existing = await this.readActiveRunId();
     if (existing !== null) {
@@ -1543,6 +1800,11 @@ export class RunStore {
       }
     }
     await mkdir(this.runDirectory(state.runId), { recursive: false });
+    await this.writeImmutableEvidence(
+      this.modelOverrideRecordPath(state.runId),
+      modelOverrideRecordBytes(models),
+      "MODEL_OVERRIDE_RECORD_CONFLICT"
+    );
     await mkdir(path.join(this.runDirectory(state.runId), "attempts"));
     await mkdir(this.verificationAttemptsDirectory(state.runId));
     await atomicWriteJson(
@@ -1612,6 +1874,113 @@ export class RunStore {
         this.statePath(runId),
         `state for ${runId}`
       )
+    );
+  }
+
+  /**
+   * Reads the run's local model record through the contained reader (ADR-0060
+   * §5). Never throws for a defective record: `absent` is reported only once
+   * the run directory itself is confirmed, and every link, non-regular file,
+   * unreadable, oversized or invalid record is `defective`. Callers decide
+   * whether a defect refuses. An unsafe run id still throws, as for every
+   * other run path.
+   */
+  async readModelOverrideRecord(
+    runId: string
+  ): Promise<ModelOverrideRecordStatus> {
+    this.modelOverrideRecordPath(runId);
+    const defective = (
+      cause: ModelOverrideRecordDefectCause
+    ): ModelOverrideRecordStatus => ({
+      state: "defective",
+      defect: modelOverrideRecordDefect(runId, cause)
+    });
+    const file = await readCancellationFile(
+      this.repoRoot,
+      `.banzai/runs/${runId}/${MODEL_OVERRIDE_RECORD_FILE}`,
+      LOCAL_CONFIG_LIMIT
+    );
+    if (file.availability === "missing") {
+      // The reader reports a missing segment anywhere on the path as missing.
+      try {
+        await cancellationEvidencePath(
+          this.repoRoot,
+          `.banzai/runs/${runId}`,
+          true
+        );
+      } catch (error) {
+        return defective(cancellationPathCause(error));
+      }
+      return { state: "absent" };
+    }
+    if (file.availability !== "available" || file.text === null) {
+      if (file.issue === "UNSAFE_EVIDENCE") return defective("unsafe");
+      return defective(
+        file.issue === "EVIDENCE_LIMIT" || file.issue === "MALFORMED_EVIDENCE"
+          ? "invalid"
+          : "unreadable"
+      );
+    }
+    const models = parseModelOverrideRecord(file.text);
+    return models === null
+      ? defective("invalid")
+      : { state: "recorded", models };
+  }
+
+  /**
+   * Publishes a new local model record for the run (ADR-0060 §5, Recording
+   * again): a temporary file renamed over the record, or a create-only record
+   * for a run that has none. The run directory must be reached without links,
+   * and an existing record must be a regular file, so nothing is written
+   * through a link. Only the recording-again paths call it.
+   */
+  async replaceModelOverrideRecord(
+    runId: string,
+    models: LocalModelLayer
+  ): Promise<void> {
+    const normalized = normalizedModelOverride(models);
+    this.modelOverrideRecordPath(runId);
+    const refuse = (cause: ModelOverrideRecordDefectCause): BanzaiError => {
+      const defect = modelOverrideRecordDefect(runId, cause);
+      return new BanzaiError(defect.code, defect.message);
+    };
+    let directory: string;
+    try {
+      directory = await cancellationEvidencePath(
+        this.repoRoot,
+        `.banzai/runs/${runId}`,
+        true
+      );
+    } catch (error) {
+      throw refuse(cancellationPathCause(error));
+    }
+    const destination = path.join(directory, MODEL_OVERRIDE_RECORD_FILE);
+    let existing: Awaited<ReturnType<typeof lstat>> | null;
+    try {
+      existing = await lstat(destination);
+    } catch (error) {
+      if (cancellationRecord(error).code !== "ENOENT") {
+        throw refuse("unreadable");
+      }
+      existing = null;
+    }
+    if (existing === null) {
+      await this.writeImmutableEvidence(
+        destination,
+        modelOverrideRecordBytes(normalized),
+        "MODEL_OVERRIDE_RECORD_CONFLICT"
+      );
+      return;
+    }
+    if (existing.isSymbolicLink() || !existing.isFile()) {
+      throw refuse("unsafe");
+    }
+    // The rename replaces the directory entry itself, never a link's target.
+    await atomicWriteJson(
+      this.repoRoot,
+      destination,
+      modelOverrideRecord(normalized),
+      false
     );
   }
 
@@ -1704,7 +2073,9 @@ export class RunStore {
       if (
         raw.runId !== runId ||
         !CANCELLATION_STATUSES.includes(raw.status as RunState["status"]) ||
-        ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(raw.schemaVersion as number)
+        ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(
+          raw.schemaVersion as number
+        )
       )
         throw new Error();
     } catch {
@@ -2190,6 +2561,12 @@ export class RunStore {
       throw new BanzaiError(
         "RESULT_DIGEST_EVIDENCE_INVALID",
         "Result digest evidence run identity does not match its path."
+      );
+    }
+    if (parsed.schema !== RESULT_DIGEST_EVIDENCE_SCHEMA) {
+      throw new BanzaiError(
+        "RESULT_DIGEST_EVIDENCE_INVALID",
+        `New result digest evidence must use ${RESULT_DIGEST_EVIDENCE_SCHEMA}.`
       );
     }
     const existing = await this.readResultDigestEvidenceIfExists(

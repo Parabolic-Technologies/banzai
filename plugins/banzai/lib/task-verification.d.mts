@@ -39,6 +39,8 @@ export function comparableTaskVerificationSources(descriptor: { sources?: { path
 export function parseTaskVerificationDescriptor(value: unknown): TaskVerificationDescriptor;
 export function parseTaskVerificationCandidates(value: unknown): TaskVerificationCandidates | null;
 export function parseTaskVerificationObligations(plan: string): TaskVerificationObligations;
+export function readTaskVerificationObligations(plan: string): TaskVerificationObligations & { observedRemainderSha256: string };
+export function rewritePlanRemainderDigest(plan: string): { plan: string; declared: string; observed: string; rewritten: boolean };
 export function parseTaskVerificationPolicy(value: unknown): TaskVerificationPolicy;
 export function selectTaskVerification(input: { required: TaskVerificationDescriptor[]; candidates: TaskVerificationCandidates | null; policy?: TaskVerificationPolicy | null }): TaskVerificationSelection;
 export function taskVerificationPath(repoRoot: string, relativePath: string, directory?: boolean): Promise<string>;

@@ -122,6 +122,19 @@ export function hangingLines(
   return [`${prefix}${first.slice(indent.length)}`, ...wrapped.slice(1)];
 }
 
+/** Renders an elapsed or limit duration at terminal scale: `850ms`, `4.2s`, `3m 5s`. */
+export function formatDuration(durationMs: number): string {
+  if (durationMs < 1_000) {
+    return `${Math.max(0, Math.round(durationMs))}ms`;
+  }
+  if (durationMs < 60_000) {
+    return `${(durationMs / 1_000).toFixed(durationMs < 10_000 ? 1 : 0)}s`;
+  }
+  const minutes = Math.floor(durationMs / 60_000);
+  const seconds = Math.floor((durationMs % 60_000) / 1_000);
+  return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`;
+}
+
 function trimmedDecimal(value: number): string {
   return value.toFixed(1).replace(/\.0$/, "");
 }
@@ -177,6 +190,19 @@ export function formatUsage(
 export function escapeTerminalText(text: string): string {
   return text.replace(
     /[\x00-\x08\x0b-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu,
+    (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`
+  );
+}
+
+/**
+ * Terminal escaping for one configuration value printed inside a line, such as
+ * a model name (ADR-0060): the escaping above plus TAB and LF, so a value can
+ * neither move the cursor nor start a new line. The escaped form contains no
+ * escapable character, so escaping it again changes nothing.
+ */
+export function escapeTerminalField(text: string): string {
+  return escapeTerminalText(text).replace(
+    /[\t\n]/gu,
     (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`
   );
 }

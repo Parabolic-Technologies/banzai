@@ -11,8 +11,12 @@ Hook type: `PreToolUse` + `PostToolUse` for `Edit`, `Write`, `MultiEdit`,
 | Target / condition                                                                     | Decision |
 | -------------------------------------------------------------------------------------- | -------- |
 | manual free paths: `documentation/**`, `PROJECT_MANIFEST.md`, `CLAUDE.md`, `AGENTS.md` | defer    |
+| manual Claude Code memory note: `<config>/projects/<project>/memory/<name>.md`         | defer    |
 | first code/codebase change in session                                                  | ask      |
 | code/codebase change after approval in same session                                    | allow    |
+| manual bookkeeping write (plans, agent memory, scratchpad) before its approval         | ask      |
+| manual bookkeeping write after a bookkeeping or code approval in same session          | allow    |
+| code/codebase change after only a bookkeeping approval in same session                 | ask      |
 | orchestrated code change with matching active run and approval digest                  | allow    |
 | orchestrated lite code change with matching active run and workflow digest             | allow    |
 | orchestrated selector write with no code authorization                                 | deny     |
@@ -25,8 +29,11 @@ Hook type: `PreToolUse` + `PostToolUse` for `Edit`, `Write`, `MultiEdit`,
 
 Session key: `session_id`.
 
-Approval marker: `$TMPDIR/banzai-spec-gate/`, written only by `PostToolUse`
-after an approved edit.
+Approval markers live in `$TMPDIR/banzai-spec-gate/` and are written only by
+`PostToolUse` after an approved edit. `approved-<session>` follows a code or
+other project write and allows every later gated write in the session.
+`bookkeeping-<session>` follows a write whose targets are all host
+bookkeeping, free paths or memory notes, and allows only later such writes.
 
 ## Optional Orchestrator Mode
 
@@ -76,11 +83,21 @@ manual gate; they do not require an orchestrator.
 - The hook is not one of the decision gates in `AGENTS.md`. It guards paths;
   it does not approve plans, decisions, or findings.
 - Node must be on `PATH`; if absent, the hook no-ops.
+- Memory notes and bookkeeping roots apply in manual mode only (ADR-0062).
+  `<config>` is an absolute `CLAUDE_CONFIG_DIR`, otherwise `~/.claude`; a
+  relative value matches nothing. Bookkeeping roots are `<config>/plans/`,
+  `<config>/agent-memory/` and the payload's absolute `scratchpad_dir`; a root
+  that holds `cwd`, the marker directory or the plugin root does not count.
+  A custom `autoMemoryDirectory` or plans directory is not recognized and
+  keeps the first-change prompt. Matching is lexical.
 
 ## Tuning
 
 - Prompt on every code edit: remove the `PostToolUse` block from `hooks.json`.
-- Free more paths: edit `isDocArtifact()` in `spec-gate.cjs`.
+- Free more paths in every mode: edit `isDocArtifact()` in `spec-gate.cjs`;
+  runner planning and the historical-document check share it. For a
+  manual-only exemption, extend the manual free check beside
+  `isClaudeMemoryNote()` instead.
 - After hook edits, reload Claude Code or restart Codex and re-trust via
   `/hooks`.
 
@@ -91,7 +108,7 @@ Historical format recognition does not authorize old-run continuation.
 
 Planning-review and planning-analysis attempts are read-only, with no artifact
 write grant. The runner alone publishes planning-review-N.md beside the exact
-bound work documents. The current hook executes state v10 only and retains its
-newer-schema update diagnostic. Binding v3 gains no role. Both structured output
+bound work documents. The current hook executes state v10 and its plan
+re-check successor v11, and retains its newer-schema update diagnostic. Binding v3 gains no role. Both structured output
 contracts remain v1 under umbrella 1.0.0; human planning triage is answer v4 in
-control 8.0.0, and never grants plan approval or ADR acceptance.
+control 9.0.0, and never grants plan approval or ADR acceptance.

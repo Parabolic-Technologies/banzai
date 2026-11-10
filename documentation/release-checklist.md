@@ -19,7 +19,7 @@ those actions.
       the pull-request run of the candidate head, whose required lanes recorded
       the candidate tree (ADR-0053). Merge with a merge commit so publication
       can reuse that evidence; a squash or rebase merge makes publication
-      re-run both supported lanes.
+      re-run every supported lane.
 - [ ] Prepare and review the notes in the GitHub draft release for `v<version>`.
       [GitHub Releases](https://github.com/Parabolic-Technologies/banzai/releases)
       is the sole source of release notes; version bumps require no local
@@ -33,15 +33,15 @@ those actions.
 
 <!-- release-policy:start -->
 
-Engines: `>=22.20.0 <23 || >=24.11.1 <25`
+Engines: `>=22.20.0 <23 || >=24.11.1 <25 || >=26.13.0 <27`
 
 Version authority: `package.json#/version`; 9 fields in 7 files.
 
-| Evidence              | Node    | Image                   | GitHub Actions job              | Policy   |
-| --------------------- | ------- | ----------------------- | ------------------------------- | -------- |
-| Supported (blocking)  | 22.20.0 | `node:22.20.0-bookworm` | `release_check_node_22`         | required |
-| Supported (blocking)  | 24.11.1 | `node:24.11.1-bookworm` | `release_check_node_24`         | required |
-| Forward compatibility | 26.7.0  | `node:26.7.0-bookworm`  | `forward_compatibility_node_26` | advisory |
+| Evidence             | Node    | Image                   | GitHub Actions job      | Policy   |
+| -------------------- | ------- | ----------------------- | ----------------------- | -------- |
+| Supported (blocking) | 22.20.0 | `node:22.20.0-bookworm` | `release_check_node_22` | required |
+| Supported (blocking) | 24.11.1 | `node:24.11.1-bookworm` | `release_check_node_24` | required |
+| Supported (blocking) | 26.13.0 | `node:26.13.0-bookworm` | `release_check_node_26` | required |
 
 <!-- release-policy:end -->
 
@@ -49,11 +49,9 @@ Version authority: `package.json#/version`; 9 fields in 7 files.
 - [ ] Confirm each deterministic image provides Git and its job passes the
       `git --version` preflight and registers the workspace as a Git
       `safe.directory` before `npm ci`.
-- [ ] Confirm Node 23 and Node 25 are neither supported nor run.
+- [ ] Confirm Node 23, Node 25 and Node 27 are neither supported nor run.
 - [ ] Treat a required runner/image/registry/setup failure as unsatisfied
       evidence; classify and retry it without calling it pass.
-- [ ] Record an advisory Node 26 failure and its follow-up disposition; it does
-      not by itself block the current supported release.
 
 Adding or removing a supported major requires a new ADR. Advancing a patch
 floor within an accepted major requires an explicit release-plan change,
@@ -154,24 +152,21 @@ for the initial release order and operator commands.
 ## Required and Advisory CI
 
 - [ ] Where the GitHub plan offers branch protection or rulesets, require the
-      two supported GitHub checks after their first hosted run; YAML alone does
+      three supported GitHub checks after their first hosted run; YAML alone does
       not enforce merge protection. GitHub Free offers neither for this private
       repository, so the merge rule below is applied by the release owner and
       the publication gate is its mechanical enforcement.
 - [ ] `release_check_node_22` passed at Node 22.20.0 on the pull request.
 - [ ] `release_check_node_24` passed at Node 24.11.1 on the pull request.
+- [ ] `release_check_node_26` passed at Node 26.13.0 on the pull request.
 - [ ] Required product failures are fixed and rerun.
 - [ ] Required environment failures are classified and rerun; evidence remains
       unsatisfied until pass.
-- [ ] Record the latest `forward_compatibility_node_26` result as pass or fail
-      with its commit. It runs on the weekly schedule and on manual dispatch,
-      never on pull requests; dispatch the workflow for a candidate-specific
-      result.
 - [ ] Confirm no default/fork job invoked Codex, Claude, auth, or a paid model.
 
-Repository policy permits merge only with both required supported-lane passes.
-The advisory lanes are not dependencies of required jobs. CI runs on pull
-requests, manual dispatch and the weekly schedule; a push to `main` or `dev`
+Repository policy permits merge only with all three required supported-lane
+passes. The advisory live lane is not a dependency of required jobs. CI runs on
+pull requests and manual dispatch; a push to `main` or `dev`
 starts no hosted run, and a newer push to a pull request cancels its older run.
 
 ## Live Compatibility Evidence

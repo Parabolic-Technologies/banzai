@@ -335,3 +335,9 @@ Implementation and review must confirm all of the following:
   loads the resolved Serena whitelist rather than nothing, and zero MCP servers
   only when no whitelist resolves. This ADR remains Accepted and its body above
   is unchanged; read the MCP consequence together with ADR-0022.
+- Amended by
+  [ADR-0063](./0063-stable-headless-vendor-invocations.md), accepted
+  2026-11-06: the ambient opt-out restores discovery arguments only.
+  Every headless invocation receives its prompt on stdin, and every headless
+  Claude invocation gets the run-stability environment in both modes. Scoped
+  isolation, plugin resolution and degradation remain. Implemented on 2026-11-06 by WP8.

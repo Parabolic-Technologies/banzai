@@ -6,8 +6,13 @@ import {
 } from "./verification-cli.js";
 import {
   configurationDecisionLines,
+  planVerificationLines,
   taskVerificationStatusLines
 } from "./verification-ui.js";
+import {
+  readVerificationOutputTails,
+  type VerificationOutputTails
+} from "./verification-output.js";
 import { InteractiveHumanTime } from "./interactive-human-time.js";
 import {
   CANCELLATION_HELP,
@@ -38,13 +43,24 @@ import {
 import { colorDepth, colorEnabled, createStyler } from "./ansi.js";
 import { resolveCliMode, stripGlobalFlags } from "./cli-routing.js";
 import { executeVersionCli } from "./version-cli.js";
-import { applyModelUpdates, initializeConfig, loadConfig } from "./config.js";
+import { initializeConfig } from "./config.js";
 import {
   executeContextReportWithOptions,
   parseContextReportArgs
 } from "./context-report-cli.js";
-import { executeDoctor, parseDoctorArgs } from "./doctor-cli.js";
+import {
+  doctorInspection,
+  executeDoctor,
+  parseDoctorArgs
+} from "./doctor-cli.js";
 import { BanzaiError, errorMessage } from "./errors.js";
+import { createLocalConfigVisibility, loadConfig } from "./local-config.js";
+import {
+  humanStatusView,
+  modelStatusLines,
+  requireRecoverable
+} from "./model-status.js";
+import { planGateWaitingLines, planRecheckLines } from "./plan-gate-ui.js";
 import { executeEvaluationExport } from "./evaluation-cli.js";
 import {
   executeEvaluationKpiFromCheckout,
@@ -62,7 +78,9 @@ import {
   changedRepositoryPaths,
   currentBranch,
   currentCommit,
-  discoverRepositoryRoot
+  discoverRepositoryRoot,
+  isPathIgnored,
+  isPathInIndex
 } from "./git.js";
 import { InquirerInteractiveIO } from "./inquirer-io.js";
 import { createInterruptHandler } from "./interrupt.js";
@@ -83,7 +101,15 @@ import {
   type RepositoryIdentity,
   type RepositoryIdentityGateway
 } from "./interactive.js";
-import { selectModelSettings } from "./model-selection.js";
+import {
+  applyLaunchModelUpdates,
+  executeModelPicker,
+  insideModelPhase,
+  loadLaunchModels,
+  parseModelArgs,
+  type ModelPickerRequest,
+  type ModelPickerRunStatus
+} from "./model-cli.js";
 import { vendorFor } from "./models.js";
 import { resolveProgressLevel, TerminalProgressReporter } from "./progress.js";
 import {
@@ -100,6 +126,7 @@ import {
 import { TerminalAttention } from "./terminal-attention.js";
 import type {
   OrchestratorConfig,
+  PlanVerificationInventory,
   ReviewFinding,
   RunState,
   VendorAdapters
@@ -114,7 +141,8 @@ import {
 } from "./workflow.js";
 
 import { ProjectFileError, safePath } from "./project-files.js";
-import { ensureExecutionIgnores } from "./work-documents.js";
+import { ensureExecutionIgnores, workSlugConflict } from "./work-documents.js";
+import { finalizeWorkSlug } from "./workflow/domain/run-identity.js";
 import { VERIFICATION_EXAMPLES } from "./init-resources.js";
 
 function authenticationGateway(
@@ -127,11 +155,15 @@ function authenticationGateway(
       if (vendor === null) {
         return null;
       }
+      const target = {
+        executable: settings.executable,
+        model: settings.model
+      };
       try {
         if (vendor === "claude") {
-          await adapters.preflightClaude(settings);
+          await adapters.preflightClaude(target);
         } else {
-          await adapters.preflightCodex(settings);
+          await adapters.preflightCodex(target);
         }
         return null;
       } catch (error) {
@@ -167,23 +199,28 @@ async function reportClaudePermissionGaps(
   );
 }
 
+/**
+ * Outside a run, the configuration every phase would use (ADR-0060 §2), with a
+ * fresh Git visibility answer: a tracked, unignored or invalid local file
+ * refuses before any executable runs.
+ */
+async function effectiveConfig(repoRoot: string): Promise<OrchestratorConfig> {
+  return await loadConfig(repoRoot, {
+    visibility: createLocalConfigVisibility()
+  });
+}
+
 function modelConfigurationGateway(
   repoRoot: string
 ): ModelConfigurationGateway {
   return {
-    async load(): Promise<OrchestratorConfig | null> {
-      try {
-        return await loadConfig(repoRoot);
-      } catch (error) {
-        if (error instanceof BanzaiError && error.code === "CONFIG_NOT_FOUND") {
-          return null;
-        }
-        throw error;
-      }
-    },
-    async applyModelUpdates(updates): Promise<void> {
-      await applyModelUpdates(repoRoot, updates);
-    }
+    // One layered read with a fresh Git check: a refused local file ends the
+    // launch before authentication, and the header shows the effective or
+    // the run's models (ADR-0060 §2, §7, reading 9).
+    load: async () => await loadLaunchModels(repoRoot),
+    // Each update goes to the file that supplies its role (ADR-0060 §3).
+    applyModelUpdates: async (updates) =>
+      await applyLaunchModelUpdates(repoRoot, updates)
   };
 }
 
@@ -214,7 +251,7 @@ Run banzai without arguments in a terminal for interactive mode.
 Commands:
   init       Initialize Banzai in this project
   setup      Set up project guidance
-  model      Choose models and effort for each phase
+  model      Choose models per phase, shared or for this machine
   run        Start a task
   status     Show the current run and next step
   resume     Continue the current run
@@ -248,14 +285,31 @@ project guidance. Run banzai doctor to check readiness.`,
   setup: `Usage: banzai setup
 
 Set up project guidance through an installed client. Requires a terminal.`,
-  model: `Usage: banzai model
+  model: `Usage: banzai model [--local]
 
 Choose the model and effort for each phase. Requires a terminal.
-Finish or cancel the current run before changing models.`,
+
+  --local   Save the choices for this machine only, in
+            .banzai/config.local.json, which Git ignores.
+
+Without --local, Banzai asks where to save when .banzai/config.json is
+tracked by Git or a local file exists: this machine only, or shared with the
+team in .banzai/config.json (commit it). A local setting replaces a phase's
+executable, model and effort on this machine; verification, timeouts and
+every other setting stay shared. When Git does not ignore the local file,
+banzai model adds it to this clone's exclude file, never to .gitignore.
+
+Finish the current run, or run banzai cancel, before changing models. While
+banzai status recommends banzai retry for a blocked run, the choices are
+saved for this machine only; run banzai retry afterwards.`,
   run: `Usage: banzai run --slug <kebab-case> --request <text>
 
 Start a task in the current checkout.
 Example: banzai run --slug fix-login --request "Fix the login error"
+
+The run slug and documentation/work/ directory get today's yymmdd- prefix
+unless --slug already starts with it; on 2026-11-10 the example starts
+261110-fix-login. banzai status reports the final slug.
 
 Progress options: banzai help progress`,
   status: `Usage: banzai status [--json]
@@ -427,19 +481,19 @@ function printFinding(finding: ReviewFinding): void {
  * rather than leading every command's output.
  */
 export function parsePlanGateArgs(args: readonly string[]): {
-  decision: "approve" | "rework";
+  decision: "approve" | "recheck" | "rework";
   note: string | null;
   by: string | null;
   autoResume: boolean;
 } {
   const options = exactPlanningOptions(args, false);
   const decision = options.decision ?? "approve";
-  if (decision !== "approve" && decision !== "rework")
+  if (decision !== "approve" && decision !== "recheck" && decision !== "rework")
     throw new BanzaiError(
       "INVALID_DECISION",
-      "Plan decision must be approve or rework."
+      "Plan decision must be approve, recheck or rework."
     );
-  if (decision === "approve" && options.note !== null)
+  if (decision !== "rework" && options.note !== null)
     throw new BanzaiError(
       "INVALID_DECISION",
       "--note is accepted only with --decision rework."
@@ -532,7 +586,29 @@ function parsePlanningReviewArgs(args: readonly string[]): {
   };
 }
 
-function printState(status: WorkflowStatus, metrics = false): void {
+/** Status facts that need I/O beyond run state; only human output loads them. */
+interface StatusDetails {
+  outputTails?: VerificationOutputTails;
+  planVerification?: PlanVerificationInventory | null;
+  /** The ADR-0060 §7 model block; only `banzai status` passes it (reading 10). */
+  models?: readonly string[];
+}
+
+async function statusDetails(
+  runner: WorkflowRunner,
+  state: RunState
+): Promise<StatusDetails> {
+  return {
+    outputTails: await readVerificationOutputTails(runner.repoRoot, state),
+    planVerification: await runner.planVerificationInventory(state)
+  };
+}
+
+function printState(
+  status: WorkflowStatus,
+  metrics = false,
+  { outputTails, planVerification, models }: StatusDetails = {}
+): void {
   const { state, nextAction } = status;
   console.log(`Run: ${state.runId}`);
   console.log(`Feature: ${state.slug}`);
@@ -560,7 +636,24 @@ function printState(status: WorkflowStatus, metrics = false): void {
       `${state.workflowSelection.workflow} (${state.workflowSelection.reason})`
     );
   }
-  for (const line of taskVerificationStatusLines(state)) console.log(line);
+  for (const line of taskVerificationStatusLines(state, outputTails))
+    console.log(line);
+  if (planVerification != null)
+    for (const line of planVerificationLines(planVerification))
+      console.log(line);
+  if (
+    state.status === "needs_plan_approval" &&
+    status.planningReview?.decisions.includes("recheck") === true
+  ) {
+    for (const line of planGateWaitingLines(
+      status.planningReview.reviewPaths,
+      "cli"
+    ))
+      console.log(line);
+    if (status.planRecheck !== undefined)
+      for (const line of planRecheckLines(status.planRecheck))
+        console.log(line);
+  }
   if (state.blockReason !== null) {
     printLabeled("Blocked", state.blockReason);
   }
@@ -638,6 +731,7 @@ function printState(status: WorkflowStatus, metrics = false): void {
       pendingRotationText(state.pendingReviewRotationReason)
     );
   }
+  for (const line of models ?? []) console.log(line);
   if (nextAction === "banzai retry") {
     console.log(
       state.blockedFrom === "created"
@@ -658,7 +752,9 @@ function printState(status: WorkflowStatus, metrics = false): void {
     );
   } else if (state.status === "needs_plan_approval") {
     console.log(
-      "Next: review the plan artifacts, then run `banzai approve plan`."
+      status.planningReview?.decisions.includes("recheck") === true
+        ? "Next: review the plan artifacts, then run `banzai approve plan`, or `banzai approve plan --decision recheck` after editing them."
+        : "Next: review the plan artifacts, then run `banzai approve plan`."
     );
   } else if (state.status === "needs_human_decision") {
     console.log(
@@ -694,42 +790,29 @@ async function printRunnerState(
   runner: WorkflowRunner,
   metrics: boolean
 ): Promise<void> {
-  printState(await runner.status(), metrics);
-}
-
-async function activeRunState(
-  runner: WorkflowRunner
-): Promise<RunState | null> {
-  try {
-    return (await runner.status()).state;
-  } catch (error) {
-    if (error instanceof BanzaiError && error.code === "NO_ACTIVE_RUN") {
-      return null;
-    }
-    throw error;
-  }
+  const status = await runner.status();
+  printState(status, metrics, await statusDetails(runner, status.state));
 }
 
 /**
- * Runs the model picker and writes the result. Returns false when the terminal
- * cannot host the dialog, so callers can degrade instead of failing.
+ * Runs the model picker and writes the result (ADR-0060 §3): the layered
+ * reader, the exclude step, the runner lock and the destination. Returns false
+ * when the terminal cannot host the dialog, so callers can degrade instead of
+ * failing. `status` enables the blocked-run exception of `banzai model`.
  */
 async function runModelPicker(
   repoRoot: string,
   interactiveTerminal: boolean,
-  configCreated = false
+  request: ModelPickerRequest,
+  status?: () => Promise<ModelPickerRunStatus>
 ): Promise<boolean> {
   if (!interactiveTerminal) {
     return false;
   }
-  const io = new InquirerInteractiveIO();
-  const config = await loadConfig(repoRoot);
-  const updates = await selectModelSettings(io, config, configCreated);
-  if (updates.length === 0) {
-    return true;
-  }
-  await applyModelUpdates(repoRoot, updates);
-  io.writeLine("Updated .banzai/config.json. Review and commit the change.");
+  await executeModelPicker(repoRoot, request, {
+    io: new InquirerInteractiveIO(),
+    ...(status === undefined ? {} : { status })
+  });
   return true;
 }
 
@@ -832,6 +915,14 @@ async function main(): Promise<void> {
     command === "cancel" ? parseCancellationArgs(args.slice(1)) : null;
   if (cancellationInput === "help") {
     console.log(CANCELLATION_HELP);
+    return;
+  }
+  // `banzai model` owns an exact grammar, checked before the terminal and
+  // before repository discovery (ADR-0060 §3, reading 5).
+  const modelCommand =
+    command === "model" ? parseModelArgs(args.slice(1)) : null;
+  if (modelCommand === "help") {
+    console.log(helpText(["help", "model"]));
     return;
   }
   const planCommand =
@@ -951,13 +1042,7 @@ async function main(): Promise<void> {
     repoRoot = await discoverRepositoryRoot(process.cwd());
   }
   if (command === "init") {
-    if (
-      [
-        "BANZAI_RUN_ID",
-        "BANZAI_APPROVAL_DIGEST",
-        "BANZAI_WORKFLOW_DIGEST"
-      ].some((name) => Object.hasOwn(process.env, name))
-    )
+    if (insideModelPhase(process.env))
       throw new BanzaiError(
         "CONFIGURATION_MODEL_WRITE_DENIED",
         "Model phases cannot initialize runner configuration. Record missing configuration in Human prerequisites."
@@ -1029,17 +1114,17 @@ async function main(): Promise<void> {
         : ".gitignore already covers local run state."
     );
     if (
-      !(await runModelPicker(
-        repoRoot,
-        interactiveTerminal,
-        result.configCreated
-      ))
+      // Reading 6: the committed file only, never the destination question.
+      !(await runModelPicker(repoRoot, interactiveTerminal, {
+        entry: "init",
+        configCreated: result.configCreated
+      }))
     ) {
       console.log(
         "Run `banzai model` in a terminal to choose the model and effort for each phase."
       );
     }
-    const config = await loadConfig(repoRoot);
+    const config = await effectiveConfig(repoRoot);
     console.log("Banzai configuration saved.\n");
     if (interactiveTerminal) {
       process.exitCode = await runProjectSetup(
@@ -1097,7 +1182,7 @@ async function main(): Promise<void> {
         "TTY_REQUIRED",
         `banzai setup requires terminal input and output. Open your client in this project and explicitly invoke banzai:project-manifest, or rerun banzai setup in a terminal. ${SETUP_PLUGIN_PREREQUISITE}`
       );
-    const config = await loadConfig(repoRoot);
+    const config = await effectiveConfig(repoRoot);
     process.exitCode = await runProjectSetup(
       repoRoot,
       config,
@@ -1116,7 +1201,7 @@ async function main(): Promise<void> {
       state.status === "done" ||
       state.status === "cancelled"
     ) {
-      const config = await loadConfig(repoRoot);
+      const config = await effectiveConfig(repoRoot);
       if ((await inspectProjectAdoption(repoRoot)).classification !== "ready") {
         process.exitCode = await runProjectSetup(
           repoRoot,
@@ -1130,10 +1215,17 @@ async function main(): Promise<void> {
   }
 
   if (command === "doctor") {
-    process.exitCode = await executeDoctor(repoRoot, args.slice(1), {
-      stdout: (value) => process.stdout.write(value),
-      stderr: (value) => process.stderr.write(value)
-    });
+    // Doctor never imports the Git module; its two read-only local-file
+    // queries come from here (ADR-0060 §8).
+    process.exitCode = await executeDoctor(
+      repoRoot,
+      args.slice(1),
+      {
+        stdout: (value) => process.stdout.write(value),
+        stderr: (value) => process.stderr.write(value)
+      },
+      doctorInspection({ isPathInIndex, isPathIgnored })
+    );
     return;
   }
 
@@ -1246,7 +1338,7 @@ async function main(): Promise<void> {
           try {
             process.exitCode = await runProjectSetup(
               repoRoot,
-              await loadConfig(repoRoot),
+              await effectiveConfig(repoRoot),
               interactiveIO ?? new InquirerInteractiveIO()
             );
           } finally {
@@ -1255,10 +1347,13 @@ async function main(): Promise<void> {
           return false;
         }
         await currentCommit(repoRoot);
-        await loadConfig(repoRoot);
+        await effectiveConfig(repoRoot);
         return true;
       },
       attention,
+      workSlugs: {
+        conflict: async (slug) => await workSlugConflict(repoRoot, slug)
+      },
       models: modelConfigurationGateway(repoRoot),
       auth: authenticationGateway(adapters),
       repository: repositoryIdentityGateway(repoRoot),
@@ -1276,27 +1371,21 @@ async function main(): Promise<void> {
         "`banzai model` requires terminal input and output."
       );
     }
-    // Phases read model settings fresh, so changing them mid-run would swap the
-    // model executing the rest of an approved plan.
-    const active = await activeRunState(runner);
-    if (
-      active !== null &&
-      active.status !== "done" &&
-      active.status !== "cancelled"
-    ) {
-      throw new BanzaiError(
-        "RUN_IN_PROGRESS",
-        `Run ${active.runId} is ${active.status}. Finish or cancel it before changing models.`
-      );
-    }
-    await runModelPicker(repoRoot, interactiveTerminal);
+    // The picker refuses during an active run, except that a blocked run for
+    // which status recommends retry accepts local choices (ADR-0060 §3).
+    await runModelPicker(
+      repoRoot,
+      interactiveTerminal,
+      { entry: "model", local: modelCommand?.local === true },
+      async () => await runner.status()
+    );
     return;
   }
   if (command === "run") {
-    await loadConfig(repoRoot);
+    await effectiveConfig(repoRoot);
     await attention.run(() =>
       runner.start({
-        slug: requireOption(args, "--slug"),
+        slug: finalizeWorkSlug(requireOption(args, "--slug"), new Date()),
         request: requireOption(args, "--request")
       })
     );
@@ -1308,7 +1397,13 @@ async function main(): Promise<void> {
     if (args.includes("--json")) {
       console.log(JSON.stringify(status, null, 2));
     } else {
-      printState(status, metrics);
+      // ADR-0060 §7: the model block and the reading 11 override are human
+      // output only; the JSON above stays as status() derives it.
+      const models = await runner.modelStatus(status.state);
+      printState(humanStatusView(status, models), metrics, {
+        ...(await statusDetails(runner, status.state)),
+        models: modelStatusLines(models)
+      });
       if (status.planApprovalValid !== null) {
         console.log(
           `Plan approval: ${status.planApprovalValid ? "valid" : "STALE"}`
@@ -1328,7 +1423,9 @@ async function main(): Promise<void> {
     return;
   }
   if (command === "retry") {
-    await attention.run(() => runner.retry());
+    // Reading 17: a human at a terminal may record a changed local model
+    // layer; an agent's retry, without one, refuses instead (ADR-0060 §5).
+    await attention.run(() => runner.retry({ terminal: interactiveTerminal }));
     await printRunnerState(runner, metrics);
     return;
   }
@@ -1355,15 +1452,15 @@ async function main(): Promise<void> {
         "Recover accepts no options; inspect status and confirm interactively."
       );
     }
-    const status = await runner.status();
+    // Reading 11: an invalid model record makes recovery not eligible here,
+    // with a reason naming the record.
+    const observed = await runner.status();
+    const status = humanStatusView(
+      observed,
+      await runner.modelStatus(observed.state)
+    );
     printState(status, metrics);
-    if (
-      !status.recovery.eligible ||
-      status.recovery.attemptId === null ||
-      status.recovery.recoveryIdentity === null
-    ) {
-      throw new BanzaiError("RECOVERY_NOT_ALLOWED", status.recovery.reason);
-    }
+    const { attemptId, recoveryIdentity } = requireRecoverable(status);
     const io = new InquirerInteractiveIO();
     const confirmation =
       status.recovery.sourceKind === "prerequisite_blocked_fix"
@@ -1374,7 +1471,6 @@ async function main(): Promise<void> {
     if (!(await io.confirm(confirmation, false))) {
       return;
     }
-    const { attemptId, recoveryIdentity } = status.recovery;
     await attention.run(() =>
       runner.recover({
         attemptId,
@@ -1416,10 +1512,15 @@ async function main(): Promise<void> {
               decidedBy: planCommand.by ?? defaultDecisionMaker(),
               autoResume: planCommand.autoResume
             })
-          : runner.approvePlan(
-              planCommand.by ?? defaultDecisionMaker(),
-              planCommand.autoResume
-            )
+          : planCommand.decision === "recheck"
+            ? // Re-check never starts a phase, so --no-resume has no effect.
+              runner.recheckPlan({
+                decidedBy: planCommand.by ?? defaultDecisionMaker()
+              })
+            : runner.approvePlan(
+                planCommand.by ?? defaultDecisionMaker(),
+                planCommand.autoResume
+              )
       );
       await printRunnerState(runner, metrics);
       return;

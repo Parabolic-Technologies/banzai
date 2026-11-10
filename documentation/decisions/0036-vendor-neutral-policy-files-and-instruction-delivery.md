@@ -504,6 +504,15 @@ Implementation and review must establish:
 
 ## Lifecycle Links
 
+- Amended by
+  [ADR-0065](./0065-continuable-planner-declared-planning-blocks.md),
+  accepted 2026-11-06: a completed planning attempt with `outcome=blocked`
+  becomes retryable. The layout stop keeps `gate=escalation`. Implemented by
+  WP21 of the 2.8–2.9 program.
+- Amended by [ADR-0061](./0061-initiative-skill-and-documents.md), accepted
+  2026-11-05: the read matrix gains an `initiative` row with no policy duty.
+  The skill keeps layout recognition and the legacy-layout stop; the
+  bootstrap exceptions stay exactly two.
 - Amended by [ADR-0042](./0042-runner-delivered-phase-instructions.md), accepted
   2026-09-11: runner phases receive the stated six-policy duty union inline
   from embedded canonical resources. Retain substantive/conditional duties,

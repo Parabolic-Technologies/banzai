@@ -546,6 +546,12 @@ Implementation and independent review must confirm:
 
 ## Lifecycle Links
 
+- Amended by [ADR-0058](./0058-human-plan-edits-rechecked-at-the-plan-gate.md),
+  accepted 2026-10-31: adds the `recheck` plan gate decision to the terminal,
+  the `banzai approve plan` grammar and agent control under a new major
+  revision. Approval remains the only transition to `plan_approved`.
+  Implementation is Planned.
+
 - Proposed narrow amendment to
   [ADR-0031](0031-interactive-decision-consultation.md): add the
   `planning_review_triage` pending kind beside consultation, and reuse its

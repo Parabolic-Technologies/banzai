@@ -37,6 +37,8 @@ type FakeVariant =
   | "stderr"
   | "not-ready"
   | "mutation"
+  | "missing-ignore-line"
+  | "doctor-models-mismatch"
   | "hang";
 
 function fakeBundleSource(variant: FakeVariant): string {
@@ -79,14 +81,14 @@ if (command === "help") {
 } else if (command === "control capabilities") {
   if (variant === "mutation") await writeFile(path.join(process.cwd(), "mutated.txt"), "mutated\\n");
   process.stdout.write(variant === "malformed-capabilities" ? "{bad\\n" : JSON.stringify({
-    schema: variant === "incompatible-capabilities" ? "banzai-agent-capabilities/v1" : "banzai-agent-capabilities/v8",
-    schemaVersion: variant === "incompatible-capabilities" ? 1 : 8,
-    controlContractVersion: "8.0.0",
+    schema: variant === "incompatible-capabilities" ? "banzai-agent-capabilities/v1" : "banzai-agent-capabilities/v9",
+    schemaVersion: variant === "incompatible-capabilities" ? 1 : 9,
+    controlContractVersion: "9.0.0",
     workDocuments: {
       directoryPattern: "documentation/work/<slug>/",
       bindingSchemas: ["banzai-work-binding/v3"],
       workspaceSnapshotVersion: 3,
-      verificationRequestSchemas: ["banzai-verification-request/v3"]
+      verificationRequestSchemas: ["banzai-verification-request/v4", "banzai-verification-request/v3"]
     },
     orchestratorVersion: variant === "capability-version-mismatch" ? "0.0.0" : version,
     umbrellaContractVersion: "1.0.0",
@@ -111,11 +113,14 @@ if (command === "help") {
     schemaVersion: 4,
     contractVersion: "1.0.0",
     models: {
-      planner: { executable: process.execPath },
-      implementer: { executable: process.execPath },
-      reviewer: { executable: process.execPath }
+      planner: { executable: process.execPath, model: "claude-opus-5-5", effort: "xhigh" },
+      implementer: { executable: process.execPath, model: "claude-opus-5-5", effort: "xhigh" },
+      reviewer: { executable: process.execPath, model: "gpt-6.1-sol", effort: "xhigh" }
     }
   }) + "\\n");
+  const ignoreLines = [".banzai/runs/", ".banzai/active-run.json", ".banzai/runner.lock"];
+  if (variant !== "missing-ignore-line") ignoreLines.push(".banzai/config.local.json");
+  await writeFile(path.join(process.cwd(), ".gitignore"), ignoreLines.join("\\n") + "\\n");
 } else if (command === "doctor --json") {
   if (variant === "nonzero") process.exit(7);
   if (variant === "hang") {
@@ -123,9 +128,17 @@ if (command === "help") {
     await new Promise(() => {});
   }
   if (variant === "stderr") process.stderr.write("private output\\n");
-  process.stdout.write(variant === "malformed-doctor" ? "{bad\\n" : JSON.stringify({ schema: "banzai-doctor/v5", schemaVersion: 5, ready: variant !== "not-ready" }) + "\\n");
+  const config = JSON.parse(await readFile(path.join(process.cwd(), ".banzai/config.json"), "utf8"));
+  const models = ["planner", "implementer", "reviewer"].map((role) => ({
+    role,
+    vendor: null,
+    model: config.models[role].model,
+    effort: config.models[role].effort,
+    source: variant === "doctor-models-mismatch" && role === "reviewer" ? "local" : "committed"
+  }));
+  process.stdout.write(variant === "malformed-doctor" ? "{bad\\n" : JSON.stringify({ schema: "banzai-doctor/v6", schemaVersion: 6, ready: variant !== "not-ready", projectTypes: ["node"], models, summary: { passed: 1, warnings: 0, failed: 0, skipped: 0 }, checks: [] }) + "\\n");
 } else if (command === "control status") {
-  process.stdout.write(variant === "malformed-status" ? "{bad\\n" : JSON.stringify({ schema: "banzai-agent-status/v6", schemaVersion: 6, activeRun: await activeStatus() }) + "\\n");
+  process.stdout.write(variant === "malformed-status" ? "{bad\\n" : JSON.stringify({ schema: "banzai-agent-status/v7", schemaVersion: 7, activeRun: await activeStatus() }) + "\\n");
 } else if (command === "control answer --by Smoke User --no-resume") {
   const answer = JSON.parse(await stdinText());
   const pointer = JSON.parse(await readFile(path.join(process.cwd(), ".banzai/active-run.json"), "utf8"));
@@ -150,7 +163,7 @@ if (command === "help") {
     runId: state.runId,
     details: { cardCount: answer.answers.length, answerModes: { option: 0, preference: 1 }, completion: "answered" }
   }) + "\\n");
-  process.stdout.write(JSON.stringify({ schema: "banzai-agent-status/v6", schemaVersion: 6, activeRun: await activeStatus() }) + "\\n");
+  process.stdout.write(JSON.stringify({ schema: "banzai-agent-status/v7", schemaVersion: 7, activeRun: await activeStatus() }) + "\\n");
 } else if (command === "eval export --json") {
   process.stderr.write("[EVAL_PARTIAL] Export includes incomplete evidence; inspect the structured issues in the report.\\n");
   process.stdout.write(variant === "malformed-evaluation" ? "{bad\\n" : JSON.stringify({ schema: "banzai-evaluation-export/v1", schemaVersion: 1, runs: [] }) + "\\n");
@@ -304,7 +317,9 @@ for (const [variant, code] of [
   ["help-version-mismatch", "SMOKE_VERSION_MISMATCH"],
   ["stderr", "SMOKE_STDERR"],
   ["not-ready", "SMOKE_DOCTOR_NOT_READY"],
-  ["mutation", "SMOKE_TREE_MUTATION"]
+  ["mutation", "SMOKE_TREE_MUTATION"],
+  ["missing-ignore-line", "SMOKE_IGNORE_MISMATCH"],
+  ["doctor-models-mismatch", "SMOKE_CONTRACT_MISMATCH"]
 ] as const) {
   test(`smoke fails closed for ${variant} and cleans after failure`, async () => {
     const candidate = await fixture(variant);

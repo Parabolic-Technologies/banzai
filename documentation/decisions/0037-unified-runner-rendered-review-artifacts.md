@@ -354,6 +354,13 @@ requires the subsequent approved plan.
 ## Lifecycle Links
 
 - Amended by
+  [ADR-0059](./0059-claude-default-reviewer-and-reviewer-isolation.md),
+  accepted 2026-10-31: required Claude review tools become `Read`, `Glob` and
+  `Grep`, and review roles run without auto memory or refusal fallback.
+  Read-only enforcement, the Serena boundary and independent sessions remain.
+  Implemented by WP7 for the 2.8 release.
+
+- Amended by
   [ADR-0055](./0055-planning-gate-rework-and-independent-planning-review.md),
   accepted 2026-10-13: adds a separate runner-rendered, create-only
   `planning-review-<N>.md` family. Code-review rendering, snapshots, numbering

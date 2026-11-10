@@ -219,7 +219,7 @@ export function decideDigestRejected(
   return decided({
     eligible: true,
     terminalCheckpointPresent: true,
-    reason: `The ${phase} result was refused because ${evidence.comparisons.filter((comparison) => !comparison.matched).length} digest it authored never matched the bytes it named. Recovery authorizes one linked ${phase} attempt to supply a corrected result; the rejected attempt and its result are retained.`,
+    reason: `The ${phase} result was refused because ${evidence.comparisons.filter((comparison) => !comparison.matched && !comparison.recorded).length} digest it authored never matched the bytes it named. Recovery authorizes one linked ${phase} attempt to supply a corrected result; the rejected attempt and its result are retained.`,
     warning:
       "The rejected attempt keeps its failed status and its result. Recovery authorizes one new attempt for the same phase and no additional scope; a replacement strict plan still passes the existing approval gate.",
     sourceKind: "digest_rejected",

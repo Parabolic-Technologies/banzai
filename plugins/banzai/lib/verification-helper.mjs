@@ -34,14 +34,17 @@ async function invoke(command, root, environment) {
 
 /** Direct document selection carries skill authority; it never creates runner approval. */
 export async function verificationOperation(operation, request) {
-  if (request?.schema !== "banzai-verification-request/v3" || request.schemaVersion !== 3) {
-    const error = new VerificationEvidenceError("Legacy executable requests are unsupported. Use verification request v3 with documentPath and workflow; leave historical documents unchanged.");
+  // v4 differs only in retryOf: one attempt id in v3, the round's whole unsuccessful set in v4 (ADR-0057 §2).
+  const revision = request?.schema === "banzai-verification-request/v4" && request.schemaVersion === 4 ? 4 : request?.schema === "banzai-verification-request/v3" && request.schemaVersion === 3 ? 3 : null;
+  if (revision === null) {
+    const error = new VerificationEvidenceError("Legacy executable requests are unsupported. Use verification request v4 with documentPath and workflow; leave historical documents unchanged.");
     error.code = "VERIFICATION_REQUEST_UNSUPPORTED";
     throw error;
   }
   if (!["inspect", "decide", "execute"].includes(operation)) fail("Unsupported task verification operation.");
   exactObject(request, ["schema", "schemaVersion", "repoRoot", "documentPath", "workflow", "roundId"], operation === "execute" ? ["retryOf"] : []);
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(request.roundId) || !["strict", "feature", "quick-fix"].includes(request.workflow)) fail("Unsupported task verification identity or workflow.");
+  if (revision === 4 && Object.hasOwn(request, "retryOf") && (!Array.isArray(request.retryOf) || request.retryOf.length === 0 || request.retryOf.length > 200 || request.retryOf.some((id) => typeof id !== "string" || !/^verification-[a-f0-9-]{36}$/u.test(id)))) fail("Verification request v4 retryOf must list unsuccessful attempt identities.");
   const root = await projectRoot(request.repoRoot);
   const document = relativePath(request.documentPath);
   const name = path.posix.basename(document);
@@ -105,7 +108,7 @@ export async function verificationOperation(operation, request) {
     const attempts = await readTaskVerificationAttempts(storage);
     return { supported: true, authorityKind: "standalone-skill", decision, applicability: await taskVerificationApplicability(storage, decision, attempts, before), physicalAttempts: attempts.length };
   }
-    const publication = await executeTaskVerification({ ...storage, selection, authority, context, policy, roundId: request.roundId, retryOf: request.retryOf, revalidate, invoke: (descriptor, cwd) => invoke(descriptor, cwd, environment) });
+    const publication = await executeTaskVerification({ ...storage, selection, authority, context, policy, roundId: request.roundId, ...(request.retryOf === undefined ? {} : revision === 4 ? { retrySet: request.retryOf } : { retryOf: request.retryOf }), revalidate, invoke: (descriptor, cwd) => invoke(descriptor, cwd, environment) });
     return { supported: true, authorityKind: "standalone-skill", ...publication, physicalAttempts: publication.attempts.length };
   };
   return operation === "execute" ? withExecutionOwnership(root, directory, run) : run();

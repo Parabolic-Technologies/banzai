@@ -236,7 +236,7 @@ function validatePolicyShape(policy) {
   const node = record(root.node, policyPath, "node");
   requireExact(
     node.engines,
-    ">=22.20.0 <23 || >=24.11.1 <25",
+    ">=22.20.0 <23 || >=24.11.1 <25 || >=26.13.0 <27",
     "NODE_POLICY_DRIFT",
     policyPath,
     "engines"
@@ -249,17 +249,19 @@ function validatePolicyShape(policy) {
     "build target"
   );
   const supported = array(node.supported, policyPath, "node.supported");
-  if (supported.length !== 2) {
+  // ADR-0067: exactly three required supported lanes and no forward lane.
+  const expectedSupported = [
+    [22, "22.20.0", "node:22.20.0-bookworm", "release_check_node_22"],
+    [24, "24.11.1", "node:24.11.1-bookworm", "release_check_node_24"],
+    [26, "26.13.0", "node:26.13.0-bookworm", "release_check_node_26"]
+  ];
+  if (supported.length !== expectedSupported.length) {
     fail(
       "NODE_POLICY_DRIFT",
       policyPath,
-      "exactly two supported lanes are required"
+      "exactly three supported lanes are required"
     );
   }
-  const expectedSupported = [
-    [22, "22.20.0", "node:22.20.0-bookworm", "release_check_node_22"],
-    [24, "24.11.1", "node:24.11.1-bookworm", "release_check_node_24"]
-  ];
   for (const [index, expected] of expectedSupported.entries()) {
     const lane = record(
       supported[index],
@@ -278,25 +280,10 @@ function validatePolicyShape(policy) {
       );
     }
   }
-  const forward = record(node.forward, policyPath, "node.forward");
-  const expectedForward = [
-    26,
-    "26.7.0",
-    "node:26.7.0-bookworm",
-    "forward_compatibility_node_26"
-  ];
-  if (
-    JSON.stringify([
-      forward.major,
-      forward.version,
-      forward.image,
-      forward.job
-    ]) !== JSON.stringify(expectedForward) ||
-    forward.required !== false
-  ) {
+  if (Object.hasOwn(node, "forward")) {
     fail("NODE_POLICY_DRIFT", policyPath, "forward lane is not accepted");
   }
-  for (const lane of [...supported, forward]) {
+  for (const lane of supported) {
     if (!/^node:\d+\.\d+\.\d+-bookworm$/.test(lane.image)) {
       fail(
         "NODE_POLICY_DRIFT",
@@ -467,9 +454,9 @@ function validatePolicyShape(policy) {
     "contracts.agentControl"
   );
   const expectedControl = {
-    contractVersion: "8.0.0",
-    capabilities: "banzai-agent-capabilities/v8",
-    status: "banzai-agent-status/v6",
+    contractVersion: "9.0.0",
+    capabilities: "banzai-agent-capabilities/v9",
+    status: "banzai-agent-status/v7",
     request: "banzai-agent-request/v1",
     answer: "banzai-agent-answer/v2",
     configurationAnswer: "banzai-agent-answer/v3",
@@ -959,14 +946,14 @@ async function validateContracts(root, policy) {
     );
   }
   if (
-    !/export interface RunState\s*{[^}]*?schemaVersion:\s*3\s*\|\s*4\s*\|\s*5\s*\|\s*6\s*\|\s*7\s*\|\s*8\s*\|\s*9\s*\|\s*10;/.test(
+    !/export interface RunState\s*{[^}]*?schemaVersion:\s*3\s*\|\s*4\s*\|\s*5\s*\|\s*6\s*\|\s*7\s*\|\s*8\s*\|\s*9\s*\|\s*10\s*\|\s*11;/.test(
       typesSource
     )
   ) {
     fail(
       "STATE_CONTRACT_DRIFT",
       typesPath,
-      "current run state must retain historical readers and support tracked-document state v10"
+      "current run state must retain historical readers and support tracked-document state v10 and its plan re-check successor v11"
     );
   }
   if (!/schemaVersion:\s*1\s*\|\s*2;/.test(typesSource)) {
@@ -1027,8 +1014,8 @@ async function validateContracts(root, policy) {
   for (const [name, expected] of [
     ["PLANNING_REVIEW_RESULT_SCHEMA_VERSION", 1],
     ["PLANNING_REVIEW_ANALYSIS_SCHEMA_VERSION", 1],
-    ["AGENT_CAPABILITIES_SCHEMA_VERSION", 8],
-    ["AGENT_STATUS_SCHEMA_VERSION", 6],
+    ["AGENT_CAPABILITIES_SCHEMA_VERSION", 9],
+    ["AGENT_STATUS_SCHEMA_VERSION", 7],
     ["AGENT_ANSWER_SCHEMA_VERSION", 2],
     ["CONFIGURATION_ANSWER_SCHEMA_VERSION", 3],
     ["AGENT_REQUEST_SCHEMA_VERSION", 1],
@@ -1214,7 +1201,15 @@ async function validateHookRuntimeVersion(root, releaseVersion) {
 }
 
 const ciWorkflow = ".github/workflows/ci.yml";
-const ciSchedule = "17 5 * * 1";
+
+// ADR-0039 and ADR-0067: evidence checking, publishing and the live lane keep
+// the Node 24 runtime while the supported matrix grows.
+const toolingLaneJob = "release_check_node_24";
+
+function toolingNodeVersion(policy) {
+  return policy.node.supported.find((lane) => lane.job === toolingLaneJob)
+    .version;
+}
 
 function jobBlock(source, job) {
   const escaped = job.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1236,18 +1231,14 @@ function requireJobText(block, expected, job, label) {
   }
 }
 
-// ADR-0053: each deterministic lane must be exactly its approved job. Any
-// added line, in any YAML spelling of a key (a quoted or escaped `if`, for
+// ADR-0053 and ADR-0067: each required lane must be exactly its approved job.
+// Any added line, in any YAML spelling of a key (a quoted or escaped `if`, for
 // example), could change when the lane runs or skip its gate, so the lane is
 // compared as whole text instead of matching keys by pattern.
 function ciLaneDefinition(lane) {
   return [
-    lane.required === true
-      ? "    if: github.event_name != 'schedule'"
-      : "    if: github.event_name != 'pull_request'",
     "    runs-on: ubuntu-24.04",
     `    container: ${lane.image}`,
-    ...(lane.required === true ? [] : ["    continue-on-error: true"]),
     "    steps:",
     "      - uses: actions/checkout@v6",
     "        with:",
@@ -1257,18 +1248,14 @@ function ciLaneDefinition(lane) {
     '      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"',
     "      - run: npm ci",
     "      - run: npm run release:check",
-    ...(lane.required === true
-      ? [
-          "      - id: release_evidence",
-          "        run: node packages/orchestrator/scripts/release-evidence.mjs record",
-          "      - uses: actions/upload-artifact@v7",
-          "        with:",
-          "          name: ${{ steps.release_evidence.outputs.name }}",
-          "          path: ${{ steps.release_evidence.outputs.path }}",
-          "          if-no-files-found: error",
-          "          retention-days: 30"
-        ]
-      : [])
+    "      - id: release_evidence",
+    "        run: node packages/orchestrator/scripts/release-evidence.mjs record",
+    "      - uses: actions/upload-artifact@v7",
+    "        with:",
+    "          name: ${{ steps.release_evidence.outputs.name }}",
+    "          path: ${{ steps.release_evidence.outputs.path }}",
+    "          if-no-files-found: error",
+    "          retention-days: 30"
   ].join("\n");
 }
 
@@ -1285,9 +1272,7 @@ async function validateCi(root, policy) {
     `      ${policy.ci.liveInput}:`,
     "        description: Run live vendor compatibility on the dedicated protected runner",
     "        type: boolean",
-    "        default: false",
-    "  schedule:",
-    `    - cron: "${ciSchedule}"`
+    "        default: false"
   ].join("\n");
   if (
     source
@@ -1297,7 +1282,7 @@ async function validateCi(root, policy) {
     fail(
       "CI_POLICY_DRIFT",
       ciWorkflow,
-      "expected pull_request, opt-in manual and weekly schedule triggers"
+      "expected pull_request and opt-in manual triggers"
     );
   }
   // ADR-0053: a newer push cancels only the older run of the same pull
@@ -1318,7 +1303,7 @@ async function validateCi(root, policy) {
     "read-only permissions and pull-request-only cancellation"
   );
 
-  const lanes = [...policy.node.supported, policy.node.forward];
+  const lanes = policy.node.supported;
   const liveJob = nonEmptyString(
     policy.ci.liveJob,
     "release-policy.json",
@@ -1338,7 +1323,7 @@ async function validateCi(root, policy) {
     fail(
       "CI_POLICY_DRIFT",
       ciWorkflow,
-      "expected exactly the supported, forward and live jobs"
+      "expected exactly the supported and live jobs"
     );
   }
   for (const lane of lanes) {
@@ -1383,16 +1368,8 @@ async function validateCi(root, policy) {
     if (/^\s+needs:/m.test(block)) {
       fail("CI_POLICY_DRIFT", ciWorkflow, `${lane.job} must run independently`);
     }
-    if (lane.required === true && /continue-on-error:/.test(block)) {
+    if (/continue-on-error:/.test(block)) {
       fail("CI_POLICY_DRIFT", ciWorkflow, `${lane.job} must be required`);
-    }
-    if (lane.required === false) {
-      requireJobText(
-        block,
-        "    continue-on-error: true",
-        lane.job,
-        "advisory flag"
-      );
     }
     if (/\b(?:codex|claude|auth|compatibility:live|banzai)\b/i.test(block)) {
       fail(
@@ -1445,7 +1422,7 @@ async function validateCi(root, policy) {
     ],
     ["      - uses: actions/setup-node@v6", "Node setup"],
     [
-      `          node-version: ${policy.node.supported.at(-1).version}`,
+      `          node-version: ${toolingNodeVersion(policy)}`,
       "supported live runtime"
     ],
     ["          package-manager-cache: false", "disabled automatic cache"],
@@ -1493,13 +1470,13 @@ const releaseGuard =
   "github.event.release.draft == false && github.event.release.prerelease == false";
 
 // ADR-0053: publication either reuses bound pull-request evidence or runs the
-// complete gate on both supported lanes, and only the publishing job can mint
+// complete gate on every supported lane, and only the publishing job can mint
 // an OIDC token. Any added line, in any YAML spelling of a key (a quoted or
 // escaped `if`, for example), could weaken that, so the validator owns the
 // whole file as exact text instead of matching keys by pattern.
 function publishDefinition(policy) {
   const lanes = policy.node.supported;
-  const node = `          node-version: ${lanes.at(-1).version}`;
+  const node = `          node-version: ${toolingNodeVersion(policy)}`;
   const evidence = [
     "name: Publish",
     "",
@@ -1563,7 +1540,10 @@ function publishDefinition(policy) {
     .join(" && ");
   const publish = [
     `  ${publishJob}:`,
-    `    needs: [${[evidenceJob, ...lanes.map((lane) => lane.job)].join(", ")}]`,
+    "    needs:",
+    ...[evidenceJob, ...lanes.map((lane) => lane.job)].map(
+      (job) => `      - ${job}`
+    ),
     "    if: >-",
     "      !cancelled() &&",
     `      ${releaseGuard} &&`,
@@ -1665,14 +1645,7 @@ function renderPolicyBlock(policy) {
       `\`${lane.image}\``,
       `\`${lane.job}\``,
       "required"
-    ]),
-    [
-      "Forward compatibility",
-      policy.node.forward.version,
-      `\`${policy.node.forward.image}\``,
-      `\`${policy.node.forward.job}\``,
-      "advisory"
-    ]
+    ])
   ];
   const widths = rows[0].map((_, index) =>
     Math.max(...rows.map((row) => row[index].length))
@@ -1916,7 +1889,8 @@ async function validateInstructionLayout(root) {
     "feature",
     "quick-fix",
     "project-manifest",
-    "orchestrate"
+    "orchestrate",
+    "initiative"
   ];
   const policyNames = Object.keys(POLICY_READ_MATRIX);
   const requiredPaths = (await readJson(root, "release-policy.json")).plugin
@@ -2061,8 +2035,11 @@ async function validateInstructionLayout(root) {
         fail(code, relativePath, "Sources names an extra or missing policy");
       if (!flatText(contents).includes(diagnostic))
         fail(code, relativePath, "missing legacy diagnostic");
+      // ADR-0061: `initiative` has an empty policy row, so it resolves no
+      // policy file while keeping the process source and the legacy stop.
       if (
-        !sources.includes("../../policies/<name>.md") ||
+        sources.includes("../../policies/<name>.md") !==
+          (skill !== "initiative") ||
         !sources.includes("the project root `AGENTS.md`") ||
         !sources.includes("unreadable")
       )
@@ -2716,15 +2693,15 @@ async function validateDecisionConsultationPolicy(root) {
         "There are five existing decision gates",
         "Consultation is conditional, planning-only, and concise",
         "it does not accept an ADR, approve a plan",
-        "control contract `8.0.0`"
+        "control contract `9.0.0`"
       ]
     ],
     [
       "documentation/orchestrator.md",
       [
         "workflow's five existing decision gates",
-        "banzai-agent-capabilities/v8",
-        "banzai-agent-status/v6",
+        "banzai-agent-capabilities/v9",
+        "banzai-agent-status/v7",
         "banzai-agent-answer/v2",
         "A v1 answer cannot answer a consultation.",
         "New runs start at schema version 10",
@@ -2748,7 +2725,7 @@ async function validateDecisionConsultationPolicy(root) {
         "the five existing decision gates",
         "five existing workflow gates",
         "phase-result schema v4 and state schema v10 with explicit historical readers",
-        "control contract version `8.0.0`",
+        "control contract version `9.0.0`",
         "phase-result v4 is current",
         "phase-result v1/v2/v3 remain byte-preserved legacy reader surfaces"
       ]
@@ -2833,8 +2810,8 @@ async function validateDecisionConsultationPolicy(root) {
       "packages/orchestrator/scripts/smoke-committed.mjs",
       [
         "setupConsultationRun",
-        "banzai-agent-capabilities/v8",
-        "banzai-agent-status/v6",
+        "banzai-agent-capabilities/v9",
+        "banzai-agent-status/v7",
         "answer_consultation",
         "banzai-agent-answer/v2",
         "consultation lifecycle events are not count-only",
@@ -2844,8 +2821,8 @@ async function validateDecisionConsultationPolicy(root) {
     [
       "packages/orchestrator/test/committed-smoke.test.ts",
       [
-        "banzai-agent-capabilities/v8",
-        "banzai-agent-status/v6",
+        "banzai-agent-capabilities/v9",
+        "banzai-agent-status/v7",
         "control answer --by Smoke User --no-resume",
         "decision.consultation.answered"
       ]
@@ -2903,7 +2880,7 @@ async function validateOrchestrateSkill(root) {
         "BANZAI_WORKFLOW_DIGEST",
         "banzai control capabilities",
         "banzai control status",
-        "exact supported v8 declaration",
+        "exact supported v9 declaration",
         "banzai-agent-request/v1",
         "banzai-agent-answer/v2",
         "banzai-agent-answer/v1",
@@ -2931,14 +2908,14 @@ async function validateOrchestrateSkill(root) {
     [
       "plugins/banzai/skills/orchestrate/references/control-protocol.md",
       [
-        "banzai-agent-capabilities/v8",
-        "banzai-agent-status/v6",
+        "banzai-agent-capabilities/v9",
+        "banzai-agent-status/v7",
         "banzai-agent-gate-decision/v1",
         "banzai-agent-answer/v4",
         "answer_planning_review_triage",
         "raw UTF-8 JSON",
         "CONTROL_INPUT_TOO_LARGE",
-        'controlContractVersion: "8.0.0"',
+        'controlContractVersion: "9.0.0"',
         "banzai-agent-request/v1",
         "banzai-agent-answer/v2",
         "banzai-agent-answer/v1",
@@ -2963,6 +2940,55 @@ async function validateOrchestrateSkill(root) {
       if (!contents.includes(fragment)) {
         fail(
           "ORCHESTRATE_SKILL_POLICY_DRIFT",
+          relativePath,
+          `missing required policy fragment: ${fragment}`
+        );
+      }
+    }
+  }
+}
+
+// ADR-0061: the initiative skill is entered only by explicit invocation and
+// keeps its authority limits; the template routes to it by name.
+async function validateInitiativeSkill(root) {
+  const requiredFragments = new Map([
+    [
+      "plugins/banzai/skills/initiative/SKILL.md",
+      [
+        "name: initiative",
+        "user-invocable: true",
+        "disable-model-invocation: true",
+        "only when the user invokes this skill explicitly by name",
+        "never select it from prompt wording alone",
+        "documentation/initiatives/<slug>/",
+        "Initiative documents grant no approval.",
+        "Never fetch, stage, commit or push.",
+        "Never invoke `orchestrate` or the `banzai` CLI",
+        "`next` writes nothing.",
+        "the only write allowed is a re-freeze",
+        "`gate` refuses to overwrite an existing report",
+        "Never edit `brief.md` after `start`."
+      ]
+    ],
+    [
+      "plugins/banzai/skills/initiative/agents/openai.yaml",
+      [
+        'display_name: "Banzai Initiative"',
+        'default_prompt: "Use $banzai:initiative',
+        "allow_implicit_invocation: false"
+      ]
+    ],
+    [
+      "plugins/banzai/AGENTS.md",
+      ["Multi-package initiative -> `initiative`", "are not decision gates"]
+    ]
+  ]);
+  for (const [relativePath, fragments] of requiredFragments) {
+    const contents = flatText(await readText(root, relativePath));
+    for (const fragment of fragments) {
+      if (!contents.includes(fragment)) {
+        fail(
+          "INITIATIVE_SKILL_POLICY_DRIFT",
           relativePath,
           `missing required policy fragment: ${fragment}`
         );
@@ -3059,6 +3085,7 @@ async function validateRepository(root) {
   await validateEngineeringQualityPolicy(root);
   await validateDecisionConsultationPolicy(root);
   await validateOrchestrateSkill(root);
+  await validateInitiativeSkill(root);
   try {
     await validateGuidanceExtraction(root);
   } catch {

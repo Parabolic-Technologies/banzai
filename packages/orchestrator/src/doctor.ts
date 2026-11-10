@@ -4,20 +4,34 @@ import { access, lstat, readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import {
+  MINIMUM_CLAUDE_VERSION,
+  describeRoles,
+  meetsClaudeMinimum,
   resolveClaudeInvocationScope,
   vendorFor,
+  vendorUsage,
   FALLBACK_VENDOR,
   MODEL_ROLES,
+  type ModelRole,
   type ResolvedClaudeInvocationScope
 } from "./adapters.js";
 import {
   claudePermissionRemediation,
   inspectClaudePermissions,
+  inspectClaudeUserPluginScope,
   inspectConfiguredClaudePermissions,
   type ClaudePermissionAudit,
   type ClaudePermissionInput
 } from "./claude-permissions.js";
 import { CONFIG_FILE } from "./config.js";
+import {
+  LOCAL_CONFIG_FILE,
+  MODEL_IDENTIFIER_PATTERN,
+  createLocalConfigVisibility,
+  mergeModelLayer,
+  readLocalModelLayer,
+  type LocalConfigGitProbe
+} from "./local-config.js";
 import {
   adoptionDiagnostic,
   inspectProjectAdoption
@@ -33,6 +47,12 @@ import {
 import { CONTRACT_VERSION } from "./types.js";
 import type {
   ClaudeEnvironmentSettings,
+  LocalConfigDefect,
+  LocalModelLayer,
+  LocalModelLayerStatus,
+  ModelSettings,
+  ModelSource,
+  ModelSources,
   OrchestratorConfig,
   RunStatus,
   VerificationProjectType
@@ -88,14 +108,38 @@ export interface DoctorSummary {
   skipped: number;
 }
 
+/**
+ * One role of the effective configuration (ADR-0060 §6, §8). Only the vendor,
+ * an identifier-shaped model, the effort and the source are disclosed; the
+ * executable path, timeouts and every other value stay undisclosed.
+ */
+export interface DoctorModel {
+  role: "planner" | "implementer" | "reviewer";
+  /** `null` for an executable that is neither `claude` nor `codex`. */
+  vendor: "claude" | "codex" | null;
+  /** `null` unless the identifier matches `MODEL_IDENTIFIER_PATTERN`. */
+  model: string | null;
+  effort: ModelSettings["effort"];
+  source: ModelSource;
+}
+
 export interface DoctorReport {
-  schema: "banzai-doctor/v5";
-  schemaVersion: 5;
+  schema: "banzai-doctor/v6";
+  schemaVersion: 6;
   ready: boolean;
   projectTypes: VerificationProjectType[];
+  /** Empty while the effective configuration is unavailable. */
+  models: DoctorModel[];
   summary: DoctorSummary;
   checks: DoctorCheck[];
 }
+
+/**
+ * The two read-only Git queries doctor may run for the local model file
+ * (ADR-0060 §8): `git ls-files --error-unmatch --` and
+ * `git check-ignore -q --`, at the repository root with `LC_ALL=C`.
+ */
+export type DoctorLocalConfigGitProbe = LocalConfigGitProbe;
 
 export interface DoctorDependencies {
   executableAvailable(
@@ -110,6 +154,27 @@ export interface DoctorDependencies {
   inspectClaudePermissions?(
     input: ClaudePermissionInput
   ): Promise<ClaudePermissionAudit>;
+  /**
+   * Where Claude's user settings are found (`HOME`, `CLAUDE_CONFIG_DIR`).
+   * Defaults to this process's environment; tests point it at a temporary home.
+   */
+  claudeSettingsEnvironment?: NodeJS.ProcessEnv;
+  /**
+   * Injected by the composition root, because doctor itself never imports the
+   * Git module. Asked only when `.banzai/config.local.json` exists. Without
+   * it, an existing local file fails `config.local` as if Git could not run.
+   */
+  localConfigGitState?: DoctorLocalConfigGitProbe;
+  /**
+   * The installed Claude Code version, read from the file system only
+   * (ADR-0008, ADR-0059 §2), or `null` when no known layout yields one.
+   * Defaults to `readInstalledClaudeVersion`.
+   */
+  installedClaudeVersion?(
+    command: string,
+    cwd: string,
+    env: NodeJS.ProcessEnv
+  ): Promise<string | null>;
 }
 
 const RUN_STATUSES = new Set<RunStatus>([
@@ -173,6 +238,84 @@ async function executableAvailable(
   return false;
 }
 
+const VERSION_SHAPE = /^\d+\.\d+\.\d+$/u;
+/** The npm wrapper package, or the platform package that carries the binary. */
+const CLAUDE_PACKAGE_NAME =
+  /^@anthropic-ai\/claude-code(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?$/u;
+const PACKAGE_MANIFEST_LIMIT = 1024 * 1024;
+
+/**
+ * The native installer names each installed file by its version, as in
+ * `~/.local/share/claude/versions/2.1.319`.
+ */
+function nativeInstallerVersion(resolved: string): string | null {
+  const name = path.basename(resolved);
+  return path.basename(path.dirname(resolved)) === "versions" &&
+    VERSION_SHAPE.test(name)
+    ? name
+    : null;
+}
+
+/**
+ * npm installs the binary inside its package (the wrapper's `bin/claude.exe`,
+ * or the platform package). The walk stops at the first `package.json` above
+ * the file, whatever it names, so an unrelated manifest is never skipped past.
+ */
+async function npmPackageVersion(resolved: string): Promise<string | null> {
+  let directory = path.dirname(resolved);
+  for (;;) {
+    const manifest = path.join(directory, "package.json");
+    let found = false;
+    try {
+      const metadata = await stat(manifest);
+      found = true;
+      if (!metadata.isFile() || metadata.size > PACKAGE_MANIFEST_LIMIT) {
+        return null;
+      }
+      const parsed = JSON.parse(await readFile(manifest, "utf8")) as unknown;
+      return isRecord(parsed) &&
+        typeof parsed.name === "string" &&
+        CLAUDE_PACKAGE_NAME.test(parsed.name) &&
+        typeof parsed.version === "string" &&
+        VERSION_SHAPE.test(parsed.version)
+        ? parsed.version
+        : null;
+    } catch {
+      if (found) return null;
+    }
+    const parent = path.dirname(directory);
+    if (parent === directory) return null;
+    directory = parent;
+  }
+}
+
+/**
+ * Reads the installed Claude Code version without running it (ADR-0008): the
+ * first executable `PATH` candidate, as `executableAvailable` finds it, is
+ * resolved through its links and matched against the native and npm layouts.
+ * Returns `null` when neither yields a version-shaped value.
+ */
+export async function readInstalledClaudeVersion(
+  command: string,
+  cwd: string,
+  env: NodeJS.ProcessEnv
+): Promise<string | null> {
+  for (const candidate of executableCandidates(command, cwd, env)) {
+    let resolved: string;
+    try {
+      await access(candidate, constants.X_OK);
+      if (!(await stat(candidate)).isFile()) continue;
+      resolved = await realpath(candidate);
+    } catch {
+      continue;
+    }
+    return (
+      nativeInstallerVersion(resolved) ?? (await npmPackageVersion(resolved))
+    );
+  }
+  return null;
+}
+
 function processAlive(pid: number): "live" | "stale" {
   try {
     process.kill(pid, 0);
@@ -186,6 +329,13 @@ const DEFAULT_DEPENDENCIES: DoctorDependencies = {
   executableAvailable,
   processAlive
 };
+
+/** The default doctor dependencies with `overrides` in their place. */
+export function doctorDependencies(
+  overrides: Partial<DoctorDependencies> = {}
+): DoctorDependencies {
+  return { ...DEFAULT_DEPENDENCIES, ...overrides };
+}
 
 function check(
   id: string,
@@ -316,6 +466,264 @@ function configVersionCheck(document: unknown): DoctorCheck {
   );
 }
 
+const LOCAL_CONFIG_DOCUMENTATION =
+  "documentation/orchestrator.md#model-configuration";
+const LOCAL_CONFIG_CORRECTION: DoctorFix = {
+  action: `Correct ${LOCAL_CONFIG_FILE}, or delete it to use the shared models in ${CONFIG_FILE}.`,
+  documentation: LOCAL_CONFIG_DOCUMENTATION
+};
+
+/**
+ * The field paths of the local file's own schema. Doctor names a defect's
+ * field path only from this fixed set, so no key chosen by the file's author
+ * reaches the report (ADR-0060 §6, §8).
+ */
+const SCHEMA_FIELD_PATHS: ReadonlySet<string> = new Set([
+  "schemaVersion",
+  "models",
+  ...MODEL_ROLES.flatMap((role) => [
+    `models.${role}`,
+    `models.${role}.executable`,
+    `models.${role}.model`,
+    `models.${role}.effort`
+  ])
+]);
+
+/** Where a refused key sits, named only through the schema's own paths. */
+function refusedKeyLocation(fieldPath: string): string {
+  const unsupported = "an unsupported key in ";
+  let parent: string;
+  if (fieldPath.startsWith(unsupported)) {
+    parent = fieldPath.slice(unsupported.length);
+  } else if (fieldPath.includes(".")) {
+    parent = fieldPath.slice(0, fieldPath.lastIndexOf("."));
+  } else {
+    return "at the top level";
+  }
+  return SCHEMA_FIELD_PATHS.has(parent) ? `in ${parent}` : "in the file";
+}
+
+function localConfigFailure(message: string, fix: DoctorFix): DoctorCheck {
+  return check("config.local", "config", "fail", message, [fix]);
+}
+
+/** The fixed `config.local` text for each cause of a refused local file. */
+function localConfigDefectCheck(defect: LocalConfigDefect): DoctorCheck {
+  switch (defect.cause) {
+    case "tracked":
+      return localConfigFailure(
+        `${LOCAL_CONFIG_FILE} is in the Git index, so it is shared through Git and may hold someone else's model choice.`,
+        {
+          action: `Run \`git rm --cached ${LOCAL_CONFIG_FILE}\`, review the local copy, and commit the removal.`,
+          documentation: LOCAL_CONFIG_DOCUMENTATION
+        }
+      );
+    case "not_ignored":
+      return localConfigFailure(
+        `${LOCAL_CONFIG_FILE} is not ignored by Git, so it could be committed and shared.`,
+        {
+          action: `Run \`banzai model --local\`, which ignores the file for this clone, or add the line ${LOCAL_CONFIG_FILE} to .gitignore and commit it.`,
+          documentation: LOCAL_CONFIG_DOCUMENTATION
+        }
+      );
+    case "unsafe":
+      return localConfigFailure(
+        `${LOCAL_CONFIG_FILE} is unsafe to read: it or .banzai/ is a symbolic link, or it is not a regular file.`,
+        {
+          action: `Make .banzai/ a directory and ${LOCAL_CONFIG_FILE} a regular file, or delete the local file to use the shared models in ${CONFIG_FILE}.`,
+          documentation: LOCAL_CONFIG_DOCUMENTATION
+        }
+      );
+    case "unreadable":
+      return localConfigFailure(
+        `${LOCAL_CONFIG_FILE} cannot be read.`,
+        LOCAL_CONFIG_CORRECTION
+      );
+    case "refused_key":
+      return localConfigFailure(
+        `${LOCAL_CONFIG_FILE} sets a key that is not allowed ${refusedKeyLocation(defect.fieldPath)}; it may set only schemaVersion and models, with executable, model and effort for planner, implementer and reviewer.`,
+        LOCAL_CONFIG_CORRECTION
+      );
+    case "invalid":
+      return localConfigFailure(
+        invalidLocalConfigMessage(defect.fieldPath),
+        LOCAL_CONFIG_CORRECTION
+      );
+  }
+}
+
+function invalidLocalConfigMessage(fieldPath: string): string {
+  if (fieldPath === LOCAL_CONFIG_FILE) {
+    return `${LOCAL_CONFIG_FILE} is not a local model file: it is larger than 64 KiB, not UTF-8 text, not JSON or not a JSON object.`;
+  }
+  return SCHEMA_FIELD_PATHS.has(fieldPath)
+    ? `${LOCAL_CONFIG_FILE} has a missing or invalid value at ${fieldPath}.`
+    : `${LOCAL_CONFIG_FILE} has a missing or invalid value.`;
+}
+
+/** A failure of one of the two Git queries, never a statement about the file. */
+class LocalConfigGitUnavailable extends Error {
+  constructor() {
+    super("Git could not answer for the local model file.");
+    this.name = "LocalConfigGitUnavailable";
+  }
+}
+
+/**
+ * Wraps the injected probe so any Git failure, or a missing probe, surfaces as
+ * one marker that `config.local` reports with fixed text.
+ */
+function doctorGitProbe(
+  probe: DoctorLocalConfigGitProbe | undefined
+): LocalConfigGitProbe {
+  const ask = async (
+    query: (target: DoctorLocalConfigGitProbe) => Promise<boolean>
+  ): Promise<boolean> => {
+    if (probe === undefined) throw new LocalConfigGitUnavailable();
+    try {
+      return await query(probe);
+    } catch {
+      throw new LocalConfigGitUnavailable();
+    }
+  };
+  return {
+    isPathInIndex: async (repoRoot, relativePath) =>
+      await ask(async (target) => target.isPathInIndex(repoRoot, relativePath)),
+    isPathIgnored: async (repoRoot, relativePath) =>
+      await ask(async (target) => target.isPathIgnored(repoRoot, relativePath))
+  };
+}
+
+interface LocalConfigInspection {
+  check: DoctorCheck;
+  /** The usable local layer (`{}` when absent); null while `config.local` fails. */
+  layer: LocalModelLayer | null;
+}
+
+/**
+ * The `config.local` check (ADR-0060 §6). The layered reader decides presence
+ * by `lstat`, so Git is asked only about an existing file, and in the order
+ * index, then ignore state, then the contained read and validation.
+ */
+async function localConfigCheck(
+  repoRoot: string,
+  dependencies: DoctorDependencies
+): Promise<LocalConfigInspection> {
+  let status: LocalModelLayerStatus;
+  try {
+    status = await readLocalModelLayer(repoRoot, {
+      visibility: createLocalConfigVisibility(
+        doctorGitProbe(dependencies.localConfigGitState)
+      )
+    });
+  } catch (error) {
+    return {
+      check:
+        error instanceof LocalConfigGitUnavailable
+          ? localConfigFailure(
+              `Git could not report whether ${LOCAL_CONFIG_FILE} is in the Git index or ignored, so the local model file was not used.`,
+              {
+                action:
+                  "Make sure git runs in this checkout, then run banzai doctor again.",
+                documentation: LOCAL_CONFIG_DOCUMENTATION
+              }
+            )
+          : localConfigFailure(
+              `${LOCAL_CONFIG_FILE} cannot be read.`,
+              LOCAL_CONFIG_CORRECTION
+            ),
+      layer: null
+    };
+  }
+  if (status.state === "defective") {
+    return { check: localConfigDefectCheck(status.defect), layer: null };
+  }
+  if (status.state === "absent") {
+    return {
+      check: check(
+        "config.local",
+        "config",
+        "pass",
+        `No local model file is present; every role uses the shared models in ${CONFIG_FILE}.`
+      ),
+      layer: {}
+    };
+  }
+  return {
+    check: check(
+      "config.local",
+      "config",
+      "pass",
+      `${LOCAL_CONFIG_FILE} is valid, ignored by Git and not in the Git index; the roles it sets replace the shared ones.`
+    ),
+    layer: status.models
+  };
+}
+
+/**
+ * The disclosed per-role models of the effective configuration (ADR-0060 §8),
+ * in planner, implementer, reviewer order.
+ */
+function doctorModels(
+  config: OrchestratorConfig,
+  sources: ModelSources
+): DoctorModel[] {
+  return MODEL_ROLES.map((role) => {
+    const settings = config.models[role];
+    return {
+      role,
+      vendor: vendorFor(settings.executable),
+      model: MODEL_IDENTIFIER_PATTERN.test(settings.model)
+        ? settings.model
+        : null,
+      effort: settings.effort,
+      source: sources[role]
+    };
+  });
+}
+
+/** Why a role check that reads the effective configuration did not run. */
+const LOCAL_CONFIG_SKIP = "while the local model file fails config.local";
+
+/** What the role checks and the `models` field read (ADR-0060 §2, §6). */
+interface RoleConfiguration {
+  /** The effective configuration; null without a valid committed one. */
+  config: OrchestratorConfig | null;
+  /** `config.local` failed, so the role checks are skipped. */
+  localFailed: boolean;
+  models: DoctorModel[];
+  executables: string[] | null;
+  executablesSkipped: string | undefined;
+}
+
+function roleConfiguration(
+  committed: OrchestratorConfig | null,
+  layer: LocalModelLayer | null
+): RoleConfiguration {
+  if (committed === null || layer === null) {
+    return {
+      config: committed,
+      localFailed: layer === null,
+      models: [],
+      executables: null,
+      executablesSkipped:
+        committed === null
+          ? undefined
+          : `Model executable availability is skipped ${LOCAL_CONFIG_SKIP}.`
+    };
+  }
+  const effective = mergeModelLayer(committed, layer);
+  return {
+    config: effective.config,
+    localFailed: false,
+    models: doctorModels(effective.config, effective.sources),
+    executables: MODEL_ROLES.map(
+      (role) => effective.config.models[role].executable
+    ),
+    executablesSkipped: undefined
+  };
+}
+
 async function claudeEnvironmentCheck(
   config: OrchestratorConfig | null,
   dependencies: DoctorDependencies
@@ -365,6 +773,7 @@ async function claudeEnvironmentCheck(
 
 async function claudeInstructionsCheck(
   config: OrchestratorConfig | null,
+  localFailed: boolean,
   dependencies: DoctorDependencies
 ): Promise<DoctorCheck> {
   if (config === null)
@@ -373,6 +782,13 @@ async function claudeInstructionsCheck(
       "config",
       "skipped",
       "Instruction comparison is skipped without a valid configuration."
+    );
+  if (localFailed)
+    return check(
+      "claude.instructions",
+      "config",
+      "skipped",
+      `Instruction comparison is skipped ${LOCAL_CONFIG_SKIP}.`
     );
   let directory: string | null;
   try {
@@ -440,6 +856,7 @@ async function claudeInstructionsCheck(
 async function claudePermissionsCheck(
   repoRoot: string,
   config: OrchestratorConfig | null,
+  localFailed: boolean,
   dependencies: DoctorDependencies
 ): Promise<DoctorCheck> {
   if (config === null) {
@@ -448,6 +865,14 @@ async function claudePermissionsCheck(
       "config",
       "skipped",
       "Claude permission inspection requires a valid configuration."
+    );
+  }
+  if (localFailed) {
+    return check(
+      "claude.permissions",
+      "config",
+      "skipped",
+      `Claude permission inspection is skipped ${LOCAL_CONFIG_SKIP}.`
     );
   }
   const permissions = await inspectConfiguredClaudePermissions(
@@ -519,19 +944,56 @@ async function claudePermissionsCheck(
   );
 }
 
+/**
+ * Advisory only: a user-scope install loads Banzai's skill descriptions into
+ * every Claude session in every repository. Readiness never depends on it.
+ */
+async function claudePluginScopeCheck(
+  dependencies: DoctorDependencies
+): Promise<DoctorCheck> {
+  const scope = await inspectClaudeUserPluginScope(
+    dependencies.claudeSettingsEnvironment ?? process.env
+  );
+  if (scope.state === "unreadable") {
+    return check(
+      "claude.plugin-scope",
+      "config",
+      "skipped",
+      `Claude user settings at ${scope.path} are unreadable or not a JSON object, so the plugin scope was not inspected.`
+    );
+  }
+  if (scope.state === "not_enabled") {
+    return check(
+      "claude.plugin-scope",
+      "config",
+      "pass",
+      "Banzai is not enabled in Claude user settings."
+    );
+  }
+  return check(
+    "claude.plugin-scope",
+    "config",
+    "warning",
+    `Claude user settings at ${scope.path} enable ${scope.keys.join(", ")}, so Banzai skill descriptions load in every repository.`,
+    [
+      {
+        action:
+          "Install Banzai for this repository instead: run `claude plugin uninstall banzai@banzai-plugins --scope user`, then `claude plugin install banzai@banzai-plugins --scope local`, or `--scope project` to share it with your team.",
+        documentation: "documentation/getting-started.md#claude-code-plugin"
+      }
+    ]
+  );
+}
+
 async function configuredExecutableCheck(
   id: "executables.models" | "executables.verification",
   commands: readonly string[] | null,
   repoRoot: string,
-  dependencies: DoctorDependencies
+  dependencies: DoctorDependencies,
+  skipped = "Executable availability requires a valid configuration."
 ): Promise<DoctorCheck> {
   if (commands === null) {
-    return check(
-      id,
-      "executables",
-      "skipped",
-      "Executable availability requires a valid configuration."
-    );
+    return check(id, "executables", "skipped", skipped);
   }
   const uniqueCommands = [...new Set(commands)];
   let missing = 0;
@@ -567,6 +1029,118 @@ async function configuredExecutableCheck(
     "executables",
     "pass",
     `All ${uniqueCommands.length} configured ${subject} executables are available.`
+  );
+}
+
+const CLAUDE_VERSION_FIXES: DoctorFix[] = [
+  {
+    action: `Update Claude Code to ${MINIMUM_CLAUDE_VERSION} or newer, or choose other models with \`banzai model\`.`,
+    documentation:
+      "documentation/getting-started.md#install-and-sign-in-to-model-clients"
+  }
+];
+
+/**
+ * The one Claude Code minimum (ADR-0063 §1, §5), read offline for every role
+ * that runs on Claude. Each distinct executable is read once; an unavailable
+ * one is left to `executables.models`. Run start still refuses an older client
+ * whatever this reports.
+ */
+async function claudeVersionCheck(
+  roles: RoleConfiguration,
+  repoRoot: string,
+  dependencies: DoctorDependencies
+): Promise<DoctorCheck> {
+  const id = "claude.version";
+  if (roles.config === null) {
+    return check(
+      id,
+      "executables",
+      "skipped",
+      "The Claude Code version check requires a valid configuration."
+    );
+  }
+  if (roles.localFailed) {
+    return check(
+      id,
+      "executables",
+      "skipped",
+      `The Claude Code version check is skipped ${LOCAL_CONFIG_SKIP}.`
+    );
+  }
+  const claude = vendorUsage(roles.config).filter(
+    (usage) => usage.vendor === "claude"
+  );
+  if (claude.length === 0) {
+    return check(
+      id,
+      "executables",
+      "skipped",
+      "No role runs on Claude Code, so its minimum does not apply."
+    );
+  }
+  const environment = { PATH: process.env.PATH };
+  const read: { version: string | null; roles: string }[] = [];
+  const unavailable: ModelRole[] = [];
+  for (const usage of claude) {
+    if (
+      !(await dependencies.executableAvailable(
+        usage.executable,
+        repoRoot,
+        environment
+      ))
+    ) {
+      unavailable.push(...usage.roles);
+      continue;
+    }
+    read.push({
+      version: await (
+        dependencies.installedClaudeVersion ?? readInstalledClaudeVersion
+      )(usage.executable, repoRoot, environment),
+      roles: describeRoles(usage.roles)
+    });
+  }
+  if (read.length === 0) {
+    return check(
+      id,
+      "executables",
+      "skipped",
+      "No configured Claude Code executable is available, so no version was read."
+    );
+  }
+  const notChecked =
+    unavailable.length === 0
+      ? ""
+      : ` Not checked, because its executable is unavailable: ${describeRoles(unavailable)}.`;
+  const describe = (entry: { version: string | null; roles: string }) =>
+    `${entry.version} (${entry.roles})`;
+  const old = read.filter(
+    (entry) => entry.version !== null && !meetsClaudeMinimum(entry.version)
+  );
+  if (old.length > 0) {
+    return check(
+      id,
+      "executables",
+      "fail",
+      `Claude Code is older than the minimum ${MINIMUM_CLAUDE_VERSION}: ${old.map(describe).join("; ")}.${notChecked}`,
+      CLAUDE_VERSION_FIXES
+    );
+  }
+  const unknown = read.filter((entry) => entry.version === null);
+  if (unknown.length > 0) {
+    return check(
+      id,
+      "executables",
+      "warning",
+      `The installed Claude Code version could not be read offline for ${unknown.map((entry) => entry.roles).join("; ")}. Run start refuses Claude Code older than ${MINIMUM_CLAUDE_VERSION}.${notChecked}`,
+      CLAUDE_VERSION_FIXES
+    );
+  }
+  return check(
+    id,
+    "executables",
+    "pass",
+    `Claude Code meets the minimum ${MINIMUM_CLAUDE_VERSION}: ${read.map(describe).join("; ")}.${notChecked}`
   );
 }
 
@@ -653,7 +1227,9 @@ async function activeRunCheck(repoRoot: string): Promise<DoctorCheck> {
   }
   if (
     !isRecord(state) ||
-    ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(state.schemaVersion as number) ||
+    ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(
+      state.schemaVersion as number
+    ) ||
     typeof state.runId !== "string" ||
     typeof state.repoRoot !== "string" ||
     typeof state.status !== "string" ||
@@ -674,7 +1250,8 @@ async function activeRunCheck(repoRoot: string): Promise<DoctorCheck> {
     state.schemaVersion === 7 ||
     state.schemaVersion === 8 ||
     state.schemaVersion === 9 ||
-    state.schemaVersion === 10
+    state.schemaVersion === 10 ||
+    state.schemaVersion === 11
   ) {
     try {
       validateConfigurationStateEnvelope(state);
@@ -950,9 +1527,25 @@ export async function inspectDoctor(
     );
   }
   checks.push(configVersionCheck(configDocument));
+  const local = await localConfigCheck(repoRoot, dependencies);
+  checks.push(local.check);
+  // ADR-0060 §2, §6: role checks read the effective configuration; the
+  // environment and verification checks keep the committed values, which the
+  // local file cannot change.
+  const roles = roleConfiguration(config, local.layer);
   checks.push(await claudeEnvironmentCheck(config, dependencies));
-  checks.push(await claudeInstructionsCheck(config, dependencies));
-  checks.push(await claudePermissionsCheck(repoRoot, config, dependencies));
+  checks.push(
+    await claudeInstructionsCheck(roles.config, roles.localFailed, dependencies)
+  );
+  checks.push(
+    await claudePermissionsCheck(
+      repoRoot,
+      roles.config,
+      roles.localFailed,
+      dependencies
+    )
+  );
+  checks.push(await claudePluginScopeCheck(dependencies));
 
   let projectTypes: VerificationProjectType[] = [];
   try {
@@ -998,16 +1591,12 @@ export async function inspectDoctor(
   checks.push(
     await configuredExecutableCheck(
       "executables.models",
-      config === null
-        ? null
-        : [
-            config.models.planner.executable,
-            config.models.implementer.executable,
-            config.models.reviewer.executable
-          ],
+      roles.executables,
       repoRoot,
-      dependencies
+      dependencies,
+      roles.executablesSkipped
     ),
+    await claudeVersionCheck(roles, repoRoot, dependencies),
     await configuredExecutableCheck(
       "executables.verification",
       config === null
@@ -1022,7 +1611,7 @@ export async function inspectDoctor(
       "authentication.models",
       "executables",
       "warning",
-      "Model authentication readiness and vendor CLI versions were not checked. Doctor is offline and executable availability is not authentication proof; startup preflight remains authoritative. Run Banzai from a regular terminal, restore vendor login, or use the vendor-supported setup-token flow when unattended authentication is required."
+      "Model authentication readiness was not checked, and doctor checks no vendor CLI version except Claude Code's, which it reads offline. Doctor is offline and executable availability is not authentication proof; startup preflight remains authoritative. Run Banzai from a regular terminal, restore vendor login, or use the vendor-supported setup-token flow when unattended authentication is required."
     ),
     await activeRunCheck(repoRoot),
     await runnerLockCheck(repoRoot, dependencies)
@@ -1030,10 +1619,11 @@ export async function inspectDoctor(
 
   const reportSummary = summary(checks);
   return {
-    schema: "banzai-doctor/v5",
-    schemaVersion: 5,
+    schema: "banzai-doctor/v6",
+    schemaVersion: 6,
     ready: reportSummary.failed === 0,
     projectTypes,
+    models: roles.models,
     summary: reportSummary,
     checks
   };

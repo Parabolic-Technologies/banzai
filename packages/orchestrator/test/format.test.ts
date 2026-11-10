@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  escapeTerminalField,
+  escapeTerminalText,
   formatTokenCount,
   formatUsage,
   hangingLines,
@@ -172,4 +174,24 @@ test("the turn count gives a cumulative input total its denominator", () => {
   // A non-reporting vendor omits the part rather than rendering a zero.
   assert.equal(formatUsage(100, 0, 10, 0), "100 in · 10 out");
   assert.equal(formatUsage(100, 0, 10, Number.NaN), "100 in · 10 out");
+});
+
+test("a configuration field is escaped so it stays on one inert line", () => {
+  // ADR-0060: model values come from a developer's local file and are printed
+  // inside status, header, doctor and progress lines.
+  const hostile =
+    "gpt\t5\nnext\u001b[2Jclear\u0085c1\u202eltr\u2066iso\u0000nul\u007fdel";
+  const escaped = escapeTerminalField(hostile);
+  assert.equal(
+    escaped,
+    "gpt\\u00095\\u000anext\\u001b[2Jclear\\u0085c1\\u202eltr\\u2066iso\\u0000nul\\u007fdel"
+  );
+  assert.doesNotMatch(
+    escaped,
+    /[\x00-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u
+  );
+  assert.equal(escapeTerminalField(escaped), escaped);
+  assert.equal(escapeTerminalField("claude-opus-5[1m]"), "claude-opus-5[1m]");
+  // Multi-line text keeps its line breaks and tabs; only a field loses them.
+  assert.equal(escapeTerminalText("a\tb\nc"), "a\tb\nc");
 });

@@ -209,6 +209,73 @@ function requireIdentity(value, schema, schemaVersion, label) {
   }
 }
 
+// ADR-0060: init ignores the per-developer model file with this exact line,
+// and doctor discloses a committed model only when it matches the pattern.
+const LOCAL_MODEL_IGNORE_LINE = ".banzai/config.local.json";
+const MODEL_ROLES = ["planner", "implementer", "reviewer"];
+const MODEL_IDENTIFIER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]{0,127}$/u;
+
+async function requireLocalModelIgnoreLine(root) {
+  let gitignore;
+  try {
+    gitignore = await readFile(path.join(root, ".gitignore"), "utf8");
+  } catch {
+    fail("SMOKE_IGNORE_MISMATCH", "init did not create .gitignore");
+  }
+  const matches = gitignore
+    .split(/\r?\n/u)
+    .filter((line) => line === LOCAL_MODEL_IGNORE_LINE);
+  if (matches.length !== 1) {
+    fail(
+      "SMOKE_IGNORE_MISMATCH",
+      "init did not add the local model file ignore line exactly once"
+    );
+  }
+}
+
+// The smoke configuration runs every role on the Node executable, which
+// belongs to neither vendor, and has no local model file.
+function expectedDoctorModels(config) {
+  return MODEL_ROLES.map((role) => {
+    const settings = config.models[role];
+    return {
+      role,
+      vendor: null,
+      model:
+        typeof settings.model === "string" &&
+        MODEL_IDENTIFIER_PATTERN.test(settings.model)
+          ? settings.model
+          : null,
+      effort: settings.effort,
+      source: "committed"
+    };
+  });
+}
+
+function requireDoctorModels(doctor, config) {
+  const keys = Object.keys(doctor);
+  const position = keys.indexOf("models");
+  if (
+    position < 1 ||
+    keys[position - 1] !== "projectTypes" ||
+    keys[position + 1] !== "summary"
+  ) {
+    fail(
+      "SMOKE_CONTRACT_MISMATCH",
+      "doctor models do not sit between projectTypes and summary"
+    );
+  }
+  if (
+    JSON.stringify(doctor.models) !==
+    JSON.stringify(expectedDoctorModels(config))
+  ) {
+    fail(
+      "SMOKE_CONTRACT_MISMATCH",
+      "doctor models differ from the committed configuration"
+    );
+  }
+}
+
 async function snapshotTree(root) {
   const entries = [];
   async function visit(directory, prefix) {
@@ -312,6 +379,7 @@ async function setupRepository(root, bundle, expectedVersion) {
     fail("SMOKE_HELP_MISMATCH", "help output is incomplete");
   }
   await runCli(bundle, root, ["init"], "init");
+  await requireLocalModelIgnoreLine(root);
 
   const configPath = path.join(root, ".banzai", "config.json");
   const config = parseJson(await readFile(configPath, "utf8"), "init config");
@@ -574,8 +642,8 @@ async function runSmoke(options) {
     );
     requireIdentity(
       capabilities,
-      "banzai-agent-capabilities/v8",
-      8,
+      "banzai-agent-capabilities/v9",
+      9,
       "agent control capabilities"
     );
     if (capabilities.orchestratorVersion !== expectedVersion) {
@@ -585,7 +653,7 @@ async function runSmoke(options) {
       );
     }
     if (
-      capabilities.controlContractVersion !== "8.0.0" ||
+      capabilities.controlContractVersion !== "9.0.0" ||
       Object.hasOwn(capabilities, "artifactStorage") ||
       capabilities.workDocuments?.directoryPattern !==
         "documentation/work/<slug>/" ||
@@ -593,7 +661,10 @@ async function runSmoke(options) {
         JSON.stringify(["banzai-work-binding/v3"]) ||
       capabilities.workDocuments?.workspaceSnapshotVersion !== 3 ||
       JSON.stringify(capabilities.workDocuments?.verificationRequestSchemas) !==
-        JSON.stringify(["banzai-verification-request/v3"]) ||
+        JSON.stringify([
+          "banzai-verification-request/v4",
+          "banzai-verification-request/v3"
+        ]) ||
       capabilities.operations?.status?.supported !== true ||
       JSON.stringify(capabilities.operations?.decideGate?.inputSchemas) !==
         JSON.stringify(["banzai-agent-gate-decision/v1"]) ||
@@ -648,8 +719,8 @@ async function runSmoke(options) {
     const status = parseJson(statusFirst, "agent control status");
     requireIdentity(
       status,
-      "banzai-agent-status/v6",
-      6,
+      "banzai-agent-status/v7",
+      7,
       "agent control status"
     );
     if (status.activeRun !== null) {
@@ -678,13 +749,20 @@ async function runSmoke(options) {
       "doctor repeat"
     );
     const doctor = parseJson(doctorFirst, "doctor");
-    requireIdentity(doctor, "banzai-doctor/v5", 5, "doctor");
+    requireIdentity(doctor, "banzai-doctor/v6", 6, "doctor");
     if (doctor.ready !== true) {
       fail(
         "SMOKE_DOCTOR_NOT_READY",
         "doctor did not report a ready repository"
       );
     }
+    requireDoctorModels(
+      doctor,
+      parseJson(
+        await readFile(path.join(smokeRoot, ".banzai", "config.json"), "utf8"),
+        "smoke config"
+      )
+    );
     if (doctorFirst !== doctorSecond) {
       fail(
         "SMOKE_NONDETERMINISTIC",
@@ -705,8 +783,8 @@ async function runSmoke(options) {
     );
     requireIdentity(
       consultationStatus,
-      "banzai-agent-status/v6",
-      6,
+      "banzai-agent-status/v7",
+      7,
       "consultation status"
     );
     if (
@@ -752,8 +830,8 @@ async function runSmoke(options) {
     const answered = parseJson(answeredText, "consultation answer");
     requireIdentity(
       answered,
-      "banzai-agent-status/v6",
-      6,
+      "banzai-agent-status/v7",
+      7,
       "consultation answer"
     );
     if (

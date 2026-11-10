@@ -11,14 +11,20 @@ import type {
 
 export const MAX_PLANNING_REVIEW_NUMBER = 1_000_000;
 
+/**
+ * Re-check exists only where a remainder digest does: a strict
+ * task-verification plan (ADR-0058).
+ */
 export function planningGateActions(
   gate: PlanningGate,
   version: number,
-  available: boolean
+  available: boolean,
+  taskVerification = false
 ): string[] {
   const actions =
     gate === "adr_approval" ? ["accept", "reject", "rework"] : ["approve"];
   if (version < 10) return actions;
+  if (gate === "plan_approval" && taskVerification) actions.push("recheck");
   if (gate === "plan_approval") actions.push("rework");
   if (available) actions.push("review");
   return actions;
@@ -169,7 +175,7 @@ export function planningRestoreEligible(
   const record = state.humanDecisions?.at(-1);
   const pending = state.pendingHumanDecision;
   return (
-    state.schemaVersion === 10 &&
+    state.schemaVersion >= 10 &&
     state.status === "needs_human_decision" &&
     episode?.step === "awaiting_triage" &&
     record?.kind === "planning_review_triage" &&

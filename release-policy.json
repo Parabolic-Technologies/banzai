@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "node": {
-    "engines": ">=22.20.0 <23 || >=24.11.1 <25",
+    "engines": ">=22.20.0 <23 || >=24.11.1 <25 || >=26.13.0 <27",
     "buildTarget": "node22",
     "supported": [
       {
@@ -17,15 +17,15 @@
         "image": "node:24.11.1-bookworm",
         "job": "release_check_node_24",
         "required": true
+      },
+      {
+        "major": 26,
+        "version": "26.13.0",
+        "image": "node:26.13.0-bookworm",
+        "job": "release_check_node_26",
+        "required": true
       }
-    ],
-    "forward": {
-      "major": 26,
-      "version": "26.7.0",
-      "image": "node:26.7.0-bookworm",
-      "job": "forward_compatibility_node_26",
-      "required": false
-    }
+    ]
   },
   "plugin": {
     "versionMirrors": [
@@ -64,6 +64,8 @@
       "plugins/banzai/contracts/artifacts/v3/work-binding.schema.json",
       "plugins/banzai/contracts/verification/v3/inspect-request.schema.json",
       "plugins/banzai/contracts/verification/v3/execute-request.schema.json",
+      "plugins/banzai/contracts/verification/v4/inspect-request.schema.json",
+      "plugins/banzai/contracts/verification/v4/execute-request.schema.json",
       "plugins/banzai/contracts/v1/planning-review-result.schema.json",
       "plugins/banzai/contracts/v1/planning-review-analysis.schema.json"
     ],
@@ -76,6 +78,10 @@
       "plugins/banzai/skills/feature-review/SKILL.md",
       "plugins/banzai/skills/feature-status/SKILL.md",
       "plugins/banzai/skills/feature/SKILL.md",
+      "plugins/banzai/skills/initiative/SKILL.md",
+      "plugins/banzai/skills/initiative/agents/openai.yaml",
+      "plugins/banzai/skills/initiative/references/brief-template.md",
+      "plugins/banzai/skills/initiative/references/tracker-template.md",
       "plugins/banzai/skills/orchestrate/SKILL.md",
       "plugins/banzai/skills/orchestrate/references/control-protocol.md",
       "plugins/banzai/skills/project-manifest/SKILL.md",
@@ -136,6 +142,8 @@
       "plugins/banzai/contracts/artifacts/v3/work-binding.schema.json",
       "plugins/banzai/contracts/verification/v3/inspect-request.schema.json",
       "plugins/banzai/contracts/verification/v3/execute-request.schema.json",
+      "plugins/banzai/contracts/verification/v4/inspect-request.schema.json",
+      "plugins/banzai/contracts/verification/v4/execute-request.schema.json",
       "plugins/banzai/contracts/v1/planning-review-result.schema.json",
       "plugins/banzai/contracts/v1/planning-review-analysis.schema.json",
       "plugins/banzai/phases/planning-review.md"
@@ -188,9 +196,9 @@
       ]
     },
     "agentControl": {
-      "contractVersion": "8.0.0",
-      "capabilities": "banzai-agent-capabilities/v8",
-      "status": "banzai-agent-status/v6",
+      "contractVersion": "9.0.0",
+      "capabilities": "banzai-agent-capabilities/v9",
+      "status": "banzai-agent-status/v7",
       "request": "banzai-agent-request/v1",
       "answer": "banzai-agent-answer/v2",
       "legacyAnswer": "banzai-agent-answer/v1",
@@ -251,7 +259,7 @@
     "totalTimeoutMs": 900000,
     "minimumCliVersions": {
       "codex": "0.145.0",
-      "claude": "2.1.218"
+      "claude": "2.1.290"
     },
     "authRootVariables": {
       "codex": "BANZAI_LIVE_CODEX_AUTH_ROOT",

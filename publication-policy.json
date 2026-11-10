@@ -419,6 +419,61 @@
       "sha256": null
     },
     {
+      "path": "documentation/decisions/0057-complete-task-verification-rounds.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0058-human-plan-edits-rechecked-at-the-plan-gate.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0059-claude-default-reviewer-and-reviewer-isolation.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0060-local-model-override.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0061-initiative-skill-and-documents.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0062-claude-memory-notes-in-the-manual-hook-gate.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0063-stable-headless-vendor-invocations.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0064-runner-recorded-plan-remainder-digest.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0065-continuable-planner-declared-planning-blocks.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0066-date-prefixed-work-and-initiative-slugs.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0067-node-26-supported-release-lane.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
       "path": "documentation/decisions/README.md",
       "classification": "maintainer",
       "sha256": null
@@ -879,6 +934,16 @@
       "sha256": null
     },
     {
+      "path": "plugins/banzai/contracts/verification/v4/execute-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/contracts/verification/v4/inspect-request.schema.json",
+      "classification": "product",
+      "sha256": null
+    },
+    {
       "path": "plugins/banzai/documentation/README.md",
       "classification": "product",
       "sha256": null
@@ -1170,6 +1235,26 @@
     },
     {
       "path": "plugins/banzai/skills/feature/SKILL.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/skills/initiative/SKILL.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/skills/initiative/agents/openai.yaml",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/skills/initiative/references/brief-template.md",
+      "classification": "product",
+      "sha256": null
+    },
+    {
+      "path": "plugins/banzai/skills/initiative/references/tracker-template.md",
       "classification": "product",
       "sha256": null
     },

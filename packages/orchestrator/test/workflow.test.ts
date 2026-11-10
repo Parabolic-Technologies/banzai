@@ -22,7 +22,9 @@ import {
   CONTRACT_VERSION,
   PLAN_TASK_COMPLETION_SCHEMA_VERSION,
   type AdapterResult,
+  type OrchestratorConfig,
   type PhaseAdapterRequest,
+  type VendorPreflightTarget,
   type PhaseResult,
   type ProcessRunner,
   type ProgressEvent
@@ -49,7 +51,8 @@ import {
   createTestRepository,
   commitAll,
   monochromeEnv,
-  snapshotTree
+  snapshotTree,
+  withVendorExecutablesOnPath
 } from "./helpers.js";
 import {
   assertTrace,
@@ -451,6 +454,40 @@ test("an invalid context policy fails before creating run evidence", async () =>
     assert.deepEqual(
       await readdir(path.join(repository.root, ".banzai")),
       before
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("a start whose slug names an existing initiative refuses before creating a run", async () => {
+  const repository = await createTestRepository();
+  try {
+    await mkdir(
+      path.join(repository.root, "documentation/initiatives/261110-fix-login"),
+      { recursive: true }
+    );
+    const runner = new WorkflowRunner(repository.root, new FakeAdapters());
+
+    await assert.rejects(
+      runner.start({ slug: "261110-fix-login", request: "Fix the login." }),
+      (error: unknown) =>
+        error instanceof Error &&
+        (error as { code?: unknown }).code === "ARTIFACT_WORK_CONFLICT" &&
+        error.message.startsWith(
+          "documentation/initiatives/261110-fix-login already exists."
+        )
+    );
+    await assert.rejects(
+      readdir(
+        path.join(repository.root, "documentation/work/261110-fix-login")
+      ),
+      { code: "ENOENT" }
+    );
+    await assert.rejects(
+      runner.status(),
+      (error: unknown) =>
+        error instanceof BanzaiError && error.code === "NO_ACTIVE_RUN"
     );
   } finally {
     await repository.dispose();
@@ -2643,7 +2680,7 @@ const TRACE_RETRY: readonly string[] = [
   "state verifying",
   "event attempt.applied",
   "state verifying",
-  "state blocked <- verifying: Task verification is incomplete. Inspect the retained physical evidence and retry the failed check without replaying implementation.",
+  "state blocked <- verifying: Task verification is incomplete: custom-1 (supplemental) exited with code 7. The verification details show each command, its output and log paths. Retry re-runs the failed check without replaying implementation.",
   "state verifying",
   "event verification.retry_requested",
   "state verifying",
@@ -3031,7 +3068,7 @@ const TRACE_CANCEL: readonly string[] = [
   "state verifying",
   "event attempt.applied",
   "state verifying",
-  "state blocked <- verifying: Task verification is incomplete. Inspect the retained physical evidence and retry the failed check without replaying implementation.",
+  "state blocked <- verifying: Task verification is incomplete: custom-1 (supplemental) exited with code 7. The verification details show each command, its output and log paths. Retry re-runs the failed check without replaying implementation.",
   "state cancelled",
   "event run.cancelled"
 ];
@@ -3149,6 +3186,101 @@ test("default runner sources keep the baseline timestamp and identifier formats"
       assert.match(record.startedAt, ISO_TIMESTAMP);
       assert.match(record.completedAt ?? "", ISO_TIMESTAMP);
     }
+  } finally {
+    await repository.dispose();
+  }
+});
+
+/** Refuses every Claude target, as a client below the minimum would. */
+class BelowClaudeMinimumAdapters extends FakeAdapters {
+  async preflightClaude(target: VendorPreflightTarget): Promise<void> {
+    await super.preflightClaude(target);
+    throw new BanzaiError(
+      "CLI_TOO_OLD",
+      "claude 2.1.289 is older than required 2.1.290: earlier releases can report a delivered structured result as an error. Update claude."
+    );
+  }
+}
+
+test("run start refuses an old Claude client for a pair that only builds, before selection", async () => {
+  const repository = await createTestRepository();
+  try {
+    await withVendorExecutablesOnPath(async () => {
+      const configPath = path.join(repository.root, ".banzai/config.json");
+      const config = JSON.parse(
+        await readFile(configPath, "utf8")
+      ) as OrchestratorConfig;
+      for (const role of ["planner", "implementer"] as const) {
+        config.models[role].executable = "claude";
+        config.models[role].model = "claude-opus-5-5";
+      }
+      config.models.reviewer.executable = "codex";
+      config.models.reviewer.model = "gpt-6.1-sol";
+      await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
+      await commitAll(repository.root, "claude builds, codex reviews");
+
+      const adapters = new BelowClaudeMinimumAdapters();
+      adapters.reviewResults.push(passingReview());
+      const runner = new WorkflowRunner(repository.root, adapters);
+      const blocked = await runner.start({
+        slug: "example",
+        request: "Implement it."
+      });
+      assert.equal(blocked.status, "blocked", blocked.blockReason ?? "");
+      assert.equal(blocked.blockedFrom, "created");
+      assert.match(blocked.blockReason ?? "", /older than required 2\.1\.290/u);
+      assert.equal(adapters.selectionPrompts.length, 0);
+      // ADR-0063 §1: one minimum, so the shared pair carries no review marker.
+      assert.deepEqual(adapters.claudePreflightTargets, [
+        { executable: "claude", model: "claude-opus-5-5" }
+      ]);
+
+      const retried = await runner.retry();
+      assert.equal(retried.status, "blocked", retried.blockReason ?? "");
+      assert.equal(adapters.selectionPrompts.length, 0);
+    });
+  } finally {
+    await repository.dispose();
+  }
+});
+
+test("run start checks a Claude pair shared by every role once, without a review marker", async () => {
+  const repository = await createTestRepository();
+  try {
+    await withVendorExecutablesOnPath(async () => {
+      const configPath = path.join(repository.root, ".banzai/config.json");
+      const config = JSON.parse(
+        await readFile(configPath, "utf8")
+      ) as OrchestratorConfig;
+      for (const role of ["planner", "implementer", "reviewer"] as const) {
+        config.models[role].executable = "claude";
+        config.models[role].model = "claude-opus-5-5";
+      }
+      await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
+      await commitAll(repository.root, "all roles on claude");
+
+      const adapters = new FakeAdapters();
+      adapters.reviewResults.push(passingReview());
+      const runner = new WorkflowRunner(repository.root, adapters);
+      const planned = await runner.start({
+        slug: "example",
+        request: "Implement it."
+      });
+      assert.equal(
+        planned.status,
+        "needs_plan_approval",
+        planned.blockReason ?? ""
+      );
+      assert.deepEqual(adapters.claudePreflightTargets[0], {
+        executable: "claude",
+        model: "claude-opus-5-5"
+      });
+      assert.ok(
+        adapters.claudePreflightTargets.every(
+          (target) => !("reviews" in target)
+        )
+      );
+    });
   } finally {
     await repository.dispose();
   }

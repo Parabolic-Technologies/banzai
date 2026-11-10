@@ -355,7 +355,7 @@ test("shipped workflow preserves five gates and scopes retained configuration fo
   assert.match(feature, /cannot use the planning-only consultation gate/);
 
   const assertSupervisorSafety = (source: string): void => {
-    assert.match(source, /exact supported v8 declaration/i);
+    assert.match(source, /exact supported v9 declaration/i);
     assert.match(source, /answer_consultation/);
     assert.match(
       source,
@@ -374,9 +374,9 @@ test("shipped workflow preserves five gates and scopes retained configuration fo
     );
   });
 
-  assert.match(protocol, /banzai-agent-capabilities\/v8/);
-  assert.match(protocol, /controlContractVersion: "8\.0\.0"/);
-  assert.match(protocol, /banzai-agent-status\/v6/);
+  assert.match(protocol, /banzai-agent-capabilities\/v9/);
+  assert.match(protocol, /controlContractVersion: "9\.0\.0"/);
+  assert.match(protocol, /banzai-agent-status\/v7/);
   assert.match(protocol, /answer_escalation/);
   assert.match(protocol, /answer_consultation/);
   const documents = [...protocol.matchAll(/```json\n([\s\S]*?)\n```/gu)].map(
@@ -481,6 +481,13 @@ const EXPECTED_POLICY_READS = {
     "security-assurance": "-",
     "engineering-quality": "-",
     "plan-task-completion": "-"
+  },
+  initiative: {
+    "decision-consultation": "-",
+    "test-assurance": "-",
+    "security-assurance": "-",
+    "engineering-quality": "-",
+    "plan-task-completion": "-"
   }
 } as const;
 
@@ -488,7 +495,9 @@ test("skills read the matrix policies and stop on a legacy layout", async () => 
   for (const [skill, legacyRow] of Object.entries(EXPECTED_POLICY_READS)) {
     const row = {
       ...legacyRow,
-      "artifact-storage": skill === "orchestrate" ? "-" : "R"
+      "artifact-storage": ["orchestrate", "initiative"].includes(skill)
+        ? "-"
+        : "R"
     };
     const source = await productSource(
       `plugins/banzai/skills/${skill}/SKILL.md`
@@ -523,13 +532,21 @@ test("skills read the matrix policies and stop on a legacy layout", async () => 
       assert.equal(sources.includes("bootstrap source rule"), bootstrap, skill);
       if (skill === "feature-review")
         assert.match(source, /`verdict=blocked`[\s\S]*?no findings/);
-      else if (!bootstrap)
+      else if (skill === "initiative") {
+        // Standalone only (ADR-0061): no runner phase result to return.
+        assert.doesNotMatch(sources, /\.\.\/\.\.\/policies\//);
+        assert.doesNotMatch(source, /`gate=escalation`/);
+      } else if (!bootstrap)
         assert.match(
           source,
           /`outcome=needs_human_decision`,\s+`gate=escalation`/
         );
     }
-    if (["test-writing", "feature-status", "orchestrate"].includes(skill))
+    if (
+      ["test-writing", "feature-status", "orchestrate", "initiative"].includes(
+        skill
+      )
+    )
       assert.doesNotMatch(source, /engineering-quality\.md/);
   }
   const protocol = await productSource(

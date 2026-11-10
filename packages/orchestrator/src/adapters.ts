@@ -55,7 +55,87 @@ import {
 } from "./validation.js";
 
 export const MINIMUM_CODEX_VERSION = "0.145.0";
-export const MINIMUM_CLAUDE_VERSION = "2.1.218";
+/**
+ * ADR-0063 §1: one minimum for every Claude role. Earlier releases can report a
+ * delivered `--json-schema` success as an error, and 2.1.290 is also the
+ * oldest that honours both review isolation variables (ADR-0059 §2).
+ */
+export const MINIMUM_CLAUDE_VERSION = "2.1.290";
+
+/**
+ * ADR-0063 §2: the closing turn's reserve inside the enforced timeout, and the
+ * vendor's own 2-minute default, below which no Bash maximum lowers the
+ * ceiling once `BASH_DEFAULT_TIMEOUT_MS` is removed.
+ */
+export const CLAUDE_BASH_TIMEOUT_RESERVE_MS = 5 * 60_000;
+export const CLAUDE_BASH_TIMEOUT_FLOOR_MS = 2 * 60_000;
+const CLAUDE_DISABLE_BACKGROUND_TASKS = "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS";
+const CLAUDE_BASH_MAX_TIMEOUT = "BASH_MAX_TIMEOUT_MS";
+
+/** ADR-0059 §2: a Claude review reads; it runs no skill and no other review flow. */
+const CLAUDE_REVIEW_TOOLS = "Read,Glob,Grep";
+const CLAUDE_REVIEW_DISALLOWED_TOOLS =
+  "Skill,Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch";
+/** A planner-role read-only invocation (planning analysis) keeps `Skill`. */
+const CLAUDE_PLANNER_READ_TOOLS = "Read,Glob,Grep,Skill";
+const CLAUDE_PLANNER_READ_DISALLOWED_TOOLS =
+  "Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch";
+const CLAUDE_DISABLE_AUTO_MEMORY = "CLAUDE_CODE_DISABLE_AUTO_MEMORY";
+const CLAUDE_DISABLE_REFUSAL_FALLBACK = "CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK";
+
+/**
+ * The isolation contract every Claude review invocation carries (ADR-0059 §2).
+ * The reviewer invocation digest covers it, so a session recorded before this
+ * contract existed rotates instead of resuming.
+ */
+export const CLAUDE_REVIEW_ISOLATION = {
+  tools: CLAUDE_REVIEW_TOOLS,
+  disallowedTools: CLAUDE_REVIEW_DISALLOWED_TOOLS,
+  environment: [CLAUDE_DISABLE_AUTO_MEMORY, CLAUDE_DISABLE_REFUSAL_FALLBACK]
+} as const;
+
+/**
+ * ADR-0063 §2: a command started with this maximum ends before the runner
+ * stops the invocation. Below `reserve + floor` the vendor's 2-minute default
+ * is the real ceiling, so the value never reads lower than it.
+ */
+export function claudeBashMaxTimeoutMs(timeoutMs: number): number {
+  return Math.max(
+    timeoutMs - CLAUDE_BASH_TIMEOUT_RESERVE_MS,
+    CLAUDE_BASH_TIMEOUT_FLOOR_MS
+  );
+}
+
+/**
+ * Applied to the environment `subscriptionOnlyEnvironment` built, so an
+ * inherited value never survives.
+ *
+ * - ADR-0059 §2–§3: a review runs without auto memory and without the refusal
+ *   fallback in every mode; every other Claude role loses auto memory only in
+ *   scoped mode and keeps the vendor fallback.
+ * - ADR-0063 §2: every headless Claude invocation, in every mode, runs without
+ *   background tasks and with a Bash maximum inside its enforced timeout, so a
+ *   second `result` event cannot follow the first.
+ */
+function isolatedClaudeEnvironment(
+  env: NodeJS.ProcessEnv,
+  reviews: boolean,
+  scope: ClaudeInvocationScope | undefined,
+  timeoutMs: number
+): NodeJS.ProcessEnv {
+  const isolated: NodeJS.ProcessEnv = { ...env };
+  if (reviews || scope?.strictMcpConfig === true) {
+    isolated[CLAUDE_DISABLE_AUTO_MEMORY] = "1";
+  }
+  if (reviews) {
+    isolated[CLAUDE_DISABLE_REFUSAL_FALLBACK] = "1";
+  }
+  isolated[CLAUDE_DISABLE_BACKGROUND_TASKS] = "1";
+  isolated[CLAUDE_BASH_MAX_TIMEOUT] = String(claudeBashMaxTimeoutMs(timeoutMs));
+  // Removed, so the raised maximum, not an inherited default, is the ceiling.
+  delete isolated.BASH_DEFAULT_TIMEOUT_MS;
+  return isolated;
+}
 const MAX_FAILURE_SUMMARY_LENGTH = 1_000;
 const MAX_PROGRESS_DETAIL_LENGTH = 240;
 
@@ -1076,6 +1156,11 @@ function parseVersion(output: string, executable: string): string {
   return match[1];
 }
 
+/** Whether a Claude Code version meets the one Claude minimum (ADR-0063 §1). */
+export function meetsClaudeMinimum(version: string): boolean {
+  return versionAtLeast(version, MINIMUM_CLAUDE_VERSION);
+}
+
 function versionAtLeast(actual: string, minimum: string): boolean {
   const left = actual.split(".").map(Number);
   const right = minimum.split(".").map(Number);
@@ -1147,7 +1232,9 @@ async function requireVersion(
   if (!versionAtLeast(actual, minimum)) {
     throw new BanzaiError(
       "CLI_TOO_OLD",
-      `${target.executable} ${actual} is older than required ${minimum}.`
+      vendor === "claude"
+        ? `${target.executable} ${actual} is older than required ${minimum}: earlier releases can report a delivered structured result as an error. Update ${target.executable}.`
+        : `${target.executable} ${actual} is older than required ${minimum}.`
     );
   }
   const modelMinimum =
@@ -1170,6 +1257,9 @@ export interface CodexInvocation {
   resumeSessionId: string | null;
   environment?: ClaudeInvocationScope | undefined;
 }
+
+/** `codex exec -` and `codex exec resume <id> -` read the prompt from stdin. */
+const CODEX_STDIN_PROMPT = "-";
 
 function invocationPrompt(request: {
   prompt: string;
@@ -1235,6 +1325,8 @@ export function buildCodexArguments(
   outputPath: string,
   sandbox: CodexSandbox = "workspace-write"
 ): string[] {
+  // The prompt travels on stdin (ADR-0063 §3); the check still runs here.
+  invocationPrompt(request);
   const shared = [
     "--json",
     "--output-schema",
@@ -1258,7 +1350,7 @@ export function buildCodexArguments(
       "-c",
       `sandbox_mode=${JSON.stringify(sandbox)}`,
       request.resumeSessionId,
-      invocationPrompt(request)
+      CODEX_STDIN_PROMPT
     ];
   }
   return [
@@ -1268,7 +1360,7 @@ export function buildCodexArguments(
     sandbox,
     "--cd",
     request.repoRoot,
-    invocationPrompt(request)
+    CODEX_STDIN_PROMPT
   ];
 }
 
@@ -1530,11 +1622,14 @@ export function buildClaudeArguments(
         PlanningAdapterRequest<PlanningReviewResult | PlanningReviewAnalysis>,
         "onTerminalSuccess"
       >,
-  identity: OutputContractIdentity = "review-result/v2"
+  identity: OutputContractIdentity = "review-result/v2",
+  // Review and planning review are review roles; planning analysis is not.
+  reviews = true
 ): string[] {
+  // The prompt travels on stdin (ADR-0063 §3); the check still runs here.
+  invocationPrompt(request);
   const args = [
     "-p",
-    invocationPrompt(request),
     "--output-format",
     "stream-json",
     "--verbose",
@@ -1547,9 +1642,11 @@ export function buildClaudeArguments(
     "--permission-mode",
     "dontAsk",
     "--tools",
-    "Read,Glob,Grep,Skill",
+    reviews ? CLAUDE_REVIEW_TOOLS : CLAUDE_PLANNER_READ_TOOLS,
     "--disallowedTools",
-    "Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch"
+    reviews
+      ? CLAUDE_REVIEW_DISALLOWED_TOOLS
+      : CLAUDE_PLANNER_READ_DISALLOWED_TOOLS
   ];
   if (request.resumeSessionId !== null) {
     args.push("--resume", request.resumeSessionId);
@@ -1576,9 +1673,10 @@ export function buildClaudeArguments(
 export function buildClaudeSelectionArguments(
   request: WorkflowSelectionAdapterRequest
 ): string[] {
+  // The prompt travels on stdin (ADR-0063 §3); the check still runs here.
+  invocationPrompt(request);
   return [
     "-p",
-    invocationPrompt(request),
     "--output-format",
     "stream-json",
     "--verbose",
@@ -1609,9 +1707,10 @@ export function buildClaudeSelectionArguments(
 export function buildClaudePhaseArguments(
   request: PhaseAdapterRequest
 ): string[] {
+  // The prompt travels on stdin (ADR-0063 §3); the check still runs here.
+  invocationPrompt(request);
   const args = [
     "-p",
-    invocationPrompt(request),
     "--output-format",
     "stream-json",
     "--verbose",
@@ -1741,9 +1840,13 @@ async function writeCodexContract(
   await mkdir(contractDirectory, { recursive: true });
   const schemaPath = path.join(contractDirectory, schemaName);
   await writeFile(schemaPath, serialized, "utf8");
+  // Codex `-o` creates no parent directory: a missing one loses the result
+  // while the process still exits 0.
+  const attemptDirectory = path.join(runDirectory, "attempts");
+  await mkdir(attemptDirectory, { recursive: true });
   return {
     schemaPath,
-    outputPath: path.join(runDirectory, "attempts", `${attemptId}-result.json`)
+    outputPath: path.join(attemptDirectory, `${attemptId}-result.json`)
   };
 }
 
@@ -1820,7 +1923,8 @@ async function runPlanningAdapter<
   runner: ProcessRunner,
   request: PlanningAdapterRequest<T>,
   identity: OutputContractIdentity,
-  parse: (value: unknown) => T
+  parse: (value: unknown) => T,
+  reviews: boolean
 ): Promise<AdapterResult<T>> {
   const vendor = requireVendor(request.settings.executable);
   return withModelFailureEvidence(runner, vendor, async (run) => {
@@ -1838,10 +1942,16 @@ async function runPlanningAdapter<
       );
       const processResult = await run({
         command: request.settings.executable,
-        args: buildClaudeArguments(request, identity),
+        args: buildClaudeArguments(request, identity, reviews),
         cwd: request.repoRoot,
-        env,
+        env: isolatedClaudeEnvironment(
+          env,
+          reviews,
+          request.environment,
+          request.settings.timeoutMs
+        ),
         timeoutMs: request.settings.timeoutMs,
+        stdin: invocationPrompt(request),
         onStart: request.onStart,
         onStdoutLine: createClaudeProgressObserver(
           request.onProgress,
@@ -1888,6 +1998,7 @@ async function runPlanningAdapter<
       cwd: request.repoRoot,
       env,
       timeoutMs: request.settings.timeoutMs,
+      stdin: invocationPrompt(request),
       onStart: request.onStart,
       onStdoutLine: createCodexProgressObserver(
         request.onProgress,
@@ -2023,8 +2134,14 @@ export function createVendorAdapters(
             command: request.settings.executable,
             args: buildClaudeSelectionArguments(request),
             cwd: request.repoRoot,
-            env,
+            env: isolatedClaudeEnvironment(
+              env,
+              false,
+              request.environment,
+              request.settings.timeoutMs
+            ),
             timeoutMs: request.settings.timeoutMs,
+            stdin: invocationPrompt(request),
             onStart: request.onStart,
             onStdoutLine: observeProgress,
             onStdoutLineDurable: terminal.observe
@@ -2077,6 +2194,7 @@ export function createVendorAdapters(
           cwd: request.repoRoot,
           env,
           timeoutMs: request.settings.timeoutMs,
+          stdin: invocationPrompt(request),
           onStart: request.onStart,
           onStdoutLine: observeProgress,
           onStdoutLineDurable: terminal.observe
@@ -2128,8 +2246,14 @@ export function createVendorAdapters(
             command: request.settings.executable,
             args: buildClaudePhaseArguments(request),
             cwd: request.repoRoot,
-            env,
+            env: isolatedClaudeEnvironment(
+              env,
+              false,
+              request.environment,
+              request.settings.timeoutMs
+            ),
             timeoutMs: request.settings.timeoutMs,
+            stdin: invocationPrompt(request),
             onStart: request.onStart,
             onStdoutLine: observeProgress,
             onStdoutLineDurable: observeSessionStart(
@@ -2187,6 +2311,7 @@ export function createVendorAdapters(
           cwd: request.repoRoot,
           env,
           timeoutMs: request.settings.timeoutMs,
+          stdin: invocationPrompt(request),
           onStart: request.onStart,
           onStdoutLine: observeProgress,
           onStdoutLineDurable: observeSessionStart(
@@ -2215,7 +2340,8 @@ export function createVendorAdapters(
         runner,
         request,
         "planning-review-result/v1",
-        parsePlanningReviewResult
+        parsePlanningReviewResult,
+        true
       );
     },
     async runPlanningAnalysis(request) {
@@ -2223,7 +2349,8 @@ export function createVendorAdapters(
         runner,
         request,
         "planning-review-analysis/v1",
-        parsePlanningReviewAnalysis
+        parsePlanningReviewAnalysis,
+        false
       );
     },
 
@@ -2268,6 +2395,7 @@ export function createVendorAdapters(
             cwd: request.repoRoot,
             env,
             timeoutMs: request.settings.timeoutMs,
+            stdin: invocationPrompt(request),
             onStart: request.onStart,
             onStdoutLine: observeProgress,
             onStdoutLineDurable: terminal.observe
@@ -2304,8 +2432,14 @@ export function createVendorAdapters(
           command: request.settings.executable,
           args: buildClaudeArguments(request),
           cwd: request.repoRoot,
-          env,
+          env: isolatedClaudeEnvironment(
+            env,
+            true,
+            request.environment,
+            request.settings.timeoutMs
+          ),
           timeoutMs: request.settings.timeoutMs,
+          stdin: invocationPrompt(request),
           onStart: request.onStart,
           onStdoutLine: observeProgress,
           onStdoutLineDurable: terminal.observe
@@ -2337,4 +2471,11 @@ export function createVendorAdapters(
 }
 
 // Share the existing adapter dispatch identity with offline invocation diagnostics.
-export { vendorFor, FALLBACK_VENDOR, MODEL_ROLES } from "./models.js";
+export {
+  vendorFor,
+  vendorUsage,
+  describeRoles,
+  FALLBACK_VENDOR,
+  MODEL_ROLES
+} from "./models.js";
+export type { ModelRole } from "./models.js";

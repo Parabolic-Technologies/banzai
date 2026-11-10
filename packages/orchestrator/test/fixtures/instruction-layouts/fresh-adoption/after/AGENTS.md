@@ -66,15 +66,16 @@ Orchestrated work assigns phase responsibilities to three model roles so review 
 - implementer: lite feature or quick-fix work; strict implementation and
   assurance, followed by accepted-finding fixes when human triage requires them;
 - reviewer: independent source-read-only review, with no planner or implementer
-  transcript. Compatible strict planning, implementation, and fixes share one
-  builder lineage. The primary review starts a fresh independent reviewer;
+  transcript. Independence comes from a fresh session, no memory shared with
+  the builders and a fixed read-only tool set. Compatible strict planning,
+  implementation, and fixes share one builder lineage. The primary review starts a fresh independent reviewer;
   routine re-review may resume that reviewer for at most two deltas before a
   fresh full review. Both vendors return structured review evidence. The runner
   alone renders and validates the attempt-owned candidate and publishes the
   canonical review artifact.
 
 The reviewer never fixes its own findings. The implementer never triages them.
-The fixer may read the review artifact for cross-model context, but only the
+The fixer may read the review artifact for review context, but only the
 human-triaged structured finding payload defines its scope.
 
 When triage accepts no finding, the strict run finishes from the recorded human
@@ -114,6 +115,10 @@ invoke no nested CLI process and write nothing.
   `disable-model-invocation: true`: it runs only when the user invokes it by
   name (`/` or `$`). When the manifest is missing or stale, say so and ask the
   user to run it; do not scaffold its files another way instead.
+- Multi-package initiative -> `initiative`, outside runner phases. It carries
+  `disable-model-invocation: true` and runs only when the user invokes it by
+  name; when it looks appropriate, say so and ask the user to run it. Its
+  stage gates fall between packages and are not decision gates.
 - Status report -> `feature-status`.
 - Artifact-aware audit -> `feature-review`.
 
@@ -294,14 +299,18 @@ approved plan.
 `hooks/spec-gate.cjs` enforces authorized-workflow-before-code where supported.
 
 - Free paths: `documentation/**`, `PROJECT_MANIFEST.md`, `CLAUDE.md`,
-  `AGENTS.md`.
+  `AGENTS.md`. In manual sessions, Claude Code memory notes
+  (`<config>/projects/<project>/memory/<name>.md`, where `<config>` is an
+  absolute `CLAUDE_CONFIG_DIR` or `~/.claude`) are free paths too.
 - Manual sessions are gated only in Banzai-adopted projects: the hook requires
   `.banzai/config.json` or a root `PROJECT_MANIFEST.md` in the session
   directory or a parent, and stays silent elsewhere because there is no spec
   or plan to protect.
 - Standalone: the first code/codebase edit in a session asks for human approval,
   one approval unlocks later code edits in that session, and a new session
-  re-locks.
+  re-locks. Approving a Claude Code plan, subagent-memory or session
+  scratchpad write allows only such writes for the session; the first code
+  edit still asks.
 - Orchestrated strict: the hook checks the active run and approved artifact
   digest, so approved code phases run without a per-edit prompt and writes to
   the approved bundle are denied.

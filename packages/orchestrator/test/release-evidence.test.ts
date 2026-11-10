@@ -18,7 +18,11 @@ const API_BASE = "https://api.example.invalid";
 const TOKEN = "release-evidence-fixture-secret-5d1e";
 const REPOSITORY = "example/banzai";
 const REPOSITORY_ID = 4242;
-const LANES = ["release_check_node_22", "release_check_node_24"] as const;
+const LANES = [
+  "release_check_node_22",
+  "release_check_node_24",
+  "release_check_node_26"
+] as const;
 const RUN_ID = 9001;
 const ATTEMPT = 2;
 
@@ -124,8 +128,8 @@ function boundScenario(head: string, tree: string): Scenario {
         conclusion: "success"
       })),
       {
-        id: 102,
-        name: "forward_compatibility_node_26",
+        id: 110,
+        name: "live_vendor_compatibility",
         run_id: RUN_ID,
         run_attempt: ATTEMPT,
         status: "completed",
@@ -308,7 +312,7 @@ test("verify uses a later run when an earlier candidate is not bound", async () 
   }
 });
 
-test("verify leaves every unbound case to the two-lane fallback", async (t) => {
+test("verify leaves every unbound case to the every-lane fallback", async (t) => {
   const fixture = await mergeFixture();
   const plain = await repository();
   const diverged = await mergeFixture({ divergeMain: true });
@@ -366,6 +370,18 @@ test("verify leaves every unbound case to the two-lane fallback", async (t) => {
         );
       }
     })),
+    {
+      name: "a run without the Node 26 lane (ADR-0067)",
+      reason: /release_check_node_26 did not succeed exactly once/,
+      change: (scenario) => {
+        scenario.jobs = scenario.jobs.filter(
+          (job) => job.name !== "release_check_node_26"
+        );
+        scenario.artifacts = scenario.artifacts.filter(
+          (artifact) => !String(artifact.name).includes("release_check_node_26")
+        );
+      }
+    },
     {
       name: "lane jobs of another attempt",
       reason: new RegExp(`${lane22} did not succeed exactly once`),
@@ -477,7 +493,7 @@ test("verify leaves every unbound case to the two-lane fallback", async (t) => {
         assert.match(result.summary, item.reason);
         assert.match(
           result.summary,
-          /The complete release gate runs on both supported lanes\.\n$/
+          /The complete release gate runs on every supported lane\.\n$/
         );
       });
     }

@@ -49,6 +49,21 @@ export const RECOVERABLE_MUTABLE_FAILURE_CAUSES = new Set<ModelFailureCause>([
   "transport"
 ]);
 
+/**
+ * The summary of a block a completed plan attempt reported itself. Any other
+ * record, including a failed attempt, returns null (ADR-0065).
+ */
+export function plannerBlockSummary(record: AttemptRecord): string | null {
+  const result = record.result;
+  return record.attempt.kind === "plan" &&
+    record.status === "completed" &&
+    result !== null &&
+    "outcome" in result &&
+    result.outcome === "blocked"
+    ? result.summary
+    : null;
+}
+
 export const PLANNING_REPAIR_FAILURE_CODES = new Set([
   "INVALID_RESULT",
   "MODEL_RESULT_INVALID",

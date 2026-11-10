@@ -9,8 +9,14 @@
 ## Artifact Storage
 
 New work documents use `documentation/work/<slug>/`, one flat directory named
-for the work's subject. Use a stable, repository-unique lowercase kebab-case
-slug without required dates, mode/status prefixes or owner folders. Keep
+for the work's subject. The slug is `yymmdd-<subject>`: the local creation date
+as two-digit year, month and day, then a stable lowercase kebab-case subject,
+without mode/status prefixes or owner folders. A candidate that already begins
+with today's prefix keeps it; any other candidate receives it, and the prefix
+is never omitted. The full name, at most 100 characters, must not exist under
+`documentation/work/` or `documentation/initiatives/`. The `banzai` CLI applies
+this rule to the runs it starts. Existing undated directories keep their names
+and are continued at their known paths. Keep
 `description.md`, `plan.md`, required `implementation-report.md` and
 `test-report.md`, and successive `review-N.md` files together. Lite work uses
 `work.md`; quick-fix creates `change-report.md` only under its existing trigger.
@@ -53,12 +59,15 @@ excluded from plugin/npm payloads; client evidence belongs only to its project.
 
 The installed `../../scripts/verification.cjs <inspect|decide|execute> --json
 <request-file>` consumes a private regular JSON request using
-`banzai-verification-request/v3`, `schemaVersion: 3`, absolute `repoRoot`, exact
+`banzai-verification-request/v4`, `schemaVersion: 4`, absolute `repoRoot`, exact
 repository-relative `documentPath`, `workflow` (`strict`, `feature` or
-`quick-fix`) and a UUID `roundId`. Execute may include `retryOf` for an exact
-unsuccessful attempt in that round. Commands and output destinations are never
-request fields; descriptors come from the document's existing v2 obligation
-inventory. The unchanged result envelope is `banzai-verification-result/v2`.
+`quick-fix`) and a UUID `roundId`. A round runs every selected check unless a
+signal, runner failure or fail-closed refusal stops it. Execute may include
+`retryOf`: the ids of every unsuccessful latest attempt in that round and no
+other, so one retry reruns them all. Request v3, whose `retryOf` names one
+attempt, keeps its meaning. Commands and output destinations are never request
+fields; descriptors come from the document's existing v2 obligation inventory.
+The unchanged result envelope is `banzai-verification-result/v2`.
 
 The calling skill must already hold task/plan execution authorization. Inspect
 and decide create nothing; absent machine evidence is unavailable. Execute

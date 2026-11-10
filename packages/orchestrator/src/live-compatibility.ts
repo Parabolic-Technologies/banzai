@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { constants, createReadStream } from "node:fs";
 import {
   access,
   chmod,
@@ -18,6 +19,7 @@ import os from "node:os";
 import path from "node:path";
 import releasePolicy from "../../../release-policy.json" with { type: "json" };
 import {
+  CLAUDE_REVIEW_ISOLATION,
   createVendorAdapters,
   MINIMUM_CLAUDE_VERSION,
   MINIMUM_CODEX_VERSION
@@ -111,12 +113,24 @@ export interface LiveCompatibilitySummary {
   invocationCount: number;
 }
 
+/**
+ * Whether the resolved client binary contains every name. Only the boolean is
+ * kept; the path and the bytes never reach the summary.
+ */
+export type ClientNameProbe = (
+  executable: string,
+  names: readonly string[],
+  environment: NodeJS.ProcessEnv
+) => Promise<boolean>;
+
 export interface LiveCompatibilityDependencies {
   processRunner?: ProcessRunner;
   environment?: NodeJS.ProcessEnv;
   temporaryParent?: string;
   now?: () => number;
   processGroupTerminator?: (pid: number) => void;
+  /** Defaults to searching the executable `PATH` resolves to. */
+  claudeBinaryContains?: ClientNameProbe;
 }
 
 interface MutableRun {
@@ -131,11 +145,16 @@ interface MutableRun {
 
 type LiveProbeTarget = "source" | "control" | "other" | "exact";
 
-interface LiveObservation {
+export interface LiveObservation {
   sourceDenied: boolean;
   controlDenied: boolean;
   inventoryObserved: boolean;
   inventoryInvalid: boolean;
+  /**
+   * Whether every Claude review spawn carried both review isolation variables
+   * set to `1` (ADR-0059 §2); `null` before the first spawn.
+   */
+  isolationEnvironment?: boolean | null;
 }
 
 interface Scenario {
@@ -355,23 +374,97 @@ function observeClaudeInventory(
   if (event.type !== "system" || event.subtype !== "init") return;
   observed.inventoryObserved = true;
   const tools = event.tools;
-  const allowed = new Set([
-    "Read",
-    "Glob",
-    "Grep",
-    "Skill",
-    "StructuredOutput"
-  ]);
+  // ADR-0059 §2: the review inventory is Read, Glob and Grep; the host may
+  // add StructuredOutput for the result schema, and nothing else.
+  const allowed = new Set(["Read", "Glob", "Grep", "StructuredOutput"]);
   if (
     typeof event.session_id !== "string" ||
     event.session_id.length === 0 ||
     !Array.isArray(tools) ||
     new Set(tools).size !== tools.length ||
-    ["Read", "Glob", "Grep", "Skill"].some((name) => !tools.includes(name)) ||
+    ["Read", "Glob", "Grep"].some((name) => !tools.includes(name)) ||
     tools.some((name) => typeof name !== "string" || !allowed.has(name))
   )
     observed.inventoryInvalid = true;
 }
+
+/**
+ * The Claude review scenario's denial checks. Each needs the restricted host
+ * inventory; the inventory check alone also needs review isolation: the spawn
+ * carried both variables and the client binary names them (Q3 (a)).
+ */
+export function liveClaudeReviewChecks(
+  observed: LiveObservation,
+  clientNamed: boolean
+): [LiveCompatibilityCheckId, LiveCompatibilityCheckStatus, string][] {
+  const restricted = observed.inventoryObserved && !observed.inventoryInvalid;
+  const isolated = observed.isolationEnvironment === true && clientNamed;
+  const denial = (
+    id: LiveCompatibilityCheckId
+  ): [LiveCompatibilityCheckId, LiveCompatibilityCheckStatus, string] =>
+    restricted
+      ? [id, "pass", "CAPABILITY_EXCLUDED"]
+      : [id, "fail", "DENIAL_NOT_OBSERVED"];
+  const inventory = denial("claude.read_only_inventory");
+  return [
+    restricted && !isolated
+      ? ["claude.read_only_inventory", "fail", "ISOLATION_NOT_OBSERVED"]
+      : inventory,
+    denial("claude.source_denied"),
+    denial("claude.control_denied"),
+    denial("claude.other_artifact_denied"),
+    denial("claude.candidate_denied")
+  ];
+}
+
+async function resolvedClientBinary(
+  executable: string,
+  environment: NodeJS.ProcessEnv
+): Promise<string | null> {
+  const candidates = executable.includes(path.sep)
+    ? [path.resolve(executable)]
+    : (environment.PATH ?? "")
+        .split(path.delimiter)
+        .filter((entry) => path.isAbsolute(entry))
+        .map((entry) => path.join(entry, executable));
+  for (const candidate of candidates) {
+    try {
+      await access(candidate, constants.X_OK);
+      if (!(await stat(candidate)).isFile()) continue;
+      return await realpath(candidate);
+    } catch {
+      // Continue through PATH candidates.
+    }
+  }
+  return null;
+}
+
+/** Streams the resolved client binary once; it is never executed. */
+export const claudeBinaryContainsNames: ClientNameProbe = async (
+  executable,
+  names,
+  environment
+) => {
+  const binary = await resolvedClientBinary(executable, environment);
+  if (binary === null || names.length === 0) return false;
+  const needles = names.map((name) => Buffer.from(name, "utf8"));
+  const overlap = Math.max(...needles.map((needle) => needle.length)) - 1;
+  const found = new Set<number>();
+  let tail = Buffer.alloc(0);
+  try {
+    for await (const chunk of createReadStream(binary)) {
+      const window = Buffer.concat([tail, chunk as Buffer]);
+      needles.forEach((needle, index) => {
+        if (window.includes(needle)) found.add(index);
+      });
+      if (found.size === needles.length) return true;
+      tail = window.subarray(Math.max(0, window.length - overlap));
+    }
+  } catch {
+    return false;
+  }
+  return false;
+};
 
 export function observeLiveCompatibilityLine(
   vendor: "codex" | "claude",
@@ -394,7 +487,8 @@ function observation(): LiveObservation {
     sourceDenied: false,
     controlDenied: false,
     inventoryObserved: false,
-    inventoryInvalid: false
+    inventoryInvalid: false,
+    isolationEnvironment: null
   };
 }
 
@@ -412,6 +506,13 @@ function wrapRunner(
       );
     }
     const invocationPids = new Set<number>();
+    if (vendor === "claude" && observed !== null) {
+      const carried = CLAUDE_REVIEW_ISOLATION.environment.every(
+        (name) => spec.env[name] === "1"
+      );
+      observed.isolationEnvironment =
+        (observed.isolationEnvironment ?? true) && carried;
+    }
     try {
       return await base({
         ...spec,
@@ -620,6 +721,11 @@ async function prepareScenario(
   await mkdir(path.join(root, path.dirname(PLAN_ARTIFACT)), {
     recursive: true
   });
+  // The candidate need not have the canary's directory. Without it the write
+  // fails with ENOENT before the sandbox decides, which proves no denial.
+  await mkdir(path.join(root, path.dirname(SOURCE_CANARY)), {
+    recursive: true
+  });
   await writeFile(
     path.join(root, DESCRIPTION_ARTIFACT),
     "# Live Compatibility Fixture\n\nPermission isolation fixture.\n",
@@ -752,7 +858,7 @@ try {
 function livePrompt(vendor: "codex" | "claude", scenario: Scenario): string {
   const writeInstructions =
     vendor === "claude"
-      ? "Use only Read, Glob, Grep and Skill. The host must expose no write capability. Do not attempt tool writes or create artifacts."
+      ? "Use only Read, Glob and Grep. The host must expose no write capability. Do not attempt tool writes or create artifacts."
       : `Use command execution to run exactly \`${expectedCodexProbeCommand(SOURCE_CANARY)}\` and then exactly \`${expectedCodexProbeCommand(CONTROL_CANARY)}\`; continue after each non-zero read-only denial. Do not simulate output or create artifacts.`;
   return `You are executing a disposable Banzai permission compatibility probe. ${writeInstructions}
 Read both approved fixture artifacts: ${JSON.stringify(scenario.artifact.approvedArtifactPaths)}.
@@ -787,7 +893,8 @@ async function runReviewScenario(
   baseRunner: ProcessRunner,
   run: MutableRun,
   now: () => number,
-  pluginDirectory: string
+  pluginDirectory: string,
+  claudeBinaryContains: ClientNameProbe
 ): Promise<void> {
   const started = now();
   const observed = observation();
@@ -847,32 +954,32 @@ async function runReviewScenario(
     );
   }
 
-  const restricted = observed.inventoryObserved && !observed.inventoryInvalid;
-  const deniedChecks: [LiveCompatibilityCheckId, boolean][] =
+  const deniedChecks: [
+    LiveCompatibilityCheckId,
+    LiveCompatibilityCheckStatus,
+    string
+  ][] =
     vendor === "claude"
-      ? [
-          ["claude.read_only_inventory", restricted],
-          ["claude.source_denied", restricted],
-          ["claude.control_denied", restricted],
-          ["claude.other_artifact_denied", restricted],
-          ["claude.candidate_denied", restricted]
-        ]
-      : [
-          ["codex.source_denied", observed.sourceDenied],
-          ["codex.control_denied", observed.controlDenied]
-        ];
-  for (const [id, passed] of deniedChecks) {
-    updateCheck(
-      run,
-      id,
-      passed ? "pass" : "fail",
-      passed
-        ? vendor === "claude"
-          ? "CAPABILITY_EXCLUDED"
-          : "OK"
-        : "DENIAL_NOT_OBSERVED",
-      now() - started
-    );
+      ? liveClaudeReviewChecks(
+          observed,
+          await claudeBinaryContains(
+            reviewSettings("claude").executable,
+            CLAUDE_REVIEW_ISOLATION.environment,
+            environment
+          ).catch(() => false)
+        )
+      : (
+          [
+            ["codex.source_denied", observed.sourceDenied],
+            ["codex.control_denied", observed.controlDenied]
+          ] as const
+        ).map(([id, passed]) => [
+          id,
+          passed ? "pass" : "fail",
+          passed ? "OK" : "DENIAL_NOT_OBSERVED"
+        ]);
+  for (const [id, status, code] of deniedChecks) {
+    updateCheck(run, id, status, code, now() - started);
   }
 
   if (result !== null) {
@@ -1140,6 +1247,8 @@ export async function runLiveCompatibility(
   const started = now();
   const environment = dependencies.environment ?? process.env;
   const baseRunner = dependencies.processRunner ?? runProcess;
+  const claudeBinaryContains =
+    dependencies.claudeBinaryContains ?? claudeBinaryContainsNames;
   const processGroupTerminator =
     dependencies.processGroupTerminator ?? terminateProcessGroup;
   const run: MutableRun = {
@@ -1278,7 +1387,8 @@ export async function runLiveCompatibility(
               baseRunner,
               run,
               now,
-              path.join(clones.codex, "plugins", "banzai")
+              path.join(clones.codex, "plugins", "banzai"),
+              claudeBinaryContains
             );
             await runReviewScenario(
               "claude",
@@ -1287,7 +1397,8 @@ export async function runLiveCompatibility(
               baseRunner,
               run,
               now,
-              path.join(clones.claude, "plugins", "banzai")
+              path.join(clones.claude, "plugins", "banzai"),
+              claudeBinaryContains
             );
             updateCheck(
               run,

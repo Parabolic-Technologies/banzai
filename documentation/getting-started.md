@@ -13,24 +13,29 @@ For skills directly in one client, follow [Use only the plugin](#use-only-the-pl
 For the CLI workflow, you need:
 
 - **macOS or Linux**, Git, and a regular terminal with interactive input/output.
-- **Node.js 22.20.0+ within major 22**, or **24.11.1+ within major 24**.
+- **Node.js 22.20.0+ within major 22**, **24.11.1+ within major 24**, or
+  **26.13.0+ within major 26**.
 - The model clients for your selected providers, signed in through individual
-  subscriptions. The default configuration uses **Claude Code 2.1.280+** for
-  planning and implementation and **Codex CLI 0.159.1+** for review.
+  subscriptions. The default configuration uses **Claude Code 2.1.290+** for
+  planning, implementation and review. You need the **Codex CLI** only when you
+  select a Codex model for a role.
 - Your application's dependencies, when it has any. Banzai can work with an
   existing project or an empty Git repository. Its Node.js runtime does not
   require your application to use JavaScript.
 
-To use one provider, install its client and plugin, then select that provider
-for all three roles during `banzai init` in step 3. Strict review still uses
-a fresh session. You need both clients only when your selected roles use both.
+Claude Code serves every role by default; to use Codex instead, install its
+client and plugin, then select it for the roles you want during `banzai init`
+in step 3. Strict review uses a fresh session without the builder's
+conversation, shared memory or skills, whichever vendor runs it. You need both
+clients only when your selected roles use both.
 
 Banzai invokes the local executables for your selected providers. You do not
 enter API keys into Banzai. Model work uses the clients' remote services and
 subscription limits.
 
-For older model selections, the vendor minimums are Codex CLI 0.145.0 and
-Claude Code 2.1.218. Each selected model must meet its own
+Every Claude role needs Claude Code 2.1.290 or newer, which `banzai doctor`
+checks. Codex roles need Codex CLI 0.145.0 or newer, and each selected model
+must meet its own
 [client-version requirement](orchestrator.md#model-configuration).
 
 ### Install and sign in to model clients
@@ -75,12 +80,53 @@ provider. Follow the matching plugin blocks below.
 
 ### Claude Code plugin
 
-**Inside Claude Code**, run:
+Install the plugin for one repository. **In your terminal**, from your
+project's root directory, run:
 
-```text
-/plugin marketplace add https://github.com/Parabolic-Technologies/banzai.git
-/plugin install banzai@banzai-plugins
+```sh
+claude plugin marketplace add Parabolic-Technologies/banzai --scope local
+claude plugin install banzai@banzai-plugins --scope local
 ```
+
+The scope decides who gets the plugin and which settings file records it:
+
+| Scope                                  | Settings file                 | Who gets the plugin                      |
+| -------------------------------------- | ----------------------------- | ---------------------------------------- |
+| `local`, recommended for a first try   | `.claude/settings.local.json` | You, in this repository                  |
+| `project`, recommended for a team      | `.claude/settings.json`       | Everyone who works in this repository    |
+| `user`, used when `--scope` is omitted | `~/.claude/settings.json`     | You, in every repository on this machine |
+
+For a team, run both commands with `--scope project`, then review and commit
+`.claude/settings.json`. Each teammate runs
+`claude plugin install banzai@banzai-plugins --scope project` once, because the
+committed file enables the plugin but does not download it.
+
+User scope loads the descriptions of Banzai's skills into every Claude Code
+session, including repositories that do not use Banzai, and `banzai doctor`
+reports it as a warning. To move a user-scope install to this repository, run:
+
+```sh
+claude plugin uninstall banzai@banzai-plugins --scope user
+claude plugin install banzai@banzai-plugins --scope local
+```
+
+**Inside a Claude Code session**,
+`/plugin marketplace add Parabolic-Technologies/banzai` adds the marketplace,
+and `/plugin install banzai@banzai-plugins` opens the plugin's details. Choose
+**Install for you, in this repo only** (local scope) or **Install for all
+collaborators on this repository** (project scope).
+
+**In VS Code**, the Claude Code panel has no `/plugin` command. Type `/plugins`
+to open **Manage plugins**:
+
+1. On the **Marketplaces** tab, add `Parabolic-Technologies/banzai`.
+2. On the **Plugins** tab, install `banzai`.
+3. Choose **Install locally** or **Install for this project**.
+
+You can also run the terminal commands above. The Banzai CLI starts Claude
+phases through the standalone `claude` executable, so for the CLI workflow
+also [install Claude Code](#install-and-sign-in-to-model-clients) and check
+that `claude --version` works in your terminal.
 
 ### Codex plugin
 
@@ -92,7 +138,8 @@ codex plugin add banzai@banzai-plugins
 ```
 
 **Expected result:** `banzai --help` displays the CLI commands, and the plugin
-is installed and enabled in each selected client. Check sign-in using the
+is installed and enabled in each selected client. For Claude Code,
+`claude plugin list` shows `banzai@banzai-plugins` with the scope you chose. Check sign-in using the
 [client checks above](#install-and-sign-in-to-model-clients).
 
 ## 2. Prepare your repository
@@ -141,7 +188,9 @@ banzai init
 Choose the model and effort for planning, implementation, and review.
 If you installed only one provider's client, select that provider for all three
 roles instead of keeping the mixed-provider defaults.
-You can change these later with `banzai model`.
+You can change these later with `banzai model`. To run a phase with another
+model on your machine only, see
+[Use other models on this machine](#use-other-models-on-this-machine).
 
 If guidance is incomplete, init offers **Run project-manifest with Codex**,
 **Run project-manifest with Claude Code**, **Show manual instructions**, and
@@ -159,7 +208,8 @@ project's existing instructions and resolve proposed merges before continuing.
 The manifest should describe your actual stack, conventions, and checks.
 
 Init also creates `documentation/verification-examples.md` when missing and
-adds local run-state entries to `.gitignore`. Existing configuration and guide
+adds local run-state entries and the per-developer model file
+`.banzai/config.local.json` to `.gitignore`. Existing configuration and guide
 contents are retained.
 
 <details>
@@ -246,8 +296,16 @@ does not guarantee a particular route.
 | `strict`                 | Requirements and planning, any required architecture or clarification decisions, your plan approval, implementation, verification, and independent review. |
 
 For strict work, inspect the plan and its required checks before approving it.
-You can request rework or independent planning review; revisions return for
-approval. After implementation review, accept, reject, or defer each finding.
+The plan gate and `banzai status` list each check's exact command, directory
+and timeout under **Verification that gates completion**; compare them with the
+commands your project documents, such as a missing `--config` flag.
+The run waits at the gate, and the gate lists the plan files with their full
+paths. To fix the plan yourself, edit those files in any editor, then choose
+**Re-check my edits** or run `banzai approve plan --decision recheck`. The
+re-check validates your edits, updates the plan's verification digest to match
+them, and shows what changed against the planner's version; it never approves.
+Approve afterwards. You can also request rework or independent planning review;
+revisions return for approval. After implementation review, accept, reject, or defer each finding.
 Accepted findings authorize scoped fixes. Rejected and deferred findings stay
 out of the fixer. A passing review, or complete triage with no accepted
 findings, can finish the run while retaining the original review verdict.
@@ -292,23 +350,83 @@ by the run; different routes create different documents.
 and any required planning and review records. The orchestrator leaves commits
 and publication to you. Use your normal review and commit process.
 
+## Use other models on this machine
+
+`.banzai/config.json` sets the models for everyone who works in the
+repository. If you cannot run a phase's client, or want to try another model,
+save your own choice for this checkout only:
+
+```sh
+banzai model --local
+```
+
+The picker shows each phase's current setting, tagged `(committed)` or
+`(local)`, and writes only the phases you change to
+`.banzai/config.local.json`. Choose `Use shared setting` to return a phase to
+the team's choice. Without `--local`, `banzai model` asks
+**Where should these model choices be saved?** when `.banzai/config.json` is
+committed or a local file exists.
+
+You can also write the file by hand. This one runs review with Claude on your
+machine only:
+
+```json
+{
+  "schemaVersion": 1,
+  "models": {
+    "reviewer": {
+      "executable": "claude",
+      "model": "claude-opus-5-5",
+      "effort": "xhigh"
+    }
+  }
+}
+```
+
+List only the phases you override; the others keep the shared setting. An
+entry sets exactly `executable` (`claude` or `codex`), `model`, and `effort`.
+Timeouts, verification, and every other setting stay shared. Run
+`banzai doctor` to check the file: its `Models:` block shows each phase with
+its source, and its `config.local` check reports any problem with the file.
+
+Git must ignore the file. `banzai init` adds the line
+`.banzai/config.local.json` to `.gitignore`; commit it with the rest of your
+setup. If your `.gitignore` lacks the line, `banzai model` adds it to your
+clone's exclude file instead, so `git status` stays clean. Until one of them
+ignores a hand-written file, Banzai refuses it with `LOCAL_CONFIG_NOT_IGNORED`.
+
+A run keeps the local models it started with. If the file changes during a
+run, the run's next command or model call refuses with
+`LOCAL_MODEL_OVERRIDE_CHANGED`. To give a blocked run other models, run
+`banzai model` while `banzai status` recommends `banzai retry`, then run
+`banzai retry`. See [the local model file](orchestrator.md#local-model-file)
+for every rule.
+
 ## Setup troubleshooting
 
-| Symptom                                                         | Next step                                                                                                                                                                                     |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `banzai` is not found                                           | Check the global npm installation and this terminal's `PATH`. Reopen the terminal after changing Node installations.                                                                          |
-| A selected model client is not found or is signed out           | Follow the [client installation and sign-in instructions](#install-and-sign-in-to-model-clients), then repeat that client's version and sign-in checks.                                       |
-| The plugin or project-manifest skill is unavailable             | Complete the [Claude Code](#claude-code-plugin) or [Codex](#codex-plugin) plugin installation for that client and check that it is enabled.                                                   |
-| Model picker or interactive prompts are unavailable             | Use a regular terminal. `banzai setup` requires interactive input/output.                                                                                                                     |
-| `GIT_REPOSITORY_REQUIRED`                                       | Run from your project's Git root, or initialize the intended new directory as described in step 2.                                                                                            |
-| `GIT_INITIAL_COMMIT_REQUIRED`                                   | Create your first commit after reviewing the setup in step 4.                                                                                                                                 |
-| Configuration or project guidance is missing                    | Run `banzai init` from the intended repository and complete the offered setup. Use `banzai setup` to continue later.                                                                          |
-| Doctor is ready, but startup rejects authentication or capacity | Resolve the reported client sign-in, subscription, or provider issue. Retry start checks only when `banzai status` offers that action.                                                        |
-| Claude or Codex cannot access its login or state                | Run Banzai from a regular terminal. An enclosing agent sandbox can hide Claude's Keychain login or make Codex state read-only; see [client environment](orchestrator.md#model-configuration). |
-| Claude tool permissions fail                                    | Follow the specific finding and [permission guidance](orchestrator.md#claude-tool-permissions). Review proposed settings before accepting them.                                               |
-| A legacy configuration is reported                              | Follow the [legacy configuration reference](orchestrator.md#project-verification-readiness). Rerunning init does not migrate an existing configuration.                                       |
-| Setup is blocked by unfinished work                             | Inspect `banzai status` and the [setup ownership rules](orchestrator.md#project-guidance-setup). Finish or explicitly cancel the existing run before setup.                                   |
-| A task is blocked or interrupted                                | Follow the action offered by `banzai status`. See [failure recovery](orchestrator.md#failure-recovery) for the distinct retry, resume, and recovery rules.                                    |
+| Symptom                                                         | Next step                                                                                                                                                                                                                                                                                            |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `banzai` is not found                                           | Check the global npm installation and this terminal's `PATH`. Reopen the terminal after changing Node installations.                                                                                                                                                                                 |
+| A selected model client is not found or is signed out           | Follow the [client installation and sign-in instructions](#install-and-sign-in-to-model-clients), then repeat that client's version and sign-in checks.                                                                                                                                              |
+| The plugin or project-manifest skill is unavailable             | Complete the [Claude Code](#claude-code-plugin) or [Codex](#codex-plugin) plugin installation for that client and check that it is enabled.                                                                                                                                                          |
+| `banzai doctor` warns about `claude.plugin-scope`               | Banzai is enabled at Claude user scope. [Move the install to local or project scope](#claude-code-plugin), or keep it: the warning does not affect readiness.                                                                                                                                        |
+| Model picker or interactive prompts are unavailable             | Use a regular terminal. `banzai setup` requires interactive input/output.                                                                                                                                                                                                                            |
+| `GIT_REPOSITORY_REQUIRED`                                       | Run from your project's Git root, or initialize the intended new directory as described in step 2.                                                                                                                                                                                                   |
+| `GIT_INITIAL_COMMIT_REQUIRED`                                   | Create your first commit after reviewing the setup in step 4.                                                                                                                                                                                                                                        |
+| Configuration or project guidance is missing                    | Run `banzai init` from the intended repository and complete the offered setup. Use `banzai setup` to continue later.                                                                                                                                                                                 |
+| Doctor is ready, but startup rejects authentication or capacity | Resolve the reported client sign-in, subscription, or provider issue. Retry start checks only when `banzai status` offers that action.                                                                                                                                                               |
+| Claude or Codex cannot access its login or state                | Run Banzai from a regular terminal. An enclosing agent sandbox can hide Claude's Keychain login or make Codex state read-only; see [client environment](orchestrator.md#model-configuration).                                                                                                        |
+| Claude tool permissions fail                                    | Follow the specific finding and [permission guidance](orchestrator.md#claude-tool-permissions). Review proposed settings before accepting them.                                                                                                                                                      |
+| A legacy configuration is reported                              | Follow the [legacy configuration reference](orchestrator.md#project-verification-readiness). Rerunning init does not migrate an existing configuration.                                                                                                                                              |
+| Setup is blocked by unfinished work                             | Inspect `banzai status` and the [setup ownership rules](orchestrator.md#project-guidance-setup). Finish or explicitly cancel the existing run before setup.                                                                                                                                          |
+| A task is blocked or interrupted                                | Follow the action offered by `banzai status`. See [failure recovery](orchestrator.md#failure-recovery) for the distinct retry, resume, and recovery rules.                                                                                                                                           |
+| A required verification check fails                             | `banzai status` shows the command, the exit code or signal, the end of its output and the log paths. Fix the cause, then retry. `Retry anyway (…expected to fail again)` means the command and project files are unchanged since the failure.                                                        |
+| `LOCAL_CONFIG_NOT_IGNORED`                                      | `.banzai/config.local.json` is in the Git index or not ignored. For a file in the index, run `git rm --cached .banzai/config.local.json`, review your copy, and commit the removal. Otherwise run `banzai model --local`, or add the line `.banzai/config.local.json` to `.gitignore` and commit it. |
+| `LOCAL_CONFIG_KEY_REFUSED`                                      | The [local model file](#use-other-models-on-this-machine) sets something other than a phase's `executable`, `model` and `effort`, such as `timeoutMs`. Remove the named key, or delete the file to use the shared models.                                                                            |
+| `LOCAL_CONFIG_INVALID`                                          | Correct the named field in `.banzai/config.local.json`, or delete the file to use the shared models. It must be a regular UTF-8 JSON file of at most 64 KiB, and neither it nor `.banzai/` may be a symbolic link.                                                                                   |
+| `LOCAL_MODEL_OVERRIDE_CHANGED`                                  | The local model file changed after the run recorded it. Restore it and repeat the command, run `banzai retry` in a terminal when `banzai status` recommends it, or run `banzai cancel`. A change you did not make may come from a model phase or a project script.                                   |
+| `LOCAL_MODEL_OVERRIDE_RECORD_INVALID`                           | The run's record of its local models cannot be read, so its models cannot be confirmed. Run `banzai cancel` and start a new task.                                                                                                                                                                    |
+| A blocked run needs a model you can run                         | When `banzai status` recommends `banzai retry`, run `banzai model`, which saves your choice for this machine only, then run `banzai retry`.                                                                                                                                                          |
 
 If setup still fails, report the OS, Node and client versions, command,
 failing check identifier, and a minimal reproduction through
@@ -389,6 +507,38 @@ After approval, run
 Review the findings and explicitly select any fixes. Each linked skill
 describes its inputs, outputs, and approval boundaries.
 
+### Multi-package initiatives
+
+Use [initiative](../plugins/banzai/skills/initiative/SKILL.md) when one plan
+spans several work packages, stages and owner gates. It keeps a frozen brief
+and a living tracker in `documentation/initiatives/<slug>/`. Every package
+still runs through its own workflow in its own `documentation/work/<slug>/`
+directory.
+
+The skill runs only when you invoke it by name:
+
+| Client      | Start                             | Next package              |
+| ----------- | --------------------------------- | ------------------------- |
+| Codex       | `$banzai:initiative start <slug>` | `$banzai:initiative next` |
+| Claude Code | `/banzai:initiative start <slug>` | `/banzai:initiative next` |
+
+1. **Start.** Give the brief in chat or name its file. `start` copies it as
+   approved, records its SHA-256 in the tracker and writes nothing else.
+2. **Next.** `next` reads the tracker, reports drift and hands off one
+   package with its recommended route. It writes nothing.
+3. **Work the package** with `feature`, `quick-fix`, the strict skills or an
+   orchestrated run, then commit it yourself.
+4. **Record.** `record` updates the package row, an owner decision, a
+   deviation, a question or an ADR reservation, one entry at a time.
+5. **Gate.** After a stage's last package, `gate <N>` writes
+   `gate-<N>-report.md` from existing evidence. Record your decision with
+   `record` before the next stage starts.
+
+The skill never edits the brief after `start`, never stages, commits, pushes
+or fetches, runs no project command, and never invokes `orchestrate` or the
+`banzai` CLI. Stage gates are not decision gates, and the documents grant no
+approval.
+
 <a id="incomplete-guidance-during-an-existing-run"></a>
 <a id="rework-and-independent-planning-review"></a>
 
@@ -397,5 +547,6 @@ describes its inputs, outputs, and approval boundaries.
 - [Project guidance setup and repair](orchestrator.md#project-guidance-setup)
 - [Rework and independent planning review](orchestrator.md#rework-and-independent-planning-review)
 - [Models and effort](orchestrator.md#choosing-models)
+- [Local model file](orchestrator.md#local-model-file)
 - [Work-document storage](artifact-storage.md)
 - [CLI commands and advanced workflows](orchestrator.md#commands)

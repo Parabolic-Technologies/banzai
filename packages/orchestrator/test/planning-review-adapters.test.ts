@@ -3,7 +3,8 @@ import test from "node:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createVendorAdapters } from "../src/adapters.js";
+import { AMBIENT_CLAUDE_SCOPE, createVendorAdapters } from "../src/adapters.js";
+import { ProcessExitError } from "../src/errors.js";
 import { createPromptEnvelope } from "../src/prompt-envelope.js";
 import { resolveOutputContract } from "../src/output-contract.js";
 import {
@@ -11,11 +12,23 @@ import {
   planningReviewAnalysis
 } from "./planning-review-fixtures.js";
 import type {
+  ClaudeInvocationScope,
   ProcessRunner,
   PlanningAdapterRequest,
   PlanningReviewResult,
   PlanningReviewAnalysis
 } from "../src/types.js";
+
+/** ADR-0059 §2: planning review is a review role and loses `Skill`. */
+const REVIEW_TOOLS = "Read,Glob,Grep";
+const REVIEW_DISALLOWED_TOOLS =
+  "Skill,Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch";
+/** Planning analysis is a planner-role invocation and keeps today's tools. */
+const PLANNER_TOOLS = "Read,Glob,Grep,Skill";
+const PLANNER_DISALLOWED_TOOLS =
+  "Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch";
+const MEMORY = "CLAUDE_CODE_DISABLE_AUTO_MEMORY";
+const FALLBACK = "CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK";
 
 test("planning invocations preserve read-only argv, exact schema and environment for both vendors", async (t) => {
   for (const vendor of ["codex", "claude"] as const)
@@ -46,10 +59,21 @@ test("planning invocations preserve read-only argv, exact schema and environment
                 ])
                   assert.ok(!spec.env[key]);
                 assert.equal(spec.cwd, directory);
+                // ADR-0063 §3: the prompt travels on stdin, never in argv.
+                assert.equal(spec.stdin, "Read only");
+                assert.equal(spec.args.includes("Read only"), false);
+                if (vendor === "codex") {
+                  assert.equal(spec.env[MEMORY], undefined);
+                  assert.equal(spec.env[FALLBACK], undefined);
+                  assert.equal(spec.env.BASH_MAX_TIMEOUT_MS, undefined);
+                  assert.equal(
+                    spec.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS,
+                    undefined
+                  );
+                }
                 if (vendor === "claude") {
                   assert.deepEqual(spec.args, [
                     "-p",
-                    "Read only",
                     "--output-format",
                     "stream-json",
                     "--verbose",
@@ -62,19 +86,13 @@ test("planning invocations preserve read-only argv, exact schema and environment
                     "--permission-mode",
                     "dontAsk",
                     "--tools",
-                    "Read,Glob,Grep,Skill",
+                    analysis ? PLANNER_TOOLS : REVIEW_TOOLS,
                     "--disallowedTools",
-                    "Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch",
+                    analysis
+                      ? PLANNER_DISALLOWED_TOOLS
+                      : REVIEW_DISALLOWED_TOOLS,
                     ...(resumed ? ["--resume", "session"] : [])
                   ]);
-                  assert.equal(
-                    spec.args[spec.args.indexOf("--tools") + 1],
-                    "Read,Glob,Grep,Skill"
-                  );
-                  assert.equal(
-                    spec.args[spec.args.indexOf("--disallowedTools") + 1],
-                    "Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch"
-                  );
                   assert.equal(
                     spec.args[spec.args.indexOf("--json-schema") + 1],
                     resolveOutputContract(vendor, identity).serialized
@@ -111,7 +129,7 @@ test("planning invocations preserve read-only argv, exact schema and environment
                           "-c",
                           'sandbox_mode="read-only"',
                           "session",
-                          "Read only"
+                          "-"
                         ]
                       : [
                           "exec",
@@ -120,7 +138,7 @@ test("planning invocations preserve read-only argv, exact schema and environment
                           "read-only",
                           "--cd",
                           directory,
-                          "Read only"
+                          "-"
                         ]
                   );
                   assert.ok(
@@ -214,4 +232,147 @@ test("planning invocations preserve read-only argv, exact schema and environment
             }
           }
         );
+});
+
+function planningRequest(
+  directory: string,
+  analysis: boolean,
+  extra: Partial<
+    PlanningAdapterRequest<PlanningReviewResult | PlanningReviewAnalysis>
+  > = {}
+): PlanningAdapterRequest<PlanningReviewResult | PlanningReviewAnalysis> {
+  const identity = analysis
+    ? "planning-review-analysis/v1"
+    : "planning-review-result/v1";
+  return {
+    repoRoot: directory,
+    runId: "run-planning",
+    runDirectory: directory,
+    attemptId: "planning-1",
+    prompt: "Read only",
+    promptEnvelope: createPromptEnvelope([
+      { category: "phase_instructions", text: "Read only" }
+    ]),
+    outputContract: resolveOutputContract("claude", identity),
+    settings: {
+      executable: "claude",
+      model: "model",
+      effort: "high",
+      timeoutMs: 1000
+    },
+    resumeSessionId: null,
+    env: {
+      PATH: "/usr/bin",
+      [MEMORY]: "0",
+      [FALLBACK]: "0",
+      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "0",
+      BASH_DEFAULT_TIMEOUT_MS: "9999999"
+    },
+    onStart: async () => {},
+    onProgress: () => {},
+    ...extra
+  };
+}
+
+const scopes: readonly [string, ClaudeInvocationScope | undefined][] = [
+  [
+    "scoped",
+    {
+      strictMcpConfig: true,
+      settingSources: "project",
+      pluginDirectory: "/plugins/banzai"
+    }
+  ],
+  [
+    "degraded scoped",
+    { strictMcpConfig: true, settingSources: null, pluginDirectory: null }
+  ],
+  ["ambient", AMBIENT_CLAUDE_SCOPE],
+  ["no scope", undefined]
+];
+
+test("Claude planning review isolates the reviewer and planning analysis keeps the planner's environment", async () => {
+  for (const analysis of [false, true])
+    for (const [name, environment] of scopes) {
+      const spawns: NodeJS.ProcessEnv[] = [];
+      const runner: ProcessRunner = async (spec) => {
+        spawns.push({ ...spec.env });
+        return {
+          exitCode: 1,
+          signal: null,
+          stdout: "",
+          stderr: "stopped after spawn",
+          startedAt: "2026-10-14T00:00:00.000Z",
+          completedAt: "2026-10-14T00:00:01.000Z"
+        };
+      };
+      const adapters = createVendorAdapters(runner);
+      const request = planningRequest(
+        "/repo",
+        analysis,
+        environment === undefined ? {} : { environment }
+      );
+      await assert.rejects(
+        analysis
+          ? adapters.runPlanningAnalysis(request)
+          : adapters.runPlanningReview(request)
+      );
+      const env = spawns[0];
+      assert.ok(env);
+      const label = `${analysis ? "analysis" : "review"} ${name}`;
+      if (!analysis) {
+        assert.equal(env[MEMORY], "1", label);
+        assert.equal(env[FALLBACK], "1", label);
+      } else {
+        assert.equal(
+          env[MEMORY],
+          environment?.strictMcpConfig === true ? "1" : "0",
+          label
+        );
+        assert.equal(env[FALLBACK], "0", label);
+      }
+      assert.equal(env.BANZAI_RUN_ID, "run-planning", label);
+      // ADR-0063 §2: a 1-second timeout keeps the vendor's 2-minute floor.
+      assert.equal(env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS, "1", label);
+      assert.equal(env.BASH_MAX_TIMEOUT_MS, "120000", label);
+      assert.equal("BASH_DEFAULT_TIMEOUT_MS" in env, false, label);
+    }
+});
+
+test("a refused Claude planning review is a typed, retry-eligible model failure", async () => {
+  const line = JSON.stringify({
+    type: "result",
+    subtype: "error_during_execution",
+    is_error: true,
+    result: "The request was declined.",
+    session_id: "session"
+  });
+  let checkpoints = 0;
+  const runner: ProcessRunner = async (spec) => {
+    await spec.onStdoutLineDurable?.(line);
+    return {
+      exitCode: 1,
+      signal: null,
+      stdout: line,
+      stderr: "",
+      startedAt: "2026-10-14T00:00:00.000Z",
+      completedAt: "2026-10-14T00:00:01.000Z"
+    };
+  };
+  await assert.rejects(
+    createVendorAdapters(runner).runPlanningReview(
+      planningRequest("/repo", false, {
+        onTerminalSuccess: async () => {
+          checkpoints += 1;
+        }
+      })
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof ProcessExitError);
+      assert.equal(error.code, "CLAUDE_PLANNING_FAILED");
+      assert.equal(error.failureCause, "unclassified");
+      return true;
+    }
+  );
+  assert.equal(checkpoints, 0);
 });

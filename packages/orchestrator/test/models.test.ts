@@ -8,7 +8,7 @@ import {
   CONFIG_FILE,
   DEFAULT_CONFIG,
   initializeConfig,
-  loadConfig
+  loadCommittedConfig
 } from "../src/config.js";
 import { BanzaiError } from "../src/errors.js";
 import {
@@ -48,7 +48,8 @@ test("the shipped default configuration uses only current models", () => {
     [
       ["claude", "claude-opus-5-5", "xhigh"],
       ["claude", "claude-opus-5-5", "xhigh"],
-      ["codex", "gpt-6.1-sol", "xhigh"]
+      // ADR-0059 §1: Claude reviews by default.
+      ["claude", "claude-opus-5-5", "xhigh"]
     ]
   );
 });
@@ -126,7 +127,7 @@ test("supported models, tier aliases, and unknown identifiers raise no advisory"
   }
 });
 
-test("models newer than the vendor CLI minimum name the release that first serves them", () => {
+test("catalogued models record the CLI release that first serves them", () => {
   assert.deepEqual(
     SELECTABLE_MODELS.flatMap((model) => {
       const minimum = modelCliMinimum(model.vendor, model.id);
@@ -291,7 +292,7 @@ test("applying model updates rewrites only the named model fields", async () => 
       { role: "reviewer", model: "claude-fable-5-1" }
     ]);
 
-    const updated = await loadConfig(root);
+    const updated = await loadCommittedConfig(root);
     assert.equal(updated.models.reviewer.model, "claude-fable-5-1");
     assert.equal(updated.models.reviewer.effort, "xhigh");
     assert.equal(

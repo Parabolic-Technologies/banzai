@@ -77,6 +77,87 @@ test("tracked work is source content without inventory entries and machine evide
   );
 });
 
+test("initiative documents are scanned source content excluded from payloads", async () => {
+  const { inspectPublicationFiles } = (await import(
+    pathToFileURL(script).href
+  )) as typeof import("../scripts/publication-check.mjs");
+  const policy = {
+    schema: "banzai-publication-inventory/v1",
+    schemaVersion: 1,
+    mode: "clean",
+    entries: []
+  };
+  const tracker = "documentation/initiatives/new-program/tracker.md";
+  const files = new Map([[tracker, Buffer.from("# Tracker\n")]]);
+  assert.deepEqual(inspectPublicationFiles(policy, files), {
+    schema: "banzai-publication-result/v1",
+    schemaVersion: 1,
+    mode: "clean",
+    fileCount: 1,
+    historicalExposure: 0,
+    classification: "classified-public-surface"
+  });
+  assert.throws(
+    () =>
+      inspectPublicationFiles(
+        policy,
+        new Map([
+          [
+            tracker,
+            Buffer.from(
+              '```json\n{"schema":"banzai-work-binding/v3","workId":"private"}\n```\n'
+            )
+          ]
+        ])
+      ),
+    /PRIVATE_CONTENT/u
+  );
+  for (const distribution of ["plugin", "npm"] as const)
+    for (const name of [tracker, "package/documentation/initiatives/x.json"])
+      assert.throws(
+        () =>
+          inspectPublicationFiles(
+            policy,
+            new Map([[name, Buffer.from("{}")]]),
+            {
+              distribution
+            }
+          ),
+        /PACKAGE_INVALID/u
+      );
+  assert.throws(
+    () =>
+      inspectPublicationFiles(
+        policy,
+        new Map([
+          [
+            "bundle.mjs.map",
+            Buffer.from(
+              JSON.stringify({
+                sources: ["../documentation/initiatives/new-program/brief.md"],
+                sourcesContent: ["# Brief"]
+              })
+            )
+          ]
+        ])
+      ),
+    /PRIVATE_SOURCE/u
+  );
+  for (const name of [
+    "documentation/initiatives/New_Program/tracker.md",
+    "documentation/initiatives/new-program/notes/tracker.md",
+    "documentation/initiatives/new-program/data.json",
+    "documentation/initiatives/README.md",
+    "documentation/notes/tracker.md"
+  ])
+    assert.throws(
+      () =>
+        inspectPublicationFiles(policy, new Map([[name, Buffer.from("{}")]])),
+      /UNCLASSIFIED/u,
+      name
+    );
+});
+
 test("publication guard inspects staged bytes and exact historical exceptions", async () => {
   const repository = await createTestRepository();
   try {

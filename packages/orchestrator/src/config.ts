@@ -29,9 +29,11 @@ export const DEFAULT_CONFIG: OrchestratorConfig = {
       effort: "xhigh",
       timeoutMs: 60 * 60 * 1000
     },
+    // ADR-0059 §1: one vendor serves every role by default. Independence comes
+    // from the reviewer's fresh, isolated session, not from a second vendor.
     reviewer: {
-      executable: "codex",
-      model: "gpt-6.1-sol",
+      executable: "claude",
+      model: "claude-opus-5-5",
       effort: "xhigh",
       timeoutMs: 30 * 60 * 1000
     }
@@ -82,7 +84,12 @@ async function pathExists(filePath: string): Promise<boolean> {
   }
 }
 
-export async function loadConfig(
+/**
+ * The committed `.banzai/config.json` alone. Committed-only readers and the
+ * layered reader in `local-config.ts` use it; the configuration a phase uses
+ * merges the local model layer (ADR-0060 §2).
+ */
+export async function loadCommittedConfig(
   repoRoot: string
 ): Promise<OrchestratorConfig> {
   const configPath = path.join(repoRoot, CONFIG_FILE);
@@ -682,7 +689,10 @@ export async function initializeConfig(
   const requiredEntries = [
     ".banzai/runs/",
     ".banzai/active-run.json",
-    ".banzai/runner.lock"
+    ".banzai/runner.lock",
+    // The exact line for the per-developer model file, never a broader
+    // pattern that would hide portable configuration (ADR-0060 §4, ADR-0041).
+    ".banzai/config.local.json"
   ];
   let current = "";
   if (await pathExists(ignorePath)) {

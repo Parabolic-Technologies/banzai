@@ -14,6 +14,13 @@
  *     hook defers instead of taxing unrelated repositories.
  *   - In manual mode, documentation / spec artifacts (documentation/**,
  *     PROJECT_MANIFEST.md, CLAUDE.md, AGENTS.md) flow freely.
+ *   - In manual mode, Claude Code memory notes flow freely too:
+ *     <config>/projects/<project>/memory/<name>.md, where <config> is an
+ *     absolute CLAUDE_CONFIG_DIR or ~/.claude.
+ *   - In manual mode, host bookkeeping writes (<config>/plans,
+ *     <config>/agent-memory and the session scratchpad) have their own
+ *     approval scope: approving one records a bookkeeping marker that allows
+ *     later bookkeeping writes and never authorizes a code change.
  *   - In runner mode, approved planning artifacts are immutable while new
  *     implementation reports and other unapproved documentation stay writable.
  *   - Orchestrated reviewers are read-only; the runner owns every review
@@ -41,11 +48,12 @@ const crypto = require('crypto');
 const os = require('os');
 const path = require('path');
 
-// Newest run-state schema this hook can interpret; it tracks the runner's
-// RUN_STATE_SCHEMA_VERSION. Codex and Claude Code refresh an installed plugin
+// Newest run-state schema this hook can interpret; it tracks the newest state
+// the runner writes (new runs start at RUN_STATE_SCHEMA_VERSION, and a plan
+// re-check moves one to the next version). Codex and Claude Code refresh an installed plugin
 // cache only on a version change, so a newer state means this hook is stale,
 // not that the run is legacy.
-const NEWEST_RUN_STATE_SCHEMA = 10;
+const NEWEST_RUN_STATE_SCHEMA = 11;
 
 function deferAndExit() {
   // No stdout + exit 0 => Claude Code falls through to normal permission flow.
@@ -144,6 +152,62 @@ function isDocArtifact(p) {
   return base === 'PROJECT_MANIFEST.md' || base === 'CLAUDE.md' || base === 'AGENTS.md';
 }
 
+// --- Claude Code host files in manual mode (ADR-0062). ---
+// Matching is lexical and never reads the file system. A path that does not
+// match exactly is a project write and keeps today's first-change prompt, so
+// every mismatch fails closed.
+const markerDir = path.join(os.tmpdir(), 'banzai-spec-gate');
+
+function claudeConfigDir() {
+  const configured = process.env.CLAUDE_CONFIG_DIR;
+  // A relative value defines no config directory and has no fallback.
+  if (configured) return path.isAbsolute(configured) ? path.resolve(configured) : null;
+  try {
+    return path.join(os.homedir(), '.claude');
+  } catch (_) {
+    return null;
+  }
+}
+const claudeConfig = claudeConfigDir();
+
+// The segments of `candidate` strictly below `root`, or null.
+function segmentsBelow(root, candidate) {
+  const relative = path.relative(root, candidate);
+  if (!relative || path.isAbsolute(relative)) return null;
+  const segments = relative.split(path.sep);
+  return segments[0] === '..' ? null : segments;
+}
+
+function isClaudeMemoryNote(target) {
+  if (!claudeConfig) return false;
+  const segments = segmentsBelow(claudeConfig, path.resolve(cwd, target));
+  return Boolean(segments) && segments.length === 4 &&
+    segments[0] === 'projects' && segments[2] === 'memory' &&
+    segments[3].length > 3 && segments[3].endsWith('.md');
+}
+
+// A root holding the session directory, the marker directory or this plugin
+// does not count, so a bookkeeping approval can never reach project files,
+// approval markers or the hook itself.
+function bookkeepingRoots() {
+  const scratchpad = payload.scratchpad_dir;
+  const roots = [
+    ...(claudeConfig ? [path.join(claudeConfig, 'plans'), path.join(claudeConfig, 'agent-memory')] : []),
+    ...(typeof scratchpad === 'string' && path.isAbsolute(scratchpad) ? [path.resolve(scratchpad)] : [])
+  ];
+  const guarded = [path.resolve(cwd), markerDir, ...(pluginRoot ? [path.resolve(pluginRoot)] : [])];
+  return roots.filter(root => !guarded.some(candidate =>
+    path.relative(root, candidate) === '' || segmentsBelow(root, candidate) !== null));
+}
+
+function isBookkeeping(target, roots) {
+  const resolved = path.resolve(cwd, target);
+  if (resolved.split(path.sep).some(segment => segment.toLowerCase() === 'banzai-spec-gate')) {
+    return false;
+  }
+  return roots.some(root => segmentsBelow(root, resolved) !== null);
+}
+
 // Codex's apply_patch carries the patch text in `tool_input.command`, not a
 // `file_path`. Pull the target paths out of the patch body.
 function patchTargets(input) {
@@ -199,7 +263,7 @@ if (!runnerMode && targets.some(target => /(?:^|\/)\.banzai\/work\//.test(target
 
 // Pure documentation / spec writes are free in manual mode. Runner mode must
 // still protect the exact planning bundle that received human approval.
-if (!runnerMode && targets.every(isDocArtifact)) {
+if (!runnerMode && targets.every(target => isDocArtifact(target) || isClaudeMemoryNote(target))) {
   deferAndExit();
 }
 
@@ -292,11 +356,11 @@ if (runnerMode) {
     }
     const controlRoot = path.join(projectRoot, '.banzai');
     let privateWrites = new Set();
-    if (state.schemaVersion === 10 || state.schemaVersion === 9 || state.schemaVersion === 8 || state.schemaVersion === 4 || state.schemaVersion === 5 || state.schemaVersion === 6 || (state.schemaVersion === 7 && state.artifactBinding !== undefined)) {
+    if (state.schemaVersion === 11 || state.schemaVersion === 10 || state.schemaVersion === 9 || state.schemaVersion === 8 || state.schemaVersion === 4 || state.schemaVersion === 5 || state.schemaVersion === 6 || (state.schemaVersion === 7 && state.artifactBinding !== undefined)) {
       const storage = await import('../lib/work-documents.mjs');
       const files = await import('../lib/project-files.mjs');
       const bound = await storage.inspectBoundWork(projectRoot, state.artifactBinding);
-      if (state.schemaVersion !== 10 || bound.binding.schemaVersion !== 3) throw new Error('historical run execution is unsupported; preserve its documents and start new work');
+      if ((state.schemaVersion !== 10 && state.schemaVersion !== 11) || bound.binding.schemaVersion !== 3) throw new Error('historical run execution is unsupported; preserve its documents and start new work');
       if (bound.binding.artifacts.verificationDirectory !== `.banzai/runs/${state.runId}/verification`) throw new Error('verification role belongs to another run');
       if (state.schemaVersion >= 6) {
         const readers = await import('../lib/artifact-readers.mjs');
@@ -406,26 +470,34 @@ if (runnerMode) {
   }
 }
 
-// --- Session approval marker (per session, in the OS temp dir). ---
-const markerDir = path.join(os.tmpdir(), 'banzai-spec-gate');
-const markerFile = path.join(markerDir, `approved-${sessionId.replace(/[^A-Za-z0-9_-]/g, '_')}`);
+// --- Session approval markers (per session, in the OS temp dir). ---
+// A write with no project target is host bookkeeping; any other write keeps
+// the project marker, whose name earlier hook versions also wrote.
+const roots = bookkeepingRoots();
+const bookkeepingWrite = targets.every(target =>
+  isDocArtifact(target) || isClaudeMemoryNote(target) || isBookkeeping(target, roots));
+const sessionKey = sessionId.replace(/[^A-Za-z0-9_-]/g, '_');
+const markerFile = path.join(markerDir, `approved-${sessionKey}`);
+const bookkeepingMarkerFile = path.join(markerDir, `bookkeeping-${sessionKey}`);
 
 if (event === 'PostToolUse') {
-  // A gated code change just succeeded, which means the human approved this
-  // session's implementation phase. Record it so we stop re-prompting.
+  // A gated change just succeeded, which means the human approved it. Record
+  // only the scope that was approved so we stop re-prompting for it.
   try {
     fs.mkdirSync(markerDir, { recursive: true });
-    fs.writeFileSync(markerFile, String(Date.now()));
+    fs.writeFileSync(bookkeepingWrite ? bookkeepingMarkerFile : markerFile, String(Date.now()));
   } catch (_) {
     /* best effort; if this fails the next edit simply prompts again */
   }
   process.exit(0);
 }
 
+function markerExists(file) {
+  try { return fs.existsSync(file); } catch (_) { return false; }
+}
+
 // --- PreToolUse for a code/codebase change. ---
-const alreadyApproved = (() => {
-  try { return fs.existsSync(markerFile); } catch (_) { return false; }
-})();
+const alreadyApproved = markerExists(markerFile);
 
 if (alreadyApproved) {
   // Implementation phase already approved this session: let code changes flow.
@@ -434,6 +506,28 @@ if (alreadyApproved) {
       hookEventName: 'PreToolUse',
       permissionDecision: 'allow',
       permissionDecisionReason: 'banzai spec-gate: implementation phase already approved for this session.'
+    }
+  }));
+  process.exit(0);
+}
+
+if (bookkeepingWrite) {
+  // Host bookkeeping never authorizes code, so its approval has its own scope.
+  const bookkeepingApproved = markerExists(bookkeepingMarkerFile);
+  process.stdout.write(JSON.stringify({
+    hookSpecificOutput: bookkeepingApproved ? {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'allow',
+      permissionDecisionReason: 'banzai spec-gate: host bookkeeping writes already approved for this session.'
+    } : {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'ask',
+      permissionDecisionReason:
+        'banzai spec-gate: host bookkeeping write (plan, subagent memory or session scratchpad). ' +
+        'Approval allows writes under these host directories for this session only; it does not authorize project code changes.',
+      additionalContext:
+        'This approval covers host bookkeeping directories only (plans, subagent memory, session scratchpad). ' +
+        'The first project code change in this session still needs its own approval.'
     }
   }));
   process.exit(0);

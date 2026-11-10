@@ -137,23 +137,22 @@ supported Node lanes:
 
 <!-- release-policy:start -->
 
-Engines: `>=22.20.0 <23 || >=24.11.1 <25`
+Engines: `>=22.20.0 <23 || >=24.11.1 <25 || >=26.13.0 <27`
 
 Version authority: `package.json#/version`; 9 fields in 7 files.
 
-| Evidence              | Node    | Image                   | GitHub Actions job              | Policy   |
-| --------------------- | ------- | ----------------------- | ------------------------------- | -------- |
-| Supported (blocking)  | 22.20.0 | `node:22.20.0-bookworm` | `release_check_node_22`         | required |
-| Supported (blocking)  | 24.11.1 | `node:24.11.1-bookworm` | `release_check_node_24`         | required |
-| Forward compatibility | 26.7.0  | `node:26.7.0-bookworm`  | `forward_compatibility_node_26` | advisory |
+| Evidence             | Node    | Image                   | GitHub Actions job      | Policy   |
+| -------------------- | ------- | ----------------------- | ----------------------- | -------- |
+| Supported (blocking) | 22.20.0 | `node:22.20.0-bookworm` | `release_check_node_22` | required |
+| Supported (blocking) | 24.11.1 | `node:24.11.1-bookworm` | `release_check_node_24` | required |
+| Supported (blocking) | 26.13.0 | `node:26.13.0-bookworm` | `release_check_node_26` | required |
 
 <!-- release-policy:end -->
 
 Live vendor-permission evidence is a separate manual, protected-ref-only path;
 deterministic tests are never labeled as proof of hosted permission behavior.
-The [GitHub Actions workflow](.github/workflows/ci.yml) runs the required
-supported lanes on pull requests and on manual dispatch, and the advisory Node
-26 lane weekly and on manual dispatch. A push to `main` or `dev` starts no
+The [GitHub Actions workflow](.github/workflows/ci.yml) runs the three required
+supported lanes on pull requests and on manual dispatch. A push to `main` or `dev` starts no
 hosted run, so run `npm run release:check` locally or dispatch the workflow
 by hand. Each lane uses a fresh checkout with read-only
 repository permissions and no persisted checkout credentials. Release owners

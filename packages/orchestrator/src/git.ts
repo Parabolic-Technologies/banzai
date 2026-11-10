@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { lstat, readFile } from "node:fs/promises";
+import { constants, type Stats } from "node:fs";
+import { lstat, mkdir, open, readFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import { BanzaiError } from "./errors.js";
 import { runProcess } from "./process.js";
@@ -20,25 +21,250 @@ async function runGit(repoRoot: string, args: string[]) {
   });
 }
 
+function gitFailure(args: string[], stderr: string): BanzaiError {
+  // Match only failed discovery, not corrupt gitdir pointers or access errors.
+  if (stderr.startsWith("fatal: not a git repository (or any")) {
+    return new BanzaiError(
+      "GIT_REPOSITORY_REQUIRED",
+      "Banzai requires a Git repository. Run `git init` in your project directory and create an initial commit, then start Banzai again."
+    );
+  }
+  return new BanzaiError(
+    "GIT_FAILED",
+    `git ${args.join(" ")} failed: ${stderr.trim() || "unknown error"}`
+  );
+}
+
 async function git(
   repoRoot: string,
   args: string[]
 ): Promise<{ stdout: string; stderr: string }> {
   const result = await runGit(repoRoot, args);
   if (result.exitCode !== 0) {
-    // Match only failed discovery, not corrupt gitdir pointers or access errors.
-    if (result.stderr.startsWith("fatal: not a git repository (or any")) {
-      throw new BanzaiError(
-        "GIT_REPOSITORY_REQUIRED",
-        "Banzai requires a Git repository. Run `git init` in your project directory and create an initial commit, then start Banzai again."
-      );
-    }
-    throw new BanzaiError(
-      "GIT_FAILED",
-      `git ${args.join(" ")} failed: ${result.stderr.trim() || "unknown error"}`
-    );
+    throw gitFailure(args, result.stderr);
   }
   return result;
+}
+
+/**
+ * A Git query that answers by exit status: 0 is yes and 1 is no. Any other
+ * status, or a process ended by a signal, is a Git failure and never "no".
+ */
+async function gitPredicate(
+  repoRoot: string,
+  args: string[]
+): Promise<boolean> {
+  const result = await runGit(repoRoot, args);
+  if (result.signal === null && result.exitCode === 0) {
+    return true;
+  }
+  if (result.signal === null && result.exitCode === 1) {
+    return false;
+  }
+  throw gitFailure(args, result.stderr);
+}
+
+/**
+ * Whether the repository-relative `relativePath` is in the Git index
+ * (`git ls-files --error-unmatch`). A staged file counts; a file removed with
+ * `git rm --cached` does not.
+ */
+export async function isPathInIndex(
+  repoRoot: string,
+  relativePath: string
+): Promise<boolean> {
+  return await gitPredicate(repoRoot, [
+    "ls-files",
+    "--error-unmatch",
+    "--",
+    relativePath
+  ]);
+}
+
+/**
+ * Whether Git ignores the repository-relative `relativePath`
+ * (`git check-ignore -q`), counting `.gitignore` files, the clone's exclude
+ * file and the global excludes. Git never reports a path in the index as
+ * ignored, so callers check the index first.
+ */
+export async function isPathIgnored(
+  repoRoot: string,
+  relativePath: string
+): Promise<boolean> {
+  return await gitPredicate(repoRoot, [
+    "check-ignore",
+    "-q",
+    "--",
+    relativePath
+  ]);
+}
+
+/**
+ * The clone's own exclude file (ADR-0060 §4): the path
+ * `git rev-parse --git-path info/exclude` prints, resolved against the
+ * repository root. It is relative in the main worktree and names the common
+ * directory's file in a linked worktree, so every worktree of a clone shares
+ * it. Git honours the file and never tracks it.
+ */
+export async function cloneExcludePath(repoRoot: string): Promise<string> {
+  const args = ["rev-parse", "--git-path", "info/exclude"];
+  const printed = (await git(repoRoot, args)).stdout.replace(/\r?\n$/u, "");
+  if (printed.length === 0 || printed.includes("\n")) {
+    throw new BanzaiError(
+      "GIT_FAILED",
+      `git ${args.join(" ")} printed no single path.`
+    );
+  }
+  return path.resolve(repoRoot, printed);
+}
+
+export type CloneExcludeAppend = "present" | "appended";
+
+const EXCLUDE_UNSAFE_MESSAGE =
+  "This clone's Git exclude file (info/exclude in the Git directory) or its info/ directory is a symbolic link or not a regular file, so Banzai does not write to it.";
+
+function excludeUnsafe(line: string): BanzaiError {
+  return new BanzaiError(
+    "GIT_EXCLUDE_UNSAFE",
+    `${EXCLUDE_UNSAFE_MESSAGE} Repair it, or add the line ${line} to .gitignore and commit it.`
+  );
+}
+
+async function lstatOrNull(target: string) {
+  try {
+    return await lstat(target);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+/** Opens never follow a link at the final path component. */
+const NO_FOLLOW = constants.O_NOFOLLOW;
+
+/**
+ * Refuses unless `info/` is still the real directory first checked (same
+ * device and inode, not a link). `O_NOFOLLOW` guards only the file itself, so
+ * this runs immediately before and after each open.
+ */
+async function requireSameExcludeDirectory(
+  directory: string,
+  expected: Stats,
+  line: string
+): Promise<void> {
+  const current = await lstatOrNull(directory);
+  if (
+    current === null ||
+    current.isSymbolicLink() ||
+    !current.isDirectory() ||
+    current.dev !== expected.dev ||
+    current.ino !== expected.ino
+  ) {
+    throw excludeUnsafe(line);
+  }
+}
+
+export interface CloneExcludeAppendOptions {
+  /** Test seam: runs after `info/` is checked and before the file is opened. */
+  beforeOpen?: () => Promise<void>;
+}
+
+/**
+ * Appends `line` to this clone's exclude file unless the file already holds
+ * exactly that line (ADR-0060 §4). It creates `info/` when it is missing,
+ * refuses a symbolic link or a non-directory at `info/` and a symbolic link or
+ * non-regular exclude file with `GIT_EXCLUDE_UNSAFE`, and opens the file
+ * without following links. `info/` is checked again immediately before and
+ * after the open, so a directory swapped for a link never receives the line.
+ * A file without a final newline gets one first.
+ */
+export async function appendCloneExcludeLine(
+  repoRoot: string,
+  line: string,
+  options: CloneExcludeAppendOptions = {}
+): Promise<CloneExcludeAppend> {
+  if (line.length === 0 || /[\r\n]/u.test(line)) {
+    throw new BanzaiError(
+      "INVALID_EXCLUDE_LINE",
+      "An exclude entry must be one non-empty line."
+    );
+  }
+  const file = await cloneExcludePath(repoRoot);
+  const directory = path.dirname(file);
+  if ((await lstatOrNull(directory)) === null) {
+    try {
+      await mkdir(directory);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+  }
+  const directoryStat = await lstatOrNull(directory);
+  if (
+    directoryStat === null ||
+    directoryStat.isSymbolicLink() ||
+    !directoryStat.isDirectory()
+  ) {
+    throw excludeUnsafe(line);
+  }
+  await options.beforeOpen?.();
+  await requireSameExcludeDirectory(directory, directoryStat, line);
+  const existing = await lstatOrNull(file);
+  if (existing === null) {
+    const created = await open(
+      file,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NO_FOLLOW,
+      0o644
+    );
+    try {
+      const opened = await created.stat();
+      try {
+        await requireSameExcludeDirectory(directory, directoryStat, line);
+      } catch (error) {
+        // Created through a swapped directory: remove only that new file.
+        const current = await lstatOrNull(file).catch(() => null);
+        if (current?.ino === opened.ino && current.dev === opened.dev)
+          await unlink(file).catch(() => undefined);
+        throw error;
+      }
+      await created.writeFile(`${line}\n`, "utf8");
+    } finally {
+      await created.close();
+    }
+    return "appended";
+  }
+  if (existing.isSymbolicLink() || !existing.isFile()) {
+    throw excludeUnsafe(line);
+  }
+  let handle;
+  try {
+    handle = await open(
+      file,
+      constants.O_RDWR | constants.O_APPEND | NO_FOLLOW
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ELOOP") {
+      throw excludeUnsafe(line);
+    }
+    throw error;
+  }
+  try {
+    const opened = await handle.stat();
+    if (
+      !opened.isFile() ||
+      opened.ino !== existing.ino ||
+      opened.dev !== existing.dev
+    ) {
+      throw excludeUnsafe(line);
+    }
+    await requireSameExcludeDirectory(directory, directoryStat, line);
+    const text = await handle.readFile("utf8");
+    if (text.split(/\r?\n/u).includes(line)) return "present";
+    const separator = text.length === 0 || text.endsWith("\n") ? "" : "\n";
+    await handle.writeFile(`${separator}${line}\n`, "utf8");
+    return "appended";
+  } finally {
+    await handle.close();
+  }
 }
 
 export async function discoverRepositoryRoot(cwd: string): Promise<string> {

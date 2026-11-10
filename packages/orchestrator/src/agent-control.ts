@@ -17,6 +17,7 @@ import path from "node:path";
 import packageManifest from "../package.json" with { type: "json" };
 import { BanzaiError } from "./errors.js";
 import type {
+  AgentControlPlanRecheck,
   AgentControlAnswerV1,
   AgentControlAnswerV2,
   AgentControlAnswerV3,
@@ -589,7 +590,7 @@ export function agentControlCapabilities(): AgentControlCapabilitiesV5 {
       gateDecisionSchema: PLANNING_GATE_DOCUMENT,
       decisions: {
         adr_approval: ["accept", "reject", "rework", "review"],
-        plan_approval: ["approve", "rework", "review"]
+        plan_approval: ["approve", "recheck", "rework", "review"]
       },
       triage: {
         pendingKind: "planning_review_triage",
@@ -609,7 +610,10 @@ export function agentControlCapabilities(): AgentControlCapabilitiesV5 {
       directoryPattern: "documentation/work/<slug>/",
       bindingSchemas: ["banzai-work-binding/v3"],
       workspaceSnapshotVersion: 3,
-      verificationRequestSchemas: ["banzai-verification-request/v3"]
+      verificationRequestSchemas: [
+        "banzai-verification-request/v4",
+        "banzai-verification-request/v3"
+      ]
     },
     configurationPrerequisite: {
       kind: "configuration_prerequisite",
@@ -973,6 +977,24 @@ function approvalArtifacts(state: RunState): string[] {
   );
 }
 
+/** Status v7 carries the summary without digests or file contents (ADR-0058 §6). */
+function planRecheckProjection(
+  status: WorkflowStatus
+): AgentControlPlanRecheck | null {
+  const record = status.planRecheck;
+  if (record === undefined) return null;
+  const projected = {
+    recheckId: record.recheckId,
+    decidedAt: record.decidedAt,
+    summary: record.summary
+  };
+  if (Buffer.byteLength(JSON.stringify(projected), "utf8") > 32 * 1024)
+    throw statusError(
+      "The plan re-check summary exceeds the status size bound."
+    );
+  return projected;
+}
+
 function pendingGate(status: WorkflowStatus): AgentControlPendingGateV3 | null {
   const { state } = status;
   if (state.status === "needs_adr_approval") {
@@ -1010,9 +1032,11 @@ function pendingGate(status: WorkflowStatus): AgentControlPendingGateV3 | null {
       decisions: planningGateActions(
         "plan_approval",
         state.schemaVersion,
-        gateArtifactPaths(state, "plan_approval").length > 0
+        gateArtifactPaths(state, "plan_approval").length > 0,
+        state.verificationMode === "task"
       ),
-      reviewPaths: gateArtifactPaths(state, "plan_approval")
+      reviewPaths: gateArtifactPaths(state, "plan_approval"),
+      recheck: planRecheckProjection(status)
     };
   }
   if (state.status === "needs_human_decision") {

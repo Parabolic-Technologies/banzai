@@ -7,7 +7,8 @@ import type {
 import { RunStore } from "../src/store.js";
 import {
   parseTaskVerificationDescriptor,
-  evidenceDigest
+  evidenceDigest,
+  type TaskVerificationDescriptor
 } from "../src/verification-evidence.js";
 import assert from "node:assert/strict";
 import { mkdir, readFile, symlink, writeFile } from "node:fs/promises";
@@ -30,6 +31,7 @@ import {
   type RunState,
   type SessionInventory,
   type VendorAdapters,
+  type VendorPreflightTarget,
   type WorkflowSelectionAdapterRequest,
   type WorkflowSelectionResult
 } from "../src/types.js";
@@ -414,6 +416,9 @@ export class FakeAdapters implements VendorAdapters {
   onCodexPreflight: (() => Promise<void>) | null = null;
   onClaudePreflight: (() => Promise<void>) | null = null;
   claudePreflightErrors: Error[] = [];
+  /** Every preflight target in call order, as the runner passed it. */
+  codexPreflightTargets: VendorPreflightTarget[] = [];
+  claudePreflightTargets: VendorPreflightTarget[] = [];
   selectionPrompts: string[] = [];
   selectionErrors: Error[] = [];
   selectionResults: WorkflowSelectionResult[] = [];
@@ -451,6 +456,12 @@ export class FakeAdapters implements VendorAdapters {
   emitReviewTerminalCheckpoint = true;
   failReviewAfterTerminalCheckpoint = false;
   planTaskIds = ["T001"];
+  /** Plan obligations to write instead of the configured profile commands. */
+  planVerificationChecks: TaskVerificationDescriptor[] | null = null;
+  /** The remainder digest the planner declares instead of the correct one. */
+  planRemainderDeclared: string | null = null;
+  /** Supplemental strict candidates; lite candidates keep `fixtureTaskChecks`. */
+  strictVerificationCandidates: TaskVerificationDescriptor[] | null = null;
 
   protected async emitImplementationCheckpoint(
     request: PhaseAdapterRequest,
@@ -486,13 +497,15 @@ export class FakeAdapters implements VendorAdapters {
     });
   }
 
-  async preflightCodex(): Promise<void> {
+  async preflightCodex(target: VendorPreflightTarget): Promise<void> {
     this.codexPreflights += 1;
+    this.codexPreflightTargets.push(target);
     await this.onCodexPreflight?.();
   }
 
-  async preflightClaude(): Promise<void> {
+  async preflightClaude(target: VendorPreflightTarget): Promise<void> {
     this.claudePreflights += 1;
+    this.claudePreflightTargets.push(target);
     await this.onClaudePreflight?.();
     const error = this.claudePreflightErrors.shift();
     if (error !== undefined) {
@@ -558,16 +571,22 @@ export class FakeAdapters implements VendorAdapters {
     const bind = (result: PhaseResult): PhaseResult => {
       if (state.verificationMode === "task") {
         result.schemaVersion = 4;
-        result.verificationCandidates =
-          result.phase === "plan" ||
-          (state.workflowSelection?.workflow ?? "strict") === "strict"
-            ? null
-            : {
-                checks: fixtureChecks,
-                absenceReason: fixtureChecks.length
-                  ? null
-                  : "Fixture task uses direct source assertions."
-              };
+        const strict =
+          (state.workflowSelection?.workflow ?? "strict") === "strict";
+        const strictCandidates = this.strictVerificationCandidates;
+        if (result.phase === "plan") result.verificationCandidates = null;
+        else if (strict)
+          result.verificationCandidates =
+            strictCandidates === null
+              ? null
+              : { checks: strictCandidates, absenceReason: null };
+        else
+          result.verificationCandidates = {
+            checks: fixtureChecks,
+            absenceReason: fixtureChecks.length
+              ? null
+              : "Fixture task uses direct source assertions."
+          };
       }
       if (!roles) return result;
       const mapping = new Map<string, string | null>([
@@ -653,19 +672,21 @@ export class FakeAdapters implements VendorAdapters {
             "utf8"
           )
         ) as OrchestratorConfig;
-        const checks = config.verification.profiles.flatMap((profile) =>
-          profile.commands.map((command, index) =>
-            parseTaskVerificationDescriptor({
-              ...command,
-              id: `${profile.id}-${index + 1}`,
-              requirementRefs: ["FR1"],
-              cwd: ".",
-              evidence: "fresh",
-              sources: [],
-              materialization: null
-            })
-          )
-        );
+        const checks =
+          this.planVerificationChecks ??
+          config.verification.profiles.flatMap((profile) =>
+            profile.commands.map((command, index) =>
+              parseTaskVerificationDescriptor({
+                ...command,
+                id: `${profile.id}-${index + 1}`,
+                requirementRefs: ["FR1"],
+                cwd: ".",
+                evidence: "fresh",
+                sources: [],
+                materialization: null
+              })
+            )
+          );
         await writeFile(
           file,
           before +
@@ -674,7 +695,8 @@ export class FakeAdapters implements VendorAdapters {
               schema: "banzai-verification-obligations/v2",
               schemaVersion: 2,
               complete: true,
-              planRemainderSha256: evidenceDigest(before + "\n"),
+              planRemainderSha256:
+                this.planRemainderDeclared ?? evidenceDigest(before + "\n"),
               checks,
               absenceReason: checks.length
                 ? null

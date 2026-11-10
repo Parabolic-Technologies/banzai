@@ -630,7 +630,8 @@ export async function establishResultSourceIdentities(
       observed,
       size,
       limit,
-      matched: observed === identity.declared
+      matched: observed === identity.declared,
+      recorded: false
     });
   }
   await recordResultDigestEvidence(context, state, attempt, comparisons);

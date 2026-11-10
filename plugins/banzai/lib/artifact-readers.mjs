@@ -187,12 +187,12 @@ function validateConfigurationStateEnvelope(value) {
   if (!value || typeof value !== "object" || Array.isArray(value))
     configurationInvalid();
   const state = value;
-  if ((state.schemaVersion === 8 || state.schemaVersion === 9 || state.schemaVersion === 10) && state.verificationMode !== "task")
+  if ((state.schemaVersion === 8 || state.schemaVersion === 9 || state.schemaVersion === 10 || state.schemaVersion === 11) && state.verificationMode !== "task")
     configurationInvalid();
   if (state.schemaVersion !== 6 && !(state.schemaVersion === 7 && "configurationSetup" in state)) {
     if (Array.isArray(state.humanDecisions) && state.humanDecisions.some(
       (record) => record?.kind === "configuration_prerequisite"
-    ) || "configurationSetup" in state || "verificationMode" in state && !((state.schemaVersion === 8 || state.schemaVersion === 9 || state.schemaVersion === 10) && state.verificationMode === "task") || state.pendingHumanDecision?.kind === "configuration_prerequisite")
+    ) || "configurationSetup" in state || "verificationMode" in state && !((state.schemaVersion === 8 || state.schemaVersion === 9 || state.schemaVersion === 10 || state.schemaVersion === 11) && state.verificationMode === "task") || state.pendingHumanDecision?.kind === "configuration_prerequisite")
       configurationInvalid();
     return;
   }
@@ -4605,9 +4605,11 @@ var DEFAULT_CONFIG = {
       effort: "xhigh",
       timeoutMs: 60 * 60 * 1e3
     },
+    // ADR-0059 §1: one vendor serves every role by default. Independence comes
+    // from the reviewer's fresh, isolated session, not from a second vendor.
     reviewer: {
-      executable: "codex",
-      model: "gpt-6.1-sol",
+      executable: "claude",
+      model: "claude-opus-5-5",
       effort: "xhigh",
       timeoutMs: 30 * 60 * 1e3
     }

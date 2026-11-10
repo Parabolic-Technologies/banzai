@@ -43,7 +43,7 @@ test("setup client discovery is local, validates explicit skill and preserves se
           { id: "banzai@local", enabled: true, installPath: plugin }
         ]);
       else if (args === "--version")
-        stdout = spec.command === "claude" ? "2.1.218" : "codex-cli 0.145.0";
+        stdout = spec.command === "claude" ? "2.1.290" : "codex-cli 0.145.0";
       else if (args === "login status") stdout = "Logged in using ChatGPT";
       else if (args === "auth status --json")
         stdout = JSON.stringify({
@@ -157,6 +157,31 @@ test("setup client discovery is local, validates explicit skill and preserves se
           return true;
         }
       );
+    // ADR-0063 §1: setup refuses a Claude client below the one minimum.
+    const oldClaude: ProcessRunner = async (spec) =>
+      spec.command === "claude" && spec.args.join(" ") === "--version"
+        ? {
+            exitCode: 0,
+            signal: null,
+            stdout: "2.1.289 (Claude Code)",
+            stderr: "",
+            startedAt: "",
+            completedAt: ""
+          }
+        : runner(spec);
+    const claudeClient = clients.find((client) => client.vendor === "claude");
+    assert.ok(claudeClient);
+    await assert.rejects(
+      prepareSetupLaunch(claudeClient, root, config, env, {
+        runner: oldClaude
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.equal((error as { code?: string }).code, "CLI_TOO_OLD");
+        assert.match(error.message, /older than required 2\.1\.290/);
+        return true;
+      }
+    );
     const missingExecutable: ProcessRunner = async () => {
       throw new Error("ENOENT FORBIDDEN_SECRET");
     };

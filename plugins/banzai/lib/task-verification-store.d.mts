@@ -28,9 +28,11 @@ export function parseTaskVerificationAttempt(value: unknown): TaskVerificationAt
 export function captureTaskVerificationInputs(input: VerificationStorage, descriptors: TaskVerificationDescriptor[], policy: TaskVerificationPolicy | null): Promise<TaskVerificationCapture>;
 export function readTaskVerificationAttempts(input: VerificationStorage, repairOrigins?: boolean): Promise<TaskVerificationAttempt[]>;
 export function taskVerificationApplicability(input: VerificationStorage, decision: TaskVerificationDecision, attempts: TaskVerificationAttempt[], current: TaskVerificationCapture): Promise<TaskVerificationApplicability>;
+export function unsuccessfulRoundAttempts(attempts: TaskVerificationAttempt[], selection: Pick<TaskVerificationSelection, "checks">, roundId: string): TaskVerificationAttempt[];
+export function taskVerificationContinues(attempt: Pick<TaskVerificationAttempt, "status" | "failureCategory" | "signal">): boolean;
 export function executeTaskVerification(input: VerificationStorage & {
   selection: TaskVerificationSelection; authority: TaskVerificationAuthority; context: TaskVerificationContext; policy: TaskVerificationPolicy | null;
-  roundId: string; retryOf?: string; recoverInterrupted?: boolean;
+  roundId: string; retryOf?: string; retrySet?: string[]; recoverInterrupted?: boolean;
   revalidate(): Promise<void>;
   invoke(descriptor: TaskVerificationDescriptor, cwd: string): Promise<{
     status: "completed" | "failed" | "interrupted"; stdout: string; stderr: string; completedAt: string; exitCode: number | null; signal: string | null;

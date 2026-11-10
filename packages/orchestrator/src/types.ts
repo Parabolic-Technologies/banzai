@@ -2,6 +2,7 @@ import type { ReviewConfigurationSetup } from "./configuration-review.js";
 import type {
   TaskVerificationPublication,
   TaskVerificationCandidates,
+  TaskVerificationDescriptor,
   TaskVerificationPolicy,
   VerificationPolicy,
   ReviewVerificationEvidence,
@@ -9,6 +10,9 @@ import type {
   VerificationDecision,
   VerificationApplicability
 } from "./verification-evidence.js";
+
+// Domain modules read inventories through this module only (ADR-0052).
+export type { TaskVerificationCandidates, TaskVerificationDescriptor };
 import type { ArtifactBoundWork } from "./work-documents.js";
 import type {
   ConfigurationAction,
@@ -109,18 +113,22 @@ export const RECOVERY_AUTHORIZATION_SCHEMA =
   "banzai-recovery-authorization/v1" as const;
 export const RECOVERY_AUTHORIZATION_SCHEMA_VERSION = 1 as const;
 export const RESULT_DIGEST_EVIDENCE_SCHEMA =
+  "banzai-result-digest-evidence/v2" as const;
+export const RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION = 2 as const;
+/** Written before ADR-0064 and read as comparisons the runner never recorded. */
+export const LEGACY_RESULT_DIGEST_EVIDENCE_SCHEMA =
   "banzai-result-digest-evidence/v1" as const;
-export const RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION = 1 as const;
-export const AGENT_CONTROL_CONTRACT_VERSION = "8.0.0" as const;
-export const AGENT_CAPABILITIES_SCHEMA_VERSION = 8 as const;
-export const AGENT_STATUS_SCHEMA_VERSION = 6 as const;
+export const LEGACY_RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION = 1 as const;
+export const AGENT_CONTROL_CONTRACT_VERSION = "9.0.0" as const;
+export const AGENT_CAPABILITIES_SCHEMA_VERSION = 9 as const;
+export const AGENT_STATUS_SCHEMA_VERSION = 7 as const;
 export const AGENT_ANSWER_SCHEMA_VERSION = 2 as const;
 export const AGENT_REQUEST_SCHEMA_VERSION = 1 as const;
 export const AGENT_RECOVERY_SCHEMA_VERSION = 1 as const;
 export const LEGACY_AGENT_CONTROL_SCHEMA_VERSION = 1 as const;
 export const AGENT_CAPABILITIES_SCHEMA =
-  "banzai-agent-capabilities/v8" as const;
-export const AGENT_STATUS_SCHEMA = "banzai-agent-status/v6" as const;
+  "banzai-agent-capabilities/v9" as const;
+export const AGENT_STATUS_SCHEMA = "banzai-agent-status/v7" as const;
 export const AGENT_REQUEST_SCHEMA = "banzai-agent-request/v1" as const;
 export const AGENT_ANSWER_SCHEMA = "banzai-agent-answer/v2" as const;
 export const CONFIGURATION_ANSWER_SCHEMA = "banzai-agent-answer/v3" as const;
@@ -182,7 +190,7 @@ export interface AgentControlCapabilitiesV5 {
     gateDecisionSchema: typeof PLANNING_GATE_DOCUMENT;
     decisions: {
       adr_approval: readonly ["accept", "reject", "rework", "review"];
-      plan_approval: readonly ["approve", "rework", "review"];
+      plan_approval: readonly ["approve", "recheck", "rework", "review"];
     };
     triage: {
       pendingKind: "planning_review_triage";
@@ -207,7 +215,10 @@ export interface AgentControlCapabilitiesV5 {
     directoryPattern: "documentation/work/<slug>/";
     bindingSchemas: ["banzai-work-binding/v3"];
     workspaceSnapshotVersion: 3;
-    verificationRequestSchemas: ["banzai-verification-request/v3"];
+    verificationRequestSchemas: [
+      "banzai-verification-request/v4",
+      "banzai-verification-request/v3"
+    ];
   };
   configurationPrerequisite: {
     kind: "configuration_prerequisite";
@@ -265,6 +276,13 @@ export interface AgentControlRecoveryV1 {
   unknownSideEffectsAccepted: true;
 }
 
+/** A re-check as status v7 shows it: no digests and no file contents. */
+export interface AgentControlPlanRecheck {
+  recheckId: string;
+  decidedAt: string;
+  summary: PlanRecheckSummary;
+}
+
 export type AgentControlNextActionV1 =
   | "approve_adr"
   | "approve_plan"
@@ -296,6 +314,8 @@ export type AgentControlPendingGateV1 =
       decisions?: string[];
       reviewPaths?: string[];
       artifactPaths: string[];
+      /** Status v7: the latest re-check of this gate entry, or null. */
+      recheck?: AgentControlPlanRecheck | null;
     }
   | {
       kind: "escalation";
@@ -1247,6 +1267,21 @@ export interface VerificationCommand {
   timeoutMs: number;
 }
 
+/**
+ * The checks a plan under approval binds, in verification order, or the error
+ * approval would raise for its inventory. A read-only plan gate projection.
+ */
+export type PlanVerificationInventory =
+  | {
+      checks: {
+        descriptor: TaskVerificationDescriptor;
+        /** `policy` marks a project-policy check the plan does not restate. */
+        origin: "plan" | "policy";
+      }[];
+      absenceReason: string | null;
+    }
+  | { error: string };
+
 export type VerificationProjectType =
   | "repository"
   | "node"
@@ -1284,6 +1319,193 @@ export interface OrchestratorConfig {
   maxFixCycles: number;
 }
 
+/** The file that supplies a role's model triple (ADR-0060 §2). */
+export type ModelSource = "committed" | "local";
+
+export type ModelSources = Record<
+  keyof OrchestratorConfig["models"],
+  ModelSource
+>;
+
+/**
+ * A role triple from `.banzai/config.local.json`. It replaces the committed
+ * triple as one unit; `timeoutMs` stays committed (ADR-0060 §1).
+ */
+export interface LocalModelTriple {
+  executable: "claude" | "codex";
+  model: string;
+  effort: ModelSettings["effort"];
+}
+
+/** The normalized local role map; `{}` when no local file exists. */
+export type LocalModelLayer = Partial<
+  Record<keyof OrchestratorConfig["models"], LocalModelTriple>
+>;
+
+export type LocalConfigDefectCode =
+  | "LOCAL_CONFIG_INVALID"
+  | "LOCAL_CONFIG_KEY_REFUSED"
+  | "LOCAL_CONFIG_NOT_IGNORED";
+
+/**
+ * Why a local model file cannot be used: `unsafe` covers a symbolic link at
+ * `.banzai/` or at the file and a non-regular file; `invalid` covers the size
+ * bound, the encoding, JSON and every wrong value.
+ */
+export type LocalConfigDefectCause =
+  | "unsafe"
+  | "unreadable"
+  | "invalid"
+  | "refused_key"
+  | "tracked"
+  | "not_ignored";
+
+/**
+ * A refused local model file. `fieldPath` and `message` never carry a value
+ * from the file: a key is named only when it is a plain identifier.
+ */
+export interface LocalConfigDefect {
+  code: LocalConfigDefectCode;
+  cause: LocalConfigDefectCause;
+  fieldPath: string;
+  message: string;
+}
+
+export type UsableLocalModelLayer =
+  { state: "absent" } | { state: "valid"; models: LocalModelLayer };
+
+export interface DefectiveLocalModelLayer {
+  state: "defective";
+  defect: LocalConfigDefect;
+}
+
+export type LocalModelLayerStatus =
+  UsableLocalModelLayer | DefectiveLocalModelLayer;
+
+/** The committed configuration with each local triple in its place. */
+export interface EffectiveModelConfiguration {
+  config: OrchestratorConfig;
+  models: LocalModelLayer;
+  sources: ModelSources;
+}
+
+/**
+ * What the layered reader saw: the committed layer always, and the effective
+ * configuration only while the local file is usable.
+ */
+export type LayeredConfiguration =
+  | {
+      committed: OrchestratorConfig;
+      local: UsableLocalModelLayer;
+      effective: EffectiveModelConfiguration;
+    }
+  | {
+      committed: OrchestratorConfig;
+      local: DefectiveLocalModelLayer;
+      effective: null;
+    };
+
+/**
+ * One role of a model status: the triple a phase of that role uses and the
+ * file it comes from. Values are raw file values; print each through
+ * `escapeTerminalField`.
+ */
+export interface ModelRoleStatus {
+  executable: string;
+  model: string;
+  effort: ModelSettings["effort"];
+  source: ModelSource;
+}
+
+export type ModelRoleStatuses = Record<
+  keyof OrchestratorConfig["models"],
+  ModelRoleStatus
+>;
+
+/**
+ * ADR-0060 §7 model status for human output only: `banzai status` and the
+ * interactive launch header. It is never part of `WorkflowStatus`, so
+ * `status --json` and agent status stay unchanged.
+ *
+ * `scope` says which models it describes:
+ * - `run`: a run that is not done or cancelled. `run` holds the
+ *   run-effective models (the committed file merged with the run's record),
+ *   `current` the models a new run would use now (`null` while the local file
+ *   cannot be used), and `drift` the escaped lines between the record and the
+ *   current local file: one `<Role>: recorded …, now …` line per differing
+ *   role, or one line naming a tracked, unignored or invalid local file;
+ *   empty without drift.
+ * - `current`: no run, or a done or cancelled one. `current` holds the models
+ *   a new run would use now; `localDefect` is the escaped line naming a local
+ *   file that cannot be used, in place of those models.
+ *
+ * `record_invalid` is a run whose record cannot be read: it has no
+ * run-effective configuration, and human output reports retry and recovery
+ * as not eligible and recommends `banzai cancel` (reading 11).
+ * `unavailable` is a committed file that cannot be read, with its error code.
+ */
+export type ModelStatus =
+  | {
+      scope: "run";
+      state: "recorded";
+      runId: string;
+      run: ModelRoleStatuses;
+      current: ModelRoleStatuses | null;
+      drift: string[];
+    }
+  | {
+      scope: "run";
+      state: "record_invalid";
+      runId: string;
+      /** The record's repository-relative path. */
+      recordPath: string;
+    }
+  | { scope: "current"; state: "effective"; current: ModelRoleStatuses }
+  | { scope: "current"; state: "local_defective"; localDefect: string }
+  | { scope: "run" | "current"; state: "unavailable"; code: string };
+
+/**
+ * The run's local model record, `.banzai/runs/<runId>/model-override.json`
+ * (ADR-0060 §5): the normalized role map of the local file that started or
+ * last re-recorded the run, `{}` when there was none. It sits beside run
+ * state, never inside it, so run state schemas are unchanged.
+ */
+export interface ModelOverrideRecord {
+  schema: "banzai-run-model-override/v1";
+  models: LocalModelLayer;
+}
+
+/**
+ * Why a run's model record cannot be used: `unsafe` covers a symbolic link at
+ * or above it and a non-regular file; `unreadable` covers I/O failures and a
+ * missing run directory; `invalid` covers the size bound, the encoding, JSON,
+ * another identity and every value the local file would refuse.
+ */
+export type ModelOverrideRecordDefectCause =
+  "unsafe" | "unreadable" | "invalid";
+
+/**
+ * A run model record that is neither usable nor absent. It is never treated
+ * as absent; `path` is repository-relative and `message` names it and says to
+ * cancel the run without echoing anything from the file.
+ */
+export interface ModelOverrideRecordDefect {
+  code: "LOCAL_MODEL_OVERRIDE_RECORD_INVALID";
+  cause: ModelOverrideRecordDefectCause;
+  path: string;
+  message: string;
+}
+
+/**
+ * What a run's model record says. Only `absent`, reported once the run
+ * directory itself is confirmed, means a run created before ADR-0060, which
+ * has an empty record.
+ */
+export type ModelOverrideRecordStatus =
+  | { state: "absent" }
+  | { state: "recorded"; models: LocalModelLayer }
+  | { state: "defective"; defect: ModelOverrideRecordDefect };
+
 export type RunStatus =
   | "created"
   | "selecting"
@@ -1307,6 +1529,11 @@ export interface ApprovalRecord {
   approvedAt: string;
   approvedBy: string;
   paths: string[];
+  /**
+   * State v11 only: the plan re-check whose resulting bundle this approval
+   * covers, or null when the approved bytes are the planner's (ADR-0058 §4).
+   */
+  recheckId?: string | null;
 }
 
 export interface AdrDecision {
@@ -1408,6 +1635,51 @@ export interface PlanReworkRecord {
   decidedBy: string;
   decidedAt: string;
 }
+/**
+ * What a plan re-check found against the planner's version at gate entry. It
+ * names files, headings, check identities and field names only, never file
+ * contents (ADR-0058 §3).
+ */
+export interface PlanRecheckSummary {
+  plannerVersion: boolean;
+  files: {
+    path: string;
+    change: "added" | "removed" | "changed";
+    sections: {
+      added: string[];
+      removed: string[];
+      changed: string[];
+      omitted: number;
+    } | null;
+  }[];
+  omittedFiles: number;
+  checks: {
+    current: string[];
+    added: string[];
+    removed: string[];
+    changed: { id: string; fields: string[] }[];
+    absenceReasonChanged: boolean;
+    omitted: number;
+  };
+  remainderDigestRewritten: boolean;
+  acceptedAdrsChanged: string[];
+}
+export interface PlanRecheckRecord {
+  kind: "plan_recheck";
+  recheckId: string;
+  /** The gate-entry snapshot compared with, or null when none exists. */
+  gateEntry: number | null;
+  plannerBundleDigest: string | null;
+  plannerRemainderSha256: string | null;
+  observedRemainderSha256: string;
+  /** Null when the declared digest already matched and nothing was written. */
+  writtenRemainderSha256: string | null;
+  bundleDigest: string;
+  changedPaths: string[];
+  summary: PlanRecheckSummary;
+  decidedBy: string;
+  decidedAt: string;
+}
 export interface AdrReworkRecord {
   kind: "adr_rework";
   adrId: string;
@@ -1441,6 +1713,7 @@ export type HumanDecisionRecord =
   | ConsultationDecisionRecord
   | ConfigurationDecisionRecord
   | PlanReworkRecord
+  | PlanRecheckRecord
   | AdrReworkRecord
   | PlanningReviewTriageRecord;
 
@@ -1692,9 +1965,11 @@ export interface RunState {
    * 7 is reached only when the first strict implementation or fix attempt under
    * the completion protocol is created; new runs still bootstrap at 4 or 6 and
    * keep their configuration/binding combination unchanged across the move.
+   * Likewise 11 is reached only when a v10 run records its first plan
+   * re-check (ADR-0058 §4); new runs still bootstrap at 10.
    */
-  schemaVersion: 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
-  /** Required on v10; absent on historical states. */
+  schemaVersion: 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
+  /** Required on v10 and v11; absent on historical states. */
   planningReview?: PlanningReviewState;
   verificationMode?: "ordered" | "policy" | "task";
   taskVerification?: TaskVerificationPublication;
@@ -2070,6 +2345,12 @@ export interface ResultDigestComparison {
   /** The bound a size rejection exceeded; null for every other outcome. */
   limit: number | null;
   matched: boolean;
+  /**
+   * True only for a plan remainder the runner wrote at acceptance (ADR-0064):
+   * `declared` is the planner's value, `observed` the recorded one, and the
+   * mismatch does not reject the result.
+   */
+  recorded: boolean;
 }
 
 /**
@@ -2079,8 +2360,12 @@ export interface ResultDigestComparison {
  * baseline exists and none may be reconstructed from current bytes.
  */
 export interface ResultDigestEvidence {
-  schema: typeof RESULT_DIGEST_EVIDENCE_SCHEMA;
-  schemaVersion: typeof RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION;
+  schema:
+    | typeof RESULT_DIGEST_EVIDENCE_SCHEMA
+    | typeof LEGACY_RESULT_DIGEST_EVIDENCE_SCHEMA;
+  schemaVersion:
+    | typeof RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION
+    | typeof LEGACY_RESULT_DIGEST_EVIDENCE_SCHEMA_VERSION;
   runId: string;
   attempt: { id: string; kind: AttemptReference["kind"] };
   outcome: "accepted" | "rejected";
@@ -2564,6 +2849,11 @@ export interface ProcessSpec {
   cwd: string;
   env: NodeJS.ProcessEnv;
   timeoutMs: number;
+  /**
+   * Text written whole to the child's stdin, which is then closed (ADR-0063
+   * §3). Without it, stdin is ignored.
+   */
+  stdin?: string;
   maxOutputBytes?: number;
   onStart?: (pid: number) => Promise<void> | void;
   onStdoutLine?: (line: string) => void;

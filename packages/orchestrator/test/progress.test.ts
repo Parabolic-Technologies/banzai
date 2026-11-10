@@ -746,3 +746,48 @@ test("an activity with no model omits it rather than inventing one", () => {
     assert.match(line, /^⠋ Verification 1\/2 {2}\d/);
   }
 });
+
+test("a hostile model value cannot break the banner or the live line", () => {
+  // ADR-0060: a local file's model value is escaped as one field wherever
+  // progress prints it.
+  const descriptor = {
+    executable: "claude",
+    model: "evil\nmodel\u001b[2J",
+    effort: "xhigh\t",
+    sessionMode: "fresh" as const,
+    timeoutMs: 3_600_000,
+    phases: ["feature"]
+  };
+  const lines: string[] = [];
+  const banner = new TerminalProgressReporter(
+    (line) => lines.push(line),
+    30_000,
+    { styler: createStyler(true), columns: () => 120 }
+  );
+  banner.report({
+    kind: "activity_started",
+    id: "b",
+    label: "Review",
+    detail: "d",
+    descriptor
+  });
+  banner.close();
+  const head = bare(lines[0] ?? "");
+  assert.match(head, /evil\\u000amodel\\u001b\[2J · xhigh\\u0009 · fresh/);
+  assert.doesNotMatch(head, /[\n\t]|\u001b\[2J/);
+
+  const { raw, reporter } = liveReporter();
+  reporter.report({
+    kind: "activity_started",
+    id: "l",
+    label: "Review",
+    detail: "d",
+    descriptor
+  });
+  reporter.close();
+  const drawn = raw.filter((chunk) => chunk !== ERASE).map(drawnText);
+  assert.ok(drawn.length > 0);
+  for (const line of drawn) {
+    assert.match(line, /Review · evil\\u000amodel\\u001b\[2J xhigh\\u0009/);
+  }
+});
