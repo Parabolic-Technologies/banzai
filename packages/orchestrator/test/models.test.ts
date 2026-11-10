@@ -87,6 +87,14 @@ test("superseded, deprecated, and retired models each report a replacement", () 
     "claude-sonnet-4-5 is deprecated and retires 2026-11-30; claude-sonnet-5-5 replaces it."
   );
 
+  const supersededFable = modelAdvisories(
+    configWith({ reviewer: "claude-fable-5" })
+  );
+  assert.equal(
+    supersededFable[0]?.detail,
+    "claude-fable-5 is superseded by claude-fable-5-2."
+  );
+
   const retired = modelAdvisories(configWith({ reviewer: "claude-opus-4-1" }));
   assert.equal(retired[0]?.standing, "retired");
   assert.equal(
@@ -101,11 +109,11 @@ test("superseded, deprecated, and retired models each report a replacement", () 
   assert.equal(codexAdvisory.replacement, "gpt-6.1-sol");
   assert.equal(codexAdvisory.detail, "gpt-5 is superseded by gpt-6.1-sol.");
 
-  const retiringCodex = modelAdvisories(configWith({ planner: "gpt-5.5" }));
-  assert.equal(retiringCodex[0]?.standing, "deprecated");
+  const retiredCodex = modelAdvisories(configWith({ planner: "gpt-5.5" }));
+  assert.equal(retiredCodex[0]?.standing, "retired");
   assert.equal(
-    retiringCodex[0].detail,
-    "gpt-5.5 is deprecated and retires 2026-10-14; gpt-6.1-sol replaces it."
+    retiredCodex[0].detail,
+    "gpt-5.5 was retired 2026-10-14; gpt-6.1-sol replaces it."
   );
 });
 
@@ -113,7 +121,9 @@ test("supported models, tier aliases, and unknown identifiers raise no advisory"
   for (const model of [
     "claude-opus-5-5",
     "claude-sonnet-5-5",
+    "claude-fable-5-2",
     "claude-fable-5-1",
+    "claude-haiku-5-5",
     "claude-haiku-4-5",
     "opus",
     "sonnet",
@@ -135,10 +145,13 @@ test("catalogued models record the CLI release that first serves them", () => {
     }),
     [
       ["claude-opus-5-5", "2.1.280"],
-      ["claude-fable-5-1", "2.1.257"],
+      ["claude-fable-5-2", "2.1.321"],
       ["claude-sonnet-5-5", "2.1.284"],
+      ["claude-haiku-5-5", "2.1.293"],
+      ["claude-fable-5-1", "2.1.257"],
       ["gpt-6.1-sol", "0.159.1"],
       ["gpt-6-astra", "0.153.1"],
+      ["gpt-6.1-terra", "0.165.0"],
       ["gpt-6-sol", "0.156.1"],
       ["gpt-6-luna", "0.156.1"]
     ]

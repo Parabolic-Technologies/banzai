@@ -632,7 +632,7 @@ test("model PTY asks where to save when the shared file is tracked and writes on
     assert.equal(layer.schemaVersion, 1);
     assert.deepEqual(Object.keys(layer.models), ["reviewer"]);
     assert.equal(layer.models.reviewer?.executable, "claude");
-    assert.equal(layer.models.reviewer.model, "claude-fable-5-1");
+    assert.equal(layer.models.reviewer.model, "claude-fable-5-2");
 
     // The shared answer writes .banzai/config.json and keeps the local layer.
     const shared = host.run(
@@ -653,7 +653,7 @@ test("model PTY asks where to save when the shared file is tracked and writes on
     assert.equal(shared.exitCode, 0, shared.output);
     assert.match(
       shared.output,
-      /This machine keeps using its local Review setting: claude claude-fable-5-1 effort=\S+ \(\.banzai\/config\.local\.json\)\./
+      /This machine keeps using its local Review setting: claude claude-fable-5-2 effort=\S+ \(\.banzai\/config\.local\.json\)\./
     );
     const afterShared = await files();
     assert.equal(afterShared.local, afterLocal.local);
@@ -665,7 +665,7 @@ test("model PTY asks where to save when the shared file is tracked and writes on
           models: { reviewer: { model: string } };
         }
       ).models.reviewer.model,
-      "claude-fable-5-1"
+      "claude-fable-5-2"
     );
     await assert.rejects(readFile(host.capture), /ENOENT/);
   } finally {

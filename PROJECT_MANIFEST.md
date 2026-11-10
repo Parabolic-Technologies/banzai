@@ -13,7 +13,7 @@ projects. Detailed module behavior belongs in the
   local `banzai` CLI that coordinates planning, implementation, verification
   and independent review with human decisions.
 - The plugin and CLI are independently usable and separately delivered. They
-  share release-train version `2.8.1`, owned by root `package.json.version`.
+  share release-train version `2.8.2`, owned by root `package.json.version`.
 - This repository maintains those products. Its root guidance and manifest
   describe the source workspace; packaged templates describe neither its
   process nor its current implementation.
@@ -454,6 +454,11 @@ Plugin and release owners:
 
 - Repository documents and UI/CLI copy are English. Markdown prose wraps at
   80 columns, with tables and link-heavy lines exempt.
+- `packages/orchestrator/README.md` is the npm package page and mirrors the
+  root `README.md`; every root README change updates it in the same change.
+  Its only intended differences are absolute GitHub links and image URLs on
+  `main`, no legacy `<a id>` anchors, and the npm install command. No release
+  check compares the two files.
 - Files, directories, work slugs and skills use `kebab-case`; functions and
   variables use `camelCase`; types/classes use `PascalCase`; constants and
   error codes use `SCREAMING_SNAKE_CASE`. ADR paths use
