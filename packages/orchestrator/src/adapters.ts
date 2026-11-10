@@ -1840,9 +1840,13 @@ async function writeCodexContract(
   await mkdir(contractDirectory, { recursive: true });
   const schemaPath = path.join(contractDirectory, schemaName);
   await writeFile(schemaPath, serialized, "utf8");
+  // Codex `-o` creates no parent directory: a missing one loses the result
+  // while the process still exits 0.
+  const attemptDirectory = path.join(runDirectory, "attempts");
+  await mkdir(attemptDirectory, { recursive: true });
   return {
     schemaPath,
-    outputPath: path.join(runDirectory, "attempts", `${attemptId}-result.json`)
+    outputPath: path.join(attemptDirectory, `${attemptId}-result.json`)
   };
 }
 

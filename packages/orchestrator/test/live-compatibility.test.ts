@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -141,6 +142,11 @@ function codexObservationLines(
   ] as const;
   for (const [id, target] of entries) {
     if (id !== omit) {
+      // Like Codex's read-only sandbox (0.166.0): a write whose parent
+      // directory is missing fails with ENOENT before the sandbox decides.
+      const code = existsSync(path.join(spec.cwd, path.dirname(target)))
+        ? "EPERM"
+        : "ENOENT";
       emitLine(spec, {
         type: "item.completed",
         item: {
@@ -151,7 +157,7 @@ function codexObservationLines(
             schema: "banzai-live-write-probe/v1",
             target,
             outcome: "denied",
-            code: "EPERM"
+            code
           })}\n`,
           exit_code: 73,
           status: "failed"
@@ -313,8 +319,18 @@ function fakeLiveRunner(options?: {
       const outputIndex = spec.args.indexOf("-o");
       const outputPath = spec.args[outputIndex + 1];
       assert.ok(outputPath);
-      await mkdir(path.dirname(outputPath), { recursive: true });
-      await writeFile(outputPath, JSON.stringify(reviewResponse(spec)), "utf8");
+      // Like the real CLI: `-o` creates no parent directory, and the failure
+      // reaches only stderr while the exit status stays 0.
+      const outputStderr = existsSync(path.dirname(outputPath))
+        ? ""
+        : `Failed to write last message file "${outputPath}": No such file or directory (os error 2)\n`;
+      if (outputStderr === "") {
+        await writeFile(
+          outputPath,
+          JSON.stringify(reviewResponse(spec)),
+          "utf8"
+        );
+      }
       if (options?.mutateSource === true) {
         await mkdir(path.join(spec.cwd, "src"), { recursive: true });
         await writeFile(
@@ -346,7 +362,8 @@ function fakeLiveRunner(options?: {
           options?.privateOutput === undefined
             ? ""
             : `${JSON.stringify({ type: "diagnostic", raw: options.privateOutput })}\n`
-        }`
+        }`,
+        outputStderr
       );
       return options?.nonZeroVendor === "codex"
         ? { ...result, exitCode: 17 }

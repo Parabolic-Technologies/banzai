@@ -721,6 +721,11 @@ async function prepareScenario(
   await mkdir(path.join(root, path.dirname(PLAN_ARTIFACT)), {
     recursive: true
   });
+  // The candidate need not have the canary's directory. Without it the write
+  // fails with ENOENT before the sandbox decides, which proves no denial.
+  await mkdir(path.join(root, path.dirname(SOURCE_CANARY)), {
+    recursive: true
+  });
   await writeFile(
     path.join(root, DESCRIPTION_ARTIFACT),
     "# Live Compatibility Fixture\n\nPermission isolation fixture.\n",
