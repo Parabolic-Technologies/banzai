@@ -1,6 +1,6 @@
 # banzai 2.8–2.9 program tracker
 
-Status: active · Stage 1 in progress · Updated 2026-11-06
+Status: active · Gate 1 closed, Stage 2 not started · Updated 2026-11-10
 
 This file is the only living record of the program. The plan itself is the
 frozen [brief.md](brief.md); never edit it. Record anything that departs from
@@ -56,30 +56,31 @@ Status values: `not started` · `ADR draft` · `ADR proposed` · `ADR accepted` 
 
 ### Gate 1
 
-Report: [`gate-1-report.md`](gate-1-report.md), waiting for the owner.
+Report: [`gate-1-report.md`](gate-1-report.md). Closed by the owner on
+2026-11-10 with all nine items accepted, on candidate `b8b6d1b` (2.8.1).
 
 - [x] phpcs fixture: the command is visible at the plan gate; the blocked
       summary shows argv, exit code, stderr tail and log paths; every required
       check ran; Retry warns about a deterministic failure.
-- [ ] A prose edit to plan.md is re-checked and approved without manual
+- [x] A prose edit to plan.md is re-checked and approved without manual
       hashing (WP4, after its ADR is accepted).
-- [ ] A Claude-only developer installs at local scope from the terminal,
+- [x] A Claude-only developer installs at local scope from the terminal,
       leaves `.banzai/config.json` untouched through `config.local.json`, and
       gets Claude as the default reviewer.
-- [ ] `npm run verify` is green, and the owner-authorized live scenarios pass
+- [x] `npm run verify` is green, and the owner-authorized live scenarios pass
       on Claude Code 2.1.290 and on the current release.
 - [x] The release train is set to the 2.8 version with
       `npm run version:set`, and `npm run release:validate` passes.
-- [ ] A new initiative started through the WP19 skill keeps its brief,
+- [x] A new initiative started through the WP19 skill keeps its brief,
       tracker and gate reports in `documentation/initiatives/<slug>/`, while
       its packages stay in `documentation/work/<slug>/`.
-- [ ] With the 2.8 plugin installed, the hook lets a manual session write a
+- [x] With the 2.8 plugin installed, the hook lets a manual session write a
       Claude Code memory note without a prompt or an approval marker, and the
       next code edit in that session still asks (WP20). Approving one
       scratchpad write leaves only `bookkeeping-<session>` in
       `$TMPDIR/banzai-spec-gate/`, and the next code edit still asks with the
       first-change reason.
-- [ ] WP8 probe (ADR-0063 §6), on Claude Code 2.1.290 and on the current
+- [x] WP8 probe (ADR-0063 §6), on Claude Code 2.1.290 and on the current
       release: a Banzai implementation phase runs one foreground command
       longer than 10 minutes, whose sentinel exists before the result; no
       background-task event occurs; the phase and a resumed invocation each
@@ -93,7 +94,7 @@ Report: [`gate-1-report.md`](gate-1-report.md), waiting for the owner.
 
 ## Stage 2 (2.9): no lost runs
 
-Starts only after the owner closes Gate 1.
+Gate 1 closed on 2026-11-10, so Stage 2 can start.
 
 | WP   | Package                                                  | Depends on    | ADR                                                         | Work directory                         | Status      | Commit | Notes                        |
 | ---- | -------------------------------------------------------- | ------------- | ----------------------------------------------------------- | -------------------------------------- | ----------- | ------ | ---------------------------- |
@@ -403,6 +404,43 @@ release:validate` passes, so the deferred `HOOK_CHANGED_WITHOUT_VERSION_BUMP`
   item on the Gate 1 report's evidence, and both are ticked. Six items stay open:
   the prose edit re-check and the five that need the owner's run.
 
+- 2026-11-10: `Include it`. The owner added the ADR-0066 work (date-prefixed
+  work and initiative slugs,
+  [`interactive-slug-selection`](../interactive-slug-selection/change-report.md))
+  to the Gate 1 candidate. It is committed as `fa79c8b`. The release train
+  moved to `2.8.1`, because `plugins/banzai/lib/work-documents.mjs` changed,
+  and `release:validate` passes. Gate 1 item 6 was rerun on it.
+
+- 2026-11-10: The owner ran Gate 1 items 3, 6, 7 and 8, and all four passed.
+  The [Gate 1 report](gate-1-report.md) has the evidence and the recipe
+  corrections. Items 3 and 8 ran on `2c4db3c` plus the ADR-0066 work, which was
+  not yet committed. That work touches none of the code these items exercise.
+
+- 2026-11-10: The first live suite run on `fa79c8b` failed two Codex checks.
+  Both failures came from live-harness defects present since v2.3.0. The owner
+  approved the fix with `Ок, давай quick-fix`. It is described in
+  [`change-report.md`](../261110-live-harness-codex-fixture/change-report.md)
+  and committed as `b8b6d1b`. On that commit the live suite passes with Codex
+  0.166.0 on Claude Code 2.1.322 and on 2.1.290, and `npm run verify` passes
+  inside the release-candidate check.
+
+- 2026-11-10: `Yes, record it`. The results are recorded here and in the Gate 1
+  report. Items 3, 4, 6, 7 and 8 stay unticked until the owner accepts them.
+  Item 2 still waits for a decision.
+
+- 2026-11-10: `Accept all five`. The owner accepts Gate 1 items 3, 4, 6, 7 and
+  8 on the recorded evidence, including the provenance of items 3 and 8. All
+  five are ticked. Only item 2, the prose edit re-check, stays open.
+
+- 2026-11-10: `Accept on tests`. The owner accepts the prose edit re-check
+  (item 2) on the evidence of `plan-recheck.test.ts`, although no real run has
+  used it yet. The item is ticked, so all nine Gate 1 items are accepted.
+  Follow-up: confirm the re-check at the next real plan gate.
+
+- 2026-11-10: `Close it`. The owner closes Gate 1 on candidate `b8b6d1b`
+  (2.8.1), and Stage 2 can start. Publishing 2.8.1 stays a separate decision
+  under [public-publication.md](../../releases/public-publication.md).
+
 ## Open questions left to the owner by the brief
 
 Settle each in the named WP's ADR or requirements, then record the answer
@@ -460,3 +498,8 @@ under Owner decisions.
   2-minute Bash floor instead of the full 5-minute reserve, which departs from
   ADR-0063 Compliance 4. No default role is affected; the live review's
   5-minute bound gets 120,000 ms.
+- Stage 1 (2026-11-10): ADR-0066 (date-prefixed work and initiative slugs) is
+  not in the brief. The owner included it in the 2.8 candidate, so the release
+  train is `2.8.1`, not `2.8.0`.
+- Gate 1 (2026-11-10): the live-harness quick fix `b8b6d1b` is not in the
+  brief. Gate 1 item 4 could not pass without it.

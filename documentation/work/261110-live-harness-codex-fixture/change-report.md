@@ -90,11 +90,16 @@ added. No structural assessment trigger applies.
 - `node packages/orchestrator/scripts/release-candidate-check.mjs` exits 0.
   Its full `npm run verify` passes typecheck, lint, 2170 of 2170 tests and
   `build:check`. `release:validate`, the publication check and the committed
-  smoke also pass. The rebuilt distribution leaves no tracked change.
+  smoke also pass. The check builds in an isolated copy, so it does not refresh
+  the untracked local `packages/orchestrator/dist/banzai.mjs` that
+  `npm run compatibility:live` runs.
+- Live suite on `b8b6d1b`, after `npm run build:dist`, Codex 0.166.0: status
+  `pass` with Claude Code 2.1.322 and again with 2.1.290. All 17 checks pass,
+  with 2 model invocations per run. A rerun on the stale bundle reproduced
+  both original failures.
 
 ## Assurance critique
 
 The existing pass-path tests protect both guarantees, because their fake now
 reproduces the observed vendor behavior. No new test case duplicates them. The
-live suite still has to run on the new commit with both Claude clients before
-Gate 1 item 4 can close.
+live suite confirms both fixes against the real vendor CLIs.
