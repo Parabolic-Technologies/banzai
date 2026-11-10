@@ -1303,15 +1303,17 @@ Planning: claude claude-opus-5-5 effort=xhigh
 ? Planning model
     Keep claude-opus-5-5 (effort=xhigh)
     Claude Opus 5.5 (claude-opus-5-5)      Long-running agentic coding and knowledge work.
-    Claude Fable 5.1 (claude-fable-5-1)    Most capable model for demanding long-horizon agentic work.
+    Claude Fable 5.2 (claude-fable-5-2)    Most capable model for demanding long-horizon agentic work.
     Claude Sonnet 5.5 (claude-sonnet-5-5)  Best combination of speed and intelligence.
+    Claude Haiku 5.5 (claude-haiku-5-5)    Fastest model for high-volume, latency-sensitive tasks.
     Claude Opus 5 (claude-opus-5)          Previous-generation Opus for complex agentic coding.
-    Claude Fable 5 (claude-fable-5)        Previous-generation Fable for demanding agentic work.
+    Claude Fable 5.1 (claude-fable-5-1)    Previous-generation Fable for demanding agentic work.
     Claude Sonnet 5 (claude-sonnet-5)      Previous-generation Sonnet with near-Opus coding quality.
     Claude Opus 4.8 (claude-opus-4-8)      Older-generation Opus for complex agentic work.
     Claude Sonnet 4.6 (claude-sonnet-4-6)  Older-generation Sonnet balancing intelligence and speed.
   > GPT-6.1-Sol (gpt-6.1-sol)              Latest workhorse model for coding and everyday work.
     GPT-6-Astra (gpt-6-astra)              Most capable model for complex, demanding work.
+    GPT-6.1-Terra (gpt-6.1-terra)          Fast, efficient model for clear writing and computer use.
     GPT-6-Sol (gpt-6-sol)                  Previous-generation workhorse model.
     GPT-6-Luna (gpt-6-luna)                Fast and affordable model for easier tasks.
     GPT-5.6-Sol (gpt-5.6-sol)              Older-generation workhorse model.
@@ -1320,8 +1322,8 @@ Planning: claude claude-opus-5-5 effort=xhigh
 ```
 
 Every phase runs on either vendor, so each menu lists both Claude and GPT models.
-GPT-6.1-Sol, GPT-6-Astra, and GPT-6-Sol support `low`, `medium`, `high`,
-`xhigh`, `max`, and `ultra` effort.
+GPT-6.1-Sol, GPT-6-Astra, GPT-6.1-Terra, and GPT-6-Sol support `low`, `medium`,
+`high`, `xhigh`, `max`, and `ultra` effort.
 The adapter picks its argument shape from the configured executable: `codex exec`
 with a schema file and a sandbox, or `claude -p` with an inline schema and a tool
 allow-list. A phase that writes gets edit and shell tools or `workspace-write`;
@@ -1335,9 +1337,9 @@ made earlier in the same dialog is used immediately:
 
 ```text
 Implementation: claude claude-opus-5-5 effort=xhigh
-Planning selection: claude claude-fable-5-1 effort=max
+Planning selection: claude claude-fable-5-2 effort=max
 ? Implementation model
-  > Match Planning: Claude Fable 5.1 (claude-fable-5-1), effort=max - recommended
+  > Match Planning: Claude Fable 5.2 (claude-fable-5-2), effort=max - recommended
 ```
 
 An existing exact match is marked on **Keep** instead. Exact matching makes a
@@ -1348,20 +1350,22 @@ that implementation will start fresh from approved artifacts. Lite routes do
 not inherit the planner session, and the reviewer remains independent.
 
 The picker offers the current generation plus deliberate earlier-generation
-choices: Claude Opus 5, Claude Fable 5, Claude Sonnet 5, Claude Opus 4.8, Claude
-Sonnet 4.6, GPT-6-Sol, and the GPT-5.6 family. Other supported identifiers still
-load from a hand-edited config but are not presented as choices. GPT-5.5 is no
-longer offered: it retires from Codex on 2026-10-14, and a configuration that
-still names it receives an update offer for GPT-6.1-Sol.
+choices: Claude Opus 5, Claude Fable 5.1, Claude Sonnet 5, Claude Opus 4.8,
+Claude Sonnet 4.6, GPT-6-Sol, and the GPT-5.6 family. Other supported identifiers
+still load from a hand-edited config but are not presented as choices. Claude
+Fable 5 is no longer offered, and a configuration that still names it receives
+an update offer for Claude Fable 5.2. GPT-5.5 is no longer offered: it retired
+from Codex on 2026-10-14, and a configuration that still names it receives an
+update offer for GPT-6.1-Sol.
 
 The effort menu is filtered to the levels the chosen model accepts. For
 implementation, the planning effort is recommended when the executable and
 model match; otherwise the picker preselects the phase's current level when the
 model supports it, or `xhigh`, or the model's highest level when it has no
-`xhigh`. Codex's `ultra` tier appears for GPT-6.1-Sol, GPT-6-Astra, GPT-6-Sol,
-GPT-5.6-Sol, and GPT-5.6-Terra, which support it, and not for GPT-6-Luna,
-GPT-5.6-Luna, or any Claude model, which do not. Claude Sonnet 4.6 predates
-`xhigh` and offers `low`, `medium`, `high`, and `max`.
+`xhigh`. Codex's `ultra` tier appears for GPT-6.1-Sol, GPT-6-Astra,
+GPT-6.1-Terra, GPT-6-Sol, GPT-5.6-Sol, and GPT-5.6-Terra, which support it, and
+not for GPT-6-Luna, GPT-5.6-Luna, or any Claude model, which do not. Claude
+Sonnet 4.6 predates `xhigh` and offers `low`, `medium`, `high`, and `max`.
 
 Nothing is written until the dialog shows a before-and-after summary and the
 change is confirmed. Only `executable`, `model`, and `effort` are rewritten;
@@ -1591,14 +1595,18 @@ retired.
 
 The catalog records the first CLI release that serves each of these models. A
 model minimum at or below the vendor minimum in [Boundaries](#boundaries)
-stays recorded and never decides; every Claude entry is currently at or below
-Claude Code 2.1.290:
+stays recorded and never decides; of the Claude entries, only
+`claude-fable-5-2` and `claude-haiku-5-5` need a release newer than Claude Code
+2.1.290:
 
 | Model                     | Minimum CLI         |
 | ------------------------- | ------------------- |
+| `claude-fable-5-2`        | Claude Code 2.1.321 |
+| `claude-haiku-5-5`        | Claude Code 2.1.293 |
 | `claude-opus-5-5`         | Claude Code 2.1.280 |
 | `claude-sonnet-5-5`       | Claude Code 2.1.284 |
 | `claude-fable-5-1`        | Claude Code 2.1.257 |
+| `gpt-6.1-terra`           | Codex CLI 0.165.0   |
 | `gpt-6.1-sol`             | Codex CLI 0.159.1   |
 | `gpt-6-sol`, `gpt-6-luna` | Codex CLI 0.156.1   |
 | `gpt-6-astra`             | Codex CLI 0.153.1   |

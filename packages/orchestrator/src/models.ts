@@ -47,15 +47,16 @@ function retired(replacement: string, date: string): CatalogEntry {
 
 const OPUS = "claude-opus-5-5";
 const SONNET = "claude-sonnet-5-5";
-const HAIKU = "claude-haiku-4-5";
+const HAIKU = "claude-haiku-5-5";
+const FABLE = "claude-fable-5-2";
 
 // Maintained by hand from the published Claude model catalog. The runner is
 // subscription-only and never calls a vendor API, so currency is a source fact
 // that ships with a release rather than something discovered at run time.
 const CLAUDE_CATALOG: VendorCatalog = {
   supported: new Set([
+    FABLE,
     "claude-fable-5-1",
-    "claude-fable-5",
     OPUS,
     SONNET,
     "claude-opus-5",
@@ -63,6 +64,7 @@ const CLAUDE_CATALOG: VendorCatalog = {
     "claude-opus-4-8",
     "claude-sonnet-4-6",
     HAIKU,
+    "claude-haiku-4-5",
     "claude-haiku-4-5-20251001",
     // Claude Code aliases always resolve to the current model of their tier.
     "opus",
@@ -80,7 +82,8 @@ const CLAUDE_CATALOG: VendorCatalog = {
     ["claude-opus-4-0", retired(OPUS, "2026-06-15")],
     ["claude-opus-4-20250514", retired(OPUS, "2026-06-15")],
     ["claude-3-opus-20240229", retired(OPUS, "2026-01-05")],
-    ["claude-mythos-preview", superseded("claude-fable-5-1")],
+    ["claude-fable-5", superseded(FABLE)],
+    ["claude-mythos-preview", superseded(FABLE)],
     ["claude-sonnet-4-5", deprecated(SONNET, "2026-11-30")],
     ["claude-sonnet-4-5-20250929", deprecated(SONNET, "2026-11-30")],
     ["claude-sonnet-4-0", retired(SONNET, "2026-06-15")],
@@ -98,6 +101,8 @@ const CLAUDE_CATALOG: VendorCatalog = {
   cliMinimums: new Map([
     [OPUS, "2.1.280"],
     [SONNET, "2.1.284"],
+    [HAIKU, "2.1.293"],
+    [FABLE, "2.1.321"],
     ["claude-fable-5-1", "2.1.257"]
   ])
 };
@@ -111,6 +116,7 @@ const CODEX_CATALOG: VendorCatalog = {
   supported: new Set([
     CODEX_SOL,
     "gpt-6-astra",
+    "gpt-6.1-terra",
     "gpt-6-sol",
     "gpt-6-luna",
     "gpt-5.6-sol",
@@ -118,7 +124,7 @@ const CODEX_CATALOG: VendorCatalog = {
     "gpt-5.6-luna"
   ]),
   replacements: new Map([
-    ["gpt-5.5", deprecated(CODEX_SOL, "2026-10-14")],
+    ["gpt-5.5", retired(CODEX_SOL, "2026-10-14")],
     ["gpt-5.4", retired(CODEX_SOL, "2026-08-31")],
     ["gpt-5.4-mini", retired("gpt-6-luna", "2026-08-31")],
     ["gpt-5", superseded(CODEX_SOL)]
@@ -127,6 +133,7 @@ const CODEX_CATALOG: VendorCatalog = {
   // model, from the Codex CLI release notes.
   cliMinimums: new Map([
     [CODEX_SOL, "0.159.1"],
+    ["gpt-6.1-terra", "0.165.0"],
     ["gpt-6-sol", "0.156.1"],
     ["gpt-6-luna", "0.156.1"],
     ["gpt-6-astra", "0.153.1"]
@@ -193,8 +200,8 @@ export const SELECTABLE_MODELS: readonly SelectableModel[] = [
     efforts: FULL_EFFORTS
   },
   {
-    id: "claude-fable-5-1",
-    label: "Claude Fable 5.1",
+    id: "claude-fable-5-2",
+    label: "Claude Fable 5.2",
     vendor: "claude",
     executable: "claude",
     description: "Most capable model for demanding long-horizon agentic work.",
@@ -209,6 +216,14 @@ export const SELECTABLE_MODELS: readonly SelectableModel[] = [
     efforts: FULL_EFFORTS
   },
   {
+    id: "claude-haiku-5-5",
+    label: "Claude Haiku 5.5",
+    vendor: "claude",
+    executable: "claude",
+    description: "Fastest model for high-volume, latency-sensitive tasks.",
+    efforts: FULL_EFFORTS
+  },
+  {
     id: "claude-opus-5",
     label: "Claude Opus 5",
     vendor: "claude",
@@ -217,8 +232,8 @@ export const SELECTABLE_MODELS: readonly SelectableModel[] = [
     efforts: FULL_EFFORTS
   },
   {
-    id: "claude-fable-5",
-    label: "Claude Fable 5",
+    id: "claude-fable-5-1",
+    label: "Claude Fable 5.1",
     vendor: "claude",
     executable: "claude",
     description: "Previous-generation Fable for demanding agentic work.",
@@ -262,6 +277,14 @@ export const SELECTABLE_MODELS: readonly SelectableModel[] = [
     vendor: "codex",
     executable: "codex",
     description: "Most capable model for complex, demanding work.",
+    efforts: CODEX_EFFORTS
+  },
+  {
+    id: "gpt-6.1-terra",
+    label: "GPT-6.1-Terra",
+    vendor: "codex",
+    executable: "codex",
+    description: "Fast, efficient model for clear writing and computer use.",
     efforts: CODEX_EFFORTS
   },
   {

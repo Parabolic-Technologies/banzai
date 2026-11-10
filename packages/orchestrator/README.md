@@ -39,80 +39,182 @@ Runs through your existing subscriptions. No API keys required.
 
 ## Quick start
 
-Use a regular terminal in your own Git repository on macOS or Linux. You need
-Git, Node.js **22.20.0+ within major 22** or **24.11.1+ within major 24**,
-and the clients for your selected providers, signed in through individual
-subscriptions. The default configuration uses Claude Code for planning,
-implementation and review, and every Claude role needs **Claude Code
-2.1.290+**; the **Codex CLI** is needed only for roles you assign to Codex
-during `banzai init`. Strict review uses a fresh session
-without the builder's conversation, shared memory or skills. Model work uses
-the clients' remote services and subscription limits.
+Use a regular terminal in your own Git repository. You need:
 
-Install this CLI package in your terminal:
+- macOS or Linux, Git, and Node.js **22.20.0+ within major 22**,
+  **24.11.1+ within major 24** or **26.13.0+ within major 26**;
+- **Claude Code 2.1.290+** for every Claude role, signed in through an
+  individual subscription, and the **Codex CLI** only for roles you assign to
+  Codex;
+- the Banzai CLI and the separately installed Banzai plugin in each client
+  selected for planning, implementation, or review.
+
+The default configuration uses Claude for planning, implementation and review.
+To use Codex for any role, install its client and plugin, then select it during
+`banzai init`. Strict review uses a fresh session without the builder's
+conversation, shared memory or skills. The team shares these choices in
+`.banzai/config.json`;
+`banzai model --local` saves different models for any phase on your machine
+only, in the Git-ignored
+[local model file](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/orchestrator.md#local-model-file).
+
+Model work uses the clients' remote services and subscription limits.
+The [getting-started guide](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/getting-started.md) covers client setup,
+CLI and plugin installation, supported older-client options, and expected results.
+For Claude Code, it installs the plugin from a terminal at
+[local or project scope](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/getting-started.md#claude-code-plugin),
+so Banzai's skills load only in that repository.
+
+This package installs the CLI and its runtime dependencies:
 
 ```sh
 npm install --global @parabolic-technologies/banzai
 banzai --help
 ```
 
-The npm package installs the CLI and its runtime dependencies.
-**Install the Banzai plugin separately in each selected client before project setup.**
-Follow **[Get started](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/getting-started.md)**
-for every plugin command, older-client options, and expected results through
-your first task.
+| Step                   | Action                                                                                                                                                            | Ready to continue when                                                                                                  |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| 1. Install             | [Install the CLI and required plugins](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/getting-started.md#1-install-the-cli-and-plugin). | The CLI is available and the plugin is enabled in each selected client.                                                 |
+| 2. Set up your project | Run `banzai init`, choose models, and complete the offered project setup. Exit the client to return to Banzai.                                                    | You have reviewed the generated guidance and configuration.                                                             |
+| 3. Check readiness     | Run `banzai doctor`, resolve failures, review warnings, and commit the reviewed setup through your usual Git workflow.                                            | The project has a committed baseline and no unresolved readiness failures. Doctor does not verify model authentication. |
+| 4. Run a task          | Run `banzai` and enter one bounded request.                                                                                                                       | Banzai displays the selected workflow and guides the decisions it needs.                                                |
 
-After those installations, the project steps are:
+Follow **[Get started](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/getting-started.md)** from installation
+through inspecting your first change. For a plugin-only workflow in one client,
+see [standalone use](#using-the-plugin-without-the-orchestrator).
 
-| Step               | Action                                                                                                                                                                                   |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Set up             | Run `banzai init`, choose models, and complete the offered project guidance setup. Exit the client to return to Banzai.                                                                  |
-| Check readiness    | Run `banzai doctor`, resolve failures, review warnings, and commit the reviewed setup. A task needs a committed baseline. Doctor does not verify model authentication or run your tests. |
-| Run a task         | Run `banzai`, enter one bounded request, and follow the required decisions.                                                                                                              |
-| Inspect the result | Use `banzai status`, inspect the diff and new files, and check the requested behavior before committing.                                                                                 |
-
-The [plugin-only walkthrough](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/getting-started.md#use-only-the-plugin)
-covers use in one supported client without installing this CLI.
-
-## Workflow walkthrough
+## How it works
 
 For a project with a filtered records view, a first request could be:
 
 > Add a CSV export for the currently filtered records. Preserve existing access
 > rules and cover empty results and quoted values with tests.
 
-Banzai reads the project and selects a route. Small changes use `quick-fix`
-or `feature`, ending after implementation and task verification. For
-`strict` work, you resolve architecture decisions and approve the plan
-before implementation. Banzai runs the task's checks, then starts an independent
-reviewer without the builder's conversation. A different model family or
-vendor is optional. You accept, reject, or defer findings; accepted fixes go
-through verification and re-review.
+Banzai reads the project and selects a route. `quick-fix` and `feature`
+complete after implementation and task verification, without an independent
+reviewer phase. Complex or uncertain work takes the `strict` route:
 
-The example's route and results depend on the project.
-See the [illustrated workflow](https://github.com/Parabolic-Technologies/banzai#how-it-works)
-and [approval boundaries](https://github.com/Parabolic-Technologies/banzai#where-you-decide).
-The orchestrator works in your current checkout and leaves commits and
-publication to you.
+![Illustrated strict workflow: planning, human approval, implementation and verification, independent review, and human triage](https://raw.githubusercontent.com/Parabolic-Technologies/banzai/main/assets/demo/strict-workflow.svg)
 
-## Documentation
+This is an illustration of the strict workflow. The example request's actual
+route and results depend on the project.
 
-| What you need                                | Guide                                                                                                                               |
-| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Installation, your first task, or setup help | [Get started](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/getting-started.md)                          |
-| Commands and options                         | [CLI reference](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/orchestrator.md#commands)                  |
-| Models for each role                         | [Model configuration](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/orchestrator.md#model-configuration) |
-| Checks for your application stack            | [Task verification](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/verification-examples.md)              |
-| Blocked or interrupted work                  | [Failure recovery](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/orchestrator.md#failure-recovery)       |
-| Skills and advanced topics                   | [Documentation index](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/README.md)                           |
-| Current release notes                        | [Latest release](https://github.com/Parabolic-Technologies/banzai/releases/latest)                                                  |
+In strict work, you resolve architecture decisions and approve the plan before
+implementation. Banzai runs the task's checks before independent review.
+The reviewer starts without the builder's conversation; using a different
+model family or vendor is optional. You accept, reject, or defer findings.
+Accepted fixes go through verification and re-review. A passing review, or
+completed triage with no accepted findings, can finish the run.
 
-## Contributing
+Work stays in the current checkout. The orchestrator does not switch branches,
+stash, reset, commit, or publish changes. Existing uncommitted changes are
+recorded and excluded from the reviewed set. Review the final diff, new files,
+and application behavior before committing through your normal Git workflow.
+
+<details>
+<summary>Human decisions and approval boundaries</summary>
+
+### Where You Decide
+
+There are five existing decision gates; the CLI presents their human actions:
+
+| Gate                  | You decide                                                                                      |
+| --------------------- | ----------------------------------------------------------------------------------------------- |
+| Decision consultation | Resolve material options left open after strict planning examines the repository.               |
+| ADR acceptance        | Accept, reject, or rework a proposed architecture decision.                                     |
+| Plan approval         | Approve the exact description, accepted ADRs, and plan.                                         |
+| Review triage         | Accept, reject, or defer each review finding.                                                   |
+| Escalation            | Resolve questions about dependencies, contracts, security, deployment, or unspecified behavior. |
+
+Which gates appear depends on the route and the task. Consultation is
+conditional, planning-only, and concise: it records your answer to an unresolved
+decision; it does not accept an ADR, approve a plan, authorize code, triage,
+recovery, release, or an external side effect.
+
+Approving the plan authorizes the work it describes. Approved planning
+artifacts remain immutable during implementation and fixes. Checks and review
+follow without separate approval at every phase unless an escalation or
+failure needs attention. The reviewer uses read-only tools; only
+human-accepted findings reach the fixer.
+
+At a strict planning gate, you can request rework or independent planning
+review. Revisions return for approval. You can also edit the plan files
+yourself and choose **Re-check my edits** (`banzai approve plan --decision
+recheck`): it validates the edits and updates the plan's verification digest,
+then the gate waits for your approval. See
+[planning review](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/orchestrator.md#rework-and-independent-planning-review),
+[plan authority](https://github.com/Parabolic-Technologies/banzai/blob/main/plugins/banzai/policies/plan-task-completion.md), and
+[runtime boundaries](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/orchestrator.md#boundaries).
+
+</details>
+
+## Using The Plugin Without The Orchestrator
+
+You can use Banzai workflow skills directly in either Codex or Claude Code.
+The [plugin-only walkthrough](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/getting-started.md#use-only-the-plugin)
+covers installing your chosen client and plugin, preparing project guidance,
+and running a first skill. This path does not require the Banzai CLI.
+
+Use `feature` for an ordinary new capability, `quick-fix` for a bounded fix,
+or `feature-review` for a source-read-only audit. Invoke skills as
+`/banzai:<skill>` in Claude Code or `$banzai:<skill>` in Codex.
+Each skill guides its checks, reports, and required human decisions in chat.
+
+The orchestrator adds model coordination and runner-owned verification.
+For standalone requirements, architecture decisions, and the strict sequence,
+see [strict work with standalone skills](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/getting-started.md#strict-work-with-standalone-skills).
+For a plan that spans several packages and stages, invoke `initiative` by name; see
+[multi-package initiatives](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/getting-started.md#multi-package-initiatives).
+
+## Documentation and community
+
+| What you need                                | Where to go                                                                                                            |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Installation, your first task, or setup help | [Get started](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/getting-started.md)             |
+| Commands, models, or failure recovery        | [CLI reference](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/orchestrator.md)              |
+| Checks for your application stack            | [Task verification](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/verification-examples.md) |
+| Workflow skills and deeper topics            | [Documentation index](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/README.md)              |
+| Current release notes                        | [Latest release](https://github.com/Parabolic-Technologies/banzai/releases/latest)                                     |
 
 Report reproducible problems through
 [GitHub Issues](https://github.com/Parabolic-Technologies/banzai/issues).
 To improve the docs, contribute a fix, or share a workflow, read
-[Contributing](https://github.com/Parabolic-Technologies/banzai/blob/main/CONTRIBUTING.md)
-and the [Code of Conduct](https://github.com/Parabolic-Technologies/banzai/blob/main/CODE_OF_CONDUCT.md).
-Report vulnerabilities through the
+[Contributing](https://github.com/Parabolic-Technologies/banzai/blob/main/CONTRIBUTING.md). Report vulnerabilities through the
 [security policy](https://github.com/Parabolic-Technologies/banzai/blob/main/SECURITY.md).
+
+<details>
+<summary>Advanced workflows and maintainer references</summary>
+
+To supervise a run from a chat agent, explicitly invoke `/banzai:orchestrate`
+in Claude Code or `$banzai:orchestrate` in Codex. Compatible supervisors
+require control contract `9.0.0`; see
+[agent control](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/orchestrator.md#agent-control).
+
+- [Project guidance and setup](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/orchestrator.md#project-guidance-setup)
+  and [existing-project migration](https://github.com/Parabolic-Technologies/banzai/blob/main/plugins/banzai/skills/project-manifest/references/layout-migration.md)
+- [Client environment and permissions](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/orchestrator.md#spawned-claude-environment)
+- [Review artifacts](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/orchestrator.md#review-artifact)
+  and [work-document storage](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/artifact-storage.md)
+- [Evaluation and KPIs](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/evaluation/README.md),
+  [context reporting](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/context/README.md), and
+  [cancellation observations](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/orchestrator.md#cancellation-observations)
+- [Engineering quality](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/engineering-quality.md)
+  and [shadow evaluation](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/evaluation/engineering-quality-shadow.md)
+- [Machine contracts](https://github.com/Parabolic-Technologies/banzai/tree/main/plugins/banzai/contracts),
+  [optional enforcement hook](https://github.com/Parabolic-Technologies/banzai/blob/main/plugins/banzai/hooks/README.md), and
+  [release checklist](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/release-checklist.md)
+
+</details>
+
+## Author and License
+
+Owned by **Banzai International, Inc. d/b/a Parabolic ("Parabolic")**.
+Created by [Alexander Torosh](https://github.com/alexander-torosh).
+Contact: [alexander@parabolic.io](mailto:alexander@parabolic.io).
+Source: [Parabolic-Technologies/banzai](https://github.com/Parabolic-Technologies/banzai).
+
+Banzai is licensed under the [Apache License, Version 2.0](https://github.com/Parabolic-Technologies/banzai/blob/main/LICENSE).
+See [NOTICE](https://github.com/Parabolic-Technologies/banzai/blob/main/NOTICE), [third-party information](https://github.com/Parabolic-Technologies/banzai/blob/main/THIRD_PARTY_NOTICES.md),
+[Terms of Use](https://github.com/Parabolic-Technologies/banzai/blob/main/TERMS_OF_USE.md), and [Names and Logos](https://github.com/Parabolic-Technologies/banzai/blob/main/TRADEMARKS.md).
+Using Banzai does not require open-sourcing your own project. Community
+participation follows the [Code of Conduct](https://github.com/Parabolic-Technologies/banzai/blob/main/CODE_OF_CONDUCT.md).

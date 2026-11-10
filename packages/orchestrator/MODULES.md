@@ -973,8 +973,8 @@ is a navigational reference and is updated with the module it describes.
   CLI release that serves a model newer than the vendor-wide minimum),
   `vendorFor`, `vendorUsage`, and role labels. It is the source of truth for supported identities and for the
   model and effort levels the menus offer. The Codex choices `gpt-6.1-sol`,
-  `gpt-6-astra`, and `gpt-6-sol` offer `low`, `medium`, `high`, `xhigh`, `max`,
-  and `ultra` effort; `claude-sonnet-4-6` offers no `xhigh`.
+  `gpt-6-astra`, `gpt-6.1-terra`, and `gpt-6-sol` offer `low`, `medium`, `high`,
+  `xhigh`, `max`, and `ultra` effort; `claude-sonnet-4-6` offers no `xhigh`.
 - `model-selection.ts` — `selectModelSettings`; the per-role model and effort
   dialog, filtered to the levels the chosen model accepts. Its implementation
   menu recommends the effective planning executable, model, and effort as one

@@ -586,11 +586,12 @@ function retired(replacement, date) {
 }
 var OPUS = "claude-opus-5-5";
 var SONNET = "claude-sonnet-5-5";
-var HAIKU = "claude-haiku-4-5";
+var HAIKU = "claude-haiku-5-5";
+var FABLE = "claude-fable-5-2";
 var CLAUDE_CATALOG = {
   supported: /* @__PURE__ */ new Set([
+    FABLE,
     "claude-fable-5-1",
-    "claude-fable-5",
     OPUS,
     SONNET,
     "claude-opus-5",
@@ -598,6 +599,7 @@ var CLAUDE_CATALOG = {
     "claude-opus-4-8",
     "claude-sonnet-4-6",
     HAIKU,
+    "claude-haiku-4-5",
     "claude-haiku-4-5-20251001",
     // Claude Code aliases always resolve to the current model of their tier.
     "opus",
@@ -615,7 +617,8 @@ var CLAUDE_CATALOG = {
     ["claude-opus-4-0", retired(OPUS, "2026-06-15")],
     ["claude-opus-4-20250514", retired(OPUS, "2026-06-15")],
     ["claude-3-opus-20240229", retired(OPUS, "2026-01-05")],
-    ["claude-mythos-preview", superseded("claude-fable-5-1")],
+    ["claude-fable-5", superseded(FABLE)],
+    ["claude-mythos-preview", superseded(FABLE)],
     ["claude-sonnet-4-5", deprecated(SONNET, "2026-11-30")],
     ["claude-sonnet-4-5-20250929", deprecated(SONNET, "2026-11-30")],
     ["claude-sonnet-4-0", retired(SONNET, "2026-06-15")],
@@ -633,6 +636,8 @@ var CLAUDE_CATALOG = {
   cliMinimums: /* @__PURE__ */ new Map([
     [OPUS, "2.1.280"],
     [SONNET, "2.1.284"],
+    [HAIKU, "2.1.293"],
+    [FABLE, "2.1.321"],
     ["claude-fable-5-1", "2.1.257"]
   ])
 };
@@ -641,6 +646,7 @@ var CODEX_CATALOG = {
   supported: /* @__PURE__ */ new Set([
     CODEX_SOL,
     "gpt-6-astra",
+    "gpt-6.1-terra",
     "gpt-6-sol",
     "gpt-6-luna",
     "gpt-5.6-sol",
@@ -648,7 +654,7 @@ var CODEX_CATALOG = {
     "gpt-5.6-luna"
   ]),
   replacements: /* @__PURE__ */ new Map([
-    ["gpt-5.5", deprecated(CODEX_SOL, "2026-10-14")],
+    ["gpt-5.5", retired(CODEX_SOL, "2026-10-14")],
     ["gpt-5.4", retired(CODEX_SOL, "2026-08-31")],
     ["gpt-5.4-mini", retired("gpt-6-luna", "2026-08-31")],
     ["gpt-5", superseded(CODEX_SOL)]
@@ -657,6 +663,7 @@ var CODEX_CATALOG = {
   // model, from the Codex CLI release notes.
   cliMinimums: /* @__PURE__ */ new Map([
     [CODEX_SOL, "0.159.1"],
+    ["gpt-6.1-terra", "0.165.0"],
     ["gpt-6-sol", "0.156.1"],
     ["gpt-6-luna", "0.156.1"],
     ["gpt-6-astra", "0.153.1"]
