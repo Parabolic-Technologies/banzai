@@ -2,6 +2,7 @@ import { decodePlanningGateDecision } from "./agent-control.js";
 import { parsePlanningReviewTriageAnswer } from "./validation.js";
 import { planningReviewScope } from "./workflow/domain/planning-review.js";
 import { gateArtifactPaths } from "./workflow/domain/artifact-scope.js";
+import { finalizeWorkSlug } from "./workflow/domain/run-identity.js";
 import type { PlanningReviewTriageAnswer } from "./types.js";
 import { BanzaiError } from "./errors.js";
 import {
@@ -215,7 +216,8 @@ export async function executeAgentControlCommand(
   command: Exclude<AgentControlCliCommand, { command: "capabilities" }>,
   createRunner: () => AgentControlRunner,
   io: AgentControlCliIO,
-  defaultDecisionMaker: string
+  defaultDecisionMaker: string,
+  clock: () => Date = () => new Date()
 ): Promise<void> {
   if (command.command === "status") {
     const runner = createRunner();
@@ -236,7 +238,10 @@ export async function executeAgentControlCommand(
             };
   const runner = createRunner();
   if (decoded.kind === "start" && command.command === "start") {
-    await runner.start({ slug: command.slug, request: decoded.value.request });
+    await runner.start({
+      slug: finalizeWorkSlug(command.slug, clock()),
+      request: decoded.value.request
+    });
   } else if (decoded.kind === "decide" && command.command === "decide") {
     const doc = decoded.value;
     const current = await runner.status();

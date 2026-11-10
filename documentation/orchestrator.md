@@ -1120,9 +1120,20 @@ banzai
 
 With terminal input and output attached, the runner opens a minimal
 state-driven interface. When no run exists, it collects the task request,
-derives a deterministic kebab-case slug, and shows that slug before the start
-confirmation. The planner then selects and displays `quick-fix`, `feature`, or
-`strict` with its reason and phase responsibilities.
+derives a deterministic kebab-case slug, and prints it with the local date
+prefix as `Generated slug: <yymmdd>-<slug>`. One prompt,
+`Press Enter or y to accept it, or type your own slug:`, then accepts that slug
+or takes the engineer's own. A typed slug receives today's `yymmdd-` prefix
+unless it already starts with it, and the prompt stays open with a message
+while the result is not lowercase kebab-case, exceeds 100 characters, or names
+an existing `documentation/work/` or `documentation/initiatives/` directory.
+When that existence check is refused, for example because a documentation
+directory is a symlink, the prompt shows `Could not check <slug>: <reason>`.
+The session then prints `Slug: <final>` and `Request: <request>` before the
+start confirmation, and the run starts with that slug unchanged
+([ADR-0066](decisions/0066-date-prefixed-work-and-initiative-slugs.md)).
+The planner then selects and displays `quick-fix`, `feature`, or `strict` with
+its reason and phase responsibilities.
 
 The request prompt enables terminal bracketed-paste mode. A multiline paste is
 captured through its closing marker and rendered as
@@ -1621,6 +1632,12 @@ for scripts, CI, direct recovery, and explicit slug overrides:
 ```text
 banzai run --slug my-explicit-slug --request "Implement the task"
 ```
+
+`banzai run --slug` and `banzai control start --slug` apply the same local date
+prefix when the command starts: on 2026-11-10 the example above starts run slug
+`261110-my-explicit-slug` in `documentation/work/261110-my-explicit-slug/`.
+Status reports the prefixed slug. A start refuses, creating nothing, when that
+directory or `documentation/initiatives/261110-my-explicit-slug/` exists.
 
 ### Local model file
 

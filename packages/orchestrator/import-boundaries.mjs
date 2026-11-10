@@ -21,6 +21,7 @@ const ADR_0055 = "ADR-0055";
 const ADR_0058 = "ADR-0058";
 const ADR_0060 = "ADR-0060";
 const ADR_0064 = "ADR-0064";
+const ADR_0066 = "ADR-0066";
 const POLICY_ADR_AUTHORITIES = new Set([
   ADR_0026,
   ADR_0028,
@@ -38,7 +39,8 @@ const POLICY_ADR_AUTHORITIES = new Set([
   ADR_0055,
   ADR_0058,
   ADR_0060,
-  ADR_0064
+  ADR_0064,
+  ADR_0066
 ]);
 const POLICY_ERROR_CODE = "IMPORT_BOUNDARY_POLICY_INVALID";
 const IMPORTER_PATTERN =
@@ -406,8 +408,9 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
   boundary(
     "src/agent-control-cli.ts",
     "agent-control-cli",
-    [MANIFEST_ARCHITECTURE, MANIFEST_MODULES, ADR_0055],
+    [MANIFEST_ARCHITECTURE, MANIFEST_MODULES, ADR_0055, ADR_0066],
     [
+      permission("./workflow/domain/run-identity.js", ADR_0066),
       permission("./workflow/domain/planning-review.js", ADR_0055),
       permission("./workflow/domain/artifact-scope.js", ADR_0055),
       permission("./validation.js", ADR_0055),
@@ -509,9 +512,11 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       ADR_0041,
       ADR_0055,
       ADR_0058,
-      ADR_0060
+      ADR_0060,
+      ADR_0066
     ],
     [
+      permission("./workflow/domain/run-identity.js", ADR_0066),
       permission("./local-config.js", ADR_0060),
       permission("./model-status.js", ADR_0060),
       permission("./plan-gate-ui.js", ADR_0058),
@@ -801,9 +806,11 @@ export const ORCHESTRATOR_IMPORT_BOUNDARIES = [
       ADR_0035,
       ADR_0055,
       ADR_0058,
-      ADR_0060
+      ADR_0060,
+      ADR_0066
     ],
     [
+      permission("./workflow/domain/run-identity.js", ADR_0066),
       permission("./model-status.js", ADR_0060),
       permission("./plan-gate-ui.js", ADR_0058),
       permission("./validation.js", ADR_0055),

@@ -44,6 +44,7 @@ import {
   type InteractiveChoice,
   type InteractiveInput,
   type InteractiveIO,
+  type InteractiveOptions,
   type AuthenticationGateway,
   type InteractiveRunner,
   type LaunchModelUpdate,
@@ -1289,17 +1290,20 @@ test("interactive mode starts a run from validated user input", async () => {
   ]);
   const io = new FakeIO(
     ["start", "approve_plan", "exit"],
-    ["Implement SC-12345."],
+    ["Implement SC-12345.", ""],
     [true, true]
   );
 
-  await runInteractive(runner, io, { decidedBy: "human" });
+  await runInteractive(runner, io, {
+    decidedBy: "human",
+    clock: () => NOVEMBER_10
+  });
 
   assert.deepEqual(runner.calls, [
     {
       operation: "start",
       value: {
-        slug: "implement-sc-12345",
+        slug: "261110-implement-sc-12345",
         request: "Implement SC-12345."
       }
     },
@@ -1307,9 +1311,225 @@ test("interactive mode starts a run from validated user input", async () => {
   ]);
   assert.deepEqual(io.choiceSets[1], ["approve_plan", "cancel", "exit"]);
   assert.ok(
-    io.lines.some((line) => line === "Generated slug: implement-sc-12345")
+    io.lines.some(
+      (line) => line === "Generated slug: 261110-implement-sc-12345"
+    )
   );
   assert.equal(io.inputOptions[0]?.collapsedPaste, true);
+});
+
+// Local noon keeps the local calendar date fixed in every time zone.
+const NOVEMBER_10 = new Date(2026, 10, 10, 12);
+
+/** Runs each prompt's validation the way the terminal prompts do. */
+class ValidatingIO extends FakeIO {
+  override async input(options: InteractiveInput): Promise<string> {
+    const value = await super.input(options);
+    assert.equal(await options.validate?.(value), true);
+    return value;
+  }
+}
+
+async function startWithSlugInput(
+  answer: string,
+  options: Partial<InteractiveOptions> = {}
+): Promise<{ runner: FakeRunner; io: FakeIO }> {
+  const runner = new FakeRunner([null, null]);
+  const io = new ValidatingIO(
+    ["start", "exit"],
+    ["Fix the login error", answer],
+    [true]
+  );
+  await runInteractive(runner, io, {
+    decidedBy: "human",
+    clock: () => NOVEMBER_10,
+    ...options
+  });
+  return { runner, io };
+}
+
+function startedSlug(runner: FakeRunner): unknown {
+  const call = runner.calls.find((entry) => entry.operation === "start");
+  return (call?.value as { slug?: unknown } | undefined)?.slug;
+}
+
+test("the slug step accepts the generated slug with Enter, y or Y", async () => {
+  for (const answer of ["", "y", " Y "]) {
+    const { runner, io } = await startWithSlugInput(answer);
+    assert.equal(startedSlug(runner), "261110-fix-the-login-error");
+    assert.deepEqual(io.inputMessages, [
+      "What should Banzai implement?",
+      "Press Enter or y to accept it, or type your own slug:"
+    ]);
+    const shown = io.lines.filter(
+      (line) =>
+        line.startsWith("Generated slug: ") ||
+        line.startsWith("Slug: ") ||
+        line.startsWith("Request: ")
+    );
+    assert.deepEqual(shown, [
+      "Generated slug: 261110-fix-the-login-error",
+      "Slug: 261110-fix-the-login-error",
+      "Request: Fix the login error"
+    ]);
+    assert.deepEqual(io.confirmationMessages, [
+      "Start this task with automatic workflow selection?"
+    ]);
+    assert.deepEqual(io.confirmationDefaults, [true]);
+  }
+});
+
+test("the slug step adds only a missing current-date prefix to a typed slug", async () => {
+  for (const [answer, expected] of [
+    ["login-fix", "261110-login-fix"],
+    ["261110-login-fix", "261110-login-fix"],
+    ["251001-login-fix", "261110-251001-login-fix"]
+  ] as const) {
+    const { runner, io } = await startWithSlugInput(answer);
+    assert.equal(startedSlug(runner), expected);
+    assert.ok(io.lines.includes(`Slug: ${expected}`));
+  }
+});
+
+test("the slug step keeps its prompt open for invalid, long or existing names", async () => {
+  const existing = new Map([
+    ["261110-login-fix", "documentation/work/261110-login-fix"],
+    ["261110-program", "documentation/initiatives/261110-program"],
+    [
+      "261110-fix-the-login-error",
+      "documentation/work/261110-fix-the-login-error"
+    ],
+    // Names that also fail an earlier check prove the precedence.
+    ["261110-Login_Fix", "documentation/work/261110-Login_Fix"],
+    [`261110-${"b".repeat(94)}`, `documentation/work/261110-${"b".repeat(94)}`]
+  ]);
+  const runner = new FakeRunner([null, null]);
+  const io = new FakeIO(
+    ["start", "exit"],
+    ["Fix the login error", "other-fix"],
+    [false]
+  );
+  await runInteractive(runner, io, {
+    decidedBy: "human",
+    clock: () => NOVEMBER_10,
+    workSlugs: { conflict: async (slug) => existing.get(slug) ?? null }
+  });
+  const validate = io.inputOptions[1]?.validate;
+  assert.ok(validate !== undefined);
+  assert.equal(
+    await validate("Login_Fix"),
+    "Use lowercase letters, digits and single hyphens, for example login-fix."
+  );
+  assert.equal(
+    await validate("a".repeat(94)),
+    "Use at most 100 characters, including the 261110- prefix."
+  );
+  assert.equal(await validate("a".repeat(93)), true);
+  // Format before length, and both before the existence check (the gateway
+  // also reports `Login_Fix` and the 94-character `b` slug as existing).
+  assert.equal(
+    await validate("A".repeat(94)),
+    "Use lowercase letters, digits and single hyphens, for example login-fix."
+  );
+  assert.equal(
+    await validate("b".repeat(94)),
+    "Use at most 100 characters, including the 261110- prefix."
+  );
+  assert.equal(
+    await validate("login-fix"),
+    "documentation/work/261110-login-fix already exists. Type a different slug."
+  );
+  assert.equal(
+    await validate("program"),
+    "documentation/initiatives/261110-program already exists. Type a different slug."
+  );
+  assert.equal(
+    await validate(""),
+    "documentation/work/261110-fix-the-login-error already exists. Type a different slug."
+  );
+  assert.equal(await validate("other-fix"), true);
+  assert.deepEqual(runner.calls, []);
+});
+
+test("a refused existence check keeps the slug prompt open with its reason", async () => {
+  const runner = new FakeRunner([null, null]);
+  const io = new FakeIO(
+    ["start", "exit"],
+    ["Fix the login error", ""],
+    [false]
+  );
+  await runInteractive(runner, io, {
+    decidedBy: "human",
+    clock: () => NOVEMBER_10,
+    workSlugs: {
+      conflict: async (slug) => {
+        if (slug === "261110-other-fix") return null;
+        throw new Error(
+          "Artifact storage requires owned directories and regular files without symlinks."
+        );
+      }
+    }
+  });
+  const validate = io.inputOptions[1]?.validate;
+  assert.ok(validate !== undefined);
+  assert.equal(
+    await validate("login-fix"),
+    "Could not check 261110-login-fix: Artifact storage requires owned directories and regular files without symlinks."
+  );
+  assert.equal(await validate("other-fix"), true);
+  assert.deepEqual(runner.calls, []);
+});
+
+test("a slug accepted before midnight starts the run unchanged after midnight", async () => {
+  let now = new Date(2026, 10, 10, 23, 59);
+  const runner = new FakeRunner([null, null]);
+  const io = new ValidatingIO(
+    ["start", "exit"],
+    ["Fix the login error", "login-fix"],
+    [true]
+  );
+  const confirm = io.confirm.bind(io);
+  io.confirm = async (message, defaultValue) => {
+    now = new Date(2026, 10, 11, 0, 1);
+    return await confirm(message, defaultValue);
+  };
+  await runInteractive(runner, io, { decidedBy: "human", clock: () => now });
+  assert.ok(io.lines.includes("Slug: 261110-login-fix"));
+  assert.equal(startedSlug(runner), "261110-login-fix");
+});
+
+test("declining or interrupting the slug step starts no run", async () => {
+  const declined = new FakeRunner([null, null]);
+  const declinedIO = new FakeIO(
+    ["start", "exit"],
+    ["Fix the login error", ""],
+    [false]
+  );
+  await runInteractive(declined, declinedIO, {
+    decidedBy: "human",
+    clock: () => NOVEMBER_10
+  });
+  assert.deepEqual(declined.calls, []);
+
+  for (const errorName of ["ExitPromptError", "AbortPromptError"]) {
+    const runner = new FakeRunner([null]);
+    const io = new FakeIO(["start"], ["Fix the login error"], []);
+    const input = io.input.bind(io);
+    io.input = async (options) => {
+      if (options.message.startsWith("Press Enter")) {
+        const error = new Error("Prompt closed");
+        error.name = errorName;
+        throw error;
+      }
+      return await input(options);
+    };
+    await runInteractive(runner, io, {
+      decidedBy: "human",
+      clock: () => NOVEMBER_10
+    });
+    assert.deepEqual(runner.calls, []);
+    assert.deepEqual(io.confirmationMessages, []);
+  }
 });
 
 test("attention counts runner time only and does not repeat on a declined confirmation", async () => {
@@ -1346,7 +1566,7 @@ test("attention counts runner time only and does not repeat on a declined confir
     };
     const io = new FakeIO(
       ["start", "approve_plan", "approve_plan", "exit"],
-      ["Implement terminal attention."],
+      ["Implement terminal attention.", ""],
       [true, false, true]
     );
     const confirm = io.confirm.bind(io);

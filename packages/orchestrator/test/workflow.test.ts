@@ -460,6 +460,40 @@ test("an invalid context policy fails before creating run evidence", async () =>
   }
 });
 
+test("a start whose slug names an existing initiative refuses before creating a run", async () => {
+  const repository = await createTestRepository();
+  try {
+    await mkdir(
+      path.join(repository.root, "documentation/initiatives/261110-fix-login"),
+      { recursive: true }
+    );
+    const runner = new WorkflowRunner(repository.root, new FakeAdapters());
+
+    await assert.rejects(
+      runner.start({ slug: "261110-fix-login", request: "Fix the login." }),
+      (error: unknown) =>
+        error instanceof Error &&
+        (error as { code?: unknown }).code === "ARTIFACT_WORK_CONFLICT" &&
+        error.message.startsWith(
+          "documentation/initiatives/261110-fix-login already exists."
+        )
+    );
+    await assert.rejects(
+      readdir(
+        path.join(repository.root, "documentation/work/261110-fix-login")
+      ),
+      { code: "ENOENT" }
+    );
+    await assert.rejects(
+      runner.status(),
+      (error: unknown) =>
+        error instanceof BanzaiError && error.code === "NO_ACTIVE_RUN"
+    );
+  } finally {
+    await repository.dispose();
+  }
+});
+
 test("post-call vendor limits remain advisory in enforce mode", async () => {
   const repository = await createTestRepository();
   try {

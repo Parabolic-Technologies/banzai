@@ -19,6 +19,11 @@ import {
 } from "../src/types.js";
 import type { WorkflowStatus } from "../src/workflow.js";
 import { planningTriageRequest } from "./planning-review-fixtures.js";
+import { readdir } from "node:fs/promises";
+import path from "node:path";
+import { WorkflowRunner } from "../src/workflow.js";
+import { createTestRepository } from "./helpers.js";
+import { FakeAdapters } from "./workflow-fixtures.js";
 
 test("control decide has exact stdin grammar and rejects incompatible documents before runner construction", async () => {
   assert.deepEqual(
@@ -565,7 +570,7 @@ test("capabilities and no-active-run status emit one canonical JSON document", a
   });
 });
 
-test("control start passes metacharacter request data unchanged and refreshes status", async () => {
+test("control start prefixes the slug with the local date and passes request data unchanged", async () => {
   const runner = new FakeRunner();
   const request = "  first\n'\"; | > $(touch /tmp/owned) `false` $VALUE  ";
   const output: string[] = [];
@@ -582,15 +587,54 @@ test("control start passes metacharacter request data unchanged and refreshes st
       ),
       stdout: (value) => output.push(value)
     },
-    "default-user"
+    "default-user",
+    // Local noon keeps the local calendar date fixed in every time zone.
+    () => new Date(2026, 10, 10, 12)
   );
-  assert.deepEqual(runner.starts, [{ slug: "agent-task", request }]);
+  assert.deepEqual(runner.starts, [{ slug: "261110-agent-task", request }]);
   assert.equal(output.length, 1);
   assert.equal(
     (JSON.parse(output[0] ?? "") as { activeRun: { state: string } }).activeRun
       .state,
     "selecting"
   );
+});
+
+test("control start with a real runner carries the prefixed slug into state, run id, work directory and status", async () => {
+  const repository = await createTestRepository();
+  try {
+    const runner = new WorkflowRunner(repository.root, new FakeAdapters());
+    const output: string[] = [];
+    await executeAgentControlCommand(
+      { command: "start", slug: "agent-task" },
+      () => runner,
+      {
+        stdin: stream(
+          document({
+            schema: AGENT_REQUEST_SCHEMA,
+            schemaVersion: 1,
+            request: "Implement the agent task."
+          })
+        ),
+        stdout: (value) => output.push(value)
+      },
+      "default-user",
+      () => new Date(2026, 10, 10, 12)
+    );
+    const projected = JSON.parse(output[0] ?? "") as {
+      activeRun: { runId: string; slug: string };
+    };
+    assert.equal(projected.activeRun.slug, "261110-agent-task");
+    assert.match(projected.activeRun.runId, /-261110-agent-task-[0-9a-f]{8}$/);
+    const { state } = await runner.status();
+    assert.equal(state.slug, "261110-agent-task");
+    assert.equal(state.runId, projected.activeRun.runId);
+    await readdir(
+      path.join(repository.root, "documentation/work/261110-agent-task")
+    );
+  } finally {
+    await repository.dispose();
+  }
 });
 
 test("control answer preserves ordered text provenance and resume choice", async () => {

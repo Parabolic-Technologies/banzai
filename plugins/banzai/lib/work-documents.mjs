@@ -1,5 +1,5 @@
 import path from "node:path";
-import { mkdir, readdir } from "node:fs/promises";
+import { lstat, mkdir, readdir } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import {
   canonicalJson, digestBytes, exactObject, fail, git, ignored, makeDirectories,
@@ -9,6 +9,7 @@ import { parseHistoricalBinding } from "./work-binding-history.mjs";
 export { ignored } from "./project-files.mjs";
 
 export const WORK_DIRECTORY = "documentation/work";
+export const INITIATIVE_DIRECTORY = "documentation/initiatives";
 export const BINDING_SCHEMA = "banzai-work-binding/v3";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
@@ -63,6 +64,29 @@ export async function verifyDocumentVisibility(root, roles, extraPaths = []) {
   }
 }
 
+// The contained-path walk refuses symlinked or non-directory components, so a
+// conflict is never answered from outside the repository.
+async function occupied(root, relative) {
+  const resolved = await safePath(root, relative, { missing: true, directory: true });
+  try { await lstat(resolved); return true; }
+  catch (error) {
+    if (error.code === "ENOENT") return false;
+    fail("ARTIFACT_IO_ERROR", "Artifact storage could not be inspected. Check local permissions.");
+  }
+}
+
+function conflictFailure(relative) {
+  fail("ARTIFACT_WORK_CONFLICT", `${relative} already exists. Select existing standalone work explicitly or use a distinct slug for a new run.`);
+}
+
+/** Read-only: the existing work or initiative directory with this full name, or null (ADR-0066 §4). */
+export async function workSlugConflict(repoRoot, slug) {
+  const root = await projectRoot(repoRoot);
+  for (const relative of [workDirectory(slug), `${INITIATIVE_DIRECTORY}/${slug}`])
+    if (await occupied(root, relative)) return relative;
+  return null;
+}
+
 /** Allocate authority only as part of starting an actual runner execution. */
 export async function createExecutionBinding({ repoRoot, slug, mode, runId, creationId = randomUUID(), createdAt = new Date().toISOString(), sourceCommit = null }) {
   const root = await projectRoot(repoRoot);
@@ -70,11 +94,13 @@ export async function createExecutionBinding({ repoRoot, slug, mode, runId, crea
     artifacts: { ...documentRoles(slug, mode), verificationDirectory: `.banzai/runs/${runId}/verification` } });
   await verifyDocumentVisibility(root, binding.artifacts);
   const directory = workDirectory(slug);
+  const initiative = `${INITIATIVE_DIRECTORY}/${slug}`;
+  if (await occupied(root, initiative)) conflictFailure(initiative);
   await makeDirectories(root, WORK_DIRECTORY);
   await safePath(root, directory, { missing: true, directory: true });
   try { await mkdir(path.join(root, directory)); }
   catch (error) {
-    if (error.code === "EEXIST") fail("ARTIFACT_WORK_CONFLICT", "This work directory already exists. Select existing standalone work explicitly or use a distinct slug for a new run.");
+    if (error.code === "EEXIST") conflictFailure(directory);
     throw error;
   }
   return { binding, sha256: digestBytes(canonicalJson(binding)) };

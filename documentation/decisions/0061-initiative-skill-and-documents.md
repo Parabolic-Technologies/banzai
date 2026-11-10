@@ -375,5 +375,10 @@ cross-principal or outbound-request surface.
   [ADR-0036](./0036-vendor-neutral-policy-files-and-instruction-delivery.md):
   its read matrix gains the `initiative` row (section 7), with a reciprocal
   link on acceptance.
+- Partially superseded by
+  [ADR-0066](./0066-date-prefixed-work-and-initiative-slugs.md), accepted
+  2026-11-10: a new initiative directory name begins with its local creation
+  date as `yymmdd-`, replacing only the "with no date" part of the slug rule
+  in section 1. All other rules of this ADR stay in force.
 - Supersedes: None.
 - Superseded by: None.

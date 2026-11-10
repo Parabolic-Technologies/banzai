@@ -18,6 +18,7 @@ import { CONFIG_FILE, DEFAULT_CONFIG } from "../src/config.js";
 import { BanzaiError } from "../src/errors.js";
 import { parseModelArgs } from "../src/model-cli.js";
 import { workspaceDigest } from "../src/git.js";
+import { workSlugDatePrefix } from "../src/workflow/domain/run-identity.js";
 import {
   CONTRACT_VERSION,
   type ReviewResult,
@@ -923,6 +924,59 @@ test("committed CLI keeps the stable code of a shared-library refusal", async ()
   } finally {
     await repository.dispose();
     await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("committed run prefixes --slug and refuses an existing initiative without starting a run", async () => {
+  const repository = await createTestRepository();
+  try {
+    // The CLI reads its own clock, so cover a midnight crossing during the test.
+    const now = Date.now();
+    const prefixes = [
+      ...new Set(
+        [now, now + 3_600_000].map((at) => workSlugDatePrefix(new Date(at)))
+      )
+    ];
+    for (const prefix of prefixes) {
+      await mkdir(
+        path.join(
+          repository.root,
+          "documentation/initiatives",
+          `${prefix}fix-login`
+        ),
+        { recursive: true }
+      );
+    }
+    const result = spawnSync(
+      process.execPath,
+      [COMMITTED_CLI, "run", "--slug", "fix-login", "--request", "Fix login."],
+      {
+        cwd: repository.root,
+        encoding: "utf8",
+        env: monochromeEnv(),
+        timeout: 30000
+      }
+    );
+    assert.equal(result.status, 1, result.stderr);
+    const refused =
+      /^\[ARTIFACT_WORK_CONFLICT\] (documentation\/initiatives\/(\d{6}-)fix-login) already exists\./m.exec(
+        result.stderr
+      );
+    assert.ok(refused !== null, result.stderr);
+    assert.ok(prefixes.includes(refused[2] ?? ""), result.stderr);
+    for (const prefix of prefixes) {
+      await assert.rejects(
+        readFile(
+          path.join(repository.root, "documentation/work", `${prefix}fix-login`)
+        ),
+        { code: "ENOENT" }
+      );
+    }
+    const status = runCommittedStatus(repository.root);
+    assert.equal(status.status, 1, status.stderr);
+    assert.match(status.stderr, /^\[NO_ACTIVE_RUN\] /m);
+  } finally {
+    await repository.dispose();
   }
 });
 

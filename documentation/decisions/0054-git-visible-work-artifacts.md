@@ -290,4 +290,9 @@ detection. Report local, installed-client and delivery evidence separately.
   accepted 2026-11-05: documents that span several works use a second fixed
   root, `documentation/initiatives/<slug>/`, which shares the source-tree
   exemption and the payload exclusion. Work directories stay flat.
+- Partially superseded by
+  [ADR-0066](./0066-date-prefixed-work-and-initiative-slugs.md),
+  accepted 2026-11-10: a new work directory name begins with its local creation
+  date as `yymmdd-`, replacing only the rule that a date does not become a
+  required name prefix. Existing directories keep their names.
 - Superseded by: None.

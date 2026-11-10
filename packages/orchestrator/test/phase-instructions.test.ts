@@ -99,6 +99,16 @@ test("embedded phase bodies preserve all canonical UTF-8 bytes in the exact reso
   }
 });
 
+test("delivered artifact-storage policy states the ADR-0066 date-prefixed slug rule", () => {
+  const text = phaseInstructionParts("feature").join("\n");
+  assert.match(text, /The slug is `yymmdd-<subject>`: the local creation date/);
+  assert.match(
+    text,
+    /must not exist under\s+`documentation\/work\/` or `documentation\/initiatives\/`/
+  );
+  assert.doesNotMatch(text, /without required dates/);
+});
+
 test("composed review instructions exclude the code-design method that its consumers receive", async () => {
   const method = await readFile(
     path.join(SOURCE_PLUGIN, "guidance/code-design.md"),

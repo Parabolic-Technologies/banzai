@@ -9,8 +9,14 @@
 ## Artifact Storage
 
 New work documents use `documentation/work/<slug>/`, one flat directory named
-for the work's subject. Use a stable, repository-unique lowercase kebab-case
-slug without required dates, mode/status prefixes or owner folders. Keep
+for the work's subject. The slug is `yymmdd-<subject>`: the local creation date
+as two-digit year, month and day, then a stable lowercase kebab-case subject,
+without mode/status prefixes or owner folders. A candidate that already begins
+with today's prefix keeps it; any other candidate receives it, and the prefix
+is never omitted. The full name, at most 100 characters, must not exist under
+`documentation/work/` or `documentation/initiatives/`. The `banzai` CLI applies
+this rule to the runs it starts. Existing undated directories keep their names
+and are continued at their known paths. Keep
 `description.md`, `plan.md`, required `implementation-report.md` and
 `test-report.md`, and successive `review-N.md` files together. Lite work uses
 `work.md`; quick-fix creates `change-report.md` only under its existing trigger.

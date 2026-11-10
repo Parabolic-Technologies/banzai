@@ -14,6 +14,11 @@ is a navigational reference and is updated with the module it describes.
   workspace v3 inventories selected documents once, including unchanged approved
   bytes. `lib/work-binding-history.mjs` decodes retained v1/v2 evidence read-only;
   `isHistoricalWork` is the shared predicate status, home and doctor use for it.
+  `workSlugConflict` is the read-only ADR-0066 query for a final slug: it
+  returns the existing `documentation/work/<slug>` or
+  `documentation/initiatives/<slug>` through contained-path resolution, and
+  execution-binding creation refuses either with `ARTIFACT_WORK_CONFLICT`
+  before creating the work directory.
   `lib/execution-ownership.mjs` coordinates actual runner/verification execution
   by the selected document directory; ordinary Markdown editing has no claims.
   Its recovery-only option requires repository ownership, exact bound-work
@@ -328,7 +333,15 @@ is a navigational reference and is updated with the module it describes.
   digest-rejected result whose authorized repair outranks replaying its terminal
   checkpoint,
   derives the kebab-case feature slug via `generateFeatureSlug`, and keeps the
-  session open when a phase returns a gate. It uses the shared review-completion
+  session open when a phase returns a gate. Before the start confirmation, the
+  slug step prints `Generated slug:` with the date-prefixed default and asks one
+  input: Enter, `y` or `Y` keep it, other text is finalized with today's prefix.
+  Its validation keeps the prompt open for format, then length, then an
+  existing directory reported by the optional `workSlugs` gateway. A gateway
+  refusal or failure keeps the prompt open with `Could not check <slug>:` and
+  its reason, because the prompt library drops a rejected validation. The
+  session starts the run with the slug that passed validation, read from the
+  optional `clock` (ADR-0066). It uses the shared review-completion
   projection so terminal triage is never displayed as reviewer pass.
   Planning gates offer rework and explicit review with default-No confirmations.
   A strict task-verification plan gate first prints the waiting copy with the
@@ -649,7 +662,13 @@ is a navigational reference and is updated with the module it describes.
   `workflow.ts` re-exports, and the `decisionText` and `decisionIdentifier`
   validators for human-decision input (`INVALID_DECISION`).
 - `workflow/domain/run-identity.ts` — `runId`, the run identifier derived from
-  the slug, creation time and UUID, and `requireSlug` (`INVALID_SLUG`).
+  the slug, creation time and UUID, and `requireSlug` (`INVALID_SLUG`). It also
+  owns the ADR-0066 slug rule for new work: `workSlugDatePrefix` gives the
+  `yymmdd-` prefix of a supplied instant's local calendar date,
+  `finalizeWorkSlug` adds it unless the candidate already starts with that
+  date's prefix, and `workSlugProblem` classifies a final slug as wrong
+  `format` (not kebab-case or not prefixed) before too `length` (over
+  `MAX_WORK_SLUG_LENGTH`, 100, prefix included). Callers own the clock.
 - `workflow/domain/artifact-scope.ts` — `artifactPaths`, the approved planning
   bundle in description, ADR, plan order (`INCOMPLETE_PLAN`), and
   `isDocumentationPath`. `gateArtifactPaths` supplies exact gate membership,

@@ -13,7 +13,7 @@ projects. Detailed module behavior belongs in the
   local `banzai` CLI that coordinates planning, implementation, verification
   and independent review with human decisions.
 - The plugin and CLI are independently usable and separately delivered. They
-  share release-train version `2.8.0`, owned by root `package.json.version`.
+  share release-train version `2.8.1`, owned by root `package.json.version`.
 - This repository maintains those products. Its root guidance and manifest
   describe the source workspace; packaged templates describe neither its
   process nor its current implementation.
@@ -182,8 +182,10 @@ behavior and edge cases; source and tests own the executable evidence.
   before delegating to `WorkflowRunner` and return current status.
 - `interactive.ts`, `inquirer-io.ts`, `plan-gate-ui.ts` — state-driven human
   decisions through `InteractiveIO`; only `inquirer-io.ts` imports
-  `@inquirer/*`. `plan-gate-ui.ts` renders the plan gate's waiting copy and the
-  re-check summary for the terminal and the CLI.
+  `@inquirer/*`. A new run's slug step offers the date-prefixed generated slug
+  or validates a typed one before the start confirmation. `plan-gate-ui.ts`
+  renders the plan gate's waiting copy and the re-check summary for the
+  terminal and the CLI.
 - `progress.ts`, `interrupt.ts`, `terminal-attention.ts`, `vocabulary.ts`,
   `ansi.ts`, `format.ts` — terminal presentation and bounded interruption;
   human rendering never becomes machine authority.
@@ -454,6 +456,10 @@ Plugin and release owners:
   variables use `camelCase`; types/classes use `PascalCase`; constants and
   error codes use `SCREAMING_SNAKE_CASE`. ADR paths use
   `documentation/decisions/NNNN-<short-kebab-case-title>.md`.
+- New `documentation/work/` and `documentation/initiatives/` directories, and
+  the run slugs the CLI starts, are named `yymmdd-<kebab-case-subject>` from
+  the local creation date (ADR-0066), at most 100 characters and unused in
+  both roots; existing undated directories keep their names.
 - TypeScript uses `strict`, `noUncheckedIndexedAccess`,
   `exactOptionalPropertyTypes`, `verbatimModuleSyntax` and NodeNext module
   resolution. Relative imports use `.js` and type-only imports are explicit.
@@ -606,3 +612,4 @@ delivery or installation.
 | ADR-0063 | Stable headless vendor invocations                                 | [Source](documentation/decisions/0063-stable-headless-vendor-invocations.md)                     | Implemented |
 | ADR-0064 | Runner-recorded plan remainder digest                              | [Source](documentation/decisions/0064-runner-recorded-plan-remainder-digest.md)                  | Implemented |
 | ADR-0065 | Continuable planner-declared planning blocks                       | [Source](documentation/decisions/0065-continuable-planner-declared-planning-blocks.md)           | Implemented |
+| ADR-0066 | Date-prefixed work and initiative slugs                            | [Source](documentation/decisions/0066-date-prefixed-work-and-initiative-slugs.md)                | Implemented |

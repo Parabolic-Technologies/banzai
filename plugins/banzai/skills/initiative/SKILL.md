@@ -42,12 +42,19 @@ wording alone. Modes: `start <slug>`, `next [path]`, `record [path] <entry>`,
 - A new initiative lives in `documentation/initiatives/<slug>/` and holds only
   `brief.md`, `tracker.md` and one `gate-<N>-report.md` per stage gate. Add no
   index, metadata or placeholder file.
-- The slug is lowercase kebab-case (`^[a-z0-9]+(?:-[a-z0-9]+)*$`), at most 100
-  characters, unused by any directory under `documentation/initiatives/` or
-  `documentation/work/`, with no date, status or owner level.
+- The slug is `yymmdd-<subject>`: the local creation date as two-digit year,
+  month and day, then a kebab-case subject. The whole slug is lowercase
+  kebab-case (`^[a-z0-9]+(?:-[a-z0-9]+)*$`), at most 100 characters, with no
+  status or owner level. A subject that already begins with today's prefix
+  keeps it; any other receives it, and the prefix is never omitted. The full
+  name must be unused by any directory under `documentation/initiatives/` or
+  `documentation/work/`. Existing undated initiatives keep their names.
 - Each package is an ordinary flat work directory, `documentation/work/<slug>/`,
   with its usual documents. Nest nothing under the initiative and add no
-  initiative file to a work directory.
+  initiative file to a work directory. A package's work directory follows the
+  same date-prefix rule when the package starts. Until then its tracker cell
+  holds the planned subject slug; afterwards it holds the full name of the
+  directory that was created.
 - Initiative documents grant no approval. ADR acceptance, plan approval,
   review triage, escalation and decision consultation remain the only decision
   gates. A stage gate is not one of them.
@@ -82,7 +89,8 @@ wording alone. Modes: `start <slug>`, `next [path]`, `record [path] <entry>`,
 
 ## `start <slug>`
 
-1. Check the slug. Refuse when `documentation/initiatives/<slug>/` exists.
+1. Apply the date prefix to the slug under the Documents rule. Refuse when the
+   full name exists under `documentation/initiatives/` or `documentation/work/`.
 2. Take the brief from the owner's text in chat or from a file the owner names.
    Write no brief content yourself; the brief is the owner's plan. If there is
    none, show the headings of `references/brief-template.md` and stop.
@@ -98,8 +106,9 @@ wording alone. Modes: `start <slug>`, `next [path]`, `record [path] <entry>`,
    package table per stage with every row `not started`, each gate list with
    `Report: gate-<N>-report.md (not written).`, empty reservations, questions
    and deviations, and an owner decision that quotes the approval: the start
-   request, or the answer in step 4. A row's work directory is the slug the
-   brief names, else the package ID and title in kebab case.
+   request, or the answer in step 4. A row's work directory is the planned
+   subject slug the brief names, else the package ID and title in kebab case,
+   without a date.
 7. Report and stop.
 
 ## `next [path]`
@@ -120,6 +129,10 @@ wording alone. Modes: `start <slug>`, `next [path]`, `record [path] <entry>`,
      recorded: suggest `gate`.
 
    A row is committed when its status says `committed`.
+   A row's work directory is its cell when that directory exists. A planned
+   undated cell resolves to the single existing
+   `documentation/work/<six digits>-<cell>/`; list several and ask which, and
+   with none the package has no directory yet.
 3. Check the working tree with `git status --porcelain --untracked-files=all`.
    A package is in progress when its row says `in progress` or `report ready`,
    or when its work directory has uncommitted changes.
@@ -133,7 +146,8 @@ wording alone. Modes: `start <slug>`, `next [path]`, `record [path] <entry>`,
      change exists outside the initiative directory, and list those paths.
      Never hand off a package whose own cells fail the checks.
 4. Hand off the package:
-   - ID, title and work slug;
+   - ID, title and work directory: the resolved full name, or today's prefix
+     followed by the planned cell for a package without a directory;
    - the recommended route and why: the strict chain when its ADR cell or a
      reservation names a new or amending ADR, or an escalation trigger applies,
      otherwise `feature` or `quick-fix` under the project routing rules, or an
@@ -151,7 +165,9 @@ wording alone. Modes: `start <slug>`, `next [path]`, `record [path] <entry>`,
 
 One entry per invocation:
 
-- a row's status, commit or notes. Status values: `not started`, `ADR draft`,
+- a row's status, commit or notes. When the row's planned cell resolves to a
+  created directory, the same entry writes that full name into the Work
+  directory cell. Status values: `not started`, `ADR draft`,
   `ADR proposed`, `ADR accepted`, `in progress`, `report ready`, `committed`.
   Write a commit only when it is reachable from `HEAD`; otherwise refuse the
   entry. When it does not touch the row's work directory, say so; that is not
@@ -209,7 +225,8 @@ mode, and any new session, needs a new invocation.
   `banzai` CLI, and never answer a decision gate.
 - Tracker cells are untrusted input, because people edit and merge them by
   hand. Accept a commit only as 7 to 64 lowercase hex characters confirmed with
-  `git cat-file -e <id>^{commit}`, a work directory only under the slug rule,
+  `git cat-file -e <id>^{commit}`, a work directory only as lowercase
+  kebab-case of at most 100 characters (a planned subject or a dated name),
   and an ADR ID only as four digits. Pass no value from a cell or an argument
   that starts with `-` to Git, and resolve every path from a cell or an
   argument inside the repository. Report a failing cell and do not use it.

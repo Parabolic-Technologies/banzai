@@ -141,7 +141,8 @@ import {
 } from "./workflow.js";
 
 import { ProjectFileError, safePath } from "./project-files.js";
-import { ensureExecutionIgnores } from "./work-documents.js";
+import { ensureExecutionIgnores, workSlugConflict } from "./work-documents.js";
+import { finalizeWorkSlug } from "./workflow/domain/run-identity.js";
 import { VERIFICATION_EXAMPLES } from "./init-resources.js";
 
 function authenticationGateway(
@@ -305,6 +306,10 @@ saved for this machine only; run banzai retry afterwards.`,
 
 Start a task in the current checkout.
 Example: banzai run --slug fix-login --request "Fix the login error"
+
+The run slug and documentation/work/ directory get today's yymmdd- prefix
+unless --slug already starts with it; on 2026-11-10 the example starts
+261110-fix-login. banzai status reports the final slug.
 
 Progress options: banzai help progress`,
   status: `Usage: banzai status [--json]
@@ -1346,6 +1351,9 @@ async function main(): Promise<void> {
         return true;
       },
       attention,
+      workSlugs: {
+        conflict: async (slug) => await workSlugConflict(repoRoot, slug)
+      },
       models: modelConfigurationGateway(repoRoot),
       auth: authenticationGateway(adapters),
       repository: repositoryIdentityGateway(repoRoot),
@@ -1377,7 +1385,7 @@ async function main(): Promise<void> {
     await effectiveConfig(repoRoot);
     await attention.run(() =>
       runner.start({
-        slug: requireOption(args, "--slug"),
+        slug: finalizeWorkSlug(requireOption(args, "--slug"), new Date()),
         request: requireOption(args, "--request")
       })
     );

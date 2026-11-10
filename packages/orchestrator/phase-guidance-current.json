@@ -46,7 +46,7 @@
     "plugins/banzai/phases/planning.md": "862ce2cdc932847da787b698f0e321ee151dbbefe2554044592820f2b8554096",
     "plugins/banzai/phases/quick-fix.md": "2acd0d7af182c2f77126a4e632639a7dc68627dfe7edf8c856d881b1726dccf1",
     "plugins/banzai/phases/review.md": "bae167a98386f417f1be0d9028059a038456a0b7f5dc970030818c23ba0c277c",
-    "plugins/banzai/policies/artifact-storage.md": "4cbfb7748bbf8baa5ea550c14c6e2525a0b58be05d016d28bbb913edac2fb272",
+    "plugins/banzai/policies/artifact-storage.md": "27f8cc46ab6a5cda06625da1b7fa942e5d3e96c458b40dc05be9b958f3cea403",
     "plugins/banzai/policies/decision-consultation.md": "82a869ef55849063b96742f5a60474bcf54492b737ca2703380d4a53f46f26d5",
     "plugins/banzai/policies/engineering-quality.md": "36fdf0cc236d13d136bcba2421ca0e2833176f180014324785a200d9cbfe0cc8",
     "plugins/banzai/policies/plan-task-completion.md": "d3dfa8cbc55a6b22bf194e53a9b68fe1e34c89bb679622e3177dd6af02348d5d",
@@ -1124,6 +1124,24 @@
           "key": "plugins/banzai/hooks/spec-gate.cjs",
           "before": "93659be21468d61b29cbb67542258a139ca0803f615f2404366f48f4e33078a5",
           "after": "fab91f126fe90c51dd2976b5116f9fa1cd73af84e8b3e089a9e8a56f90bc5181"
+        }
+      ]
+    },
+    {
+      "predecessorSha256": "cae322b16467e541d91dc91fde6fe420e0ba0074d8318a4aaf9ce42bdb4d34b4",
+      "successorSha256": "4407e71a62e7cd4b238dfe81d9b4d2c70e376031873bf25e8e06b90173e55552",
+      "authorities": [
+        {
+          "path": "documentation/decisions/0066-date-prefixed-work-and-initiative-slugs.md",
+          "sha256": "409ebbb125e234a6d1426d2e99f2cc115a47832b836bfd3547ec5b1ac5cecb81",
+          "scope": "Date-prefixed work and initiative slugs in the artifact storage policy"
+        }
+      ],
+      "changes": [
+        {
+          "key": "plugins/banzai/policies/artifact-storage.md",
+          "before": "4cbfb7748bbf8baa5ea550c14c6e2525a0b58be05d016d28bbb913edac2fb272",
+          "after": "27f8cc46ab6a5cda06625da1b7fa942e5d3e96c458b40dc05be9b958f3cea403"
         }
       ]
     }

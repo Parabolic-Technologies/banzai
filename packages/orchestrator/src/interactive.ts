@@ -84,6 +84,12 @@ import {
 } from "./workflow.js";
 import type { TerminalAttention } from "./terminal-attention.js";
 import {
+  finalizeWorkSlug,
+  MAX_WORK_SLUG_LENGTH,
+  workSlugDatePrefix,
+  workSlugProblem
+} from "./workflow/domain/run-identity.js";
+import {
   pendingRotationText,
   reviewExecutionText,
   reviewSeverityText,
@@ -102,7 +108,7 @@ export interface InteractiveInput {
   message: string;
   defaultValue?: string;
   collapsedPaste?: boolean;
-  validate?: (value: string) => true | string;
+  validate?: (value: string) => true | string | Promise<true | string>;
 }
 
 export interface InteractiveIO {
@@ -286,8 +292,18 @@ export interface RepositoryIdentityGateway {
   describe(): Promise<RepositoryIdentity>;
 }
 
+/** Existing directory names that a new work slug must not reuse (ADR-0066). */
+export interface WorkSlugGateway {
+  /** The repository-relative work or initiative directory with this name. */
+  conflict(slug: string): Promise<string | null>;
+}
+
 export interface InteractiveOptions {
   beforeStart?: () => Promise<boolean>;
+  /** Reads the local date of new work slugs; defaults to the system clock. */
+  clock?: () => Date;
+  /** Without it the slug step skips only the conflict check; run start refuses a conflict anyway. */
+  workSlugs?: WorkSlugGateway;
   /** Base IO for the single cancellation reason prompt, without timing actions. */
   cancellationIO?: InteractiveIO;
   humanTime?: HumanTimeGateway;
@@ -919,6 +935,61 @@ async function runWork(
   }
 }
 
+/**
+ * One input step that accepts the generated slug or takes the engineer's own.
+ * The date is read at submission, and the slug that passed validation is the
+ * slug the run starts with, even if the date changes before confirmation.
+ */
+async function selectWorkSlug(
+  io: InteractiveIO,
+  generated: string,
+  clock: () => Date,
+  workSlugs: WorkSlugGateway | undefined
+): Promise<string> {
+  const finalize = (value: string, at: Date): string => {
+    const trimmed = value.trim();
+    return finalizeWorkSlug(
+      trimmed === "" || trimmed === "y" || trimmed === "Y"
+        ? generated
+        : trimmed,
+      at
+    );
+  };
+  const accepted: { value: string | null; slug: string } = {
+    value: null,
+    slug: ""
+  };
+  const value = await io.input({
+    message: "Press Enter or y to accept it, or type your own slug:",
+    validate: async (candidate) => {
+      const at = clock();
+      const slug = finalize(candidate, at);
+      const problem = workSlugProblem(slug, at);
+      if (problem === "format") {
+        return "Use lowercase letters, digits and single hyphens, for example login-fix.";
+      }
+      if (problem === "length") {
+        return `Use at most ${String(MAX_WORK_SLUG_LENGTH)} characters, including the ${workSlugDatePrefix(at)} prefix.`;
+      }
+      let existing: string | null;
+      try {
+        existing = (await workSlugs?.conflict(slug)) ?? null;
+      } catch (error) {
+        // Inquirer drops a rejected validation and the process crashes, so a
+        // refused or failed check keeps the prompt open with its reason.
+        return `Could not check ${slug}: ${escapeTerminalText(errorMessage(error))}`;
+      }
+      if (existing !== null) {
+        return `${existing} already exists. Type a different slug.`;
+      }
+      accepted.value = candidate;
+      accepted.slug = slug;
+      return true;
+    }
+  });
+  return accepted.value === value ? accepted.slug : finalize(value, clock());
+}
+
 async function startRun(
   runner: InteractiveRunner,
   io: InteractiveIO,
@@ -933,8 +1004,11 @@ async function startRun(
       validate: nonEmpty
     })
   ).trim();
-  const slug = generateFeatureSlug(request);
-  io.writeLine(`Generated slug: ${slug}`);
+  const clock = options.clock ?? (() => new Date());
+  const generated = generateFeatureSlug(request);
+  io.writeLine(`Generated slug: ${finalizeWorkSlug(generated, clock())}`);
+  const slug = await selectWorkSlug(io, generated, clock, options.workSlugs);
+  io.writeLine(`Slug: ${slug}`);
   io.writeLine(`Request: ${request}`);
   if (
     await io.confirm("Start this task with automatic workflow selection?", true)

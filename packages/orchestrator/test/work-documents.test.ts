@@ -12,7 +12,8 @@ import {
   inspectBoundWork,
   parseBinding,
   planningReviewFilenames,
-  workDocumentInventory
+  workDocumentInventory,
+  workSlugConflict
 } from "../../../plugins/banzai/lib/work-documents.mjs";
 import {
   executionKey,
@@ -385,6 +386,98 @@ test("new executor binding groups tracked documents, ignores declarations and pr
       { code: "ARTIFACT_VERSION_UNSUPPORTED" }
     );
     assert.equal(invoked, false);
+  } finally {
+    await repo.dispose();
+  }
+});
+
+test("work slugs conflict by full name in the work and initiative roots", async () => {
+  const repo = await createTestRepository({ artifactLayout: null });
+  try {
+    await mkdir(path.join(repo.root, "documentation/work/login-fix"), {
+      recursive: true
+    });
+    await mkdir(
+      path.join(repo.root, "documentation/initiatives/261110-program"),
+      { recursive: true }
+    );
+    assert.equal(await workSlugConflict(repo.root, "261110-login-fix"), null);
+    assert.equal(
+      await workSlugConflict(repo.root, "login-fix"),
+      "documentation/work/login-fix"
+    );
+    assert.equal(
+      await workSlugConflict(repo.root, "261110-program"),
+      "documentation/initiatives/261110-program"
+    );
+    await assert.rejects(
+      createExecutionBinding({
+        repoRoot: repo.root,
+        slug: "261110-program",
+        mode: "workflow",
+        runId: "run"
+      }),
+      (error: unknown) =>
+        error instanceof Error &&
+        (error as { code?: unknown }).code === "ARTIFACT_WORK_CONFLICT" &&
+        error.message.startsWith(
+          "documentation/initiatives/261110-program already exists."
+        )
+    );
+    assert.deepEqual(
+      (await readdir(path.join(repo.root, "documentation/work"))).sort(),
+      ["login-fix"]
+    );
+    await assert.rejects(
+      createExecutionBinding({
+        repoRoot: repo.root,
+        slug: "login-fix",
+        mode: "workflow",
+        runId: "run"
+      }),
+      /documentation\/work\/login-fix already exists\./u
+    );
+    // The query takes untrusted slugs, so it must refuse them before any path use.
+    for (const slug of ["../initiatives", "261110-program/../x", ""])
+      await assert.rejects(
+        workSlugConflict(repo.root, slug),
+        (error: unknown) =>
+          (error as { code?: unknown }).code === "ARTIFACT_INPUT_INVALID"
+      );
+  } finally {
+    await repo.dispose();
+  }
+});
+
+test("work slug conflicts refuse a symlinked root instead of following it", async () => {
+  const repo = await createTestRepository({ artifactLayout: null });
+  try {
+    await mkdir(path.join(repo.root, "outside/261110-elsewhere"), {
+      recursive: true
+    });
+    await mkdir(path.join(repo.root, "documentation"), { recursive: true });
+    await symlink(
+      path.join(repo.root, "outside"),
+      path.join(repo.root, "documentation/initiatives")
+    );
+    const unsafe = (error: unknown): boolean =>
+      (error as { code?: unknown }).code === "ARTIFACT_UNSAFE_PATH";
+    await assert.rejects(
+      workSlugConflict(repo.root, "261110-elsewhere"),
+      unsafe
+    );
+    await assert.rejects(
+      createExecutionBinding({
+        repoRoot: repo.root,
+        slug: "261110-elsewhere",
+        mode: "workflow",
+        runId: "run"
+      }),
+      unsafe
+    );
+    assert.deepEqual(await readdir(path.join(repo.root, "documentation")), [
+      "initiatives"
+    ]);
   } finally {
     await repo.dispose();
   }
