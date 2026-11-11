@@ -465,12 +465,14 @@ Both live invocations receive their prompt on stdin, and the Claude review
 runs with the run-stability environment of
 [Headless Invocations](#headless-invocations); at the five-minute bound its
 `BASH_MAX_TIMEOUT_MS` is the 120,000 ms floor. The live suite runs no long
-foreground command. That host behaviour has its own owner-run probe,
-`node packages/orchestrator/scripts/gate-1-probe.mjs`, which runs a Banzai
+foreground command and no denied tool call. The owner confirmed both host
+behaviours once, with probes that were never part of `compatibility:live`: an
 implementation phase with an 11-minute foreground command and a resumed
-invocation in a scratch repository; see
-[the Gate 1 probe](work/wp08-stable-claude-phases/gate-1-probe.md). It is not
-part of `compatibility:live` and makes no automatic model call.
+invocation, and a phase with one granted and one denied command under
+`--permission-prompts none`. The probe code is no longer in the repository.
+[The Gate 1 probe](work/wp08-stable-claude-phases/gate-1-probe.md) and
+[the Gate 2 probe](work/261111-wp14-permission-denial-list/gate-2-probe.md)
+record how each ran, and the program tracker records the results.
 
 Each invocation is limited to five minutes, the complete command to fifteen
 minutes, and the total to two model calls. The only stdout is
@@ -1929,6 +1931,56 @@ Grant the shell commands your phases need, for example:
 
 Missing or scoped `Bash` grants are reported as advisories rather than blocks:
 the run continues, and the phase runs only the commands the rules named.
+
+#### Denied tool calls
+
+Every Claude phase also runs with `--permission-prompts none`. Claude Code
+then denies at once any call that would need approval, tells the model that
+nobody can approve it and that it must not retry, and does not offer the
+model its question tool. The flag only denies. Allow rules, the permission
+mode and the hook decide first, exactly as without it.
+
+Claude Code reports each call it denied. When an attempt had denied calls,
+the runner prints them when the attempt ends, whether it succeeded or failed:
+
+```text
+Claude denied 3 tool calls during implementation:
+  - Bash: npm run lint (2 times)
+  - Bash: cd packages/api && npx vitest run (needs a hand-written rule)
+To allow the exact commands in later phases, add these rules to .claude/settings.json (tracked and shared):
+  {
+    "permissions": {
+      "allow": [
+        "Bash(npm run lint)"
+      ]
+    }
+  }
+Banzai never writes permission rules.
+```
+
+- Each distinct call appears once, with a repeat count, a `subagent` mark for
+  a subagent's call, and `refused by a deny or ask rule` when a rule refused
+  it. No allow rule overrides such a rule, so none is proposed for it.
+- A proposed rule is the denied command verbatim, so it grants that command
+  and nothing else. Only one plain command of at most 200 characters gets a
+  rule. A command with `&&`, `||`, `;`, a pipe, a redirection, a substitution,
+  parentheses, `*` or a line break needs a rule you write yourself, and so
+  does a command with a credential-shaped token, which Banzai never keeps
+  verbatim.
+- The named file is the one the session loads: `.claude/settings.json` in
+  scoped mode and `.claude/settings.local.json` in ambient mode. For an
+  untrusted checkout the trust step comes first. Check a new rule in a manual
+  `claude` session; Claude Code owns the rule syntax.
+- Denials never change an attempt's outcome, its retry or its recovery. The
+  list is advisory.
+- A write that the Banzai hook refuses is not a permission denial, and Claude
+  Code does not report it in this list.
+
+The runner records the list in the run's `events.jsonl` as one
+`attempt.permission_denials` event with an exact count and at most 50 calls.
+`banzai status` repeats the block for a blocked run whose newest model
+attempt had denied calls. `status --json`, agent control and the evaluation,
+KPI, context and cancellation reports carry none of it.
 
 `banzai init` and a completed `banzai setup` run the same read-only audit and,
 when a refusing rule would stop the first run, print its reasons and

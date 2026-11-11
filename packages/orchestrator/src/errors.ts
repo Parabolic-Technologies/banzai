@@ -3,6 +3,7 @@ import type {
   ModelFailureCause,
   RunState,
   ModelUsage,
+  PermissionDenial,
   ProcessResult,
   SessionInventory
 } from "./types.js";
@@ -108,6 +109,8 @@ export class ProcessExitError extends BanzaiError {
   readonly usage: ModelUsage | null;
   readonly inventory: SessionInventory | null;
   readonly turnCount: number | null;
+  /** Tool calls the failed Claude process had denied; empty otherwise. */
+  readonly permissionDenials: PermissionDenial[];
 
   constructor(
     code: string,
@@ -118,6 +121,7 @@ export class ProcessExitError extends BanzaiError {
       usage?: ModelUsage | null;
       inventory?: SessionInventory | null;
       turnCount?: number | null;
+      permissionDenials?: PermissionDenial[];
     } = {}
   ) {
     super(code, message);
@@ -129,6 +133,7 @@ export class ProcessExitError extends BanzaiError {
     this.usage = evidence.usage ?? null;
     this.inventory = evidence.inventory ?? null;
     this.turnCount = evidence.turnCount ?? null;
+    this.permissionDenials = evidence.permissionDenials ?? [];
   }
 }
 

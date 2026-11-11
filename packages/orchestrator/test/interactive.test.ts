@@ -2273,6 +2273,49 @@ test("interactive mode offers retry only when status marks it eligible", async (
   );
 });
 
+test("interactive status shows a blocked run's denied Claude tool calls after the block reason", async () => {
+  const report = [
+    "Claude denied 1 tool call during implementation:",
+    "  - Bash: npm run lint",
+    "Banzai never writes permission rules."
+  ];
+  const blocked = (): WorkflowStatus =>
+    workflowStatus(
+      runState("blocked", {
+        blockedFrom: "implementing",
+        blockReason: "The phase could not run its checks."
+      })
+    );
+  class DeniedRunner extends FakeRunner {
+    async permissionDenialReport(): Promise<readonly string[]> {
+      return report;
+    }
+  }
+  const io = new FakeIO(["exit"]);
+  await runInteractive(new DeniedRunner([blocked()]), io, {
+    decidedBy: "human"
+  });
+  const reason = io.lines.findIndex((line) =>
+    line.includes("The phase could not run its checks.")
+  );
+  assert.notEqual(reason, -1);
+  assert.deepEqual(
+    io.lines.filter((line) => report.includes(line)),
+    report
+  );
+  assert.ok(io.lines.indexOf(report[0] ?? "") > reason);
+
+  // A runner without the optional view renders the same status without it.
+  const plain = new FakeIO(["exit"]);
+  await runInteractive(new FakeRunner([blocked()]), plain, {
+    decidedBy: "human"
+  });
+  assert.equal(
+    plain.lines.some((line) => line.includes("Claude denied")),
+    false
+  );
+});
+
 test("interactive retry runs as a human at a terminal", async () => {
   const runner = new FakeRunner([
     workflowStatus(

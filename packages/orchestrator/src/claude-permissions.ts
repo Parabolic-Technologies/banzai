@@ -5,7 +5,8 @@ import { FALLBACK_VENDOR, MODEL_ROLES, vendorFor } from "./models.js";
 import type {
   ClaudeEnvironmentSettings,
   ClaudeInvocationScope,
-  OrchestratorConfig
+  OrchestratorConfig,
+  PermissionDenial
 } from "./types.js";
 
 /**
@@ -541,4 +542,275 @@ export async function inspectClaudeUserPluginScope(
   return keys.length === 0
     ? { state: "not_enabled", path: file }
     : { state: "enabled", path: file, keys };
+}
+
+/**
+ * Denied tool calls as a remediation list.
+ *
+ * Claude Code reports every call it denied without a prompt. The functions
+ * below turn that list into the block a human reads and the record a later
+ * `banzai status` repeats. They propose rules and write none: what Claude may
+ * do in a settings file stays the operator's decision.
+ */
+
+/** What the `attempt.permission_denials` run event carries. */
+export interface PermissionDenialRecord {
+  attemptId: string;
+  kind: string;
+  /** Every denied call of the attempt, including those not stored. */
+  count: number;
+  denials: PermissionDenial[];
+}
+
+export const MAX_RECORDED_PERMISSION_DENIALS = 50;
+const MAX_REPORTED_PERMISSION_DENIALS = 20;
+const MAX_RULE_COMMAND_LENGTH = 200;
+const MAX_DENIAL_DETAIL_LENGTH = 240;
+/**
+ * A proposed rule names one plain command and nothing wider. An operator, a
+ * redirection, a substitution or a subshell makes a command more than one
+ * call, and `*` would turn the exact rule into a pattern.
+ */
+const RULE_UNSAFE_CHARACTERS = /[;&|<>`()*\n\r]|\$\(/;
+const UNSAFE_DISPLAY_CHARACTERS =
+  /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/;
+const RECORDED_TOOL_NAME = /^[A-Za-z0-9_.:-]{1,100}$/;
+const RECORDED_REASON_TYPE = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
+const RECORDED_IDENTIFIER = /^[A-Za-z0-9_.-]{1,200}$/;
+
+/**
+ * The exact-match allow rule for one denied Bash command, or null when the
+ * command is not one plain call. The rule grants what was denied and no more.
+ */
+export function proposedAllowRule(command: string): string | null {
+  const exact = command.trim();
+  if (
+    exact.length === 0 ||
+    exact.length > MAX_RULE_COMMAND_LENGTH ||
+    exact !== command ||
+    RULE_UNSAFE_CHARACTERS.test(exact) ||
+    UNSAFE_DISPLAY_CHARACTERS.test(exact)
+  ) {
+    return null;
+  }
+  return `Bash(${exact})`;
+}
+
+function refusedByRule(denial: PermissionDenial): boolean {
+  return denial.reasonType === "rule";
+}
+
+interface DeniedCallGroup {
+  tool: string;
+  detail: string;
+  times: number;
+  subagent: boolean;
+  refused: boolean;
+  rule: string | null;
+}
+
+function groupDeniedCalls(
+  denials: readonly PermissionDenial[]
+): DeniedCallGroup[] {
+  const groups = new Map<string, DeniedCallGroup>();
+  for (const denial of denials) {
+    const key = `${denial.tool}\u0000${denial.command ?? denial.detail}`;
+    const group = groups.get(key);
+    const refused = refusedByRule(denial);
+    // No allow rule overrides a deny or ask rule, so none is proposed.
+    const rule =
+      denial.tool === "Bash" && !refused && denial.command !== null
+        ? proposedAllowRule(denial.command)
+        : null;
+    if (group === undefined) {
+      groups.set(key, {
+        tool: denial.tool,
+        detail: denial.detail,
+        times: 1,
+        subagent: denial.subagent,
+        refused,
+        rule
+      });
+      continue;
+    }
+    group.times += 1;
+    group.subagent ||= denial.subagent;
+    group.refused ||= refused;
+    if (group.refused) {
+      group.rule = null;
+    }
+  }
+  return [...groups.values()];
+}
+
+function deniedCallLine(group: DeniedCallGroup): string {
+  const marks = [
+    ...(group.times > 1 ? [`${group.times} times`] : []),
+    ...(group.subagent ? ["subagent"] : []),
+    ...(group.refused ? ["refused by a deny or ask rule"] : []),
+    ...(group.tool === "Bash" && !group.refused && group.rule === null
+      ? ["needs a hand-written rule"]
+      : [])
+  ];
+  return `  - ${group.tool}${group.detail.length > 0 ? `: ${group.detail}` : ""}${
+    marks.length > 0 ? ` (${marks.join("; ")})` : ""
+  }`;
+}
+
+/** The settings file the session loads last, which is where a rule belongs. */
+function ruleTarget(audit: ClaudePermissionAudit | null): {
+  name: string;
+  repository: boolean;
+} {
+  if (audit === null) {
+    return { name: "the settings Claude loads", repository: false };
+  }
+  if (audit.sources.includes("local")) {
+    return { name: ".claude/settings.local.json", repository: true };
+  }
+  if (audit.sources.includes("project")) {
+    return {
+      name: ".claude/settings.json (tracked and shared)",
+      repository: true
+    };
+  }
+  return { name: "your Claude user settings", repository: false };
+}
+
+/**
+ * The block a human reads after an attempt with denied calls: each distinct
+ * call once, then the exact rules that would allow the plain Bash commands and
+ * the file the session actually loads. An empty list renders nothing.
+ */
+export function claudePermissionDenialReport(input: {
+  denials: readonly PermissionDenial[];
+  /** Every denied call of the attempt; the list may hold fewer. */
+  count: number;
+  phase: string;
+  audit: ClaudePermissionAudit | null;
+}): string[] {
+  const groups = groupDeniedCalls(input.denials);
+  if (groups.length === 0) {
+    return [];
+  }
+  const count = Math.max(input.count, input.denials.length);
+  const lines = [
+    `Claude denied ${count} tool ${count === 1 ? "call" : "calls"} during ${input.phase.replace(/_/g, " ")}:`,
+    ...groups.slice(0, MAX_REPORTED_PERMISSION_DENIALS).map(deniedCallLine)
+  ];
+  if (groups.length > MAX_REPORTED_PERMISSION_DENIALS) {
+    lines.push(`  and ${groups.length - MAX_REPORTED_PERMISSION_DENIALS} more`);
+  }
+  const rules = [
+    ...new Set(groups.flatMap((group) => (group.rule ? [group.rule] : [])))
+  ];
+  if (rules.length > 0) {
+    const target = ruleTarget(input.audit);
+    if (target.repository && input.audit?.trust === "untrusted") {
+      lines.push(
+        "First run `claude` once in this checkout and accept the trust prompt; until then Claude Code ignores the repository's allow rules."
+      );
+    }
+    lines.push(
+      `To allow the exact commands in later phases, add these rules to ${target.name}:`,
+      ...JSON.stringify({ permissions: { allow: rules } }, null, 2)
+        .split("\n")
+        .map((line) => `  ${line}`)
+    );
+  }
+  lines.push("Banzai never writes permission rules.");
+  return lines;
+}
+
+/** The bounded record of one attempt's denied calls. */
+export function permissionDenialRecord(
+  attempt: { id: string; kind: string },
+  denials: readonly PermissionDenial[]
+): PermissionDenialRecord {
+  return {
+    attemptId: attempt.id,
+    kind: attempt.kind,
+    count: denials.length,
+    denials: denials
+      .slice(0, MAX_RECORDED_PERMISSION_DENIALS)
+      .map((denial) => ({
+        tool: denial.tool,
+        detail: denial.detail,
+        command: denial.command,
+        reasonType: denial.reasonType,
+        subagent: denial.subagent
+      }))
+  };
+}
+
+function displayText(value: unknown, maximum: number): string | null {
+  return typeof value === "string" &&
+    value.length <= maximum &&
+    !UNSAFE_DISPLAY_CHARACTERS.test(value)
+    ? value
+    : null;
+}
+
+function parseRecordedDenial(value: unknown): PermissionDenial | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const detail = displayText(value.detail, MAX_DENIAL_DETAIL_LENGTH);
+  const command =
+    value.command === null
+      ? null
+      : displayText(value.command, MAX_RULE_COMMAND_LENGTH);
+  if (
+    typeof value.tool !== "string" ||
+    !RECORDED_TOOL_NAME.test(value.tool) ||
+    detail === null ||
+    (value.command !== null && command === null) ||
+    typeof value.subagent !== "boolean" ||
+    (value.reasonType !== null &&
+      (typeof value.reasonType !== "string" ||
+        !RECORDED_REASON_TYPE.test(value.reasonType)))
+  ) {
+    return null;
+  }
+  return {
+    tool: value.tool,
+    detail,
+    command,
+    reasonType: value.reasonType,
+    subagent: value.subagent
+  };
+}
+
+/**
+ * Reads a recorded event back for display. The events file is local evidence
+ * and still untrusted display input: a damaged record yields null, and an entry
+ * that could not have been written by `permissionDenialRecord` is dropped.
+ */
+export function parsePermissionDenialRecord(
+  details: unknown
+): PermissionDenialRecord | null {
+  if (
+    !isRecord(details) ||
+    typeof details.attemptId !== "string" ||
+    !RECORDED_IDENTIFIER.test(details.attemptId) ||
+    typeof details.kind !== "string" ||
+    !RECORDED_IDENTIFIER.test(details.kind) ||
+    typeof details.count !== "number" ||
+    !Number.isSafeInteger(details.count) ||
+    details.count < 0 ||
+    !Array.isArray(details.denials)
+  ) {
+    return null;
+  }
+  return {
+    attemptId: details.attemptId,
+    kind: details.kind,
+    count: details.count,
+    denials: details.denials
+      .slice(0, MAX_RECORDED_PERMISSION_DENIALS)
+      .flatMap((entry) => {
+        const denial = parseRecordedDenial(entry);
+        return denial === null ? [] : [denial];
+      })
+  };
 }

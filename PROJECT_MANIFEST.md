@@ -13,7 +13,7 @@ projects. Detailed module behavior belongs in the
   local `banzai` CLI that coordinates planning, implementation, verification
   and independent review with human decisions.
 - The plugin and CLI are independently usable and separately delivered. They
-  share release-train version `2.8.2`, owned by root `package.json.version`.
+  share release-train version `2.8.3`, owned by root `package.json.version`.
 - This repository maintains those products. Its root guidance and manifest
   describe the source workspace; packaged templates describe neither its
   process nor its current implementation.
@@ -165,6 +165,13 @@ projects. Detailed module behavior belongs in the
   source maps; private execution evidence is excluded from public
   source and distributions. See the
   [Publication Boundary](documentation/publication-boundary.md).
+- `.claude/skills/` holds three maintainer-only skills for Claude Code
+  sessions in this repository; none is part of the plugin or npm payloads.
+  `/version-bump` proposes the next release-train version, waits for
+  confirmation and runs the documented version update. `/commit-message`
+  prints one commit subject, prefixed with `v<version>` when the root version
+  changed. `/release` prepares the GitHub draft release for the version on
+  `main`. None of them commits, stages, tags, pushes or publishes.
 - `assets/logo/` owns coordinated SVG and PNG brand assets.
   `.serena/project.yml` configures optional local TypeScript tooling.
 
@@ -229,6 +236,10 @@ behavior and edge cases; source and tests own the executable evidence.
   `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, `BASH_MAX_TIMEOUT_MS` equal to its
   timeout minus a 5-minute reserve with a 2-minute floor, and no
   `BASH_DEFAULT_TIMEOUT_MS` (ADR-0063); Codex children get none of these.
+  Every Claude argv carries `--permission-prompts none`. The adapter reads
+  the tool calls Claude Code denied from each stream, and
+  `claude-permissions.ts` renders them as a remediation list with exact-match
+  `Bash(<command>)` rules for plain commands.
 - `project-setup.ts`, `setup-client.ts`, `foreground-client.ts` — explicit
   interactive `project-manifest` entry, client discovery and terminal cleanup;
   setup refuses unfinished runs and creates no task or approval.
@@ -374,6 +385,11 @@ Plugin and release owners:
   has a separate source-read-only lineage, fresh/full primary review and at
   most two consecutive resumed delta reviews; compatibility, approval and
   typed failure rules determine rotation.
+- An attempt with denied Claude tool calls appends one
+  `attempt.permission_denials` event (exact count, at most 50 redacted
+  entries) and prints the list with proposed allow rules when it ends. Human
+  `banzai status` repeats it for a blocked run. The list is advisory and never
+  changes an outcome, a retry or a recovery.
 - A passing review completes strict work. Human triage accepting zero findings
   can also complete it while retaining a `changes_requested` verdict. Accepted
   findings alone enter fixes, verification and bounded re-review.
@@ -529,7 +545,9 @@ Plugin and release owners:
   write grants; shell permission is separate. Code reviewers have no write
   tools. Claude review roles receive only `Read`, `Glob` and `Grep` and run
   without auto memory or refusal fallback. The CLI never silently writes
-  permission rules.
+  permission rules; the allow rules it proposes for denied calls are printed
+  text. `status --json`, agent control and the reporting contracts carry no
+  denied-call content.
 - Runner operations do not switch branches, create worktrees, stash, reset or
   commit. Start-time changes are recorded as baseline evidence. Explicit
   restore uses digest-verified approved bytes; recovery preserves failed

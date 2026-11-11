@@ -85,6 +85,8 @@ test("planning invocations preserve read-only argv, exact schema and environment
                     "high",
                     "--permission-mode",
                     "dontAsk",
+                    "--permission-prompts",
+                    "none",
                     "--tools",
                     analysis ? PLANNER_TOOLS : REVIEW_TOOLS,
                     "--disallowedTools",

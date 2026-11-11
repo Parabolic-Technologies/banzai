@@ -1,6 +1,6 @@
 # banzai 2.8–2.9 program tracker
 
-Status: active · Gate 1 closed, Stage 2 not started · Updated 2026-11-10
+Status: active · Gate 1 closed, Stage 2: WP14 report ready · Updated 2026-11-11
 
 This file is the only living record of the program. The plan itself is the
 frozen [brief.md](brief.md); never edit it. Record anything that departs from
@@ -25,7 +25,7 @@ the brief under [Deviations from the brief](#deviations-from-the-brief).
    stop for the owner.
 
 Status values: `not started` · `ADR draft` · `ADR proposed` · `ADR accepted` ·
-`in progress` · `report ready` · `committed`.
+`in progress` · `report ready` · `committed` · `deferred` · `dropped`.
 
 ## Baseline
 
@@ -94,16 +94,26 @@ Report: [`gate-1-report.md`](gate-1-report.md). Closed by the owner on
 
 ## Stage 2 (2.9): no lost runs
 
-Gate 1 closed on 2026-11-10, so Stage 2 can start.
+Gate 1 closed on 2026-11-10, so Stage 2 can start. On 2026-11-11 the owner
+cut the stage's scope after a user-value review; see
+[Owner decisions](#owner-decisions) and
+[Deviations from the brief](#deviations-from-the-brief). The owner then added
+WP22–WP25, and WP23 replaces WP10. Order: WP14, WP22, WP24, WP9, WP23, WP11,
+WP12, WP13, WP25. A new package's work directory is named when the package
+starts, with the date prefix ADR-0066 requires.
 
-| WP   | Package                                                  | Depends on    | ADR                                                         | Work directory                         | Status      | Commit | Notes                        |
-| ---- | -------------------------------------------------------- | ------------- | ----------------------------------------------------------- | -------------------------------------- | ----------- | ------ | ---------------------------- |
-| WP9  | Correct a verification command without re-implementation | WP1, WP3      | new, amends 0049 §1, §2, §4 (pinned); affects 0047 (pinned) | `wp09-verification-command-correction` | not started |        | Control protocol revision    |
-| WP10 | Baseline check run before implementation                 | WP1, WP3, WP9 | new                                                         | `wp10-baseline-check-run`              | not started |        | Control protocol revision    |
-| WP11 | Workflow choice: explanation and override                | —             | new, amends 0001                                            | `wp11-workflow-choice-override`        | not started |        | Template text changes        |
-| WP12 | Slim AGENTS.md template, small-project mode              | —             | new, amends 0036 and 0040                                   | `wp12-slim-agents-template`            | not started |        | Release layout check changes |
-| WP13 | Subscription limits without manual retry                 | WP8           | check 0021                                                  | `wp13-subscription-limit-retry`        | not started |        | Live scenario needs go-ahead |
-| WP14 | Permission denials as a remediation list                 | WP8           | none expected                                               | `wp14-permission-denial-list`          | not started |        | Live scenario needs go-ahead |
+| WP   | Package                                                  | Depends on    | ADR                                                     | Work directory                         | Status       | Commit | Notes                                                  |
+| ---- | -------------------------------------------------------- | ------------- | ------------------------------------------------------- | -------------------------------------- | ------------ | ------ | ------------------------------------------------------ |
+| WP9  | Correct a verification command without re-implementation | WP1, WP3      | new, amends 0049 §2, §4 (pinned); affects 0047 (pinned) | `wp09-verification-command-correction` | not started  |        | Human edit only, no planner proposal; control revision |
+| WP10 | Baseline check run before implementation                 | WP1, WP3, WP9 | new                                                     | `wp10-baseline-check-run`              | dropped      |        | Replaced by WP23                                       |
+| WP11 | Workflow choice: explanation and override                | —             | new, amends 0001                                        | `wp11-workflow-choice-override`        | not started  |        | No pause after selection; template text changes        |
+| WP12 | Slim AGENTS.md template, package guides, context map     | —             | new, amends 0036                                        | `wp12-slim-agents-template`            | not started  |        | Three parts, template first; no minimal manifest       |
+| WP13 | Subscription limits without manual retry                 | WP8           | check 0021                                              | `wp13-subscription-limit-retry`        | not started  |        | No live scenario; spawn environment check instead      |
+| WP14 | Permission denials as a remediation list                 | WP8           | none                                                    | `261111-wp14-permission-denial-list`   | report ready |        | Probe passed on 2.1.290 and 2.1.322; ships as 2.8.3    |
+| WP22 | Runner-granted commands from the approved plan           | WP3, WP14     | new, amends 0020                                        | —                                      | not started  |        | Outside the brief; live probe needs go-ahead           |
+| WP23 | Undocumented-command marker at the plan gate             | WP3           | none expected                                           | —                                      | not started  |        | Outside the brief; replaces WP10                       |
+| WP24 | No blocked state with cancel as its only exit            | —             | new; may affect 0024, 0065                              | —                                      | not started  |        | Outside the brief; audit before WP9                    |
+| WP25 | Notification when a run waits for a human                | —             | check at start                                          | —                                      | not started  |        | Outside the brief                                      |
 
 ### Gate 2
 
@@ -112,17 +122,34 @@ Report: `gate-2-report.md` (not written).
 - [ ] On the phpcs fixture, the wrong mandatory command is corrected through
       WP9 and verification passes without re-implementation; the audit trail
       shows both approvals and every attempt.
-- [ ] The baseline run (WP10) catches the wrong command before implementation
-      starts.
 - [ ] One real project run by the owner confirms the WP9 route.
-- [ ] `npm run verify` is green, and WP13 and WP14 pass the owner-authorized
-      live probe.
+- [ ] On the phpcs fixture, the plan gate marks the wrong command as
+      undocumented and names the documented one (WP23).
+- [ ] In a project with no Bash allow rule, a Claude implementation phase
+      runs the approved plan's check commands, and any other command is still
+      denied (WP22, owner-authorized live probe).
+- [ ] A test proves that every block reason offers an action that keeps the
+      run's work (WP24).
+- [ ] `npm run verify` is green, and WP14 passes the owner-authorized live
+      probe on Claude Code 2.1.290 and on the current release. Both probe runs
+      passed on 2026-11-11; the probe code was then removed, and
+      `documentation/work/261111-wp14-permission-denial-list/gate-2-probe.md`
+      records how it ran.
+
+The brief's baseline item (WP10) and the WP13 live probe left this gate on
+2026-11-11. The WP22, WP23 and WP24 items joined it the same day.
 
 ## Stage 3: measure
 
 Planned only after Gate 2; each package needs its own requirements first.
-WP15 eval suite, WP16 native attempt limits, WP17 builder sandbox, WP18 full
-context accounting.
+Scope after the owner's 2026-11-11 decision:
+
+- WP15 eval suite, narrowed to the cases that guard WP3 and WP12, plus
+  `claude plugin validate --json` in ordinary CI. The Claude and Codex reviewer
+  comparison is dropped.
+- WP17 builder sandbox stays a candidate. Decide on it from WP14's data about
+  how often permission denials block runs.
+- WP16 native attempt limits and WP18 full context accounting are dropped.
 
 ### Eval cases queued for WP15
 
@@ -441,15 +468,170 @@ release:validate` passes, so the deferred `HOOK_CHANGED_WITHOUT_VERSION_BUMP`
   (2.8.1), and Stage 2 can start. Publishing 2.8.1 stays a separate decision
   under [public-publication.md](../../releases/public-publication.md).
 
+- 2026-11-11: `Так, усі`. After a user-value review of the unimplemented
+  packages, the owner accepts every recommended change to the plan:
+  - WP14 goes first in Stage 2. Its remediation output also proposes
+    `permissions.allow` rules for the denied calls; the requirements settle
+    the form. The flag needs no version gate, because the Claude Code minimum
+    is 2.1.290 since WP8.
+  - WP9 keeps the human edit of a check descriptor and drops the planner
+    proposal call, so its ADR no longer amends ADR-0049 §1.
+  - WP11 keeps the route explanation and the `--workflow` override with the
+    matching choice in the interactive start. No Continue or Switch pause is
+    added after selection.
+  - WP12 keeps the slim template and drops the minimal manifest for small
+    projects, so ADR-0040 is not amended.
+  - WP13 keeps the retry watchdog variables, the `api_retry` categories and
+    the progress line. It adds no live scenario: tests check the variables in
+    the spawn environment, as WP7 does, because a subscription limit cannot be
+    triggered safely.
+  - WP10 is deferred and leaves Gate 2. Decide on it after a real project run
+    confirms the WP9 route.
+  - Stage 3: WP16 and WP18 are dropped, WP15 is narrowed and WP17 stays a
+    candidate.
+
+- 2026-11-11: `Так, додай`. WP12 grows from the slim template to three parts,
+  done in this order. The pattern for parts 2 and 3 comes from one of the
+  owner's adopted projects, where it cut `PROJECT_MANIFEST.md` from 49.0 KB to
+  21.1 KB:
+  1. the slim `AGENTS.md` template, as decided above. It is the only part
+     that cuts text loaded into every session;
+  2. package guides: `project-manifest` offers to move package facts out of
+     the manifest into `<package>/AGENTS.md`, with a two-line
+     `<package>/CLAUDE.md` pointer and a root rule that says when to read the
+     guide. The skill offers this only for a multi-package workspace or an
+     oversized manifest;
+  3. an optional domain glossary per package with a
+     `documentation/CONTEXT-MAP.md` index of contexts, relationships and
+     homonyms, read on demand. It serves naming accuracy, not token savings,
+     and needs the owner's input, so the mode is interactive.
+
+  Parts 2 and 3 are estimated at 3–5 days on top of the brief's 3–5 days.
+
+- 2026-11-11: `Усі чотири`. Four packages join Stage 2 from a review of what
+  still costs users time. WP10 is dropped, because WP23 catches the same
+  mistake without running anything.
+  - WP22, runner-granted commands. Without a Bash allow rule every command a
+    Claude phase runs is denied, and scoped mode does not load local settings,
+    so the rules must go into the shared `.claude/settings.json`. The human
+    already approves each check's argv at the plan gate (WP3), and the runner
+    runs those commands itself at verification. The runner passes exactly
+    those commands to the phase with `--allowedTools`, as it already does for
+    Serena. About 3–5 days plus an ADR that amends ADR-0020.
+  - WP23, undocumented-command marker. The plan gate marks a check whose argv
+    matches no documented command (package scripts, manifest, CI) and names
+    the closest one. About 1–2 days.
+  - WP24, no cancel-only block. Three lost runs each exposed a blocked state
+    whose only exit was cancel: the phpcs case, the planner block (WP21) and
+    an escalation that offered an option nothing could execute. Block reasons
+    become a closed set, each with at least one action that keeps the work,
+    and a test enforces it. The audit takes about 2–3 days and runs before
+    WP9; its findings size the fixes.
+  - WP25, attention notification. The phpcs run waited 2 h 36 min for
+    decisions, and the attention signal works only in Apple Terminal and
+    iTerm on macOS. About 1 day.
+
+- 2026-11-11: WP14 starts with `Починай WP14`. Its directory is
+  `261111-wp14-permission-denial-list`, with the date prefix ADR-0066
+  requires. The flag, the `permission_denied` event and the result's
+  `permission_denials` were read from the installed 2.1.318, 2.1.319 and
+  2.1.322 binaries. No ADR is needed: the flag is not a discovery argument, it
+  only denies, and Banzai writes no rule. The requirements and plan are
+  drafted and await approval with three owner questions: the form of a
+  proposed allow rule (Q1), the live evidence and its budget (Q2), and the
+  download for the 2.1.290 binary check (Q3). The package is sized at 2–3
+  days, because the rule proposal and a human status view join the brief's
+  scope.
+
+- 2026-11-11: `Approve, all (a)`. The WP14 requirements and plan are
+  approved. Q1 (a): a proposed allow rule is the exact denied command and
+  nothing wider. Q2 (a): the live evidence is a Gate 2 maintainer probe with
+  one invocation per client version, so `compatibility:live` keeps its v2
+  summary and its two-invocation budget. Q3 (a): the 2.1.290 binary was
+  downloaded, checked without running it and deleted; it has the flag, the
+  `permission_denied` event and the result's `permission_denials`.
+
+- 2026-11-11: WP14 implemented as one change set; report ready. Every Claude
+  phase runs with `--permission-prompts none`. An attempt with denied calls
+  records one `attempt.permission_denials` event and prints the list with
+  exact-match allow rules, and human `banzai status` repeats it for a blocked
+  run. No contract, state schema, instruction text or plugin file changed.
+  The Gate 2 probe is built and documented in
+  [gate-2-probe.md](../261111-wp14-permission-denial-list/gate-2-probe.md)
+  and awaits the owner's run on 2.1.290 and on the current release. It makes
+  no file write, so a hook-allowed write under the flag is confirmed by the
+  next real run or the WP22 probe.
+
+- 2026-11-11: The owner ran the WP14 Gate 2 probe on Claude Code 2.1.290, on
+  the uncommitted WP14 change set over `ef34b98`. Verdict `pass`: one `result`
+  event, exit status 0, the granted command ran, `sh ./denied.sh` did not run
+  and is the only denied call, and `AskUserQuestion` was not offered. The
+  denied call's `reasonType` is `mode`, which confirms the fixtures. The block
+  proposes `Bash(sh ./denied.sh)` for `.claude/settings.json`. The run on the
+  current release is still open, so the Gate 2 item stays unticked.
+
+- 2026-11-11: The owner ran the same probe on the current release, Claude
+  Code 2.1.322, on the same change set. Verdict `pass` with the same facts:
+  one `result` event, exit status 0, the granted command ran,
+  `sh ./denied.sh` is the only denied call with `reasonType` `mode`, and
+  `AskUserQuestion` was not offered. Both client versions now pass, which is
+  the WP14 probe half of the Gate 2 item. The item stays unticked for the
+  owner: its `npm run verify` half belongs to the Gate 2 candidate, and a
+  hook-allowed write under the flag is still unconfirmed live.
+
+- 2026-11-11: `Leave until Gate 2`. The owner keeps the WP14 Gate 2 item
+  unticked until the Gate 2 report. The two probe verdicts above are its
+  probe evidence.
+
+- 2026-11-11: `Я хотів би зарелізити цю зміну як v2.8.3`. On the owner's
+  request the release train moved to `2.8.3` with `npm run version:set`, in
+  the WP14 change set. `release:validate` passes, and
+  `release-candidate-check.mjs` passes on the candidate copy with 2197 of
+  2197 tests. The commit, the pull request to `main`, the GitHub release notes
+  and publication stay with the owner under
+  [public-publication.md](../../releases/public-publication.md). Stage 2 is
+  not complete, so 2.8.3 ships WP14 alone and Gate 2 stays open. See the WP14
+  [report](../261111-wp14-permission-denial-list/implementation-report.md#release-train-283).
+
+- 2026-11-11: `Removed on purpose`, then `Remove probes fully`. The owner
+  removed the probe sources under `packages/orchestrator/test/probes/`, and
+  on that decision the Gate 1 and Gate 2 probe tests and launcher scripts
+  left the repository too. Both probes had done their work: Gate 1 is closed,
+  and the Gate 2 permission probe passed on both client versions. Their
+  recipes stay as records of how the evidence was produced; the commands in
+  them, and in the Gate 1 item above, no longer run. A later probe, such as
+  WP22's, starts from its own requirements.
+
+- 2026-11-11: On the owner's request three maintainer-only Claude Code
+  skills joined the repository under `.claude/skills/`: `/version-bump`
+  (propose patch, minor or major, wait for confirmation, run the documented
+  version update), `/commit-message` (one commit subject, with a `v<version>`
+  prefix when the root version changed) and `/release` (the GitHub draft
+  release for the version on `main`, with notes; never publishes). They are
+  outside the brief and ship in the 2.8.3 change set. Each is classified as
+  `maintainer` in `publication-policy.json`.
+
 ## Open questions left to the owner by the brief
 
 Settle each in the named WP's ADR or requirements, then record the answer
 under Owner decisions.
 
-- WP10: default for the baseline run (proposal: on for short checks, opt-in
-  for long suites).
-- WP11: add a Continue or Switch pause after workflow selection (a sixth
-  decision point)?
+- WP12: where package glossaries live. `<package>/CONTEXT.md` is not a free
+  path, so its edits prompt as code in manual sessions unless a new ADR
+  changes the pinned hook; `documentation/context/<package>.md` needs no hook
+  change.
+- WP12: whether the package adds an always-on size budget with an offline
+  `banzai doctor` advisory.
+- WP22: what authorizes commands on the lite routes, which have no plan gate.
+  Today discovery supplies information, never execution permission.
+- WP22: the live-suite budget for its probe, decided together with WP14's.
+- WP25: an operating-system notification, a user command from local
+  configuration, or both.
+- Gate 2: should it ask Developers A and B to repeat their scenarios on 2.8?
+
+Settled: WP11 adds no Continue or Switch pause after workflow selection
+(2026-11-11). WP14's live evidence is a Gate 2 probe outside
+`compatibility:live`, so the suite stays at two invocations (2026-11-11).
 
 ## Deviations from the brief
 
@@ -503,3 +685,18 @@ under Owner decisions.
   train is `2.8.1`, not `2.8.0`.
 - Gate 1 (2026-11-10): the live-harness quick fix `b8b6d1b` is not in the
   brief. Gate 1 item 4 could not pass without it.
+- Stage 2 and Stage 3 (2026-11-11): the owner cut scope after a user-value
+  review. Against the brief:
+  - WP9 has no planner proposal call;
+  - WP10 is dropped and WP23 replaces it, so Gate 2 has no baseline item;
+  - WP11 adds no pause after selection;
+  - WP12 has no small-project mode, and adds package guides and an optional
+    context map through `project-manifest`;
+  - WP13 has no live scenario, and Gate 2 has no WP13 live probe;
+  - WP14 needs no version gate and also proposes allow rules;
+  - WP16 and WP18 are dropped, and WP15 loses the reviewer comparison.
+- Stage 2 (2026-11-11): WP22, WP23, WP24 and WP25 are not in the brief; the
+  owner added them. Gate 2 gains one item each for WP22, WP23 and WP24.
+- Stage 2 (2026-11-11): the brief ships Stage 2 as 2.9 after Gate 2. On the
+  owner's request WP14 ships alone as `2.8.3`, before the other Stage 2
+  packages and before Gate 2.

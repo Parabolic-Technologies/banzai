@@ -164,6 +164,8 @@ export interface InteractiveRunner {
   planVerificationInventory?(
     state: RunState
   ): Promise<PlanVerificationInventory | null>;
+  /** A blocked run's denied Claude tool calls with their remediation. */
+  permissionDenialReport?(state: RunState): Promise<readonly string[]>;
   status(): Promise<WorkflowStatus>;
   /** The run's model view, which human status applies (ADR-0060 reading 11). */
   modelStatus?(
@@ -638,7 +640,8 @@ function renderStatus(
   styler: Styler,
   humanTime?: HumanTimeSummary,
   outputTails?: VerificationOutputTails,
-  planVerification?: PlanVerificationInventory | null
+  planVerification?: PlanVerificationInventory | null,
+  permissionDenials: readonly string[] = []
 ): void {
   const state = status.state;
   const width = resolveWidth(io.width);
@@ -692,6 +695,7 @@ function renderStatus(
   if (state.blockReason !== null) {
     renderSection(io, styler, ["Blocked", state.blockReason]);
   }
+  renderPreformattedSection(io, styler, permissionDenials);
   if (
     state.status === "needs_adr_approval" ||
     state.status === "needs_plan_approval"
@@ -2886,7 +2890,8 @@ async function interactiveLoop(
       options.styler ?? createStyler(false),
       humanTime,
       await readVerificationOutputTails(runner.repoRoot, status.state),
-      await runner.planVerificationInventory?.(status.state)
+      await runner.planVerificationInventory?.(status.state),
+      await runner.permissionDenialReport?.(status.state)
     );
     const decisionIO = withRunMenu(
       io,

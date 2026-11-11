@@ -21,6 +21,7 @@ import {
   buildClaudeSelectionArguments,
   buildCodexArguments,
   claudeJsonSchema,
+  claudePermissionDenials,
   claudeSessionInventory,
   claudeUsage,
   classifyClaudeFailure,
@@ -2958,7 +2959,9 @@ test("ambient and no-whitelist argv is today's argv without the prompt", () => {
       "--effort",
       "xhigh",
       "--permission-mode",
-      "dontAsk"
+      "dontAsk",
+      "--permission-prompts",
+      "none"
     ];
     const review = buildClaudeArguments({ ...baseReviewRequest, environment });
     assert.deepEqual(review, [
@@ -3142,6 +3145,358 @@ test("Codex children receive no run-stability settings from Banzai", async () =>
       assert.deepEqual(phase.env, subscriptionOnlyEnvironment(source));
       assert.deepEqual(selection.env, subscriptionOnlyEnvironment(source));
     }
+  } finally {
+    await rm(runDirectory, { recursive: true, force: true });
+  }
+});
+
+/** Every Claude argv the adapter can build, by name. */
+function everyClaudeArgv(): [string, string[]][] {
+  const built: [string, string[]][] = [];
+  for (const [scope, environment] of claudeScopes) {
+    for (const resumeSessionId of [null, "session-1"]) {
+      const suffix = `${scope}, ${resumeSessionId === null ? "fresh" : "resumed"}`;
+      built.push([
+        `review, ${suffix}`,
+        buildClaudeArguments({
+          ...baseReviewRequest,
+          resumeSessionId,
+          ...scoped(environment)
+        })
+      ]);
+      built.push([
+        `phase, ${suffix}`,
+        buildClaudePhaseArguments({
+          ...basePhaseRequest,
+          settings,
+          outputContract: claudePhaseOutputContract,
+          resumeSessionId,
+          ...scoped(environment)
+        })
+      ]);
+    }
+    built.push([
+      `selection, ${scope}`,
+      buildClaudeSelectionArguments({
+        ...baseSelectionRequest,
+        settings,
+        outputContract: claudeSelectionOutputContract,
+        ...scoped(environment)
+      })
+    ]);
+  }
+  return built;
+}
+
+test("every Claude argv tells the client that nobody answers permission prompts", () => {
+  for (const [name, args] of everyClaudeArgv()) {
+    const mode = args.indexOf("--permission-mode");
+    assert.deepEqual(
+      args.slice(mode, mode + 4),
+      ["--permission-mode", "dontAsk", "--permission-prompts", "none"],
+      name
+    );
+    assert.equal(
+      args.filter((arg) => arg === "--permission-prompts").length,
+      1,
+      name
+    );
+  }
+});
+
+test("no Codex argv carries the Claude permission-prompt flag", () => {
+  for (const resumeSessionId of [null, "session-1"]) {
+    for (const sandbox of ["workspace-write", "read-only"] as const) {
+      const args = buildCodexArguments(
+        { ...basePhaseRequest, resumeSessionId },
+        "/schema.json",
+        "/out.json",
+        sandbox
+      );
+      assert.equal(args.includes("--permission-prompts"), false);
+    }
+  }
+});
+
+function deniedEvent(
+  id: string,
+  tool: string,
+  extra: Record<string, unknown> = {}
+): string {
+  return JSON.stringify({
+    type: "system",
+    subtype: "permission_denied",
+    tool_name: tool,
+    tool_use_id: id,
+    decision_reason_type: "mode",
+    message: "Permission for this tool use was denied.",
+    uuid: `uuid-${id}`,
+    session_id: "session-1",
+    ...extra
+  });
+}
+
+function resultWithDenials(denials: unknown[]): string {
+  return JSON.stringify({
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    session_id: "session-1",
+    num_turns: 4,
+    permission_denials: denials
+  });
+}
+
+test("a Claude stream yields the exact list of denied calls", () => {
+  const stdout = [
+    JSON.stringify({ type: "system", subtype: "init" }),
+    deniedEvent("toolu_1", "Bash"),
+    deniedEvent("toolu_2", "Bash"),
+    deniedEvent("toolu_3", "Bash", { agent_id: "agent-7" }),
+    deniedEvent("toolu_4", "Write", { decision_reason_type: "rule" }),
+    resultWithDenials([
+      {
+        tool_name: "Bash",
+        tool_use_id: "toolu_1",
+        tool_input: { command: "npm run lint" }
+      },
+      {
+        tool_name: "Bash",
+        tool_use_id: "toolu_2",
+        tool_input: { command: "npm run lint" }
+      },
+      {
+        tool_name: "Bash",
+        tool_use_id: "toolu_3",
+        tool_input: { command: "cd /repo/packages/api && npx vitest run" }
+      },
+      {
+        tool_name: "Write",
+        tool_use_id: "toolu_4",
+        tool_input: { file_path: "/repo/src/config.ts", content: "x" }
+      }
+    ])
+  ].join("\n");
+  assert.deepEqual(claudePermissionDenials(stdout, "/repo"), [
+    {
+      tool: "Bash",
+      detail: "npm run lint",
+      command: "npm run lint",
+      reasonType: "mode",
+      subagent: false
+    },
+    {
+      tool: "Bash",
+      detail: "npm run lint",
+      command: "npm run lint",
+      reasonType: "mode",
+      subagent: false
+    },
+    {
+      tool: "Bash",
+      detail: "cd packages/api && npx vitest run",
+      command: "cd /repo/packages/api && npx vitest run",
+      reasonType: "mode",
+      subagent: true
+    },
+    {
+      tool: "Write",
+      detail: "src/config.ts",
+      command: null,
+      reasonType: "rule",
+      subagent: false
+    }
+  ]);
+});
+
+test("a stream that ends without a result still names the denied calls", () => {
+  const stdout = [
+    deniedEvent("toolu_1", "Bash"),
+    deniedEvent("toolu_2", "mcp__serena__replace_content", {
+      agent_id: "agent-1"
+    })
+  ].join("\n");
+  assert.deepEqual(claudePermissionDenials(stdout, "/repo"), [
+    {
+      tool: "Bash",
+      detail: "",
+      command: null,
+      reasonType: "mode",
+      subagent: false
+    },
+    {
+      tool: "mcp__serena__replace_content",
+      detail: "",
+      command: null,
+      reasonType: "mode",
+      subagent: true
+    }
+  ]);
+});
+
+test("the result is authoritative, malformed entries are skipped and a clean stream is empty", () => {
+  const stdout = [
+    // An event without a call id names nothing.
+    JSON.stringify({
+      type: "system",
+      subtype: "permission_denied",
+      tool_name: "Bash"
+    }),
+    deniedEvent("toolu_9", "Bash", { decision_reason_type: 7 }),
+    resultWithDenials([
+      // A denial the best-effort event never announced.
+      {
+        tool_name: "Grep",
+        tool_use_id: "toolu_5",
+        tool_input: { pattern: "TODO" }
+      },
+      { tool_name: "", tool_use_id: "toolu_6", tool_input: {} },
+      { tool_use_id: "toolu_7" },
+      "not a record",
+      {
+        tool_name: "Bash",
+        tool_use_id: "toolu_9",
+        tool_input: { command: "git status" }
+      }
+    ])
+  ].join("\n");
+  assert.deepEqual(claudePermissionDenials(stdout, "/repo"), [
+    {
+      tool: "Bash",
+      detail: "git status",
+      command: "git status",
+      reasonType: null,
+      subagent: false
+    },
+    {
+      tool: "Grep",
+      detail: "TODO",
+      command: null,
+      reasonType: null,
+      subagent: false
+    }
+  ]);
+  assert.deepEqual(claudePermissionDenials(resultWithDenials([]), "/repo"), []);
+  assert.deepEqual(
+    claudePermissionDenials(
+      JSON.stringify({ type: "result", subtype: "success" }),
+      "/repo"
+    ),
+    []
+  );
+  assert.deepEqual(claudePermissionDenials("not json\n", "/repo"), []);
+});
+
+test("a denied command with a secret or an unbounded shape is never kept verbatim", () => {
+  const secret = "sk-ant-abcdefghijklmnopqrstuvwxyz";
+  const commands = [
+    `curl -H "Authorization: Bearer ${secret}" https://example.test`,
+    `API_TOKEN=${secret} npm run deploy`,
+    `deploy --token ${secret}`,
+    `echo ${secret}`,
+    "printf one\nprintf two",
+    `node -e "${"x".repeat(240)}"`
+  ];
+  const denials = claudePermissionDenials(
+    resultWithDenials(
+      commands.map((command, index) => ({
+        tool_name: "Bash",
+        tool_use_id: `toolu_${index}`,
+        tool_input: { command }
+      }))
+    ),
+    "/repo"
+  );
+  assert.equal(denials.length, commands.length);
+  for (const denial of denials) {
+    assert.equal(denial.command, null, denial.detail);
+    assert.equal(JSON.stringify(denial).includes(secret), false);
+    assert.equal(/[\n\r]/.test(denial.detail), false);
+    assert.ok(denial.detail.length <= 240);
+  }
+});
+
+test("a successful Claude phase and a failed Claude process both carry the denied calls", async () => {
+  const denied = [
+    {
+      tool: "Bash",
+      detail: "npm test",
+      command: "npm test",
+      reasonType: "mode",
+      subagent: false
+    }
+  ];
+  const lines = [
+    JSON.stringify({ type: "system", subtype: "init", tools: ["Bash"] }),
+    deniedEvent("toolu_1", "Bash"),
+    JSON.stringify({
+      type: "result",
+      subtype: "error_during_execution",
+      is_error: true,
+      session_id: "session-1",
+      permission_denials: [
+        {
+          tool_name: "Bash",
+          tool_use_id: "toolu_1",
+          tool_input: { command: "npm test" }
+        }
+      ]
+    })
+  ];
+  const failing: ProcessRunner = async () => failed(lines.join("\n"), "");
+  await assert.rejects(
+    createVendorAdapters(failing).runPhase({
+      ...basePhaseRequest,
+      settings,
+      outputContract: claudePhaseOutputContract
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof ProcessExitError);
+      assert.deepEqual(error.permissionDenials, denied);
+      return true;
+    }
+  );
+
+  const review = currentReviewFixture(reviewSnapshotFixture());
+  const succeeding: ProcessRunner = async () =>
+    successful(
+      [
+        deniedEvent("toolu_1", "Bash"),
+        JSON.stringify({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          structured_output: review,
+          session_id: "review-session",
+          permission_denials: [
+            {
+              tool_name: "Bash",
+              tool_use_id: "toolu_1",
+              tool_input: { command: "npm test" }
+            }
+          ]
+        })
+      ].join("\n")
+    );
+  const result =
+    await createVendorAdapters(succeeding).runReview(baseReviewRequest);
+  assert.deepEqual(result.permissionDenials, denied);
+
+  // A Codex failure carries none.
+  const codexFailing: ProcessRunner = async () => failed("", "boom");
+  const runDirectory = await mkdtemp(path.join(tmpdir(), "banzai-denials-"));
+  try {
+    await assert.rejects(
+      createVendorAdapters(codexFailing).runPhase({
+        ...basePhaseRequest,
+        runDirectory
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof ProcessExitError);
+        assert.deepEqual(error.permissionDenials, []);
+        return true;
+      }
+    );
   } finally {
     await rm(runDirectory, { recursive: true, force: true });
   }

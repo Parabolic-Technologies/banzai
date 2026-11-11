@@ -2266,6 +2266,28 @@ export class RunStore {
     return await this.appendEvent(runId, type, details);
   }
 
+  /**
+   * The details of the newest event of one type, for display only. A missing
+   * or unreadable ledger and a damaged line yield null or are skipped: the
+   * caller validates whatever comes back.
+   */
+  async readLatestEventDetails(runId: string, type: string): Promise<unknown> {
+    const contents = await readFile(
+      path.join(this.runDirectory(runId), "events.jsonl"),
+      "utf8"
+    ).catch(() => "");
+    for (const line of contents.split("\n").reverse()) {
+      if (!line.includes(type)) continue;
+      try {
+        const event = JSON.parse(line) as Partial<RunEvent> | null;
+        if (event?.type === type) return event.details ?? null;
+      } catch {
+        // A damaged line is not this event.
+      }
+    }
+    return null;
+  }
+
   async writeRunAttempt(runId: string, record: AttemptRecord): Promise<void> {
     parseModelAttemptRecord(record);
     await atomicWriteJson(

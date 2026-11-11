@@ -238,6 +238,21 @@ is a navigational reference and is updated with the module it describes.
   `inspectConfiguredClaudePermissions()` composes demand, the injected scope
   resolution and the audit for doctor and the CLI; an unresolvable scope is
   `unresolved`, not a permission finding.
+  The module also turns one attempt's denied tool calls into a remediation
+  list. `proposedAllowRule(command)` returns the exact-match `Bash(<command>)`
+  rule for one plain command of at most 200 characters, and null for a
+  command with a shell operator, a redirection, a substitution, parentheses,
+  `*` or a line break. `claudePermissionDenialReport()` renders the block:
+  each distinct call once with its repeat count, a subagent mark and a
+  deny-or-ask mark, at most 20 calls, then the proposed rules as a
+  `permissions.allow` fragment for the settings file the audit says the
+  session loads, with the trust step first for an untrusted checkout. A call
+  that a deny or ask rule refused gets no proposed rule.
+  `permissionDenialRecord()` builds the `attempt.permission_denials` event
+  payload with an exact count and at most 50 entries, and
+  `parsePermissionDenialRecord()` reads it back for display, refusing a
+  damaged record and dropping an entry it could not have written. The module
+  writes no settings file.
 - `evaluation-cli.ts` — strict parser and injected stdout/stderr composition for
   `banzai eval export`; the branch runs before adapters or `WorkflowRunner` are
   constructed.
@@ -772,7 +787,9 @@ is a navigational reference and is updated with the module it describes.
   excluding checkpoint, candidate, raw-result and completion-protocol evidence,
   writes the immutable attempt-owned completion transition, original report,
   capture, candidate and publication records (`wx` temp plus link),
-  appends deduplicated events through `appendEventOnce`, and enforces the
+  appends deduplicated events through `appendEventOnce`, returns the newest
+  event of one type for display through `readLatestEventDetails` (a missing
+  ledger or a damaged line yields null), and enforces the
   single-active-run lock. It writes numbered, create-only plan-gate entry
   snapshots under `plan-gate/<NNN>/` (private files, manifest `bundle.json`
   last) and reads the latest one; an unreadable latest entry is
@@ -843,6 +860,19 @@ is a navigational reference and is updated with the module it describes.
   the existing read-only construction accepts both planning contracts. Their
   environment carries the run identity with empty approval, workflow and
   review-artifact grants; hook and workspace scope checks deny model writes.
+  Every Claude argv carries `--permission-prompts none` directly after
+  `--permission-mode dontAsk`, in every scope and for fresh and resumed
+  sessions: the client denies at once whatever would prompt and tells the
+  model not to retry. `claudePermissionDenials(stdout, repoRoot)` reads the
+  denied calls from one Claude stream. The last `result` event's
+  `permission_denials` supplies each call's input, and the `permission_denied`
+  system events supply the reason type and the subagent mark and are all that
+  a stream without a result has. Entries merge by `tool_use_id`; only
+  structured fields are read. Each entry has a sanitized display detail, and
+  keeps the exact Bash command only when it is one line of at most 200
+  characters without a credential-shaped token. A hook refusal is not a
+  permission denial and never appears. The list travels on `AdapterResult`
+  and on `ProcessExitError` as `permissionDenials`; Codex results carry none.
   structured usage, turn count, and privacy-safe inventory evidence survive
   success, typed process failure, durable-observer failure, timeout, and
   post-close decoding failure when the vendor reported them. Codex checkpoints
@@ -1308,14 +1338,6 @@ is a navigational reference and is updated with the module it describes.
   accepts exactly one target; `version-recover.mjs` derives the same checkout
   and accepts no arguments. They expose no production root/path override and
   perform no unrelated command or delivery action.
-- `gate-1-probe.mjs` is the owner-run Gate 1 probe of ADR-0063 §6 and is not
-  part of any check. It bundles `test/probes/gate-1-probe-main.ts` into
-  `.dist-check-gate-1-probe/` and runs it against a scratch repository and a
-  chosen `claude` executable. The probe runs one implementation phase through
-  `createVendorAdapters` and the real `runProcess`, then a resumed invocation,
-  classifies stream lines with the pure `test/probes/gate-1-probe.ts`, and
-  prints only `banzai-gate-1-probe/v1` counts, exit statuses and a verdict. It
-  refuses to start inside Claude Code.
 
 Project adoption refusal (ADR-0040) is independent of a run failure. Workflow
 checks complete guidance before new-run publication and layout only before
@@ -1411,6 +1433,16 @@ parses the plan's v2 inventory and merges project policy through
 checks or the error approval would raise. Only the CLI and interactive
 renderers call it; `planVerificationLines` keeps each command on a
 detail-indented line that renderers never rewrap.
+
+After every model attempt, completed or failed, `invokeWithContext` hands the
+adapter's `permissionDenials` to the runner. A non-empty list is redacted
+again, appended as one `attempt.permission_denials` event and printed as
+runner messages with `claudePermissionDenialReport`, using the Bash audit of
+the resolved Claude scope. The step is advisory: it changes no outcome,
+failure cause, retry or recovery, and its own failure costs one message.
+`WorkflowRunner.permissionDenialReport(state)` returns the same block for a
+blocked run whose newest attempt record matches the newest such event, and an
+empty list otherwise. Only the CLI and interactive status renderers call it.
 
 `verification-evidence.ts` exposes the shared builtin-only
 `task-verification.mjs` and `task-verification-store.mjs` owners. Discovery reads
