@@ -4,6 +4,21 @@
   "mode": "clean",
   "entries": [
     {
+      "path": ".claude/skills/commit-message/SKILL.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": ".claude/skills/release/SKILL.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": ".claude/skills/version-bump/SKILL.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
       "path": "AGENTS.md",
       "classification": "maintainer",
       "sha256": null

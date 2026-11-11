@@ -31,6 +31,7 @@ import type {
   ModelUsage,
   OutputContractEnvelope,
   OutputContractIdentity,
+  PermissionDenial,
   PhaseAdapterRequest,
   PhaseResult,
   PhaseResultEnvelope,
@@ -1031,6 +1032,152 @@ export function claudeTurnCount(stdout: string): number | null {
     : null;
 }
 
+const MAX_DENIED_COMMAND_LENGTH = 200;
+const DENIED_TOOL_NAME = /^[A-Za-z0-9_.:-]{1,100}$/;
+const DENIAL_REASON_TYPE = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
+const DENIED_FILE_TOOLS = new Set([
+  "Read",
+  "Edit",
+  "Write",
+  "MultiEdit",
+  "NotebookEdit"
+]);
+
+/**
+ * The denied Bash command verbatim, or null when keeping it could keep a
+ * secret or more than one bounded line. The display detail has no such limit,
+ * because `summarizeCommand` elides instead of refusing.
+ */
+function retainableCommand(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const command = value.trim();
+  if (
+    command.length === 0 ||
+    command.length > MAX_DENIED_COMMAND_LENGTH ||
+    CONTROL_CHARACTERS.test(command) ||
+    SPOOFING_CHARACTERS.test(command) ||
+    redactSensitiveText(command) !== command
+  ) {
+    return null;
+  }
+  const tokens = tokenizeCommand(command);
+  const sensitive = tokens.some(
+    (token, index) =>
+      (index === 0 && token.includes("=")) ||
+      CREDENTIAL_FLAG.test(token) ||
+      CREDENTIAL_ASSIGNMENT.test(token) ||
+      ENVIRONMENT_ASSIGNMENT.test(token) ||
+      SECRET_VALUE.test(token)
+  );
+  return sensitive ? null : command;
+}
+
+function denialReasonType(value: unknown): string | null {
+  return typeof value === "string" && DENIAL_REASON_TYPE.test(value)
+    ? value
+    : null;
+}
+
+function deniedCallDetail(
+  tool: string,
+  input: JsonRecord,
+  repoRoot: string
+): string {
+  if (tool === "Bash") {
+    return summarizeCommand(input.command, repoRoot);
+  }
+  if (DENIED_FILE_TOOLS.has(tool)) {
+    return displayPath(
+      progressDetail(input.file_path ?? input.path ?? input.notebook_path),
+      repoRoot
+    );
+  }
+  if (tool === "Glob" || tool === "Grep") {
+    return truncateDetail(progressDetail(input.pattern));
+  }
+  return "";
+}
+
+/**
+ * The tool calls Claude Code denied without a prompt, in order of first
+ * appearance. `result.permission_denials` is the vendor's authoritative record
+ * and supplies each call's input; the best-effort `permission_denied` events
+ * supply the reason type and the subagent mark, and are all that a stream
+ * without a result has. Only structured fields are read, never message prose.
+ *
+ * A hook's refusal is not a permission denial and appears in neither source.
+ */
+export function claudePermissionDenials(
+  stdout: string,
+  repoRoot = ""
+): PermissionDenial[] {
+  const records = streamRecords(stdout);
+  const denials: PermissionDenial[] = [];
+  const byCall = new Map<string, PermissionDenial>();
+  const entry = (id: string | null, name: unknown): PermissionDenial | null => {
+    const known = id === null ? undefined : byCall.get(id);
+    if (known !== undefined) {
+      return known;
+    }
+    const tool = typeof name === "string" ? name.trim() : "";
+    if (!DENIED_TOOL_NAME.test(tool)) {
+      return null;
+    }
+    const created: PermissionDenial = {
+      tool,
+      detail: "",
+      command: null,
+      reasonType: null,
+      subagent: false
+    };
+    denials.push(created);
+    if (id !== null) {
+      byCall.set(id, created);
+    }
+    return created;
+  };
+  const callId = (value: unknown): string | null =>
+    typeof value === "string" && value.length > 0 ? value : null;
+
+  for (const event of records) {
+    if (event.type !== "system" || event.subtype !== "permission_denied") {
+      continue;
+    }
+    const id = callId(event.tool_use_id);
+    const denial = id === null ? null : entry(id, event.tool_name);
+    if (denial === null) {
+      continue;
+    }
+    denial.reasonType = denialReasonType(event.decision_reason_type);
+    denial.subagent = callId(event.agent_id) !== null;
+  }
+
+  const result = [...records].reverse().find((event) => {
+    return event.type === "result";
+  });
+  const reported = Array.isArray(result?.permission_denials)
+    ? result.permission_denials
+    : [];
+  for (const item of reported) {
+    const record = jsonRecord(item);
+    if (record === null) {
+      continue;
+    }
+    const denial = entry(callId(record.tool_use_id), record.tool_name);
+    const input = jsonRecord(record.tool_input);
+    if (denial === null || input === null) {
+      continue;
+    }
+    denial.detail = deniedCallDetail(denial.tool, input, repoRoot);
+    denial.command =
+      denial.tool === "Bash" ? retainableCommand(input.command) : null;
+  }
+  return denials;
+}
+
 /**
  * Classifies from structured stream fields only. Vendor prose is not a contract:
  * it is localised, redacted, and reworded without notice, so no branch here may
@@ -1120,9 +1267,14 @@ async function withModelFailureEvidence<T>(
   vendor: Vendor,
   operation: (run: ProcessRunner) => Promise<T>
 ): Promise<T> {
-  const captured: { result: ProcessResult | null } = { result: null };
+  const captured: { result: ProcessResult | null; cwd: string } = {
+    result: null,
+    cwd: ""
+  };
   try {
     return await operation(async (spec) => {
+      // Every model child runs in the checkout, which display paths drop.
+      captured.cwd = spec.cwd;
       captured.result = await runner(spec);
       return captured.result;
     });
@@ -1139,7 +1291,10 @@ async function withModelFailureEvidence<T>(
         failureCause: classifyModelFailure(error),
         usage: claude ? claudeUsage(result.stdout) : codexUsage(result.stdout),
         inventory: claude ? claudeSessionInventory(result.stdout) : null,
-        turnCount: claude ? claudeTurnCount(result.stdout) : null
+        turnCount: claude ? claudeTurnCount(result.stdout) : null,
+        permissionDenials: claude
+          ? claudePermissionDenials(result.stdout, captured.cwd)
+          : []
       }
     );
   }
@@ -1578,6 +1733,13 @@ export async function resolveClaudeInvocationScope(
   };
 }
 
+/**
+ * Tells the client that nobody answers a permission prompt: a call that would
+ * prompt is denied at once, and the model is told not to retry it. The flag
+ * only denies; allow rules, the permission mode and hooks decide first.
+ */
+const CLAUDE_NO_PERMISSION_PROMPTS = ["--permission-prompts", "none"] as const;
+
 function claudeEnvironmentArguments(
   scope: ClaudeInvocationScope | undefined,
   pluginDirectoryOverride: string | null = null
@@ -1641,6 +1803,7 @@ export function buildClaudeArguments(
     request.settings.effort,
     "--permission-mode",
     "dontAsk",
+    ...CLAUDE_NO_PERMISSION_PROMPTS,
     "--tools",
     reviews ? CLAUDE_REVIEW_TOOLS : CLAUDE_PLANNER_READ_TOOLS,
     "--disallowedTools",
@@ -1688,6 +1851,7 @@ export function buildClaudeSelectionArguments(
     request.settings.effort,
     "--permission-mode",
     "dontAsk",
+    ...CLAUDE_NO_PERMISSION_PROMPTS,
     "--add-dir",
     request.repoRoot,
     "--tools",
@@ -1728,6 +1892,7 @@ export function buildClaudePhaseArguments(
     request.settings.effort,
     "--permission-mode",
     "dontAsk",
+    ...CLAUDE_NO_PERMISSION_PROMPTS,
     "--add-dir",
     request.repoRoot,
     "--tools",
@@ -1979,7 +2144,11 @@ async function runPlanningAdapter<
         stdout: processResult.stdout,
         stderr: processResult.stderr,
         inventory: claudeSessionInventory(processResult.stdout),
-        turnCount: claudeTurnCount(processResult.stdout)
+        turnCount: claudeTurnCount(processResult.stdout),
+        permissionDenials: claudePermissionDenials(
+          processResult.stdout,
+          request.repoRoot
+        )
       };
     }
     const { schemaPath, outputPath } = await writeCodexContract(
@@ -2165,7 +2334,11 @@ export function createVendorAdapters(
             stderr: processResult.stderr,
             usage: parsed.usage,
             inventory: claudeSessionInventory(processResult.stdout),
-            turnCount: claudeTurnCount(processResult.stdout)
+            turnCount: claudeTurnCount(processResult.stdout),
+            permissionDenials: claudePermissionDenials(
+              processResult.stdout,
+              request.repoRoot
+            )
           };
         }
 
@@ -2281,7 +2454,11 @@ export function createVendorAdapters(
             stderr: processResult.stderr,
             usage: parsed.usage,
             inventory: claudeSessionInventory(processResult.stdout),
-            turnCount: claudeTurnCount(processResult.stdout)
+            turnCount: claudeTurnCount(processResult.stdout),
+            permissionDenials: claudePermissionDenials(
+              processResult.stdout,
+              request.repoRoot
+            )
           };
         }
 
@@ -2463,7 +2640,11 @@ export function createVendorAdapters(
           stderr: processResult.stderr,
           usage: parsed.usage,
           inventory: claudeSessionInventory(processResult.stdout),
-          turnCount: claudeTurnCount(processResult.stdout)
+          turnCount: claudeTurnCount(processResult.stdout),
+          permissionDenials: claudePermissionDenials(
+            processResult.stdout,
+            request.repoRoot
+          )
         };
       });
     }

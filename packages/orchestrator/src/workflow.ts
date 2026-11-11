@@ -102,7 +102,11 @@ import {
   instructionParityDiagnostic,
   instructionPhasesForRole
 } from "./phase-instructions.js";
-import type { InstructionPhase, InstructionParity } from "./types.js";
+import type {
+  InstructionPhase,
+  InstructionParity,
+  PermissionDenial
+} from "./types.js";
 import {
   DIGEST_REJECTED_FAILURE_CODES,
   isRetryableInterruptedAttempt,
@@ -276,8 +280,12 @@ import { assertContractParity } from "./contracts.js";
 import {
   claudePermissionDemand,
   claudePermissionDemanded,
+  claudePermissionDenialReport,
   claudePermissionRemediation,
-  inspectClaudePermissions
+  inspectClaudePermissions,
+  parsePermissionDenialRecord,
+  permissionDenialRecord,
+  type ClaudePermissionAudit
 } from "./claude-permissions.js";
 import { loadCommittedConfig } from "./config.js";
 import {
@@ -524,6 +532,8 @@ import {
 } from "./verification.js";
 
 const TERMINAL_STATUSES = new Set(["done", "cancelled"]);
+/** The run event that keeps one attempt's denied Claude tool calls. */
+const PERMISSION_DENIALS_EVENT = "attempt.permission_denials";
 const MAX_CONSECUTIVE_DELTA_REVIEWS = 2;
 const PHASE_PHASES = {
   Selection: ["selection"],
@@ -4947,6 +4957,39 @@ export class WorkflowRunner {
   }
 
   /**
+   * The denied-call block of a blocked run's newest model attempt, read back
+   * from the recorded event. Read-only and for human renderers alone: machine
+   * projections never carry it.
+   */
+  async permissionDenialReport(state: RunState): Promise<readonly string[]> {
+    if (state.status !== "blocked") return [];
+    try {
+      const record = parsePermissionDenialRecord(
+        await this.store.readLatestEventDetails(
+          state.runId,
+          PERMISSION_DENIALS_EVENT
+        )
+      );
+      if (record === null || record.denials.length === 0) return [];
+      const newest = (await this.store.readRunAttempts(state.runId))
+        .sort((left, right) => left.startedAt.localeCompare(right.startedAt))
+        .at(-1);
+      if (newest?.attempt.id !== record.attemptId) return [];
+      return claudePermissionDenialReport({
+        denials: record.denials,
+        count: record.count,
+        phase: record.kind,
+        audit: await this.claudeShellAudit(
+          await loadCommittedConfig(this.repoRoot)
+        )
+      });
+    } catch (error) {
+      if (passesThroughRunCatches(error)) throw error;
+      return [];
+    }
+  }
+
+  /**
    * The mandatory checks the plan under approval binds, selected with project
    * policy exactly as verification will select them. Read-only; the human
    * renderers call it at the plan gate only.
@@ -6703,6 +6746,70 @@ export class WorkflowRunner {
   }
 
   /**
+   * The Bash side of the permission audit for the scope a Claude phase
+   * resolves, or null when the scope cannot be resolved. It only names where a
+   * proposed rule belongs.
+   */
+  private async claudeShellAudit(
+    config: OrchestratorConfig
+  ): Promise<ClaudePermissionAudit | null> {
+    try {
+      const resolved = await resolveClaudeInvocationScope(
+        config.claudeEnvironment
+      );
+      return await inspectClaudePermissions({
+        repoRoot: this.repoRoot,
+        demand: { fileWrites: false, shellCommands: true },
+        settingSources: resolved.scope.settingSources
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Records and reports the tool calls Claude Code denied in one attempt. It
+   * is advisory: it changes no outcome, and its own failure costs one line.
+   */
+  private async reportPermissionDenials(
+    state: RunState,
+    attempt: AttemptReference,
+    config: OrchestratorConfig,
+    reported: readonly PermissionDenial[] | undefined
+  ): Promise<void> {
+    if (reported === undefined || reported.length === 0) return;
+    try {
+      // The adapter already sanitizes; a caller-built list gets the same rule.
+      const denials = reported.map((denial) => ({
+        ...denial,
+        detail: redactSensitiveText(denial.detail),
+        command:
+          denial.command === null ||
+          redactSensitiveText(denial.command) !== denial.command
+            ? null
+            : denial.command
+      }));
+      const record = permissionDenialRecord(attempt, denials);
+      await this.store.appendEvent(state.runId, PERMISSION_DENIALS_EVENT, {
+        ...record
+      });
+      for (const line of claudePermissionDenialReport({
+        denials: record.denials,
+        count: record.count,
+        phase: attempt.kind,
+        audit: await this.claudeShellAudit(config)
+      })) {
+        this.info(line);
+      }
+    } catch (error) {
+      if (passesThroughRunCatches(error)) throw error;
+      this.info(
+        `Claude denied ${reported.length} tool calls; the list could not be recorded: ${errorMessage(error)}`
+      );
+    }
+  }
+
+  /**
    * Claude phases run with `--permission-mode dontAsk`, so a tool the loaded
    * settings never granted is refused with no way to approve it mid-run. The
    * refusal costs a whole phase, and the model reports it as its own failure,
@@ -7099,9 +7206,24 @@ export class WorkflowRunner {
             ? error.turnCount
             : (result?.turnCount ?? null)
       });
+      // The failure that ended the attempt outranks anything raised here.
+      await this.reportPermissionDenials(
+        input.state,
+        input.attempt,
+        input.config,
+        error instanceof ProcessExitError
+          ? error.permissionDenials
+          : result?.permissionDenials
+      ).catch(() => undefined);
       throw error;
     }
     await finish("completed", result);
+    await this.reportPermissionDenials(
+      input.state,
+      input.attempt,
+      input.config,
+      result.permissionDenials
+    );
     return result;
   }
 

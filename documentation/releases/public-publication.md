@@ -35,6 +35,11 @@ or the specific published release's GitHub URL. Earlier local notes remain
 recoverable from Git history; that history is not a second maintained release
 notes archive. This file retains the publication procedure and delivery record.
 
+In a Claude Code session in this repository, the maintainer-only `/release`
+skill (`.claude/skills/release/SKILL.md`) prepares that draft for the version
+on `main`: it writes the notes, pins the draft to the `main` commit and shows
+both for confirmation. It never publishes, tags or pushes.
+
 ## Publication order
 
 1. On `dev`, select the release target and run `npm run version:set -- <version>`

@@ -590,6 +590,8 @@ function parsePlanningReviewArgs(args: readonly string[]): {
 interface StatusDetails {
   outputTails?: VerificationOutputTails;
   planVerification?: PlanVerificationInventory | null;
+  /** A blocked run's denied Claude tool calls with their remediation. */
+  permissionDenials?: readonly string[];
   /** The ADR-0060 §7 model block; only `banzai status` passes it (reading 10). */
   models?: readonly string[];
 }
@@ -600,14 +602,20 @@ async function statusDetails(
 ): Promise<StatusDetails> {
   return {
     outputTails: await readVerificationOutputTails(runner.repoRoot, state),
-    planVerification: await runner.planVerificationInventory(state)
+    planVerification: await runner.planVerificationInventory(state),
+    permissionDenials: await runner.permissionDenialReport(state)
   };
 }
 
 function printState(
   status: WorkflowStatus,
   metrics = false,
-  { outputTails, planVerification, models }: StatusDetails = {}
+  {
+    outputTails,
+    planVerification,
+    permissionDenials,
+    models
+  }: StatusDetails = {}
 ): void {
   const { state, nextAction } = status;
   console.log(`Run: ${state.runId}`);
@@ -657,6 +665,7 @@ function printState(
   if (state.blockReason !== null) {
     printLabeled("Blocked", state.blockReason);
   }
+  for (const line of permissionDenials ?? []) console.log(line);
   if (status.recovery.eligible && status.recovery.workspace !== null) {
     printLabeled("Recovery", status.recovery.reason);
     if (status.recovery.sourceKind === "prerequisite_blocked_fix") {

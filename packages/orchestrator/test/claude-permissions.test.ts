@@ -6,12 +6,17 @@ import test from "node:test";
 import {
   claudePermissionDemand,
   claudePermissionDemanded,
+  claudePermissionDenialReport,
   claudePermissionRemediation,
   inspectClaudePermissions,
   inspectClaudeUserPluginScope,
+  parsePermissionDenialRecord,
+  permissionDenialRecord,
+  proposedAllowRule,
+  type ClaudePermissionAudit,
   type ClaudePermissionDemand
 } from "../src/claude-permissions.js";
-import type { OrchestratorConfig } from "../src/types.js";
+import type { OrchestratorConfig, PermissionDenial } from "../src/types.js";
 import { reviewerOnlyClaudeConfig } from "./helpers.js";
 
 const BUILDER: ClaudePermissionDemand = {
@@ -397,4 +402,221 @@ test("the user plugin scope reads only enabled banzai keys from the user setting
   } finally {
     await rm(home, { recursive: true, force: true });
   }
+});
+
+function denial(overrides: Partial<PermissionDenial> = {}): PermissionDenial {
+  return {
+    tool: "Bash",
+    detail: "npm run lint",
+    command: "npm run lint",
+    reasonType: "mode",
+    subagent: false,
+    ...overrides
+  };
+}
+
+function shellAudit(
+  overrides: Partial<ClaudePermissionAudit> = {}
+): ClaudePermissionAudit {
+  return {
+    demand: { fileWrites: false, shellCommands: true },
+    sources: ["project"],
+    trust: "trusted",
+    tools: [{ tool: "Bash", grant: "missing" }],
+    repositoryRulesIgnored: false,
+    blocking: [],
+    advisories: [],
+    ...overrides
+  };
+}
+
+test("an allow rule is proposed only for one plain command, verbatim", () => {
+  assert.equal(proposedAllowRule("npm run lint"), "Bash(npm run lint)");
+  assert.equal(
+    proposedAllowRule("vendor/bin/phpcs --standard=PSR12 src"),
+    "Bash(vendor/bin/phpcs --standard=PSR12 src)"
+  );
+  for (const command of [
+    "npm run lint && npm test",
+    "npm run lint || true",
+    "npm run lint; npm test",
+    "cat a.txt | grep b",
+    "npm test > out.txt",
+    "sort < in.txt",
+    "echo $(date)",
+    "echo `date`",
+    "(cd api && npm test)",
+    "npm test &",
+    "ls *.ts",
+    "printf one\nprintf two",
+    "",
+    "   ",
+    `node -e "${"x".repeat(200)}"`
+  ]) {
+    assert.equal(proposedAllowRule(command), null, JSON.stringify(command));
+  }
+});
+
+test("the denial report names each call once and proposes exact rules for the loaded file", () => {
+  const lines = claudePermissionDenialReport({
+    denials: [
+      denial(),
+      denial(),
+      denial({
+        detail: "cd packages/api && npx vitest run",
+        command: "cd packages/api && npx vitest run",
+        subagent: true
+      }),
+      denial({
+        tool: "Write",
+        detail: "src/config.ts",
+        command: null,
+        reasonType: "rule"
+      }),
+      denial({ detail: "git status", command: "git status" }),
+      denial({ tool: "WebFetch", detail: "", command: null })
+    ],
+    count: 6,
+    phase: "implementation",
+    audit: shellAudit()
+  });
+  assert.deepEqual(lines, [
+    "Claude denied 6 tool calls during implementation:",
+    "  - Bash: npm run lint (2 times)",
+    "  - Bash: cd packages/api && npx vitest run (subagent; needs a hand-written rule)",
+    "  - Write: src/config.ts (refused by a deny or ask rule)",
+    "  - Bash: git status",
+    "  - WebFetch",
+    "To allow the exact commands in later phases, add these rules to .claude/settings.json (tracked and shared):",
+    "  {",
+    '    "permissions": {',
+    '      "allow": [',
+    '        "Bash(npm run lint)",',
+    '        "Bash(git status)"',
+    "      ]",
+    "    }",
+    "  }",
+    "Banzai never writes permission rules."
+  ]);
+});
+
+test("the denial report follows the settings the session loads and the trust state", () => {
+  const input = { denials: [denial()], count: 1, phase: "plan" };
+  const target = (audit: ClaudePermissionAudit | null): string[] =>
+    claudePermissionDenialReport({ ...input, audit }).filter(
+      (line) => line.startsWith("To allow") || line.startsWith("First")
+    );
+  assert.deepEqual(
+    target(shellAudit({ sources: ["user", "project", "local"] })),
+    [
+      "To allow the exact commands in later phases, add these rules to .claude/settings.local.json:"
+    ]
+  );
+  assert.deepEqual(target(shellAudit({ sources: ["user"] })), [
+    "To allow the exact commands in later phases, add these rules to your Claude user settings:"
+  ]);
+  assert.deepEqual(target(null), [
+    "To allow the exact commands in later phases, add these rules to the settings Claude loads:"
+  ]);
+  assert.deepEqual(target(shellAudit({ trust: "untrusted" })), [
+    "First run `claude` once in this checkout and accept the trust prompt; until then Claude Code ignores the repository's allow rules.",
+    "To allow the exact commands in later phases, add these rules to .claude/settings.json (tracked and shared):"
+  ]);
+  assert.equal(
+    claudePermissionDenialReport({ ...input, audit: shellAudit() })[0],
+    "Claude denied 1 tool call during plan:"
+  );
+});
+
+test("a deny-or-ask refusal and an unknown command get no proposed rule", () => {
+  const lines = claudePermissionDenialReport({
+    denials: [
+      denial({ reasonType: "rule" }),
+      denial({ detail: "", command: null }),
+      denial({ detail: "deploy --token …", command: null })
+    ],
+    count: 3,
+    phase: "fix",
+    audit: shellAudit()
+  });
+  assert.deepEqual(lines, [
+    "Claude denied 3 tool calls during fix:",
+    "  - Bash: npm run lint (refused by a deny or ask rule)",
+    "  - Bash (needs a hand-written rule)",
+    "  - Bash: deploy --token … (needs a hand-written rule)",
+    "Banzai never writes permission rules."
+  ]);
+});
+
+test("the denial report caps distinct calls and renders nothing for an empty list", () => {
+  const many = Array.from({ length: 25 }, (_, index) =>
+    denial({ detail: `npm run job-${index}`, command: `npm run job-${index}` })
+  );
+  const lines = claudePermissionDenialReport({
+    denials: many,
+    count: 60,
+    phase: "implementation",
+    audit: shellAudit()
+  });
+  assert.equal(lines[0], "Claude denied 60 tool calls during implementation:");
+  assert.equal(lines.filter((line) => line.startsWith("  - ")).length, 20);
+  assert.equal(lines[21], "  and 5 more");
+  assert.deepEqual(
+    claudePermissionDenialReport({
+      denials: [],
+      count: 0,
+      phase: "implementation",
+      audit: shellAudit()
+    }),
+    []
+  );
+});
+
+test("the denial record keeps an exact count, bounds its entries and survives a round trip", () => {
+  const many = Array.from({ length: 60 }, (_, index) =>
+    denial({ detail: `npm run job-${index}`, command: `npm run job-${index}` })
+  );
+  const record = permissionDenialRecord(
+    { id: "implementation-1-abcd1234", kind: "implementation" },
+    many
+  );
+  assert.equal(record.attemptId, "implementation-1-abcd1234");
+  assert.equal(record.kind, "implementation");
+  assert.equal(record.count, 60);
+  assert.equal(record.denials.length, 50);
+  assert.deepEqual(
+    parsePermissionDenialRecord(JSON.parse(JSON.stringify(record))),
+    record
+  );
+});
+
+test("a damaged denial record is refused and unsafe entries are dropped", () => {
+  for (const details of [
+    null,
+    "text",
+    {},
+    { attemptId: "a", kind: "plan", count: "2", denials: [] },
+    { attemptId: "a", kind: "plan", count: 1, denials: "none" },
+    { attemptId: 4, kind: "plan", count: 1, denials: [] }
+  ]) {
+    assert.equal(parsePermissionDenialRecord(details), null);
+  }
+  const parsed = parsePermissionDenialRecord({
+    attemptId: "plan-1",
+    kind: "plan",
+    count: 4,
+    denials: [
+      denial(),
+      denial({ detail: "bad\u001b[31mdetail" }),
+      { tool: "Bash" },
+      denial({ command: "x".repeat(500) }),
+      denial({ tool: "Bash tool" })
+    ]
+  });
+  assert.deepEqual(parsed, {
+    attemptId: "plan-1",
+    kind: "plan",
+    count: 4,
+    denials: [denial()]
+  });
 });

@@ -2880,6 +2880,28 @@ export interface AdapterResult<T> {
   usage: ModelUsage | null;
   inventory?: SessionInventory | null;
   turnCount?: number | null;
+  /** Tool calls Claude Code denied without a prompt; absent for Codex. */
+  permissionDenials?: PermissionDenial[];
+}
+
+/**
+ * One tool call that Claude Code denied without a prompt. Every string is
+ * sanitized display text; none of it is authority for anything.
+ */
+export interface PermissionDenial {
+  /** The tool name as the vendor reported it. */
+  tool: string;
+  /** One display line for the call; empty when its input is unknown. */
+  detail: string;
+  /**
+   * The exact Bash command, kept only when it is one bounded line without a
+   * credential-shaped token. It is what a proposed allow rule would name.
+   */
+  command: string | null;
+  /** The vendor's reason discriminator, such as `mode` or `rule`. */
+  reasonType: string | null;
+  /** A subagent made the call. */
+  subagent: boolean;
 }
 
 export interface PhaseAdapterRequest {
