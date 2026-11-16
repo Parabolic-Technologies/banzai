@@ -42,7 +42,8 @@
   - the hook is stated to stay coupled to the orchestrator's sources;
   - the frozen copy is the tracked generated module, an option the first
     draft did not consider, and the contracts are classified.
-- Implementation state: Planned. See the work plan.
+- Implementation state: Implemented on 2026-11-16. See the
+  [implementation report](../work/261116-p11-orchestrator-instruction-copy/implementation-report.md).
 - Preparation authority: the owner's question of 2026-11-16, asked in place
   of an answer to a consultation card on shared text: whether plugin policies
   and skill text can be decoupled from the orchestrator. Preparing this

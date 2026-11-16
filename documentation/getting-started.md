@@ -536,9 +536,8 @@ The skill runs only when you invoke it by name:
    `record` before the next stage starts.
 
 The skill never edits the brief after `start`, never stages, commits, pushes
-or fetches, runs no project command, and never invokes `orchestrate` or the
-`banzai` CLI. Stage gates are not decision gates, and the documents grant no
-approval.
+or fetches, runs no project command, and never invokes the `banzai` CLI. Stage
+gates are not decision gates, and the documents grant no approval.
 
 <a id="incomplete-guidance-during-an-existing-run"></a>
 <a id="rework-and-independent-planning-review"></a>

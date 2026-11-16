@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
+import {
+  access,
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -73,6 +81,11 @@ test("setup client discovery is local, validates explicit skill and preserves se
       BANZAI_WORKFLOW_DIGEST: "old-grant",
       BANZAI_REVIEW_ARTIFACT: "old-grant"
     };
+    // ADR-0070 section 7: the packaged plugin has no `orchestrate` skill and
+    // setup accepts it without one.
+    await assert.rejects(access(path.join(plugin, "skills/orchestrate")), {
+      code: "ENOENT"
+    });
     const clients = await discoverSetupClients(root, config, env, runner);
     assert.ok(
       clients.every((client) => client.unavailable === null),
@@ -193,6 +206,24 @@ test("setup client discovery is local, validates explicit skill and preserves se
     );
     assert.ok(missing.every((client) => client.unavailable !== null));
     assert.doesNotMatch(JSON.stringify(missing), /FORBIDDEN_SECRET/);
+    // A plugin published before the removal still carries the skill and is
+    // accepted too.
+    await mkdir(path.join(plugin, "skills/orchestrate"));
+    await writeFile(
+      path.join(plugin, "skills/orchestrate/SKILL.md"),
+      "# orchestrate\n",
+      "utf8"
+    );
+    const withOrchestrate = await discoverSetupClients(
+      root,
+      config,
+      env,
+      runner
+    );
+    assert.ok(
+      withOrchestrate.every((client) => client.unavailable === null),
+      JSON.stringify(withOrchestrate)
+    );
     await rm(path.join(plugin, "skills/project-manifest/SKILL.md"));
     assert.ok(
       (await discoverSetupClients(root, config, env, runner)).every(

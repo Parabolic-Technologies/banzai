@@ -85,6 +85,24 @@ Focused test evidence uses
 (`npm run format:check`) is deliberately outside `verify`; run it during final
 review.
 
+### Plugin text and the runner's instruction copy
+
+Plugin skills, policies, guidance and templates are ordinary source. Change
+them by pull request; they need no baseline transition and no orchestrator
+rebuild. Some release-validation checks and tests pin standalone text, so
+update an affected check in the same pull request.
+
+The runner's own instruction text is frozen in
+`packages/orchestrator/src/phase-resources.ts` (ADR-0070) and is not generated
+from plugin files. `npm run build` writes only the `hooks/hooks.json` and
+`hooks/spec-gate.cjs` digests into it. A change to one of its text entries, its
+phase table, either hook file or a plugin manifest needs a transition in
+`packages/orchestrator/instruction-baseline.json` that cites an Accepted ADR;
+a manifest's `version` value is exempt. A hook change also needs
+`npm run build`. The `phase-guidance-*` files are a closed record; do not edit
+them. The procedure is in
+[Maintained instruction baselines](documentation/engineering-quality.md#maintained-instruction-baselines).
+
 ### Mechanical import boundaries
 
 `packages/orchestrator/import-boundaries.mjs` is the executable projection of

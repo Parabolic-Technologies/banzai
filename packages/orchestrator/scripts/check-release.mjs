@@ -4,10 +4,11 @@ import { access, lstat, readFile, readdir, realpath } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { promisify } from "node:util";
+import { validateClosedGuidanceBaseline } from "./phase-resources-build.mjs";
 import {
-  instructionConsumerText,
-  validateGuidanceExtraction
-} from "./phase-resources-build.mjs";
+  SUCCESSOR_BASELINE,
+  validateInstructionBaseline
+} from "./successor-baseline.mjs";
 
 const execFileAsync = promisify(execFile);
 const scriptPackageRoot = path.resolve(
@@ -42,6 +43,21 @@ const expectedOrchestratorPolicy = {
   lockfileMirror: "package-lock.json",
   lockfileVersionPointer: "/packages/packages~1orchestrator/version"
 };
+// The v1 instruction baseline is a closed record (ADR-0070 section 3).
+const closedBaselineFiles = [
+  [
+    "packages/orchestrator/phase-guidance-baseline.json",
+    "0f8b3242033991e2a6a50e7a02cb568a3ebe7bc6c5a559f06a4dd3d6926a2292"
+  ],
+  [
+    "packages/orchestrator/phase-guidance-current.json",
+    "01682ea8429657e2b3dc0cdd0facd8aaa1c21f34100275280a272e01e6134335"
+  ],
+  [
+    "packages/orchestrator/phase-guidance-current.sha256",
+    "8be77cc20bd33f7fec1cfc33d144feb0690e47a183fc33c11c4d73ac5a70c96d"
+  ]
+];
 const expectedRecoveryDirectory = ".banzai-version-set";
 const expectedRecoveryGuard = `${expectedRecoveryDirectory}.guard`;
 const expectedRecoveryGuardTemporary = `${expectedRecoveryGuard}.tmp`;
@@ -623,6 +639,43 @@ async function validateRequiredPaths(root, policy) {
         "required path does not exist"
       );
     }
+  }
+}
+
+async function validateInstructionBaselines(root) {
+  for (const [relativePath, expected] of closedBaselineFiles) {
+    const bytes = await readFile(repositoryPath(root, relativePath)).catch(
+      () => null
+    );
+    if (
+      bytes === null ||
+      createHash("sha256").update(bytes).digest("hex") !== expected
+    )
+      fail(
+        "INSTRUCTION_RESOURCE_DRIFT",
+        relativePath,
+        "Closed instruction baseline file differs from its pinned digest."
+      );
+  }
+  // The closed record replays against its own root and authorities only. No
+  // plugin phase document, guidance file or policy is read (ADR-0070 section 3).
+  try {
+    await validateClosedGuidanceBaseline(root);
+  } catch {
+    fail(
+      "INSTRUCTION_RESOURCE_DRIFT",
+      "packages/orchestrator/phase-guidance-current.json",
+      "Closed instruction baseline no longer replays: its chain or an authority differs."
+    );
+  }
+  try {
+    await validateInstructionBaseline(root);
+  } catch {
+    fail(
+      "INSTRUCTION_RESOURCE_DRIFT",
+      SUCCESSOR_BASELINE,
+      "A pinned resource, the sibling digest, the pinned first generation, the transition chain or an authority differs."
+    );
   }
 }
 
@@ -1889,7 +1942,6 @@ async function validateInstructionLayout(root) {
     "feature",
     "quick-fix",
     "project-manifest",
-    "orchestrate",
     "initiative"
   ];
   const policyNames = Object.keys(POLICY_READ_MATRIX);
@@ -2006,51 +2058,48 @@ async function validateInstructionLayout(root) {
   for (const skill of skills) {
     const relativePath = `${plugin}/skills/${skill}/SKILL.md`;
     const contents = await readText(root, relativePath, code);
-    if (skill !== "orchestrate") {
-      const sources =
-        contents.match(/^## Sources\n([\s\S]*?)(?=^## |$(?![\s\S]))/m)?.[1] ??
-        "";
-      const actual = [
-        ...sources.matchAll(/^\s+- `([a-z-]+)\.md` (before|when) /gm)
-      ].map((match) => [match[1], match[2]]);
-      const expectedReads = Object.entries(POLICY_READ_MATRIX).flatMap(
-        ([name, entry]) =>
-          entry.read.includes(skill)
-            ? [[name, "before"]]
-            : entry.conditional.includes(skill)
-              ? [[name, "when"]]
-              : []
-      );
-      if (JSON.stringify(actual) !== JSON.stringify(expectedReads))
-        fail(code, relativePath, "Sources reads differ from the policy matrix");
-      const mentioned = [
-        ...new Set(
-          [...sources.matchAll(/`([a-z-]+)\.md`/g)].map((match) => match[1])
-        )
-      ];
-      if (
-        JSON.stringify(mentioned.sort()) !==
-        JSON.stringify(expectedReads.map(([name]) => name).sort())
+    const sources =
+      contents.match(/^## Sources\n([\s\S]*?)(?=^## |$(?![\s\S]))/m)?.[1] ?? "";
+    const actual = [
+      ...sources.matchAll(/^\s+- `([a-z-]+)\.md` (before|when) /gm)
+    ].map((match) => [match[1], match[2]]);
+    const expectedReads = Object.entries(POLICY_READ_MATRIX).flatMap(
+      ([name, entry]) =>
+        entry.read.includes(skill)
+          ? [[name, "before"]]
+          : entry.conditional.includes(skill)
+            ? [[name, "when"]]
+            : []
+    );
+    if (JSON.stringify(actual) !== JSON.stringify(expectedReads))
+      fail(code, relativePath, "Sources reads differ from the policy matrix");
+    const mentioned = [
+      ...new Set(
+        [...sources.matchAll(/`([a-z-]+)\.md`/g)].map((match) => match[1])
       )
-        fail(code, relativePath, "Sources names an extra or missing policy");
-      if (!flatText(contents).includes(diagnostic))
-        fail(code, relativePath, "missing legacy diagnostic");
-      // ADR-0061: `initiative` has an empty policy row, so it resolves no
-      // policy file while keeping the process source and the legacy stop.
-      if (
-        sources.includes("../../policies/<name>.md") !==
-          (skill !== "initiative") ||
-        !sources.includes("the project root `AGENTS.md`") ||
-        !sources.includes("unreadable")
-      )
-        fail(
-          code,
-          relativePath,
-          "missing source-resolution or availability boundary"
-        );
-    }
+    ];
     if (
-      ["test-writing", "feature-status", "orchestrate"].includes(skill) &&
+      JSON.stringify(mentioned.sort()) !==
+      JSON.stringify(expectedReads.map(([name]) => name).sort())
+    )
+      fail(code, relativePath, "Sources names an extra or missing policy");
+    if (!flatText(contents).includes(diagnostic))
+      fail(code, relativePath, "missing legacy diagnostic");
+    // ADR-0061: `initiative` has an empty policy row, so it resolves no
+    // policy file while keeping the process source and the legacy stop.
+    if (
+      sources.includes("../../policies/<name>.md") !==
+        (skill !== "initiative") ||
+      !sources.includes("the project root `AGENTS.md`") ||
+      !sources.includes("unreadable")
+    )
+      fail(
+        code,
+        relativePath,
+        "missing source-resolution or availability boundary"
+      );
+    if (
+      ["test-writing", "feature-status"].includes(skill) &&
       contents.includes("engineering-quality.md")
     )
       fail(code, relativePath, "unexpected Engineering Quality read");
@@ -2096,11 +2145,6 @@ async function validateInstructionLayout(root) {
       );
     if (STALE_CLAUDE_REFERENCE_PATTERNS.some((pattern) => pattern.test(flat)))
       fail(code, relativePath, "obsolete CLAUDE process or policy reference");
-    if (
-      relativePath.endsWith("orchestrate/references/control-protocol.md") &&
-      contents.includes("engineering-quality.md")
-    )
-      fail(code, relativePath, "supervisor must not read Engineering Quality");
     for (const line of contents.split("\n")) {
       if (!line.includes("CLAUDE.md")) continue;
       // These two unchanged hook lines are the existing free-path contract.
@@ -2171,6 +2215,27 @@ async function validateInstructionLayout(root) {
       migrationPath,
       "legacy release is greater than the current source version"
     );
+}
+
+/**
+ * What a standalone skill instructs: its own text plus every guidance file it
+ * links by section. Each link is resolved to its path in the plugin, as the
+ * installed skill resolves it, never through the runner's frozen phase table
+ * (ADR-0070 section 6), so a skill may link guidance no runner phase embeds.
+ */
+async function instructionConsumerText(root, relativePath) {
+  const original = await readText(root, relativePath);
+  if (!/^plugins\/banzai\/skills\/[^/]+\/SKILL\.md$/.test(relativePath))
+    return original;
+  const names = new Set(
+    [
+      ...original.matchAll(/\]\(\.\.\/\.\.\/guidance\/([a-z-]+)\.md#[a-z-]+\)/g)
+    ].map((match) => match[1])
+  );
+  const guidance = [];
+  for (const name of names)
+    guidance.push(await readText(root, `plugins/banzai/guidance/${name}.md`));
+  return [original, ...guidance].join("\n\n");
 }
 
 async function validateTestAssurancePolicy(root) {
@@ -2770,9 +2835,7 @@ async function validateDecisionConsultationPolicy(root) {
     [
       "packages/orchestrator/test/workflow-skills.test.ts",
       [
-        "shipped workflow preserves five gates and scopes retained configuration formats as legacy",
-        "assertSupervisorSafety",
-        "May choose and rewrite"
+        "shipped workflow preserves five gates and scopes retained configuration formats as legacy"
       ]
     ],
     [
@@ -2865,89 +2928,6 @@ async function validateDecisionConsultationPolicy(root) {
   }
 }
 
-async function validateOrchestrateSkill(root) {
-  const requiredFragments = new Map([
-    [
-      "plugins/banzai/skills/orchestrate/SKILL.md",
-      [
-        "name: orchestrate",
-        "user-invocable: true",
-        "disable-model-invocation: true",
-        "never select it from prompt wording alone",
-        "only when the user invokes it explicitly by name",
-        "BANZAI_RUN_ID",
-        "BANZAI_APPROVAL_DIGEST",
-        "BANZAI_WORKFLOW_DIGEST",
-        "banzai control capabilities",
-        "banzai control status",
-        "exact supported v9 declaration",
-        "banzai-agent-request/v1",
-        "banzai-agent-answer/v2",
-        "banzai-agent-answer/v1",
-        "banzai-agent-recovery/v1",
-        "answer_escalation",
-        "answer_consultation",
-        "Never select, infer, rewrite, summarize into an answer, or fill a missing card.",
-        "A consultation answer records preference provenance only.",
-        "with writable stdin, write the complete document",
-        "A terminal `done` or `cancelled` projection does not block a new run.",
-        "Never run `banzai cancel` without an explicit current user decision.",
-        "CLAUDE_AUTH_UNAVAILABLE_IN_SANDBOX",
-        "Do not call `done` alone complete.",
-        "Never convert a `null` completion count to zero"
-      ]
-    ],
-    [
-      "plugins/banzai/skills/orchestrate/agents/openai.yaml",
-      [
-        'display_name: "Banzai Orchestrate"',
-        'default_prompt: "Use $banzai:orchestrate',
-        "allow_implicit_invocation: false"
-      ]
-    ],
-    [
-      "plugins/banzai/skills/orchestrate/references/control-protocol.md",
-      [
-        "banzai-agent-capabilities/v9",
-        "banzai-agent-status/v7",
-        "banzai-agent-gate-decision/v1",
-        "banzai-agent-answer/v4",
-        "answer_planning_review_triage",
-        "raw UTF-8 JSON",
-        "CONTROL_INPUT_TOO_LARGE",
-        'controlContractVersion: "9.0.0"',
-        "banzai-agent-request/v1",
-        "banzai-agent-answer/v2",
-        "banzai-agent-answer/v1",
-        "banzai-agent-recovery/v1",
-        "input limit is 64 KiB",
-        "live-session/write-stdin mechanism",
-        "Only a non-terminal `activeRun` blocks `control start`.",
-        "| `approve_adr` |",
-        "| `approve_plan` |",
-        "| `answer_escalation` |",
-        "| `answer_consultation` |",
-        "| `triage` |",
-        "| `retry` |",
-        "| `recover` |",
-        "| `cancel` |"
-      ]
-    ]
-  ]);
-  for (const [relativePath, fragments] of requiredFragments) {
-    const contents = flatText(await readText(root, relativePath));
-    for (const fragment of fragments) {
-      if (!contents.includes(fragment)) {
-        fail(
-          "ORCHESTRATE_SKILL_POLICY_DRIFT",
-          relativePath,
-          `missing required policy fragment: ${fragment}`
-        );
-      }
-    }
-  }
-}
-
 // ADR-0061: the initiative skill is entered only by explicit invocation and
 // keeps its authority limits; the template routes to it by name.
 async function validateInitiativeSkill(root) {
@@ -2963,7 +2943,7 @@ async function validateInitiativeSkill(root) {
         "documentation/initiatives/<slug>/",
         "Initiative documents grant no approval.",
         "Never fetch, stage, commit or push.",
-        "Never invoke `orchestrate` or the `banzai` CLI",
+        "Never invoke the `banzai` CLI",
         "`next` writes nothing.",
         "the only write allowed is a re-freeze",
         "`gate` refuses to overwrite an existing report",
@@ -3084,17 +3064,8 @@ async function validateRepository(root) {
   await validateSecurityAssurancePolicy(root);
   await validateEngineeringQualityPolicy(root);
   await validateDecisionConsultationPolicy(root);
-  await validateOrchestrateSkill(root);
   await validateInitiativeSkill(root);
-  try {
-    await validateGuidanceExtraction(root);
-  } catch {
-    fail(
-      "INSTRUCTION_RESOURCE_DRIFT",
-      "plugins/banzai",
-      "Canonical instruction resources, extraction evidence or consumer boundaries differ."
-    );
-  }
+  await validateInstructionBaselines(root);
 
   const rootScripts = record(rootPackage.scripts, "package.json", "scripts");
   requireExact(

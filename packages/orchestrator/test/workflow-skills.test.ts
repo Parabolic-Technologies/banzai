@@ -1,14 +1,8 @@
-import { decodePlanningGateDecision } from "../src/agent-control.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import {
-  decodeAgentControlAnswer,
-  decodeAgentControlRecovery,
-  decodeAgentControlRequest
-} from "../src/agent-control.js";
 
 const REPOSITORY_ROOT = path.resolve(process.cwd(), "../..");
 
@@ -306,9 +300,7 @@ test("shipped workflow preserves five gates and scopes retained configuration fo
     codeWriting,
     testWriting,
     feature,
-    quickFix,
-    supervisor,
-    protocol
+    quickFix
   ] = await Promise.all([
     productSource("plugins/banzai/AGENTS.md"),
     productSource("plugins/banzai/policies/decision-consultation.md"),
@@ -318,11 +310,7 @@ test("shipped workflow preserves five gates and scopes retained configuration fo
     productSource("plugins/banzai/skills/code-writing/SKILL.md"),
     productSource("plugins/banzai/skills/test-writing/SKILL.md"),
     productSource("plugins/banzai/skills/feature/SKILL.md"),
-    productSource("plugins/banzai/skills/quick-fix/SKILL.md"),
-    productSource("plugins/banzai/skills/orchestrate/SKILL.md"),
-    productSource(
-      "plugins/banzai/skills/orchestrate/references/control-protocol.md"
-    )
+    productSource("plugins/banzai/skills/quick-fix/SKILL.md")
   ]);
 
   assert.match(workflow, /five existing gates/);
@@ -332,7 +320,6 @@ test("shipped workflow preserves five gates and scopes retained configuration fo
     planning,
     /Task verification adds no profile or\nconfiguration-prerequisite gate/
   );
-  assert.match(protocol, /banzai-agent-answer\/v3/);
   assert.match(workflow, /conditional gate, not a\s+route or mandatory phase/i);
   assert.match(workflow, /first analyzes.*repository evidence/is);
   assert.match(consultation, /Consultation is not approval or permission/i);
@@ -353,55 +340,6 @@ test("shipped workflow preserves five gates and scopes retained configuration fo
     assert.match(source, /decisionConsultation: null/);
   }
   assert.match(feature, /cannot use the planning-only consultation gate/);
-
-  const assertSupervisorSafety = (source: string): void => {
-    assert.match(source, /exact supported v9 declaration/i);
-    assert.match(source, /answer_consultation/);
-    assert.match(
-      source,
-      /Decision.*Why this matters.*Repository evidence.*Options.*Recommendation/is
-    );
-    assert.match(source, /Never select, infer, rewrite/is);
-    assert.match(source, /never accepts an\s+ADR, approves a plan/is);
-  };
-  assertSupervisorSafety(supervisor);
-  assert.throws(() => {
-    assertSupervisorSafety(
-      supervisor.replace(
-        "Never select, infer, rewrite",
-        "May choose and rewrite"
-      )
-    );
-  });
-
-  assert.match(protocol, /banzai-agent-capabilities\/v9/);
-  assert.match(protocol, /controlContractVersion: "9\.0\.0"/);
-  assert.match(protocol, /banzai-agent-status\/v7/);
-  assert.match(protocol, /answer_escalation/);
-  assert.match(protocol, /answer_consultation/);
-  const documents = [...protocol.matchAll(/```json\n([\s\S]*?)\n```/gu)].map(
-    (match) => JSON.parse(match[1] ?? "") as { schema: string }
-  );
-  assert.equal(documents.length, 6);
-  for (const document of documents) {
-    const encoded = Buffer.from(JSON.stringify(document));
-    if (document.schema === "banzai-agent-request/v1") {
-      decodeAgentControlRequest(encoded);
-    } else if (
-      document.schema === "banzai-agent-answer/v1" ||
-      document.schema === "banzai-agent-answer/v2"
-    ) {
-      decodeAgentControlAnswer(encoded);
-    } else if (document.schema === "banzai-agent-answer/v4") {
-      decodeAgentControlAnswer(encoded);
-    } else if (document.schema === "banzai-agent-gate-decision/v1") {
-      decodePlanningGateDecision(encoded);
-    } else if (document.schema === "banzai-agent-recovery/v1") {
-      decodeAgentControlRecovery(encoded);
-    } else {
-      assert.fail(`Unexpected protocol schema ${document.schema}.`);
-    }
-  }
 });
 
 const EXPECTED_POLICY_READS = {
@@ -475,13 +413,6 @@ const EXPECTED_POLICY_READS = {
     "engineering-quality": "R",
     "plan-task-completion": "-"
   },
-  orchestrate: {
-    "decision-consultation": "-",
-    "test-assurance": "-",
-    "security-assurance": "-",
-    "engineering-quality": "-",
-    "plan-task-completion": "-"
-  },
   initiative: {
     "decision-consultation": "-",
     "test-assurance": "-",
@@ -495,67 +426,71 @@ test("skills read the matrix policies and stop on a legacy layout", async () => 
   for (const [skill, legacyRow] of Object.entries(EXPECTED_POLICY_READS)) {
     const row = {
       ...legacyRow,
-      "artifact-storage": ["orchestrate", "initiative"].includes(skill)
-        ? "-"
-        : "R"
+      "artifact-storage": skill === "initiative" ? "-" : "R"
     };
     const source = await productSource(
       `plugins/banzai/skills/${skill}/SKILL.md`
     );
-    if (skill === "orchestrate") {
-      assert.doesNotMatch(source, /^## Sources$/m);
+    const sources = /^## Sources\n([\s\S]*?)(?=^## |$(?![\s\S]))/m.exec(
+      source
+    )?.[1];
+    assert.ok(sources, skill);
+    const actual = [
+      ...sources.matchAll(/^\s+- `([a-z-]+)\.md` (before|when) /gm)
+    ].map((match) => [match[1], match[2]]);
+    const expected = Object.entries(row).flatMap(([name, mode]) =>
+      mode === "-" ? [] : [[name, mode === "R" ? "before" : "when"]]
+    );
+    assert.deepEqual(actual, expected, skill);
+    assert.ok(
+      source
+        .replace(/\s+/g, " ")
+        .includes("legacy Banzai layout: run `project-manifest` to migrate"),
+      skill
+    );
+    assert.match(sources, /the project root `AGENTS.md`/);
+    assert.match(sources, /unreadable/);
+    const bootstrap = ["project-manifest", "feature-status"].includes(skill);
+    assert.equal(sources.includes("bootstrap source rule"), bootstrap, skill);
+    if (skill === "feature-review")
+      assert.match(source, /`verdict=blocked`[\s\S]*?no findings/);
+    else if (skill === "initiative") {
+      // Standalone only (ADR-0061): no runner phase result to return.
+      assert.doesNotMatch(sources, /\.\.\/\.\.\/policies\//);
+      assert.doesNotMatch(source, /`gate=escalation`/);
+    } else if (!bootstrap)
       assert.match(
         source,
-        /Relay a summary beginning with `legacy Banzai layout:` verbatim/
+        /`outcome=needs_human_decision`,\s+`gate=escalation`/
       );
-    } else {
-      const sources = /^## Sources\n([\s\S]*?)(?=^## |$(?![\s\S]))/m.exec(
-        source
-      )?.[1];
-      assert.ok(sources, skill);
-      const actual = [
-        ...sources.matchAll(/^\s+- `([a-z-]+)\.md` (before|when) /gm)
-      ].map((match) => [match[1], match[2]]);
-      const expected = Object.entries(row).flatMap(([name, mode]) =>
-        mode === "-" ? [] : [[name, mode === "R" ? "before" : "when"]]
-      );
-      assert.deepEqual(actual, expected, skill);
-      assert.ok(
-        source
-          .replace(/\s+/g, " ")
-          .includes("legacy Banzai layout: run `project-manifest` to migrate"),
-        skill
-      );
-      assert.match(sources, /the project root `AGENTS.md`/);
-      assert.match(sources, /unreadable/);
-      const bootstrap = ["project-manifest", "feature-status"].includes(skill);
-      assert.equal(sources.includes("bootstrap source rule"), bootstrap, skill);
-      if (skill === "feature-review")
-        assert.match(source, /`verdict=blocked`[\s\S]*?no findings/);
-      else if (skill === "initiative") {
-        // Standalone only (ADR-0061): no runner phase result to return.
-        assert.doesNotMatch(sources, /\.\.\/\.\.\/policies\//);
-        assert.doesNotMatch(source, /`gate=escalation`/);
-      } else if (!bootstrap)
-        assert.match(
-          source,
-          /`outcome=needs_human_decision`,\s+`gate=escalation`/
-        );
-    }
-    if (
-      ["test-writing", "feature-status", "orchestrate", "initiative"].includes(
-        skill
-      )
-    )
+    if (["test-writing", "feature-status", "initiative"].includes(skill))
       assert.doesNotMatch(source, /engineering-quality\.md/);
   }
-  const protocol = await productSource(
-    "plugins/banzai/skills/orchestrate/references/control-protocol.md"
-  );
-  assert.doesNotMatch(
-    protocol,
-    /engineering-quality\.md|bootstrap source rule/
-  );
+});
+
+// ADR-0070 section 7, owner choice (c), and compliance item 12.
+test("no plugin file holds, offers or routes to an orchestrate skill", async () => {
+  const plugin = path.join(REPOSITORY_ROOT, "plugins/banzai");
+  const skills = (
+    await readdir(path.join(plugin, "skills"), { withFileTypes: true })
+  )
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  assert.deepEqual(skills, [...Object.keys(EXPECTED_POLICY_READS)].sort());
+  assert.ok(!skills.includes("orchestrate"));
+  const naming: string[] = [];
+  const scan = async (directory: string): Promise<void> => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const target = path.join(directory, entry.name);
+      if (entry.isDirectory()) await scan(target);
+      // The verb's other forms, such as "orchestrated run", name no skill.
+      else if (/\borchestrate\b/u.test(await readFile(target, "utf8")))
+        naming.push(path.relative(plugin, target));
+    }
+  };
+  await scan(plugin);
+  assert.deepEqual(naming, []);
 });
 
 test("standalone review keeps durable Markdown while orchestration returns only v2", async () => {

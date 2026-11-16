@@ -82,8 +82,6 @@
       "plugins/banzai/skills/initiative/agents/openai.yaml",
       "plugins/banzai/skills/initiative/references/brief-template.md",
       "plugins/banzai/skills/initiative/references/tracker-template.md",
-      "plugins/banzai/skills/orchestrate/SKILL.md",
-      "plugins/banzai/skills/orchestrate/references/control-protocol.md",
       "plugins/banzai/skills/project-manifest/SKILL.md",
       "plugins/banzai/skills/quick-fix/SKILL.md",
       "plugins/banzai/skills/test-writing/SKILL.md",
@@ -113,12 +111,6 @@
       "plugins/banzai/lib/review-snapshot.mjs",
       "plugins/banzai/contracts/artifacts/v1/work-binding.schema.json",
       "plugins/banzai/lib/artifact-readers.mjs",
-      "plugins/banzai/phases/planning.md",
-      "plugins/banzai/phases/implementation.md",
-      "plugins/banzai/phases/review.md",
-      "plugins/banzai/phases/fix.md",
-      "plugins/banzai/phases/feature.md",
-      "plugins/banzai/phases/quick-fix.md",
       "plugins/banzai/guidance/requirements.md",
       "plugins/banzai/guidance/architecture.md",
       "plugins/banzai/guidance/planning.md",
@@ -145,8 +137,7 @@
       "plugins/banzai/contracts/verification/v4/inspect-request.schema.json",
       "plugins/banzai/contracts/verification/v4/execute-request.schema.json",
       "plugins/banzai/contracts/v1/planning-review-result.schema.json",
-      "plugins/banzai/contracts/v1/planning-review-analysis.schema.json",
-      "plugins/banzai/phases/planning-review.md"
+      "plugins/banzai/contracts/v1/planning-review-analysis.schema.json"
     ]
   },
   "contracts": {

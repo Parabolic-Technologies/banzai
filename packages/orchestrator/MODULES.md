@@ -1108,15 +1108,20 @@ is a navigational reference and is updated with the module it describes.
   creates `info/` when missing, refuses a link or non-regular file there with
   `GIT_EXCLUDE_UNSAFE`, opens without following links and appends a missing
   line once.
-- `phase-resources.ts` — generated committed exact resource text and SHA-256
-  identities; imports nothing. `phase-instructions.ts` validates/selects that
-  data and compares only declared resources inside a supplied verified plugin
-  directory using bounded non-following reads. Its four outcomes distinguish
-  confirmed mismatch from absent evidence. Workflow enforces before attempts;
-  doctor only diagnoses. No runtime filesystem fallback loads instructions.
+- `phase-resources.ts` — frozen committed instruction set (ADR-0070): the
+  phase table, exact phase, guidance and policy text with SHA-256 identities,
+  and the two hook digests; imports nothing. The build writes only the hook
+  digests, and the successor baseline pins every other entry.
+  `phase-instructions.ts` validates/selects that data for delivery and
+  compares only `hooks/hooks.json` and `hooks/spec-gate.cjs` inside a supplied
+  verified plugin directory using bounded non-following reads; plugin phase
+  documents, guidance and policies are not compared. Its four outcomes
+  distinguish confirmed mismatch from absent evidence. Workflow enforces
+  before attempts; doctor only diagnoses. No runtime filesystem fallback
+  loads instructions.
 - `prompts.ts` — the phase prompt texts and `workflowPhases`, the supplied
   phase responsibilities per route. Planning, strict implementation, review and
-  accepted-finding fix prompts inline canonical shared guidance and policy
+  accepted-finding fix prompts inline the frozen module's guidance and policy
   bodies and preserve the plan policy's authority
   convention: explicit obligations, labeled discretion only under applicable
   approved meaning, and required evidence despite report corrections. Legacy
@@ -1270,8 +1275,8 @@ is a navigational reference and is updated with the module it describes.
   absence of retained `.banzai-version-set` state, hook,
   current phase-result/state/control identities, byte-preserved legacy
   phase-result schemas, the five existing gates and conditional runner
-  configuration gate, decision-consultation and supervisor policy,
-  privacy canaries, `orchestrate`, Test Assurance, Security Assurance, and
+  configuration gate, decision-consultation policy, privacy canaries, the
+  `initiative` skill, Test Assurance, Security Assurance, and
   Engineering Quality policy references/syntax/identity, the ADR-0050
   structural-assessment trigger heading, code-design method shape and budget,
   consumer anchors and audit exclusion, the versionless Claude
@@ -1290,8 +1295,13 @@ is a navigational reference and is updated with the module it describes.
   fragments, short references without a complete skill copy, and
   shadow/resolution prompt wiring. Authority ordering is checked in its own
   section. These policy checks match whitespace-normalized text, so rewrapped
-  portable guidance passes while a removal or relocated rule fails; retained
-  skill skeletons and Orchestrated Mode blocks remain byte-frozen. These
+  portable guidance passes while a removal or relocated rule fails. A check on
+  a skill reads the guidance it links by its plugin path. No check compares a
+  plugin phase document, guidance file or policy with runner instruction
+  text. Both instruction baselines are validated and failures report
+  `INSTRUCTION_RESOURCE_DRIFT`: the three closed v1 files by pinned digest and
+  chain replay, and the successor by sibling digest, origin, chain,
+  authorities and the current bytes of every pinned resource. These
   checks do not perform
   semantic analysis of target-project source.
 - `smoke-committed.mjs` runs help, control capabilities, init (which must add
@@ -1311,7 +1321,9 @@ is a navigational reference and is updated with the module it describes.
   built-bundle smoke with a vendor-free environment and tracked-tree mutation
   detection. Its default component list excludes version synchronization and
   recovery.
-- `build.mjs` regenerates tracked resource modules for explicit `build` calls.
+- `build.mjs` regenerates `src/init-resources.ts` and the plugin's
+  `lib/artifact-readers.mjs` and writes the two hook digests into the frozen
+  `src/phase-resources.ts` for explicit `build` calls.
   Its `--distribution-only` mode (`build:dist`) writes only ignored `dist/`
   output for CI, release checks and publication. `check-dist.mjs` still checks
   tracked resources without repair and compares bundle/map bytes with a fresh
@@ -1367,26 +1379,45 @@ repair: terminal ones pass and unfinished ones warn with a `banzai cancel`
 remedy. Status skips their review revalidation, reports completion as legacy and
 recommends only `banzai cancel`; the interactive home offers only cancellation.
 
-## Runner instruction generation and parity
+## Runner instruction module, baselines and parity
 
-`phase-resources-build.mjs` owns the seven-phase/ten-guidance/six-policy inventory
-and hook reference identities. Artifact-reader generation resolves shared runtime
-reader imports to canonical validation source, so generation never consumes its
-previous output. `build.mjs` explicitly regenerates the committed
-module; typecheck/lint/test never repair it. `check-dist.mjs` compares it and the
-bundle/map. Extraction validation preserves the immutable pre-change root and exact
-Orchestrated Mode blocks. The current baseline v1/pin contains the maintained
-expectations plus replayable, Accepted-ADR-scoped transitions. Raw expectation
-keys cover phases, policies and guidance authored directly rather than extracted
-from a skill section, so such a resource enters through a first transition whose
-`before` is `null`. The explicit
+`src/phase-resources.ts` is the runner's frozen instruction set (ADR-0070): the
+seven-phase/ten-guidance/six-policy text, the phase table and the two hook
+digests. `phase-resources-build.mjs` reads that module and, of the plugin, only
+the two hook files. `build.mjs` writes the hook digests and preserves every
+other byte. It fails unless the module holds exactly one digest slot per hook
+id and the module's phase table equals the script's. Typecheck/lint/test never
+repair the module. `check-dist.mjs` compares the hook digests and the
+bundle/map. Artifact-reader generation resolves shared runtime reader imports
+to canonical validation source, so generation never consumes its previous
+output.
+
+The v1 baseline (`phase-guidance-baseline.json`, `phase-guidance-current.json`
+and its pin) is a closed record. `validateClosedGuidanceBaseline` replays its
+Accepted-ADR-scoped transitions from the immutable root under the v1 key rules
+and reads no file under `plugins/banzai/`; the release validator also pins the
+three files by digest. `successor-baseline.mjs` owns the successor,
+`instruction-baseline.json` (`banzai-instruction-baseline/v2`) with its sibling
+pin. Its keys are one per text entry of the frozen module, one for the phase
+table, the two hook files by raw bytes and the two plugin manifests with
+`version` normalized. It records the v1 file's digest as its predecessor and
+the first generation's authorities in `origin`; a digest constant in
+`successor-baseline.mjs` fixes the identity of that first generation, and
+replay refuses a file that differs from it. Both baselines use the one
+authority rule and the one transition-step rule exported by
+`phase-resources-build.mjs`; the successor admits a change to any of its keys.
+The explicit
 `instruction-baseline.mjs --describe` interface reports the exact pending scope;
 `--authorization <file> --check` validates without writes and the authoring command
-publishes the exact reviewed transition. Interrupted publication retains a journal
+publishes the exact reviewed transition. `--initialize <file> [--check]` writes
+the first generation from current bytes and is refused once the baseline holds
+a transition or when the result differs from the pinned first generation.
+Interrupted publication retains a journal
 and requires the identical authorization and unchanged source to recover. Normal
-build, parity and publication checks never regenerate a baseline or pin.
-Publication checks inspect actual source/plugin archives, npm bytes and source-map
-content against the same candidate; indexed/working instruction skew fails.
+build, parity and publication checks never write a baseline or pin.
+Publication checks compare the hook files of the actual source/plugin archives,
+and the frozen module across the source archive, npm bytes and source-map
+content, against the same candidate; indexed/working skew fails.
 
 Prompts compose common instructions, phase/guidance/policies and exact work
 roles/capabilities before request, human decisions, approved architecture,
@@ -1585,11 +1616,14 @@ coverage only for confirmed markerless custom projects. Static preflight offers
 configuration before model work; every failed verification-category check and
 `executables.verification` supplies an exact fix command/document pointer.
 
-The instruction baseline retains predecessor and original pins. ADR-0045 permits
+The closed v1 instruction baseline retains predecessor and original pins. In
+its replay, ADR-0045 permits
 its exact declared hook/planning/supervisor transition, including the supervisor
 entry skeleton. For retained ADR-0043 authority, only a leading, indented ADR-0045
 lifecycle annotation may be excluded for comparison; the original accepted body
 and retained suffix must still match their recorded full-byte hash.
 ADR-0055 admits the exact ADR-0054 reciprocal lifecycle annotation through a
 finite image map guarded by its Accepted status. It also authorizes retained
-`#orchestrated` and supervisor skill keys; protected manifest keys remain denied.
+`#orchestrated` and supervisor skill keys in the v1 chain, where protected
+manifest keys remain denied. The successor baseline admits hook-configuration
+and manifest keys.

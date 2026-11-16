@@ -312,21 +312,6 @@ test("adoption product source pins the shared identity predicate and approved sc
     skill,
     /A declined migration leaves project files byte-identical/
   );
-  const supervisor = await readFile(
-    path.join(
-      root,
-      "plugins/banzai/skills/orchestrate/references/control-protocol.md"
-    ),
-    "utf8"
-  );
-  assert.match(
-    supervisor,
-    /On `PROJECT_SETUP_REQUIRED`, stop the automatic continuation loop/
-  );
-  assert.match(
-    supervisor,
-    /Do not run `banzai setup` or\n`project-manifest` autonomously/
-  );
 });
 
 test("adoption detects a file changed through the filesystem during inspection", async (t) => {

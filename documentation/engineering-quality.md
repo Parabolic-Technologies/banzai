@@ -18,8 +18,12 @@ ADR-0036 places process rules in packaged `AGENTS.md` and keeps `CLAUDE.md`
 as its include shim. Each policy has one owner file under `plugins/banzai/policies/`.
 Consuming skills read applicable policies relative to their installed `SKILL.md`
 before the affected responsibility. The Sources matrix distinguishes required
-and conditional reads; neither `test-writing`, `feature-status` nor the
-supervisor independently reads Engineering Quality.
+and conditional reads; neither `test-writing` nor `feature-status`
+independently reads Engineering Quality.
+
+Runner phases receive the policy body from the orchestrator's frozen
+`packages/orchestrator/src/phase-resources.ts` (ADR-0070). No build or check
+compares that copy with the plugin file.
 
 Skills and orchestrator prompts carry short references and phase-specific
 responsibilities. Projects receive process text and an index, never copied
@@ -122,17 +126,35 @@ high-confidence, exact-evidence, material-impact, approved-invariant, and
 observable-closure threshold. Meeting that threshold is eligibility evidence,
 not authorization for hard enforcement.
 
-## Maintained instruction baseline
+## Maintained instruction baselines
 
-ADR-0044 preserves `packages/orchestrator/phase-guidance-baseline.json` and its
-original canonical pin as immutable extraction evidence. Ongoing expectations
-live in `phase-guidance-current.json` (`banzai-instruction-baseline/v1`) with a
-separate `.sha256` pin and ordered transitions. Each transition retains exact
-old/new resource or section identities, predecessor/successor expectation digests
-and accepted public ADR/scope references. The first inventory also pins phase and
-policy resources that were not individually pinned in the original extraction.
+Two baselines exist (ADR-0044, ADR-0070).
 
-After an authorized instruction edit, run
+The v1 baseline is a closed record. It consists of
+`packages/orchestrator/phase-guidance-baseline.json` with its original
+canonical pin, and `phase-guidance-current.json`
+(`banzai-instruction-baseline/v1`) with its `.sha256` pin and ordered
+transitions. Release validation pins the three files by digest and replays the
+chain against its own root and Accepted authorities. Nothing extends it, and
+its replay reads no plugin file.
+
+The successor baseline is `packages/orchestrator/instruction-baseline.json`
+(`banzai-instruction-baseline/v2`) with a sibling
+`instruction-baseline.sha256`. It records the digest of
+`phase-guidance-current.json` as its predecessor and pins what a runner phase
+or the hook gate executes:
+
+- the 23 text entries and the phase table of the frozen
+  `packages/orchestrator/src/phase-resources.ts`;
+- `plugins/banzai/hooks/hooks.json` and `plugins/banzai/hooks/spec-gate.cjs`;
+- both plugin manifests, with their `version` value normalized.
+
+A transition may change any pinned key, the hook configuration and the plugin
+manifests included. Plugin skills, policies, guidance, phase documents and
+templates are not pinned: they change by ordinary review, with no transition.
+`npm run build` writes only the two hook digests into the frozen module.
+
+After an authorized change to a pinned resource, run
 `node packages/orchestrator/scripts/instruction-baseline.mjs --describe` for a
 read-only scope proposal. Prepare a private authorization JSON with
 `schema: "banzai-instruction-authorization/v1"`, `schemaVersion: 1`, the exact
@@ -142,12 +164,21 @@ public ADR `path`, current `sha256` and a bounded `scope` explanation. Preview w
 reviewable baseline/pin transition. Repeated matching invocation is idempotent.
 An interrupted two-file publication retains a private journal; retry only the
 same authorization and unchanged source. Mismatched partial inputs fail closed.
+`--initialize <file> [--check]` writes the first generation from current bytes
+under a `banzai-instruction-origin/v1` authority file. It is refused once the
+baseline holds a transition, and whenever the result differs from the pinned
+first generation, so it can only restore that generation.
 
-Build, tests, build:check and release checks never regenerate baselines. They
-validate the original root, current pin, transition linkage, exact scope,
-Accepted authority, normalized expectations and independent structural duties.
-Retained Orchestrated Mode blocks, hook registration, plugin discovery and
-version-only manifest normalization retain their original boundaries. An
-unrecorded change remains `INSTRUCTION_RESOURCE_DRIFT`; changing hashes without a
-valid transition does not authorize it. Hashes establish consistency, not human
+The first generation is fixed outside the baseline file. A digest constant in
+`packages/orchestrator/scripts/successor-baseline.mjs` holds the identity of
+the file's `predecessorBaselineSha256` and `origin`; no flag, environment
+variable or file overrides it. A pinned resource therefore changes only
+through a transition that cites an Accepted ADR.
+
+Build, tests, build:check and release checks never write a baseline. Release
+validation checks the successor's sibling digest, pinned first generation,
+transition linkage, exact scope, Accepted authority and current bytes. An
+unrecorded change remains `INSTRUCTION_RESOURCE_DRIFT`; changing hashes, or
+writing the first generation again, without a valid transition does not
+authorize it. Hashes establish consistency, not human
 approval or semantic correctness. Normal review and human gates still apply.
