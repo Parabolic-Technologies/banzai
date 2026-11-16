@@ -1,6 +1,6 @@
 # banzai 2.8–2.9 program tracker
 
-Status: active · Gate 1 closed, Stage 2: WP14 report ready · Updated 2026-11-11
+Status: active · Gate 1 closed, Stage 2: WP14 committed, WP22 on hold with ADR-0068 Proposed · Updated 2026-11-16
 
 This file is the only living record of the program. The plan itself is the
 frozen [brief.md](brief.md); never edit it. Record anything that departs from
@@ -102,18 +102,18 @@ WP22–WP25, and WP23 replaces WP10. Order: WP14, WP22, WP24, WP9, WP23, WP11,
 WP12, WP13, WP25. A new package's work directory is named when the package
 starts, with the date prefix ADR-0066 requires.
 
-| WP   | Package                                                  | Depends on    | ADR                                                     | Work directory                         | Status       | Commit | Notes                                                  |
-| ---- | -------------------------------------------------------- | ------------- | ------------------------------------------------------- | -------------------------------------- | ------------ | ------ | ------------------------------------------------------ |
-| WP9  | Correct a verification command without re-implementation | WP1, WP3      | new, amends 0049 §2, §4 (pinned); affects 0047 (pinned) | `wp09-verification-command-correction` | not started  |        | Human edit only, no planner proposal; control revision |
-| WP10 | Baseline check run before implementation                 | WP1, WP3, WP9 | new                                                     | `wp10-baseline-check-run`              | dropped      |        | Replaced by WP23                                       |
-| WP11 | Workflow choice: explanation and override                | —             | new, amends 0001                                        | `wp11-workflow-choice-override`        | not started  |        | No pause after selection; template text changes        |
-| WP12 | Slim AGENTS.md template, package guides, context map     | —             | new, amends 0036                                        | `wp12-slim-agents-template`            | not started  |        | Three parts, template first; no minimal manifest       |
-| WP13 | Subscription limits without manual retry                 | WP8           | check 0021                                              | `wp13-subscription-limit-retry`        | not started  |        | No live scenario; spawn environment check instead      |
-| WP14 | Permission denials as a remediation list                 | WP8           | none                                                    | `261111-wp14-permission-denial-list`   | report ready |        | Probe passed on 2.1.290 and 2.1.322; ships as 2.8.3    |
-| WP22 | Runner-granted commands from the approved plan           | WP3, WP14     | new, amends 0020                                        | —                                      | not started  |        | Outside the brief; live probe needs go-ahead           |
-| WP23 | Undocumented-command marker at the plan gate             | WP3           | none expected                                           | —                                      | not started  |        | Outside the brief; replaces WP10                       |
-| WP24 | No blocked state with cancel as its only exit            | —             | new; may affect 0024, 0065                              | —                                      | not started  |        | Outside the brief; audit before WP9                    |
-| WP25 | Notification when a run waits for a human                | —             | check at start                                          | —                                      | not started  |        | Outside the brief                                      |
+| WP   | Package                                                  | Depends on    | ADR                                                     | Work directory                         | Status      | Commit  | Notes                                                  |
+| ---- | -------------------------------------------------------- | ------------- | ------------------------------------------------------- | -------------------------------------- | ----------- | ------- | ------------------------------------------------------ |
+| WP9  | Correct a verification command without re-implementation | WP1, WP3      | new, amends 0049 §2, §4 (pinned); affects 0047 (pinned) | `wp09-verification-command-correction` | not started |         | Human edit only, no planner proposal; control revision |
+| WP10 | Baseline check run before implementation                 | WP1, WP3, WP9 | new                                                     | `wp10-baseline-check-run`              | dropped     |         | Replaced by WP23                                       |
+| WP11 | Workflow choice: explanation and override                | —             | new, amends 0001                                        | `wp11-workflow-choice-override`        | not started |         | No pause after selection; template text changes        |
+| WP12 | Slim AGENTS.md template, package guides, context map     | —             | new, amends 0036                                        | `wp12-slim-agents-template`            | not started |         | Three parts, template first; no minimal manifest       |
+| WP13 | Subscription limits without manual retry                 | WP8           | check 0021                                              | `wp13-subscription-limit-retry`        | not started |         | No live scenario; spawn environment check instead      |
+| WP14 | Permission denials as a remediation list                 | WP8           | none                                                    | `261111-wp14-permission-denial-list`   | committed   | fa89da9 | Probe passed on 2.1.290 and 2.1.322; ships as 2.8.3    |
+| WP22 | Runner-granted commands from the approved plan           | WP3, WP14     | 0068 Proposed; amends 0020, 0049 §2 (pinned), 0063      | `261111-wp22-runner-granted-commands`  | on hold     |         | Outside the brief; on hold until the study report      |
+| WP23 | Undocumented-command marker at the plan gate             | WP3           | none expected                                           | —                                      | not started |         | Outside the brief; replaces WP10                       |
+| WP24 | No blocked state with cancel as its only exit            | —             | new; may affect 0024, 0065                              | —                                      | not started |         | Outside the brief; audit before WP9                    |
+| WP25 | Notification when a run waits for a human                | —             | check at start                                          | —                                      | not started |         | Outside the brief                                      |
 
 ### Gate 2
 
@@ -172,10 +172,13 @@ Scope after the owner's 2026-11-11 decision:
 | 0063 | WP8  | Stable headless vendor invocations                     | Accepted, 2026-11-06 |
 | 0064 | WP21 | Runner-recorded plan remainder digest                  | Accepted, 2026-11-06 |
 | 0065 | WP21 | Continuable planner-declared planning blocks           | Accepted, 2026-11-06 |
+| 0068 | WP22 | Runner-granted commands from the approved plan         | Proposed, 2026-11-11 |
 
 IDs checked free on 2026-10-31 (0057–0059), 2026-11-03 (0060) and 2026-11-05
 (0061) and 2026-11-06 (0063, 0064–0065) in `dev`, `main`, `v3.0.0-branch`,
-every local branch and every local worktree.
+every local branch and every local worktree. ADR-0066 and ADR-0067 were
+written outside the program. 0068 was checked free on 2026-11-11 in every
+local and remote-tracking branch and every local worktree.
 
 ## Shared fixtures
 
@@ -611,6 +614,45 @@ release:validate` passes, so the deferred `HOOK_CHANGED_WITHOUT_VERSION_BUMP`
   outside the brief and ship in the 2.8.3 change set. Each is classified as
   `maintainer` in `publication-policy.json`.
 
+- 2026-11-11: WP14 and the 2.8.3 change set are committed as `fa89da9` and
+  merged into `main` through pull request 28 as `44552ad`, with all three
+  required CI lanes green. A GitHub draft release `v2.8.3` pinned to
+  `44552ad` is prepared; publication stays the owner's decision. Two local
+  candidate checks after the commit each failed one unrelated test at a
+  timeout under machine load; both test files pass alone. The WP14
+  [report](../261111-wp14-permission-denial-list/implementation-report.md#after-the-commit)
+  has the details.
+
+- 2026-11-11: WP22 starts with `Давай рухатись далі по трекеру`. Its work
+  directory will be `261111-wp22-runner-granted-commands`, and ADR ID 0068 is
+  reserved. Before drafting, the owner answered two closed questions:
+  - lite routes: "Strict only (Recommended)". Commands are granted only after
+    plan approval on the strict route; lite routes keep the WP14 list;
+  - rule width: "Command plus arguments". Each rule is `Bash(<command> *)`,
+    so a builder can run focused variants of an approved check. This is wider
+    than the `Усі чотири` entry's "exactly those commands".
+
+- 2026-11-11: ADR-0068 is drafted as Proposed. One independent read-only
+  review found six major and eight minor issues, all applied. The main
+  changes: grants come from plan obligations only, because approval does not
+  bind project policy; eligibility is an allow-list over raw argv words with
+  a launcher rule that fails closed; the live probe grew to three invocations
+  per client version and covers trust, word boundaries, redirection and a
+  resumed session. The ADR narrowly amends ADR-0020, pinned ADR-0049 §2 and
+  ADR-0063 §4. It awaits acceptance with three owner choices: ambient mode
+  (1), the probe's form (2) and a project switch that turns the grant off
+  (3). WP22 requirements and plan wait for that decision.
+
+- 2026-11-16: WP22 is on hold and ADR-0068 stays Proposed, with the owner's
+  `Keep Proposed, on hold`. The owner neither accepts nor rejects the
+  proposal now. Its decision is taken with the report of the replay
+  comparison study (`documentation/work/261111-native-comparison-study/`),
+  together with the question of further orchestrator work. The proposal is
+  kept because the study's first orchestrator runs on this repository showed
+  the problem it addresses: Claude phases had 16 and 10 shell commands denied.
+  No WP22 requirements, plan or live probe start before that decision. This
+  entry decides nothing about the other Stage 2 packages.
+
 ## Open questions left to the owner by the brief
 
 Settle each in the named WP's ADR or requirements, then record the answer
@@ -622,9 +664,11 @@ under Owner decisions.
   change.
 - WP12: whether the package adds an always-on size budget with an offline
   `banzai doctor` advisory.
-- WP22: what authorizes commands on the lite routes, which have no plan gate.
-  Today discovery supplies information, never execution permission.
-- WP22: the live-suite budget for its probe, decided together with WP14's.
+- WP22: the live-suite budget for its probe. ADR-0068 owner choice 2
+  recommends a Gate 2 probe outside `compatibility:live`, as for WP14.
+- WP22: whether `.banzai/config.json` gets a switch that turns the grant off
+  (ADR-0068 owner choice 3), and whether ambient mode gets the grant (owner
+  choice 1).
 - WP25: an operating-system notification, a user command from local
   configuration, or both.
 - Gate 2: should it ask Developers A and B to repeat their scenarios on 2.8?
@@ -632,6 +676,7 @@ under Owner decisions.
 Settled: WP11 adds no Continue or Switch pause after workflow selection
 (2026-11-11). WP14's live evidence is a Gate 2 probe outside
 `compatibility:live`, so the suite stays at two invocations (2026-11-11).
+WP22 grants nothing on the lite routes (2026-11-11).
 
 ## Deviations from the brief
 

@@ -74,6 +74,7 @@ plugin and orchestrator source.
 | [0065](./0065-continuable-planner-declared-planning-blocks.md) | Continuable planner-declared planning blocks | Accepted | 2026-11-06 | [Program `release-2-8-2-9-program`](../work/release-2-8-2-9-program/tracker.md), WP21; owner accepted in chat with `Accept both`; amends 0036; implementation Implemented |
 | [0066](./0066-date-prefixed-work-and-initiative-slugs.md) | Date-prefixed work and initiative slugs | Accepted | 2026-11-10 | [Work `interactive-slug-selection`](../work/interactive-slug-selection/description.md); owner accepted in chat; partial supersession of 0054 (no-date name rule) and 0061 §1; implementation Implemented |
 | [0067](./0067-node-26-supported-release-lane.md) | Node 26 supported release lane | Accepted | 2026-11-10 | [Work `261110-node-26-supported-lane`](../work/261110-node-26-supported-lane/work.md); owner accepted in chat; partial supersession of 0009 and amendments to 0010, 0053 and 0056; implementation Implemented; hosted Node 26 CI not yet observed |
+| [0068](./0068-runner-granted-commands-from-the-approved-plan.md) | Runner-granted commands from the approved plan | Proposed | 2026-11-11 | [Program `release-2-8-2-9-program`](../work/release-2-8-2-9-program/tracker.md), WP22; on hold since 2026-11-16, decided with the replay comparison study report; would amend 0020, 0049 §2 (pinned), 0063 §4 and, under owner choice 1 (a), 0059 §3 |
 
 ## File Names
 
