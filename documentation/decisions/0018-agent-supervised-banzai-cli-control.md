@@ -395,3 +395,8 @@ Implementation and review must confirm:
 
 - Supersedes: None
 - Superseded by: None
+- Amended by [ADR-0070](./0070-orchestrator-owned-instruction-copy.md), accepted
+  2026-11-16 with the owner's choice to remove the skill: the optional
+  `orchestrate` skill and its protocol reference leave the plugin. The CLI's
+  control contract is unchanged and has no packaged supervisor.
+  Implementation is Planned.

@@ -639,3 +639,6 @@ delivery or installation.
 | ADR-0065 | Continuable planner-declared planning blocks                       | [Source](documentation/decisions/0065-continuable-planner-declared-planning-blocks.md)           | Implemented |
 | ADR-0066 | Date-prefixed work and initiative slugs                            | [Source](documentation/decisions/0066-date-prefixed-work-and-initiative-slugs.md)                | Implemented |
 | ADR-0067 | Node 26 supported release lane                                     | [Source](documentation/decisions/0067-node-26-supported-release-lane.md)                         | Implemented |
+| ADR-0069 | Standalone plugin control model                                    | [Source](documentation/decisions/0069-standalone-plugin-control-model.md)                        | Planned     |
+| ADR-0070 | Orchestrator-owned instruction copy                                | [Source](documentation/decisions/0070-orchestrator-owned-instruction-copy.md)                    | Planned     |
+| ADR-0071 | Path-scoped verification gate                                      | [Source](documentation/decisions/0071-path-scoped-verification-gate.md)                          | Planned     |

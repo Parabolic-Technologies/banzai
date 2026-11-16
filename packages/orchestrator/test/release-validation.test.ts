@@ -145,6 +145,8 @@ const FIXTURE_PATHS = [
   "documentation/decisions/0063-stable-headless-vendor-invocations.md",
   "documentation/decisions/0064-runner-recorded-plan-remainder-digest.md",
   "documentation/decisions/0066-date-prefixed-work-and-initiative-slugs.md",
+  "documentation/decisions/0069-standalone-plugin-control-model.md",
+  "documentation/decisions/0070-orchestrator-owned-instruction-copy.md",
   "packages/orchestrator/scripts/check-dist.mjs",
   "packages/orchestrator/scripts/release-version.mjs",
   "packages/orchestrator/scripts/smoke-committed.mjs",
@@ -3381,6 +3383,76 @@ test("ADR-0066 admits only its exact accepted ADR-0054 lifecycle annotation", as
     const amendment = path.join(
       root,
       "documentation/decisions/0066-date-prefixed-work-and-initiative-slugs.md"
+    );
+    const accepted = await readFile(amendment, "utf8");
+    await writeFile(
+      amendment,
+      accepted.replace("- Status: Accepted", "- Status: Proposed")
+    );
+    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    await writeFile(amendment, accepted);
+    await validateGuidanceExtraction(root);
+  });
+});
+
+test("ADR-0069 admits only its exact accepted ADR-0062 lifecycle annotation", async () => {
+  await withFixture(async (root) => {
+    await validateGuidanceExtraction(root);
+    const authority = path.join(
+      root,
+      "documentation/decisions/0062-claude-memory-notes-in-the-manual-hook-gate.md"
+    );
+    const original = await readFile(authority, "utf8");
+    for (const changed of [
+      original.replace(
+        "the bookkeeping scope and the per-session marker remain.",
+        "Other behaviour remains."
+      ),
+      original + "\nUnaccepted decision body.\n"
+    ]) {
+      assert.notEqual(changed, original);
+      await writeFile(authority, changed);
+      await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    }
+    await writeFile(authority, original);
+    const amendment = path.join(
+      root,
+      "documentation/decisions/0069-standalone-plugin-control-model.md"
+    );
+    const accepted = await readFile(amendment, "utf8");
+    await writeFile(
+      amendment,
+      accepted.replace("- Status: Accepted", "- Status: Proposed")
+    );
+    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    await writeFile(amendment, accepted);
+    await validateGuidanceExtraction(root);
+  });
+});
+
+test("ADR-0070 admits only its exact accepted ADR-0044 lifecycle annotation", async () => {
+  await withFixture(async (root) => {
+    await validateGuidanceExtraction(root);
+    const authority = path.join(
+      root,
+      "documentation/decisions/0044-instruction-baseline-evolution.md"
+    );
+    const original = await readFile(authority, "utf8");
+    for (const changed of [
+      original.replace(
+        "admits transitions for the hook configuration and the manifests.",
+        "Other behaviour remains."
+      ),
+      original + "\nUnaccepted decision body.\n"
+    ]) {
+      assert.notEqual(changed, original);
+      await writeFile(authority, changed);
+      await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    }
+    await writeFile(authority, original);
+    const amendment = path.join(
+      root,
+      "documentation/decisions/0070-orchestrator-owned-instruction-copy.md"
     );
     const accepted = await readFile(amendment, "utf8");
     await writeFile(

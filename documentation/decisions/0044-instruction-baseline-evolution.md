@@ -186,3 +186,10 @@ root is retained evidence, not a reason to rerun its closed package.
   before this lifecycle update. This record supersedes proposal-stage
   pending-acceptance wording; the decision body is preserved. Implementation
   state: Planned. Separate approval of the resulting plan bundle is required.
+- Amended by [ADR-0070](./0070-orchestrator-owned-instruction-copy.md), accepted
+  2026-11-16: the current baseline is closed and kept as a record, pinned by
+  digest and no longer replayed against the plugin's files (section 1 and
+  section 3 items 4 and 5). A successor baseline pins the frozen instruction
+  module, the hook files and the plugin manifests, and it
+  admits transitions for the hook configuration and the manifests.
+  Implementation is Planned.

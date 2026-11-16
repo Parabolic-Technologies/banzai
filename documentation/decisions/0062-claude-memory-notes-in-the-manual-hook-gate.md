@@ -355,3 +355,9 @@ cross-principal, outbound-request or destructive surface.
   manual-only class.
 - Supersedes: None.
 - Superseded by: None.
+- Amended by [ADR-0069](./0069-standalone-plugin-control-model.md), accepted
+  2026-11-16: manual mode gains a work approval for strict work, a session
+  attachment typed by the human, a denial of file-tool writes to the hook's
+  own records and a comparison around shell commands. Free paths, memory
+  notes, the bookkeeping scope and the per-session marker remain.
+  Implementation is Planned.

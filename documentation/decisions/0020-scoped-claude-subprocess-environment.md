@@ -341,3 +341,7 @@ Implementation and review must confirm all of the following:
   Every headless invocation receives its prompt on stdin, and every headless
   Claude invocation gets the run-stability environment in both modes. Scoped
   isolation, plugin resolution and degradation remain. Implemented on 2026-11-06 by WP8.
+- Amended by [ADR-0070](./0070-orchestrator-owned-instruction-copy.md), accepted
+  2026-11-16: the structural check of an installed plugin no longer names the
+  `orchestrate` skill, so ten skill files are required. Implementation is
+  Planned.

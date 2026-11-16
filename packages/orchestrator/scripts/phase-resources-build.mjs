@@ -788,6 +788,22 @@ const DATE_PREFIX_AUTHORITY_AMENDMENTS = new Map([
   ]
 ]);
 
+// Exact ADR-0062 reciprocal lifecycle annotation accepted with ADR-0069.
+const CONTROL_MODEL_AUTHORITY_AMENDMENTS = new Map([
+  [
+    "e28a014f67d2ddc4d0142f1789f7531cff3085448fd07ca3277bdfae471012ef",
+    "abcd8ea1ace8182b9dedc5d133ebea9db378314d6c1f5a03fca5544f5ffd027f"
+  ]
+]);
+
+// Exact ADR-0044 reciprocal lifecycle annotation accepted with ADR-0070.
+const INSTRUCTION_COPY_AUTHORITY_AMENDMENTS = new Map([
+  [
+    "9105dc7658a48a59c51b0d10faef88837cb884db2dd4c6fb73b42f333641cd09",
+    "0734d3c90a395fb6a20ca473df167cc0356f47cc800baf78ec9d42a5f407c693"
+  ]
+]);
+
 const RETAINED_AUTHORITY_AMENDMENTS = [
   {
     decision: "documentation/decisions/0045-guided-verification-setup.md",
@@ -834,6 +850,15 @@ const RETAINED_AUTHORITY_AMENDMENTS = [
     decision:
       "documentation/decisions/0066-date-prefixed-work-and-initiative-slugs.md",
     images: DATE_PREFIX_AUTHORITY_AMENDMENTS
+  },
+  {
+    decision: "documentation/decisions/0069-standalone-plugin-control-model.md",
+    images: CONTROL_MODEL_AUTHORITY_AMENDMENTS
+  },
+  {
+    decision:
+      "documentation/decisions/0070-orchestrator-owned-instruction-copy.md",
+    images: INSTRUCTION_COPY_AUTHORITY_AMENDMENTS
   }
 ];
 

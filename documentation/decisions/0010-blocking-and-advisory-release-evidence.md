@@ -307,3 +307,7 @@ Implementation and review must confirm:
   required lane. Failure classification and release authority are unchanged.
 - Supersedes: None
 - Superseded by: None in full
+- Amended by [ADR-0071](./0071-path-scoped-verification-gate.md), accepted
+  2026-11-16: for merge, the required lanes run the checks of the change's
+  scope. For release, the complete `release:check` on every supported lane
+  stays the required evidence. Implementation is Planned.
