@@ -24,19 +24,33 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          fetch-depth: 2
       - run: git --version
       - run: python3 --version
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - id: scope
+        run: |
+          if git show HEAD^1:packages/orchestrator/scripts/verification-scope.mjs > "$RUNNER_TEMP/verification-scope.mjs"; then
+            node "$RUNNER_TEMP/verification-scope.mjs" --ci
+          else
+            echo "scope=full" >> "$GITHUB_OUTPUT"
+            printf '%s\n' '## Verification scope: full' '' '```text' 'Reason: the base revision has no scope rules' '```' | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
       - run: npm ci
       - run: npm run release:check
+        if: steps.scope.outputs.scope != 'documents' && steps.scope.outputs.scope != 'plugin'
       - id: release_evidence
+        if: steps.scope.outputs.scope != 'documents' && steps.scope.outputs.scope != 'plugin'
         run: node packages/orchestrator/scripts/release-evidence.mjs record
       - uses: actions/upload-artifact@v7
+        if: steps.scope.outputs.scope != 'documents' && steps.scope.outputs.scope != 'plugin'
         with:
           name: ${{ steps.release_evidence.outputs.name }}
           path: ${{ steps.release_evidence.outputs.path }}
           if-no-files-found: error
           retention-days: 30
+      - run: npm run check -- --base HEAD^1
+        if: steps.scope.outputs.scope == 'documents' || steps.scope.outputs.scope == 'plugin'
 
   release_check_node_24:
     runs-on: ubuntu-24.04
@@ -45,19 +59,33 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          fetch-depth: 2
       - run: git --version
       - run: python3 --version
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - id: scope
+        run: |
+          if git show HEAD^1:packages/orchestrator/scripts/verification-scope.mjs > "$RUNNER_TEMP/verification-scope.mjs"; then
+            node "$RUNNER_TEMP/verification-scope.mjs" --ci
+          else
+            echo "scope=full" >> "$GITHUB_OUTPUT"
+            printf '%s\n' '## Verification scope: full' '' '```text' 'Reason: the base revision has no scope rules' '```' | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
       - run: npm ci
       - run: npm run release:check
+        if: steps.scope.outputs.scope != 'documents' && steps.scope.outputs.scope != 'plugin'
       - id: release_evidence
+        if: steps.scope.outputs.scope != 'documents' && steps.scope.outputs.scope != 'plugin'
         run: node packages/orchestrator/scripts/release-evidence.mjs record
       - uses: actions/upload-artifact@v7
+        if: steps.scope.outputs.scope != 'documents' && steps.scope.outputs.scope != 'plugin'
         with:
           name: ${{ steps.release_evidence.outputs.name }}
           path: ${{ steps.release_evidence.outputs.path }}
           if-no-files-found: error
           retention-days: 30
+      - run: npm run check -- --base HEAD^1
+        if: steps.scope.outputs.scope == 'documents' || steps.scope.outputs.scope == 'plugin'
 
   release_check_node_26:
     runs-on: ubuntu-24.04
@@ -66,19 +94,33 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          fetch-depth: 2
       - run: git --version
       - run: python3 --version
       - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - id: scope
+        run: |
+          if git show HEAD^1:packages/orchestrator/scripts/verification-scope.mjs > "$RUNNER_TEMP/verification-scope.mjs"; then
+            node "$RUNNER_TEMP/verification-scope.mjs" --ci
+          else
+            echo "scope=full" >> "$GITHUB_OUTPUT"
+            printf '%s\n' '## Verification scope: full' '' '```text' 'Reason: the base revision has no scope rules' '```' | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
       - run: npm ci
       - run: npm run release:check
+        if: steps.scope.outputs.scope != 'documents' && steps.scope.outputs.scope != 'plugin'
       - id: release_evidence
+        if: steps.scope.outputs.scope != 'documents' && steps.scope.outputs.scope != 'plugin'
         run: node packages/orchestrator/scripts/release-evidence.mjs record
       - uses: actions/upload-artifact@v7
+        if: steps.scope.outputs.scope != 'documents' && steps.scope.outputs.scope != 'plugin'
         with:
           name: ${{ steps.release_evidence.outputs.name }}
           path: ${{ steps.release_evidence.outputs.path }}
           if-no-files-found: error
           retention-days: 30
+      - run: npm run check -- --base HEAD^1
+        if: steps.scope.outputs.scope == 'documents' || steps.scope.outputs.scope == 'plugin'
 
   live_vendor_compatibility:
     if: >-

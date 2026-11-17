@@ -21,6 +21,12 @@ const SCRIPT = path.join(
   "release-candidate-check.mjs"
 );
 const RELEASE_CHECK = path.join(process.cwd(), "scripts", "release-check.mjs");
+const COMPONENT_RUNNER = path.join(
+  process.cwd(),
+  "scripts",
+  "component-runner.mjs"
+);
+const CHECKOUT_COPY = path.join(process.cwd(), "scripts", "checkout-copy.mjs");
 
 const git = (root: string, args: string[]) => {
   const result = spawnSync("git", args, {
@@ -46,6 +52,11 @@ async function fixtureRepository(
   await copyFile(
     RELEASE_CHECK,
     path.join(root, "packages/orchestrator/scripts/release-check.mjs")
+  );
+  // The candidate runs its own copy of the release check and what it imports.
+  await copyFile(
+    COMPONENT_RUNNER,
+    path.join(root, "packages/orchestrator/scripts/component-runner.mjs")
   );
   await writeFile(
     path.join(root, ".gitignore"),
@@ -251,10 +262,12 @@ test("an unmappable workspace link fails closed before any component runs", asyn
 });
 
 test("the candidate check never commits and never writes in the real checkout", async () => {
-  const source = await readFile(SCRIPT, "utf8");
+  // The Git calls of the candidate live in the shared checkout copy module.
+  const source = await readFile(CHECKOUT_COPY, "utf8");
+  assert.doesNotMatch(await readFile(SCRIPT, "utf8"), /"commit"/);
   assert.doesNotMatch(source, /"commit"/);
-  // Every mutating Git call must target the candidate, never the enumerated root.
-  assert.match(source, /git\(candidate, \[\s*"add"/);
+  // Every mutating Git call must target the copy, never the enumerated root.
+  assert.match(source, /git\(copy, \[\s*"add"/);
   assert.match(
     source,
     /ls-files",\s*"-z",\s*"--cached",\s*"--others",\s*"--exclude-standard"/

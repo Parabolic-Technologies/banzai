@@ -2424,6 +2424,15 @@ test("default CI lanes reject vendor calls and live CI requires explicit opt-in"
 });
 
 test("release validation rejects weakened GitHub CI evidence and live isolation", async () => {
+  // ADR-0071: the complementary branch conditions of a release lane.
+  const full =
+    "steps.scope.outputs.scope != 'documents' && steps.scope.outputs.scope != 'plugin'";
+  const narrow =
+    "steps.scope.outputs.scope == 'documents' || steps.scope.outputs.scope == 'plugin'";
+  const releaseCheck = `      - run: npm run release:check\n        if: ${full}\n`;
+  const evidence = `      - id: release_evidence\n        if: ${full}\n`;
+  const upload = `      - uses: actions/upload-artifact@v7\n        if: ${full}\n`;
+  const scopedCheck = `      - run: npm run check -- --base HEAD^1\n        if: ${narrow}\n`;
   await withFixture(async (root) => {
     const ciPath = path.join(root, ".github/workflows/ci.yml");
     const accepted = await readFile(ciPath, "utf8");
@@ -2461,17 +2470,66 @@ test("release validation rejects weakened GitHub CI evidence and live isolation"
         "CI_POLICY_DRIFT"
       ],
       [
-        "      - run: npm run release:check\n",
+        releaseCheck,
         "      - run: npm run release:check\n        if: false\n",
         "CI_POLICY_DRIFT"
       ],
       // A quoted key is the same condition in another YAML spelling (review-3 F1).
       [
-        "      - run: npm run release:check\n",
+        releaseCheck,
         "      - run: npm run release:check\n        \"if\": github.event_name != 'pull_request'\n",
         "CI_POLICY_DRIFT"
       ],
       ["      - uses: actions/upload-artifact@v7\n", "", "CI_POLICY_DRIFT"],
+      // ADR-0071: the full branch alone runs the release check and records
+      // and uploads evidence; a narrow branch records none.
+      [releaseCheck, "      - run: npm run release:check\n", "CI_POLICY_DRIFT"],
+      [evidence, "      - id: release_evidence\n", "CI_POLICY_DRIFT"],
+      [
+        evidence,
+        "      - id: release_evidence\n        if: always()\n",
+        "CI_POLICY_DRIFT"
+      ],
+      [
+        evidence,
+        `      - id: release_evidence\n        if: ${narrow}\n`,
+        "CI_POLICY_DRIFT"
+      ],
+      [upload, "      - uses: actions/upload-artifact@v7\n", "CI_POLICY_DRIFT"],
+      [
+        upload,
+        "      - uses: actions/upload-artifact@v7\n        if: success()\n",
+        "CI_POLICY_DRIFT"
+      ],
+      // Overlapping conditions run both branches for some scope.
+      [
+        releaseCheck,
+        "      - run: npm run release:check\n        if: steps.scope.outputs.scope != 'documents'\n",
+        "CI_POLICY_DRIFT"
+      ],
+      [
+        scopedCheck,
+        "      - run: npm run check -- --base HEAD^1\n        if: steps.scope.outputs.scope != 'full'\n",
+        "CI_POLICY_DRIFT"
+      ],
+      [scopedCheck, "", "CI_POLICY_DRIFT"],
+      // The scope step must run the first parent's module, never the
+      // checked-out one, and needs the first parent in the checkout.
+      [
+        '            node "$RUNNER_TEMP/verification-scope.mjs" --ci\n',
+        "            node packages/orchestrator/scripts/verification-scope.mjs --ci\n",
+        "CI_POLICY_DRIFT"
+      ],
+      [
+        '            echo "scope=full" >> "$GITHUB_OUTPUT"\n',
+        '            echo "scope=documents" >> "$GITHUB_OUTPUT"\n',
+        "CI_POLICY_DRIFT"
+      ],
+      [
+        "          persist-credentials: false\n          fetch-depth: 2\n",
+        "          persist-credentials: false\n",
+        "CI_POLICY_DRIFT"
+      ],
       // Node 26 is a required lane: it runs on pull requests and blocks.
       [
         "  release_check_node_26:\n",

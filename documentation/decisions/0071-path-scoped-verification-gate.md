@@ -38,7 +38,9 @@
   - the documents scope runs the tests that read documents;
   - the absence of branch protection is stated, and a lane reports its scope;
   - the amendments to ADR-0067 and ADR-0056 are declared.
-- Implementation state: Planned. See the work plan.
+- Implementation state: source implemented on 2026-11-16; see the
+  [implementation report](../work/261116-p12-path-scoped-verification-gate/implementation-report.md).
+  Hosted confirmation of compliance items 13 and 14 is outstanding.
 - Preparation authority: the owner's question of 2026-11-16 whether the
   orchestrator's tests can be switched off while it is frozen, and the reply
   `Yes, draft it` to a proposed path-scoped gate. Preparing this proposal is

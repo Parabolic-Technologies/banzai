@@ -1321,6 +1321,31 @@ is a navigational reference and is updated with the module it describes.
   built-bundle smoke with a vendor-free environment and tracked-tree mutation
   detection. Its default component list excludes version synchronization and
   recovery.
+- `component-runner.mjs` owns the one credential-free child environment and
+  the execution of one check component without a shell, with stdin ignored and
+  output inherited. It reports an exit code, a signal or a failure to start;
+  `release-check.mjs` and `scoped-check.mjs` word their own diagnostics.
+- `checkout-copy.mjs` owns the disposable checkout copy: read-only enumeration
+  of tracked and untracked non-ignored files, refusal of absolute and `..`
+  names, links copied as links, refusal of other non-regular files, a
+  repository of its own whose index lists exactly the enumerated names, no
+  commit, and removal of the copy and its pathspec file after success and
+  failure. `release-candidate-check.mjs` and `scoped-check.mjs` use it.
+- `verification-scope.mjs` (ADR-0071) holds the only path rules of the
+  verification scope, the local and CI change sets, the report and job
+  summary, and the `--ci` entry. It imports only Node built-ins: a CI lane runs
+  the first parent's copy of this file alone from `$RUNNER_TEMP`, so its
+  `--ci` command line, its environment (`GITHUB_EVENT_NAME`, `GITHUB_OUTPUT`,
+  `GITHUB_STEP_SUMMARY`) and its single `scope=<scope>` output line are a
+  compatibility surface between a change's workflow and its base revision.
+- `verification-suites.mjs` lists the documents and plugin test suites; the
+  membership test `test/verification-suites.test.ts` decides what each list
+  must hold.
+- `scoped-check.mjs` is `npm run check`: it computes the local change set and
+  its scope, prints the report and runs that scope's checks, the publication
+  check on a checkout copy that also holds the built distribution. Its
+  `--root` and `--fixture-components` options are test-only and select or
+  narrow no scope.
 - `build.mjs` regenerates `src/init-resources.ts` and the plugin's
   `lib/artifact-readers.mjs` and writes the two hook digests into the frozen
   `src/phase-resources.ts` for explicit `build` calls.
@@ -1329,10 +1354,10 @@ is a navigational reference and is updated with the module it describes.
   tracked resources without repair and compares bundle/map bytes with a fresh
   build before CLI smoke.
 - `release-candidate-check.mjs` copies the enumerated checkout into a temporary
-  candidate outside the repository, links installed dependencies read-only with
-  workspace entries resolving to the candidate's own packages, indexes the
-  candidate without committing, and runs the candidate's `release-check.mjs`
-  fresh. It never stages, commits or writes in the real checkout and removes the
+  candidate outside the repository through `checkout-copy.mjs`, links installed
+  dependencies read-only with workspace entries resolving to the candidate's
+  own packages before the candidate is indexed, and runs the candidate's
+  `release-check.mjs` fresh. It never stages, commits or writes in the real checkout and removes the
   candidate on success and failure.
 - `release-version.mjs` owns canonical SemVer comparison, fixed policy and JSON
   pointer decoding, exact byte-span candidates, restrictive durable transaction

@@ -1284,10 +1284,20 @@ function requireJobText(block, expected, job, label) {
   }
 }
 
-// ADR-0053 and ADR-0067: each required lane must be exactly its approved job.
-// Any added line, in any YAML spelling of a key (a quoted or escaped `if`, for
-// example), could change when the lane runs or skip its gate, so the lane is
-// compared as whole text instead of matching keys by pattern.
+// ADR-0053, ADR-0067 and ADR-0071: each required lane must be exactly its
+// approved job. Any added line, in any YAML spelling of a key (a quoted or
+// escaped `if`, for example), could change when the lane runs or skip its
+// gate, so the lane is compared as whole text instead of matching keys by
+// pattern. The scope step runs the first parent's scope module, never the
+// checked-out one, and writes the bootstrap reason itself when that parent
+// has none. The full and narrow conditions are complements, so exactly one
+// branch runs and a missing or unknown scope takes the full branch; only the
+// full branch records release evidence.
+const FULL_SCOPE_CONDITION =
+  "steps.scope.outputs.scope != 'documents' && steps.scope.outputs.scope != 'plugin'";
+const NARROW_SCOPE_CONDITION =
+  "steps.scope.outputs.scope == 'documents' || steps.scope.outputs.scope == 'plugin'";
+
 function ciLaneDefinition(lane) {
   return [
     "    runs-on: ubuntu-24.04",
@@ -1296,19 +1306,33 @@ function ciLaneDefinition(lane) {
     "      - uses: actions/checkout@v6",
     "        with:",
     "          persist-credentials: false",
+    "          fetch-depth: 2",
     "      - run: git --version",
     "      - run: python3 --version",
     '      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"',
+    "      - id: scope",
+    "        run: |",
+    '          if git show HEAD^1:packages/orchestrator/scripts/verification-scope.mjs > "$RUNNER_TEMP/verification-scope.mjs"; then',
+    '            node "$RUNNER_TEMP/verification-scope.mjs" --ci',
+    "          else",
+    '            echo "scope=full" >> "$GITHUB_OUTPUT"',
+    "            printf '%s\\n' '## Verification scope: full' '' '```text' 'Reason: the base revision has no scope rules' '```' | tee -a \"$GITHUB_STEP_SUMMARY\"",
+    "          fi",
     "      - run: npm ci",
     "      - run: npm run release:check",
+    `        if: ${FULL_SCOPE_CONDITION}`,
     "      - id: release_evidence",
+    `        if: ${FULL_SCOPE_CONDITION}`,
     "        run: node packages/orchestrator/scripts/release-evidence.mjs record",
     "      - uses: actions/upload-artifact@v7",
+    `        if: ${FULL_SCOPE_CONDITION}`,
     "        with:",
     "          name: ${{ steps.release_evidence.outputs.name }}",
     "          path: ${{ steps.release_evidence.outputs.path }}",
     "          if-no-files-found: error",
-    "          retention-days: 30"
+    "          retention-days: 30",
+    "      - run: npm run check -- --base HEAD^1",
+    `        if: ${NARROW_SCOPE_CONDITION}`
   ].join("\n");
 }
 

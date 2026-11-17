@@ -68,21 +68,34 @@ projects. Detailed module behavior belongs in the
 - `node packages/orchestrator/scripts/release-candidate-check.mjs` runs the
   release gate in a disposable copy of tracked and untracked non-ignored
   files, with installed dependencies linked read-only and a separate index.
+- `npm run check` runs the checks of the working tree's verification scope
+  (ADR-0071). It compares the working tree and untracked non-ignored files
+  with `HEAD` or `--base <revision>`, prints the scope with its deciding paths
+  or reason, and runs: for `documents`, `build:dist`, `build:check`, release
+  validation, the publication check on a disposable copy with its own index
+  and the documents suite; for `plugin`, the same with both suites; for
+  `full`, `build:dist` and `verify`. Scope rules live in
+  `packages/orchestrator/scripts/verification-scope.mjs`, suites in
+  `verification-suites.mjs`.
 - `npm run version:set -- <version>` synchronizes nine fields across seven
   files to a human-selected version. `npm run version:recover` restores
   authenticated transaction originals; retained transaction evidence blocks
   release validation.
 - `npm run banzai` runs the local bundle. `npm run install:orchestrator`
   builds and links `@parabolic-technologies/banzai` for local CLI use.
-- [.github/workflows/ci.yml](.github/workflows/ci.yml) runs the complete
-  release gate on all three supported Node lanes for pull requests and manual
-  dispatch; it has no scheduled run. The live lane additionally requires
-  explicit protected-runner authorization.
+- [.github/workflows/ci.yml](.github/workflows/ci.yml) runs all three
+  supported Node lanes for pull requests and manual dispatch; it has no
+  scheduled run. Each lane computes its verification scope with the scope
+  rules of the merge commit's first parent and names it in the job summary. A
+  `full` lane runs the complete release gate and records release evidence; a
+  `documents` or `plugin` lane runs `npm run check -- --base HEAD^1` and
+  records none. Manual dispatch runs the complete gate. The live lane
+  additionally requires explicit protected-runner authorization.
   Branch pushes alone start no workflow.
 - [.github/workflows/publish.yml](.github/workflows/publish.yml) handles
   published stable GitHub Releases. It reuses tree-bound evidence from all
-  required PR lanes when valid, otherwise runs every supported lane on the
-  release tag. Evidence checking and publishing run on Node 24.11.1.
+  required PR lanes when valid, otherwise, including a merge whose lanes ran a
+  narrow scope, runs every supported lane on the release tag. Evidence checking and publishing run on Node 24.11.1.
   The publishing job builds its own bundle and uses npm trusted publishing
   for the CLI workspace. Plugin installation and registry availability have
   separate delivery evidence in
@@ -480,9 +493,12 @@ Plugin and release owners:
 - Release-evidence tests run the real script with a test-only `fetch` preload
   and native `Request`/`Response` objects; they require no network listener or
   network access.
-- Required final suite: `npm run verify`, with all tests passing, clean
-  typecheck, zero lint errors and distribution parity. Advisory lint warnings
-  remain visible. Release work additionally requires fresh `npm run release:check`.
+- Required final suite: `npm run check`, the checks of the change's
+  verification scope; for a `full` change that includes `npm run verify`, with
+  all tests passing, clean typecheck, zero lint errors and distribution parity.
+  `npm run verify` remains a valid final suite for any change. Advisory lint
+  warnings remain visible. Release work additionally requires fresh
+  `npm run release:check`.
 - Coverage threshold: `None`; no numeric coverage threshold or coverage gate
   is configured in the repository's test runner or CI.
 - Final-suite ownership: orchestrated builders run affected checks; the runner

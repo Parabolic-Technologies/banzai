@@ -359,6 +359,31 @@ the pinned machine-contract versions.
 formatting to the unchanged `verify` gate, rejects tracked byte or mode mutation, and never invokes
 `version:set` or `version:recover`.
 
+`npm run check` runs the checks of a change's verification scope
+([ADR-0071](decisions/0071-path-scoped-verification-gate.md)). The change set is
+every path that differs between the working tree and `HEAD`, or the commit or
+tree named by `--base <revision>`, plus untracked non-ignored files; a moved
+file counts under both paths. The rules in
+`packages/orchestrator/scripts/verification-scope.mjs` give each path a scope,
+first rule first: the orchestrator package, plugin hooks, library, contracts
+and manifests, root package files, release-train version files, `.github/` and
+`release-policy.json` are `full`; other `plugins/banzai/` files are `plugin`;
+`documentation/`, root Markdown and `publication-policy.json` are `documents`;
+any other path is `full`. The change set takes its widest scope, and an empty
+or uncomputable change set is `full`. The command prints the scope with its
+deciding paths or its reason, then runs, stopping at the first failure:
+
+- `documents`: `build:dist`, `build:check`, `release:validate`, the
+  publication check on a disposable copy of the tracked and untracked
+  non-ignored files and the built distribution with its own index, and the
+  documents suite;
+- `plugin`: the same checks with the documents and plugin suites;
+- `full`: `build:dist` and `verify`.
+
+The suites in `packages/orchestrator/scripts/verification-suites.mjs` list
+every test that reads a path of their scope; a membership test enforces the
+lists. The command creates no Git object, index entry or ref in the checkout.
+
 <!-- release-policy:start -->
 
 Engines: `>=22.20.0 <23 || >=24.11.1 <25 || >=26.13.0 <27`
@@ -374,7 +399,8 @@ Version authority: `package.json#/version`; 9 fields in 7 files.
 <!-- release-policy:end -->
 
 The supported lanes are blocking and each runs `npm ci` plus the full local
-gate ([ADR-0067](decisions/0067-node-26-supported-release-lane.md)). Node 23,
+gate ([ADR-0067](decisions/0067-node-26-supported-release-lane.md)), or the
+checks of a narrower verification scope. Node 23,
 25 and 27 have no lane and no support claim. A required environment
 failure remains missing evidence rather than becoming a product pass.
 The images are the Git-capable official Bookworm variants. Each lane runs
@@ -388,15 +414,25 @@ The workflow is [`.github/workflows/ci.yml`](https://github.com/Parabolic-Techno
 The supported lanes run on pull requests and manual dispatch; the workflow has
 no scheduled run. A push
 to `main` or `dev` starts no hosted run, and a newer push to a pull request
-cancels that pull request's in-progress run. After `release:check` passes, each
-supported lane records the tree it verified as a 30-day
-`release-evidence-<lane>-attempt-<attempt>-tree-<tree>` artifact.
+cancels that pull request's in-progress run. Each lane checks out the merge
+commit with its first parent and computes its verification scope before any
+check by running the first parent's copy of `verification-scope.mjs`, read with
+`git show`, so a change cannot narrow its own lane. When the first parent has
+no scope module the scope is `full` with the reason
+`the base revision has no scope rules`; manual dispatch is always `full`. The
+job summary names the scope and its deciding paths, and only the word
+`scope=<scope>` reaches the step output. A `full` lane runs `release:check`;
+after it passes, the lane records the tree it verified as a 30-day
+`release-evidence-<lane>-attempt-<attempt>-tree-<tree>` artifact. A
+`documents` or `plugin` lane runs `npm run check -- --base HEAD^1` and records
+no evidence.
 
 Publication through `.github/workflows/publish.yml` reuses that evidence only
 when the release tag is a merge commit whose tree equals its second parent's,
 and a successful pull-request run of this repository's `ci.yml` for that parent
 has every supported lane's evidence for the tag's tree in its latest attempt.
-Otherwise every supported lane runs the complete `release:check` on the tag
+Otherwise, including a merge whose lanes ran a narrow scope and so recorded no
+evidence, every supported lane runs the complete `release:check` on the tag
 before anything is published. The `release_evidence` job summary states which
 path ran. `npm run release:validate` owns the layout of both workflows.
 

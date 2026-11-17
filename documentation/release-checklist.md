@@ -19,7 +19,10 @@ those actions.
       the pull-request run of the candidate head, whose required lanes recorded
       the candidate tree (ADR-0053). Merge with a merge commit so publication
       can reuse that evidence; a squash or rebase merge makes publication
-      re-run every supported lane.
+      re-run every supported lane. A green lane may have run a narrow
+      verification scope (ADR-0071): read the scope in each lane's job summary.
+      A `documents` or `plugin` lane records no release evidence, so a merge
+      whose lanes ran a narrow scope makes publication run the complete check.
 - [ ] Prepare and review the notes in the GitHub draft release for `v<version>`.
       [GitHub Releases](https://github.com/Parabolic-Technologies/banzai/releases)
       is the sole source of release notes; version bumps require no local
@@ -168,6 +171,10 @@ Repository policy permits merge only with all three required supported-lane
 passes. The advisory live lane is not a dependency of required jobs. CI runs on
 pull requests and manual dispatch; a push to `main` or `dev`
 starts no hosted run, and a newer push to a pull request cancels its older run.
+Each lane runs the checks of the change's verification scope, computed with
+the scope rules of the merge commit's first parent; only a `full` lane runs
+`release:check` and records release evidence. The person who merges reads the
+scope in the job summary. Manual dispatch always runs the complete check.
 
 ## Live Compatibility Evidence
 
