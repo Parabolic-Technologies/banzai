@@ -4,7 +4,7 @@ import { lstat, readFile, readdir, readlink, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { promisify } from "node:util";
-import { spawn } from "node:child_process";
+import { startComponent } from "./component-runner.mjs";
 
 const execFileAsync = promisify(execFile);
 const packageRoot = path.resolve(
@@ -90,32 +90,6 @@ async function parseArguments(args) {
     return { name: value.name, command: value.command, args: value.args };
   });
   return { root, components };
-}
-
-function sanitizedEnvironment() {
-  const blocked = new Set([
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "AWS_BEARER_TOKEN_BEDROCK",
-    "CLAUDE_CODE_USE_BEDROCK",
-    "CLAUDE_CODE_USE_FOUNDRY",
-    "CLAUDE_CODE_USE_VERTEX",
-    "CODEX_API_KEY",
-    "OPENAI_API_KEY"
-  ]);
-  const environment = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    const upper = key.toUpperCase();
-    if (
-      blocked.has(upper) ||
-      upper.startsWith("BANZAI_LIVE_") ||
-      /(?:OPENAI|ANTHROPIC|CODEX).*(?:API_?KEY|AUTH_?TOKEN)/.test(upper)
-    ) {
-      continue;
-    }
-    environment[key] = value;
-  }
-  return environment;
 }
 
 async function trackedSnapshot(root) {
@@ -204,30 +178,12 @@ async function cleanupTransient(root) {
 
 async function runComponent(component, root) {
   process.stdout.write(`release check: ${component.name}\n`);
-  const exitCode = await new Promise((resolve, reject) => {
-    const child = spawn(component.command, component.args, {
-      cwd: root,
-      env: sanitizedEnvironment(),
-      shell: false,
-      stdio: ["ignore", "inherit", "inherit"]
-    });
-    child.once("error", reject);
-    child.once("exit", (code, signal) => {
-      if (signal !== null) {
-        reject(
-          new ReleaseCheckError(
-            "RELEASE_COMPONENT_SIGNAL",
-            `${component.name} was interrupted`
-          )
-        );
-        return;
-      }
-      resolve(code ?? 1);
-    });
-  }).catch(() => {
+  const outcome = await startComponent(component, root).outcome;
+  // A component that cannot start or is interrupted cannot complete.
+  if (outcome.kind !== "exit") {
     fail("RELEASE_COMPONENT_FAILED", `${component.name} could not complete`);
-  });
-  if (exitCode !== 0) {
+  }
+  if (outcome.code !== 0) {
     fail("RELEASE_COMPONENT_FAILED", `${component.name} exited non-zero`);
   }
 }

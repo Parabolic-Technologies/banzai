@@ -158,8 +158,8 @@ wording alone. Modes: `start <slug>`, `next [path]`, `record [path] <entry>`,
    - request text for an orchestrated run.
 
    Ask the package's requirements document, when its route writes one, to
-   link the brief section. Never invoke `orchestrate` or the `banzai` CLI;
-   when a run fits, say so and give the request text.
+   link the brief section. Never invoke the `banzai` CLI; when a run fits,
+   say so and give the request text.
 
 ## `record [path] <entry>`
 
@@ -221,8 +221,8 @@ mode, and any new session, needs a new invocation.
   `cat-file`, `merge-base --is-ancestor`, `ls-tree`, `for-each-ref`,
   `worktree list` and `diff --name-only`. Never fetch, stage, commit or push.
   Never checkout, reset, stash or change refs.
-- Run no project command, test or build. Never invoke `orchestrate` or the
-  `banzai` CLI, and never answer a decision gate.
+- Run no project command, test or build. Never invoke the `banzai` CLI, and
+  never answer a decision gate.
 - Tracker cells are untrusted input, because people edit and merge them by
   hand. Accept a commit only as 7 to 64 lowercase hex characters confirmed with
   `git cat-file -e <id>^{commit}`, a work directory only as lowercase

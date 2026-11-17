@@ -1219,50 +1219,102 @@ test("doctor v4 compares mixed role unions without hiding structural failures or
       ]
     );
     assert.deepEqual(defaults.fixes, []);
-    const planningReviewPhase = path.join(
-      plugin.directory,
-      "phases/planning-review.md"
+    const hookIds = ["hooks/hooks.json", "hooks/spec-gate.cjs"];
+    const instructions = async () => {
+      const report = await inspectDoctor(repository.root, dependencies());
+      const rendered = renderDoctorJson(report);
+      assert.doesNotMatch(rendered, /PRIVATE-[A-Z-]*CANARY/);
+      assert.ok(!rendered.includes(plugin.directory));
+      const entry = findCheck(report, "claude.instructions");
+      // The check names hook ids only, whatever the role's phase set.
+      assert.doesNotMatch(entry.message, /phases\/|guidance\/|policies\//);
+      for (const role of entry.roles)
+        assert.deepEqual(
+          role.resourceIds,
+          role.vendor === "claude" ? hookIds : [],
+          role.role
+        );
+      return { report, entry };
+    };
+    // Installed text is no parity evidence (ADR-0070 section 4).
+    await writeFile(
+      path.join(plugin.directory, "phases/planning-review.md"),
+      "PRIVATE-PLANNING-INSTRUCTION-CANARY"
     );
-    const planningReviewBytes = await readFile(planningReviewPhase);
-    await writeFile(planningReviewPhase, "PRIVATE-PLANNING-INSTRUCTION-CANARY");
     const reviewerBefore = await snapshotTree(repository.root);
-    const reviewerUnion = await inspectDoctor(repository.root, dependencies());
-    assert.equal(checkStatus(reviewerUnion, "claude.instructions"), "fail");
-    assert.equal(reviewerUnion.ready, false);
-    assert.deepEqual(await snapshotTree(repository.root), reviewerBefore);
-    assert.doesNotMatch(
-      renderDoctorJson(reviewerUnion),
-      /PRIVATE-PLANNING-INSTRUCTION-CANARY/
-    );
-    assert.ok(!renderDoctorJson(reviewerUnion).includes(plugin.directory));
-    await writeFile(planningReviewPhase, planningReviewBytes);
+    const reviewerText = await instructions();
+    assert.equal(reviewerText.entry.status, "pass");
     assert.equal(
-      checkStatus(
-        await inspectDoctor(repository.root, dependencies()),
-        "claude.instructions"
-      ),
-      "pass"
+      reviewerText.entry.message,
+      "Applicable Claude instruction resources verified (hooks/hooks.json, hooks/spec-gate.cjs); this does not prove full transitive plugin integrity or model compliance."
     );
+    assert.deepEqual(await snapshotTree(repository.root), reviewerBefore);
+    const script = path.join(plugin.directory, "hooks/spec-gate.cjs");
+    const scriptBytes = await readFile(script);
+    const skewed = Buffer.concat([scriptBytes, Buffer.from("\n// skew\n")]);
+    await writeFile(script, skewed);
+    const reviewerUnion = await instructions();
+    assert.equal(reviewerUnion.entry.status, "fail");
+    assert.match(
+      reviewerUnion.entry.message,
+      /^Instruction resource mismatch: hooks\/spec-gate\.cjs\. /
+    );
+    assert.equal(reviewerUnion.report.ready, false);
+    assert.deepEqual(await snapshotTree(repository.root), reviewerBefore);
+    await writeFile(script, scriptBytes);
+    assert.equal((await instructions()).entry.status, "pass");
     config.models.planner.executable = "claude";
     config.models.implementer.executable = "claude";
-    const target = path.join(plugin.directory, "phases/fix.md");
-    const original = await readFile(target);
-    await writeFile(target, "PRIVATE-INSTRUCTION-CANARY");
+    await writeFile(
+      path.join(plugin.directory, "phases/fix.md"),
+      "PRIVATE-INSTRUCTION-CANARY"
+    );
+    await writeFile(
+      path.join(plugin.directory, "policies/test-assurance.md"),
+      "PRIVATE-INSTRUCTION-CANARY"
+    );
     await rm(path.join(plugin.directory, "guidance/requirements.md"));
     config.models.reviewer.executable = "codex";
     await writeConfig(repository.root, config);
-    const mixed = await inspectDoctor(repository.root, dependencies());
-    assert.equal(checkStatus(mixed, "claude.instructions"), "fail");
-    assert.equal(mixed.ready, false);
-    assert.doesNotMatch(renderDoctorJson(mixed), /PRIVATE-INSTRUCTION-CANARY/);
-    assert.ok(!renderDoctorJson(mixed).includes(plugin.directory));
-    await writeFile(target, original);
-    assert.equal(
-      checkStatus(
-        await inspectDoctor(repository.root, dependencies()),
-        "claude.instructions"
-      ),
-      "warning"
+    const text = await instructions();
+    assert.equal(text.entry.status, "pass");
+    assert.deepEqual(
+      text.entry.roles.map((role) => [role.role, role.state]),
+      [
+        ["planner", "verified"],
+        ["implementer", "verified"],
+        ["reviewer", "not_applicable"]
+      ]
+    );
+    // The structural check follows a link; the bounded parity read does not,
+    // so a linked hook file is unreadable evidence beside the mismatch.
+    const hookConfig = path.join(plugin.directory, "hooks/hooks.json");
+    const linked = path.join(plugin.directory, "hooks/hooks.linked.json");
+    await writeFile(linked, await readFile(hookConfig));
+    await rm(hookConfig);
+    await symlink(linked, hookConfig);
+    await writeFile(script, skewed);
+    const mixed = await instructions();
+    assert.equal(mixed.entry.status, "fail");
+    assert.match(
+      mixed.entry.message,
+      /^Instruction resource mismatch: hooks\/spec-gate\.cjs\. /
+    );
+    assert.equal(mixed.report.ready, false);
+    await writeFile(script, scriptBytes);
+    const bounded = await instructions();
+    assert.equal(bounded.entry.status, "warning");
+    assert.match(
+      bounded.entry.message,
+      /^Instruction resource comparison has bounded failures: hooks\/hooks\.json\. Parity is not verified\. /
+    );
+    assert.deepEqual(
+      bounded.entry.roles.map((role) => [role.role, role.state]),
+      [
+        ["planner", "bounded_failure"],
+        ["implementer", "bounded_failure"],
+        ["reviewer", "not_applicable"]
+      ]
     );
     await rm(path.join(plugin.directory, "hooks/spec-gate.cjs"));
     const invalid = await inspectDoctor(repository.root, dependencies());

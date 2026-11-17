@@ -120,7 +120,11 @@ export async function inspectInstructionParity(
   directory: string | null,
   phases: readonly InstructionPhase[]
 ): Promise<InstructionParity> {
-  const resourceIds = instructionResourceIds(phases);
+  // An unknown phase stays refused before any comparison.
+  instructionResourceIds(phases);
+  // Runner text comes from the frozen module, so only the shared hook is
+  // compared with an installed plugin (ADR-0070 section 4).
+  const resourceIds = [...HOOK_IDS];
   if (directory === null)
     return {
       state: "unverifiable",

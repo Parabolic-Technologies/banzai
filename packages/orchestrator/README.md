@@ -185,9 +185,9 @@ To improve the docs, contribute a fix, or share a workflow, read
 <details>
 <summary>Advanced workflows and maintainer references</summary>
 
-To supervise a run from a chat agent, explicitly invoke `/banzai:orchestrate`
-in Claude Code or `$banzai:orchestrate` in Codex. Compatible supervisors
-require control contract `9.0.0`; see
+To supervise a run from a chat agent or a script, use the CLI's versioned
+`banzai control` interface. The plugin packages no supervisor skill.
+Compatible supervisors require control contract `9.0.0`; see
 [agent control](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/orchestrator.md#agent-control).
 
 - [Project guidance and setup](https://github.com/Parabolic-Technologies/banzai/blob/main/documentation/orchestrator.md#project-guidance-setup)

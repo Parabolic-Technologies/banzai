@@ -1,24 +1,9 @@
-import { execFile, spawn } from "node:child_process";
-import { constants } from "node:fs";
-import {
-  chmod,
-  copyFile,
-  lstat,
-  mkdir,
-  mkdtemp,
-  readdir,
-  readlink,
-  realpath,
-  rm,
-  symlink,
-  writeFile
-} from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { spawn } from "node:child_process";
+import { lstat, mkdir, readdir, realpath, symlink } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
+import { CheckoutCopyError, withCheckoutCopy } from "./checkout-copy.mjs";
 
-const execFileAsync = promisify(execFile);
 const packageRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   ".."
@@ -56,61 +41,12 @@ function parseArguments(args) {
   return { root, fixtureComponents };
 }
 
-async function git(root, args) {
-  const { stdout } = await execFileAsync("git", ["-C", root, ...args], {
-    encoding: "buffer",
-    timeout: 120_000,
-    maxBuffer: 128 * 1024 * 1024
-  });
-  return stdout;
-}
-
-/**
- * Read-only enumeration of the real checkout. `--others --exclude-standard`
- * keeps untracked work in the candidate while leaving ignored evidence,
- * credentials and installed dependencies behind.
- */
-async function candidateFiles(root) {
-  const stdout = await git(root, [
-    "ls-files",
-    "-z",
-    "--cached",
-    "--others",
-    "--exclude-standard"
-  ]);
-  const names = stdout
-    .toString("utf8")
-    .split("\0")
-    .filter((name) => name.length > 0);
-  if (names.length === 0) {
-    fail("EMPTY_RELEASE_CANDIDATE", "the checkout enumerates no files");
-  }
-  for (const name of names) {
-    if (path.isAbsolute(name) || name.split("/").includes("..")) {
-      fail("INVALID_RELEASE_CANDIDATE_PATH", name);
-    }
-  }
-  return names;
-}
-
-async function copyCandidate(root, candidate, names) {
-  for (const name of names) {
-    const source = path.join(root, name);
-    const target = path.join(candidate, name);
-    const info = await lstat(source).catch(() => null);
-    // A race or a dangling index entry must not silently shrink the candidate.
-    if (info === null) fail("MISSING_RELEASE_CANDIDATE_FILE", name);
-    await mkdir(path.dirname(target), { recursive: true });
-    if (info.isSymbolicLink()) {
-      await symlink(await readlink(source), target);
-      continue;
-    }
-    if (!info.isFile()) fail("INVALID_RELEASE_CANDIDATE_FILE", name);
-    await copyFile(source, target, constants.COPYFILE_FICLONE);
-    // Release validation requires the committed CLI to stay executable.
-    await chmod(target, info.mode & 0o777);
-  }
-}
+const COPY_FAILURES = {
+  empty: "EMPTY_RELEASE_CANDIDATE",
+  "invalid-path": "INVALID_RELEASE_CANDIDATE_PATH",
+  "missing-file": "MISSING_RELEASE_CANDIDATE_FILE",
+  "invalid-file": "INVALID_RELEASE_CANDIDATE_FILE"
+};
 
 const contains = (directory, target) =>
   target === directory || target.startsWith(directory + path.sep);
@@ -174,28 +110,6 @@ async function provideDependencies(root, candidate) {
   );
 }
 
-/**
- * The candidate gets its own history-free repository whose index matches its
- * working tree, as ADR-0044 section 3 requires. Nothing is ever staged or
- * committed in the real checkout, and this repository is never committed.
- */
-async function indexCandidate(candidate, names, pathspec) {
-  await execFileAsync("git", ["init", "--initial-branch=main", candidate], {
-    timeout: 120_000
-  });
-  await writeFile(pathspec, names.join("\0"), "utf8");
-  try {
-    await git(candidate, [
-      "add",
-      "--pathspec-from-file",
-      pathspec,
-      "--pathspec-file-nul"
-    ]);
-  } finally {
-    await rm(pathspec, { force: true });
-  }
-}
-
 async function runReleaseCheck(candidate, fixtureComponents) {
   const script = path.join(
     candidate,
@@ -217,23 +131,26 @@ async function runReleaseCheck(candidate, fixtureComponents) {
   });
 }
 
+/**
+ * The candidate is the disposable checkout copy of `checkout-copy.mjs` with
+ * the installed dependencies linked in, so its own history-free index matches
+ * its working tree as ADR-0044 section 3 requires.
+ */
 async function executeReleaseCandidateCheck({ root, fixtureComponents }) {
-  const names = await candidateFiles(root);
-  const candidate = await realpath(
-    await mkdtemp(
-      path.join(await realpath(tmpdir()), "banzai-release-candidate-")
-    )
-  );
   try {
-    await copyCandidate(root, candidate, names);
-    await provideDependencies(root, candidate);
-    // The pathspec file stays outside the candidate so its working tree and
-    // index agree at every point release validation can observe them.
-    await indexCandidate(candidate, names, `${candidate}.pathspec`);
-    return await runReleaseCheck(candidate, fixtureComponents);
-  } finally {
-    await rm(`${candidate}.pathspec`, { force: true });
-    await rm(candidate, { recursive: true, force: true });
+    return await withCheckoutCopy(
+      root,
+      {
+        prefix: "banzai-release-candidate-",
+        prepare: (candidate) => provideDependencies(root, candidate)
+      },
+      (candidate) => runReleaseCheck(candidate, fixtureComponents)
+    );
+  } catch (error) {
+    if (error instanceof CheckoutCopyError) {
+      fail(COPY_FAILURES[error.reason], error.detail);
+    }
+    throw error;
   }
 }
 

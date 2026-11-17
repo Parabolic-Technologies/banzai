@@ -4,6 +4,7 @@ import {
 } from "./review-fixtures.js";
 import assert from "node:assert/strict";
 import {
+  access,
   mkdir,
   mkdtemp,
   readFile,
@@ -242,7 +243,8 @@ async function spawned(
 
 async function pluginFixture(
   manifest: string | null,
-  withRequiredSurface = true
+  withRequiredSurface = true,
+  extraSkills: readonly string[] = []
 ): Promise<{ root: string; directory: string }> {
   const root = await mkdtemp(path.join(tmpdir(), "banzai-plugin-"));
   const directory = path.join(root, "plugins", "banzai");
@@ -263,10 +265,10 @@ async function pluginFixture(
       "feature-description",
       "feature-review",
       "feature-status",
-      "orchestrate",
       "project-manifest",
       "quick-fix",
-      "test-writing"
+      "test-writing",
+      ...extraSkills
     ]) {
       await mkdir(path.join(directory, "skills", skill), { recursive: true });
       await writeFile(
@@ -403,20 +405,40 @@ test("plugin directory resolution verifies Banzai identity and its required surf
     '{"name":"banzai","version":"1.0.0","skills":"./skills/"}',
     false
   );
+  // ADR-0070 section 7: a plugin published before the skill was removed
+  // still carries it, and the check accepts both shapes.
+  const withOrchestrate = await pluginFixture(
+    '{"name":"banzai","version":"1.0.0","skills":"./skills/"}',
+    true,
+    ["orchestrate"]
+  );
+  const missingSkill = await pluginFixture(
+    '{"name":"banzai","version":"1.0.0","skills":"./skills/"}'
+  );
+  await rm(path.join(missingSkill.directory, "skills", "quick-fix"), {
+    recursive: true
+  });
   try {
-    const explicit = await resolveClaudeInvocationScope({
-      mode: "scoped",
-      pluginDirectory: valid.directory
-    });
-    assert.equal(explicit.scope.pluginDirectory, valid.directory);
-    assert.equal(explicit.scope.settingSources, "project");
-    assert.equal(explicit.degradedReason, null);
+    await assert.rejects(
+      access(path.join(valid.directory, "skills", "orchestrate")),
+      { code: "ENOENT" }
+    );
+    for (const accepted of [valid, withOrchestrate]) {
+      const explicit = await resolveClaudeInvocationScope({
+        mode: "scoped",
+        pluginDirectory: accepted.directory
+      });
+      assert.equal(explicit.scope.pluginDirectory, accepted.directory);
+      assert.equal(explicit.scope.settingSources, "project");
+      assert.equal(explicit.degradedReason, null);
+    }
 
     for (const directory of [
       missing.directory,
       malformed.directory,
       wrongPlugin.directory,
-      incomplete.directory
+      incomplete.directory,
+      missingSkill.directory
     ]) {
       await assert.rejects(
         async () =>
@@ -451,7 +473,9 @@ test("plugin directory resolution verifies Banzai identity and its required surf
       missing,
       malformed,
       wrongPlugin,
-      incomplete
+      incomplete,
+      withOrchestrate,
+      missingSkill
     ]) {
       await rm(fixture.root, { recursive: true, force: true });
     }

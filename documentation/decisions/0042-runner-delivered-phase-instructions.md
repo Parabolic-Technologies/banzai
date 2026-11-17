@@ -535,3 +535,11 @@ by preparing this decision.
   accepted authority while this proposal is still Proposed.
 - Implementation state: `Planned`; not implemented or confirmed in installed
   clients. Remain Planned until the required installed-client evidence exists.
+- Amended by [ADR-0070](./0070-orchestrator-owned-instruction-copy.md), accepted
+  2026-11-16: the orchestrator's tracked instruction module is its own frozen
+  instruction set and is no longer generated from the plugin's files, so the
+  single canonical guidance source of section 1 serves standalone skills
+  only. The transitional exception for the skills' `Orchestrated Mode`
+  sections ends. Section 6's parity check keeps the hook and drops the text,
+  and its structural check no longer names the `orchestrate` skill.
+  Implementation is Planned.

@@ -270,3 +270,6 @@ Implementation and review must confirm:
   the exact required lanes are Node 22.20.0, 24.11.1 and 26.13.0. Per-lane
   source builds, the Node 22 target and the publishing build are unchanged.
 - Superseded by: None.
+- Amended by [ADR-0071](./0071-path-scoped-verification-gate.md), accepted
+  2026-11-16: every scope starts with the distribution build, and the
+  complete check runs in full scope only. Implementation is Planned.

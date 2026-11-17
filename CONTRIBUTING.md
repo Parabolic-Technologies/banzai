@@ -39,9 +39,11 @@ improvements and small fixes can be proposed directly.
    documentation and refresh tracked generated resources with `npm run build`
    if their inputs change. The CLI bundle and source map in `dist/` are ignored
    build outputs; CI builds them from source.
-4. Run `npm run release:check` and `git diff --check`. Report the exact commands,
-   results, and any unavailable checks. Documentation-only changes still need
-   relevant link and release validation; explain any unrun checks.
+4. Run `npm run check` and `git diff --check`. `npm run check` prints the
+   verification scope of your change and runs that scope's checks; a change
+   outside documentation and plugin text runs the complete gate. Report the
+   exact commands, results, and any unavailable checks; explain any unrun
+   checks.
 5. Open a pull request describing the problem, resulting behavior, linked
    issue or approved artifacts, verification, and material limitations.
 
@@ -84,6 +86,24 @@ Focused test evidence uses
 `node packages/orchestrator/scripts/test.mjs --pattern <regex>`. The formatter
 (`npm run format:check`) is deliberately outside `verify`; run it during final
 review.
+
+### Plugin text and the runner's instruction copy
+
+Plugin skills, policies, guidance and templates are ordinary source. Change
+them by pull request; they need no baseline transition and no orchestrator
+rebuild. Some release-validation checks and tests pin standalone text, so
+update an affected check in the same pull request.
+
+The runner's own instruction text is frozen in
+`packages/orchestrator/src/phase-resources.ts` (ADR-0070) and is not generated
+from plugin files. `npm run build` writes only the `hooks/hooks.json` and
+`hooks/spec-gate.cjs` digests into it. A change to one of its text entries, its
+phase table, either hook file or a plugin manifest needs a transition in
+`packages/orchestrator/instruction-baseline.json` that cites an Accepted ADR;
+a manifest's `version` value is exempt. A hook change also needs
+`npm run build`. The `phase-guidance-*` files are a closed record; do not edit
+them. The procedure is in
+[Maintained instruction baselines](documentation/engineering-quality.md#maintained-instruction-baselines).
 
 ### Mechanical import boundaries
 
@@ -132,7 +152,23 @@ full `verify` sequence plus the formatter check, plugin/marketplace/release
 validation, hook syntax, distribution checks, and an isolated built-bundle
 smoke. The build leaves tracked generated resources untouched, so stale
 resources still fail verification. The gate fails if a component
-changes a tracked byte or executable mode. CI runs the same gate on the
+changes a tracked byte or executable mode.
+
+For a change under way, `npm run check` runs the checks of its verification
+scope ([ADR-0071](documentation/decisions/0071-path-scoped-verification-gate.md)).
+It compares the working tree and its untracked non-ignored files with `HEAD`,
+or with `--base <revision>`, and prints the scope and the paths that decide it.
+A change confined to documentation, root Markdown and the publication policy
+has the `documents` scope: the distribution build, `build:check`, release
+validation, the publication check on a disposable copy with its own index, and
+the documents test suite. A change that also touches plugin text outside its
+hooks, library, contracts and manifests has the `plugin` scope, which adds the
+plugin test suite. Any other change, an empty change set or one that cannot be
+computed has the `full` scope: the distribution build and `verify`. Scope
+rules and suites live in `packages/orchestrator/scripts/`; release work still
+runs `npm run release:check`.
+
+CI runs the release gate, or the checks of a change's narrower scope, on the
 supported Node lanes:
 
 <!-- release-policy:start -->
@@ -152,7 +188,13 @@ Version authority: `package.json#/version`; 9 fields in 7 files.
 Live vendor-permission evidence is a separate manual, protected-ref-only path;
 deterministic tests are never labeled as proof of hosted permission behavior.
 The [GitHub Actions workflow](.github/workflows/ci.yml) runs the three required
-supported lanes on pull requests and on manual dispatch. A push to `main` or `dev` starts no
+supported lanes on pull requests and on manual dispatch. Each lane first
+computes its verification scope with the scope rules of the merge commit's
+first parent, never the rules the change brings, and names the scope and its
+deciding paths in the job summary. A `full` lane runs `npm run release:check`
+and records release evidence; a `documents` or `plugin` lane runs
+`npm run check -- --base HEAD^1` and records none. Manual dispatch always runs
+the complete gate. A push to `main` or `dev` starts no
 hosted run, so run `npm run release:check` locally or dispatch the workflow
 by hand. Each lane uses a fresh checkout with read-only
 repository permissions and no persisted checkout credentials. Release owners

@@ -35,16 +35,18 @@ projects. Detailed module behavior belongs in the
   the Node platform.
 - Package manager: npm workspaces, `workspaces: ["packages/*"]`, with root
   `package-lock.json` at `lockfileVersion: 3`.
-- `npm run build` regenerates tracked `src/init-resources.ts`,
-  `src/phase-resources.ts` and `plugins/banzai/lib/artifact-readers.mjs`, then
+- `npm run build` regenerates tracked `src/init-resources.ts` and
+  `plugins/banzai/lib/artifact-readers.mjs`, writes the `hooks/hooks.json` and
+  `hooks/spec-gate.cjs` digests into tracked `src/phase-resources.ts`, then
   builds the CLI. The `src/` paths are relative to `packages/orchestrator/`.
 - `npm run build:dist` builds only ignored
   `packages/orchestrator/dist/banzai.mjs` and its source map. The executable has
   a Node shebang and mode `0755`; a fresh checkout needs this build before
   running the local CLI, standalone verification or bundle-dependent tests.
-- `npm run build:check` compares generated sources without repair, rebuilds
-  into temporary storage, checks distribution byte parity and smoke-runs the
-  local executable. It removes temporary output on success and failure.
+- `npm run build:check` compares generated sources and the two hook digests
+  without repair, reads no plugin instruction text, rebuilds into temporary
+  storage, checks distribution byte parity and smoke-runs the local
+  executable. It removes temporary output on success and failure.
 - `npm run typecheck` runs `tsc --project tsconfig.json --noEmit` in the
   orchestrator workspace.
 - `npm run test` bundles TypeScript tests with esbuild, runs `node --test`
@@ -66,21 +68,34 @@ projects. Detailed module behavior belongs in the
 - `node packages/orchestrator/scripts/release-candidate-check.mjs` runs the
   release gate in a disposable copy of tracked and untracked non-ignored
   files, with installed dependencies linked read-only and a separate index.
+- `npm run check` runs the checks of the working tree's verification scope
+  (ADR-0071). It compares the working tree and untracked non-ignored files
+  with `HEAD` or `--base <revision>`, prints the scope with its deciding paths
+  or reason, and runs: for `documents`, `build:dist`, `build:check`, release
+  validation, the publication check on a disposable copy with its own index
+  and the documents suite; for `plugin`, the same with both suites; for
+  `full`, `build:dist` and `verify`. Scope rules live in
+  `packages/orchestrator/scripts/verification-scope.mjs`, suites in
+  `verification-suites.mjs`.
 - `npm run version:set -- <version>` synchronizes nine fields across seven
   files to a human-selected version. `npm run version:recover` restores
   authenticated transaction originals; retained transaction evidence blocks
   release validation.
 - `npm run banzai` runs the local bundle. `npm run install:orchestrator`
   builds and links `@parabolic-technologies/banzai` for local CLI use.
-- [.github/workflows/ci.yml](.github/workflows/ci.yml) runs the complete
-  release gate on all three supported Node lanes for pull requests and manual
-  dispatch; it has no scheduled run. The live lane additionally requires
-  explicit protected-runner authorization.
+- [.github/workflows/ci.yml](.github/workflows/ci.yml) runs all three
+  supported Node lanes for pull requests and manual dispatch; it has no
+  scheduled run. Each lane computes its verification scope with the scope
+  rules of the merge commit's first parent and names it in the job summary. A
+  `full` lane runs the complete release gate and records release evidence; a
+  `documents` or `plugin` lane runs `npm run check -- --base HEAD^1` and
+  records none. Manual dispatch runs the complete gate. The live lane
+  additionally requires explicit protected-runner authorization.
   Branch pushes alone start no workflow.
 - [.github/workflows/publish.yml](.github/workflows/publish.yml) handles
   published stable GitHub Releases. It reuses tree-bound evidence from all
-  required PR lanes when valid, otherwise runs every supported lane on the
-  release tag. Evidence checking and publishing run on Node 24.11.1.
+  required PR lanes when valid, otherwise, including a merge whose lanes ran a
+  narrow scope, runs every supported lane on the release tag. Evidence checking and publishing run on Node 24.11.1.
   The publishing job builds its own bundle and uses npm trusted publishing
   for the CLI workspace. Plugin installation and registry availability have
   separate delivery evidence in
@@ -88,9 +103,16 @@ projects. Detailed module behavior belongs in the
 
 ## 3. Architecture
 
-- `plugins/banzai/` owns the standalone skills, policies, shared guidance,
+- `plugins/banzai/` owns the standalone skills, their policies and guidance,
   schemas, hook and project templates. `packages/orchestrator/` owns the
   local CLI; neither component installs or starts the other implicitly.
+- The runner's instruction text is the orchestrator's own: phase documents,
+  guidance and policies come only from the frozen
+  `packages/orchestrator/src/phase-resources.ts`, and no build or check
+  compares it with plugin text (ADR-0070). Plugin skills, policies, guidance
+  and templates are ordinary source that needs no baseline transition.
+- The hook, `plugins/banzai/lib/` and `plugins/banzai/contracts/` are one copy
+  used by both components.
 - `cli.ts` composes command entry points and `interactive.ts`; workflow
   mutations delegate to `workflow.ts` (`WorkflowRunner`). The runner uses
   vendor adapters, persistence, Git, validation and instruction owners;
@@ -269,10 +291,17 @@ behavior and edge cases; source and tests own the executable evidence.
   imports.
 - `prompts.ts`, `phase-instructions.ts`, `prompt-envelope.ts`,
   `output-contract.ts` — ordered instruction and schema delivery; the measured
-  prompt bytes are the bytes supplied to the vendor adapter.
-- `init-resources.ts`, `phase-resources.ts`, `persisted-readers.ts` — generated
-  guidance/resources and the shared-reader facade; builds resolve reader
-  source, and checks detect stale generated bytes without repair.
+  prompt bytes are the bytes supplied to the vendor adapter. Installed-plugin
+  parity compares only `hooks/hooks.json` and `hooks/spec-gate.cjs` of a
+  resolved plugin directory with the embedded digests; a mismatch refuses the
+  Claude role call and fails `doctor`.
+- `phase-resources.ts` — frozen tracked instruction set: the runner's phase
+  table, 23 phase, guidance and policy text entries and the two hook digests.
+  The build writes only the hook digests; a text entry or the phase table
+  changes only through a successor-baseline transition.
+- `init-resources.ts`, `persisted-readers.ts` — generated verification guide
+  and the shared-reader facade; builds resolve reader source, and checks
+  detect stale generated bytes without repair.
 - `planning-review-state.ts`, `planning-review-artifact.ts` — bounded planning
   episodes and deterministic sibling review publication; stale scope cannot
   authorize planning changes.
@@ -305,16 +334,17 @@ behavior and edge cases; source and tests own the executable evidence.
 
 Plugin and release owners:
 
-- `plugins/banzai/skills/` — twelve standalone skills;
-  `project-manifest`, `orchestrate` and `initiative` require explicit
-  invocation in both clients. Other skills restrict automatic selection to adopted repositories
-  or explicit Banzai/skill requests.
+- `plugins/banzai/skills/` — eleven standalone skills; `project-manifest` and
+  `initiative` require explicit invocation in both clients. Other skills
+  restrict automatic selection to adopted repositories or explicit
+  Banzai/skill requests. The runner's structural plugin check and
+  `banzai setup` require the ten skills other than `initiative`.
 - `plugins/banzai/AGENTS.md`, `CLAUDE.md` and bootstrap templates — installed
   process, including the five existing decision gates; project-specific merges
   preserve approved user rules.
-- `plugins/banzai/phases/`, `guidance/`, `policies/` — seven runner phase
-  resources, ten shared guidance files and six policy owners; standalone
-  skills load installed sources, and runners deliver applicable bodies inline.
+- `plugins/banzai/guidance/`, `policies/` — ten guidance files and six policy
+  owners that standalone skills load from the installed plugin. The seven
+  documents in `plugins/banzai/phases/` are read by no skill, build or check.
 - `plugins/banzai/lib/`, `scripts/verification.cjs` — shared work-document,
   filesystem, execution-ownership, adoption, review and verification contracts;
   ordinary document authoring allocates no execution records. Authorized runner
@@ -325,10 +355,25 @@ Plugin and release owners:
   receive no write grant. In manual mode it also frees Claude Code memory
   notes and gives host bookkeeping writes (plans, subagent memory, session
   scratchpad) an approval scope that never authorizes code (ADR-0062). The
-  hook is not a general shell sandbox.
+  hook is not a general shell sandbox. Both files are pinned by the successor
+  instruction baseline, and their digests are embedded in the runner.
 - `packages/orchestrator/scripts/` — build, test, release/version,
   instruction-baseline and publication tools; explicit generation is separate
   from validation. See [Release scripts](packages/orchestrator/MODULES.md#release-scripts-scripts).
+- `packages/orchestrator/instruction-baseline.json` and its `.sha256` — the
+  successor instruction baseline (`banzai-instruction-baseline/v2`). It pins
+  the text entries and phase table of `src/phase-resources.ts`, the two hook
+  files and both plugin manifests with their `version` value normalized. Its
+  first generation is fixed by a digest constant in
+  `scripts/successor-baseline.mjs`, so a pinned resource changes only through
+  a transition that cites an Accepted ADR, written by
+  `scripts/instruction-baseline.mjs`; build, tests and release validation
+  never write it.
+- `packages/orchestrator/phase-guidance-baseline.json`,
+  `phase-guidance-current.json` and its `.sha256` — the closed v1 instruction
+  baseline. Release validation pins the three files by digest and replays the
+  chain against its own root and authorities; it is never extended and reads
+  no plugin file.
 
 ## 6. State & Data Flow
 
@@ -438,9 +483,9 @@ Plugin and release owners:
   mirror source modules; shared fixtures and cross-module contract suites are
   explicit exceptions.
 - Assurance priorities are public/persisted contracts, authorization,
-  security/privacy, state transitions, recovery, instruction parity,
-  publication boundaries and confirmed regressions. Test volume is not a
-  completion target.
+  security/privacy, state transitions, recovery, installed hook parity, the
+  instruction baselines, publication boundaries and confirmed regressions.
+  Test volume is not a completion target.
 - Boundary fakes and injected `ProcessRunner`, clock and identifier sources
   preserve production contracts while isolating vendor/process behavior.
   Workflow tests use real temporary Git repositories; mocks of the unit under
@@ -448,9 +493,12 @@ Plugin and release owners:
 - Release-evidence tests run the real script with a test-only `fetch` preload
   and native `Request`/`Response` objects; they require no network listener or
   network access.
-- Required final suite: `npm run verify`, with all tests passing, clean
-  typecheck, zero lint errors and distribution parity. Advisory lint warnings
-  remain visible. Release work additionally requires fresh `npm run release:check`.
+- Required final suite: `npm run check`, the checks of the change's
+  verification scope; for a `full` change that includes `npm run verify`, with
+  all tests passing, clean typecheck, zero lint errors and distribution parity.
+  `npm run verify` remains a valid final suite for any change. Advisory lint
+  warnings remain visible. Release work additionally requires fresh
+  `npm run release:check`.
 - Coverage threshold: `None`; no numeric coverage threshold or coverage gate
   is configured in the repository's test runner or CI.
 - Final-suite ownership: orchestrated builders run affected checks; the runner
@@ -533,9 +581,11 @@ Plugin and release owners:
   the Claude environment. `status --json`, agent status v7, capabilities v9
   and run state schemas carry no local model data; agents learn of a changed
   file only from `LOCAL_MODEL_OVERRIDE_CHANGED`.
-- Source schema, phase/guidance/policy and release-policy changes require a
-  rebuild before local CLI execution. Explicit build owns generated sources;
-  validation detects drift without repairing tracked files.
+- Source schema, hook, frozen instruction module and release-policy changes
+  require a rebuild before local CLI execution; plugin skill, policy,
+  guidance and template text changes require none. Explicit build owns
+  generated sources and the hook digests; validation detects drift without
+  repairing tracked files.
 - Vendor authentication is subscription-only. Child environments strip API
   keys and preserve Claude's explicit subscription-token path. Inherited host
   sandbox restrictions remain effective; readiness cannot prove hidden
@@ -639,3 +689,6 @@ delivery or installation.
 | ADR-0065 | Continuable planner-declared planning blocks                       | [Source](documentation/decisions/0065-continuable-planner-declared-planning-blocks.md)           | Implemented |
 | ADR-0066 | Date-prefixed work and initiative slugs                            | [Source](documentation/decisions/0066-date-prefixed-work-and-initiative-slugs.md)                | Implemented |
 | ADR-0067 | Node 26 supported release lane                                     | [Source](documentation/decisions/0067-node-26-supported-release-lane.md)                         | Implemented |
+| ADR-0069 | Standalone plugin control model                                    | [Source](documentation/decisions/0069-standalone-plugin-control-model.md)                        | Planned     |
+| ADR-0070 | Orchestrator-owned instruction copy                                | [Source](documentation/decisions/0070-orchestrator-owned-instruction-copy.md)                    | Implemented |
+| ADR-0071 | Path-scoped verification gate                                      | [Source](documentation/decisions/0071-path-scoped-verification-gate.md)                          | Planned     |

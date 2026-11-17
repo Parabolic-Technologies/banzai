@@ -359,6 +359,31 @@ the pinned machine-contract versions.
 formatting to the unchanged `verify` gate, rejects tracked byte or mode mutation, and never invokes
 `version:set` or `version:recover`.
 
+`npm run check` runs the checks of a change's verification scope
+([ADR-0071](decisions/0071-path-scoped-verification-gate.md)). The change set is
+every path that differs between the working tree and `HEAD`, or the commit or
+tree named by `--base <revision>`, plus untracked non-ignored files; a moved
+file counts under both paths. The rules in
+`packages/orchestrator/scripts/verification-scope.mjs` give each path a scope,
+first rule first: the orchestrator package, plugin hooks, library, contracts
+and manifests, root package files, release-train version files, `.github/` and
+`release-policy.json` are `full`; other `plugins/banzai/` files are `plugin`;
+`documentation/`, root Markdown and `publication-policy.json` are `documents`;
+any other path is `full`. The change set takes its widest scope, and an empty
+or uncomputable change set is `full`. The command prints the scope with its
+deciding paths or its reason, then runs, stopping at the first failure:
+
+- `documents`: `build:dist`, `build:check`, `release:validate`, the
+  publication check on a disposable copy of the tracked and untracked
+  non-ignored files and the built distribution with its own index, and the
+  documents suite;
+- `plugin`: the same checks with the documents and plugin suites;
+- `full`: `build:dist` and `verify`.
+
+The suites in `packages/orchestrator/scripts/verification-suites.mjs` list
+every test that reads a path of their scope; a membership test enforces the
+lists. The command creates no Git object, index entry or ref in the checkout.
+
 <!-- release-policy:start -->
 
 Engines: `>=22.20.0 <23 || >=24.11.1 <25 || >=26.13.0 <27`
@@ -374,7 +399,8 @@ Version authority: `package.json#/version`; 9 fields in 7 files.
 <!-- release-policy:end -->
 
 The supported lanes are blocking and each runs `npm ci` plus the full local
-gate ([ADR-0067](decisions/0067-node-26-supported-release-lane.md)). Node 23,
+gate ([ADR-0067](decisions/0067-node-26-supported-release-lane.md)), or the
+checks of a narrower verification scope. Node 23,
 25 and 27 have no lane and no support claim. A required environment
 failure remains missing evidence rather than becoming a product pass.
 The images are the Git-capable official Bookworm variants. Each lane runs
@@ -388,15 +414,25 @@ The workflow is [`.github/workflows/ci.yml`](https://github.com/Parabolic-Techno
 The supported lanes run on pull requests and manual dispatch; the workflow has
 no scheduled run. A push
 to `main` or `dev` starts no hosted run, and a newer push to a pull request
-cancels that pull request's in-progress run. After `release:check` passes, each
-supported lane records the tree it verified as a 30-day
-`release-evidence-<lane>-attempt-<attempt>-tree-<tree>` artifact.
+cancels that pull request's in-progress run. Each lane checks out the merge
+commit with its first parent and computes its verification scope before any
+check by running the first parent's copy of `verification-scope.mjs`, read with
+`git show`, so a change cannot narrow its own lane. When the first parent has
+no scope module the scope is `full` with the reason
+`the base revision has no scope rules`; manual dispatch is always `full`. The
+job summary names the scope and its deciding paths, and only the word
+`scope=<scope>` reaches the step output. A `full` lane runs `release:check`;
+after it passes, the lane records the tree it verified as a 30-day
+`release-evidence-<lane>-attempt-<attempt>-tree-<tree>` artifact. A
+`documents` or `plugin` lane runs `npm run check -- --base HEAD^1` and records
+no evidence.
 
 Publication through `.github/workflows/publish.yml` reuses that evidence only
 when the release tag is a merge commit whose tree equals its second parent's,
 and a successful pull-request run of this repository's `ci.yml` for that parent
 has every supported lane's evidence for the tag's tree in its latest attempt.
-Otherwise every supported lane runs the complete `release:check` on the tag
+Otherwise, including a merge whose lanes ran a narrow scope and so recorded no
+evidence, every supported lane runs the complete `release:check` on the tag
 before anything is published. The `release_evidence` job summary states which
 path ran. `npm run release:validate` owns the layout of both workflows.
 
@@ -630,13 +666,10 @@ present.
 
 ## Agent Control
 
-The optional `orchestrate` plugin skill supervises this CLI through a narrow
-versioned control boundary. It is an outer operator only, reachable solely
-through an explicit user invocation. Claude Code enforces that boundary with
-`disable-model-invocation: true`; Codex uses `agents/openai.yaml` with
-`policy.allow_implicit_invocation: false`. The skill is never selected from
-prompt wording, and the runner's planner, implementer, fixer, selector, and
-reviewer phases never invoke it.
+A supervisor, a chat agent or a script acting as an outer operator, drives
+this CLI through a narrow versioned control boundary. The plugin packages no
+supervisor skill; the control commands and contracts below are the complete
+interface.
 
 `banzai control capabilities` is valid outside a Git repository and performs no
 repository discovery, adapter construction, vendor/authentication call, lock,
@@ -760,24 +793,30 @@ read; relay it too, because the remedy is `banzai cancel`.
 ## Runner instruction delivery
 
 The runner embeds seven phase resources (`planning`, `implementation`, `review`,
-`fix`, `feature`, `quick-fix`, `planning-review`), ten shared guidance resources and their ordered
-six-policy unions from the plugin. Standalone skills load the shared guidance
-relatively. Selection remains prompt-only. Every fresh or resumed call, retry
+`fix`, `feature`, `quick-fix`, `planning-review`), ten guidance resources and
+their ordered six-policy unions in its own frozen module,
+`src/phase-resources.ts`.
+Standalone skills load guidance and policies from the installed plugin; the
+two sets of text are separate, and no build or check compares them.
+Selection remains prompt-only. Every fresh or resumed call, retry
 and authorized recovery receives the complete applicable payload, exact bound
 artifact roles and existing write capabilities. Review and selection have no
 model artifact writes; the runner alone renders review artifacts. Existing
 implementation/fix grants, report triggers, completion evidence and human gates
 remain unchanged. Required bytes count against existing context budgets.
 
-Structural plugin verification still requires all eleven workflow skills and the two
-hook events/script. Separately, preflight compares the applicable route union
-and each call rechecks its actual phase against the supplied verified directory.
+Structural plugin verification requires ten workflow skills, every packaged
+skill except `initiative`, and the two hook events/script. Separately,
+preflight and each call compare `hooks/hooks.json` and `hooks/spec-gate.cjs`
+of the supplied verified directory with the digests the runner was built with.
 Matching raw identities are verified; a readable mismatch refuses the call with
 `INSTRUCTION_RESOURCE_MISMATCH` before creating an attempt. Saved decisions,
 checkpoints, prior failures and retry/recovery authority remain intact. Missing,
-unreadable or unsafe resources are bounded failures; Codex, ambient mode and an
+unreadable or unsafe hook files are bounded failures; Codex, ambient mode and an
 unresolved directory are unverifiable. Evidence limitations alone do not block,
-and structural invalid-directory refusal takes precedence. These checks do not
+and structural invalid-directory refusal takes precedence. The plugin's phase
+documents, guidance and policies are not compared: editing or removing them
+neither refuses a call nor fails `banzai doctor`. These checks do not
 prove full transitive plugin integrity, model compliance or resource immutability
 during a running session.
 
@@ -787,11 +826,20 @@ ambient mode (reported as unverifiable). Banzai performs none automatically.
 After remediation, use the existing status-directed resume, retry or recovery
 operation; do not resubmit a saved human decision.
 
-Explicit `npm run build` refreshes committed `src/phase-resources.ts` and the
-bundle/map. Typecheck, lint and tests never generate it. `build:check` compares
-source/generated/bundle bytes without repair. Publication checks compare the
-same candidate across actual indexed source/plugin archives, npm payload and
-source map, rejecting staged/working instruction skew.
+Committed `src/phase-resources.ts` is frozen. Explicit `npm run build` writes
+only the two hook digests into it and rebuilds the bundle/map; typecheck, lint
+and tests never write it. `build:check` compares the hook digests and
+source/bundle bytes without repair and reads no plugin instruction text.
+Publication checks compare the hook files across the actual indexed
+source/plugin archives and the module across source, npm payload and source
+map, rejecting staged/working instruction skew.
+
+The successor baseline `packages/orchestrator/instruction-baseline.json` pins
+the module's text entries and phase table, the two hook files and both plugin
+manifests. A change to any of them needs a recorded transition that cites an
+Accepted ADR. The v1 baseline in the `phase-guidance-*` files is a closed
+record. Plugin skills, policies, guidance and templates need no transition; see
+[Maintained instruction baselines](engineering-quality.md#maintained-instruction-baselines).
 
 ## Project Verification Readiness
 
@@ -825,7 +873,7 @@ with no remedies; pinned Claude can be `verified`, `mismatch`, or bounded
 `failure`. A mismatch fails readiness. Ambient or unresolved scope is
 `unverifiable` with an ambient remedy only. Rebuild/update remedies apply only
 to mismatch or bounded failure. The default pinned Claude planner, implementer
-and reviewer produce no parity warning when resources match. Historical
+and reviewer produce no parity warning when the two hook files match. Historical
 v1-v5 reports retain their identities; consumers must negotiate v6. v6 adds
 `claude.plugin-scope` and keeps the v5 fields and status semantics.
 

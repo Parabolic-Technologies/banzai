@@ -310,3 +310,8 @@ Follow-ups:
 - Supersedes: None.
 - Superseded by: None.
 - Required lifecycle decision: accept, reject with a reason, or request rework.
+- Amended by [ADR-0069](./0069-standalone-plugin-control-model.md), accepted
+  2026-11-16: a standalone planning session obtains the plan remainder digest
+  from the verification helper's stamp operation instead of computing it
+  (section 3, the standalone bullet). Approval still rewrites no digest.
+  Implementation is Planned.
