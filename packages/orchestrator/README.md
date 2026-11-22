@@ -1,10 +1,5 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Parabolic-Technologies/banzai/main/assets/logo/banzai-logo-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Parabolic-Technologies/banzai/main/assets/logo/banzai-logo-light.svg">
-    <img alt="Banzai — Spec-Driven AI Development" src="https://raw.githubusercontent.com/Parabolic-Technologies/banzai/main/assets/logo/banzai-logo.svg" width="320">
-  </picture>
-</p>
+**This project is deprecated.** Development continues in its successor,
+[banzai-claude-plugin](https://github.com/Parabolic-Technologies/banzai-claude-plugin): a lightweight plugin for Claude Code that keeps this project's best practices without the orchestration overhead. It supports Claude Code only; Codex support is not carried over.
 
 # Banzai
 
