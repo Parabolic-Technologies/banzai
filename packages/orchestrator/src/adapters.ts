@@ -1573,7 +1573,6 @@ const REQUIRED_BANZAI_SKILLS = [
   "feature-description",
   "feature-review",
   "feature-status",
-  "orchestrate",
   "project-manifest",
   "quick-fix",
   "test-writing"

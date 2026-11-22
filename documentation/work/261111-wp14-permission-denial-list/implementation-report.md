@@ -198,7 +198,15 @@ Gate 2 probe runs passed. This is an owner-requested bump: no hook or
   `npm run format:check`, `npm run verify` with 2189 of 2189 tests,
   `npm run release:validate` and
   `publication-check.mjs --tree working` (660 files) all pass.
-  CANDIDATE_RERUN_PLACEHOLDER
+- Two later candidate checks on the same code each failed one test, a
+  different one each time, with 2188 of 2189 passing:
+  `workflow-publication` "consecutive ordinary after-write capture cursor and
+  refusal failures never become a model failure" after 278 seconds, and
+  `version-set` "offline npm projects both root lockfile versions without
+  synchronizing workspace versions" after 901 seconds, with its child `npm`
+  stopped at the timeout. The machine's load average was 9 to 10 during both
+  runs. Run alone afterwards, the two test files pass 99 of 99. The cause of
+  the load was not found. Neither test touches code this change set edits.
 - Each candidate check ran before the last edits to this report and the
   tracker. Work documents are outside the plugin and npm payloads.
 - The same change set carries three maintainer-only Claude Code skills under
@@ -213,6 +221,22 @@ Gate 2 probe runs passed. This is an owner-requested bump: no hook or
 Not done here, and left to the owner: the commit, the pull request to `main`
 with its three required CI lanes, the GitHub draft release notes for
 `v2.8.3`, the tag and publication.
+
+### After the commit
+
+Recorded on 2026-11-11, after this report was first committed. That commit
+carried a placeholder line in the list above; the two-run paragraph replaces
+it.
+
+- The owner committed the change set as `fa89da9` on `dev` and merged pull
+  request 28 into `main` as merge commit `44552ad`, whose tree equals the
+  tree of `fa89da9`.
+- The pull request's required lanes `release_check_node_22`,
+  `release_check_node_24` and `release_check_node_26` all succeeded.
+  `live_vendor_compatibility` was skipped.
+- The `/release` skill created the GitHub draft release `v2.8.3`, pinned to
+  `44552ad`, with notes the owner confirmed. It is a draft: no tag exists and
+  nothing is published.
 
 ## Deviations from the plan and the requirements
 

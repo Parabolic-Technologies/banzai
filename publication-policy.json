@@ -489,6 +489,26 @@
       "sha256": null
     },
     {
+      "path": "documentation/decisions/0068-runner-granted-commands-from-the-approved-plan.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0069-standalone-plugin-control-model.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0070-orchestrator-owned-instruction-copy.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
+      "path": "documentation/decisions/0071-path-scoped-verification-gate.md",
+      "classification": "maintainer",
+      "sha256": null
+    },
+    {
       "path": "documentation/decisions/README.md",
       "classification": "maintainer",
       "sha256": null
@@ -1270,21 +1290,6 @@
     },
     {
       "path": "plugins/banzai/skills/initiative/references/tracker-template.md",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/skills/orchestrate/SKILL.md",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/skills/orchestrate/agents/openai.yaml",
-      "classification": "product",
-      "sha256": null
-    },
-    {
-      "path": "plugins/banzai/skills/orchestrate/references/control-protocol.md",
       "classification": "product",
       "sha256": null
     },

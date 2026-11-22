@@ -231,3 +231,7 @@ Implementation and review must confirm:
 - Amends ADR-0010 and ADR-0056, on acceptance: the Node 26 forward lane leaves
   ADR-0010's advisory set, and ADR-0056's exact required lanes include
   Node 26.13.0.
+- Amended by [ADR-0071](./0071-path-scoped-verification-gate.md), accepted
+  2026-11-16: each of the three lanes runs the checks of the change's scope
+  and records tree evidence only after the complete `release:check`. The
+  lanes and their Node versions are unchanged. Implementation is Planned.

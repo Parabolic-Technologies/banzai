@@ -81,9 +81,7 @@ meaning. Planning gates use gate-decision v1 and planning-triage answer v4.
 Existing escalation/consultation answer v1/v2 inputs retain their
 semantics. The retained configuration-answer v3 and `banzai approve verification`
 utilities apply only to legacy configuration surfaces; adding a profile does
-not authorize current task execution or old-run continuation. See the maintained
-[control protocol](../skills/orchestrate/references/control-protocol.md) for
-negotiation, human provenance and bounded disclosure.
+not authorize current task execution or old-run continuation.
 
 For new strict orchestrated implementation and fix attempts, the structured
 `taskCompletion` ledger (schema 1) in the phase-result v4 hand-off is the sole

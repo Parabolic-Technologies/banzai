@@ -65,47 +65,81 @@ import {
 const LAYOUT_DIAGNOSTIC =
   "legacy Banzai layout: run `project-manifest` to migrate";
 
-test("reviewer instruction preflight includes planning-review before any model or attempt", async () => {
-  const repository = await createTestRepository();
-  const plugin = await instructionPluginFixture();
-  try {
-    await configureInstructionPlugin(repository.root, plugin.directory);
-    const configPath = path.join(repository.root, ".banzai/config.json");
-    const config = JSON.parse(
-      await readFile(configPath, "utf8")
-    ) as OrchestratorConfig;
-    config.models.reviewer.executable = config.models.implementer.executable;
-    await writeFile(configPath, JSON.stringify(config));
-    await writeFile(
-      path.join(plugin.directory, "phases/planning-review.md"),
-      "PRIVATE-PLANNING-PREFLIGHT-CANARY"
-    );
-    const adapters = new FakeAdapters();
-    const runner = new WorkflowRunner(repository.root, adapters);
-    await assert.rejects(
-      runner.start({ slug: "example", request: "Plan it." }),
-      { code: "INSTRUCTION_RESOURCE_MISMATCH" }
-    );
-    const state = await runner.store.requireActiveState();
-    assert.equal(state.status, "created");
-    assert.equal(state.activeAttempt, null);
-    assert.deepEqual(await runner.store.readRunAttempts(state.runId), []);
-    assert.equal(
-      adapters.selectionPrompts.length +
-        adapters.phasePrompts.length +
-        adapters.reviewPrompts.length +
-        adapters.planningRequests.length,
-      0
-    );
-    assert.equal(adapters.codexPreflights + adapters.claudePreflights, 0);
-    assert.doesNotMatch(
-      await readFile(runner.store.statePath(state.runId), "utf8"),
-      /PRIVATE-PLANNING-PREFLIGHT-CANARY/
-    );
-  } finally {
-    await plugin.dispose();
-    await repository.dispose();
-  }
+// Appending keeps the hook structurally valid, so the refusal is parity's.
+async function skewHookScript(directory: string): Promise<() => Promise<void>> {
+  const script = path.join(directory, "hooks/spec-gate.cjs");
+  const original = await readFile(script);
+  await writeFile(
+    script,
+    Buffer.concat([original, Buffer.from("\n// local skew\n")])
+  );
+  return () => writeFile(script, original);
+}
+
+test("reviewer instruction preflight ignores installed planning-review text and refuses a skewed hook before any model or attempt", async (t) => {
+  for (const skew of ["phase text", "hook script"] as const)
+    await t.test(skew, async () => {
+      const repository = await createTestRepository();
+      const plugin = await instructionPluginFixture();
+      try {
+        await configureInstructionPlugin(repository.root, plugin.directory);
+        const configPath = path.join(repository.root, ".banzai/config.json");
+        const config = JSON.parse(
+          await readFile(configPath, "utf8")
+        ) as OrchestratorConfig;
+        config.models.reviewer.executable =
+          config.models.implementer.executable;
+        await writeFile(configPath, JSON.stringify(config));
+        await writeFile(
+          path.join(plugin.directory, "phases/planning-review.md"),
+          "PRIVATE-PLANNING-PREFLIGHT-CANARY"
+        );
+        if (skew === "hook script") await skewHookScript(plugin.directory);
+        const adapters = new FakeAdapters();
+        const runner = new WorkflowRunner(repository.root, adapters);
+        if (skew === "phase text") {
+          const started = await runner.start({
+            slug: "example",
+            request: "Plan it."
+          });
+          assert.equal(
+            started.status,
+            "needs_plan_approval",
+            JSON.stringify(started.blockReason)
+          );
+          assert.equal(adapters.phasePrompts.length, 1);
+          assert.doesNotMatch(
+            adapters.phasePrompts.join("\n"),
+            /PRIVATE-PLANNING-PREFLIGHT-CANARY/
+          );
+        } else {
+          await assert.rejects(
+            runner.start({ slug: "example", request: "Plan it." }),
+            { code: "INSTRUCTION_RESOURCE_MISMATCH" }
+          );
+          const state = await runner.store.requireActiveState();
+          assert.equal(state.status, "created");
+          assert.equal(state.activeAttempt, null);
+          assert.deepEqual(await runner.store.readRunAttempts(state.runId), []);
+          assert.equal(
+            adapters.selectionPrompts.length +
+              adapters.phasePrompts.length +
+              adapters.reviewPrompts.length +
+              adapters.planningRequests.length,
+            0
+          );
+          assert.equal(adapters.codexPreflights + adapters.claudePreflights, 0);
+        }
+        const state = await runner.store.requireActiveState();
+        assert.doesNotMatch(
+          await readFile(runner.store.statePath(state.runId), "utf8"),
+          /PRIVATE-PLANNING-PREFLIGHT-CANARY/
+        );
+      } finally {
+        await plugin.dispose();
+        await repository.dispose();
+      }
+    });
 });
 
 class LayoutStopAdapters extends FakeAdapters {
@@ -1519,63 +1553,89 @@ test("accepted F10 public doctor recognizes actual v4 runs and rejects binding d
   }
 });
 
-test("instruction preflight refuses resource skew before any model or attempt and preserves structural refusal precedence", async (t) => {
-  for (const structural of [false, true])
-    await t.test(
-      structural ? "invalid hook" : "resource mismatch",
-      async () => {
-        const repository = await createTestRepository({
-          artifactLayout: "private"
-        });
-        const plugin = await instructionPluginFixture();
-        try {
-          await configureInstructionPlugin(repository.root, plugin.directory);
-          await writeFile(
-            path.join(plugin.directory, "phases/fix.md"),
-            "PRIVATE-SKEW-CANARY"
-          );
-          if (structural)
-            await rm(path.join(plugin.directory, "hooks/spec-gate.cjs"));
-          const adapters = new FakeAdapters();
-          const runner = new WorkflowRunner(repository.root, adapters);
-          if (structural) {
-            const state = await runner.start({
-              slug: "example",
-              request: "Plan it."
-            });
-            assert.equal(state.status, "blocked");
-            assert.equal(
-              (await runner.status()).state.metrics.attempts.plan,
-              0
-            );
-          } else {
-            await assert.rejects(
-              runner.start({ slug: "example", request: "Plan it." }),
-              { code: "INSTRUCTION_RESOURCE_MISMATCH" }
-            );
-            const status = await runner.status();
-            assert.equal(status.state.status, "created");
-            assert.equal(status.state.activeAttempt, null);
-            assert.equal(status.state.blockReason, null);
-            assert.deepEqual(
-              await runner.store.readRunAttempts(status.state.runId),
-              []
-            );
-            assert.equal(status.state.metrics.usage.inputTokens, 0);
-          }
+test("instruction preflight ignores installed text, refuses hook skew before any model or attempt and preserves structural refusal precedence", async (t) => {
+  for (const skew of ["text only", "hook mismatch", "invalid hook"] as const)
+    await t.test(skew, async () => {
+      const repository = await createTestRepository({
+        artifactLayout: "private"
+      });
+      const plugin = await instructionPluginFixture();
+      try {
+        await configureInstructionPlugin(repository.root, plugin.directory);
+        // Installed text is no parity evidence in any of the three cases.
+        await writeFile(
+          path.join(plugin.directory, "phases/fix.md"),
+          "PRIVATE-SKEW-CANARY"
+        );
+        await writeFile(
+          path.join(plugin.directory, "policies/test-assurance.md"),
+          "PRIVATE-SKEW-CANARY"
+        );
+        await rm(path.join(plugin.directory, "phases/implementation.md"));
+        await rm(path.join(plugin.directory, "guidance/assurance.md"));
+        if (skew === "hook mismatch") await skewHookScript(plugin.directory);
+        if (skew === "invalid hook")
+          await rm(path.join(plugin.directory, "hooks/spec-gate.cjs"));
+        const adapters = new FakeAdapters();
+        adapters.reviewResults.push(passingReview());
+        const runner = new WorkflowRunner(repository.root, adapters);
+        if (skew === "text only") {
+          const started = await runner.start({
+            slug: "example",
+            request: "Implement it."
+          });
           assert.equal(
-            adapters.selectionPrompts.length +
-              adapters.phasePrompts.length +
-              adapters.reviewPrompts.length,
-            0
+            started.status,
+            "needs_plan_approval",
+            JSON.stringify(started.blockReason)
           );
-          assert.equal(adapters.codexPreflights + adapters.claudePreflights, 0);
-        } finally {
-          await plugin.dispose();
-          await repository.dispose();
+          // The Claude implementer runs on the frozen text.
+          const done = await runner.approvePlan("human");
+          assert.equal(done.status, "done", JSON.stringify(done.blockReason));
+          assert.match(
+            adapters.phasePrompts.at(-1) ?? "",
+            /# Assurance Guidance/
+          );
+          assert.doesNotMatch(
+            [...adapters.phasePrompts, ...adapters.reviewPrompts].join("\n"),
+            /PRIVATE-SKEW-CANARY/
+          );
+          return;
         }
+        if (skew === "invalid hook") {
+          const state = await runner.start({
+            slug: "example",
+            request: "Plan it."
+          });
+          assert.equal(state.status, "blocked");
+          assert.equal((await runner.status()).state.metrics.attempts.plan, 0);
+        } else {
+          await assert.rejects(
+            runner.start({ slug: "example", request: "Plan it." }),
+            { code: "INSTRUCTION_RESOURCE_MISMATCH" }
+          );
+          const status = await runner.status();
+          assert.equal(status.state.status, "created");
+          assert.equal(status.state.activeAttempt, null);
+          assert.equal(status.state.blockReason, null);
+          assert.deepEqual(
+            await runner.store.readRunAttempts(status.state.runId),
+            []
+          );
+          assert.equal(status.state.metrics.usage.inputTokens, 0);
+        }
+        assert.equal(
+          adapters.selectionPrompts.length +
+            adapters.phasePrompts.length +
+            adapters.reviewPrompts.length,
+          0
+        );
+        assert.equal(adapters.codexPreflights + adapters.claudePreflights, 0);
+      } finally {
+        await plugin.dispose();
+        await repository.dispose();
       }
-    );
+    });
 });
 
 test("instruction per-call refusal retains saved approval and triage, exact bindings and usage in private and legacy work", async (t) => {
@@ -1609,15 +1669,16 @@ test("instruction per-call refusal retains saved approval and triage, exact bind
             );
           }
           const prior = (await runner.status()).state;
-          const resource = path.join(
-            plugin.directory,
-            `phases/${gate === "triage" ? "fix" : "implementation"}.md`
-          );
-          const original = await readFile(resource);
+          // The edited phase text stays in place to the end: only the hook
+          // skew refuses the call.
           await writeFile(
-            resource,
-            Buffer.concat([original, Buffer.from("\n")])
+            path.join(
+              plugin.directory,
+              `phases/${gate === "triage" ? "fix" : "implementation"}.md`
+            ),
+            "PRIVATE-PER-CALL-CANARY"
           );
+          const restoreHook = await skewHookScript(plugin.directory);
           const calls = adapters.phasePrompts.length;
           await assert.rejects(
             gate === "approval"
@@ -1684,13 +1745,14 @@ test("instruction per-call refusal retains saved approval and triage, exact bind
           );
           assert.deepEqual(await projections(), beforeProjections);
           assert.equal(adapters.phasePrompts.length, calls);
-          await writeFile(resource, original);
+          await restoreHook();
           const resumed = await runner.resume();
           assert.equal(
             resumed.status,
             "done",
             JSON.stringify(resumed.blockReason)
           );
+          assert.ok(adapters.phasePrompts.length > calls);
           const bound = saved.artifactBinding;
           assert.ok(bound);
           // Standalone status/review use this same explicit binding reader.
@@ -1737,6 +1799,7 @@ test("instruction per-call refusal retains saved approval and triage, exact bind
               prompt,
               /Use the available Skill tool|\$banzai:/
             );
+            assert.doesNotMatch(prompt, /PRIVATE-PER-CALL-CANARY/);
           }
           assert.match(
             adapters.reviewPrompts[0] ?? "",
@@ -1767,6 +1830,11 @@ test("late instruction skew preserves the failed planner retry and authorized re
         })
       );
       await configureInstructionPlugin(repository.root, plugin.directory, true);
+      // Installed planning text differs for the whole run and is never restored.
+      await writeFile(
+        path.join(plugin.directory, "phases/planning.md"),
+        "PRIVATE-LATE-SKEW-CANARY"
+      );
       const adapters = new FakeAdapters();
       adapters.planErrors.push(
         new BanzaiError("MODEL_TIMEOUT", "Planner timed out.")
@@ -1781,11 +1849,11 @@ test("late instruction skew preserves the failed planner retry and authorized re
       const before = await snapshotTree(path.join(repository.root, ".banzai"));
       const prior = await runner.status();
       const initial = adapters.claudePreflights;
-      const resource = path.join(plugin.directory, "phases/planning.md");
-      const original = await readFile(resource);
+      const script = path.join(plugin.directory, "hooks/spec-gate.cjs");
+      const original = await readFile(script);
       adapters.onClaudePreflight = async () => {
         if (adapters.claudePreflights === initial + 3)
-          await writeFile(resource, "changed");
+          await skewHookScript(plugin.directory);
       };
       await assert.rejects(runner.retry(), {
         code: "INSTRUCTION_RESOURCE_MISMATCH"
@@ -1797,9 +1865,13 @@ test("late instruction skew preserves the failed planner retry and authorized re
       assert.deepEqual((await runner.status()).retry, prior.retry);
       assert.equal(adapters.phasePrompts.length, 1);
       adapters.onClaudePreflight = null;
-      await writeFile(resource, original);
+      await writeFile(script, original);
       assert.equal((await runner.retry()).status, "needs_plan_approval");
       assert.match(adapters.phasePrompts[1] ?? "", /# Planning Guidance/);
+      assert.doesNotMatch(
+        adapters.phasePrompts.join("\n"),
+        /PRIVATE-LATE-SKEW-CANARY/
+      );
     } finally {
       if (previousClaudeConfig === undefined)
         delete process.env.CLAUDE_CONFIG_DIR;
@@ -1815,9 +1887,9 @@ test("late instruction skew preserves the failed planner retry and authorized re
     );
     try {
       const { repository, runner, adapters } = fixture;
-      const resource = path.join(plugin.directory, "phases/implementation.md");
-      const original = await readFile(resource);
-      await writeFile(resource, "changed");
+      // The deleted phase document stays deleted: only the hook skew refuses.
+      await rm(path.join(plugin.directory, "phases/implementation.md"));
+      const restoreHook = await skewHookScript(plugin.directory);
       const prior = await runner.status();
       const before = await snapshotTree(path.join(repository.root, ".banzai"));
       const calls = adapters.phasePrompts.length;
@@ -1830,7 +1902,7 @@ test("late instruction skew preserves the failed planner retry and authorized re
       );
       assert.deepEqual((await runner.status()).recovery, prior.recovery);
       assert.equal(adapters.phasePrompts.length, calls);
-      await writeFile(resource, original);
+      await restoreHook();
       assert.equal((await runner.resume()).status, "done");
       assert.match(adapters.phasePrompts.at(-1) ?? "", /# Assurance Guidance/);
       assert.match(

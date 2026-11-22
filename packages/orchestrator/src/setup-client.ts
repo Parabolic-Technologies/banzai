@@ -76,7 +76,6 @@ async function verifiedSetupPlugin(
       "feature-description",
       "feature-review",
       "feature-status",
-      "orchestrate",
       "project-manifest",
       "quick-fix",
       "test-writing"

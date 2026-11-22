@@ -91,18 +91,6 @@ reapplies source-read-only restrictions; rotation is not a human gate.
 
 ## Routing
 
-`orchestrate` is an explicit outer operator skill only, and it carries
-`disable-model-invocation: true`. It runs only when the user invokes it by name
-(`/` or `$`). A prompt that mentions Banzai, the orchestrator, the CLI, or an
-existing run is not an invocation: never select it from prompt wording, never
-select it for an ordinary feature, fix, plan, status, review, or inspection
-request, and never add it to an inner planner, implementer, fixer, selector, or
-reviewer skill chain. When Banzai orchestration looks appropriate but the user
-has not invoked the skill, say so and ask them to run it; do not reproduce its
-workflow or call the `banzai` CLI directly instead. If `BANZAI_RUN_ID`,
-`BANZAI_APPROVAL_DIGEST`, or `BANZAI_WORKFLOW_DIGEST` is present, it must
-invoke no nested CLI process and write nothing.
-
 - New capability -> `feature`.
 - Bug, polish, refactor, review cleanup -> `quick-fix`.
 - Architecturally significant decision -> `architecture-decision`.

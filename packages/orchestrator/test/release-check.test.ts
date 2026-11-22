@@ -160,3 +160,43 @@ test("release check fails closed when a component mutates a tracked file", async
     assert.match(result.stderr, /^RELEASE_TRACKED_MUTATION:/);
   });
 });
+
+test("release check words an interrupted or unstartable component as unable to complete", async () => {
+  await withRepository(async (root) => {
+    let result = await runFixture(root, [
+      "process.kill(process.pid, 'SIGTERM')"
+    ]);
+    assert.equal(result.status, 1);
+    assert.equal(
+      result.stderr,
+      "RELEASE_COMPONENT_FAILED: component-1 could not complete\n"
+    );
+    result = await runFixture(root, ["process.exit(9)"]);
+    assert.equal(
+      result.stderr,
+      "RELEASE_COMPONENT_FAILED: component-1 exited non-zero\n"
+    );
+    const componentPath = path.join(root, "missing-command.json");
+    await writeFile(
+      componentPath,
+      JSON.stringify([
+        {
+          name: "missing",
+          command: path.join(root, "missing-command"),
+          args: []
+        }
+      ]),
+      "utf8"
+    );
+    result = spawnSync(
+      process.execPath,
+      [SCRIPT, "--root", root, "--fixture-components", componentPath],
+      { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
+    );
+    assert.equal(result.status, 1);
+    assert.equal(
+      result.stderr,
+      "RELEASE_COMPONENT_FAILED: missing could not complete\n"
+    );
+  });
+});

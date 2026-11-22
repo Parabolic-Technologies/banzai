@@ -24,12 +24,20 @@ import { pathToFileURL } from "node:url";
 import test from "node:test";
 import {
   checkPhaseResourceBytes,
+  identity,
   phaseResourceBytes,
-  validateGuidanceExtraction,
-  describeGuidanceTransition,
-  evolveGuidanceBaseline,
-  resourceDigest
+  resourceDigest,
+  sortedExpectations,
+  validateClosedGuidanceBaseline,
+  type InstructionAuthority,
+  type InstructionTransition
 } from "../scripts/phase-resources-build.mjs";
+import {
+  describeInstructionTransition,
+  evolveInstructionBaseline,
+  initializeInstructionBaseline,
+  validateInstructionBaseline
+} from "../scripts/successor-baseline.mjs";
 import {
   createNodeVersionFileSystem,
   recoverProjectVersion,
@@ -123,9 +131,12 @@ const FIXTURE_PATHS = [
   "packages/orchestrator/scripts/init-resources-build.mjs",
   "packages/orchestrator/scripts/artifact-readers-build.mjs",
   "packages/orchestrator/scripts/phase-resources-build.mjs",
+  "packages/orchestrator/scripts/successor-baseline.mjs",
   "packages/orchestrator/phase-guidance-baseline.json",
   "packages/orchestrator/phase-guidance-current.json",
   "packages/orchestrator/phase-guidance-current.sha256",
+  "packages/orchestrator/instruction-baseline.json",
+  "packages/orchestrator/instruction-baseline.sha256",
   "packages/orchestrator/scripts/instruction-baseline.mjs",
   "documentation/decisions/0043-proportionate-verification-evidence.md",
   "documentation/decisions/0044-instruction-baseline-evolution.md",
@@ -145,6 +156,8 @@ const FIXTURE_PATHS = [
   "documentation/decisions/0063-stable-headless-vendor-invocations.md",
   "documentation/decisions/0064-runner-recorded-plan-remainder-digest.md",
   "documentation/decisions/0066-date-prefixed-work-and-initiative-slugs.md",
+  "documentation/decisions/0069-standalone-plugin-control-model.md",
+  "documentation/decisions/0070-orchestrator-owned-instruction-copy.md",
   "packages/orchestrator/scripts/check-dist.mjs",
   "packages/orchestrator/scripts/release-version.mjs",
   "packages/orchestrator/scripts/smoke-committed.mjs",
@@ -332,6 +345,217 @@ async function withFixture(
   }
 }
 
+const CLOSED_BASELINE = "packages/orchestrator/phase-guidance-current.json";
+const CLOSED_BASELINE_PIN =
+  "packages/orchestrator/phase-guidance-current.sha256";
+const CLOSED_BASELINE_FILES = [
+  "packages/orchestrator/phase-guidance-baseline.json",
+  CLOSED_BASELINE,
+  CLOSED_BASELINE_PIN
+] as const;
+const SUCCESSOR_BASELINE = "packages/orchestrator/instruction-baseline.json";
+const SUCCESSOR_PIN = "packages/orchestrator/instruction-baseline.sha256";
+const INSTRUCTION_MODULE = "packages/orchestrator/src/phase-resources.ts";
+const HOOK_CONFIGURATION = "plugins/banzai/hooks/hooks.json";
+const HOOK_SCRIPT = "plugins/banzai/hooks/spec-gate.cjs";
+const CLAUDE_MANIFEST = "plugins/banzai/.claude-plugin/plugin.json";
+const CODEX_MANIFEST = "plugins/banzai/.codex-plugin/plugin.json";
+const CONTROL_MODEL_DECISION =
+  "documentation/decisions/0069-standalone-plugin-control-model.md";
+const INSTRUCTION_COPY_DECISION =
+  "documentation/decisions/0070-orchestrator-owned-instruction-copy.md";
+
+interface SuccessorBaseline {
+  schema: string;
+  schemaVersion: number;
+  predecessorBaselineSha256: string;
+  origin: {
+    authorities: InstructionAuthority[];
+    expectations: Record<string, string>;
+  };
+  expectations: Record<string, string>;
+  transitions: InstructionTransition[];
+}
+
+interface ClosedBaseline {
+  expectations: Record<string, string>;
+  transitions: InstructionTransition[];
+}
+
+async function instructionAuthority(
+  root: string,
+  relativePath: string,
+  scope: string
+): Promise<InstructionAuthority> {
+  return {
+    path: relativePath,
+    sha256: resourceDigest(await readFile(path.join(root, relativePath))),
+    scope
+  };
+}
+
+async function instructionAuthorization(
+  root: string,
+  authorityPath: string,
+  scope: string
+) {
+  const proposal = await describeInstructionTransition(root);
+  return {
+    schema: "banzai-instruction-authorization/v1",
+    schemaVersion: 1,
+    predecessorSha256: proposal.predecessorSha256,
+    authorities: [await instructionAuthority(root, authorityPath, scope)],
+    scope: proposal.changes.map((change) => change.key)
+  };
+}
+
+async function readBaseline<T>(root: string, relativePath: string): Promise<T> {
+  return JSON.parse(await readFile(path.join(root, relativePath), "utf8")) as T;
+}
+
+async function writePinnedBaseline(
+  root: string,
+  relativePath: string,
+  pinPath: string,
+  baseline: unknown
+): Promise<void> {
+  const bytes = JSON.stringify(baseline, null, 2) + "\n";
+  await writeFile(path.join(root, relativePath), bytes);
+  await writeFile(path.join(root, pinPath), resourceDigest(bytes) + "\n");
+}
+
+// A hand-written chain step, valid in every respect the caller leaves alone.
+function instructionTransition(
+  expectations: Record<string, string>,
+  authorities: InstructionAuthority[],
+  changes: Record<string, string>
+): InstructionTransition {
+  return {
+    predecessorSha256: identity(expectations),
+    successorSha256: identity(
+      sortedExpectations({ ...expectations, ...changes })
+    ),
+    authorities,
+    changes: Object.entries(sortedExpectations(changes)).map(
+      ([key, after]) => ({ key, before: expectations[key] ?? null, after })
+    )
+  };
+}
+
+interface ModuleResource {
+  sha256: string;
+  text?: string;
+}
+type ModuleDefinitions = Record<string, Record<string, string[]>>;
+
+async function rewriteInstructionModule(
+  root: string,
+  mutate: (
+    definitions: ModuleDefinitions,
+    resources: Record<string, ModuleResource>
+  ) => void
+): Promise<void> {
+  const target = path.join(root, INSTRUCTION_MODULE);
+  const match =
+    /^([\s\S]*?export const PHASE_RESOURCE_DEFINITIONS = )([\s\S]*?)( as const;\n\n\/\/ prettier-ignore\nexport const EMBEDDED_PHASE_RESOURCES = )([\s\S]*)( as const;\n)$/u.exec(
+      await readFile(target, "utf8")
+    );
+  assert.ok(match);
+  const [, head, definitionsJson, middle, resourcesJson, tail] = match;
+  assert.ok(head && definitionsJson && middle && resourcesJson && tail);
+  const definitions = JSON.parse(definitionsJson) as ModuleDefinitions;
+  const resources = JSON.parse(resourcesJson) as Record<string, ModuleResource>;
+  mutate(definitions, resources);
+  await writeFile(
+    target,
+    head +
+      JSON.stringify(definitions, null, 2) +
+      middle +
+      JSON.stringify(resources, null, 2) +
+      tail
+  );
+}
+
+function runBaselineTool(
+  root: string,
+  ...args: string[]
+): SpawnSyncReturns<string> {
+  return spawnSync(
+    process.execPath,
+    [
+      path.join(root, "packages/orchestrator/scripts/instruction-baseline.mjs"),
+      ...args
+    ],
+    { cwd: root, encoding: "utf8" }
+  );
+}
+
+const FIRST_GENERATION_REFUSAL =
+  /^Error: Successor instruction baseline first generation differs from its pinned identity/;
+const FIRST_GENERATION_TOOL_REFUSAL =
+  /^INSTRUCTION_RESOURCE_DRIFT Successor instruction baseline first generation differs from its pinned identity/;
+
+// Appends a sentence to a frozen text entry and digests it again, so the
+// module stays self-consistent. Returns the pinned key and its new digest.
+async function changeFrozenTextEntry(
+  root: string,
+  id: string
+): Promise<[string, string]> {
+  let digest = "";
+  await rewriteInstructionModule(root, (_definitions, resources) => {
+    const entry = requiredFixture(resources[id]);
+    entry.text = `${entry.text ?? ""}\nFixture sentence.\n`;
+    digest = resourceDigest(entry.text);
+    entry.sha256 = digest;
+  });
+  return [`${INSTRUCTION_MODULE}#${id}`, digest];
+}
+
+async function writeOriginFile(
+  root: string,
+  authorities: InstructionAuthority[]
+): Promise<string> {
+  const originPath = path.join(path.dirname(root), "origin.json");
+  await writeFile(
+    originPath,
+    JSON.stringify({
+      schema: "banzai-instruction-origin/v1",
+      schemaVersion: 1,
+      authorities
+    })
+  );
+  return originPath;
+}
+
+// The file an unanchored initializing form would write: the recorded
+// expectations with the given changes as a new origin, and an empty chain.
+async function writeFirstGeneration(
+  root: string,
+  recorded: SuccessorBaseline,
+  changes: Record<string, string>
+): Promise<void> {
+  const expectations = sortedExpectations({
+    ...recorded.expectations,
+    ...changes
+  });
+  await writePinnedBaseline(root, SUCCESSOR_BASELINE, SUCCESSOR_PIN, {
+    ...recorded,
+    origin: { authorities: recorded.origin.authorities, expectations },
+    expectations,
+    transitions: []
+  });
+}
+
+function rebuildFixture(root: string): void {
+  const packageRoot = path.join(root, "packages/orchestrator");
+  const build = spawnSync(
+    process.execPath,
+    [path.join(packageRoot, "scripts/build.mjs")],
+    { cwd: packageRoot, encoding: "utf8" }
+  );
+  assert.equal(build.status, 0, build.stderr);
+}
+
 test("distribution-only builds start without dist and preserve tracked generated resources", async () => {
   await withFixture(async (root) => {
     const packageRoot = path.join(root, "packages/orchestrator");
@@ -423,46 +647,66 @@ test("initialization guide parity rejects stale or missing resources without rep
   });
 });
 
-test("phase resources reject byte skew and missing generated source without repairing the candidate", async () => {
+test("frozen phase resources follow the hook files only and reject a stale digest or a missing module without repair", async () => {
   await withFixture(async (root) => {
     await checkPhaseResourceBytes(root);
-    const generatedPath = path.join(
-      root,
-      "packages/orchestrator/src/phase-resources.ts"
+    const generatedPath = path.join(root, INSTRUCTION_MODULE);
+    const original = await readFile(generatedPath, "utf8");
+    // Plugin text is not an input, whether changed, added or missing. The
+    // plugin may hold none of these files, so the fixture assumes none.
+    const plugin = path.join(root, "plugins/banzai");
+    for (const name of ["phases", "guidance", "policies"])
+      await mkdir(path.join(plugin, name), { recursive: true });
+    await appendFile(path.join(plugin, "phases/review.md"), "\n");
+    await writeFile(
+      path.join(plugin, "guidance/extra.md"),
+      "Added guidance.\n"
     );
-    const original = await readFile(generatedPath);
-    const resourcePath = path.join(root, "plugins/banzai/phases/review.md");
-    const resource = await readFile(resourcePath);
-    await writeFile(resourcePath, Buffer.concat([resource, Buffer.from("\n")]));
-    assert.notEqual(await phaseResourceBytes(root), original.toString("utf8"));
+    await rm(path.join(plugin, "policies/test-assurance.md"), { force: true });
+    assert.equal(await phaseResourceBytes(root), original);
+    await checkPhaseResourceBytes(root);
+
+    const hookPath = path.join(root, HOOK_SCRIPT);
+    const hook = await readFile(hookPath);
+    await appendFile(hookPath, "// fixture\n");
+    const rebuilt = await phaseResourceBytes(root);
+    assert.notEqual(rebuilt, original);
+    assert.equal(
+      rebuilt.replace(
+        resourceDigest(await readFile(hookPath)),
+        resourceDigest(hook)
+      ),
+      original
+    );
     await assert.rejects(
       checkPhaseResourceBytes(root),
       /src\/phase-resources.ts is missing or stale.*npm run build/
     );
-    assert.deepEqual(await readFile(generatedPath), original);
-    await writeFile(resourcePath, resource);
+    assert.equal(await readFile(generatedPath, "utf8"), original);
+    await writeFile(hookPath, hook);
+
+    // A text entry is the successor baseline's to guard, not the build's.
+    await writeFile(
+      generatedPath,
+      original.replace("# Strict Planning Phase", "# Stale Planning Phase")
+    );
+    await checkPhaseResourceBytes(root);
+    await assert.rejects(
+      validateInstructionBaseline(root),
+      /Frozen instruction entry differs from its digest: phases\/planning\.md/
+    );
     await unlink(generatedPath);
     await assert.rejects(
       checkPhaseResourceBytes(root),
       /src\/phase-resources.ts is missing or stale/
     );
     await assert.rejects(access(generatedPath));
-    await writeFile(
-      generatedPath,
-      original
-        .toString("utf8")
-        .replace("# Strict Planning Phase", "# Stale Planning Phase")
-    );
-    await assert.rejects(
-      checkPhaseResourceBytes(root),
-      /src\/phase-resources.ts is missing or stale/
-    );
   });
 });
 
-test("phase resource generation rejects absent invalid and escaping input with bounded diagnostics", async () => {
+test("hook digest generation rejects absent invalid and escaping hook input and an unusable module with bounded diagnostics", async () => {
   await withFixture(async (root) => {
-    const target = path.join(root, "plugins/banzai/phases/review.md");
+    const target = path.join(root, HOOK_SCRIPT);
     const original = await readFile(target);
     for (const invalid of [
       Buffer.alloc(0),
@@ -472,97 +716,315 @@ test("phase resource generation rejects absent invalid and escaping input with b
       await writeFile(target, invalid);
       await assert.rejects(
         phaseResourceBytes(root),
-        /Instruction resource phases\/review.md is missing, unreadable, unsafe or invalid UTF-8/
+        /Instruction resource hooks\/spec-gate.cjs is missing, unreadable, unsafe or invalid UTF-8/
       );
     }
     await unlink(target);
     await assert.rejects(
       phaseResourceBytes(root),
-      /Instruction resource phases\/review.md/
+      /Instruction resource hooks\/spec-gate.cjs/
     );
     const outside = path.join(path.dirname(root), "private-canary.md");
     await writeFile(outside, "PRIVATE_RESOURCE_CONTENT_CANARY");
     await symlink(outside, target);
-    await assert.rejects(phaseResourceBytes(root), (error: unknown) => {
+    const bounded = (pattern: RegExp) => (error: unknown) => {
       assert.ok(error instanceof Error);
       assert.doesNotMatch(
         error.message,
         /PRIVATE_RESOURCE_CONTENT_CANARY|private-canary|banzai-release-fixture/
       );
-      return /phases\/review.md/.test(error.message);
-    });
+      return pattern.test(error.message);
+    };
+    await assert.rejects(
+      phaseResourceBytes(root),
+      bounded(/hooks\/spec-gate.cjs/)
+    );
     await unlink(target);
     await writeFile(target, original);
+
+    const modulePath = path.join(root, INSTRUCTION_MODULE);
+    const source = await readFile(modulePath, "utf8");
+    const slot =
+      /\n {2}"hooks\/hooks\.json": \{\n {4}"sha256": "[a-f0-9]{64}"\n {2}\},/u;
+    const entry = requiredFixture(slot.exec(source)?.[0]);
+    const build = () =>
+      spawnSync(
+        process.execPath,
+        [path.join(root, "packages/orchestrator/scripts/build.mjs")],
+        { cwd: path.join(root, "packages/orchestrator"), encoding: "utf8" }
+      );
+    // Absent, repeated and malformed digest values are each not exactly one.
+    for (const unusable of [
+      source.replace(entry, ""),
+      source.replace(entry, entry + entry),
+      source.replace(entry, entry.replace(/[a-f0-9]{64}/u, "stale"))
+    ]) {
+      await writeFile(modulePath, unusable);
+      await assert.rejects(
+        phaseResourceBytes(root),
+        /must hold exactly one digest for hooks\/hooks\.json/
+      );
+      const failed = build();
+      assert.notEqual(failed.status, 0);
+      assert.match(failed.stderr, /exactly one digest for hooks\/hooks\.json/);
+      assert.equal(await readFile(modulePath, "utf8"), unusable);
+    }
+    await writeFile(modulePath, source);
+    // The module's phase table is the authority the script constant repeats.
+    await rewriteInstructionModule(root, (definitions) => {
+      requiredFixture(definitions.review?.policies).reverse();
+    });
+    await assert.rejects(
+      phaseResourceBytes(root),
+      /Phase table of scripts\/phase-resources-build\.mjs differs from src\/phase-resources\.ts/
+    );
+    assert.notEqual(build().status, 0);
+    await unlink(modulePath);
+    await symlink(outside, modulePath);
+    await assert.rejects(
+      phaseResourceBytes(root),
+      bounded(/Frozen src\/phase-resources\.ts is missing, unreadable, unsafe/)
+    );
+    await unlink(modulePath);
+    await assert.rejects(
+      phaseResourceBytes(root),
+      /Frozen src\/phase-resources\.ts is missing/
+    );
+    assert.notEqual(build().status, 0);
+    await assert.rejects(access(modulePath));
   });
 });
 
-test("shared guidance preserves the frozen extraction and conditional consumer duties", async () => {
+test("a changed plugin policy changes no orchestrator file while a changed hook script is stale until rebuilt", async () => {
   await withFixture(async (root) => {
-    await validateGuidanceExtraction(root);
-    const target = path.join(root, "plugins/banzai/guidance/fix.md");
-    const original = await readFile(target, "utf8");
-    await writeFile(
-      target,
-      original.replace("fixes a documented bug", "optionally documents bugs")
+    const packageRoot = path.join(root, "packages/orchestrator");
+    const run = (script: string) =>
+      spawnSync(process.execPath, [path.join(packageRoot, "scripts", script)], {
+        cwd: packageRoot,
+        encoding: "utf8"
+      });
+    const snapshot = async () => {
+      const files = new Map<string, string>();
+      for (const directory of ["packages/orchestrator", "plugins/banzai/lib"]) {
+        const entries = await readdir(path.join(root, directory), {
+          recursive: true,
+          withFileTypes: true
+        });
+        for (const entry of entries) {
+          if (!entry.isFile()) continue;
+          const file = path.join(entry.parentPath, entry.name);
+          files.set(
+            path.relative(root, file),
+            resourceDigest(await readFile(file))
+          );
+        }
+      }
+      return files;
+    };
+    const changedSince = async (before: Map<string, string>) => {
+      const after = await snapshot();
+      return [...new Set([...before.keys(), ...after.keys()])]
+        .filter((name) => before.get(name) !== after.get(name))
+        .sort();
+    };
+    const before = await snapshot();
+    const modulePath = path.join(root, INSTRUCTION_MODULE);
+    const moduleBefore = await readFile(modulePath, "utf8");
+
+    await appendFile(
+      path.join(root, "plugins/banzai/policies/test-assurance.md"),
+      "\nFixture sentence the frozen module never saw.\n"
     );
-    await assert.rejects(
-      validateGuidanceExtraction(root),
-      /Shared guidance or consumer drift: fix\/Report Rule/
+    await appendFile(
+      path.join(root, "plugins/banzai/guidance/review.md"),
+      "\nFixture sentence the frozen module never saw.\n"
     );
-    await writeFile(target, original.replaceAll("\n", "\n\n"));
-    await validateGuidanceExtraction(root);
-    await writeFile(target, original);
-    const sourcePath = path.join(
-      root,
-      "plugins/banzai/skills/quick-fix/SKILL.md"
+    const built = run("build.mjs");
+    assert.equal(built.status, 0, built.stderr);
+    assert.deepEqual(await changedSince(before), []);
+    const checked = run("check-dist.mjs");
+    assert.equal(checked.status, 0, checked.stderr);
+    await validateInstructionBaseline(root);
+
+    const hookPath = path.join(root, HOOK_SCRIPT);
+    const hookBefore = resourceDigest(await readFile(hookPath));
+    await appendFile(hookPath, "// fixture\n");
+    const stale = run("check-dist.mjs");
+    assert.equal(stale.status, 1);
+    assert.match(
+      stale.stderr,
+      /Generated src\/phase-resources\.ts is missing or stale\. Run `npm run build`\./
     );
-    const source = await readFile(sourcePath, "utf8");
-    await writeFile(
-      sourcePath,
-      source.replace("## Orchestrated Mode", "## Changed Mode")
+    assert.deepEqual(await changedSince(before), []);
+    const rebuilt = run("build.mjs");
+    assert.equal(rebuilt.status, 0, rebuilt.stderr);
+    assert.deepEqual(await changedSince(before), [
+      "packages/orchestrator/dist/banzai.mjs",
+      "packages/orchestrator/dist/banzai.mjs.map",
+      INSTRUCTION_MODULE
+    ]);
+    // The rebuild wrote the hook digest and no other byte of the module.
+    assert.equal(
+      (await readFile(modulePath, "utf8")).replace(
+        resourceDigest(await readFile(hookPath)),
+        hookBefore
+      ),
+      moduleBefore
     );
-    await assert.rejects(
-      validateGuidanceExtraction(root),
-      /Non-enumerated skill change|Retained Orchestrated Mode/
+    const fresh = run("check-dist.mjs");
+    assert.equal(fresh.status, 0, fresh.stderr);
+  });
+});
+
+test("closed baseline replay reads no plugin file", async () => {
+  await withFixture(async (root) => {
+    await validateClosedGuidanceBaseline(root);
+    await rm(path.join(root, "plugins/banzai"), { recursive: true });
+    await validateClosedGuidanceBaseline(root);
+  });
+});
+
+// ADR-0070 sections 2 and 6: plugin text is ordinary source. Every edit below
+// is chosen by position, never by wording, so this test names no plugin
+// sentence itself and stays green when that text is rewritten.
+test("release validation and the build check pass after edits to plugin text that no check names and a removed phase document", async () => {
+  await withFixture(async (root) => {
+    const plugin = path.join(root, "plugins/banzai");
+    const packageRoot = path.join(root, "packages/orchestrator");
+    const moduleBefore = await readFile(
+      path.join(root, INSTRUCTION_MODULE),
+      "utf8"
     );
-    await writeFile(sourcePath, source);
-    const policyPath = path.join(
-      root,
-      "plugins/banzai/policies/security-assurance.md"
-    );
-    const policySource = await readFile(policyPath, "utf8");
-    await writeFile(
-      policyPath,
-      policySource.replace("implementation (conditional)", "implementation")
-    );
-    await assert.rejects(
-      validateGuidanceExtraction(root),
-      /Runner policy consumer drift: policies\/security-assurance.md/
-    );
-    await writeFile(
-      policyPath,
-      policySource.replace(
-        "planning, implementation",
-        "selection, planning, implementation"
+    const edit = async (
+      relativePath: string,
+      change: (text: string) => string
+    ) => {
+      const target = path.join(plugin, relativePath);
+      const before = await readFile(target, "utf8");
+      const after = change(before);
+      assert.notEqual(after, before, relativePath);
+      await writeFile(target, after, "utf8");
+    };
+    const reworded = (text: string) =>
+      text.replace(/\s*$/u, " Fixture clause that no check names.\n");
+    const withoutRunnerConsumers = (text: string) =>
+      text
+        .split("\n")
+        .filter((line) => !line.startsWith("- Runner consumers:"))
+        .join("\n");
+
+    await edit("skills/feature-status/SKILL.md", (text) =>
+      reworded(
+        text.replace(
+          /^description: .+$/mu,
+          "description: Fixture description that no check names."
+        )
       )
     );
-    await assert.rejects(
-      validateGuidanceExtraction(root),
-      /Runner policy consumer drift/
+    await edit("guidance/manifest.md", reworded);
+    // No policy needs a `- Runner consumers:` line, and one that matches no
+    // phase table is as acceptable as none.
+    for (const name of await readdir(path.join(plugin, "policies"))) {
+      const target = path.join(plugin, "policies", name);
+      await writeFile(
+        target,
+        withoutRunnerConsumers(await readFile(target, "utf8")),
+        "utf8"
+      );
+    }
+    await edit("policies/artifact-storage.md", (text) =>
+      reworded(`${text}\n- Runner consumers: selection.\n`)
     );
-    await writeFile(policyPath, policySource);
-    const extra = path.join(root, "plugins/banzai/phases/selection.md");
-    await writeFile(extra, "Do not add a selection resource.");
-    await assert.rejects(
-      validateGuidanceExtraction(root),
-      /Unexpected instruction resource inventory/
+
+    // Phase documents are read by nothing, so none is required and neither
+    // directory has an expected listing.
+    const phases = path.join(plugin, "phases");
+    const [phaseDocument] = await readdir(phases).catch((): string[] => []);
+    if (phaseDocument !== undefined)
+      await unlink(path.join(phases, phaseDocument));
+    await mkdir(phases, { recursive: true });
+    await writeFile(
+      path.join(phases, "selection.md"),
+      "Fixture phase the runner never embedded.\n"
     );
-    await unlink(extra);
-    await writeFile(target, "Injected extra preface.\n" + original);
-    await assert.rejects(
-      validateGuidanceExtraction(root),
-      /Non-enumerated guidance preface/
+    await writeFile(
+      path.join(plugin, "guidance/standalone-only.md"),
+      "# Standalone Only\n\nFixture guidance the runner never embedded.\n"
     );
+    const policy = await readBaseline<{ plugin: { requiredPaths: string[] } }>(
+      root,
+      "release-policy.json"
+    );
+    assert.deepEqual(
+      policy.plugin.requiredPaths.filter((item) =>
+        item.startsWith("plugins/banzai/phases/")
+      ),
+      []
+    );
+
+    const result = validate(root);
+    assert.equal(result.status, 0, result.stderr);
+    const buildCheck = spawnSync(
+      process.execPath,
+      [path.join(packageRoot, "scripts/check-dist.mjs")],
+      { cwd: packageRoot, encoding: "utf8" }
+    );
+    assert.equal(buildCheck.status, 0, buildCheck.stderr);
+    // No orchestrator source became stale.
+    assert.equal(await phaseResourceBytes(root), moduleBefore);
+    await validateInstructionBaseline(root);
+  });
+});
+
+test("a standalone text check fails without its fragment and reads linked guidance by its plugin path", async () => {
+  await withFixture(async (root) => {
+    const guidanceRoot = path.join(root, "plugins/banzai/guidance");
+    const skill = "plugins/banzai/skills/test-writing/SKILL.md";
+    const skillPath = path.join(root, skill);
+    // A fragment the Test Assurance check requires of this skill, removed
+    // from the skill and from every guidance file it could link.
+    const fragment = "no-new-test";
+    let removed = 0;
+    for (const target of [
+      skillPath,
+      ...(await readdir(guidanceRoot)).map((name) =>
+        path.join(guidanceRoot, name)
+      )
+    ]) {
+      const contents = await readFile(target, "utf8");
+      removed += contents.split(fragment).length - 1;
+      await writeFile(target, contents.replaceAll(fragment, "REMOVED"), "utf8");
+    }
+    assert.ok(removed > 0);
+    const missing = validate(root);
+    assert.equal(missing.status, 1);
+    assert.equal(
+      missing.stderr,
+      `TEST_ASSURANCE_POLICY_DRIFT ${skill}: missing required policy fragment: ${fragment}\n`
+    );
+
+    // The link resolves to its path in the plugin; the frozen phase table
+    // holds no entry for this file.
+    assert.doesNotMatch(
+      await readFile(path.join(root, INSTRUCTION_MODULE), "utf8"),
+      /standalone-only/u
+    );
+    await appendFile(
+      skillPath,
+      "\nRead and apply [Rules](../../guidance/standalone-only.md#rules)\n"
+    );
+    const dangling = validate(root);
+    assert.equal(dangling.status, 1);
+    assert.equal(
+      dangling.stderr,
+      "MISSING_RELEASE_FILE plugins/banzai/guidance/standalone-only.md: required file is missing or unreadable\n"
+    );
+    await writeFile(
+      path.join(guidanceRoot, "standalone-only.md"),
+      `# Standalone Only\n\n## Rules\n\nRecord a ${fragment} rationale.\n`
+    );
+    const linked = validate(root);
+    assert.equal(linked.status, 0, linked.stderr);
   });
 });
 
@@ -771,10 +1233,11 @@ test("release validation accepts a security assurance reference that wraps acros
       ),
       "utf8"
     );
-    await validateGuidanceExtraction(root);
-    const stale = validate(root);
-    assert.equal(stale.status, 1);
-    assert.match(stale.stderr, /^STALE_DISTRIBUTION /);
+    await validateClosedGuidanceBaseline(root);
+    // Plugin text is no build input: the edit leaves the distribution fresh,
+    // and a rebuild afterwards is not successor drift.
+    const edited = validate(root);
+    assert.equal(edited.status, 0, edited.stderr);
     const build = spawnSync(
       process.execPath,
       [path.join(root, "packages/orchestrator/scripts/build.mjs")],
@@ -868,25 +1331,28 @@ test("release validation rejects an Engineering Quality rule moved outside the c
   });
 });
 
-test("release validation preserves frozen skill source bytes even for a normalized policy reference rewrap", async () => {
+test("release validation accepts a changed plugin skill section that the closed baseline pinned", async () => {
   await withFixture(async (root) => {
-    const target = path.join(
+    const skill = "plugins/banzai/skills/feature-description/SKILL.md";
+    const closedBaseline = await readBaseline<ClosedBaseline>(
       root,
-      "plugins/banzai/skills/feature-description/SKILL.md"
+      CLOSED_BASELINE
     );
+    assert.ok(closedBaseline.expectations[`${skill}#section:Rules`]);
+    assert.ok(closedBaseline.expectations[`${skill}#skeleton`]);
+    const target = path.join(root, skill);
     const contents = await readFile(target, "utf8");
+    assert.match(contents, /^## Rules\n/mu);
     await writeFile(
       target,
-      replacePolicyFragment(
-        contents,
-        "canonical Engineering Quality policy in the installed `policies/engineering-quality.md`",
-        "canonical Engineering Quality\n  policy in the installed `policies/engineering-quality.md`"
+      contents.replace(
+        /^## Rules\n/mu,
+        "## Rules\n\nFixture sentence the closed baseline never saw.\n"
       ),
       "utf8"
     );
     const result = validate(root);
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /^INSTRUCTION_RESOURCE_DRIFT /);
+    assert.equal(result.status, 0, result.stderr);
   });
 });
 
@@ -1088,96 +1554,6 @@ test("release validation refuses stale current state documentation", async () =>
 });
 
 for (const [relativePath, fragment] of [
-  ["plugins/banzai/skills/orchestrate/SKILL.md", "banzai control capabilities"],
-  [
-    "plugins/banzai/skills/orchestrate/SKILL.md",
-    "disable-model-invocation: true"
-  ],
-  [
-    "plugins/banzai/skills/orchestrate/SKILL.md",
-    "never select it from prompt wording alone"
-  ],
-  [
-    "plugins/banzai/skills/orchestrate/SKILL.md",
-    "only when the user invokes it explicitly by name"
-  ],
-  [
-    "plugins/banzai/skills/orchestrate/agents/openai.yaml",
-    "allow_implicit_invocation: false"
-  ],
-  [
-    "plugins/banzai/skills/orchestrate/SKILL.md",
-    "with writable stdin, write the complete document"
-  ],
-  [
-    "plugins/banzai/skills/orchestrate/SKILL.md",
-    "exact supported v9 declaration"
-  ],
-  ["plugins/banzai/skills/orchestrate/SKILL.md", "banzai-agent-answer/v2"],
-  [
-    "plugins/banzai/skills/orchestrate/SKILL.md",
-    "Never select, infer, rewrite"
-  ],
-  [
-    "plugins/banzai/skills/orchestrate/SKILL.md",
-    "A consultation answer records preference provenance only."
-  ],
-  [
-    "plugins/banzai/skills/orchestrate/SKILL.md",
-    "A terminal `done` or `cancelled` projection does not block a new run."
-  ],
-  [
-    "plugins/banzai/skills/orchestrate/references/control-protocol.md",
-    "| `approve_plan` |"
-  ],
-  [
-    "plugins/banzai/skills/orchestrate/references/control-protocol.md",
-    "banzai-agent-capabilities/v9"
-  ],
-  [
-    "plugins/banzai/skills/orchestrate/references/control-protocol.md",
-    'controlContractVersion: "9.0.0"'
-  ],
-  [
-    "plugins/banzai/skills/orchestrate/references/control-protocol.md",
-    "| `answer_consultation` |"
-  ],
-  [
-    "plugins/banzai/skills/orchestrate/references/control-protocol.md",
-    "live-session/write-stdin mechanism"
-  ],
-  [
-    "plugins/banzai/skills/orchestrate/references/control-protocol.md",
-    "Only a non-terminal `activeRun` blocks `control start`."
-  ],
-  [
-    "plugins/banzai/skills/orchestrate/references/control-protocol.md",
-    "| `recover` |"
-  ],
-  ["plugins/banzai/skills/orchestrate/SKILL.md", "banzai-agent-recovery/v1"],
-  [
-    "plugins/banzai/skills/orchestrate/SKILL.md",
-    "Never convert a `null` completion count to zero"
-  ]
-] as const) {
-  test(`release validation protects orchestration policy in ${relativePath}`, async () => {
-    await withFixture(async (root) => {
-      const target = path.join(root, relativePath);
-      const contents = await readFile(target, "utf8");
-      assert.ok(contents.includes(fragment));
-      await writeFile(
-        target,
-        replacePolicyFragment(contents, fragment, "REMOVED"),
-        "utf8"
-      );
-      const result = validate(root);
-      assert.equal(result.status, 1);
-      assert.match(result.stderr, /^ORCHESTRATE_SKILL_POLICY_DRIFT /);
-    });
-  });
-}
-
-for (const [relativePath, fragment] of [
   ["plugins/banzai/skills/initiative/SKILL.md", "name: initiative"],
   [
     "plugins/banzai/skills/initiative/SKILL.md",
@@ -1205,7 +1581,7 @@ for (const [relativePath, fragment] of [
   ],
   [
     "plugins/banzai/skills/initiative/SKILL.md",
-    "Never invoke `orchestrate` or the `banzai` CLI"
+    "Never invoke the `banzai` CLI"
   ],
   ["plugins/banzai/skills/initiative/SKILL.md", "`next` writes nothing."],
   [
@@ -1249,6 +1625,37 @@ for (const [relativePath, fragment] of [
     });
   });
 }
+
+// ADR-0070 section 7, owner choice (c): the supervisor skill left the plugin.
+test("release validation accepts the plugin without the orchestrate skill", async () => {
+  await withFixture(async (root) => {
+    await assert.rejects(
+      access(path.join(root, "plugins/banzai/skills/orchestrate")),
+      { code: "ENOENT" }
+    );
+    // The publication policy is not part of the release fixture.
+    for (const policy of [
+      path.join(root, "release-policy.json"),
+      path.join(REPOSITORY_ROOT, "publication-policy.json")
+    ])
+      assert.doesNotMatch(
+        await readFile(policy, "utf8"),
+        /skills\/orchestrate\//
+      );
+    assert.doesNotMatch(
+      await readFile(
+        path.join(
+          REPOSITORY_ROOT,
+          "packages/orchestrator/scripts/check-release.mjs"
+        ),
+        "utf8"
+      ),
+      /ORCHESTRATE_SKILL_POLICY_DRIFT|validateOrchestrateSkill/
+    );
+    const result = validate(root);
+    assert.equal(result.status, 0, result.stderr);
+  });
+});
 
 test("release policy pins Git-capable Node images", async () => {
   const policy = JSON.parse(
@@ -1850,7 +2257,6 @@ test("release validation rejects malformed manifests", async () => {
 for (const [relativePath, code] of [
   ["plugins/banzai/hooks/spec-gate.cjs", "MISSING_RELEASE_FILE"],
   ["plugins/banzai/skills/code-writing/SKILL.md", "MISSING_RELEASE_FILE"],
-  ["plugins/banzai/skills/orchestrate/SKILL.md", "MISSING_RELEASE_FILE"],
   [
     "plugins/banzai/contracts/v1/review-result.schema.json",
     "MISSING_RELEASE_FILE"
@@ -2018,6 +2424,15 @@ test("default CI lanes reject vendor calls and live CI requires explicit opt-in"
 });
 
 test("release validation rejects weakened GitHub CI evidence and live isolation", async () => {
+  // ADR-0071: the complementary branch conditions of a release lane.
+  const full =
+    "steps.scope.outputs.scope != 'documents' && steps.scope.outputs.scope != 'plugin'";
+  const narrow =
+    "steps.scope.outputs.scope == 'documents' || steps.scope.outputs.scope == 'plugin'";
+  const releaseCheck = `      - run: npm run release:check\n        if: ${full}\n`;
+  const evidence = `      - id: release_evidence\n        if: ${full}\n`;
+  const upload = `      - uses: actions/upload-artifact@v7\n        if: ${full}\n`;
+  const scopedCheck = `      - run: npm run check -- --base HEAD^1\n        if: ${narrow}\n`;
   await withFixture(async (root) => {
     const ciPath = path.join(root, ".github/workflows/ci.yml");
     const accepted = await readFile(ciPath, "utf8");
@@ -2055,17 +2470,66 @@ test("release validation rejects weakened GitHub CI evidence and live isolation"
         "CI_POLICY_DRIFT"
       ],
       [
-        "      - run: npm run release:check\n",
+        releaseCheck,
         "      - run: npm run release:check\n        if: false\n",
         "CI_POLICY_DRIFT"
       ],
       // A quoted key is the same condition in another YAML spelling (review-3 F1).
       [
-        "      - run: npm run release:check\n",
+        releaseCheck,
         "      - run: npm run release:check\n        \"if\": github.event_name != 'pull_request'\n",
         "CI_POLICY_DRIFT"
       ],
       ["      - uses: actions/upload-artifact@v7\n", "", "CI_POLICY_DRIFT"],
+      // ADR-0071: the full branch alone runs the release check and records
+      // and uploads evidence; a narrow branch records none.
+      [releaseCheck, "      - run: npm run release:check\n", "CI_POLICY_DRIFT"],
+      [evidence, "      - id: release_evidence\n", "CI_POLICY_DRIFT"],
+      [
+        evidence,
+        "      - id: release_evidence\n        if: always()\n",
+        "CI_POLICY_DRIFT"
+      ],
+      [
+        evidence,
+        `      - id: release_evidence\n        if: ${narrow}\n`,
+        "CI_POLICY_DRIFT"
+      ],
+      [upload, "      - uses: actions/upload-artifact@v7\n", "CI_POLICY_DRIFT"],
+      [
+        upload,
+        "      - uses: actions/upload-artifact@v7\n        if: success()\n",
+        "CI_POLICY_DRIFT"
+      ],
+      // Overlapping conditions run both branches for some scope.
+      [
+        releaseCheck,
+        "      - run: npm run release:check\n        if: steps.scope.outputs.scope != 'documents'\n",
+        "CI_POLICY_DRIFT"
+      ],
+      [
+        scopedCheck,
+        "      - run: npm run check -- --base HEAD^1\n        if: steps.scope.outputs.scope != 'full'\n",
+        "CI_POLICY_DRIFT"
+      ],
+      [scopedCheck, "", "CI_POLICY_DRIFT"],
+      // The scope step must run the first parent's module, never the
+      // checked-out one, and needs the first parent in the checkout.
+      [
+        '            node "$RUNNER_TEMP/verification-scope.mjs" --ci\n',
+        "            node packages/orchestrator/scripts/verification-scope.mjs --ci\n",
+        "CI_POLICY_DRIFT"
+      ],
+      [
+        '            echo "scope=full" >> "$GITHUB_OUTPUT"\n',
+        '            echo "scope=documents" >> "$GITHUB_OUTPUT"\n',
+        "CI_POLICY_DRIFT"
+      ],
+      [
+        "          persist-credentials: false\n          fetch-depth: 2\n",
+        "          persist-credentials: false\n",
+        "CI_POLICY_DRIFT"
+      ],
       // Node 26 is a required lane: it runs on pull requests and blocks.
       [
         "  release_check_node_26:\n",
@@ -2706,17 +3170,157 @@ test("instruction layout rejects a missing packaged policy file", async () => {
   });
 });
 
-test("directly authored guidance is covered by a raw key and drifts without a transition", async () => {
+test("successor baseline pins exactly its 28 resources and rejects each unrecorded change", async () => {
   await withFixture(async (root) => {
-    const target = path.join(root, "plugins/banzai/guidance/code-design.md");
-    const source = await readFile(target, "utf8");
-    await writeFile(
-      target,
-      source.replace("## Ownership Discovery", "## Ownership discovery")
+    await validateInstructionBaseline(root);
+    const baseline = await readBaseline<SuccessorBaseline>(
+      root,
+      SUCCESSOR_BASELINE
+    );
+    assert.equal(baseline.schema, "banzai-instruction-baseline/v2");
+    assert.equal(baseline.schemaVersion, 2);
+    assert.equal(
+      baseline.predecessorBaselineSha256,
+      resourceDigest(await readFile(path.join(root, CLOSED_BASELINE)))
+    );
+    assert.deepEqual(
+      baseline.origin.authorities.map((authority) => authority.path),
+      [INSTRUCTION_COPY_DECISION]
+    );
+    const keys = Object.keys(baseline.expectations);
+    const moduleKeys = keys.filter((key) =>
+      key.startsWith(`${INSTRUCTION_MODULE}#`)
+    );
+    assert.equal(keys.length, 28);
+    assert.equal(moduleKeys.length, 24);
+    assert.ok(moduleKeys.includes(`${INSTRUCTION_MODULE}#definitions`));
+    assert.deepEqual(
+      keys.filter((key) => !moduleKeys.includes(key)),
+      [CLAUDE_MANIFEST, CODEX_MANIFEST, HOOK_CONFIGURATION, HOOK_SCRIPT]
+    );
+    // The committed file is the tool's own first generation of these bytes.
+    assert.equal(
+      (
+        await initializeInstructionBaseline(
+          root,
+          {
+            schema: "banzai-instruction-origin/v1",
+            schemaVersion: 1,
+            authorities: baseline.origin.authorities
+          },
+          { check: true }
+        )
+      ).sha256,
+      (await readFile(path.join(root, SUCCESSOR_PIN), "utf8")).trim()
+    );
+
+    const expectDrift = async (
+      relativePath: string,
+      key: string,
+      change: () => Promise<void>
+    ) => {
+      const target = path.join(root, relativePath);
+      const original = await readFile(target);
+      await change();
+      await assert.rejects(validateInstructionBaseline(root), {
+        message: `Unrecorded instruction resource drift: ${key}.`
+      });
+      await writeFile(target, original);
+      await validateInstructionBaseline(root);
+    };
+    await expectDrift(
+      INSTRUCTION_MODULE,
+      `${INSTRUCTION_MODULE}#phases/review.md`,
+      () =>
+        rewriteInstructionModule(root, (_definitions, resources) => {
+          const entry = requiredFixture(resources["phases/review.md"]);
+          entry.text = `${entry.text ?? ""}\nFixture sentence.\n`;
+          entry.sha256 = resourceDigest(entry.text);
+        })
+    );
+    await expectDrift(
+      INSTRUCTION_MODULE,
+      `${INSTRUCTION_MODULE}#definitions`,
+      () =>
+        rewriteInstructionModule(root, (definitions) => {
+          requiredFixture(definitions.review?.policies).reverse();
+        })
+    );
+    await expectDrift(HOOK_SCRIPT, HOOK_SCRIPT, () =>
+      appendFile(path.join(root, HOOK_SCRIPT), "// fixture\n")
+    );
+    await expectDrift(HOOK_CONFIGURATION, HOOK_CONFIGURATION, () =>
+      appendFile(path.join(root, HOOK_CONFIGURATION), "\n")
+    );
+    for (const manifest of [CLAUDE_MANIFEST, CODEX_MANIFEST]) {
+      await expectDrift(manifest, manifest, () =>
+        mutateJson(root, manifest, (value) => {
+          value.description = "Fixture description.";
+        })
+      );
+      // ADR-0033 owns the version value, so it is outside the pinned image.
+      await mutateJson(root, manifest, (value) => {
+        value.version = "9.9.9";
+      });
+      await validateInstructionBaseline(root);
+    }
+
+    // Object key order of the phase table is not part of its image.
+    await rewriteInstructionModule(root, (definitions) => {
+      const { guidance, ...rest } = requiredFixture(definitions.review);
+      definitions.review = { ...rest, guidance: requiredFixture(guidance) };
+    });
+    await validateInstructionBaseline(root);
+    await rewriteInstructionModule(root, (_definitions, resources) => {
+      const entry = requiredFixture(resources["phases/review.md"]);
+      entry.text = `${entry.text ?? ""}\nUndigested sentence.\n`;
+    });
+    await assert.rejects(
+      validateInstructionBaseline(root),
+      /Frozen instruction entry differs from its digest: phases\/review\.md/
+    );
+  });
+});
+
+test("release validation rejects a changed pinned resource, sibling digest or closed baseline byte", async () => {
+  await withFixture(async (root) => {
+    const expectDrift = async (
+      relativePath: string,
+      reportedPath: string,
+      change: (original: Buffer) => Buffer | string
+    ) => {
+      const target = path.join(root, relativePath);
+      const original = await readFile(target);
+      await writeFile(target, change(original));
+      const result = validate(root);
+      assert.equal(result.status, 1, relativePath);
+      assert.ok(
+        result.stderr.startsWith(
+          `INSTRUCTION_RESOURCE_DRIFT ${reportedPath}: `
+        ),
+        result.stderr
+      );
+      await writeFile(target, original);
+    };
+    for (const relativePath of CLOSED_BASELINE_FILES)
+      await expectDrift(relativePath, relativePath, (original) =>
+        Buffer.concat([original, Buffer.from("\n")])
+      );
+    await expectDrift(
+      SUCCESSOR_PIN,
+      SUCCESSOR_BASELINE,
+      () => "0".repeat(64) + "\n"
+    );
+    await expectDrift(SUCCESSOR_BASELINE, SUCCESSOR_BASELINE, (original) =>
+      JSON.stringify(JSON.parse(original.toString("utf8")))
+    );
+    await expectDrift(INSTRUCTION_MODULE, SUCCESSOR_BASELINE, (original) =>
+      original
+        .toString("utf8")
+        .replace("# Strict Planning Phase", "# Stale Planning Phase")
     );
     const result = validate(root);
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /^INSTRUCTION_RESOURCE_DRIFT /);
+    assert.equal(result.status, 0, result.stderr);
   });
 });
 
@@ -2749,36 +3353,9 @@ test("directly authored guidance enters the baseline through a first transition 
     assert.equal(introductions.length, 1);
     assert.equal(introductions[0]?.before, null);
     assert.ok(current.expectations[key]);
-    await validateGuidanceExtraction(root);
+    await validateClosedGuidanceBaseline(root);
   });
 });
-
-// Any instruction-resource edit drifts the baseline first, so a negative case
-// for the ADR-0050 checks must record its own authorized transition to reach
-// them.
-const withAuthorizedInstructionEdit = async (
-  root: string,
-  edit: () => Promise<void>
-) => {
-  await edit();
-  const proposal = await describeGuidanceTransition(root);
-  const authorityPath =
-    "documentation/decisions/0050-triggered-code-design-assessment.md";
-  await evolveGuidanceBaseline(root, {
-    schema: "banzai-instruction-authorization/v1",
-    schemaVersion: 1,
-    predecessorSha256: proposal.predecessorSha256,
-    authorities: [
-      {
-        path: authorityPath,
-        sha256: resourceDigest(await readFile(path.join(root, authorityPath))),
-        scope: "ADR 0050 section 8; fixture negative case"
-      }
-    ],
-    scope: proposal.changes.map((change) => change.key)
-  });
-  await validateGuidanceExtraction(root);
-};
 
 test("release validation rejects a duplicated structural assessment trigger heading", async () => {
   await withFixture(async (root) => {
@@ -2786,16 +3363,14 @@ test("release validation rejects a duplicated structural assessment trigger head
       root,
       "plugins/banzai/policies/engineering-quality.md"
     );
-    await withAuthorizedInstructionEdit(root, async () => {
-      const source = await readFile(target, "utf8");
-      await writeFile(
-        target,
-        source.replace(
-          "### Structural Assessment Triggers\n",
-          "### Structural Assessment Triggers\n\n### Structural Assessment Triggers\n"
-        )
-      );
-    });
+    const source = await readFile(target, "utf8");
+    await writeFile(
+      target,
+      source.replace(
+        "### Structural Assessment Triggers\n",
+        "### Structural Assessment Triggers\n\n### Structural Assessment Triggers\n"
+      )
+    );
     const result = validate(root);
     assert.equal(result.status, 1);
     assert.match(result.stderr, /^CODE_DESIGN_POLICY_DRIFT /);
@@ -2805,11 +3380,9 @@ test("release validation rejects a duplicated structural assessment trigger head
 test("release validation rejects a code-design method over its byte budget", async () => {
   await withFixture(async (root) => {
     const target = path.join(root, "plugins/banzai/guidance/code-design.md");
-    await withAuthorizedInstructionEdit(root, async () => {
-      const source = await readFile(target, "utf8");
-      const padding = `\nBudget overflow padding. ${"x".repeat(2400)}\n`;
-      await writeFile(target, source + padding);
-    });
+    const source = await readFile(target, "utf8");
+    const padding = `\nBudget overflow padding. ${"x".repeat(2400)}\n`;
+    await writeFile(target, source + padding);
     const result = validate(root);
     assert.equal(result.status, 1);
     assert.match(result.stderr, /^CODE_DESIGN_METHOD_DRIFT /);
@@ -2822,16 +3395,14 @@ test("release validation rejects a consumer skill missing its code-design anchor
       root,
       "plugins/banzai/skills/development-plan/SKILL.md"
     );
-    await withAuthorizedInstructionEdit(root, async () => {
-      const source = await readFile(target, "utf8");
-      await writeFile(
-        target,
-        source.replace(
-          "[Planning Assessment](../../guidance/code-design.md#planning-assessment)",
-          "[Planning Assessment](../../guidance/planning.md#rules)"
-        )
-      );
-    });
+    const source = await readFile(target, "utf8");
+    await writeFile(
+      target,
+      source.replace(
+        "[Planning Assessment](../../guidance/code-design.md#planning-assessment)",
+        "[Planning Assessment](../../guidance/planning.md#rules)"
+      )
+    );
     const result = validate(root);
     assert.equal(result.status, 1);
     assert.match(result.stderr, /^CODE_DESIGN_CONSUMER_DRIFT /);
@@ -2841,145 +3412,390 @@ test("release validation rejects a consumer skill missing its code-design anchor
 test("release validation rejects audit instructions that reference the code-design method", async () => {
   await withFixture(async (root) => {
     const target = path.join(root, "plugins/banzai/guidance/review.md");
-    await withAuthorizedInstructionEdit(root, async () => {
-      const source = await readFile(target, "utf8");
-      await writeFile(
-        target,
-        source.replace(
-          "For an ADR-0050 structural assessment obligation,",
-          "Read code-design.md, then for an ADR-0050 structural assessment obligation,"
-        )
-      );
-    });
+    const source = await readFile(target, "utf8");
+    await writeFile(
+      target,
+      source.replace(
+        "For an ADR-0050 structural assessment obligation,",
+        "Read code-design.md, then for an ADR-0050 structural assessment obligation,"
+      )
+    );
     const result = validate(root);
     assert.equal(result.status, 1);
     assert.match(result.stderr, /^CODE_DESIGN_CONSUMER_DRIFT /);
   });
 });
 
-test("instruction baseline evolves only an exact authorized scope and retains its immutable root", async () => {
+test("successor baseline admits a hook configuration and manifest transition only under an Accepted authority", async () => {
   await withFixture(async (root) => {
-    const originalPath = path.join(
-      root,
-      "packages/orchestrator/phase-guidance-baseline.json"
+    const closedFiles = await Promise.all(
+      CLOSED_BASELINE_FILES.map((name) => readFile(path.join(root, name)))
     );
-    const original = await readFile(originalPath);
-    const currentPath = path.join(
-      root,
-      "packages/orchestrator/phase-guidance-current.json"
-    );
-    const pinPath = path.join(
-      root,
-      "packages/orchestrator/phase-guidance-current.sha256"
-    );
-    const initial = await readFile(currentPath, "utf8");
+    const baselinePath = path.join(root, SUCCESSOR_BASELINE);
+    const pinPath = path.join(root, SUCCESSOR_PIN);
+    const initial = await readFile(baselinePath, "utf8");
     const initialPin = await readFile(pinPath, "utf8");
-    const target = path.join(root, "plugins/banzai/guidance/fix.md");
-    const source = await readFile(target, "utf8");
+    const hookPath = path.join(root, HOOK_CONFIGURATION);
     await writeFile(
-      target,
-      source.replace(
-        "Use one compact closure record",
-        "Use one bounded compact closure record"
+      hookPath,
+      (await readFile(hookPath, "utf8")).replaceAll(
+        "Edit|Write|MultiEdit",
+        "Edit|Write|MultiEdit|Fixture"
       )
     );
-    await assert.rejects(
-      validateGuidanceExtraction(root),
-      /Shared guidance or consumer drift/
-    );
-    const proposal = await describeGuidanceTransition(root);
-    const authorityPath =
-      "documentation/decisions/0044-instruction-baseline-evolution.md";
-    const authorization = {
-      schema: "banzai-instruction-authorization/v1",
-      schemaVersion: 1,
-      predecessorSha256: proposal.predecessorSha256,
-      authorities: [
-        {
-          path: authorityPath,
-          sha256: resourceDigest(
-            await readFile(path.join(root, authorityPath))
-          ),
-          scope: "ADR 0044 section 2; fixture bounded closure wording"
-        }
-      ],
-      scope: proposal.changes.map((change) => change.key)
-    };
-    assert.deepEqual(authorization.scope, [
-      "plugins/banzai/guidance/fix.md#section:Change Report"
-    ]);
-    const preview = await evolveGuidanceBaseline(root, authorization, {
-      check: true
+    await mutateJson(root, CODEX_MANIFEST, (value) => {
+      value.description = "Fixture description under the control model.";
     });
-    assert.equal(preview.changed, true);
-    assert.equal(await readFile(currentPath, "utf8"), initial);
     await assert.rejects(
-      evolveGuidanceBaseline(root, { ...authorization, scope: [] }),
-      /exact scope/
+      validateInstructionBaseline(root),
+      /Unrecorded instruction resource drift/
     );
+    const authorization = await instructionAuthorization(
+      root,
+      CONTROL_MODEL_DECISION,
+      "ADR 0069; fixture hook configuration and Codex manifest"
+    );
+    assert.deepEqual(authorization.scope, [CODEX_MANIFEST, HOOK_CONFIGURATION]);
+    const authorizationPath = path.join(
+      path.dirname(root),
+      "authorization.json"
+    );
+    const tool = async (input: unknown, ...flags: string[]) => {
+      await writeFile(authorizationPath, JSON.stringify(input));
+      return runBaselineTool(
+        root,
+        "--authorization",
+        authorizationPath,
+        ...flags
+      );
+    };
+
+    const decisionPath = path.join(root, CONTROL_MODEL_DECISION);
+    const accepted = await readFile(decisionPath, "utf8");
+    await writeFile(
+      decisionPath,
+      accepted.replace("- Status: Accepted", "- Status: Proposed")
+    );
+    const proposed = await tool({
+      ...authorization,
+      authorities: [
+        await instructionAuthority(root, CONTROL_MODEL_DECISION, "ADR 0069")
+      ]
+    });
+    assert.equal(proposed.status, 1);
+    assert.match(
+      proposed.stderr,
+      /^INSTRUCTION_RESOURCE_DRIFT Instruction transition authority changed or is not Accepted\./
+    );
+    await writeFile(decisionPath, accepted);
+    const unauthorized = await tool({ ...authorization, authorities: [] });
+    assert.equal(unauthorized.status, 1);
+    assert.match(unauthorized.stderr, /Missing accepted instruction/);
     await assert.rejects(
-      evolveGuidanceBaseline(root, {
+      evolveInstructionBaseline(root, {
         ...authorization,
         predecessorSha256: "0".repeat(64)
       }),
       /predecessor/
     );
     await assert.rejects(
-      evolveGuidanceBaseline(root, { ...authorization, authorities: [] }),
-      /authority/
+      evolveInstructionBaseline(root, { ...authorization, scope: [] }),
+      /exact scope/
     );
-    await evolveGuidanceBaseline(root, authorization);
-    await validateGuidanceExtraction(root);
+    assert.equal(await readFile(baselinePath, "utf8"), initial);
+
+    const preview = await tool(authorization, "--check");
+    assert.equal(preview.status, 0, preview.stderr);
+    assert.equal(await readFile(baselinePath, "utf8"), initial);
+    const published = await tool(authorization);
+    assert.equal(published.status, 0, published.stderr);
+    assert.equal(published.stdout, preview.stdout);
+    await validateInstructionBaseline(root);
+    const next = await readFile(baselinePath, "utf8");
+    const nextPin = await readFile(pinPath, "utf8");
+    assert.deepEqual(JSON.parse(published.stdout), {
+      changed: true,
+      sha256: resourceDigest(next)
+    });
     assert.equal(
-      (await evolveGuidanceBaseline(root, authorization)).changed,
+      (await evolveInstructionBaseline(root, authorization)).changed,
       false
     );
-    const next = await readFile(currentPath, "utf8");
-    const nextPin = await readFile(pinPath, "utf8");
-    assert.equal(resourceDigest(next), preview.sha256);
-    assert.deepEqual(await readFile(originalPath), original);
+    const described = runBaselineTool(root, "--describe");
+    assert.equal(described.status, 0, described.stderr);
+    assert.deepEqual(
+      (JSON.parse(described.stdout) as { changes: unknown[] }).changes,
+      []
+    );
+    // The embedded hook digest follows the hook file through the build.
+    const build = spawnSync(
+      process.execPath,
+      [path.join(root, "packages/orchestrator/scripts/build.mjs")],
+      { cwd: path.join(root, "packages/orchestrator"), encoding: "utf8" }
+    );
+    assert.equal(build.status, 0, build.stderr);
+    const result = validate(root);
+    assert.equal(result.status, 0, result.stderr);
+
     // Simulate interruption after baseline replacement and before pin replacement.
     const journal = path.join(
       root,
-      "packages/orchestrator/.phase-guidance-transition.json"
+      "packages/orchestrator/.instruction-baseline-transition.json"
     );
     await writeFile(pinPath, initialPin);
     await writeFile(
       journal,
       JSON.stringify({
-        authorizationSha256: resourceDigest(JSON.stringify(authorization)),
+        authorizationSha256: identity(authorization),
         previous: initial,
         next
       })
     );
-    await assert.rejects(validateGuidanceExtraction(root), /pin mismatch/);
-    await evolveGuidanceBaseline(root, authorization);
+    await assert.rejects(validateInstructionBaseline(root), /pin mismatch/);
+    await evolveInstructionBaseline(root, authorization);
     assert.equal(await readFile(pinPath, "utf8"), nextPin);
     await assert.rejects(access(journal));
-    const corrupt = JSON.parse(next) as {
-      transitions: { predecessorSha256: string }[];
+
+    const initialization = {
+      schema: "banzai-instruction-origin/v1",
+      schemaVersion: 1,
+      authorities: authorization.authorities
     };
-    requiredFixture(corrupt.transitions.at(-1)).predecessorSha256 = "0".repeat(
-      64
+    await assert.rejects(
+      initializeInstructionBaseline(root, initialization),
+      /already holds a transition/
     );
-    const corruptBytes = JSON.stringify(corrupt, null, 2) + "\n";
-    await writeFile(currentPath, corruptBytes);
-    await writeFile(pinPath, resourceDigest(corruptBytes) + "\n");
-    await assert.rejects(validateGuidanceExtraction(root), /predecessor/);
-    await writeFile(currentPath, next);
-    await writeFile(pinPath, nextPin);
-    const retained = path.join(
+    await writeFile(authorizationPath, JSON.stringify(initialization));
+    const refused = runBaselineTool(root, "--initialize", authorizationPath);
+    assert.equal(refused.status, 1);
+    assert.match(refused.stderr, /already holds a transition/);
+    assert.equal(await readFile(baselinePath, "utf8"), next);
+    // With the chain put back to empty the authority rule still applies, and
+    // no first generation is written over the changed resources.
+    await writeFile(baselinePath, initial);
+    await writeFile(pinPath, initialPin);
+    await assert.rejects(
+      initializeInstructionBaseline(root, {
+        ...initialization,
+        authorities: []
+      }),
+      /authority/
+    );
+    await assert.rejects(
+      initializeInstructionBaseline(root, initialization),
+      FIRST_GENERATION_REFUSAL
+    );
+    assert.equal(await readFile(baselinePath, "utf8"), initial);
+    assert.equal(await readFile(pinPath, "utf8"), initialPin);
+    assert.deepEqual(
+      await Promise.all(
+        CLOSED_BASELINE_FILES.map((name) => readFile(path.join(root, name)))
+      ),
+      closedFiles
+    );
+  });
+});
+
+test("release validation rejects a first generation written again over a changed text entry while the chain is empty", async () => {
+  await withFixture(async (root) => {
+    const baselinePath = path.join(root, SUCCESSOR_BASELINE);
+    const pinPath = path.join(root, SUCCESSOR_PIN);
+    const initial = await readFile(baselinePath, "utf8");
+    const initialPin = await readFile(pinPath, "utf8");
+    const baseline = await readBaseline<SuccessorBaseline>(
       root,
-      "plugins/banzai/skills/quick-fix/SKILL.md"
+      SUCCESSOR_BASELINE
     );
+    assert.deepEqual(baseline.transitions, []);
+    const [key, digest] = await changeFrozenTextEntry(
+      root,
+      "policies/security-assurance.md"
+    );
+    assert.notEqual(baseline.expectations[key], digest);
+
+    // The initializing form writes nothing, with or without its dry run.
+    const originPath = await writeOriginFile(root, baseline.origin.authorities);
+    for (const flags of [["--check"], []]) {
+      const refused = runBaselineTool(
+        root,
+        "--initialize",
+        originPath,
+        ...flags
+      );
+      assert.equal(refused.status, 1, refused.stdout);
+      assert.match(refused.stderr, FIRST_GENERATION_TOOL_REFUSAL);
+      assert.equal(await readFile(baselinePath, "utf8"), initial);
+      assert.equal(await readFile(pinPath, "utf8"), initialPin);
+    }
+
+    // The same first generation authored by hand, with a matching sibling
+    // digest and a rebuilt distribution, is refused by the real validator.
+    await writeFirstGeneration(root, baseline, { [key]: digest });
+    await assert.rejects(
+      validateInstructionBaseline(root),
+      FIRST_GENERATION_REFUSAL
+    );
+    rebuildFixture(root);
+    const result = validate(root);
+    assert.equal(result.status, 1, result.stdout);
+    assert.ok(
+      result.stderr.startsWith(
+        `INSTRUCTION_RESOURCE_DRIFT ${SUCCESSOR_BASELINE}: `
+      ),
+      result.stderr
+    );
+  });
+});
+
+test("release validation rejects a first generation written after a recorded chain was dropped", async () => {
+  await withFixture(async (root) => {
+    const baselinePath = path.join(root, SUCCESSOR_BASELINE);
+    const pinPath = path.join(root, SUCCESSOR_PIN);
+    await mutateJson(root, CODEX_MANIFEST, (value) => {
+      value.description = "Fixture description under the control model.";
+    });
+    const authorization = await instructionAuthorization(
+      root,
+      CONTROL_MODEL_DECISION,
+      "ADR 0069; fixture Codex manifest"
+    );
+    assert.deepEqual(authorization.scope, [CODEX_MANIFEST]);
+    await evolveInstructionBaseline(root, authorization);
+    const recorded = await readBaseline<SuccessorBaseline>(
+      root,
+      SUCCESSOR_BASELINE
+    );
+    assert.equal(recorded.transitions.length, 1);
+    // Control: the chain on the pinned first generation validates.
+    rebuildFixture(root);
+    const accepted = validate(root);
+    assert.equal(accepted.status, 0, accepted.stderr);
+
+    const [key, digest] = await changeFrozenTextEntry(
+      root,
+      "policies/security-assurance.md"
+    );
+    const originPath = await writeOriginFile(root, recorded.origin.authorities);
+    const held = runBaselineTool(root, "--initialize", originPath);
+    assert.equal(held.status, 1, held.stdout);
+    assert.match(held.stderr, /already holds a transition/);
+
+    // Dropping the file and its sibling digest does not reopen the first
+    // generation: the tool writes neither file and validation fails.
+    await rm(baselinePath);
+    await rm(pinPath);
+    const refused = runBaselineTool(root, "--initialize", originPath);
+    assert.equal(refused.status, 1, refused.stdout);
+    assert.match(refused.stderr, FIRST_GENERATION_TOOL_REFUSAL);
+    await assert.rejects(access(baselinePath));
+    await assert.rejects(access(pinPath));
+    const dropped = validate(root);
+    assert.equal(dropped.status, 1, dropped.stdout);
+    assert.ok(
+      dropped.stderr.startsWith(
+        `INSTRUCTION_RESOURCE_DRIFT ${SUCCESSOR_BASELINE}: `
+      ),
+      dropped.stderr
+    );
+
+    // A first generation of the current bytes, authored by hand with an empty
+    // chain, a matching sibling digest and a rebuilt distribution, is refused.
+    await writeFirstGeneration(root, recorded, { [key]: digest });
+    await assert.rejects(
+      validateInstructionBaseline(root),
+      FIRST_GENERATION_REFUSAL
+    );
+    rebuildFixture(root);
+    const result = validate(root);
+    assert.equal(result.status, 1, result.stdout);
+    assert.ok(
+      result.stderr.startsWith(
+        `INSTRUCTION_RESOURCE_DRIFT ${SUCCESSOR_BASELINE}: `
+      ),
+      result.stderr
+    );
+  });
+});
+
+test("successor chain replay refuses an unaccepted authority, a wrong predecessor, an unchanged value and unordered keys", async () => {
+  await withFixture(async (root) => {
+    const baseline = await readBaseline<SuccessorBaseline>(
+      root,
+      SUCCESSOR_BASELINE
+    );
+    const authorities = [
+      await instructionAuthority(root, CONTROL_MODEL_DECISION, "ADR 0069")
+    ];
+    const replay = async (transition: InstructionTransition) => {
+      await writePinnedBaseline(root, SUCCESSOR_BASELINE, SUCCESSOR_PIN, {
+        ...baseline,
+        transitions: [transition]
+      });
+      await validateInstructionBaseline(root);
+    };
+    const changes = {
+      [CODEX_MANIFEST]: "1".repeat(64),
+      [HOOK_CONFIGURATION]: "2".repeat(64)
+    };
+    const valid = instructionTransition(
+      baseline.expectations,
+      authorities,
+      changes
+    );
+    // Control: the chain admits the step and only the recorded result is absent.
+    await assert.rejects(
+      replay(valid),
+      /Unrecorded successor instruction expectations/
+    );
+    await assert.rejects(
+      replay({ ...valid, authorities: [] }),
+      /Missing accepted instruction transition authority/
+    );
+    await assert.rejects(
+      replay({ ...valid, predecessorSha256: "0".repeat(64) }),
+      /Invalid instruction transition predecessor/
+    );
+    await assert.rejects(
+      replay({ ...valid, changes: [...valid.changes].reverse() }),
+      /Invalid or protected instruction transition scope/
+    );
+    const [first] = valid.changes;
+    assert.ok(first?.before);
+    await assert.rejects(
+      replay({ ...valid, changes: [{ ...first, after: first.before }] }),
+      /Invalid or protected instruction transition scope/
+    );
+    await assert.rejects(
+      replay({
+        ...valid,
+        changes: [
+          {
+            key: "plugins/banzai/skills/feature/SKILL.md",
+            before: null,
+            after: "4".repeat(64)
+          }
+        ]
+      }),
+      /Invalid or protected instruction transition scope/
+    );
+    const decisionPath = path.join(root, CONTROL_MODEL_DECISION);
+    const accepted = await readFile(decisionPath, "utf8");
     await writeFile(
-      retained,
-      (await readFile(retained, "utf8")).replace(
-        "## Orchestrated Mode",
-        "## Replaced Mode"
-      )
+      decisionPath,
+      accepted.replace("- Status: Accepted", "- Status: Proposed")
     );
-    await assert.rejects(describeGuidanceTransition(root), /Orchestrated Mode/);
+    await assert.rejects(
+      replay({
+        ...valid,
+        authorities: [
+          await instructionAuthority(root, CONTROL_MODEL_DECISION, "ADR 0069")
+        ]
+      }),
+      /authority changed or is not Accepted/
+    );
+    await writeFile(decisionPath, accepted);
+    await writeFile(decisionPath, accepted + "\nUnaccepted decision body.\n");
+    await assert.rejects(replay(valid), /authority changed or is not Accepted/);
   });
 });
 
@@ -3092,7 +3908,7 @@ test("artifact reader generation resolves runtime reader edges to canonical sour
 
 test("guided baseline amendment keeps accepted authority bodies pinned and rejects hidden lifecycle headings", async () => {
   await withFixture(async (root) => {
-    await validateGuidanceExtraction(root);
+    await validateClosedGuidanceBaseline(root);
     const authority = path.join(
       root,
       "documentation/decisions/0043-proportionate-verification-evidence.md"
@@ -3111,7 +3927,7 @@ test("guided baseline amendment keeps accepted authority bodies pinned and rejec
             extra
         )
       );
-      await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+      await assert.rejects(validateClosedGuidanceBaseline(root), /authority/u);
     }
     await writeFile(
       authority,
@@ -3120,7 +3936,7 @@ test("guided baseline amendment keeps accepted authority bodies pinned and rejec
         "Current profiles may omit commands."
       )
     );
-    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    await assert.rejects(validateClosedGuidanceBaseline(root), /authority/u);
     await writeFile(
       authority,
       original.replace(
@@ -3128,13 +3944,13 @@ test("guided baseline amendment keeps accepted authority bodies pinned and rejec
         "- Amended by [ADR-0045](./0045-guided-verification-setup.md), accepted\n## Hidden authority"
       )
     );
-    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    await assert.rejects(validateClosedGuidanceBaseline(root), /authority/u);
   });
 });
 
 test("runner-owned completion annotations admit only the accepted reciprocal images and keep bodies pinned", async () => {
   await withFixture(async (root) => {
-    await validateGuidanceExtraction(root);
+    await validateClosedGuidanceBaseline(root);
     const decisions = path.join(root, "documentation/decisions");
     const authority = path.join(
       decisions,
@@ -3149,7 +3965,7 @@ test("runner-owned completion annotations admit only the accepted reciprocal ima
         "Current profiles may omit commands."
       )
     );
-    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    await assert.rejects(validateClosedGuidanceBaseline(root), /authority/u);
     // The annotation image is finite: any other lifecycle wording fails.
     await writeFile(
       authority,
@@ -3158,7 +3974,7 @@ test("runner-owned completion annotations admit only the accepted reciprocal ima
         "- Broadly amended by [ADR-0047]"
       )
     );
-    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    await assert.rejects(validateClosedGuidanceBaseline(root), /authority/u);
     await writeFile(authority, original);
     // The image is admitted only while ADR-0047 remains Accepted.
     const amendment = path.join(
@@ -3171,17 +3987,17 @@ test("runner-owned completion annotations admit only the accepted reciprocal ima
       amendment,
       accepted.replace("- Status: Accepted", "- Status: Proposed")
     );
-    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    await assert.rejects(validateClosedGuidanceBaseline(root), /authority/u);
     await writeFile(amendment, accepted);
-    await validateGuidanceExtraction(root);
-    const proposal = await describeGuidanceTransition(root);
+    await validateClosedGuidanceBaseline(root);
+    const proposal = await describeInstructionTransition(root);
     assert.match(proposal.predecessorSha256, /^[a-f0-9]{64}$/u);
   });
 });
 
 test("ADR-0054 lifecycle images require acceptance and reject arbitrary authority edits", async () => {
   await withFixture(async (root) => {
-    await validateGuidanceExtraction(root);
+    await validateClosedGuidanceBaseline(root);
     const authority = path.join(
       root,
       "documentation/decisions/0049-task-scoped-verification.md"
@@ -3196,7 +4012,7 @@ test("ADR-0054 lifecycle images require acceptance and reject arbitrary authorit
     ]) {
       assert.notEqual(changed, original);
       await writeFile(authority, changed);
-      await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+      await assert.rejects(validateClosedGuidanceBaseline(root), /authority/u);
     }
     await writeFile(authority, original);
     const decision = path.join(
@@ -3208,15 +4024,15 @@ test("ADR-0054 lifecycle images require acceptance and reject arbitrary authorit
       decision,
       accepted.replace("- Status: Accepted", "- Status: Proposed")
     );
-    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    await assert.rejects(validateClosedGuidanceBaseline(root), /authority/u);
     await writeFile(decision, accepted);
-    await validateGuidanceExtraction(root);
+    await validateClosedGuidanceBaseline(root);
   });
 });
 
 test("ADR-0055 admits only the exact accepted ADR-0054 lifecycle annotation", async () => {
   await withFixture(async (root) => {
-    await validateGuidanceExtraction(root);
+    await validateClosedGuidanceBaseline(root);
     const authority = path.join(
       root,
       "documentation/decisions/0054-git-visible-work-artifacts.md"
@@ -3231,7 +4047,7 @@ test("ADR-0055 admits only the exact accepted ADR-0054 lifecycle annotation", as
     ]) {
       assert.notEqual(changed, original);
       await writeFile(authority, changed);
-      await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+      await assert.rejects(validateClosedGuidanceBaseline(root), /authority/u);
     }
     await writeFile(authority, original);
     const amendment = path.join(
@@ -3243,15 +4059,15 @@ test("ADR-0055 admits only the exact accepted ADR-0054 lifecycle annotation", as
       amendment,
       accepted.replace("- Status: Accepted", "- Status: Proposed")
     );
-    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    await assert.rejects(validateClosedGuidanceBaseline(root), /authority/u);
     await writeFile(amendment, accepted);
-    await validateGuidanceExtraction(root);
+    await validateClosedGuidanceBaseline(root);
   });
 });
 
 test("ADR-0057 and ADR-0058 admit only their exact accepted lifecycle annotations", async () => {
   await withFixture(async (root) => {
-    await validateGuidanceExtraction(root);
+    await validateClosedGuidanceBaseline(root);
     for (const [authorityPath, amendmentPath, annotation] of [
       [
         "documentation/decisions/0045-guided-verification-setup.md",
@@ -3272,7 +4088,10 @@ test("ADR-0057 and ADR-0058 admit only their exact accepted lifecycle annotation
       ]) {
         assert.notEqual(changed, original);
         await writeFile(authority, changed);
-        await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+        await assert.rejects(
+          validateClosedGuidanceBaseline(root),
+          /authority/u
+        );
       }
       await writeFile(authority, original);
       const amendment = path.join(root, amendmentPath);
@@ -3281,16 +4100,16 @@ test("ADR-0057 and ADR-0058 admit only their exact accepted lifecycle annotation
         amendment,
         accepted.replace("- Status: Accepted", "- Status: Proposed")
       );
-      await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+      await assert.rejects(validateClosedGuidanceBaseline(root), /authority/u);
       await writeFile(amendment, accepted);
-      await validateGuidanceExtraction(root);
+      await validateClosedGuidanceBaseline(root);
     }
   });
 });
 
 test("ADR-0061 admits only its exact accepted ADR-0054 lifecycle annotation", async () => {
   await withFixture(async (root) => {
-    await validateGuidanceExtraction(root);
+    await validateClosedGuidanceBaseline(root);
     const authority = path.join(
       root,
       "documentation/decisions/0054-git-visible-work-artifacts.md"
@@ -3305,7 +4124,7 @@ test("ADR-0061 admits only its exact accepted ADR-0054 lifecycle annotation", as
     ]) {
       assert.notEqual(changed, original);
       await writeFile(authority, changed);
-      await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+      await assert.rejects(validateClosedGuidanceBaseline(root), /authority/u);
     }
     await writeFile(authority, original);
     const amendment = path.join(
@@ -3317,15 +4136,15 @@ test("ADR-0061 admits only its exact accepted ADR-0054 lifecycle annotation", as
       amendment,
       accepted.replace("- Status: Accepted", "- Status: Proposed")
     );
-    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    await assert.rejects(validateClosedGuidanceBaseline(root), /authority/u);
     await writeFile(amendment, accepted);
-    await validateGuidanceExtraction(root);
+    await validateClosedGuidanceBaseline(root);
   });
 });
 
 test("ADR-0064 admits only its exact accepted ADR-0058 lifecycle annotation", async () => {
   await withFixture(async (root) => {
-    await validateGuidanceExtraction(root);
+    await validateClosedGuidanceBaseline(root);
     const authority = path.join(
       root,
       "documentation/decisions/0058-human-plan-edits-rechecked-at-the-plan-gate.md"
@@ -3340,7 +4159,7 @@ test("ADR-0064 admits only its exact accepted ADR-0058 lifecycle annotation", as
     ]) {
       assert.notEqual(changed, original);
       await writeFile(authority, changed);
-      await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+      await assert.rejects(validateClosedGuidanceBaseline(root), /authority/u);
     }
     await writeFile(authority, original);
     const amendment = path.join(
@@ -3352,15 +4171,15 @@ test("ADR-0064 admits only its exact accepted ADR-0058 lifecycle annotation", as
       amendment,
       accepted.replace("- Status: Accepted", "- Status: Proposed")
     );
-    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    await assert.rejects(validateClosedGuidanceBaseline(root), /authority/u);
     await writeFile(amendment, accepted);
-    await validateGuidanceExtraction(root);
+    await validateClosedGuidanceBaseline(root);
   });
 });
 
 test("ADR-0066 admits only its exact accepted ADR-0054 lifecycle annotation", async () => {
   await withFixture(async (root) => {
-    await validateGuidanceExtraction(root);
+    await validateClosedGuidanceBaseline(root);
     const authority = path.join(
       root,
       "documentation/decisions/0054-git-visible-work-artifacts.md"
@@ -3375,7 +4194,7 @@ test("ADR-0066 admits only its exact accepted ADR-0054 lifecycle annotation", as
     ]) {
       assert.notEqual(changed, original);
       await writeFile(authority, changed);
-      await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+      await assert.rejects(validateClosedGuidanceBaseline(root), /authority/u);
     }
     await writeFile(authority, original);
     const amendment = path.join(
@@ -3387,70 +4206,136 @@ test("ADR-0066 admits only its exact accepted ADR-0054 lifecycle annotation", as
       amendment,
       accepted.replace("- Status: Accepted", "- Status: Proposed")
     );
-    await assert.rejects(validateGuidanceExtraction(root), /authority/u);
+    await assert.rejects(validateClosedGuidanceBaseline(root), /authority/u);
     await writeFile(amendment, accepted);
-    await validateGuidanceExtraction(root);
+    await validateClosedGuidanceBaseline(root);
   });
 });
 
-test("ADR-0055 authorizes retained orchestrated and supervisor instruction keys", async () => {
+test("ADR-0069 admits only its exact accepted ADR-0062 lifecycle annotation", async () => {
   await withFixture(async (root) => {
-    const retained = path.join(
+    await validateClosedGuidanceBaseline(root);
+    const authority = path.join(
       root,
-      "plugins/banzai/skills/architecture-decision/SKILL.md"
+      "documentation/decisions/0062-claude-memory-notes-in-the-manual-hook-gate.md"
     );
-    const source = await readFile(retained, "utf8");
+    const original = await readFile(authority, "utf8");
+    for (const changed of [
+      original.replace(
+        "the bookkeeping scope and the per-session marker remain.",
+        "Other behaviour remains."
+      ),
+      original + "\nUnaccepted decision body.\n"
+    ]) {
+      assert.notEqual(changed, original);
+      await writeFile(authority, changed);
+      await assert.rejects(validateClosedGuidanceBaseline(root), /authority/u);
+    }
+    await writeFile(authority, original);
+    const amendment = path.join(
+      root,
+      "documentation/decisions/0069-standalone-plugin-control-model.md"
+    );
+    const accepted = await readFile(amendment, "utf8");
     await writeFile(
-      retained,
-      source.replace(
-        "## Orchestrated Mode\n",
-        "## Orchestrated Mode\n\nFixture planning gate evidence.\n"
-      )
+      amendment,
+      accepted.replace("- Status: Accepted", "- Status: Proposed")
     );
-    await appendFile(
-      path.join(root, "plugins/banzai/skills/orchestrate/SKILL.md"),
-      "\nFixture planning gate evidence.\n"
+    await assert.rejects(validateClosedGuidanceBaseline(root), /authority/u);
+    await writeFile(amendment, accepted);
+    await validateClosedGuidanceBaseline(root);
+  });
+});
+
+test("ADR-0070 admits only its exact accepted ADR-0044 lifecycle annotation", async () => {
+  await withFixture(async (root) => {
+    await validateClosedGuidanceBaseline(root);
+    const authority = path.join(
+      root,
+      "documentation/decisions/0044-instruction-baseline-evolution.md"
     );
-    const proposal = await describeGuidanceTransition(root);
-    assert.deepEqual(
-      proposal.changes.map((change) => change.key),
-      [
-        "plugins/banzai/skills/architecture-decision/SKILL.md#orchestrated",
-        "plugins/banzai/skills/architecture-decision/SKILL.md#skeleton",
-        "plugins/banzai/skills/orchestrate/SKILL.md"
-      ]
+    const original = await readFile(authority, "utf8");
+    for (const changed of [
+      original.replace(
+        "admits transitions for the hook configuration and the manifests.",
+        "Other behaviour remains."
+      ),
+      original + "\nUnaccepted decision body.\n"
+    ]) {
+      assert.notEqual(changed, original);
+      await writeFile(authority, changed);
+      await assert.rejects(validateClosedGuidanceBaseline(root), /authority/u);
+    }
+    await writeFile(authority, original);
+    const amendment = path.join(
+      root,
+      "documentation/decisions/0070-orchestrator-owned-instruction-copy.md"
     );
-    const authorization = async (authorityPath: string) => ({
-      schema: "banzai-instruction-authorization/v1",
-      schemaVersion: 1,
-      predecessorSha256: proposal.predecessorSha256,
-      authorities: [
-        {
-          path: authorityPath,
-          sha256: resourceDigest(
-            await readFile(path.join(root, authorityPath))
-          ),
-          scope: "ADR 0055 instruction gate changes"
-        }
-      ],
-      scope: proposal.changes.map((change) => change.key)
-    });
-    await assert.rejects(
-      evolveGuidanceBaseline(
+    const accepted = await readFile(amendment, "utf8");
+    await writeFile(
+      amendment,
+      accepted.replace("- Status: Accepted", "- Status: Proposed")
+    );
+    await assert.rejects(validateClosedGuidanceBaseline(root), /authority/u);
+    await writeFile(amendment, accepted);
+    await validateClosedGuidanceBaseline(root);
+  });
+});
+
+test("closed chain keeps its key protections and its files stay pinned by the validator", async () => {
+  await withFixture(async (root) => {
+    const closedBaseline = await readBaseline<ClosedBaseline>(
+      root,
+      CLOSED_BASELINE
+    );
+    const replay = async (authorityPath: string, key: string) => {
+      const transition = instructionTransition(
+        closedBaseline.expectations,
+        [await instructionAuthority(root, authorityPath, "Fixture authority")],
+        { [key]: "3".repeat(64) }
+      );
+      const next = {
+        ...closedBaseline,
+        expectations: sortedExpectations({
+          ...closedBaseline.expectations,
+          [key]: "3".repeat(64)
+        }),
+        transitions: [...closedBaseline.transitions, transition]
+      };
+      await writePinnedBaseline(
         root,
-        await authorization(
-          "documentation/decisions/0044-instruction-baseline-evolution.md"
-        ),
-        { check: true }
+        CLOSED_BASELINE,
+        CLOSED_BASELINE_PIN,
+        next
+      );
+      await validateClosedGuidanceBaseline(root);
+    };
+    const retained =
+      "plugins/banzai/skills/architecture-decision/SKILL.md#orchestrated";
+    await assert.rejects(
+      replay(
+        "documentation/decisions/0044-instruction-baseline-evolution.md",
+        retained
       ),
       /protected instruction transition scope/u
     );
-    const authorized = await authorization(
-      "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md"
+    // The successor admits these keys; the closed chain still does not.
+    for (const key of [HOOK_CONFIGURATION, CODEX_MANIFEST])
+      await assert.rejects(
+        replay(CONTROL_MODEL_DECISION, key),
+        /protected instruction transition scope/u
+      );
+    await replay(
+      "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md",
+      retained
     );
-    await evolveGuidanceBaseline(root, authorized, { check: true });
-    await evolveGuidanceBaseline(root, authorized);
-    await validateGuidanceExtraction(root);
+    // A chain that replays is still not the closed record.
+    const result = validate(root);
+    assert.equal(result.status, 1);
+    assert.match(
+      result.stderr,
+      /^INSTRUCTION_RESOURCE_DRIFT packages\/orchestrator\/phase-guidance-current\.json: /
+    );
   });
 });
 

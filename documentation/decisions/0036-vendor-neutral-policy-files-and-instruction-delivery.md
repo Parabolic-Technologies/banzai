@@ -552,3 +552,8 @@ Implementation and review must establish:
   for the separately authorized cancellation prerequisite and
   [test report](../features/vendor-neutral-policy-files-and-instruction-delivery/test-report.md)
   for verification and unverified host-delivery evidence.
+- Amended by [ADR-0070](./0070-orchestrator-owned-instruction-copy.md), accepted
+  2026-11-16: runner phases take policy bodies from the orchestrator's frozen
+  instruction module, not from the plugin's policy files. Those files stay
+  canonical for standalone skills and are no longer pinned by the
+  instruction baseline. Implementation is Planned.

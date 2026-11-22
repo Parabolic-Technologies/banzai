@@ -381,9 +381,15 @@ test("actual source/plugin/npm archive resources and source-map bytes must descr
   const root = path.resolve(process.cwd(), "../..");
   const fixture = await createTestRepository();
   try {
-    const resources = INSTRUCTION_RESOURCE_IDS.map(
-      (id) => `plugins/banzai/${id}`
-    );
+    // The shared hook is the only plugin content the candidate is tied to.
+    const hookFiles = [
+      "plugins/banzai/hooks/hooks.json",
+      "plugins/banzai/hooks/spec-gate.cjs"
+    ];
+    const pluginText = [
+      "plugins/banzai/phases/fix.md",
+      "plugins/banzai/guidance/review.md"
+    ];
     const buildMap = JSON.parse(
       await readFile(
         path.join(root, "packages/orchestrator/dist/banzai.mjs.map"),
@@ -391,7 +397,7 @@ test("actual source/plugin/npm archive resources and source-map bytes must descr
       )
     ) as { sources: string[] };
     const sourceNames = new Set([
-      ...resources,
+      ...hookFiles,
       GENERATED_PHASE_RESOURCE_PATH,
       ...buildMap.sources.map((id) =>
         path.posix.normalize(path.posix.join("packages/orchestrator/dist", id))
@@ -402,6 +408,12 @@ test("actual source/plugin/npm archive resources and source-map bytes must descr
       const target = path.join(sourceRoot, name);
       await mkdir(path.dirname(target), { recursive: true });
       await writeFile(target, await readFile(path.join(root, name)));
+    }
+    // Archived plugin text differs from the frozen module's entries.
+    for (const name of pluginText) {
+      const target = path.join(sourceRoot, name);
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, "Text the frozen module never embedded.\n");
     }
     const npmRoot = path.join(fixture.root, "npm");
     for (const name of [
@@ -454,7 +466,19 @@ test("actual source/plugin/npm archive resources and source-map bytes must descr
       inspectPublicationFiles(policy, files, { distribution });
     for (const [files, key] of [
       [source, "plugins/banzai/phases/fix.md"],
-      [plugin, "plugins/banzai/guidance/review.md"],
+      [plugin, "plugins/banzai/guidance/review.md"]
+    ] as const) {
+      const original = files.get(key);
+      assert.ok(original);
+      files.set(key, Buffer.concat([original, Buffer.from(" \n")]));
+      await checkInstructionPayloads(root, { source, plugin, npm });
+      files.delete(key);
+      await checkInstructionPayloads(root, { source, plugin, npm });
+      files.set(key, original);
+    }
+    for (const [files, key] of [
+      [source, "plugins/banzai/hooks/spec-gate.cjs"],
+      [plugin, "plugins/banzai/hooks/hooks.json"],
       [npm, "package/dist/banzai.mjs"],
       [npm, "package/dist/banzai.mjs.map"],
       [source, GENERATED_PHASE_RESOURCE_PATH],
@@ -510,6 +534,43 @@ test("actual source/plugin/npm archive resources and source-map bytes must descr
       checkInstructionPayloads(root, { source, plugin, npm }),
       /bundled instruction identities/
     );
+    // An archived module is checked against itself: its keys are the embedded
+    // id list and each text entry matches its own recorded digest.
+    const moduleText = source.get(GENERATED_PHASE_RESOURCE_PATH)?.toString();
+    assert.ok(moduleText);
+    assert.deepEqual(
+      Object.keys(
+        JSON.parse(
+          /export const EMBEDDED_PHASE_RESOURCES = ([\s\S]*) as const;\n$/.exec(
+            moduleText
+          )?.[1] ?? ""
+        ) as object
+      ),
+      INSTRUCTION_RESOURCE_IDS
+    );
+    for (const [changed, message] of [
+      [
+        moduleText.replace("# Strict Planning Phase", "# Stale Planning Phase"),
+        /PUBLICATION_INSTRUCTIONS_INVALID .*Embedded instruction bytes differ from their identity/
+      ],
+      [
+        moduleText.replace(
+          /\n {2}"hooks\/hooks\.json": \{\n {4}"sha256": "[a-f0-9]{64}"\n {2}\},/,
+          ""
+        ),
+        /PUBLICATION_INSTRUCTIONS_INVALID .*Embedded instruction inventory differs/
+      ]
+    ] as const) {
+      assert.notEqual(changed, moduleText);
+      assert.throws(
+        () =>
+          inspectPublicationFiles(
+            policy,
+            new Map([[GENERATED_PHASE_RESOURCE_PATH, Buffer.from(changed)]])
+          ),
+        message
+      );
+    }
     // Privacy inspection decodes embedded bodies instead of scanning only quoted JS.
     const generated = JSON.parse(
       /export const EMBEDDED_PHASE_RESOURCES = ([\s\S]*?) as const;/.exec(

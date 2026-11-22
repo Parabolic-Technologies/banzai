@@ -50,8 +50,12 @@ both for confirmation. It never publishes, tags or pushes.
    builds ignored `dist/` output from source before checking it.
 2. Push `dev`, open the pull request to `main`, and wait for
    `release_check_node_22` and `release_check_node_24` on the exact candidate.
-   Each required lane records the tree it verified as a
-   `release-evidence-<lane>-attempt-<attempt>-tree-<tree>` artifact. Only the
+   A release candidate changes the release-train version files, so each
+   required lane runs the `full` verification scope and records the tree it
+   verified as a
+   `release-evidence-<lane>-attempt-<attempt>-tree-<tree>` artifact; a lane
+   that ran a narrow scope records none
+   ([ADR-0071](../decisions/0071-path-scoped-verification-gate.md)). Only the
    pull request starts a hosted run: pushing `dev` or merging to `main` does
    not, and a newer push to the pull request cancels its older run.
 3. Merge to `main` with a merge commit, create tag `v<version>` on that merge

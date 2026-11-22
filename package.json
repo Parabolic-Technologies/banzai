@@ -23,6 +23,7 @@
     "release:validate": "npm run release:validate --workspace @parabolic-technologies/banzai",
     "smoke:committed": "npm run smoke:committed --workspace @parabolic-technologies/banzai",
     "release:check": "node packages/orchestrator/scripts/release-check.mjs",
+    "check": "node packages/orchestrator/scripts/scoped-check.mjs",
     "version:set": "node packages/orchestrator/scripts/version-set.mjs",
     "version:recover": "node packages/orchestrator/scripts/version-recover.mjs",
     "compatibility:live": "node packages/orchestrator/dist/banzai.mjs compatibility live",

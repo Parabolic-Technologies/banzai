@@ -1,15 +1,19 @@
 import { instructionPluginFixture } from "./phase-instruction-fixtures.js";
 import assert from "node:assert/strict";
-import { readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { cp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import {
   combineInstructionParity,
   inspectInstructionParity,
+  inspectRoleInstructionParity,
   instructionParityDiagnostic,
+  instructionPhasesForRole,
   instructionResourceIds,
   phaseInstructionParts
 } from "../src/phase-instructions.js";
+import { EMBEDDED_PHASE_RESOURCES } from "../src/phase-resources.js";
 import { resolveClaudeInvocationScope } from "../src/adapters.js";
 import type { InstructionPhase } from "../src/types.js";
 
@@ -23,6 +27,34 @@ const PHASES: InstructionPhase[] = [
   "quick-fix",
   "planning-review"
 ];
+const HOOK_IDS = ["hooks/hooks.json", "hooks/spec-gate.cjs"];
+const INSTRUCTION_MODULE = "packages/orchestrator/src/phase-resources.ts";
+const TEXT_ENTRIES = new Map(
+  Object.entries(EMBEDDED_PHASE_RESOURCES).flatMap(([id, resource]) =>
+    "text" in resource ? [[id, resource] as const] : []
+  )
+);
+
+async function successorExpectations(): Promise<Record<string, string>> {
+  const baseline = JSON.parse(
+    await readFile(path.resolve("instruction-baseline.json"), "utf8")
+  ) as { expectations: Record<string, string> };
+  return baseline.expectations;
+}
+
+// The frozen module is the only source of runner text (ADR-0070 section 1):
+// an entry is trusted through its own digest and the successor baseline.
+function frozenText(id: string, expectations: Record<string, string>): string {
+  const entry = TEXT_ENTRIES.get(id);
+  assert.ok(entry, id);
+  assert.equal(
+    createHash("sha256").update(entry.text).digest("hex"),
+    entry.sha256,
+    id
+  );
+  assert.equal(expectations[`${INSTRUCTION_MODULE}#${id}`], entry.sha256, id);
+  return entry.text;
+}
 
 test("planning-review instructions deliver the ordinary threshold, EQ-only exclusion and both examples", () => {
   const text = phaseInstructionParts("planning-review").join("\n");
@@ -60,7 +92,10 @@ test("planning instructions keep Accepted ADR bodies immutable across rework, an
   );
 });
 
-test("embedded phase bodies preserve all canonical UTF-8 bytes in the exact resource order", async () => {
+test("embedded phase bodies match their own digests and the successor baseline in the exact resource order", async () => {
+  const expectations = await successorExpectations();
+  assert.equal(TEXT_ENTRIES.size, 23);
+  for (const id of TEXT_ENTRIES.keys()) frozenText(id, expectations);
   const guidance = {
     planning: ["requirements", "architecture", "planning", "code-design"],
     implementation: ["implementation", "assurance", "manifest", "code-design"],
@@ -90,10 +125,11 @@ test("embedded phase bodies preserve all canonical UTF-8 bytes in the exact reso
       ids.filter((id) => id.startsWith("policies/")),
       policies.map((name) => `policies/${name}.md`)
     );
-    const source = await Promise.all(
-      ids.map((id) => readFile(path.join(SOURCE_PLUGIN, id), "utf8"))
+    assert.deepEqual(
+      phaseInstructionParts(phase),
+      ids.map((id) => frozenText(id, expectations)),
+      phase
     );
-    assert.deepEqual(phaseInstructionParts(phase), source, phase);
     assert.equal(ids.filter((id) => id.startsWith("phases/")).length, 1);
     assert.equal(new Set(ids).size, ids.length);
   }
@@ -110,9 +146,9 @@ test("delivered artifact-storage policy states the ADR-0066 date-prefixed slug r
 });
 
 test("composed review instructions exclude the code-design method that its consumers receive", async () => {
-  const method = await readFile(
-    path.join(SOURCE_PLUGIN, "guidance/code-design.md"),
-    "utf8"
+  const method = frozenText(
+    "guidance/code-design.md",
+    await successorExpectations()
   );
   // Reviewers assess the recorded assessment under existing authority; giving
   // them the method itself would couple the audit to the design procedure.
@@ -133,11 +169,12 @@ test("composed review instructions exclude the code-design method that its consu
   }
 });
 
-test("installed parity uses bounded raw identities, with mismatch before missing evidence and no path/content leak", async () => {
+test("installed parity compares hook identities only, with mismatch before missing evidence and no path/content leak", async () => {
   const fixture = await instructionPluginFixture();
   try {
     const valid = await inspectInstructionParity(fixture.directory, PHASES);
     assert.equal(valid.state, "verified");
+    assert.deepEqual(valid.resourceIds, HOOK_IDS);
     // Chat skill bytes and release labels are not runner-consumed identities.
     await writeFile(
       path.join(fixture.directory, "skills/code-writing/SKILL.md"),
@@ -147,14 +184,45 @@ test("installed parity uses bounded raw identities, with mismatch before missing
       (await inspectInstructionParity(fixture.directory, PHASES)).state,
       "verified"
     );
-    const target = path.join(fixture.directory, "phases/fix.md");
+    // Runner text comes from the frozen module (ADR-0070 section 4): edited
+    // or deleted installed text is no parity evidence.
+    const phase = path.join(fixture.directory, "phases/fix.md");
+    await writeFile(
+      phase,
+      Buffer.concat([await readFile(phase), Buffer.from(" \n")])
+    );
+    await rm(path.join(fixture.directory, "guidance/assurance.md"));
+    await writeFile(
+      path.join(fixture.directory, "policies/test-assurance.md"),
+      "PRIVATE-CONTENT-CANARY"
+    );
+    for (const phases of [PHASES, ["fix"], ["implementation"], []] as const)
+      assert.deepEqual(
+        await inspectInstructionParity(fixture.directory, phases),
+        {
+          state: "verified",
+          resourceIds: HOOK_IDS,
+          mismatched: [],
+          unavailable: []
+        }
+      );
+    await rm(path.join(fixture.directory, "phases"), { recursive: true });
+    await rm(path.join(fixture.directory, "guidance"), { recursive: true });
+    await rm(path.join(fixture.directory, "policies"), { recursive: true });
+    assert.equal(
+      (await inspectInstructionParity(fixture.directory, PHASES)).state,
+      "verified"
+    );
+    const target = path.join(fixture.directory, "hooks/spec-gate.cjs");
+    const config = path.join(fixture.directory, "hooks/hooks.json");
     const source = await readFile(target);
     await writeFile(target, Buffer.concat([source, Buffer.from(" \n")]));
-    await rm(path.join(fixture.directory, "guidance/assurance.md"));
+    await rm(config);
     const mixed = await inspectInstructionParity(fixture.directory, PHASES);
     assert.equal(mixed.state, "mismatch");
-    assert.deepEqual(mixed.mismatched, ["phases/fix.md"]);
-    assert.deepEqual(mixed.unavailable, ["guidance/assurance.md"]);
+    assert.deepEqual(mixed.resourceIds, HOOK_IDS);
+    assert.deepEqual(mixed.mismatched, ["hooks/spec-gate.cjs"]);
+    assert.deepEqual(mixed.unavailable, ["hooks/hooks.json"]);
     assert.equal(
       combineInstructionParity([
         mixed,
@@ -165,6 +233,7 @@ test("installed parity uses bounded raw identities, with mismatch before missing
     await writeFile(target, source);
     const missing = await inspectInstructionParity(fixture.directory, PHASES);
     assert.equal(missing.state, "bounded_failure");
+    assert.deepEqual(missing.unavailable, ["hooks/hooks.json"]);
     assert.equal(
       combineInstructionParity([
         missing,
@@ -172,28 +241,39 @@ test("installed parity uses bounded raw identities, with mismatch before missing
       ]).state,
       "bounded_failure"
     );
-    await symlink(
-      path.join(SOURCE_PLUGIN, "guidance/assurance.md"),
-      path.join(fixture.directory, "guidance/assurance.md")
-    );
+    await symlink(path.join(SOURCE_PLUGIN, "hooks/hooks.json"), config);
     assert.equal(
       (await inspectInstructionParity(fixture.directory, ["implementation"]))
         .state,
       "bounded_failure"
     );
-    await writeFile(target, Buffer.alloc(1024 * 1024 + 1, 65));
+    await rm(config);
+    await cp(path.join(SOURCE_PLUGIN, "hooks/hooks.json"), config);
     assert.equal(
       (await inspectInstructionParity(fixture.directory, ["fix"])).state,
-      "bounded_failure"
+      "verified"
     );
+    await writeFile(target, Buffer.alloc(1024 * 1024 + 1, 65));
+    const oversized = await inspectInstructionParity(fixture.directory, [
+      "fix"
+    ]);
+    assert.equal(oversized.state, "bounded_failure");
+    assert.deepEqual(oversized.unavailable, ["hooks/spec-gate.cjs"]);
     for (const result of [
+      valid,
       mixed,
       missing,
       await inspectInstructionParity(null, PHASES)
     ]) {
       const diagnostic = instructionParityDiagnostic(result);
       assert.doesNotMatch(diagnostic, new RegExp(fixture.directory));
-      if (result.state === "unverifiable")
+      assert.doesNotMatch(diagnostic, /phases\/|guidance\/|policies\//);
+      if (result.state === "verified")
+        assert.match(
+          diagnostic,
+          /^Applicable Claude instruction resources verified \(hooks\/hooks\.json, hooks\/spec-gate\.cjs\); /
+        );
+      else if (result.state === "unverifiable")
         assert.doesNotMatch(
           diagnostic,
           /Rebuild|update the installed plugin|Codex/
@@ -209,6 +289,75 @@ test("installed parity uses bounded raw identities, with mismatch before missing
   }
 });
 
+test("parity names the two hook ids for every role and phase set and leaves delivered resource ids alone", async () => {
+  const fixture = await instructionPluginFixture();
+  try {
+    for (const role of ["planner", "implementer", "reviewer"] as const)
+      for (const route of [null, "strict", "feature", "quick-fix"] as const) {
+        const phases = instructionPhasesForRole(role, route) ?? [];
+        const label = `${role} ${String(route)}`;
+        assert.deepEqual(
+          await inspectRoleInstructionParity(
+            "claude",
+            fixture.directory,
+            phases
+          ),
+          {
+            state: "verified",
+            resourceIds: HOOK_IDS,
+            mismatched: [],
+            unavailable: []
+          },
+          label
+        );
+        assert.deepEqual(
+          await inspectRoleInstructionParity("claude", null, phases),
+          {
+            state: "unverifiable",
+            resourceIds: HOOK_IDS,
+            mismatched: [],
+            unavailable: []
+          },
+          label
+        );
+        assert.deepEqual(
+          await inspectRoleInstructionParity(
+            "codex",
+            fixture.directory,
+            phases
+          ),
+          {
+            state: "not_applicable",
+            resourceIds: [],
+            mismatched: [],
+            unavailable: []
+          },
+          label
+        );
+      }
+  } finally {
+    await fixture.dispose();
+  }
+  // Prompt assembly still reads the hook-first, phase-ordered id list.
+  assert.deepEqual(instructionResourceIds(["review"]), [
+    ...HOOK_IDS,
+    "phases/review.md",
+    "guidance/review.md",
+    "policies/test-assurance.md",
+    "policies/security-assurance.md",
+    "policies/engineering-quality.md",
+    "policies/plan-task-completion.md",
+    "policies/artifact-storage.md"
+  ]);
+  const unknown = ["unknown-phase"] as unknown as InstructionPhase[];
+  assert.throws(() => instructionResourceIds(unknown), {
+    code: "INSTRUCTION_RESOURCE_INVALID"
+  });
+  await assert.rejects(inspectInstructionParity(null, unknown), {
+    code: "INSTRUCTION_RESOURCE_INVALID"
+  });
+});
+
 test("selection compares hooks only and structural hook refusal precedes content parity", async () => {
   const fixture = await instructionPluginFixture();
   try {
@@ -216,10 +365,11 @@ test("selection compares hooks only and structural hook refusal precedes content
       path.join(fixture.directory, "phases/planning.md"),
       "PRIVATE-CONTENT-CANARY"
     );
-    assert.equal(
-      (await inspectInstructionParity(fixture.directory, [])).state,
-      "verified"
-    );
+    for (const phases of [[], PHASES])
+      assert.equal(
+        (await inspectInstructionParity(fixture.directory, phases)).state,
+        "verified"
+      );
     const script = path.join(fixture.directory, "hooks/spec-gate.cjs");
     await writeFile(
       script,
@@ -229,16 +379,18 @@ test("selection compares hooks only and structural hook refusal precedes content
       mode: "scoped",
       pluginDirectory: fixture.directory
     });
-    const parity = await inspectInstructionParity(
-      scope.scope.pluginDirectory,
-      []
-    );
-    assert.equal(parity.state, "mismatch");
-    assert.deepEqual(parity.mismatched, ["hooks/spec-gate.cjs"]);
-    assert.doesNotMatch(
-      instructionParityDiagnostic(parity),
-      /PRIVATE-CONTENT-CANARY/
-    );
+    for (const phases of [[], PHASES]) {
+      const parity = await inspectInstructionParity(
+        scope.scope.pluginDirectory,
+        phases
+      );
+      assert.equal(parity.state, "mismatch");
+      assert.deepEqual(parity.mismatched, ["hooks/spec-gate.cjs"]);
+      assert.doesNotMatch(
+        instructionParityDiagnostic(parity),
+        /PRIVATE-CONTENT-CANARY/
+      );
+    }
     await rm(script);
     await assert.rejects(
       resolveClaudeInvocationScope({

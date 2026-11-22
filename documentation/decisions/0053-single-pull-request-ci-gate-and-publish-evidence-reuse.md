@@ -360,3 +360,8 @@ Risks and required follow-ups:
   The partial supersession of ADR-0039 and the amendments of ADR-0009 and
   ADR-0010 are accepted target intent with implementation state Planned. The
   dependent plan requires separate human approval before implementation.
+- Amended by [ADR-0071](./0071-path-scoped-verification-gate.md), accepted
+  2026-11-16: the required lanes run the checks of the pull request's scope,
+  computed from changed paths, and the complete `release:check` only in full
+  scope. Evidence is recorded only by that complete check. The publication
+  gate and its fallback are unchanged. Implementation is Planned.

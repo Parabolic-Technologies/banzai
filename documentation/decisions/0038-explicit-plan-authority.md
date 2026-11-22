@@ -11,6 +11,10 @@
   a self-contained approved verification inventory v2 and separate non-replacing
   supplements govern new task verification. Approval immutability and human
   obligation changes remain. Implementation of the amendment is Planned.
+- Amended by [ADR-0069](./0069-standalone-plugin-control-model.md), accepted
+  2026-11-16 with owner choice 1 (a): in standalone strict work an approved
+  plan stays unchanged, and task completion is recorded in the implementation
+  report instead of the plan's checkboxes. Implementation is Planned.
 
 ## Related Artifacts
 

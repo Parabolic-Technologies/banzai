@@ -1,15 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import {
-  lstat,
-  open,
-  readFile,
-  readdir,
-  realpath,
-  rename,
-  rm,
-  writeFile
-} from "node:fs/promises";
+import { lstat, open, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 
 export const PHASE_DEFINITIONS = {
@@ -91,6 +82,7 @@ export const PHASE_DEFINITIONS = {
   }
 };
 
+const HOOK_RESOURCE_IDS = ["hooks/hooks.json", "hooks/spec-gate.cjs"];
 export const INSTRUCTION_RESOURCE_IDS = [
   ...Object.keys(PHASE_DEFINITIONS).map((phase) => `phases/${phase}.md`),
   ...new Set(
@@ -103,8 +95,7 @@ export const INSTRUCTION_RESOURCE_IDS = [
       phase.policies.map((name) => `policies/${name}.md`)
     )
   ),
-  "hooks/hooks.json",
-  "hooks/spec-gate.cjs"
+  ...HOOK_RESOURCE_IDS
 ];
 export const GENERATED_PHASE_RESOURCE_PATH =
   "packages/orchestrator/src/phase-resources.ts";
@@ -114,40 +105,10 @@ export function resourceDigest(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-export function normalizeGuidance(text) {
-  return text.replace(/\s+/gu, " ").trim();
-}
-
-export function markdownSections(text) {
-  const starts = [];
-  let offset = 0;
-  let fence = false;
-  for (const line of text.match(/[^\n]*\n|[^\n]+$/g) ?? []) {
-    if (line.startsWith("```")) fence = !fence;
-    if (!fence && line.startsWith("## ")) {
-      starts.push({
-        title: line.slice(3).trim(),
-        start: offset,
-        body: offset + line.length
-      });
-    }
-    offset += line.length;
-  }
-  if (new Set(starts.map((section) => section.title)).size !== starts.length)
-    throw new Error("Duplicate instruction section.");
-  return new Map(
-    starts.map((section, index) => [
-      section.title,
-      {
-        ...section,
-        end: starts[index + 1]?.start ?? text.length
-      }
-    ])
-  );
-}
-
+// The hook files are the only plugin files this module reads: no phase
+// document, guidance file or policy is an input (ADR-0070 sections 1 and 6).
 async function declaredResource(root, id) {
-  if (!INSTRUCTION_RESOURCE_IDS.includes(id))
+  if (!HOOK_RESOURCE_IDS.includes(id))
     throw new Error("Invalid instruction resource identity.");
   try {
     const directory = await realpath(path.join(root, "plugins/banzai"));
@@ -209,216 +170,111 @@ async function declaredResource(root, id) {
   }
 }
 
-export async function phaseResourceData(root) {
-  const resources = {};
-  for (const id of INSTRUCTION_RESOURCE_IDS) {
-    const resource = await declaredResource(root, id);
-    resources[id] = id.startsWith("hooks/")
-      ? { sha256: resource.sha256 }
-      : resource;
-  }
-  return resources;
+// The hook stays one copy shared with the plugin (ADR-0070 section 5), so its
+// two digests are the only entries still derived from plugin files.
+async function hookDigests(root) {
+  const digests = {};
+  for (const id of HOOK_RESOURCE_IDS)
+    digests[id] = (await declaredResource(root, id)).sha256;
+  return digests;
 }
 
+// The module's two literals are JSON.stringify output, so they are read as
+// JSON and the module is never compiled or executed here.
+export function frozenModuleLiterals(source) {
+  const match =
+    /\nexport const PHASE_RESOURCE_DEFINITIONS = ([\s\S]*?) as const;\n\n\/\/ prettier-ignore\nexport const EMBEDDED_PHASE_RESOURCES = ([\s\S]*) as const;\n$/u.exec(
+      source
+    );
+  if (!match) throw new Error("Invalid frozen instruction module.");
+  return {
+    definitions: JSON.parse(match[1]),
+    resources: JSON.parse(match[2])
+  };
+}
+
+async function frozenModuleSource(root) {
+  try {
+    // Strict decoding keeps a rewrite byte-exact outside the digest slots.
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+      await baselineFile(root, GENERATED_PHASE_RESOURCE_PATH, null)
+    );
+  } catch {
+    throw new Error(
+      "Frozen src/phase-resources.ts is missing, unreadable, unsafe or invalid UTF-8."
+    );
+  }
+}
+
+// A text entry is one line of the literal, so a line-anchored slot can only
+// be the hook entry itself.
+function withHookDigests(source, digests) {
+  let bytes = source;
+  for (const id of HOOK_RESOURCE_IDS) {
+    const slot = new RegExp(
+      `^(  "${id.replace(/[.]/gu, "\\.")}": \\{\\n    "sha256": ")[a-f0-9]{64}("\\n  \\})`,
+      "gmu"
+    );
+    if ([...bytes.matchAll(slot)].length !== 1)
+      throw new Error(
+        `Frozen src/phase-resources.ts must hold exactly one digest for ${id}.`
+      );
+    bytes = bytes.replace(slot, `$1${digests[id]}$2`);
+  }
+  return bytes;
+}
+
+async function moduleWithHookDigests(root, source) {
+  // The module's table is the authority; INSTRUCTION_RESOURCE_IDS and the
+  // closed v1 chain derive from the constant above, so it may not drift.
+  if (
+    canonical(frozenModuleLiterals(source).definitions) !==
+    canonical(PHASE_DEFINITIONS)
+  )
+    throw new Error(
+      "Phase table of scripts/phase-resources-build.mjs differs from src/phase-resources.ts."
+    );
+  return withHookDigests(source, await hookDigests(root));
+}
+
+/**
+ * The tracked module with the hook digests of the plugin's current hook files.
+ * Every other byte is the module's own: its text is frozen and no plugin
+ * phase document, guidance file or policy is read (ADR-0070 section 1).
+ */
 export async function phaseResourceBytes(root) {
-  const resources = await phaseResourceData(root);
-  return (
-    "// Generated by scripts/phase-resources-build.mjs from canonical plugin resources.\n" +
-    "// Run npm run build; checks compare these bytes and never repair them.\n\n" +
-    "// prettier-ignore\nexport const PHASE_RESOURCE_DEFINITIONS = " +
-    JSON.stringify(PHASE_DEFINITIONS, null, 2) +
-    " as const;\n\n" +
-    "// prettier-ignore\nexport const EMBEDDED_PHASE_RESOURCES = " +
-    JSON.stringify(resources, null, 2) +
-    " as const;\n"
-  );
+  return moduleWithHookDigests(root, await frozenModuleSource(root));
 }
 
 export async function checkPhaseResourceBytes(root) {
-  const expected = Buffer.from(await phaseResourceBytes(root));
-  const actual = await readFile(
-    path.join(root, GENERATED_PHASE_RESOURCE_PATH)
-  ).catch(() => null);
-  if (actual === null || !expected.equals(actual)) {
+  const source = await frozenModuleSource(root).catch(() => null);
+  if (
+    source === null ||
+    (await moduleWithHookDigests(root, source)) !== source
+  ) {
     throw new Error(
       "Generated src/phase-resources.ts is missing or stale. Run `npm run build`."
     );
   }
 }
 
-// This is a consumer projection for existing duty checks, not a runtime loader.
-export async function instructionConsumerText(root, relativePath) {
-  const original = await readFile(path.join(root, relativePath), "utf8");
-  if (!/^plugins\/banzai\/skills\/[^/]+\/SKILL\.md$/.test(relativePath))
-    return original;
-  const names = [
-    ...new Set(
-      [
-        ...original.matchAll(
-          /\]\(\.\.\/\.\.\/guidance\/([a-z-]+)\.md#[a-z-]+\)/g
-        )
-      ].map((match) => match[1])
-    )
-  ];
-  const guidance = [];
-  for (const name of names)
-    guidance.push((await declaredResource(root, `guidance/${name}.md`)).text);
-  return [original, ...guidance].join("\n\n");
-}
-
-export async function validateGuidanceExtraction(root, candidate = null) {
+/** Replays the closed v1 record. It reads no file under plugins/banzai. */
+export async function validateClosedGuidanceBaseline(root) {
   const original = await originalGuidanceBaseline(root);
-  const current =
-    candidate ?? (await readCurrentGuidanceBaseline(root, original));
-  const inventory = current.inventory;
-  // Pins evidence captured from the approved baseline before consumer edits.
-  // Comparing two freely edited copies would not establish preserved duties.
-  if (
-    resourceDigest(JSON.stringify(original)) !==
-    "77230bb56083c58962d45e113f262010d3969f9e595cae1d06e80e70f9c79361"
-  ) {
-    throw new Error("Invalid immutable guidance extraction baseline.");
-  }
-  for (const source of inventory.sources) {
-    const skillPath = `plugins/banzai/skills/${source.skill}/SKILL.md`;
-    const skill = await readFile(path.join(root, skillPath), "utf8");
-    const guidance = (
-      await declaredResource(root, `guidance/${source.guidance}.md`)
-    ).text;
-    const sourceSections = markdownSections(skill);
-    const guidanceSections = markdownSections(guidance);
-    if (
-      JSON.stringify([...guidanceSections.keys()]) !==
-      JSON.stringify(source.sections.map((entry) => entry.section))
-    )
-      throw new Error(`Non-enumerated guidance section: ${source.guidance}.`);
-    const firstSection = [...guidanceSections.values()][0];
-    const title = source.guidance[0].toUpperCase() + source.guidance.slice(1);
-    const preface = `# ${title} Guidance\n\nCanonical portable guidance. The active execution context supplies artifact roles\nand policies; entry, host transport and contract mechanics remain with the caller.\n\n`;
-    if (
-      normalizeGuidance(guidance.slice(0, firstSection.start)) !==
-      normalizeGuidance(preface)
-    )
-      throw new Error(`Non-enumerated guidance preface: ${source.guidance}.`);
-    let skeleton = skill;
-    const replacements = [];
-    for (const entry of source.sections) {
-      const consumer = sourceSections.get(entry.section);
-      const portable = guidanceSections.get(entry.section);
-      if (
-        !consumer ||
-        !portable ||
-        resourceDigest(
-          normalizeGuidance(skill.slice(consumer.body, consumer.end))
-        ) !== entry.consumerNormalizedSha256 ||
-        resourceDigest(
-          normalizeGuidance(guidance.slice(portable.body, portable.end))
-        ) !== entry.guidanceNormalizedSha256
-      ) {
-        throw new Error(
-          `Shared guidance or consumer drift: ${source.guidance}/${entry.section}.`
-        );
-      }
-      replacements.push(consumer);
-    }
-    for (const section of replacements.sort((a, b) => b.body - a.body)) {
-      skeleton =
-        skeleton.slice(0, section.body) +
-        "<extracted guidance>\n" +
-        skeleton.slice(section.end);
-    }
-    if (resourceDigest(skeleton) !== source.skeletonSha256)
-      throw new Error(`Non-enumerated skill change: ${source.skill}.`);
-    const orchestrated = sourceSections.get("Orchestrated Mode");
-    if (
-      source.orchestratedSha256 &&
-      (!orchestrated ||
-        resourceDigest(skill.slice(orchestrated.start, orchestrated.end)) !==
-          source.orchestratedSha256)
-    ) {
-      throw new Error(`Retained Orchestrated Mode changed: ${source.skill}.`);
-    }
-  }
-  for (const [relativePath, expected] of Object.entries(
-    inventory.preservedFiles
-  )) {
-    let bytes = await readFile(path.join(root, relativePath));
-    // ADR-0033 owns version-only release transactions independently of this
-    // extraction. Pin every other manifest byte to its original source.
-    if (
-      /^plugins\/banzai\/\.(?:claude|codex)-plugin\/plugin\.json$/.test(
-        relativePath
-      )
-    ) {
-      bytes = Buffer.from(
-        bytes
-          .toString("utf8")
-          .replace(/("version"\s*:\s*)"[^"\n]+"/, '$1"2.3.0"')
-      );
-    }
-    if (resourceDigest(bytes) !== expected) {
-      throw new Error(
-        `Preserved instruction boundary changed: ${relativePath}.`
-      );
-    }
-  }
-  for (const directory of ["phases", "guidance"]) {
-    const actual = (
-      await readdir(path.join(root, "plugins/banzai", directory))
-    ).sort();
-    const expected = INSTRUCTION_RESOURCE_IDS.filter((id) =>
-      id.startsWith(directory + "/")
-    )
-      .map((id) => id.split("/")[1])
-      .sort();
-    if (JSON.stringify(actual) !== JSON.stringify(expected))
-      throw new Error(
-        `Unexpected instruction resource inventory: ${directory}.`
-      );
-  }
-  for (const id of INSTRUCTION_RESOURCE_IDS.filter((id) =>
-    id.startsWith("policies/")
-  )) {
-    const name = path.basename(id, ".md");
-    const text = (await declaredResource(root, id)).text;
-    const lines = text
-      .split("\n")
-      .filter((value) => value.startsWith("- Runner consumers: "));
-    const actual = lines[0]
-      ?.slice("- Runner consumers: ".length)
-      .replace(/\.$/, "")
-      .split(", ");
-    const expected = Object.entries(PHASE_DEFINITIONS)
-      .filter(([, definition]) => definition.policies.includes(name))
-      .map(
-        ([phase, definition]) =>
-          phase +
-          (definition.conditionalPolicies.includes(name)
-            ? " (conditional)"
-            : "")
-      );
-    if (
-      lines.length !== 1 ||
-      JSON.stringify(actual) !== JSON.stringify(expected)
-    )
-      throw new Error(`Runner policy consumer drift: ${id}.`);
-  }
-  for (const [id, expected] of Object.entries(current.resources)) {
-    if (resourceDigest((await declaredResource(root, id)).text) !== expected)
-      throw new Error(`Unrecorded instruction resource drift: ${id}.`);
-  }
+  await validateCurrent(root, original, JSON.parse(await currentBytes(root)));
 }
 
 /** Compare actual source/plugin archives and npm bytes to one working candidate. */
 export async function checkInstructionPayloads(root, { source, plugin, npm }) {
-  const resources = await phaseResourceData(root);
-  for (const [id, expected] of Object.entries(resources)) {
+  // Only the shared hook is compared with archived plugin files; the frozen
+  // text has no counterpart there (ADR-0070 section 1).
+  for (const [id, sha256] of Object.entries(await hookDigests(root))) {
     for (const [label, files] of [
       ["source", source],
       ["plugin", plugin]
     ]) {
       const bytes = files.get(`plugins/banzai/${id}`);
-      if (!bytes || resourceDigest(bytes) !== expected.sha256) {
+      if (!bytes || resourceDigest(bytes) !== sha256) {
         throw new Error(
           `INSTRUCTION_PAYLOAD_MISMATCH: ${label} ${id} differs from the candidate.`
         );
@@ -504,13 +360,11 @@ const GUIDANCE_ROOT_PIN =
   "77230bb56083c58962d45e113f262010d3969f9e595cae1d06e80e70f9c79361";
 const CURRENT_BASELINE = "packages/orchestrator/phase-guidance-current.json";
 const CURRENT_PIN = "packages/orchestrator/phase-guidance-current.sha256";
-const TRANSITION_JOURNAL =
-  "packages/orchestrator/.phase-guidance-transition.json";
 const SHA256 = /^[a-f0-9]{64}$/u;
 const canonical = (value) => JSON.stringify(value);
-const identity = (value) => resourceDigest(canonical(value));
+export const identity = (value) => resourceDigest(canonical(value));
 
-function closed(value, keys, label) {
+export function closed(value, keys, label) {
   if (
     !value ||
     typeof value !== "object" ||
@@ -520,7 +374,7 @@ function closed(value, keys, label) {
     throw new Error(`Invalid instruction baseline ${label}.`);
 }
 
-async function baselineFile(root, relative) {
+export async function baselineFile(root, relative, encoding = "utf8") {
   let current = await realpath(root);
   for (const component of relative.split("/")) {
     current = path.join(current, component);
@@ -533,7 +387,7 @@ async function baselineFile(root, relative) {
     throw new Error("Invalid instruction baseline input.");
   const handle = await open(current, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
-    return await handle.readFile("utf8");
+    return await handle.readFile(encoding);
   } finally {
     await handle.close();
   }
@@ -587,7 +441,7 @@ function rawResourceKeys(original) {
   ).map((id) => `plugins/banzai/${id}`);
 }
 
-function sortedExpectations(value) {
+export function sortedExpectations(value) {
   return Object.fromEntries(
     Object.entries(value).sort(([a], [b]) => a.localeCompare(b, "en"))
   );
@@ -788,6 +642,22 @@ const DATE_PREFIX_AUTHORITY_AMENDMENTS = new Map([
   ]
 ]);
 
+// Exact ADR-0062 reciprocal lifecycle annotation accepted with ADR-0069.
+const CONTROL_MODEL_AUTHORITY_AMENDMENTS = new Map([
+  [
+    "e28a014f67d2ddc4d0142f1789f7531cff3085448fd07ca3277bdfae471012ef",
+    "abcd8ea1ace8182b9dedc5d133ebea9db378314d6c1f5a03fca5544f5ffd027f"
+  ]
+]);
+
+// Exact ADR-0044 reciprocal lifecycle annotation accepted with ADR-0070.
+const INSTRUCTION_COPY_AUTHORITY_AMENDMENTS = new Map([
+  [
+    "9105dc7658a48a59c51b0d10faef88837cb884db2dd4c6fb73b42f333641cd09",
+    "0734d3c90a395fb6a20ca473df167cc0356f47cc800baf78ec9d42a5f407c693"
+  ]
+]);
+
 const RETAINED_AUTHORITY_AMENDMENTS = [
   {
     decision: "documentation/decisions/0045-guided-verification-setup.md",
@@ -834,6 +704,15 @@ const RETAINED_AUTHORITY_AMENDMENTS = [
     decision:
       "documentation/decisions/0066-date-prefixed-work-and-initiative-slugs.md",
     images: DATE_PREFIX_AUTHORITY_AMENDMENTS
+  },
+  {
+    decision: "documentation/decisions/0069-standalone-plugin-control-model.md",
+    images: CONTROL_MODEL_AUTHORITY_AMENDMENTS
+  },
+  {
+    decision:
+      "documentation/decisions/0070-orchestrator-owned-instruction-copy.md",
+    images: INSTRUCTION_COPY_AUTHORITY_AMENDMENTS
   }
 ];
 
@@ -851,7 +730,7 @@ async function acceptedDecision(root, relativePath) {
 // A retained authority image may only advance through the finite accepted
 // annotation images above, each conditional on its amending decision being
 // Accepted. Arbitrary metadata or body edits leave every image unreachable.
-async function retainedAuthorityMatches(root, text, sha256) {
+export async function retainedAuthorityMatches(root, text, sha256) {
   const digest = resourceDigest(text);
   if (digest === sha256) return true;
   let images = new Set([sha256]);
@@ -868,7 +747,8 @@ async function retainedAuthorityMatches(root, text, sha256) {
   return images.has(digest);
 }
 
-async function validateAuthorities(root, authorities) {
+/** The one authority rule of both baselines: path, digest, scope, Accepted. */
+export async function validateAuthorities(root, authorities) {
   if (
     !Array.isArray(authorities) ||
     authorities.length === 0 ||
@@ -901,7 +781,12 @@ async function validateAuthorities(root, authorities) {
   }
 }
 
-async function applyTransition(root, original, previous, transition) {
+/**
+ * The one transition-step rule of both baselines: predecessor identity, the
+ * authority check, strictly ordered keys, digest format and a real change.
+ * `admits` is the calling baseline's own key rule.
+ */
+export async function applyTransitionStep(root, previous, transition, admits) {
   closed(
     transition,
     ["predecessorSha256", "successorSha256", "authorities", "changes"],
@@ -919,6 +804,30 @@ async function applyTransition(root, original, previous, transition) {
     transition.changes.length > 300
   )
     throw new Error("Invalid instruction transition scope.");
+  const next = { ...previous };
+  let last = null;
+  for (const change of transition.changes) {
+    closed(change, ["key", "before", "after"], "change");
+    if (
+      !admits(change.key, transition.authorities) ||
+      (last !== null && last.localeCompare(change.key, "en") >= 0) ||
+      !SHA256.test(change.after) ||
+      change.before !== (previous[change.key] ?? null) ||
+      change.before === change.after
+    )
+      throw new Error("Invalid or protected instruction transition scope.");
+    last = change.key;
+    next[change.key] = change.after;
+  }
+  const sorted = sortedExpectations(next);
+  if (identity(sorted) !== transition.successorSha256)
+    throw new Error("Invalid instruction transition successor.");
+  return sorted;
+}
+
+// Key rules of the closed v1 chain only. They stay private to this module so
+// the successor baseline cannot reach them.
+function closedChainAdmits(original) {
   const retainedKeys = original.sources
     .filter((source) => source.orchestratedSha256)
     .map(
@@ -929,21 +838,20 @@ async function applyTransition(root, original, previous, transition) {
     ...Object.keys(rootExpectations(original)),
     ...rawResourceKeys(original)
   ]);
-  const workDocumentTransition = transition.authorities.every(
-    (authority) =>
-      authority.path ===
-      "documentation/decisions/0054-git-visible-work-artifacts.md"
-  );
-  const next = { ...previous };
-  let last = null;
-  for (const change of transition.changes) {
-    closed(change, ["key", "before", "after"], "change");
-    if (
-      !allowed.has(change.key) ||
+  return (key, authorities) => {
+    const cites = (decisions) =>
+      authorities.some((authority) => decisions.includes(authority.path));
+    const workDocumentTransition = authorities.every(
+      (authority) =>
+        authority.path ===
+        "documentation/decisions/0054-git-visible-work-artifacts.md"
+    );
+    return !(
+      !allowed.has(key) ||
       (workDocumentTransition &&
         !(
           /^plugins\/banzai\/skills\/(?:architecture-decision|code-writing|development-plan|feature-description|feature-review|feature-status|feature|project-manifest|quick-fix|test-writing)\/SKILL\.md(?:#(?:skeleton|orchestrated|section:Rules))?$/u.test(
-            change.key
+            key
           ) ||
           [
             "plugins/banzai/policies/artifact-storage.md",
@@ -952,41 +860,26 @@ async function applyTransition(root, original, previous, transition) {
             "plugins/banzai/phases/review.md",
             "plugins/banzai/hooks/spec-gate.cjs",
             "plugins/banzai/skills/orchestrate/SKILL.md"
-          ].includes(change.key)
+          ].includes(key)
         )) ||
-      (change.key.endsWith("#orchestrated") &&
-        !transition.authorities.some((authority) =>
-          [
-            "documentation/decisions/0049-task-scoped-verification.md",
-            "documentation/decisions/0054-git-visible-work-artifacts.md",
-            "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md"
-          ].includes(authority.path)
-        )) ||
-      (last !== null && last.localeCompare(change.key, "en") >= 0) ||
-      !SHA256.test(change.after) ||
-      change.before !== (previous[change.key] ?? null) ||
-      change.before === change.after ||
+      (key.endsWith("#orchestrated") &&
+        !cites([
+          "documentation/decisions/0049-task-scoped-verification.md",
+          "documentation/decisions/0054-git-visible-work-artifacts.md",
+          "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md"
+        ])) ||
       /\/\.(?:claude|codex)-plugin\/plugin\.json|\/hooks\/hooks\.json/u.test(
-        change.key
+        key
       ) ||
-      (change.key === "plugins/banzai/skills/orchestrate/SKILL.md" &&
-        !transition.authorities.some((authority) =>
-          [
-            "documentation/decisions/0045-guided-verification-setup.md",
-            "documentation/decisions/0049-task-scoped-verification.md",
-            "documentation/decisions/0054-git-visible-work-artifacts.md",
-            "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md"
-          ].includes(authority.path)
-        ))
-    )
-      throw new Error("Invalid or protected instruction transition scope.");
-    last = change.key;
-    next[change.key] = change.after;
-  }
-  const sorted = sortedExpectations(next);
-  if (identity(sorted) !== transition.successorSha256)
-    throw new Error("Invalid instruction transition successor.");
-  return sorted;
+      (key === "plugins/banzai/skills/orchestrate/SKILL.md" &&
+        !cites([
+          "documentation/decisions/0045-guided-verification-setup.md",
+          "documentation/decisions/0049-task-scoped-verification.md",
+          "documentation/decisions/0054-git-visible-work-artifacts.md",
+          "documentation/decisions/0055-planning-gate-rework-and-independent-planning-review.md"
+        ]))
+    );
+  };
 }
 
 async function validateCurrent(root, original, current) {
@@ -1003,38 +896,13 @@ async function validateCurrent(root, original, current) {
     current.transitions.length > 100
   )
     throw new Error("Invalid current instruction baseline identity.");
+  const admits = closedChainAdmits(original);
   let expected = rootExpectations(original);
   for (const transition of current.transitions)
-    expected = await applyTransition(root, original, expected, transition);
+    expected = await applyTransitionStep(root, expected, transition, admits);
   if (canonical(expected) !== canonical(current.expectations))
     throw new Error("Unrecorded current instruction expectations.");
   return expected;
-}
-
-function projectInventory(original, expectations) {
-  const inventory = structuredClone(original);
-  for (const source of inventory.sources) {
-    const skill = `plugins/banzai/skills/${source.skill}/SKILL.md`;
-    source.orchestratedSha256 =
-      expectations[`${skill}#orchestrated`] ?? source.orchestratedSha256;
-    source.skeletonSha256 = expectations[`${skill}#skeleton`];
-    for (const entry of source.sections) {
-      entry.consumerNormalizedSha256 =
-        expectations[`${skill}#section:${entry.section}`];
-      entry.guidanceNormalizedSha256 =
-        expectations[
-          `plugins/banzai/guidance/${source.guidance}.md#section:${entry.section}`
-        ];
-    }
-  }
-  for (const file of Object.keys(inventory.preservedFiles))
-    inventory.preservedFiles[file] = expectations[file];
-  const resources = Object.fromEntries(
-    rawResourceKeys(original)
-      .filter((key) => expectations[key])
-      .map((key) => [key.slice("plugins/banzai/".length), expectations[key]])
-  );
-  return { inventory, resources };
 }
 
 async function currentBytes(root) {
@@ -1045,230 +913,4 @@ async function currentBytes(root) {
       "Current instruction baseline pin mismatch; finish the explicit transition."
     );
   return bytes;
-}
-
-export async function readCurrentGuidanceBaseline(root, original) {
-  const current = JSON.parse(await currentBytes(root));
-  const expectations = await validateCurrent(root, original, current);
-  return projectInventory(original, expectations);
-}
-
-async function captureExpectations(root, original) {
-  const expected = rootExpectations(original);
-  for (const source of original.sources) {
-    const skillPath = `plugins/banzai/skills/${source.skill}/SKILL.md`;
-    const skill = await baselineFile(root, skillPath);
-    const guidance = (
-      await declaredResource(root, `guidance/${source.guidance}.md`)
-    ).text;
-    const sections = markdownSections(skill);
-    const portable = markdownSections(guidance);
-    if (
-      canonical([...portable.keys()]) !==
-      canonical(source.sections.map((entry) => entry.section))
-    )
-      throw new Error(
-        "Instruction section inventory cannot change implicitly."
-      );
-    let skeleton = skill;
-    for (const entry of source.sections) {
-      const consumer = sections.get(entry.section);
-      const section = portable.get(entry.section);
-      if (!consumer || !section)
-        throw new Error("Missing instruction section.");
-      expected[`${skillPath}#section:${entry.section}`] = resourceDigest(
-        normalizeGuidance(skill.slice(consumer.body, consumer.end))
-      );
-      expected[
-        `plugins/banzai/guidance/${source.guidance}.md#section:${entry.section}`
-      ] = resourceDigest(
-        normalizeGuidance(guidance.slice(section.body, section.end))
-      );
-    }
-    for (const section of source.sections
-      .map((entry) => sections.get(entry.section))
-      .sort((a, b) => b.body - a.body))
-      skeleton =
-        skeleton.slice(0, section.body) +
-        "<extracted guidance>\n" +
-        skeleton.slice(section.end);
-    expected[`${skillPath}#skeleton`] = resourceDigest(skeleton);
-    const orchestrated = sections.get("Orchestrated Mode");
-    if (source.orchestratedSha256) {
-      if (!orchestrated)
-        throw new Error("Retained Orchestrated Mode cannot be removed.");
-      const digest = resourceDigest(
-        skill.slice(orchestrated.start, orchestrated.end)
-      );
-      if (digest !== source.orchestratedSha256)
-        expected[`${skillPath}#orchestrated`] = digest;
-    }
-  }
-  for (const key of Object.keys(original.preservedFiles)) {
-    let text = await baselineFile(root, key);
-    if (/\/\.(?:claude|codex)-plugin\/plugin\.json$/u.test(key))
-      text = text.replace(/("version"\s*:\s*)"[^"\n]+"/, '$1"2.3.0"');
-    expected[key] = resourceDigest(text);
-  }
-  for (const key of rawResourceKeys(original))
-    expected[key] = resourceDigest(
-      (await declaredResource(root, key.slice("plugins/banzai/".length))).text
-    );
-  return sortedExpectations(expected);
-}
-
-/** Explicit authoring only. Normal build/check paths never call this writer. */
-export async function evolveGuidanceBaseline(
-  root,
-  authorization,
-  { check = false } = {}
-) {
-  closed(
-    authorization,
-    ["schema", "schemaVersion", "predecessorSha256", "authorities", "scope"],
-    "authorization"
-  );
-  if (
-    authorization.schema !== "banzai-instruction-authorization/v1" ||
-    authorization.schemaVersion !== 1 ||
-    !Array.isArray(authorization.scope) ||
-    authorization.scope.length > 300 ||
-    authorization.scope.some((key) => typeof key !== "string") ||
-    canonical(authorization.scope) !==
-      canonical(
-        [...new Set(authorization.scope)].sort((a, b) =>
-          a.localeCompare(b, "en")
-        )
-      )
-  )
-    throw new Error("Invalid instruction baseline authorization.");
-  const original = await originalGuidanceBaseline(root);
-  let previous;
-  let journal;
-  try {
-    journal = JSON.parse(await baselineFile(root, TRANSITION_JOURNAL));
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
-  if (journal) {
-    closed(journal, ["authorizationSha256", "previous", "next"], "journal");
-    if (journal.authorizationSha256 !== identity(authorization))
-      throw new Error(
-        "Pending instruction transition has different authorization."
-      );
-    previous = JSON.parse(journal.previous);
-    await validateCurrent(root, original, previous);
-    for (const [file, oldBytes, newBytes] of [
-      [CURRENT_BASELINE, journal.previous, journal.next],
-      [
-        CURRENT_PIN,
-        resourceDigest(journal.previous) + "\n",
-        resourceDigest(journal.next) + "\n"
-      ]
-    ]) {
-      const actual = await baselineFile(root, file);
-      if (actual !== oldBytes && actual !== newBytes)
-        throw new Error("Interrupted instruction transition inputs changed.");
-    }
-  } else {
-    previous = JSON.parse(await currentBytes(root));
-    await validateCurrent(root, original, previous);
-  }
-  const captured = await captureExpectations(root, original);
-  const changes = Object.keys(captured)
-    .filter((key) => captured[key] !== previous.expectations[key])
-    .map((key) => ({
-      key,
-      before: previous.expectations[key] ?? null,
-      after: captured[key]
-    }));
-  if (changes.length === 0) {
-    const last = previous.transitions.at(-1);
-    if (
-      !last ||
-      last.predecessorSha256 !== authorization.predecessorSha256 ||
-      canonical(last.authorities) !== canonical(authorization.authorities) ||
-      canonical(last.changes.map((entry) => entry.key)) !==
-        canonical(authorization.scope)
-    )
-      throw new Error("No matching authorized instruction transition.");
-    await validateGuidanceExtraction(root);
-    return { changed: false, sha256: resourceDigest(await currentBytes(root)) };
-  }
-  if (
-    identity(previous.expectations) !== authorization.predecessorSha256 ||
-    canonical(changes.map((entry) => entry.key)) !==
-      canonical(authorization.scope)
-  )
-    throw new Error(
-      "Instruction changes do not match the authorized predecessor and exact scope."
-    );
-  const transition = {
-    predecessorSha256: authorization.predecessorSha256,
-    successorSha256: identity(captured),
-    authorities: authorization.authorities,
-    changes
-  };
-  const next = {
-    ...previous,
-    expectations: captured,
-    transitions: [...previous.transitions, transition]
-  };
-  await validateCurrent(root, original, next);
-  const nextBytes = JSON.stringify(next, null, 2) + "\n";
-  if (journal && journal.next !== nextBytes)
-    throw new Error(
-      "Instruction source changed during interrupted transition."
-    );
-  await validateGuidanceExtraction(root, projectInventory(original, captured));
-  if (check) return { changed: true, sha256: resourceDigest(nextBytes) };
-  if (!journal) {
-    journal = {
-      authorizationSha256: identity(authorization),
-      previous: await currentBytes(root),
-      next: nextBytes
-    };
-    await writeFile(
-      path.join(root, TRANSITION_JOURNAL),
-      JSON.stringify(journal) + "\n",
-      { flag: "wx", mode: 0o600 }
-    );
-  }
-  for (const [relative, bytes] of [
-    [CURRENT_BASELINE, nextBytes],
-    [CURRENT_PIN, resourceDigest(nextBytes) + "\n"]
-  ]) {
-    const temporary = path.join(root, relative + ".pending");
-    await writeFile(temporary, bytes, { flag: "wx", mode: 0o644 }).catch(
-      async (error) => {
-        if (
-          error.code !== "EEXIST" ||
-          (await baselineFile(root, relative + ".pending")) !== bytes
-        )
-          throw error;
-      }
-    );
-    await rename(temporary, path.join(root, relative));
-  }
-  await validateGuidanceExtraction(root);
-  await rm(path.join(root, TRANSITION_JOURNAL));
-  return { changed: true, sha256: resourceDigest(nextBytes) };
-}
-
-/** Read-only proposal facts; these do not authorize or publish a transition. */
-export async function describeGuidanceTransition(root) {
-  const original = await originalGuidanceBaseline(root);
-  const current = JSON.parse(await currentBytes(root));
-  await validateCurrent(root, original, current);
-  const captured = await captureExpectations(root, original);
-  return {
-    predecessorSha256: identity(current.expectations),
-    changes: Object.keys(captured)
-      .filter((key) => captured[key] !== current.expectations[key])
-      .map((key) => ({
-        key,
-        before: current.expectations[key] ?? null,
-        after: captured[key]
-      }))
-  };
 }
