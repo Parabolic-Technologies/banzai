@@ -8,6 +8,9 @@
 
 # Banzai
 
+> [!IMPORTANT]  
+> The project is in maintenance mode. Please migrate to the native Claude Code Plugin [banzai-claude-plugin](https://github.com/Parabolic-Technologies/banzai-claude-plugin)
+
 **AI coding workflows with independent review and human control.**
 
 [![npm version](https://img.shields.io/npm/v/%40parabolic-technologies%2Fbanzai)](https://www.npmjs.com/package/@parabolic-technologies/banzai)
